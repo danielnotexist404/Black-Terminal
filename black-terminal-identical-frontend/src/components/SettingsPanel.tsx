@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from "react";
-import { Shield, Lock, Eye, Mail, Key, Check, AlertTriangle, Database } from "lucide-react";
+import { Shield, Lock, Eye, Mail, Key, Check, AlertTriangle, Database, Sliders, Clock, Layout } from "lucide-react";
 import { dbUpdateUser, isSupabaseConfigured } from "../lib/supabase";
 import "../styles/settings.css";
+
+interface TerminalSettings {
+  showDOM: boolean;
+  showOrderBookHeatmap: boolean;
+  enabledTimeframes: string[];
+}
 
 interface SettingsPanelProps {
   currentUser: {
@@ -9,11 +15,25 @@ interface SettingsPanelProps {
     role: "admin" | "user";
     allowedIndicators: string[];
   };
+  terminalSettings: TerminalSettings;
+  onSettingsChange: (settings: TerminalSettings) => void;
   onClose: () => void;
 }
 
-export function SettingsPanel({ currentUser, onClose }: SettingsPanelProps) {
-  const [email, setEmail] = useState("");
+const AVAILABLE_TIMEFRAMES = [
+  { label: "1m", value: "1m" },
+  { label: "5m", value: "5m" },
+  { label: "15m", value: "15m" },
+  { label: "30m", value: "30m" },
+  { label: "1H", value: "1h" },
+  { label: "4H", value: "4h" },
+  { label: "12H", value: "12h" },
+  { label: "1D", value: "1d" },
+  { label: "1W", value: "1w" },
+  { label: "1M", value: "1M" }
+];
+
+export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange, onClose }: SettingsPanelProps) {
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -21,12 +41,11 @@ export function SettingsPanel({ currentUser, onClose }: SettingsPanelProps) {
   const [successMsg, setSuccessMsg] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Local storage properties
+  // Local alert configs
   const [webhookUrl, setWebhookUrl] = useState("");
   const [alertEmail, setAlertEmail] = useState("");
 
   useEffect(() => {
-    // Load local settings
     setWebhookUrl(localStorage.getItem("bt_webhook_url") || "");
     setAlertEmail(localStorage.getItem("bt_alert_email") || "");
   }, []);
@@ -62,7 +81,6 @@ export function SettingsPanel({ currentUser, onClose }: SettingsPanelProps) {
     setLoading(true);
 
     try {
-      // In a real app we'd verify the old password against db, but to keep it simple:
       await dbUpdateUser(currentUser.username, { password: newPassword });
       setSuccessMsg("Security credentials updated successfully!");
       setOldPassword("");
@@ -73,6 +91,22 @@ export function SettingsPanel({ currentUser, onClose }: SettingsPanelProps) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleToggleTimeframe = (tfValue: string) => {
+    let nextTfs = [...terminalSettings.enabledTimeframes];
+    if (nextTfs.includes(tfValue)) {
+      if (nextTfs.length <= 1) {
+        return; // Prevent turning off all timeframes
+      }
+      nextTfs = nextTfs.filter((t) => t !== tfValue);
+    } else {
+      nextTfs.push(tfValue);
+    }
+    onSettingsChange({
+      ...terminalSettings,
+      enabledTimeframes: nextTfs
+    });
   };
 
   return (
@@ -89,37 +123,105 @@ export function SettingsPanel({ currentUser, onClose }: SettingsPanelProps) {
 
       <div className="settings-content">
         {/* Left Side: System & Database Status */}
-        <div className="settings-section card">
-          <h2 className="settings-sec-title">
-            <Database size={16} /> SYSTEM TELEMETRY
-          </h2>
-          
-          <div className="telemetry-status-box">
-            <div className="telemetry-row">
-              <span className="telemetry-lbl">Identity Name</span>
-              <span className="telemetry-val highlight">{currentUser.username}</span>
+        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+          <div className="settings-section card">
+            <h2 className="settings-sec-title">
+              <Database size={16} /> SYSTEM TELEMETRY
+            </h2>
+            
+            <div className="telemetry-status-box">
+              <div className="telemetry-row">
+                <span className="telemetry-lbl">Identity Name</span>
+                <span className="telemetry-val highlight">{currentUser.username}</span>
+              </div>
+              <div className="telemetry-row">
+                <span className="telemetry-lbl">Access Privileges</span>
+                <span className="telemetry-val highlight" style={{ color: currentUser.role === "admin" ? "var(--red-hot)" : "var(--green)" }}>
+                  {currentUser.role.toUpperCase()}
+                </span>
+              </div>
+              <div className="telemetry-row">
+                <span className="telemetry-lbl">Database Hook</span>
+                <span className="telemetry-val" style={{ color: isSupabaseConfigured ? "var(--green)" : "var(--dim)" }}>
+                  {isSupabaseConfigured ? "CONNECTED (SUPABASE)" : "LOCAL STORAGE FALLBACK"}
+                </span>
+              </div>
             </div>
-            <div className="telemetry-row">
-              <span className="telemetry-lbl">Access Privileges</span>
-              <span className="telemetry-val highlight" style={{ color: currentUser.role === "admin" ? "var(--red-hot)" : "var(--green)" }}>
-                {currentUser.role.toUpperCase()}
-              </span>
-            </div>
-            <div className="telemetry-row">
-              <span className="telemetry-lbl">Database Hook</span>
-              <span className="telemetry-val" style={{ color: isSupabaseConfigured ? "var(--green)" : "var(--dim)" }}>
-                {isSupabaseConfigured ? "CONNECTED (SUPABASE)" : "LOCAL STORAGE FALLBACK"}
-              </span>
+
+            <h3 className="settings-subsection-title">Authorized Indicators</h3>
+            <div className="allowed-indicators-grid">
+              {currentUser.allowedIndicators.map((ind) => (
+                <span key={ind} className="indicator-badge">
+                  <Check size={10} /> {ind}
+                </span>
+              ))}
             </div>
           </div>
 
-          <h3 className="settings-subsection-title">Authorized Indicators</h3>
-          <div className="allowed-indicators-grid">
-            {currentUser.allowedIndicators.map((ind) => (
-              <span key={ind} className="indicator-badge">
-                <Check size={10} /> {ind}
-              </span>
-            ))}
+          {/* New Panel: Advanced Interface Customization (TradingView Style) */}
+          <div className="settings-section card">
+            <h2 className="settings-sec-title">
+              <Sliders size={16} /> INTERFACE & LAYOUT
+            </h2>
+
+            <div className="settings-field" style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: "20px" }}>
+              <div>
+                <label className="settings-label" style={{ fontSize: "11px", display: "block" }}>Order Book panel (DOM)</label>
+                <span className="settings-hint">Toggle visibility of the right-hand depth book & market stats panel</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={terminalSettings.showDOM}
+                onChange={(e) => onSettingsChange({ ...terminalSettings, showDOM: e.target.checked })}
+                style={{ width: "20px", height: "20px", cursor: "pointer", accentColor: "var(--red-hot)" }}
+              />
+            </div>
+
+            <div className="settings-field" style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: "20px" }}>
+              <div>
+                <label className="settings-label" style={{ fontSize: "11px", display: "block" }}>Order Book Heatmap</label>
+                <span className="settings-hint">Plot exchange order book liquidity depth maps directly on chart canvas</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={terminalSettings.showOrderBookHeatmap}
+                onChange={(e) => onSettingsChange({ ...terminalSettings, showOrderBookHeatmap: e.target.checked })}
+                style={{ width: "20px", height: "20px", cursor: "pointer", accentColor: "var(--red-hot)" }}
+              />
+            </div>
+
+            {/* Timeframe Visibility Selection */}
+            <div className="settings-field">
+              <label className="settings-label" style={{ fontSize: "11px" }}>
+                <Clock size={12} style={{ display: "inline", marginRight: "6px" }} /> Visible Top-Bar Timeframes
+              </label>
+              <span className="settings-hint" style={{ marginBottom: "10px" }}>Select which intervals appear directly on your topbar panel</span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                {AVAILABLE_TIMEFRAMES.map((tf) => {
+                  const isChecked = terminalSettings.enabledTimeframes.includes(tf.value);
+                  return (
+                    <button
+                      key={tf.value}
+                      type="button"
+                      onClick={() => handleToggleTimeframe(tf.value)}
+                      style={{
+                        padding: "6px 12px",
+                        fontSize: "11px",
+                        fontFamily: "IBM Plex Mono, monospace",
+                        background: isChecked ? "rgba(255, 0, 0, 0.15)" : "rgba(255,255,255,0.03)",
+                        border: `1px solid ${isChecked ? "var(--red-hot)" : "rgba(255,255,255,0.08)"}`,
+                        color: isChecked ? "var(--strong)" : "var(--muted)",
+                        borderRadius: "3px",
+                        cursor: "pointer",
+                        transition: "all 0.2s"
+                      }}
+                    >
+                      {tf.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -199,7 +301,7 @@ export function SettingsPanel({ currentUser, onClose }: SettingsPanelProps) {
                 type="password"
                 value={confirmPassword}
                 placeholder="CONFIRM NEW PASSWORD"
-                onChange={(e) => setConfirmPassword(e.target.value)}
+                onChange={(e) => setNewPassword(e.target.value)}
                 disabled={loading}
               />
             </div>

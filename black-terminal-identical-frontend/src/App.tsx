@@ -330,11 +330,31 @@ function loadWorkspaceSnapshots(): Record<string, WorkspaceSnapshot> {
 export default function App() {
   const [currentUser, setCurrentUser] = useState<{ username: string; role: "admin" | "user"; allowedIndicators: string[] } | null>(null);
   const [activeNav, setActiveNav] = useState("CHART");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [terminalSettings, setTerminalSettings] = useState(() => {
+    const stored = localStorage.getItem("bt_terminal_settings");
+    if (stored) {
+      try { return JSON.parse(stored); } catch (e) {}
+    }
+    return {
+      showDOM: true,
+      showOrderBookHeatmap: true,
+      enabledTimeframes: ["1m", "5m", "15m", "1h", "4h", "1d"]
+    };
+  });
 
   // Bootstrap Database
   useEffect(() => {
     // Database pre-population is done automatically in supabase.ts
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem("bt_terminal_settings", JSON.stringify(terminalSettings));
+    setVisibleIndicators(current => ({
+      ...current,
+      orderBookHeatmap: terminalSettings.showOrderBookHeatmap
+    }));
+  }, [terminalSettings]);
 
   const visibleNav = useMemo(() => {
     const base = [
@@ -776,7 +796,7 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={sidebarCollapsed ? "app-shell collapsed-sidebar" : "app-shell"}>
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark" aria-hidden />
@@ -845,7 +865,9 @@ export default function App() {
         </div>
 
         <div className="timeframes">
-          {timeframes.map((tf) => (
+          {timeframes
+            .filter((tf) => terminalSettings.enabledTimeframes.includes(tf.value))
+            .map((tf) => (
             <button
               key={tf.value}
               className={tf.value === timeframe ? "active" : ""}
@@ -1051,10 +1073,10 @@ export default function App() {
         </div>
         <div className="latency">UP 23ms</div>
         <div className="top-separator" />
-        <button className="icon-btn">
+        <button className="icon-btn" onClick={() => setActiveNav("SETTINGS")}>
           <Settings size={17} />
         </button>
-        <button className="icon-btn">
+        <button className="icon-btn" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>
           <PanelLeft size={17} />
         </button>
         <button className="icon-btn">
@@ -1068,7 +1090,7 @@ export default function App() {
         </button>
       </header>
 
-      <aside className="sidebar">
+      <aside className={sidebarCollapsed ? "sidebar collapsed" : "sidebar"}>
         <div className="nav-list" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
           {visibleNav.map(({ label, icon: Icon }) => (
             <button
@@ -1132,10 +1154,15 @@ export default function App() {
         </div>
       ) : activeNav === "SETTINGS" ? (
         <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
-          <SettingsPanel currentUser={currentUser!} onClose={() => setActiveNav("CHART")} />
+          <SettingsPanel
+            currentUser={currentUser!}
+            terminalSettings={terminalSettings}
+            onSettingsChange={setTerminalSettings}
+            onClose={() => setActiveNav("CHART")}
+          />
         </div>
       ) : (
-        <main className="terminal-grid" style={gridStyle}>
+        <main className={terminalSettings.showDOM ? "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>
         <section className={drawingsEnabled ? "chart-panel drawing-tools-open" : "chart-panel"}>
           <PixiBlackChart
             marketSymbol={symbol}
@@ -1256,15 +1283,17 @@ export default function App() {
             </div>
           )}
         </section>
-        <aside className="right-panel">
-          <OrderBook marketSymbol={symbol} lastPrice={lastPrice} exchangeLabel={selectedExchange.label} />
-          <div className="right-stack-resizer" onPointerDown={(event) => startLayoutResize("rightTop", event)} />
-          <div className="right-bottom">
-            <MarketStats />
-            <div className="right-bottom-resizer" onPointerDown={(event) => startLayoutResize("rightSplit", event)} />
-            <TradesTape marketSymbol={symbol} exchangeLabel={selectedExchange.label} />
-          </div>
-        </aside>
+        {terminalSettings.showDOM && (
+          <aside className="right-panel">
+            <OrderBook marketSymbol={symbol} lastPrice={lastPrice} exchangeLabel={selectedExchange.label} />
+            <div className="right-stack-resizer" onPointerDown={(event) => startLayoutResize("rightTop", event)} />
+            <div className="right-bottom">
+              <MarketStats />
+              <div className="right-bottom-resizer" onPointerDown={(event) => startLayoutResize("rightSplit", event)} />
+              <TradesTape marketSymbol={symbol} exchangeLabel={selectedExchange.label} />
+            </div>
+          </aside>
+        )}
         <section className={activeNav === "SCRIPT EDITOR" ? "bottom-panel script-mode" : activeNav === "ALERTS" ? "bottom-panel alerts-mode" : "bottom-panel"}>
           {activeNav === "SCRIPT EDITOR" ? (
             <ScriptEditor symbol={symbol.label} exchange={selectedExchange.label} />
@@ -1280,7 +1309,9 @@ export default function App() {
             <div className="bottom-blank" />
           )}
         </section>
-        <div className="layout-resizer resize-main-x" onPointerDown={(event) => startLayoutResize("right", event)} />
+        {terminalSettings.showDOM && (
+          <div className="layout-resizer resize-main-x" onPointerDown={(event) => startLayoutResize("right", event)} />
+        )}
         <div className="layout-resizer resize-main-y" onPointerDown={(event) => startLayoutResize("bottom", event)} />
       </main>
       )}

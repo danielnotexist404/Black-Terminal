@@ -4511,3 +4511,38 @@ body.resizing-layout * {
 .footer-right {
   margin-left: auto;
 }
+
+/* Collapsible Sidebar & Hidden Right Panel Custom Layout Adjustments */
+.app-shell.collapsed-sidebar {
+  grid-template-columns: 58px 1fr !important;
+}
+
+.sidebar.collapsed {
+  width: 58px !important;
+}
+
+.sidebar.collapsed .nav span {
+  display: none !important;
+}
+
+.sidebar.collapsed .nav {
+  justify-content: center !important;
+  padding: 0 !important;
+  gap: 0 !important;
+}
+
+.sidebar.collapsed .side-watermark {
+  display: none !important;
+}
+
+.terminal-grid.hide-right-panel {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.terminal-grid.hide-right-panel .right-panel {
+  display: none !important;
+}
+
+.terminal-grid.hide-right-panel .resize-main-x {
+  display: none !important;
+}

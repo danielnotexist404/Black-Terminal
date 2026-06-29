@@ -47,6 +47,7 @@ import { OrderBook } from "./components/OrderBook";
 import { PixiBlackChart } from "./components/PixiBlackChart";
 import { ScriptEditor } from "./components/ScriptEditor";
 import { TradesTape } from "./components/TradesTape";
+import LoginPage from "./components/LoginPage";
 import type { IndicatorAlertDefinition } from "./automation/alerts";
 import { ScannerPage } from "./modules/scanner/components/ScannerPage";
 import type { ScannerResult } from "./modules/scanner/types/scanner.types";
@@ -304,6 +305,7 @@ function loadWorkspaceSnapshots(): Record<string, WorkspaceSnapshot> {
 }
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeNav, setActiveNav] = useState("CHART");
   const [selectedExchange, setSelectedExchange] = useState<ExchangeOption>(marketCatalog[0]);
   const [symbol, setSymbol] = useState<MarketSymbolOption>(marketCatalog[0].symbols[0]);
@@ -646,6 +648,10 @@ export default function App() {
   }, []);
 
   const showModuleOverlay = activeNav !== "CHART" && activeNav !== "SCRIPT EDITOR" && activeNav !== "INDICATORS" && activeNav !== "ALERTS" && activeNav !== "STRATEGY LAB" && activeNav !== "SCANNER";
+
+  if (!isAuthenticated) {
+    return <LoginPage onLogin={() => setIsAuthenticated(true)} />;
+  }
 
   return (
     <div className="app-shell">

@@ -17,6 +17,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
 
   // Form states
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
@@ -86,6 +87,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
           const adminAllowed = [...defaultAllowed, "volumeProfile"];
           const newUser = {
             username: cleanUser,
+            email: isUserAdmin ? "admin@blackterminal.com" : "imported@blackterminal.com",
             role: (isUserAdmin ? "admin" : "user") as any,
             status: "online" as const,
             createdAt: new Date().toISOString(),
@@ -110,10 +112,16 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
     setSuccessMsg("");
 
     const cleanUser = username.trim();
+    const cleanEmail = email.trim();
     const cleanPass = password.trim();
 
-    if (!cleanUser || !cleanPass) {
+    if (!cleanUser || !cleanEmail || !cleanPass) {
       setErrorMsg("Please fill all fields");
+      return;
+    }
+
+    if (!cleanEmail.includes("@")) {
+      setErrorMsg("Please enter a valid email address");
       return;
     }
 
@@ -156,7 +164,8 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
       ];
       const newUser = {
         username: cleanUser,
-        role: "user" as const,
+        email: cleanEmail,
+        role: (cleanUser === "black_terminal_admin" ? "admin" : "user") as any,
         status: "online" as const,
         createdAt: new Date().toISOString(),
         lastLogin: new Date().toISOString(),
@@ -173,7 +182,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
       const logMsg = {
         timestamp: new Date().toLocaleTimeString(),
         tag: "CREATE" as const,
-        message: `New account registered: ${cleanUser}`
+        message: `New account registered: ${cleanUser} (${cleanEmail})`
       };
       const logMsg2 = {
         timestamp: new Date().toLocaleTimeString(),
@@ -184,7 +193,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
 
       setSuccessMsg("Account created! Connecting...");
       setTimeout(() => {
-        onLoginSuccess(cleanUser, "user");
+        onLoginSuccess(cleanUser, newUser.role);
       }, 500);
     }, 600);
   };
@@ -192,6 +201,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
   const handleOpenSignIn = () => {
     setErrorMsg("");
     setUsername("");
+    setEmail("");
     setPassword("");
     setView("signin");
   };
@@ -199,6 +209,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
   const handleOpenSignUp = () => {
     setErrorMsg("");
     setUsername("");
+    setEmail("");
     setPassword("");
     setView("signup");
   };
@@ -206,100 +217,152 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
   if (view === "signin" || view === "signup") {
     const isSignIn = view === "signin";
     return (
-      <div className="landing-container" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div className="login-container">
         <div className="login-bg-decor" />
         <div className="login-card">
-          <button className="modal-close-btn" style={{ position: "absolute", top: "20px", left: "20px" }} onClick={() => setView("landing")}>
-            <ArrowLeft size={18} />
-          </button>
-
-          <div className="login-header">
-            <div className="login-logo" />
-            <div className="login-title-group">
-              <h2 className="login-title">{isSignIn ? "SECURE ACCESS" : "INITIALIZE SHELL"}</h2>
-              <p className="login-subtitle">{isSignIn ? "BLACK TERMINAL ENCRYPTED LINK" : "GENERATE CLIENT CREDENTIALS"}</p>
+          {/* Left Visual Column */}
+          <div className="login-visual">
+            <div className="CRT-glitch-line" />
+            <div className="visual-top">
+              <span className="visual-badge">DECRYPTED LINK</span>
+              <h2 className="visual-title">BLACK TERMINAL <span>v1.0.7</span></h2>
+              <p className="visual-desc">
+                High-density cryptographic telemetry workspace. Low latency data node feeds straight on your viewport canvas.
+              </p>
+            </div>
+            
+            <div className="visual-bottom">
+              <div className="login-live-stats">
+                <div className="login-stat-item">
+                  <span className="login-stat-lbl">NODE LATENCY</span>
+                  <span className="login-stat-val up">1.42ms</span>
+                </div>
+                <div className="login-stat-item">
+                  <span className="login-stat-lbl">PIXI RUNTIME</span>
+                  <span className="login-stat-val">120 FPS</span>
+                </div>
+                <div className="login-stat-item">
+                  <span className="login-stat-lbl">VOLUME (24H)</span>
+                  <span className="login-stat-val">$18.73B</span>
+                </div>
+                <div className="login-stat-item">
+                  <span className="login-stat-lbl">SSL CERT</span>
+                  <span className="login-stat-val up">ACTIVE</span>
+                </div>
+              </div>
             </div>
           </div>
 
-          <form className="login-form" onSubmit={isSignIn ? handleSignIn : handleSignUp}>
-            {errorMsg && <div className="login-error-msg">{errorMsg}</div>}
-            {successMsg && <div className="signup-success-msg">{successMsg}</div>}
-
-            <div className="login-field">
-              <label className="login-label">Identity</label>
-              <input
-                className="login-input"
-                type="text"
-                value={username}
-                placeholder="USERNAME"
-                onChange={(e) => setUsername(e.target.value)}
-                disabled={loading}
-                autoComplete="off"
-              />
-            </div>
-
-            <div className="login-field">
-              <label className="login-label">Access Code</label>
-              <input
-                className="login-input"
-                type="password"
-                value={password}
-                placeholder="PASSWORD"
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={loading}
-                autoComplete="off"
-              />
-            </div>
-
-            <button className="login-submit-btn" type="submit" disabled={loading}>
-              {loading ? "Establishing handshake..." : isSignIn ? "Link Terminal" : "Generate Security Keys"}
+          {/* Right Form Column */}
+          <div className="login-form-area">
+            <button className="modal-close-btn" style={{ position: "absolute", top: "20px", right: "20px" }} onClick={() => setView("landing")}>
+              <ArrowLeft size={18} />
             </button>
-          </form>
 
-          {/* SSO Options */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "4px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.06)" }} />
-              <span style={{ fontSize: "9px", color: "var(--dim)", fontFamily: "IBM Plex Mono" }}>FEDERATED SSO</span>
-              <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.06)" }} />
+            <div className="login-header">
+              <div className="login-logo" />
+              <div className="login-title-group">
+                <h2 className="login-title">{isSignIn ? "SECURE ACCESS" : "INITIALIZE SHELL"}</h2>
+                <p className="login-subtitle">{isSignIn ? "BLACK TERMINAL ENCRYPTED LINK" : "GENERATE CLIENT CREDENTIALS"}</p>
+              </div>
             </div>
 
-            <button 
-              className="btn-signin" 
-              style={{ 
-                display: "flex", 
-                alignItems: "center", 
-                justifyContent: "center", 
-                gap: "10px", 
-                cursor: "not-allowed",
-                borderColor: "rgba(255,255,255,0.05)",
-                color: "var(--dim)",
-                background: "rgba(255,255,255,0.01)"
-              }}
-              disabled
-            >
-              <Chrome size={14} />
-              <span>Google Single-Sign On</span>
-              <span className="premium-badge" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", color: "var(--dim)", fontSize: "7px", padding: "1px 4px" }}>COMING SOON</span>
-            </button>
-          </div>
+            <form className="login-form" onSubmit={isSignIn ? handleSignIn : handleSignUp}>
+              {errorMsg && <div className="login-error-msg">{errorMsg}</div>}
+              {successMsg && <div className="signup-success-msg">{successMsg}</div>}
 
-          <div style={{ textAlign: "center", fontSize: "11px", color: "var(--dim)", marginTop: "8px" }}>
-            {isSignIn ? (
-              <>
-                Need secure terminal credentials?{" "}
-                <span style={{ color: "var(--red-hot)", cursor: "pointer", fontWeight: "600" }} onClick={handleOpenSignUp}>
-                  Create keys
-                </span>
-              </>
-            ) : (
-              <>
-                Credentials already configured?{" "}
-                <span style={{ color: "var(--red-hot)", cursor: "pointer", fontWeight: "600" }} onClick={handleOpenSignIn}>
-                  Login
-                </span>
-              </>
-            )}
+              <div className="login-field">
+                <label className="login-label">Identity (Username)</label>
+                <input
+                  className="login-input"
+                  type="text"
+                  value={username}
+                  placeholder="USERNAME"
+                  onChange={(e) => setUsername(e.target.value)}
+                  disabled={loading}
+                  autoComplete="off"
+                />
+              </div>
+
+              {!isSignIn && (
+                <div className="login-field">
+                  <label className="login-label">Secure Email Address</label>
+                  <input
+                    className="login-input"
+                    type="email"
+                    value={email}
+                    placeholder="EMAIL@DOMAIN.COM"
+                    onChange={(e) => setEmail(e.target.value)}
+                    disabled={loading}
+                    autoComplete="off"
+                  />
+                </div>
+              )}
+
+              <div className="login-field">
+                <label className="login-label">Access Code (Password)</label>
+                <input
+                  className="login-input"
+                  type="password"
+                  value={password}
+                  placeholder="PASSWORD"
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={loading}
+                  autoComplete="off"
+                />
+              </div>
+
+              <button className="login-submit-btn" type="submit" disabled={loading}>
+                {loading ? "Establishing handshake..." : isSignIn ? "Link Terminal" : "Generate Security Keys"}
+              </button>
+            </form>
+
+            {/* SSO federated auth */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "4px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.06)" }} />
+                <span style={{ fontSize: "9px", color: "var(--dim)", fontFamily: "IBM Plex Mono" }}>FEDERATED SSO</span>
+                <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.06)" }} />
+              </div>
+
+              <button 
+                className="btn-signin" 
+                style={{ 
+                  display: "flex", 
+                  alignItems: "center", 
+                  justifyContent: "center", 
+                  gap: "10px", 
+                  cursor: "not-allowed",
+                  borderColor: "rgba(255,255,255,0.05)",
+                  color: "var(--dim)",
+                  background: "rgba(255,255,255,0.01)",
+                  height: "36px"
+                }}
+                disabled
+              >
+                <Chrome size={14} />
+                <span>Google Single-Sign On</span>
+                <span className="premium-badge" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", color: "var(--dim)", fontSize: "7px", padding: "1px 4px" }}>COMING SOON</span>
+              </button>
+            </div>
+
+            <div style={{ textAlign: "center", fontSize: "11px", color: "var(--dim)", marginTop: "4px" }}>
+              {isSignIn ? (
+                <>
+                  Need secure terminal credentials?{" "}
+                  <span style={{ color: "var(--red-hot)", cursor: "pointer", fontWeight: "600" }} onClick={handleOpenSignUp}>
+                    Create keys
+                  </span>
+                </>
+              ) : (
+                <>
+                  Credentials already configured?{" "}
+                  <span style={{ color: "var(--red-hot)", cursor: "pointer", fontWeight: "600" }} onClick={handleOpenSignIn}>
+                    Login
+                  </span>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>

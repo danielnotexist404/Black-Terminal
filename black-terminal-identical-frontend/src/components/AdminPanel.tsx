@@ -10,6 +10,7 @@ interface User {
   lastLogin: string;
   allowedIndicators: string[];
   activeIndicators: string[];
+  email?: string;
 }
 
 interface AuditLog {
@@ -318,7 +319,10 @@ export default function AdminPanel() {
                           selectedUser?.username === u.username ? "selected" : ""
                         }`}
                       >
-                        <td className="user-name-col">{u.username}</td>
+                        <td className="user-name-col">
+                          <div style={{ fontWeight: "600" }}>{u.username}</div>
+                          {u.email && <div style={{ fontSize: "10px", color: "var(--dim)", marginTop: "2px" }}>{u.email}</div>}
+                        </td>
                         <td>
                           <span className={`user-role-badge ${u.role}`}>
                             {u.role.toUpperCase()}

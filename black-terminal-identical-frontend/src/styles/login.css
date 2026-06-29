@@ -1,4 +1,4 @@
-/* Login screen styling for Black Terminal */
+/* Fullscreen Cyberpunk Login Page Styles */
 
 .login-container {
   position: fixed;
@@ -7,108 +7,232 @@
   align-items: center;
   justify-content: center;
   background: 
-    linear-gradient(135deg, rgba(5, 6, 7, 0.96) 30%, rgba(9, 11, 13, 0.88) 100%),
+    linear-gradient(135deg, rgba(5, 6, 7, 0.97) 30%, rgba(9, 11, 13, 0.9) 100%),
     url("../assets/background.jpg") center / cover no-repeat;
   font-family: "Inter", system-ui, sans-serif;
   overflow: hidden;
   z-index: 9999;
 }
 
-/* Glowing tech border lines in background */
+/* scanlines CRT effect overlay */
+.login-container::after {
+  content: " ";
+  display: block;
+  position: absolute;
+  top: 0; left: 0; bottom: 0; right: 0;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.04), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.04));
+  z-index: 99999;
+  background-size: 100% 4px, 6px 100%;
+  pointer-events: none;
+}
+
 .login-bg-decor {
   position: absolute;
   inset: 0;
   pointer-events: none;
   background: 
-    radial-gradient(circle at 10% 10%, rgba(255, 48, 61, 0.04) 0%, transparent 40%),
+    radial-gradient(circle at 10% 10%, rgba(255, 0, 0, 0.05) 0%, transparent 40%),
     radial-gradient(circle at 90% 90%, rgba(70, 184, 102, 0.03) 0%, transparent 40%);
 }
 
 .login-card {
-  width: 100%;
-  max-width: 420px;
-  background: rgba(7, 9, 10, 0.75);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  width: 92%;
+  max-width: 960px;
+  min-height: 560px;
+  background: rgba(7, 9, 10, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 0, 0, 0.16);
   border-radius: 6px;
-  padding: 40px 32px;
   box-shadow: 
-    0 24px 64px rgba(0, 0, 0, 0.8),
-    inset 0 1px 0 rgba(255, 48, 61, 0.12);
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-  animation: loginFadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    0 24px 80px rgba(0, 0, 0, 0.9),
+    inset 0 1px 0 rgba(255, 0, 0, 0.2),
+    0 0 30px rgba(255, 0, 0, 0.04);
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  overflow: hidden;
+  animation: loginFadeIn 0.65s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 @keyframes loginFadeIn {
   from {
     opacity: 0;
-    transform: translateY(20px);
+    transform: translateY(30px) scale(0.98);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
   }
 }
 
-.login-header {
+/* Left Column: Visual Dashboard Preview */
+.login-visual {
+  background: 
+    linear-gradient(180deg, rgba(5, 6, 7, 0.35) 0%, rgba(7, 9, 10, 0.92) 100%),
+    url("../assets/terminal_mockup.jpg") center / cover no-repeat;
+  border-right: 1px solid rgba(255, 0, 0, 0.12);
+  padding: 40px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
+  justify-content: space-between;
+  position: relative;
+}
+
+.login-visual::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(45deg, rgba(255, 0, 0, 0.05) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+.visual-top {
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+  z-index: 2;
 }
 
-.login-logo {
-  width: 72px;
-  height: 60px;
-  background: url("../assets/brand-icon.png") center / contain no-repeat;
-  filter: drop-shadow(0 0 12px rgba(255, 48, 61, 0.3));
+.visual-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 0, 0, 0.1);
+  border: 1px solid rgba(255, 0, 0, 0.25);
+  color: var(--red-hot);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 8px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 2px;
+  width: fit-content;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
-.login-title-group {
+.visual-title {
+  color: #f1f2f4;
+  font-family: Georgia, serif;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.visual-title span {
+  color: var(--red-hot);
+  text-shadow: 0 0 12px rgba(255, 0, 0, 0.35);
+}
+
+.visual-desc {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.visual-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  z-index: 2;
+}
+
+.login-live-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.login-stat-item {
+  background: rgba(3, 4, 5, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  padding: 10px 14px;
+  border-radius: 3px;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
+.login-stat-lbl {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 8px;
+  color: var(--dim);
+}
+
+.login-stat-val {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  color: var(--strong);
+  font-weight: 600;
+}
+
+.login-stat-val.up {
+  color: var(--green);
+}
+
+/* Right Column: Form Area */
+.login-form-area {
+  padding: 40px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 28px;
+}
+
+.login-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.login-logo {
+  width: 60px;
+  height: 48px;
+  background: url("../assets/brand-icon.png") center / contain no-repeat;
+  filter: drop-shadow(0 0 10px rgba(255, 0, 0, 0.35));
+}
+
+.login-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+
 .login-title {
   color: #f1f2f4;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 26px;
+  font-family: Georgia, serif;
+  font-size: 22px;
   font-weight: 700;
-  letter-spacing: 0.05em;
-  text-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
+  letter-spacing: 0.02em;
 }
 
 .login-subtitle {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 800;
-  letter-spacing: 0.28em;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
 }
 
 .login-form {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
 }
 
 .login-field {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .login-label {
   color: var(--muted);
   font-family: "IBM Plex Mono", monospace;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -120,37 +244,49 @@
 
 .login-input {
   width: 100%;
-  height: 38px;
-  background: rgba(5, 6, 7, 0.85);
+  height: 36px;
+  background: rgba(3, 4, 5, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 3px;
   padding: 0 12px;
   color: var(--strong);
   font-family: "IBM Plex Mono", monospace;
-  font-size: 13px;
+  font-size: 12px;
   outline: none;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.2s ease;
 }
 
 .login-input:focus {
-  border-color: rgba(255, 48, 61, 0.5);
-  background: rgba(5, 6, 7, 0.95);
+  border-color: rgba(255, 0, 0, 0.5);
+  background: rgba(3, 4, 5, 0.95);
   box-shadow: 
-    0 0 8px rgba(255, 48, 61, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.02);
+    0 0 8px rgba(255, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.01);
 }
 
 .login-error-msg {
   color: var(--red-hot);
   font-family: "IBM Plex Mono", monospace;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   text-align: center;
-  background: rgba(255, 48, 61, 0.08);
-  border: 1px solid rgba(255, 48, 61, 0.18);
+  background: rgba(255, 0, 0, 0.06);
+  border: 1px solid rgba(255, 0, 0, 0.18);
   border-radius: 3px;
   padding: 8px 10px;
   animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both;
+}
+
+.signup-success-msg {
+  color: var(--green);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  background: rgba(70, 184, 102, 0.06);
+  border: 1px solid rgba(70, 184, 102, 0.18);
+  border-radius: 3px;
+  padding: 8px 10px;
 }
 
 @keyframes shake {
@@ -161,23 +297,24 @@
 }
 
 .login-submit-btn {
-  height: 40px;
+  height: 38px;
   background: linear-gradient(180deg, #ff0000 0%, #cc0000 100%);
   border: 1px solid #ff1a1a;
   border-radius: 3px;
   color: white;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.15em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   outline: none;
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.25s ease;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   box-shadow: 0 4px 12px rgba(255, 0, 0, 0.25);
+  margin-top: 6px;
 }
 
 .login-submit-btn:hover {
@@ -190,68 +327,44 @@
 
 .login-submit-btn:active {
   transform: translateY(1px);
-  box-shadow: 0 2px 6px rgba(255, 48, 61, 0.2);
+  box-shadow: 0 2px 6px rgba(255, 0, 0, 0.2);
 }
 
-/* System status indicators under login */
-.login-footer-info {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  padding-top: 20px;
-}
-
-.system-status {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 9px;
+.login-submit-btn:disabled {
+  background: var(--line);
+  border-color: rgba(255,255,255,0.05);
   color: var(--dim);
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
 }
 
-.status-indicator {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--green);
-  font-weight: 700;
+/* CRT monitor scanline animation */
+.CRT-glitch-line {
+  position: absolute;
+  left: 0; right: 0;
+  height: 1px;
+  background: rgba(255, 0, 0, 0.12);
+  z-index: 10;
+  animation: crtScroll 6s linear infinite;
+  pointer-events: none;
 }
 
-.status-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--green);
-  border-radius: 50%;
-  box-shadow: 0 0 8px var(--green);
-  animation: pulseGreen 2s infinite;
+@keyframes crtScroll {
+  from { top: 0%; }
+  to { top: 100%; }
 }
 
-@keyframes pulseGreen {
-  0% { opacity: 0.4; box-shadow: 0 0 4px var(--green); }
-  50% { opacity: 1; box-shadow: 0 0 10px var(--green); }
-  100% { opacity: 0.4; box-shadow: 0 0 4px var(--green); }
-}
-
-.mock-terminal-lines {
-  background: rgba(3, 4, 5, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  border-radius: 3px;
-  padding: 10px 12px;
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 8px;
-  color: rgba(216, 217, 220, 0.45);
-  line-height: 1.5;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.terminal-line-code {
-  color: var(--muted);
-}
-
-.terminal-line-val {
-  color: var(--amber);
+@media (max-width: 768px) {
+  .login-card {
+    grid-template-columns: 1fr;
+    max-height: 94vh;
+    overflow-y: auto;
+  }
+  .login-visual {
+    display: none;
+  }
+  .login-form-area {
+    padding: 30px 20px;
+  }
 }

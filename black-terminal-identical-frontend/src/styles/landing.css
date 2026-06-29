@@ -1,15 +1,25 @@
 /* Landing Page CSS - Black Terminal */
 
 .landing-container {
-  min-height: 100vh;
-  background: 
-    linear-gradient(180deg, rgba(5, 6, 7, 0.98) 0%, rgba(9, 11, 13, 0.95) 100%),
-    url("../assets/background.jpg") center / cover no-repeat fixed;
+  height: 100vh;
+  background: rgba(3, 4, 5, 1);
   color: var(--text);
   font-family: "Inter", system-ui, sans-serif;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  scrollbar-color: rgba(255, 0, 0, 0.2) transparent;
+  position: relative;
+}
+
+.landing-container::after {
+  content: " ";
+  display: block;
+  position: fixed;
+  top: 0; left: 0; bottom: 0; right: 0;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.04), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.04));
+  z-index: 999;
+  background-size: 100% 4px, 6px 100%;
+  pointer-events: none;
 }
 
 /* Header */
@@ -38,7 +48,7 @@
   width: 44px;
   height: 36px;
   background: url("../assets/brand-icon.png") center / contain no-repeat;
-  filter: drop-shadow(0 0 8px rgba(255, 48, 61, 0.2));
+  filter: drop-shadow(0 0 8px rgba(255, 0, 0, 0.2));
 }
 
 .landing-logo-title {
@@ -91,8 +101,8 @@
 }
 
 .btn-signup {
-  background: linear-gradient(180deg, #ff0000 0%, #cc0000 100%);
-  border: 1px solid #ff1a1a;
+  background: linear-gradient(180deg, #ff0000 0%, #aa0000 100%);
+  border: 1px solid #ff0000;
   color: white;
   padding: 8px 18px;
   font-size: 12px;
@@ -120,8 +130,8 @@
 }
 
 .hero-badge {
-  background: rgba(255, 48, 61, 0.08);
-  border: 1px solid rgba(255, 48, 61, 0.2);
+  background: rgba(255, 0, 0, 0.08);
+  border: 1px solid rgba(255, 0, 0, 0.2);
   color: var(--red-hot);
   padding: 6px 14px;
   border-radius: 99px;
@@ -142,7 +152,7 @@
 }
 
 .hero-title span {
-  background: linear-gradient(90deg, #ff0000, #ff1a1a);
+  background: linear-gradient(90deg, #ff0000, #ff0000);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -165,16 +175,19 @@
   font-size: 14px;
   font-weight: 700;
   border-radius: 3px;
-  background: linear-gradient(180deg, #ff0000 0%, #cc0000 100%);
-  border: 1px solid #ff1a1a;
+  background: linear-gradient(180deg, #ff0000 0%, #aa0000 100%);
+  border: 1px solid #ff0000;
   color: white;
-  box-shadow: 0 8px 24px rgba(255, 0, 0, 0.35);
-  transition: all 0.25s;
+  box-shadow: 0 4px 12px rgba(255, 0, 0, 0.25);
+  transition: all 0.25s ease;
+  letter-spacing: 0.05em;
 }
 
 .btn-primary:hover {
   transform: translateY(-1.5px);
-  box-shadow: 0 12px 32px rgba(255, 0, 0, 0.55);
+  box-shadow: 
+    0 6px 16px rgba(255, 0, 0, 0.45),
+    0 0 1px #ff0000;
 }
 
 .btn-secondary {
@@ -213,7 +226,8 @@
   font-family: Georgia, serif;
   font-size: 32px;
   font-weight: 700;
-  color: var(--strong);
+  color: #f1f2f4;
+  text-shadow: 0 0 12px rgba(255, 0, 0, 0.15);
 }
 
 .section-desc {
@@ -228,21 +242,30 @@
 }
 
 .feature-card {
-  background: rgba(7, 9, 10, 0.45);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 4px;
+  background: rgba(7, 9, 10, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 0, 0, 0.16);
+  border-radius: 6px;
   padding: 32px;
   display: flex;
   flex-direction: column;
   gap: 16px;
   transition: all 0.3s;
+  box-shadow: 
+    0 12px 40px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 0, 0, 0.1),
+    0 0 15px rgba(255, 0, 0, 0.02);
 }
 
 .feature-card:hover {
-  border-color: rgba(255, 48, 61, 0.2);
-  background: rgba(7, 9, 10, 0.65);
+  border-color: rgba(255, 0, 0, 0.35);
+  background: rgba(7, 9, 10, 0.95);
   transform: translateY(-2px);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+  box-shadow: 
+    0 24px 80px rgba(0, 0, 0, 0.9),
+    inset 0 1px 0 rgba(255, 0, 0, 0.2),
+    0 0 30px rgba(255, 0, 0, 0.08);
 }
 
 .feature-icon {
@@ -277,9 +300,11 @@
 }
 
 .pricing-card {
-  background: rgba(7, 9, 10, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 5px;
+  background: rgba(7, 9, 10, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 0, 0, 0.16);
+  border-radius: 6px;
   padding: 40px 32px;
   display: flex;
   flex-direction: column;
@@ -287,28 +312,37 @@
   gap: 30px;
   position: relative;
   transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 
+    0 12px 40px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 0, 0, 0.1),
+    0 0 15px rgba(255, 0, 0, 0.02);
 }
 
 .pricing-card.popular {
-  border-color: rgba(255, 48, 61, 0.35);
-  background: rgba(7, 9, 10, 0.75);
+  border-color: rgba(255, 0, 0, 0.5);
+  background: rgba(7, 9, 10, 0.95);
   box-shadow: 
-    0 16px 40px rgba(255, 48, 61, 0.05),
-    inset 0 1px 0 rgba(255, 48, 61, 0.15);
+    0 24px 80px rgba(0, 0, 0, 0.95),
+    inset 0 1px 0 rgba(255, 0, 0, 0.3),
+    0 0 40px rgba(255, 0, 0, 0.12);
 }
 
 .pricing-card:hover {
   transform: translateY(-4px);
-  border-color: rgba(255, 48, 61, 0.25);
-  background: rgba(7, 9, 10, 0.7);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  border-color: rgba(255, 0, 0, 0.35);
+  background: rgba(7, 9, 10, 0.95);
+  box-shadow: 
+    0 24px 80px rgba(0, 0, 0, 0.9),
+    inset 0 1px 0 rgba(255, 0, 0, 0.2),
+    0 0 30px rgba(255, 0, 0, 0.08);
 }
 
 .pricing-card.popular:hover {
-  border-color: rgba(255, 48, 61, 0.6);
+  border-color: #ff0000;
   box-shadow: 
-    0 20px 48px rgba(255, 48, 61, 0.1),
-    0 0 1px rgba(255, 48, 61, 0.4);
+    0 30px 100px rgba(0, 0, 0, 0.95),
+    inset 0 1px 0 rgba(255, 0, 0, 0.4),
+    0 0 60px rgba(255, 0, 0, 0.2);
 }
 
 .popular-badge {
@@ -316,7 +350,7 @@
   top: -12px;
   left: 50%;
   transform: translateX(-50%);
-  background: linear-gradient(90deg, #ff0000, #cc0000);
+  background: linear-gradient(90deg, #ff0000, #aa0000);
   color: white;
   font-family: "IBM Plex Mono", monospace;
   font-size: 8px;
@@ -325,7 +359,7 @@
   padding: 4px 12px;
   border-radius: 99px;
   text-transform: uppercase;
-  border: 1px solid #ff1a1a;
+  border: 1px solid #ff0000;
   box-shadow: 0 4px 10px rgba(255, 0, 0, 0.35);
 }
 
@@ -404,8 +438,8 @@
 }
 
 .pricing-card.popular .btn-plan {
-  background: linear-gradient(180deg, #ff0000 0%, #cc0000 100%);
-  border: 1px solid #ff1a1a;
+  background: linear-gradient(180deg, #ff0000 0%, #aa0000 100%);
+  border: 1px solid #ff0000;
   color: white;
   box-shadow: 0 4px 12px rgba(255, 0, 0, 0.3);
 }

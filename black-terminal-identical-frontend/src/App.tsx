@@ -68,6 +68,7 @@ import type {
   VisibleIndicators
 } from "./chart-engine/types";
 import { defaultIndicatorAdvancedSettings } from "./chart-engine/profile/volumeProfileDefaults";
+import { dbGetUsers, dbUpdateUser, dbAddAuditLog } from "./lib/supabase";
 import { getPublicMarketDataAdapter } from "./market-data/exchangeRegistry";
 import { ExchangeOption, MarketSymbolOption, marketCatalog } from "./market-data/marketCatalog";
 import type { MarketSymbol, Timeframe } from "./market-data/types";
@@ -102,7 +103,7 @@ function StrategyLabIcon({ size = 19, ...props }: SVGProps<SVGSVGElement> & { si
       <circle cx="14.1" cy="6.1" r="0.72" fill="var(--red-hot)" stroke="currentColor" strokeWidth="1.05" />
       <path d="M8 7.7h8" strokeWidth="1.75" />
       <path d="M9.25 7.7v3.3L5.85 19.1c-.55 1.32.4 2.75 1.84 2.75h8.62c1.44 0 2.39-1.43 1.84-2.75L14.75 11V7.7" strokeWidth="1.75" />
-      <path d="M8.15 18.95 10.55 13h2.9l2.4 5.95c.19.48-.16 1-.67 1H8.82c-.51 0-.86-.52-.67-1Z" fill="rgba(255, 48, 61, 0.82)" stroke="rgba(255, 48, 61, 0.9)" strokeWidth="1.25" />
+      <path d="M8.15 18.95 10.55 13h2.9l2.4 5.95c.19.48-.16 1-.67 1H8.82c-.51 0-.86-.52-.67-1Z" fill="rgba(255, 0, 0, 0.82)" stroke="rgba(255, 0, 0, 0.9)" strokeWidth="1.25" />
       <path d="M10.3 10.2h2.15M10.3 12.55h1.35M10.3 14.9h2.05" strokeWidth="1.25" />
       <circle cx="12.15" cy="16.4" r="0.82" fill="#07090b" stroke="currentColor" strokeWidth="0.9" />
       <circle cx="14.35" cy="18.25" r="0.65" fill="#07090b" stroke="currentColor" strokeWidth="0.85" />
@@ -331,39 +332,7 @@ export default function App() {
 
   // Bootstrap Database
   useEffect(() => {
-    const storedUsers = localStorage.getItem("bt_users_db");
-    const storedCreds = localStorage.getItem("bt_users_creds");
-
-    let users = storedUsers ? JSON.parse(storedUsers) : [];
-    let creds = storedCreds ? JSON.parse(storedCreds) : {};
-
-    const adminExists = users.some((u: any) => u.username === "black_terminal_admin");
-
-    if (!adminExists) {
-      const adminUser = {
-        username: "black_terminal_admin",
-        role: "admin" as const,
-        status: "offline" as const,
-        createdAt: new Date().toISOString(),
-        lastLogin: "Never",
-        allowedIndicators: ADMIN_ALLOWED,
-        activeIndicators: []
-      };
-      users.push(adminUser);
-      creds["black_terminal_admin"] = "K9#fX$p2@mQ9&zR4*tW1!vY8";
-      localStorage.setItem("bt_users_db", JSON.stringify(users));
-      localStorage.setItem("bt_users_creds", JSON.stringify(creds));
-    } else {
-      const adminUser = users.find((u: any) => u.username === "black_terminal_admin");
-      if (adminUser && adminUser.role !== "admin") {
-        adminUser.role = "admin";
-        localStorage.setItem("bt_users_db", JSON.stringify(users));
-      }
-      if (!creds["black_terminal_admin"] || creds["black_terminal_admin"] !== "K9#fX$p2@mQ9&zR4*tW1!vY8") {
-        creds["black_terminal_admin"] = "K9#fX$p2@mQ9&zR4*tW1!vY8";
-        localStorage.setItem("bt_users_creds", JSON.stringify(creds));
-      }
-    }
+    // Database pre-population is done automatically in supabase.ts
   }, []);
 
   const visibleNav = useMemo(() => {
@@ -384,24 +353,10 @@ export default function App() {
     return base;
   }, [currentUser]);
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
     if (currentUser) {
-      const storedUsers = localStorage.getItem("bt_users_db");
-      if (storedUsers) {
-        const users = JSON.parse(storedUsers);
-        const userObj = users.find((u: any) => u.username === currentUser.username);
-        if (userObj) {
-          userObj.status = "offline";
-          localStorage.setItem("bt_users_db", JSON.stringify(users));
-        }
-      }
-      const storedLogs = JSON.parse(localStorage.getItem("bt_audit_logs") || "[]");
-      const logMsg = {
-        timestamp: new Date().toLocaleTimeString(),
-        tag: "LOGOUT" as const,
-        message: `User ${currentUser.username} logged out.`
-      };
-      localStorage.setItem("bt_audit_logs", JSON.stringify([logMsg, ...storedLogs]));
+      await dbUpdateUser(currentUser.username, { status: "offline" });
+      await dbAddAuditLog("LOGOUT", `User ${currentUser.username} logged out.`);
     }
     setCurrentUser(null);
     setActiveNav("CHART");
@@ -492,27 +447,29 @@ export default function App() {
       .filter(([_, visible]) => visible === true)
       .map(([key]) => key);
 
-    const storedUsers = localStorage.getItem("bt_users_db");
-    if (storedUsers) {
-      const users = JSON.parse(storedUsers);
-      const userObj = users.find((u: any) => u.username === currentUser.username);
-      if (userObj) {
-        if (JSON.stringify(userObj.activeIndicators) !== JSON.stringify(activeList)) {
-          userObj.activeIndicators = activeList;
-          localStorage.setItem("bt_users_db", JSON.stringify(users));
+    const syncActive = async () => {
+      try {
+        const users = await dbGetUsers();
+        const userObj = users.find((u) => u.username === currentUser.username);
+        if (userObj) {
+          if (JSON.stringify(userObj.activeIndicators) !== JSON.stringify(activeList)) {
+            await dbUpdateUser(currentUser.username, { activeIndicators: activeList });
+          }
         }
+      } catch (e) {
+        console.error("App.tsx sync active indicators failed:", e);
       }
-    }
+    };
+    syncActive();
   }, [visibleIndicators, currentUser]);
 
   // Real-time allowed indicators sync (and automatic turn-off of revoked indicators)
   useEffect(() => {
     if (!currentUser) return;
-    const interval = setInterval(() => {
-      const stored = localStorage.getItem("bt_users_db");
-      if (stored) {
-        const users = JSON.parse(stored);
-        const record = users.find((u: any) => u.username === currentUser.username);
+    const interval = setInterval(async () => {
+      try {
+        const users = await dbGetUsers();
+        const record = users.find((u) => u.username === currentUser.username);
         if (record) {
           if (JSON.stringify(record.allowedIndicators) !== JSON.stringify(currentUser.allowedIndicators)) {
             setCurrentUser(prev => prev ? { ...prev, allowedIndicators: record.allowedIndicators } : null);
@@ -530,8 +487,11 @@ export default function App() {
             });
           }
         }
+      } catch (e) {
+        console.error("App.tsx allowed indicators poll failed:", e);
       }
-    }, 1000);
+    }, 1500);
+
     return () => clearInterval(interval);
   }, [currentUser]);
 

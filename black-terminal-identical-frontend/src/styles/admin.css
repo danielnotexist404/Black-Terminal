@@ -26,8 +26,8 @@
 }
 
 .admin-title-badge {
-  background: rgba(255, 48, 61, 0.1);
-  border: 1px solid rgba(255, 48, 61, 0.25);
+  background: rgba(255, 0, 0, 0.1);
+  border: 1px solid rgba(255, 0, 0, 0.25);
   color: var(--red-hot);
   font-family: "IBM Plex Mono", monospace;
   font-size: 9px;
@@ -185,7 +185,7 @@
 }
 
 .user-form-input:focus {
-  border-color: rgba(255, 48, 61, 0.4);
+  border-color: rgba(255, 0, 0, 0.4);
 }
 
 .btn-admin-add {
@@ -202,7 +202,7 @@
 
 .btn-admin-add:hover {
   border-color: #ff737d;
-  box-shadow: 0 0 8px rgba(255, 48, 61, 0.2);
+  box-shadow: 0 0 8px rgba(255, 0, 0, 0.2);
 }
 
 /* Users table */
@@ -239,7 +239,7 @@
 }
 
 .user-row-admin {
-  background: rgba(255, 48, 61, 0.02);
+  background: rgba(255, 0, 0, 0.02);
 }
 
 .user-name-col {
@@ -259,8 +259,8 @@
 }
 
 .user-role-badge.admin {
-  background: rgba(255, 48, 61, 0.08);
-  border-color: rgba(255, 48, 61, 0.2);
+  background: rgba(255, 0, 0, 0.08);
+  border-color: rgba(255, 0, 0, 0.2);
   color: var(--red-hot);
 }
 
@@ -297,7 +297,7 @@
 
 .btn-action-suspend {
   background: transparent;
-  border: 1px solid rgba(255, 48, 61, 0.25);
+  border: 1px solid rgba(255, 0, 0, 0.25);
   color: var(--red-hot);
   padding: 3px 8px;
   font-size: 10px;
@@ -306,7 +306,7 @@
 }
 
 .btn-action-suspend:hover {
-  background: rgba(255, 48, 61, 0.06);
+  background: rgba(255, 0, 0, 0.06);
 }
 
 .btn-action-reactivate {
@@ -527,7 +527,7 @@
 }
 
 .permission-toggle-card.blocked {
-  border-color: rgba(255, 48, 61, 0.15);
+  border-color: rgba(255, 0, 0, 0.15);
 }
 
 .permission-name-group {
@@ -565,7 +565,7 @@
 }
 
 .users-table tr.selected {
-  background: rgba(255, 48, 61, 0.04);
+  background: rgba(255, 0, 0, 0.04);
   box-shadow: inset 3px 0 0 var(--red-hot);
 }
 

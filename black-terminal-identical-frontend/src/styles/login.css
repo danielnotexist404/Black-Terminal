@@ -6,9 +6,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: 
-    linear-gradient(135deg, rgba(5, 6, 7, 0.97) 30%, rgba(9, 11, 13, 0.9) 100%),
-    url("../assets/background.jpg") center / cover no-repeat;
+  background: rgba(3, 4, 5, 0.85);
+  backdrop-filter: blur(12px);
   font-family: "Inter", system-ui, sans-serif;
   overflow: hidden;
   z-index: 9999;
@@ -298,8 +297,8 @@
 
 .login-submit-btn {
   height: 38px;
-  background: linear-gradient(180deg, #ff0000 0%, #cc0000 100%);
-  border: 1px solid #ff1a1a;
+  background: linear-gradient(180deg, #ff0000 0%, #aa0000 100%);
+  border: 1px solid #ff0000;
   border-radius: 3px;
   color: white;
   font-size: 10px;

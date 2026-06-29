@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { Check, Activity, Bell, Code2, Shield, Lock, X, ArrowLeft, Chrome, Layers, Cpu, TrendingUp, Users } from "lucide-react";
 import "../styles/landing.css";
+import "../styles/login.css";
+import { dbGetUsers, dbVerifyUser, dbRegisterUser, dbUpdateUser, dbAddAuditLog } from "../lib/supabase";
 
 // Import generated images
 import terminalMockup from "../assets/terminal_mockup.jpg";
@@ -23,90 +25,85 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
   const [successMsg, setSuccessMsg] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleSignIn = (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg("");
-    if (!username.trim() || !password.trim()) {
+    const cleanUser = username.trim();
+    const cleanPass = password.trim();
+
+    if (!cleanUser || !cleanPass) {
       setErrorMsg("Please fill all fields");
       return;
     }
 
     setLoading(true);
 
-    setTimeout(() => {
-      const storedUsers = localStorage.getItem("bt_users_db");
-      const storedCreds = localStorage.getItem("bt_users_creds");
-
-      const users = storedUsers ? JSON.parse(storedUsers) : [];
-      const creds = storedCreds ? JSON.parse(storedCreds) : {};
-
-      const cleanUser = username.trim();
-      const cleanPass = password.trim();
-
-      if (creds[cleanUser] && creds[cleanUser] === cleanPass) {
-        const userObj = users.find((u: any) => u.username === cleanUser);
-        if (userObj) {
-          if (userObj.status === "suspended") {
-            setErrorMsg("Access suspended by Administrator");
-            setLoading(false);
-            return;
-          }
-
-          userObj.status = "online";
-          userObj.lastLogin = new Date().toISOString();
-          localStorage.setItem("bt_users_db", JSON.stringify(users));
-
-          const storedLogs = JSON.parse(localStorage.getItem("bt_audit_logs") || "[]");
-          const logMsg = {
-            timestamp: new Date().toLocaleTimeString(),
-            tag: "LOGIN" as const,
-            message: `User ${cleanUser} logged in from landing page.`
-          };
-          localStorage.setItem("bt_audit_logs", JSON.stringify([logMsg, ...storedLogs]));
-
-          onLoginSuccess(cleanUser, userObj.role);
-        } else {
-          const isUserAdmin = cleanUser === "black_terminal_admin";
-          const defaultAllowed = [
-            "orderBookHeatmap",
-            "liquidationHeatmap",
-            "volatilityHeatmap",
-            "adaptiveSwingStrategy",
-            "vwap",
-            "ema20",
-            "ema50",
-            "ema200",
-            "sma20",
-            "sma50",
-            "bollinger",
-            "openInterestOscillator",
-            "zScoreOscillator",
-            "waveTrendOscillator",
-            "volume"
-          ];
-          const adminAllowed = [...defaultAllowed, "volumeProfile"];
-          const newUser = {
-            username: cleanUser,
-            email: isUserAdmin ? "admin@blackterminal.com" : "imported@blackterminal.com",
-            role: (isUserAdmin ? "admin" : "user") as any,
-            status: "online" as const,
-            createdAt: new Date().toISOString(),
-            lastLogin: new Date().toISOString(),
-            allowedIndicators: isUserAdmin ? adminAllowed : defaultAllowed,
-            activeIndicators: []
-          };
-          users.push(newUser);
-          localStorage.setItem("bt_users_db", JSON.stringify(users));
-          onLoginSuccess(cleanUser, newUser.role);
-        }
-      } else {
-        setErrorMsg("Access denied: Invalid credentials");
+    try {
+      const authResult = await dbVerifyUser(cleanUser, cleanPass);
+      if (!authResult.success) {
+        setErrorMsg(authResult.error || "Access denied: Invalid credentials");
         setLoading(false);
+        return;
       }
-    }, 600);
+
+      // Fetch user details to verify suspension and update status/lastLogin
+      const users = await dbGetUsers();
+      const userObj = users.find((u) => u.username === cleanUser);
+      if (userObj) {
+        if (userObj.status === "suspended") {
+          setErrorMsg("Access suspended by Administrator");
+          setLoading(false);
+          return;
+        }
+
+        await dbUpdateUser(cleanUser, {
+          status: "online",
+          lastLogin: new Date().toISOString()
+        });
+
+        await dbAddAuditLog("LOGIN", `User ${cleanUser} logged in from landing page.`);
+        onLoginSuccess(cleanUser, userObj.role);
+      } else {
+        // Fallback for special black_terminal_admin case if not in DB yet
+        const isUserAdmin = cleanUser === "black_terminal_admin";
+        const defaultAllowed = [
+          "orderBookHeatmap",
+          "liquidationHeatmap",
+          "volatilityHeatmap",
+          "adaptiveSwingStrategy",
+          "vwap",
+          "ema20",
+          "ema50",
+          "ema200",
+          "sma20",
+          "sma50",
+          "bollinger",
+          "openInterestOscillator",
+          "zScoreOscillator",
+          "waveTrendOscillator",
+          "volume"
+        ];
+        const adminAllowed = [...defaultAllowed, "volumeProfile"];
+        const newUser = {
+          username: cleanUser,
+          email: isUserAdmin ? "admin@blackterminal.com" : "imported@blackterminal.com",
+          role: (isUserAdmin ? "admin" : "user") as any,
+          status: "online" as const,
+          createdAt: new Date().toISOString(),
+          lastLogin: new Date().toISOString(),
+          allowedIndicators: isUserAdmin ? adminAllowed : defaultAllowed,
+          activeIndicators: []
+        };
+        await dbRegisterUser(newUser, cleanPass);
+        onLoginSuccess(cleanUser, newUser.role);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || "Database connection error");
+      setLoading(false);
+    }
   };
 
-  const handleSignUp = (e: React.FormEvent) => {
+  const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg("");
     setSuccessMsg("");
@@ -132,19 +129,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
 
     setLoading(true);
 
-    setTimeout(() => {
-      const storedUsers = localStorage.getItem("bt_users_db");
-      const storedCreds = localStorage.getItem("bt_users_creds");
-
-      const users = storedUsers ? JSON.parse(storedUsers) : [];
-      const creds = storedCreds ? JSON.parse(storedCreds) : {};
-
-      if (creds[cleanUser]) {
-        setErrorMsg("Username already exists");
-        setLoading(false);
-        return;
-      }
-
+    try {
       const defaultAllowed = [
         "orderBookHeatmap",
         "liquidationHeatmap",
@@ -172,30 +157,25 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
         allowedIndicators: defaultAllowed,
         activeIndicators: []
       };
-      users.push(newUser);
-      localStorage.setItem("bt_users_db", JSON.stringify(users));
 
-      creds[cleanUser] = cleanPass;
-      localStorage.setItem("bt_users_creds", JSON.stringify(creds));
+      const regResult = await dbRegisterUser(newUser, cleanPass);
+      if (!regResult.success) {
+        setErrorMsg(regResult.error || "Username already exists");
+        setLoading(false);
+        return;
+      }
 
-      const storedLogs = JSON.parse(localStorage.getItem("bt_audit_logs") || "[]");
-      const logMsg = {
-        timestamp: new Date().toLocaleTimeString(),
-        tag: "CREATE" as const,
-        message: `New account registered: ${cleanUser} (${cleanEmail})`
-      };
-      const logMsg2 = {
-        timestamp: new Date().toLocaleTimeString(),
-        tag: "LOGIN" as const,
-        message: `User ${cleanUser} logged in automatically.`
-      };
-      localStorage.setItem("bt_audit_logs", JSON.stringify([logMsg2, logMsg, ...storedLogs]));
+      await dbAddAuditLog("CREATE", `New account registered: ${cleanUser} (${cleanEmail})`);
+      await dbAddAuditLog("LOGIN", `User ${cleanUser} logged in automatically.`);
 
       setSuccessMsg("Account created! Connecting...");
       setTimeout(() => {
         onLoginSuccess(cleanUser, newUser.role);
       }, 500);
-    }, 600);
+    } catch (err: any) {
+      setErrorMsg(err.message || "Database connection error");
+      setLoading(false);
+    }
   };
 
   const handleOpenSignIn = () => {
@@ -214,7 +194,8 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
     setView("signup");
   };
 
-  if (view === "signin" || view === "signup") {
+  const renderAuthModal = () => {
+    if (view === "landing") return null;
     const isSignIn = view === "signin";
     return (
       <div className="login-container">
@@ -313,7 +294,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
               </div>
 
               <button className="login-submit-btn" type="submit" disabled={loading}>
-                {loading ? "Establishing handshake..." : isSignIn ? "Link Terminal" : "Generate Security Keys"}
+                {loading ? "Establishing handshake..." : isSignIn ? "Link Terminal" : "Register"}
               </button>
             </form>
 
@@ -333,16 +314,18 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                   justifyContent: "center", 
                   gap: "10px", 
                   cursor: "not-allowed",
-                  borderColor: "rgba(255,255,255,0.05)",
-                  color: "var(--dim)",
-                  background: "rgba(255,255,255,0.01)",
-                  height: "36px"
+                  borderColor: "rgba(255,0,0,0.25)",
+                  color: "var(--strong)",
+                  background: "rgba(255,0,0,0.05)",
+                  height: "36px",
+                  borderRadius: "3px",
+                  transition: "all 0.2s"
                 }}
                 disabled
               >
-                <Chrome size={14} />
-                <span>Google Single-Sign On</span>
-                <span className="premium-badge" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", color: "var(--dim)", fontSize: "7px", padding: "1px 4px" }}>COMING SOON</span>
+                <Chrome size={14} style={{ color: "#ff0000" }} />
+                <span style={{ fontWeight: 600, fontSize: "11px" }}>Google Single-Sign On</span>
+                <span className="premium-badge" style={{ background: "rgba(255,0,0,0.1)", border: "1px solid rgba(255,0,0,0.3)", color: "#ff0000", fontSize: "8px", padding: "2px 6px", borderRadius: "2px", fontWeight: 800 }}>COMING SOON</span>
               </button>
             </div>
 
@@ -367,7 +350,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
         </div>
       </div>
     );
-  }
+  };
 
   return (
     <div className="landing-container">
@@ -391,27 +374,46 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
       </header>
 
       {/* Hero */}
-      <section className="hero-section">
+      <section className="hero-section" style={{ position: "relative" }}>
+        <div className="CRT-glitch-line" />
         <span className="hero-badge">Cybernetic Release v1.0.7-alpha</span>
         <h1 className="hero-title">
           The Ultimate Quantum <br />
           <span>Crypto Trading Terminal</span>
         </h1>
         <p className="hero-desc">
-          Professional order-book depth tracking, sub-millisecond execution pipelines, custom Strategy Labs,
-          and sandboxed Python runtimes. Styled and optimized for institutional digital assets operations.
+          Institutional grade execution desk designed for top level traders, hedge funds and large investment firms.
         </p>
         <div className="hero-ctas">
           <button className="btn-primary" onClick={handleOpenSignUp}>Start Trading Now</button>
           <button className="btn-secondary" onClick={handleOpenSignIn}>Open Live Demo</button>
+        </div>
+
+        <div className="hero-telemetry" style={{ display: "flex", gap: "16px", marginTop: "40px", flexWrap: "wrap", justifyContent: "center" }}>
+          <div className="login-stat-item" style={{ minWidth: "130px", alignItems: "center" }}>
+            <span className="login-stat-lbl">SYSTEM LATENCY</span>
+            <span className="login-stat-val up">0.82ms</span>
+          </div>
+          <div className="login-stat-item" style={{ minWidth: "130px", alignItems: "center" }}>
+            <span className="login-stat-lbl">24H VOLUME</span>
+            <span className="login-stat-val">$18.73B</span>
+          </div>
+          <div className="login-stat-item" style={{ minWidth: "130px", alignItems: "center" }}>
+            <span className="login-stat-lbl">ACTIVE NODES</span>
+            <span className="login-stat-val up">1,402</span>
+          </div>
+          <div className="login-stat-item" style={{ minWidth: "130px", alignItems: "center" }}>
+            <span className="login-stat-lbl">UPTIME</span>
+            <span className="login-stat-val">99.999%</span>
+          </div>
         </div>
       </section>
 
       {/* Image Previews Section */}
       <section id="preview" className="preview-section" style={{ padding: "80px 40px", maxWidth: "1200px", margin: "0 auto", textAlign: "center" }}>
         <div className="section-header" style={{ marginBottom: "60px" }}>
-          <h2 className="section-title">Visual Viewport Mockups</h2>
-          <p className="section-desc">Designed with high-density telemetry dashboards and sleek layouts.</p>
+          <h2 className="section-title">Institutional Interface Viewports</h2>
+          <p className="section-desc">Sleek high-density telemetry dashboards optimized for multi-monitor desktop environments.</p>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "60px" }}>
@@ -421,9 +423,9 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
               <img src={terminalMockup} alt="Black Terminal Interface Mockup" style={{ display: "block", width: "100%", maxWidth: "960px", height: "auto" }} />
             </div>
             <div style={{ maxWidth: "600px" }}>
-              <h3 style={{ fontFamily: "Georgia, serif", fontSize: "20px", color: "var(--strong)", marginBottom: "8px" }}>Quant Trading Node Interface</h3>
+              <h3 style={{ fontFamily: "Georgia, serif", fontSize: "20px", color: "var(--strong)", marginBottom: "8px" }}>Quantitative Order Book Desk</h3>
               <p style={{ fontSize: "13px", color: "var(--muted)", lineHeight: "1.5" }}>
-                Multi-monitor dashboard layout detailing order flows, tape deltas, volume profiles, and automated indicator logs.
+                Cross-market execution interface featuring microsecond tick resolution, real-time volume profiles, and order book depth analytics.
               </p>
             </div>
           </div>
@@ -434,9 +436,9 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
               <img src={chartPreview} alt="Black Terminal Holographic Chart Projection" style={{ display: "block", width: "100%", maxWidth: "960px", height: "auto" }} />
             </div>
             <div style={{ maxWidth: "600px" }}>
-              <h3 style={{ fontFamily: "Georgia, serif", fontSize: "20px", color: "var(--strong)", marginBottom: "8px" }}>Holographic Depth Telemetry Chart</h3>
+              <h3 style={{ fontFamily: "Georgia, serif", fontSize: "20px", color: "var(--strong)", marginBottom: "8px" }}>Real-Time Liquidity Heatmap Visualizer</h3>
               <p style={{ fontSize: "13px", color: "var(--muted)", lineHeight: "1.5" }}>
-                Real-time rendered candlestick patterns overlayed with value area profiles, POC lines, and leverage liquidity clusters.
+                High-performance WebGL charting engine plotting order-book depth, liquidation clusters, and historical volume profiles.
               </p>
             </div>
           </div>
@@ -446,56 +448,56 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
       {/* Expanded Features Section */}
       <section id="features" className="features-section">
         <div className="section-header">
-          <h2 className="section-title">Cybernetic Operations Pipeline</h2>
-          <p className="section-desc">Fully decoupled client architectures ensuring privacy and rendering speed.</p>
+          <h2 className="section-title">Institutional-Grade Capabilities</h2>
+          <p className="section-desc">Engineered for sub-millisecond execution pipelines, sandboxed execution, and decentralized data nodes.</p>
         </div>
 
         <div className="features-grid">
           <div className="feature-card">
             <div className="feature-icon"><Activity size={24} /></div>
-            <h3 className="feature-name">PixiJS WebGL Engine</h3>
+            <h3 className="feature-name">High-Throughput WebGL Engine</h3>
             <p className="feature-text">
-              Renders millions of candlesticks and leverage cluster graphics at 120 FPS. Superbly optimized to run smoothly even on multiple monitors.
+              Hardware-accelerated rendering capable of processing millions of data points at 120 FPS, optimized for multi-monitor workstations.
             </p>
           </div>
 
           <div className="feature-card">
             <div className="feature-icon"><Code2 size={24} /></div>
-            <h3 className="feature-name">Sandboxed Indicator Editor</h3>
+            <h3 className="feature-name">Strategy Simulation Sandbox</h3>
             <p className="feature-text">
-              Write, compile, and run indicators using Python. Fully equipped with historical data buffering and custom signal triggers.
+              Develop, compile, and backtest custom strategies using sandboxed Python environments with native low-latency data feeds.
             </p>
           </div>
 
           <div className="feature-card">
             <div className="feature-icon"><Shield size={24} /></div>
-            <h3 className="feature-name">Encrypted Key Sockets</h3>
+            <h3 className="feature-name">Military-Grade Security Protocol</h3>
             <p className="feature-text">
-              All API keys remain local. Handshakes are directly signed and transited straight to the exchanges (Binance, Bybit, OKX).
+              Client-side API key management. Handshakes are locally signed using advanced cryptography and routed directly to institutional endpoints.
             </p>
           </div>
 
           <div className="feature-card">
             <div className="feature-icon"><Cpu size={24} /></div>
-            <h3 className="feature-name">Strategy Optimization Lab</h3>
+            <h3 className="feature-name">Algorithmic Optimization Suite</h3>
             <p className="feature-text">
-              Test strategies in complex historical regimes. Features automated optimizer grids and walk-forward diagnostic matrix reports.
+              Execute robust historical backtests with walk-forward diagnostic matrices, optimizer grids, and institutional risk metrics.
             </p>
           </div>
 
           <div className="feature-card">
             <div className="feature-icon"><TrendingUp size={24} /></div>
-            <h3 className="feature-name">Real-Time Depth Analytics</h3>
+            <h3 className="feature-name">Order Flow & Liquidity Intelligence</h3>
             <p className="feature-text">
-              Observe L2 depth blocks and order deltas. Get custom alerts for sweep runs, block reclaims, and large market maker fills.
+              Granular Level 2 order-book tracking and market maker activity analytics with real-time institutional liquidity delta alerts.
             </p>
           </div>
 
           <div className="feature-card">
             <div className="feature-icon"><Layers size={24} /></div>
-            <h3 className="feature-name">Decoupled Architecture</h3>
+            <h3 className="feature-name">Fault-Tolerant Redundant Infrastructure</h3>
             <p className="feature-text">
-              If an API stream fails, the workspace falls back dynamically to backup REST nodes, preventing execution locks.
+              Dynamically routed failovers utilizing high-availability REST backup arrays to prevent execution disruptions or connection loss.
             </p>
           </div>
         </div>
@@ -504,25 +506,25 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
       {/* Pricing Section */}
       <section id="pricing" className="pricing-section">
         <div className="section-header">
-          <h2 className="section-title">Select Your Operations Plan</h2>
-          <p className="section-desc">Get access to professional API feeds and backtest labs.</p>
+          <h2 className="section-title">Flexible Deployment Licensing</h2>
+          <p className="section-desc">Tailored operational environments designed for individual quantitative researchers, hedge funds, and enterprises.</p>
         </div>
 
         <div className="pricing-grid">
           <div className="pricing-card">
             <div className="plan-header">
-              <span className="plan-name">Starter Pack</span>
+              <span className="plan-name">Quantum Sandbox</span>
               <div className="plan-price">
                 <span className="price-amount">$0</span>
                 <span className="price-period">/ forever</span>
               </div>
-              <p className="plan-desc">Essential tools to observe markets and try out scripting.</p>
+              <p className="plan-desc">Complimentary tier for quantitative research, strategy validation, and basic API evaluation.</p>
             </div>
             <ul className="plan-features">
-              <li><Check size={16} /> Basic Candlestick Charting</li>
-              <li><Check size={16} /> Binance Public WebSocket Feed</li>
-              <li><Check size={16} /> 2 Custom Python Indicators</li>
-              <li style={{ color: "var(--dim)" }}><X size={16} style={{ color: "var(--red)" }} /> No Order-Book Heatmaps</li>
+              <li><Check size={16} /> Standard Charting Environment</li>
+              <li><Check size={16} /> Real-Time Exchange Data Stream</li>
+              <li><Check size={16} /> 2 Active Sandbox Strategy Slots</li>
+              <li style={{ color: "var(--dim)" }}><X size={16} style={{ color: "var(--red)" }} /> Restricted Order-Book Heatmaps</li>
             </ul>
             <button className="btn-plan" onClick={handleOpenSignUp}>Register Free</button>
           </div>
@@ -530,12 +532,12 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
           <div className="pricing-card popular">
             <span className="popular-badge">Most Popular</span>
             <div className="plan-header">
-              <span className="plan-name">Pro Terminal</span>
+              <span className="plan-name">Professional Terminal</span>
               <div className="plan-price">
                 <span className="price-amount">$49</span>
                 <span className="price-period">/ month</span>
               </div>
-              <p className="plan-desc">Advanced depth analytics and full indicator libraries.</p>
+              <p className="plan-desc">Full access to multi-exchange execution desks, backtest environments, and advanced heatmaps.</p>
             </div>
             <ul className="plan-features">
               <li><Check size={16} /> Order-Book & Liquidation Heatmaps</li>
@@ -548,12 +550,12 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
 
           <div className="pricing-card" style={{ borderColor: "rgba(70,184,102,0.3)", boxShadow: "0 16px 40px rgba(70,184,102,0.05)" }}>
             <div className="plan-header">
-              <span className="plan-name" style={{ color: "var(--green)" }}>Institutional & Investors</span>
+              <span className="plan-name" style={{ color: "var(--green)" }}>Enterprise Execution Suite</span>
               <div className="plan-price">
                 <span className="price-amount">$199</span>
                 <span className="price-period">/ month</span>
               </div>
-              <p className="plan-desc">Full Strategy Optimization Labs and direct low-latency pipelines.</p>
+              <p className="plan-desc">Dedicated cloud infrastructure, sub-millisecond execution arrays, and custom compliance frameworks.</p>
             </div>
             <ul className="plan-features">
               <li><Check size={16} /> AI-Assisted Strategy Optimizer</li>
@@ -565,6 +567,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
           </div>
         </div>
       </section>
+      {renderAuthModal()}
     </div>
   );
 }

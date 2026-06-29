@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Black-Terminal Pixi Engine",
+        "title": "Black Terminal",
         "width": 1672,
         "height": 941,
         "minWidth": 1200,

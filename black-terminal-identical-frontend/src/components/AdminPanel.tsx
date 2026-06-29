@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { X } from "lucide-react";
 import "../styles/admin.css";
+import { dbGetUsers, dbRegisterUser, dbUpdateUser, dbDeleteUser, dbGetAuditLogs, dbAddAuditLog } from "../lib/supabase";
 
 interface User {
   username: string;
@@ -68,10 +69,9 @@ export default function AdminPanel() {
 
   // Poll database to get real-time active indicators and state changes
   useEffect(() => {
-    const fetchDB = () => {
-      const storedUsers = localStorage.getItem("bt_users_db");
-      if (storedUsers) {
-        const parsed = JSON.parse(storedUsers);
+    const fetchDB = async () => {
+      try {
+        const parsed = await dbGetUsers();
         // Normalize fields in case older records exist
         const normalized = parsed.map((u: any) => ({
           ...u,
@@ -86,6 +86,8 @@ export default function AdminPanel() {
           const matched = normalized.find((u: any) => u.username === current.username);
           return matched || null;
         });
+      } catch (err) {
+        console.error("AdminPanel fetchDB error:", err);
       }
     };
 
@@ -96,26 +98,18 @@ export default function AdminPanel() {
 
   // Load logs
   useEffect(() => {
-    const storedLogs = localStorage.getItem("bt_audit_logs");
-    if (storedLogs) {
-      setLogs(JSON.parse(storedLogs));
-    }
+    const fetchLogs = async () => {
+      try {
+        const storedLogs = await dbGetAuditLogs();
+        setLogs(storedLogs as any);
+      } catch (e) {
+        console.error("AdminPanel fetchLogs error:", e);
+      }
+    };
+    fetchLogs();
   }, [users]); // Refresh logs list on users update
 
-  const addLog = (tag: AuditLog["tag"], message: string) => {
-    const newLog: AuditLog = {
-      timestamp: new Date().toLocaleTimeString(),
-      tag,
-      message
-    };
-    setLogs((prev) => {
-      const updated = [newLog, ...prev];
-      localStorage.setItem("bt_audit_logs", JSON.stringify(updated));
-      return updated;
-    });
-  };
-
-  const handleCreateUser = (e: React.FormEvent) => {
+  const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError("");
 
@@ -127,94 +121,89 @@ export default function AdminPanel() {
       return;
     }
 
-    const creds = JSON.parse(localStorage.getItem("bt_users_creds") || "{}");
-    if (creds[cleanUser]) {
-      setFormError("User already exists");
-      return;
-    }
-
-    const newUser: User = {
+    const newUser = {
       username: cleanUser,
-      role: "user",
-      status: "offline",
+      email: `${cleanUser}@blackterminal.com`,
+      role: "user" as const,
+      status: "offline" as const,
       createdAt: new Date().toISOString(),
       lastLogin: "Never",
-      allowedIndicators: [...DEFAULT_ALLOWED], // volumeProfile (HDLX) is NOT in DEFAULT_ALLOWED
+      allowedIndicators: [...DEFAULT_ALLOWED],
       activeIndicators: []
     };
 
-    const updatedUsers = [...users, newUser];
+    const regResult = await dbRegisterUser(newUser, cleanPass);
+    if (!regResult.success) {
+      setFormError(regResult.error || "User already exists");
+      return;
+    }
+
+    await dbAddAuditLog("CREATE", `New user ${cleanUser} created by Admin.`);
+    
+    // Refresh lists manually
+    const updatedUsers = await dbGetUsers();
     setUsers(updatedUsers);
-    localStorage.setItem("bt_users_db", JSON.stringify(updatedUsers));
 
-    creds[cleanUser] = cleanPass;
-    localStorage.setItem("bt_users_creds", JSON.stringify(creds));
-
-    addLog("CREATE", `New user ${cleanUser} created by Admin.`);
     setNewUsername("");
     setNewPassword("");
   };
 
-  const toggleSuspend = (username: string) => {
+  const toggleSuspend = async (username: string) => {
     if (username === "black_terminal_admin") return;
 
-    const updated = users.map((u) => {
-      if (u.username === username) {
-        const nextStatus = u.status === "suspended" ? "offline" : "suspended";
-        addLog(
-          nextStatus === "suspended" ? "SUSPEND" : "REACTIVATE",
-          `User ${username} status changed to ${nextStatus}.`
-        );
-        return { ...u, status: nextStatus as any };
-      }
-      return u;
-    });
+    const matchedUser = users.find(u => u.username === username);
+    if (!matchedUser) return;
 
-    setUsers(updated);
-    localStorage.setItem("bt_users_db", JSON.stringify(updated));
+    const nextStatus = matchedUser.status === "suspended" ? "offline" : "suspended";
+    await dbUpdateUser(username, { status: nextStatus as any });
+
+    const tag = nextStatus === "suspended" ? "SUSPEND" : "REACTIVATE";
+    await dbAddAuditLog(tag as any, `User ${username} status changed to ${nextStatus}.`);
+
+    const updatedUsers = await dbGetUsers();
+    setUsers(updatedUsers);
   };
 
-  const handleDeleteUser = (username: string) => {
+  const handleDeleteUser = async (username: string) => {
     if (username === "black_terminal_admin") return;
 
-    const updated = users.filter((u) => u.username !== username);
-    setUsers(updated);
-    localStorage.setItem("bt_users_db", JSON.stringify(updated));
+    await dbDeleteUser(username);
+    await dbAddAuditLog("DELETE", `User ${username} deleted from database.`);
 
-    const creds = JSON.parse(localStorage.getItem("bt_users_creds") || "{}");
-    delete creds[username];
-    localStorage.setItem("bt_users_creds", JSON.stringify(creds));
+    const updatedUsers = await dbGetUsers();
+    setUsers(updatedUsers);
 
-    addLog("DELETE", `User ${username} deleted from database.`);
     if (selectedUser?.username === username) {
       setSelectedUser(null);
     }
   };
 
-  const handleToggleIndicatorPermission = (indicatorKey: string) => {
+  const handleToggleIndicatorPermission = async (indicatorKey: string) => {
     if (!selectedUser) return;
     const isAllowed = selectedUser.allowedIndicators.includes(indicatorKey);
     let nextAllowed = [];
 
+    const tag = isAllowed ? "SUSPEND" : "REACTIVATE";
+    const msg = isAllowed 
+      ? `Revoked access to [${indicatorKey}] for user ${selectedUser.username}.`
+      : `Granted access to [${indicatorKey}] for user ${selectedUser.username}.`;
+
     if (isAllowed) {
       nextAllowed = selectedUser.allowedIndicators.filter((k) => k !== indicatorKey);
-      addLog("SUSPEND", `Revoked access to [${indicatorKey}] for user ${selectedUser.username}.`);
     } else {
       nextAllowed = [...selectedUser.allowedIndicators, indicatorKey];
-      addLog("REACTIVATE", `Granted access to [${indicatorKey}] for user ${selectedUser.username}.`);
     }
 
-    const updatedUsers = users.map((u) => {
-      if (u.username === selectedUser.username) {
-        const updated = { ...u, allowedIndicators: nextAllowed };
-        setSelectedUser(updated);
-        return updated;
-      }
-      return u;
-    });
+    await dbUpdateUser(selectedUser.username, { allowedIndicators: nextAllowed });
+    await dbAddAuditLog(tag as any, msg);
 
+    const updatedUsers = await dbGetUsers();
     setUsers(updatedUsers);
-    localStorage.setItem("bt_users_db", JSON.stringify(updatedUsers));
+
+    const updatedSelected = updatedUsers.find(u => u.username === selectedUser.username);
+    if (updatedSelected) {
+      setSelectedUser(updatedSelected);
+    }
   };
 
   const totalUsers = users.length;

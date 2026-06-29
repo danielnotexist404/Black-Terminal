@@ -1,0 +1,391 @@
+/* Admin Panel Styles - Black Terminal */
+
+.admin-panel-container {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Inter", system-ui, sans-serif;
+  overflow: hidden;
+}
+
+.admin-header {
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(7, 9, 10, 0.4);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.admin-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-title-badge {
+  background: rgba(255, 48, 61, 0.1);
+  border: 1px solid rgba(255, 48, 61, 0.25);
+  color: var(--red-hot);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 3px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.admin-title {
+  font-family: Georgia, serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--strong);
+}
+
+.admin-content {
+  padding: 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+/* Stats dashboard */
+.admin-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.admin-stat-card {
+  background: rgba(7, 9, 10, 0.6);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admin-stat-label {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.admin-stat-value {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--strong);
+}
+
+.admin-stat-value.active-sessions {
+  color: var(--green);
+}
+
+.admin-stat-sub {
+  font-size: 10px;
+  color: var(--dim);
+}
+
+/* Split view: User table & details/logs */
+.admin-split-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .admin-split-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.admin-card {
+  background: rgba(7, 9, 10, 0.6);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.admin-card-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(5, 6, 7, 0.3);
+}
+
+.admin-card-title {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--strong);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.admin-card-body {
+  padding: 20px;
+}
+
+/* User management form */
+.user-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 20px;
+  padding: 16px;
+  background: rgba(5, 6, 7, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  border-radius: 3px;
+}
+
+@media (max-width: 640px) {
+  .user-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+.user-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.user-form-label {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 8px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.user-form-input {
+  height: 32px;
+  background: #050607;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 10px;
+  color: var(--strong);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  outline: none;
+}
+
+.user-form-input:focus {
+  border-color: rgba(255, 48, 61, 0.4);
+}
+
+.btn-admin-add {
+  height: 32px;
+  background: linear-gradient(180deg, #ff303d 0%, #d62839 100%);
+  border: 1px solid #ff4d5a;
+  border-radius: 3px;
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 0 16px;
+}
+
+.btn-admin-add:hover {
+  border-color: #ff737d;
+  box-shadow: 0 0 8px rgba(255, 48, 61, 0.2);
+}
+
+/* Users table */
+.users-table-wrapper {
+  overflow-x: auto;
+}
+
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.users-table th,
+.users-table td {
+  padding: 12px 16px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.users-table th {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-weight: 600;
+  border-bottom: 1px solid var(--line);
+  background: rgba(5, 6, 7, 0.2);
+}
+
+.users-table td {
+  color: var(--text);
+  vertical-align: middle;
+}
+
+.user-row-admin {
+  background: rgba(255, 48, 61, 0.02);
+}
+
+.user-name-col {
+  font-family: "IBM Plex Mono", monospace;
+  font-weight: 600;
+  color: var(--strong);
+}
+
+.user-role-badge {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 2px;
+  color: var(--muted);
+}
+
+.user-role-badge.admin {
+  background: rgba(255, 48, 61, 0.08);
+  border-color: rgba(255, 48, 61, 0.2);
+  color: var(--red-hot);
+}
+
+.user-status-col {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.user-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.user-status-dot.online {
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+}
+
+.user-status-dot.offline {
+  background: var(--dim);
+}
+
+.user-status-dot.suspended {
+  background: var(--red-hot);
+  box-shadow: 0 0 6px var(--red-hot);
+}
+
+.users-table-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-action-suspend {
+  background: transparent;
+  border: 1px solid rgba(255, 48, 61, 0.25);
+  color: var(--red-hot);
+  padding: 3px 8px;
+  font-size: 10px;
+  border-radius: 2px;
+  font-weight: 500;
+}
+
+.btn-action-suspend:hover {
+  background: rgba(255, 48, 61, 0.06);
+}
+
+.btn-action-reactivate {
+  background: transparent;
+  border: 1px solid rgba(70, 184, 102, 0.25);
+  color: var(--green);
+  padding: 3px 8px;
+  font-size: 10px;
+  border-radius: 2px;
+  font-weight: 500;
+}
+
+.btn-action-reactivate:hover {
+  background: rgba(70, 184, 102, 0.06);
+}
+
+.btn-action-delete {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--dim);
+  padding: 3px 8px;
+  font-size: 10px;
+  border-radius: 2px;
+  font-weight: 500;
+}
+
+.btn-action-delete:hover {
+  color: var(--strong);
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* Audit logs terminal console */
+.logs-console {
+  background: #030405;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  border-radius: 3px;
+  padding: 14px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  color: rgba(216, 217, 220, 0.65);
+  line-height: 1.6;
+  max-height: 480px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+.log-entry {
+  display: flex;
+  gap: 10px;
+}
+
+.log-time {
+  color: var(--dim);
+  flex-shrink: 0;
+}
+
+.log-tag {
+  color: var(--amber);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.log-tag.login {
+  color: var(--green);
+}
+
+.log-tag.logout {
+  color: var(--muted);
+}
+
+.log-tag.error {
+  color: var(--red-hot);
+}
+
+.log-msg {
+  word-break: break-all;
+}

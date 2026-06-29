@@ -47,7 +47,9 @@ import { OrderBook } from "./components/OrderBook";
 import { PixiBlackChart } from "./components/PixiBlackChart";
 import { ScriptEditor } from "./components/ScriptEditor";
 import { TradesTape } from "./components/TradesTape";
-import LoginPage from "./components/LoginPage";
+import LandingPage from "./components/LandingPage";
+import AdminPanel from "./components/AdminPanel";
+import { LogOut, Shield } from "lucide-react";
 import type { IndicatorAlertDefinition } from "./automation/alerts";
 import { ScannerPage } from "./modules/scanner/components/ScannerPage";
 import type { ScannerResult } from "./modules/scanner/types/scanner.types";
@@ -305,8 +307,49 @@ function loadWorkspaceSnapshots(): Record<string, WorkspaceSnapshot> {
 }
 
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState<{ username: string; role: "admin" | "user" } | null>(null);
   const [activeNav, setActiveNav] = useState("CHART");
+
+  const visibleNav = useMemo(() => {
+    const base = [
+      { label: "WATCHLIST", icon: BookOpen },
+      { label: "CHART", icon: ChartCandlestick },
+      { label: "INDICATORS", icon: Activity },
+      { label: "SCANNER", icon: Radar },
+      { label: "ALERTS", icon: Bell },
+      { label: "SCRIPT EDITOR", icon: Code2 },
+      { label: "STRATEGY LAB", icon: StrategyLabIcon },
+      { label: "MARKET OVERVIEW", icon: LayoutDashboard },
+      { label: "SETTINGS", icon: Settings }
+    ];
+    if (currentUser?.role === "admin") {
+      base.push({ label: "ADMIN PANEL", icon: Shield });
+    }
+    return base;
+  }, [currentUser]);
+
+  const handleSignOut = () => {
+    if (currentUser) {
+      const storedUsers = localStorage.getItem("bt_users_db");
+      if (storedUsers) {
+        const users = JSON.parse(storedUsers);
+        const userObj = users.find((u: any) => u.username === currentUser.username);
+        if (userObj) {
+          userObj.status = "offline";
+          localStorage.setItem("bt_users_db", JSON.stringify(users));
+        }
+      }
+      const storedLogs = JSON.parse(localStorage.getItem("bt_audit_logs") || "[]");
+      const logMsg = {
+        timestamp: new Date().toLocaleTimeString(),
+        tag: "LOGOUT" as const,
+        message: `User ${currentUser.username} logged out.`
+      };
+      localStorage.setItem("bt_audit_logs", JSON.stringify([logMsg, ...storedLogs]));
+    }
+    setCurrentUser(null);
+    setActiveNav("CHART");
+  };
   const [selectedExchange, setSelectedExchange] = useState<ExchangeOption>(marketCatalog[0]);
   const [symbol, setSymbol] = useState<MarketSymbolOption>(marketCatalog[0].symbols[0]);
   const [availableSymbols, setAvailableSymbols] = useState<MarketSymbolOption[]>(marketCatalog[0].symbols);
@@ -649,8 +692,14 @@ export default function App() {
 
   const showModuleOverlay = activeNav !== "CHART" && activeNav !== "SCRIPT EDITOR" && activeNav !== "INDICATORS" && activeNav !== "ALERTS" && activeNav !== "STRATEGY LAB" && activeNav !== "SCANNER";
 
-  if (!isAuthenticated) {
-    return <LoginPage onLogin={() => setIsAuthenticated(true)} />;
+  if (!currentUser) {
+    return (
+      <LandingPage
+        onLoginSuccess={(username, role) => {
+          setCurrentUser({ username, role });
+        }}
+      />
+    );
   }
 
   return (
@@ -947,8 +996,8 @@ export default function App() {
       </header>
 
       <aside className="sidebar">
-        <div className="nav-list">
-          {nav.map(({ label, icon: Icon }) => (
+        <div className="nav-list" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+          {visibleNav.map(({ label, icon: Icon }) => (
             <button
               key={label}
               className={label === activeNav ? "nav active" : "nav"}
@@ -958,6 +1007,14 @@ export default function App() {
               <span>{label}</span>
             </button>
           ))}
+          <button
+            className="nav"
+            style={{ marginTop: "auto", borderTop: "1px solid var(--line-soft)", paddingTop: "12px", paddingBottom: "12px" }}
+            onClick={handleSignOut}
+          >
+            <LogOut size={19} />
+            <span>SIGN OUT</span>
+          </button>
         </div>
         <div className="side-watermark" aria-hidden>
           <div className="wm-mark">
@@ -996,7 +1053,12 @@ export default function App() {
         </div>
       </aside>
 
-      <main className="terminal-grid" style={gridStyle}>
+      {activeNav === "ADMIN PANEL" ? (
+        <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
+          <AdminPanel />
+        </div>
+      ) : (
+        <main className="terminal-grid" style={gridStyle}>
         <section className={drawingsEnabled ? "chart-panel drawing-tools-open" : "chart-panel"}>
           <PixiBlackChart
             marketSymbol={symbol}
@@ -1143,6 +1205,7 @@ export default function App() {
         <div className="layout-resizer resize-main-x" onPointerDown={(event) => startLayoutResize("right", event)} />
         <div className="layout-resizer resize-main-y" onPointerDown={(event) => startLayoutResize("bottom", event)} />
       </main>
+      )}
 
       <footer className="statusbar">
         <span className="status-item connected">

@@ -1,0 +1,474 @@
+/* Landing Page CSS - Black Terminal */
+
+.landing-container {
+  min-height: 100vh;
+  background: 
+    linear-gradient(180deg, rgba(5, 6, 7, 0.98) 0%, rgba(9, 11, 13, 0.95) 100%),
+    url("../assets/background.jpg") center / cover no-repeat fixed;
+  color: var(--text);
+  font-family: "Inter", system-ui, sans-serif;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+/* Header */
+.landing-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 40px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(5, 6, 7, 0.85);
+}
+
+.landing-logo-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.landing-logo-icon {
+  width: 44px;
+  height: 36px;
+  background: url("../assets/brand-icon.png") center / contain no-repeat;
+  filter: drop-shadow(0 0 8px rgba(255, 48, 61, 0.2));
+}
+
+.landing-logo-title {
+  font-family: Georgia, serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--strong);
+  letter-spacing: 0.04em;
+}
+
+.landing-nav {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.landing-nav-link {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  transition: color 0.2s;
+  cursor: pointer;
+}
+
+.landing-nav-link:hover {
+  color: var(--strong);
+}
+
+.landing-auth-btns {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.btn-signin {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--strong);
+  padding: 8px 18px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 3px;
+  transition: all 0.2s;
+}
+
+.btn-signin:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.btn-signup {
+  background: linear-gradient(180deg, #ff303d 0%, #d62839 100%);
+  border: 1px solid #ff4d5a;
+  color: white;
+  padding: 8px 18px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 3px;
+  box-shadow: 0 4px 12px rgba(255, 48, 61, 0.25);
+  transition: all 0.2s;
+}
+
+.btn-signup:hover {
+  box-shadow: 0 6px 16px rgba(255, 48, 61, 0.4);
+  transform: translateY(-1px);
+}
+
+/* Hero Section */
+.hero-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 100px 20px 60px;
+  max-width: 900px;
+  margin: 0 auto;
+  gap: 24px;
+}
+
+.hero-badge {
+  background: rgba(255, 48, 61, 0.08);
+  border: 1px solid rgba(255, 48, 61, 0.2);
+  color: var(--red-hot);
+  padding: 6px 14px;
+  border-radius: 99px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.hero-title {
+  font-family: Georgia, serif;
+  font-size: 56px;
+  font-weight: 700;
+  color: #f1f2f4;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+.hero-title span {
+  background: linear-gradient(90deg, #ff303d, #ff737d);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.hero-desc {
+  font-size: 16px;
+  color: var(--muted);
+  max-width: 620px;
+  line-height: 1.6;
+}
+
+.hero-ctas {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.btn-primary {
+  padding: 12px 28px;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #ff303d 0%, #d62839 100%);
+  border: 1px solid #ff4d5a;
+  color: white;
+  box-shadow: 0 8px 24px rgba(255, 48, 61, 0.3);
+  transition: all 0.25s;
+}
+
+.btn-primary:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 12px 32px rgba(255, 48, 61, 0.45);
+}
+
+.btn-secondary {
+  padding: 12px 28px;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 3px;
+  background: rgba(7, 9, 10, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--strong);
+  backdrop-filter: blur(8px);
+  transition: all 0.25s;
+}
+
+.btn-secondary:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(7, 9, 10, 0.8);
+}
+
+/* Features Grid */
+.features-section {
+  padding: 80px 40px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.section-header {
+  text-align: center;
+  margin-bottom: 50px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.section-title {
+  font-family: Georgia, serif;
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--strong);
+}
+
+.section-desc {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+}
+
+.feature-card {
+  background: rgba(7, 9, 10, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  transition: all 0.3s;
+}
+
+.feature-card:hover {
+  border-color: rgba(255, 48, 61, 0.2);
+  background: rgba(7, 9, 10, 0.65);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+}
+
+.feature-icon {
+  color: var(--red-hot);
+  display: flex;
+}
+
+.feature-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--strong);
+}
+
+.feature-text {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* Pricing Section */
+.pricing-section {
+  padding: 80px 40px 120px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 30px;
+  align-items: stretch;
+}
+
+.pricing-card {
+  background: rgba(7, 9, 10, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 5px;
+  padding: 40px 32px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 30px;
+  position: relative;
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pricing-card.popular {
+  border-color: rgba(255, 48, 61, 0.35);
+  background: rgba(7, 9, 10, 0.75);
+  box-shadow: 
+    0 16px 40px rgba(255, 48, 61, 0.05),
+    inset 0 1px 0 rgba(255, 48, 61, 0.15);
+}
+
+.pricing-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(255, 48, 61, 0.25);
+  background: rgba(7, 9, 10, 0.7);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+.pricing-card.popular:hover {
+  border-color: rgba(255, 48, 61, 0.6);
+  box-shadow: 
+    0 20px 48px rgba(255, 48, 61, 0.1),
+    0 0 1px rgba(255, 48, 61, 0.4);
+}
+
+.popular-badge {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(90deg, #ff303d, #d62839);
+  color: white;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  padding: 4px 12px;
+  border-radius: 99px;
+  text-transform: uppercase;
+  border: 1px solid #ff737d;
+  box-shadow: 0 4px 10px rgba(255, 48, 61, 0.2);
+}
+
+.plan-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.plan-name {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.plan-price {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.price-amount {
+  font-family: Georgia, serif;
+  font-size: 40px;
+  font-weight: 700;
+  color: var(--strong);
+}
+
+.price-period {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.plan-desc {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.4;
+  margin-top: 4px;
+}
+
+.plan-features {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.plan-features li {
+  font-size: 13px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.plan-features li svg {
+  color: var(--green);
+  flex-shrink: 0;
+}
+
+.btn-plan {
+  width: 100%;
+  height: 38px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.pricing-card.popular .btn-plan {
+  background: linear-gradient(180deg, #ff303d 0%, #d62839 100%);
+  border: 1px solid #ff4d5a;
+  color: white;
+  box-shadow: 0 4px 12px rgba(255, 48, 61, 0.2);
+}
+
+.pricing-card.popular .btn-plan:hover {
+  box-shadow: 0 6px 16px rgba(255, 48, 61, 0.35);
+}
+
+.pricing-card:not(.popular) .btn-plan {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--strong);
+}
+
+.pricing-card:not(.popular) .btn-plan:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+/* Modal overlays for Sign In / Sign Up */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 4, 5, 0.85);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: modalFade 0.25s ease forwards;
+}
+
+@keyframes modalFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-close-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.modal-close-btn:hover {
+  color: var(--strong);
+}
+
+.modal-card {
+  position: relative;
+}
+
+/* Success notification message */
+.signup-success-msg {
+  color: var(--green);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  background: rgba(70, 184, 102, 0.08);
+  border: 1px solid rgba(70, 184, 102, 0.18);
+  border-radius: 3px;
+  padding: 8px 10px;
+}

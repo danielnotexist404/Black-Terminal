@@ -1,16 +1,21 @@
 import React, { useState } from "react";
-import { Check, Activity, Bell, Code2, Shield, Lock, X } from "lucide-react";
+import { Check, Activity, Bell, Code2, Shield, Lock, X, ArrowLeft, Chrome, Layers, Cpu, TrendingUp, Users } from "lucide-react";
 import "../styles/landing.css";
+
+// Import generated images
+import terminalMockup from "../assets/terminal_mockup.jpg";
+import chartPreview from "../assets/chart_preview.jpg";
 
 interface LandingPageProps {
   onLoginSuccess: (username: string, role: "admin" | "user") => void;
 }
 
-export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
-  const [showSignInModal, setShowSignInModal] = useState(false);
-  const [showSignUpModal, setShowSignUpModal] = useState(false);
+type ViewState = "landing" | "signin" | "signup";
 
-  // Forms
+export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
+  const [view, setView] = useState<ViewState>("landing");
+
+  // Form states
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
@@ -28,7 +33,6 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
     setLoading(true);
 
     setTimeout(() => {
-      // Load user DB
       const storedUsers = localStorage.getItem("bt_users_db");
       const storedCreds = localStorage.getItem("bt_users_creds");
 
@@ -38,23 +42,19 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
       const cleanUser = username.trim();
       const cleanPass = password.trim();
 
-      // Check credential
       if (creds[cleanUser] && creds[cleanUser] === cleanPass) {
-        // Find user status
         const userObj = users.find((u: any) => u.username === cleanUser);
         if (userObj) {
           if (userObj.status === "suspended") {
-            setErrorMsg("Your secure access code is suspended");
+            setErrorMsg("Access suspended by Administrator");
             setLoading(false);
             return;
           }
 
-          // Update online status
           userObj.status = "online";
           userObj.lastLogin = new Date().toISOString();
           localStorage.setItem("bt_users_db", JSON.stringify(users));
 
-          // Log session in audit
           const storedLogs = JSON.parse(localStorage.getItem("bt_audit_logs") || "[]");
           const logMsg = {
             timestamp: new Date().toLocaleTimeString(),
@@ -65,7 +65,6 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
 
           onLoginSuccess(cleanUser, userObj.role);
         } else {
-          // If password matches but user record is missing, reconstruct it
           const isUserAdmin = cleanUser === "black_terminal_admin";
           const defaultAllowed = [
             "orderBookHeatmap",
@@ -138,7 +137,6 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
         return;
       }
 
-      // Add user record
       const defaultAllowed = [
         "orderBookHeatmap",
         "liquidationHeatmap",
@@ -171,7 +169,6 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
       creds[cleanUser] = cleanPass;
       localStorage.setItem("bt_users_creds", JSON.stringify(creds));
 
-      // Audit logs
       const storedLogs = JSON.parse(localStorage.getItem("bt_audit_logs") || "[]");
       const logMsg = {
         timestamp: new Date().toLocaleTimeString(),
@@ -196,17 +193,118 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
     setErrorMsg("");
     setUsername("");
     setPassword("");
-    setShowSignUpModal(false);
-    setShowSignInModal(true);
+    setView("signin");
   };
 
   const handleOpenSignUp = () => {
     setErrorMsg("");
     setUsername("");
     setPassword("");
-    setShowSignInModal(false);
-    setShowSignUpModal(true);
+    setView("signup");
   };
+
+  if (view === "signin" || view === "signup") {
+    const isSignIn = view === "signin";
+    return (
+      <div className="landing-container" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div className="login-bg-decor" />
+        <div className="login-card">
+          <button className="modal-close-btn" style={{ position: "absolute", top: "20px", left: "20px" }} onClick={() => setView("landing")}>
+            <ArrowLeft size={18} />
+          </button>
+
+          <div className="login-header">
+            <div className="login-logo" />
+            <div className="login-title-group">
+              <h2 className="login-title">{isSignIn ? "SECURE ACCESS" : "INITIALIZE SHELL"}</h2>
+              <p className="login-subtitle">{isSignIn ? "BLACK TERMINAL ENCRYPTED LINK" : "GENERATE CLIENT CREDENTIALS"}</p>
+            </div>
+          </div>
+
+          <form className="login-form" onSubmit={isSignIn ? handleSignIn : handleSignUp}>
+            {errorMsg && <div className="login-error-msg">{errorMsg}</div>}
+            {successMsg && <div className="signup-success-msg">{successMsg}</div>}
+
+            <div className="login-field">
+              <label className="login-label">Identity</label>
+              <input
+                className="login-input"
+                type="text"
+                value={username}
+                placeholder="USERNAME"
+                onChange={(e) => setUsername(e.target.value)}
+                disabled={loading}
+                autoComplete="off"
+              />
+            </div>
+
+            <div className="login-field">
+              <label className="login-label">Access Code</label>
+              <input
+                className="login-input"
+                type="password"
+                value={password}
+                placeholder="PASSWORD"
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={loading}
+                autoComplete="off"
+              />
+            </div>
+
+            <button className="login-submit-btn" type="submit" disabled={loading}>
+              {loading ? "Establishing handshake..." : isSignIn ? "Link Terminal" : "Generate Security Keys"}
+            </button>
+          </form>
+
+          {/* SSO Options */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "4px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.06)" }} />
+              <span style={{ fontSize: "9px", color: "var(--dim)", fontFamily: "IBM Plex Mono" }}>FEDERATED SSO</span>
+              <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.06)" }} />
+            </div>
+
+            <button 
+              className="btn-signin" 
+              style={{ 
+                display: "flex", 
+                alignItems: "center", 
+                justifyContent: "center", 
+                gap: "10px", 
+                cursor: "not-allowed",
+                borderColor: "rgba(255,255,255,0.05)",
+                color: "var(--dim)",
+                background: "rgba(255,255,255,0.01)"
+              }}
+              disabled
+            >
+              <Chrome size={14} />
+              <span>Google Single-Sign On</span>
+              <span className="premium-badge" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", color: "var(--dim)", fontSize: "7px", padding: "1px 4px" }}>COMING SOON</span>
+            </button>
+          </div>
+
+          <div style={{ textAlign: "center", fontSize: "11px", color: "var(--dim)", marginTop: "8px" }}>
+            {isSignIn ? (
+              <>
+                Need secure terminal credentials?{" "}
+                <span style={{ color: "var(--red-hot)", cursor: "pointer", fontWeight: "600" }} onClick={handleOpenSignUp}>
+                  Create keys
+                </span>
+              </>
+            ) : (
+              <>
+                Credentials already configured?{" "}
+                <span style={{ color: "var(--red-hot)", cursor: "pointer", fontWeight: "600" }} onClick={handleOpenSignIn}>
+                  Login
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="landing-container">
@@ -219,88 +317,128 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
           <span className="landing-logo-title">BLACK-TERMINAL</span>
         </div>
         <nav className="landing-nav">
-          <a href="#features" className="landing-nav-link">
-            Features
-          </a>
-          <a href="#pricing" className="landing-nav-link">
-            Pricing
-          </a>
+          <a href="#features" className="landing-nav-link">Features</a>
+          <a href="#preview" className="landing-nav-link">Previews</a>
+          <a href="#pricing" className="landing-nav-link">Pricing</a>
           <div className="landing-auth-btns">
-            <button className="btn-signin" onClick={handleOpenSignIn}>
-              Sign In
-            </button>
-            <button className="btn-signup" onClick={handleOpenSignUp}>
-              Sign Up
-            </button>
+            <button className="btn-signin" onClick={handleOpenSignIn}>Sign In</button>
+            <button className="btn-signup" onClick={handleOpenSignUp}>Sign Up</button>
           </div>
         </nav>
       </header>
 
       {/* Hero */}
       <section className="hero-section">
-        <span className="hero-badge">Pre-Alpha Release v1.0.7</span>
+        <span className="hero-badge">Cybernetic Release v1.0.7-alpha</span>
         <h1 className="hero-title">
           The Ultimate Quantum <br />
           <span>Crypto Trading Terminal</span>
         </h1>
         <p className="hero-desc">
-          Professional charting, low latency order-book heatmaps, custom strategy backtesting
-          engines, and fully customizable Python-ready indicators. Designed by quants, for quants.
+          Professional order-book depth tracking, sub-millisecond execution pipelines, custom Strategy Labs,
+          and sandboxed Python runtimes. Styled and optimized for institutional digital assets operations.
         </p>
         <div className="hero-ctas">
-          <button className="btn-primary" onClick={handleOpenSignUp}>
-            Start Trading Now
-          </button>
-          <button className="btn-secondary" onClick={handleOpenSignIn}>
-            View Live Terminal
-          </button>
+          <button className="btn-primary" onClick={handleOpenSignUp}>Start Trading Now</button>
+          <button className="btn-secondary" onClick={handleOpenSignIn}>Open Live Demo</button>
         </div>
       </section>
 
-      {/* Features */}
+      {/* Image Previews Section */}
+      <section id="preview" className="preview-section" style={{ padding: "80px 40px", maxWidth: "1200px", margin: "0 auto", textAlign: "center" }}>
+        <div className="section-header" style={{ marginBottom: "60px" }}>
+          <h2 className="section-title">Visual Viewport Mockups</h2>
+          <p className="section-desc">Designed with high-density telemetry dashboards and sleek layouts.</p>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "60px" }}>
+          {/* Mockup 1 */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px", alignItems: "center" }}>
+            <div style={{ border: "1px solid rgba(255,0,0,0.15)", borderRadius: "6px", overflow: "hidden", boxShadow: "0 20px 50px rgba(0,0,0,0.6), 0 0 20px rgba(255,0,0,0.05)" }}>
+              <img src={terminalMockup} alt="Black Terminal Interface Mockup" style={{ display: "block", width: "100%", maxWidth: "960px", height: "auto" }} />
+            </div>
+            <div style={{ maxWidth: "600px" }}>
+              <h3 style={{ fontFamily: "Georgia, serif", fontSize: "20px", color: "var(--strong)", marginBottom: "8px" }}>Quant Trading Node Interface</h3>
+              <p style={{ fontSize: "13px", color: "var(--muted)", lineHeight: "1.5" }}>
+                Multi-monitor dashboard layout detailing order flows, tape deltas, volume profiles, and automated indicator logs.
+              </p>
+            </div>
+          </div>
+
+          {/* Mockup 2 */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px", alignItems: "center" }}>
+            <div style={{ border: "1px solid rgba(255,0,0,0.15)", borderRadius: "6px", overflow: "hidden", boxShadow: "0 20px 50px rgba(0,0,0,0.6), 0 0 20px rgba(255,0,0,0.05)" }}>
+              <img src={chartPreview} alt="Black Terminal Holographic Chart Projection" style={{ display: "block", width: "100%", maxWidth: "960px", height: "auto" }} />
+            </div>
+            <div style={{ maxWidth: "600px" }}>
+              <h3 style={{ fontFamily: "Georgia, serif", fontSize: "20px", color: "var(--strong)", marginBottom: "8px" }}>Holographic Depth Telemetry Chart</h3>
+              <p style={{ fontSize: "13px", color: "var(--muted)", lineHeight: "1.5" }}>
+                Real-time rendered candlestick patterns overlayed with value area profiles, POC lines, and leverage liquidity clusters.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Expanded Features Section */}
       <section id="features" className="features-section">
         <div className="section-header">
-          <h2 className="section-title">Engineered For Execution Speed</h2>
-          <p className="section-desc">State of the art technology stack running fully in client space.</p>
+          <h2 className="section-title">Cybernetic Operations Pipeline</h2>
+          <p className="section-desc">Fully decoupled client architectures ensuring privacy and rendering speed.</p>
         </div>
 
         <div className="features-grid">
           <div className="feature-card">
-            <div className="feature-icon">
-              <Activity size={24} />
-            </div>
-            <h3 className="feature-name">PixiJS Canvas Renderer</h3>
+            <div className="feature-icon"><Activity size={24} /></div>
+            <h3 className="feature-name">PixiJS WebGL Engine</h3>
             <p className="feature-text">
-              High frame rate WebGL canvas engine supporting hundreds of thousands of candlesticks
-              and complex heatmaps smoothly.
+              Renders millions of candlesticks and leverage cluster graphics at 120 FPS. Superbly optimized to run smoothly even on multiple monitors.
             </p>
           </div>
 
           <div className="feature-card">
-            <div className="feature-icon">
-              <Code2 size={24} />
-            </div>
-            <h3 className="feature-name">Python Indicator Runtime</h3>
+            <div className="feature-icon"><Code2 size={24} /></div>
+            <h3 className="feature-name">Sandboxed Indicator Editor</h3>
             <p className="feature-text">
-              Write strategy scripts in standard Python. Parse orderbooks, liquidations, and open
-              interest in real-time.
+              Write, compile, and run indicators using Python. Fully equipped with historical data buffering and custom signal triggers.
             </p>
           </div>
 
           <div className="feature-card">
-            <div className="feature-icon">
-              <Shield size={24} />
-            </div>
-            <h3 className="feature-name">Secure Handshake API</h3>
+            <div className="feature-icon"><Shield size={24} /></div>
+            <h3 className="feature-name">Encrypted Key Sockets</h3>
             <p className="feature-text">
-              Client-to-exchange direct WebSockets ensuring your trading keys never transit through
-              third-party server logs.
+              All API keys remain local. Handshakes are directly signed and transited straight to the exchanges (Binance, Bybit, OKX).
+            </p>
+          </div>
+
+          <div className="feature-card">
+            <div className="feature-icon"><Cpu size={24} /></div>
+            <h3 className="feature-name">Strategy Optimization Lab</h3>
+            <p className="feature-text">
+              Test strategies in complex historical regimes. Features automated optimizer grids and walk-forward diagnostic matrix reports.
+            </p>
+          </div>
+
+          <div className="feature-card">
+            <div className="feature-icon"><TrendingUp size={24} /></div>
+            <h3 className="feature-name">Real-Time Depth Analytics</h3>
+            <p className="feature-text">
+              Observe L2 depth blocks and order deltas. Get custom alerts for sweep runs, block reclaims, and large market maker fills.
+            </p>
+          </div>
+
+          <div className="feature-card">
+            <div className="feature-icon"><Layers size={24} /></div>
+            <h3 className="feature-name">Decoupled Architecture</h3>
+            <p className="feature-text">
+              If an API stream fails, the workspace falls back dynamically to backup REST nodes, preventing execution locks.
             </p>
           </div>
         </div>
       </section>
 
-      {/* Pricing */}
+      {/* Pricing Section */}
       <section id="pricing" className="pricing-section">
         <div className="section-header">
           <h2 className="section-title">Select Your Operations Plan</h2>
@@ -318,19 +456,12 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
               <p className="plan-desc">Essential tools to observe markets and try out scripting.</p>
             </div>
             <ul className="plan-features">
-              <li>
-                <Check size={16} /> Basic Candlestick Charting
-              </li>
-              <li>
-                <Check size={16} /> Binance Public WebSocket Feed
-              </li>
-              <li>
-                <Check size={16} /> 2 Custom Python Indicators
-              </li>
+              <li><Check size={16} /> Basic Candlestick Charting</li>
+              <li><Check size={16} /> Binance Public WebSocket Feed</li>
+              <li><Check size={16} /> 2 Custom Python Indicators</li>
+              <li style={{ color: "var(--dim)" }}><X size={16} style={{ color: "var(--red)" }} /> No Order-Book Heatmaps</li>
             </ul>
-            <button className="btn-plan" onClick={handleOpenSignUp}>
-              Register Free
-            </button>
+            <button className="btn-plan" onClick={handleOpenSignUp}>Register Free</button>
           </div>
 
           <div className="pricing-card popular">
@@ -344,27 +475,17 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
               <p className="plan-desc">Advanced depth analytics and full indicator libraries.</p>
             </div>
             <ul className="plan-features">
-              <li>
-                <Check size={16} /> Order-Book & Liquidation Heatmaps
-              </li>
-              <li>
-                <Check size={16} /> Multi-Exchange Feed (Bybit, OKX)
-              </li>
-              <li>
-                <Check size={16} /> Unlimited Indicators & Backtesting
-              </li>
-              <li>
-                <Check size={16} /> Priority Alert System Webhooks
-              </li>
+              <li><Check size={16} /> Order-Book & Liquidation Heatmaps</li>
+              <li><Check size={16} /> Multi-Exchange Feed (Bybit, OKX)</li>
+              <li><Check size={16} /> Unlimited Indicators & Backtesting</li>
+              <li><Check size={16} /> Priority Alert System Webhooks</li>
             </ul>
-            <button className="btn-plan" onClick={handleOpenSignUp}>
-              Activate Pro
-            </button>
+            <button className="btn-plan" onClick={handleOpenSignUp}>Activate Pro</button>
           </div>
 
-          <div className="pricing-card">
+          <div className="pricing-card" style={{ borderColor: "rgba(70,184,102,0.3)", boxShadow: "0 16px 40px rgba(70,184,102,0.05)" }}>
             <div className="plan-header">
-              <span className="plan-name">Institutional</span>
+              <span className="plan-name" style={{ color: "var(--green)" }}>Institutional & Investors</span>
               <div className="plan-price">
                 <span className="price-amount">$199</span>
                 <span className="price-period">/ month</span>
@@ -372,156 +493,15 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
               <p className="plan-desc">Full Strategy Optimization Labs and direct low-latency pipelines.</p>
             </div>
             <ul className="plan-features">
-              <li>
-                <Check size={16} /> AI-Assisted Strategy Optimizer
-              </li>
-              <li>
-                <Check size={16} /> Walk-Forward Optimization Engine
-              </li>
-              <li>
-                <Check size={16} /> Sub-millisecond direct socket adapters
-              </li>
-              <li>
-                <Check size={16} /> Dedicated Server Host Cluster
-              </li>
+              <li><Check size={16} /> AI-Assisted Strategy Optimizer</li>
+              <li><Check size={16} /> Sub-millisecond direct socket adapters</li>
+              <li style={{ color: "var(--green)", fontWeight: "600" }}><Check size={16} /> INCL. INVESTOR ACCESS PANEL (VC & Angel backing)</li>
+              <li style={{ color: "var(--green)", fontWeight: "600" }}><Check size={16} /> Portfolio metrics pipeline & Equity reports</li>
             </ul>
-            <button className="btn-plan" onClick={handleOpenSignUp}>
-              Contact Sales
-            </button>
+            <button className="btn-plan" style={{ borderColor: "rgba(70,184,102,0.4)", color: "var(--green)" }} onClick={handleOpenSignUp}>Contact Sales</button>
           </div>
         </div>
       </section>
-
-      {/* Sign In Modal */}
-      {showSignInModal && (
-        <div className="modal-overlay" onClick={() => setShowSignInModal(false)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="login-card">
-              <button className="modal-close-btn" onClick={() => setShowSignInModal(false)}>
-                <X size={18} />
-              </button>
-
-              <div className="login-header">
-                <div className="login-logo" />
-                <div className="login-title-group">
-                  <h2 className="login-title">SECURE LOGIN</h2>
-                  <p className="login-subtitle">Establish Terminal Connection</p>
-                </div>
-              </div>
-
-              <form className="login-form" onSubmit={handleSignIn}>
-                {errorMsg && <div className="login-error-msg">{errorMsg}</div>}
-
-                <div className="login-field">
-                  <label className="login-label">Secure Identity</label>
-                  <input
-                    className="login-input"
-                    type="text"
-                    value={username}
-                    placeholder="USERNAME"
-                    onChange={(e) => setUsername(e.target.value)}
-                    disabled={loading}
-                    autoComplete="off"
-                  />
-                </div>
-
-                <div className="login-field">
-                  <label className="login-label">Access Code</label>
-                  <input
-                    className="login-input"
-                    type="password"
-                    value={password}
-                    placeholder="PASSWORD"
-                    onChange={(e) => setPassword(e.target.value)}
-                    disabled={loading}
-                    autoComplete="off"
-                  />
-                </div>
-
-                <button className="login-submit-btn" type="submit" disabled={loading}>
-                  {loading ? "Establishing Link..." : "Decrypt Terminal Key"}
-                </button>
-              </form>
-
-              <div style={{ textAlign: "center", fontSize: "11px", color: "var(--dim)" }}>
-                Need a terminal key?{" "}
-                <span
-                  style={{ color: "var(--red-hot)", cursor: "pointer", fontWeight: "600" }}
-                  onClick={handleOpenSignUp}
-                >
-                  Create one now
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Sign Up Modal */}
-      {showSignUpModal && (
-        <div className="modal-overlay" onClick={() => setShowSignUpModal(false)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="login-card">
-              <button className="modal-close-btn" onClick={() => setShowSignUpModal(false)}>
-                <X size={18} />
-              </button>
-
-              <div className="login-header">
-                <div className="login-logo" />
-                <div className="login-title-group">
-                  <h2 className="login-title">REGISTER SECURE IDENT</h2>
-                  <p className="login-subtitle">Initialize Client-Side Shell</p>
-                </div>
-              </div>
-
-              <form className="login-form" onSubmit={handleSignUp}>
-                {errorMsg && <div className="login-error-msg">{errorMsg}</div>}
-                {successMsg && <div className="signup-success-msg">{successMsg}</div>}
-
-                <div className="login-field">
-                  <label className="login-label">Choose Identity</label>
-                  <input
-                    className="login-input"
-                    type="text"
-                    value={username}
-                    placeholder="USERNAME"
-                    onChange={(e) => setUsername(e.target.value)}
-                    disabled={loading}
-                    autoComplete="off"
-                  />
-                </div>
-
-                <div className="login-field">
-                  <label className="login-label">Generate Access Code</label>
-                  <input
-                    className="login-input"
-                    type="password"
-                    value={password}
-                    placeholder="COMPLEX_PASSWORD"
-                    onChange={(e) => setPassword(e.target.value)}
-                    disabled={loading}
-                    autoComplete="off"
-                  />
-                </div>
-
-                <button className="login-submit-btn" type="submit" disabled={loading}>
-                  {loading ? "Registering Node..." : "Initialize Security Keys"}
-                </button>
-              </form>
-
-              <div style={{ textAlign: "center", fontSize: "11px", color: "var(--dim)" }}>
-                Already registered?{" "}
-                <span
-                  style={{ color: "var(--red-hot)", cursor: "pointer", fontWeight: "600" }}
-                  onClick={handleOpenSignIn}
-                >
-                  Login here
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

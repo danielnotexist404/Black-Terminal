@@ -1084,6 +1084,11 @@ export default function App() {
           {replayControls.enabled ? "REPLAY" : "LIVE"} <span />
         </div>
         <div className="latency">UP 23ms</div>
+        {currentUser?.role !== "admin" && (
+          <button className="upgrade-btn" onClick={() => setActiveNav("SETTINGS")}>
+            UPGRADE
+          </button>
+        )}
         <div className="top-separator" />
         <button className="icon-btn" onClick={() => setActiveNav("SETTINGS")}>
           <Settings size={17} />

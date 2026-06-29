@@ -1,0 +1,17 @@
+{
+  "folders": [
+    {
+      "name": "black-terminal",
+      "path": "black-terminal-identical-frontend"
+    }
+  ],
+  "settings": {
+    "editor.formatOnSave": true,
+    "files.eol": "\n",
+    "search.exclude": {
+      "**/dist": true,
+      "**/node_modules": true,
+      "**/src-tauri/target": true
+    }
+  }
+}

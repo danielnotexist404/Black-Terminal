@@ -1,0 +1,16 @@
+{
+  "editor.formatOnSave": true,
+  "editor.rulers": [100],
+  "files.eol": "\n",
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.preferences.importModuleSpecifier": "relative",
+  "rust-analyzer.cargo.features": "all",
+  "search.exclude": {
+    "**/dist": true,
+    "**/node_modules": true,
+    "**/src-tauri/target": true
+  },
+  "files.associations": {
+    "*.css": "css"
+  }
+}

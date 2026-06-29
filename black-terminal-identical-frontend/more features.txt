@@ -1,0 +1,908 @@
+PROJECT OBJECTIVE
+
+Transform Black Terminal into a professional institutional-grade desktop trading platform capable of:
+
+Professional charting
+Professional order execution
+Multi-exchange connectivity
+Multi-supported wallet connectivity including DEXes. 
+Multi-investor account management
+Portfolio monitoring
+Institutional risk management
+Ultra-low latency order routing
+
+The application MUST remain 100% desktop based.
+
+NO cloud server.
+
+NO web application.
+
+NO SaaS architecture.
+
+Everything runs locally exactly like MetaTrader 5.
+
+OVERALL ARCHITECTURE
+
+Split the entire application into independent modules.
+
+UI
+
+↓
+
+Workspace Manager
+
+↓
+
+Trading Engine
+
+↓
+
+Execution Engine
+
+↓
+
+Risk Engine
+
+↓
+
+Broker Adapters
+
+↓
+
+Exchange APIs
+
+Each module must be completely isolated.
+
+No exchange-specific logic is allowed inside the UI.
+
+NEW LEFT SIDEBAR
+
+Add two new menu sections directly below Settings.
+
+WATCHLIST
+
+CHART
+
+INDICATORS
+
+SCANNER
+
+ALERTS
+
+SCRIPT EDITOR
+
+STRATEGY LAB
+
+MARKET OVERVIEW
+
+SETTINGS
+
+------------------------
+
+POSITIONS
+
+PORTFOLIO MANAGER
+
+These become first-class pages.
+
+POSITIONS PAGE
+
+When clicking Positions:
+
+Instead of Alerts opening,
+
+create a new expandable bottom panel.
+
+This panel behaves exactly like the existing Alerts panel.
+
+It can be resized.
+
+It can be minimized.
+
+It remembers its size.
+
+Inside Positions create tabs.
+
+Accounts
+
+Positions
+
+Orders
+
+History
+
+Balances
+
+Risk
+
+Logs
+Accounts Tab
+
+Displays every connected exchange.
+
+Initially empty.
+
+Large center button:
+
++ Connect Exchange
+
+When clicked:
+
+Open modal.
+
+Supported connectors:
+
+Bybit
+
+Binance
+
+OKX
+
+Bitget
+
+Coinbase
+
+Kraken
+
+Hyperliquid
+
+Deribit
+
+BloFin
+
+KuCoin
+
+Phantom 
+
+any other DEX style wallet that supports trading, 
+
+Custom REST API
+
+Each connector uses its own adapter.
+
+Exchange Connection Wizard
+
+Step 1
+
+Choose exchange
+
+↓
+
+Step 2
+
+Enter
+
+API Key
+
+Secret
+
+Passphrase (if required)
+
+Testnet / Live
+
+Read Only
+
+Trading Enabled
+
+↓
+
+Validate keys
+
+↓
+
+Download
+
+Balances
+
+Open positions
+
+Open orders
+
+Leverage
+
+Wallets
+
+↓
+
+Store securely
+
+↓
+
+Connection complete
+
+Once connected display
+
+Green dot
+
+Exchange logo
+
+Latency
+
+Connected since
+
+Last heartbeat
+
+Current balance
+
+Available margin
+
+Unrealized PNL
+
+Realized PNL
+
+Open Positions
+
+Open Orders
+
+Automatically reconnect if disconnected.
+
+Positions Tab
+
+Institutional grid.
+
+Columns
+
+Exchange
+
+Account
+
+Symbol
+
+Direction
+
+Contracts
+
+Entry
+
+Mark Price
+
+Current Price
+
+Leverage
+
+Margin Used
+
+Liquidation
+
+Funding
+
+PnL $
+
+PnL %
+
+ROI
+
+Risk
+
+Take Profit
+
+Stop Loss
+
+Status
+
+Updates in real time.
+
+No refresh button.
+
+Everything via websocket.
+
+Double clicking a row opens
+
+Position Inspector
+
+Shows
+
+Entire execution history
+
+Average fills
+
+Funding history
+
+Current fees
+
+Expected liquidation
+
+Risk metrics
+
+Orders Tab
+
+Shows
+
+Pending Orders
+
+Filled Orders
+
+Cancelled
+
+Rejected
+
+Partial
+
+Modify order
+
+Cancel order
+
+Cancel all
+
+Flatten
+
+Reverse
+
+Scale
+
+Everything must happen in milliseconds.
+
+Balances Tab
+
+Shows
+
+Every connected exchange.
+
+Assets
+
+Free
+
+Locked
+
+Available
+
+Margin
+
+USD Value
+
+24H Change
+
+Risk Tab
+
+Shows
+
+Current exposure
+
+Long exposure
+
+Short exposure
+
+Leverage
+
+Max drawdown
+
+Portfolio VaR
+
+Margin usage
+
+Largest losing position
+
+Largest winning position
+
+Daily realized
+
+Daily unrealized
+
+INVESTORS PAGE
+
+Purpose:
+
+Professional multi-account management.
+
+Supports unlimited investor accounts.
+
+No artificial limit.
+
+Layout
+
+Top toolbar
+
++ Add Investor
+
+Import
+
+Export
+
+Search
+
+Groups
+
+Filters
+
+Investor Grid
+
+Columns
+
+Investor Name
+
+Exchange
+
+Status
+
+Connected
+
+Balance
+
+Equity
+
+PnL Today
+
+Open Positions
+
+Open Orders
+
+API Status
+
+Latency
+
+Permissions
+
+Last Update
+
+Green
+
+Connected
+
+Yellow
+
+Reconnecting
+
+Red
+
+Offline
+
+Add Investor Wizard
+
+Fields
+
+Investor Name
+
+Exchange
+
+API Key
+
+Secret
+
+Passphrase
+
+Group
+
+Notes
+
+Color Tag
+
+Trading Enabled
+
+Read Only
+
+Maximum Allocation
+
+Maximum Daily Loss
+
+Maximum Position Size
+
+Maximum Leverage
+
+Maximum Exposure
+
+Emergency Stop
+
+Validate API
+
+Finish
+
+IMPORTANT
+
+Never request withdrawal permissions.
+
+Never require withdrawal permissions.
+
+Trading permission only.
+
+All credentials stored locally using Windows secure credential storage.
+
+Never plaintext.
+
+Never send credentials anywhere.
+
+INVESTOR DASHBOARD
+
+Click investor.
+
+Open full profile.
+
+Contains
+
+Overview
+
+Positions
+
+Orders
+
+History
+
+Risk
+
+Performance
+
+Journal
+
+Logs
+
+Statistics
+
+Everything updates live.
+
+MASS ORDER EXECUTION
+
+Create execution engine.
+
+Single click
+
+BUY
+
+↓
+
+Choose accounts
+
+↓
+
+Execution window
+
+Account A
+
+0.50 BTC
+
+✓
+
+Account B
+
+1.00 BTC
+
+✓
+
+Account C
+
+0.20 BTC
+
+✓
+
+
+↓
+
+Execute
+
+Engine sends orders simultaneously.
+
+Parallel execution.
+
+Not sequential.
+
+Execution report
+
+Shows
+
+Accepted
+
+Rejected
+
+Filled
+
+Pending
+
+Average latency
+
+TRADE ALLOCATION ENGINE
+
+Support
+
+Fixed Quantity
+
+Fixed USD
+
+Percentage Equity
+
+Risk %
+
+Volatility Based
+
+ATR Based
+
+Kelly
+
+Custom Formula
+
+Example
+
+Master Position
+
+BUY BTC
+
+↓
+
+Investor A
+
+0.10 BTC
+
+Investor B
+
+0.35 BTC
+
+Investor C
+
+0.07 BTC
+
+Automatically calculated.
+
+COPY EXECUTION
+
+Modes
+
+Mirror
+
+Inverse
+
+Scale
+
+Percentage
+
+Fixed
+
+Multiplier
+
+Custom
+
+ORDER TYPES
+
+Support
+
+Market
+
+Limit
+
+Stop
+
+Stop Limit
+
+Trigger
+
+Post Only
+
+Reduce Only
+
+IOC
+
+FOK
+
+TWAP
+
+Iceberg
+
+Bracket
+
+OCO
+
+Trailing Stop
+
+RISK ENGINE
+
+Before ANY order
+
+Check
+
+Daily Loss
+
+Account Drawdown
+
+Max Position
+
+Max Exposure
+
+Max Leverage
+
+Margin Available
+
+Duplicate Orders
+
+Whitelist Symbols
+
+Blacklist Symbols
+
+Trading Session
+
+Emergency Stop
+
+If any fail
+
+Reject.
+
+Never send.
+
+BROKER ABSTRACTION
+
+Every exchange must implement
+
+connect()
+
+disconnect()
+
+heartbeat()
+
+getBalances()
+
+getPositions()
+
+getOrders()
+
+placeOrder()
+
+modifyOrder()
+
+cancelOrder()
+
+cancelAll()
+
+getHistory()
+
+subscribePositions()
+
+subscribeOrders()
+
+subscribeBalances()
+
+subscribeTrades()
+
+No UI code may reference exchange APIs directly.
+
+WEBSOCKET ENGINE
+
+One websocket manager.
+
+Handles
+
+Reconnect
+
+Heartbeat
+
+Authentication
+
+Subscriptions
+
+Compression
+
+Backoff
+
+Sequence validation
+
+Message ordering
+
+Latency measurement
+
+PERFORMANCE
+
+Target
+
+60 FPS UI
+
+Non-blocking rendering
+
+Async execution
+
+Background API workers
+
+No UI freezes
+
+GPU rendering
+
+Memory optimized
+LOGGING
+
+Everything logged.
+
+Connection
+
+Orders
+
+Errors
+
+Risk
+
+Latency
+
+Execution
+
+Reconnects
+
+API messages
+
+Searchable.
+
+Exportable.
+
+SECURITY
+
+Use Windows Credential Manager or DPAPI.
+
+Encrypt API secrets.
+
+Never log secrets.
+
+Never expose secrets.
+
+Never transmit credentials outside exchange connections.
+
+Support biometric unlock if available.
+
+FUTURE READY
+
+Architecture must support future additions without rewriting core code.
+
+Examples
+
+Interactive Brokers
+
+CME
+
+TradingView execution
+
+FIX protocol
+
+CQG
+
+Rithmic
+
+Bloomberg
+
+Multi-PC synchronization
+
+Dedicated execution server
+
+AI assistant
+
+Portfolio optimization
+
+Strategy automation
+
+Custom plugins
+
+CODING STANDARDS
+
+Use modular architecture.
+
+Strict TypeScript.
+
+Strong typing.
+
+Dependency injection.
+
+Event-driven design.
+
+No global state.
+
+Unit tests for trading engine, broker adapters, and risk engine.
+
+Zero exchange-specific logic inside UI components.
+
+One architectural recommendation
+
+I would add one more module beyond what you've described: a Master Account.
+
+Instead of your chart sending orders directly to investor accounts:
+
+Charts
+    │
+Strategy / Manual Trade
+    │
+Master Execution Engine
+    │
+Risk Engine
+    │
+Allocation Engine
+    │
+Broker Adapters
+    │
+──────────────────────────────
+│        │        │
+Your     Inv A    Inv B
+Bybit    Bybit    Hyperliquid
+│        │        │
+Exchange Exchange Exchange
+
+This gives you one-click trading while allowing different sizing, leverage limits, and risk rules per investor account. It's also much easier to audit, replay, and extend in the future.
+
+With the platform you've already shown, these additions would move it from being an advanced charting terminal toward a full desktop execution and portfolio management workstation. The remaining engineering work is primarily around connectivity, security, execution, and risk management rather than chart rendering.

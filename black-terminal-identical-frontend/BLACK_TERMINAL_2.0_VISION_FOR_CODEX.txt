@@ -1,0 +1,69 @@
+BLACK TERMINAL 2.0 - VISION DOCUMENT FOR CODEX
+
+Mission: Transform Black Terminal from a charting application into a
+modular desktop trading operating system.
+
+Core principles: - Desktop-first (Tauri + PixiJS) - React is UI shell
+only. - PixiJS renders all market graphics. - Modular architecture. -
+Event-driven communication. - Exchange-agnostic broker layer. -
+Institutional-grade OMS/EMS. - Local execution. No cloud dependency.
+
+Current strengths: - Custom GPU chart engine. - Layered renderer. -
+Custom indicators. - Workspace concept. - Excellent foundation for
+future growth.
+
+Architectural direction:
+
+Black Core ├─ Event Bus ├─ Command Bus ├─ Service Registry ├─ Plugin
+Manager ├─ Workspace Manager ├─ Layout Manager ├─ Persistence ├─ Logger
+└─ Performance Monitor
+
+Feature modules: - Chart Engine - Market Data Engine - Broker
+Framework - Execution Engine - Order Management System (OMS) - Portfolio
+Manager - Risk Engine - Alert Engine - Scanner Engine - Strategy
+Engine - Replay Engine - AI Assistant - Plugin SDK
+
+Broker framework: - Broker adapters expose a common interface. - UI must
+never call exchange APIs directly. - Support Bybit first, then
+additional exchanges such as Binance,OKX,Bitget,phantom and other DEXes. - Trading APIs only; no withdrawal permissions
+required.
+
+Portfolio Manager: Add a simple “Portfolio Manager” capable of managing authorized trading accounts.
+
+Capabilities: - Unlimited connected accounts. - Live balances. - Live
+positions. - Live orders. - Equity. - PnL. - Risk metrics. - Groups. -
+Allocation profiles. - Audit logs.
+
+Sidebar additions: - Positions - Portfolio Manager
+
+Bottom workspace: The Positions and Portfolio Manager pages open
+institutional-style dockable bottom workspaces rather than modal
+dialogs.
+
+Portfolio workspace tabs: - Overview - Accounts - Positions - Orders -
+Allocations - Performance - Risk - History - Fees - Audit - Logs
+
+Execution workflow: Manual trade → Risk Engine → Allocation Engine →
+Broker Adapter → Exchange
+
+Allocation engine: Support: - Equity % - Risk % - Fixed USDT/USDC - Fixed
+Quantity - Volatility-based - Portfolio weights
+
+Every account stores an Allocation Profile so quantities are calculated
+automatically.
+
+Execution Matrix: Before sending orders, display every selected account,
+calculated size, estimated exposure and confirmation.
+
+Risk: Each account has configurable: - Max leverage - Max position
+size - Max daily loss - Max exposure - Allowed symbols - Emergency
+stop - Read-only mode
+
+Rendering roadmap: - Typed-array buffers - Geometry batching - Millions
+of candles - Order-book heatmap - Footprints - Volume profile - Replay -
+GPU optimized layers
+
+Long-term objective: Black Terminal should evolve into an institutional grade desktop trading
+platform where the chart is only one module among many. Build every new
+capability as an independent service or plugin so the platform can
+continue to scale cleanly.

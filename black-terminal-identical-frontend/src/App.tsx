@@ -329,6 +329,43 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<{ username: string; role: "admin" | "user"; allowedIndicators: string[] } | null>(null);
   const [activeNav, setActiveNav] = useState("CHART");
 
+  // Bootstrap Database
+  useEffect(() => {
+    const storedUsers = localStorage.getItem("bt_users_db");
+    const storedCreds = localStorage.getItem("bt_users_creds");
+
+    let users = storedUsers ? JSON.parse(storedUsers) : [];
+    let creds = storedCreds ? JSON.parse(storedCreds) : {};
+
+    const adminExists = users.some((u: any) => u.username === "black_terminal_admin");
+
+    if (!adminExists) {
+      const adminUser = {
+        username: "black_terminal_admin",
+        role: "admin" as const,
+        status: "offline" as const,
+        createdAt: new Date().toISOString(),
+        lastLogin: "Never",
+        allowedIndicators: ADMIN_ALLOWED,
+        activeIndicators: []
+      };
+      users.push(adminUser);
+      creds["black_terminal_admin"] = "K9#fX$p2@mQ9&zR4*tW1!vY8";
+      localStorage.setItem("bt_users_db", JSON.stringify(users));
+      localStorage.setItem("bt_users_creds", JSON.stringify(creds));
+    } else {
+      const adminUser = users.find((u: any) => u.username === "black_terminal_admin");
+      if (adminUser && adminUser.role !== "admin") {
+        adminUser.role = "admin";
+        localStorage.setItem("bt_users_db", JSON.stringify(users));
+      }
+      if (!creds["black_terminal_admin"] || creds["black_terminal_admin"] !== "K9#fX$p2@mQ9&zR4*tW1!vY8") {
+        creds["black_terminal_admin"] = "K9#fX$p2@mQ9&zR4*tW1!vY8";
+        localStorage.setItem("bt_users_creds", JSON.stringify(creds));
+      }
+    }
+  }, []);
+
   const visibleNav = useMemo(() => {
     const base = [
       { label: "WATCHLIST", icon: BookOpen },
@@ -765,11 +802,13 @@ export default function App() {
     return (
       <LandingPage
         onLoginSuccess={(username, role) => {
+          const isUserAdmin = username === "black_terminal_admin";
+          const resolvedRole = isUserAdmin ? "admin" as const : role;
           const stored = localStorage.getItem("bt_users_db");
           const users = stored ? JSON.parse(stored) : [];
           const matched = users.find((u: any) => u.username === username);
-          const allowed = matched?.allowedIndicators || (role === "admin" ? ADMIN_ALLOWED : DEFAULT_ALLOWED);
-          setCurrentUser({ username, role, allowedIndicators: allowed });
+          const allowed = matched?.allowedIndicators || (resolvedRole === "admin" ? ADMIN_ALLOWED : DEFAULT_ALLOWED);
+          setCurrentUser({ username, role: resolvedRole, allowedIndicators: allowed });
         }}
       />
     );

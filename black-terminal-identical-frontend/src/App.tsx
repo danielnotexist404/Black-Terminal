@@ -49,6 +49,7 @@ import { ScriptEditor } from "./components/ScriptEditor";
 import { TradesTape } from "./components/TradesTape";
 import LandingPage from "./components/LandingPage";
 import AdminPanel from "./components/AdminPanel";
+import { SettingsPanel } from "./components/SettingsPanel";
 import { LogOut, Shield } from "lucide-react";
 import type { IndicatorAlertDefinition } from "./automation/alerts";
 import { ScannerPage } from "./modules/scanner/components/ScannerPage";
@@ -1128,6 +1129,10 @@ export default function App() {
       {activeNav === "ADMIN PANEL" ? (
         <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
           <AdminPanel />
+        </div>
+      ) : activeNav === "SETTINGS" ? (
+        <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
+          <SettingsPanel currentUser={currentUser!} onClose={() => setActiveNav("CHART")} />
         </div>
       ) : (
         <main className="terminal-grid" style={gridStyle}>

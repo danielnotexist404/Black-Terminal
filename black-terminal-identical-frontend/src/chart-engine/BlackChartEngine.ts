@@ -1011,14 +1011,28 @@ export class BlackChartEngine {
     return plotWidth - barsFromRight * step - this.view.candleWidth / 2 - 12;
   }
 
+  private getOscillatorPaneHeight() {
+    const hasOscillator =
+      this.visibleIndicators.openInterestOscillator ||
+      this.visibleIndicators.zScoreOscillator ||
+      this.visibleIndicators.waveTrendOscillator;
+    if (!hasOscillator) return 0;
+
+    const plotHeight = this.view.height - this.view.bottomAxisHeight;
+    const paneHeight = Math.max(82, Math.min(128, plotHeight * 0.19));
+    return paneHeight + 20;
+  }
+
   private yForPrice(price: number) {
-    const plotHeight = this.view.height - this.view.bottomAxisHeight - this.view.topPadding;
+    const oscHeight = this.getOscillatorPaneHeight();
+    const plotHeight = this.view.height - this.view.bottomAxisHeight - this.view.topPadding - oscHeight;
     const n = (price - this.view.priceMin) / (this.view.priceMax - this.view.priceMin);
     return this.view.topPadding + (1 - n) * plotHeight;
   }
 
   private priceForY(y: number) {
-    const plotHeight = this.view.height - this.view.bottomAxisHeight - this.view.topPadding;
+    const oscHeight = this.getOscillatorPaneHeight();
+    const plotHeight = this.view.height - this.view.bottomAxisHeight - this.view.topPadding - oscHeight;
     const n = 1 - (y - this.view.topPadding) / plotHeight;
     return this.view.priceMin + n * (this.view.priceMax - this.view.priceMin);
   }
@@ -1841,8 +1855,7 @@ export class BlackChartEngine {
     const g = this.indicatorLayer;
     const plotWidth = this.view.width - this.view.rightAxisWidth;
     const plotHeight = this.view.height - this.view.bottomAxisHeight;
-    const bottomOffset = this.visibleIndicators.volume ? 108 : 16;
-    const paneBottom = plotHeight - bottomOffset;
+    const paneBottom = plotHeight - 16;
     const paneHeight = Math.max(82, Math.min(128, plotHeight * 0.19));
     const paneTop = Math.max(this.view.topPadding + 22, paneBottom - paneHeight);
     const paneMid = (paneTop + paneBottom) / 2;
@@ -2936,7 +2949,11 @@ export class BlackChartEngine {
     if (!this.visibleIndicators.volume) return;
     const data = this.getDisplayCandles();
     if (data.length === 0) return;
+
+    const oscHeight = this.getOscillatorPaneHeight();
     const plotHeight = this.view.height - this.view.bottomAxisHeight;
+    const priceAreaBottom = plotHeight - oscHeight;
+
     const visible = data.slice(this.view.firstIndex, this.view.lastIndex + 1);
     const maxVol = Math.max(...visible.map(c => c.volume), 1);
     const visual = this.visualFor("volume", "red");
@@ -2949,7 +2966,7 @@ export class BlackChartEngine {
       const h = (c.volume / maxVol) * 96;
       const color = c.close >= c.open ? theme.silver : visual.color;
       const alpha = (this.view.candleWidth < 0.8 ? 0.16 : c.close >= c.open ? 0.20 : 0.32) * Math.max(0.35, visual.alpha);
-      g.rect(x, plotHeight - h, barWidth, h).fill({ color, alpha });
+      g.rect(x, priceAreaBottom - h, barWidth, h).fill({ color, alpha });
     }
   }
 

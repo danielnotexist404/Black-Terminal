@@ -328,7 +328,21 @@ function loadWorkspaceSnapshots(): Record<string, WorkspaceSnapshot> {
 }
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<{ username: string; role: "admin" | "user"; allowedIndicators: string[] } | null>(null);
+  const [currentUser, setCurrentUser] = useState<{ username: string; role: "admin" | "user"; allowedIndicators: string[] } | null>(() => {
+    const stored = localStorage.getItem("bt_current_user");
+    if (stored) {
+      try { return JSON.parse(stored); } catch (e) {}
+    }
+    return null;
+  });
+
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem("bt_current_user", JSON.stringify(currentUser));
+    } else {
+      localStorage.removeItem("bt_current_user");
+    }
+  }, [currentUser]);
   const [activeNav, setActiveNav] = useState("CHART");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [terminalSettings, setTerminalSettings] = useState(() => {
@@ -782,11 +796,9 @@ export default function App() {
   if (!currentUser) {
     return (
       <LandingPage
-        onLoginSuccess={(username, role) => {
-          const isUserAdmin = username === "black_terminal_admin";
-          const resolvedRole = isUserAdmin ? "admin" as const : role;
-          const stored = localStorage.getItem("bt_users_db");
-          const users = stored ? JSON.parse(stored) : [];
+        onLoginSuccess={async (username, role) => {
+          const resolvedRole = username === "black_terminal_admin" ? "admin" as const : role;
+          const users = await dbGetUsers();
           const matched = users.find((u: any) => u.username === username);
           const allowed = matched?.allowedIndicators || (resolvedRole === "admin" ? ADMIN_ALLOWED : DEFAULT_ALLOWED);
           setCurrentUser({ username, role: resolvedRole, allowedIndicators: allowed });

@@ -66,12 +66,33 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
           onLoginSuccess(cleanUser, userObj.role);
         } else {
           // If password matches but user record is missing, reconstruct it
+          const isUserAdmin = cleanUser === "black_terminal_admin";
+          const defaultAllowed = [
+            "orderBookHeatmap",
+            "liquidationHeatmap",
+            "volatilityHeatmap",
+            "adaptiveSwingStrategy",
+            "vwap",
+            "ema20",
+            "ema50",
+            "ema200",
+            "sma20",
+            "sma50",
+            "bollinger",
+            "openInterestOscillator",
+            "zScoreOscillator",
+            "waveTrendOscillator",
+            "volume"
+          ];
+          const adminAllowed = [...defaultAllowed, "volumeProfile"];
           const newUser = {
             username: cleanUser,
-            role: (cleanUser === "black_terminal_admin" ? "admin" : "user") as any,
+            role: (isUserAdmin ? "admin" : "user") as any,
             status: "online" as const,
             createdAt: new Date().toISOString(),
-            lastLogin: new Date().toISOString()
+            lastLogin: new Date().toISOString(),
+            allowedIndicators: isUserAdmin ? adminAllowed : defaultAllowed,
+            activeIndicators: []
           };
           users.push(newUser);
           localStorage.setItem("bt_users_db", JSON.stringify(users));
@@ -118,12 +139,31 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
       }
 
       // Add user record
+      const defaultAllowed = [
+        "orderBookHeatmap",
+        "liquidationHeatmap",
+        "volatilityHeatmap",
+        "adaptiveSwingStrategy",
+        "vwap",
+        "ema20",
+        "ema50",
+        "ema200",
+        "sma20",
+        "sma50",
+        "bollinger",
+        "openInterestOscillator",
+        "zScoreOscillator",
+        "waveTrendOscillator",
+        "volume"
+      ];
       const newUser = {
         username: cleanUser,
         role: "user" as const,
         status: "online" as const,
         createdAt: new Date().toISOString(),
-        lastLogin: new Date().toISOString()
+        lastLogin: new Date().toISOString(),
+        allowedIndicators: defaultAllowed,
+        activeIndicators: []
       };
       users.push(newUser);
       localStorage.setItem("bt_users_db", JSON.stringify(users));

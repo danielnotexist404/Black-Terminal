@@ -124,6 +124,25 @@ const timeframes: { label: string; value: Timeframe }[] = [
   { label: "1M", value: "1M" }
 ];
 
+const DEFAULT_ALLOWED = [
+  "orderBookHeatmap",
+  "liquidationHeatmap",
+  "volatilityHeatmap",
+  "adaptiveSwingStrategy",
+  "vwap",
+  "ema20",
+  "ema50",
+  "ema200",
+  "sma20",
+  "sma50",
+  "bollinger",
+  "openInterestOscillator",
+  "zScoreOscillator",
+  "waveTrendOscillator",
+  "volume"
+];
+const ADMIN_ALLOWED = [...DEFAULT_ALLOWED, "volumeProfile"];
+
 const defaultWorkspaces = ["Quant Desk", "Scalp Layout", "Strategy Lab"] as const;
 const workspaceStorageKey = "bt_workspaces_v1";
 const workspaceNamesStorageKey = "bt_workspace_names_v1";
@@ -307,7 +326,7 @@ function loadWorkspaceSnapshots(): Record<string, WorkspaceSnapshot> {
 }
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<{ username: string; role: "admin" | "user" } | null>(null);
+  const [currentUser, setCurrentUser] = useState<{ username: string; role: "admin" | "user"; allowedIndicators: string[] } | null>(null);
   const [activeNav, setActiveNav] = useState("CHART");
 
   const visibleNav = useMemo(() => {
@@ -428,6 +447,56 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(alertStorageKey, JSON.stringify(indicatorAlerts));
   }, [indicatorAlerts]);
+
+  // Real-time active indicators sync
+  useEffect(() => {
+    if (!currentUser) return;
+    const activeList = Object.entries(visibleIndicators)
+      .filter(([_, visible]) => visible === true)
+      .map(([key]) => key);
+
+    const storedUsers = localStorage.getItem("bt_users_db");
+    if (storedUsers) {
+      const users = JSON.parse(storedUsers);
+      const userObj = users.find((u: any) => u.username === currentUser.username);
+      if (userObj) {
+        if (JSON.stringify(userObj.activeIndicators) !== JSON.stringify(activeList)) {
+          userObj.activeIndicators = activeList;
+          localStorage.setItem("bt_users_db", JSON.stringify(users));
+        }
+      }
+    }
+  }, [visibleIndicators, currentUser]);
+
+  // Real-time allowed indicators sync (and automatic turn-off of revoked indicators)
+  useEffect(() => {
+    if (!currentUser) return;
+    const interval = setInterval(() => {
+      const stored = localStorage.getItem("bt_users_db");
+      if (stored) {
+        const users = JSON.parse(stored);
+        const record = users.find((u: any) => u.username === currentUser.username);
+        if (record) {
+          if (JSON.stringify(record.allowedIndicators) !== JSON.stringify(currentUser.allowedIndicators)) {
+            setCurrentUser(prev => prev ? { ...prev, allowedIndicators: record.allowedIndicators } : null);
+            
+            setVisibleIndicators(current => {
+              const next = { ...current };
+              let changed = false;
+              Object.keys(next).forEach((key) => {
+                if (next[key as keyof VisibleIndicators] && !record.allowedIndicators.includes(key)) {
+                  next[key as keyof VisibleIndicators] = false;
+                  changed = true;
+                }
+              });
+              return changed ? next : current;
+            });
+          }
+        }
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [currentUser]);
 
   useEffect(() => {
     let disposed = false;
@@ -696,7 +765,11 @@ export default function App() {
     return (
       <LandingPage
         onLoginSuccess={(username, role) => {
-          setCurrentUser({ username, role });
+          const stored = localStorage.getItem("bt_users_db");
+          const users = stored ? JSON.parse(stored) : [];
+          const matched = users.find((u: any) => u.username === username);
+          const allowed = matched?.allowedIndicators || (role === "admin" ? ADMIN_ALLOWED : DEFAULT_ALLOWED);
+          setCurrentUser({ username, role, allowedIndicators: allowed });
         }}
       />
     );
@@ -1147,6 +1220,7 @@ export default function App() {
               onAddCommunityStrategy={addCommunityStrategy}
               onClose={() => setActiveNav("CHART")}
               onOpenScriptEditor={() => setActiveNav("SCRIPT EDITOR")}
+              allowedIndicators={currentUser?.allowedIndicators || []}
             />
           )}
           {activeNav === "STRATEGY LAB" && (

@@ -20,9 +20,11 @@
   padding: 20px 40px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   backdrop-filter: blur(12px);
-  position: sticky;
+  position: fixed;
   top: 0;
-  z-index: 100;
+  left: 0;
+  right: 0;
+  z-index: 1000;
   background: rgba(5, 6, 7, 0.85);
 }
 
@@ -89,19 +91,19 @@
 }
 
 .btn-signup {
-  background: linear-gradient(180deg, #ff303d 0%, #d62839 100%);
-  border: 1px solid #ff4d5a;
+  background: linear-gradient(180deg, #ff0000 0%, #cc0000 100%);
+  border: 1px solid #ff1a1a;
   color: white;
   padding: 8px 18px;
   font-size: 12px;
   font-weight: 600;
   border-radius: 3px;
-  box-shadow: 0 4px 12px rgba(255, 48, 61, 0.25);
+  box-shadow: 0 4px 12px rgba(255, 0, 0, 0.35);
   transition: all 0.2s;
 }
 
 .btn-signup:hover {
-  box-shadow: 0 6px 16px rgba(255, 48, 61, 0.4);
+  box-shadow: 0 6px 16px rgba(255, 0, 0, 0.5);
   transform: translateY(-1px);
 }
 
@@ -111,7 +113,7 @@
   flex-direction: column;
   align-items: center;
   text-align: center;
-  padding: 100px 20px 60px;
+  padding: 160px 20px 60px;
   max-width: 900px;
   margin: 0 auto;
   gap: 24px;
@@ -140,7 +142,7 @@
 }
 
 .hero-title span {
-  background: linear-gradient(90deg, #ff303d, #ff737d);
+  background: linear-gradient(90deg, #ff0000, #ff1a1a);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -163,16 +165,16 @@
   font-size: 14px;
   font-weight: 700;
   border-radius: 3px;
-  background: linear-gradient(180deg, #ff303d 0%, #d62839 100%);
-  border: 1px solid #ff4d5a;
+  background: linear-gradient(180deg, #ff0000 0%, #cc0000 100%);
+  border: 1px solid #ff1a1a;
   color: white;
-  box-shadow: 0 8px 24px rgba(255, 48, 61, 0.3);
+  box-shadow: 0 8px 24px rgba(255, 0, 0, 0.35);
   transition: all 0.25s;
 }
 
 .btn-primary:hover {
   transform: translateY(-1.5px);
-  box-shadow: 0 12px 32px rgba(255, 48, 61, 0.45);
+  box-shadow: 0 12px 32px rgba(255, 0, 0, 0.55);
 }
 
 .btn-secondary {
@@ -314,7 +316,7 @@
   top: -12px;
   left: 50%;
   transform: translateX(-50%);
-  background: linear-gradient(90deg, #ff303d, #d62839);
+  background: linear-gradient(90deg, #ff0000, #cc0000);
   color: white;
   font-family: "IBM Plex Mono", monospace;
   font-size: 8px;
@@ -323,8 +325,8 @@
   padding: 4px 12px;
   border-radius: 99px;
   text-transform: uppercase;
-  border: 1px solid #ff737d;
-  box-shadow: 0 4px 10px rgba(255, 48, 61, 0.2);
+  border: 1px solid #ff1a1a;
+  box-shadow: 0 4px 10px rgba(255, 0, 0, 0.35);
 }
 
 .plan-header {
@@ -402,14 +404,14 @@
 }
 
 .pricing-card.popular .btn-plan {
-  background: linear-gradient(180deg, #ff303d 0%, #d62839 100%);
-  border: 1px solid #ff4d5a;
+  background: linear-gradient(180deg, #ff0000 0%, #cc0000 100%);
+  border: 1px solid #ff1a1a;
   color: white;
-  box-shadow: 0 4px 12px rgba(255, 48, 61, 0.2);
+  box-shadow: 0 4px 12px rgba(255, 0, 0, 0.3);
 }
 
 .pricing-card.popular .btn-plan:hover {
-  box-shadow: 0 6px 16px rgba(255, 48, 61, 0.35);
+  box-shadow: 0 6px 16px rgba(255, 0, 0, 0.5);
 }
 
 .pricing-card:not(.popular) .btn-plan {

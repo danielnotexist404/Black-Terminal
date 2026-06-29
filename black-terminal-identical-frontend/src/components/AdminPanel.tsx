@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { X } from "lucide-react";
 import "../styles/admin.css";
 
 interface User {
@@ -7,6 +8,8 @@ interface User {
   status: "online" | "offline" | "suspended";
   createdAt: string;
   lastLogin: string;
+  allowedIndicators: string[];
+  activeIndicators: string[];
 }
 
 interface AuditLog {
@@ -15,79 +18,88 @@ interface AuditLog {
   message: string;
 }
 
+const ALL_INDICATORS_METADATA = [
+  { key: "volumeProfile", name: "HDLX Profile (hdlx)", desc: "Fixed locked/visible volume profile" },
+  { key: "orderBookHeatmap", name: "Order Book Heatmap", desc: "Live L2 depth blocks" },
+  { key: "liquidationHeatmap", name: "Liquidation Heatmap", desc: "Modeled leverage clusters" },
+  { key: "volatilityHeatmap", name: "Volatility Heatmap", desc: "Pine projection buy/sell zones" },
+  { key: "adaptiveSwingStrategy", name: "Adaptive Swing Reversal", desc: "Native strategy overlay" },
+  { key: "vwap", name: "VWAP", desc: "Volume weighted average price" },
+  { key: "ema20", name: "EMA 20", desc: "Fast exponential moving average" },
+  { key: "ema50", name: "EMA 50", desc: "Medium exponential moving average" },
+  { key: "ema200", name: "EMA 200", desc: "Slow macro exponential average" },
+  { key: "sma20", name: "SMA 20", desc: "Fast simple moving average" },
+  { key: "sma50", name: "SMA 50", desc: "Medium simple moving average" },
+  { key: "bollinger", name: "Bollinger Bands", desc: "Volatility deviation channels" },
+  { key: "openInterestOscillator", name: "Open Interest Oscillator", desc: "OI derivative pressure" },
+  { key: "zScoreOscillator", name: "Z-Score Oscillator", desc: "Standard deviation distance" },
+  { key: "waveTrendOscillator", name: "WaveTrend Oscillator", desc: "Momentum oscillator" },
+  { key: "volume", name: "Volume Panel", desc: "Exchange traded volume bar charts" }
+];
+
+const DEFAULT_ALLOWED = [
+  "orderBookHeatmap",
+  "liquidationHeatmap",
+  "volatilityHeatmap",
+  "adaptiveSwingStrategy",
+  "vwap",
+  "ema20",
+  "ema50",
+  "ema200",
+  "sma20",
+  "sma50",
+  "bollinger",
+  "openInterestOscillator",
+  "zScoreOscillator",
+  "waveTrendOscillator",
+  "volume"
+];
+
+const ADMIN_ALLOWED = [...DEFAULT_ALLOWED, "volumeProfile"];
+
 export default function AdminPanel() {
   const [users, setUsers] = useState<User[]>([]);
   const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [formError, setFormError] = useState("");
 
-  // Load database
+  // Poll database to get real-time active indicators and state changes
   useEffect(() => {
-    // Check users DB
-    const storedUsers = localStorage.getItem("bt_users_db");
-    let currentUsers: User[] = [];
-    if (!storedUsers) {
-      const defaultUsers = [
-        {
-          username: "black_terminal_admin",
-          role: "admin" as const,
-          status: "online" as const,
-          createdAt: new Date(Date.now() - 86400000 * 10).toISOString(),
-          lastLogin: new Date().toISOString()
-        },
-        {
-          username: "demo_user",
-          role: "user" as const,
-          status: "offline" as const,
-          createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
-          lastLogin: new Date(Date.now() - 3600000 * 4).toISOString()
-        }
-      ];
-      localStorage.setItem("bt_users_db", JSON.stringify(defaultUsers));
-      // Save default passwords in another map
-      const defaultCreds = {
-        black_terminal_admin: "K9#fX$p2@mQ9&zR4*tW1!vY8",
-        demo_user: "DemoUser123!"
-      };
-      localStorage.setItem("bt_users_creds", JSON.stringify(defaultCreds));
-      currentUsers = defaultUsers;
-    } else {
-      currentUsers = JSON.parse(storedUsers);
-    }
-    setUsers(currentUsers);
+    const fetchDB = () => {
+      const storedUsers = localStorage.getItem("bt_users_db");
+      if (storedUsers) {
+        const parsed = JSON.parse(storedUsers);
+        // Normalize fields in case older records exist
+        const normalized = parsed.map((u: any) => ({
+          ...u,
+          allowedIndicators: u.allowedIndicators || (u.role === "admin" ? ADMIN_ALLOWED : DEFAULT_ALLOWED),
+          activeIndicators: u.activeIndicators || []
+        }));
+        setUsers(normalized);
 
-    // Check logs DB
+        // Update selected user's reference
+        setSelectedUser((current) => {
+          if (!current) return null;
+          const matched = normalized.find((u: any) => u.username === current.username);
+          return matched || null;
+        });
+      }
+    };
+
+    fetchDB();
+    const interval = setInterval(fetchDB, 1500); // Poll every 1.5s for real-time tracking
+    return () => clearInterval(interval);
+  }, []);
+
+  // Load logs
+  useEffect(() => {
     const storedLogs = localStorage.getItem("bt_audit_logs");
-    if (!storedLogs) {
-      const defaultLogs = [
-        {
-          timestamp: new Date(Date.now() - 3600000 * 2).toLocaleTimeString(),
-          tag: "CREATE" as const,
-          message: "User demo_user created successfully."
-        },
-        {
-          timestamp: new Date(Date.now() - 3600000 * 1).toLocaleTimeString(),
-          tag: "LOGIN" as const,
-          message: "User demo_user logged in from IP 127.0.0.1"
-        },
-        {
-          timestamp: new Date(Date.now() - 1800000).toLocaleTimeString(),
-          tag: "LOGOUT" as const,
-          message: "User demo_user logged out."
-        },
-        {
-          timestamp: new Date().toLocaleTimeString(),
-          tag: "LOGIN" as const,
-          message: "Admin black_terminal_admin established secure link."
-        }
-      ];
-      localStorage.setItem("bt_audit_logs", JSON.stringify(defaultLogs));
-      setLogs(defaultLogs);
-    } else {
+    if (storedLogs) {
       setLogs(JSON.parse(storedLogs));
     }
-  }, []);
+  }, [users]); // Refresh logs list on users update
 
   const addLog = (tag: AuditLog["tag"], message: string) => {
     const newLog: AuditLog = {
@@ -114,20 +126,20 @@ export default function AdminPanel() {
       return;
     }
 
-    // Check if user exists
     const creds = JSON.parse(localStorage.getItem("bt_users_creds") || "{}");
     if (creds[cleanUser]) {
       setFormError("User already exists");
       return;
     }
 
-    // Add user
     const newUser: User = {
       username: cleanUser,
       role: "user",
       status: "offline",
       createdAt: new Date().toISOString(),
-      lastLogin: "Never"
+      lastLogin: "Never",
+      allowedIndicators: [...DEFAULT_ALLOWED], // volumeProfile (HDLX) is NOT in DEFAULT_ALLOWED
+      activeIndicators: []
     };
 
     const updatedUsers = [...users, newUser];
@@ -173,6 +185,35 @@ export default function AdminPanel() {
     localStorage.setItem("bt_users_creds", JSON.stringify(creds));
 
     addLog("DELETE", `User ${username} deleted from database.`);
+    if (selectedUser?.username === username) {
+      setSelectedUser(null);
+    }
+  };
+
+  const handleToggleIndicatorPermission = (indicatorKey: string) => {
+    if (!selectedUser) return;
+    const isAllowed = selectedUser.allowedIndicators.includes(indicatorKey);
+    let nextAllowed = [];
+
+    if (isAllowed) {
+      nextAllowed = selectedUser.allowedIndicators.filter((k) => k !== indicatorKey);
+      addLog("SUSPEND", `Revoked access to [${indicatorKey}] for user ${selectedUser.username}.`);
+    } else {
+      nextAllowed = [...selectedUser.allowedIndicators, indicatorKey];
+      addLog("REACTIVATE", `Granted access to [${indicatorKey}] for user ${selectedUser.username}.`);
+    }
+
+    const updatedUsers = users.map((u) => {
+      if (u.username === selectedUser.username) {
+        const updated = { ...u, allowedIndicators: nextAllowed };
+        setSelectedUser(updated);
+        return updated;
+      }
+      return u;
+    });
+
+    setUsers(updatedUsers);
+    localStorage.setItem("bt_users_db", JSON.stringify(updatedUsers));
   };
 
   const totalUsers = users.length;
@@ -273,7 +314,9 @@ export default function AdminPanel() {
                     {users.map((u) => (
                       <tr
                         key={u.username}
-                        className={u.role === "admin" ? "user-row-admin" : ""}
+                        className={`${u.role === "admin" ? "user-row-admin" : ""} ${
+                          selectedUser?.username === u.username ? "selected" : ""
+                        }`}
                       >
                         <td className="user-name-col">{u.username}</td>
                         <td>
@@ -293,26 +336,34 @@ export default function AdminPanel() {
                           {new Date(u.createdAt).toLocaleDateString()}
                         </td>
                         <td>
-                          {u.username !== "black_terminal_admin" && (
-                            <div className="users-table-actions">
-                              <button
-                                className={
-                                  u.status === "suspended"
-                                    ? "btn-action-reactivate"
-                                    : "btn-action-suspend"
-                                }
-                                onClick={() => toggleSuspend(u.username)}
-                              >
-                                {u.status === "suspended" ? "REACTIVATE" : "SUSPEND"}
-                              </button>
-                              <button
-                                className="btn-action-delete"
-                                onClick={() => handleDeleteUser(u.username)}
-                              >
-                                DELETE
-                              </button>
-                            </div>
-                          )}
+                          <div className="users-table-actions">
+                            <button
+                              className="btn-action-permissions"
+                              onClick={() => setSelectedUser(u)}
+                            >
+                              PERMISSIONS
+                            </button>
+                            {u.username !== "black_terminal_admin" && (
+                              <>
+                                <button
+                                  className={
+                                    u.status === "suspended"
+                                      ? "btn-action-reactivate"
+                                      : "btn-action-suspend"
+                                  }
+                                  onClick={() => toggleSuspend(u.username)}
+                                >
+                                  {u.status === "suspended" ? "REACTIVATE" : "SUSPEND"}
+                                </button>
+                                <button
+                                  className="btn-action-delete"
+                                  onClick={() => handleDeleteUser(u.username)}
+                                >
+                                  DELETE
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -329,7 +380,7 @@ export default function AdminPanel() {
             </div>
             <div className="admin-card-body" style={{ padding: "12px" }}>
               <div className="logs-console">
-                {logs.map((l, index) => (
+                {logs.slice(0, 100).map((l, index) => (
                   <div className="log-entry" key={index}>
                     <span className="log-time">[{l.timestamp}]</span>
                     <span className={`log-tag ${l.tag.toLowerCase()}`}>{l.tag}</span>
@@ -339,6 +390,76 @@ export default function AdminPanel() {
               </div>
             </div>
           </div>
+
+          {/* Expanded panel: User detailed permissions and active tracking */}
+          {selectedUser && (
+            <div className="admin-user-details-card">
+              <div className="user-details-header">
+                <span className="user-details-title">
+                  ACCESS CONTROLS & MONITORING // USER: <span>{selectedUser.username.toUpperCase()}</span>
+                </span>
+                <button
+                  className="btn-close-details"
+                  onClick={() => setSelectedUser(null)}
+                >
+                  <X size={15} />
+                </button>
+              </div>
+              <div className="user-details-body">
+                {/* Active monitoring column */}
+                <div className="details-column">
+                  <span className="details-subtitle">Live Active Indicators</span>
+                  <div className="active-indicators-list">
+                    {selectedUser.activeIndicators.length > 0 ? (
+                      selectedUser.activeIndicators.map((key) => {
+                        const metadata = ALL_INDICATORS_METADATA.find((m) => m.key === key);
+                        return (
+                          <span className="active-indicator-badge" key={key}>
+                            {metadata ? metadata.name : key}
+                          </span>
+                        );
+                      })
+                    ) : (
+                      <span className="active-indicators-empty">
+                        No active indicators running on chart.
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ color: "var(--dim)", fontSize: "10px", lineHeight: "1.4" }}>
+                    * Updates in real-time as the client toggles overlays on their viewport canvas.
+                  </div>
+                </div>
+
+                {/* Permissions configuration column */}
+                <div className="details-column">
+                  <span className="details-subtitle">Toggle Permissions Configuration</span>
+                  <div className="permissions-grid">
+                    {ALL_INDICATORS_METADATA.map((ind) => {
+                      const isAllowed = selectedUser.allowedIndicators.includes(ind.key);
+                      return (
+                        <div
+                          key={ind.key}
+                          className={`permission-toggle-card ${isAllowed ? "allowed" : "blocked"}`}
+                          onClick={() => handleToggleIndicatorPermission(ind.key)}
+                          title={ind.desc}
+                        >
+                          <div className="permission-name-group">
+                            <span className="permission-name">{ind.name}</span>
+                            <span className="permission-key">{ind.key}</span>
+                          </div>
+                          <span
+                            className={`permission-status-dot ${
+                              isAllowed ? "allowed" : "blocked"
+                            }`}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

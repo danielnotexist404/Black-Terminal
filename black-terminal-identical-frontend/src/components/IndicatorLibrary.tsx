@@ -18,6 +18,7 @@ type IndicatorLibraryProps = {
   onAddCommunityStrategy?: (strategyKind: StrategyRuntimeKind) => void;
   onClose: () => void;
   onOpenScriptEditor: () => void;
+  allowedIndicators: string[];
 };
 
 type BuiltInIndicator = {
@@ -214,7 +215,8 @@ export function IndicatorLibrary({
   onIndicatorPeriodsChange,
   onAddCommunityStrategy,
   onClose,
-  onOpenScriptEditor
+  onOpenScriptEditor,
+  allowedIndicators
 }: IndicatorLibraryProps) {
   const [activeTab, setActiveTab] = useState<IndicatorTab>("builtins");
   const [query, setQuery] = useState("");
@@ -248,7 +250,7 @@ export function IndicatorLibrary({
   const adaptiveSwingInstalled = activeStrategyKind === "builtin-adaptive-swing";
 
   const toggleIndicator = (key: IndicatorKey) => {
-    if (!canUseIndicator(key)) return;
+    if (!allowedIndicators.includes(key)) return;
     onVisibleIndicatorsChange((current) => ({ ...current, [key]: !current[key] }));
   };
 
@@ -349,7 +351,7 @@ export function IndicatorLibrary({
         <div className="library-list">
           {filteredIndicators.map((indicator) => {
             const active = visibleIndicators[indicator.key];
-            const locked = isPremiumIndicator(indicator.key) && !canUseIndicator(indicator.key);
+            const locked = !allowedIndicators.includes(indicator.key);
 
             return (
               <div className={`${active ? "library-row active" : "library-row"}${locked ? " premium-locked" : ""}`} key={indicator.key}>
@@ -415,29 +417,36 @@ export function IndicatorLibrary({
       {activeTab === "myStrategies" && (
         adaptiveSwingInstalled ? (
           <div className="library-list">
-            <div className={visibleIndicators.adaptiveSwingStrategy ? "library-row active" : "library-row"}>
-              <button
-                type="button"
-                className="library-row-main"
-                onClick={() => toggleIndicator("adaptiveSwingStrategy")}
-              >
-                <Activity size={15} />
-                <span>
-                  <strong>Adaptive Swing Reversal</strong>
-                  <em>Community / Strategy Overlay / Native</em>
-                </span>
-              </button>
-              <span className="library-signal">Long Entry, Short Entry, TP/SL projections, regime EMA</span>
-              <span className="library-period static">AUTO</span>
-              <button
-                type="button"
-                className={visibleIndicators.adaptiveSwingStrategy ? "library-action active" : "library-action"}
-                onClick={() => toggleIndicator("adaptiveSwingStrategy")}
-              >
-                {visibleIndicators.adaptiveSwingStrategy ? <Check size={14} /> : <Plus size={14} />}
-                <span>{visibleIndicators.adaptiveSwingStrategy ? "ON" : "ADD"}</span>
-              </button>
-            </div>
+            {(() => {
+              const locked = !allowedIndicators.includes("adaptiveSwingStrategy");
+              return (
+                <div className={`${visibleIndicators.adaptiveSwingStrategy ? "library-row active" : "library-row"}${locked ? " premium-locked" : ""}`}>
+                  <button
+                    type="button"
+                    className="library-row-main"
+                    disabled={locked}
+                    onClick={() => toggleIndicator("adaptiveSwingStrategy")}
+                  >
+                    {locked ? <Lock size={15} /> : <Activity size={15} />}
+                    <span>
+                      <strong>Adaptive Swing Reversal</strong>
+                      <em>Community / Strategy Overlay / Native</em>
+                    </span>
+                  </button>
+                  <span className="library-signal">Long Entry, Short Entry, TP/SL projections, regime EMA</span>
+                  <span className="library-period static">AUTO</span>
+                  <button
+                    type="button"
+                    className={visibleIndicators.adaptiveSwingStrategy ? "library-action active" : "library-action"}
+                    disabled={locked}
+                    onClick={() => toggleIndicator("adaptiveSwingStrategy")}
+                  >
+                    {locked ? <Lock size={14} /> : visibleIndicators.adaptiveSwingStrategy ? <Check size={14} /> : <Plus size={14} />}
+                    <span>{locked ? "LOCKED" : visibleIndicators.adaptiveSwingStrategy ? "ON" : "ADD"}</span>
+                  </button>
+                </div>
+              );
+            })()}
           </div>
         ) : (
           <div className="script-library">

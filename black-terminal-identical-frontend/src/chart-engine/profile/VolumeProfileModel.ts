@@ -200,7 +200,7 @@ export class VolumeProfileModel {
 
   private isProfileGap(rows: VolumeProfileRow[], index: number, window: number) {
     const row = rows[index];
-    if (!row || row.totalVolume <= 0) return false;
+    if (!row || row.totalVolume < 0) return false;
     let neighborTotal = 0;
     let neighborCount = 0;
     for (let offset = -window; offset <= window; offset++) {

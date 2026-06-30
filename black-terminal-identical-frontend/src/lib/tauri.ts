@@ -59,7 +59,7 @@ export async function sendIndicatorAlert(
       ...payload,
       delivery: "email",
       emailTo: delivery.emailTo.trim()
-    }, webhookUrl));
+    }));
   }
 
   return results;

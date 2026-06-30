@@ -256,6 +256,69 @@ function createOkxOrderBookSubscription(
   };
 }
 
+function createOkxTradeSubscription(
+  symbol: MarketSymbol,
+  onTrade: (trade: TradeTick) => void
+): MarketDataSubscription<TradeTick> {
+  const messageHandlers = new Set<(message: TradeTick) => void>([onTrade]);
+  const errorHandlers = new Set<(error: Error) => void>();
+  const ws = new WebSocket(OKX_WS);
+  const instId = normalizeOkxSymbol(symbol.rawSymbol);
+
+  const reportError = (err: unknown) => {
+    const error = err instanceof Error ? err : new Error(String(err));
+    errorHandlers.forEach((handler) => handler(error));
+  };
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({
+      op: "subscribe",
+      args: [{ channel: "trades", instId }]
+    }));
+  };
+
+  ws.onmessage = (event: MessageEvent<string>) => {
+    try {
+      const payload = JSON.parse(event.data);
+      if (payload.event === "error") {
+        throw new Error(`OKX trade subscription failed: ${payload.msg ?? instId}`);
+      }
+      if (payload.arg?.channel !== "trades" || !Array.isArray(payload.data)) return;
+
+      for (const t of payload.data) {
+        const trade: TradeTick = {
+          exchange: "okx",
+          symbol: symbol.rawSymbol,
+          tradeId: t.tradeId,
+          time: Math.floor(parseNumber(t.ts) / 1000),
+          price: parseNumber(t.px),
+          quantity: parseNumber(t.sz),
+          side: t.side === "buy" ? "buy" : "sell"
+        };
+        messageHandlers.forEach((handler) => handler(trade));
+      }
+    } catch (err) {
+      reportError(err);
+    }
+  };
+
+  ws.onerror = () => reportError(new Error(`OKX trade WebSocket failed: ${instId}`));
+
+  return {
+    unsubscribe: () => {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close(1000, "Black-Terminal trade closed");
+      }
+    },
+    onMessage: (handler) => {
+      messageHandlers.add(handler);
+    },
+    onError: (handler) => {
+      errorHandlers.add(handler);
+    }
+  };
+}
+
 export const okxMarketDataAdapter: MarketDataAdapter = {
   id: "okx",
   label: "OKX",
@@ -269,9 +332,9 @@ export const okxMarketDataAdapter: MarketDataAdapter = {
     liquidations: true
   },
   normalizeSymbol: (symbol) => normalizeOkxSymbol(symbol),
-  getSymbols: async () => {
+  getSymbols: async (marketKind = "perpetual") => {
     const params = new URLSearchParams({
-      instType: "SWAP"
+      instType: marketKind === "spot" ? "SPOT" : "SWAP"
     });
     const data = await okxGet<OkxInstrument[]>("/api/v5/public/instruments", params);
     return data
@@ -333,5 +396,6 @@ export const okxMarketDataAdapter: MarketDataAdapter = {
     }
     return mapTicker(symbol, data[0]);
   },
+  subscribeTrades: (symbol, onTrade) => createOkxTradeSubscription(symbol, onTrade),
   subscribeOrderBook: (symbol, onBook) => createOkxOrderBookSubscription(symbol, onBook)
 };

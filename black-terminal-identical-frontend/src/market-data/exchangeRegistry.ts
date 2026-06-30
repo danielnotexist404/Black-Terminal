@@ -2,6 +2,10 @@ import { ExchangeId, MarketDataCapabilities, MarketKind } from "./types";
 import { binanceMarketDataAdapter } from "./adapters/binance";
 import { bybitMarketDataAdapter } from "./adapters/bybit";
 import { okxMarketDataAdapter } from "./adapters/okx";
+import { coinbaseMarketDataAdapter } from "./adapters/coinbase";
+import { krakenMarketDataAdapter } from "./adapters/kraken";
+import { bitfinexMarketDataAdapter } from "./adapters/bitfinex";
+import { hyperliquidMarketDataAdapter } from "./adapters/hyperliquid";
 import { createSimulatedMarketDataAdapter } from "./adapters/simulated";
 
 export type ExchangeDefinition = {
@@ -144,7 +148,11 @@ export function getExchangeDefinition(exchange: ExchangeId) {
 export const publicMarketDataAdapters = {
   binance: binanceMarketDataAdapter,
   bybit: bybitMarketDataAdapter,
-  okx: okxMarketDataAdapter
+  okx: okxMarketDataAdapter,
+  coinbase: coinbaseMarketDataAdapter,
+  kraken: krakenMarketDataAdapter,
+  bitfinex: bitfinexMarketDataAdapter,
+  hyperliquid: hyperliquidMarketDataAdapter
 } as const;
 
 export function getPublicMarketDataAdapter(exchange: ExchangeId) {

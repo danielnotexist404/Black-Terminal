@@ -52,67 +52,67 @@ export const marketCatalog: ExchangeOption[] = [
   {
     id: "hyperliquid",
     label: "Hyperliquid",
-    status: "NEXT",
+    status: "REST LIVE",
     symbols: ["BTC", "ETH", "SOL", "HYPE"].map((base) => makeUsdtSymbol("hyperliquid", base, "perpetual"))
   },
   {
     id: "bitfinex",
     label: "Bitfinex",
-    status: "NEXT",
+    status: "REST LIVE",
     symbols: ["BTC", "ETH", "SOL", "XRP", "LTC"].map((base) => makeUsdtSymbol("bitfinex", base, "spot"))
   },
   {
     id: "coinbase",
     label: "Coinbase",
-    status: "NEXT",
+    status: "REST LIVE",
     symbols: ["BTC", "ETH", "SOL", "XRP", "ADA", "AVAX", "LINK"].map((base) => makeUsdtSymbol("coinbase", base, "spot"))
   },
   {
     id: "kraken",
     label: "Kraken",
-    status: "NEXT",
+    status: "REST LIVE",
     symbols: ["BTC", "ETH", "SOL", "XRP", "ADA", "LTC"].map((base) => makeUsdtSymbol("kraken", base, "spot"))
   },
   {
     id: "bitstamp",
     label: "Bitstamp",
-    status: "NEXT",
+    status: "REST LIVE",
     symbols: ["BTC", "ETH", "XRP", "LTC", "LINK"].map((base) => makeUsdtSymbol("bitstamp", base, "spot"))
   },
   {
     id: "deribit",
     label: "Deribit",
-    status: "NEXT",
+    status: "REST LIVE",
     symbols: ["BTC", "ETH", "SOL"].map((base) => makeUsdtSymbol("deribit", base, "options"))
   },
   {
     id: "bitget",
     label: "Bitget",
-    status: "NEXT",
+    status: "REST LIVE",
     symbols: coreSymbols.map((base) => makeUsdtSymbol("bitget", base, "perpetual"))
   },
   {
     id: "kucoin",
     label: "KuCoin",
-    status: "NEXT",
+    status: "REST LIVE",
     symbols: ["BTC", "ETH", "SOL", "XRP", "ADA", "AVAX", "LINK", "DOGE"].map((base) => makeUsdtSymbol("kucoin", base, "spot"))
   },
   {
     id: "gateio",
     label: "Gate.io",
-    status: "NEXT",
+    status: "REST LIVE",
     symbols: coreSymbols.map((base) => makeUsdtSymbol("gateio", base, "perpetual"))
   },
   {
     id: "mexc",
     label: "MEXC",
-    status: "NEXT",
+    status: "REST LIVE",
     symbols: coreSymbols.map((base) => makeUsdtSymbol("mexc", base, "perpetual"))
   },
   {
     id: "bitmex",
     label: "BitMEX",
-    status: "NEXT",
+    status: "REST LIVE",
     symbols: ["BTC", "ETH", "SOL", "XRP", "LINK"].map((base) => makeUsdtSymbol("bitmex", base, "perpetual"))
   }
 ];

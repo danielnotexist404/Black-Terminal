@@ -12,6 +12,7 @@ import { VolatilityHeatmapModel } from "./heatmap/VolatilityHeatmapModel";
 import { VolumeProfileModel, VolumeProfileResult, VolumeProfileRow } from "./profile/VolumeProfileModel";
 import { defaultIndicatorAdvancedSettings } from "./profile/volumeProfileDefaults";
 import type { IndicatorAlertDefinition } from "../automation/alerts";
+import type { CompiledPlot } from "../components/ScriptCompiler";
 import { OrderBookSnapshot } from "../market-data/types";
 import { createAdaptiveSwingSignals } from "../modules/strategy-lab/adapters/signalAdapter";
 import type { StrategySettings, StrategySignal } from "../modules/strategy-lab/types/strategy.types";
@@ -140,6 +141,10 @@ export class BlackChartEngine {
   private onNeedMoreHistory?: (oldestCandle: Candle) => void;
   private onFps?: (fps: number) => void;
   private onAlertEditRequest?: (alertId: string) => void;
+  private activePointers = new Map<number, { x: number; y: number }>();
+  private lastPinchDistance: number | null = null;
+  private lastCountdownTime = 0;
+  private customPlots: CompiledPlot[] = [];
   private alertDefinitions: IndicatorAlertDefinition[] = [];
   private visibleIndicators: VisibleIndicators = {
     orderBookHeatmap: false,
@@ -312,6 +317,24 @@ export class BlackChartEngine {
     this.app.stage.on("pointermove", (e: FederatedPointerEvent) => {
       this.pointer = { x: e.global.x, y: e.global.y, active: true };
       this.setPriceScaleHover(this.isInsidePriceAxis(e.global.x, e.global.y));
+      this.activePointers.set(e.pointerId, { x: e.global.x, y: e.global.y });
+
+      if (this.activePointers.size === 2) {
+        const coords = Array.from(this.activePointers.values());
+        const dx = coords[0].x - coords[1].x;
+        const dy = coords[0].y - coords[1].y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (this.lastPinchDistance !== null && this.lastPinchDistance > 0) {
+          const factor = dist / this.lastPinchDistance;
+          const centerX = (coords[0].x + coords[1].x) / 2;
+          this.zoomTimeAxis(factor, centerX);
+          this.draw();
+        }
+        this.lastPinchDistance = dist;
+        return;
+      }
+
       if (this.handleDrawingPointerMove(e)) {
         return;
       } else if (this.priceScaleDragging) {
@@ -319,7 +342,8 @@ export class BlackChartEngine {
       } else if (this.dragging) {
         const dx = e.global.x - this.dragStartX;
         const dy = e.global.y - this.dragStartY;
-        this.view.scrollX = Math.max(0, this.dragStartScroll - dx);
+        const maxScroll = Math.max(0, (this.getDisplayCandles().length - 1) * this.timeStep());
+        this.view.scrollX = Math.max(0, Math.min(maxScroll, this.dragStartScroll + dx));
         this.panPriceAxis(dy);
         this.draw();
       } else {
@@ -328,6 +352,16 @@ export class BlackChartEngine {
     });
 
     this.app.stage.on("pointerdown", (e: FederatedPointerEvent) => {
+      this.activePointers.set(e.pointerId, { x: e.global.x, y: e.global.y });
+      if (this.activePointers.size === 2) {
+        this.dragging = false;
+        const coords = Array.from(this.activePointers.values());
+        const dx = coords[0].x - coords[1].x;
+        const dy = coords[0].y - coords[1].y;
+        this.lastPinchDistance = Math.sqrt(dx * dx + dy * dy);
+        return;
+      }
+
       if (e.button !== 0) return;
 
       if (this.handleReplaySelectionPointerDown(e)) return;
@@ -351,14 +385,18 @@ export class BlackChartEngine {
       this.dragStartPriceMax = this.view.priceMax;
     });
 
-    this.app.stage.on("pointerup", () => {
+    const cleanUpPointer = (e: FederatedPointerEvent) => {
+      this.activePointers.delete(e.pointerId);
+      if (this.activePointers.size < 2) {
+        this.lastPinchDistance = null;
+      }
       this.finishBrushDrawing();
       this.stopDragging();
-    });
-    this.app.stage.on("pointerupoutside", () => {
-      this.finishBrushDrawing();
-      this.stopDragging();
-    });
+    };
+
+    this.app.stage.on("pointerup", cleanUpPointer);
+    this.app.stage.on("pointerupoutside", cleanUpPointer);
+    this.app.stage.on("pointercancel", cleanUpPointer);
     this.app.stage.on("pointerleave", () => {
       this.pointer.active = false;
       this.setPriceScaleHover(false);
@@ -853,6 +891,13 @@ export class BlackChartEngine {
       this.onFps?.(fps);
       this.frameCount = 0;
       this.lastFpsTime = now;
+    }
+    
+    // Redraw once per second to update the price countdown timer
+    const epochSec = Math.floor(Date.now() / 1000);
+    if (epochSec !== this.lastCountdownTime) {
+      this.lastCountdownTime = epochSec;
+      this.draw();
     }
   }
 
@@ -2940,7 +2985,35 @@ export class BlackChartEngine {
     if (this.visibleIndicators.adaptiveSwingStrategy) {
       this.drawAdaptiveSwingStrategy(g, data);
     }
+    
+    // Draw custom compiled script indicator plots
+    for (const plot of this.customPlots) {
+      const color = this.hexColor(plot.color, 0x00ffcc);
+      let started = false;
+      for (let i = this.view.firstIndex; i <= this.view.lastIndex; i++) {
+        const val = plot.values[i];
+        if (val === null || val === undefined || Number.isNaN(val)) {
+          started = false;
+          continue;
+        }
+        const x = this.xForIndex(i);
+        const y = this.yForPrice(val);
+        if (!started) {
+          g.moveTo(x, y);
+          started = true;
+        } else {
+          g.lineTo(x, y);
+        }
+      }
+      g.stroke({ width: plot.width || 1, color, alpha: 0.95 });
+    }
+
     this.drawOscillatorPane(data);
+  }
+
+  public setCustomPlots(plots: CompiledPlot[]) {
+    this.customPlots = plots;
+    this.draw();
   }
 
   private drawVolume() {
@@ -3531,14 +3604,56 @@ export class BlackChartEngine {
     if (last) {
       const y = this.yForPrice(last.close);
       g.moveTo(0, y).lineTo(plotWidth, y).stroke({ width: 1, color: 0xffffff, alpha: 0.18 });
-      g.rect(plotWidth + 4, y - 13, 64, 26).fill({ color: 0xf2f2f3, alpha: 1 });
+
+      // Calculate timeframe in seconds from candles
+      let timeframeSeconds = 60;
+      if (data.length >= 2) {
+        timeframeSeconds = data[data.length - 1].time - data[data.length - 2].time;
+      }
+      
+      const timeRemainingSeconds = Math.max(0, (last.time + timeframeSeconds) - Math.floor(Date.now() / 1000));
+      
+      const formatCountdown = (secs: number) => {
+        if (secs <= 0) return "00:00";
+        if (secs >= 86400) {
+          const d = Math.floor(secs / 86400);
+          const h = Math.floor((secs % 86400) / 3600);
+          return `${d}d ${h}h`;
+        }
+        const h = Math.floor(secs / 3600);
+        const m = Math.floor((secs % 3600) / 60);
+        const s = secs % 60;
+        if (h > 0) {
+          return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+        }
+        return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+      };
+
+      const priceText = last.close.toLocaleString(undefined, { maximumFractionDigits: 1 });
+      const timerText = formatCountdown(timeRemainingSeconds);
+
+      // Neon-glowing TradingView style box
+      g.rect(plotWidth + 4, y - 18, 74, 36)
+        .fill({ color: 0x07090b, alpha: 0.96 })
+        .stroke({ width: 1.5, color: 0xff0055, alpha: 0.95 });
+
       this.addText(
         this.priceTexts,
-        last.close.toLocaleString(undefined, { maximumFractionDigits: 1 }),
-        plotWidth + 8,
-        y - 8,
-        11,
-        0x050506,
+        priceText,
+        plotWidth + 9,
+        y - 14,
+        10,
+        0xffffff,
+        "700"
+      );
+
+      this.addText(
+        this.priceTexts,
+        timerText,
+        plotWidth + 9,
+        y + 2,
+        9,
+        0xff0055,
         "600"
       );
     }

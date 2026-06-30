@@ -24,6 +24,7 @@ import { createMockCandles } from "../data/mockMarket";
 import type { AlertCondition, AlertIndicatorTarget, IndicatorAlertDefinition } from "../automation/alerts";
 import { canUseIndicator } from "../features/premium";
 import { sendIndicatorAlert, sendWebhook } from "../lib/tauri";
+import type { CompiledPlot } from "./ScriptCompiler";
 import { getPublicMarketDataAdapter, publicMarketDataAdapters } from "../market-data/exchangeRegistry";
 import { ExchangeId, MarketDataAdapter, MarketDataSubscription, MarketSymbol, OrderBookSnapshot, Timeframe } from "../market-data/types";
 
@@ -55,6 +56,8 @@ type PixiBlackChartProps = {
   onPriceChange?: (price: number) => void;
   onReplayStatusChange?: (status: ReplayStatus) => void;
   onReplayStartSelected?: (selection: ReplaySelection) => void;
+  customPlots?: CompiledPlot[];
+  onAlertFired?: (symbol: string, message: string) => void;
 };
 
 type IndicatorKey = keyof VisibleIndicators;
@@ -101,8 +104,10 @@ const historyDepthOptions: { label: string; value: HistoryDepth }[] = [
   { label: "10K bars", value: 10000 }
 ];
 
-const timeframeSeconds: Record<Timeframe, number> = {
+const timeframeSeconds: Record<any, number> = {
   "1s": 1,
+  "10s": 10,
+  "30s": 30,
   "1m": 60,
   "3m": 180,
   "5m": 300,
@@ -116,7 +121,9 @@ const timeframeSeconds: Record<Timeframe, number> = {
   "12h": 43200,
   "1d": 86400,
   "1w": 604800,
-  "1M": 2592000
+  "1M": 2592000,
+  "10t": 10,
+  "100t": 100
 };
 
 const indicatorColorOptions: { label: string; value: IndicatorColorKey }[] = [
@@ -242,7 +249,9 @@ export function PixiBlackChart({
   onOpenStrategyLab,
   onPriceChange,
   onReplayStatusChange,
-  onReplayStartSelected
+  onReplayStartSelected,
+  customPlots,
+  onAlertFired
 }: PixiBlackChartProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<BlackChartEngine | null>(null);
@@ -278,7 +287,7 @@ export function PixiBlackChart({
     return alertDefinitions.filter((definition) =>
       definition.symbol === displaySymbol &&
       definition.exchange === exchangeLabel &&
-      definition.timeframe === timeframe
+      (definition.indicator === "price" || definition.timeframe === timeframe)
     );
   }, [alertDefinitions, displaySymbol, exchangeLabel, timeframe]);
 
@@ -720,6 +729,8 @@ export function PixiBlackChart({
       indicatorVisualSettings,
       indicatorAdvancedSettings,
       alertDefinitions: scopedChartAlerts,
+      customPlots: customPlots || [],
+      onAlertFired: (alertId, price) => onAlertFired?.(alertId, price),
       onAlertEditRequest: (alertId) => {
         setEditingChartAlertId(alertId);
         setChartContextMenu(null);
@@ -1398,6 +1409,7 @@ export function PixiBlackChart({
     }
 
     showLocalAlertToast(definition.name, formatConfiguredAlertMessage(definition, context));
+    onAlertFired?.(displaySymbol, formatConfiguredAlertMessage(definition, context));
 
     void sendIndicatorAlert(
       {
@@ -1433,7 +1445,7 @@ export function PixiBlackChart({
       definition.enabled &&
       definition.symbol === displaySymbol &&
       definition.exchange === exchangeLabel &&
-      definition.timeframe === timeframe
+      (definition.indicator === "price" || definition.timeframe === timeframe)
     );
     if (scopedAlerts.length === 0) return;
 
@@ -1456,6 +1468,13 @@ export function PixiBlackChart({
       }
     }
   }, [alertDefinitions, lastCandle, visibleIndicators, displaySymbol, exchangeLabel, timeframe]);
+
+  // Synchronize compiled indicators scripts overlays
+  useEffect(() => {
+    if (customPlots && engineRef.current) {
+      engineRef.current.setCustomPlots(customPlots);
+    }
+  }, [customPlots]);
 
   const displayCandle = lastCandle ?? {
     time: 0,

@@ -4,6 +4,8 @@ import type { MarketSymbol, Timeframe } from "../../../market-data/types";
 
 const timeframeSeconds: Record<Timeframe, number> = {
   "1s": 1,
+  "10s": 10,
+  "30s": 30,
   "1m": 60,
   "3m": 180,
   "5m": 300,
@@ -17,7 +19,9 @@ const timeframeSeconds: Record<Timeframe, number> = {
   "12h": 43200,
   "1d": 86400,
   "1w": 604800,
-  "1M": 2592000
+  "1M": 2592000,
+  "10t": 10,
+  "100t": 100
 };
 
 function uniqueSortedCandles(candles: Candle[]) {

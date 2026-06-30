@@ -7,6 +7,7 @@ interface TerminalSettings {
   showDOM: boolean;
   showOrderBookHeatmap: boolean;
   enabledTimeframes: string[];
+  theme?: string;
 }
 
 interface SettingsPanelProps {
@@ -21,6 +22,8 @@ interface SettingsPanelProps {
 }
 
 const AVAILABLE_TIMEFRAMES = [
+  { label: "10s", value: "10s" },
+  { label: "30s", value: "30s" },
   { label: "1m", value: "1m" },
   { label: "5m", value: "5m" },
   { label: "15m", value: "15m" },
@@ -30,7 +33,16 @@ const AVAILABLE_TIMEFRAMES = [
   { label: "12H", value: "12h" },
   { label: "1D", value: "1d" },
   { label: "1W", value: "1w" },
-  { label: "1M", value: "1M" }
+  { label: "1M", value: "1M" },
+  { label: "10t", value: "10t" },
+  { label: "100t", value: "100t" }
+];
+
+export const THEMES = [
+  { id: "black-terminal", label: "Black Terminal (Default)", accent: "#ff0000", bg: "#050607" },
+  { id: "tradingview", label: "TradingView Blue", accent: "#2962ff", bg: "#131722" },
+  { id: "monochrome", label: "Monochrome Minimal", accent: "#ffffff", bg: "#0a0a0a" },
+  { id: "emerald", label: "Emerald Matrix", accent: "#00ff88", bg: "#050806" }
 ];
 
 export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange, onClose }: SettingsPanelProps) {
@@ -163,6 +175,37 @@ export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange,
             <h2 className="settings-sec-title">
               <Sliders size={16} /> INTERFACE & LAYOUT
             </h2>
+
+            {/* Theme Selector */}
+            <div className="settings-field" style={{ marginBottom: "18px" }}>
+              <label className="settings-label" style={{ fontSize: "11px", display: "block" }}>Theme & Accent Color</label>
+              <span className="settings-hint" style={{ marginBottom: "8px" }}>Change primary accent color and terminal grid background style</span>
+              <select
+                value={terminalSettings.theme || "black-terminal"}
+                onChange={(e) => {
+                  const newTheme = e.target.value;
+                  onSettingsChange({
+                    ...terminalSettings,
+                    theme: newTheme
+                  });
+                  const t = THEMES.find(item => item.id === newTheme) || THEMES[0];
+                  document.documentElement.style.setProperty("--red-hot", t.accent);
+                  document.documentElement.style.setProperty("--red", t.accent === "#ffffff" ? "#888888" : t.accent === "#2962ff" ? "#1d4ed8" : t.accent);
+                  document.documentElement.style.setProperty("--bg", t.bg);
+                  if (newTheme === "emerald") {
+                    document.documentElement.style.setProperty("--green", "#00ff88");
+                  } else {
+                    document.documentElement.style.setProperty("--green", "#46b866");
+                  }
+                }}
+                className="settings-input"
+                style={{ background: "rgba(0,0,0,0.3)", color: "var(--strong)", border: "1px solid rgba(255,255,255,0.08)", height: "34px", padding: "0 10px" }}
+              >
+                {THEMES.map(theme => (
+                  <option key={theme.id} value={theme.id}>{theme.label}</option>
+                ))}
+              </select>
+            </div>
 
             <div className="settings-field" style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: "20px" }}>
               <div>
@@ -301,7 +344,7 @@ export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange,
                 type="password"
                 value={confirmPassword}
                 placeholder="CONFIRM NEW PASSWORD"
-                onChange={(e) => setNewPassword(e.target.value)}
+                onChange={(e) => setConfirmPassword(e.target.value)}
                 disabled={loading}
               />
             </div>

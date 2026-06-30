@@ -1,5 +1,5 @@
 import { Bell, Mail, Pencil, Plus, Power, Save, Trash2, Webhook, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type {
   AlertCondition,
@@ -10,12 +10,20 @@ import type {
 } from "../automation/alerts";
 import type { Timeframe } from "../market-data/types";
 
+type AlertEventLog = {
+  timestamp: string;
+  symbol: string;
+  message: string;
+};
+
 type AlertCenterProps = {
   alerts: IndicatorAlertDefinition[];
   onAlertsChange: Dispatch<SetStateAction<IndicatorAlertDefinition[]>>;
   symbol: string;
   exchange: string;
   timeframe: Timeframe;
+  eventLogs: AlertEventLog[];
+  onClearEventLogs: () => void;
 };
 
 const indicatorOptions: { value: AlertIndicatorTarget; label: string }[] = [
@@ -63,17 +71,17 @@ function createAlertDraft(symbol: string, exchange: string, timeframe: Timeframe
   return {
     id: makeAlertId(),
     enabled: true,
-    name: `${symbol} HDLX test`,
+    name: `${symbol} price alert`,
     symbol,
     exchange,
     timeframe,
-    indicator: "hdlxProfile",
+    indicator: "price",
     levelTarget: "any",
     targetPrice: undefined,
     color: "#ffffff",
-    condition: "testing",
+    condition: "crossingAbove",
     runMode: "perpetual",
-    cooldownSeconds: 90,
+    cooldownSeconds: 60,
     webhookUrl: "",
     p2pEndpoint: "",
     sshTarget: "",
@@ -85,16 +93,16 @@ function createAlertDraft(symbol: string, exchange: string, timeframe: Timeframe
   };
 }
 
-export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timeframe }: AlertCenterProps) {
+export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timeframe, eventLogs, onClearEventLogs }: AlertCenterProps) {
   const [draft, setDraft] = useState<IndicatorAlertDefinition | null>(null);
 
   const sortedAlerts = useMemo(() => {
     return [...alerts].sort((a, b) => {
-      const aCurrent = a.symbol === symbol && a.exchange === exchange && a.timeframe === timeframe ? 0 : 1;
-      const bCurrent = b.symbol === symbol && b.exchange === exchange && b.timeframe === timeframe ? 0 : 1;
+      const aCurrent = a.symbol === symbol && a.exchange === exchange ? 0 : 1;
+      const bCurrent = b.symbol === symbol && b.exchange === exchange ? 0 : 1;
       return aCurrent - bCurrent || b.createdAt - a.createdAt;
     });
-  }, [alerts, exchange, symbol, timeframe]);
+  }, [alerts, exchange, symbol]);
 
   const activeCount = alerts.filter((alert) => alert.enabled && !alert.fired).length;
 
@@ -201,163 +209,223 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
         </div>
       </div>
 
-      <div className="alert-editor-pane">
-        {draft ? (
-          <form
-            className="alert-editor"
-            onSubmit={(event) => {
-              event.preventDefault();
-              saveDraft();
-            }}
-          >
-            <div className="alert-editor-head">
-              <div>
-                <span>{draft.symbol}</span>
-                <b>{draft.exchange.toUpperCase()} / {draft.timeframe}</b>
-              </div>
-              <button type="button" aria-label="Close alert editor" title="Close" onClick={() => setDraft(null)}>
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="alert-editor-grid">
-              <label className="alert-field wide">
-                Alert Name
-                <input value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} />
-              </label>
-              <label className="alert-field toggle-field">
-                Enabled
-                <input type="checkbox" checked={draft.enabled} onChange={(event) => updateDraft("enabled", event.target.checked)} />
-              </label>
-              <label className="alert-field">
-                Indicator
-                <select
-                  value={draft.indicator}
-                  onChange={(event) => {
-                    const indicator = event.target.value as AlertIndicatorTarget;
-                    setDraft((current) => current ? {
-                      ...current,
-                      indicator,
-                      levelTarget: indicator === "hdlxProfile" ? current.levelTarget ?? "any" : undefined,
-                      targetPrice: indicator === "price" ? current.targetPrice : undefined
-                    } : current);
-                  }}
-                >
-                  {indicatorOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="alert-field">
-                Level
-                <select
-                  value={draft.levelTarget ?? "any"}
-                  disabled={draft.indicator !== "hdlxProfile"}
-                  onChange={(event) => updateDraft("levelTarget", event.target.value as AlertLevelTarget)}
-                >
-                  {levelOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="alert-field">
-                Price
-                <input
-                  type="number"
-                  step="0.1"
-                  value={draft.targetPrice ?? ""}
-                  disabled={draft.indicator !== "price"}
-                  onChange={(event) => updateDraft("targetPrice", Number(event.target.value))}
-                />
-              </label>
-              <label className="alert-field">
-                Line Color
-                <input
-                  type="color"
-                  value={draft.color ?? "#ffffff"}
-                  disabled={draft.indicator !== "price"}
-                  onChange={(event) => updateDraft("color", event.target.value)}
-                />
-              </label>
-              <label className="alert-field">
-                Condition
-                <select value={draft.condition} onChange={(event) => updateDraft("condition", event.target.value as AlertCondition)}>
-                  {conditionOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="alert-field">
-                Cooldown Seconds
-                <input
-                  type="number"
-                  min={5}
-                  max={86400}
-                  step={5}
-                  value={draft.cooldownSeconds}
-                  onChange={(event) => updateDraft("cooldownSeconds", clampNumber(Number(event.target.value), 5, 86400))}
-                />
-              </label>
-              <div className="alert-field wide">
-                Run Mode
-                <div className="alert-segmented">
-                  {runModeOptions.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={draft.runMode === option.value ? "active" : ""}
-                      onClick={() => updateDraft("runMode", option.value)}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
+      <div className="alert-editor-pane" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+        <div style={{ flex: draft ? "1 1 auto" : "0 0 auto", overflowY: "auto", paddingBottom: "10px" }}>
+          {draft ? (
+            <form
+              className="alert-editor"
+              onSubmit={(event) => {
+                event.preventDefault();
+                saveDraft();
+              }}
+            >
+              <div className="alert-editor-head">
+                <div>
+                  <span>{draft.symbol}</span>
+                  <b>{draft.exchange.toUpperCase()} / {draft.timeframe}</b>
                 </div>
+                <button type="button" aria-label="Close alert editor" title="Close" onClick={() => setDraft(null)}>
+                  <X size={16} />
+                </button>
               </div>
-              <label className="alert-field wide">
-                Webhook URL
-                <input value={draft.webhookUrl ?? ""} onChange={(event) => updateDraft("webhookUrl", event.target.value)} />
-              </label>
-              <label className="alert-field wide">
-                P2P Relay Endpoint
-                <input placeholder="http://peer.local:8787/alert" value={draft.p2pEndpoint ?? ""} onChange={(event) => updateDraft("p2pEndpoint", event.target.value)} />
-              </label>
-              <label className="alert-field wide">
-                SSH Target
-                <input placeholder="user@host" value={draft.sshTarget ?? ""} onChange={(event) => updateDraft("sshTarget", event.target.value)} />
-              </label>
-              <label className="alert-field wide">
-                Email Address
-                <input type="email" value={draft.emailTo ?? ""} onChange={(event) => updateDraft("emailTo", event.target.value)} />
-              </label>
-              <label className="alert-field wide">
-                Custom Message
-                <textarea rows={3} value={draft.message} onChange={(event) => updateDraft("message", event.target.value)} />
-              </label>
-              <label className="alert-field wide">
-                Custom Script
-                <textarea rows={4} value={draft.script} onChange={(event) => updateDraft("script", event.target.value)} />
-              </label>
-            </div>
 
-            <div className="alert-editor-actions">
-              <button type="button" className="ghost" onClick={() => deleteAlert(draft.id)}>
-                <Trash2 size={14} />
-                Delete
-              </button>
-              <span />
-              <button type="button" className="ghost" onClick={() => setDraft(null)}>Cancel</button>
-              <button type="submit" className="primary">
-                <Save size={14} />
-                Save Alert
-              </button>
+              <div className="alert-editor-grid">
+                <label className="alert-field wide">
+                  Alert Name
+                  <input value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} />
+                </label>
+                <label className="alert-field toggle-field">
+                  Enabled
+                  <input type="checkbox" checked={draft.enabled} onChange={(event) => updateDraft("enabled", event.target.checked)} />
+                </label>
+                <label className="alert-field">
+                  Indicator
+                  <select
+                    value={draft.indicator}
+                    onChange={(event) => {
+                      const indicator = event.target.value as AlertIndicatorTarget;
+                      setDraft((current) => current ? {
+                        ...current,
+                        indicator,
+                        levelTarget: indicator === "hdlxProfile" ? current.levelTarget ?? "any" : undefined,
+                        targetPrice: indicator === "price" ? current.targetPrice : undefined
+                      } : current);
+                    }}
+                  >
+                    {indicatorOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="alert-field">
+                  Level
+                  <select
+                    value={draft.levelTarget ?? "any"}
+                    disabled={draft.indicator !== "hdlxProfile"}
+                    onChange={(event) => updateDraft("levelTarget", event.target.value as AlertLevelTarget)}
+                  >
+                    {levelOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="alert-field">
+                  Price
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={draft.targetPrice ?? ""}
+                    disabled={draft.indicator !== "price"}
+                    onChange={(event) => updateDraft("targetPrice", Number(event.target.value))}
+                  />
+                </label>
+                <label className="alert-field">
+                  Line Color
+                  <input
+                    type="color"
+                    value={draft.color ?? "#ffffff"}
+                    disabled={draft.indicator !== "price"}
+                    onChange={(event) => updateDraft("color", event.target.value)}
+                  />
+                </label>
+                <label className="alert-field">
+                  Condition
+                  <select value={draft.condition} onChange={(event) => updateDraft("condition", event.target.value as AlertCondition)}>
+                    {conditionOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="alert-field">
+                  Cooldown Seconds
+                  <input
+                    type="number"
+                    min={5}
+                    max={86400}
+                    step={5}
+                    value={draft.cooldownSeconds}
+                    onChange={(event) => updateDraft("cooldownSeconds", clampNumber(Number(event.target.value), 5, 86400))}
+                  />
+                </label>
+                <div className="alert-field wide">
+                  Run Mode
+                  <div className="alert-segmented">
+                    {runModeOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={draft.runMode === option.value ? "active" : ""}
+                        onClick={() => updateDraft("runMode", option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <label className="alert-field wide">
+                  Webhook URL
+                  <input value={draft.webhookUrl ?? ""} onChange={(event) => updateDraft("webhookUrl", event.target.value)} />
+                </label>
+                <label className="alert-field wide">
+                  P2P Relay Endpoint
+                  <input placeholder="http://peer.local:8787/alert" value={draft.p2pEndpoint ?? ""} onChange={(event) => updateDraft("p2pEndpoint", event.target.value)} />
+                </label>
+                <label className="alert-field wide">
+                  SSH Target
+                  <input placeholder="user@host" value={draft.sshTarget ?? ""} onChange={(event) => updateDraft("sshTarget", event.target.value)} />
+                </label>
+                <label className="alert-field wide">
+                  Email Address
+                  <input type="email" value={draft.emailTo ?? ""} onChange={(event) => updateDraft("emailTo", event.target.value)} />
+                </label>
+                <label className="alert-field wide">
+                  Custom Message
+                  <textarea rows={3} value={draft.message} onChange={(event) => updateDraft("message", event.target.value)} />
+                </label>
+                <label className="alert-field wide">
+                  Custom Script
+                  <textarea rows={4} value={draft.script} onChange={(event) => updateDraft("script", event.target.value)} />
+                </label>
+              </div>
+
+              <div className="alert-editor-actions">
+                <button type="button" className="ghost" onClick={() => deleteAlert(draft.id)}>
+                  <Trash2 size={14} />
+                  Delete
+                </button>
+                <span />
+                <button type="button" className="ghost" onClick={() => setDraft(null)}>Cancel</button>
+                <button type="submit" className="primary">
+                  <Save size={14} />
+                  Save Alert
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="alerts-idle">
+              <Bell size={18} />
+              <span>ALERT DESK</span>
             </div>
-          </form>
-        ) : (
-          <div className="alerts-idle">
-            <Bell size={18} />
-            <span>ALERT DESK</span>
+          )}
+        </div>
+
+        {/* Live Event Log Console */}
+        <div className="alert-event-log-container" style={{
+          flex: draft ? "0 0 160px" : "1 1 auto",
+          borderTop: "1px solid rgba(255, 0, 0, 0.12)",
+          background: "rgba(3, 4, 5, 0.95)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          padding: "12px 16px"
+        }}>
+          <div className="event-log-header" style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "8px"
+          }}>
+            <span style={{ fontSize: "10px", fontFamily: "IBM Plex Mono, monospace", fontWeight: 700, color: "var(--muted)", letterSpacing: "0.08em" }}>ALERT EVENT LOG</span>
+            <button type="button" onClick={onClearEventLogs} style={{
+              background: "transparent",
+              border: 0,
+              color: "var(--red-hot)",
+              fontSize: "9px",
+              fontFamily: "IBM Plex Mono, monospace",
+              cursor: "pointer",
+              textDecoration: "underline"
+            }}>
+              Clear Log History
+            </button>
           </div>
-        )}
+          <div className="event-log-list" style={{
+            flex: 1,
+            overflowY: "auto",
+            fontFamily: "IBM Plex Mono, monospace",
+            fontSize: "10px",
+            color: "var(--text)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "6px"
+          }}>
+            {eventLogs.length === 0 ? (
+              <div style={{ color: "var(--dim)", fontStyle: "italic", textAlign: "center", padding: "20px 0" }}>NO EVENTS FIRED YET</div>
+            ) : (
+              eventLogs.map((log, index) => (
+                <div key={index} style={{
+                  borderBottom: "1px solid rgba(255,255,255,0.02)",
+                  paddingBottom: "4px",
+                  lineHeight: "1.4",
+                  textAlign: "left"
+                }}>
+                  <span style={{ color: "var(--muted)", marginRight: "8px" }}>[{log.timestamp}]</span>
+                  <span style={{ color: "var(--red-hot)", fontWeight: 600, marginRight: "8px" }}>[{log.symbol}]</span>
+                  <span>{log.message}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

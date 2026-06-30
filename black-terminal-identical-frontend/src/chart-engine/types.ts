@@ -99,6 +99,8 @@ export type ChartEngineOptions = {
   indicatorVisualSettings?: IndicatorVisualSettings;
   indicatorAdvancedSettings?: IndicatorAdvancedSettings;
   alertDefinitions?: IndicatorAlertDefinition[];
+  customPlots?: any[];
+  onAlertFired?: (symbol: string, message: string) => void;
   onAlertEditRequest?: (alertId: string) => void;
   onNeedMoreHistory?: (oldestCandle: Candle) => void;
   onPriceChange?: (price: number) => void;

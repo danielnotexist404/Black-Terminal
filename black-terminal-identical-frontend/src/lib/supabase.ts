@@ -19,6 +19,14 @@ export interface DBUser {
   allowedIndicators: string[];
   activeIndicators: string[];
   password?: string;
+
+  // Configuration persistence fields
+  workspaces?: string[];
+  workspaceSnapshots?: any;
+  activeWorkspace?: string;
+  alerts?: any[];
+  scripts?: any[];
+  alertEventLogs?: any[];
 }
 
 export interface DBAuditLog {
@@ -92,7 +100,13 @@ export async function dbGetUsers(): Promise<DBUser[]> {
           createdAt: u.created_at || u.createdAt || new Date().toISOString(),
           lastLogin: u.last_login || u.lastLogin || new Date().toISOString(),
           allowedIndicators: u.allowed_indicators || u.allowedIndicators || [],
-          activeIndicators: u.active_indicators || u.activeIndicators || []
+          activeIndicators: u.active_indicators || u.activeIndicators || [],
+          workspaces: u.workspaces || [],
+          workspaceSnapshots: u.workspace_snapshots || {},
+          activeWorkspace: u.active_workspace || "Quant Desk",
+          alerts: u.alerts || [],
+          scripts: u.scripts || [],
+          alertEventLogs: u.alert_event_logs || []
         }));
       }
     } catch (e) {
@@ -165,7 +179,13 @@ export async function dbRegisterUser(user: DBUser, accessCode: string): Promise<
           created_at: user.createdAt,
           last_login: user.lastLogin,
           allowed_indicators: user.allowedIndicators,
-          active_indicators: user.activeIndicators
+          active_indicators: user.activeIndicators,
+          workspaces: user.workspaces || ["Quant Desk", "Scalp Layout", "Strategy Lab"],
+          workspace_snapshots: user.workspaceSnapshots || {},
+          active_workspace: user.activeWorkspace || "Quant Desk",
+          alerts: user.alerts || [],
+          scripts: user.scripts || [],
+          alert_event_logs: user.alertEventLogs || []
         });
       if (error) throw error;
       return { success: true };
@@ -204,6 +224,12 @@ export async function dbUpdateUser(username: string, patch: Partial<DBUser> & { 
       if (patch.allowedIndicators !== undefined) dbPatch.allowed_indicators = patch.allowedIndicators;
       if (patch.activeIndicators !== undefined) dbPatch.active_indicators = patch.activeIndicators;
       if (patch.password !== undefined) dbPatch.password = patch.password;
+      if (patch.workspaces !== undefined) dbPatch.workspaces = patch.workspaces;
+      if (patch.workspaceSnapshots !== undefined) dbPatch.workspace_snapshots = patch.workspaceSnapshots;
+      if (patch.activeWorkspace !== undefined) dbPatch.active_workspace = patch.activeWorkspace;
+      if (patch.alerts !== undefined) dbPatch.alerts = patch.alerts;
+      if (patch.scripts !== undefined) dbPatch.scripts = patch.scripts;
+      if (patch.alertEventLogs !== undefined) dbPatch.alert_event_logs = patch.alertEventLogs;
 
       const { error } = await supabase
         .from("bt_users")

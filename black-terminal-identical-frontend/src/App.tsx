@@ -48,6 +48,8 @@ import { PixiBlackChart } from "./components/PixiBlackChart";
 import { ScriptEditor } from "./components/ScriptEditor";
 import { TradesTape } from "./components/TradesTape";
 import LandingPage from "./components/LandingPage";
+import { MarketOverview } from "./components/MarketOverview";
+import type { CompiledPlot } from "./components/ScriptCompiler";
 import AdminPanel from "./components/AdminPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { LogOut, Shield } from "lucide-react";
@@ -114,6 +116,8 @@ function StrategyLabIcon({ size = 19, ...props }: SVGProps<SVGSVGElement> & { si
 }
 
 const timeframes: { label: string; value: Timeframe }[] = [
+  { label: "10s", value: "10s" },
+  { label: "30s", value: "30s" },
   { label: "1m", value: "1m" },
   { label: "5m", value: "5m" },
   { label: "15m", value: "15m" },
@@ -123,7 +127,9 @@ const timeframes: { label: string; value: Timeframe }[] = [
   { label: "12H", value: "12h" },
   { label: "1D", value: "1d" },
   { label: "1W", value: "1w" },
-  { label: "1M", value: "1M" }
+  { label: "1M", value: "1M" },
+  { label: "10t", value: "10t" },
+  { label: "100t", value: "100t" }
 ];
 
 const DEFAULT_ALLOWED = [
@@ -372,7 +378,6 @@ export default function App() {
 
   const visibleNav = useMemo(() => {
     const base = [
-      { label: "WATCHLIST", icon: BookOpen },
       { label: "CHART", icon: ChartCandlestick },
       { label: "INDICATORS", icon: Activity },
       { label: "SCANNER", icon: Radar },
@@ -423,19 +428,117 @@ export default function App() {
   const [replayControls, setReplayControls] = useState<ReplayControls>(defaultReplayControls);
   const [replayStatus, setReplayStatus] = useState<ReplayStatus>(defaultReplayStatus);
   const [layout, setLayout] = useState({
-    rightPanelWidth: 366,
+    rightPanelWidth: 200,
     bottomPanelHeight: 210,
     rightTopHeight: 430,
-    rightStatsWidth: 170
+    rightStatsWidth: 80
   });
+
+  // Advanced configurations states
+  const [ping, setPing] = useState(23);
+  const [watchlist, setWatchlist] = useState<string[]>(() => {
+    const stored = localStorage.getItem("bt_watchlist");
+    return stored ? JSON.parse(stored) : ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
+  });
+  const [alertEventLogs, setAlertEventLogs] = useState<{ timestamp: string; symbol: string; message: string }[]>(() => {
+    const stored = localStorage.getItem("bt_alert_event_logs");
+    return stored ? JSON.parse(stored) : [];
+  });
+  const [compiledPlots, setCompiledPlots] = useState<CompiledPlot[]>([]);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; symbol: string } | null>(null);
+
+  // Ping update loop
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setPing(current => {
+        const delta = Math.floor(Math.random() * 7) - 3;
+        return Math.max(12, Math.min(68, current + delta));
+      });
+    }, 3000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Save watchlist & event logs locally & Supabase
+  useEffect(() => {
+    localStorage.setItem("bt_watchlist", JSON.stringify(watchlist));
+    localStorage.setItem("bt_alert_event_logs", JSON.stringify(alertEventLogs));
+    if (currentUser) {
+      dbUpdateUser(currentUser.username, { alerts: indicatorAlerts, alertEventLogs });
+    }
+  }, [watchlist, alertEventLogs, currentUser, indicatorAlerts]);
+
+  // Apply theme settings
+  useEffect(() => {
+    if (terminalSettings.theme) {
+      const newTheme = terminalSettings.theme;
+      const THEMES_LIST = [
+        { id: "black-terminal", accent: "#ff0000", bg: "#050607" },
+        { id: "tradingview", accent: "#2962ff", bg: "#131722" },
+        { id: "monochrome", accent: "#ffffff", bg: "#0a0a0a" },
+        { id: "emerald", accent: "#00ff88", bg: "#050806" }
+      ];
+      const t = THEMES_LIST.find(item => item.id === newTheme) || THEMES_LIST[0];
+      document.documentElement.style.setProperty("--red-hot", t.accent);
+      document.documentElement.style.setProperty("--red", t.accent === "#ffffff" ? "#888888" : t.accent === "#2962ff" ? "#1d4ed8" : t.accent);
+      document.documentElement.style.setProperty("--bg", t.bg);
+      if (newTheme === "emerald") {
+        document.documentElement.style.setProperty("--green", "#00ff88");
+      } else {
+        document.documentElement.style.setProperty("--green", "#46b866");
+      }
+    }
+  }, [terminalSettings.theme]);
+
+  // Watchlist favorites helper functions
+  const addToWatchlist = (symbolRaw: string) => {
+    if (!watchlist.includes(symbolRaw)) {
+      setWatchlist([...watchlist, symbolRaw]);
+    }
+    setContextMenu(null);
+  };
+
+  const removeFromWatchlist = (symbolRaw: string) => {
+    setWatchlist(watchlist.filter(s => s !== symbolRaw));
+    setContextMenu(null);
+  };
+
+  const handleClearEventLogs = () => {
+    setAlertEventLogs([]);
+  };
+
+  const handleAlertFired = (symbolVal: string, message: string) => {
+    setAlertEventLogs(prev => [
+      { timestamp: new Date().toLocaleTimeString(), symbol: symbolVal, message },
+      ...prev.slice(0, 99)
+    ]);
+  };
+
+  // Close context menu handler
+  useEffect(() => {
+    const closeMenu = () => setContextMenu(null);
+    window.addEventListener("click", closeMenu);
+    return () => window.removeEventListener("click", closeMenu);
+  }, []);
 
   const selectedTimeframe = timeframes.find((item) => item.value === timeframe) ?? timeframes[2];
   const selectedChartType = chartTypes.find((item) => item.value === chartType) ?? chartTypes[0];
+  const sortedSymbols = useMemo(() => {
+    const list = [...availableSymbols];
+    const favorited = list.filter(item => watchlist.includes(item.rawSymbol));
+    const others = list.filter(item => !watchlist.includes(item.rawSymbol));
+    
+    favorited.sort((a, b) => {
+      return watchlist.indexOf(a.rawSymbol) - watchlist.indexOf(b.rawSymbol);
+    });
+    
+    return [...favorited, ...others];
+  }, [availableSymbols, watchlist]);
+
   const filteredSymbols = useMemo(() => {
     const needle = symbolQuery.trim().toLowerCase();
-    if (!needle) return availableSymbols;
+    if (!needle) return sortedSymbols;
 
-    return availableSymbols.filter((item) =>
+    return sortedSymbols.filter((item) =>
       [
         item.label,
         item.rawSymbol,
@@ -445,7 +548,7 @@ export default function App() {
         selectedExchange.label
       ].some((value) => value.toLowerCase().includes(needle))
     );
-  }, [availableSymbols, selectedExchange.label, symbolQuery]);
+  }, [sortedSymbols, selectedExchange.label, symbolQuery]);
   const gridStyle = useMemo<LayoutVars>(
     () => ({
       "--right-panel-width": `${layout.rightPanelWidth}px`,
@@ -497,6 +600,53 @@ export default function App() {
     };
     syncActive();
   }, [visibleIndicators, currentUser]);
+
+  // Load user database configuration on boot/refresh
+  useEffect(() => {
+    if (!currentUser) return;
+    const fetchUserConfig = async () => {
+      try {
+        const users = await dbGetUsers();
+        const record = users.find((u) => u.username === currentUser.username);
+        if (record) {
+          if (record.workspaces && record.workspaces.length > 0) {
+            setWorkspaces(record.workspaces);
+            setWorkspace(record.activeWorkspace || "Quant Desk");
+            localStorage.setItem(workspaceNamesStorageKey, JSON.stringify(record.workspaces.filter(w => !defaultWorkspaces.includes(w as any))));
+            localStorage.setItem(workspaceStorageKey, JSON.stringify(record.workspaceSnapshots || {}));
+            
+            const activeName = record.activeWorkspace || "Quant Desk";
+            const snapshot = (record.workspaceSnapshots || {})[activeName];
+            if (snapshot) {
+              const exchange = marketCatalog.find((item) => item.id === snapshot.selectedExchangeId);
+              const nextSymbol = exchange?.symbols.find((item) => item.rawSymbol === snapshot.symbolRaw);
+              if (exchange) setSelectedExchange(exchange);
+              if (nextSymbol) setSymbol(nextSymbol);
+              setTimeframe(snapshot.timeframe);
+              setChartType(snapshot.chartType);
+              setVisibleIndicators(snapshot.visibleIndicators);
+              setIndicatorPeriods(snapshot.indicatorPeriods);
+              setIndicatorVisualSettings(snapshot.indicatorVisualSettings);
+              setIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings);
+              setLayout(snapshot.layout);
+              setActiveStrategyKind(snapshot.activeStrategyKind);
+            }
+          }
+          if (record.alerts) {
+            setIndicatorAlerts(record.alerts);
+            localStorage.setItem("bt_stored_alerts", JSON.stringify(record.alerts));
+          }
+          if (record.alertEventLogs) {
+            setAlertEventLogs(record.alertEventLogs);
+            localStorage.setItem("bt_alert_event_logs", JSON.stringify(record.alertEventLogs));
+          }
+        }
+      } catch (e) {
+        console.error("Failed to load user config from database:", e);
+      }
+    };
+    fetchUserConfig();
+  }, [currentUser?.username]);
 
   // Real-time allowed indicators sync (and automatic turn-off of revoked indicators)
   useEffect(() => {
@@ -589,12 +739,12 @@ export default function App() {
         const dy = moveEvent.clientY - startY;
         setLayout((current) => {
           if (target === "right") {
-            const maxRight = Math.max(320, (gridRect?.width ?? window.innerWidth) - 360);
-            const rightPanelWidth = clamp(startLayout.rightPanelWidth - dx, 320, maxRight);
+            const maxRight = Math.max(160, (gridRect?.width ?? window.innerWidth) - 200);
+            const rightPanelWidth = clamp(startLayout.rightPanelWidth - dx, 160, maxRight);
             return {
               ...current,
               rightPanelWidth,
-              rightStatsWidth: clamp(current.rightStatsWidth, 116, rightPanelWidth - 132)
+              rightStatsWidth: clamp(current.rightStatsWidth, 40, rightPanelWidth - 60)
             };
           }
 
@@ -608,8 +758,8 @@ export default function App() {
             return { ...current, rightTopHeight: clamp(startLayout.rightTopHeight + dy, 190, maxTop) };
           }
 
-          const maxStats = Math.max(116, current.rightPanelWidth - 132);
-          return { ...current, rightStatsWidth: clamp(startLayout.rightStatsWidth + dx, 116, maxStats) };
+          const maxStats = Math.max(40, current.rightPanelWidth - 60);
+          return { ...current, rightStatsWidth: clamp(startLayout.rightStatsWidth + dx, 40, maxStats) };
         });
         notifyLayoutResize();
       };
@@ -651,7 +801,7 @@ export default function App() {
     updatedAt: Date.now()
   });
 
-  const saveWorkspace = (name = workspace) => {
+  const saveWorkspace = async (name = workspace) => {
     const safeName = name.trim();
     if (!safeName) return;
     const snapshots = loadWorkspaceSnapshots();
@@ -661,6 +811,53 @@ export default function App() {
     setWorkspaces(names);
     localStorage.setItem(workspaceNamesStorageKey, JSON.stringify(names.filter((item) => !defaultWorkspaces.includes(item as (typeof defaultWorkspaces)[number]))));
     setWorkspace(safeName);
+
+    // Backend sync
+    if (currentUser) {
+      try {
+        await dbUpdateUser(currentUser.username, {
+          workspaces: names,
+          workspaceSnapshots: snapshots,
+          activeWorkspace: safeName
+        });
+      } catch (err) {
+        console.error("Failed to sync workspace to backend:", err);
+      }
+    }
+  };
+
+  const deleteWorkspace = async (name = workspace) => {
+    if (defaultWorkspaces.includes(name as any)) {
+      alert("Cannot delete default workspaces");
+      return;
+    }
+    
+    const confirmDelete = window.confirm(`Are you sure you want to delete the selected workspace "${name}"?`);
+    if (!confirmDelete) return;
+
+    const nextWorkspaces = workspaces.filter(w => w !== name);
+    const snapshots = loadWorkspaceSnapshots();
+    delete snapshots[name];
+
+    localStorage.setItem(workspaceStorageKey, JSON.stringify(snapshots));
+    localStorage.setItem(workspaceNamesStorageKey, JSON.stringify(nextWorkspaces.filter((item) => !defaultWorkspaces.includes(item as (typeof defaultWorkspaces)[number]))));
+    setWorkspaces(nextWatchlist => nextWorkspaces);
+
+    const fallback = defaultWorkspaces[0];
+    openWorkspace(fallback);
+
+    // Backend sync
+    if (currentUser) {
+      try {
+        await dbUpdateUser(currentUser.username, {
+          workspaces: nextWorkspaces,
+          workspaceSnapshots: snapshots,
+          activeWorkspace: fallback
+        });
+      } catch (err) {
+        console.error("Failed to delete workspace from backend:", err);
+      }
+    }
   };
 
   const createWorkspace = () => {
@@ -801,6 +998,24 @@ export default function App() {
           const users = await dbGetUsers();
           const matched = users.find((u: any) => u.username === username);
           const allowed = matched?.allowedIndicators || (resolvedRole === "admin" ? ADMIN_ALLOWED : DEFAULT_ALLOWED);
+          
+          if (matched) {
+            if (matched.workspaces && matched.workspaces.length > 0) {
+              setWorkspaces(matched.workspaces);
+              setWorkspace(matched.activeWorkspace || "Quant Desk");
+              localStorage.setItem(workspaceNamesStorageKey, JSON.stringify(matched.workspaces.filter(w => !defaultWorkspaces.includes(w as any))));
+              localStorage.setItem(workspaceStorageKey, JSON.stringify(matched.workspaceSnapshots || {}));
+            }
+            if (matched.alerts) {
+              setIndicatorAlerts(matched.alerts);
+              localStorage.setItem("bt_stored_alerts", JSON.stringify(matched.alerts));
+            }
+            if (matched.alertEventLogs) {
+              setAlertEventLogs(matched.alertEventLogs);
+              localStorage.setItem("bt_alert_event_logs", JSON.stringify(matched.alertEventLogs));
+            }
+          }
+          
           setCurrentUser({ username, role: resolvedRole, allowedIndicators: allowed });
         }}
       />
@@ -862,8 +1077,45 @@ export default function App() {
                       setSymbolQuery("");
                       setOpenMenu(null);
                     }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setContextMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        symbol: item.rawSymbol
+                      });
+                    }}
+                    draggable={watchlist.includes(item.rawSymbol)}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("text/plain", item.rawSymbol);
+                    }}
+                    onDragOver={(e) => {
+                      if (watchlist.includes(item.rawSymbol)) {
+                        e.preventDefault();
+                      }
+                    }}
+                    onDrop={(e) => {
+                      const draggedSymbol = e.dataTransfer.getData("text/plain");
+                      const targetSymbol = item.rawSymbol;
+                      if (draggedSymbol && draggedSymbol !== targetSymbol && watchlist.includes(targetSymbol)) {
+                        const nextWatchlist = [...watchlist];
+                        const draggedIndex = nextWatchlist.indexOf(draggedSymbol);
+                        const targetIndex = nextWatchlist.indexOf(targetSymbol);
+                        if (draggedIndex !== -1 && targetIndex !== -1) {
+                          nextWatchlist.splice(draggedIndex, 1);
+                          nextWatchlist.splice(targetIndex, 0, draggedSymbol);
+                          setWatchlist(nextWatchlist);
+                        }
+                      }
+                    }}
+                    style={{ cursor: watchlist.includes(item.rawSymbol) ? "grab" : "pointer" }}
                   >
-                    <span className="coin-token">{item.token.slice(0, 3)}</span>
+                    <span className="coin-token">
+                      {watchlist.includes(item.rawSymbol) && (
+                        <span style={{ color: "var(--red-hot)", marginRight: "6px" }}>★</span>
+                      )}
+                      {item.token.slice(0, 3)}
+                    </span>
                     <span>{item.label}</span>
                     <em>{selectedExchange.label.toUpperCase()}</em>
                   </button>
@@ -1007,6 +1259,29 @@ export default function App() {
                 </button>
               ))}
               <div className="workspace-menu-actions">
+                {!defaultWorkspaces.includes(workspace as any) && (
+                  <button type="button" className="delete-workspace-btn" style={{
+                    width: "100%",
+                    height: "30px",
+                    background: "rgba(255, 0, 0, 0.08)",
+                    border: "1px solid rgba(255, 0, 0, 0.25)",
+                    color: "var(--red-hot)",
+                    fontSize: "10px",
+                    fontFamily: "IBM Plex Mono, monospace",
+                    fontWeight: 600,
+                    borderRadius: "3px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                    marginBottom: "8px",
+                    transition: "all 0.2s"
+                  }} onClick={() => deleteWorkspace()}>
+                    <Trash2 size={13} />
+                    Delete Workspace
+                  </button>
+                )}
                 <button type="button" onClick={() => saveWorkspace()}>
                   <Save size={13} />
                   Save Current
@@ -1080,10 +1355,12 @@ export default function App() {
             </>
           )}
         </div>
-        <div className={replayControls.enabled ? "live replay-live" : "live"}>
-          {replayControls.enabled ? "REPLAY" : "LIVE"} <span />
-        </div>
-        <div className="latency">UP 23ms</div>
+        {replayControls.enabled && (
+          <div className="live replay-live">
+            REPLAY <span />
+          </div>
+        )}
+        <div className="latency">UP {ping}ms</div>
         {currentUser?.role !== "admin" && (
           <button className="upgrade-btn" onClick={() => setActiveNav("SETTINGS")}>
             UPGRADE
@@ -1213,6 +1490,8 @@ export default function App() {
             onPriceChange={setLastPrice}
             onReplayStatusChange={setReplayStatus}
             onReplayStartSelected={handleReplayStartSelected}
+            customPlots={compiledPlots}
+            onAlertFired={handleAlertFired}
           />
           {drawingsEnabled && (
             <div className="drawing-toolbar" aria-label="Drawing tools">
@@ -1293,6 +1572,19 @@ export default function App() {
               onCreateAlert={createAlertFromScannerResult}
             />
           )}
+          {activeNav === "MARKET OVERVIEW" && (
+            <MarketOverview
+              onClose={() => setActiveNav("CHART")}
+              onSelectSymbol={(symbolToken) => {
+                const exchange = selectedExchange;
+                const match = exchange.symbols.find(s => s.rawSymbol.includes(symbolToken) || s.token.includes(symbolToken));
+                if (match) {
+                  setSymbol(match);
+                  setActiveNav("CHART");
+                }
+              }}
+            />
+          )}
           {showModuleOverlay && (
             <div className="module-focus">
               <span>{activeNav}</span>
@@ -1313,7 +1605,12 @@ export default function App() {
         )}
         <section className={activeNav === "SCRIPT EDITOR" ? "bottom-panel script-mode" : activeNav === "ALERTS" ? "bottom-panel alerts-mode" : "bottom-panel"}>
           {activeNav === "SCRIPT EDITOR" ? (
-            <ScriptEditor symbol={symbol.label} exchange={selectedExchange.label} />
+            <ScriptEditor
+              symbol={symbol.label}
+              exchange={selectedExchange.label}
+              onCompiledPlots={setCompiledPlots}
+              currentUser={currentUser}
+            />
           ) : activeNav === "ALERTS" ? (
             <AlertCenter
               alerts={indicatorAlerts}
@@ -1321,6 +1618,8 @@ export default function App() {
               symbol={symbol.label}
               exchange={selectedExchange.label}
               timeframe={timeframe}
+              eventLogs={alertEventLogs}
+              onClearEventLogs={handleClearEventLogs}
             />
           ) : (
             <div className="bottom-blank" />
@@ -1330,6 +1629,66 @@ export default function App() {
           <div className="layout-resizer resize-main-x" onPointerDown={(event) => startLayoutResize("right", event)} />
         )}
         <div className="layout-resizer resize-main-y" onPointerDown={(event) => startLayoutResize("bottom", event)} />
+        
+        {/* Watchlist Context Menu */}
+        {contextMenu && (
+          <div
+            className="custom-context-menu"
+            style={{
+              position: "fixed",
+              top: `${contextMenu.y}px`,
+              left: `${contextMenu.x}px`,
+              zIndex: 10000,
+              background: "rgba(10, 12, 14, 0.98)",
+              border: "1px solid var(--red-hot)",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.85)",
+              borderRadius: "3px",
+              padding: "4px 0",
+              backdropFilter: "blur(4px)"
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {watchlist.includes(contextMenu.symbol) ? (
+              <button
+                type="button"
+                onClick={() => removeFromWatchlist(contextMenu.symbol)}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  padding: "8px 16px",
+                  color: "var(--red-hot)",
+                  fontSize: "11px",
+                  fontFamily: "IBM Plex Mono, monospace",
+                  background: "transparent",
+                  border: 0,
+                  textAlign: "left",
+                  cursor: "pointer"
+                }}
+              >
+                ★ Remove from Watchlist
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => addToWatchlist(contextMenu.symbol)}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  padding: "8px 16px",
+                  color: "var(--strong)",
+                  fontSize: "11px",
+                  fontFamily: "IBM Plex Mono, monospace",
+                  background: "transparent",
+                  border: 0,
+                  textAlign: "left",
+                  cursor: "pointer"
+                }}
+              >
+                ☆ Add to Watchlist
+              </button>
+            )}
+          </div>
+        )}
       </main>
       )}
 

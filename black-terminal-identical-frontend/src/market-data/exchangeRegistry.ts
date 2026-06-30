@@ -2,6 +2,7 @@ import { ExchangeId, MarketDataCapabilities, MarketKind } from "./types";
 import { binanceMarketDataAdapter } from "./adapters/binance";
 import { bybitMarketDataAdapter } from "./adapters/bybit";
 import { okxMarketDataAdapter } from "./adapters/okx";
+import { createSimulatedMarketDataAdapter } from "./adapters/simulated";
 
 export type ExchangeDefinition = {
   id: ExchangeId;
@@ -147,5 +148,7 @@ export const publicMarketDataAdapters = {
 } as const;
 
 export function getPublicMarketDataAdapter(exchange: ExchangeId) {
-  return publicMarketDataAdapters[exchange as keyof typeof publicMarketDataAdapters];
+  const adapter = publicMarketDataAdapters[exchange as keyof typeof publicMarketDataAdapters];
+  if (adapter) return adapter;
+  return createSimulatedMarketDataAdapter(exchange);
 }

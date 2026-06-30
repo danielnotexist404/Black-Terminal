@@ -110,16 +110,20 @@ export function ScannerPage({ currentSymbol, selectedExchange, timeframe, onClos
   const [running, setRunning] = useState(false);
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState<string>();
-  const [includeRankedCandidates, setIncludeRankedCandidates] = useState(true);
+  const [includeRankedCandidates, setIncludeRankedCandidates] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const engine = useMemo(() => new ScannerEngine(new PublicMarketScannerDataAdapter()), []);
   const validation = useMemo(() => validateScanConfig(config), [config]);
   const universeSymbols = useMemo(() => resolveUniverseSymbols(config, selectedExchange.symbols), [config, selectedExchange.symbols]);
   const filteredResults = useMemo(() => {
+    let list = results;
+    if (!includeRankedCandidates) {
+      list = list.filter((r) => r.status === "match");
+    }
     const query = search.trim().toLowerCase();
-    if (!query) return results;
-    return results.filter((result) => [result.symbol, result.exchange, result.timeframe, result.error, result.matchedConditions.map((item) => item.label).join(" ")].join(" ").toLowerCase().includes(query));
-  }, [results, search]);
+    if (!query) return list;
+    return list.filter((result) => [result.symbol, result.exchange, result.timeframe, result.error, result.matchedConditions.map((item) => item.label).join(" ")].join(" ").toLowerCase().includes(query));
+  }, [results, search, includeRankedCandidates]);
 
   const updateConfig = (patch: Partial<ScanConfig>) => setConfig((current) => ({ ...current, ...patch, updatedAt: Date.now() }));
 

@@ -22,6 +22,8 @@ export type MarketKind = "spot" | "margin" | "perpetual" | "futures" | "options"
 
 export type Timeframe =
   | "1s"
+  | "10s"
+  | "30s"
   | "1m"
   | "3m"
   | "5m"
@@ -35,7 +37,9 @@ export type Timeframe =
   | "12h"
   | "1d"
   | "1w"
-  | "1M";
+  | "1M"
+  | "10t"
+  | "100t";
 
 export type MarketSymbol = {
   exchange: ExchangeId;

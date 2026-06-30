@@ -11,21 +11,25 @@ import {
   Timeframe,
   TradeTick
 } from "../types";
+import { binanceMarketDataAdapter } from "./binance";
+import { bybitMarketDataAdapter } from "./bybit";
 
-// Base prices for simulation
+// Base prices for simulation fallback
 const BASE_PRICES: Record<string, number> = {
-  BTC: 66000,
-  ETH: 3500,
-  SOL: 145,
+  BTC: 58000,
+  ETH: 3100,
+  SOL: 135,
   XRP: 0.48,
-  BNB: 580,
-  DOGE: 0.12,
-  ADA: 0.38,
-  AVAX: 28,
-  LINK: 14,
-  LTC: 75,
+  BNB: 530,
+  DOGE: 0.11,
+  ADA: 0.35,
+  AVAX: 26,
+  LINK: 13,
+  LTC: 70,
   HYPE: 12
 };
+
+const priceCache: Record<string, number> = { ...BASE_PRICES };
 
 const timeframeSeconds: Record<string, number> = {
   "1s": 1,
@@ -47,11 +51,59 @@ const timeframeSeconds: Record<string, number> = {
   "1M": 2592000
 };
 
-export function createSimulatedMarketDataAdapter(exchangeId: string): MarketDataAdapter {
-  const getBasePrice = (token: string) => BASE_PRICES[token.toUpperCase()] || 100;
+export function extractBaseToken(symbol: string): string {
+  const clean = symbol.trim().toUpperCase();
+  if (clean.includes("-")) return clean.split("-")[0];
+  if (clean.includes("/")) return clean.split("/")[0];
+  if (clean.includes("_")) return clean.split("_")[0];
+  if (clean.endsWith("USDT")) return clean.replace(/USDT$/, "");
+  if (clean.endsWith("USD")) return clean.replace(/USD$/, "");
+  return clean.slice(0, 3);
+}
 
-  const generateCandles = (query: CandleQuery): Candle[] => {
-    const basePrice = getBasePrice(query.symbol.slice(0, 3));
+async function fetchRealPrice(token: string): Promise<number> {
+  const t = token.toUpperCase();
+  if (t === "USDT" || t === "USD") return 1;
+  const symbolStr = `${t}USDT`;
+
+  try {
+    if (binanceMarketDataAdapter.getTickerSnapshot) {
+      const ticker = await binanceMarketDataAdapter.getTickerSnapshot({
+        exchange: "binance",
+        rawSymbol: symbolStr,
+        baseAsset: t,
+        quoteAsset: "USDT",
+        marketKind: "spot"
+      });
+      if (ticker && ticker.lastPrice > 0) {
+        priceCache[t] = ticker.lastPrice;
+        return ticker.lastPrice;
+      }
+    }
+  } catch (e) {
+    try {
+      if (bybitMarketDataAdapter.getTickerSnapshot) {
+        const ticker = await bybitMarketDataAdapter.getTickerSnapshot({
+          exchange: "bybit",
+          rawSymbol: symbolStr,
+          baseAsset: t,
+          quoteAsset: "USDT",
+          marketKind: "spot"
+        });
+        if (ticker && ticker.lastPrice > 0) {
+          priceCache[t] = ticker.lastPrice;
+          return ticker.lastPrice;
+        }
+      }
+    } catch (err) {}
+  }
+  return priceCache[t] || BASE_PRICES[t] || 100;
+}
+
+export function createSimulatedMarketDataAdapter(exchangeId: string): MarketDataAdapter {
+  const getBasePrice = (token: string) => priceCache[token.toUpperCase()] || BASE_PRICES[token.toUpperCase()] || 100;
+
+  const generateCandles = (query: CandleQuery, basePrice: number): Candle[] => {
     const tfSec = timeframeSeconds[query.timeframe] || 60;
     const limit = query.limit || 500;
     const to = query.to || Math.floor(Date.now() / 1000);
@@ -87,8 +139,7 @@ export function createSimulatedMarketDataAdapter(exchangeId: string): MarketData
     return candles.reverse();
   };
 
-  const generateOrderBook = (symbol: string): OrderBookSnapshot => {
-    const basePrice = getBasePrice(symbol.slice(0, 3));
+  const generateOrderBook = (symbol: string, basePrice: number): OrderBookSnapshot => {
     const bids: OrderBookLevel[] = [];
     const asks: OrderBookLevel[] = [];
 
@@ -110,8 +161,7 @@ export function createSimulatedMarketDataAdapter(exchangeId: string): MarketData
     };
   };
 
-  const generateTrades = (symbol: string, limit = 50): TradeTick[] => {
-    const basePrice = getBasePrice(symbol.slice(0, 3));
+  const generateTrades = (symbol: string, basePrice: number, limit = 50): TradeTick[] => {
     const trades: TradeTick[] = [];
     let timeSec = Math.floor(Date.now() / 1000);
 
@@ -147,24 +197,38 @@ export function createSimulatedMarketDataAdapter(exchangeId: string): MarketData
       liquidations: true
     },
     normalizeSymbol: (symbol) => symbol,
-    getHistoricalCandles: async (query) => generateCandles(query),
-    getOrderBookSnapshot: async (symbol) => generateOrderBook(symbol.rawSymbol),
-    getRecentTrades: async (symbol, limit) => generateTrades(symbol.rawSymbol, limit),
+    getHistoricalCandles: async (query) => {
+      const baseToken = extractBaseToken(query.symbol);
+      const basePrice = await fetchRealPrice(baseToken);
+      return generateCandles(query, basePrice);
+    },
+    getOrderBookSnapshot: async (symbol) => {
+      const baseToken = extractBaseToken(symbol.rawSymbol);
+      const basePrice = await fetchRealPrice(baseToken);
+      return generateOrderBook(symbol.rawSymbol, basePrice);
+    },
+    getRecentTrades: async (symbol, limit) => {
+      const baseToken = extractBaseToken(symbol.rawSymbol);
+      const basePrice = await fetchRealPrice(baseToken);
+      return generateTrades(symbol.rawSymbol, basePrice, limit);
+    },
     getTickerSnapshot: async (symbol) => {
-      const price = getBasePrice(symbol.rawSymbol.slice(0, 3));
+      const baseToken = extractBaseToken(symbol.rawSymbol);
+      const basePrice = await fetchRealPrice(baseToken);
       return {
         exchange: exchangeId as any,
         symbol: symbol.rawSymbol,
         time: Math.floor(Date.now() / 1000),
-        lastPrice: price,
+        lastPrice: basePrice,
         priceChangePercent: Math.random() * 6 - 3,
         volume: Math.random() * 5000000,
-        highPrice: price * 1.05,
-        lowPrice: price * 0.95
+        highPrice: basePrice * 1.05,
+        lowPrice: basePrice * 0.95
       };
     },
     subscribeCandles: (query, onCandle) => {
-      let lastPrice = getBasePrice(query.symbol.slice(0, 3));
+      const baseToken = extractBaseToken(query.symbol);
+      let lastPrice = getBasePrice(baseToken);
       const intervalSec = timeframeSeconds[query.timeframe] || 60;
       let currentCandleTime = Math.floor(Math.floor(Date.now() / 1000) / intervalSec) * intervalSec;
       let open = lastPrice;
@@ -173,6 +237,11 @@ export function createSimulatedMarketDataAdapter(exchangeId: string): MarketData
       let close = lastPrice;
 
       const interval = setInterval(() => {
+        const latestPrice = getBasePrice(baseToken);
+        if (Math.abs(close - latestPrice) / latestPrice > 0.05) {
+          close = latestPrice;
+        }
+
         const nowSec = Math.floor(Date.now() / 1000);
         const candleTime = Math.floor(nowSec / intervalSec) * intervalSec;
 
@@ -206,8 +275,9 @@ export function createSimulatedMarketDataAdapter(exchangeId: string): MarketData
       };
     },
     subscribeTrades: (symbol, onTrade) => {
-      const basePrice = getBasePrice(symbol.rawSymbol.slice(0, 3));
+      const baseToken = extractBaseToken(symbol.rawSymbol);
       const interval = setInterval(() => {
+        const basePrice = getBasePrice(baseToken);
         onTrade({
           exchange: exchangeId as any,
           symbol: symbol.rawSymbol,
@@ -226,8 +296,10 @@ export function createSimulatedMarketDataAdapter(exchangeId: string): MarketData
       };
     },
     subscribeOrderBook: (symbol, onBook) => {
+      const baseToken = extractBaseToken(symbol.rawSymbol);
       const interval = setInterval(() => {
-        onBook(generateOrderBook(symbol.rawSymbol));
+        const basePrice = getBasePrice(baseToken);
+        onBook(generateOrderBook(symbol.rawSymbol, basePrice));
       }, 1500);
 
       return {

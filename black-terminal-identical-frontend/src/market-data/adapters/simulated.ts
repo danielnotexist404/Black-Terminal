@@ -55,11 +55,12 @@ export function createSimulatedMarketDataAdapter(exchangeId: string): MarketData
     const tfSec = timeframeSeconds[query.timeframe] || 60;
     const limit = query.limit || 500;
     const to = query.to || Math.floor(Date.now() / 1000);
-    const from = query.from || (to - limit * tfSec);
+    const toAligned = Math.floor(to / tfSec) * tfSec;
+    const from = query.from || (toAligned - limit * tfSec);
 
     const candles: Candle[] = [];
     let currentPrice = basePrice;
-    let time = to;
+    let time = toAligned;
 
     for (let i = 0; i < limit; i++) {
       const change = currentPrice * (Math.random() - 0.5) * 0.015;
@@ -112,7 +113,7 @@ export function createSimulatedMarketDataAdapter(exchangeId: string): MarketData
   const generateTrades = (symbol: string, limit = 50): TradeTick[] => {
     const basePrice = getBasePrice(symbol.slice(0, 3));
     const trades: TradeTick[] = [];
-    let time = Date.now();
+    let timeSec = Math.floor(Date.now() / 1000);
 
     for (let i = 0; i < limit; i++) {
       const price = basePrice + basePrice * (Math.random() - 0.5) * 0.008;
@@ -120,13 +121,13 @@ export function createSimulatedMarketDataAdapter(exchangeId: string): MarketData
       trades.push({
         exchange: exchangeId as any,
         symbol,
-        tradeId: `sim-${time}-${i}`,
+        tradeId: `sim-${timeSec}-${i}`,
         price,
         quantity,
-        time,
+        time: timeSec,
         side: Math.random() > 0.5 ? "buy" : "sell"
       });
-      time -= Math.floor(Math.random() * 1500) + 100;
+      timeSec -= Math.floor(Math.random() * 2) + 1;
     }
     return trades;
   };
@@ -165,23 +166,37 @@ export function createSimulatedMarketDataAdapter(exchangeId: string): MarketData
     subscribeCandles: (query, onCandle) => {
       let lastPrice = getBasePrice(query.symbol.slice(0, 3));
       const intervalSec = timeframeSeconds[query.timeframe] || 60;
+      let currentCandleTime = Math.floor(Math.floor(Date.now() / 1000) / intervalSec) * intervalSec;
+      let open = lastPrice;
+      let high = lastPrice;
+      let low = lastPrice;
+      let close = lastPrice;
 
       const interval = setInterval(() => {
-        const change = lastPrice * (Math.random() - 0.5) * 0.003;
-        const open = lastPrice;
-        const close = lastPrice + change;
-        const high = Math.max(open, close) + lastPrice * Math.random() * 0.002;
-        const low = Math.min(open, close) - lastPrice * Math.random() * 0.002;
+        const nowSec = Math.floor(Date.now() / 1000);
+        const candleTime = Math.floor(nowSec / intervalSec) * intervalSec;
+
+        const change = close * (Math.random() - 0.5) * 0.003;
+        close = close + change;
+
+        if (candleTime !== currentCandleTime) {
+          currentCandleTime = candleTime;
+          open = close;
+          high = close;
+          low = close;
+        } else {
+          high = Math.max(high, close);
+          low = Math.min(low, close);
+        }
         
         onCandle({
-          time: Math.floor(Date.now() / 1000),
+          time: candleTime,
           open,
           high,
           low,
           close,
           volume: Math.random() * 5 + 0.1
         });
-        lastPrice = close;
       }, 1000);
 
       return {
@@ -199,7 +214,7 @@ export function createSimulatedMarketDataAdapter(exchangeId: string): MarketData
           tradeId: `sim-live-${Date.now()}`,
           price: basePrice + basePrice * (Math.random() - 0.5) * 0.003,
           quantity: Math.random() * 1.5 + 0.01,
-          time: Date.now(),
+          time: Math.floor(Date.now() / 1000),
           side: Math.random() > 0.5 ? "buy" : "sell"
         });
       }, 1200);

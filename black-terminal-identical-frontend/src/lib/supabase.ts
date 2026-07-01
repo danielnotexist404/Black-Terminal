@@ -110,9 +110,9 @@ export async function dbGetUsers(): Promise<DBUser[]> {
           alerts: u.alerts || [],
           scripts: u.scripts || [],
           alertEventLogs: u.alert_event_logs || [],
-          ip: u.ip || "",
-          countryCode: u.country_code || u.countryCode || "",
-          countryName: u.country_name || u.countryName || ""
+          ip: u.ip || "127.0.0.1",
+          countryCode: u.country_code || u.countryCode || "IL",
+          countryName: u.country_name || u.countryName || "Israel"
         }));
       }
     } catch (e) {
@@ -121,7 +121,13 @@ export async function dbGetUsers(): Promise<DBUser[]> {
   }
 
   const stored = localStorage.getItem(USERS_DB_KEY);
-  return stored ? JSON.parse(stored) : [];
+  const parsed = stored ? JSON.parse(stored) : [];
+  return parsed.map((u: any) => ({
+    ...u,
+    ip: u.ip || "127.0.0.1",
+    countryCode: u.countryCode || u.country_code || "IL",
+    countryName: u.countryName || u.country_name || "Israel"
+  }));
 }
 
 export async function getGeoIPInfo(): Promise<{ ip: string; countryCode: string; countryName: string }> {

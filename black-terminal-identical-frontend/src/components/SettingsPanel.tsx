@@ -8,6 +8,8 @@ interface TerminalSettings {
   showOrderBookHeatmap: boolean;
   enabledTimeframes: string[];
   theme?: string;
+  priceLineColor?: string;
+  priceLineIntensity?: number;
 }
 
 interface SettingsPanelProps {
@@ -230,6 +232,61 @@ export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange,
                 checked={terminalSettings.showOrderBookHeatmap}
                 onChange={(e) => onSettingsChange({ ...terminalSettings, showOrderBookHeatmap: e.target.checked })}
                 style={{ width: "20px", height: "20px", cursor: "pointer", accentColor: "var(--red-hot)" }}
+              />
+            </div>
+
+            <div className="settings-field" style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: "20px" }}>
+              <div>
+                <label className="settings-label" style={{ fontSize: "11px", display: "block" }}>Price Line Color</label>
+                <span className="settings-hint">Color of the horizontal line showing the current price</span>
+              </div>
+              <select
+                value={terminalSettings.priceLineColor ?? ""}
+                onChange={(e) => onSettingsChange({ ...terminalSettings, priceLineColor: e.target.value })}
+                style={{
+                  width: "140px",
+                  padding: "6px 8px",
+                  borderRadius: "4px",
+                  background: "#0c0f12",
+                  border: "1px solid #20262e",
+                  color: "#fff",
+                  fontSize: "11px",
+                  cursor: "pointer"
+                }}
+              >
+                <option value="">Dynamic (Green/Red)</option>
+                <option value="#ffffff">White</option>
+                <option value="#888888">Gray</option>
+                <option value="#00ff66">Green</option>
+                <option value="#ff101b">Red</option>
+                <option value="#2962ff">Blue</option>
+                <option value="#f59f18">Yellow</option>
+                <option value="#ff00aa">Pink</option>
+              </select>
+            </div>
+
+            <div className="settings-field" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <label className="settings-label" style={{ fontSize: "11px" }}>Price Line Opacity</label>
+                <span style={{ fontSize: "10px", color: "var(--dim)" }}>{terminalSettings.priceLineIntensity ?? 75}%</span>
+              </div>
+              <span className="settings-hint">Brightness and opacity of the current price level line</span>
+              <input
+                type="range"
+                min="10"
+                max="100"
+                step="5"
+                value={terminalSettings.priceLineIntensity ?? 75}
+                onChange={(e) => onSettingsChange({ ...terminalSettings, priceLineIntensity: Number(e.target.value) })}
+                style={{
+                  width: "100%",
+                  cursor: "pointer",
+                  accentColor: "var(--red-hot)",
+                  background: "#20262e",
+                  height: "4px",
+                  borderRadius: "2px",
+                  appearance: "none"
+                }}
               />
             </div>
 

@@ -219,6 +219,8 @@ export class BlackChartEngine {
   private profileTexts: Text[] = [];
   private heatmapTexts: Text[] = [];
   private alertTexts: Text[] = [];
+  private priceLineColor = "";
+  private priceLineIntensity = 75;
 
   private view: ViewState = {
     width: 800,
@@ -280,6 +282,8 @@ export class BlackChartEngine {
     this.onFps = options.onFps;
     this.alertDefinitions = options.alertDefinitions ?? [];
     this.onAlertEditRequest = options.onAlertEditRequest;
+    if (options.priceLineColor !== undefined) this.priceLineColor = options.priceLineColor;
+    if (options.priceLineIntensity !== undefined) this.priceLineIntensity = options.priceLineIntensity;
   }
 
   async init() {
@@ -626,6 +630,12 @@ export class BlackChartEngine {
       this.orderBookDrawTimer = undefined;
     }
     this.setHeatmapSource(this.candles.all(), this.heatmapVisibleUntilIndex);
+    this.draw();
+  }
+
+  setPriceLineSettings(color: string, intensity: number) {
+    this.priceLineColor = color;
+    this.priceLineIntensity = intensity;
     this.draw();
   }
 
@@ -1300,9 +1310,10 @@ export class BlackChartEngine {
       g.moveTo(0, y).lineTo(plotWidth, y).stroke({ width: 1, color: theme.grid, alpha: theme.gridAlpha });
     }
 
-    for (let i = 0; i <= 12; i++) {
-      const x = (plotWidth / 12) * i;
-      g.moveTo(x, this.view.topPadding).lineTo(x, plotHeight).stroke({ width: 1, color: theme.grid, alpha: theme.gridAlpha });
+    const data = this.getDisplayCandles();
+    const ticks = this.getAlignedTimeTicks(data);
+    for (const tick of ticks) {
+      g.moveTo(tick.x, this.view.topPadding).lineTo(tick.x, plotHeight).stroke({ width: 1, color: theme.grid, alpha: theme.gridAlpha });
     }
 
     g.moveTo(plotWidth, 0).lineTo(plotWidth, this.view.height).stroke({ width: 1, color: 0xffffff, alpha: 0.08 });
@@ -3557,6 +3568,103 @@ export class BlackChartEngine {
     return t;
   }
 
+  private getAlignedTimeTicks(data: Candle[]) {
+    const ticks: { index: number; x: number; time: number; label: string }[] = [];
+    const firstCandle = data[this.view.firstIndex];
+    const lastCandle = data[this.view.lastIndex];
+    if (!firstCandle || !lastCandle) return ticks;
+
+    const timeRange = lastCandle.time - firstCandle.time;
+    if (timeRange <= 0) return ticks;
+
+    const targetStep = timeRange / 7;
+    const standardSteps = [
+      60, 300, 900, 1800, 3600, 7200, 14400, 43200, 86400, 172800, 432000, 604800, 1209600, 2592000, 7776000, 31536000
+    ];
+    let step = standardSteps[0];
+    let minDiff = Math.abs(targetStep - step);
+    for (const s of standardSteps) {
+      const diff = Math.abs(targetStep - s);
+      if (diff < minDiff) {
+        minDiff = diff;
+        step = s;
+      }
+    }
+
+    const firstAlignedTime = Math.ceil(firstCandle.time / step) * step;
+    const lastAlignedTime = Math.floor(lastCandle.time / step) * step;
+
+    const findClosestIndex = (time: number) => {
+      let low = this.view.firstIndex;
+      let high = this.view.lastIndex;
+      while (low < high) {
+        const mid = Math.floor((low + high) / 2);
+        if (data[mid].time < time) {
+          low = mid + 1;
+        } else {
+          high = mid;
+        }
+      }
+      return low;
+    };
+
+    let lastDrawnIdx = -1;
+    let lastDateStr = "";
+    let lastMonthStr = "";
+    let lastYearStr = "";
+
+    for (let t = firstAlignedTime; t <= lastAlignedTime; t += step) {
+      const idx = findClosestIndex(t);
+      if (idx === lastDrawnIdx || idx < this.view.firstIndex || idx > this.view.lastIndex) continue;
+      const c = data[idx];
+      if (!c) continue;
+
+      const x = this.xForIndex(idx);
+      const d = new Date(c.time * 1000);
+
+      const year = d.getFullYear();
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const month = monthNames[d.getMonth()];
+      const day = d.getDate();
+      const hours = String(d.getHours()).padStart(2, "0");
+      const minutes = String(d.getMinutes()).padStart(2, "0");
+
+      let label = "";
+      const isNewYear = lastYearStr === "" || String(year) !== lastYearStr;
+      const isNewMonth = lastMonthStr === "" || month !== lastMonthStr || isNewYear;
+      const isNewDay = lastDateStr === "" || String(day) !== lastDateStr || isNewMonth;
+
+      const intervalSec = data.length >= 2 ? Math.max(1, data[data.length - 1].time - data[data.length - 2].time) : 3600;
+
+      if (intervalSec >= 86400) {
+        if (isNewYear) {
+          label = `${year}`;
+        } else if (isNewMonth) {
+          label = `${month}`;
+        } else {
+          label = `${month} ${day}`;
+        }
+      } else {
+        if (isNewMonth) {
+          label = `${month} ${day}`;
+        } else if (isNewDay) {
+          label = `${month} ${day}`;
+        } else {
+          label = `${hours}:${minutes}`;
+        }
+      }
+
+      lastDateStr = String(day);
+      lastMonthStr = month;
+      lastYearStr = String(year);
+      lastDrawnIdx = idx;
+
+      ticks.push({ index: idx, x, time: c.time, label });
+    }
+
+    return ticks;
+  }
+
   private timeLabelForX(x: number) {
     const plotWidth = this.view.width - this.view.rightAxisWidth;
     const step = this.timeStep();
@@ -3603,7 +3711,11 @@ export class BlackChartEngine {
     const last = data[data.length - 1];
     if (last) {
       const y = this.yForPrice(last.close);
-      g.moveTo(0, y).lineTo(plotWidth, y).stroke({ width: 1, color: 0xffffff, alpha: 0.18 });
+      const isRising = last.close >= last.open;
+      const defaultColor = isRising ? 0x00ff66 : 0xff101b;
+      const lineColor = this.priceLineColor ? this.hexColor(this.priceLineColor, defaultColor) : defaultColor;
+      const lineAlpha = (this.priceLineIntensity ?? 75) / 100;
+      g.moveTo(0, y).lineTo(plotWidth, y).stroke({ width: 1.25, color: lineColor, alpha: lineAlpha });
 
       // Calculate timeframe in seconds from candles
       let timeframeSeconds = 60;
@@ -3635,7 +3747,7 @@ export class BlackChartEngine {
       // Neon-glowing TradingView style box
       g.rect(plotWidth + 4, y - 18, 74, 36)
         .fill({ color: 0x07090b, alpha: 0.96 })
-        .stroke({ width: 1.5, color: 0xff0055, alpha: 0.95 });
+        .stroke({ width: 1.5, color: lineColor, alpha: 0.95 });
 
       this.addText(
         this.priceTexts,
@@ -3664,16 +3776,10 @@ export class BlackChartEngine {
     }
 
     // bottom time axis
-    const marks = 7;
-    for (let i = 0; i <= marks; i++) {
-      const idx = Math.round(this.view.firstIndex + ((this.view.lastIndex - this.view.firstIndex) / marks) * i);
-      const c = data[idx];
-      if (!c) continue;
-      const x = this.xForIndex(idx);
-      const d = new Date(c.time * 1000);
-      const label = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-      this.addText(this.timeTexts, label, x - 18, plotHeight + 9, 11, theme.muted);
-      g.moveTo(x, plotHeight).lineTo(x, plotHeight + 5).stroke({ width: 1, color: 0xffffff, alpha: 0.10 });
+    const ticks = this.getAlignedTimeTicks(data);
+    for (const tick of ticks) {
+      this.addText(this.timeTexts, tick.label, tick.x - 18, plotHeight + 9, 11, theme.muted);
+      g.moveTo(tick.x, plotHeight).lineTo(tick.x, plotHeight + 5).stroke({ width: 1, color: 0xffffff, alpha: 0.10 });
     }
 
     // chart range buttons, lower left

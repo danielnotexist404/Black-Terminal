@@ -106,6 +106,8 @@ export type ChartEngineOptions = {
   onPriceChange?: (price: number) => void;
   onCandleChange?: (candle: Candle) => void;
   onFps?: (fps: number) => void;
+  priceLineColor?: string;
+  priceLineIntensity?: number;
 };
 
 export type VisibleIndicators = {

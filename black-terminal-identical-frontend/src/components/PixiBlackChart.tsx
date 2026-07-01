@@ -58,6 +58,8 @@ type PixiBlackChartProps = {
   onReplayStartSelected?: (selection: ReplaySelection) => void;
   customPlots?: CompiledPlot[];
   onAlertFired?: (symbol: string, message: string) => void;
+  priceLineColor?: string;
+  priceLineIntensity?: number;
 };
 
 type IndicatorKey = keyof VisibleIndicators;
@@ -251,7 +253,9 @@ export function PixiBlackChart({
   onReplayStatusChange,
   onReplayStartSelected,
   customPlots,
-  onAlertFired
+  onAlertFired,
+  priceLineColor,
+  priceLineIntensity
 }: PixiBlackChartProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<BlackChartEngine | null>(null);
@@ -741,7 +745,9 @@ export function PixiBlackChart({
         setLastPrice(price);
         onPriceChange?.(price);
       },
-      onCandleChange: setLastCandle
+      onCandleChange: setLastCandle,
+      priceLineColor,
+      priceLineIntensity
     });
     engineRef.current = engine;
     engine.setReplaySelectionMode(
@@ -1001,6 +1007,10 @@ export function PixiBlackChart({
   useEffect(() => {
     engineRef.current?.setIndicatorState(visibleIndicators, indicatorPeriods, indicatorVisualSettings, indicatorAdvancedSettings);
   }, [visibleIndicators, indicatorPeriods, indicatorVisualSettings, indicatorAdvancedSettings]);
+
+  useEffect(() => {
+    engineRef.current?.setPriceLineSettings(priceLineColor ?? "", priceLineIntensity ?? 75);
+  }, [priceLineColor, priceLineIntensity]);
 
   useEffect(() => {
     engineRef.current?.setAlertDefinitions(scopedChartAlerts);

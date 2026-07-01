@@ -1492,6 +1492,8 @@ export default function App() {
             onReplayStartSelected={handleReplayStartSelected}
             customPlots={compiledPlots}
             onAlertFired={handleAlertFired}
+            priceLineColor={terminalSettings.priceLineColor}
+            priceLineIntensity={terminalSettings.priceLineIntensity}
           />
           {drawingsEnabled && (
             <div className="drawing-toolbar" aria-label="Drawing tools">

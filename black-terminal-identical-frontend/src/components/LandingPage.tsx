@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Check, Activity, Bell, Code2, Shield, Lock, X, ArrowLeft, Chrome, Layers, Cpu, TrendingUp, Users } from "lucide-react";
 import "../styles/landing.css";
 import "../styles/login.css";
-import { dbGetUsers, dbVerifyUser, dbRegisterUser, dbUpdateUser, dbAddAuditLog } from "../lib/supabase";
+import { dbGetUsers, dbVerifyUser, dbRegisterUser, dbUpdateUser, dbAddAuditLog, getGeoIPInfo } from "../lib/supabase";
 
 // Import generated images
 import terminalMockup from "../assets/terminal_mockup.jpg";
@@ -56,9 +56,13 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
           return;
         }
 
+        const geo = await getGeoIPInfo();
         await dbUpdateUser(cleanUser, {
           status: "online",
-          lastLogin: new Date().toISOString()
+          lastLogin: new Date().toISOString(),
+          ip: geo.ip,
+          countryCode: geo.countryCode,
+          countryName: geo.countryName
         });
 
         await dbAddAuditLog("LOGIN", `User ${cleanUser} logged in from landing page.`);

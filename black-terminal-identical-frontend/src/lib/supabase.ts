@@ -27,6 +27,9 @@ export interface DBUser {
   alerts?: any[];
   scripts?: any[];
   alertEventLogs?: any[];
+  ip?: string;
+  countryCode?: string;
+  countryName?: string;
 }
 
 export interface DBAuditLog {
@@ -106,7 +109,10 @@ export async function dbGetUsers(): Promise<DBUser[]> {
           activeWorkspace: u.active_workspace || "Quant Desk",
           alerts: u.alerts || [],
           scripts: u.scripts || [],
-          alertEventLogs: u.alert_event_logs || []
+          alertEventLogs: u.alert_event_logs || [],
+          ip: u.ip || "",
+          countryCode: u.country_code || u.countryCode || "",
+          countryName: u.country_name || u.countryName || ""
         }));
       }
     } catch (e) {
@@ -116,6 +122,24 @@ export async function dbGetUsers(): Promise<DBUser[]> {
 
   const stored = localStorage.getItem(USERS_DB_KEY);
   return stored ? JSON.parse(stored) : [];
+}
+
+export async function getGeoIPInfo(): Promise<{ ip: string; countryCode: string; countryName: string }> {
+  let ip = "127.0.0.1";
+  let countryCode = "IL";
+  let countryName = "Israel";
+  try {
+    const res = await fetch("https://ipapi.co/json/");
+    if (res.ok) {
+      const geo = await res.json();
+      if (geo.ip) ip = geo.ip;
+      if (geo.country_code) countryCode = geo.country_code;
+      if (geo.country_name) countryName = geo.country_name;
+    }
+  } catch (e) {
+    console.error("Geo IP lookup failed:", e);
+  }
+  return { ip, countryCode, countryName };
 }
 
 // Helper: Verify credentials and return user role
@@ -156,6 +180,16 @@ export async function dbVerifyUser(username: string, accessCode: string): Promis
 
 // Helper: Register user
 export async function dbRegisterUser(user: DBUser, accessCode: string): Promise<{ success: boolean; error?: string }> {
+  let ip = user.ip;
+  let countryCode = user.countryCode;
+  let countryName = user.countryName;
+  if (!ip || !countryCode) {
+    const geo = await getGeoIPInfo();
+    ip = ip || geo.ip;
+    countryCode = countryCode || geo.countryCode;
+    countryName = countryName || geo.countryName;
+  }
+
   if (isSupabaseConfigured && supabase) {
     try {
       // Check if user already exists
@@ -185,7 +219,10 @@ export async function dbRegisterUser(user: DBUser, accessCode: string): Promise<
           active_workspace: user.activeWorkspace || "Quant Desk",
           alerts: user.alerts || [],
           scripts: user.scripts || [],
-          alert_event_logs: user.alertEventLogs || []
+          alert_event_logs: user.alertEventLogs || [],
+          ip: ip,
+          country_code: countryCode,
+          country_name: countryName
         });
       if (error) throw error;
       return { success: true };
@@ -203,7 +240,12 @@ export async function dbRegisterUser(user: DBUser, accessCode: string): Promise<
   }
 
   const users = await dbGetUsers();
-  users.push(user);
+  users.push({
+    ...user,
+    ip,
+    countryCode,
+    countryName
+  });
   localStorage.setItem(USERS_DB_KEY, JSON.stringify(users));
 
   creds[user.username] = accessCode.trim();
@@ -230,6 +272,9 @@ export async function dbUpdateUser(username: string, patch: Partial<DBUser> & { 
       if (patch.alerts !== undefined) dbPatch.alerts = patch.alerts;
       if (patch.scripts !== undefined) dbPatch.scripts = patch.scripts;
       if (patch.alertEventLogs !== undefined) dbPatch.alert_event_logs = patch.alertEventLogs;
+      if (patch.ip !== undefined) dbPatch.ip = patch.ip;
+      if (patch.countryCode !== undefined) dbPatch.country_code = patch.countryCode;
+      if (patch.countryName !== undefined) dbPatch.country_name = patch.countryName;
 
       const { error } = await supabase
         .from("bt_users")

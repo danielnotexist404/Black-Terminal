@@ -12,6 +12,9 @@ interface User {
   allowedIndicators: string[];
   activeIndicators: string[];
   email?: string;
+  ip?: string;
+  countryCode?: string;
+  countryName?: string;
 }
 
 interface AuditLog {
@@ -295,6 +298,7 @@ export default function AdminPanel() {
                     <tr>
                       <th>Identity</th>
                       <th>Level</th>
+                      <th>Location</th>
                       <th>Status</th>
                       <th>Registered</th>
                       <th>Actions</th>
@@ -316,6 +320,24 @@ export default function AdminPanel() {
                           <span className={`user-role-badge ${u.role}`}>
                             {u.role.toUpperCase()}
                           </span>
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            {u.countryCode ? (
+                              <img
+                                src={`https://flagcdn.com/w20/${u.countryCode.toLowerCase()}.png`}
+                                alt={u.countryName || u.countryCode}
+                                title={u.countryName || u.countryCode}
+                                style={{ width: "20px", height: "auto", borderRadius: "2px", border: "1px solid rgba(255,255,255,0.15)" }}
+                              />
+                            ) : (
+                              <span style={{ fontSize: "12px" }}>🏳️</span>
+                            )}
+                            <div style={{ display: "flex", flexDirection: "column" }}>
+                              <span style={{ fontSize: "11px", fontWeight: "500" }}>{u.countryName || "Unknown"}</span>
+                              {u.ip && <span style={{ fontSize: "9px", color: "var(--dim)" }}>{u.ip}</span>}
+                            </div>
+                          </div>
                         </td>
                         <td>
                           <div className="user-status-col">

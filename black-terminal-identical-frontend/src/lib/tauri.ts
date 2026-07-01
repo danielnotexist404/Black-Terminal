@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { sendResendEmail } from "./resend";
 
 export async function publicMarketGet<T = unknown>(url: string) {
   return await invoke<T>("public_market_get", { url });
@@ -55,10 +56,18 @@ export async function sendIndicatorAlert(
   }
 
   if (delivery.email && delivery.emailTo?.trim()) {
-    results.push(await sendWebhook({
-      ...payload,
-      delivery: "email",
-      emailTo: delivery.emailTo.trim()
+    results.push(await sendResendEmail({
+      to: delivery.emailTo.trim(),
+      alertName: String(payload.alertName || "Alert"),
+      symbol: String(payload.symbol || ""),
+      exchange: String(payload.exchange || ""),
+      timeframe: String(payload.timeframe || ""),
+      price: String(payload.price || ""),
+      message: String(payload.message || ""),
+      indicator: payload.indicator ? String(payload.indicator) : undefined,
+      condition: payload.condition ? String(payload.condition) : undefined,
+      level: payload.level !== undefined ? String(payload.level) : undefined,
+      timestamp: String(payload.timestamp || new Date().toISOString())
     }));
   }
 

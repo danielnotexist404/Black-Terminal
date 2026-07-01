@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, SVGProps } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { LucideIcon } from "lucide-react";
@@ -417,6 +417,16 @@ export default function App() {
   const [workspace, setWorkspace] = useState<string>("Quant Desk");
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [lastPrice, setLastPrice] = useState(66678.1);
+  const prevPriceRef = useRef(lastPrice);
+
+  // Update browser tab title with price + direction like TradingView
+  useEffect(() => {
+    const arrow = lastPrice >= prevPriceRef.current ? "▲" : "▼";
+    const formatted = lastPrice.toLocaleString(undefined, { maximumFractionDigits: 1 });
+    document.title = `${symbol.label} ${formatted} ${arrow} · Black Terminal`;
+    prevPriceRef.current = lastPrice;
+  }, [lastPrice, symbol.label]);
+
   const [openMenu, setOpenMenu] = useState<MenuId>(null);
   const [symbolQuery, setSymbolQuery] = useState("");
   const [drawingsEnabled, setDrawingsEnabled] = useState(false);

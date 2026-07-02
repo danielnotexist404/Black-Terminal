@@ -37,8 +37,9 @@ import {
   Square,
   Trash2,
   TrendingUp,
-  Type,
-  Unlock
+  Unlock,
+  Bot,
+  Type
 } from "lucide-react";
 import { MarketStats } from "./components/MarketStats";
 import { AlertCenter } from "./components/AlertCenter";
@@ -53,6 +54,7 @@ import type { CompiledPlot } from "./components/ScriptCompiler";
 import AdminPanel from "./components/AdminPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import UpgradePanel from "./components/UpgradePanel";
+import BlackGPT from "./components/BlackGPT";
 import { LogOut, Shield } from "lucide-react";
 import type { IndicatorAlertDefinition } from "./automation/alerts";
 import { ScannerPage } from "./modules/scanner/components/ScannerPage";
@@ -335,7 +337,13 @@ function loadWorkspaceSnapshots(): Record<string, WorkspaceSnapshot> {
 }
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<{ username: string; role: "admin" | "user"; allowedIndicators: string[] } | null>(() => {
+  const [currentUser, setCurrentUser] = useState<{ 
+    username: string; 
+    role: "admin" | "user"; 
+    allowedIndicators: string[];
+    aiMessagesCount?: number;
+    aiLastMessageTimestamp?: string;
+  } | null>(() => {
     const stored = localStorage.getItem("bt_current_user");
     if (stored) {
       try { return JSON.parse(stored); } catch (e) {}
@@ -380,6 +388,7 @@ export default function App() {
   const visibleNav = useMemo(() => {
     const base = [
       { label: "CHART", icon: ChartCandlestick },
+      { label: "BlackGPT", icon: Bot },
       { label: "INDICATORS", icon: Activity },
       { label: "SCANNER", icon: Radar },
       { label: "ALERTS", icon: Bell },
@@ -1402,9 +1411,30 @@ export default function App() {
               key={label}
               className={label === activeNav ? "nav active" : "nav"}
               onClick={() => setActiveNav(label)}
+              style={{ position: "relative" }}
             >
               <Icon size={19} />
               <span>{label}</span>
+              {label === "BlackGPT" && (
+                <span style={{
+                  position: "absolute",
+                  right: "12px",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "rgba(0, 255, 102, 0.15)",
+                  border: "1px solid #00ff66",
+                  color: "#00ff66",
+                  fontSize: "8px",
+                  fontWeight: 800,
+                  padding: "1px 4px",
+                  borderRadius: "2px",
+                  fontFamily: "IBM Plex Mono",
+                  letterSpacing: "0.5px",
+                  animation: "pulse 1.5s infinite"
+                }}>
+                  NEW
+                </span>
+              )}
             </button>
           ))}
           <button
@@ -1478,6 +1508,19 @@ export default function App() {
                 if (updated) setCurrentUser(updated);
               });
             }}
+          />
+        </div>
+      ) : activeNav === "BlackGPT" ? (
+        <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
+          <BlackGPT
+            currentUser={currentUser!}
+            onUserUpdate={setCurrentUser}
+            workspace={workspace}
+            symbol={symbol.label}
+            price={lastPrice}
+            timeframe={selectedTimeframe.label}
+            exchange={selectedExchange.label}
+            activeIndicators={Object.keys(visibleIndicators).filter(k => visibleIndicators[k as keyof typeof visibleIndicators])}
           />
         </div>
       ) : (

@@ -39,6 +39,8 @@ export interface DBUser {
   newsletterOptIn?: boolean;
   referredBy?: string;
   emailVerified?: boolean;
+  aiMessagesCount?: number;
+  aiLastMessageTimestamp?: string;
 }
 
 export interface DBAuditLog {
@@ -119,42 +121,46 @@ export async function dbGetUsers(): Promise<DBUser[]> {
           alerts: u.alerts || [],
           scripts: u.scripts || [],
           alertEventLogs: u.alert_event_logs || [],
-           ip: u.ip || "127.0.0.1",
-           countryCode: u.country_code || u.countryCode || "IL",
-           countryName: u.country_name || u.countryName || "Israel",
-           firstName: u.first_name || u.firstName || "",
-           lastName: u.last_name || u.lastName || "",
-           organization: u.organization || "",
-           billingAddress: u.billing_address || u.billingAddress || "",
-           purposeOfUse: u.purpose_of_use || u.purposeOfUse || "personal",
-           phone: u.phone || "",
-           newsletterOptIn: u.newsletter_opt_in ?? u.newsletterOptIn ?? false,
-           referredBy: u.referred_by || u.referredBy || "",
-           emailVerified: u.email_verified ?? u.emailVerified ?? false
-         }));
-       }
-     } catch (e) {
-       console.error("Supabase error dbGetUsers, falling back:", e);
-     }
-   }
- 
-   const stored = localStorage.getItem(USERS_DB_KEY);
-   const parsed = stored ? JSON.parse(stored) : [];
-   return parsed.map((u: any) => ({
-     ...u,
-     ip: u.ip || "127.0.0.1",
-     countryCode: u.countryCode || u.country_code || "IL",
-     countryName: u.countryName || u.country_name || "Israel",
-     firstName: u.firstName || u.first_name || "",
-     lastName: u.lastName || u.last_name || "",
-     organization: u.organization || "",
-     billingAddress: u.billingAddress || u.billing_address || "",
-     purposeOfUse: u.purposeOfUse || u.purpose_of_use || "personal",
-     phone: u.phone || "",
-     newsletterOptIn: u.newsletterOptIn ?? u.newsletter_opt_in ?? false,
-     referredBy: u.referredBy || u.referred_by || "",
-     emailVerified: u.emailVerified ?? u.email_verified ?? false
-   }));
+          ip: u.ip || "127.0.0.1",
+          countryCode: u.country_code || u.countryCode || "IL",
+          countryName: u.country_name || u.countryName || "Israel",
+          firstName: u.first_name || u.firstName || "",
+          lastName: u.last_name || u.lastName || "",
+          organization: u.organization || "",
+          billingAddress: u.billing_address || u.billingAddress || "",
+          purposeOfUse: u.purpose_of_use || u.purposeOfUse || "personal",
+          phone: u.phone || "",
+          newsletterOptIn: u.newsletter_opt_in ?? u.newsletterOptIn ?? false,
+          referredBy: u.referred_by || u.referredBy || "",
+          emailVerified: u.email_verified ?? u.emailVerified ?? false,
+          aiMessagesCount: u.ai_messages_count ?? u.aiMessagesCount ?? 0,
+          aiLastMessageTimestamp: u.ai_last_message_timestamp || u.aiLastMessageTimestamp || ""
+        }));
+      }
+    } catch (e) {
+      console.error("Supabase error dbGetUsers, falling back:", e);
+    }
+  }
+
+  const stored = localStorage.getItem(USERS_DB_KEY);
+  const parsed = stored ? JSON.parse(stored) : [];
+  return parsed.map((u: any) => ({
+    ...u,
+    ip: u.ip || "127.0.0.1",
+    countryCode: u.countryCode || u.country_code || "IL",
+    countryName: u.countryName || u.country_name || "Israel",
+    firstName: u.firstName || u.first_name || "",
+    lastName: u.lastName || u.last_name || "",
+    organization: u.organization || "",
+    billingAddress: u.billingAddress || u.billing_address || "",
+    purposeOfUse: u.purposeOfUse || u.purpose_of_use || "personal",
+    phone: u.phone || "",
+    newsletterOptIn: u.newsletterOptIn ?? u.newsletter_opt_in ?? false,
+    referredBy: u.referredBy || u.referred_by || "",
+    emailVerified: u.emailVerified ?? u.email_verified ?? false,
+    aiMessagesCount: u.aiMessagesCount ?? u.ai_messages_count ?? 0,
+    aiLastMessageTimestamp: u.aiLastMessageTimestamp || u.ai_last_message_timestamp || ""
+  }));
 }
 
 export async function getGeoIPInfo(): Promise<{ ip: string; countryCode: string; countryName: string }> {
@@ -326,6 +332,8 @@ export async function dbUpdateUser(username: string, patch: Partial<DBUser> & { 
       if (patch.newsletterOptIn !== undefined) dbPatch.newsletter_opt_in = patch.newsletterOptIn;
       if (patch.referredBy !== undefined) dbPatch.referred_by = patch.referredBy;
       if (patch.emailVerified !== undefined) dbPatch.email_verified = patch.emailVerified;
+      if (patch.aiMessagesCount !== undefined) dbPatch.ai_messages_count = patch.aiMessagesCount;
+      if (patch.aiLastMessageTimestamp !== undefined) dbPatch.ai_last_message_timestamp = patch.aiLastMessageTimestamp;
 
       const { error } = await supabase
         .from("bt_users")

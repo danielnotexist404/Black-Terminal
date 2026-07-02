@@ -253,3 +253,26 @@ export async function sendVerificationEmail(to: string, username: string, code: 
   return await executeEmailSend(to, subject, html);
 }
 
+export async function sendSecurityAlertEmail(to: string, username: string, query: string): Promise<{ success: boolean; error?: string }> {
+  if (!isResendConfigured) {
+    return { success: false, error: "Resend API key not configured" };
+  }
+
+  const subject = `🚨 SECURITY ALERT - Source Code Extraction Attempt`;
+  const html = `
+<!DOCTYPE html>
+<html>
+<body style="background:#0a0c0f;color:#fff;font-family:sans-serif;padding:20px;">
+  <h2 style="color:#ff0044;font-family:monospace;letter-spacing:1px;">🚨 SECURITY BREACH WARNING</h2>
+  <p>A source code extraction attempt was detected on BlackGPT.</p>
+  <hr style="border:none;border-top:1px solid #1e2530;margin:15px 0;" />
+  <p><strong>Username:</strong> ${username}</p>
+  <p><strong>Query:</strong> "${query}"</p>
+  <p><strong>Timestamp:</strong> ${new Date().toISOString()}</p>
+  <p><strong>Action Taken:</strong> Request blocked, audit log recorded.</p>
+</body>
+</html>`;
+
+  return await executeEmailSend(to, subject, html);
+}
+

@@ -122,8 +122,7 @@ export default function UpgradePanel({ onClose, currentUser, onUpgradeSuccess }:
           "openInterestOscillator",
           "zScoreOscillator",
           "waveTrendOscillator",
-          "volume",
-          "volumeProfile" // Unlocks Volume Profile/HDLX
+          "volume"
         ];
 
         await dbUpdateUser(currentUser.username, {

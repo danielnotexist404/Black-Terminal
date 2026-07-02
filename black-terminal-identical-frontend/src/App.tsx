@@ -52,6 +52,7 @@ import { MarketOverview } from "./components/MarketOverview";
 import type { CompiledPlot } from "./components/ScriptCompiler";
 import AdminPanel from "./components/AdminPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import UpgradePanel from "./components/UpgradePanel";
 import { LogOut, Shield } from "lucide-react";
 import type { IndicatorAlertDefinition } from "./automation/alerts";
 import { ScannerPage } from "./modules/scanner/components/ScannerPage";
@@ -1372,7 +1373,7 @@ export default function App() {
         )}
         <div className="latency">UP {ping}ms</div>
         {currentUser?.role !== "admin" && (
-          <button className="upgrade-btn" onClick={() => setActiveNav("SETTINGS")}>
+          <button className="upgrade-btn" onClick={() => setActiveNav("UPGRADE")}>
             UPGRADE
           </button>
         )}
@@ -1463,6 +1464,20 @@ export default function App() {
             terminalSettings={terminalSettings}
             onSettingsChange={setTerminalSettings}
             onClose={() => setActiveNav("CHART")}
+          />
+        </div>
+      ) : activeNav === "UPGRADE" ? (
+        <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
+          <UpgradePanel
+            currentUser={currentUser!}
+            onClose={() => setActiveNav("CHART")}
+            onUpgradeSuccess={() => {
+              // Reload current user details to update roles and indicators in context
+              dbGetUsers().then(users => {
+                const updated = users.find(u => u.username === currentUser?.username);
+                if (updated) setCurrentUser(updated);
+              });
+            }}
           />
         </div>
       ) : (

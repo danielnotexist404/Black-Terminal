@@ -494,29 +494,27 @@ export default function AdminPanel() {
                         {selectedUser.aiMessagesCount || 0} / 5
                       </span>
                     </div>
-                    {(selectedUser.aiMessagesCount || 0) > 0 && (
-                      <button
-                        onClick={async () => {
-                          await dbUpdateUser(selectedUser.username, { aiMessagesCount: 0 });
-                          await dbAddAuditLog("SYSTEM", `Admin manually reset BlackGPT daily query usage for user ${selectedUser.username}`);
-                        }}
-                        style={{
-                          marginTop: "8px",
-                          width: "100%",
-                          height: "24px",
-                          background: "rgba(255,0,68,0.15)",
-                          border: "1px solid var(--red-hot)",
-                          color: "var(--red-hot)",
-                          fontFamily: "IBM Plex Mono",
-                          fontSize: "9px",
-                          fontWeight: 700,
-                          cursor: "pointer",
-                          borderRadius: "2px"
-                        }}
-                      >
-                        RESET DAILY QUERIES
-                      </button>
-                    )}
+                    <button
+                      onClick={async () => {
+                        await dbUpdateUser(selectedUser.username, { aiMessagesCount: 0 });
+                        await dbAddAuditLog("SYSTEM", `Admin manually reset BlackGPT daily query usage for user ${selectedUser.username}`);
+                      }}
+                      style={{
+                        marginTop: "8px",
+                        width: "100%",
+                        height: "24px",
+                        background: "rgba(255,0,68,0.15)",
+                        border: "1px solid var(--red-hot)",
+                        color: "var(--red-hot)",
+                        fontFamily: "IBM Plex Mono",
+                        fontSize: "9px",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        borderRadius: "2px"
+                      }}
+                    >
+                      RESET DAILY QUERIES
+                    </button>
                   </div>
                 </div>
 

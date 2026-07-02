@@ -26,7 +26,9 @@ interface BlackGPTProps {
   exchange: string;
   activeIndicators: string[];
 }
-
+const isHebrew = (text: string): boolean => {
+  return /[\u0590-\u05FF]/.test(text);
+};
 export default function BlackGPT({
   currentUser,
   onUserUpdate,
@@ -199,10 +201,10 @@ export default function BlackGPT({
 You are BlackGPT, a premium AI cryptocurrency trading assistant designed by Black Triangle Group.
 You assist professional quant traders.
 
-LANGUAGE & CONCISENESS RULES:
-- You MUST reply strictly in Hebrew (עברית) unless specifically asked otherwise.
-- Be extremely brief, concise, and direct. Avoid any introductions, conversational filler, or general trading lectures. Save tokens at all costs!
-- Keep all explanations to 1-2 short sentences maximum.
+LANGUAGE & LENGTH RULES:
+- You MUST detect the language used by the user in their prompt and reply strictly in that same language.
+- If the user writes in Hebrew, reply in Hebrew. If the user writes in English, reply in English.
+- Keep your responses balanced: neither too short (like single words) nor too long (like endless essays). Give complete, professional, yet concise answers.
 
 YOUR CURRENT REAL-TIME CONTEXT:
 - Active Workspace: ${workspace}
@@ -213,17 +215,19 @@ YOUR CURRENT REAL-TIME CONTEXT:
 - Active Chart Overlays/Indicators: ${formattedIndicators}
 - User Membership Tier: ${isPremium ? "PREMIUM MEMBER" : "FREE TRIAL"}
 
-SECURITY CONSTRAINTS:
-- NEVER output indicator code, scripts, or private repository files. Decline firmly in Hebrew if asked.
+ASSET CONTEXT OVERRIDE:
+- Although you are given the active chart symbol for context, you MUST analyze and discuss whatever asset the user explicitly asks about in their query. For example, if the active chart is BTC but they ask about Ethereum (ETH), do not force your response to be about BTC; answer about Ethereum instead!
 
-TRADING SIGNAL REQUIREMENTS:
-- When asked to analyze or recommend trades, output ONLY this template:
-  * פעולה: [קנייה/לונג | מכירה/שורט | המתנה]
-  * כניסה: [מחיר / טווח]
-  * Take Profit (TP): [יעדי רווח]
-  * Stop Loss (SL): [רמת עצירת הפסד]
-  * יחס סיכון-סיכוי: [X:Y]
-  * סיבה בקצרה: [הסבר של משפט אחד בלבד בעברית המבוסס על האינדיקטורים הפעילים]
+SECURITY CONSTRAINTS:
+- NEVER output indicator code, scripts, or private repository files.
+
+TRADING SIGNAL TEMPLATE (use when analyzing/recommending trades):
+- Activity Action (e.g. LONG/SHORT/HOLD)
+- Recommended Entry price/range
+- Take Profit (TP) target levels
+- Stop Loss (SL) level
+- Risk-Reward Ratio
+- Brief 1-2 sentence rationales supporting your decision.
 `;
 
       const msgRoleMap = { model: "assistant" } as const;
@@ -335,25 +339,30 @@ TRADING SIGNAL REQUIREMENTS:
               alignItems: msg.role === "user" ? "flex-end" : "flex-start"
             }}
           >
-            <div style={{
-              background: msg.role === "user" 
-                ? "var(--red-hot)" 
-                : msg.role === "system" 
-                  ? "rgba(255,0,68,0.05)" 
-                  : "rgba(18,22,28,0.95)",
-              border: msg.role === "user" 
-                ? "none" 
-                : msg.role === "system" 
-                  ? "1px solid rgba(255,0,68,0.3)" 
-                  : "1px solid rgba(255,255,255,0.06)",
-              borderRadius: "6px",
-              padding: "12px 16px",
-              color: msg.role === "system" ? "var(--red-hot)" : "#fff",
-              fontSize: "12px",
-              lineHeight: "1.6",
-              fontFamily: msg.role === "user" ? "sans-serif" : "inherit",
-              whiteSpace: "pre-wrap"
-            }}>
+            <div 
+              dir={isHebrew(msg.text) ? "rtl" : "ltr"}
+              style={{
+                background: msg.role === "user" 
+                  ? "var(--red-hot)" 
+                  : msg.role === "system" 
+                    ? "rgba(255,0,68,0.05)" 
+                    : "rgba(18,22,28,0.95)",
+                border: msg.role === "user" 
+                  ? "none" 
+                  : msg.role === "system" 
+                    ? "1px solid rgba(255,0,68,0.3)" 
+                    : "1px solid rgba(255,255,255,0.06)",
+                borderRadius: "6px",
+                padding: "12px 16px",
+                color: msg.role === "system" ? "var(--red-hot)" : "#fff",
+                fontSize: "12px",
+                lineHeight: "1.6",
+                fontFamily: msg.role === "user" ? "sans-serif" : "inherit",
+                whiteSpace: "pre-wrap",
+                direction: isHebrew(msg.text) ? "rtl" : "ltr",
+                textAlign: isHebrew(msg.text) ? "right" : "left"
+              }}
+            >
               {msg.role === "system" && <ShieldAlert size={14} style={{ display: "inline", marginRight: "6px", verticalAlign: "middle" }} />}
               {msg.text}
             </div>

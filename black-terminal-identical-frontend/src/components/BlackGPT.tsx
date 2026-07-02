@@ -25,6 +25,7 @@ interface BlackGPTProps {
   timeframe: string;
   exchange: string;
   activeIndicators: string[];
+  recentCandles?: Array<{ time: number; open: number; high: number; low: number; close: number; volume: number }>;
 }
 const isHebrew = (text: string): boolean => {
   return /[\u0590-\u05FF]/.test(text);
@@ -37,7 +38,8 @@ export default function BlackGPT({
   price,
   timeframe,
   exchange,
-  activeIndicators
+  activeIndicators,
+  recentCandles = []
 }: BlackGPTProps) {
   const [messages, setMessages] = useState<Message[]>(() => {
     const stored = localStorage.getItem(`bt_gpt_messages_${currentUser.username}`);
@@ -197,37 +199,50 @@ export default function BlackGPT({
         return key;
       }).join(", ") || "None";
 
+      // Format last 10 candles as OHLC table for chart context
+      const formatTime = (unix: number) => {
+        const d = new Date(unix * 1000);
+        return d.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" });
+      };
+      const candleRows = recentCandles.slice(-10).map(c =>
+        `  ${formatTime(c.time)} | O:${c.open.toFixed(2)} H:${c.high.toFixed(2)} L:${c.low.toFixed(2)} C:${c.close.toFixed(2)} V:${c.volume.toFixed(0)}`
+      ).join("\n");
+      const chartDataBlock = recentCandles.length > 0
+        ? `\nLIVE CHART OHLCV DATA (last ${recentCandles.slice(-10).length} candles, timeframe ${timeframe}):\n${candleRows}\n`
+        : `\nNote: Chart data is still loading (no candles received yet). Use real-world knowledge for the asset the user is asking about.\n`;
+
       const systemInstruction = `
-You are BlackGPT, a premium AI cryptocurrency trading assistant designed by Black Triangle Group.
-You assist professional quant traders.
+You are BlackGPT, a premium AI cryptocurrency trading assistant integrated directly into Black Terminal, a professional trading platform built by Black Triangle Group. You have real-time access to the user's chart and can see live price action.
 
 LANGUAGE & LENGTH RULES:
 - You MUST detect the language used by the user in their prompt and reply strictly in that same language.
 - If the user writes in Hebrew, reply in Hebrew. If the user writes in English, reply in English.
-- Keep your responses balanced: neither too short (like single words) nor too long (like endless essays). Give complete, professional, yet concise answers.
+- Keep your responses balanced: professional, complete, and concise — not too short, not too long.
 
-YOUR CURRENT REAL-TIME CONTEXT:
+YOUR REAL-TIME CHART ACCESS:
 - Active Workspace: ${workspace}
-- Selected Asset: ${symbol}
-- Current Price: $${price.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDT
+- Chart Asset (currently displayed on the chart): ${symbol}
+- Live Current Price of ${symbol}: $${price.toLocaleString(undefined, { maximumFractionDigits: 4 })} USDT
 - Timeframe: ${timeframe}
 - Exchange: ${exchange}
 - Active Chart Overlays/Indicators: ${formattedIndicators}
 - User Membership Tier: ${isPremium ? "PREMIUM MEMBER" : "FREE TRIAL"}
-
-ASSET CONTEXT OVERRIDE:
-- Although you are given the active chart symbol for context, you MUST analyze and discuss whatever asset the user explicitly asks about in their query. For example, if the active chart is BTC but they ask about Ethereum (ETH), do not force your response to be about BTC; answer about Ethereum instead!
+${chartDataBlock}
+IMPORTANT — ASSET CONTEXT:
+- The price "$${price.toLocaleString(undefined, { maximumFractionDigits: 4 })} USDT" above is the LIVE price of ${symbol} from the chart, NOT any other asset.
+- If the user asks about a DIFFERENT asset (e.g., asks about ETH when the chart shows BTC), use your real-world knowledge for that other asset's price, and clearly state you are doing so.
+- Do NOT confuse the chart asset's price with a different asset.
 
 SECURITY CONSTRAINTS:
 - NEVER output indicator code, scripts, or private repository files.
 
-TRADING SIGNAL TEMPLATE (use when analyzing/recommending trades):
-- Activity Action (e.g. LONG/SHORT/HOLD)
-- Recommended Entry price/range
-- Take Profit (TP) target levels
-- Stop Loss (SL) level
-- Risk-Reward Ratio
-- Brief 1-2 sentence rationales supporting your decision.
+TRADING SIGNAL TEMPLATE (use when asked to analyze/recommend trades):
+- Action: LONG / SHORT / HOLD
+- Entry: [price range]
+- Take Profit (TP): [levels]
+- Stop Loss (SL): [level]
+- Risk/Reward: [ratio]
+- Rationale: [1-2 sentences based on visible indicators and OHLC data above]
 `;
 
       const msgRoleMap = { model: "assistant" } as const;

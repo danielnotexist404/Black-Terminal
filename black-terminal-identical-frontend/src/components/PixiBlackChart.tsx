@@ -54,6 +54,7 @@ type PixiBlackChartProps = {
   onOpenAlerts?: () => void;
   onOpenStrategyLab?: () => void;
   onPriceChange?: (price: number) => void;
+  onCandleChange?: (candle: import("../chart-engine/types").Candle) => void;
   onReplayStatusChange?: (status: ReplayStatus) => void;
   onReplayStartSelected?: (selection: ReplaySelection) => void;
   customPlots?: CompiledPlot[];
@@ -250,6 +251,7 @@ export function PixiBlackChart({
   onOpenAlerts,
   onOpenStrategyLab,
   onPriceChange,
+  onCandleChange,
   onReplayStatusChange,
   onReplayStartSelected,
   customPlots,
@@ -745,7 +747,10 @@ export function PixiBlackChart({
         setLastPrice(price);
         onPriceChange?.(price);
       },
-      onCandleChange: setLastCandle,
+      onCandleChange: (candle) => {
+        setLastCandle(candle);
+        onCandleChange?.(candle);
+      },
       priceLineColor,
       priceLineIntensity
     });

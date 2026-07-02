@@ -452,6 +452,8 @@ export default function App() {
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [lastPrice, setLastPrice] = useState(66678.1);
   const prevPriceRef = useRef(lastPrice);
+  const [recentCandles, setRecentCandles] = useState<Array<{ time: number; open: number; high: number; low: number; close: number; volume: number }>>([]);
+  const recentCandlesRef = useRef(recentCandles);
 
   // Update browser tab title with price + direction like TradingView
   useEffect(() => {
@@ -1566,6 +1568,7 @@ export default function App() {
             timeframe={selectedTimeframe.label}
             exchange={selectedExchange.label}
             activeIndicators={Object.keys(visibleIndicators).filter(k => visibleIndicators[k as keyof typeof visibleIndicators])}
+            recentCandles={recentCandles}
           />
         </div>
       ) : (
@@ -1601,6 +1604,10 @@ export default function App() {
             onOpenAlerts={() => setActiveNav("ALERTS")}
             onOpenStrategyLab={() => setActiveNav("STRATEGY LAB")}
             onPriceChange={setLastPrice}
+            onCandleChange={(candle) => {
+              recentCandlesRef.current = [...recentCandlesRef.current.slice(-19), candle];
+              setRecentCandles(recentCandlesRef.current);
+            }}
             onReplayStatusChange={setReplayStatus}
             onReplayStartSelected={handleReplayStartSelected}
             customPlots={compiledPlots}

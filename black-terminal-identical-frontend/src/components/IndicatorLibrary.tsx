@@ -75,9 +75,9 @@ const builtInIndicators: BuiltInIndicator[] = [
   {
     key: "volumeProfile",
     title: "HDLX Profile",
-    group: "Volume",
+    group: "market Structure",
     type: "Overlay",
-    signal: "Fixed locked/visible profile, POC, value area, sentiment, HDLX",
+    signal: "",
     runtime: "Python"
   },
   {
@@ -363,7 +363,23 @@ export function IndicatorLibrary({
                 >
                   {locked ? <Lock size={15} style={{ color: "var(--red-hot)" }} /> : <Activity size={15} />}
                   <span>
-                    <strong>HDLX Profile - <span style={{ color: "var(--red-hot)", fontSize: "10px", fontWeight: "bold" }}>Proprietary</span></strong>
+                    <strong>HDLX Profile</strong>
+                    <em>
+                      market Structure / Overlay / Python
+                      {locked ? (
+                        <b style={{
+                          background: "rgba(255, 0, 68, 0.12)",
+                          border: "1px solid var(--red-hot)",
+                          color: "var(--red-hot)",
+                          padding: "1px 5px",
+                          fontSize: "8px",
+                          borderRadius: "2px",
+                          fontWeight: 800,
+                          marginLeft: "8px",
+                          textTransform: "uppercase"
+                        }}>Proprietary/classified</b>
+                      ) : null}
+                    </em>
                   </span>
                 </button>
                 <span className="library-signal"></span>

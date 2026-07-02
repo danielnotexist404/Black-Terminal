@@ -360,6 +360,7 @@ export default function App() {
   }, [currentUser]);
   const [activeNav, setActiveNav] = useState("CHART");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [showRevokedPopup, setShowRevokedPopup] = useState(false);
   const [terminalSettings, setTerminalSettings] = useState(() => {
     const stored = localStorage.getItem("bt_terminal_settings");
     if (stored) {
@@ -644,7 +645,16 @@ export default function App() {
               if (nextSymbol) setSymbol(nextSymbol);
               setTimeframe(snapshot.timeframe);
               setChartType(snapshot.chartType);
-              setVisibleIndicators(snapshot.visibleIndicators);
+              
+              // Sanitize active indicators against allowed list on boot
+              const nextVisible = { ...snapshot.visibleIndicators };
+              Object.keys(nextVisible).forEach((k) => {
+                if (nextVisible[k as keyof VisibleIndicators] && !record.allowedIndicators.includes(k)) {
+                  nextVisible[k as keyof VisibleIndicators] = false;
+                }
+              });
+              setVisibleIndicators(nextVisible);
+              
               setIndicatorPeriods(snapshot.indicatorPeriods);
               setIndicatorVisualSettings(snapshot.indicatorVisualSettings);
               setIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings);
@@ -679,6 +689,7 @@ export default function App() {
           if (JSON.stringify(record.allowedIndicators) !== JSON.stringify(currentUser.allowedIndicators)) {
             setCurrentUser(prev => prev ? { ...prev, allowedIndicators: record.allowedIndicators } : null);
             
+            let wasRevoked = false;
             setVisibleIndicators(current => {
               const next = { ...current };
               let changed = false;
@@ -686,10 +697,21 @@ export default function App() {
                 if (next[key as keyof VisibleIndicators] && !record.allowedIndicators.includes(key)) {
                   next[key as keyof VisibleIndicators] = false;
                   changed = true;
+                  wasRevoked = true;
                 }
               });
-              return changed ? next : current;
+              if (changed) {
+                // Update database active indicators immediately
+                const nextActiveList = Object.keys(next).filter(k => next[k as keyof VisibleIndicators]);
+                dbUpdateUser(currentUser.username, { activeIndicators: nextActiveList });
+                return next;
+              }
+              return current;
             });
+
+            if (wasRevoked) {
+              setShowRevokedPopup(true);
+            }
           }
         }
       } catch (e) {
@@ -1785,6 +1807,43 @@ export default function App() {
           API STATUS <span className="green-dot" />
         </span>
       </footer>
+
+      {/* Revoked indicator warning popup modal */}
+      {showRevokedPopup && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh",
+          background: "rgba(3, 4, 5, 0.9)", display: "flex", alignItems: "center", justifyContent: "center",
+          zIndex: 99999, backdropFilter: "blur(8px)"
+        }}>
+          <div style={{
+            background: "rgba(18, 22, 28, 0.98)",
+            border: "1px solid var(--red-hot)",
+            boxShadow: "0 0 40px rgba(255, 0, 68, 0.25)",
+            borderRadius: "4px", padding: "30px 40px", maxWidth: "450px", textAlign: "center"
+          }}>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: "15px" }}>
+              <Lock style={{ color: "var(--red-hot)", animation: "pulse 1.5s infinite" }} size={48} />
+            </div>
+            <h3 style={{ fontFamily: "IBM Plex Mono", fontSize: "16px", color: "#fff", letterSpacing: "1px", marginBottom: "10px" }}>
+              ACCESS REVOKED
+            </h3>
+            <p style={{ color: "var(--dim)", fontSize: "12px", lineHeight: "1.6", marginBottom: "25px" }}>
+              your indicator access was revoked by managment
+            </p>
+            <button
+              onClick={() => setShowRevokedPopup(false)}
+              style={{
+                background: "linear-gradient(180deg, #ff0000 0%, #aa0000 100%)",
+                border: "1px solid #ff0000", color: "#fff",
+                padding: "8px 24px", fontFamily: "IBM Plex Mono", fontSize: "11px", fontWeight: 700,
+                borderRadius: "2px", cursor: "pointer", width: "100%"
+              }}
+            >
+              ACKNOWLEDGE HANDSHAKE
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

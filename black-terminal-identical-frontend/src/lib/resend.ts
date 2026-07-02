@@ -127,6 +127,57 @@ function buildAlertEmailHtml(payload: AlertEmailPayload): string {
 </html>`;
 }
 
+async function executeEmailSend(to: string, subject: string, html: string): Promise<{ success: boolean; error?: string }> {
+  const isLocalhost = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+  const isTauri = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__ !== undefined;
+
+  const useDirect = isTauri || isLocalhost;
+  const endpoint = useDirect ? "https://api.resend.com/emails" : "/api/send-email";
+
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json"
+    };
+
+    if (useDirect) {
+      headers["Authorization"] = `Bearer ${RESEND_API_KEY}`;
+    }
+
+    const body = useDirect
+      ? JSON.stringify({
+          from: RESEND_FROM,
+          to: [to.trim()],
+          subject,
+          html
+        })
+      : JSON.stringify({
+          to: to.trim(),
+          subject,
+          html
+        });
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      let errMsg = response.statusText;
+      try {
+        const parsed = JSON.parse(errText);
+        errMsg = parsed.error || parsed.message || errMsg;
+      } catch (e) {}
+      return { success: false, error: errMsg };
+    }
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: String(err) };
+  }
+}
+
 export async function sendResendEmail(payload: AlertEmailPayload): Promise<{ success: boolean; error?: string }> {
   if (!isResendConfigured) {
     return { success: false, error: "Resend API key not configured" };
@@ -136,35 +187,10 @@ export async function sendResendEmail(payload: AlertEmailPayload): Promise<{ suc
     return { success: false, error: "No recipient email provided" };
   }
 
-  try {
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${RESEND_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        from: RESEND_FROM,
-        to: [payload.to.trim()],
-        subject: `🔔 Alert: ${payload.alertName} — ${payload.symbol} @ $${payload.price}`,
-        html: buildAlertEmailHtml(payload)
-      })
-    });
+  const subject = `🔔 Alert: ${payload.alertName} — ${payload.symbol} @ $${payload.price}`;
+  const html = buildAlertEmailHtml(payload);
 
-    if (!response.ok) {
-      const errBody = await response.json().catch(() => ({}));
-      const errMsg = (errBody as any)?.message || response.statusText;
-      console.error("Resend API error:", errMsg);
-      return { success: false, error: errMsg };
-    }
-
-    const result = await response.json();
-    console.log("Resend email sent:", (result as any)?.id);
-    return { success: true };
-  } catch (err) {
-    console.error("Resend email failed:", err);
-    return { success: false, error: String(err) };
-  }
+  return await executeEmailSend(payload.to, subject, html);
 }
 
 export async function sendVerificationEmail(to: string, username: string, code: string): Promise<{ success: boolean; error?: string }> {
@@ -172,18 +198,8 @@ export async function sendVerificationEmail(to: string, username: string, code: 
     return { success: false, error: "Resend API key not configured" };
   }
 
-  try {
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${RESEND_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        from: RESEND_FROM,
-        to: [to.trim()],
-        subject: `🔐 Black Terminal - Verify Your Registration`,
-        html: `
+  const subject = `🔐 Black Terminal - Verify Your Registration`;
+  const html = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -232,19 +248,8 @@ export async function sendVerificationEmail(to: string, username: string, code: 
     </tr>
   </table>
 </body>
-</html>`
-      })
-    });
+</html>`;
 
-    if (!response.ok) {
-      const errBody = await response.json().catch(() => ({}));
-      const errMsg = (errBody as any)?.message || response.statusText;
-      return { success: false, error: errMsg };
-    }
-
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: String(err) };
-  }
+  return await executeEmailSend(to, subject, html);
 }
 

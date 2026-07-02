@@ -358,9 +358,13 @@ export default function App() {
       localStorage.removeItem("bt_current_user");
     }
   }, [currentUser]);
-  const [activeNav, setActiveNav] = useState("CHART");
+  const [activeNav, setActiveNav] = useState(() => localStorage.getItem("bt_active_nav") || "CHART");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showRevokedPopup, setShowRevokedPopup] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem("bt_active_nav", activeNav);
+  }, [activeNav]);
   const [terminalSettings, setTerminalSettings] = useState(() => {
     const stored = localStorage.getItem("bt_terminal_settings");
     if (stored) {
@@ -413,10 +417,29 @@ export default function App() {
     setActiveNav("CHART");
   };
   const [selectedExchange, setSelectedExchange] = useState<ExchangeOption>(marketCatalog[0]);
-  const [symbol, setSymbol] = useState<MarketSymbolOption>(marketCatalog[0].symbols[0]);
+  const [symbol, setSymbol] = useState<MarketSymbolOption>(() => {
+    const stored = localStorage.getItem("bt_last_symbol");
+    if (stored) {
+      try { return JSON.parse(stored); } catch (e) {}
+    }
+    return marketCatalog[0].symbols[0];
+  });
   const [availableSymbols, setAvailableSymbols] = useState<MarketSymbolOption[]>(marketCatalog[0].symbols);
-  const [timeframe, setTimeframe] = useState<Timeframe>("15m");
-  const [chartType, setChartType] = useState<ChartDisplayType>("candlesticks");
+  const [timeframe, setTimeframe] = useState<Timeframe>(() => (localStorage.getItem("bt_last_timeframe") as Timeframe) || "15m");
+  const [chartType, setChartType] = useState<ChartDisplayType>(() => (localStorage.getItem("bt_last_chart_type") as ChartDisplayType) || "candlesticks");
+
+  useEffect(() => {
+    localStorage.setItem("bt_last_symbol", JSON.stringify(symbol));
+  }, [symbol]);
+
+  useEffect(() => {
+    localStorage.setItem("bt_last_timeframe", timeframe);
+  }, [timeframe]);
+
+  useEffect(() => {
+    localStorage.setItem("bt_last_chart_type", chartType);
+  }, [chartType]);
+
   const [visibleIndicators, setVisibleIndicators] = useState<VisibleIndicators>(defaultVisibleIndicators);
   const [indicatorPeriods, setIndicatorPeriods] = useState<IndicatorPeriods>(defaultIndicatorPeriods);
   const [indicatorVisualSettings, setIndicatorVisualSettings] = useState<IndicatorVisualSettings>(defaultIndicatorVisualSettings);

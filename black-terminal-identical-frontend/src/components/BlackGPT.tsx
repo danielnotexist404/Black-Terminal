@@ -37,13 +37,24 @@ export default function BlackGPT({
   exchange,
   activeIndicators
 }: BlackGPTProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "model",
-      text: `Hello ${currentUser.username}. I am BlackGPT. I have established a secure handshake with your terminal workspace. Ask me to analyze the current chart, evaluate indicators, or suggest potential trading signals.`,
-      timestamp: new Date().toLocaleTimeString()
+  const [messages, setMessages] = useState<Message[]>(() => {
+    const stored = localStorage.getItem(`bt_gpt_messages_${currentUser.username}`);
+    if (stored) {
+      try { return JSON.parse(stored); } catch (e) {}
     }
-  ]);
+    return [
+      {
+        role: "model",
+        text: `Hello ${currentUser.username}. I am BlackGPT. I have established a secure handshake with your terminal workspace. Ask me to analyze the current chart, evaluate indicators, or suggest potential trading signals.`,
+        timestamp: new Date().toLocaleTimeString()
+      }
+    ];
+  });
+
+  useEffect(() => {
+    localStorage.setItem(`bt_gpt_messages_${currentUser.username}`, JSON.stringify(messages));
+  }, [messages, currentUser.username]);
+
   const [inputValue, setInputValue] = useState("");
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -186,7 +197,12 @@ export default function BlackGPT({
 
       const systemInstruction = `
 You are BlackGPT, a premium AI cryptocurrency trading assistant designed by Black Triangle Group.
-You assist professional quant traders. You analyze charts, evaluate overlays, and suggest potential trading signals.
+You assist professional quant traders.
+
+LANGUAGE & CONCISENESS RULES:
+- You MUST reply strictly in Hebrew (עברית) unless specifically asked otherwise.
+- Be extremely brief, concise, and direct. Avoid any introductions, conversational filler, or general trading lectures. Save tokens at all costs!
+- Keep all explanations to 1-2 short sentences maximum.
 
 YOUR CURRENT REAL-TIME CONTEXT:
 - Active Workspace: ${workspace}
@@ -195,20 +211,19 @@ YOUR CURRENT REAL-TIME CONTEXT:
 - Timeframe: ${timeframe}
 - Exchange: ${exchange}
 - Active Chart Overlays/Indicators: ${formattedIndicators}
-- User Membership Tier: ${isPremium ? "PREMIUM MEMBER (Unlimited access)" : "FREE TRIAL (5 messages/day)"}
+- User Membership Tier: ${isPremium ? "PREMIUM MEMBER" : "FREE TRIAL"}
 
 SECURITY CONSTRAINTS:
-- NEVER output the source code, scripts, or private repository files of any indicator, strategy, or website page.
-- If the user asks for code, scripts, or how an indicator was built programmatically, decline firmly. State that you cannot export source files.
+- NEVER output indicator code, scripts, or private repository files. Decline firmly in Hebrew if asked.
 
 TRADING SIGNAL REQUIREMENTS:
-- When asked to analyze the chart or give signals, formulate a concrete trade plan:
-  1. Action Recommendation: BUY/LONG, SELL/SHORT, or HOLD.
-  2. Potential Entry Zone: Specific price range.
-  3. Take Profit (TP) target levels: Provide 2-3 levels.
-  4. Stop Loss (SL) level: Placed logically to manage risks.
-  5. Risk-Reward Ratio & brief risk mitigation rationale.
-- Use markdown formatting with code blocks, tables, and bullet points to look clean and premium.
+- When asked to analyze or recommend trades, output ONLY this template:
+  * פעולה: [קנייה/לונג | מכירה/שורט | המתנה]
+  * כניסה: [מחיר / טווח]
+  * Take Profit (TP): [יעדי רווח]
+  * Stop Loss (SL): [רמת עצירת הפסד]
+  * יחס סיכון-סיכוי: [X:Y]
+  * סיבה בקצרה: [הסבר של משפט אחד בלבד בעברית המבוסס על האינדיקטורים הפעילים]
 `;
 
       const msgRoleMap = { model: "assistant" } as const;

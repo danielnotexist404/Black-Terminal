@@ -3,6 +3,7 @@ import { Check, Activity, Bell, Code2, Shield, Lock, X, ArrowLeft, Chrome, Layer
 import "../styles/landing.css";
 import "../styles/login.css";
 import { dbGetUsers, dbVerifyUser, dbRegisterUser, dbUpdateUser, dbAddAuditLog, getGeoIPInfo } from "../lib/supabase";
+import { sendVerificationEmail } from "../lib/resend";
 
 // Import generated images
 import terminalMockup from "../assets/terminal_mockup.jpg";
@@ -14,6 +15,47 @@ interface LandingPageProps {
 
 type ViewState = "landing" | "signin" | "signup";
 
+const countryDialCodes: Record<string, string> = {
+  "IL": "+972",
+  "US": "+1",
+  "CA": "+1",
+  "GB": "+44",
+  "AU": "+61",
+  "DE": "+49",
+  "FR": "+33",
+  "IT": "+39",
+  "ES": "+34",
+  "RU": "+7",
+  "IN": "+91",
+  "CN": "+86",
+  "JP": "+81",
+  "BR": "+55",
+  "ZA": "+27",
+  "SG": "+65",
+  "AE": "+971",
+  "UA": "+380",
+  "PL": "+48",
+  "NL": "+31",
+  "BE": "+32",
+  "CH": "+41",
+  "SE": "+46",
+  "NO": "+47",
+  "FI": "+358",
+  "DK": "+45",
+  "IE": "+353",
+  "NZ": "+64",
+  "MX": "+52",
+  "AR": "+54",
+  "CL": "+56",
+  "CO": "+57",
+  "TR": "+90",
+  "SA": "+966",
+  "CY": "+357",
+  "GR": "+30",
+  "PT": "+351"
+};
+
+
 export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
   const [view, setView] = useState<ViewState>("landing");
 
@@ -24,6 +66,33 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // New registration multi-step states
+  const [signUpStep, setSignUpStep] = useState(1);
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [organization, setOrganization] = useState("");
+  const [billingAddress, setBillingAddress] = useState("");
+  const [purposeOfUse, setPurposeOfUse] = useState<"personal" | "commercial">("personal");
+  const [referredBy, setReferredBy] = useState("google");
+  const [otherReferral, setOtherReferral] = useState("");
+  const [phone, setPhone] = useState("");
+  const [phonePrefix, setPhonePrefix] = useState("+972");
+  const [newsletterOptIn, setNewsletterOptIn] = useState(false);
+
+  // Captcha & Code verification states
+  const [mathCaptcha, setMathCaptcha] = useState({ num1: 0, num2: 0, result: 0 });
+  const [captchaAnswer, setCaptchaAnswer] = useState("");
+  const [generatedVerificationCode, setGeneratedVerificationCode] = useState("");
+  const [verificationInput, setVerificationInput] = useState("");
+
+  const generateCaptcha = () => {
+    const num1 = Math.floor(Math.random() * 9) + 2;
+    const num2 = Math.floor(Math.random() * 9) + 2;
+    setMathCaptcha({ num1, num2, result: num1 + num2 });
+    setCaptchaAnswer("");
+  };
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,69 +185,172 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
     const cleanEmail = email.trim();
     const cleanPass = password.trim();
 
-    if (!cleanUser || !cleanEmail || !cleanPass) {
-      setErrorMsg("Please fill all fields");
-      return;
-    }
-
-    if (!cleanEmail.includes("@")) {
-      setErrorMsg("Please enter a valid email address");
-      return;
-    }
-
-    if (cleanUser.length < 3) {
-      setErrorMsg("Username must be at least 3 characters");
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      const defaultAllowed = [
-        "orderBookHeatmap",
-        "liquidationHeatmap",
-        "volatilityHeatmap",
-        "adaptiveSwingStrategy",
-        "vwap",
-        "ema20",
-        "ema50",
-        "ema200",
-        "sma20",
-        "sma50",
-        "bollinger",
-        "openInterestOscillator",
-        "zScoreOscillator",
-        "waveTrendOscillator",
-        "volume"
-      ];
-      const newUser = {
-        username: cleanUser,
-        email: cleanEmail,
-        role: (cleanUser === "black_terminal_admin" ? "admin" : "user") as any,
-        status: "online" as const,
-        createdAt: new Date().toISOString(),
-        lastLogin: new Date().toISOString(),
-        allowedIndicators: defaultAllowed,
-        activeIndicators: []
-      };
-
-      const regResult = await dbRegisterUser(newUser, cleanPass);
-      if (!regResult.success) {
-        setErrorMsg(regResult.error || "Username already exists");
-        setLoading(false);
+    if (signUpStep === 1) {
+      if (!cleanUser || !cleanEmail || !cleanPass || !confirmPassword.trim()) {
+        setErrorMsg("Please fill all fields");
         return;
       }
 
-      await dbAddAuditLog("CREATE", `New account registered: ${cleanUser} (${cleanEmail})`);
-      await dbAddAuditLog("LOGIN", `User ${cleanUser} logged in automatically.`);
+      if (cleanUser.length < 3) {
+        setErrorMsg("Username must be at least 3 characters");
+        return;
+      }
 
-      setSuccessMsg("Account created! Connecting...");
-      setTimeout(() => {
-        onLoginSuccess(cleanUser, newUser.role);
-      }, 500);
-    } catch (err: any) {
-      setErrorMsg(err.message || "Database connection error");
+      if (!cleanEmail.includes("@")) {
+        setErrorMsg("Please enter a valid email address");
+        return;
+      }
+
+      // Allowed domains validation
+      const allowedDomains = ["gmail.com", "googlemail.com", "proton.me", "protonmail.com", "protonmail.ch", "outlook.com", "hotmail.com", "icloud.com", "yahoo.com"];
+      const emailDomain = cleanEmail.split("@")[1]?.toLowerCase();
+      if (!allowedDomains.includes(emailDomain)) {
+        setErrorMsg("Access denied. Only standard email domains are allowed (Google, Proton, Outlook, Hotmail, iCloud, Yahoo).");
+        return;
+      }
+
+      if (cleanPass.length < 6) {
+        setErrorMsg("Password must be at least 6 characters");
+        return;
+      }
+
+      if (cleanPass !== confirmPassword.trim()) {
+        setErrorMsg("Passwords do not match");
+        return;
+      }
+
+      // Check if user already exists locally
+      setLoading(true);
+      try {
+        const users = await dbGetUsers();
+        if (users.some(u => u.username.toLowerCase() === cleanUser.toLowerCase())) {
+          setErrorMsg("Username already exists");
+          setLoading(false);
+          return;
+        }
+      } catch (err) {
+        console.error("User pre-check failed:", err);
+      }
       setLoading(false);
+
+      // Advance to Step 2
+      generateCaptcha();
+      setLoading(true);
+      try {
+        const geo = await getGeoIPInfo();
+        if (geo.countryCode) {
+          const dial = countryDialCodes[geo.countryCode.toUpperCase()];
+          if (dial) setPhonePrefix(dial);
+        }
+      } catch (e) {
+        console.error("Geo pre-fetch failed:", e);
+      }
+      setLoading(false);
+      setSignUpStep(2);
+      return;
+    }
+
+    if (signUpStep === 2) {
+      const cleanFirst = firstName.trim();
+      const cleanLast = lastName.trim();
+      const cleanOrg = organization.trim();
+      const cleanBilling = billingAddress.trim();
+      const cleanPhone = phone.trim();
+
+      if (!cleanFirst || !cleanLast || !cleanOrg || !cleanBilling || !cleanPhone || !captchaAnswer.trim()) {
+        setErrorMsg("Please fill all fields and solve CAPTCHA");
+        return;
+      }
+
+      if (parseInt(captchaAnswer) !== mathCaptcha.result) {
+        setErrorMsg("CAPTCHA answer is incorrect. Please try again.");
+        return;
+      }
+
+      // Send Verification Email
+      setLoading(true);
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      setGeneratedVerificationCode(code);
+
+      try {
+        const mailRes = await sendVerificationEmail(cleanEmail, cleanUser, code);
+        setLoading(false);
+        if (mailRes.success) {
+          setSignUpStep(3);
+          setSuccessMsg(`Verification code sent to ${cleanEmail}`);
+        } else {
+          setErrorMsg(mailRes.error || "Failed to send verification email. Verify your address or Resend setup.");
+        }
+      } catch (err: any) {
+        setLoading(false);
+        setErrorMsg(err.message || "Email dispatch failed");
+      }
+      return;
+    }
+
+    if (signUpStep === 3) {
+      if (verificationInput.trim() !== generatedVerificationCode) {
+        setErrorMsg("Invalid verification code. Please check your email.");
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const defaultAllowed = [
+          "orderBookHeatmap",
+          "liquidationHeatmap",
+          "volatilityHeatmap",
+          "adaptiveSwingStrategy",
+          "vwap",
+          "ema20",
+          "ema50",
+          "ema200",
+          "sma20",
+          "sma50",
+          "bollinger",
+          "openInterestOscillator",
+          "zScoreOscillator",
+          "waveTrendOscillator",
+          "volume"
+        ];
+        const newUser = {
+          username: cleanUser,
+          email: cleanEmail,
+          role: (cleanUser === "black_terminal_admin" ? "admin" : "user") as any,
+          status: "online" as const,
+          createdAt: new Date().toISOString(),
+          lastLogin: new Date().toISOString(),
+          allowedIndicators: defaultAllowed,
+          activeIndicators: [],
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          organization: organization.trim(),
+          billingAddress: billingAddress.trim(),
+          purposeOfUse: purposeOfUse,
+          phone: `${phonePrefix} ${phone.trim()}`,
+          newsletterOptIn: newsletterOptIn,
+          referredBy: referredBy === "other" ? otherReferral.trim() : referredBy,
+          emailVerified: true
+        };
+
+        const regResult = await dbRegisterUser(newUser, cleanPass);
+        if (!regResult.success) {
+          setErrorMsg(regResult.error || "Registration failed. Try again.");
+          setLoading(false);
+          return;
+        }
+
+        await dbAddAuditLog("CREATE", `New secure account registered: ${cleanUser} (${cleanEmail})`);
+        await dbAddAuditLog("LOGIN", `User ${cleanUser} logged in automatically.`);
+
+        setSuccessMsg("Handshake successful! Terminal ready...");
+        setTimeout(() => {
+          onLoginSuccess(cleanUser, newUser.role);
+        }, 800);
+      } catch (err: any) {
+        setErrorMsg(err.message || "Database connection error");
+        setLoading(false);
+      }
     }
   };
 
@@ -195,6 +367,17 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
     setUsername("");
     setEmail("");
     setPassword("");
+    setConfirmPassword("");
+    setFirstName("");
+    setLastName("");
+    setOrganization("");
+    setBillingAddress("");
+    setPurposeOfUse("personal");
+    setReferredBy("google");
+    setOtherReferral("");
+    setPhone("");
+    setNewsletterOptIn(false);
+    setSignUpStep(1);
     setView("signup");
   };
 
@@ -252,55 +435,324 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
               </div>
             </div>
 
-            <form className="login-form" onSubmit={isSignIn ? handleSignIn : handleSignUp}>
-              {errorMsg && <div className="login-error-msg">{errorMsg}</div>}
-              {successMsg && <div className="signup-success-msg">{successMsg}</div>}
+             {view === "signup" && (
+               <div className="signup-steps-header">
+                 <div className={`signup-step-tab ${signUpStep === 1 ? 'active' : ''}`}>
+                   <span className="signup-step-tab-num">1</span> CREDENTIALS
+                 </div>
+                 <div className={`signup-step-tab ${signUpStep === 2 ? 'active' : ''}`}>
+                   <span className="signup-step-tab-num">2</span> PROFILE & BILLING
+                 </div>
+                 <div className={`signup-step-tab ${signUpStep === 3 ? 'active' : ''}`}>
+                   <span className="signup-step-tab-num">3</span> VERIFY
+                 </div>
+               </div>
+             )}
 
-              <div className="login-field">
-                <label className="login-label">Identity (Username)</label>
-                <input
-                  className="login-input"
-                  type="text"
-                  value={username}
-                  placeholder="USERNAME"
-                  onChange={(e) => setUsername(e.target.value)}
-                  disabled={loading}
-                  autoComplete="off"
-                />
-              </div>
+             <form className="login-form" onSubmit={isSignIn ? handleSignIn : handleSignUp}>
+               {errorMsg && <div className="login-error-msg">{errorMsg}</div>}
+               {successMsg && <div className="signup-success-msg">{successMsg}</div>}
 
-              {!isSignIn && (
-                <div className="login-field">
-                  <label className="login-label">Secure Email Address</label>
-                  <input
-                    className="login-input"
-                    type="email"
-                    value={email}
-                    placeholder="EMAIL@DOMAIN.COM"
-                    onChange={(e) => setEmail(e.target.value)}
-                    disabled={loading}
-                    autoComplete="off"
-                  />
-                </div>
-              )}
+               {/* SIGN IN VIEW */}
+               {isSignIn && (
+                 <>
+                   <div className="login-field">
+                     <label className="login-label">Identity (Username)</label>
+                     <input
+                       className="login-input"
+                       type="text"
+                       value={username}
+                       placeholder="USERNAME"
+                       onChange={(e) => setUsername(e.target.value)}
+                       disabled={loading}
+                       autoComplete="off"
+                       required
+                     />
+                   </div>
+                   <div className="login-field">
+                     <label className="login-label">Access Code (Password)</label>
+                     <input
+                       className="login-input"
+                       type="password"
+                       value={password}
+                       placeholder="PASSWORD"
+                       onChange={(e) => setPassword(e.target.value)}
+                       disabled={loading}
+                       autoComplete="off"
+                       required
+                     />
+                   </div>
+                   <button className="login-submit-btn" type="submit" disabled={loading}>
+                     {loading ? "Establishing handshake..." : "Link Terminal"}
+                   </button>
+                 </>
+               )}
 
-              <div className="login-field">
-                <label className="login-label">Access Code (Password)</label>
-                <input
-                  className="login-input"
-                  type="password"
-                  value={password}
-                  placeholder="PASSWORD"
-                  onChange={(e) => setPassword(e.target.value)}
-                  disabled={loading}
-                  autoComplete="off"
-                />
-              </div>
+               {/* SIGN UP STEP 1: CREDENTIALS */}
+               {!isSignIn && signUpStep === 1 && (
+                 <>
+                   <div className="login-field">
+                     <label className="login-label">Identity (Username)</label>
+                     <input
+                       className="login-input"
+                       type="text"
+                       value={username}
+                       placeholder="USERNAME"
+                       onChange={(e) => setUsername(e.target.value)}
+                       disabled={loading}
+                       autoComplete="off"
+                     />
+                   </div>
+                   <div className="login-field">
+                     <label className="login-label">Secure Email Address</label>
+                     <input
+                       className="login-input"
+                       type="email"
+                       value={email}
+                       placeholder="EMAIL@DOMAIN.COM"
+                       onChange={(e) => setEmail(e.target.value)}
+                       disabled={loading}
+                       autoComplete="off"
+                     />
+                     <span style={{ fontSize: '9px', color: 'var(--dim)', marginTop: '4px', display: 'block' }}>
+                       Only Google, Proton, Outlook, Hotmail, iCloud, Yahoo addresses accepted.
+                     </span>
+                   </div>
+                   <div className="login-field">
+                     <label className="login-label">Access Code (Password)</label>
+                     <input
+                       className="login-input"
+                       type="password"
+                       value={password}
+                       placeholder="PASSWORD"
+                       onChange={(e) => setPassword(e.target.value)}
+                       disabled={loading}
+                       autoComplete="off"
+                     />
+                   </div>
+                   <div className="login-field">
+                     <label className="login-label">Confirm Password</label>
+                     <input
+                       className="login-input"
+                       type="password"
+                       value={confirmPassword}
+                       placeholder="CONFIRM PASSWORD"
+                       onChange={(e) => setConfirmPassword(e.target.value)}
+                       disabled={loading}
+                       autoComplete="off"
+                     />
+                   </div>
+                   <button className="login-submit-btn" type="submit" disabled={loading}>
+                     Next: Profile Setup
+                   </button>
+                 </>
+               )}
 
-              <button className="login-submit-btn" type="submit" disabled={loading}>
-                {loading ? "Establishing handshake..." : isSignIn ? "Link Terminal" : "Register"}
-              </button>
-            </form>
+               {/* SIGN UP STEP 2: PROFILE & BILLING */}
+               {!isSignIn && signUpStep === 2 && (
+                 <>
+                   <div className="signup-two-col">
+                     <div className="login-field">
+                       <label className="login-label">First Name</label>
+                       <input
+                         className="login-input"
+                         type="text"
+                         value={firstName}
+                         placeholder="FIRST NAME"
+                         onChange={(e) => setFirstName(e.target.value)}
+                         disabled={loading}
+                       />
+                     </div>
+                     <div className="login-field">
+                       <label className="login-label">Last Name</label>
+                       <input
+                         className="login-input"
+                         type="text"
+                         value={lastName}
+                         placeholder="LAST NAME"
+                         onChange={(e) => setLastName(e.target.value)}
+                         disabled={loading}
+                       />
+                     </div>
+                   </div>
+
+                   <div className="login-field">
+                     <label className="login-label">Organization / Company</label>
+                     <input
+                       className="login-input"
+                       type="text"
+                       value={organization}
+                       placeholder="COMPANY OR INDEPENDENT"
+                       onChange={(e) => setOrganization(e.target.value)}
+                       disabled={loading}
+                     />
+                   </div>
+
+                   <div className="login-field">
+                     <label className="login-label">Billing Address</label>
+                     <input
+                       className="login-input"
+                       type="text"
+                       value={billingAddress}
+                       placeholder="STREET, CITY, COUNTRY"
+                       onChange={(e) => setBillingAddress(e.target.value)}
+                       disabled={loading}
+                     />
+                   </div>
+
+                   <div className="signup-two-col">
+                     <div className="login-field">
+                       <label className="login-label">Purpose of Use</label>
+                       <select
+                         className="signup-select"
+                         value={purposeOfUse}
+                         onChange={(e: any) => setPurposeOfUse(e.target.value)}
+                         disabled={loading}
+                       >
+                         <option value="personal">Personal Use</option>
+                         <option value="commercial">Commercial Use</option>
+                       </select>
+                     </div>
+
+                     <div className="login-field">
+                       <label className="login-label">How did you find us?</label>
+                       <select
+                         className="signup-select"
+                         value={referredBy}
+                         onChange={(e) => setReferredBy(e.target.value)}
+                         disabled={loading}
+                       >
+                         <option value="google">Google Search</option>
+                         <option value="social">Social Media</option>
+                         <option value="friend">Friend / Colleague</option>
+                         <option value="other">Other (Please specify)</option>
+                       </select>
+                     </div>
+                   </div>
+
+                   {referredBy === "other" && (
+                     <div className="login-field">
+                       <label className="login-label">Referral Source Details</label>
+                       <input
+                         className="login-input"
+                         type="text"
+                         value={otherReferral}
+                         placeholder="SPECIFY SOURCE"
+                         onChange={(e) => setOtherReferral(e.target.value)}
+                         disabled={loading}
+                       />
+                     </div>
+                   )}
+
+                   <div className="login-field">
+                     <label className="login-label">Phone Number for 2FA</label>
+                     <div className="signup-phone-container">
+                       <select
+                         className="signup-phone-prefix"
+                         value={phonePrefix}
+                         onChange={(e) => setPhonePrefix(e.target.value)}
+                         disabled={loading}
+                       >
+                         <option value="+972">🇮🇱 +972</option>
+                         <option value="+1">🇺🇸 +1</option>
+                         <option value="+44">🇬🇧 +44</option>
+                         <option value="+49">🇩🇪 +49</option>
+                         <option value="+33">🇫🇷 +33</option>
+                         <option value="+971">🇦🇪 +971</option>
+                         <option value="+39">🇮🇹 +39</option>
+                         <option value="+34">🇪🇸 +34</option>
+                       </select>
+                       <input
+                         className="login-input"
+                         type="tel"
+                         value={phone}
+                         placeholder="541234567"
+                         onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
+                         disabled={loading}
+                       />
+                     </div>
+                   </div>
+
+                   <label className="signup-checkbox-label">
+                     <input
+                       type="checkbox"
+                       className="signup-checkbox"
+                       checked={newsletterOptIn}
+                       onChange={(e) => setNewsletterOptIn(e.target.checked)}
+                       disabled={loading}
+                     />
+                     <span>I want to receive terminal system updates, hot features, billing terms and statements.</span>
+                   </label>
+
+                   {/* CAPTCHA SECTION */}
+                   <div className="signup-captcha-box">
+                     <span className="signup-captcha-question">
+                       CAPTCHA: {mathCaptcha.num1} + {mathCaptcha.num2} =
+                     </span>
+                     <input
+                       className="signup-captcha-input"
+                       type="text"
+                       value={captchaAnswer}
+                       placeholder="?"
+                       onChange={(e) => setCaptchaAnswer(e.target.value.replace(/\D/g, ''))}
+                       disabled={loading}
+                       maxLength={3}
+                     />
+                   </div>
+
+                   <div className="signup-wizard-nav">
+                     <button
+                       className="signup-back-btn"
+                       type="button"
+                       onClick={() => setSignUpStep(1)}
+                       disabled={loading}
+                     >
+                       Back
+                     </button>
+                     <button className="login-submit-btn" type="submit" disabled={loading}>
+                       {loading ? "Sending mail..." : "Send Verification Code"}
+                     </button>
+                   </div>
+                 </>
+               )}
+
+               {/* SIGN UP STEP 3: CODE VERIFICATION */}
+               {!isSignIn && signUpStep === 3 && (
+                 <>
+                   <div className="signup-verification-text">
+                     Security protocol initiated. Enter the 6-digit cryptographic verification code sent to your secure email to authorize registration.
+                   </div>
+                   <div className="login-field">
+                     <label className="login-label">Verification Code</label>
+                     <input
+                       className="login-input"
+                       style={{ letterSpacing: '6px', textAlign: 'center', fontSize: '18px', fontWeight: 'bold' }}
+                       type="text"
+                       maxLength={6}
+                       value={verificationInput}
+                       placeholder="XXXXXX"
+                       onChange={(e) => setVerificationInput(e.target.value.replace(/\D/g, ''))}
+                       disabled={loading}
+                       autoComplete="off"
+                     />
+                   </div>
+
+                   <div className="signup-wizard-nav">
+                     <button
+                       className="signup-back-btn"
+                       type="button"
+                       onClick={() => setSignUpStep(2)}
+                       disabled={loading}
+                     >
+                       Back
+                     </button>
+                     <button className="login-submit-btn" type="submit" disabled={loading}>
+                       {loading ? "Completing handshake..." : "Verify & Complete Signup"}
+                     </button>
+                   </div>
+                 </>
+               )}
+             </form>
 
             {/* SSO federated auth */}
             <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "4px" }}>

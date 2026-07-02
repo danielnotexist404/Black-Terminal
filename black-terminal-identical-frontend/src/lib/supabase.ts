@@ -30,6 +30,15 @@ export interface DBUser {
   ip?: string;
   countryCode?: string;
   countryName?: string;
+  firstName?: string;
+  lastName?: string;
+  organization?: string;
+  billingAddress?: string;
+  purposeOfUse?: "personal" | "commercial";
+  phone?: string;
+  newsletterOptIn?: boolean;
+  referredBy?: string;
+  emailVerified?: boolean;
 }
 
 export interface DBAuditLog {
@@ -110,24 +119,42 @@ export async function dbGetUsers(): Promise<DBUser[]> {
           alerts: u.alerts || [],
           scripts: u.scripts || [],
           alertEventLogs: u.alert_event_logs || [],
-          ip: u.ip || "127.0.0.1",
-          countryCode: u.country_code || u.countryCode || "IL",
-          countryName: u.country_name || u.countryName || "Israel"
-        }));
-      }
-    } catch (e) {
-      console.error("Supabase error dbGetUsers, falling back:", e);
-    }
-  }
-
-  const stored = localStorage.getItem(USERS_DB_KEY);
-  const parsed = stored ? JSON.parse(stored) : [];
-  return parsed.map((u: any) => ({
-    ...u,
-    ip: u.ip || "127.0.0.1",
-    countryCode: u.countryCode || u.country_code || "IL",
-    countryName: u.countryName || u.country_name || "Israel"
-  }));
+           ip: u.ip || "127.0.0.1",
+           countryCode: u.country_code || u.countryCode || "IL",
+           countryName: u.country_name || u.countryName || "Israel",
+           firstName: u.first_name || u.firstName || "",
+           lastName: u.last_name || u.lastName || "",
+           organization: u.organization || "",
+           billingAddress: u.billing_address || u.billingAddress || "",
+           purposeOfUse: u.purpose_of_use || u.purposeOfUse || "personal",
+           phone: u.phone || "",
+           newsletterOptIn: u.newsletter_opt_in ?? u.newsletterOptIn ?? false,
+           referredBy: u.referred_by || u.referredBy || "",
+           emailVerified: u.email_verified ?? u.emailVerified ?? false
+         }));
+       }
+     } catch (e) {
+       console.error("Supabase error dbGetUsers, falling back:", e);
+     }
+   }
+ 
+   const stored = localStorage.getItem(USERS_DB_KEY);
+   const parsed = stored ? JSON.parse(stored) : [];
+   return parsed.map((u: any) => ({
+     ...u,
+     ip: u.ip || "127.0.0.1",
+     countryCode: u.countryCode || u.country_code || "IL",
+     countryName: u.countryName || u.country_name || "Israel",
+     firstName: u.firstName || u.first_name || "",
+     lastName: u.lastName || u.last_name || "",
+     organization: u.organization || "",
+     billingAddress: u.billingAddress || u.billing_address || "",
+     purposeOfUse: u.purposeOfUse || u.purpose_of_use || "personal",
+     phone: u.phone || "",
+     newsletterOptIn: u.newsletterOptIn ?? u.newsletter_opt_in ?? false,
+     referredBy: u.referredBy || u.referred_by || "",
+     emailVerified: u.emailVerified ?? u.email_verified ?? false
+   }));
 }
 
 export async function getGeoIPInfo(): Promise<{ ip: string; countryCode: string; countryName: string }> {
@@ -228,7 +255,16 @@ export async function dbRegisterUser(user: DBUser, accessCode: string): Promise<
           alert_event_logs: user.alertEventLogs || [],
           ip: ip,
           country_code: countryCode,
-          country_name: countryName
+          country_name: countryName,
+          first_name: user.firstName || "",
+          last_name: user.lastName || "",
+          organization: user.organization || "",
+          billing_address: user.billingAddress || "",
+          purpose_of_use: user.purposeOfUse || "personal",
+          phone: user.phone || "",
+          newsletter_opt_in: user.newsletterOptIn || false,
+          referred_by: user.referredBy || "",
+          email_verified: user.emailVerified || false
         });
       if (error) throw error;
       return { success: true };
@@ -281,6 +317,15 @@ export async function dbUpdateUser(username: string, patch: Partial<DBUser> & { 
       if (patch.ip !== undefined) dbPatch.ip = patch.ip;
       if (patch.countryCode !== undefined) dbPatch.country_code = patch.countryCode;
       if (patch.countryName !== undefined) dbPatch.country_name = patch.countryName;
+      if (patch.firstName !== undefined) dbPatch.first_name = patch.firstName;
+      if (patch.lastName !== undefined) dbPatch.last_name = patch.lastName;
+      if (patch.organization !== undefined) dbPatch.organization = patch.organization;
+      if (patch.billingAddress !== undefined) dbPatch.billing_address = patch.billingAddress;
+      if (patch.purposeOfUse !== undefined) dbPatch.purpose_of_use = patch.purposeOfUse;
+      if (patch.phone !== undefined) dbPatch.phone = patch.phone;
+      if (patch.newsletterOptIn !== undefined) dbPatch.newsletter_opt_in = patch.newsletterOptIn;
+      if (patch.referredBy !== undefined) dbPatch.referred_by = patch.referredBy;
+      if (patch.emailVerified !== undefined) dbPatch.email_verified = patch.emailVerified;
 
       const { error } = await supabase
         .from("bt_users")

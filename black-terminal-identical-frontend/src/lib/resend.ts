@@ -166,3 +166,85 @@ export async function sendResendEmail(payload: AlertEmailPayload): Promise<{ suc
     return { success: false, error: String(err) };
   }
 }
+
+export async function sendVerificationEmail(to: string, username: string, code: string): Promise<{ success: boolean; error?: string }> {
+  if (!isResendConfigured) {
+    return { success: false, error: "Resend API key not configured" };
+  }
+
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: RESEND_FROM,
+        to: [to.trim()],
+        subject: `🔐 Black Terminal - Verify Your Registration`,
+        html: `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0;padding:0;background:#0a0c0f;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0c0f;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table width="520" cellpadding="0" cellspacing="0" style="background:#12161c;border-radius:12px;border:1px solid #1e2530;overflow:hidden;">
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#ff0044 0%,#cc0033 100%);padding:20px 28px;">
+              <div style="font-size:18px;font-weight:700;color:#ffffff;letter-spacing:0.5px;">⚡ BLACK TERMINAL</div>
+              <div style="font-size:12px;color:rgba(255,255,255,0.8);margin-top:4px;">Security & Account Verification</div>
+            </td>
+          </tr>
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px 28px;">
+              <div style="font-size:22px;font-weight:700;color:#ffffff;margin-bottom:16px;">Verify Your Identity</div>
+              <div style="font-size:14px;color:#a8b2c1;line-height:1.6;margin-bottom:24px;">
+                Hi <strong>${username}</strong>,<br><br>
+                Thank you for signing up to Black Terminal. To complete your registration and secure your node connection, please use the 6-digit verification code below:
+              </div>
+              <!-- Code Box -->
+              <div style="background:#0d1017;border:1px solid #1a1f2a;border-radius:8px;padding:20px;text-align:center;margin-bottom:24px;">
+                <span style="font-family:'Courier New',Courier,monospace;font-size:32px;font-weight:700;color:#00ff66;letter-spacing:6px;">${code}</span>
+              </div>
+              <div style="font-size:12px;color:#6b7585;line-height:1.5;">
+                This code is valid for 10 minutes. If you did not request this verification, you can safely ignore this email.
+              </div>
+            </td>
+          </tr>
+          <!-- Footer -->
+          <tr>
+            <td style="padding:16px 28px;border-top:1px solid #1a1f2a;">
+              <div style="font-size:11px;color:#4a5568;text-align:center;">
+                Sent by Black Terminal Security Engine &bull; Do not reply to this email
+              </div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
+      })
+    });
+
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => ({}));
+      const errMsg = (errBody as any)?.message || response.statusText;
+      return { success: false, error: errMsg };
+    }
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: String(err) };
+  }
+}
+

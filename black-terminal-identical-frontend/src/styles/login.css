@@ -367,3 +367,209 @@
     padding: 30px 20px;
   }
 }
+
+/* Signup Wizard Premium Styles */
+.signup-steps-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  padding: 8px 12px;
+}
+
+.signup-step-tab {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--dim);
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.signup-step-tab.active {
+  color: var(--red-hot);
+  text-shadow: 0 0 8px rgba(255, 0, 0, 0.4);
+}
+
+.signup-step-tab-num {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+}
+
+.signup-step-tab.active .signup-step-tab-num {
+  background: rgba(255, 0, 0, 0.15);
+  border-color: rgba(255, 0, 0, 0.4);
+  color: var(--strong);
+}
+
+.signup-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.signup-phone-container {
+  display: flex;
+  gap: 8px;
+}
+
+.signup-phone-prefix {
+  width: 90px;
+  height: 36px;
+  background: rgba(3, 4, 5, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  color: var(--strong);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  padding: 0 8px;
+  outline: none;
+  cursor: pointer;
+}
+
+.signup-phone-prefix:focus {
+  border-color: rgba(255, 0, 0, 0.5);
+}
+
+.signup-select {
+  width: 100%;
+  height: 36px;
+  background: rgba(3, 4, 5, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  color: var(--strong);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  padding: 0 10px;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg fill='white' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/><path d='M0 0h24v24H0z' fill='none'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 18px;
+}
+
+.signup-select:focus {
+  border-color: rgba(255, 0, 0, 0.5);
+}
+
+.signup-checkbox-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  color: var(--dim);
+  line-height: 1.4;
+  margin-top: 12px;
+  border: 1px solid rgba(255,255,255,0.03);
+  background: rgba(255,255,255,0.01);
+  padding: 8px 10px;
+  border-radius: 3px;
+  transition: all 0.2s;
+}
+
+.signup-checkbox-label:hover {
+  background: rgba(255,255,255,0.03);
+  color: var(--strong);
+}
+
+.signup-checkbox {
+  margin-top: 2px;
+  cursor: pointer;
+  accent-color: var(--red-hot);
+}
+
+.signup-captcha-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 0, 68, 0.03);
+  border: 1px solid rgba(255, 0, 68, 0.08);
+  border-radius: 4px;
+  padding: 10px 12px;
+  margin-top: 12px;
+}
+
+.signup-captcha-question {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: var(--strong);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.signup-captcha-input {
+  flex: 1;
+  height: 30px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  color: #00ff66;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  outline: none;
+}
+
+.signup-captcha-input:focus {
+  border-color: #00ff66;
+  box-shadow: 0 0 6px rgba(0, 255, 102, 0.2);
+}
+
+.signup-wizard-nav {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.signup-back-btn {
+  height: 38px;
+  padding: 0 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.signup-back-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--strong);
+}
+
+.signup-verification-text {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: var(--dim);
+  line-height: 1.6;
+  margin-bottom: 16px;
+  text-align: center;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.05);
+  padding: 12px;
+  border-radius: 4px;
+}
+

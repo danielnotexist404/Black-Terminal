@@ -15,6 +15,15 @@ interface User {
   ip?: string;
   countryCode?: string;
   countryName?: string;
+  firstName?: string;
+  lastName?: string;
+  organization?: string;
+  billingAddress?: string;
+  purposeOfUse?: "personal" | "commercial";
+  phone?: string;
+  newsletterOptIn?: boolean;
+  referredBy?: string;
+  emailVerified?: boolean;
 }
 
 interface AuditLog {
@@ -442,6 +451,41 @@ export default function AdminPanel() {
                   </div>
                   <div style={{ color: "var(--dim)", fontSize: "10px", lineHeight: "1.4" }}>
                     * Updates in real-time as the client toggles overlays on their viewport canvas.
+                  </div>
+                </div>
+
+                {/* Registration Profile Column */}
+                <div className="details-column" style={{ borderLeft: "1px solid rgba(255,255,255,0.06)", borderRight: "1px solid rgba(255,255,255,0.06)", padding: "0 24px" }}>
+                  <span className="details-subtitle">User Registry Profile</span>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "12px", fontFamily: "IBM Plex Mono", fontSize: "11px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px dashed rgba(255,255,255,0.04)", paddingBottom: "6px" }}>
+                      <span style={{ color: "var(--dim)" }}>Full Name:</span>
+                      <span style={{ color: "var(--strong)", fontWeight: 600 }}>{selectedUser.firstName || selectedUser.lastName ? `${selectedUser.firstName} ${selectedUser.lastName}` : "N/A"}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px dashed rgba(255,255,255,0.04)", paddingBottom: "6px" }}>
+                      <span style={{ color: "var(--dim)" }}>Phone:</span>
+                      <span style={{ color: "var(--strong)" }}>{selectedUser.phone || "N/A"}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px dashed rgba(255,255,255,0.04)", paddingBottom: "6px" }}>
+                      <span style={{ color: "var(--dim)" }}>Organization:</span>
+                      <span style={{ color: "var(--strong)" }}>{selectedUser.organization || "N/A"}</span>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "4px", borderBottom: "1px dashed rgba(255,255,255,0.04)", paddingBottom: "6px" }}>
+                      <span style={{ color: "var(--dim)" }}>Billing Address:</span>
+                      <span style={{ color: "var(--strong)", wordBreak: "break-all" }}>{selectedUser.billingAddress || "N/A"}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px dashed rgba(255,255,255,0.04)", paddingBottom: "6px" }}>
+                      <span style={{ color: "var(--dim)" }}>Use Category:</span>
+                      <span style={{ color: selectedUser.purposeOfUse === "commercial" ? "#f59f18" : "#00ff66", fontWeight: 700, textTransform: "uppercase" }}>{selectedUser.purposeOfUse || "personal"}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px dashed rgba(255,255,255,0.04)", paddingBottom: "6px" }}>
+                      <span style={{ color: "var(--dim)" }}>Acquisition Source:</span>
+                      <span style={{ color: "var(--strong)" }}>{selectedUser.referredBy || "N/A"}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ color: "var(--dim)" }}>System Updates Opt-In:</span>
+                      <span style={{ color: selectedUser.newsletterOptIn ? "#00ff66" : "var(--dim)" }}>{selectedUser.newsletterOptIn ? "YES" : "NO"}</span>
+                    </div>
                   </div>
                 </div>
 

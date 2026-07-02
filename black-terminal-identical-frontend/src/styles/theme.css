@@ -72,6 +72,10 @@ body.resizing-layout * {
   z-index: 20;
 }
 
+.topbar > *:not(.top-spacer) {
+  flex-shrink: 0;
+}
+
 .brand {
   display: flex;
   align-items: center;

@@ -3715,7 +3715,14 @@ export class BlackChartEngine {
       const defaultColor = isRising ? 0x00ff66 : 0xff101b;
       const lineColor = this.priceLineColor ? this.hexColor(this.priceLineColor, defaultColor) : defaultColor;
       const lineAlpha = (this.priceLineIntensity ?? 75) / 100;
-      g.moveTo(0, y).lineTo(plotWidth, y).stroke({ width: 1.25, color: lineColor, alpha: lineAlpha });
+      const dashLength = 3;
+      const gapLength = 3;
+      let currentX = 0;
+      while (currentX < plotWidth) {
+        g.moveTo(currentX, y).lineTo(Math.min(currentX + dashLength, plotWidth), y);
+        currentX += dashLength + gapLength;
+      }
+      g.stroke({ width: 0.85, color: lineColor, alpha: lineAlpha });
 
       // Calculate timeframe in seconds from candles
       let timeframeSeconds = 60;

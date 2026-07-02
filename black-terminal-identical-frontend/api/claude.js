@@ -39,7 +39,7 @@ export default async function handler(req, res) {
         'content-type': 'application/json'
       },
       body: JSON.stringify({
-        model: model || 'claude-3-5-haiku-20241022',
+        model: model || 'claude-haiku-4-5',
         max_tokens: 1500,
         system: system || '',
         messages

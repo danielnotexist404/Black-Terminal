@@ -353,7 +353,33 @@ export function IndicatorLibrary({
             const active = visibleIndicators[indicator.key];
             const locked = !allowedIndicators.includes(indicator.key);
 
-            return (
+            return indicator.key === "volumeProfile" ? (
+              <div className={`${active ? "library-row active" : "library-row"}${locked ? " premium-locked" : ""}`} key={indicator.key}>
+                <button
+                  type="button"
+                  className="library-row-main"
+                  disabled={locked}
+                  onClick={() => toggleIndicator(indicator.key)}
+                >
+                  {locked ? <Lock size={15} style={{ color: "var(--red-hot)" }} /> : <Activity size={15} />}
+                  <span>
+                    <strong>HDLX Profile - <span style={{ color: "var(--red-hot)", fontSize: "10px", fontWeight: "bold" }}>Proprietary</span></strong>
+                  </span>
+                </button>
+                <span className="library-signal"></span>
+                <span className="library-period static">AUTO</span>
+                <button
+                  type="button"
+                  className={active ? "library-action active" : "library-action"}
+                  disabled={locked}
+                  onClick={() => toggleIndicator(indicator.key)}
+                  style={{ minWidth: "110px" }}
+                >
+                  {locked ? <Lock size={14} style={{ color: "var(--red-hot)" }} /> : active ? <Check size={14} /> : <Plus size={14} />}
+                  <span>{locked ? "PROPRIETARY" : active ? "ON" : "ADD"}</span>
+                </button>
+              </div>
+            ) : (
               <div className={`${active ? "library-row active" : "library-row"}${locked ? " premium-locked" : ""}`} key={indicator.key}>
                 <button
                   type="button"

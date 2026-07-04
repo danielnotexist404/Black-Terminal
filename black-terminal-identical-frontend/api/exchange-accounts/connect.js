@@ -7,6 +7,7 @@ import {
   sendError,
   toCamelAccount
 } from "../../server/portfolio-api.js";
+import { syncBybitAccountToSupabase, validateBybitCredentials } from "../../server/exchanges/bybit.js";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -19,14 +20,18 @@ export default async function handler(req, res) {
 
     const exchange = String(req.body.exchange).trim().toLowerCase();
     const accountName = String(req.body.accountName).trim();
-    const credentialRef = `exchange:${exchange}:${user.id}:${Date.now()}`;
-    const encryptedPayload = encryptCredentialPayload({
+    const rawCredentials = {
       exchange,
       apiKey: String(req.body.apiKey),
       apiSecret: String(req.body.apiSecret),
       passphrase: req.body.passphrase ? String(req.body.passphrase) : undefined,
       createdAt: new Date().toISOString()
-    });
+    };
+    const validation = exchange === "bybit"
+      ? await validateBybitCredentials(rawCredentials)
+      : { status: "read-only", apiHealth: "unknown", latencyMs: 0 };
+    const credentialRef = `exchange:${exchange}:${user.id}:${Date.now()}`;
+    const encryptedPayload = encryptCredentialPayload(rawCredentials);
 
     const { data: account, error: accountError } = await supabase
       .from("exchange_accounts")
@@ -34,9 +39,9 @@ export default async function handler(req, res) {
         user_id: user.id,
         exchange,
         account_name: accountName,
-        status: "read-only",
-        api_health: "unknown",
-        latency_ms: 0,
+        status: validation.status,
+        api_health: validation.apiHealth,
+        latency_ms: validation.latencyMs,
         permissions: ["read-account", "read-orders", "read-positions"],
         is_read_only: true,
         trading_enabled: false,
@@ -76,6 +81,10 @@ export default async function handler(req, res) {
       throw riskError;
     }
 
+    if (exchange === "bybit") {
+      await syncBybitAccountToSupabase(supabase, account, rawCredentials);
+    }
+
     await supabase.from("execution_audit_logs").insert({
       user_id: user.id,
       account_id: account.id,
@@ -86,7 +95,12 @@ export default async function handler(req, res) {
     });
 
     return res.status(200).json({
-      account: toCamelAccount(account, riskControls)
+      account: toCamelAccount({
+        ...account,
+        status: validation.status,
+        api_health: validation.apiHealth,
+        latency_ms: validation.latencyMs
+      }, riskControls)
     });
   } catch (error) {
     return sendError(res, error);

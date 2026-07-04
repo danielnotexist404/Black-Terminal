@@ -1,0 +1,23 @@
+import { registerBlackCoreService } from "./blackCore";
+import { blackCoreBrokerFramework } from "../broker/brokerFramework";
+import { blackCoreMarketDataEngine } from "../market-data/engine/marketDataEngine";
+import { blackCoreNotificationCenter } from "../notifications/notificationCenter";
+import { blackCoreOrderSyncService } from "../orders/orderSyncService";
+import { blackCorePortfolioService } from "../portfolio/portfolioService";
+import { PerformanceMonitor } from "../performance/performanceMonitor";
+import { blackCoreWalletFramework } from "../wallets/walletFramework";
+
+let registered = false;
+
+export function registerBlackCoreServices() {
+  if (registered) return;
+  registered = true;
+
+  registerBlackCoreService("marketData", blackCoreMarketDataEngine);
+  registerBlackCoreService("brokerFramework", blackCoreBrokerFramework);
+  registerBlackCoreService("walletFramework", blackCoreWalletFramework);
+  registerBlackCoreService("portfolio", blackCorePortfolioService);
+  registerBlackCoreService("orders", blackCoreOrderSyncService);
+  registerBlackCoreService("notifications", blackCoreNotificationCenter);
+  registerBlackCoreService("performance", new PerformanceMonitor());
+}

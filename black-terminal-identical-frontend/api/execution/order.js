@@ -1,12 +1,14 @@
 import {
   applyCors,
   checkOrderRisk,
+  decryptCredentialPayload,
   getOwnedAccount,
   requireFields,
   requireMethod,
   requireUser,
   sendError
 } from "../../server/portfolio-api.js";
+import { placeBybitOrder } from "../../server/exchanges/bybit.js";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -45,11 +47,40 @@ export default async function handler(req, res) {
     });
     const estimatedFees = risk.notional * 0.0004;
     const estimatedMargin = risk.notional / Math.max(1, Number(riskControls.max_leverage || 1));
-    const status = risk.status === "approved" ? "rejected" : "rejected";
-    const rejectionReason =
-      risk.status === "approved"
-        ? "No live exchange execution adapter is configured yet."
-        : risk.reasons.join(" ");
+    let status = "rejected";
+    let rejectionReason = risk.reasons.join(" ");
+    let exchangeOrderId = null;
+    let clientOrderId = null;
+
+    if (risk.status === "approved") {
+      if (account.exchange === "bybit") {
+        try {
+          const { data: credential, error: credentialError } = await supabase
+            .from("exchange_credentials")
+            .select("encrypted_payload")
+            .eq("account_id", account.id)
+            .single();
+
+          if (credentialError || !credential) throw credentialError || new Error("Missing encrypted credentials.");
+          const credentials = decryptCredentialPayload(credential.encrypted_payload);
+          const exchangeResult = await placeBybitOrder(credentials, {
+            ...req.body,
+            marketKind: req.body.marketKind || "perpetual",
+            limitPrice: req.body.limitPrice,
+            timeInForce: req.body.timeInForce || "gtc"
+          });
+          status = "accepted";
+          rejectionReason = null;
+          exchangeOrderId = exchangeResult.exchangeOrderId || null;
+          clientOrderId = exchangeResult.clientOrderId || null;
+        } catch (exchangeError) {
+          status = "rejected";
+          rejectionReason = exchangeError instanceof Error ? exchangeError.message : String(exchangeError);
+        }
+      } else {
+        rejectionReason = "No live exchange execution adapter is configured for this venue yet.";
+      }
+    }
 
     const { data: order, error: orderError } = await supabase
       .from("execution_orders")
@@ -70,6 +101,8 @@ export default async function handler(req, res) {
         reduce_only: Boolean(req.body.reduceOnly),
         time_in_force: req.body.timeInForce || "gtc",
         status,
+        exchange_order_id: exchangeOrderId,
+        client_order_id: clientOrderId,
         filled_quantity: 0,
         rejection_reason: rejectionReason,
         estimated_fees: estimatedFees,
@@ -87,9 +120,9 @@ export default async function handler(req, res) {
       user_id: user.id,
       account_id: account.id,
       order_id: order.id,
-      event_type: "order_rejected",
-      severity: risk.status === "approved" ? "warning" : "error",
-      message: rejectionReason,
+      event_type: status === "accepted" ? "order_accepted" : "order_rejected",
+      severity: status === "accepted" ? "info" : risk.status === "approved" ? "warning" : "error",
+      message: rejectionReason || `Order accepted by ${account.exchange}.`,
       metadata: { riskStatus: risk.status, notional: risk.notional }
     });
 

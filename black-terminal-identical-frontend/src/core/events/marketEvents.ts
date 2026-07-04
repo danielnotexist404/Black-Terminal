@@ -1,0 +1,35 @@
+import type { Candle } from "../../chart-engine/types";
+import type {
+  ExchangeId,
+  FundingRate,
+  MarketSymbol,
+  OpenInterest,
+  OrderBookSnapshot,
+  TickerSnapshot,
+  TradeTick
+} from "../../market-data/types";
+
+export type MarketConnectionEvent = {
+  exchange: ExchangeId;
+  connectedAt?: number;
+  disconnectedAt?: number;
+  latencyMs?: number;
+  reason?: string;
+};
+
+export type MarketEventMap = {
+  "market.connected": MarketConnectionEvent;
+  "market.disconnected": MarketConnectionEvent;
+  "market.error": MarketConnectionEvent & { message: string };
+  "trade.received": TradeTick;
+  "ticker.updated": TickerSnapshot;
+  "candle.updated": Candle & { symbol: MarketSymbol };
+  "candle.closed": Candle & { symbol: MarketSymbol };
+  "orderbook.updated": OrderBookSnapshot;
+  "funding.updated": FundingRate;
+  "openInterest.updated": OpenInterest;
+  "liquidation.received": { exchange: ExchangeId; symbol: string; price: number; quantity: number; side: "buy" | "sell"; time: number };
+  "position.updated": { accountId: string; symbol: string; time: number };
+  "portfolio.updated": { accountId?: string; time: number };
+  "performance.metric": { name: string; value: number; unit: string; time: number; tags?: Record<string, string> };
+};

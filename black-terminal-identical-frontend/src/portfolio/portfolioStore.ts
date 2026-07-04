@@ -5,6 +5,7 @@ import type { AccountConnection, Balance, OrderUpdate } from "../execution/types
 import { marketCatalog } from "../market-data/marketCatalog";
 import type { PortfolioPosition } from "../positions/types";
 import { defaultRiskControls } from "../risk/types";
+import { connectExchangeAccountViaApi, fetchPortfolioSnapshotFromApi } from "./portfolioApiClient";
 import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } from "./types";
 
 const credentialStore = new TauriSecureCredentialStore();
@@ -83,6 +84,13 @@ function buildCurves() {
 }
 
 export async function getPortfolioSnapshot(): Promise<PortfolioSnapshot> {
+  try {
+    const remoteSnapshot = await fetchPortfolioSnapshotFromApi();
+    if (remoteSnapshot) return remoteSnapshot;
+  } catch (error) {
+    console.error("Portfolio API snapshot failed, using local fallback.", error);
+  }
+
   const positionsByAccount = await Promise.all(accounts.map((account) => getBrokerAdapter(account.exchange).getPositions(account.id)));
   const balancesByAccount = await Promise.all(accounts.map((account) => getBrokerAdapter(account.exchange).getBalances(account.id)));
   const positions = positionsByAccount.flat();
@@ -123,6 +131,13 @@ export async function getPortfolioSnapshot(): Promise<PortfolioSnapshot> {
 }
 
 export async function connectExchangeAccount(draft: ExchangeConnectionDraft): Promise<PortfolioAccount> {
+  try {
+    const remoteAccount = await connectExchangeAccountViaApi(draft);
+    if (remoteAccount) return remoteAccount;
+  } catch (error) {
+    console.error("Portfolio API connect failed, using local fallback.", error);
+  }
+
   const id = createId("acct");
   const exchange = marketCatalog.find((item) => item.id === draft.exchange);
 

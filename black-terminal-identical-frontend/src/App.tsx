@@ -60,9 +60,10 @@ import type { IndicatorAlertDefinition } from "./automation/alerts";
 import { ScannerPage } from "./modules/scanner/components/ScannerPage";
 import type { ScannerResult } from "./modules/scanner/types/scanner.types";
 import { StrategyLabPage } from "./modules/strategy-lab/components/StrategyLabPage";
-import PortfolioManagerPage, { PortfolioPositionsPanel } from "./modules/portfolio-manager/components/PortfolioManagerPage";
+import PortfolioManagerPage, { PositionsWorkspace } from "./modules/portfolio-manager/components/PortfolioManagerPage";
 import { getPortfolioSnapshot } from "./portfolio/portfolioStore";
 import type { PortfolioPosition } from "./positions/types";
+import type { PortfolioSnapshot } from "./portfolio/types";
 import type { StrategyRuntimeKind } from "./modules/strategy-lab/types/strategy.types";
 import type {
   ChartDisplayType,
@@ -78,7 +79,7 @@ import type {
 } from "./chart-engine/types";
 import { defaultIndicatorAdvancedSettings } from "./chart-engine/profile/volumeProfileDefaults";
 import { dbGetUsers, dbUpdateUser, dbAddAuditLog } from "./lib/supabase";
-import { getPublicMarketDataAdapter } from "./market-data/exchangeRegistry";
+import { getMarketDataEngineAdapter } from "./market-data/engine/marketDataEngine";
 import { ExchangeOption, MarketSymbolOption, marketCatalog } from "./market-data/marketCatalog";
 import type { MarketSymbol, Timeframe } from "./market-data/types";
 
@@ -498,13 +499,17 @@ export default function App() {
   const [compiledPlots, setCompiledPlots] = useState<CompiledPlot[]>([]);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; symbol: string } | null>(null);
   const [portfolioPositions, setPortfolioPositions] = useState<PortfolioPosition[]>([]);
+  const [portfolioOrders, setPortfolioOrders] = useState<PortfolioSnapshot["orders"]>([]);
 
   useEffect(() => {
     let mounted = true;
 
     const loadPortfolioPositions = async () => {
       const snapshot = await getPortfolioSnapshot();
-      if (mounted) setPortfolioPositions(snapshot.positions);
+      if (mounted) {
+        setPortfolioPositions(snapshot.positions);
+        setPortfolioOrders(snapshot.orders);
+      }
     };
 
     void loadPortfolioPositions();
@@ -772,7 +777,7 @@ export default function App() {
   useEffect(() => {
     let disposed = false;
     const fallbackSymbols = selectedExchange.symbols;
-    const adapter = getPublicMarketDataAdapter(selectedExchange.id);
+    const adapter = getMarketDataEngineAdapter(selectedExchange.id);
     setAvailableSymbols(fallbackSymbols);
 
     adapter
@@ -1770,7 +1775,7 @@ export default function App() {
               onClearEventLogs={handleClearEventLogs}
             />
           ) : activeNav === "POSITIONS" ? (
-            <PortfolioPositionsPanel positions={portfolioPositions} />
+            <PositionsWorkspace positions={portfolioPositions} orders={portfolioOrders} />
           ) : (
             <div className="bottom-blank" />
           )}

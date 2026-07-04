@@ -25,7 +25,7 @@ import type { AlertCondition, AlertIndicatorTarget, IndicatorAlertDefinition } f
 import { canUseIndicator } from "../features/premium";
 import { sendIndicatorAlert, sendWebhook } from "../lib/tauri";
 import type { CompiledPlot } from "./ScriptCompiler";
-import { getPublicMarketDataAdapter, publicMarketDataAdapters } from "../market-data/exchangeRegistry";
+import { getMarketDataEngineAdapter } from "../market-data/engine/marketDataEngine";
 import { ExchangeId, MarketDataAdapter, MarketDataSubscription, MarketSymbol, OrderBookSnapshot, Timeframe } from "../market-data/types";
 
 type PixiBlackChartProps = {
@@ -442,7 +442,7 @@ export function PixiBlackChart({
     const seenTradeOrder: string[] = [];
     const host = hostRef.current;
     if (!host) return;
-    const adapter = getPublicMarketDataAdapter(marketSymbol.exchange);
+    const adapter = getMarketDataEngineAdapter(marketSymbol.exchange);
     replaySourceRef.current = [];
     replayCursorRef.current = 0;
     replayAppliedRef.current = false;
@@ -517,7 +517,7 @@ export function PixiBlackChart({
       const failures: string[] = [];
 
       for (const exchange of historyFallbackOrder(marketSymbol.exchange)) {
-        const sourceAdapter = publicMarketDataAdapters[exchange as keyof typeof publicMarketDataAdapters];
+        const sourceAdapter = getMarketDataEngineAdapter(exchange);
         if (!sourceAdapter) continue;
 
         try {
@@ -858,7 +858,7 @@ export function PixiBlackChart({
     let disposed = false;
     let subscription: MarketDataSubscription<OrderBookSnapshot> | undefined;
     let pollTimer: number | undefined;
-    const adapter = getPublicMarketDataAdapter(marketSymbol.exchange);
+    const adapter = getMarketDataEngineAdapter(marketSymbol.exchange);
     if (!adapter) return;
 
     const ingestOrderBook = (book: OrderBookSnapshot) => {

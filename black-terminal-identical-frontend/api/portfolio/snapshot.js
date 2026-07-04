@@ -1,4 +1,12 @@
-import { applyCors, requireMethod, requireUser, sendError, toCamelAccount } from "../../server/portfolio-api.js";
+import {
+  applyCors,
+  decryptCredentialPayload,
+  requireMethod,
+  requireUser,
+  sendError,
+  toCamelAccount
+} from "../../server/portfolio-api.js";
+import { syncBybitAccountToSupabase } from "../../server/exchanges/bybit.js";
 
 function num(value) {
   return Number(value || 0);
@@ -31,6 +39,8 @@ export default async function handler(req, res) {
         orders: []
       });
     }
+
+    await syncLiveAccounts(supabase, user.id, accounts);
 
     const [riskResult, balancesResult, positionsResult, ordersResult] = await Promise.all([
       supabase.from("account_risk_controls").select("*").in("account_id", accountIds),
@@ -112,6 +122,35 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     return sendError(res, error);
+  }
+}
+
+async function syncLiveAccounts(supabase, userId, accounts) {
+  const bybitAccounts = accounts.filter((account) => account.exchange === "bybit");
+  if (bybitAccounts.length === 0) return;
+
+  for (const account of bybitAccounts) {
+    try {
+      const { data: credential, error } = await supabase
+        .from("exchange_credentials")
+        .select("encrypted_payload")
+        .eq("account_id", account.id)
+        .single();
+
+      if (error || !credential) continue;
+      const credentials = decryptCredentialPayload(credential.encrypted_payload);
+      await syncBybitAccountToSupabase(supabase, account, credentials);
+    } catch (error) {
+      console.error(`Bybit sync failed for account ${account.id}`, error);
+      await supabase
+        .from("exchange_accounts")
+        .update({
+          status: "degraded",
+          api_health: "warning"
+        })
+        .eq("id", account.id)
+        .eq("user_id", userId);
+    }
   }
 }
 

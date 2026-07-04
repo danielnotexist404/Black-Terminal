@@ -168,7 +168,7 @@ export function checkOrderRisk({ account, riskControls, order, accountExposureUs
   const reasons = [];
   const referencePrice = Number(order.referencePrice || order.limitPrice || order.stopPrice || 1);
   const quantity = Number(order.quantity || 0);
-  const notional = Math.abs(quantity * referencePrice);
+  const notional = order.quantityMode === "usd" ? Math.abs(quantity) : Math.abs(quantity * referencePrice);
 
   if (!account) reasons.push("Account not found.");
   if (account?.is_read_only) reasons.push("Account is read-only.");

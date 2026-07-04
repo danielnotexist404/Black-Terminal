@@ -1,7 +1,7 @@
 import { getBrokerAdapter } from "../broker/brokerRegistry";
 import { createId } from "../core/ids";
 import { TauriSecureCredentialStore } from "../core/secureCredentialStore";
-import type { AccountConnection, Balance, OrderUpdate } from "../execution/types";
+import type { AccountConnection, OrderUpdate } from "../execution/types";
 import { marketCatalog } from "../market-data/marketCatalog";
 import type { PortfolioPosition } from "../positions/types";
 import { defaultRiskControls } from "../risk/types";
@@ -10,76 +10,15 @@ import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } fro
 
 const credentialStore = new TauriSecureCredentialStore();
 
-const seedAccounts: PortfolioAccount[] = [
-  {
-    id: "acct-primary-bybit",
-    exchange: "bybit",
-    label: "Bybit Prime",
-    accountName: "Bybit Prime",
-    permissions: ["read-account", "read-orders", "read-positions"],
-    isPaper: false,
-    connectedAt: Date.now() - 1000 * 60 * 60 * 24 * 18,
-    lastValidatedAt: Date.now() - 1000 * 46,
-    status: "read-only",
-    apiHealth: "healthy",
-    latencyMs: 31,
-    balanceUsd: 124_860,
-    equityUsd: 127_472,
-    marginUsed: 15_701,
-    availableMargin: 111_771,
-    buyingPower: 558_855,
-    leverage: 4.4,
-    dailyPnl: 1_182,
-    monthlyPnl: 8_944,
-    openPositions: 2,
-    openOrders: 4,
-    riskControls: defaultRiskControls
-  },
-  {
-    id: "acct-binance-hedge",
-    exchange: "binance",
-    label: "Binance Hedge",
-    accountName: "Binance Hedge",
-    permissions: ["read-account", "read-orders", "read-positions"],
-    isPaper: false,
-    connectedAt: Date.now() - 1000 * 60 * 60 * 24 * 7,
-    lastValidatedAt: Date.now() - 1000 * 72,
-    status: "connected",
-    apiHealth: "healthy",
-    latencyMs: 44,
-    balanceUsd: 81_420,
-    equityUsd: 82_011,
-    marginUsed: 6_280,
-    availableMargin: 75_731,
-    buyingPower: 378_655,
-    leverage: 2.9,
-    dailyPnl: -214,
-    monthlyPnl: 2_140,
-    openPositions: 1,
-    openOrders: 2,
-    riskControls: { ...defaultRiskControls, tradingEnabled: true, maxLeverage: 3 }
-  }
-];
-
-let accounts = [...seedAccounts];
+let accounts: PortfolioAccount[] = [];
 let orders: OrderUpdate[] = [];
 
 function buildCurves() {
-  const equity = [201_000, 204_200, 202_880, 207_400, 206_150, 209_483].map((value, index) => ({
-    time: `D-${5 - index}`,
-    value
-  }));
-
   return {
-    equity,
-    drawdown: [0.8, 1.4, 2.6, 1.2, 1.9, 1.1].map((value, index) => ({ time: `D-${5 - index}`, value })),
-    dailyReturns: [0.42, 1.58, -0.65, 2.23, -0.6, 1.62].map((value, index) => ({ time: `D-${5 - index}`, value })),
-    exposure: [
-      { label: "BTC", value: 54 },
-      { label: "ETH", value: 26 },
-      { label: "SOL", value: 12 },
-      { label: "Cash", value: 8 }
-    ]
+    equity: [],
+    drawdown: [],
+    dailyReturns: [],
+    exposure: []
   };
 }
 
@@ -113,14 +52,14 @@ export async function getPortfolioSnapshot(): Promise<PortfolioSnapshot> {
       unrealizedPnl,
       realizedPnl,
       dailyPnl,
-      weeklyPnl: 4_680,
+      weeklyPnl: 0,
       monthlyPnl,
-      drawdownPct: 1.35,
+      drawdownPct: 0,
       marginUsed,
       availableMargin,
       buyingPower,
       leverage: totalEquity > 0 ? buyingPower / totalEquity : 0,
-      riskScore: 31
+      riskScore: accounts.length > 0 ? 1 : 0
     },
     accounts,
     balances,

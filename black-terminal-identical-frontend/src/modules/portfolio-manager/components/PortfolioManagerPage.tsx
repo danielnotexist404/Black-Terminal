@@ -12,8 +12,6 @@ import {
   ShieldCheck,
   X
 } from "lucide-react";
-import { buildExecutionMatrix } from "../../../copyTrading/allocationEngine";
-import type { CopyTradingFollower } from "../../../copyTrading/types";
 import { submitPortfolioOrderViaApi } from "../../../portfolio/portfolioApiClient";
 import type { ExchangeConnectionDraft, PortfolioSnapshot } from "../../../portfolio/types";
 import { connectExchangeAccount, getPortfolioSnapshot } from "../../../portfolio/portfolioStore";
@@ -24,6 +22,7 @@ import type { PortfolioPosition } from "../../../positions/types";
 
 type PortfolioManagerTab = "Overview" | "Accounts" | "Copy Trading" | "Orders";
 type VenueKind = "cex" | "dex";
+type VenueSelectorKind = VenueKind | "wallet";
 type DexVenueId = "uniswap" | "jupiter" | "raydium" | "pancakeswap";
 type WalletProviderId = "metamask" | "phantom";
 type TradeMode = "spot" | "convert" | "futures";
@@ -78,7 +77,7 @@ const defaultTicket: OrderTicketDraft = {
   side: "buy",
   symbol: "BTCUSDT",
   quantityMode: "usd",
-  quantity: 5000,
+  quantity: 0,
   postOnly: false,
   reduceOnly: false,
   timeInForce: "gtc"
@@ -91,38 +90,14 @@ const dexVenues: Array<{ id: DexVenueId; label: string; chain: string; defaultPr
   { id: "pancakeswap", label: "PancakeSwap", chain: "BNB Chain", defaultProvider: "metamask" }
 ];
 
+const walletProviders: Array<{ id: WalletProviderId; label: string; chainHint: string; defaultDex: DexVenueId }> = [
+  { id: "metamask", label: "MetaMask", chainHint: "Ethereum / BNB Chain", defaultDex: "uniswap" },
+  { id: "phantom", label: "Phantom", chainHint: "Solana", defaultDex: "jupiter" }
+];
+
 const walletLinksStorageKey = "bt_wallet_links_v1";
 const brokerLinksStorageKey = "bt_broker_links_v1";
 const activeExecutionVenueStorageKey = "bt_active_execution_venue_v1";
-
-const followersSeed: CopyTradingFollower[] = [
-  {
-    id: "follower-01",
-    displayName: "Atlas Follower 01",
-    status: "active",
-    equity: 48_250,
-    dailyPnl: 312,
-    monthlyPnl: 1_904,
-    connectedExchange: "bybit",
-    positions: [],
-    drawdownPct: 1.8,
-    allocationProfile: { id: "ap-01", name: "Risk 1%", method: "riskPercentage", value: 1, maxExposureUsd: 12_000 },
-    connectionHealth: "healthy"
-  },
-  {
-    id: "follower-02",
-    displayName: "Momentum Vault",
-    status: "paused",
-    equity: 112_800,
-    dailyPnl: -84,
-    monthlyPnl: 3_180,
-    connectedExchange: "binance",
-    positions: [],
-    drawdownPct: 2.4,
-    allocationProfile: { id: "ap-02", name: "Equity 4%", method: "equityPercentage", value: 4, maxExposureUsd: 20_000 },
-    connectionHealth: "warning"
-  }
-];
 
 export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPosition[] }) {
   return (
@@ -161,6 +136,11 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
           <span>{position.exchange.toUpperCase()}</span>
         </div>
       ))}
+      {positions.length === 0 && (
+        <div className="positions-empty-state">
+          NO LIVE POSITIONS. CONNECT A BROKER OR DEX WALLET TO SYNC REAL ACCOUNT EXPOSURE.
+        </div>
+      )}
     </div>
   );
 }
@@ -250,17 +230,27 @@ export function PositionsWorkspace({
   const venueValue = `${venueKind}:${venueKind === "cex" ? selectedCex : selectedDex}`;
 
   function updateVenue(value: string) {
-    const [kind, id] = value.split(":") as [VenueKind, string];
-    setVenueKind(kind);
+    const [kind, id] = value.split(":") as [VenueSelectorKind, string];
     setConnectStatus("");
 
     if (kind === "cex") {
+      setVenueKind("cex");
       setSelectedCex(id as ExchangeId);
       setConnection((current) => ({ ...current, exchange: id as ExchangeId }));
       return;
     }
 
+    if (kind === "wallet") {
+      const wallet = walletProviders.find((provider) => provider.id === id) ?? walletProviders[0];
+      const dex = dexVenues.find((venue) => venue.id === wallet.defaultDex) ?? dexVenues[0];
+      setVenueKind("dex");
+      setSelectedDex(dex.id);
+      setWalletProvider(wallet.id);
+      return;
+    }
+
     const dex = dexVenues.find((venue) => venue.id === id) ?? dexVenues[0];
+    setVenueKind("dex");
     setSelectedDex(dex.id);
     setWalletProvider(dex.defaultProvider);
   }
@@ -437,7 +427,16 @@ export function PositionsWorkspace({
               </optgroup>
               <optgroup label="DEX">
                 {dexVenues.map((venue) => (
-                  <option key={venue.id} value={`dex:${venue.id}`}>{venue.label}</option>
+                  <option key={venue.id} value={`dex:${venue.id}`}>
+                    {venue.label} / {venue.defaultProvider === "metamask" ? "MetaMask" : "Phantom"}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Wallet Connectors">
+                {walletProviders.map((provider) => (
+                  <option key={provider.id} value={`wallet:${provider.id}`}>
+                    {provider.label} Wallet ({provider.chainHint})
+                  </option>
                 ))}
               </optgroup>
             </select>
@@ -495,7 +494,7 @@ function ExecutionDock({
   const [marginEnabled, setMarginEnabled] = useState(false);
   const [marginMode, setMarginMode] = useState<"cross" | "isolated">("cross");
   const [leverage, setLeverage] = useState(5);
-  const [price, setPrice] = useState("62551.2");
+  const [price, setPrice] = useState("");
   const [quantity, setQuantity] = useState("");
   const [orderValue, setOrderValue] = useState("");
   const [sizePercent, setSizePercent] = useState(0);
@@ -708,11 +707,10 @@ export default function PortfolioManagerPage({ onClose }: { onClose: () => void 
     };
   }, []);
 
-  const executionMatrix = useMemo(() => buildExecutionMatrix(followersSeed, ticket, 66_610), [ticket]);
-
   if (!snapshot) return <div className="portfolio-manager loading">LOADING PORTFOLIO MANAGER</div>;
 
   const { summary } = snapshot;
+  const hasPortfolioData = snapshot.accounts.length > 0 || snapshot.balances.length > 0 || snapshot.positions.length > 0 || snapshot.orders.length > 0;
 
   return (
     <div className="portfolio-manager">
@@ -758,19 +756,28 @@ export default function PortfolioManagerPage({ onClose }: { onClose: () => void 
               </div>
             ))}
           </div>
+          {!hasPortfolioData && (
+            <div className="pm-empty">
+              NO LIVE PORTFOLIO DATA CONNECTED. LINK A BROKER ACCOUNT OR WALLET TO START SYNCING BALANCES, POSITIONS, ORDERS, AND RISK.
+            </div>
+          )}
           <div className="pm-chart-grid">
             <MiniCurve title="Equity Curve" points={snapshot.curves.equity} icon={CircleDollarSign} />
             <MiniCurve title="Drawdown Curve" points={snapshot.curves.drawdown} icon={AlertTriangle} />
             <MiniCurve title="Daily Returns" points={snapshot.curves.dailyReturns} icon={Activity} />
             <div className="pm-panel">
               <div className="pm-panel-title"><Layers3 size={15} /> Portfolio Exposure</div>
-              {snapshot.curves.exposure.map((item) => (
-                <div className="pm-exposure" key={item.label}>
-                  <span>{item.label}</span>
-                  <i><b style={{ width: `${item.value}%` }} /></i>
-                  <em>{item.value}%</em>
-                </div>
-              ))}
+              {snapshot.curves.exposure.length > 0 ? (
+                snapshot.curves.exposure.map((item) => (
+                  <div className="pm-exposure" key={item.label}>
+                    <span>{item.label}</span>
+                    <i><b style={{ width: `${item.value}%` }} /></i>
+                    <em>{item.value}%</em>
+                  </div>
+                ))
+              ) : (
+                <div className="pm-panel-empty">AWAITING LIVE EXPOSURE DATA</div>
+              )}
             </div>
           </div>
         </section>
@@ -781,20 +788,24 @@ export default function PortfolioManagerPage({ onClose }: { onClose: () => void 
           <div className="pm-table-head pm-account-grid">
             <span>Exchange</span><span>Account</span><span>Status</span><span>API</span><span>Latency</span><span>Balance</span><span>Equity</span><span>Margin</span><span>Positions</span><span>Orders</span>
           </div>
-          {snapshot.accounts.map((account) => (
-            <div className="pm-table-row pm-account-grid" key={account.id}>
-              <b>{account.exchange.toUpperCase()}</b>
-              <span>{account.accountName}</span>
-              <span>{account.status}</span>
-              <span className={account.apiHealth === "healthy" ? "green" : "red"}>{account.apiHealth}</span>
-              <span>{account.latencyMs}ms</span>
-              <span>{money.format(account.balanceUsd)}</span>
-              <span>{money.format(account.equityUsd)}</span>
-              <span>{money.format(account.marginUsed)}</span>
-              <span>{account.openPositions}</span>
-              <span>{account.openOrders}</span>
-            </div>
-          ))}
+          {snapshot.accounts.length > 0 ? (
+            snapshot.accounts.map((account) => (
+              <div className="pm-table-row pm-account-grid" key={account.id}>
+                <b>{account.exchange.toUpperCase()}</b>
+                <span>{account.accountName}</span>
+                <span>{account.status}</span>
+                <span className={account.apiHealth === "healthy" ? "green" : "red"}>{account.apiHealth}</span>
+                <span>{account.latencyMs}ms</span>
+                <span>{money.format(account.balanceUsd)}</span>
+                <span>{money.format(account.equityUsd)}</span>
+                <span>{money.format(account.marginUsed)}</span>
+                <span>{account.openPositions}</span>
+                <span>{account.openOrders}</span>
+              </div>
+            ))
+          ) : (
+            <div className="pm-empty">NO BROKER ACCOUNTS CONNECTED.</div>
+          )}
         </section>
       )}
 
@@ -802,27 +813,11 @@ export default function PortfolioManagerPage({ onClose }: { onClose: () => void 
         <section className="pm-workspace split">
           <div className="pm-panel">
             <div className="pm-panel-title"><Copy size={15} /> Authorized Followers</div>
-            {followersSeed.map((follower) => (
-              <div className="pm-follower" key={follower.id}>
-                <b>{follower.displayName}</b>
-                <span>{follower.connectedExchange.toUpperCase()} / {follower.allocationProfile.name}</span>
-                <em className={follower.status === "active" ? "green" : "red"}>{follower.status}</em>
-                <strong>{money.format(follower.equity)}</strong>
-              </div>
-            ))}
+            <div className="pm-panel-empty">NO AUTHORIZED FOLLOWERS CONNECTED.</div>
           </div>
           <div className="pm-panel">
             <div className="pm-panel-title"><ShieldCheck size={15} /> Execution Matrix</div>
-            {executionMatrix.map((row) => (
-              <div className="pm-matrix-row" key={row.accountId}>
-                <span>{row.accountName}</span>
-                <b>{row.exchange.toUpperCase()}</b>
-                <span>{row.allocationMethod}</span>
-                <strong>{compact.format(row.calculatedQuantity)}</strong>
-                <em>{money.format(row.estimatedExposure)}</em>
-                {row.riskCheck.status === "approved" ? <CheckCircle2 className="green" size={15} /> : <AlertTriangle className="red" size={15} />}
-              </div>
-            ))}
+            <div className="pm-panel-empty">AWAITING COPY ALLOCATION PROFILES AND LIVE FOLLOWER ACCOUNTS.</div>
           </div>
         </section>
       )}
@@ -848,9 +843,9 @@ export default function PortfolioManagerPage({ onClose }: { onClose: () => void 
             <label><input type="checkbox" checked={ticket.postOnly} onChange={(event) => setTicket((current) => ({ ...current, postOnly: event.target.checked }))} /> Post Only</label>
             <label><input type="checkbox" checked={ticket.reduceOnly} onChange={(event) => setTicket((current) => ({ ...current, reduceOnly: event.target.checked }))} /> Reduce Only</label>
             <div className="pm-estimates">
-              <span>Fees {money.format(ticket.quantity * 0.0004)}</span>
-              <span>Margin {money.format(ticket.quantity / 5)}</span>
-              <span>Slippage 0.03%</span>
+              <span>Fees Awaiting quote</span>
+              <span>Margin Awaiting quote</span>
+              <span>Slippage Awaiting quote</span>
             </div>
             <button className="primary">Confirm Through Execution Engine</button>
           </div>
@@ -861,6 +856,15 @@ export default function PortfolioManagerPage({ onClose }: { onClose: () => void 
 }
 
 function MiniCurve({ title, points, icon: Icon }: { title: string; points: { time: string; value: number }[]; icon: typeof Activity }) {
+  if (points.length === 0) {
+    return (
+      <div className="pm-panel">
+        <div className="pm-panel-title"><Icon size={15} /> {title}</div>
+        <div className="pm-panel-empty">AWAITING LIVE DATA</div>
+      </div>
+    );
+  }
+
   const max = Math.max(...points.map((point) => point.value));
   return (
     <div className="pm-panel">

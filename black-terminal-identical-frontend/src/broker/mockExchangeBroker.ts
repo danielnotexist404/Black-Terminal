@@ -32,49 +32,13 @@ export class MockExchangeBrokerAdapter implements ExchangeBrokerAdapter {
   }
 
   async getBalances(accountId: string): Promise<Balance[]> {
-    return [
-      { accountId, exchange: this.exchange, asset: "USDT", free: 62_400, locked: 8_100, total: 70_500, usdValue: 70_500 },
-      { accountId, exchange: this.exchange, asset: "BTC", free: 0.62, locked: 0.18, total: 0.8, usdValue: 53_280 }
-    ];
+    void accountId;
+    return [];
   }
 
   async getPositions(accountId: string): Promise<PortfolioPosition[]> {
-    return [
-      {
-        id: `${accountId}-BTCUSDT`,
-        accountId,
-        exchange: this.exchange,
-        symbol: "BTCUSDT",
-        direction: "long",
-        quantity: 0.82,
-        averagePrice: 64_280,
-        currentPrice: 66_610,
-        unrealizedPnl: 1_910.6,
-        realizedPnl: 420,
-        margin: 10_548,
-        leverage: 5,
-        liquidationPrice: 54_920,
-        stopLoss: 63_400,
-        takeProfit: 69_800,
-        openedAt: Date.now() - 1000 * 60 * 60 * 9
-      },
-      {
-        id: `${accountId}-ETHUSDT`,
-        accountId,
-        exchange: this.exchange,
-        symbol: "ETHUSDT",
-        direction: "short",
-        quantity: 7.4,
-        averagePrice: 3_520,
-        currentPrice: 3_482,
-        unrealizedPnl: 281.2,
-        realizedPnl: -84,
-        margin: 5_153,
-        leverage: 4,
-        liquidationPrice: 3_880,
-        openedAt: Date.now() - 1000 * 60 * 38
-      }
-    ];
+    void accountId;
+    return [];
   }
 
   async placeOrder(order: OrderRequest): Promise<OrderUpdate> {

@@ -3,25 +3,32 @@ import type { MouseEvent } from "react";
 import {
   Activity,
   AlertTriangle,
-  CheckCircle2,
   CircleDollarSign,
   Copy,
   KeyRound,
   Layers3,
-  Play,
   Plus,
   ShieldCheck,
   X
 } from "lucide-react";
+import { getCapabilities, resolveProductTier, type CapabilityUser } from "../../../core/permissions/capabilities";
 import { submitPortfolioOrderViaApi } from "../../../portfolio/portfolioApiClient";
 import type { ExchangeConnectionDraft, PortfolioSnapshot } from "../../../portfolio/types";
 import { connectExchangeAccount, getPortfolioSnapshot } from "../../../portfolio/portfolioStore";
 import { marketCatalog } from "../../../market-data/marketCatalog";
 import type { ExchangeId } from "../../../market-data/types";
-import type { OrderTicketDraft } from "../../../orders/types";
 import type { PortfolioPosition } from "../../../positions/types";
 
-type PortfolioManagerTab = "Overview" | "Accounts" | "Copy Trading" | "Orders";
+type PortfolioManagerTab =
+  | "Overview"
+  | "Performance"
+  | "Risk"
+  | "Investment Groups"
+  | "Managed Capital"
+  | "Followers"
+  | "Execution Matrix"
+  | "Audit"
+  | "Permissions";
 type VenueKind = "cex" | "dex";
 type VenueSelectorKind = VenueKind | "wallet";
 type DexVenueId = "uniswap" | "jupiter" | "raydium" | "pancakeswap";
@@ -72,17 +79,6 @@ type WalletLink = {
 
 const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const compact = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
-
-const defaultTicket: OrderTicketDraft = {
-  orderType: "market",
-  side: "buy",
-  symbol: "BTCUSDT",
-  quantityMode: "usd",
-  quantity: 0,
-  postOnly: false,
-  reduceOnly: false,
-  timeInForce: "gtc"
-};
 
 const dexVenues: Array<{ id: DexVenueId; label: string; chain: string; defaultProvider: WalletProviderId }> = [
   { id: "uniswap", label: "Uniswap", chain: "Ethereum", defaultProvider: "metamask" },
@@ -838,11 +834,18 @@ function ExecutionDock({
   );
 }
 
-export default function PortfolioManagerPage({ onClose }: { onClose: () => void }) {
+export default function PortfolioManagerPage({ onClose, currentUser }: { onClose: () => void; currentUser?: CapabilityUser | null }) {
   const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
   const [activeTab, setActiveTab] = useState<PortfolioManagerTab>("Overview");
-  const [showTicket, setShowTicket] = useState(false);
-  const [ticket, setTicket] = useState<OrderTicketDraft>(defaultTicket);
+  const capabilities = useMemo(() => getCapabilities(currentUser), [currentUser]);
+  const productTier = resolveProductTier(currentUser);
+  const portfolioTabs = useMemo<PortfolioManagerTab[]>(() => {
+    const tabs: PortfolioManagerTab[] = ["Overview", "Performance", "Risk", "Investment Groups"];
+    if (capabilities.has("portfolio.enterpriseCapital")) {
+      tabs.push("Managed Capital", "Followers", "Execution Matrix", "Audit", "Permissions");
+    }
+    return tabs;
+  }, [capabilities]);
 
   useEffect(() => {
     let alive = true;
@@ -860,26 +863,43 @@ export default function PortfolioManagerPage({ onClose }: { onClose: () => void 
     };
   }, []);
 
+  useEffect(() => {
+    if (!portfolioTabs.includes(activeTab)) setActiveTab("Overview");
+  }, [activeTab, portfolioTabs]);
+
   if (!snapshot) return <div className="portfolio-manager loading">LOADING PORTFOLIO MANAGER</div>;
 
   const { summary } = snapshot;
   const hasPortfolioData = snapshot.accounts.length > 0 || snapshot.balances.length > 0 || snapshot.positions.length > 0 || snapshot.orders.length > 0;
+  const retailMetrics = [
+    ["Total Equity", money.format(summary.totalEquity)],
+    ["Daily Return", money.format(summary.dailyPnl)],
+    ["Weekly Return", money.format(summary.weeklyPnl)],
+    ["Monthly Return", money.format(summary.monthlyPnl)],
+    ["Yearly Return", "AWAITING HISTORY"],
+    ["Drawdown", `${summary.drawdownPct}%`],
+    ["Unrealized PnL", money.format(summary.unrealizedPnl)],
+    ["Realized PnL", money.format(summary.realizedPnl)],
+    ["Margin Used", money.format(summary.marginUsed)],
+    ["Available Margin", money.format(summary.availableMargin)],
+    ["Buying Power", money.format(summary.buyingPower)],
+    ["Risk Score", `${summary.riskScore}/100`]
+  ];
 
   return (
     <div className="portfolio-manager">
       <header className="pm-header">
         <div>
           <span>PORTFOLIO MANAGER</span>
-          <strong>Execution, risk, accounts, and copy allocation</strong>
+          <strong>{productTier.toUpperCase()} capital management and performance analytics</strong>
         </div>
         <div className="pm-actions">
-          <button onClick={() => setShowTicket(true)}><Play size={14} /> Order Ticket</button>
           <button onClick={onClose}><X size={14} /></button>
         </div>
       </header>
 
       <nav className="pm-tabs">
-        {(["Overview", "Accounts", "Copy Trading", "Orders"] as PortfolioManagerTab[]).map((tab) => (
+        {portfolioTabs.map((tab) => (
           <button key={tab} className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>
             {tab}
           </button>
@@ -889,20 +909,7 @@ export default function PortfolioManagerPage({ onClose }: { onClose: () => void 
       {activeTab === "Overview" && (
         <section className="pm-workspace">
           <div className="pm-metrics">
-            {[
-              ["Total Equity", money.format(summary.totalEquity)],
-              ["Total Balance", money.format(summary.totalBalance)],
-              ["Unrealized PnL", money.format(summary.unrealizedPnl)],
-              ["Realized PnL", money.format(summary.realizedPnl)],
-              ["Daily PnL", money.format(summary.dailyPnl)],
-              ["Weekly PnL", money.format(summary.weeklyPnl)],
-              ["Monthly PnL", money.format(summary.monthlyPnl)],
-              ["Drawdown", `${summary.drawdownPct}%`],
-              ["Margin Used", money.format(summary.marginUsed)],
-              ["Available Margin", money.format(summary.availableMargin)],
-              ["Buying Power", money.format(summary.buyingPower)],
-              ["Risk Score", `${summary.riskScore}/100`]
-            ].map(([label, value]) => (
+            {retailMetrics.map(([label, value]) => (
               <div className="pm-metric" key={label}>
                 <span>{label}</span>
                 <b>{value}</b>
@@ -936,75 +943,77 @@ export default function PortfolioManagerPage({ onClose }: { onClose: () => void 
         </section>
       )}
 
-      {activeTab === "Accounts" && (
+      {activeTab === "Performance" && (
         <section className="pm-workspace">
-          <div className="pm-table-head pm-account-grid">
-            <span>Exchange</span><span>Account</span><span>Status</span><span>API</span><span>Latency</span><span>Balance</span><span>Equity</span><span>Margin</span><span>Positions</span><span>Orders</span>
+          <div className="pm-panel">
+            <div className="pm-panel-title"><Activity size={15} /> Trade Analytics</div>
+            <div className="pm-panel-empty">AWAITING LIVE ORDER HISTORY, FILLS, WIN RATE, EXPECTANCY, AND SESSION PERFORMANCE.</div>
           </div>
-          {snapshot.accounts.length > 0 ? (
-            snapshot.accounts.map((account) => (
-              <div className="pm-table-row pm-account-grid" key={account.id}>
-                <b>{account.exchange.toUpperCase()}</b>
-                <span>{account.accountName}</span>
-                <span>{account.status}</span>
-                <span className={account.apiHealth === "healthy" ? "green" : "red"}>{account.apiHealth}</span>
-                <span>{account.latencyMs}ms</span>
-                <span>{money.format(account.balanceUsd)}</span>
-                <span>{money.format(account.equityUsd)}</span>
-                <span>{money.format(account.marginUsed)}</span>
-                <span>{account.openPositions}</span>
-                <span>{account.openOrders}</span>
-              </div>
-            ))
-          ) : (
-            <div className="pm-empty">NO BROKER ACCOUNTS CONNECTED.</div>
-          )}
+          <div className="pm-panel">
+            <div className="pm-panel-title"><CircleDollarSign size={15} /> Performance Statistics</div>
+            <div className="pm-panel-empty">EQUITY HISTORY WILL POPULATE AFTER SYNCHRONIZED PORTFOLIO SNAPSHOTS ARE AVAILABLE.</div>
+          </div>
         </section>
       )}
 
-      {activeTab === "Copy Trading" && (
+      {activeTab === "Risk" && (
         <section className="pm-workspace split">
           <div className="pm-panel">
-            <div className="pm-panel-title"><Copy size={15} /> Authorized Followers</div>
-            <div className="pm-panel-empty">NO AUTHORIZED FOLLOWERS CONNECTED.</div>
+            <div className="pm-panel-title"><ShieldCheck size={15} /> Risk Statistics</div>
+            <div className="pm-risk-list">
+              <span>Risk Score <b>{summary.riskScore}/100</b></span>
+              <span>Drawdown <b>{summary.drawdownPct}%</b></span>
+              <span>Leverage <b>{compact.format(summary.leverage)}x</b></span>
+              <span>Margin Used <b>{money.format(summary.marginUsed)}</b></span>
+            </div>
           </div>
           <div className="pm-panel">
-            <div className="pm-panel-title"><ShieldCheck size={15} /> Execution Matrix</div>
-            <div className="pm-panel-empty">AWAITING COPY ALLOCATION PROFILES AND LIVE FOLLOWER ACCOUNTS.</div>
+            <div className="pm-panel-title"><Layers3 size={15} /> Exposure Controls</div>
+            <div className="pm-panel-empty">ENTERPRISE RISK LIMITS ARE ENFORCED SERVER-SIDE BY THE EXECUTION ENGINE.</div>
           </div>
         </section>
       )}
 
-      {activeTab === "Orders" && (
+      {activeTab === "Investment Groups" && (
         <section className="pm-workspace">
-          <div className="pm-empty">OPEN, FILLED, CANCELLED, REJECTED, AND PENDING ORDERS WILL STREAM THROUGH THE EXECUTION ENGINE.</div>
+          <div className="pm-panel">
+            <div className="pm-panel-title"><Layers3 size={15} /> Investment Group Discovery</div>
+            <div className="pm-panel-empty">NO VERIFIED INVESTMENT GROUPS ARE PUBLISHED YET. DISCOVERY WILL SHOW PERFORMANCE, DRAWDOWN, FOLLOWERS, RISK SCORE, AUM, AND SUPPORTED EXCHANGES.</div>
+          </div>
         </section>
       )}
-      {showTicket && (
-        <div className="pm-floating">
-          <div className="pm-ticket">
-            <div className="pm-ticket-head"><Play size={15} /> Institutional Order Ticket <button onClick={() => setShowTicket(false)}><X size={14} /></button></div>
-            <select value={ticket.orderType} onChange={(event) => setTicket((current) => ({ ...current, orderType: event.target.value as OrderTicketDraft["orderType"] }))}>
-              {["market", "limit", "stop-market", "stop-limit", "bracket", "twap", "iceberg"].map((type) => <option key={type}>{type}</option>)}
-            </select>
-            <div className="pm-segment">
-              <button className={ticket.side === "buy" ? "active" : ""} onClick={() => setTicket((current) => ({ ...current, side: "buy" }))}>BUY</button>
-              <button className={ticket.side === "sell" ? "active" : ""} onClick={() => setTicket((current) => ({ ...current, side: "sell" }))}>SELL</button>
-            </div>
-            <input value={ticket.symbol} onChange={(event) => setTicket((current) => ({ ...current, symbol: event.target.value.toUpperCase() }))} />
-            <input type="number" value={ticket.quantity} onChange={(event) => setTicket((current) => ({ ...current, quantity: Number(event.target.value) }))} />
-            <label><input type="checkbox" checked={ticket.postOnly} onChange={(event) => setTicket((current) => ({ ...current, postOnly: event.target.checked }))} /> Post Only</label>
-            <label><input type="checkbox" checked={ticket.reduceOnly} onChange={(event) => setTicket((current) => ({ ...current, reduceOnly: event.target.checked }))} /> Reduce Only</label>
-            <div className="pm-estimates">
-              <span>Fees Awaiting quote</span>
-              <span>Margin Awaiting quote</span>
-              <span>Slippage Awaiting quote</span>
-            </div>
-            <button className="primary">Confirm Through Execution Engine</button>
-          </div>
-        </div>
+
+      {activeTab === "Managed Capital" && (
+        <EnterprisePanel icon={CircleDollarSign} title="Managed Capital" message="CAPITAL ALLOCATION PROFILES, MANAGED AUM, AND GROUP-LEVEL EQUITY CONTROLS REQUIRE ENTERPRISE PERMISSIONS AND SERVER-SIDE POLICY TABLES." />
+      )}
+
+      {activeTab === "Followers" && (
+        <EnterprisePanel icon={Copy} title="Followers" message="NO MANAGED FOLLOWERS CONNECTED. FOLLOWER ACCOUNTS ARE CAPITAL-MANAGEMENT ENTITIES, NOT BROKER CONNECTIONS." />
+      )}
+
+      {activeTab === "Execution Matrix" && (
+        <EnterprisePanel icon={ShieldCheck} title="Execution Matrix" message="THE EXECUTION MATRIX WILL CONSUME CAPITAL ALLOCATION RULES AND ROUTE ORDERS THROUGH POSITIONS / EXECUTION ENGINE ONLY." />
+      )}
+
+      {activeTab === "Audit" && (
+        <EnterprisePanel icon={Activity} title="Audit" message="EXECUTION, ALLOCATION, PERMISSION, AND INVESTMENT GROUP EVENTS WILL STREAM HERE FROM SERVER-SIDE AUDIT LOGS." />
+      )}
+
+      {activeTab === "Permissions" && (
+        <EnterprisePanel icon={ShieldCheck} title="Permissions" message="PERMISSION MANAGEMENT IS AVAILABLE ONLY TO ENTERPRISE OR ADMIN ACCOUNTS AND MUST BE ENFORCED BY SERVER AUTHORIZATION." />
       )}
     </div>
+  );
+}
+
+function EnterprisePanel({ title, message, icon: Icon }: { title: string; message: string; icon: typeof Activity }) {
+  return (
+    <section className="pm-workspace">
+      <div className="pm-panel">
+        <div className="pm-panel-title"><Icon size={15} /> {title}</div>
+        <div className="pm-panel-empty">{message}</div>
+      </div>
+    </section>
   );
 }
 

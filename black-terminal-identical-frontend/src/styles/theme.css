@@ -4768,6 +4768,29 @@ body.resizing-layout * {
   text-transform: uppercase;
 }
 
+.pm-risk-list {
+  display: grid;
+  gap: 1px;
+  background: var(--line-soft);
+}
+
+.pm-risk-list span {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 10px;
+  background: #050607;
+  color: #8b929c;
+  font: 800 10px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.pm-risk-list b {
+  color: var(--strong);
+}
+
 .pm-bars {
   height: 178px;
   display: flex;

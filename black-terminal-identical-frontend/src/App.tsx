@@ -1626,7 +1626,7 @@ export default function App() {
         </div>
       ) : activeNav === "PORTFOLIO MANAGER" ? (
         <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
-          <PortfolioManagerPage onClose={() => setActiveNav("CHART")} />
+          <PortfolioManagerPage onClose={() => setActiveNav("CHART")} currentUser={currentUser} />
         </div>
       ) : (
         <main className={terminalSettings.showDOM ? "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>

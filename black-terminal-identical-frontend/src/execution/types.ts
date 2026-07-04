@@ -20,8 +20,38 @@ export type AccountConnection = {
 };
 
 export type OrderSide = "buy" | "sell";
-export type OrderType = "market" | "limit" | "stop-market" | "stop-limit" | "post-only";
+export type OrderType = "market" | "limit" | "stop-market" | "stop-limit" | "trailing-stop" | "bracket" | "twap" | "iceberg" | "post-only";
 export type TimeInForce = "gtc" | "ioc" | "fok";
+export type OrderLifecycleState =
+  | "created"
+  | "validated"
+  | "risk-approved"
+  | "risk-rejected"
+  | "allocated"
+  | "submitted"
+  | "accepted"
+  | "working"
+  | "partially-filled"
+  | "filled"
+  | "cancelled"
+  | "rejected"
+  | "expired"
+  | "archived";
+
+export type ExecutionSource =
+  | "chart"
+  | "order-ticket"
+  | "hotkey"
+  | "strategy"
+  | "ai-assistant"
+  | "capital-allocation"
+  | "replay-engine"
+  | "future-api"
+  | "positions";
+
+export type ExecutionDestination = "personal-portfolio" | "allocation-engine" | "simulation" | "replay" | "paper-trading";
+export type SizingMethod = "quantity" | "contracts" | "coin" | "usd" | "portfolioPct" | "equityPct" | "riskPct" | "fixedDollarRisk";
+export type MarginMode = "cross" | "isolated";
 
 export type OrderRequest = {
   accountId: string;
@@ -31,11 +61,21 @@ export type OrderRequest = {
   side: OrderSide;
   type: OrderType;
   quantity: number;
+  sizingMethod?: SizingMethod;
   limitPrice?: number;
   stopPrice?: number;
+  referencePrice?: number;
+  leverage?: number;
+  marginMode?: MarginMode;
+  takeProfit?: number;
+  stopLoss?: number;
   reduceOnly?: boolean;
+  postOnly?: boolean;
   timeInForce?: TimeInForce;
   clientOrderId?: string;
+  internalOrderId?: string;
+  source?: ExecutionSource;
+  destinations?: ExecutionDestination[];
 };
 
 export type OrderStatus =
@@ -58,6 +98,56 @@ export type OrderUpdate = {
   averageFillPrice?: number;
   reason?: string;
   time: number;
+};
+
+export type ExecutionRequest = {
+  internalOrderId: string;
+  userId?: string;
+  accountId: string;
+  exchange: ExchangeId;
+  symbol: string;
+  marketKind: MarketKind;
+  side: OrderSide;
+  orderType: OrderType;
+  quantity: number;
+  sizingMethod: SizingMethod;
+  limitPrice?: number;
+  stopPrice?: number;
+  referencePrice?: number;
+  timeInForce: TimeInForce;
+  leverage?: number;
+  marginMode?: MarginMode;
+  takeProfit?: number;
+  stopLoss?: number;
+  reduceOnly?: boolean;
+  postOnly?: boolean;
+  destinations: ExecutionDestination[];
+  source: ExecutionSource;
+  timestamp: number;
+  parentOrderId?: string;
+};
+
+export type ExecutionReport = OrderUpdate & {
+  internalOrderId: string;
+  lifecycleState: OrderLifecycleState;
+  latencyMs?: number;
+  destination?: ExecutionDestination;
+  diagnosticContext?: Record<string, unknown>;
+};
+
+export type ExecutionMatrixPreviewRow = {
+  accountId: string;
+  accountName: string;
+  exchange: ExchangeId;
+  allocationMethod: string;
+  calculatedQuantity: number;
+  estimatedMargin: number;
+  estimatedFees: number;
+  estimatedExposure: number;
+  riskStatus: "pending" | "approved" | "blocked";
+  validationStatus: "pending" | "valid" | "invalid";
+  executionStatus: OrderLifecycleState;
+  reasons: string[];
 };
 
 export type Position = {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, MouseEvent as ReactMouseEvent, SetStateAction } from "react";
-import { Bell, Brush, Columns3, Copy, Eye, EyeOff, Minus, Plus, SlidersHorizontal, Square, TrendingUp, Type, X } from "lucide-react";
+import { Bell, Brush, Columns3, Copy, Eye, EyeOff, Minus, Play, Plus, SlidersHorizontal, Square, TrendingUp, Type, X } from "lucide-react";
 import { BlackChartEngine } from "../chart-engine/BlackChartEngine";
 import type { ChartPoint, IndicatorAlertLevel, IndicatorAlertLine } from "../chart-engine/BlackChartEngine";
 import {
@@ -27,6 +27,8 @@ import { sendIndicatorAlert, sendWebhook } from "../lib/tauri";
 import type { CompiledPlot } from "./ScriptCompiler";
 import { getMarketDataEngineAdapter } from "../market-data/engine/marketDataEngine";
 import { ExchangeId, MarketDataAdapter, MarketDataSubscription, MarketSymbol, OrderBookSnapshot, Timeframe } from "../market-data/types";
+import { UnifiedExecutionTicket, type UnifiedExecutionTicketPreset } from "../execution/components/UnifiedExecutionTicket";
+import type { ExecutionSource, OrderSide, OrderType } from "../execution/types";
 
 type PixiBlackChartProps = {
   marketSymbol: MarketSymbol;
@@ -272,6 +274,7 @@ export function PixiBlackChart({
   const [mountedIndicators, setMountedIndicators] = useState<Record<IndicatorKey, boolean>>(() => ({ ...visibleIndicators }));
   const [alertSettings, setAlertSettings] = useState<IndicatorAlertSettings>(defaultIndicatorAlertSettings);
   const [chartContextMenu, setChartContextMenu] = useState<ChartContextMenuState | null>(null);
+  const [executionTicketPreset, setExecutionTicketPreset] = useState<UnifiedExecutionTicketPreset | null>(null);
   const [alertToast, setAlertToast] = useState<AlertToast | null>(null);
   const [editingChartAlertId, setEditingChartAlertId] = useState<string | null>(null);
   const replaySourceRef = useRef<Candle[]>([]);
@@ -1141,7 +1144,7 @@ export function PixiBlackChart({
     if (!chartBounds) return;
     setChartContextMenu({
       x: Math.min(Math.max(8, event.clientX - chartBounds.left), Math.max(8, chartBounds.width - 252)),
-      y: Math.min(Math.max(52, event.clientY - chartBounds.top), Math.max(52, chartBounds.height - 318)),
+      y: Math.min(Math.max(52, event.clientY - chartBounds.top), Math.max(52, chartBounds.height - 620)),
       point
     });
   };
@@ -1209,6 +1212,25 @@ export function PixiBlackChart({
     if (!point) return;
     void navigator.clipboard?.writeText(String(Number(point.price.toFixed(2))));
     showLocalAlertToast("Price Copied", formatAlertPrice(point.price));
+    setChartContextMenu(null);
+  };
+
+  const openExecutionTicketFromContext = (
+    side: OrderSide,
+    orderType: OrderType,
+    source: ExecutionSource = "chart",
+    allocationEnabled = false
+  ) => {
+    const point = chartContextMenu?.point;
+    setExecutionTicketPreset({
+      symbol: displaySymbol,
+      price: point?.price,
+      side,
+      orderType,
+      source,
+      allocationEnabled,
+      marketKind: marketSymbol.marketKind
+    });
     setChartContextMenu(null);
   };
 
@@ -2837,6 +2859,52 @@ export function PixiBlackChart({
             <b>{formatAlertPrice(chartContextMenu.point.price)}</b>
           </div>
           <div className="chart-context-section">
+            <small>Execution</small>
+            <button type="button" onClick={() => openExecutionTicketFromContext("buy", "market")}>
+              <Play size={14} />
+              Execute Order
+            </button>
+            <button type="button" onClick={() => openExecutionTicketFromContext("buy", "market", "capital-allocation", true)}>
+              <Copy size={14} />
+              Execute Copy-Trade Order
+            </button>
+            <button type="button" onClick={() => openExecutionTicketFromContext("buy", "market")}>
+              <Plus size={14} />
+              Long Market / Buy Market
+            </button>
+            <button type="button" onClick={() => openExecutionTicketFromContext("sell", "market")}>
+              <Minus size={14} />
+              Short Market / Sell Market
+            </button>
+            <button type="button" onClick={() => openExecutionTicketFromContext("buy", "limit")}>
+              <Plus size={14} />
+              Buy Limit Here / Long Limit
+            </button>
+            <button type="button" onClick={() => openExecutionTicketFromContext("sell", "limit")}>
+              <Minus size={14} />
+              Sell Limit Here / Short Limit
+            </button>
+            <button type="button" onClick={() => openExecutionTicketFromContext("sell", "market", "positions")}>
+              <X size={14} />
+              Close Position
+            </button>
+            <button type="button" onClick={() => openExecutionTicketFromContext("sell", "market", "positions")}>
+              <TrendingUp size={14} />
+              Reverse Position
+            </button>
+            <button type="button" onClick={() => openExecutionTicketFromContext("sell", "limit", "positions")}>
+              <X size={14} />
+              Cancel Orders
+            </button>
+            <button type="button" onClick={() => {
+              setChartContextMenu(null);
+              showLocalAlertToast("Trading Settings", "Execution settings live in the unified ticket and Positions module.");
+            }}>
+              <SlidersHorizontal size={14} />
+              Trading Settings
+            </button>
+          </div>
+          <div className="chart-context-section">
             <small>Price Alert</small>
             <button type="button" onClick={() => createPriceAlertAtContext("testing")}>
               <Bell size={14} />
@@ -2892,6 +2960,13 @@ export function PixiBlackChart({
             </button>
           </div>
         </div>
+      )}
+
+      {executionTicketPreset && (
+        <UnifiedExecutionTicket
+          preset={executionTicketPreset}
+          onClose={() => setExecutionTicketPreset(null)}
+        />
       )}
 
       {editingChartAlert && (

@@ -67,7 +67,9 @@ export default async function handler(req, res) {
             ...req.body,
             marketKind: req.body.marketKind || "perpetual",
             limitPrice: req.body.limitPrice,
-            timeInForce: req.body.timeInForce || "gtc"
+            timeInForce: req.body.timeInForce || "gtc",
+            source: req.body.source || "order-ticket",
+            destinations: req.body.destinations || ["personal-portfolio"]
           });
           status = "accepted";
           rejectionReason = null;
@@ -92,7 +94,7 @@ export default async function handler(req, res) {
         side: req.body.side,
         order_type: req.body.orderType,
         quantity: Number(req.body.quantity),
-        quantity_mode: req.body.quantityMode || "quantity",
+        quantity_mode: req.body.quantityMode || req.body.sizingMethod || "quantity",
         limit_price: req.body.limitPrice ?? null,
         stop_price: req.body.stopPrice ?? null,
         take_profit: req.body.takeProfit ?? null,
@@ -123,7 +125,15 @@ export default async function handler(req, res) {
       event_type: status === "accepted" ? "order_accepted" : "order_rejected",
       severity: status === "accepted" ? "info" : risk.status === "approved" ? "warning" : "error",
       message: rejectionReason || `Order accepted by ${account.exchange}.`,
-      metadata: { riskStatus: risk.status, notional: risk.notional }
+      metadata: {
+        riskStatus: risk.status,
+        notional: risk.notional,
+        source: req.body.source || "order-ticket",
+        destinations: req.body.destinations || ["personal-portfolio"],
+        sizingMethod: req.body.sizingMethod || req.body.quantityMode || "quantity",
+        leverage: req.body.leverage ?? null,
+        marginMode: req.body.marginMode ?? null
+      }
     });
 
     return res.status(200).json({ order });

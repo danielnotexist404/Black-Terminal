@@ -1,31 +1,34 @@
-import { getBrokerAdapter } from "../broker/brokerRegistry";
-import { createId } from "../core/ids";
 import type { OrderRequest, OrderUpdate } from "./types";
 import type { PortfolioAccount } from "../portfolio/types";
-import { evaluateOrderRisk } from "../risk/riskEngine";
+import { blackCoreEmsService } from "./emsService";
+import { blackCoreOmsService } from "./omsService";
 
 export async function submitOrder(
   order: Omit<OrderRequest, "clientOrderId">,
   account: PortfolioAccount,
   referencePrice: number
 ): Promise<OrderUpdate> {
-  const risk = evaluateOrderRisk(order, account, account.riskControls, referencePrice);
-
-  if (risk.status === "blocked") {
-    return {
-      accountId: order.accountId,
-      exchange: order.exchange,
-      orderId: createId("risk-block"),
-      symbol: order.symbol,
-      status: "rejected",
-      filledQuantity: 0,
-      reason: risk.reasons.join(" "),
-      time: Date.now()
-    };
-  }
-
-  return getBrokerAdapter(order.exchange).placeOrder({
-    ...order,
-    clientOrderId: createId("bt")
+  const request = blackCoreOmsService.createOrder({
+    accountId: order.accountId,
+    exchange: order.exchange,
+    symbol: order.symbol,
+    marketKind: order.marketKind,
+    side: order.side,
+    orderType: order.type,
+    quantity: order.quantity,
+    sizingMethod: order.sizingMethod ?? "quantity",
+    limitPrice: order.limitPrice,
+    stopPrice: order.stopPrice,
+    referencePrice: order.referencePrice ?? referencePrice,
+    timeInForce: order.timeInForce ?? "gtc",
+    leverage: order.leverage,
+    marginMode: order.marginMode,
+    takeProfit: order.takeProfit,
+    stopLoss: order.stopLoss,
+    reduceOnly: order.reduceOnly,
+    postOnly: order.postOnly,
+    destinations: order.destinations ?? ["personal-portfolio"],
+    source: order.source ?? "order-ticket"
   });
+  return blackCoreEmsService.submit(request, { account });
 }

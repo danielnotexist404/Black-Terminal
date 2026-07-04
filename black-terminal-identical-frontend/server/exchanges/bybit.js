@@ -227,6 +227,9 @@ function buildQueryString(query) {
 function normalizeBybitOrderType(orderType) {
   if (orderType === "market") return "Market";
   if (orderType === "stop-market") return "Market";
+  if (["trailing-stop", "twap", "iceberg"].includes(orderType)) {
+    throw new Error(`${orderType} execution algorithm is not configured for Bybit yet.`);
+  }
   return "Limit";
 }
 

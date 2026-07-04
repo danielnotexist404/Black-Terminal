@@ -3155,8 +3155,10 @@ body.resizing-layout * {
   position: absolute;
   z-index: 60;
   width: 244px;
+  max-height: min(620px, calc(100vh - 94px));
   display: grid;
   gap: 7px;
+  overflow: auto;
   padding: 8px;
   border: 1px solid rgba(255, 0, 0, 0.24);
   border-radius: 4px;
@@ -3236,6 +3238,131 @@ body.resizing-layout * {
 .chart-context-section.compact {
   padding-top: 5px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.unified-ticket-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.42);
+  pointer-events: auto;
+}
+
+.unified-ticket {
+  width: min(720px, calc(100vw - 40px));
+  max-height: min(760px, calc(100vh - 80px));
+  display: grid;
+  gap: 10px;
+  overflow: auto;
+  padding: 0 12px 12px;
+  border: 1px solid rgba(255, 0, 0, 0.32);
+  border-radius: 4px;
+  background: rgba(5, 6, 7, 0.99);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.66);
+}
+
+.unified-ticket-head {
+  height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 -12px;
+  padding: 0 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  color: var(--strong);
+  font: 900 11px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.unified-ticket-head button {
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  background: #07090b;
+  color: #d9dde4;
+}
+
+.unified-ticket label,
+.unified-destination-panel {
+  display: grid;
+  gap: 5px;
+  color: #8f96a0;
+  font: 800 10px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.unified-ticket input,
+.unified-ticket select {
+  height: 32px;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 3px;
+  background: #050607;
+  color: var(--text);
+  padding: 0 9px;
+  font: 800 11px "IBM Plex Mono", monospace;
+}
+
+.unified-destination-panel {
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  padding: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.unified-destination-panel label,
+.unified-ticket-checks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.unified-ticket-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.unified-ticket-checks {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.unified-execution-matrix {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--line-soft);
+}
+
+.unified-execution-matrix div {
+  min-height: 42px;
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  background: #050607;
+  text-align: center;
+}
+
+.unified-execution-matrix span {
+  color: #777e88;
+  font: 800 9px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.unified-execution-matrix b {
+  color: var(--strong);
+  font: 800 10px "IBM Plex Mono", monospace;
 }
 
 .chart-alert-editor {

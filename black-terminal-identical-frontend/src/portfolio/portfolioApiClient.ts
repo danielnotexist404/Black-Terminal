@@ -1,5 +1,5 @@
 import { supabase } from "../lib/supabase";
-import type { OrderUpdate } from "../execution/types";
+import type { ExecutionDestination, ExecutionSource, MarginMode, OrderType, OrderUpdate, SizingMethod } from "../execution/types";
 import type { ExchangeId, MarketKind } from "../market-data/types";
 import type { PortfolioPosition } from "../positions/types";
 import { defaultRiskControls } from "../risk/types";
@@ -40,14 +40,19 @@ export type PortfolioOrderDraft = {
   symbol: string;
   marketKind: MarketKind;
   side: "buy" | "sell";
-  orderType: string;
+  orderType: OrderType;
   quantity: number;
   quantityMode?: string;
+  sizingMethod?: SizingMethod;
   referencePrice?: number;
   limitPrice?: number;
   stopPrice?: number;
   takeProfit?: number;
   stopLoss?: number;
+  leverage?: number;
+  marginMode?: MarginMode;
+  source?: ExecutionSource;
+  destinations?: ExecutionDestination[];
   postOnly?: boolean;
   reduceOnly?: boolean;
   timeInForce?: "gtc" | "ioc" | "fok";

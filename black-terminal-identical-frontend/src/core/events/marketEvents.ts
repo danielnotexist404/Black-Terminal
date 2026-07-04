@@ -8,6 +8,7 @@ import type {
   TickerSnapshot,
   TradeTick
 } from "../../market-data/types";
+import type { ExecutionEvent } from "../../execution/executionEvents";
 
 export type MarketConnectionEvent = {
   exchange: ExchangeId;
@@ -31,5 +32,6 @@ export type MarketEventMap = {
   "liquidation.received": { exchange: ExchangeId; symbol: string; price: number; quantity: number; side: "buy" | "sell"; time: number };
   "position.updated": { accountId: string; symbol: string; time: number };
   "portfolio.updated": { accountId?: string; time: number };
+  "execution.event": ExecutionEvent;
   "performance.metric": { name: string; value: number; unit: string; time: number; tags?: Record<string, string> };
 };

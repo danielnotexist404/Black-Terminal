@@ -103,6 +103,19 @@ export async function placeBybitOrder(credentials, order) {
     body.price = String(order.limitPrice);
   }
 
+  if (order.stopPrice) {
+    body.triggerPrice = String(order.stopPrice);
+    body.triggerDirection = Number(order.stopPrice) >= Number(order.referencePrice || order.limitPrice || 0) ? 1 : 2;
+  }
+
+  if (order.takeProfit) {
+    body.takeProfit = String(order.takeProfit);
+  }
+
+  if (order.stopLoss) {
+    body.stopLoss = String(order.stopLoss);
+  }
+
   if (category !== "spot" && order.reduceOnly) {
     body.reduceOnly = true;
   }
@@ -213,6 +226,7 @@ function buildQueryString(query) {
 
 function normalizeBybitOrderType(orderType) {
   if (orderType === "market") return "Market";
+  if (orderType === "stop-market") return "Market";
   return "Limit";
 }
 

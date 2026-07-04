@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { MouseEvent } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -100,6 +101,140 @@ const brokerLinksStorageKey = "bt_broker_links_v1";
 const activeExecutionVenueStorageKey = "bt_active_execution_venue_v1";
 
 export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPosition[] }) {
+  const [positionMenu, setPositionMenu] = useState<{ x: number; y: number; position: PortfolioPosition } | null>(null);
+  const [positionActionStatus, setPositionActionStatus] = useState("");
+
+  useEffect(() => {
+    const closeMenu = () => setPositionMenu(null);
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPositionMenu(null);
+    };
+
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
+
+  function openPositionMenu(event: MouseEvent<HTMLDivElement>, position: PortfolioPosition) {
+    event.preventDefault();
+    event.stopPropagation();
+    setPositionMenu({ x: event.clientX, y: event.clientY, position });
+  }
+
+  async function submitPositionAction(
+    position: PortfolioPosition,
+    action: "close" | "reverse" | "takeProfit" | "stopLoss" | "bracket"
+  ) {
+    const exitSide = position.direction === "long" ? "sell" : "buy";
+    const referencePrice = position.currentPrice || position.averagePrice;
+    setPositionMenu(null);
+    setPositionActionStatus("SUBMITTING POSITION ACTION");
+
+    const submitOrder = async (draft: Parameters<typeof submitPortfolioOrderViaApi>[0]) => {
+      const update = await submitPortfolioOrderViaApi(draft);
+      if (!update) throw new Error("AUTHENTICATED BROKER SESSION REQUIRED");
+      if (update.status === "rejected") throw new Error(update.reason || "ORDER REJECTED");
+      return update;
+    };
+
+    try {
+      if (action === "close") {
+        await submitOrder({
+          accountId: position.accountId,
+          exchange: position.exchange,
+          symbol: position.symbol,
+          marketKind: "perpetual",
+          side: exitSide,
+          orderType: "market",
+          quantity: position.quantity,
+          quantityMode: "quantity",
+          referencePrice,
+          reduceOnly: true,
+          timeInForce: "ioc"
+        });
+        setPositionActionStatus(`CLOSE ORDER SUBMITTED FOR ${position.symbol}`);
+        return;
+      }
+
+      if (action === "reverse") {
+        await submitOrder({
+          accountId: position.accountId,
+          exchange: position.exchange,
+          symbol: position.symbol,
+          marketKind: "perpetual",
+          side: exitSide,
+          orderType: "market",
+          quantity: position.quantity * 2,
+          quantityMode: "quantity",
+          referencePrice,
+          reduceOnly: false,
+          timeInForce: "ioc"
+        });
+        setPositionActionStatus(`REVERSE ORDER SUBMITTED FOR ${position.symbol}`);
+        return;
+      }
+
+      const takeProfit = action === "takeProfit" || action === "bracket"
+        ? Number(window.prompt(`Take profit price for ${position.symbol}`, position.takeProfit ? String(position.takeProfit) : ""))
+        : undefined;
+      const stopLoss = action === "stopLoss" || action === "bracket"
+        ? Number(window.prompt(`Stop loss price for ${position.symbol}`, position.stopLoss ? String(position.stopLoss) : ""))
+        : undefined;
+
+      if ((action === "takeProfit" || action === "bracket") && (!takeProfit || takeProfit <= 0)) {
+        setPositionActionStatus("TAKE PROFIT UPDATE CANCELLED");
+        return;
+      }
+      if ((action === "stopLoss" || action === "bracket") && (!stopLoss || stopLoss <= 0)) {
+        setPositionActionStatus("STOP LOSS UPDATE CANCELLED");
+        return;
+      }
+
+      if (takeProfit) {
+        await submitOrder({
+          accountId: position.accountId,
+          exchange: position.exchange,
+          symbol: position.symbol,
+          marketKind: "perpetual",
+          side: exitSide,
+          orderType: "limit",
+          quantity: position.quantity,
+          quantityMode: "quantity",
+          referencePrice,
+          limitPrice: takeProfit,
+          takeProfit,
+          reduceOnly: true,
+          timeInForce: "gtc"
+        });
+      }
+
+      if (stopLoss) {
+        await submitOrder({
+          accountId: position.accountId,
+          exchange: position.exchange,
+          symbol: position.symbol,
+          marketKind: "perpetual",
+          side: exitSide,
+          orderType: "stop-market",
+          quantity: position.quantity,
+          quantityMode: "quantity",
+          referencePrice,
+          stopPrice: stopLoss,
+          stopLoss,
+          reduceOnly: true,
+          timeInForce: "gtc"
+        });
+      }
+
+      setPositionActionStatus(action === "bracket" ? `TP/SL ORDERS SUBMITTED FOR ${position.symbol}` : `POSITION PROTECTION UPDATED FOR ${position.symbol}`);
+    } catch (error) {
+      setPositionActionStatus(error instanceof Error ? error.message.toUpperCase() : String(error));
+    }
+  }
+
   return (
     <div className="portfolio-positions-panel">
       <div className="pm-table-head pm-positions-grid">
@@ -119,7 +254,7 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
         <span>Exchange</span>
       </div>
       {positions.map((position) => (
-        <div className="pm-table-row pm-positions-grid" key={position.id}>
+        <div className="pm-table-row pm-positions-grid position-row-actionable" key={position.id} onContextMenu={(event) => openPositionMenu(event, position)}>
           <b>{position.symbol}</b>
           <span className={position.direction === "long" ? "green" : "red"}>{position.direction.toUpperCase()}</span>
           <span>{compact.format(position.quantity)}</span>
@@ -136,9 +271,27 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
           <span>{position.exchange.toUpperCase()}</span>
         </div>
       ))}
+      {positionActionStatus && <div className="positions-action-status">{positionActionStatus}</div>}
       {positions.length === 0 && (
         <div className="positions-empty-state">
           NO LIVE POSITIONS. CONNECT A BROKER OR DEX WALLET TO SYNC REAL ACCOUNT EXPOSURE.
+        </div>
+      )}
+      {positionMenu && (
+        <div
+          className="position-context-menu"
+          style={{ left: positionMenu.x, top: positionMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="position-context-head">
+            <b>{positionMenu.position.symbol}</b>
+            <span>{positionMenu.position.direction.toUpperCase()} {compact.format(positionMenu.position.quantity)}</span>
+          </div>
+          <button onClick={() => submitPositionAction(positionMenu.position, "close")}>Close Position</button>
+          <button onClick={() => submitPositionAction(positionMenu.position, "reverse")}>Reverse Position</button>
+          <button onClick={() => submitPositionAction(positionMenu.position, "takeProfit")}>Change Take Profit</button>
+          <button onClick={() => submitPositionAction(positionMenu.position, "stopLoss")}>Change Stop Loss</button>
+          <button onClick={() => submitPositionAction(positionMenu.position, "bracket")}>Change TP/SL Bracket</button>
         </div>
       )}
     </div>

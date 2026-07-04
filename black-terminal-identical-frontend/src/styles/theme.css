@@ -4927,6 +4927,75 @@ body.resizing-layout * {
   letter-spacing: 0.04em;
 }
 
+.position-row-actionable {
+  cursor: context-menu;
+}
+
+.position-row-actionable:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.positions-action-status {
+  min-width: 1060px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-top: 1px solid rgba(245, 159, 24, 0.18);
+  color: #f2c14d;
+  background: rgba(245, 159, 24, 0.06);
+  font: 800 10px "IBM Plex Mono", monospace;
+  letter-spacing: 0.04em;
+}
+
+.position-context-menu {
+  position: fixed;
+  z-index: 12000;
+  width: 190px;
+  border: 1px solid rgba(255, 0, 0, 0.34);
+  border-radius: 4px;
+  background: rgba(5, 6, 8, 0.98);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.62);
+  overflow: hidden;
+}
+
+.position-context-head {
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 0, 0, 0.08);
+}
+
+.position-context-head b {
+  color: var(--strong);
+  font: 800 11px "IBM Plex Mono", monospace;
+}
+
+.position-context-head span {
+  color: #aeb4bd;
+  font: 800 9px "IBM Plex Mono", monospace;
+}
+
+.position-context-menu button {
+  width: 100%;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+  background: transparent;
+  color: #d9dde4;
+  padding: 0 10px;
+  font: 800 10px "IBM Plex Mono", monospace;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.position-context-menu button:hover {
+  color: #fff;
+  background: rgba(255, 0, 0, 0.16);
+}
+
 .positions-connect-dock {
   min-width: 0;
   min-height: 0;

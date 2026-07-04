@@ -188,6 +188,14 @@ function mapOrder(order: any): OrderUpdate {
 
 function buildCurves(summary: PortfolioSnapshot["summary"]) {
   const base = summary.totalEquity || 0;
+  if (base <= 0) {
+    return {
+      equity: [],
+      drawdown: [],
+      dailyReturns: [],
+      exposure: []
+    };
+  }
 
   return {
     equity: [0.97, 0.985, 0.978, 0.995, 0.99, 1].map((multiplier, index) => ({
@@ -205,7 +213,7 @@ function buildCurves(summary: PortfolioSnapshot["summary"]) {
     exposure: [
       { label: "Margin", value: summary.totalEquity > 0 ? Math.round((summary.marginUsed / summary.totalEquity) * 100) : 0 },
       { label: "Cash", value: summary.totalEquity > 0 ? Math.round((summary.availableMargin / summary.totalEquity) * 100) : 0 }
-    ]
+    ].filter((item) => item.value > 0)
   };
 }
 

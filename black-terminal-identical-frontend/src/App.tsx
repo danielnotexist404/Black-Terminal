@@ -593,6 +593,32 @@ export default function App() {
     return () => window.removeEventListener("click", closeMenu);
   }, []);
 
+  useEffect(() => {
+    const blockContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+    };
+    const blockBrowserShortcuts = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      const modified = event.ctrlKey || event.metaKey;
+      const blocked =
+        (modified && ["s", "u", "p"].includes(key)) ||
+        (event.ctrlKey && event.shiftKey && ["i", "j", "c"].includes(key)) ||
+        event.key === "F12";
+
+      if (blocked) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+
+    window.addEventListener("contextmenu", blockContextMenu);
+    window.addEventListener("keydown", blockBrowserShortcuts, true);
+    return () => {
+      window.removeEventListener("contextmenu", blockContextMenu);
+      window.removeEventListener("keydown", blockBrowserShortcuts, true);
+    };
+  }, []);
+
   const selectedTimeframe = timeframes.find((item) => item.value === timeframe) ?? timeframes[2];
   const selectedChartType = chartTypes.find((item) => item.value === chartType) ?? chartTypes[0];
   const sortedSymbols = useMemo(() => {

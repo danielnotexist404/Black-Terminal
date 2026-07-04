@@ -4957,3 +4957,98 @@ body.resizing-layout * {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Institutional Layout Responsive Optimizations */
+@media (max-width: 1400px) {
+  .brand {
+    width: auto !important;
+    min-width: 0 !important;
+    gap: 8px !important;
+  }
+  .brand-sub {
+    display: none !important;
+  }
+  .workspace-control span {
+    display: none !important;
+  }
+  .timeframes button:not(.active):not(.tf-chevron) {
+    display: none !important;
+  }
+  .timeframes {
+    padding: 0 4px !important;
+  }
+  .topbar {
+    gap: 6px !important;
+    padding: 0 10px !important;
+  }
+}
+
+@media (max-width: 1200px) {
+  .latency {
+    display: none !important;
+  }
+  .top-separator {
+    display: none !important;
+  }
+  .topbar > button.icon-btn:nth-last-of-type(-n+3) {
+    display: none !important;
+  }
+  .replay-controls span {
+    display: none !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-shell {
+    grid-template-columns: 56px 1fr !important;
+  }
+  .sidebar {
+    width: 56px !important;
+  }
+  .sidebar .nav span {
+    display: none !important;
+  }
+  .sidebar .nav {
+    padding: 0 !important;
+    justify-content: center !important;
+    gap: 0 !important;
+    height: 48px !important;
+  }
+  .sidebar-bottom {
+    display: none !important;
+  }
+  .brand > div:last-child {
+    display: none !important;
+  }
+  .brand-mark {
+    width: 36px !important;
+    height: 32px !important;
+    flex: 0 0 36px !important;
+  }
+  .symbol-control {
+    padding: 0 6px !important;
+    height: 32px !important;
+    font-size: 11px !important;
+  }
+  .symbol-control .coin-token {
+    display: none !important;
+  }
+  .tool-cluster {
+    display: none !important;
+  }
+  .exchange-control {
+    display: none !important;
+  }
+  .workspace-control {
+    display: none !important;
+  }
+  .replay-controls {
+    display: none !important;
+  }
+  .upgrade-btn {
+    margin-left: 4px !important;
+    padding: 4px 8px !important;
+    font-size: 9px !important;
+  }
+}
+

@@ -60,6 +60,9 @@ import type { IndicatorAlertDefinition } from "./automation/alerts";
 import { ScannerPage } from "./modules/scanner/components/ScannerPage";
 import type { ScannerResult } from "./modules/scanner/types/scanner.types";
 import { StrategyLabPage } from "./modules/strategy-lab/components/StrategyLabPage";
+import PortfolioManagerPage, { PortfolioPositionsPanel } from "./modules/portfolio-manager/components/PortfolioManagerPage";
+import { getPortfolioSnapshot } from "./portfolio/portfolioStore";
+import type { PortfolioPosition } from "./positions/types";
 import type { StrategyRuntimeKind } from "./modules/strategy-lab/types/strategy.types";
 import type {
   ChartDisplayType,
@@ -396,6 +399,8 @@ export default function App() {
       { label: "BlackGPT", icon: Bot },
       { label: "INDICATORS", icon: Activity },
       { label: "SCANNER", icon: Radar },
+      { label: "POSITIONS", icon: LineChart },
+      { label: "PORTFOLIO MANAGER", icon: LayoutDashboard },
       { label: "ALERTS", icon: Bell },
       { label: "SCRIPT EDITOR", icon: Code2 },
       { label: "STRATEGY LAB", icon: StrategyLabIcon },
@@ -492,6 +497,23 @@ export default function App() {
   });
   const [compiledPlots, setCompiledPlots] = useState<CompiledPlot[]>([]);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; symbol: string } | null>(null);
+  const [portfolioPositions, setPortfolioPositions] = useState<PortfolioPosition[]>([]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadPortfolioPositions = async () => {
+      const snapshot = await getPortfolioSnapshot();
+      if (mounted) setPortfolioPositions(snapshot.positions);
+    };
+
+    void loadPortfolioPositions();
+    const timer = window.setInterval(loadPortfolioPositions, 5000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   // Ping update loop
   useEffect(() => {
@@ -1055,7 +1077,7 @@ export default function App() {
     setActiveNav("ALERTS");
   }, []);
 
-  const showModuleOverlay = activeNav !== "CHART" && activeNav !== "SCRIPT EDITOR" && activeNav !== "INDICATORS" && activeNav !== "ALERTS" && activeNav !== "STRATEGY LAB" && activeNav !== "SCANNER";
+  const showModuleOverlay = activeNav !== "CHART" && activeNav !== "SCRIPT EDITOR" && activeNav !== "INDICATORS" && activeNav !== "ALERTS" && activeNav !== "STRATEGY LAB" && activeNav !== "SCANNER" && activeNav !== "POSITIONS" && activeNav !== "PORTFOLIO MANAGER";
 
   if (!currentUser) {
     return (
@@ -1571,6 +1593,10 @@ export default function App() {
             recentCandles={recentCandles}
           />
         </div>
+      ) : activeNav === "PORTFOLIO MANAGER" ? (
+        <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
+          <PortfolioManagerPage onClose={() => setActiveNav("CHART")} />
+        </div>
       ) : (
         <main className={terminalSettings.showDOM ? "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>
         <section className={drawingsEnabled ? "chart-panel drawing-tools-open" : "chart-panel"}>
@@ -1725,7 +1751,7 @@ export default function App() {
             </div>
           </aside>
         )}
-        <section className={activeNav === "SCRIPT EDITOR" ? "bottom-panel script-mode" : activeNav === "ALERTS" ? "bottom-panel alerts-mode" : "bottom-panel"}>
+        <section className={activeNav === "SCRIPT EDITOR" ? "bottom-panel script-mode" : activeNav === "ALERTS" ? "bottom-panel alerts-mode" : activeNav === "POSITIONS" ? "bottom-panel positions-mode" : "bottom-panel"}>
           {activeNav === "SCRIPT EDITOR" ? (
             <ScriptEditor
               symbol={symbol.label}
@@ -1743,6 +1769,8 @@ export default function App() {
               eventLogs={alertEventLogs}
               onClearEventLogs={handleClearEventLogs}
             />
+          ) : activeNav === "POSITIONS" ? (
+            <PortfolioPositionsPanel positions={portfolioPositions} />
           ) : (
             <div className="bottom-blank" />
           )}

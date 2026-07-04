@@ -1,17 +1,17 @@
 PROJECT OBJECTIVE
 
-Transform Black Terminal into a professional institutional-grade desktop trading platform capable of:
+Transform Black Terminal into Two professional institutional-grade web & desktop trading platform versions  capable of:
 
 Professional charting
 Professional order execution
-Multi-exchange connectivity
+Multi-exchange connectivity support
 Multi-supported wallet connectivity including DEXes. 
-Multi-investor account management
+Multi-investor/copy-trading account management
 Portfolio monitoring
 Institutional risk management
 Ultra-low latency order routing
 
-The application MUST remain 100% desktop based.
+The downloadable client version application MUST remain 100% desktop based.
 
 NO cloud server.
 
@@ -19,7 +19,7 @@ NO web application.
 
 NO SaaS architecture.
 
-Everything runs locally exactly like MetaTrader 5.
+Everything runs locally exactly like MetaTrader 5 or to choose to connect to the cloud for 24/7 alert support as an optional feature.
 
 OVERALL ARCHITECTURE
 

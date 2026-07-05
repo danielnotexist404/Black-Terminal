@@ -61,10 +61,14 @@ src-tauri/
   src/lib.rs                  Tauri command layer
 
 docs/
+  README.md                   Documentation index and update rules
   PROJECT_BRIEF.md            Product intent and principles
+  PLATFORM_BUILD_MANUAL.md    End-to-end platform build manual
+  IMPLEMENTATION_HISTORY.md   Chronological engineering record
   ARCHITECTURE.md             Current and target architecture
   EXCHANGE_AUTOMATION.md      Exchange data, trading, and webhook strategy plan
   PYTHON_INDICATORS.md        Indicator runtime contract
+  SUPABASE_MIGRATIONS.md      Supabase schema migration ledger
   ROADMAP.md                  Suggested milestone sequence
 
 examples/
@@ -73,10 +77,10 @@ examples/
 
 ## Current Gaps
 
-- Market data is still mocked.
-- Exchange adapters are typed and documented but not wired to live REST/WebSocket streams yet.
+- Market data has a Black Core adapter foundation, but more venue paths still need production hardening.
+- Exchange adapters are typed and partially wired; duplicated venue WebSocket logic should continue moving into the shared manager.
 - Indicator execution is documented and typed but not implemented.
-- Account trading and automation are typed and documented but not implemented.
+- Account trading has Vercel/Supabase and Bybit foundations, but more broker adapters and DEX protocol adapters are still required.
 - Chart rendering is custom, but candle geometry is still immediate-mode drawing rather than
   batched geometry.
 - There are no automated tests yet for scale math, candle buffers, or protocol validation.

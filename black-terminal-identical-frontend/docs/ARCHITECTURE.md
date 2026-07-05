@@ -15,8 +15,11 @@ Custom chart engine
 Native command layer
   src-tauri/src/lib.rs
 
-Mock market data
-  src/data/mockMarket.ts
+Black Core platform services
+  src/core/registerBlackCore.ts
+  src/core/events/marketEvents.ts
+  src/market-data/engine/marketDataEngine.ts
+  src/connectivity/connectionManager.ts
 
 Exchange and automation contracts
   src/market-data/types.ts
@@ -109,6 +112,24 @@ webhook handling:
 - Run every automated order through a risk guard.
 - Keep full logs for trigger, action, decision, exchange response, and timestamp.
 - Treat inbound webhooks as untrusted until signed and validated.
+
+## Phase III Connection Rule
+
+The Black Core Connection Manager is the single runtime source of truth for connected accounts.
+
+The following modules must consume connection diagnostics from it instead of keeping independent
+broker or wallet account stores:
+
+- Positions
+- Unified Execution Ticket
+- OMS / EMS routing
+- Broker Router
+- Portfolio Statistics
+- Allocation Engine
+- Investment Groups
+
+Wallets such as MetaMask and Phantom are signer connections. They do not become futures venues until
+a protocol adapter reports executable perpetual capabilities.
 
 ## Near-Term Engineering Decisions
 

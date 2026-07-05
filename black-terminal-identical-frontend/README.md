@@ -4,11 +4,15 @@ This version removes TradingView Lightweight Charts and uses a custom GPU-render
 
 ## Workspace docs
 
+- `docs/README.md` - documentation index and rules
 - `docs/PROJECT_BRIEF.md` - product direction and principles
+- `docs/PLATFORM_BUILD_MANUAL.md` - how the platform is built end to end
+- `docs/IMPLEMENTATION_HISTORY.md` - chronological engineering record
 - `docs/ARCHITECTURE.md` - current structure and target architecture
 - `docs/EXCHANGE_AUTOMATION.md` - exchange data, trading, and webhook strategy plan
 - `docs/WORKSPACE.md` - local setup, commands, and directory guide
 - `docs/PYTHON_INDICATORS.md` - draft Python indicator contract
+- `docs/SUPABASE_MIGRATIONS.md` - Supabase schema migration ledger
 - `docs/ROADMAP.md` - suggested milestone sequence
 
 ## Why this version

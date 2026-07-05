@@ -80,8 +80,11 @@ import type {
 import { defaultIndicatorAdvancedSettings } from "./chart-engine/profile/volumeProfileDefaults";
 import { dbGetUsers, dbUpdateUser, dbAddAuditLog } from "./lib/supabase";
 import { getMarketDataEngineAdapter } from "./market-data/engine/marketDataEngine";
-import { ExchangeOption, MarketSymbolOption, marketCatalog } from "./market-data/marketCatalog";
-import type { MarketSymbol, Timeframe } from "./market-data/types";
+import { ExchangeOption, MarketSymbolOption, getExchangeOption, marketCatalog } from "./market-data/marketCatalog";
+import type { ExchangeId, MarketSymbol, Timeframe } from "./market-data/types";
+import { blackCoreConnectionManager } from "./connectivity/connectionManager";
+import { readActiveExecutionVenueId, subscribeActiveExecutionVenue } from "./connectivity/activeExecutionVenue";
+import type { ConnectionDiagnostics } from "./connectivity/types";
 
 const nav = [
   { label: "WATCHLIST", icon: BookOpen },
@@ -303,6 +306,22 @@ function toSymbolOption(symbol: MarketSymbol): MarketSymbolOption {
   };
 }
 
+function isCatalogExchange(provider: string): provider is ExchangeId {
+  return marketCatalog.some((exchange) => exchange.id === provider);
+}
+
+function exchangeForConnection(connection: ConnectionDiagnostics | null) {
+  if (!connection) return null;
+  if (isCatalogExchange(connection.provider)) return getExchangeOption(connection.provider);
+  if (typeof connection.metadata.venue === "string" && isCatalogExchange(connection.metadata.venue)) {
+    return getExchangeOption(connection.metadata.venue);
+  }
+  if (typeof connection.metadata.protocol === "string" && isCatalogExchange(connection.metadata.protocol)) {
+    return getExchangeOption(connection.metadata.protocol);
+  }
+  return null;
+}
+
 function loadStoredAlerts(): IndicatorAlertDefinition[] {
   if (typeof window === "undefined") return [];
 
@@ -500,6 +519,35 @@ export default function App() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; symbol: string } | null>(null);
   const [portfolioPositions, setPortfolioPositions] = useState<PortfolioPosition[]>([]);
   const [portfolioOrders, setPortfolioOrders] = useState<PortfolioSnapshot["orders"]>([]);
+  const [connectionDiagnostics, setConnectionDiagnostics] = useState<ConnectionDiagnostics[]>(() => blackCoreConnectionManager.listDiagnostics());
+  const [activeExecutionVenueId, setActiveExecutionVenueIdState] = useState<string | null>(() => readActiveExecutionVenueId());
+
+  useEffect(() => blackCoreConnectionManager.subscribe(setConnectionDiagnostics), []);
+  useEffect(() => subscribeActiveExecutionVenue(setActiveExecutionVenueIdState), []);
+
+  const activeExecutionConnection = useMemo(() => {
+    const activeConnections = connectionDiagnostics.filter((connection) => !["disconnected", "offline", "unsupported"].includes(connection.status));
+    return activeConnections.find((connection) => connection.id === activeExecutionVenueId) ?? null;
+  }, [activeExecutionVenueId, connectionDiagnostics]);
+
+  const lockedMarketExchange = useMemo(() => exchangeForConnection(activeExecutionConnection), [activeExecutionConnection]);
+  const marketScopeLocked = Boolean(activeExecutionConnection && lockedMarketExchange);
+  const exchangeMenuOptions = lockedMarketExchange ? [lockedMarketExchange] : marketCatalog;
+  const marketScopeLabel = activeExecutionConnection && lockedMarketExchange
+    ? `${activeExecutionConnection.label} -> ${lockedMarketExchange.label}`
+    : "";
+
+  useEffect(() => {
+    if (!lockedMarketExchange) return;
+    setSelectedExchange((current) => current.id === lockedMarketExchange.id ? current : lockedMarketExchange);
+    setAvailableSymbols(lockedMarketExchange.symbols);
+    setSymbol((current) => {
+      if (current.exchange === lockedMarketExchange.id) return current;
+      return lockedMarketExchange.symbols[0];
+    });
+    setSymbolQuery("");
+    setOpenMenu((current) => current === "exchange" ? null : current);
+  }, [lockedMarketExchange]);
 
   useEffect(() => {
     let mounted = true;
@@ -899,6 +947,7 @@ export default function App() {
 
   const selectExchange = (exchange: ExchangeOption) => {
     if (exchange.status === "NEXT") return;
+    if (lockedMarketExchange && exchange.id !== lockedMarketExchange.id) return;
     setSelectedExchange(exchange);
     setSymbol(exchange.symbols[0]);
     setSymbolQuery("");
@@ -1068,6 +1117,7 @@ export default function App() {
 
   const openScannerResultChart = useCallback((nextSymbol: MarketSymbol, nextTimeframe: Timeframe) => {
     const nextExchange = marketCatalog.find((exchange) => exchange.id === nextSymbol.exchange);
+    if (lockedMarketExchange && nextExchange?.id !== lockedMarketExchange.id) return;
     if (nextExchange?.status === "REST LIVE") {
       setSelectedExchange(nextExchange);
       const catalogSymbol = nextExchange.symbols.find((item) => item.rawSymbol === nextSymbol.rawSymbol) ?? toSymbolOption(nextSymbol);
@@ -1080,7 +1130,7 @@ export default function App() {
     setReplayControls(defaultReplayControls);
     setReplayStatus(defaultReplayStatus);
     setActiveNav("CHART");
-  }, []);
+  }, [lockedMarketExchange]);
 
   const createAlertFromScannerResult = useCallback((result: ScannerResult) => {
     if (!result.lastPrice) return;
@@ -1155,7 +1205,8 @@ export default function App() {
 
         <div className="menu-wrap">
           <button
-            className="symbol-control"
+            className={marketScopeLocked ? "symbol-control locked" : "symbol-control"}
+            title={marketScopeLocked ? `Markets locked to ${marketScopeLabel}` : undefined}
             onClick={() => {
               setSymbolQuery("");
               setOpenMenu(openMenu === "symbol" ? null : "symbol");
@@ -1163,10 +1214,17 @@ export default function App() {
           >
             <span className="coin-token">{symbol.token.slice(0, 3)}</span>
             <span>{symbol.label}</span>
+            {marketScopeLocked && <Lock size={12} />}
             <ChevronDown size={15} />
           </button>
           {openMenu === "symbol" && (
             <div className="dropdown-menu symbol-menu">
+              {marketScopeLocked && (
+                <div className="dropdown-scope-lock">
+                  <Lock size={12} />
+                  <span>MARKETS LOCKED TO {lockedMarketExchange?.label.toUpperCase()}</span>
+                </div>
+              )}
               <label className="dropdown-search">
                 <Search size={13} />
                 <input
@@ -1332,16 +1390,24 @@ export default function App() {
 
         <div className="menu-wrap">
           <button
-            className="exchange-control"
+            className={marketScopeLocked ? "exchange-control locked" : "exchange-control"}
+            title={marketScopeLocked ? `Exchange locked by ${marketScopeLabel}` : undefined}
             onClick={() => setOpenMenu(openMenu === "exchange" ? null : "exchange")}
           >
             <span className="exchange-badge">{selectedExchange.label.slice(0, 2).toUpperCase()}</span>
             <span>{selectedExchange.label.toUpperCase()}</span>
+            {marketScopeLocked && <Lock size={12} />}
             <ChevronDown size={15} />
           </button>
           {openMenu === "exchange" && (
             <div className="dropdown-menu exchange-menu">
-              {marketCatalog.map((exchange) => (
+              {marketScopeLocked && (
+                <div className="dropdown-scope-lock">
+                  <Lock size={12} />
+                  <span>LINKED ACCOUNT SCOPE</span>
+                </div>
+              )}
+              {exchangeMenuOptions.map((exchange) => (
                 <button
                   className={exchange.id === selectedExchange.id ? "menu-option selected" : "menu-option"}
                   disabled={exchange.status === "NEXT"}

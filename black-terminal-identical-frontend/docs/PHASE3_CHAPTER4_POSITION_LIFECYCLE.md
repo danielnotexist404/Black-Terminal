@@ -186,6 +186,18 @@ Important limitation:
 
 The frontend protocol adapter can connect MetaMask and expose protocol capabilities, but live Hyperliquid execution still requires a server-side signing/order relay before real order placement is allowed. The UI therefore enables futures capability detection while blocking live protocol submission with an explicit message until that relay exists.
 
+## Linked Market Scope
+
+When an active broker or protocol connection is selected, the top market selector locks to that venue's market universe.
+
+Examples:
+
+- Hyperliquid / MetaMask active connection -> top selector shows Hyperliquid symbols only.
+- Bybit active broker connection -> top selector shows Bybit markets only.
+- Binance active broker connection -> top selector shows Binance markets only.
+
+This keeps chart context, order book, tape, execution ticket, and Positions aligned with the account that will receive the execution.
+
 ## Remaining Work
 
 - Persist managed positions, protection records, timeline events, notes, and tags in Supabase.

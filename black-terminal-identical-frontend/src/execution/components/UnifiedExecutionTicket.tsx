@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Play, X } from "lucide-react";
 import { blackCoreConnectionManager } from "../../connectivity/connectionManager";
+import { readActiveExecutionVenueId } from "../../connectivity/activeExecutionVenue";
 import type { ConnectionDiagnostics } from "../../connectivity/types";
 import { submitPortfolioOrderViaApi } from "../../portfolio/portfolioApiClient";
 import type { ExecutionDestination, ExecutionSource, MarginMode, OrderSide, OrderType, SizingMethod, TimeInForce } from "../types";
@@ -35,8 +36,6 @@ type UnifiedExecutionTicketProps = {
   onClose: () => void;
 };
 
-const activeExecutionVenueStorageKey = "bt_active_execution_venue_v1";
-
 const orderTypes: OrderType[] = ["market", "limit", "stop-market", "stop-limit", "trailing-stop", "bracket", "twap", "iceberg"];
 const sizingMethods: Array<{ value: SizingMethod; label: string }> = [
   { value: "quantity", label: "Quantity" },
@@ -52,7 +51,7 @@ const sizingMethods: Array<{ value: SizingMethod; label: string }> = [
 export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTicketProps) {
   const [connections, setConnections] = useState<ConnectionDiagnostics[]>(() => blackCoreConnectionManager.listDiagnostics());
   const activeConnections = useMemo(() => connections.filter((connection) => !["disconnected", "offline", "unsupported"].includes(connection.status)), [connections]);
-  const activeVenueId = typeof window === "undefined" ? null : localStorage.getItem(activeExecutionVenueStorageKey);
+  const activeVenueId = readActiveExecutionVenueId();
   const defaultConnection = activeConnections.find((connection) => connection.id === activeVenueId) ?? activeConnections[0] ?? null;
   const [connectionId, setConnectionId] = useState(defaultConnection?.id ?? "");
   const selectedConnection = activeConnections.find((connection) => connection.id === connectionId) ?? defaultConnection;
@@ -112,7 +111,7 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
       return;
     }
     if (selectedConnection.category === "protocol") {
-      setStatus("PROTOCOL CONNECTED. SERVER-SIDE SIGNING AND ORDER RELAY ARE REQUIRED FOR LIVE EXECUTION.");
+      setStatus(`${selectedConnection.label.toUpperCase()} CONNECTED. LIVE ORDERS REQUIRE SERVER-SIDE SIGNING RELAY.`);
       return;
     }
     if (!selectedConnection.accountId) {
@@ -240,7 +239,7 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
 
         <div className="unified-execution-matrix">
           <div><span>Validation Status</span><b>{selectedConnection && Number(quantity) > 0 ? "READY" : "PENDING"}</b></div>
-          <div><span>Risk Status</span><b>{selectedConnection?.category === "wallet" ? "ROUTER REQUIRED" : "SERVER CHECK"}</b></div>
+          <div><span>Risk Status</span><b>{selectedConnection?.category === "wallet" ? "ROUTER REQUIRED" : selectedConnection?.category === "protocol" ? "RELAY REQUIRED" : "SERVER CHECK"}</b></div>
           <div><span>Execution Status</span><b>{status || "NOT SUBMITTED"}</b></div>
         </div>
 

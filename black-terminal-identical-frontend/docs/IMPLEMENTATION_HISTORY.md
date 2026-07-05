@@ -226,6 +226,7 @@ Changed:
 - Draggable protection lines update Position Manager and publish lifecycle events.
 - Unified Execution Ticket supports TP/SL/trailing-stop position presets.
 - Added protocol framework and Hyperliquid protocol adapter.
+- Active broker/protocol connection now scopes the top market selector to the linked venue's market universe.
 
 Why:
 

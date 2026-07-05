@@ -133,6 +133,17 @@ body.resizing-layout * {
   white-space: nowrap;
 }
 
+.symbol-control.locked,
+.exchange-control.locked {
+  border-color: rgba(255, 0, 0, 0.32);
+  box-shadow: inset 0 -1px 0 rgba(255, 0, 0, 0.42);
+}
+
+.symbol-control.locked svg,
+.exchange-control.locked svg {
+  color: var(--red-hot);
+}
+
 .menu-wrap {
   position: relative;
   display: inline-flex;
@@ -198,12 +209,13 @@ body.resizing-layout * {
 .symbol-menu {
   width: 264px;
   max-height: min(520px, calc(100vh - 116px));
-  display: grid;
-  grid-template-rows: 38px minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
 .symbol-list {
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
@@ -287,6 +299,7 @@ body.resizing-layout * {
 }
 
 .dropdown-search {
+  flex: 0 0 auto;
   height: 34px;
   display: flex;
   align-items: center;
@@ -297,6 +310,22 @@ body.resizing-layout * {
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.025);
   color: #777d86;
+}
+
+.dropdown-scope-lock {
+  flex: 0 0 auto;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 5px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 0, 0, 0.24);
+  border-radius: 3px;
+  background: rgba(255, 0, 0, 0.08);
+  color: var(--red-hot);
+  font: 800 9px "IBM Plex Mono", monospace;
+  letter-spacing: 0.06em;
 }
 
 .dropdown-search input {

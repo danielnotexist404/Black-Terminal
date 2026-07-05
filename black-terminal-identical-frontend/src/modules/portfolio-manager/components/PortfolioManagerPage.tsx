@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { getCapabilities, resolveProductTier, type CapabilityUser } from "../../../core/permissions/capabilities";
 import { blackCoreConnectionManager } from "../../../connectivity/connectionManager";
+import { readActiveExecutionVenueId, setActiveExecutionVenueId } from "../../../connectivity/activeExecutionVenue";
 import type { ConnectionCapability, ConnectionDiagnostics } from "../../../connectivity/types";
 import { submitPortfolioOrderViaApi } from "../../../portfolio/portfolioApiClient";
 import type { ExchangeConnectionDraft, PortfolioSnapshot } from "../../../portfolio/types";
@@ -83,8 +84,6 @@ const walletProviders: Array<{ id: WalletProviderId; label: string; chainHint: s
   { id: "metamask", label: "MetaMask", chainHint: "Ethereum / BNB Chain", defaultDex: "uniswap" },
   { id: "phantom", label: "Phantom", chainHint: "Solana", defaultDex: "jupiter" }
 ];
-
-const activeExecutionVenueStorageKey = "bt_active_execution_venue_v1";
 
 export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPosition[] }) {
   const [managedPositions, setManagedPositions] = useState<ManagedPosition[]>(() => blackCorePositionManager.listActivePositions());
@@ -373,7 +372,7 @@ export function PositionsWorkspace({
   const [connectionDiagnostics, setConnectionDiagnostics] = useState<ConnectionDiagnostics[]>(() => blackCoreConnectionManager.listDiagnostics());
   const [activeVenueId, setActiveVenueId] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
-    return localStorage.getItem(activeExecutionVenueStorageKey);
+    return readActiveExecutionVenueId();
   });
 
   useEffect(() => blackCoreConnectionManager.subscribe(setConnectionDiagnostics), []);
@@ -404,11 +403,7 @@ export function PositionsWorkspace({
   const activeExecutionVenue = executionVenues.find((venue) => venue.id === activeVenueId) ?? executionVenues[0] ?? null;
 
   useEffect(() => {
-    if (activeVenueId) {
-      localStorage.setItem(activeExecutionVenueStorageKey, activeVenueId);
-    } else {
-      localStorage.removeItem(activeExecutionVenueStorageKey);
-    }
+    setActiveExecutionVenueId(activeVenueId);
   }, [activeVenueId]);
 
   useEffect(() => {
@@ -712,7 +707,7 @@ function ExecutionDock({
 
     if (venue.kind === "dex") {
       setSubmitStatus(isProtocol
-        ? "PROTOCOL CONNECTED. SERVER-SIDE SIGNING AND ORDER RELAY ARE REQUIRED FOR LIVE EXECUTION."
+        ? `${venue.label.toUpperCase()} CONNECTED. LIVE ORDERS REQUIRE SERVER-SIDE SIGNING RELAY.`
         : venue.capabilities.includes("swap")
         ? "DEX QUOTE / SIGN FLOW IS NEXT"
         : "WALLET CONNECTED. EXECUTION REQUIRES A DEX ROUTING ADAPTER.");

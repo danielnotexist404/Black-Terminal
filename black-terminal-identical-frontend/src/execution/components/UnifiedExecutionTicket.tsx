@@ -5,6 +5,8 @@ import type { ConnectionDiagnostics } from "../../connectivity/types";
 import { submitPortfolioOrderViaApi } from "../../portfolio/portfolioApiClient";
 import type { ExecutionDestination, ExecutionSource, MarginMode, OrderSide, OrderType, SizingMethod, TimeInForce } from "../types";
 import type { ExchangeId, MarketKind } from "../../market-data/types";
+import { blackCorePositionManager } from "../../positions/positionManager";
+import type { PositionProtectionType } from "../../positions/types";
 
 export type UnifiedExecutionTicketPreset = {
   symbol: string;
@@ -14,6 +16,18 @@ export type UnifiedExecutionTicketPreset = {
   source: ExecutionSource;
   allocationEnabled?: boolean;
   marketKind?: MarketKind;
+  quantity?: string;
+  stopPrice?: string;
+  takeProfit?: string;
+  stopLoss?: string;
+  reduceOnly?: boolean;
+  positionId?: string;
+  protectionIntent?: PositionProtectionType;
+  trailingStopEnabled?: boolean;
+  trailingTrailBy?: string;
+  trailingMode?: "percentage" | "usd" | "ticks" | "atr";
+  trailingActivation?: "immediate" | "custom-price" | "offset";
+  trailingActivationPrice?: string;
 };
 
 type UnifiedExecutionTicketProps = {
@@ -44,17 +58,22 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
   const selectedConnection = activeConnections.find((connection) => connection.id === connectionId) ?? defaultConnection;
   const [side, setSide] = useState<OrderSide>(preset.side ?? "buy");
   const [orderType, setOrderType] = useState<OrderType>(preset.orderType ?? "market");
-  const [quantity, setQuantity] = useState("");
+  const [quantity, setQuantity] = useState(preset.quantity ?? "");
   const [sizingMethod, setSizingMethod] = useState<SizingMethod>("quantity");
   const [price, setPrice] = useState(preset.price ? String(Number(preset.price.toFixed(2))) : "");
-  const [stopPrice, setStopPrice] = useState("");
-  const [takeProfit, setTakeProfit] = useState("");
-  const [stopLoss, setStopLoss] = useState("");
+  const [stopPrice, setStopPrice] = useState(preset.stopPrice ?? "");
+  const [takeProfit, setTakeProfit] = useState(preset.takeProfit ?? "");
+  const [stopLoss, setStopLoss] = useState(preset.stopLoss ?? "");
+  const [trailingStopEnabled, setTrailingStopEnabled] = useState(Boolean(preset.trailingStopEnabled));
+  const [trailingTrailBy, setTrailingTrailBy] = useState(preset.trailingTrailBy ?? "");
+  const [trailingMode, setTrailingMode] = useState<"percentage" | "usd" | "ticks" | "atr">(preset.trailingMode ?? "usd");
+  const [trailingActivation, setTrailingActivation] = useState<"immediate" | "custom-price" | "offset">(preset.trailingActivation ?? "immediate");
+  const [trailingActivationPrice, setTrailingActivationPrice] = useState(preset.trailingActivationPrice ?? "");
   const [timeInForce, setTimeInForce] = useState<TimeInForce>("gtc");
   const [leverage, setLeverage] = useState(1);
   const [marginMode, setMarginMode] = useState<MarginMode>("cross");
   const [postOnly, setPostOnly] = useState(false);
-  const [reduceOnly, setReduceOnly] = useState(false);
+  const [reduceOnly, setReduceOnly] = useState(Boolean(preset.reduceOnly));
   const [personalDestination, setPersonalDestination] = useState(true);
   const [allocationDestination, setAllocationDestination] = useState(Boolean(preset.allocationEnabled));
   const [status, setStatus] = useState("");
@@ -92,6 +111,10 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
       setStatus(reason.toUpperCase());
       return;
     }
+    if (selectedConnection.category === "protocol") {
+      setStatus("PROTOCOL CONNECTED. SERVER-SIDE SIGNING AND ORDER RELAY ARE REQUIRED FOR LIVE EXECUTION.");
+      return;
+    }
     if (!selectedConnection.accountId) {
       setStatus("CONNECTED VENUE HAS NO BROKER ACCOUNT ID");
       return;
@@ -126,9 +149,32 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
         postOnly,
         reduceOnly,
         timeInForce,
+        trailingStopEnabled,
+        trailingTrailBy: Number(trailingTrailBy || 0) || undefined,
+        trailingMode,
+        trailingActivation,
+        trailingActivationPrice: Number(trailingActivationPrice || 0) || undefined,
         source: preset.source,
         destinations
       });
+      if (preset.positionId && preset.protectionIntent) {
+        if (preset.protectionIntent === "take-profit" && Number(takeProfit)) {
+          blackCorePositionManager.setProtection(preset.positionId, "take-profit", { price: Number(takeProfit), metadata: { source: "unified-ticket" } });
+        }
+        if (preset.protectionIntent === "stop-loss" && Number(stopLoss || stopPrice)) {
+          blackCorePositionManager.setProtection(preset.positionId, "stop-loss", { price: Number(stopLoss || stopPrice), metadata: { source: "unified-ticket" } });
+        }
+        if (preset.protectionIntent === "trailing-stop" && trailingStopEnabled) {
+          blackCorePositionManager.enableTrailingStop(preset.positionId, {
+            price: Number(stopPrice || trailingActivationPrice || 0) || undefined,
+            trailBy: Number(trailingTrailBy || 0) || undefined,
+            trailMode: trailingMode,
+            activation: trailingActivation,
+            activationPrice: Number(trailingActivationPrice || 0) || undefined,
+            metadata: { source: "unified-ticket" }
+          });
+        }
+      }
       setStatus(update ? `${update.status.toUpperCase()}: ${update.reason || update.orderId}` : "AUTHENTICATED BROKER SESSION REQUIRED");
     } catch (error) {
       setStatus(error instanceof Error ? error.message.toUpperCase() : String(error));
@@ -177,6 +223,14 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
           <label><span>Leverage</span><input value={leverage} onChange={(event) => setLeverage(Number(event.target.value || 1))} inputMode="numeric" /></label>
           <label><span>Margin Mode</span><select value={marginMode} onChange={(event) => setMarginMode(event.target.value as MarginMode)}><option value="cross">Cross</option><option value="isolated">Isolated</option></select></label>
           <label><span>TIF</span><select value={timeInForce} onChange={(event) => setTimeInForce(event.target.value as TimeInForce)}><option value="gtc">GTC</option><option value="ioc">IOC</option><option value="fok">FOK</option></select></label>
+        </div>
+
+        <div className="unified-trailing-panel">
+          <label><input type="checkbox" checked={trailingStopEnabled} onChange={(event) => setTrailingStopEnabled(event.target.checked)} /> Enable Trailing Stop</label>
+          <label><span>Trail By</span><input value={trailingTrailBy} onChange={(event) => setTrailingTrailBy(event.target.value)} inputMode="decimal" /></label>
+          <label><span>Mode</span><select value={trailingMode} onChange={(event) => setTrailingMode(event.target.value as typeof trailingMode)}><option value="percentage">Percentage</option><option value="usd">USD</option><option value="ticks">Ticks</option><option value="atr">ATR Future</option></select></label>
+          <label><span>Activation</span><select value={trailingActivation} onChange={(event) => setTrailingActivation(event.target.value as typeof trailingActivation)}><option value="immediate">Immediate</option><option value="custom-price">Custom Price</option><option value="offset">Offset</option></select></label>
+          <label><span>Activation Price</span><input value={trailingActivationPrice} onChange={(event) => setTrailingActivationPrice(event.target.value)} inputMode="decimal" /></label>
         </div>
 
         <div className="unified-ticket-checks">

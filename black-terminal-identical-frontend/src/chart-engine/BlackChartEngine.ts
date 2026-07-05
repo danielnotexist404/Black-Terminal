@@ -538,6 +538,16 @@ export class BlackChartEngine {
     };
   }
 
+  getScreenYForPrice(price: number) {
+    if (!Number.isFinite(price)) return null;
+    return this.yForPrice(price);
+  }
+
+  getPriceFromClientY(clientY: number) {
+    const bounds = this.host.getBoundingClientRect();
+    return this.priceForY(clientY - bounds.top);
+  }
+
   addDrawingAtPoint(tool: DrawingToolId, index: number, price: number, text?: string) {
     if (tool !== "horizontalLine" && tool !== "verticalLine" && tool !== "text") return false;
 

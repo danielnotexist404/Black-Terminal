@@ -6,6 +6,7 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
+- Current - Implement Phase III Chapter IV position lifecycle foundation.
 - `6d57492` - Implement Phase III connectivity source of truth.
 - `d34b423` - Implement Phase III OMS EMS foundation.
 - `17e183b` - Implement Phase III portfolio role separation.
@@ -209,6 +210,38 @@ Changed:
 Why:
 
 - Black Terminal is now large enough that architecture decisions cannot live only in chat or commits.
+
+## Phase III Chapter 4: Position Lifecycle Engine
+
+Status: Implemented runtime foundation
+
+Changed:
+
+- Added Black Core Position Manager.
+- Added managed position lifecycle types, protection orders, timeline events, health metrics, notes, and tags.
+- EMS now promotes filled execution reports into managed positions.
+- Positions workspace syncs portfolio positions into Position Manager.
+- Chart context menu now switches between execution actions and position lifecycle actions depending on active symbol exposure.
+- Chart renders entry, TP, SL, trailing, and liquidation lines for managed positions.
+- Draggable protection lines update Position Manager and publish lifecycle events.
+- Unified Execution Ticket supports TP/SL/trailing-stop position presets.
+- Added protocol framework and Hyperliquid protocol adapter.
+
+Why:
+
+- Positions must become first-class managed objects after execution.
+- Wallets are signers, not exchanges. Hyperliquid and future perpetual DEXes need protocol adapters behind wallet signing.
+
+Remaining:
+
+- Add persistent Supabase position lifecycle tables.
+- Add backend position lifecycle API routes.
+- Add server-side Hyperliquid signing/order relay.
+- Sync real protocol positions, balances, orders, funding, fees, and fills.
+
+Docs:
+
+- `PHASE3_CHAPTER4_POSITION_LIFECYCLE.md`
 
 ## Future Work Log
 

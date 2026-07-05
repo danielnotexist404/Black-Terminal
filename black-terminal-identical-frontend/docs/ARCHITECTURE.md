@@ -131,6 +131,18 @@ broker or wallet account stores:
 Wallets such as MetaMask and Phantom are signer connections. They do not become futures venues until
 a protocol adapter reports executable perpetual capabilities.
 
+## Phase III Position Rule
+
+OMS owns orders.
+
+EMS owns execution.
+
+Position Manager owns positions.
+
+Protection relationships belong to Position Manager, not OMS. A take-profit, stop-loss, trailing
+stop, break-even level, or future OCO group is position lifecycle state even when one or more
+exchange orders are required to enforce it.
+
 ## Near-Term Engineering Decisions
 
 - Keep `src/chart-engine` framework-independent except for PixiJS.

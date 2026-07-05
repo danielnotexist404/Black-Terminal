@@ -3240,6 +3240,92 @@ body.resizing-layout * {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.position-protection-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 46;
+  pointer-events: none;
+}
+
+.position-line {
+  position: absolute;
+  left: 0;
+  right: 86px;
+  height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  border-top: 1px dashed rgba(255, 255, 255, 0.44);
+  color: #d8dde5;
+  font: 800 10px "IBM Plex Mono", monospace;
+  pointer-events: none;
+}
+
+.position-line::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -7px;
+  height: 14px;
+}
+
+.position-line span,
+.position-line b {
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(5, 6, 7, 0.92);
+}
+
+.position-line span {
+  border-right: 0;
+  color: #9fa6b1;
+}
+
+.position-line b {
+  min-width: 74px;
+  justify-content: flex-end;
+  color: #fff;
+}
+
+.position-line.draggable {
+  cursor: ns-resize;
+  pointer-events: auto;
+}
+
+.position-line.tp {
+  border-top-color: rgba(39, 196, 123, 0.82);
+}
+
+.position-line.tp b {
+  color: #27c47b;
+}
+
+.position-line.sl,
+.position-line.liq {
+  border-top-color: rgba(255, 55, 76, 0.82);
+}
+
+.position-line.sl b,
+.position-line.liq b {
+  color: #ff374c;
+}
+
+.position-line.trail {
+  border-top-color: rgba(245, 188, 67, 0.82);
+}
+
+.position-line.trail b {
+  color: #f5bc43;
+}
+
+.position-line.entry {
+  border-top-color: rgba(255, 255, 255, 0.52);
+}
+
 .unified-ticket-overlay {
   position: absolute;
   inset: 0;
@@ -3336,6 +3422,21 @@ body.resizing-layout * {
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.unified-trailing-panel {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.2fr) repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.unified-trailing-panel label {
+  min-width: 0;
+  margin: 0;
 }
 
 .unified-execution-matrix {

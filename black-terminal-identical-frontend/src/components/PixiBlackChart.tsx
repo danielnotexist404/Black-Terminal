@@ -29,6 +29,8 @@ import { getMarketDataEngineAdapter } from "../market-data/engine/marketDataEngi
 import { ExchangeId, MarketDataAdapter, MarketDataSubscription, MarketSymbol, OrderBookSnapshot, Timeframe } from "../market-data/types";
 import { UnifiedExecutionTicket, type UnifiedExecutionTicketPreset } from "../execution/components/UnifiedExecutionTicket";
 import type { ExecutionSource, OrderSide, OrderType } from "../execution/types";
+import { blackCorePositionManager } from "../positions/positionManager";
+import type { ManagedPosition, PositionProtectionOrder, PositionProtectionType } from "../positions/types";
 
 type PixiBlackChartProps = {
   marketSymbol: MarketSymbol;
@@ -217,6 +219,18 @@ function formatAlertPrice(price: number) {
   return price.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
+function normalizeChartSymbol(symbol: string) {
+  return symbol.replace(/[-_/:\s]/g, "").toUpperCase();
+}
+
+function protectionLabel(type: PositionProtectionType) {
+  if (type === "take-profit") return "TAKE PROFIT";
+  if (type === "stop-loss") return "STOP LOSS";
+  if (type === "trailing-stop") return "TRAILING STOP";
+  if (type === "break-even") return "BREAK EVEN";
+  return "OCO";
+}
+
 function formatReplayLabel(time?: number) {
   if (!time) return "Waiting";
   return new Date(time * 1000).toLocaleString(undefined, {
@@ -275,6 +289,8 @@ export function PixiBlackChart({
   const [alertSettings, setAlertSettings] = useState<IndicatorAlertSettings>(defaultIndicatorAlertSettings);
   const [chartContextMenu, setChartContextMenu] = useState<ChartContextMenuState | null>(null);
   const [executionTicketPreset, setExecutionTicketPreset] = useState<UnifiedExecutionTicketPreset | null>(null);
+  const [managedPositions, setManagedPositions] = useState<ManagedPosition[]>(() => blackCorePositionManager.listActivePositions());
+  const [positionOverlayTick, setPositionOverlayTick] = useState(0);
   const [alertToast, setAlertToast] = useState<AlertToast | null>(null);
   const [editingChartAlertId, setEditingChartAlertId] = useState<string | null>(null);
   const replaySourceRef = useRef<Candle[]>([]);
@@ -304,6 +320,55 @@ export function PixiBlackChart({
     () => scopedChartAlerts.find((alert) => alert.id === editingChartAlertId) ?? null,
     [editingChartAlertId, scopedChartAlerts]
   );
+
+  const activeChartPosition = useMemo(() => {
+    const symbol = normalizeChartSymbol(displaySymbol || marketSymbol.rawSymbol);
+    return managedPositions.find((position) =>
+      normalizeChartSymbol(position.symbol) === symbol &&
+      (!marketSymbol.exchange || position.exchange === marketSymbol.exchange)
+    ) ?? null;
+  }, [displaySymbol, managedPositions, marketSymbol.exchange, marketSymbol.rawSymbol]);
+
+  const positionLines = useMemo(() => {
+    if (!activeChartPosition) return [];
+    const lines: Array<{
+      id: string;
+      label: string;
+      price: number;
+      tone: "entry" | "tp" | "sl" | "trail" | "liq";
+      protection?: PositionProtectionOrder;
+      y?: number | null;
+    }> = [
+      { id: "entry", label: "AVG ENTRY", price: activeChartPosition.averagePrice, tone: "entry" }
+    ];
+
+    if (activeChartPosition.liquidationPrice) {
+      lines.push({ id: "liq", label: "LIQUIDATION", price: activeChartPosition.liquidationPrice, tone: "liq" });
+    }
+
+    for (const protection of activeChartPosition.protections) {
+      if (protection.status !== "active" || !protection.price) continue;
+      lines.push({
+        id: protection.id,
+        label: protectionLabel(protection.type),
+        price: protection.price,
+        tone: protection.type === "take-profit" ? "tp" : protection.type === "trailing-stop" ? "trail" : "sl",
+        protection
+      });
+    }
+
+    return lines
+      .map((line) => ({ ...line, y: engineRef.current?.getScreenYForPrice(line.price) ?? null }))
+      .filter((line) => line.y !== null);
+  }, [activeChartPosition, positionOverlayTick]);
+
+  useEffect(() => blackCorePositionManager.subscribe(setManagedPositions), []);
+
+  useEffect(() => {
+    if (!activeChartPosition) return;
+    const timer = window.setInterval(() => setPositionOverlayTick((tick) => tick + 1), 250);
+    return () => window.clearInterval(timer);
+  }, [activeChartPosition]);
 
   const emitReplayStatus = (active = replayControlsRef.current.enabled, playing = replayControlsRef.current.playing) => {
     const source = replaySourceRef.current;
@@ -1219,7 +1284,8 @@ export function PixiBlackChart({
     side: OrderSide,
     orderType: OrderType,
     source: ExecutionSource = "chart",
-    allocationEnabled = false
+    allocationEnabled = false,
+    patch: Partial<UnifiedExecutionTicketPreset> = {}
   ) => {
     const point = chartContextMenu?.point;
     setExecutionTicketPreset({
@@ -1229,9 +1295,140 @@ export function PixiBlackChart({
       orderType,
       source,
       allocationEnabled,
-      marketKind: marketSymbol.marketKind
+      marketKind: marketSymbol.marketKind,
+      ...patch
     });
     setChartContextMenu(null);
+  };
+
+  const openPositionProtectionTicket = (type: "take-profit" | "stop-loss" | "trailing-stop") => {
+    const position = activeChartPosition;
+    const point = chartContextMenu?.point;
+    if (!position || !point) return;
+    const price = Number(point.price.toFixed(2));
+    const exitSide: OrderSide = position.direction === "long" ? "sell" : "buy";
+
+    if (type === "take-profit") {
+      blackCorePositionManager.setProtection(position.id, "take-profit", { price, metadata: { source: "chart-context" } });
+      openExecutionTicketFromContext(exitSide, "limit", "positions", false, {
+        quantity: String(position.quantity),
+        reduceOnly: true,
+        takeProfit: String(price),
+        positionId: position.id,
+        protectionIntent: "take-profit"
+      });
+      return;
+    }
+
+    if (type === "stop-loss") {
+      blackCorePositionManager.setProtection(position.id, "stop-loss", { price, metadata: { source: "chart-context" } });
+      openExecutionTicketFromContext(exitSide, "stop-market", "positions", false, {
+        quantity: String(position.quantity),
+        reduceOnly: true,
+        stopLoss: String(price),
+        stopPrice: String(price),
+        positionId: position.id,
+        protectionIntent: "stop-loss"
+      });
+      return;
+    }
+
+    blackCorePositionManager.enableTrailingStop(position.id, {
+      price,
+      trailBy: Math.max(1, Math.abs(price - position.currentPrice)),
+      trailMode: "usd",
+      activation: "immediate",
+      metadata: { source: "chart-context" }
+    });
+    openExecutionTicketFromContext(exitSide, "trailing-stop", "positions", false, {
+      quantity: String(position.quantity),
+      reduceOnly: true,
+      trailingStopEnabled: true,
+      trailingTrailBy: String(Math.max(1, Math.abs(price - position.currentPrice)).toFixed(2)),
+      trailingMode: "usd",
+      trailingActivation: "immediate",
+      positionId: position.id,
+      protectionIntent: "trailing-stop"
+    });
+  };
+
+  const recordPositionContextAction = (action: "add" | "scaleIn" | "scaleOut" | "partialClose" | "close" | "reverse" | "moveProtection" | "cancelTp" | "cancelSl" | "cancelTrailing" | "stats" | "notes" | "timeline") => {
+    const position = activeChartPosition;
+    if (!position) return;
+    setChartContextMenu(null);
+
+    if (action === "add" || action === "scaleIn") {
+      blackCorePositionManager.scaleIn(position.id, Math.max(1, position.quantity * 0.25), position.currentPrice);
+      showLocalAlertToast("Position Scaled", `${position.symbol} scale-in recorded.`);
+      return;
+    }
+    if (action === "scaleOut" || action === "partialClose") {
+      blackCorePositionManager.scaleOut(position.id, Math.max(1, position.quantity * 0.25));
+      showLocalAlertToast("Position Reduced", `${position.symbol} scale-out recorded.`);
+      return;
+    }
+    if (action === "close") {
+      openExecutionTicketFromContext(position.direction === "long" ? "sell" : "buy", "market", "positions", false, {
+        quantity: String(position.quantity),
+        reduceOnly: true,
+        positionId: position.id
+      });
+      return;
+    }
+    if (action === "reverse") {
+      openExecutionTicketFromContext(position.direction === "long" ? "sell" : "buy", "market", "positions", false, {
+        quantity: String(position.quantity * 2),
+        positionId: position.id
+      });
+      return;
+    }
+    if (action === "moveProtection") {
+      showLocalAlertToast("Move Protection", "Drag a TP, SL, or trailing line to move protection.");
+      return;
+    }
+    if (action === "cancelTp") {
+      blackCorePositionManager.cancelProtection(position.id, "take-profit");
+      showLocalAlertToast("TP Cancelled", position.symbol);
+      return;
+    }
+    if (action === "cancelSl") {
+      blackCorePositionManager.cancelProtection(position.id, "stop-loss");
+      showLocalAlertToast("SL Cancelled", position.symbol);
+      return;
+    }
+    if (action === "cancelTrailing") {
+      blackCorePositionManager.cancelProtection(position.id, "trailing-stop");
+      showLocalAlertToast("Trailing Cancelled", position.symbol);
+      return;
+    }
+    if (action === "notes") {
+      const note = window.prompt(`Trade note for ${position.symbol}`, "");
+      if (note) blackCorePositionManager.addNote(position.id, note);
+      return;
+    }
+    if (action === "timeline") {
+      showLocalAlertToast("Trade Timeline", position.timeline.slice(0, 3).map((item) => item.message).join(" | ") || "No timeline events.");
+      return;
+    }
+    showLocalAlertToast("Position Statistics", `PnL ${formatAlertPrice(position.health.currentPnl)} | RR ${position.health.riskReward?.toFixed(2) ?? "-"}`);
+  };
+
+  const dragProtectionLine = (protection: PositionProtectionOrder | undefined) => (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!activeChartPosition || !protection) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const move = (moveEvent: MouseEvent) => {
+      const price = engineRef.current?.getPriceFromClientY(moveEvent.clientY);
+      if (price && Number.isFinite(price)) {
+        blackCorePositionManager.moveProtection(activeChartPosition.id, protection.id, Number(price.toFixed(2)));
+      }
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
   };
 
   const priceTouchesLevel = (candle: Candle | undefined, price: number | undefined) => {
@@ -2859,50 +3056,54 @@ export function PixiBlackChart({
             <b>{formatAlertPrice(chartContextMenu.point.price)}</b>
           </div>
           <div className="chart-context-section">
-            <small>Execution</small>
-            <button type="button" onClick={() => openExecutionTicketFromContext("buy", "market")}>
-              <Play size={14} />
-              Execute Order
-            </button>
-            <button type="button" onClick={() => openExecutionTicketFromContext("buy", "market", "capital-allocation", true)}>
-              <Copy size={14} />
-              Execute Copy-Trade Order
-            </button>
-            <button type="button" onClick={() => openExecutionTicketFromContext("buy", "market")}>
-              <Plus size={14} />
-              Long Market / Buy Market
-            </button>
-            <button type="button" onClick={() => openExecutionTicketFromContext("sell", "market")}>
-              <Minus size={14} />
-              Short Market / Sell Market
-            </button>
-            <button type="button" onClick={() => openExecutionTicketFromContext("buy", "limit")}>
-              <Plus size={14} />
-              Buy Limit Here / Long Limit
-            </button>
-            <button type="button" onClick={() => openExecutionTicketFromContext("sell", "limit")}>
-              <Minus size={14} />
-              Sell Limit Here / Short Limit
-            </button>
-            <button type="button" onClick={() => openExecutionTicketFromContext("sell", "market", "positions")}>
-              <X size={14} />
-              Close Position
-            </button>
-            <button type="button" onClick={() => openExecutionTicketFromContext("sell", "market", "positions")}>
-              <TrendingUp size={14} />
-              Reverse Position
-            </button>
-            <button type="button" onClick={() => openExecutionTicketFromContext("sell", "limit", "positions")}>
-              <X size={14} />
-              Cancel Orders
-            </button>
-            <button type="button" onClick={() => {
-              setChartContextMenu(null);
-              showLocalAlertToast("Trading Settings", "Execution settings live in the unified ticket and Positions module.");
-            }}>
-              <SlidersHorizontal size={14} />
-              Trading Settings
-            </button>
+            <small>{activeChartPosition ? "Position Lifecycle" : "Execution"}</small>
+            {activeChartPosition ? (
+              <>
+                <button type="button" onClick={() => recordPositionContextAction("stats")}><Eye size={14} />Position Statistics</button>
+                <button type="button" onClick={() => recordPositionContextAction("add")}><Plus size={14} />Add To Position</button>
+                <button type="button" onClick={() => recordPositionContextAction("scaleIn")}><Plus size={14} />Scale In</button>
+                <button type="button" onClick={() => recordPositionContextAction("scaleOut")}><Minus size={14} />Scale Out</button>
+                <button type="button" onClick={() => recordPositionContextAction("partialClose")}><Minus size={14} />Partial Close</button>
+                <button type="button" onClick={() => recordPositionContextAction("close")}><X size={14} />Close Position</button>
+                <button type="button" onClick={() => recordPositionContextAction("reverse")}><TrendingUp size={14} />Reverse Position</button>
+                <button type="button" onClick={() => openPositionProtectionTicket("take-profit")}><Plus size={14} />Set Take Profit Here</button>
+                <button type="button" onClick={() => openPositionProtectionTicket("stop-loss")}><Minus size={14} />Set Stop Loss Here</button>
+                <button type="button" onClick={() => openPositionProtectionTicket("trailing-stop")}><SlidersHorizontal size={14} />Set Trailing Stop</button>
+                <button type="button" onClick={() => recordPositionContextAction("moveProtection")}><SlidersHorizontal size={14} />Move Protection</button>
+                <button type="button" onClick={() => recordPositionContextAction("cancelTp")}><X size={14} />Cancel TP</button>
+                <button type="button" onClick={() => recordPositionContextAction("cancelSl")}><X size={14} />Cancel SL</button>
+                <button type="button" onClick={() => recordPositionContextAction("cancelTrailing")}><X size={14} />Cancel Trailing</button>
+                <button type="button" onClick={() => recordPositionContextAction("notes")}><Type size={14} />Trade Notes</button>
+                <button type="button" onClick={() => recordPositionContextAction("timeline")}><Copy size={14} />Trade Timeline</button>
+              </>
+            ) : (
+              <>
+                <button type="button" onClick={() => openExecutionTicketFromContext("buy", "market")}>
+                  <Play size={14} />
+                  Execute Order
+                </button>
+                <button type="button" onClick={() => openExecutionTicketFromContext("buy", "market", "capital-allocation", true)}>
+                  <Copy size={14} />
+                  Execute Copy Trade Order
+                </button>
+                <button type="button" onClick={() => openExecutionTicketFromContext("buy", "market")}>
+                  <Plus size={14} />
+                  Buy Market
+                </button>
+                <button type="button" onClick={() => openExecutionTicketFromContext("sell", "market")}>
+                  <Minus size={14} />
+                  Sell Market
+                </button>
+                <button type="button" onClick={() => openExecutionTicketFromContext("buy", "limit")}>
+                  <Plus size={14} />
+                  Buy Limit Here
+                </button>
+                <button type="button" onClick={() => openExecutionTicketFromContext("sell", "limit")}>
+                  <Minus size={14} />
+                  Sell Limit Here
+                </button>
+              </>
+            )}
           </div>
           <div className="chart-context-section">
             <small>Price Alert</small>
@@ -3046,6 +3247,23 @@ export function PixiBlackChart({
             <strong>{alertToast.title}</strong>
             <span>{alertToast.message}</span>
           </div>
+        </div>
+      )}
+
+      {activeChartPosition && positionLines.length > 0 && (
+        <div className="position-protection-overlay" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+          {positionLines.map((line) => (
+            <div
+              key={line.id}
+              className={`position-line ${line.tone}${line.protection ? " draggable" : ""}`}
+              style={{ top: Number(line.y) }}
+              title={`${activeChartPosition.exchange.toUpperCase()} ${activeChartPosition.symbol} ${line.label} ${formatAlertPrice(line.price)} | PnL ${formatAlertPrice(activeChartPosition.health.currentPnl)} | RR ${activeChartPosition.health.riskReward?.toFixed(2) ?? "-"}`}
+              onMouseDown={dragProtectionLine(line.protection)}
+            >
+              <span>{line.label}</span>
+              <b>{formatAlertPrice(line.price)}</b>
+            </div>
+          ))}
         </div>
       )}
 

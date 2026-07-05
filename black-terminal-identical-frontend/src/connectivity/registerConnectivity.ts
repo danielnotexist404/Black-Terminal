@@ -2,6 +2,7 @@ import { marketCatalog } from "../market-data/marketCatalog";
 import { blackCoreConnectionManager } from "./connectionManager";
 import { createCentralizedExchangeConnectionAdapter } from "./adapters/centralizedExchangeAdapter";
 import { metaMaskConnectionAdapter, phantomConnectionAdapter } from "./adapters/walletAdapters";
+import { registerProtocolAdapters } from "../protocols/registerProtocols";
 
 let registered = false;
 
@@ -15,4 +16,5 @@ export function registerConnectivityAdapters() {
 
   blackCoreConnectionManager.registerAdapter(metaMaskConnectionAdapter);
   blackCoreConnectionManager.registerAdapter(phantomConnectionAdapter);
+  registerProtocolAdapters();
 }

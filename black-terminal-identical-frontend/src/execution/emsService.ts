@@ -4,6 +4,7 @@ import { evaluateOrderRisk } from "../risk/riskEngine";
 import { blackCoreBrokerRouter } from "./brokerRouter";
 import { auditExecutionReport, auditExecutionRequest } from "./executionAudit";
 import { blackCoreOmsService } from "./omsService";
+import { blackCorePositionManager } from "../positions/positionManager";
 import type { ExecutionMatrixPreviewRow, ExecutionReport, ExecutionRequest, OrderRequest } from "./types";
 
 export type ExecutionSubmissionContext = {
@@ -50,6 +51,7 @@ export class EmsService {
         update.averageFillPrice
       );
       blackCoreOmsService.applyReport(report);
+      blackCorePositionManager.ingestExecutionReport(report, request);
       auditExecutionReport(report, request, { riskDecision: "approved", allocationDecision: request.destinations.includes("allocation-engine") ? "enabled" : "not-requested" });
       blackCoreEventBus.publish("execution.event", {
         type: "portfolio.updated",

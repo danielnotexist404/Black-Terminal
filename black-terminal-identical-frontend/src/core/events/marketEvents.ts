@@ -10,6 +10,7 @@ import type {
 } from "../../market-data/types";
 import type { ExecutionEvent } from "../../execution/executionEvents";
 import type { ConnectivityEvent } from "../../connectivity/connectionEvents";
+import type { PositionLifecycleEvent } from "../../positions/types";
 
 export type MarketConnectionEvent = {
   exchange: ExchangeId;
@@ -32,6 +33,7 @@ export type MarketEventMap = {
   "openInterest.updated": OpenInterest;
   "liquidation.received": { exchange: ExchangeId; symbol: string; price: number; quantity: number; side: "buy" | "sell"; time: number };
   "position.updated": { accountId: string; symbol: string; time: number };
+  "position.lifecycle": PositionLifecycleEvent;
   "portfolio.updated": { accountId?: string; time: number };
   "execution.event": ExecutionEvent;
   "connectivity.event": ConnectivityEvent;

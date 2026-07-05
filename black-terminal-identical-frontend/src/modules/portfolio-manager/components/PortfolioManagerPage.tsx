@@ -19,7 +19,8 @@ import type { ExchangeConnectionDraft, PortfolioSnapshot } from "../../../portfo
 import { getPortfolioSnapshot } from "../../../portfolio/portfolioStore";
 import { marketCatalog } from "../../../market-data/marketCatalog";
 import type { ExchangeId } from "../../../market-data/types";
-import type { PortfolioPosition } from "../../../positions/types";
+import { blackCorePositionManager } from "../../../positions/positionManager";
+import type { ManagedPosition, PortfolioPosition } from "../../../positions/types";
 
 type PortfolioManagerTab =
   | "Overview"
@@ -33,7 +34,7 @@ type PortfolioManagerTab =
   | "Permissions";
 type VenueKind = "cex" | "dex";
 type VenueSelectorKind = VenueKind | "wallet";
-type DexVenueId = "uniswap" | "jupiter" | "raydium" | "pancakeswap";
+type DexVenueId = "hyperliquid" | "uniswap" | "jupiter" | "raydium" | "pancakeswap";
 type WalletProviderId = "metamask" | "phantom";
 type TradeMode = "spot" | "convert" | "futures";
 type ExecutionSide = "buy" | "sell";
@@ -42,6 +43,7 @@ type TicketOrderType = "limit" | "market" | "tpSl";
 type ExecutionVenue = {
   id: string;
   kind: VenueKind;
+  category: ConnectionDiagnostics["category"];
   label: string;
   detail: string;
   accountId?: string;
@@ -70,6 +72,7 @@ const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "U
 const compact = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 
 const dexVenues: Array<{ id: DexVenueId; label: string; chain: string; defaultProvider: WalletProviderId }> = [
+  { id: "hyperliquid", label: "Hyperliquid", chain: "Arbitrum / Hyperliquid", defaultProvider: "metamask" },
   { id: "uniswap", label: "Uniswap", chain: "Ethereum", defaultProvider: "metamask" },
   { id: "jupiter", label: "Jupiter", chain: "Solana", defaultProvider: "phantom" },
   { id: "raydium", label: "Raydium", chain: "Solana", defaultProvider: "phantom" },
@@ -84,8 +87,15 @@ const walletProviders: Array<{ id: WalletProviderId; label: string; chainHint: s
 const activeExecutionVenueStorageKey = "bt_active_execution_venue_v1";
 
 export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPosition[] }) {
-  const [positionMenu, setPositionMenu] = useState<{ x: number; y: number; position: PortfolioPosition } | null>(null);
+  const [managedPositions, setManagedPositions] = useState<ManagedPosition[]>(() => blackCorePositionManager.listActivePositions());
+  const [positionMenu, setPositionMenu] = useState<{ x: number; y: number; position: ManagedPosition } | null>(null);
   const [positionActionStatus, setPositionActionStatus] = useState("");
+
+  useEffect(() => blackCorePositionManager.subscribe(setManagedPositions), []);
+
+  useEffect(() => {
+    blackCorePositionManager.syncExternalPositions(positions, "portfolio-manager");
+  }, [positions]);
 
   useEffect(() => {
     const closeMenu = () => setPositionMenu(null);
@@ -101,15 +111,15 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
     };
   }, []);
 
-  function openPositionMenu(event: MouseEvent<HTMLDivElement>, position: PortfolioPosition) {
+  function openPositionMenu(event: MouseEvent<HTMLDivElement>, position: ManagedPosition) {
     event.preventDefault();
     event.stopPropagation();
     setPositionMenu({ x: event.clientX, y: event.clientY, position });
   }
 
   async function submitPositionAction(
-    position: PortfolioPosition,
-    action: "close" | "reverse" | "takeProfit" | "stopLoss" | "bracket"
+    position: ManagedPosition,
+    action: "close" | "reverse" | "takeProfit" | "stopLoss" | "bracket" | "scaleIn" | "scaleOut" | "breakEven" | "note" | "tags" | "timeline" | "stats"
   ) {
     const exitSide = position.direction === "long" ? "sell" : "buy";
     const referencePrice = position.currentPrice || position.averagePrice;
@@ -124,6 +134,54 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
     };
 
     try {
+      if (action === "stats") {
+        setPositionActionStatus(`RR ${position.health.riskReward?.toFixed(2) ?? "-"} | RISK ${money.format(position.health.currentRisk)} | TIME ${Math.round(position.health.timeInTradeMs / 60000)}M`);
+        return;
+      }
+
+      if (action === "timeline") {
+        setPositionActionStatus(position.timeline.slice(0, 3).map((event) => event.message).join(" | ") || "NO POSITION TIMELINE EVENTS");
+        return;
+      }
+
+      if (action === "note") {
+        const note = window.prompt(`Add note for ${position.symbol}`, "");
+        if (note) {
+          blackCorePositionManager.addNote(position.id, note);
+          setPositionActionStatus(`NOTE ADDED TO ${position.symbol}`);
+        } else {
+          setPositionActionStatus("NOTE CANCELLED");
+        }
+        return;
+      }
+
+      if (action === "tags") {
+        const tags = window.prompt(`Tags for ${position.symbol}`, position.tags.join(", "));
+        if (tags !== null) {
+          blackCorePositionManager.setTags(position.id, tags.split(","));
+          setPositionActionStatus(`TAGS UPDATED FOR ${position.symbol}`);
+        }
+        return;
+      }
+
+      if (action === "breakEven") {
+        blackCorePositionManager.setProtection(position.id, "break-even", { price: position.averagePrice, metadata: { source: "positions-panel" } });
+        setPositionActionStatus(`BREAK EVEN SET FOR ${position.symbol}`);
+        return;
+      }
+
+      if (action === "scaleIn" || action === "scaleOut") {
+        const amount = Number(window.prompt(`${action === "scaleIn" ? "Scale in" : "Scale out"} quantity for ${position.symbol}`, String(position.quantity / 2)));
+        if (!amount || amount <= 0) {
+          setPositionActionStatus("SCALE ACTION CANCELLED");
+          return;
+        }
+        if (action === "scaleIn") blackCorePositionManager.scaleIn(position.id, amount, referencePrice);
+        if (action === "scaleOut") blackCorePositionManager.scaleOut(position.id, amount);
+        setPositionActionStatus(`${action === "scaleIn" ? "SCALE IN" : "SCALE OUT"} RECORDED FOR ${position.symbol}`);
+        return;
+      }
+
       if (action === "close") {
         await submitOrder({
           accountId: position.accountId,
@@ -138,6 +196,7 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
           reduceOnly: true,
           timeInForce: "ioc"
         });
+        blackCorePositionManager.closePosition(position.id);
         setPositionActionStatus(`CLOSE ORDER SUBMITTED FOR ${position.symbol}`);
         return;
       }
@@ -156,6 +215,7 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
           reduceOnly: false,
           timeInForce: "ioc"
         });
+        blackCorePositionManager.reversePosition(position.id);
         setPositionActionStatus(`REVERSE ORDER SUBMITTED FOR ${position.symbol}`);
         return;
       }
@@ -177,6 +237,7 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
       }
 
       if (takeProfit) {
+        blackCorePositionManager.setProtection(position.id, "take-profit", { price: takeProfit, metadata: { source: "positions-panel" } });
         await submitOrder({
           accountId: position.accountId,
           exchange: position.exchange,
@@ -195,6 +256,7 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
       }
 
       if (stopLoss) {
+        blackCorePositionManager.setProtection(position.id, "stop-loss", { price: stopLoss, metadata: { source: "positions-panel" } });
         await submitOrder({
           accountId: position.accountId,
           exchange: position.exchange,
@@ -236,7 +298,7 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
         <span>Open</span>
         <span>Exchange</span>
       </div>
-      {positions.map((position) => (
+      {managedPositions.map((position) => (
         <div className="pm-table-row pm-positions-grid position-row-actionable" key={position.id} onContextMenu={(event) => openPositionMenu(event, position)}>
           <b>{position.symbol}</b>
           <span className={position.direction === "long" ? "green" : "red"}>{position.direction.toUpperCase()}</span>
@@ -255,7 +317,7 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
         </div>
       ))}
       {positionActionStatus && <div className="positions-action-status">{positionActionStatus}</div>}
-      {positions.length === 0 && (
+      {managedPositions.length === 0 && (
         <div className="positions-empty-state">
           NO LIVE POSITIONS. CONNECT A BROKER OR DEX WALLET TO SYNC REAL ACCOUNT EXPOSURE.
         </div>
@@ -272,9 +334,16 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
           </div>
           <button onClick={() => submitPositionAction(positionMenu.position, "close")}>Close Position</button>
           <button onClick={() => submitPositionAction(positionMenu.position, "reverse")}>Reverse Position</button>
+          <button onClick={() => submitPositionAction(positionMenu.position, "scaleIn")}>Scale In</button>
+          <button onClick={() => submitPositionAction(positionMenu.position, "scaleOut")}>Scale Out / Partial Close</button>
+          <button onClick={() => submitPositionAction(positionMenu.position, "breakEven")}>Move Stop To Break Even</button>
           <button onClick={() => submitPositionAction(positionMenu.position, "takeProfit")}>Change Take Profit</button>
           <button onClick={() => submitPositionAction(positionMenu.position, "stopLoss")}>Change Stop Loss</button>
           <button onClick={() => submitPositionAction(positionMenu.position, "bracket")}>Change TP/SL Bracket</button>
+          <button onClick={() => submitPositionAction(positionMenu.position, "stats")}>Position Statistics</button>
+          <button onClick={() => submitPositionAction(positionMenu.position, "timeline")}>Trade Timeline</button>
+          <button onClick={() => submitPositionAction(positionMenu.position, "note")}>Trade Notes</button>
+          <button onClick={() => submitPositionAction(positionMenu.position, "tags")}>Trade Tags</button>
         </div>
       )}
     </div>
@@ -312,12 +381,13 @@ export function PositionsWorkspace({
   const executionVenues: ExecutionVenue[] = useMemo(() => connectionDiagnostics
     .filter((connection) => !["disconnected", "offline", "unsupported"].includes(connection.status))
     .map((connection) => {
-      const isWallet = connection.category === "wallet";
+      const isWallet = connection.category === "wallet" || connection.category === "protocol";
       const venueLabel = String(connection.metadata.venueLabel || connection.metadata.venue || connection.provider);
       const address = connection.walletAddress;
       return {
         id: connection.id,
         kind: isWallet ? "dex" as const : "cex" as const,
+        category: connection.category,
         label: isWallet ? `${venueLabel.toUpperCase()} / ${connection.provider.toUpperCase()}` : connection.label,
         detail: isWallet && address
           ? `${connection.provider.toUpperCase()} ${address.slice(0, 6)}...${address.slice(-4)}`
@@ -413,19 +483,22 @@ export function PositionsWorkspace({
 
   async function handleConnectDex() {
     try {
+      const isHyperliquid = selectedDex === "hyperliquid";
       const nextConnection = await blackCoreConnectionManager.connect({
-        adapterId: `wallet:${walletProvider}`,
-        category: "wallet",
-        provider: walletProvider,
+        adapterId: isHyperliquid ? "protocol:hyperliquid" : `wallet:${walletProvider}`,
+        category: isHyperliquid ? "protocol" : "wallet",
+        provider: isHyperliquid ? "hyperliquid" : walletProvider,
         label: `${selectedDexVenue.label} / ${walletProvider === "metamask" ? "MetaMask" : "Phantom"}`,
         metadata: {
+          protocol: isHyperliquid ? "hyperliquid" : undefined,
+          signer: walletProvider,
           venue: selectedDex,
           venueLabel: selectedDexVenue.label,
           chain: selectedDexVenue.chain
         }
       });
       setActiveVenueId(nextConnection.id);
-      setConnectStatus("WALLET LINKED");
+      setConnectStatus(isHyperliquid ? "HYPERLIQUID PROTOCOL LINKED" : "WALLET LINKED");
       setShowConnection(false);
     } catch (error) {
       setConnectStatus(error instanceof Error ? error.message : String(error));
@@ -613,6 +686,7 @@ function ExecutionDock({
   const [submitStatus, setSubmitStatus] = useState("");
 
   const isDex = venue.kind === "dex";
+  const isProtocol = venue.category === "protocol";
   const supportsSpot = !isDex || venue.capabilities.includes("spot-orders") || venue.capabilities.includes("market-orders");
   const supportsConvert = !isDex || venue.capabilities.includes("swap");
   const supportsFutures = venue.capabilities.includes("perpetual-orders") || venue.capabilities.includes("leverage");
@@ -637,7 +711,9 @@ function ExecutionDock({
     setSubmitStatus("");
 
     if (venue.kind === "dex") {
-      setSubmitStatus(venue.capabilities.includes("swap")
+      setSubmitStatus(isProtocol
+        ? "PROTOCOL CONNECTED. SERVER-SIDE SIGNING AND ORDER RELAY ARE REQUIRED FOR LIVE EXECUTION."
+        : venue.capabilities.includes("swap")
         ? "DEX QUOTE / SIGN FLOW IS NEXT"
         : "WALLET CONNECTED. EXECUTION REQUIRES A DEX ROUTING ADAPTER.");
       return;

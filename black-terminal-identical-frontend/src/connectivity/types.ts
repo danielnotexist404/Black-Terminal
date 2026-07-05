@@ -3,7 +3,7 @@ import type { Balance } from "../execution/types";
 import type { ExchangeId } from "../market-data/types";
 import type { PortfolioPosition } from "../positions/types";
 
-export type ConnectionCategory = "centralized-exchange" | "wallet" | "market-data" | "institutional";
+export type ConnectionCategory = "centralized-exchange" | "wallet" | "protocol" | "market-data" | "institutional";
 
 export type ConnectionStatus =
   | "connecting"
@@ -27,6 +27,10 @@ export type ConnectionCapability =
   | "leverage"
   | "cross-margin"
   | "isolated-margin"
+  | "funding"
+  | "liquidation"
+  | "reduce-only"
+  | "post-only"
   | "private-websocket"
   | "public-websocket"
   | "wallet-connect"

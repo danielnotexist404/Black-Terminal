@@ -125,6 +125,15 @@ Key files:
 - `src/risk/`
 - `src/copyTrading/`
 
+Chapter IV adds the Black Core Position Manager:
+
+- `src/positions/positionManager.ts`
+- `src/positions/types.ts`
+
+Position Manager owns active positions, protection state, timeline, health, notes, and tags. Filled
+EMS reports are promoted into managed positions. UI surfaces must consume this manager rather than
+creating independent position lifecycle state.
+
 ## Backend And Supabase
 
 Backend code is hosted as Vercel API routes and shared server helpers.
@@ -162,6 +171,17 @@ Capability detection controls the UI:
 - Wallet signer only: wallet connected, router required for execution.
 - Centralized exchange: spot, limit, conditional, leverage, positions, balances, orders, and private/public streams depending on adapter support.
 - Future DEX adapter: should report swap and/or perpetual capabilities only when real protocol execution is implemented.
+
+Protocol framework files:
+
+- `src/protocols/types.ts`
+- `src/protocols/protocolRouter.ts`
+- `src/protocols/hyperliquidAdapter.ts`
+- `src/protocols/registerProtocols.ts`
+
+Hyperliquid is registered as a protocol adapter behind MetaMask signing. The adapter reports
+perpetual capabilities but live order placement remains blocked until the server-side signing and
+order relay is implemented.
 
 ## Security Boundaries
 

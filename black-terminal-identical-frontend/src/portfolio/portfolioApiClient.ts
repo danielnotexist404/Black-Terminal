@@ -56,6 +56,11 @@ export type PortfolioOrderDraft = {
   postOnly?: boolean;
   reduceOnly?: boolean;
   timeInForce?: "gtc" | "ioc" | "fok";
+  trailingStopEnabled?: boolean;
+  trailingTrailBy?: number;
+  trailingMode?: "percentage" | "usd" | "ticks" | "atr";
+  trailingActivation?: "immediate" | "custom-price" | "offset";
+  trailingActivationPrice?: number;
 };
 
 export async function getPortfolioApiToken() {

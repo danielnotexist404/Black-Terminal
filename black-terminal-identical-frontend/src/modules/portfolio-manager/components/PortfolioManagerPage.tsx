@@ -12,9 +12,11 @@ import {
   X
 } from "lucide-react";
 import { getCapabilities, resolveProductTier, type CapabilityUser } from "../../../core/permissions/capabilities";
+import { blackCoreConnectionManager } from "../../../connectivity/connectionManager";
+import type { ConnectionCapability, ConnectionDiagnostics } from "../../../connectivity/types";
 import { submitPortfolioOrderViaApi } from "../../../portfolio/portfolioApiClient";
 import type { ExchangeConnectionDraft, PortfolioSnapshot } from "../../../portfolio/types";
-import { connectExchangeAccount, getPortfolioSnapshot } from "../../../portfolio/portfolioStore";
+import { getPortfolioSnapshot } from "../../../portfolio/portfolioStore";
 import { marketCatalog } from "../../../market-data/marketCatalog";
 import type { ExchangeId } from "../../../market-data/types";
 import type { PortfolioPosition } from "../../../positions/types";
@@ -37,15 +39,6 @@ type TradeMode = "spot" | "convert" | "futures";
 type ExecutionSide = "buy" | "sell";
 type TicketOrderType = "limit" | "market" | "tpSl";
 
-type BrokerLink = {
-  id: string;
-  accountId: string;
-  exchange: ExchangeId;
-  accountName: string;
-  status: "read-only" | "connected";
-  linkedAt: number;
-};
-
 type ExecutionVenue = {
   id: string;
   kind: VenueKind;
@@ -53,6 +46,11 @@ type ExecutionVenue = {
   detail: string;
   accountId?: string;
   exchange?: ExchangeId;
+  walletAddress?: string;
+  provider: string;
+  capabilities: ConnectionCapability[];
+  health: ConnectionDiagnostics["health"];
+  unsupportedReason?: string;
 };
 
 type PositionOrderRow = {
@@ -66,15 +64,6 @@ type PositionOrderRow = {
   averageFillPrice?: number;
   reason?: string;
   time?: number;
-};
-
-type WalletLink = {
-  id: string;
-  venue: DexVenueId;
-  provider: WalletProviderId;
-  address: string;
-  chain: string;
-  linkedAt: number;
 };
 
 const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -92,8 +81,6 @@ const walletProviders: Array<{ id: WalletProviderId; label: string; chainHint: s
   { id: "phantom", label: "Phantom", chainHint: "Solana", defaultDex: "jupiter" }
 ];
 
-const walletLinksStorageKey = "bt_wallet_links_v1";
-const brokerLinksStorageKey = "bt_broker_links_v1";
 const activeExecutionVenueStorageKey = "bt_active_execution_venue_v1";
 
 export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPosition[] }) {
@@ -314,54 +301,37 @@ export function PositionsWorkspace({
     passphrase: ""
   });
   const [connectStatus, setConnectStatus] = useState("");
-  const [brokerLinks, setBrokerLinks] = useState<BrokerLink[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const stored = localStorage.getItem(brokerLinksStorageKey);
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  });
-  const [walletLinks, setWalletLinks] = useState<WalletLink[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const stored = localStorage.getItem(walletLinksStorageKey);
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [connectionDiagnostics, setConnectionDiagnostics] = useState<ConnectionDiagnostics[]>(() => blackCoreConnectionManager.listDiagnostics());
   const [activeVenueId, setActiveVenueId] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
     return localStorage.getItem(activeExecutionVenueStorageKey);
   });
 
-  const executionVenues: ExecutionVenue[] = useMemo(() => [
-    ...brokerLinks.map((link) => ({
-      id: link.id,
-      kind: "cex" as const,
-      label: link.accountName,
-      detail: `${link.exchange.toUpperCase()} ${link.status.toUpperCase()}`,
-      accountId: link.accountId,
-      exchange: link.exchange
-    })),
-    ...walletLinks.map((link) => ({
-      id: link.id,
-      kind: "dex" as const,
-      label: link.venue.toUpperCase(),
-      detail: `${link.provider.toUpperCase()} ${link.address.slice(0, 6)}...${link.address.slice(-4)}`
-    }))
-  ], [brokerLinks, walletLinks]);
+  useEffect(() => blackCoreConnectionManager.subscribe(setConnectionDiagnostics), []);
+
+  const executionVenues: ExecutionVenue[] = useMemo(() => connectionDiagnostics
+    .filter((connection) => !["disconnected", "offline", "unsupported"].includes(connection.status))
+    .map((connection) => {
+      const isWallet = connection.category === "wallet";
+      const venueLabel = String(connection.metadata.venueLabel || connection.metadata.venue || connection.provider);
+      const address = connection.walletAddress;
+      return {
+        id: connection.id,
+        kind: isWallet ? "dex" as const : "cex" as const,
+        label: isWallet ? `${venueLabel.toUpperCase()} / ${connection.provider.toUpperCase()}` : connection.label,
+        detail: isWallet && address
+          ? `${connection.provider.toUpperCase()} ${address.slice(0, 6)}...${address.slice(-4)}`
+          : `${connection.provider.toUpperCase()} ${connection.status.toUpperCase()} ${connection.health.latencyMs}ms`,
+        accountId: connection.accountId,
+        exchange: isWallet ? undefined : connection.provider as ExchangeId,
+        walletAddress: address,
+        provider: connection.provider,
+        capabilities: connection.capabilities,
+        health: connection.health,
+        unsupportedReason: typeof connection.metadata.futuresUnsupportedReason === "string" ? connection.metadata.futuresUnsupportedReason : undefined
+      };
+    }), [connectionDiagnostics]);
   const activeExecutionVenue = executionVenues.find((venue) => venue.id === activeVenueId) ?? executionVenues[0] ?? null;
-
-  useEffect(() => {
-    localStorage.setItem(brokerLinksStorageKey, JSON.stringify(brokerLinks));
-  }, [brokerLinks]);
-
-  useEffect(() => {
-    localStorage.setItem(walletLinksStorageKey, JSON.stringify(walletLinks));
-  }, [walletLinks]);
 
   useEffect(() => {
     if (activeVenueId) {
@@ -373,10 +343,16 @@ export function PositionsWorkspace({
 
   useEffect(() => {
     if (!activeVenueId && executionVenues[0]) setActiveVenueId(executionVenues[0].id);
+    if (activeVenueId && executionVenues.length > 0 && !executionVenues.some((venue) => venue.id === activeVenueId)) {
+      setActiveVenueId(executionVenues[0].id);
+    }
   }, [activeVenueId, executionVenues]);
 
   const selectedDexVenue = dexVenues.find((venue) => venue.id === selectedDex) ?? dexVenues[0];
   const venueValue = `${venueKind}:${venueKind === "cex" ? selectedCex : selectedDex}`;
+  const centralizedConnectionCount = connectionDiagnostics.filter((connection) => connection.category === "centralized-exchange").length;
+  const walletConnectionCount = connectionDiagnostics.filter((connection) => connection.category === "wallet").length;
+  const walletDiagnostics = connectionDiagnostics.filter((connection) => connection.category === "wallet");
 
   function updateVenue(value: string) {
     const [kind, id] = value.split(":") as [VenueSelectorKind, string];
@@ -411,57 +387,44 @@ export function PositionsWorkspace({
       return;
     }
 
-    const account = await connectExchangeAccount({
-      ...connection,
-      exchange: selectedCex,
-      accountName
-    });
-    const link: BrokerLink = {
-      id: `cex-${account.id}`,
-      accountId: account.id,
-      exchange: selectedCex,
-      accountName,
-      status: account.status === "connected" ? "connected" : "read-only",
-      linkedAt: Date.now()
-    };
-    setBrokerLinks((current) => [link, ...current.filter((item) => item.id !== link.id)]);
-    setActiveVenueId(link.id);
-    setConnection({ exchange: selectedCex, accountName: "", apiKey: "", apiSecret: "", passphrase: "" });
-    setConnectStatus("BROKER LINK STORED");
-    setShowConnection(false);
+    try {
+      const nextConnection = await blackCoreConnectionManager.connect({
+        adapterId: `cex:${selectedCex}`,
+        category: "centralized-exchange",
+        provider: selectedCex,
+        label: accountName,
+        credentials: {
+          ...connection,
+          exchange: selectedCex,
+          accountName
+        },
+        metadata: {
+          accountName
+        }
+      });
+      setActiveVenueId(nextConnection.id);
+      setConnection({ exchange: selectedCex, accountName: "", apiKey: "", apiSecret: "", passphrase: "" });
+      setConnectStatus("BROKER LINK STORED");
+      setShowConnection(false);
+    } catch (error) {
+      setConnectStatus(error instanceof Error ? error.message.toUpperCase() : String(error));
+    }
   }
 
   async function handleConnectDex() {
     try {
-      let address = "";
-      let chain = selectedDexVenue.chain;
-
-      if (walletProvider === "metamask") {
-        const ethereum = (window as any).ethereum;
-        if (!ethereum?.request) throw new Error("METAMASK NOT DETECTED");
-        const accounts = await ethereum.request({ method: "eth_requestAccounts" });
-        const chainId = await ethereum.request({ method: "eth_chainId" });
-        address = accounts?.[0] || "";
-        chain = chainId || selectedDexVenue.chain;
-      } else {
-        const solana = (window as any).solana;
-        if (!solana?.connect) throw new Error("PHANTOM NOT DETECTED");
-        const response = await solana.connect();
-        address = response?.publicKey?.toString() || "";
-      }
-
-      if (!address) throw new Error("NO WALLET ADDRESS RETURNED");
-
-      const link: WalletLink = {
-        id: `dex-${selectedDex}-${address}`,
-        venue: selectedDex,
+      const nextConnection = await blackCoreConnectionManager.connect({
+        adapterId: `wallet:${walletProvider}`,
+        category: "wallet",
         provider: walletProvider,
-        address,
-        chain,
-        linkedAt: Date.now()
-      };
-      setWalletLinks((current) => [link, ...current.filter((item) => item.id !== link.id)]);
-      setActiveVenueId(link.id);
+        label: `${selectedDexVenue.label} / ${walletProvider === "metamask" ? "MetaMask" : "Phantom"}`,
+        metadata: {
+          venue: selectedDex,
+          venueLabel: selectedDexVenue.label,
+          chain: selectedDexVenue.chain
+        }
+      });
+      setActiveVenueId(nextConnection.id);
       setConnectStatus("WALLET LINKED");
       setShowConnection(false);
     } catch (error) {
@@ -484,11 +447,7 @@ export function PositionsWorkspace({
     if (!activeExecutionVenue) return;
 
     const nextVenue = executionVenues.find((venue) => venue.id !== activeExecutionVenue.id);
-    if (activeExecutionVenue.kind === "cex") {
-      setBrokerLinks((current) => current.filter((link) => link.id !== activeExecutionVenue.id));
-    } else {
-      setWalletLinks((current) => current.filter((link) => link.id !== activeExecutionVenue.id));
-    }
+    void blackCoreConnectionManager.disconnect(activeExecutionVenue.id);
     setActiveVenueId(nextVenue?.id ?? null);
   }
 
@@ -543,16 +502,16 @@ export function PositionsWorkspace({
             </button>
             <div className="positions-connect-summary">
               <span>Broker Links</span>
-              <b>{brokerLinks.length}</b>
+              <b>{centralizedConnectionCount}</b>
               <span>Wallet Links</span>
-              <b>{walletLinks.length}</b>
+              <b>{walletConnectionCount}</b>
             </div>
             <div className="positions-wallet-list">
-              {walletLinks.map((link) => (
-                <div className="positions-wallet-link" key={link.id}>
-                  <b>{link.venue.toUpperCase()}</b>
-                  <span>{link.provider.toUpperCase()}</span>
-                  <em>{link.address.slice(0, 6)}...{link.address.slice(-4)}</em>
+              {walletDiagnostics.map((connection) => (
+                <div className="positions-wallet-link" key={connection.id}>
+                  <b>{String(connection.metadata.venue || connection.provider).toUpperCase()}</b>
+                  <span>{connection.provider.toUpperCase()}</span>
+                  <em>{connection.walletAddress ? `${connection.walletAddress.slice(0, 6)}...${connection.walletAddress.slice(-4)}` : connection.status.toUpperCase()}</em>
                 </div>
               ))}
             </div>
@@ -654,11 +613,19 @@ function ExecutionDock({
   const [submitStatus, setSubmitStatus] = useState("");
 
   const isDex = venue.kind === "dex";
-  const selectedMode = isDex && mode === "futures" ? "spot" : mode;
+  const supportsSpot = !isDex || venue.capabilities.includes("spot-orders") || venue.capabilities.includes("market-orders");
+  const supportsConvert = !isDex || venue.capabilities.includes("swap");
+  const supportsFutures = venue.capabilities.includes("perpetual-orders") || venue.capabilities.includes("leverage");
+  const modeSupported = (item: TradeMode) => {
+    if (item === "spot") return supportsSpot;
+    if (item === "convert") return supportsConvert;
+    return supportsFutures;
+  };
+  const selectedMode = modeSupported(mode) ? mode : supportsSpot ? "spot" : supportsConvert ? "convert" : supportsFutures ? "futures" : "spot";
 
   useEffect(() => {
-    if (isDex && mode === "futures") setMode("spot");
-  }, [isDex, mode]);
+    if (!modeSupported(mode)) setMode(supportsSpot ? "spot" : supportsConvert ? "convert" : supportsFutures ? "futures" : "spot");
+  }, [mode, supportsSpot, supportsConvert, supportsFutures]);
 
   const submitLabel = selectedMode === "convert"
     ? "Preview Convert"
@@ -670,7 +637,9 @@ function ExecutionDock({
     setSubmitStatus("");
 
     if (venue.kind === "dex") {
-      setSubmitStatus("DEX QUOTE / SIGN FLOW IS NEXT");
+      setSubmitStatus(venue.capabilities.includes("swap")
+        ? "DEX QUOTE / SIGN FLOW IS NEXT"
+        : "WALLET CONNECTED. EXECUTION REQUIRES A DEX ROUTING ADAPTER.");
       return;
     }
 
@@ -730,12 +699,23 @@ function ExecutionDock({
         ))}
       </select>
 
+      <div className="execution-diagnostics-strip">
+        <span>Status <b>{venue.health.status.toUpperCase()}</b></span>
+        <span>Latency <b>{venue.health.latencyMs}ms</b></span>
+        <span>Auth <b>{venue.health.authentication.toUpperCase()}</b></span>
+        <span>Heartbeat <b>{venue.health.heartbeat.toUpperCase()}</b></span>
+        <span>Subs <b>{venue.health.subscriptionCount}</b></span>
+        <span>Reconnects <b>{venue.health.reconnectCount}</b></span>
+        {venue.health.permissions.withdrawal && <em>WITHDRAWAL API PERMISSION DETECTED. USE TRADING-ONLY KEYS.</em>}
+      </div>
+
       <div className="execution-mode-row">
         {(["spot", "convert", "futures"] as TradeMode[]).map((item) => (
           <button
             key={item}
             className={selectedMode === item ? "active" : ""}
-            disabled={isDex && item === "futures"}
+            disabled={!modeSupported(item)}
+            title={!modeSupported(item) ? capabilityReason(item, venue) : undefined}
             onClick={() => setMode(item)}
           >
             {item.toUpperCase()}
@@ -746,6 +726,13 @@ function ExecutionDock({
           Margin
         </label>
       </div>
+      {isDex && (!supportsSpot || !supportsConvert || !supportsFutures) && (
+        <div className="execution-capability-note">
+          {venue.capabilities.length > 0
+            ? venue.unsupportedReason || "This connection only enables features advertised by its adapter."
+            : "No executable trading capabilities reported by this connection."}
+        </div>
+      )}
 
       {selectedMode === "futures" && (
         <div className="execution-futures-box">
@@ -832,6 +819,16 @@ function ExecutionDock({
       </div>
     </div>
   );
+}
+
+function capabilityReason(mode: TradeMode, venue: ExecutionVenue) {
+  if (mode === "futures") {
+    return venue.unsupportedReason || "Futures require a perpetual DEX or broker adapter with leverage/perpetual capability.";
+  }
+  if (mode === "convert") {
+    return "Convert requires a DEX swap routing adapter. Wallet signing alone is not enough.";
+  }
+  return "Spot trading requires an executable broker or DEX routing adapter.";
 }
 
 export default function PortfolioManagerPage({ onClose, currentUser }: { onClose: () => void; currentUser?: CapabilityUser | null }) {

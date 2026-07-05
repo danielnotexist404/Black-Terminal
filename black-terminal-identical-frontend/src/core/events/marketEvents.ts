@@ -9,6 +9,7 @@ import type {
   TradeTick
 } from "../../market-data/types";
 import type { ExecutionEvent } from "../../execution/executionEvents";
+import type { ConnectivityEvent } from "../../connectivity/connectionEvents";
 
 export type MarketConnectionEvent = {
   exchange: ExchangeId;
@@ -33,5 +34,6 @@ export type MarketEventMap = {
   "position.updated": { accountId: string; symbol: string; time: number };
   "portfolio.updated": { accountId?: string; time: number };
   "execution.event": ExecutionEvent;
+  "connectivity.event": ConnectivityEvent;
   "performance.metric": { name: string; value: number; unit: string; time: number; tags?: Record<string, string> };
 };

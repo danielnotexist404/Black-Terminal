@@ -1,5 +1,7 @@
 import { registerBlackCoreService } from "./blackCore";
 import { blackCoreBrokerFramework } from "../broker/brokerFramework";
+import { blackCoreConnectionManager } from "../connectivity/connectionManager";
+import { registerConnectivityAdapters } from "../connectivity/registerConnectivity";
 import { blackCoreMarketDataEngine } from "../market-data/engine/marketDataEngine";
 import { blackCoreNotificationCenter } from "../notifications/notificationCenter";
 import { blackCoreOrderSyncService } from "../orders/orderSyncService";
@@ -12,7 +14,9 @@ let registered = false;
 export function registerBlackCoreServices() {
   if (registered) return;
   registered = true;
+  registerConnectivityAdapters();
 
+  registerBlackCoreService("connections", blackCoreConnectionManager);
   registerBlackCoreService("marketData", blackCoreMarketDataEngine);
   registerBlackCoreService("brokerFramework", blackCoreBrokerFramework);
   registerBlackCoreService("walletFramework", blackCoreWalletFramework);

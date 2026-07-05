@@ -5342,6 +5342,44 @@ body.resizing-layout * {
   font: 800 10px "IBM Plex Mono", monospace;
 }
 
+.execution-diagnostics-strip {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.execution-diagnostics-strip span,
+.execution-diagnostics-strip em,
+.execution-capability-note {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 7px;
+  background: #050607;
+  color: #7f858e;
+  font: 800 9px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.execution-diagnostics-strip b {
+  color: var(--strong);
+}
+
+.execution-diagnostics-strip em,
+.execution-capability-note {
+  grid-column: 1 / -1;
+  justify-content: center;
+  min-height: 30px;
+  color: #f2c14d;
+  background: rgba(245, 159, 24, 0.07);
+  border: 1px solid rgba(245, 159, 24, 0.2);
+  font-style: normal;
+  text-align: center;
+}
+
 .execution-connection-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;

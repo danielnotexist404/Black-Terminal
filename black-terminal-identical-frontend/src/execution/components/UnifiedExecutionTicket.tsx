@@ -1,16 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Play, X } from "lucide-react";
+import { blackCoreConnectionManager } from "../../connectivity/connectionManager";
+import type { ConnectionDiagnostics } from "../../connectivity/types";
 import { submitPortfolioOrderViaApi } from "../../portfolio/portfolioApiClient";
 import type { ExecutionDestination, ExecutionSource, MarginMode, OrderSide, OrderType, SizingMethod, TimeInForce } from "../types";
 import type { ExchangeId, MarketKind } from "../../market-data/types";
-
-type StoredBrokerLink = {
-  id: string;
-  accountId: string;
-  exchange: ExchangeId;
-  accountName: string;
-  status: "read-only" | "connected";
-};
 
 export type UnifiedExecutionTicketPreset = {
   symbol: string;
@@ -27,7 +21,6 @@ type UnifiedExecutionTicketProps = {
   onClose: () => void;
 };
 
-const brokerLinksStorageKey = "bt_broker_links_v1";
 const activeExecutionVenueStorageKey = "bt_active_execution_venue_v1";
 
 const orderTypes: OrderType[] = ["market", "limit", "stop-market", "stop-limit", "trailing-stop", "bracket", "twap", "iceberg"];
@@ -43,11 +36,12 @@ const sizingMethods: Array<{ value: SizingMethod; label: string }> = [
 ];
 
 export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTicketProps) {
-  const brokerLinks = useMemo(() => readBrokerLinks(), []);
+  const [connections, setConnections] = useState<ConnectionDiagnostics[]>(() => blackCoreConnectionManager.listDiagnostics());
+  const activeConnections = useMemo(() => connections.filter((connection) => !["disconnected", "offline", "unsupported"].includes(connection.status)), [connections]);
   const activeVenueId = typeof window === "undefined" ? null : localStorage.getItem(activeExecutionVenueStorageKey);
-  const defaultBroker = brokerLinks.find((link) => link.id === activeVenueId) ?? brokerLinks[0] ?? null;
-  const [accountId, setAccountId] = useState(defaultBroker?.accountId ?? "");
-  const selectedBroker = brokerLinks.find((link) => link.accountId === accountId) ?? defaultBroker;
+  const defaultConnection = activeConnections.find((connection) => connection.id === activeVenueId) ?? activeConnections[0] ?? null;
+  const [connectionId, setConnectionId] = useState(defaultConnection?.id ?? "");
+  const selectedConnection = activeConnections.find((connection) => connection.id === connectionId) ?? defaultConnection;
   const [side, setSide] = useState<OrderSide>(preset.side ?? "buy");
   const [orderType, setOrderType] = useState<OrderType>(preset.orderType ?? "market");
   const [quantity, setQuantity] = useState("");
@@ -65,6 +59,18 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
   const [allocationDestination, setAllocationDestination] = useState(Boolean(preset.allocationEnabled));
   const [status, setStatus] = useState("");
 
+  useEffect(() => blackCoreConnectionManager.subscribe(setConnections), []);
+
+  useEffect(() => {
+    if (activeConnections.length === 0) {
+      setConnectionId("");
+      return;
+    }
+    if (!connectionId || !activeConnections.some((connection) => connection.id === connectionId)) {
+      setConnectionId(defaultConnection?.id ?? activeConnections[0].id);
+    }
+  }, [activeConnections, connectionId, defaultConnection]);
+
   const destinations = useMemo(() => {
     const next: ExecutionDestination[] = [];
     if (personalDestination) next.push("personal-portfolio");
@@ -75,8 +81,19 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
   async function submit() {
     setStatus("");
     const parsedQuantity = Number(quantity);
-    if (!selectedBroker) {
-      setStatus("CONNECT A BROKER IN POSITIONS FIRST");
+    if (!selectedConnection) {
+      setStatus("CONNECT AN ACCOUNT IN POSITIONS FIRST");
+      return;
+    }
+    if (selectedConnection.category === "wallet") {
+      const reason = typeof selectedConnection.metadata.futuresUnsupportedReason === "string"
+        ? selectedConnection.metadata.futuresUnsupportedReason
+        : "Wallet is connected, but no executable DEX routing adapter is configured for this protocol yet.";
+      setStatus(reason.toUpperCase());
+      return;
+    }
+    if (!selectedConnection.accountId) {
+      setStatus("CONNECTED VENUE HAS NO BROKER ACCOUNT ID");
       return;
     }
     if (!parsedQuantity || parsedQuantity <= 0) {
@@ -90,8 +107,8 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
 
     try {
       const update = await submitPortfolioOrderViaApi({
-        accountId: selectedBroker.accountId,
-        exchange: selectedBroker.exchange,
+        accountId: selectedConnection.accountId,
+        exchange: selectedConnection.provider as ExchangeId,
         symbol: preset.symbol.toUpperCase(),
         marketKind: preset.marketKind ?? "perpetual",
         side,
@@ -129,10 +146,10 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
 
         <label>
           <span>Account</span>
-          <select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
-            {brokerLinks.length === 0 && <option value="">Connect broker in Positions</option>}
-            {brokerLinks.map((link) => (
-              <option key={link.id} value={link.accountId}>{link.accountName} / {link.exchange.toUpperCase()}</option>
+          <select value={connectionId} onChange={(event) => setConnectionId(event.target.value)}>
+            {activeConnections.length === 0 && <option value="">Connect account in Positions</option>}
+            {activeConnections.map((connection) => (
+              <option key={connection.id} value={connection.id}>{formatConnectionOption(connection)}</option>
             ))}
           </select>
         </label>
@@ -168,8 +185,8 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
         </div>
 
         <div className="unified-execution-matrix">
-          <div><span>Validation Status</span><b>{selectedBroker && Number(quantity) > 0 ? "READY" : "PENDING"}</b></div>
-          <div><span>Risk Status</span><b>SERVER CHECK</b></div>
+          <div><span>Validation Status</span><b>{selectedConnection && Number(quantity) > 0 ? "READY" : "PENDING"}</b></div>
+          <div><span>Risk Status</span><b>{selectedConnection?.category === "wallet" ? "ROUTER REQUIRED" : "SERVER CHECK"}</b></div>
           <div><span>Execution Status</span><b>{status || "NOT SUBMITTED"}</b></div>
         </div>
 
@@ -181,12 +198,11 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
   );
 }
 
-function readBrokerLinks(): StoredBrokerLink[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const stored = localStorage.getItem(brokerLinksStorageKey);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
+function formatConnectionOption(connection: ConnectionDiagnostics) {
+  const latency = `${connection.health.latencyMs}ms`;
+  if (connection.category === "wallet") {
+    const address = connection.walletAddress ? `${connection.walletAddress.slice(0, 6)}...${connection.walletAddress.slice(-4)}` : "wallet";
+    return `${connection.label} / ${address} / ${connection.status.toUpperCase()} / ${latency}`;
   }
+  return `${connection.label} / ${connection.provider.toUpperCase()} / ${connection.status.toUpperCase()} / ${latency}`;
 }

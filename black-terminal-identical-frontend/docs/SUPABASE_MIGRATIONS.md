@@ -1010,3 +1010,18 @@ Reason:
 Future migration trigger:
 
 - Add a migration only if camera presets, saved viewport domains, diagnostics snapshots, or cross-device DOM Pro+ layouts need account-level Supabase persistence.
+
+## 2026-07-10 - DOM Pro+ Profile And Depth Curve Fix
+
+Status: No Supabase migration required.
+
+Reason:
+
+- The change is limited to frontend DOM Pro+ rendering and depth/profile derivation from already available market data.
+- Volume Profile now keeps a full camera-domain scaffold locally.
+- Depth Chart now consumes raw L2 levels before falling back to aggregated buckets.
+- No new server records, account settings, credentials, audit rows, or Supabase policies were introduced.
+
+Future migration trigger:
+
+- Add a migration only if per-user saved DOM camera layouts, DOM diagnostics snapshots, or cross-device order-flow workspace presets need Supabase persistence.

@@ -135,9 +135,11 @@ DOM Pro+ execution panel
 - Added a historical OHLCV macro radar layer using cached/fetched daily candles from the existing Market Data Engine.
 - Added macro structure bands for POC, supply, and demand zones across a wider historical range.
 - Aligned the volume profile to the same vertical viewport used by the heatmap.
+- Volume Profile now renders a continuous camera-domain scaffold with an outline and price scale, so zoomed-out views preserve the visible range even when liquidity only exists in part of the domain.
 - Replaced the depth chart block bars with a cumulative bid/ask depth curve.
 - Made the depth chart inherit the same visible price camera as the heatmap.
 - Restored the depth chart around a current-price center reference with bid cumulative depth on the lower-price side and ask cumulative depth on the higher-price side.
+- Depth chart now prefers raw L2 levels over aggregated buckets, maps price to the shared camera domain, and extends available curves to the viewport edges instead of disappearing when institutional buckets collapse into one row.
 - Depth chart now renders one available side with an explicit source warning instead of going blank.
 - Replaced liquidity flow blocks with rolling time-bucket histogram bars and percentile outlier scaling.
 - Redesigned CVD as a larger heuristic CVD panel with current delta, session delta, aggressive buy percentage, aggressive sell percentage, trend label, horizon controls, EMA smoothing, and a thicker line.

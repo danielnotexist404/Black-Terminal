@@ -6,6 +6,7 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
+- Current - Fix DOM Pro+ profile domain scaffold and raw-depth curve.
 - Current - Polish DOM Pro+ cockpit rendering and viewport controls.
 - Current - Refine DOM Pro+ heatmap camera and remove artificial zoom-out limit.
 - Current - Fix DOM Pro+ full price domain, buy walls, and depth diagnostics.
@@ -94,6 +95,8 @@ Changed:
 - Updated liquidity-flow delta scaling with p95 clamp and square-root scaling to prevent giant block artifacts.
 - Scoped the central heatmap to the selected visible range so institutional mode shows balanced buy/sell radar around current price instead of drifting only toward distant upside history.
 - Aligned Volume Profile with the heatmap viewport and added hover inspection.
+- Changed Volume Profile rendering from sparse populated rows into a full camera-domain scaffold with a continuous outline, right-side price scale, and zero-volume rows hidden instead of collapsing the visible range.
+- Changed the depth chart to use raw L2 bid/ask levels before aggregated buckets, map the shared price camera horizontally, extend available cumulative curves to the visible domain edges, and keep explicit sparse-source warnings.
 - Slowed heuristic CVD with 15M/1H/4H/12H/24H horizons, EMA smoothing, and sample intervals.
 - Replaced the block-style depth chart with a cumulative bid/ask market-depth curve.
 - Replaced liquidity flow blocks with rolling time-bucket histogram bars using percentile outlier scaling.

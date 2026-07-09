@@ -410,6 +410,10 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     [heatmapRange, macroCandles, snapshot.volumeProfile]
   );
   const maxProfileVolume = Math.max(...institutionalProfile.map((node) => node.volume), 1);
+  const profileOutline = useMemo(
+    () => buildProfileOutline(institutionalProfile, maxProfileVolume, heatmapRange),
+    [heatmapRange, institutionalProfile, maxProfileVolume]
+  );
   const smoothedCvdData = useMemo(() => buildSmoothedCvd(cvdData, settings), [cvdData, settings]);
   const cvdStats = useMemo(() => buildCvdStats(snapshot.trades, smoothedCvdData, settings), [settings, smoothedCvdData, snapshot.trades]);
   const cvdPath = useMemo(() => buildCvdPath(smoothedCvdData), [smoothedCvdData]);
@@ -702,9 +706,16 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             <PanelTitle title="Volume Profile" status="VISIBLE RANGE" />
             {!settings.showVolumeProfile ? <EmptyState text="Volume profile hidden in DOM settings." /> : institutionalProfile.length === 0 ? <EmptyState text="Awaiting live orderbook or historical candles." /> : (
                   <div className="dom-pro-profile-scale" onMouseMove={handleProfileMouseMove} onMouseLeave={() => setDomHover(null)} onDoubleClick={centerMarketCamera}>
+                <div className="dom-pro-profile-axis">
+                  {buildPriceScale(heatmapRange).map((price) => <span key={price} style={{ top: priceToTop(price, heatmapRange) }}>{formatPrice(price)}</span>)}
+                </div>
+                <svg className="dom-pro-profile-outline" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                  {profileOutline.area && <polygon points={profileOutline.area} />}
+                  {profileOutline.line && <polyline points={profileOutline.line} />}
+                </svg>
                 {institutionalProfile.map((node) => (
-                  <div className={`dom-pro-profile-node ${node.kind}`} key={`${node.price}-${node.kind}`} style={{ top: priceToTop(node.price, heatmapRange) }}>
-                    <i style={{ width: `${Math.max(3, node.volume / maxProfileVolume * 100)}%` }} />
+                  <div className={`dom-pro-profile-node ${node.kind} ${node.volume <= 0 ? "empty" : ""}`} key={`${node.price}-${node.kind}`} style={{ top: priceToTop(node.price, heatmapRange) }}>
+                    <i style={{ width: `${node.volume <= 0 ? 0 : Math.max(3, node.volume / maxProfileVolume * 100)}%` }} />
                     <span>{formatPrice(node.price)}</span>
                     <b>{node.kind.toUpperCase()}</b>
                   </div>
@@ -1140,9 +1151,10 @@ function rangeFromPricePct(price: number, rangePct: number, source: MacroLiquidi
 }
 
 function buildInstitutionalProfile(liveProfile: VolumeProfileNode[], candles: Candle[], range: MacroLiquidityRange): VolumeProfileNode[] {
-  const source = candles.filter((candle) => candle.high >= range.min && candle.low <= range.max).slice(-365);
-  if (source.length < 20) return liveProfile.filter((node) => node.price >= range.min && node.price <= range.max).sort((a, b) => b.price - a.price);
-  const binCount = 96;
+  const historicalSource = candles.slice(-365);
+  const overlappingSource = historicalSource.filter((candle) => candle.high >= range.min && candle.low <= range.max);
+  const source = overlappingSource.length >= 8 ? overlappingSource : historicalSource.filter((candle) => candle.close >= range.min && candle.close <= range.max);
+  const binCount = 128;
   const step = Math.max((range.max - range.min) / binCount, 0.0001);
   const bins = Array.from({ length: binCount + 1 }, (_, index) => ({ price: range.min + index * step, volume: 0 }));
 
@@ -1155,17 +1167,37 @@ function buildInstitutionalProfile(liveProfile: VolumeProfileNode[], candles: Ca
     }
   }
 
+  for (const node of liveProfile) {
+    if (node.price < range.min || node.price > range.max || node.volume <= 0) continue;
+    const index = Math.max(0, Math.min(bins.length - 1, Math.round((node.price - range.min) / step)));
+    bins[index].volume += node.volume * Math.max(8, source.length ? 1 : 18);
+  }
+
   const volumes = bins.map((bin) => bin.volume);
   const max = Math.max(...volumes, 1);
-  const avg = volumes.reduce((sum, value) => sum + value, 0) / Math.max(1, volumes.length);
+  const positiveVolumes = volumes.filter((volume) => volume > 0);
+  const avg = positiveVolumes.reduce((sum, value) => sum + value, 0) / Math.max(1, positiveVolumes.length);
   return bins
-    .filter((bin) => bin.volume > 0)
     .map((bin) => ({
       price: bin.price,
       volume: bin.volume,
-      kind: (bin.volume === max ? "poc" : bin.volume > avg * 1.55 ? "hvn" : bin.volume < avg * 0.42 ? "lvn" : "normal") as VolumeProfileNode["kind"]
+      kind: (bin.volume <= 0 ? "lvn" : bin.volume === max ? "poc" : bin.volume > avg * 1.55 ? "hvn" : bin.volume < avg * 0.42 ? "lvn" : "normal") as VolumeProfileNode["kind"]
     }))
     .sort((a, b) => b.price - a.price);
+}
+
+function buildProfileOutline(profile: VolumeProfileNode[], maxVolume: number, range: MacroLiquidityRange) {
+  const rows = profile
+    .slice()
+    .sort((a, b) => b.price - a.price)
+    .map((node) => ({
+      x: 4 + Math.sqrt(Math.max(0, node.volume) / Math.max(1, maxVolume)) * 72,
+      y: priceToY(node.price, range)
+    }));
+  if (rows.length < 2) return { line: "", area: "" };
+  const line = rows.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
+  const area = `4,${rows[0].y.toFixed(2)} ${line} 4,${rows[rows.length - 1].y.toFixed(2)}`;
+  return { line, area };
 }
 
 function resolveHorizonFrameCount(settings: DomSettings) {
@@ -1184,8 +1216,19 @@ function resolveHorizonFrameCount(settings: DomSettings) {
 
 function priceToTop(price: number | null | undefined, range: MacroLiquidityRange) {
   if (!Number.isFinite(price ?? NaN) || range.max <= range.min) return "50%";
-  const pct = 100 - ((Number(price) - range.min) / (range.max - range.min)) * 100;
-  return `${Math.max(1, Math.min(99, pct))}%`;
+  return `${priceToY(Number(price), range)}%`;
+}
+
+function priceToY(price: number, range: MacroLiquidityRange) {
+  if (!Number.isFinite(price) || range.max <= range.min) return 50;
+  const pct = 100 - ((price - range.min) / (range.max - range.min)) * 100;
+  return Math.max(1, Math.min(99, pct));
+}
+
+function priceToX(price: number, range: MacroLiquidityRange) {
+  if (!Number.isFinite(price) || range.max <= range.min) return 50;
+  const pct = ((price - range.min) / (range.max - range.min)) * 94 + 3;
+  return Math.max(3, Math.min(97, pct));
 }
 
 function buildPriceScale(range: MacroLiquidityRange) {
@@ -1507,20 +1550,22 @@ function buildCvdPath(points: Array<{ value: number }>) {
 
 function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityRange) {
   const currentPrice = snapshot.midPrice ?? snapshot.lastPrice ?? midpoint(range);
-  const bidSource = snapshot.bids.length
-    ? snapshot.bids
-    : (snapshot.sourceBook?.bids ?? []).map((level) => ({ price: level.price, bidSize: level.quantity, askSize: 0 }));
-  const askSource = snapshot.asks.length
-    ? snapshot.asks
-    : (snapshot.sourceBook?.asks ?? []).map((level) => ({ price: level.price, askSize: level.quantity, bidSize: 0 }));
+  const rawBidSource = (snapshot.sourceBook?.bids ?? [])
+    .map((level) => ({ price: level.price, bidSize: level.quantity, askSize: 0 }))
+    .filter((level) => level.price > 0 && level.bidSize > 0);
+  const rawAskSource = (snapshot.sourceBook?.asks ?? [])
+    .map((level) => ({ price: level.price, askSize: level.quantity, bidSize: 0 }))
+    .filter((level) => level.price > 0 && level.askSize > 0);
+  const bidSource = rawBidSource.length >= 2 ? rawBidSource : snapshot.bids;
+  const askSource = rawAskSource.length >= 2 ? rawAskSource : snapshot.asks;
   const bidLevels = bidSource
     .filter((level) => level.price >= range.min && level.price <= Math.min(currentPrice, range.max) && level.bidSize > 0)
     .sort((a, b) => b.price - a.price)
-    .slice(0, 160);
+    .slice(0, 420);
   const askLevels = askSource
     .filter((level) => level.price <= range.max && level.price >= Math.max(currentPrice, range.min) && level.askSize > 0)
     .sort((a, b) => a.price - b.price)
-    .slice(0, 160);
+    .slice(0, 420);
   if (bidLevels.length === 0 && askLevels.length === 0) {
     return { empty: true, bidLine: "", askLine: "", bidArea: "", askArea: "", bidPoints: 0, askPoints: 0, warning: "Depth chart awaiting bid/ask buckets." };
   }
@@ -1537,34 +1582,42 @@ function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityR
     return askTotal;
   });
   const maxTotal = Math.max(1, bidTotal, askTotal);
-  const bidSpan = Math.max(currentPrice - range.min, rangeSpan(range) * 0.05);
-  const askSpan = Math.max(range.max - currentPrice, rangeSpan(range) * 0.05);
-  const bidPriceToX = (price: number) => Math.max(3, Math.min(50, 50 - ((currentPrice - price) / bidSpan) * 47));
-  const askPriceToX = (price: number) => Math.max(50, Math.min(97, 50 + ((price - currentPrice) / askSpan) * 47));
-  const startX = 50;
+  const startX = priceToX(currentPrice, range);
   bidLevels.forEach((level, index) => {
-    const x = bidPriceToX(level.price);
-    const y = 94 - (bidTotals[index] / maxTotal) * 82;
+    const x = priceToX(level.price, range);
+    const y = 94 - Math.sqrt(bidTotals[index] / maxTotal) * 82;
     bidCumulative.push({ x, y });
   });
   askLevels.forEach((level, index) => {
-    const x = askPriceToX(level.price);
-    const y = 94 - (askTotals[index] / maxTotal) * 82;
+    const x = priceToX(level.price, range);
+    const y = 94 - Math.sqrt(askTotals[index] / maxTotal) * 82;
     askCumulative.push({ x, y });
   });
-  const bidLinePoints = bidCumulative.length ? [{ x: startX, y: 94 }, ...bidCumulative] : [];
-  const askLinePoints = askCumulative.length ? [{ x: startX, y: 94 }, ...askCumulative] : [];
+  const bidLinePoints = bidCumulative.length
+    ? extendDepthSide([{ x: startX, y: 94 }, ...bidCumulative].sort((a, b) => a.x - b.x), "bid")
+    : [];
+  const askLinePoints = askCumulative.length
+    ? extendDepthSide([{ x: startX, y: 94 }, ...askCumulative].sort((a, b) => a.x - b.x), "ask")
+    : [];
   const pointString = (points: Array<{ x: number; y: number }>) => points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
   return {
     empty: false,
     bidLine: pointString(bidLinePoints),
     askLine: pointString(askLinePoints),
-    bidArea: bidLinePoints.length ? `${pointString(bidLinePoints)} ${bidCumulative[bidCumulative.length - 1]?.x.toFixed(2) ?? "3"},94 ${startX.toFixed(2)},94` : "",
-    askArea: askLinePoints.length ? `${pointString(askLinePoints)} ${askCumulative[askCumulative.length - 1]?.x.toFixed(2) ?? "97"},94 ${startX.toFixed(2)},94` : "",
+    bidArea: bidLinePoints.length ? `${pointString(bidLinePoints)} ${startX.toFixed(2)},94 ${bidLinePoints[0].x.toFixed(2)},94` : "",
+    askArea: askLinePoints.length ? `${pointString(askLinePoints)} ${askLinePoints[askLinePoints.length - 1].x.toFixed(2)},94 ${startX.toFixed(2)},94` : "",
     bidPoints: bidLinePoints.length,
     askPoints: askLinePoints.length,
-    warning: bidLinePoints.length === 0 ? "Only ask side available from source." : askLinePoints.length === 0 ? "Only bid side available from source." : ""
+    warning: bidLinePoints.length === 0 ? "Only ask side available from source." : askLinePoints.length === 0 ? "Only bid side available from source." : rawBidSource.length < 2 || rawAskSource.length < 2 ? "Raw depth sparse; using aggregated fallback." : ""
   };
+}
+
+function extendDepthSide(points: Array<{ x: number; y: number }>, side: "bid" | "ask") {
+  if (points.length === 0) return points;
+  const next = points.slice();
+  if (side === "bid" && next[0].x > 3.5) next.unshift({ x: 3, y: next[0].y });
+  if (side === "ask" && next[next.length - 1].x < 96.5) next.push({ x: 97, y: next[next.length - 1].y });
+  return next;
 }
 
 function buildDomDebugStats(

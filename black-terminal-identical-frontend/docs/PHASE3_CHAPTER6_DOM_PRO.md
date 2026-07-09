@@ -124,11 +124,15 @@ DOM Pro+ execution panel
 - Added camera presets for Current, 1H, 6H, 12H, 24H, 3D, and Fit to Visible Data.
 - Allowed broad zoom-out up to macro liquidity map scale without snapping back to current price.
 - Prepared the camera model around center price, zoom, offset, and height so a future minimap/navigator can consume the same viewport state.
+- Fixed the aggregation slice that could keep only upper ask-side buckets in wide domains; visible bucket selection now preserves both bid/buy buckets below market and ask/sell buckets above market.
+- Balanced heatmap memory and wall detection by side so buy walls cannot be starved out by stronger sell-side rankings.
+- Added DOM diagnostics for raw bid/ask levels, aggregated bid/ask buckets, buy/sell wall counts, shared domain min/max, rendered heatmap/profile rows, and depth bid/ask points.
 - Added a historical OHLCV macro radar layer using cached/fetched daily candles from the existing Market Data Engine.
 - Added macro structure bands for POC, supply, and demand zones across a wider historical range.
 - Aligned the volume profile to the same vertical viewport used by the heatmap.
 - Replaced the depth chart block bars with a cumulative bid/ask depth curve.
 - Made the depth chart inherit the same visible price camera as the heatmap.
+- Restored the depth chart around a current-price center reference with bid cumulative depth on the lower-price side and ask cumulative depth on the higher-price side.
 - Replaced liquidity flow blocks with rolling time-bucket histogram bars and percentile outlier scaling.
 - Redesigned CVD as a larger heuristic CVD panel with current delta, session delta, aggressive buy percentage, aggressive sell percentage, trend label, horizon controls, EMA smoothing, and a thicker line.
 - Updated institutional defaults to 500x buckets, +/-2% visible range, 24H heatmap, 4H smoothed CVD, and 10-12 FPS behavior.

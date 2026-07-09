@@ -8,6 +8,7 @@ Recent pushed commits:
 
 - Current - Polish DOM Pro+ cockpit rendering and viewport controls.
 - Current - Refine DOM Pro+ heatmap camera and remove artificial zoom-out limit.
+- Current - Fix DOM Pro+ full price domain, buy walls, and depth diagnostics.
 - Current - Consolidate Vercel API route dispatchers for production deploy.
 - Current - Redesign DOM Pro+ as institutional liquidity radar.
 - Current - Implement Phase III Chapter VI DOM Pro+ cockpit.
@@ -80,6 +81,10 @@ Changed:
 - Added Current, 1H, 6H, 12H, 24H, 3D, and Fit camera presets.
 - Removed the old minimum zoom-out behavior so users can inspect wider liquidity maps up to institutional/macro scale.
 - Kept panning user-controlled without snapping back to current price except when explicitly centering the market.
+- Fixed a bucket-domain bug where wide ranges could retain only higher-price ask buckets and cut off bid/buy liquidity below current price.
+- Changed heatmap memory and wall detection to select bid and ask candidates separately, preserving buy walls below market and sell walls above market.
+- Restored the cumulative depth chart with current price as the center reference and separate bid/ask cumulative curves.
+- Added DOM diagnostics for raw levels, aggregated buckets, wall counts, shared domain bounds, rendered rows, and depth points.
 - Scoped the central heatmap to the selected visible range so institutional mode shows balanced buy/sell radar around current price instead of drifting only toward distant upside history.
 - Aligned Volume Profile with the heatmap viewport and added hover inspection.
 - Slowed heuristic CVD with 15M/1H/4H/12H/24H horizons, EMA smoothing, and sample intervals.

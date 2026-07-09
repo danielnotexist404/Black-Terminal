@@ -64,6 +64,23 @@ type FlowPoint = {
   net: number;
 };
 
+type DomDebugStats = {
+  domainMin: number;
+  domainMax: number;
+  currentPrice: number;
+  rawBidLevels: number;
+  rawAskLevels: number;
+  bidBuckets: number;
+  askBuckets: number;
+  buyWalls: number;
+  sellWalls: number;
+  visibleRows: number;
+  heatmapRowsRendered: number;
+  profileRowsRendered: number;
+  depthBidPoints: number;
+  depthAskPoints: number;
+};
+
 const orderTypes: OrderType[] = ["limit", "market", "twap", "iceberg"];
 const visibleRanges: Array<{ value: DomVisibleRange; label: string }> = [
   { value: "auto", label: "Auto" },
@@ -371,6 +388,10 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const cvdPath = useMemo(() => buildCvdPath(smoothedCvdData), [smoothedCvdData]);
   const depthChart = useMemo(() => buildDepthChart(snapshot, heatmapRange), [heatmapRange, snapshot]);
   const flowBars = useMemo(() => buildFlowBars(flowSeries, settings), [flowSeries, settings]);
+  const debugStats = useMemo(
+    () => buildDomDebugStats(snapshot, heatmapRange, heatmapFrames, institutionalProfile, depthChart, snapshot.lastPrice ?? lastPrice),
+    [depthChart, heatmapFrames, heatmapRange, institutionalProfile, lastPrice, snapshot]
+  );
 
   const centerMarketCamera = useCallback(() => {
     setHeatmapViewport(createCameraFromRange(macroRange, macroRange, "current", snapshot.lastPrice ?? lastPrice));
@@ -693,7 +714,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                     <em>{band.touches} touches / {Math.round(band.strength * 100)}%</em>
                   </div>
                 ))}
-                {heatmapFrames.map((frame, frameIndex) => frame.cells.filter((cell) => cell.price >= heatmapRange.min && cell.price <= heatmapRange.max).slice(0, 130).map((cell, cellIndex) => (
+                {heatmapFrames.map((frame, frameIndex) => frame.cells.filter((cell) => cell.price >= heatmapRange.min && cell.price <= heatmapRange.max).slice(0, 260).map((cell, cellIndex) => (
                   <i
                     key={`${frame.time}-${cell.price}-${cellIndex}`}
                     className={`dom-pro-heatmap-cell ${cell.side}`}
@@ -771,7 +792,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
 
           <section className="dom-pro-panel dom-pro-depth-chart">
             <PanelTitle title="Depth Chart" status="AGGREGATED" />
-            {depthChart.empty ? <EmptyState text="Depth chart requires bid and ask depth." /> : (
+            {depthChart.empty ? <EmptyState text="Depth chart awaiting bid/ask buckets." /> : (
               <svg className="dom-pro-depth-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Cumulative market depth">
                 <line className="axis" x1="50" y1="8" x2="50" y2="94" />
                 <line className="axis zero" x1="3" y1="94" x2="97" y2="94" />
@@ -842,6 +863,16 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
               <Metric label="Last Render" value={`${snapshot.renderStats.lastRenderMs.toFixed(2)} ms`} />
               <Metric label="Memory Estimate" value={`${snapshot.renderStats.memoryEstimateKb} KB`} />
               <Metric label="Subscriptions" value={String(snapshot.renderStats.subscriptionCount)} />
+              <Metric label="Domain Min" value={formatPrice(debugStats.domainMin)} />
+              <Metric label="Domain Max" value={formatPrice(debugStats.domainMax)} />
+              <Metric label="Current Price" value={formatPrice(debugStats.currentPrice)} />
+              <Metric label="Raw Bid / Ask" value={`${debugStats.rawBidLevels} / ${debugStats.rawAskLevels}`} />
+              <Metric label="Bid / Ask Buckets" value={`${debugStats.bidBuckets} / ${debugStats.askBuckets}`} />
+              <Metric label="Buy / Sell Walls" value={`${debugStats.buyWalls} / ${debugStats.sellWalls}`} />
+              <Metric label="Visible Rows" value={String(debugStats.visibleRows)} />
+              <Metric label="Heatmap Rows" value={String(debugStats.heatmapRowsRendered)} />
+              <Metric label="Profile Rows" value={String(debugStats.profileRowsRendered)} />
+              <Metric label="Depth Points" value={`${debugStats.depthBidPoints} / ${debugStats.depthAskPoints}`} />
               {snapshot.renderStats.lastRenderMs > 12 && <div className="dom-pro-warning">DOM Pro+ render load high. Increase bucket size or reduce FPS.</div>}
             </section>
           )}
@@ -1034,7 +1065,7 @@ function resolveMacroLiquidityRange(snapshot: AggregatedDomSnapshot, candles: Ca
 
 function buildInstitutionalProfile(liveProfile: VolumeProfileNode[], candles: Candle[], range: MacroLiquidityRange): VolumeProfileNode[] {
   const source = candles.filter((candle) => candle.high >= range.min && candle.low <= range.max).slice(-365);
-  if (source.length < 20) return liveProfile;
+  if (source.length < 20) return liveProfile.filter((node) => node.price >= range.min && node.price <= range.max).sort((a, b) => b.price - a.price);
   const binCount = 96;
   const step = Math.max((range.max - range.min) / binCount, 0.0001);
   const bins = Array.from({ length: binCount + 1 }, (_, index) => ({ price: range.min + index * step, volume: 0 }));
@@ -1169,12 +1200,18 @@ function resolveLiquidityDataRange(
   fallbackRange: MacroLiquidityRange
 ): MacroLiquidityRange {
   const prices = [
+    fallbackRange.min,
+    fallbackRange.max,
+    snapshot.lastPrice,
+    snapshot.midPrice,
+    snapshot.bestBid,
+    snapshot.bestAsk,
     ...bands.flatMap((band) => [band.low, band.high, band.price]),
     ...frames.flatMap((frame) => frame.cells.map((cell) => cell.price)),
     ...snapshot.walls.map((wall) => wall.price),
     ...snapshot.volumeProfile.map((node) => node.price),
     ...snapshot.buckets.map((bucket) => bucket.price)
-  ].filter((value) => Number.isFinite(value) && value > 0);
+  ].map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0);
   return pricesToRange(prices, fallbackRange, bands.length || frames.length ? "historical-ohlcv" : snapshot.buckets.length ? "live-depth" : fallbackRange.source);
 }
 
@@ -1191,11 +1228,17 @@ function resolveCameraPresetRange(
     .filter((frame) => frame.time >= cutoff)
     .flatMap((frame) => frame.cells.map((cell) => cell.price));
   const prices = [
+    fallbackRange.min,
+    fallbackRange.max,
+    currentPrice,
+    snapshot.midPrice,
+    snapshot.bestBid,
+    snapshot.bestAsk,
     ...cells,
     ...snapshot.walls.map((wall) => wall.price),
     ...snapshot.buckets.map((bucket) => bucket.price),
     ...(preset === "12h" || preset === "24h" || preset === "3d" ? bands.flatMap((band) => [band.low, band.high, band.price]) : [])
-  ].filter((value) => Number.isFinite(value) && value > 0);
+  ].map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0);
   const fallback = Number.isFinite(currentPrice ?? NaN)
     ? { min: Number(currentPrice) - rangeSpan(fallbackRange) / 2, max: Number(currentPrice) + rangeSpan(fallbackRange) / 2, source: fallbackRange.source }
     : fallbackRange;
@@ -1358,10 +1401,17 @@ function buildCvdPath(points: Array<{ value: number }>) {
 }
 
 function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityRange) {
-  const bidLevels = snapshot.bids.filter((level) => level.price >= range.min && level.price <= range.max).slice(0, 120).sort((a, b) => b.price - a.price);
-  const askLevels = snapshot.asks.filter((level) => level.price >= range.min && level.price <= range.max).slice(0, 120).sort((a, b) => a.price - b.price);
+  const currentPrice = snapshot.midPrice ?? snapshot.lastPrice ?? midpoint(range);
+  const bidLevels = snapshot.bids
+    .filter((level) => level.price >= range.min && level.price <= Math.min(currentPrice, range.max) && level.bidSize > 0)
+    .sort((a, b) => b.price - a.price)
+    .slice(0, 160);
+  const askLevels = snapshot.asks
+    .filter((level) => level.price <= range.max && level.price >= Math.max(currentPrice, range.min) && level.askSize > 0)
+    .sort((a, b) => a.price - b.price)
+    .slice(0, 160);
   if (bidLevels.length === 0 || askLevels.length === 0) {
-    return { empty: true, bidLine: "", askLine: "", bidArea: "", askArea: "" };
+    return { empty: true, bidLine: "", askLine: "", bidArea: "", askArea: "", bidPoints: 0, askPoints: 0 };
   }
   const bidCumulative: Array<{ x: number; y: number }> = [];
   const askCumulative: Array<{ x: number; y: number }> = [];
@@ -1376,15 +1426,18 @@ function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityR
     return askTotal;
   });
   const maxTotal = Math.max(1, bidTotal, askTotal);
-  const priceToX = (price: number) => Math.max(3, Math.min(97, 3 + ((price - range.min) / rangeSpan(range)) * 94));
-  const startX = priceToX(snapshot.midPrice ?? snapshot.lastPrice ?? midpoint(range));
+  const bidSpan = Math.max(currentPrice - range.min, rangeSpan(range) * 0.05);
+  const askSpan = Math.max(range.max - currentPrice, rangeSpan(range) * 0.05);
+  const bidPriceToX = (price: number) => Math.max(3, Math.min(50, 50 - ((currentPrice - price) / bidSpan) * 47));
+  const askPriceToX = (price: number) => Math.max(50, Math.min(97, 50 + ((price - currentPrice) / askSpan) * 47));
+  const startX = 50;
   bidLevels.forEach((level, index) => {
-    const x = priceToX(level.price);
+    const x = bidPriceToX(level.price);
     const y = 94 - (bidTotals[index] / maxTotal) * 82;
     bidCumulative.push({ x, y });
   });
   askLevels.forEach((level, index) => {
-    const x = priceToX(level.price);
+    const x = askPriceToX(level.price);
     const y = 94 - (askTotals[index] / maxTotal) * 82;
     askCumulative.push({ x, y });
   });
@@ -1396,7 +1449,39 @@ function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityR
     bidLine: pointString(bidLinePoints),
     askLine: pointString(askLinePoints),
     bidArea: `${pointString(bidLinePoints)} ${bidCumulative[bidCumulative.length - 1]?.x.toFixed(2) ?? "3"},94 ${startX.toFixed(2)},94`,
-    askArea: `${pointString(askLinePoints)} ${askCumulative[askCumulative.length - 1]?.x.toFixed(2) ?? "97"},94 ${startX.toFixed(2)},94`
+    askArea: `${pointString(askLinePoints)} ${askCumulative[askCumulative.length - 1]?.x.toFixed(2) ?? "97"},94 ${startX.toFixed(2)},94`,
+    bidPoints: bidLinePoints.length,
+    askPoints: askLinePoints.length
+  };
+}
+
+function buildDomDebugStats(
+  snapshot: AggregatedDomSnapshot,
+  domain: MacroLiquidityRange,
+  heatmapFrames: AggregatedDomSnapshot["heatmap"],
+  profile: VolumeProfileNode[],
+  depthChart: ReturnType<typeof buildDepthChart>,
+  currentPrice: number | null | undefined
+): DomDebugStats {
+  const visibleHeatmapRows = heatmapFrames.reduce(
+    (sum, frame) => sum + frame.cells.filter((cell) => cell.price >= domain.min && cell.price <= domain.max).length,
+    0
+  );
+  return {
+    domainMin: domain.min,
+    domainMax: domain.max,
+    currentPrice: Number(currentPrice ?? snapshot.midPrice ?? midpoint(domain)),
+    rawBidLevels: snapshot.sourceBook?.bids.length ?? 0,
+    rawAskLevels: snapshot.sourceBook?.asks.length ?? 0,
+    bidBuckets: snapshot.bids.length,
+    askBuckets: snapshot.asks.length,
+    buyWalls: snapshot.walls.filter((wall) => wall.side === "buy").length,
+    sellWalls: snapshot.walls.filter((wall) => wall.side === "sell").length,
+    visibleRows: snapshot.buckets.length,
+    heatmapRowsRendered: visibleHeatmapRows,
+    profileRowsRendered: profile.length,
+    depthBidPoints: depthChart.bidPoints ?? 0,
+    depthAskPoints: depthChart.askPoints ?? 0
   };
 }
 

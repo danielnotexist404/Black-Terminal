@@ -984,3 +984,16 @@ Reason:
 Future migration trigger:
 
 - Add a migration only if saved DOM camera presets, per-user viewport layouts, minimap state, or cross-device DOM Pro+ workspaces need Supabase persistence.
+
+## 2026-07-10 - DOM Pro+ Full Price Domain Fix
+
+Status: No Supabase migration required.
+
+Reason:
+
+- The fix is limited to local DOM aggregation, shared price-domain rendering, diagnostics, and depth-chart visualization.
+- No server-owned records, credentials, execution audit rows, or persistent workspace tables were introduced.
+
+Future migration trigger:
+
+- Add a migration only if DOM diagnostics snapshots, saved camera domains, or cross-device DOM Pro+ layouts need account-level persistence.

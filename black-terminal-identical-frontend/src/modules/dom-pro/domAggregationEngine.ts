@@ -224,16 +224,23 @@ export class DomAggregationEngine {
   }
 
   private detectWalls(buckets: DomBucket[], settings: DomSettings, price: number, now: number): WallDetection[] {
-    const sizes = buckets.flatMap((bucket) => [bucket.bidSize, bucket.askSize]).filter((size) => size > 0);
-    const average = sizes.reduce((sum, size) => sum + size, 0) / Math.max(1, sizes.length);
-    const threshold = Math.max(average * settings.liquidityThreshold, average + standardDeviation(sizes) * 1.2);
     const seen = new Set<string>();
     const walls: WallDetection[] = [];
 
-    for (const bucket of buckets) {
-      for (const side of ["bid", "ask"] as const) {
-        const size = side === "bid" ? bucket.bidSize : bucket.askSize;
-        if (size < threshold) continue;
+    for (const side of ["bid", "ask"] as const) {
+      const candidates = buckets
+        .map((bucket) => ({ bucket, size: side === "bid" ? bucket.bidSize : bucket.askSize }))
+        .filter(({ bucket, size }) => size > 0 && (side === "bid" ? bucket.price <= price : bucket.price >= price))
+        .sort((a, b) => b.size - a.size);
+      const sizes = candidates.map((candidate) => candidate.size);
+      const average = sizes.reduce((sum, size) => sum + size, 0) / Math.max(1, sizes.length);
+      const threshold = Math.max(average * Math.max(1.15, settings.liquidityThreshold * 0.62), average + standardDeviation(sizes) * 0.82);
+      let accepted = candidates.filter((candidate) => candidate.size >= threshold);
+      if (accepted.length === 0 && candidates.length > 0) {
+        accepted = candidates.slice(0, Math.min(2, candidates.length));
+      }
+
+      for (const { bucket, size } of accepted.slice(0, 6)) {
         const key = `${side}:${bucket.price}`;
         const existing = this.wallMemory.get(key);
         const distancePct = price > 0 ? Math.abs(bucket.price - price) / price * 100 : 0;
@@ -264,7 +271,9 @@ export class DomAggregationEngine {
       if (!seen.has(key) && now - memory.lastSeen > 15000) this.wallMemory.delete(key);
     }
 
-    return walls.sort((a, b) => b.score - a.score).slice(0, 8);
+    const buyWalls = walls.filter((wall) => wall.side === "buy").sort((a, b) => b.score - a.score).slice(0, 5);
+    const sellWalls = walls.filter((wall) => wall.side === "sell").sort((a, b) => b.score - a.score).slice(0, 5);
+    return [...sellWalls, ...buyWalls].sort((a, b) => b.score - a.score).slice(0, 10);
   }
 
   private detectLiquidityMigration(walls: WallDetection[], now: number): LiquidityMigration[] {
@@ -301,20 +310,14 @@ export class DomAggregationEngine {
   }
 
   private pushHeatmapFrame(buckets: DomBucket[], settings: DomSettings, time: number) {
-    const max = Math.max(...buckets.map((bucket) => bucket.totalSize), 1);
-    const averageSize = average(buckets.map((bucket) => bucket.totalSize));
-    const significantBuckets = buckets
-      .filter((bucket) => bucket.totalSize >= averageSize * Math.max(0.85, settings.liquidityThreshold * 0.38) || bucket.heat > 0.2)
-      .sort((a, b) => b.totalSize - a.totalSize)
-      .slice(0, Math.max(40, Math.min(180, settings.maxVisibleBuckets)));
+    const sideCandidates = buildHeatmapCandidates(buckets, settings);
     const smoothing = Math.min(0.97, Math.max(0.4, settings.persistenceSmoothing / 100));
     const horizonMs = heatmapHorizonMs(settings.heatmapHorizon);
 
-    for (const bucket of significantBuckets) {
-      const side = bucket.askSize >= bucket.bidSize ? "ask" : "bid";
+    for (const { bucket, side, size, maxSideSize } of sideCandidates) {
       const key = `${side}:${bucket.price}`;
       const previous = this.heatmapMemory.get(key);
-      const rawIntensity = Math.min(1, bucket.totalSize / max) * (settings.colorIntensity / 100);
+      const rawIntensity = Math.min(1, size / Math.max(maxSideSize, 1)) * (settings.colorIntensity / 100);
       const intensity = previous ? previous.intensity * smoothing + rawIntensity * (1 - smoothing) : rawIntensity;
       this.heatmapMemory.set(key, {
         price: bucket.price,
@@ -336,9 +339,7 @@ export class DomAggregationEngine {
 
     this.heatmap.push({
       time,
-      cells: Array.from(this.heatmapMemory.values())
-        .sort((a, b) => b.intensity - a.intensity)
-        .slice(0, Math.max(60, settings.maxVisibleBuckets))
+      cells: selectBalancedHeatmapCells(Array.from(this.heatmapMemory.values()), settings)
         .map((cell) => ({
           price: cell.price,
           side: cell.side,
@@ -401,10 +402,55 @@ function buildBuckets(book: OrderBookSnapshot, bucketSize: number, price: number
     .filter((bucket) => bucket.price >= min && bucket.price <= max)
     .sort((a, b) => b.price - a.price);
 
-  const maxSize = Math.max(...buckets.map((bucket) => bucket.totalSize), 1);
-  return buckets
+  const selected = selectBucketsAroundPrice(buckets, price, settings.maxVisibleBuckets);
+  const maxSize = Math.max(...selected.map((bucket) => bucket.totalSize), 1);
+  return selected
     .map((bucket) => ({ ...bucket, heat: bucket.totalSize / maxSize }))
-    .slice(0, settings.maxVisibleBuckets);
+    .sort((a, b) => b.price - a.price);
+}
+
+function selectBucketsAroundPrice(buckets: DomBucket[], price: number, limit: number) {
+  if (buckets.length <= limit) return buckets;
+  const maxRows = Math.max(20, limit);
+  const below = buckets.filter((bucket) => bucket.price <= price).sort((a, b) => b.price - a.price);
+  const above = buckets.filter((bucket) => bucket.price > price).sort((a, b) => a.price - b.price);
+  const half = Math.floor(maxRows / 2);
+  const selected = [...below.slice(0, half), ...above.slice(0, maxRows - half)];
+  if (selected.length < maxRows) {
+    const selectedKeys = new Set(selected.map(bucketKey));
+    const remainder = buckets
+      .filter((bucket) => !selectedKeys.has(bucketKey(bucket)))
+      .sort((a, b) => Math.abs(a.price - price) - Math.abs(b.price - price));
+    selected.push(...remainder.slice(0, maxRows - selected.length));
+  }
+  return selected;
+}
+
+function buildHeatmapCandidates(buckets: DomBucket[], settings: DomSettings) {
+  const perSideLimit = Math.max(30, Math.floor(Math.min(260, settings.maxVisibleBuckets * 1.4) / 2));
+  const buildForSide = (side: "bid" | "ask") => {
+    const rows = buckets
+      .map((bucket) => ({ bucket, size: side === "bid" ? bucket.bidSize : bucket.askSize }))
+      .filter((row) => row.size > 0)
+      .sort((a, b) => b.size - a.size);
+    const sizes = rows.map((row) => row.size);
+    const avg = average(sizes);
+    const threshold = Math.max(avg * Math.max(0.9, settings.liquidityThreshold * 0.34), avg + standardDeviation(sizes) * 0.42);
+    const maxSideSize = Math.max(...sizes, 1);
+    const accepted = rows
+      .filter((row) => row.size >= threshold || row.bucket.heat > 0.12)
+      .slice(0, perSideLimit);
+    const fallback = accepted.length ? accepted : rows.slice(0, Math.min(18, rows.length));
+    return fallback.map((row) => ({ ...row, side, maxSideSize }));
+  };
+  return [...buildForSide("ask"), ...buildForSide("bid")];
+}
+
+function selectBalancedHeatmapCells(cells: HeatmapMemory[], settings: DomSettings) {
+  const perSideLimit = Math.max(40, Math.floor(Math.min(320, settings.maxVisibleBuckets * 1.5) / 2));
+  const ask = cells.filter((cell) => cell.side === "ask").sort((a, b) => b.intensity - a.intensity).slice(0, perSideLimit);
+  const bid = cells.filter((cell) => cell.side === "bid").sort((a, b) => b.intensity - a.intensity).slice(0, perSideLimit);
+  return [...ask, ...bid].sort((a, b) => b.intensity - a.intensity);
 }
 
 function buildVolumeProfile(buckets: DomBucket[]): VolumeProfileNode[] {

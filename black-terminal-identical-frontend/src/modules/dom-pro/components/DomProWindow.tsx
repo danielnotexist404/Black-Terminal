@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, Maximize2, Minus, Settings, X } from "lucide-react";
 import { blackCoreConnectionManager } from "../../../connectivity/connectionManager";
 import { readActiveExecutionVenueId } from "../../../connectivity/activeExecutionVenue";
 import type { ConnectionDiagnostics } from "../../../connectivity/types";
+import type { BlackCoreModuleMode } from "../../../core/modules/moduleRegistry";
 import { submitOrder } from "../../../execution/executionEngine";
 import type { MarginMode, OrderSide, OrderType, TimeInForce } from "../../../execution/types";
 import type { MarketSymbol } from "../../../market-data/types";
@@ -18,6 +19,8 @@ type DomProWindowProps = {
   lastPrice: number;
   exchangeLabel: string;
   workspaceId: string;
+  windowMode: BlackCoreModuleMode;
+  settingsOpenSignal?: number;
   onClose: () => void;
 };
 
@@ -33,11 +36,15 @@ const visibleRanges: Array<{ value: DomVisibleRange; label: string }> = [
 ];
 const modes: DomMode[] = ["micro", "scalper", "standard", "swing", "macro", "custom"];
 
-export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspaceId, onClose }: DomProWindowProps) {
+export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspaceId, windowMode, settingsOpenSignal = 0, onClose }: DomProWindowProps) {
   const symbolKey = `${marketSymbol.exchange}:${marketSymbol.marketKind}:${marketSymbol.rawSymbol}`;
+  const channelName = `bt-dom-pro:${workspaceId}:${symbolKey}`;
   const feed = useDomFeed(marketSymbol);
   const engineRef = useRef(new DomAggregationEngine());
   const frameRef = useRef<number | null>(null);
+  const popoutRef = useRef<Window | null>(null);
+  const channelRef = useRef<BroadcastChannel | null>(null);
+  const submitQuickOrderRef = useRef<(targetSide: OrderSide, override?: Partial<{ quantity: string; price: string; orderType: OrderType; reduceOnly: boolean; postOnly: boolean }>) => Promise<void>>();
   const lastRenderAtRef = useRef(0);
   const droppedFramesRef = useRef(0);
   const [settings, setSettings] = useState<DomSettings>(() => readDomSettings(workspaceId, symbolKey));
@@ -79,6 +86,10 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   useEffect(() => {
     writeDomSettings(settings);
   }, [settings]);
+
+  useEffect(() => {
+    if (settingsOpenSignal > 0) setSettingsOpen(true);
+  }, [settingsOpenSignal]);
 
   useEffect(() => {
     if (frameRef.current !== null) return;
@@ -135,10 +146,15 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     setSettings((current) => ({ ...current, ...patch }));
   }
 
-  async function submitQuickOrder(targetSide: OrderSide) {
+  const submitQuickOrder = useCallback(async (targetSide: OrderSide, override: Partial<{ quantity: string; price: string; orderType: OrderType; reduceOnly: boolean; postOnly: boolean }> = {}) => {
     setExecutionStatus("");
-    const parsedQuantity = Number(quantity);
-    const parsedPrice = Number(price || snapshot.lastPrice || lastPrice || 0);
+    const nextQuantity = override.quantity ?? quantity;
+    const nextPrice = override.price ?? price;
+    const nextOrderType = override.orderType ?? orderType;
+    const nextReduceOnly = override.reduceOnly ?? reduceOnly;
+    const nextPostOnly = override.postOnly ?? postOnly;
+    const parsedQuantity = Number(nextQuantity);
+    const parsedPrice = Number(nextPrice || snapshot.lastPrice || lastPrice || 0);
     if (!selectedConnection) {
       setExecutionStatus("CONNECT ACCOUNT IN POSITIONS");
       return;
@@ -167,13 +183,13 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
         symbol: marketSymbol.rawSymbol.toUpperCase(),
         marketKind: marketSymbol.marketKind,
         side: targetSide,
-        type: orderType,
+        type: nextOrderType,
         quantity: parsedQuantity,
         sizingMethod: "quantity",
-        limitPrice: orderType === "limit" || orderType === "iceberg" || orderType === "twap" ? parsedPrice : undefined,
+        limitPrice: nextOrderType === "limit" || nextOrderType === "iceberg" || nextOrderType === "twap" ? parsedPrice : undefined,
         referencePrice: parsedPrice,
-        reduceOnly,
-        postOnly,
+        reduceOnly: nextReduceOnly,
+        postOnly: nextPostOnly,
         marginMode,
         timeInForce,
         source: "order-ticket",
@@ -183,11 +199,78 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     } catch (error) {
       setExecutionStatus(error instanceof Error ? error.message.toUpperCase() : String(error));
     }
-  }
+  }, [lastPrice, marginMode, marketSymbol.marketKind, marketSymbol.rawSymbol, orderType, postOnly, price, quantity, reduceOnly, selectedConnection, snapshot.lastPrice, timeInForce]);
+
+  useEffect(() => {
+    submitQuickOrderRef.current = submitQuickOrder;
+  }, [submitQuickOrder]);
+
+  const cvdData = engineRef.current.cvdData();
+
+  useEffect(() => {
+    if (windowMode !== "detached-browser") return;
+    if (typeof BroadcastChannel !== "undefined" && !channelRef.current) {
+      const channel = new BroadcastChannel(channelName);
+      channel.onmessage = (event) => {
+        if (event.data?.type !== "quick-order") return;
+        const payload = event.data.payload ?? {};
+        void submitQuickOrderRef.current?.(payload.side === "sell" ? "sell" : "buy", {
+          quantity: payload.quantity,
+          price: payload.price,
+          orderType: payload.orderType,
+          reduceOnly: Boolean(payload.reduceOnly),
+          postOnly: Boolean(payload.postOnly)
+        });
+      };
+      channelRef.current = channel;
+    }
+
+    if (!popoutRef.current || popoutRef.current.closed) {
+      const popout = window.open("", "black-terminal-dom-pro", "popup=yes,width=1480,height=920,left=80,top=60");
+      if (popout) {
+        popout.document.open();
+        popout.document.write(buildDomProPopoutDocument(channelName));
+        popout.document.close();
+        popoutRef.current = popout;
+      }
+    }
+
+    return () => {
+      channelRef.current?.close();
+      channelRef.current = null;
+      if (popoutRef.current && !popoutRef.current.closed) popoutRef.current.close();
+      popoutRef.current = null;
+    };
+  }, [channelName, windowMode]);
+
+  useEffect(() => {
+    if (windowMode !== "detached-browser") return;
+    channelRef.current?.postMessage({
+      type: "snapshot",
+      snapshot,
+      settings,
+      cvdData,
+      executionStatus,
+      marketSymbol,
+      lastPrice,
+      exchangeLabel
+    });
+  }, [cvdData, exchangeLabel, executionStatus, lastPrice, marketSymbol, settings, snapshot, windowMode]);
 
   const priceRows = snapshot.buckets;
   const maxTotal = Math.max(...priceRows.map((row) => row.totalSize), 1);
-  const cvdData = engineRef.current.cvdData();
+
+  if (windowMode === "detached-browser") {
+    return (
+      <div className="dom-pro-shell dom-pro-detached-controller" role="dialog" aria-label="DOM Pro plus detached browser controller">
+        <div className="dom-pro-detached-card">
+          <b>DOM PRO+ DETACHED</b>
+          <span>{popoutRef.current && !popoutRef.current.closed ? "Streaming through parent Black Core feed." : "Popout blocked or closed. Use Open DOM Pro+ to return in-workspace."}</span>
+          <button type="button" onClick={onClose}>Close Detached DOM</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="dom-pro-shell" role="dialog" aria-label="DOM Pro plus institutional order flow terminal">
@@ -453,6 +536,154 @@ function Field({ label, value, min, max, step = 1, onChange }: { label: string; 
 
 function EmptyState({ text }: { text: string }) {
   return <div className="dom-pro-empty">{text}</div>;
+}
+
+function buildDomProPopoutDocument(channelName: string) {
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>DOM Pro+ - Black Terminal</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #030405; color: #d9dde4; font-family: "IBM Plex Mono", Consolas, monospace; overflow: hidden; }
+    .shell { height: 100vh; display: grid; grid-template-rows: 46px 72px minmax(0, 1fr); border: 1px solid rgba(255,0,0,.32); background: radial-gradient(circle at 50% 20%, rgba(120,0,0,.12), transparent 34%), #050607; }
+    header { display: flex; align-items: center; justify-content: space-between; padding: 0 15px; border-bottom: 1px solid rgba(255,0,0,.24); background: linear-gradient(180deg, #101316, #050607); }
+    header b { color: #fff; font-size: 13px; letter-spacing: .06em; }
+    header span, .stat span, .panel-title b, .metric span { color: #858b95; font-size: 9px; font-weight: 800; text-transform: uppercase; }
+    .stats { display: grid; grid-template-columns: repeat(8, minmax(110px, 1fr)); border-bottom: 1px solid rgba(255,255,255,.08); }
+    .stat { display: grid; align-content: center; gap: 6px; padding: 8px 11px; border-right: 1px solid rgba(255,255,255,.075); min-width: 0; }
+    .stat b { color: #f2f4f7; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .grid { min-height: 0; display: grid; grid-template-columns: 1.05fr .9fr 1.45fr .75fr .95fr .9fr; grid-template-rows: minmax(0, 1fr) 178px 206px; gap: 8px; padding: 8px; }
+    .panel { min-width: 0; min-height: 0; overflow: hidden; background: rgba(5,6,7,.97); border: 1px solid rgba(255,255,255,.09); }
+    .panel-title { height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; border-bottom: 1px solid rgba(255,255,255,.08); }
+    .panel-title span { color: #eef1f5; font-size: 10px; font-weight: 900; text-transform: uppercase; }
+    .ladder { grid-column: 1; grid-row: 1 / 3; }
+    .profile { grid-column: 2; grid-row: 1 / 3; }
+    .heatmap { grid-column: 3; grid-row: 1 / 3; }
+    .walls { grid-column: 4; grid-row: 1 / 3; }
+    .tape { grid-column: 5; grid-row: 1; }
+    .metrics { grid-column: 6; grid-row: 1; }
+    .depth { grid-column: 1 / 3; grid-row: 3; }
+    .flow { grid-column: 3 / 5; grid-row: 3; }
+    .cvd { grid-column: 5; grid-row: 2; }
+    .perf { grid-column: 6; grid-row: 2; }
+    .exec { grid-column: 5 / 7; grid-row: 3; }
+    .empty { height: calc(100% - 34px); display: grid; place-items: center; padding: 20px; color: #7e858f; font-size: 10px; font-weight: 800; text-align: center; text-transform: uppercase; }
+    .row, .head, .tape-row, .tape-head { display: grid; align-items: center; font-size: 10px; }
+    .head, .row { grid-template-columns: 1fr .95fr .95fr; padding: 0 8px 0 10px; }
+    .head, .tape-head { height: 28px; color: #7d838c; font-size: 9px; text-transform: uppercase; }
+    .row { position: relative; height: 18px; color: #d4d7dc; }
+    .row span { position: relative; z-index: 1; }
+    .row span:nth-child(2), .row span:nth-child(3), .head span:nth-child(2), .head span:nth-child(3) { text-align: right; }
+    .row i { position: absolute; top: 2px; bottom: 2px; width: 44%; opacity: .38; transform-origin: right center; }
+    .row .bid { left: 24%; background: linear-gradient(90deg, rgba(180,185,194,.06), rgba(205,209,216,.44)); }
+    .row .ask { right: 8px; background: linear-gradient(270deg, rgba(255,0,0,.66), rgba(255,0,0,.02)); }
+    .row.current { box-shadow: inset 0 0 0 1px rgba(255,255,255,.48); background: rgba(255,255,255,.05); }
+    .ladder-body, .profile-body { height: calc(100% - 34px); overflow: auto; }
+    .profile-row { display: grid; grid-template-columns: 76px 1fr 38px; align-items: center; gap: 7px; height: 14px; color: #a9aeb6; font-size: 9px; font-weight: 700; padding: 0 8px; }
+    .profile-row i { height: 8px; background: linear-gradient(90deg, rgba(145,150,158,.28), rgba(226,229,235,.82)); }
+    .profile-row.poc i { background: linear-gradient(90deg, rgba(255,0,0,.3), rgba(255,255,255,.94)); box-shadow: 0 0 10px rgba(255,0,0,.34); }
+    .heatmap-canvas, .bars { position: relative; height: calc(100% - 34px); overflow: hidden; background: linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px); background-size: 48px 28px; }
+    .heatmap-canvas span { position: absolute; display: block; width: 1.8%; height: 1.2%; background: rgba(255,255,255,.72); box-shadow: 0 0 10px rgba(255,0,0,.34); }
+    .heatmap-canvas span.ask { background: rgba(255,0,0,.84); }
+    .wall, .metric { display: grid; gap: 3px; padding: 9px 10px; border-bottom: 1px solid rgba(255,255,255,.06); }
+    .wall b, .metric b.hot { color: #ff1d1d; }
+    .wall span, .metric b { color: #fff; font-size: 12px; }
+    .wall em, .metric em { color: #969ca5; font-size: 9px; font-style: normal; text-align: right; }
+    .tape-head, .tape-row { grid-template-columns: .9fr 1fr .8fr .42fr; padding: 0 10px; }
+    .tape-row { height: 20px; color: #d1d4da; }
+    .tape-row.sell { color: #ff1d1d; }
+    .metric { grid-template-columns: 1fr auto; min-height: 38px; }
+    .metric em { grid-column: 1 / -1; }
+    .bars { display: flex; align-items: end; gap: 1px; padding: 12px 14px; }
+    .bars i { flex: 1; min-width: 2px; background: linear-gradient(180deg, rgba(230,233,238,.78), rgba(230,233,238,.08)); }
+    .bars i.ask, .bars i.neg { background: linear-gradient(180deg, rgba(255,0,0,.88), rgba(255,0,0,.12)); }
+    .cvd-line { position: relative; height: calc(100% - 34px); overflow: hidden; background: linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px); background-size: 42px 26px; }
+    .cvd-line span { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: #cfd3da; box-shadow: 0 0 8px rgba(255,255,255,.28); }
+    .cvd-line span.neg { background: #ff1d1d; box-shadow: 0 0 9px rgba(255,0,0,.38); }
+    .exec-inner { padding: 9px 10px; display: grid; gap: 8px; }
+    .exec-inner select, .exec-inner input { height: 30px; background: #050607; color: #fff; border: 1px solid rgba(255,255,255,.14); padding: 0 8px; }
+    .exec-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    button { height: 30px; color: #fff; border: 1px solid rgba(255,255,255,.14); background: rgba(190,190,194,.16); font: 900 10px "IBM Plex Mono", Consolas, monospace; text-transform: uppercase; cursor: pointer; }
+    button.sell { background: rgba(175,0,0,.76); border-color: rgba(255,0,0,.62); }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header><div><b>DOM PRO+</b> <span>Detached Institutional Depth & Order Flow Terminal</span></div><span id="status">Awaiting parent feed</span></header>
+    <section class="stats" id="stats"></section>
+    <main class="grid">
+      <section class="panel ladder"><div class="panel-title"><span>Aggregated DOM Ladder</span><b id="bookStatus">--</b></div><div id="ladder" class="ladder-body empty">Awaiting live orderbook stream.</div></section>
+      <section class="panel profile"><div class="panel-title"><span>Volume Profile</span><b>DOM</b></div><div id="profile" class="profile-body empty">Awaiting live orderbook stream.</div></section>
+      <section class="panel heatmap"><div class="panel-title"><span>Liquidity Heatmap</span><b>LOW -> HIGH</b></div><div id="heatmap" class="heatmap-canvas"></div></section>
+      <section class="panel walls"><div class="panel-title"><span>Wall Detection</span><b>HEURISTIC</b></div><div id="walls" class="empty">No persistent liquidity wall detected.</div></section>
+      <section class="panel tape"><div class="panel-title"><span>Trade Tape</span><b id="tapeStatus">--</b></div><div id="tape"></div></section>
+      <section class="panel metrics"><div class="panel-title"><span>DOM Metrics</span><b>LIVE</b></div><div id="metrics"></div></section>
+      <section class="panel depth"><div class="panel-title"><span>Depth Chart</span><b>AGGREGATED</b></div><div id="depth" class="bars"></div></section>
+      <section class="panel flow"><div class="panel-title"><span>Liquidity Flow Delta</span><b>PULL / STACK</b></div><div id="flow" class="bars"></div></section>
+      <section class="panel cvd"><div class="panel-title"><span>CVD</span><b>CUMULATIVE</b></div><div id="cvd" class="cvd-line empty">Trade stream unavailable for this venue.</div></section>
+      <section class="panel perf"><div class="panel-title"><span>Performance</span><b id="perfStatus">OK</b></div><div id="perf"></div></section>
+      <section class="panel exec"><div class="panel-title"><span>Execution</span><b>OMS / EMS</b></div><div class="exec-inner"><select id="orderType"><option value="limit">LIMIT</option><option value="market">MARKET</option><option value="twap">TWAP</option><option value="iceberg">ICEBERG</option></select><input id="qty" value="0.001" placeholder="Quantity" /><input id="px" placeholder="Price" /><label><input id="postOnly" type="checkbox" /> Post Only</label><label><input id="reduceOnly" type="checkbox" /> Reduce Only</label><div class="exec-buttons"><button id="buy">Place Buy</button><button id="sell" class="sell">Place Sell</button></div><small id="execStatus">Orders route through parent OMS / EMS / Risk.</small></div></section>
+    </main>
+  </div>
+  <script>
+    const channel = new BroadcastChannel(${JSON.stringify(channelName)});
+    const fmt = (n, d = 1) => Number.isFinite(Number(n)) ? Number(n).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }) : '--';
+    const compact = (n) => Number.isFinite(Number(n)) ? Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 2 }).format(Number(n)) : '--';
+    const metric = (label, value, note, hot) => '<div class="metric"><span>' + label + '</span><b class="' + (hot ? 'hot' : '') + '">' + value + '</b>' + (note ? '<em>' + note + '</em>' : '') + '</div>';
+    function render(data) {
+      const s = data.snapshot;
+      const ticker = s.ticker || {};
+      document.getElementById('status').textContent = s.statusMessage || 'Live parent feed';
+      document.getElementById('bookStatus').textContent = s.statusMessage || '--';
+      document.getElementById('tapeStatus').textContent = s.trades && s.trades.length ? 'LIVE / REST' : 'UNAVAILABLE';
+      document.getElementById('execStatus').textContent = data.executionStatus || 'Orders route through parent OMS / EMS / Risk.';
+      document.getElementById('px').value = document.getElementById('px').value || fmt(s.lastPrice, 2).replace(/,/g, '');
+      document.getElementById('stats').innerHTML = [
+        ['Symbol', s.marketSymbol.rawSymbol + ' ' + s.marketSymbol.marketKind.toUpperCase()],
+        ['Last Price', fmt(s.lastPrice)],
+        ['24H Change', ticker.priceChangePercent ? Number(ticker.priceChangePercent).toFixed(2) + '%' : '--'],
+        ['24H High', fmt(ticker.highPrice)],
+        ['24H Low', fmt(ticker.lowPrice)],
+        ['24H Volume', compact(ticker.quoteVolume || ticker.volume)],
+        ['DOM Mode', data.settings.mode.toUpperCase()],
+        ['Bucket', fmt(s.renderStats.bucketSize) + ' ' + s.marketSymbol.quoteAsset]
+      ].map(x => '<div class="stat"><span>' + x[0] + '</span><b>' + x[1] + '</b></div>').join('');
+      const rows = s.buckets || [];
+      const max = Math.max(1, ...rows.map(r => r.totalSize));
+      document.getElementById('ladder').className = rows.length ? 'ladder-body' : 'ladder-body empty';
+      document.getElementById('ladder').innerHTML = rows.length ? '<div class="head"><span>Price</span><span>Bid</span><span>Ask</span></div>' + rows.map(r => '<div class="row ' + (r.isCurrentPrice ? 'current' : '') + '"><span>' + fmt(r.price) + '</span><span>' + fmt(r.bidSize, 3) + '</span><span style="color:#ff1d1d">' + fmt(r.askSize, 3) + '</span><i class="bid" style="transform:scaleX(' + (r.bidSize / max) + ')"></i><i class="ask" style="transform:scaleX(' + (r.askSize / max) + ')"></i></div>').join('') : 'Awaiting live orderbook stream.';
+      const prof = s.volumeProfile || [];
+      const pmax = Math.max(1, ...prof.map(p => p.volume));
+      document.getElementById('profile').className = prof.length ? 'profile-body' : 'profile-body empty';
+      document.getElementById('profile').innerHTML = prof.length ? prof.map(p => '<div class="profile-row ' + p.kind + '"><span>' + fmt(p.price) + '</span><i style="width:' + Math.max(2, p.volume / pmax * 100) + '%"></i><b>' + p.kind.toUpperCase() + '</b></div>').join('') : 'Awaiting live orderbook stream.';
+      const frames = (s.heatmap || []).slice(-60);
+      document.getElementById('heatmap').innerHTML = frames.flatMap((f, fi) => f.cells.slice(0, 90).map((c, ci) => '<span class="' + c.side + '" style="left:' + (fi / 60 * 100) + '%;top:' + (ci / Math.max(1, f.cells.length) * 100) + '%;opacity:' + Math.max(.08, c.intensity) + '"></span>')).join('');
+      const walls = s.walls || [];
+      document.getElementById('walls').className = walls.length ? '' : 'empty';
+      document.getElementById('walls').innerHTML = walls.length ? walls.map(w => '<div class="wall"><b>' + (w.side === 'sell' ? 'SELL WALL' : 'BUY WALL') + '</b><span>' + fmt(w.price) + '</span><em>' + fmt(w.size, 3) + ' / score ' + Math.round(w.score) + '</em></div>').join('') : 'No persistent liquidity wall detected.';
+      document.getElementById('tape').innerHTML = s.trades && s.trades.length ? '<div class="tape-head"><span>Time</span><span>Price</span><span>Size</span><span>Side</span></div>' + s.trades.slice(0, 24).map(t => '<div class="tape-row ' + t.side + '"><span>' + new Date(t.time * 1000).toLocaleTimeString() + '</span><span>' + fmt(t.price) + '</span><span>' + fmt(t.quantity, 3) + '</span><span>' + (t.side === 'sell' ? 'S' : 'B') + '</span></div>').join('') : '<div class="empty">Trade stream unavailable for this venue.</div>';
+      document.getElementById('metrics').innerHTML = metric('Orderbook Imbalance', s.metrics.orderBookImbalance.toFixed(2) + '%', s.metrics.orderBookImbalance >= 0 ? 'BID HEAVY' : 'ASK HEAVY') + metric('Liquidity Score', s.metrics.liquidityScore.toFixed(0) + ' / 100', 'STRUCTURE') + metric('Absorption', s.absorption.detected ? 'DETECTED' : 'NONE', s.absorption.label, s.absorption.detected) + metric('Pulling / Stacking', s.metrics.bidStacked + s.metrics.askStacked >= s.metrics.bidPulled + s.metrics.askPulled ? 'STACKING' : 'PULLING', 'NET', true) + metric('Est. Icebergs', String(s.iceberg.estimatedCount), s.iceberg.probability.toUpperCase(), s.iceberg.probability !== 'low') + metric('Latency', s.metrics.latencyMs.toFixed(0) + ' ms', 'PARENT FEED');
+      document.getElementById('depth').innerHTML = (s.bids || []).slice(0, 35).reverse().map(b => '<i style="height:' + Math.max(2, b.bidSize / max * 100) + '%"></i>').join('') + (s.asks || []).slice(0, 35).map(a => '<i class="ask" style="height:' + Math.max(2, a.askSize / max * 100) + '%"></i>').join('');
+      document.getElementById('flow').innerHTML = (s.liquidityDelta || []).slice(0, 80).map(d => '<i class="' + (d.net >= 0 ? '' : 'neg') + '" style="height:' + Math.min(100, Math.abs(d.net) / max * 160) + '%"></i>').join('');
+      const cvd = data.cvdData || [];
+      const cmin = Math.min(...cvd.map(p => p.value), 0);
+      const cmax = Math.max(...cvd.map(p => p.value), 1);
+      const cspan = Math.max(1, cmax - cmin);
+      document.getElementById('cvd').className = cvd.length ? 'cvd-line' : 'cvd-line empty';
+      document.getElementById('cvd').innerHTML = cvd.length ? cvd.map((p, i) => '<span class="' + (p.value < 0 ? 'neg' : '') + '" style="left:' + (i / Math.max(1, cvd.length - 1) * 100) + '%;bottom:' + ((p.value - cmin) / cspan * 86 + 7) + '%"></span>').join('') : 'Trade stream unavailable for this venue.';
+      document.getElementById('perf').innerHTML = metric('Updates / Sec', s.renderStats.updateRate.toFixed(1)) + metric('Render FPS', s.renderStats.renderFps.toFixed(1)) + metric('Visible Buckets', String(s.renderStats.visibleBuckets)) + metric('Bucket Size', fmt(s.renderStats.bucketSize)) + metric('Dropped Frames', String(s.renderStats.droppedFrames)) + metric('Last Render', s.renderStats.lastRenderMs.toFixed(2) + ' ms') + metric('Subscriptions', String(s.renderStats.subscriptionCount));
+    }
+    function send(side) {
+      channel.postMessage({ type: 'quick-order', payload: { side, quantity: document.getElementById('qty').value, price: document.getElementById('px').value, orderType: document.getElementById('orderType').value, postOnly: document.getElementById('postOnly').checked, reduceOnly: document.getElementById('reduceOnly').checked } });
+    }
+    document.getElementById('buy').onclick = () => send('buy');
+    document.getElementById('sell').onclick = () => send('sell');
+    channel.onmessage = (event) => { if (event.data && event.data.type === 'snapshot') render(event.data); };
+  </script>
+</body>
+</html>`;
 }
 
 function buildExecutionAccount(connection: ConnectionDiagnostics): PortfolioAccount {

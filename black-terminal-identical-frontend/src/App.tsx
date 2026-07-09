@@ -410,14 +410,19 @@ export default function App() {
     };
   });
   const [domProOpen, setDomProOpen] = useState(false);
+  const [domProMode, setDomProMode] = useState<BlackCoreModuleMode>("expanded");
+  const [domProSettingsSignal, setDomProSettingsSignal] = useState(0);
   const showCompactDom = terminalSettings.showDOM && !domProOpen;
 
   useEffect(() => blackCoreWindowDockManager.subscribe((windows) => {
-    setDomProOpen(Boolean(windows.find((windowState) => windowState.moduleId === "dom-pro" && windowState.isOpen)));
+    const domWindow = windows.find((windowState) => windowState.moduleId === "dom-pro" && windowState.isOpen);
+    setDomProOpen(Boolean(domWindow));
+    if (domWindow) setDomProMode(domWindow.mode);
   }), []);
 
-  const openDomPro = useCallback((mode: BlackCoreModuleMode = "expanded") => {
+  const openDomPro = useCallback((mode: BlackCoreModuleMode = "expanded", options?: { openSettings?: boolean }) => {
     blackCoreWindowDockManager.open("dom-pro", "DOM Pro+", mode);
+    if (options?.openSettings) setDomProSettingsSignal((value) => value + 1);
   }, []);
 
   const closeDomPro = useCallback(() => {
@@ -1928,6 +1933,8 @@ export default function App() {
             lastPrice={lastPrice}
             exchangeLabel={selectedExchange.label}
             workspaceId={workspace}
+            windowMode={domProMode}
+            settingsOpenSignal={domProSettingsSignal}
             onClose={closeDomPro}
           />
         )}

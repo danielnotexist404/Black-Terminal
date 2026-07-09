@@ -59,6 +59,9 @@ Changed:
 - Added DOM Pro+ panels for aggregated ladder, DOM-aligned volume profile, liquidity heatmap, wall detection, trade tape, metrics, depth chart, liquidity flow delta, CVD, diagnostics, and quick execution.
 - DOM quick execution routes through the existing `submitOrder` OMS/EMS path.
 - Compact DOM can open DOM Pro+ from a right-click/header menu and hides while DOM Pro+ is open.
+- Detached browser mode opens a popout window fed by the parent workspace over `BroadcastChannel`, so the child window does not open duplicate exchange feeds.
+- Detached popout quick execution sends order intents back to the parent workspace for OMS/EMS/Risk routing.
+- Detached popout renders parent-fed CVD data, and the compact DOM menu can open DOM Pro+ directly into settings.
 
 Why:
 
@@ -71,7 +74,7 @@ Validation:
 
 Remaining:
 
-- True separate browser popout still needs a shared worker or BroadcastChannel feed bridge to preserve the no-duplicate-feed rule across windows.
+- Detached browser popout requires the parent workspace to remain open because the parent owns feed subscriptions and execution context.
 - Worker/Rust aggregation offload remains future work.
 - No Supabase migration is required until DOM layouts/settings need server persistence.
 

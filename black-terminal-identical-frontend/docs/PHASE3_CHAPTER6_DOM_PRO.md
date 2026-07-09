@@ -66,12 +66,15 @@ DOM Pro+ execution panel
 - Added throttled DOM Pro+ rendering with FPS cap settings.
 - Added detached/expanded DOM Pro+ workspace surface.
 - Compact DOM hides when DOM Pro+ is open.
+- Browser-detached mode opens a popout window that receives parent DOM snapshots through `BroadcastChannel`.
+- Detached popout quick execution sends order intents back to the parent window, where they continue through OMS / EMS / Risk.
+- Detached popout receives parent CVD data and renders it without opening its own market-data feed.
 - Added compact DOM right-click menu:
   - Open DOM Pro+
   - Detach DOM
-  - Send to monitor
+  - Send to monitor through detached browser mode
   - Reset DOM layout
-  - DOM settings
+  - DOM settings, which opens DOM Pro+ directly into its settings panel
 - Added DOM Pro+ panels:
   - Aggregated DOM ladder
   - DOM-aligned volume profile
@@ -109,7 +112,8 @@ DOM Pro+ execution panel
 
 ## Current Limitations
 
-- Browser-detached and Tauri-native modes are represented in the module/window architecture, but the current runtime opens DOM Pro+ as an expanded in-workspace module to avoid duplicate full-app windows.
+- Browser-detached mode depends on the parent workspace remaining open because the parent owns the market-data feed and OMS/EMS execution context.
+- If a browser blocks popups, the parent workspace shows a detached-controller state and the user can close/reopen DOM Pro+ in-workspace.
 - Wall, absorption, and iceberg readings are first-pass heuristics and are labeled accordingly.
 - DOM Pro+ settings currently persist locally. No Supabase table is required yet.
 - Worker/Rust offload is prepared by keeping aggregation separate from React, but aggregation still runs in the browser thread.
@@ -122,5 +126,5 @@ DOM Pro+ execution panel
 
 - Move aggregation to Web Worker once real depth load requires it.
 - Add layout persistence for detached window geometry.
-- Add true browser popout via a shared worker or BroadcastChannel feed bridge so detached windows still avoid duplicate exchange feeds.
+- Upgrade the browser popout from BroadcastChannel bridge to Shared Worker if multiple detached DOM windows need cross-tab feed ownership.
 - Add server-persisted DOM workspaces if users need cross-device DOM layouts.

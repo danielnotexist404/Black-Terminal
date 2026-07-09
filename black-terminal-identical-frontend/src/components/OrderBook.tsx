@@ -13,7 +13,7 @@ type OrderBookProps = {
   marketSymbol: MarketSymbol;
   lastPrice: number;
   exchangeLabel: string;
-  onOpenDomPro?: (mode?: "expanded" | "detached-browser") => void;
+  onOpenDomPro?: (mode?: "expanded" | "detached-browser", options?: { openSettings?: boolean }) => void;
   onResetDomLayout?: () => void;
 };
 
@@ -211,14 +211,7 @@ export function OrderBook({ marketSymbol, lastPrice, exchangeLabel, onOpenDomPro
         <span>Time</span>
       </div>
       {trades.length === 0
-        ? Array.from({ length: 12 }).map((_, index) => (
-            <div className="terminal-trade-row" key={index}>
-              <span>--</span>
-              <span>--</span>
-              <span>--</span>
-              <span>--</span>
-            </div>
-          ))
+        ? <div className="book-empty">Trade stream unavailable for this venue.</div>
         : trades.slice(0, 30).map((trade) => (
             <div className={`terminal-trade-row ${trade.side}`} key={trade.tradeId}>
               <span>{formatPrice(trade.price)}</span>
@@ -294,9 +287,9 @@ export function OrderBook({ marketSymbol, lastPrice, exchangeLabel, onOpenDomPro
         <div className="dom-compact-menu" style={{ left: menu.x, top: menu.y }} onClick={(event) => event.stopPropagation()}>
           <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("expanded"); }}>Open DOM Pro+</button>
           <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("detached-browser"); }}>Detach DOM</button>
-          <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("expanded"); }}>Send to monitor</button>
+          <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("detached-browser"); }}>Send to monitor</button>
           <button type="button" onClick={() => { setMenu(null); onResetDomLayout?.(); }}>Reset DOM layout</button>
-          <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("expanded"); }}>DOM settings</button>
+          <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("expanded", { openSettings: true }); }}>DOM settings</button>
         </div>
       )}
       <div className="book-body">

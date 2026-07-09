@@ -1,5 +1,5 @@
-import { applyCors, requireFields, requireMethod, requireUser, sendError } from "../../server/portfolio-api.js";
-import { assertNetworkCapability } from "../../server/network/permissions.js";
+import { applyCors, requireFields, requireMethod, requireUser, sendError } from "../../portfolio-api.js";
+import { assertNetworkCapability } from "../permissions.js";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;

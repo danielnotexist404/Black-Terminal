@@ -6,6 +6,7 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
+- Current - Consolidate Vercel API route dispatchers for production deploy.
 - Current - Implement Phase IV professional network foundation.
 - Current - Implement Phase III Chapter IV position lifecycle foundation.
 - Current - Implement Hyperliquid execution relay routes.
@@ -18,6 +19,28 @@ Recent pushed commits:
 - `e327cf0` - Optimize topbar and sidebar layout for MacBook 13-inch and mobile viewports.
 - `fe1777a` - Integrate Portfolio Manager, Copy Trading, Risk Engine, and Wallet connection modules.
 - `c7d928e` - Give BlackGPT real-time OHLCV chart access with live candle buffer and precise price context.
+
+## Vercel API Route Consolidation
+
+Status: Implemented
+
+Changed:
+
+- Collapsed the six Hyperliquid relay API files into one dynamic Vercel function at `api/protocols/hyperliquid/[action].js`.
+- Moved Hyperliquid route implementations into `server/protocols/hyperliquid-routes/`.
+- Collapsed the Professional Network API files into dynamic dispatchers at `api/network/[resource].js` and `api/network/investment-groups/[groupId]/[action].js`.
+- Moved Professional Network route implementations into `server/network/routes/`.
+- Added `.vercel` to `.gitignore` so local Vercel project linkage is never committed.
+
+Why:
+
+- Vercel builds were passing, then failing while deploying outputs after the API surface expanded. The generated build output had 20 serverless functions; route consolidation reduces this to 10 functions while preserving endpoint URLs.
+
+Validation:
+
+- `npm run build` passes.
+- `vercel build --yes` passes locally.
+- Generated Vercel output now contains 10 API functions instead of 20.
 
 ## Phase IV Professional Network Foundation
 

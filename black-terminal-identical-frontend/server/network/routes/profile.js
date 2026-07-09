@@ -1,4 +1,4 @@
-import { applyCors, requireMethod, requireUser, sendError } from "../../server/portfolio-api.js";
+import { applyCors, requireMethod, requireUser, sendError } from "../../portfolio-api.js";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;

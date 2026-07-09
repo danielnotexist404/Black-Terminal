@@ -6,7 +6,7 @@ import {
   requireMethod,
   requireUser,
   sendError
-} from "../../../server/portfolio-api.js";
+} from "../../portfolio-api.js";
 import {
   buildRejectedHyperliquidUpdate,
   loadHyperliquidCredential,
@@ -14,7 +14,7 @@ import {
   toHyperliquidExecutionReport,
   unsupportedHyperliquidOrderReason,
   writeHyperliquidRelayEvent
-} from "../../../server/protocols/hyperliquid.js";
+} from "../hyperliquid.js";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;

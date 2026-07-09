@@ -57,6 +57,7 @@ DOM Pro+ execution panel
   - Custom
 - Changed default DOM Pro+ behavior to institutional mode: wider visible range, larger buckets, lower visual FPS, and a calmer 24H heatmap horizon.
 - Added heatmap history horizons:
+  - 15M
   - 2H
   - 6H
   - 12H
@@ -72,6 +73,7 @@ DOM Pro+ execution panel
   - +/-5%
   - Custom
 - Added throttled DOM Pro+ rendering with FPS cap settings.
+- Added render-cost guard that skips frames when DOM Pro+ render time is high.
 - Split raw orderbook ingestion from slower visual rendering with frame throttling and persistent heatmap memory.
 - Added detached/expanded DOM Pro+ workspace surface.
 - Compact DOM hides when DOM Pro+ is open.
@@ -111,9 +113,20 @@ DOM Pro+ execution panel
   - current-price line
   - right-side price scale
   - 12H/24H default radar behavior instead of tick-by-tick micro flashing
+- Added heatmap viewport controls:
+  - mouse-wheel zoom
+  - vertical drag pan
+  - Shift + wheel pan
+  - double-click reset
+  - Reset View button
+  - hover readout for price, time, intensity, wall, and persistence context
 - Added a historical OHLCV macro radar layer using cached/fetched daily candles from the existing Market Data Engine.
 - Added macro structure bands for POC, supply, and demand zones across a wider historical range.
-- Redesigned CVD as a larger heuristic CVD panel with current delta, session delta, aggressive buy percentage, aggressive sell percentage, trend label, and a thicker line.
+- Aligned the volume profile to the same vertical viewport used by the heatmap.
+- Replaced the depth chart block bars with a cumulative bid/ask depth curve.
+- Replaced liquidity flow blocks with rolling time-bucket histogram bars and percentile outlier scaling.
+- Redesigned CVD as a larger heuristic CVD panel with current delta, session delta, aggressive buy percentage, aggressive sell percentage, trend label, horizon controls, EMA smoothing, and a thicker line.
+- Updated institutional defaults to 500x buckets, +/-2% visible range, 24H heatmap, 4H smoothed CVD, and 10-12 FPS behavior.
 - Added performance diagnostics:
   - updates/sec
   - render FPS

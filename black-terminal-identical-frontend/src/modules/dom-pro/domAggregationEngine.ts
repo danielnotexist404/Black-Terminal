@@ -131,7 +131,7 @@ export class DomAggregationEngine {
   }
 
   cvdData() {
-    return this.cvdSeries.slice(-80);
+    return this.cvdSeries.slice(-1200);
   }
 
   private updateCvd(trades: TradeTick[]) {
@@ -147,7 +147,7 @@ export class DomAggregationEngine {
       if (trade.side === "sell") this.cvd -= trade.quantity;
       this.cvdSeries.push({ time: trade.time, value: this.cvd });
     }
-    this.cvdSeries = this.cvdSeries.slice(-240);
+    this.cvdSeries = this.cvdSeries.slice(-2400);
   }
 
   private emptySnapshot(
@@ -521,6 +521,7 @@ function estimatePersistencePct(memory: WallMemory, now: number) {
 
 function heatmapHorizonMs(horizon: DomSettings["heatmapHorizon"]) {
   switch (horizon) {
+    case "15m": return 15 * 60 * 1000;
     case "2h": return 2 * 60 * 60 * 1000;
     case "6h": return 6 * 60 * 60 * 1000;
     case "12h": return 12 * 60 * 60 * 1000;

@@ -6,6 +6,7 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
+- Current - Polish DOM Pro+ cockpit rendering and viewport controls.
 - Current - Consolidate Vercel API route dispatchers for production deploy.
 - Current - Redesign DOM Pro+ as institutional liquidity radar.
 - Current - Implement Phase III Chapter VI DOM Pro+ cockpit.
@@ -71,6 +72,15 @@ Changed:
 - Detached browser mode opens a popout window fed by the parent workspace over `BroadcastChannel`, so the child window does not open duplicate exchange feeds.
 - Detached popout quick execution sends order intents back to the parent workspace for OMS/EMS/Risk routing.
 - Detached popout renders parent-fed CVD data, and the compact DOM menu can open DOM Pro+ directly into settings.
+- Fixed DOM Pro+ cockpit grid placement so the main panel fills the remaining window height instead of leaving bottom dead space.
+- Expanded the bottom cockpit row so the Execution panel is visible and scrolls internally when content exceeds available space.
+- Added heatmap viewport controls: wheel zoom, vertical drag/pan, Shift + wheel pan, double-click reset, Reset View, and hover readouts.
+- Scoped the central heatmap to the selected visible range so institutional mode shows balanced buy/sell radar around current price instead of drifting only toward distant upside history.
+- Aligned Volume Profile with the heatmap viewport and added hover inspection.
+- Slowed heuristic CVD with 15M/1H/4H/12H/24H horizons, EMA smoothing, and sample intervals.
+- Replaced the block-style depth chart with a cumulative bid/ask market-depth curve.
+- Replaced liquidity flow blocks with rolling time-bucket histogram bars using percentile outlier scaling.
+- Added render-cost frame skipping and a high-load diagnostic warning.
 
 Why:
 

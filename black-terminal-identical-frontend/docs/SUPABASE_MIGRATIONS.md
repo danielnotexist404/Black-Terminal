@@ -956,3 +956,17 @@ Reason:
 Future migration trigger:
 
 - Add a Supabase migration only if DOM layouts, detached window geometry, DOM presets, heatmap history, or cross-device order-flow workspaces need server persistence.
+
+## 2026-07-10 - DOM Pro+ Polish Sprint
+
+Status: No Supabase migration required.
+
+Reason:
+
+- This sprint only changes the DOM Pro+ frontend renderer, local DOM settings, viewport math, and visual diagnostics.
+- Heatmap viewport, CVD horizon/smoothing, cumulative depth, and liquidity-flow histogram state remain derived from live market data in the browser.
+- No new user-owned server records, execution audit records, credentials, or permission tables were introduced.
+
+Future migration trigger:
+
+- Add a migration if DOM Pro+ presets, saved heatmap viewports, detached cockpit geometry, or cross-device DOM workspace layouts need account-level persistence.

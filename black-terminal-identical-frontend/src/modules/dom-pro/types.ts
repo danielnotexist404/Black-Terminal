@@ -3,7 +3,8 @@ import type { MarketSymbol, OrderBookSnapshot, TickerSnapshot, TradeTick } from 
 export type DomMode = "micro" | "scalper" | "standard" | "intraday" | "institutional" | "swing" | "macro" | "custom";
 export type DomVisibleRange = "auto" | "0.25" | "0.5" | "1" | "2" | "5" | "custom";
 export type DomProfileSource = "session" | "visible-range" | "rolling-window";
-export type DomHeatmapHorizon = "2h" | "6h" | "12h" | "24h" | "3d" | "1w";
+export type DomHeatmapHorizon = "15m" | "2h" | "6h" | "12h" | "24h" | "3d" | "1w";
+export type DomCvdHorizon = "15m" | "1h" | "4h" | "12h" | "24h";
 
 export type DomLevel = {
   price: number;
@@ -175,6 +176,9 @@ export type DomSettings = {
   maxVisibleBuckets: number;
   maxHeatmapHistory: number;
   heatmapHorizon: DomHeatmapHorizon;
+  cvdHorizon: DomCvdHorizon;
+  cvdSampleIntervalSec: number;
+  cvdSmoothingLength: number;
   macroLookbackDays: number;
   macroBandCount: number;
   persistenceSmoothing: number;

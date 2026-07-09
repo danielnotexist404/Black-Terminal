@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent, WheelEvent as ReactWheelEvent } from "react";
 import { ExternalLink, Maximize2, Minus, Settings, X } from "lucide-react";
 import type { Candle } from "../../../chart-engine/types";
 import { blackCoreConnectionManager } from "../../../connectivity/connectionManager";
@@ -16,6 +17,7 @@ import { readDomSettings, updateModeSettings, writeDomSettings } from "../domSet
 import { useDomFeed } from "../useDomFeed";
 import type {
   AggregatedDomSnapshot,
+  DomCvdHorizon,
   DomHeatmapHorizon,
   DomMode,
   DomSettings,
@@ -35,6 +37,27 @@ type DomProWindowProps = {
   onClose: () => void;
 };
 
+type HeatmapViewportState = {
+  zoom: number;
+  offset: number;
+};
+
+type DomHoverInfo = {
+  x: number;
+  y: number;
+  title: string;
+  lines: string[];
+};
+
+type FlowPoint = {
+  time: number;
+  bidAdded: number;
+  askAdded: number;
+  bidRemoved: number;
+  askRemoved: number;
+  net: number;
+};
+
 const orderTypes: OrderType[] = ["limit", "market", "twap", "iceberg"];
 const visibleRanges: Array<{ value: DomVisibleRange; label: string }> = [
   { value: "auto", label: "Auto" },
@@ -47,12 +70,20 @@ const visibleRanges: Array<{ value: DomVisibleRange; label: string }> = [
 ];
 const modes: DomMode[] = ["scalper", "intraday", "standard", "institutional", "macro", "custom"];
 const heatmapHorizons: Array<{ value: DomHeatmapHorizon; label: string }> = [
+  { value: "15m", label: "15M" },
   { value: "2h", label: "2H" },
   { value: "6h", label: "6H" },
   { value: "12h", label: "12H" },
   { value: "24h", label: "24H" },
   { value: "3d", label: "3D" },
   { value: "1w", label: "1W" }
+];
+const cvdHorizons: Array<{ value: DomCvdHorizon; label: string }> = [
+  { value: "15m", label: "15M" },
+  { value: "1h", label: "1H" },
+  { value: "4h", label: "4H" },
+  { value: "12h", label: "12H" },
+  { value: "24h", label: "24H" }
 ];
 
 export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspaceId, windowMode, settingsOpenSignal = 0, onClose }: DomProWindowProps) {
@@ -66,8 +97,13 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const submitQuickOrderRef = useRef<(targetSide: OrderSide, override?: Partial<{ quantity: string; price: string; orderType: OrderType; reduceOnly: boolean; postOnly: boolean }>) => Promise<void>>();
   const lastRenderAtRef = useRef(0);
   const droppedFramesRef = useRef(0);
+  const renderCooldownUntilRef = useRef(0);
+  const heatmapDragRef = useRef<{ startY: number; startOffset: number } | null>(null);
   const [settings, setSettings] = useState<DomSettings>(() => readDomSettings(workspaceId, symbolKey));
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [heatmapViewport, setHeatmapViewport] = useState<HeatmapViewportState>({ zoom: 1, offset: 0 });
+  const [domHover, setDomHover] = useState<DomHoverInfo | null>(null);
+  const [flowSeries, setFlowSeries] = useState<FlowPoint[]>([]);
   const [snapshot, setSnapshot] = useState<AggregatedDomSnapshot>(() =>
     engineRef.current.aggregate({
       marketSymbol,
@@ -102,6 +138,8 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     const next = readDomSettings(workspaceId, symbolKey);
     setSettings(next);
     engineRef.current = new DomAggregationEngine();
+    setHeatmapViewport({ zoom: 1, offset: 0 });
+    setDomHover(null);
   }, [workspaceId, symbolKey]);
 
   useEffect(() => {
@@ -111,6 +149,10 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   useEffect(() => {
     if (settingsOpenSignal > 0) setSettingsOpen(true);
   }, [settingsOpenSignal]);
+
+  useEffect(() => {
+    setHeatmapViewport({ zoom: 1, offset: 0 });
+  }, [settings.mode, settings.visibleRange, settings.heatmapHorizon]);
 
   useEffect(() => {
     let cancelled = false;
@@ -151,6 +193,14 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     const now = performance.now();
     const minFrameMs = 1000 / Math.max(1, settings.fpsCap);
     const elapsed = now - lastRenderAtRef.current;
+    if (now < renderCooldownUntilRef.current) {
+      droppedFramesRef.current += 1;
+      frameRef.current = window.setTimeout(() => {
+        frameRef.current = null;
+        renderSnapshot();
+      }, Math.max(minFrameMs, renderCooldownUntilRef.current - now)) as unknown as number;
+      return;
+    }
     if (elapsed < minFrameMs) {
       droppedFramesRef.current += 1;
       frameRef.current = window.setTimeout(() => {
@@ -177,6 +227,24 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     if (!price && snapshot.lastPrice) setPrice(String(Number(snapshot.lastPrice.toFixed(2))));
   }, [snapshot.lastPrice, price]);
 
+  useEffect(() => {
+    if (!snapshot.liquidityDelta.length) return;
+    const bucketTime = Math.floor((snapshot.generatedAt / 1000) / settings.cvdSampleIntervalSec) * settings.cvdSampleIntervalSec;
+    const nextPoint: FlowPoint = {
+      time: bucketTime,
+      bidAdded: snapshot.liquidityDelta.reduce((sum, delta) => sum + delta.bidAdded, 0),
+      askAdded: snapshot.liquidityDelta.reduce((sum, delta) => sum + delta.askAdded, 0),
+      bidRemoved: snapshot.liquidityDelta.reduce((sum, delta) => sum + delta.bidRemoved, 0),
+      askRemoved: snapshot.liquidityDelta.reduce((sum, delta) => sum + delta.askRemoved, 0),
+      net: snapshot.liquidityDelta.reduce((sum, delta) => sum + delta.bidAdded + delta.askRemoved - delta.askAdded - delta.bidRemoved, 0)
+    };
+    const cutoff = bucketTime - horizonSeconds(settings.cvdHorizon);
+    setFlowSeries((current) => {
+      const withoutCurrent = current.filter((point) => point.time !== bucketTime && point.time >= cutoff);
+      return [...withoutCurrent, nextPoint].slice(-420);
+    });
+  }, [settings.cvdHorizon, settings.cvdSampleIntervalSec, snapshot.generatedAt, snapshot.liquidityDelta]);
+
   function renderSnapshot() {
     const started = performance.now();
     const next = engineRef.current.aggregate({
@@ -193,6 +261,10 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
       subscriptionCount: feed.subscriptionCount
     });
     next.renderStats.lastRenderMs = performance.now() - started;
+    if (next.renderStats.lastRenderMs > 18) {
+      renderCooldownUntilRef.current = performance.now() + 1000 / Math.max(1, settings.fpsCap);
+      droppedFramesRef.current += 1;
+    }
     lastRenderAtRef.current = performance.now();
     setSnapshot(next);
   }
@@ -266,17 +338,67 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     [lastPrice, macroCandles, settings.macroBandCount, settings.macroLookbackDays, settings.showMacroRadar, snapshot.lastPrice]
   );
   const macroRange = useMemo(
-    () => resolveMacroLiquidityRange(snapshot, macroCandles, macroBands, snapshot.lastPrice ?? lastPrice),
-    [lastPrice, macroBands, macroCandles, snapshot]
+    () => resolveMacroLiquidityRange(snapshot, macroCandles, macroBands, snapshot.lastPrice ?? lastPrice, settings),
+    [lastPrice, macroBands, macroCandles, settings, snapshot]
+  );
+  const heatmapRange = useMemo(
+    () => applyHeatmapViewport(macroRange, heatmapViewport),
+    [heatmapViewport, macroRange]
   );
   const institutionalProfile = useMemo(
-    () => buildInstitutionalProfile(snapshot.volumeProfile, macroCandles, macroRange),
-    [macroCandles, macroRange, snapshot.volumeProfile]
+    () => buildInstitutionalProfile(snapshot.volumeProfile, macroCandles, heatmapRange),
+    [heatmapRange, macroCandles, snapshot.volumeProfile]
   );
   const maxProfileVolume = Math.max(...institutionalProfile.map((node) => node.volume), 1);
   const heatmapFrames = useMemo(() => snapshot.heatmap.slice(-resolveHorizonFrameCount(settings)), [settings, snapshot.heatmap]);
-  const cvdStats = useMemo(() => buildCvdStats(snapshot.trades, cvdData), [cvdData, snapshot.trades]);
-  const cvdPath = useMemo(() => buildCvdPath(cvdData), [cvdData]);
+  const smoothedCvdData = useMemo(() => buildSmoothedCvd(cvdData, settings), [cvdData, settings]);
+  const cvdStats = useMemo(() => buildCvdStats(snapshot.trades, smoothedCvdData, settings), [settings, smoothedCvdData, snapshot.trades]);
+  const cvdPath = useMemo(() => buildCvdPath(smoothedCvdData), [smoothedCvdData]);
+  const depthChart = useMemo(() => buildDepthChart(snapshot), [snapshot]);
+  const flowBars = useMemo(() => buildFlowBars(flowSeries, settings), [flowSeries, settings]);
+
+  const resetHeatmapView = useCallback(() => {
+    setHeatmapViewport({ zoom: 1, offset: 0 });
+    setDomHover(null);
+  }, []);
+
+  const handleHeatmapWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setHeatmapViewport((current) => {
+      if (event.shiftKey) {
+        return clampViewport({ ...current, offset: current.offset + event.deltaY * 0.0012 / current.zoom });
+      }
+      const factor = event.deltaY > 0 ? 0.9 : 1.12;
+      return clampViewport({ zoom: Math.max(1, Math.min(8, current.zoom * factor)), offset: current.offset });
+    });
+  }, []);
+
+  const handleHeatmapMouseDown = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    heatmapDragRef.current = { startY: event.clientY, startOffset: heatmapViewport.offset };
+  }, [heatmapViewport.offset]);
+
+  const handleHeatmapMouseMove = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (heatmapDragRef.current) {
+      const delta = (event.clientY - heatmapDragRef.current.startY) / Math.max(1, rect.height);
+      setHeatmapViewport((current) => clampViewport({ ...current, offset: heatmapDragRef.current!.startOffset + delta / current.zoom }));
+      return;
+    }
+    setDomHover(buildHeatmapHover(event, rect, heatmapRange, heatmapFrames, macroBands, snapshot.walls));
+  }, [heatmapFrames, heatmapRange, macroBands, snapshot.walls]);
+
+  const handleProfileMouseMove = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setDomHover(buildProfileHover(event, rect, heatmapRange, institutionalProfile));
+  }, [heatmapRange, institutionalProfile]);
+
+  useEffect(() => {
+    const clearDrag = () => {
+      heatmapDragRef.current = null;
+    };
+    window.addEventListener("mouseup", clearDrag);
+    return () => window.removeEventListener("mouseup", clearDrag);
+  }, []);
 
   useEffect(() => {
     if (windowMode !== "detached-browser") return;
@@ -322,13 +444,13 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
       settings,
       cvdData,
       macroBands,
-      macroRange,
+      macroRange: heatmapRange,
       executionStatus,
       marketSymbol,
       lastPrice,
       exchangeLabel
     });
-  }, [cvdData, exchangeLabel, executionStatus, lastPrice, macroBands, macroRange, marketSymbol, settings, snapshot, windowMode]);
+  }, [cvdData, exchangeLabel, executionStatus, heatmapRange, lastPrice, macroBands, marketSymbol, settings, snapshot, windowMode]);
 
   const priceRows = snapshot.buckets;
   const maxTotal = Math.max(...priceRows.map((row) => row.totalSize), 1);
@@ -347,7 +469,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
 
   return (
     <div className="dom-pro-shell" role="dialog" aria-label="DOM Pro plus institutional order flow terminal">
-      <div className="dom-pro-window">
+      <div className={`dom-pro-window ${settingsOpen ? "settings-open" : ""}`}>
         <header className="dom-pro-header">
           <div>
             <b>DOM PRO+</b>
@@ -413,6 +535,8 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             <Field label="Macro Lookback" value={settings.macroLookbackDays} min={90} max={1000} onChange={(value) => patchSettings({ macroLookbackDays: value })} />
             <Field label="Macro Bands" value={settings.macroBandCount} min={4} max={18} onChange={(value) => patchSettings({ macroBandCount: value })} />
             <Field label="Smoothing" value={settings.persistenceSmoothing} min={40} max={97} onChange={(value) => patchSettings({ persistenceSmoothing: value })} />
+            <Field label="CVD Sample" value={settings.cvdSampleIntervalSec} min={5} max={60} onChange={(value) => patchSettings({ cvdSampleIntervalSec: value })} />
+            <Field label="CVD Smooth" value={settings.cvdSmoothingLength} min={8} max={80} onChange={(value) => patchSettings({ cvdSmoothingLength: value })} />
             {settings.bucketMultiplier === "custom" && <Field label="Custom Bucket" value={settings.customBucketSize} min={0.01} max={10000} step={0.01} onChange={(value) => patchSettings({ customBucketSize: value })} />}
           </section>
         )}
@@ -446,9 +570,9 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
           <section className="dom-pro-panel dom-pro-profile">
             <PanelTitle title="Volume Profile" status="VISIBLE RANGE" />
             {!settings.showVolumeProfile ? <EmptyState text="Volume profile hidden in DOM settings." /> : institutionalProfile.length === 0 ? <EmptyState text="Awaiting live orderbook or historical candles." /> : (
-              <div className="dom-pro-profile-scale">
+              <div className="dom-pro-profile-scale" onMouseMove={handleProfileMouseMove} onMouseLeave={() => setDomHover(null)} onDoubleClick={resetHeatmapView}>
                 {institutionalProfile.map((node) => (
-                  <div className={`dom-pro-profile-node ${node.kind}`} key={`${node.price}-${node.kind}`} style={{ top: priceToTop(node.price, macroRange) }}>
+                  <div className={`dom-pro-profile-node ${node.kind}`} key={`${node.price}-${node.kind}`} style={{ top: priceToTop(node.price, heatmapRange) }}>
                     <i style={{ width: `${Math.max(3, node.volume / maxProfileVolume * 100)}%` }} />
                     <span>{formatPrice(node.price)}</span>
                     <b>{node.kind.toUpperCase()}</b>
@@ -462,6 +586,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
           <section className="dom-pro-panel dom-pro-heatmap">
             <PanelTitle title="Liquidity Heatmap" status={`${settings.heatmapHorizon.toUpperCase()} HISTORICAL DEPTH`} />
             <div className="dom-pro-horizon-controls">
+              <button type="button" className="reset" onClick={resetHeatmapView}>RESET VIEW</button>
               {heatmapHorizons.map((horizon) => (
                 <button
                   key={horizon.value}
@@ -474,16 +599,23 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
               ))}
             </div>
             {!settings.showHeatmap ? <EmptyState text="Liquidity heatmap hidden in DOM settings." /> : heatmapFrames.length === 0 && macroBands.length === 0 ? <EmptyState text="Liquidity heatmap requires depth history or historical candles." /> : (
-              <div className="dom-pro-heatmap-canvas">
+              <div
+                className="dom-pro-heatmap-canvas"
+                onWheel={handleHeatmapWheel}
+                onMouseDown={handleHeatmapMouseDown}
+                onMouseMove={handleHeatmapMouseMove}
+                onMouseLeave={() => setDomHover(null)}
+                onDoubleClick={resetHeatmapView}
+              >
                 <div className="dom-pro-heatmap-scale">
-                  {buildPriceScale(macroRange).map((price) => <span key={price} style={{ top: priceToTop(price, macroRange) }}>{formatPrice(price)}</span>)}
+                  {buildPriceScale(heatmapRange).map((price) => <span key={price} style={{ top: priceToTop(price, heatmapRange) }}>{formatPrice(price)}</span>)}
                 </div>
-                {macroBands.map((band) => (
+                {macroBands.filter((band) => band.high >= heatmapRange.min && band.low <= heatmapRange.max).map((band) => (
                   <div
                     key={band.id}
                     className={`dom-pro-macro-band ${band.side}`}
                     style={{
-                      top: priceToTop(band.price, macroRange),
+                      top: priceToTop(band.price, heatmapRange),
                       height: `${Math.max(5, Math.min(24, (band.strength * 18) + 5))}px`,
                       opacity: Math.max(0.28, band.strength)
                     }}
@@ -493,21 +625,22 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                     <em>{band.touches} touches / {Math.round(band.strength * 100)}%</em>
                   </div>
                 ))}
-                {heatmapFrames.map((frame, frameIndex) => frame.cells.slice(0, 130).map((cell, cellIndex) => (
+                {heatmapFrames.map((frame, frameIndex) => frame.cells.filter((cell) => cell.price >= heatmapRange.min && cell.price <= heatmapRange.max).slice(0, 130).map((cell, cellIndex) => (
                   <i
                     key={`${frame.time}-${cell.price}-${cellIndex}`}
                     className={`dom-pro-heatmap-cell ${cell.side}`}
                     style={{
                       left: `${(frameIndex / Math.max(1, heatmapFrames.length - 1)) * 92}%`,
-                      top: priceToTop(cell.price, macroRange),
+                      top: priceToTop(cell.price, heatmapRange),
                       opacity: Math.max(0.08, cell.intensity),
                       width: `${Math.max(1.4, 92 / Math.max(18, heatmapFrames.length))}%`,
                       height: `${Math.max(2, Math.min(10, cell.intensity * 9))}px`
                     }}
                   />
                 )))}
-                <b className="dom-pro-current-price" style={{ top: priceToTop(snapshot.lastPrice ?? lastPrice, macroRange) }} />
-                <div className="dom-pro-heatmap-footer"><span>{macroStatus}</span><span>{macroRange.source.replace("-", " ").toUpperCase()}</span></div>
+                <b className="dom-pro-current-price" style={{ top: priceToTop(snapshot.lastPrice ?? lastPrice, heatmapRange) }} />
+                {domHover && <HoverTooltip hover={domHover} />}
+                <div className="dom-pro-heatmap-footer"><span>{macroStatus}</span><span>{heatmapRange.source.replace("-", " ").toUpperCase()} / {heatmapViewport.zoom.toFixed(1)}x</span></div>
               </div>
             )}
           </section>
@@ -570,32 +703,56 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
 
           <section className="dom-pro-panel dom-pro-depth-chart">
             <PanelTitle title="Depth Chart" status="AGGREGATED" />
-            <div className="dom-pro-depth-bars">
-              {snapshot.bids.slice(0, 35).reverse().map((bucket) => <i className="bid" key={`b-${bucket.price}`} style={{ height: `${Math.max(2, bucket.bidSize / maxTotal * 100)}%` }} />)}
-              {snapshot.asks.slice(0, 35).map((bucket) => <i className="ask" key={`a-${bucket.price}`} style={{ height: `${Math.max(2, bucket.askSize / maxTotal * 100)}%` }} />)}
-            </div>
+            {depthChart.empty ? <EmptyState text="Depth chart requires bid and ask depth." /> : (
+              <svg className="dom-pro-depth-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Cumulative market depth">
+                <line className="axis" x1="50" y1="8" x2="50" y2="94" />
+                <line className="axis zero" x1="3" y1="94" x2="97" y2="94" />
+                <polygon className="bid-fill" points={depthChart.bidArea} />
+                <polygon className="ask-fill" points={depthChart.askArea} />
+                <polyline className="bid-line" points={depthChart.bidLine} />
+                <polyline className="ask-line" points={depthChart.askLine} />
+              </svg>
+            )}
           </section>
 
           <section className="dom-pro-panel dom-pro-flow">
             <PanelTitle title="Liquidity Flow Delta" status="PULL / STACK" />
-            <div className="dom-pro-flow-bars">
-              {snapshot.liquidityDelta.slice(0, 80).map((delta) => (
-                <i key={delta.price} className={delta.net >= 0 ? "positive" : "negative"} style={{ height: `${Math.min(100, Math.abs(delta.net) / Math.max(maxTotal, 1) * 160)}%` }} />
-              ))}
-            </div>
+            {flowBars.length === 0 ? <EmptyState text="Awaiting rolling liquidity delta." /> : (
+              <div className="dom-pro-flow-histogram">
+                <b />
+                {flowBars.map((bar, index) => (
+                  <i
+                    key={`${bar.time}-${index}`}
+                    className={bar.net >= 0 ? "positive" : "negative"}
+                    style={{
+                      left: `${bar.left}%`,
+                      width: `${bar.width}%`,
+                      height: `${bar.height}%`,
+                      bottom: bar.net >= 0 ? "50%" : `${50 - bar.height}%`
+                    }}
+                  />
+                ))}
+              </div>
+            )}
           </section>
 
           {settings.showCvd && (
             <section className="dom-pro-panel dom-pro-cvd">
-              <PanelTitle title="Heuristic CVD" status={cvdStats.trend.toUpperCase()} />
+              <PanelTitle title="Heuristic CVD" status={`${settings.cvdHorizon.toUpperCase()} / ${cvdStats.trend.toUpperCase()}`} />
+              <div className="dom-pro-cvd-controls">
+                {cvdHorizons.map((horizon) => (
+                  <button key={horizon.value} type="button" className={settings.cvdHorizon === horizon.value ? "active" : ""} onClick={() => patchSettings({ cvdHorizon: horizon.value })}>{horizon.label}</button>
+                ))}
+              </div>
               <div className="dom-pro-cvd-card">
-                {cvdData.length === 0 ? <EmptyState text="Trade stream unavailable for this venue." /> : (
+                {smoothedCvdData.length === 0 ? <EmptyState text="Trade stream unavailable for this venue." /> : (
                   <>
                     <div className="dom-pro-cvd-stats">
                       <span>Current <b>{formatSize(cvdStats.current)}</b></span>
                       <span>Session <b>{formatSize(cvdStats.sessionDelta)}</b></span>
                       <span>Buy <b>{cvdStats.buyPct.toFixed(0)}%</b></span>
                       <span>Sell <b>{cvdStats.sellPct.toFixed(0)}%</b></span>
+                      <span>Divergence <b>WATCH</b></span>
                     </div>
                     <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Heuristic cumulative volume delta">
                       <polyline points={cvdPath} />
@@ -676,6 +833,15 @@ function EmptyState({ text }: { text: string }) {
   return <div className="dom-pro-empty">{text}</div>;
 }
 
+function HoverTooltip({ hover }: { hover: DomHoverInfo }) {
+  return (
+    <div className="dom-pro-hover-tooltip" style={{ left: hover.x, top: hover.y }}>
+      <b>{hover.title}</b>
+      {hover.lines.map((line) => <span key={line}>{line}</span>)}
+    </div>
+  );
+}
+
 function labelDomMode(mode: DomMode) {
   if (mode === "intraday") return "INTRADAY";
   if (mode === "institutional") return "INSTITUTIONAL";
@@ -729,13 +895,32 @@ function buildMacroLiquidityBands(candles: Candle[], currentPrice: number | null
 
   const selected: typeof ranked = [];
   const minGap = step * 4;
-  for (const candidate of ranked) {
-    if (selected.some((node) => Math.abs(node.price - candidate.price) < minGap)) continue;
+  const price = Number(currentPrice ?? source[source.length - 1]?.close ?? 0);
+  const proximityRank = (candidate: typeof ranked[number]) => {
+    const distancePct = price > 0 ? Math.abs(candidate.price - price) / price * 100 : 0;
+    return candidate.strength * 0.78 + Math.max(0, 1 - distancePct / 8) * 0.22;
+  };
+  const pushCandidate = (candidate: typeof ranked[number]) => {
+    if (selected.some((node) => Math.abs(node.price - candidate.price) < minGap)) return false;
     selected.push(candidate);
+    return true;
+  };
+  const below = ranked.filter((candidate) => price <= 0 || candidate.price < price).sort((a, b) => proximityRank(b) - proximityRank(a));
+  const above = ranked.filter((candidate) => price <= 0 || candidate.price > price).sort((a, b) => proximityRank(b) - proximityRank(a));
+  const perSideTarget = Math.max(2, Math.floor(settings.macroBandCount / 2));
+  for (const candidate of below) {
+    pushCandidate(candidate);
+    if (selected.filter((node) => node.price < price).length >= perSideTarget) break;
+  }
+  for (const candidate of above) {
+    pushCandidate(candidate);
+    if (selected.filter((node) => node.price > price).length >= perSideTarget) break;
+  }
+  for (const candidate of ranked) {
+    pushCandidate(candidate);
     if (selected.length >= Math.max(4, settings.macroBandCount)) break;
   }
 
-  const price = Number(currentPrice ?? source[source.length - 1]?.close ?? 0);
   return selected.map((bin, index) => {
     const isPoc = index === 0;
     const side: MacroLiquidityBand["side"] = isPoc ? "poc" : bin.price > price ? "supply" : "demand";
@@ -754,22 +939,29 @@ function buildMacroLiquidityBands(candles: Candle[], currentPrice: number | null
   }).sort((a, b) => b.price - a.price);
 }
 
-function resolveMacroLiquidityRange(snapshot: AggregatedDomSnapshot, candles: Candle[], bands: MacroLiquidityBand[], currentPrice: number | null | undefined): MacroLiquidityRange {
-  const prices = [
-    ...candles.slice(-365).flatMap((candle) => [candle.high, candle.low]),
-    ...bands.flatMap((band) => [band.high, band.low]),
-    ...snapshot.buckets.map((bucket) => bucket.price)
-  ].filter((value) => Number.isFinite(value) && value > 0);
-
-  if (prices.length > 0) {
-    const min = Math.min(...prices);
-    const max = Math.max(...prices);
-    const pad = Math.max((max - min) * 0.035, Number(currentPrice ?? 1) * 0.002);
-    return { min: min - pad, max: max + pad, source: candles.length ? "historical-ohlcv" : "live-depth" };
-  }
-
-  const price = Number(currentPrice ?? 1);
-  return { min: price * 0.98, max: price * 1.02, source: "fallback" };
+function resolveMacroLiquidityRange(snapshot: AggregatedDomSnapshot, candles: Candle[], bands: MacroLiquidityBand[], currentPrice: number | null | undefined, settings: DomSettings): MacroLiquidityRange {
+  const priceCandidates = [
+    currentPrice,
+    snapshot.lastPrice,
+    snapshot.midPrice,
+    snapshot.bestBid,
+    snapshot.bestAsk,
+    snapshot.buckets[0]?.price,
+    candles[candles.length - 1]?.close
+  ].filter((value) => Number.isFinite(value ?? NaN) && Number(value) > 0);
+  const price = Number(priceCandidates[0] ?? 1);
+  const rangePct = resolveVisibleRangePct(settings);
+  const min = price * (1 - rangePct / 100);
+  const max = price * (1 + rangePct / 100);
+  const minimumSpan = Math.max(price * 0.0025, snapshot.renderStats.bucketSize * 18, 1);
+  const currentSpan = max - min;
+  const paddedMin = currentSpan < minimumSpan ? price - minimumSpan / 2 : min;
+  const paddedMax = currentSpan < minimumSpan ? price + minimumSpan / 2 : max;
+  return {
+    min: Math.max(0.00000001, paddedMin),
+    max: Math.max(paddedMin + 0.00000001, paddedMax),
+    source: candles.length || bands.length ? "historical-ohlcv" : snapshot.buckets.length ? "live-depth" : "fallback"
+  };
 }
 
 function buildInstitutionalProfile(liveProfile: VolumeProfileNode[], candles: Candle[], range: MacroLiquidityRange): VolumeProfileNode[] {
@@ -804,6 +996,7 @@ function buildInstitutionalProfile(liveProfile: VolumeProfileNode[], candles: Ca
 function resolveHorizonFrameCount(settings: DomSettings) {
   const fallback = settings.maxHeatmapHistory;
   switch (settings.heatmapHorizon) {
+    case "15m": return Math.min(fallback, 45);
     case "2h": return Math.min(fallback, 90);
     case "6h": return Math.min(fallback, 150);
     case "12h": return Math.min(fallback, 240);
@@ -825,19 +1018,166 @@ function buildPriceScale(range: MacroLiquidityRange) {
   return Array.from({ length: 6 }, (_, index) => range.max - step * index);
 }
 
-function buildCvdStats(trades: AggregatedDomSnapshot["trades"], cvdData: Array<{ value: number }>) {
-  const buyVolume = trades.filter((trade) => trade.side === "buy").reduce((sum, trade) => sum + trade.quantity, 0);
-  const sellVolume = trades.filter((trade) => trade.side === "sell").reduce((sum, trade) => sum + trade.quantity, 0);
+function resolveVisibleRangePct(settings: DomSettings) {
+  if (settings.visibleRange === "custom") return Math.max(0.05, settings.customVisibleRangePct);
+  if (settings.visibleRange !== "auto") return Number(settings.visibleRange);
+  if (settings.mode === "macro") return 5;
+  if (settings.mode === "institutional" || settings.mode === "standard" || settings.mode === "swing") return 2;
+  if (settings.mode === "intraday") return 1;
+  return 0.25;
+}
+
+function clampViewport(viewport: HeatmapViewportState): HeatmapViewportState {
+  const zoom = Math.max(1, Math.min(8, viewport.zoom));
+  const maxOffset = (1 - 1 / zoom) / 2;
+  return {
+    zoom,
+    offset: Math.max(-maxOffset, Math.min(maxOffset, viewport.offset))
+  };
+}
+
+function applyHeatmapViewport(range: MacroLiquidityRange, viewport: HeatmapViewportState): MacroLiquidityRange {
+  const normalized = clampViewport(viewport);
+  const span = Math.max(range.max - range.min, 0.00000001);
+  const visibleSpan = span / normalized.zoom;
+  const center = (range.min + range.max) / 2 + normalized.offset * span;
+  let min = center - visibleSpan / 2;
+  let max = center + visibleSpan / 2;
+  if (min < range.min) {
+    max += range.min - min;
+    min = range.min;
+  }
+  if (max > range.max) {
+    min -= max - range.max;
+    max = range.max;
+  }
+  return {
+    min: Math.max(0.00000001, min),
+    max: Math.max(min + 0.00000001, max),
+    source: range.source
+  };
+}
+
+function priceFromY(y: number, rect: DOMRect, range: MacroLiquidityRange) {
+  const pct = Math.max(0, Math.min(1, y / Math.max(1, rect.height)));
+  return range.max - pct * (range.max - range.min);
+}
+
+function buildHeatmapHover(
+  event: ReactMouseEvent<HTMLDivElement>,
+  rect: DOMRect,
+  range: MacroLiquidityRange,
+  frames: AggregatedDomSnapshot["heatmap"],
+  bands: MacroLiquidityBand[],
+  walls: AggregatedDomSnapshot["walls"]
+): DomHoverInfo {
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  const price = priceFromY(y, rect, range);
+  const xPct = Math.max(0, Math.min(1, x / Math.max(1, rect.width)));
+  const frame = frames[Math.round(xPct * Math.max(0, frames.length - 1))];
+  const priceWindow = Math.max((range.max - range.min) * 0.008, 0.00000001);
+  const nearestCell = frame?.cells
+    .filter((cell) => Math.abs(cell.price - price) <= priceWindow)
+    .sort((a, b) => Math.abs(a.price - price) - Math.abs(b.price - price))[0];
+  const nearestBand = bands
+    .filter((band) => band.high >= price - priceWindow && band.low <= price + priceWindow)
+    .sort((a, b) => Math.abs(a.price - price) - Math.abs(b.price - price))[0];
+  const nearestWall = walls
+    .filter((wall) => Math.abs(wall.price - price) <= priceWindow)
+    .sort((a, b) => Math.abs(a.price - price) - Math.abs(b.price - price))[0];
+  const lines = [
+    `Price ${formatPrice(price)}`,
+    `Time ${frame ? formatHeatmapTime(frame.time) : "Historical band"}`,
+    `Liquidity ${nearestCell ? `${nearestCell.side === "ask" ? "sell" : "buy"} / ${(nearestCell.intensity * 100).toFixed(0)}% intensity` : "No live cell at cursor"}`
+  ];
+  if (nearestBand) lines.push(`${nearestBand.label} ${formatPrice(nearestBand.price)} / ${nearestBand.touches} touches / ${Math.round(nearestBand.strength * 100)}%`);
+  if (nearestWall) lines.push(`${nearestWall.side === "sell" ? "Sell wall" : "Buy wall"} ${formatSize(nearestWall.size)} / ${formatDuration(nearestWall.persistenceMs)}`);
+  return {
+    x,
+    y,
+    title: nearestBand?.label ?? (nearestWall ? `${nearestWall.side.toUpperCase()} WALL` : "LIQUIDITY POINT"),
+    lines
+  };
+}
+
+function buildProfileHover(event: ReactMouseEvent<HTMLDivElement>, rect: DOMRect, range: MacroLiquidityRange, profile: VolumeProfileNode[]): DomHoverInfo {
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  const price = priceFromY(y, rect, range);
+  const nearest = profile
+    .slice()
+    .sort((a, b) => Math.abs(a.price - price) - Math.abs(b.price - price))[0];
+  return {
+    x,
+    y,
+    title: nearest ? nearest.kind.toUpperCase() : "PROFILE",
+    lines: [
+      `Price ${formatPrice(nearest?.price ?? price)}`,
+      `Volume ${formatCompact(nearest?.volume ?? 0)}`,
+      `Node ${nearest?.kind.toUpperCase() ?? "NONE"}`
+    ]
+  };
+}
+
+function horizonSeconds(horizon: DomHeatmapHorizon | DomCvdHorizon) {
+  switch (horizon) {
+    case "15m": return 15 * 60;
+    case "1h": return 60 * 60;
+    case "2h": return 2 * 60 * 60;
+    case "4h": return 4 * 60 * 60;
+    case "6h": return 6 * 60 * 60;
+    case "12h": return 12 * 60 * 60;
+    case "24h": return 24 * 60 * 60;
+    case "3d": return 3 * 24 * 60 * 60;
+    case "1w": return 7 * 24 * 60 * 60;
+    default: return 24 * 60 * 60;
+  }
+}
+
+function buildSmoothedCvd(points: Array<{ time: number; value: number }>, settings: DomSettings) {
+  if (points.length === 0) return [];
+  const now = Math.max(Date.now() / 1000, ...points.map((point) => normalizeEpochSeconds(point.time)));
+  const cutoff = now - horizonSeconds(settings.cvdHorizon);
+  const ordered = points
+    .map((point) => ({ time: normalizeEpochSeconds(point.time), value: point.value }))
+    .filter((point) => point.time >= cutoff)
+    .sort((a, b) => a.time - b.time);
+  const source = ordered.length ? ordered : points.slice(-180).map((point) => ({ time: normalizeEpochSeconds(point.time), value: point.value }));
+  const interval = Math.max(1, settings.cvdSampleIntervalSec);
+  const bucketed = new Map<number, number>();
+  for (const point of source) {
+    bucketed.set(Math.floor(point.time / interval) * interval, point.value);
+  }
+  const samples = Array.from(bucketed.entries()).map(([time, value]) => ({ time, value })).sort((a, b) => a.time - b.time);
+  if (samples.length <= 1) return samples;
+  const alpha = 2 / (Math.max(2, settings.cvdSmoothingLength) + 1);
+  let ema = samples[0].value;
+  return samples.map((point) => {
+    ema = ema + alpha * (point.value - ema);
+    return { time: point.time, value: ema };
+  });
+}
+
+function buildCvdStats(trades: AggregatedDomSnapshot["trades"], cvdData: Array<{ time?: number; value: number }>, settings: DomSettings) {
+  const now = Math.floor(Date.now() / 1000);
+  const cutoff = now - horizonSeconds(settings.cvdHorizon);
+  const horizonTrades = trades.filter((trade) => normalizeEpochSeconds(trade.time) >= cutoff);
+  const buyVolume = horizonTrades.filter((trade) => trade.side === "buy").reduce((sum, trade) => sum + trade.quantity, 0);
+  const sellVolume = horizonTrades.filter((trade) => trade.side === "sell").reduce((sum, trade) => sum + trade.quantity, 0);
   const total = Math.max(1, buyVolume + sellVolume);
   const current = cvdData[cvdData.length - 1]?.value ?? 0;
   const first = cvdData[0]?.value ?? 0;
   const sessionDelta = current - first;
+  const lookback = cvdData[Math.max(0, cvdData.length - Math.max(4, Math.floor(cvdData.length * 0.25)))]?.value ?? first;
+  const slope = current - lookback;
+  const noise = Math.max(1, Math.abs(sessionDelta) * 0.08);
   return {
     current,
     sessionDelta,
     buyPct: buyVolume / total * 100,
     sellPct: sellVolume / total * 100,
-    trend: sessionDelta < 0 ? "selling pressure" : sessionDelta > 0 ? "buying pressure" : "balanced"
+    trend: slope > noise ? "rising" : slope < -noise ? "falling" : "flat"
   };
 }
 
@@ -852,6 +1192,85 @@ function buildCvdPath(points: Array<{ value: number }>) {
     const y = 92 - ((point.value - min) / span) * 82;
     return `${x.toFixed(2)},${y.toFixed(2)}`;
   }).join(" ");
+}
+
+function buildDepthChart(snapshot: AggregatedDomSnapshot) {
+  const bidLevels = snapshot.bids.slice(0, 90).sort((a, b) => b.price - a.price);
+  const askLevels = snapshot.asks.slice(0, 90).sort((a, b) => a.price - b.price);
+  if (bidLevels.length === 0 || askLevels.length === 0) {
+    return { empty: true, bidLine: "", askLine: "", bidArea: "", askArea: "" };
+  }
+  const bidCumulative: Array<{ x: number; y: number }> = [];
+  const askCumulative: Array<{ x: number; y: number }> = [];
+  let bidTotal = 0;
+  let askTotal = 0;
+  const bidTotals = bidLevels.map((level) => {
+    bidTotal += level.bidSize;
+    return bidTotal;
+  });
+  const askTotals = askLevels.map((level) => {
+    askTotal += level.askSize;
+    return askTotal;
+  });
+  const maxTotal = Math.max(1, bidTotal, askTotal);
+  bidLevels.forEach((_level, index) => {
+    const x = 50 - ((index + 1) / Math.max(1, bidLevels.length)) * 47;
+    const y = 94 - (bidTotals[index] / maxTotal) * 82;
+    bidCumulative.push({ x, y });
+  });
+  askLevels.forEach((_level, index) => {
+    const x = 50 + ((index + 1) / Math.max(1, askLevels.length)) * 47;
+    const y = 94 - (askTotals[index] / maxTotal) * 82;
+    askCumulative.push({ x, y });
+  });
+  const bidLinePoints = [{ x: 50, y: 94 }, ...bidCumulative];
+  const askLinePoints = [{ x: 50, y: 94 }, ...askCumulative];
+  const pointString = (points: Array<{ x: number; y: number }>) => points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
+  return {
+    empty: false,
+    bidLine: pointString(bidLinePoints),
+    askLine: pointString(askLinePoints),
+    bidArea: `${pointString(bidLinePoints)} ${bidCumulative[bidCumulative.length - 1]?.x.toFixed(2) ?? "3"},94 50,94`,
+    askArea: `${pointString(askLinePoints)} ${askCumulative[askCumulative.length - 1]?.x.toFixed(2) ?? "97"},94 50,94`
+  };
+}
+
+function buildFlowBars(series: FlowPoint[], settings: DomSettings) {
+  if (series.length === 0) return [];
+  const now = Math.max(...series.map((point) => point.time));
+  const cutoff = now - horizonSeconds(settings.cvdHorizon);
+  const points = series.filter((point) => point.time >= cutoff).sort((a, b) => a.time - b.time).slice(-220);
+  if (points.length === 0) return [];
+  const scale = Math.max(1, percentile(points.map((point) => Math.abs(point.net)), 0.92));
+  const width = Math.max(0.25, 96 / Math.max(16, points.length));
+  return points.map((point, index) => ({
+    time: point.time,
+    net: point.net,
+    left: index / Math.max(1, points.length) * 100,
+    width,
+    height: Math.max(1, Math.min(46, Math.abs(point.net) / scale * 46))
+  }));
+}
+
+function percentile(values: number[], pct: number) {
+  const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (sorted.length === 0) return 0;
+  const index = Math.max(0, Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * pct)));
+  return sorted[index];
+}
+
+function normalizeEpochSeconds(time: number) {
+  return time > 100000000000 ? Math.floor(time / 1000) : time;
+}
+
+function formatHeatmapTime(time: number) {
+  return new Date(time > 100000000000 ? time : time * 1000).toLocaleString(undefined, {
+    hour12: false,
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
 function formatDuration(ms: number) {

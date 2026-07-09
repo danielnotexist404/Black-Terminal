@@ -7,6 +7,7 @@ This file records what has been built so far and what must be recorded going for
 Recent pushed commits:
 
 - Current - Polish DOM Pro+ cockpit rendering and viewport controls.
+- Current - Refine DOM Pro+ heatmap camera and remove artificial zoom-out limit.
 - Current - Consolidate Vercel API route dispatchers for production deploy.
 - Current - Redesign DOM Pro+ as institutional liquidity radar.
 - Current - Implement Phase III Chapter VI DOM Pro+ cockpit.
@@ -75,6 +76,10 @@ Changed:
 - Fixed DOM Pro+ cockpit grid placement so the main panel fills the remaining window height instead of leaving bottom dead space.
 - Expanded the bottom cockpit row so the Execution panel is visible and scrolls internally when content exceeds available space.
 - Added heatmap viewport controls: wheel zoom, vertical drag/pan, Shift + wheel pan, double-click reset, Reset View, and hover readouts.
+- Replaced the bounded viewport with a shared price-space camera for heatmap, volume profile, and depth chart alignment.
+- Added Current, 1H, 6H, 12H, 24H, 3D, and Fit camera presets.
+- Removed the old minimum zoom-out behavior so users can inspect wider liquidity maps up to institutional/macro scale.
+- Kept panning user-controlled without snapping back to current price except when explicitly centering the market.
 - Scoped the central heatmap to the selected visible range so institutional mode shows balanced buy/sell radar around current price instead of drifting only toward distant upside history.
 - Aligned Volume Profile with the heatmap viewport and added hover inspection.
 - Slowed heuristic CVD with 15M/1H/4H/12H/24H horizons, EMA smoothing, and sample intervals.

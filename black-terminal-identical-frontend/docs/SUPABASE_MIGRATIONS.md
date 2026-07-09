@@ -970,3 +970,17 @@ Reason:
 Future migration trigger:
 
 - Add a migration if DOM Pro+ presets, saved heatmap viewports, detached cockpit geometry, or cross-device DOM workspace layouts need account-level persistence.
+
+## 2026-07-10 - DOM Pro+ Viewport Refinement
+
+Status: No Supabase migration required.
+
+Reason:
+
+- The shared heatmap, volume profile, and depth chart camera is local frontend viewport state.
+- Camera presets, fit-to-data behavior, and user pan/zoom do not introduce server-owned records.
+- No credentials, execution audit rows, account records, or persistent workspace tables were added.
+
+Future migration trigger:
+
+- Add a migration only if saved DOM camera presets, per-user viewport layouts, minimap state, or cross-device DOM Pro+ workspaces need Supabase persistence.

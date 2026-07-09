@@ -120,10 +120,15 @@ DOM Pro+ execution panel
   - double-click reset
   - Reset View button
   - hover readout for price, time, intensity, wall, and persistence context
+- Replaced the old bounded heatmap viewport with a shared price-space camera used by both the heatmap and volume profile.
+- Added camera presets for Current, 1H, 6H, 12H, 24H, 3D, and Fit to Visible Data.
+- Allowed broad zoom-out up to macro liquidity map scale without snapping back to current price.
+- Prepared the camera model around center price, zoom, offset, and height so a future minimap/navigator can consume the same viewport state.
 - Added a historical OHLCV macro radar layer using cached/fetched daily candles from the existing Market Data Engine.
 - Added macro structure bands for POC, supply, and demand zones across a wider historical range.
 - Aligned the volume profile to the same vertical viewport used by the heatmap.
 - Replaced the depth chart block bars with a cumulative bid/ask depth curve.
+- Made the depth chart inherit the same visible price camera as the heatmap.
 - Replaced liquidity flow blocks with rolling time-bucket histogram bars and percentile outlier scaling.
 - Redesigned CVD as a larger heuristic CVD panel with current delta, session delta, aggressive buy percentage, aggressive sell percentage, trend label, horizon controls, EMA smoothing, and a thicker line.
 - Updated institutional defaults to 500x buckets, +/-2% visible range, 24H heatmap, 4H smoothed CVD, and 10-12 FPS behavior.

@@ -6898,7 +6898,8 @@ body.resizing-layout * {
   min-height: 0;
   display: grid;
   grid-template-columns: 1.03fr 0.9fr 1.72fr 0.82fr 0.96fr 0.86fr;
-  grid-template-rows: minmax(0, 1fr) 174px 202px;
+  grid-template-rows: minmax(0, 1fr) 174px minmax(284px, 0.42fr);
+  align-content: stretch;
   gap: 8px;
   padding: 8px;
   overflow: hidden;
@@ -7501,6 +7502,8 @@ body.resizing-layout * {
 }
 
 .dom-pro-execution {
+  display: flex;
+  flex-direction: column;
   padding-bottom: 8px;
 }
 
@@ -7525,7 +7528,7 @@ body.resizing-layout * {
 .dom-pro-order-types button,
 .dom-pro-side-buttons button,
 .dom-pro-submit-row button {
-  height: 28px;
+  height: 26px;
   font: 900 9px "IBM Plex Mono", monospace;
   text-transform: uppercase;
 }
@@ -7549,7 +7552,7 @@ body.resizing-layout * {
   grid-template-columns: 90px 1fr;
   align-items: center;
   gap: 8px;
-  padding: 7px 10px 0;
+  padding: 6px 10px 0;
 }
 
 .dom-pro-checks {
@@ -7559,7 +7562,8 @@ body.resizing-layout * {
 }
 
 .dom-pro-execution p {
-  margin: 8px 10px 0;
+  margin: auto 10px 0;
+  padding-top: 8px;
   color: #8f959e;
   font: 800 9px "IBM Plex Mono", monospace;
   text-transform: uppercase;

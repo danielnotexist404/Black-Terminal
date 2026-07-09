@@ -880,7 +880,7 @@ function buildDomProPopoutDocument(channelName: string) {
     .stats { display: grid; grid-template-columns: repeat(8, minmax(110px, 1fr)); border-bottom: 1px solid rgba(255,255,255,.08); }
     .stat { display: grid; align-content: center; gap: 6px; padding: 8px 11px; border-right: 1px solid rgba(255,255,255,.075); min-width: 0; }
     .stat b { color: #f2f4f7; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .grid { min-height: 0; display: grid; grid-template-columns: 1.05fr .9fr 1.45fr .75fr .95fr .9fr; grid-template-rows: minmax(0, 1fr) 178px 206px; gap: 8px; padding: 8px; }
+    .grid { min-height: 0; display: grid; grid-template-columns: 1.05fr .9fr 1.45fr .75fr .95fr .9fr; grid-template-rows: minmax(0, 1fr) 178px minmax(284px, .42fr); align-content: stretch; gap: 8px; padding: 8px; }
     .panel { min-width: 0; min-height: 0; overflow: hidden; background: rgba(5,6,7,.97); border: 1px solid rgba(255,255,255,.09); }
     .panel-title { height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; border-bottom: 1px solid rgba(255,255,255,.08); }
     .panel-title span { color: #eef1f5; font-size: 10px; font-weight: 900; text-transform: uppercase; }
@@ -936,7 +936,8 @@ function buildDomProPopoutDocument(channelName: string) {
     .cvd-line { position: relative; height: calc(100% - 34px); overflow: hidden; background: linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px); background-size: 42px 26px; }
     .cvd-line span { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: #cfd3da; box-shadow: 0 0 8px rgba(255,255,255,.28); }
     .cvd-line span.neg { background: #ff1d1d; box-shadow: 0 0 9px rgba(255,0,0,.38); }
-    .exec-inner { padding: 9px 10px; display: grid; gap: 8px; }
+    .exec { display: flex; flex-direction: column; }
+    .exec-inner { min-height: 0; flex: 1; padding: 9px 10px; display: grid; grid-auto-rows: min-content; gap: 8px; }
     .exec-inner select, .exec-inner input { height: 30px; background: #050607; color: #fff; border: 1px solid rgba(255,255,255,.14); padding: 0 8px; }
     .exec-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     button { height: 30px; color: #fff; border: 1px solid rgba(255,255,255,.14); background: rgba(190,190,194,.16); font: 900 10px "IBM Plex Mono", Consolas, monospace; text-transform: uppercase; cursor: pointer; }

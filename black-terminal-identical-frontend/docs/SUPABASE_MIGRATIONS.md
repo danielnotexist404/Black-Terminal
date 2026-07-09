@@ -510,3 +510,433 @@ create policy "hyperliquid_snapshots_insert_own"
   on public.hyperliquid_account_snapshots for insert
   with check (auth.uid() = user_id);
 ```
+
+## 2026-07-09 - Professional Network Foundation
+
+Status: Required for Phase IV Preview.
+
+Purpose:
+
+- Store professional profile identity, avatar/banner metadata, and opt-in public performance disclosure flags.
+- Store research feed posts, published indicators, published strategies, and follow graph data.
+- Store Investment Groups, group stats, group members, join requests, Trading Room messages, and notification events.
+- Enforce server-side ownership and group permission boundaries with RLS.
+- Store only password hashes for password-protected groups.
+
+SQL:
+
+```sql
+create extension if not exists pgcrypto;
+
+create table if not exists public.profiles_extended (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  display_name text,
+  bio text not null default '',
+  avatar_url text,
+  banner_url text,
+  country text,
+  trading_style_tags jsonb not null default '[]'::jsonb,
+  show_public_stats boolean not null default false,
+  show_public_pnl boolean not null default false,
+  show_public_drawdown boolean not null default false,
+  show_public_equity_curve boolean not null default false,
+  show_verified_exchange_performance boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.profiles_extended enable row level security;
+
+create policy "profiles_extended_select_public"
+  on public.profiles_extended for select
+  using (true);
+
+create policy "profiles_extended_insert_own"
+  on public.profiles_extended for insert
+  with check (auth.uid() = user_id);
+
+create policy "profiles_extended_update_own"
+  on public.profiles_extended for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create table if not exists public.user_follows (
+  follower_user_id uuid not null references auth.users(id) on delete cascade,
+  followed_user_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (follower_user_id, followed_user_id),
+  check (follower_user_id <> followed_user_id)
+);
+
+create index if not exists idx_user_follows_followed
+  on public.user_follows(followed_user_id, created_at desc);
+
+alter table public.user_follows enable row level security;
+
+create policy "user_follows_select_public"
+  on public.user_follows for select
+  using (true);
+
+create policy "user_follows_insert_own"
+  on public.user_follows for insert
+  with check (auth.uid() = follower_user_id);
+
+create policy "user_follows_delete_own"
+  on public.user_follows for delete
+  using (auth.uid() = follower_user_id);
+
+create table if not exists public.profile_posts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  post_type text not null check (post_type in ('status','market_research','trade_idea','indicator_release','strategy_note','group_announcement')),
+  body text not null,
+  symbol text,
+  timeframe text,
+  visibility text not null default 'public' check (visibility in ('public','followers','private')),
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_profile_posts_user_time
+  on public.profile_posts(user_id, created_at desc);
+
+create index if not exists idx_profile_posts_visibility_time
+  on public.profile_posts(visibility, created_at desc);
+
+alter table public.profile_posts enable row level security;
+
+create policy "profile_posts_select_visible"
+  on public.profile_posts for select
+  using (
+    visibility = 'public'
+    or auth.uid() = user_id
+    or (
+      visibility = 'followers'
+      and exists (
+        select 1
+        from public.user_follows f
+        where f.follower_user_id = auth.uid()
+          and f.followed_user_id = profile_posts.user_id
+      )
+    )
+  );
+
+create policy "profile_posts_insert_own"
+  on public.profile_posts for insert
+  with check (auth.uid() = user_id);
+
+create policy "profile_posts_update_own"
+  on public.profile_posts for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create policy "profile_posts_delete_own"
+  on public.profile_posts for delete
+  using (auth.uid() = user_id);
+
+create table if not exists public.published_indicators (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  description text not null default '',
+  version text not null default '1.0.0',
+  visibility text not null default 'public' check (visibility in ('public','followers','private')),
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_published_indicators_user_time
+  on public.published_indicators(user_id, updated_at desc);
+
+alter table public.published_indicators enable row level security;
+
+create policy "published_indicators_select_visible"
+  on public.published_indicators for select
+  using (visibility = 'public' or auth.uid() = user_id);
+
+create policy "published_indicators_insert_own"
+  on public.published_indicators for insert
+  with check (auth.uid() = user_id);
+
+create policy "published_indicators_update_own"
+  on public.published_indicators for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create table if not exists public.published_strategies (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  description text not null default '',
+  market text,
+  timeframe text,
+  risk_profile text not null default 'balanced' check (risk_profile in ('conservative','balanced','aggressive','custom')),
+  visibility text not null default 'public' check (visibility in ('public','followers','private')),
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_published_strategies_user_time
+  on public.published_strategies(user_id, updated_at desc);
+
+alter table public.published_strategies enable row level security;
+
+create policy "published_strategies_select_visible"
+  on public.published_strategies for select
+  using (visibility = 'public' or auth.uid() = user_id);
+
+create policy "published_strategies_insert_own"
+  on public.published_strategies for insert
+  with check (auth.uid() = user_id);
+
+create policy "published_strategies_update_own"
+  on public.published_strategies for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create table if not exists public.investment_groups (
+  id uuid primary key default gen_random_uuid(),
+  owner_user_id uuid not null references auth.users(id) on delete cascade,
+  firm_name text not null,
+  slug text not null unique,
+  description text not null default '',
+  bio text not null default '',
+  logo_url text,
+  banner_url text,
+  visibility text not null default 'public' check (visibility in ('public','private','invite_only','password_protected')),
+  access_mode text not null default 'approval_required' check (access_mode in ('open','approval_required','invite_only','password_protected')),
+  password_hash text,
+  trading_style_tags jsonb not null default '[]'::jsonb,
+  accepted_exchanges jsonb not null default '[]'::jsonb,
+  accepted_wallets jsonb not null default '[]'::jsonb,
+  minimum_equity numeric,
+  max_followers integer,
+  approval_required boolean not null default true,
+  status text not null default 'active' check (status in ('draft','active','suspended','archived')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_investment_groups_owner_status
+  on public.investment_groups(owner_user_id, status);
+
+create index if not exists idx_investment_groups_visibility_status
+  on public.investment_groups(visibility, status, created_at desc);
+
+alter table public.investment_groups enable row level security;
+
+create policy "investment_groups_select_visible"
+  on public.investment_groups for select
+  using (
+    visibility = 'public'
+    or auth.uid() = owner_user_id
+  );
+
+create policy "investment_groups_insert_own"
+  on public.investment_groups for insert
+  with check (auth.uid() = owner_user_id);
+
+create policy "investment_groups_update_owner"
+  on public.investment_groups for update
+  using (auth.uid() = owner_user_id)
+  with check (auth.uid() = owner_user_id);
+
+create table if not exists public.investment_group_stats (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid not null unique references public.investment_groups(id) on delete cascade,
+  follower_count integer not null default 0,
+  connected_equity numeric not null default 0,
+  monthly_return numeric,
+  yearly_return numeric,
+  total_return numeric,
+  max_drawdown numeric,
+  current_drawdown numeric,
+  risk_score numeric,
+  win_rate numeric,
+  profit_factor numeric,
+  average_trade_duration text,
+  verified boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.investment_group_stats enable row level security;
+
+create policy "investment_group_stats_select_visible"
+  on public.investment_group_stats for select
+  using (
+    exists (
+      select 1
+      from public.investment_groups g
+      where g.id = investment_group_stats.group_id
+        and (g.visibility = 'public' or g.owner_user_id = auth.uid())
+    )
+  );
+
+create policy "investment_group_stats_owner_write"
+  on public.investment_group_stats for all
+  using (
+    exists (
+      select 1 from public.investment_groups g
+      where g.id = investment_group_stats.group_id
+        and g.owner_user_id = auth.uid()
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.investment_groups g
+      where g.id = investment_group_stats.group_id
+        and g.owner_user_id = auth.uid()
+    )
+  );
+
+create table if not exists public.investment_group_members (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid not null references public.investment_groups(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  role text not null default 'member' check (role in ('owner','manager','member')),
+  status text not null default 'active' check (status in ('active','pending','removed')),
+  joined_at timestamptz,
+  created_at timestamptz not null default now(),
+  unique(group_id, user_id)
+);
+
+create index if not exists idx_investment_group_members_user
+  on public.investment_group_members(user_id, status);
+
+alter table public.investment_group_members enable row level security;
+
+create policy "investment_group_members_select_related"
+  on public.investment_group_members for select
+  using (
+    auth.uid() = user_id
+    or exists (
+      select 1 from public.investment_groups g
+      where g.id = investment_group_members.group_id
+        and g.owner_user_id = auth.uid()
+    )
+  );
+
+create policy "investment_group_members_owner_write"
+  on public.investment_group_members for all
+  using (
+    exists (
+      select 1 from public.investment_groups g
+      where g.id = investment_group_members.group_id
+        and g.owner_user_id = auth.uid()
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.investment_groups g
+      where g.id = investment_group_members.group_id
+        and g.owner_user_id = auth.uid()
+    )
+  );
+
+create table if not exists public.investment_group_join_requests (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid not null references public.investment_groups(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  message text not null default '',
+  status text not null default 'pending' check (status in ('pending','approved','declined')),
+  reviewed_by uuid references auth.users(id) on delete set null,
+  reviewed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_investment_group_requests_group_status
+  on public.investment_group_join_requests(group_id, status, created_at desc);
+
+alter table public.investment_group_join_requests enable row level security;
+
+create policy "investment_group_requests_select_related"
+  on public.investment_group_join_requests for select
+  using (
+    auth.uid() = user_id
+    or exists (
+      select 1 from public.investment_groups g
+      where g.id = investment_group_join_requests.group_id
+        and g.owner_user_id = auth.uid()
+    )
+  );
+
+create policy "investment_group_requests_insert_own"
+  on public.investment_group_join_requests for insert
+  with check (auth.uid() = user_id);
+
+create policy "investment_group_requests_owner_update"
+  on public.investment_group_join_requests for update
+  using (
+    exists (
+      select 1 from public.investment_groups g
+      where g.id = investment_group_join_requests.group_id
+        and g.owner_user_id = auth.uid()
+    )
+  );
+
+create table if not exists public.investment_group_messages (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid not null references public.investment_groups(id) on delete cascade,
+  channel text not null check (channel in ('announcements','general','research','trades')),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  body text not null,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_investment_group_messages_group_channel
+  on public.investment_group_messages(group_id, channel, created_at desc);
+
+alter table public.investment_group_messages enable row level security;
+
+create policy "investment_group_messages_select_members"
+  on public.investment_group_messages for select
+  using (
+    exists (
+      select 1 from public.investment_group_members m
+      where m.group_id = investment_group_messages.group_id
+        and m.user_id = auth.uid()
+        and m.status = 'active'
+    )
+  );
+
+create policy "investment_group_messages_insert_members"
+  on public.investment_group_messages for insert
+  with check (
+    auth.uid() = user_id
+    and exists (
+      select 1 from public.investment_group_members m
+      where m.group_id = investment_group_messages.group_id
+        and m.user_id = auth.uid()
+        and m.status = 'active'
+    )
+  );
+
+create table if not exists public.notification_events (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  event_type text not null,
+  title text not null,
+  body text not null default '',
+  metadata jsonb not null default '{}'::jsonb,
+  read_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_notification_events_user_time
+  on public.notification_events(user_id, created_at desc);
+
+alter table public.notification_events enable row level security;
+
+create policy "notification_events_select_own"
+  on public.notification_events for select
+  using (auth.uid() = user_id);
+
+create policy "notification_events_update_own"
+  on public.notification_events for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+```

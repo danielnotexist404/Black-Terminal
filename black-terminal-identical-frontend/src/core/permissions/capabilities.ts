@@ -11,6 +11,15 @@ export type TerminalCapability =
   | "portfolio.executionMatrix"
   | "portfolio.audit"
   | "portfolio.permissions"
+  | "can_create_investment_group"
+  | "can_manage_investment_group"
+  | "can_approve_group_requests"
+  | "can_post_group_announcements"
+  | "can_view_enterprise_portfolio_tools"
+  | "can_publish_research"
+  | "can_publish_indicators"
+  | "can_publish_strategies"
+  | "can_follow_users"
   | "admin.override";
 
 export type CapabilityUser = {
@@ -26,14 +35,20 @@ const tierCapabilities: Record<ProductTier, TerminalCapability[]> = {
     "execution.connectWallet",
     "execution.managePositions",
     "portfolio.retailAnalytics",
-    "portfolio.investmentGroupDiscovery"
+    "portfolio.investmentGroupDiscovery",
+    "can_publish_research",
+    "can_follow_users"
   ],
   professional: [
     "execution.connectBroker",
     "execution.connectWallet",
     "execution.managePositions",
     "portfolio.retailAnalytics",
-    "portfolio.investmentGroupDiscovery"
+    "portfolio.investmentGroupDiscovery",
+    "can_publish_research",
+    "can_publish_indicators",
+    "can_publish_strategies",
+    "can_follow_users"
   ],
   enterprise: [
     "execution.connectBroker",
@@ -45,7 +60,16 @@ const tierCapabilities: Record<ProductTier, TerminalCapability[]> = {
     "portfolio.followers",
     "portfolio.executionMatrix",
     "portfolio.audit",
-    "portfolio.permissions"
+    "portfolio.permissions",
+    "can_create_investment_group",
+    "can_manage_investment_group",
+    "can_approve_group_requests",
+    "can_post_group_announcements",
+    "can_view_enterprise_portfolio_tools",
+    "can_publish_research",
+    "can_publish_indicators",
+    "can_publish_strategies",
+    "can_follow_users"
   ],
   admin: [
     "execution.connectBroker",
@@ -58,6 +82,15 @@ const tierCapabilities: Record<ProductTier, TerminalCapability[]> = {
     "portfolio.executionMatrix",
     "portfolio.audit",
     "portfolio.permissions",
+    "can_create_investment_group",
+    "can_manage_investment_group",
+    "can_approve_group_requests",
+    "can_post_group_announcements",
+    "can_view_enterprise_portfolio_tools",
+    "can_publish_research",
+    "can_publish_indicators",
+    "can_publish_strategies",
+    "can_follow_users",
     "admin.override"
   ]
 };

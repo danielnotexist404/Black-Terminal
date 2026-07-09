@@ -5928,3 +5928,704 @@ body.resizing-layout * {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.network-page {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  overflow: hidden;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px),
+    #030405;
+  background-size: 98px 72px;
+  color: var(--text);
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.network-head {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  background: rgba(7, 9, 11, 0.96);
+}
+
+.network-head span,
+.network-panel-title {
+  color: var(--strong);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.network-head strong {
+  display: block;
+  margin-top: 4px;
+  color: #7e8794;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.network-head button,
+.network-head-actions button,
+.network-tabs button,
+.network-primary,
+.network-composer button,
+.network-inline-form button,
+.network-card button,
+.network-asset-form button,
+.network-modal footer button,
+.investment-join button,
+.request-row button,
+.wizard-tags button,
+.wizard-steps button {
+  min-height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.025);
+  color: #dfe4eb;
+  font: 800 10px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.network-head button:hover,
+.network-head-actions button:hover,
+.network-tabs button.active,
+.network-primary,
+.network-composer button,
+.network-inline-form button,
+.network-modal footer button:last-child,
+.investment-join button,
+.wizard-tags button.active,
+.wizard-steps button.active {
+  border-color: rgba(255, 0, 0, 0.55);
+  background: rgba(255, 0, 0, 0.16);
+  color: #fff;
+}
+
+.network-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.network-head-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+}
+
+.profile-hero,
+.investment-hero {
+  margin: 10px;
+  border: 1px solid rgba(255, 0, 0, 0.16);
+  border-radius: 4px;
+  background: rgba(5, 6, 7, 0.94);
+  overflow: hidden;
+}
+
+.profile-banner,
+.investment-banner {
+  min-height: 118px;
+  position: relative;
+  background:
+    linear-gradient(135deg, rgba(255, 0, 0, 0.12), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(0, 0, 0, 0.18)),
+    #080a0d;
+  background-position: center;
+  background-size: cover;
+}
+
+.network-upload,
+.profile-avatar-upload {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #d9dee6;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.network-upload input,
+.profile-avatar-upload input {
+  display: none;
+}
+
+.profile-identity,
+.investment-title-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+}
+
+.profile-avatar,
+.investment-logo {
+  width: 76px;
+  height: 76px;
+  display: grid;
+  place-items: center;
+  position: relative;
+  border: 1px solid rgba(255, 0, 0, 0.35);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.035);
+  background-position: center;
+  background-size: cover;
+  color: var(--strong);
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.profile-avatar-upload {
+  right: 4px;
+  bottom: 4px;
+  padding: 5px;
+}
+
+.profile-title div,
+.investment-title-row div:nth-child(2) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.profile-title strong,
+.investment-title-row strong {
+  color: #fff;
+  font-size: 18px;
+  letter-spacing: 0.02em;
+}
+
+.profile-title em,
+.investment-badges em {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--green);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.profile-title span,
+.investment-title-row span,
+.network-muted,
+.network-note {
+  color: #858d99;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.profile-title p,
+.investment-title-row p {
+  max-width: 760px;
+  margin: 6px 0 0;
+  color: #c4cad3;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.profile-counts,
+.investment-badges {
+  display: grid;
+  gap: 7px;
+  min-width: 170px;
+}
+
+.profile-counts span,
+.network-stat {
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.018);
+  color: #8a929f;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.profile-counts b,
+.network-stat b {
+  color: #fff;
+  font-size: 11px;
+}
+
+.network-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.network-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.network-tabs button {
+  min-width: fit-content;
+  height: 34px;
+  border-color: transparent;
+  background: transparent;
+  color: #8d949f;
+  padding: 0 10px;
+}
+
+.network-tabs button.active {
+  box-shadow: inset 0 -2px 0 var(--red-hot);
+}
+
+.network-status {
+  margin: 8px 10px 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 0, 0, 0.18);
+  color: #e7ecf3;
+  background: rgba(255, 0, 0, 0.08);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.network-body,
+.investment-layout {
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.network-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.network-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.network-grid.feed,
+.investment-layout {
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.55fr);
+}
+
+.network-panel,
+.investment-discovery,
+.investment-detail {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 4px;
+  background: rgba(6, 7, 8, 0.94);
+}
+
+.network-panel {
+  padding: 12px;
+}
+
+.network-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.network-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.network-form-grid.compact {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.network-form-grid .wide,
+.network-check.wide {
+  grid-column: 1 / -1;
+}
+
+.network-form-grid label,
+.profile-disclosure-grid label,
+.network-check {
+  display: grid;
+  gap: 5px;
+  color: #7f8793;
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.network-form-grid input,
+.network-form-grid textarea,
+.network-form-grid select,
+.network-composer textarea,
+.network-composer input,
+.network-composer select,
+.network-inline-form input,
+.network-inline-form select,
+.network-asset-form input,
+.network-asset-form textarea,
+.investment-join input {
+  width: 100%;
+  min-height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.25);
+  color: #e8edf5;
+  font: 700 10px "IBM Plex Mono", monospace;
+  padding: 7px 8px;
+}
+
+.network-form-grid textarea,
+.network-composer textarea,
+.network-asset-form textarea {
+  min-height: 74px;
+  resize: vertical;
+}
+
+.network-primary {
+  margin-top: 10px;
+  padding: 0 12px;
+}
+
+.network-primary.compact {
+  margin: 0 0 10px;
+}
+
+.network-composer,
+.network-asset-form {
+  display: grid;
+  gap: 8px;
+}
+
+.network-composer button,
+.network-inline-form button,
+.network-asset-form button {
+  padding: 0 10px;
+}
+
+.network-composer button:disabled,
+.network-card button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.network-inline-form,
+.investment-join {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.investment-join {
+  grid-template-columns: minmax(130px, 0.35fr) minmax(0, 1fr) auto;
+  padding: 0 14px 14px;
+}
+
+.network-list,
+.network-card-list {
+  display: grid;
+  gap: 8px;
+}
+
+.network-list-row,
+.network-card,
+.network-post {
+  display: grid;
+  gap: 5px;
+  padding: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.network-list-row {
+  grid-template-columns: minmax(120px, 0.3fr) minmax(0, 1fr) auto auto auto;
+  align-items: center;
+}
+
+.network-list-row strong,
+.network-card strong,
+.network-post strong {
+  color: #fff;
+  font-size: 11px;
+}
+
+.network-list-row span,
+.network-card span,
+.network-post p {
+  color: #bdc4ce;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.network-list-row em,
+.network-card em,
+.network-post em,
+.network-post footer {
+  color: #78808c;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.network-post header,
+.network-post footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.network-post footer span,
+.network-post footer b {
+  padding: 3px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 2px;
+  color: #dce2ea;
+}
+
+.network-empty {
+  display: grid;
+  place-items: center;
+  min-height: 86px;
+  padding: 14px;
+  border: 1px dashed rgba(255, 255, 255, 0.09);
+  color: #7f8792;
+  font-size: 10px;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.network-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 8px;
+  border: 1px solid rgba(255, 193, 7, 0.18);
+  color: #f0c36a;
+  background: rgba(255, 193, 7, 0.06);
+}
+
+.profile-disclosure-grid,
+.network-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.profile-disclosure-grid label {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.network-stat {
+  display: grid;
+  gap: 5px;
+}
+
+.network-stat span {
+  color: #7e8794;
+}
+
+.network-stat em {
+  color: var(--green);
+  font-size: 8px;
+  font-style: normal;
+}
+
+.investment-layout {
+  display: grid;
+  gap: 10px;
+}
+
+.investment-discovery {
+  padding: 10px;
+  overflow: auto;
+}
+
+.investment-group-row {
+  width: 100%;
+  display: grid;
+  gap: 4px;
+  margin-bottom: 7px;
+  padding: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.015);
+  color: #dbe1e8;
+  text-align: left;
+}
+
+.investment-group-row.active,
+.investment-group-row:hover {
+  border-color: rgba(255, 0, 0, 0.45);
+  background: rgba(255, 0, 0, 0.09);
+}
+
+.investment-group-row strong {
+  color: #fff;
+  font-size: 11px;
+}
+
+.investment-group-row span,
+.investment-group-row em {
+  color: #8a929f;
+  font-size: 9px;
+  font-style: normal;
+}
+
+.investment-detail {
+  min-height: 0;
+  overflow: auto;
+}
+
+.investment-detail.empty {
+  display: grid;
+  place-items: center;
+}
+
+.investment-badges {
+  min-width: 210px;
+}
+
+.compact-tabs {
+  padding: 0 10px;
+}
+
+.network-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.network-modal {
+  width: min(760px, calc(100vw - 36px));
+  max-height: calc(100vh - 46px);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  border: 1px solid rgba(255, 0, 0, 0.38);
+  border-radius: 4px;
+  background: #050607;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.72);
+  overflow: hidden;
+}
+
+.network-modal header,
+.network-modal footer,
+.wizard-steps {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.network-modal footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-bottom: 0;
+}
+
+.network-modal header strong {
+  color: #fff;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.network-modal > .network-form-grid,
+.network-summary,
+.wizard-tags {
+  min-height: 260px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.wizard-steps {
+  justify-content: flex-start;
+}
+
+.wizard-steps button {
+  width: 28px;
+  height: 28px;
+}
+
+.wizard-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 8px;
+}
+
+.wizard-tags button {
+  padding: 0 10px;
+}
+
+.network-summary {
+  display: grid;
+  align-content: center;
+  gap: 10px;
+}
+
+.network-summary strong {
+  color: #fff;
+  font-size: 17px;
+}
+
+.network-summary span,
+.network-summary p {
+  color: #aeb6c1;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+@media (max-width: 1180px) {
+  .network-grid.two,
+  .network-grid.feed,
+  .investment-layout,
+  .profile-identity,
+  .investment-title-row {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-counts,
+  .investment-badges {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .network-list-row,
+  .investment-join,
+  .network-inline-form {
+    grid-template-columns: 1fr;
+  }
+}

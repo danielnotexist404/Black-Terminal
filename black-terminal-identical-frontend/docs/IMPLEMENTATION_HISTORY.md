@@ -6,6 +6,7 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
+- Current - Implement Phase IV professional network foundation.
 - Current - Implement Phase III Chapter IV position lifecycle foundation.
 - Current - Implement Hyperliquid execution relay routes.
 - `6d57492` - Implement Phase III connectivity source of truth.
@@ -17,6 +18,35 @@ Recent pushed commits:
 - `e327cf0` - Optimize topbar and sidebar layout for MacBook 13-inch and mobile viewports.
 - `fe1777a` - Integrate Portfolio Manager, Copy Trading, Risk Engine, and Wallet connection modules.
 - `c7d928e` - Give BlackGPT real-time OHLCV chart access with live candle buffer and precise price context.
+
+## Phase IV Professional Network Foundation
+
+Status: Implemented foundation
+
+Changed:
+
+- Added `PROFILE` and `INVESTMENT GROUPS` to the main sidebar.
+- Implemented Professional Profile with avatar/banner upload scaffolding, profile editing, Research Feed composer, own posts, followed research feed, follower/following lists, published indicator scaffolding, published strategy scaffolding, opt-in performance disclosure, and group membership views.
+- Implemented Investment Groups discovery with Enterprise/Admin creation gate, six-step create wizard, password-hash-only protected group handling, group detail tabs, join requests, owner/admin review, and Trading Room channels.
+- Added professional network capabilities to the existing role/capability model.
+- Added server-side permission helpers and API scaffolds for profile, posts, follows, groups, join requests, request review, and group messages.
+- Updated Portfolio Manager Investment Groups tab with owned/joined/discovery groups and retail versus enterprise tool status.
+- Added the Phase IV Supabase migration ledger for profiles, follows, posts, published tools, investment groups, stats, members, join requests, messages, and notifications.
+
+Why:
+
+- Black Terminal needs a professional trading identity and investment discovery layer before allocation, group reputation, and verified manager analytics can be safely built.
+- The system must avoid generic social mechanics and fake performance while preparing trust, permission, and governance rails.
+
+Validation:
+
+- `npm run typecheck` passes after the Phase IV module and route integration.
+
+Remaining:
+
+- Apply the Phase IV Supabase migration and connect the frontend pages to the API routes.
+- Add verified exchange performance feeds and admin moderation workflows.
+- Connect Investment Groups to future Allocation Engine rules without bypassing OMS, EMS, Risk, or execution audit.
 
 ## Foundation
 

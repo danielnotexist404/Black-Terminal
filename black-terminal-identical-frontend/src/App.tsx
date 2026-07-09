@@ -6,6 +6,7 @@ import {
   Activity,
   Bell,
   BookOpen,
+  Building2,
   ChartCandlestick,
   ChevronDown,
   CircleStop,
@@ -39,7 +40,8 @@ import {
   TrendingUp,
   Unlock,
   Bot,
-  Type
+  Type,
+  UserRound
 } from "lucide-react";
 import { MarketStats } from "./components/MarketStats";
 import { AlertCenter } from "./components/AlertCenter";
@@ -61,6 +63,8 @@ import { ScannerPage } from "./modules/scanner/components/ScannerPage";
 import type { ScannerResult } from "./modules/scanner/types/scanner.types";
 import { StrategyLabPage } from "./modules/strategy-lab/components/StrategyLabPage";
 import PortfolioManagerPage, { PositionsWorkspace } from "./modules/portfolio-manager/components/PortfolioManagerPage";
+import { ProfilePage } from "./modules/profile/components/ProfilePage";
+import { InvestmentGroupsPage } from "./modules/investment-groups/components/InvestmentGroupsPage";
 import { getPortfolioSnapshot } from "./portfolio/portfolioStore";
 import type { PortfolioPosition } from "./positions/types";
 import type { PortfolioSnapshot } from "./portfolio/types";
@@ -85,6 +89,7 @@ import type { ExchangeId, MarketSymbol, Timeframe } from "./market-data/types";
 import { blackCoreConnectionManager } from "./connectivity/connectionManager";
 import { readActiveExecutionVenueId, subscribeActiveExecutionVenue } from "./connectivity/activeExecutionVenue";
 import type { ConnectionDiagnostics } from "./connectivity/types";
+import type { CapabilityUser, ProductTier, TerminalCapability } from "./core/permissions/capabilities";
 
 const nav = [
   { label: "WATCHLIST", icon: BookOpen },
@@ -359,14 +364,16 @@ function loadWorkspaceSnapshots(): Record<string, WorkspaceSnapshot> {
   }
 }
 
-export default function App() {
-  const [currentUser, setCurrentUser] = useState<{ 
-    username: string; 
-    role: "admin" | "user"; 
+type AppUser = CapabilityUser & {
     allowedIndicators: string[];
+    productTier?: ProductTier;
+    permissions?: TerminalCapability[];
     aiMessagesCount?: number;
     aiLastMessageTimestamp?: string;
-  } | null>(() => {
+};
+
+export default function App() {
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     const stored = localStorage.getItem("bt_current_user");
     if (stored) {
       try { return JSON.parse(stored); } catch (e) {}
@@ -421,6 +428,8 @@ export default function App() {
       { label: "SCANNER", icon: Radar },
       { label: "POSITIONS", icon: LineChart },
       { label: "PORTFOLIO MANAGER", icon: LayoutDashboard },
+      { label: "INVESTMENT GROUPS", icon: Building2 },
+      { label: "PROFILE", icon: UserRound },
       { label: "ALERTS", icon: Bell },
       { label: "SCRIPT EDITOR", icon: Code2 },
       { label: "STRATEGY LAB", icon: StrategyLabIcon },
@@ -1158,7 +1167,7 @@ export default function App() {
     setActiveNav("ALERTS");
   }, []);
 
-  const showModuleOverlay = activeNav !== "CHART" && activeNav !== "SCRIPT EDITOR" && activeNav !== "INDICATORS" && activeNav !== "ALERTS" && activeNav !== "STRATEGY LAB" && activeNav !== "SCANNER" && activeNav !== "POSITIONS" && activeNav !== "PORTFOLIO MANAGER";
+  const showModuleOverlay = activeNav !== "CHART" && activeNav !== "SCRIPT EDITOR" && activeNav !== "INDICATORS" && activeNav !== "ALERTS" && activeNav !== "STRATEGY LAB" && activeNav !== "SCANNER" && activeNav !== "POSITIONS" && activeNav !== "PORTFOLIO MANAGER" && activeNav !== "PROFILE" && activeNav !== "INVESTMENT GROUPS";
 
   if (!currentUser) {
     return (
@@ -1186,7 +1195,13 @@ export default function App() {
             }
           }
           
-          setCurrentUser({ username, role: resolvedRole, allowedIndicators: allowed });
+          setCurrentUser({
+            username,
+            role: resolvedRole,
+            allowedIndicators: allowed,
+            productTier: (matched as any)?.productTier,
+            permissions: (matched as any)?.permissions
+          });
         }}
       />
     );
@@ -1693,6 +1708,18 @@ export default function App() {
       ) : activeNav === "PORTFOLIO MANAGER" ? (
         <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
           <PortfolioManagerPage onClose={() => setActiveNav("CHART")} currentUser={currentUser} />
+        </div>
+      ) : activeNav === "PROFILE" ? (
+        <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
+          <ProfilePage
+            currentUser={currentUser}
+            onClose={() => setActiveNav("CHART")}
+            onOpenInvestmentGroups={() => setActiveNav("INVESTMENT GROUPS")}
+          />
+        </div>
+      ) : activeNav === "INVESTMENT GROUPS" ? (
+        <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
+          <InvestmentGroupsPage currentUser={currentUser} onClose={() => setActiveNav("CHART")} />
         </div>
       ) : (
         <main className={terminalSettings.showDOM ? "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>

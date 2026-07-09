@@ -7496,7 +7496,7 @@ body.resizing-layout * {
   background: linear-gradient(180deg, rgba(210, 214, 222, 0.82), rgba(210, 214, 222, 0.08));
 }
 
-.dom-pro-depth-svg,
+.dom-pro-depth-wrap,
 .dom-pro-flow-histogram {
   position: relative;
   width: 100%;
@@ -7507,6 +7507,21 @@ body.resizing-layout * {
     linear-gradient(90deg, rgba(255, 255, 255, 0.024) 1px, transparent 1px),
     #050607;
   background-size: 100% 30px, 58px 100%, auto;
+}
+
+.dom-pro-depth-svg {
+  width: 100%;
+  height: 100%;
+}
+
+.dom-pro-depth-wrap > span {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 8px;
+  color: #a3a9b2;
+  font: 800 9px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
 }
 
 .dom-pro-depth-svg .axis {

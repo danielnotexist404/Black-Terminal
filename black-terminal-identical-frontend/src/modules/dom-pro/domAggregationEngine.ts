@@ -391,6 +391,7 @@ function buildBuckets(book: OrderBookSnapshot, bucketSize: number, price: number
   const rangePct = resolveVisibleRangePct(settings, price, bucketSize);
   const min = price * (1 - rangePct / 100);
   const max = price * (1 + rangePct / 100);
+  const aggregationLimit = resolveAggregationBucketLimit(settings);
   const buckets = Array.from(map.values())
     .map((bucket) => ({
       ...bucket,
@@ -402,7 +403,7 @@ function buildBuckets(book: OrderBookSnapshot, bucketSize: number, price: number
     .filter((bucket) => bucket.price >= min && bucket.price <= max)
     .sort((a, b) => b.price - a.price);
 
-  const selected = selectBucketsAroundPrice(buckets, price, settings.maxVisibleBuckets);
+  const selected = selectBucketsAroundPrice(buckets, price, aggregationLimit);
   const maxSize = Math.max(...selected.map((bucket) => bucket.totalSize), 1);
   return selected
     .map((bucket) => ({ ...bucket, heat: bucket.totalSize / maxSize }))
@@ -424,6 +425,13 @@ function selectBucketsAroundPrice(buckets: DomBucket[], price: number, limit: nu
     selected.push(...remainder.slice(0, maxRows - selected.length));
   }
   return selected;
+}
+
+function resolveAggregationBucketLimit(settings: DomSettings) {
+  if (settings.visibleRange === "full" || settings.visibleRange === "20") return Math.max(settings.maxVisibleBuckets, 1200);
+  if (settings.visibleRange === "10") return Math.max(settings.maxVisibleBuckets, 900);
+  if (settings.visibleRange === "5") return Math.max(settings.maxVisibleBuckets, 640);
+  return Math.max(settings.maxVisibleBuckets, 420);
 }
 
 function buildHeatmapCandidates(buckets: DomBucket[], settings: DomSettings) {
@@ -534,6 +542,7 @@ function resolveBucketSize(settings: DomSettings, tickSize: number) {
 
 function resolveVisibleRangePct(settings: DomSettings, price: number, bucketSize: number) {
   if (settings.visibleRange === "custom") return Math.max(0.05, settings.customVisibleRangePct);
+  if (settings.visibleRange === "full") return 20;
   if (settings.visibleRange !== "auto") return Number(settings.visibleRange);
   if (!price) return 1;
   return Math.max(0.35, Math.min(5, (bucketSize * settings.maxVisibleBuckets * 0.5) / price * 100));

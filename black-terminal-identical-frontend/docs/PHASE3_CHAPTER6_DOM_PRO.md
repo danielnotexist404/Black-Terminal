@@ -127,12 +127,18 @@ DOM Pro+ execution panel
 - Fixed the aggregation slice that could keep only upper ask-side buckets in wide domains; visible bucket selection now preserves both bid/buy buckets below market and ask/sell buckets above market.
 - Balanced heatmap memory and wall detection by side so buy walls cannot be starved out by stronger sell-side rankings.
 - Added DOM diagnostics for raw bid/ask levels, aggregated bid/ask buckets, buy/sell wall counts, shared domain min/max, rendered heatmap/profile rows, and depth bid/ask points.
+- Added real price-domain camera fields for center price, domain min/max, zoom factor, mode, and explicit camera domain.
+- Added +/-1%, +/-2%, +/-5%, +/-10%, +/-20%, and Full Data camera presets.
+- Expanded the DOM aggregation domain for wide/full ranges so source depth is retained for camera navigation instead of capped by the visible ladder row limit.
+- Added raw-orderbook fallback for the depth chart, so raw bid/ask data can still render if aggregated buckets are missing.
+- Expanded diagnostics with best bid/ask, mid price, min/max side prices, total bid/ask size, selected visible range, computed domain, camera domain, and exact debug reason.
 - Added a historical OHLCV macro radar layer using cached/fetched daily candles from the existing Market Data Engine.
 - Added macro structure bands for POC, supply, and demand zones across a wider historical range.
 - Aligned the volume profile to the same vertical viewport used by the heatmap.
 - Replaced the depth chart block bars with a cumulative bid/ask depth curve.
 - Made the depth chart inherit the same visible price camera as the heatmap.
 - Restored the depth chart around a current-price center reference with bid cumulative depth on the lower-price side and ask cumulative depth on the higher-price side.
+- Depth chart now renders one available side with an explicit source warning instead of going blank.
 - Replaced liquidity flow blocks with rolling time-bucket histogram bars and percentile outlier scaling.
 - Redesigned CVD as a larger heuristic CVD panel with current delta, session delta, aggressive buy percentage, aggressive sell percentage, trend label, horizon controls, EMA smoothing, and a thicker line.
 - Updated institutional defaults to 500x buckets, +/-2% visible range, 24H heatmap, 4H smoothed CVD, and 10-12 FPS behavior.

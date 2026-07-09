@@ -997,3 +997,16 @@ Reason:
 Future migration trigger:
 
 - Add a migration only if DOM diagnostics snapshots, saved camera domains, or cross-device DOM Pro+ layouts need account-level persistence.
+
+## 2026-07-10 - DOM Pro+ Real Liquidity Camera
+
+Status: No Supabase migration required.
+
+Reason:
+
+- The real price-domain camera, widened range presets, retained aggregation buckets, hard diagnostics, raw-depth fallback, and flow-delta scaling are frontend/domain-rendering changes.
+- No server-owned records, user permissions, execution audit rows, credentials, or persistent workspace tables were introduced.
+
+Future migration trigger:
+
+- Add a migration only if camera presets, saved viewport domains, diagnostics snapshots, or cross-device DOM Pro+ layouts need account-level Supabase persistence.

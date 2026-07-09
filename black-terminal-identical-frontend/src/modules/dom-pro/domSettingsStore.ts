@@ -5,7 +5,9 @@ const storagePrefix = "bt_dom_pro_settings";
 export const modeBucketDefaults: Record<DomMode, DomSettings["bucketMultiplier"]> = {
   micro: 1,
   scalper: 10,
-  standard: 50,
+  standard: 100,
+  intraday: 100,
+  institutional: 250,
   swing: 250,
   macro: 500,
   custom: "custom"
@@ -15,23 +17,28 @@ export function defaultDomSettings(workspaceId: string, symbolKey: string): DomS
   return {
     workspaceId,
     symbolKey,
-    mode: "standard",
-    bucketMultiplier: 50,
+    mode: "institutional",
+    bucketMultiplier: 250,
     customBucketSize: 50,
-    visibleRange: "auto",
-    customVisibleRangePct: 1,
-    fpsCap: 15,
+    visibleRange: "2",
+    customVisibleRangePct: 2,
+    fpsCap: 12,
     showVolumeProfile: true,
     showHeatmap: true,
     showWallDetection: true,
     showCvd: true,
     showExecutionPanel: true,
     showDiagnostics: true,
+    showMacroRadar: true,
     colorIntensity: 82,
-    liquidityThreshold: 2.2,
-    maxVisibleBuckets: 90,
-    maxHeatmapHistory: 90,
-    updateThrottleMs: 66,
+    liquidityThreshold: 2.8,
+    maxVisibleBuckets: 120,
+    maxHeatmapHistory: 360,
+    heatmapHorizon: "24h",
+    macroLookbackDays: 365,
+    macroBandCount: 10,
+    persistenceSmoothing: 88,
+    updateThrottleMs: 90,
     profileSource: "visible-range",
     profileWidth: 42,
     showPoc: true,
@@ -63,11 +70,16 @@ export function writeDomSettings(settings: DomSettings) {
 
 export function updateModeSettings(settings: DomSettings, mode: DomMode): DomSettings {
   const bucketMultiplier = modeBucketDefaults[mode];
+  const nextMode = mode === "micro" ? "scalper" : mode === "swing" ? "institutional" : mode;
   return {
     ...settings,
-    mode,
+    mode: nextMode,
     bucketMultiplier,
-    fpsCap: mode === "scalper" ? 30 : mode === "macro" ? 8 : mode === "micro" ? 15 : 15,
-    visibleRange: mode === "macro" ? "5" : mode === "swing" ? "2" : mode === "micro" ? "0.25" : settings.visibleRange
+    fpsCap: nextMode === "scalper" ? 24 : nextMode === "macro" ? 7 : nextMode === "institutional" ? 12 : 15,
+    visibleRange: nextMode === "macro" ? "5" : nextMode === "institutional" || nextMode === "standard" ? "2" : nextMode === "scalper" ? "0.25" : "1",
+    heatmapHorizon: nextMode === "macro" ? "1w" : nextMode === "institutional" || nextMode === "standard" ? "24h" : nextMode === "intraday" ? "12h" : "2h",
+    maxHeatmapHistory: nextMode === "macro" ? 520 : nextMode === "institutional" ? 360 : nextMode === "intraday" ? 240 : 120,
+    macroLookbackDays: nextMode === "macro" ? 720 : 365,
+    persistenceSmoothing: nextMode === "scalper" ? 68 : nextMode === "macro" ? 94 : 88
   };
 }

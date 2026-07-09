@@ -6809,7 +6809,7 @@ body.resizing-layout * {
 
 .dom-pro-stats {
   display: grid;
-  grid-template-columns: repeat(6, minmax(108px, 1fr)) minmax(130px, 0.9fr) minmax(120px, 0.8fr) minmax(138px, 0.9fr) 88px 116px;
+  grid-template-columns: repeat(6, minmax(104px, 1fr)) minmax(128px, 0.88fr) minmax(120px, 0.78fr) minmax(136px, 0.86fr) minmax(112px, 0.72fr) 84px 116px;
   min-height: 72px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -6897,8 +6897,8 @@ body.resizing-layout * {
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: 1.05fr 0.86fr 1.46fr 0.72fr 0.95fr 0.88fr;
-  grid-template-rows: minmax(0, 1fr) 172px 202px;
+  grid-template-columns: 1.03fr 0.9fr 1.72fr 0.82fr 0.96fr 0.86fr;
+  grid-template-rows: minmax(0, 1fr) 174px 202px;
   gap: 8px;
   padding: 8px;
   overflow: hidden;
@@ -7089,6 +7089,68 @@ body.resizing-layout * {
   opacity: 0.54;
 }
 
+.dom-pro-profile-scale {
+  position: relative;
+  height: calc(100% - 34px);
+  overflow: hidden;
+  padding: 6px 8px 20px;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.026) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: 100% 28px, 54px 100%;
+}
+
+.dom-pro-profile-node {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 12px;
+  display: grid;
+  grid-template-columns: 1fr 64px 34px;
+  align-items: center;
+  gap: 7px;
+  transform: translateY(-50%);
+  color: #9da3ac;
+  font: 800 9px "IBM Plex Mono", monospace;
+}
+
+.dom-pro-profile-node i {
+  height: 7px;
+  background: linear-gradient(90deg, rgba(120, 124, 132, 0.16), rgba(218, 222, 230, 0.78));
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.06);
+}
+
+.dom-pro-profile-node.poc i {
+  background: linear-gradient(90deg, rgba(255, 0, 0, 0.26), rgba(255, 255, 255, 0.95));
+  box-shadow: 0 0 13px rgba(255, 0, 0, 0.38);
+}
+
+.dom-pro-profile-node.hvn i {
+  background: linear-gradient(90deg, rgba(255, 0, 0, 0.22), rgba(190, 196, 206, 0.86));
+}
+
+.dom-pro-profile-node.lvn {
+  opacity: 0.45;
+}
+
+.dom-pro-profile-node b {
+  color: var(--red-hot);
+  font-size: 8px;
+  text-align: right;
+}
+
+.dom-pro-profile-legend {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  color: #8f959e;
+  font: 800 8px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
 .dom-pro-heatmap-canvas,
 .dom-pro-cvd-line,
 .dom-pro-depth-bars,
@@ -7100,31 +7162,150 @@ body.resizing-layout * {
   background-size: 48px 28px;
 }
 
-.dom-pro-heatmap-canvas span {
+.dom-pro-horizon-controls {
+  height: 32px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+  padding: 5px 9px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.dom-pro-horizon-controls button {
+  width: 36px;
+  height: 22px;
+  color: #8f959f;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: rgba(12, 14, 16, 0.86);
+  font: 900 8px "IBM Plex Mono", monospace;
+}
+
+.dom-pro-horizon-controls button.active {
+  color: #fff;
+  border-color: rgba(255, 0, 0, 0.6);
+  background: rgba(135, 0, 0, 0.42);
+  box-shadow: inset 0 -2px 0 var(--red-hot);
+}
+
+.dom-pro-heatmap .dom-pro-heatmap-canvas {
+  height: calc(100% - 66px);
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.032) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.026) 1px, transparent 1px),
+    radial-gradient(circle at 38% 50%, rgba(255, 0, 0, 0.08), transparent 34%),
+    #040506;
+  background-size: 100% 32px, 58px 100%, auto, auto;
+}
+
+.dom-pro-heatmap-cell {
   position: absolute;
   display: block;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: 0 0 10px rgba(255, 0, 0, 0.34);
+  transform: translateY(-50%);
+  background: rgba(195, 200, 208, 0.58);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.08);
 }
 
-.dom-pro-heatmap-canvas span.ask {
-  background: rgba(255, 0, 0, 0.84);
+.dom-pro-heatmap-cell.ask {
+  background: rgba(255, 20, 20, 0.8);
+  box-shadow: 0 0 14px rgba(255, 0, 0, 0.42);
 }
 
-.dom-pro-heatmap-canvas span.bid {
-  background: rgba(205, 210, 218, 0.7);
+.dom-pro-heatmap-cell.bid {
+  background: rgba(205, 210, 218, 0.66);
 }
 
-.dom-pro-heatmap-canvas > b {
+.dom-pro-current-price {
   position: absolute;
   left: 0;
   right: 0;
   height: 1px;
   background: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.42);
+}
+
+.dom-pro-heatmap-scale {
+  position: absolute;
+  top: 0;
+  right: 7px;
+  bottom: 0;
+  width: 64px;
+  pointer-events: none;
+}
+
+.dom-pro-heatmap-scale span {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  color: #8f959e;
+  font: 800 9px "IBM Plex Mono", monospace;
+}
+
+.dom-pro-macro-band {
+  position: absolute;
+  left: 4px;
+  right: 74px;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 7px;
+  padding: 0 8px;
+  transform: translateY(-50%);
+  color: #fff;
+  font: 900 9px "IBM Plex Mono", monospace;
+  pointer-events: none;
+}
+
+.dom-pro-macro-band.supply {
+  background: linear-gradient(90deg, rgba(255, 0, 0, 0.08), rgba(255, 0, 0, 0.88), rgba(255, 0, 0, 0.07));
+  box-shadow: 0 0 16px rgba(255, 0, 0, 0.46);
+}
+
+.dom-pro-macro-band.demand,
+.dom-pro-macro-band.magnet {
+  background: linear-gradient(90deg, rgba(190, 196, 206, 0.05), rgba(230, 234, 240, 0.78), rgba(190, 196, 206, 0.06));
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.22);
+}
+
+.dom-pro-macro-band.poc {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.92), rgba(255, 0, 0, 0.18));
+  color: #111;
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.34), 0 0 12px rgba(255, 0, 0, 0.24);
+}
+
+.dom-pro-macro-band em {
+  color: inherit;
+  font-style: normal;
+  opacity: 0.78;
+}
+
+.dom-pro-heatmap-footer {
+  position: absolute;
+  left: 8px;
+  right: 74px;
+  bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  color: #858b94;
+  font: 800 8px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.dom-pro-wall-head {
+  display: grid;
+  grid-template-columns: 0.9fr 1fr 0.9fr 0.65fr;
+  height: 28px;
+  align-items: center;
+  padding: 0 11px;
+  color: #7f858f;
+  font: 800 8px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .dom-pro-wall {
   display: grid;
+  grid-template-columns: 0.9fr 1fr 0.9fr;
   gap: 3px;
   padding: 10px 11px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
@@ -7147,9 +7328,30 @@ body.resizing-layout * {
 
 .dom-pro-wall em,
 .dom-pro-wall small {
+  grid-column: 1 / -1;
   color: #969ca5;
   font-style: normal;
   font-size: 9px;
+}
+
+.dom-pro-migration {
+  display: grid;
+  gap: 5px;
+  margin: 9px 10px;
+  padding: 9px;
+  border: 1px solid rgba(255, 0, 0, 0.28);
+  background: rgba(110, 0, 0, 0.16);
+  font: 800 9px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.dom-pro-migration b {
+  color: var(--red-hot);
+}
+
+.dom-pro-migration span {
+  color: #cdd1d8;
+  line-height: 1.45;
 }
 
 .dom-pro-tape-head,
@@ -7241,6 +7443,51 @@ body.resizing-layout * {
   border-radius: 50%;
   background: #d8dce3;
   box-shadow: 0 0 8px rgba(255, 0, 0, 0.26);
+}
+
+.dom-pro-cvd-card {
+  height: calc(100% - 34px);
+  display: grid;
+  grid-template-rows: 42px minmax(0, 1fr);
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.026) 1px, transparent 1px),
+    #050607;
+  background-size: 100% 28px, 42px 100%;
+}
+
+.dom-pro-cvd-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  padding: 7px 8px 4px;
+  color: #8f959e;
+  font: 800 8px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.dom-pro-cvd-stats span {
+  display: grid;
+  gap: 3px;
+}
+
+.dom-pro-cvd-stats b {
+  color: #f2f4f8;
+  font-size: 9px;
+}
+
+.dom-pro-cvd-card svg {
+  width: 100%;
+  height: 100%;
+  padding: 4px 8px 10px;
+}
+
+.dom-pro-cvd-card polyline {
+  fill: none;
+  stroke: var(--red-hot);
+  stroke-width: 2.7;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 6px rgba(255, 0, 0, 0.42));
 }
 
 .dom-pro-warning {

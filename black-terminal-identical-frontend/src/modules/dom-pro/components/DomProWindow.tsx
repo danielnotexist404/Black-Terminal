@@ -1,18 +1,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, Maximize2, Minus, Settings, X } from "lucide-react";
+import type { Candle } from "../../../chart-engine/types";
 import { blackCoreConnectionManager } from "../../../connectivity/connectionManager";
 import { readActiveExecutionVenueId } from "../../../connectivity/activeExecutionVenue";
 import type { ConnectionDiagnostics } from "../../../connectivity/types";
 import type { BlackCoreModuleMode } from "../../../core/modules/moduleRegistry";
 import { submitOrder } from "../../../execution/executionEngine";
 import type { MarginMode, OrderSide, OrderType, TimeInForce } from "../../../execution/types";
+import { blackCoreMarketDataEngine } from "../../../market-data/engine/marketDataEngine";
 import type { MarketSymbol } from "../../../market-data/types";
 import type { PortfolioAccount } from "../../../portfolio/types";
 import { defaultRiskControls } from "../../../risk/types";
 import { DomAggregationEngine } from "../domAggregationEngine";
 import { readDomSettings, updateModeSettings, writeDomSettings } from "../domSettingsStore";
 import { useDomFeed } from "../useDomFeed";
-import type { AggregatedDomSnapshot, DomMode, DomSettings, DomVisibleRange } from "../types";
+import type {
+  AggregatedDomSnapshot,
+  DomHeatmapHorizon,
+  DomMode,
+  DomSettings,
+  DomVisibleRange,
+  MacroLiquidityBand,
+  MacroLiquidityRange,
+  VolumeProfileNode
+} from "../types";
 
 type DomProWindowProps = {
   marketSymbol: MarketSymbol;
@@ -34,7 +45,15 @@ const visibleRanges: Array<{ value: DomVisibleRange; label: string }> = [
   { value: "5", label: "+/-5%" },
   { value: "custom", label: "Custom" }
 ];
-const modes: DomMode[] = ["micro", "scalper", "standard", "swing", "macro", "custom"];
+const modes: DomMode[] = ["scalper", "intraday", "standard", "institutional", "macro", "custom"];
+const heatmapHorizons: Array<{ value: DomHeatmapHorizon; label: string }> = [
+  { value: "2h", label: "2H" },
+  { value: "6h", label: "6H" },
+  { value: "12h", label: "12H" },
+  { value: "24h", label: "24H" },
+  { value: "3d", label: "3D" },
+  { value: "1w", label: "1W" }
+];
 
 export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspaceId, windowMode, settingsOpenSignal = 0, onClose }: DomProWindowProps) {
   const symbolKey = `${marketSymbol.exchange}:${marketSymbol.marketKind}:${marketSymbol.rawSymbol}`;
@@ -74,6 +93,8 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const [marginMode, setMarginMode] = useState<MarginMode>("cross");
   const [timeInForce, setTimeInForce] = useState<TimeInForce>("gtc");
   const [executionStatus, setExecutionStatus] = useState("");
+  const [macroCandles, setMacroCandles] = useState<Candle[]>(() => blackCoreMarketDataEngine.cache.getCandles(marketSymbol, "1d"));
+  const [macroStatus, setMacroStatus] = useState("HISTORICAL DEPTH");
 
   useEffect(() => blackCoreConnectionManager.subscribe(setConnections), []);
 
@@ -90,6 +111,40 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   useEffect(() => {
     if (settingsOpenSignal > 0) setSettingsOpen(true);
   }, [settingsOpenSignal]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const cached = blackCoreMarketDataEngine.cache.getCandles(marketSymbol, "1d");
+    if (cached.length) {
+      setMacroCandles(cached);
+      setMacroStatus(`HISTORICAL ${cached.length}D`);
+    } else {
+      setMacroCandles([]);
+      setMacroStatus("LOADING HISTORICAL DEPTH");
+    }
+
+    const adapter = blackCoreMarketDataEngine.getAdapter(marketSymbol.exchange);
+    adapter.getHistoricalCandles({
+      exchange: marketSymbol.exchange,
+      symbol: marketSymbol.rawSymbol,
+      marketKind: marketSymbol.marketKind,
+      timeframe: "1d",
+      limit: Math.min(1000, Math.max(90, settings.macroLookbackDays))
+    }).then((candles) => {
+      if (cancelled) return;
+      setMacroCandles(candles);
+      setMacroStatus(candles.length ? `HISTORICAL ${candles.length}D` : "NO HISTORICAL DEPTH");
+    }).catch(() => {
+      if (cancelled) return;
+      const fallback = blackCoreMarketDataEngine.cache.getCandles(marketSymbol, "1d");
+      setMacroCandles(fallback);
+      setMacroStatus(fallback.length ? `CACHE ${fallback.length}D` : "HISTORICAL DEPTH UNAVAILABLE");
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [marketSymbol.exchange, marketSymbol.marketKind, marketSymbol.rawSymbol, settings.macroLookbackDays]);
 
   useEffect(() => {
     if (frameRef.current !== null) return;
@@ -206,6 +261,22 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   }, [submitQuickOrder]);
 
   const cvdData = engineRef.current.cvdData();
+  const macroBands = useMemo(
+    () => settings.showMacroRadar ? buildMacroLiquidityBands(macroCandles, snapshot.lastPrice ?? lastPrice, settings) : [],
+    [lastPrice, macroCandles, settings.macroBandCount, settings.macroLookbackDays, settings.showMacroRadar, snapshot.lastPrice]
+  );
+  const macroRange = useMemo(
+    () => resolveMacroLiquidityRange(snapshot, macroCandles, macroBands, snapshot.lastPrice ?? lastPrice),
+    [lastPrice, macroBands, macroCandles, snapshot]
+  );
+  const institutionalProfile = useMemo(
+    () => buildInstitutionalProfile(snapshot.volumeProfile, macroCandles, macroRange),
+    [macroCandles, macroRange, snapshot.volumeProfile]
+  );
+  const maxProfileVolume = Math.max(...institutionalProfile.map((node) => node.volume), 1);
+  const heatmapFrames = useMemo(() => snapshot.heatmap.slice(-resolveHorizonFrameCount(settings)), [settings, snapshot.heatmap]);
+  const cvdStats = useMemo(() => buildCvdStats(snapshot.trades, cvdData), [cvdData, snapshot.trades]);
+  const cvdPath = useMemo(() => buildCvdPath(cvdData), [cvdData]);
 
   useEffect(() => {
     if (windowMode !== "detached-browser") return;
@@ -250,12 +321,14 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
       snapshot,
       settings,
       cvdData,
+      macroBands,
+      macroRange,
       executionStatus,
       marketSymbol,
       lastPrice,
       exchangeLabel
     });
-  }, [cvdData, exchangeLabel, executionStatus, lastPrice, marketSymbol, settings, snapshot, windowMode]);
+  }, [cvdData, exchangeLabel, executionStatus, lastPrice, macroBands, macroRange, marketSymbol, settings, snapshot, windowMode]);
 
   const priceRows = snapshot.buckets;
   const maxTotal = Math.max(...priceRows.map((row) => row.totalSize), 1);
@@ -298,7 +371,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
           <label>
             <span>DOM Mode</span>
             <select value={settings.mode} onChange={(event) => setSettings(updateModeSettings(settings, event.target.value as DomMode))}>
-              {modes.map((mode) => <option key={mode} value={mode}>{mode.toUpperCase()}</option>)}
+              {modes.map((mode) => <option key={mode} value={mode}>{labelDomMode(mode)}</option>)}
             </select>
           </label>
           <label>
@@ -314,6 +387,12 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
               {visibleRanges.map((range) => <option key={range.value} value={range.value}>{range.label}</option>)}
             </select>
           </label>
+          <label>
+            <span>Heatmap</span>
+            <select value={settings.heatmapHorizon} onChange={(event) => patchSettings({ heatmapHorizon: event.target.value as DomHeatmapHorizon })}>
+              {heatmapHorizons.map((horizon) => <option key={horizon.value} value={horizon.value}>{horizon.label}</option>)}
+            </select>
+          </label>
           <Stat label="FPS Cap" value={`${settings.fpsCap} FPS`} />
           <button type="button" className="dom-pro-settings-btn" onClick={() => setSettingsOpen((value) => !value)}><Settings size={15} /> Settings</button>
         </section>
@@ -326,10 +405,14 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             <Toggle label="CVD" checked={settings.showCvd} onChange={(value) => patchSettings({ showCvd: value })} />
             <Toggle label="Execution" checked={settings.showExecutionPanel} onChange={(value) => patchSettings({ showExecutionPanel: value })} />
             <Toggle label="Diagnostics" checked={settings.showDiagnostics} onChange={(value) => patchSettings({ showDiagnostics: value })} />
+            <Toggle label="Macro Radar" checked={settings.showMacroRadar} onChange={(value) => patchSettings({ showMacroRadar: value })} />
             <Field label="FPS" value={settings.fpsCap} min={5} max={30} onChange={(value) => patchSettings({ fpsCap: value })} />
             <Field label="Max Buckets" value={settings.maxVisibleBuckets} min={20} max={180} onChange={(value) => patchSettings({ maxVisibleBuckets: value })} />
-            <Field label="Heatmap History" value={settings.maxHeatmapHistory} min={20} max={240} onChange={(value) => patchSettings({ maxHeatmapHistory: value })} />
+            <Field label="Heatmap Frames" value={settings.maxHeatmapHistory} min={60} max={720} onChange={(value) => patchSettings({ maxHeatmapHistory: value })} />
             <Field label="Liquidity Threshold" value={settings.liquidityThreshold} min={1} max={8} step={0.1} onChange={(value) => patchSettings({ liquidityThreshold: value })} />
+            <Field label="Macro Lookback" value={settings.macroLookbackDays} min={90} max={1000} onChange={(value) => patchSettings({ macroLookbackDays: value })} />
+            <Field label="Macro Bands" value={settings.macroBandCount} min={4} max={18} onChange={(value) => patchSettings({ macroBandCount: value })} />
+            <Field label="Smoothing" value={settings.persistenceSmoothing} min={40} max={97} onChange={(value) => patchSettings({ persistenceSmoothing: value })} />
             {settings.bucketMultiplier === "custom" && <Field label="Custom Bucket" value={settings.customBucketSize} min={0.01} max={10000} step={0.01} onChange={(value) => patchSettings({ customBucketSize: value })} />}
           </section>
         )}
@@ -361,53 +444,98 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
           </section>
 
           <section className="dom-pro-panel dom-pro-profile">
-            <PanelTitle title="Volume Profile" status={settings.profileSource.toUpperCase()} />
-            {!settings.showVolumeProfile ? <EmptyState text="Volume profile hidden in DOM settings." /> : snapshot.volumeProfile.length === 0 ? <EmptyState text="Awaiting live orderbook stream." /> : (
-              <div className="dom-pro-profile-rows">
-                {snapshot.volumeProfile.map((node) => (
-                  <div className={`dom-pro-profile-row ${node.kind}`} key={node.price}>
+            <PanelTitle title="Volume Profile" status="VISIBLE RANGE" />
+            {!settings.showVolumeProfile ? <EmptyState text="Volume profile hidden in DOM settings." /> : institutionalProfile.length === 0 ? <EmptyState text="Awaiting live orderbook or historical candles." /> : (
+              <div className="dom-pro-profile-scale">
+                {institutionalProfile.map((node) => (
+                  <div className={`dom-pro-profile-node ${node.kind}`} key={`${node.price}-${node.kind}`} style={{ top: priceToTop(node.price, macroRange) }}>
+                    <i style={{ width: `${Math.max(3, node.volume / maxProfileVolume * 100)}%` }} />
                     <span>{formatPrice(node.price)}</span>
-                    <i style={{ width: `${Math.max(2, node.volume / Math.max(...snapshot.volumeProfile.map((item) => item.volume), 1) * 100)}%` }} />
                     <b>{node.kind.toUpperCase()}</b>
                   </div>
                 ))}
+                <div className="dom-pro-profile-legend"><span>POC</span><span>VALUE AREA</span><span>HVN</span><span>LVN</span></div>
               </div>
             )}
           </section>
 
           <section className="dom-pro-panel dom-pro-heatmap">
-            <PanelTitle title="Liquidity Heatmap" status="LOW -> HIGH" />
-            {!settings.showHeatmap ? <EmptyState text="Liquidity heatmap hidden in DOM settings." /> : snapshot.heatmap.length === 0 ? <EmptyState text="Liquidity heatmap requires depth history." /> : (
+            <PanelTitle title="Liquidity Heatmap" status={`${settings.heatmapHorizon.toUpperCase()} HISTORICAL DEPTH`} />
+            <div className="dom-pro-horizon-controls">
+              {heatmapHorizons.map((horizon) => (
+                <button
+                  key={horizon.value}
+                  type="button"
+                  className={settings.heatmapHorizon === horizon.value ? "active" : ""}
+                  onClick={() => patchSettings({ heatmapHorizon: horizon.value })}
+                >
+                  {horizon.label}
+                </button>
+              ))}
+            </div>
+            {!settings.showHeatmap ? <EmptyState text="Liquidity heatmap hidden in DOM settings." /> : heatmapFrames.length === 0 && macroBands.length === 0 ? <EmptyState text="Liquidity heatmap requires depth history or historical candles." /> : (
               <div className="dom-pro-heatmap-canvas">
-                {snapshot.heatmap.slice(-60).map((frame, frameIndex) => frame.cells.slice(0, 90).map((cell, cellIndex) => (
-                  <span
-                    key={`${frame.time}-${cell.price}-${cellIndex}`}
-                    className={cell.side}
+                <div className="dom-pro-heatmap-scale">
+                  {buildPriceScale(macroRange).map((price) => <span key={price} style={{ top: priceToTop(price, macroRange) }}>{formatPrice(price)}</span>)}
+                </div>
+                {macroBands.map((band) => (
+                  <div
+                    key={band.id}
+                    className={`dom-pro-macro-band ${band.side}`}
                     style={{
-                      left: `${(frameIndex / 60) * 100}%`,
-                      top: `${(cellIndex / Math.max(1, frame.cells.length)) * 100}%`,
+                      top: priceToTop(band.price, macroRange),
+                      height: `${Math.max(5, Math.min(24, (band.strength * 18) + 5))}px`,
+                      opacity: Math.max(0.28, band.strength)
+                    }}
+                  >
+                    <span>{band.label}</span>
+                    <b>{formatPrice(band.price)}</b>
+                    <em>{band.touches} touches / {Math.round(band.strength * 100)}%</em>
+                  </div>
+                ))}
+                {heatmapFrames.map((frame, frameIndex) => frame.cells.slice(0, 130).map((cell, cellIndex) => (
+                  <i
+                    key={`${frame.time}-${cell.price}-${cellIndex}`}
+                    className={`dom-pro-heatmap-cell ${cell.side}`}
+                    style={{
+                      left: `${(frameIndex / Math.max(1, heatmapFrames.length - 1)) * 92}%`,
+                      top: priceToTop(cell.price, macroRange),
                       opacity: Math.max(0.08, cell.intensity),
-                      width: "1.8%",
-                      height: "1.2%"
+                      width: `${Math.max(1.4, 92 / Math.max(18, heatmapFrames.length))}%`,
+                      height: `${Math.max(2, Math.min(10, cell.intensity * 9))}px`
                     }}
                   />
                 )))}
-                <b style={{ top: "50%" }} />
+                <b className="dom-pro-current-price" style={{ top: priceToTop(snapshot.lastPrice ?? lastPrice, macroRange) }} />
+                <div className="dom-pro-heatmap-footer"><span>{macroStatus}</span><span>{macroRange.source.replace("-", " ").toUpperCase()}</span></div>
               </div>
             )}
           </section>
 
           <section className="dom-pro-panel dom-pro-walls">
-            <PanelTitle title="Wall Detection" status="HEURISTIC" />
+            <PanelTitle title="Wall Detection" status="PERSISTENCE" />
             {!settings.showWallDetection ? <EmptyState text="Wall detection hidden in DOM settings." /> : snapshot.walls.length === 0 ? <EmptyState text="No persistent liquidity wall detected." /> : (
-              snapshot.walls.map((wall) => (
-                <div className={`dom-pro-wall ${wall.side}`} key={wall.id}>
-                  <b>{wall.side === "sell" ? "SELL WALL" : "BUY WALL"}</b>
-                  <span>{formatPrice(wall.price)}</span>
-                  <em>{formatSize(wall.size)} {marketSymbol.baseAsset}</em>
-                  <small>{Math.round(wall.persistenceMs / 1000)}s / score {wall.score.toFixed(0)}</small>
-                </div>
-              ))
+              <>
+                <div className="dom-pro-wall-head"><span>Type</span><span>Price</span><span>Size</span><span>Age</span></div>
+                {snapshot.walls.map((wall) => (
+                  <div className={`dom-pro-wall ${wall.side}`} key={wall.id}>
+                    <b>{wall.side === "sell" ? "SELL WALL" : "BUY WALL"}</b>
+                    <span>{formatPrice(wall.price)}</span>
+                    <em>{formatSize(wall.size)} {marketSymbol.baseAsset}</em>
+                    <small>{formatDuration(wall.persistenceMs)} / {wall.persistencePct.toFixed(0)}% / {wall.distancePct.toFixed(2)}%</small>
+                  </div>
+                ))}
+                {snapshot.liquidityMigration.length > 0 && (
+                  <div className="dom-pro-migration">
+                    <b>Liquidity Migration</b>
+                    {snapshot.liquidityMigration.map((migration) => (
+                      <span key={migration.id}>
+                        {migration.side === "sell" ? "Sell" : "Buy"} wall moved {migration.direction} {formatPrice(migration.distance)} {marketSymbol.quoteAsset} over {formatDuration(migration.elapsedMs)}.
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </section>
 
@@ -459,11 +587,21 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
 
           {settings.showCvd && (
             <section className="dom-pro-panel dom-pro-cvd">
-              <PanelTitle title="CVD" status="CUMULATIVE VOLUME DELTA" />
-              <div className="dom-pro-cvd-line">
-                {cvdData.length === 0 ? <EmptyState text="Trade stream unavailable for this venue." /> : cvdData.map((point, index) => (
-                  <i key={`${point.time}-${index}`} style={{ left: `${index / Math.max(1, cvdData.length - 1) * 100}%`, bottom: `${50 + normalizeCvd(point.value, cvdData) * 42}%` }} />
-                ))}
+              <PanelTitle title="Heuristic CVD" status={cvdStats.trend.toUpperCase()} />
+              <div className="dom-pro-cvd-card">
+                {cvdData.length === 0 ? <EmptyState text="Trade stream unavailable for this venue." /> : (
+                  <>
+                    <div className="dom-pro-cvd-stats">
+                      <span>Current <b>{formatSize(cvdStats.current)}</b></span>
+                      <span>Session <b>{formatSize(cvdStats.sessionDelta)}</b></span>
+                      <span>Buy <b>{cvdStats.buyPct.toFixed(0)}%</b></span>
+                      <span>Sell <b>{cvdStats.sellPct.toFixed(0)}%</b></span>
+                    </div>
+                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Heuristic cumulative volume delta">
+                      <polyline points={cvdPath} />
+                    </svg>
+                  </>
+                )}
               </div>
             </section>
           )}
@@ -538,6 +676,194 @@ function EmptyState({ text }: { text: string }) {
   return <div className="dom-pro-empty">{text}</div>;
 }
 
+function labelDomMode(mode: DomMode) {
+  if (mode === "intraday") return "INTRADAY";
+  if (mode === "institutional") return "INSTITUTIONAL";
+  if (mode === "macro") return "MACRO";
+  if (mode === "scalper") return "SCALPER";
+  return mode.toUpperCase();
+}
+
+function buildMacroLiquidityBands(candles: Candle[], currentPrice: number | null | undefined, settings: DomSettings): MacroLiquidityBand[] {
+  const source = candles.filter((candle) => Number.isFinite(candle.high) && Number.isFinite(candle.low) && candle.high > candle.low).slice(-settings.macroLookbackDays);
+  if (source.length < 20) return [];
+
+  const min = Math.min(...source.map((candle) => candle.low));
+  const max = Math.max(...source.map((candle) => candle.high));
+  const span = Math.max(max - min, currentPrice ? currentPrice * 0.02 : 1);
+  const binCount = 120;
+  const step = span / binCount;
+  const bins = Array.from({ length: binCount + 1 }, (_, index) => ({
+    price: min + index * step,
+    volume: 0,
+    touches: 0,
+    lastTouch: 0
+  }));
+
+  for (const candle of source) {
+    const typical = (candle.high + candle.low + candle.close) / 3;
+    const width = Math.max(candle.high - candle.low, step);
+    const candleVolume = Math.max(1, candle.volume || 1);
+    for (const bin of bins) {
+      if (bin.price < candle.low - step || bin.price > candle.high + step) continue;
+      const proximity = 1 / (1 + Math.abs(bin.price - typical) / width);
+      bin.volume += candleVolume * proximity;
+      bin.touches += bin.price >= candle.low && bin.price <= candle.high ? 1 : 0;
+      if (bin.price >= candle.low && bin.price <= candle.high) bin.lastTouch = Math.max(bin.lastTouch, candle.time);
+    }
+  }
+
+  const maxVolume = Math.max(...bins.map((bin) => bin.volume), 1);
+  const ranked = bins
+    .map((bin, index) => ({
+      ...bin,
+      index,
+      strength: Math.min(1, (bin.volume / maxVolume) * 0.78 + Math.min(0.22, bin.touches / Math.max(1, source.length) * 1.8))
+    }))
+    .filter((bin, index, all) => {
+      const left = all[index - 1]?.volume ?? 0;
+      const right = all[index + 1]?.volume ?? 0;
+      return bin.volume >= left && bin.volume >= right && bin.strength >= 0.18;
+    })
+    .sort((a, b) => b.strength - a.strength);
+
+  const selected: typeof ranked = [];
+  const minGap = step * 4;
+  for (const candidate of ranked) {
+    if (selected.some((node) => Math.abs(node.price - candidate.price) < minGap)) continue;
+    selected.push(candidate);
+    if (selected.length >= Math.max(4, settings.macroBandCount)) break;
+  }
+
+  const price = Number(currentPrice ?? source[source.length - 1]?.close ?? 0);
+  return selected.map((bin, index) => {
+    const isPoc = index === 0;
+    const side: MacroLiquidityBand["side"] = isPoc ? "poc" : bin.price > price ? "supply" : "demand";
+    return {
+      id: `macro:${side}:${Math.round(bin.price / Math.max(step, 0.0001))}`,
+      price: bin.price,
+      low: bin.price - step * 0.65,
+      high: bin.price + step * 0.65,
+      strength: bin.strength,
+      side,
+      label: isPoc ? "POC" : side === "supply" ? "SELL WALL" : "BUY WALL",
+      touches: bin.touches,
+      ageDays: bin.lastTouch ? Math.max(0, (Date.now() / 1000 - bin.lastTouch) / 86400) : 0,
+      source: "historical-ohlcv" as const
+    };
+  }).sort((a, b) => b.price - a.price);
+}
+
+function resolveMacroLiquidityRange(snapshot: AggregatedDomSnapshot, candles: Candle[], bands: MacroLiquidityBand[], currentPrice: number | null | undefined): MacroLiquidityRange {
+  const prices = [
+    ...candles.slice(-365).flatMap((candle) => [candle.high, candle.low]),
+    ...bands.flatMap((band) => [band.high, band.low]),
+    ...snapshot.buckets.map((bucket) => bucket.price)
+  ].filter((value) => Number.isFinite(value) && value > 0);
+
+  if (prices.length > 0) {
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    const pad = Math.max((max - min) * 0.035, Number(currentPrice ?? 1) * 0.002);
+    return { min: min - pad, max: max + pad, source: candles.length ? "historical-ohlcv" : "live-depth" };
+  }
+
+  const price = Number(currentPrice ?? 1);
+  return { min: price * 0.98, max: price * 1.02, source: "fallback" };
+}
+
+function buildInstitutionalProfile(liveProfile: VolumeProfileNode[], candles: Candle[], range: MacroLiquidityRange): VolumeProfileNode[] {
+  const source = candles.filter((candle) => candle.high >= range.min && candle.low <= range.max).slice(-365);
+  if (source.length < 20) return liveProfile;
+  const binCount = 96;
+  const step = Math.max((range.max - range.min) / binCount, 0.0001);
+  const bins = Array.from({ length: binCount + 1 }, (_, index) => ({ price: range.min + index * step, volume: 0 }));
+
+  for (const candle of source) {
+    const width = Math.max(candle.high - candle.low, step);
+    const volume = Math.max(1, candle.volume || 1);
+    for (const bin of bins) {
+      if (bin.price < candle.low || bin.price > candle.high) continue;
+      bin.volume += volume / Math.max(1, width / step);
+    }
+  }
+
+  const volumes = bins.map((bin) => bin.volume);
+  const max = Math.max(...volumes, 1);
+  const avg = volumes.reduce((sum, value) => sum + value, 0) / Math.max(1, volumes.length);
+  return bins
+    .filter((bin) => bin.volume > 0)
+    .map((bin) => ({
+      price: bin.price,
+      volume: bin.volume,
+      kind: (bin.volume === max ? "poc" : bin.volume > avg * 1.55 ? "hvn" : bin.volume < avg * 0.42 ? "lvn" : "normal") as VolumeProfileNode["kind"]
+    }))
+    .sort((a, b) => b.price - a.price);
+}
+
+function resolveHorizonFrameCount(settings: DomSettings) {
+  const fallback = settings.maxHeatmapHistory;
+  switch (settings.heatmapHorizon) {
+    case "2h": return Math.min(fallback, 90);
+    case "6h": return Math.min(fallback, 150);
+    case "12h": return Math.min(fallback, 240);
+    case "24h": return Math.min(fallback, 360);
+    case "3d": return Math.min(fallback, 520);
+    case "1w": return Math.min(fallback, 720);
+    default: return fallback;
+  }
+}
+
+function priceToTop(price: number | null | undefined, range: MacroLiquidityRange) {
+  if (!Number.isFinite(price ?? NaN) || range.max <= range.min) return "50%";
+  const pct = 100 - ((Number(price) - range.min) / (range.max - range.min)) * 100;
+  return `${Math.max(1, Math.min(99, pct))}%`;
+}
+
+function buildPriceScale(range: MacroLiquidityRange) {
+  const step = (range.max - range.min) / 5;
+  return Array.from({ length: 6 }, (_, index) => range.max - step * index);
+}
+
+function buildCvdStats(trades: AggregatedDomSnapshot["trades"], cvdData: Array<{ value: number }>) {
+  const buyVolume = trades.filter((trade) => trade.side === "buy").reduce((sum, trade) => sum + trade.quantity, 0);
+  const sellVolume = trades.filter((trade) => trade.side === "sell").reduce((sum, trade) => sum + trade.quantity, 0);
+  const total = Math.max(1, buyVolume + sellVolume);
+  const current = cvdData[cvdData.length - 1]?.value ?? 0;
+  const first = cvdData[0]?.value ?? 0;
+  const sessionDelta = current - first;
+  return {
+    current,
+    sessionDelta,
+    buyPct: buyVolume / total * 100,
+    sellPct: sellVolume / total * 100,
+    trend: sessionDelta < 0 ? "selling pressure" : sessionDelta > 0 ? "buying pressure" : "balanced"
+  };
+}
+
+function buildCvdPath(points: Array<{ value: number }>) {
+  if (points.length < 2) return "0,50 100,50";
+  const values = points.map((point) => point.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(1, max - min);
+  return points.map((point, index) => {
+    const x = index / Math.max(1, points.length - 1) * 100;
+    const y = 92 - ((point.value - min) / span) * 82;
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  }).join(" ");
+}
+
+function formatDuration(ms: number) {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
 function buildDomProPopoutDocument(channelName: string) {
   return `<!doctype html>
 <html>
@@ -585,8 +911,16 @@ function buildDomProPopoutDocument(channelName: string) {
     .profile-row i { height: 8px; background: linear-gradient(90deg, rgba(145,150,158,.28), rgba(226,229,235,.82)); }
     .profile-row.poc i { background: linear-gradient(90deg, rgba(255,0,0,.3), rgba(255,255,255,.94)); box-shadow: 0 0 10px rgba(255,0,0,.34); }
     .heatmap-canvas, .bars { position: relative; height: calc(100% - 34px); overflow: hidden; background: linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px); background-size: 48px 28px; }
-    .heatmap-canvas span { position: absolute; display: block; width: 1.8%; height: 1.2%; background: rgba(255,255,255,.72); box-shadow: 0 0 10px rgba(255,0,0,.34); }
-    .heatmap-canvas span.ask { background: rgba(255,0,0,.84); }
+    .heatmap-canvas .cell { position: absolute; display: block; min-width: 2px; height: 5px; transform: translateY(-50%); background: rgba(205,210,218,.62); box-shadow: 0 0 8px rgba(255,255,255,.1); }
+    .heatmap-canvas .cell.ask { background: rgba(255,0,0,.82); box-shadow: 0 0 13px rgba(255,0,0,.42); }
+    .macro-band { position: absolute; left: 5px; right: 70px; min-height: 7px; display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; padding: 0 8px; transform: translateY(-50%); color: #fff; font-size: 9px; font-weight: 900; pointer-events: none; }
+    .macro-band.supply { background: linear-gradient(90deg, rgba(255,0,0,.08), rgba(255,0,0,.88), rgba(255,0,0,.06)); box-shadow: 0 0 16px rgba(255,0,0,.45); }
+    .macro-band.demand { background: linear-gradient(90deg, rgba(190,196,206,.05), rgba(230,234,240,.78), rgba(190,196,206,.06)); box-shadow: 0 0 14px rgba(255,255,255,.22); }
+    .macro-band.poc { color: #111; background: linear-gradient(90deg, rgba(255,255,255,.06), rgba(255,255,255,.92), rgba(255,0,0,.18)); box-shadow: 0 0 18px rgba(255,255,255,.34); }
+    .heatmap-scale { position:absolute; top:0; right:7px; bottom:0; width:58px; pointer-events:none; }
+    .heatmap-scale span { position:absolute; right:0; transform:translateY(-50%); color:#8f959e; font-size:9px; font-weight:800; }
+    .current-price { position:absolute; left:0; right:0; height:1px; background:rgba(255,255,255,.78); box-shadow:0 0 8px rgba(255,255,255,.42); }
+    .heatmap-footer { position:absolute; left:8px; right:70px; bottom:6px; display:flex; justify-content:space-between; color:#858b94; font-size:8px; font-weight:800; text-transform:uppercase; }
     .wall, .metric { display: grid; gap: 3px; padding: 9px 10px; border-bottom: 1px solid rgba(255,255,255,.06); }
     .wall b, .metric b.hot { color: #ff1d1d; }
     .wall span, .metric b { color: #fff; font-size: 12px; }
@@ -632,6 +966,15 @@ function buildDomProPopoutDocument(channelName: string) {
     const fmt = (n, d = 1) => Number.isFinite(Number(n)) ? Number(n).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }) : '--';
     const compact = (n) => Number.isFinite(Number(n)) ? Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 2 }).format(Number(n)) : '--';
     const metric = (label, value, note, hot) => '<div class="metric"><span>' + label + '</span><b class="' + (hot ? 'hot' : '') + '">' + value + '</b>' + (note ? '<em>' + note + '</em>' : '') + '</div>';
+    const deriveRange = (s, bands) => {
+      const prices = [...(s.buckets || []).map(b => b.price), ...(bands || []).flatMap(b => [b.low, b.high])].filter(v => Number.isFinite(Number(v)) && Number(v) > 0);
+      const last = Number(s.lastPrice || 1);
+      if (!prices.length) return { min: last * .98, max: last * 1.02, source: 'fallback' };
+      const min = Math.min(...prices);
+      const max = Math.max(...prices);
+      const pad = Math.max((max - min) * .035, last * .002);
+      return { min: min - pad, max: max + pad, source: bands && bands.length ? 'historical-ohlcv' : 'live-depth' };
+    };
     function render(data) {
       const s = data.snapshot;
       const ticker = s.ticker || {};
@@ -658,8 +1001,15 @@ function buildDomProPopoutDocument(channelName: string) {
       const pmax = Math.max(1, ...prof.map(p => p.volume));
       document.getElementById('profile').className = prof.length ? 'profile-body' : 'profile-body empty';
       document.getElementById('profile').innerHTML = prof.length ? prof.map(p => '<div class="profile-row ' + p.kind + '"><span>' + fmt(p.price) + '</span><i style="width:' + Math.max(2, p.volume / pmax * 100) + '%"></i><b>' + p.kind.toUpperCase() + '</b></div>').join('') : 'Awaiting live orderbook stream.';
-      const frames = (s.heatmap || []).slice(-60);
-      document.getElementById('heatmap').innerHTML = frames.flatMap((f, fi) => f.cells.slice(0, 90).map((c, ci) => '<span class="' + c.side + '" style="left:' + (fi / 60 * 100) + '%;top:' + (ci / Math.max(1, f.cells.length) * 100) + '%;opacity:' + Math.max(.08, c.intensity) + '"></span>')).join('');
+      const bands = data.macroBands || [];
+      const range = data.macroRange || deriveRange(s, bands);
+      const top = (price) => Math.max(1, Math.min(99, 100 - ((Number(price) - range.min) / Math.max(1, range.max - range.min)) * 100));
+      const frameLimit = data.settings.heatmapHorizon === '1w' ? 720 : data.settings.heatmapHorizon === '3d' ? 520 : data.settings.heatmapHorizon === '24h' ? 360 : data.settings.heatmapHorizon === '12h' ? 240 : data.settings.heatmapHorizon === '6h' ? 150 : 90;
+      const frames = (s.heatmap || []).slice(-Math.min(frameLimit, data.settings.maxHeatmapHistory || frameLimit));
+      const scale = Array.from({ length: 6 }, (_, i) => range.max - ((range.max - range.min) / 5) * i).map(p => '<span style="top:' + top(p) + '%">' + fmt(p) + '</span>').join('');
+      const bandHtml = bands.map(b => '<div class="macro-band ' + b.side + '" style="top:' + top(b.price) + '%;height:' + Math.max(7, Math.min(24, b.strength * 18 + 5)) + 'px;opacity:' + Math.max(.28, b.strength) + '"><span>' + b.label + '</span><b>' + fmt(b.price) + '</b><em>' + b.touches + ' touches</em></div>').join('');
+      const cellHtml = frames.flatMap((f, fi) => f.cells.slice(0, 130).map(c => '<i class="cell ' + c.side + '" style="left:' + (fi / Math.max(1, frames.length - 1) * 92) + '%;top:' + top(c.price) + '%;width:' + Math.max(1.4, 92 / Math.max(18, frames.length)) + '%;opacity:' + Math.max(.08, c.intensity) + '"></i>')).join('');
+      document.getElementById('heatmap').innerHTML = '<div class="heatmap-scale">' + scale + '</div>' + bandHtml + cellHtml + '<b class="current-price" style="top:' + top(s.lastPrice) + '%"></b><div class="heatmap-footer"><span>' + String(data.settings.heatmapHorizon || '24h').toUpperCase() + ' RADAR</span><span>' + String(range.source || 'live-depth').toUpperCase() + '</span></div>';
       const walls = s.walls || [];
       document.getElementById('walls').className = walls.length ? '' : 'empty';
       document.getElementById('walls').innerHTML = walls.length ? walls.map(w => '<div class="wall"><b>' + (w.side === 'sell' ? 'SELL WALL' : 'BUY WALL') + '</b><span>' + fmt(w.price) + '</span><em>' + fmt(w.size, 3) + ' / score ' + Math.round(w.score) + '</em></div>').join('') : 'No persistent liquidity wall detected.';

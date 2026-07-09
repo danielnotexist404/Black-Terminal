@@ -949,6 +949,8 @@ Reason:
 
 - DOM Pro+ currently persists settings in local browser storage per workspace and symbol.
 - It consumes live orderbook, trade, and ticker data from the Black Core Market Data Engine.
+- The institutional macro radar uses historical candles fetched through the existing Market Data Engine cache and adapter path.
+- Heatmap horizon, macro radar, bucket, FPS, and persistence settings remain local workspace settings.
 - It does not introduce user-owned server records, credentials, audit tables, or permission tables yet.
 
 Future migration trigger:

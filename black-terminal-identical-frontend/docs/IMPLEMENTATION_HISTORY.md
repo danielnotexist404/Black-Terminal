@@ -7,6 +7,7 @@ This file records what has been built so far and what must be recorded going for
 Recent pushed commits:
 
 - Current - Consolidate Vercel API route dispatchers for production deploy.
+- Current - Redesign DOM Pro+ as institutional liquidity radar.
 - Current - Implement Phase III Chapter VI DOM Pro+ cockpit.
 - Current - Implement Phase IV professional network foundation.
 - Current - Implement Phase III Chapter IV position lifecycle foundation.
@@ -45,7 +46,7 @@ Validation:
 
 ## Phase III Chapter VI: DOM Pro+
 
-Status: Implemented frontend foundation
+Status: Implemented frontend foundation with institutional liquidity radar redesign
 
 Changed:
 
@@ -55,6 +56,14 @@ Changed:
 - Added shared DOM Feed Store consumed by compact DOM and DOM Pro+.
 - Removed fake compact DOM liquidity fallback.
 - Added DOM Aggregation Engine with bucket multipliers from 1x through 1000x, DOM modes, visible range settings, wall detection, pulling/stacking, absorption heuristic, iceberg probability heuristic, liquidity delta, heatmap history, CVD input tracking, metrics, and render diagnostics.
+- Reworked DOM Pro+ away from a fast scalper micro-DOM into a slower institutional cockpit.
+- Added heatmap horizons for 2H, 6H, 12H, 24H, 3D, and 1W.
+- Added institutional defaults: 250x buckets, +/-2% visible range, 24H heatmap horizon, persistent heatmap memory, lower visual FPS, and larger significant-liquidity filters.
+- Added ranked wall persistence with age, persistence percentage, distance from price, and first-pass liquidity migration detection.
+- Added a historical OHLCV macro radar layer through the existing Market Data Engine candle cache/fetch path.
+- Added macro bands for POC, supply, and demand structure across a wider historical range. These bands are derived market-structure zones, not fake live orderbook levels.
+- Redesigned the central heatmap to render broad red/gray/white horizontal liquidity bands with a price scale and current-price line.
+- Redesigned CVD into a larger heuristic CVD panel with current/session delta, aggressive buy/sell percentages, trend label, and a thicker curve.
 - Added persistent local DOM settings per workspace and symbol.
 - Added DOM Pro+ panels for aggregated ladder, DOM-aligned volume profile, liquidity heatmap, wall detection, trade tape, metrics, depth chart, liquidity flow delta, CVD, diagnostics, and quick execution.
 - DOM quick execution routes through the existing `submitOrder` OMS/EMS path.

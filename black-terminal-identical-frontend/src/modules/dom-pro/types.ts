@@ -1,8 +1,9 @@
 import type { MarketSymbol, OrderBookSnapshot, TickerSnapshot, TradeTick } from "../../market-data/types";
 
-export type DomMode = "micro" | "scalper" | "standard" | "swing" | "macro" | "custom";
+export type DomMode = "micro" | "scalper" | "standard" | "intraday" | "institutional" | "swing" | "macro" | "custom";
 export type DomVisibleRange = "auto" | "0.25" | "0.5" | "1" | "2" | "5" | "custom";
 export type DomProfileSource = "session" | "visible-range" | "rolling-window";
+export type DomHeatmapHorizon = "2h" | "6h" | "12h" | "24h" | "3d" | "1w";
 
 export type DomLevel = {
   price: number;
@@ -39,7 +40,19 @@ export type WallDetection = {
   score: number;
   distancePct: number;
   persistenceMs: number;
+  persistencePct: number;
   state: "added" | "persisting" | "removed";
+};
+
+export type LiquidityMigration = {
+  id: string;
+  side: "buy" | "sell";
+  previousPrice: number;
+  currentPrice: number;
+  distance: number;
+  direction: "up" | "down";
+  elapsedMs: number;
+  size: number;
 };
 
 export type LiquidityDelta = {
@@ -95,6 +108,25 @@ export type DomHeatmapFrame = {
   cells: Array<{ price: number; side: "bid" | "ask"; intensity: number }>;
 };
 
+export type MacroLiquidityBand = {
+  id: string;
+  price: number;
+  low: number;
+  high: number;
+  strength: number;
+  side: "supply" | "demand" | "poc" | "magnet";
+  label: string;
+  touches: number;
+  ageDays: number;
+  source: "historical-ohlcv" | "live-depth";
+};
+
+export type MacroLiquidityRange = {
+  min: number;
+  max: number;
+  source: "historical-ohlcv" | "live-depth" | "fallback";
+};
+
 export type AggregatedDomSnapshot = {
   marketSymbol: MarketSymbol;
   sourceBook: OrderBookSnapshot | null;
@@ -106,6 +138,7 @@ export type AggregatedDomSnapshot = {
   volumeProfile: VolumeProfileNode[];
   heatmap: DomHeatmapFrame[];
   walls: WallDetection[];
+  liquidityMigration: LiquidityMigration[];
   liquidityDelta: LiquidityDelta[];
   absorption: AbsorptionSignal;
   iceberg: IcebergEstimate;
@@ -136,10 +169,15 @@ export type DomSettings = {
   showCvd: boolean;
   showExecutionPanel: boolean;
   showDiagnostics: boolean;
+  showMacroRadar: boolean;
   colorIntensity: number;
   liquidityThreshold: number;
   maxVisibleBuckets: number;
   maxHeatmapHistory: number;
+  heatmapHorizon: DomHeatmapHorizon;
+  macroLookbackDays: number;
+  macroBandCount: number;
+  persistenceSmoothing: number;
   updateThrottleMs: number;
   profileSource: DomProfileSource;
   profileWidth: number;

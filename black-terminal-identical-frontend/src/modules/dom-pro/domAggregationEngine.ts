@@ -8,6 +8,7 @@ import type {
   DomRenderStats,
   DomSettings,
   IcebergEstimate,
+  LiquidityMigration,
   LiquidityDelta,
   VolumeProfileNode,
   WallDetection
@@ -17,6 +18,23 @@ type WallMemory = {
   firstSeen: number;
   lastSeen: number;
   refreshes: number;
+  peakSize: number;
+  observations: number;
+};
+
+type HeatmapMemory = {
+  price: number;
+  side: "bid" | "ask";
+  intensity: number;
+  firstSeen: number;
+  lastSeen: number;
+  peak: number;
+};
+
+type MajorWallMemory = {
+  price: number;
+  time: number;
+  size: number;
 };
 
 const emptyAbsorption: AbsorptionSignal = {
@@ -30,6 +48,8 @@ const emptyAbsorption: AbsorptionSignal = {
 export class DomAggregationEngine {
   private previousBuckets = new Map<string, DomBucket>();
   private wallMemory = new Map<string, WallMemory>();
+  private heatmapMemory = new Map<string, HeatmapMemory>();
+  private majorWallBySide = new Map<"buy" | "sell", MajorWallMemory>();
   private heatmap: DomHeatmapFrame[] = [];
   private cvd = 0;
   private cvdSeries: Array<{ time: number; value: number }> = [];
@@ -63,6 +83,7 @@ export class DomAggregationEngine {
     const deltas = this.detectLiquidityDelta(buckets);
     const profile = buildVolumeProfile(buckets);
     const walls = this.detectWalls(buckets, input.settings, lastPrice ?? midPrice ?? 0, now);
+    const liquidityMigration = this.detectLiquidityMigration(walls, now);
     const heatmap = this.pushHeatmapFrame(buckets, input.settings, now);
     this.updateCvd(input.trades);
     const absorption = detectAbsorption(input.trades, buckets, deltas, lastPrice ?? midPrice ?? 0);
@@ -82,6 +103,7 @@ export class DomAggregationEngine {
       volumeProfile: profile,
       heatmap,
       walls,
+      liquidityMigration,
       liquidityDelta: deltas,
       absorption,
       iceberg,
@@ -147,6 +169,7 @@ export class DomAggregationEngine {
       volumeProfile: [],
       heatmap: [],
       walls: [],
+      liquidityMigration: [],
       liquidityDelta: [],
       absorption: emptyAbsorption,
       iceberg: { estimatedCount: 0, probability: "low", score: 0 },
@@ -203,7 +226,7 @@ export class DomAggregationEngine {
   private detectWalls(buckets: DomBucket[], settings: DomSettings, price: number, now: number): WallDetection[] {
     const sizes = buckets.flatMap((bucket) => [bucket.bidSize, bucket.askSize]).filter((size) => size > 0);
     const average = sizes.reduce((sum, size) => sum + size, 0) / Math.max(1, sizes.length);
-    const threshold = Math.max(average * settings.liquidityThreshold, average + standardDeviation(sizes));
+    const threshold = Math.max(average * settings.liquidityThreshold, average + standardDeviation(sizes) * 1.2);
     const seen = new Set<string>();
     const walls: WallDetection[] = [];
 
@@ -214,20 +237,24 @@ export class DomAggregationEngine {
         const key = `${side}:${bucket.price}`;
         const existing = this.wallMemory.get(key);
         const distancePct = price > 0 ? Math.abs(bucket.price - price) / price * 100 : 0;
-        const memory = existing ?? { firstSeen: now, lastSeen: now, refreshes: 0 };
+        const memory = existing ?? { firstSeen: now, lastSeen: now, refreshes: 0, peakSize: size, observations: 0 };
         memory.lastSeen = now;
         memory.refreshes += existing ? 1 : 0;
+        memory.observations += 1;
+        memory.peakSize = Math.max(memory.peakSize, size);
         this.wallMemory.set(key, memory);
         seen.add(key);
         const persistenceMs = now - memory.firstSeen;
+        const persistencePct = estimatePersistencePct(memory, now);
         walls.push({
           id: key,
           side: side === "bid" ? "buy" : "sell",
           price: bucket.price,
           size,
-          score: Math.min(100, (size / Math.max(average, 1)) * 16 + Math.max(0, 30 - distancePct * 20) + Math.min(24, persistenceMs / 1000)),
+          score: Math.min(100, (size / Math.max(average, 1)) * 15 + Math.max(0, 28 - distancePct * 12) + persistencePct * 0.35),
           distancePct,
           persistenceMs,
+          persistencePct,
           state: existing ? "persisting" : "added"
         });
       }
@@ -240,15 +267,83 @@ export class DomAggregationEngine {
     return walls.sort((a, b) => b.score - a.score).slice(0, 8);
   }
 
+  private detectLiquidityMigration(walls: WallDetection[], now: number): LiquidityMigration[] {
+    const migrations: LiquidityMigration[] = [];
+    for (const side of ["buy", "sell"] as const) {
+      const top = walls.filter((wall) => wall.side === side).sort((a, b) => b.size - a.size)[0];
+      if (!top) continue;
+      const previous = this.majorWallBySide.get(side);
+      if (previous) {
+        if (Math.abs(previous.price - top.price) < 0.0000001) {
+          this.majorWallBySide.set(side, { price: top.price, time: previous.time, size: Math.max(previous.size, top.size) });
+          continue;
+        }
+        const distance = top.price - previous.price;
+        const distancePct = Math.abs(distance) / Math.max(top.price, 1) * 100;
+        const movedEnough = distancePct >= 0.08 && Math.abs(distance) >= Math.max(top.price * 0.0005, 1);
+        const elapsedMs = now - previous.time;
+        if (movedEnough && elapsedMs > 8000) {
+          migrations.push({
+            id: `${side}:${previous.price}:${top.price}:${now}`,
+            side,
+            previousPrice: previous.price,
+            currentPrice: top.price,
+            distance: Math.abs(distance),
+            direction: distance > 0 ? "up" : "down",
+            elapsedMs,
+            size: top.size
+          });
+        }
+      }
+      this.majorWallBySide.set(side, { price: top.price, time: now, size: top.size });
+    }
+    return migrations.slice(0, 4);
+  }
+
   private pushHeatmapFrame(buckets: DomBucket[], settings: DomSettings, time: number) {
     const max = Math.max(...buckets.map((bucket) => bucket.totalSize), 1);
+    const averageSize = average(buckets.map((bucket) => bucket.totalSize));
+    const significantBuckets = buckets
+      .filter((bucket) => bucket.totalSize >= averageSize * Math.max(0.85, settings.liquidityThreshold * 0.38) || bucket.heat > 0.2)
+      .sort((a, b) => b.totalSize - a.totalSize)
+      .slice(0, Math.max(40, Math.min(180, settings.maxVisibleBuckets)));
+    const smoothing = Math.min(0.97, Math.max(0.4, settings.persistenceSmoothing / 100));
+    const horizonMs = heatmapHorizonMs(settings.heatmapHorizon);
+
+    for (const bucket of significantBuckets) {
+      const side = bucket.askSize >= bucket.bidSize ? "ask" : "bid";
+      const key = `${side}:${bucket.price}`;
+      const previous = this.heatmapMemory.get(key);
+      const rawIntensity = Math.min(1, bucket.totalSize / max) * (settings.colorIntensity / 100);
+      const intensity = previous ? previous.intensity * smoothing + rawIntensity * (1 - smoothing) : rawIntensity;
+      this.heatmapMemory.set(key, {
+        price: bucket.price,
+        side,
+        intensity,
+        firstSeen: previous?.firstSeen ?? time,
+        lastSeen: time,
+        peak: Math.max(previous?.peak ?? 0, rawIntensity)
+      });
+    }
+
+    for (const [key, memory] of this.heatmapMemory) {
+      if (time - memory.lastSeen > horizonMs || memory.intensity < 0.025) {
+        this.heatmapMemory.delete(key);
+      } else if (memory.lastSeen !== time) {
+        memory.intensity *= smoothing;
+      }
+    }
+
     this.heatmap.push({
       time,
-      cells: buckets.map((bucket) => ({
-        price: bucket.price,
-        side: bucket.askSize > bucket.bidSize ? "ask" : "bid",
-        intensity: Math.min(1, bucket.totalSize / max) * (settings.colorIntensity / 100)
-      }))
+      cells: Array.from(this.heatmapMemory.values())
+        .sort((a, b) => b.intensity - a.intensity)
+        .slice(0, Math.max(60, settings.maxVisibleBuckets))
+        .map((cell) => ({
+          price: cell.price,
+          side: cell.side,
+          intensity: Math.min(1, Math.max(0.035, cell.intensity))
+        }))
     });
     this.heatmap = this.heatmap.slice(-settings.maxHeatmapHistory);
     return this.heatmap;
@@ -415,6 +510,25 @@ function roundToBucket(price: number, bucketSize: number) {
 
 function bucketKey(bucket: DomBucket) {
   return `${bucket.price}`;
+}
+
+function estimatePersistencePct(memory: WallMemory, now: number) {
+  const ageScore = Math.min(58, (now - memory.firstSeen) / 600000 * 58);
+  const refreshScore = Math.min(34, memory.refreshes * 2.8);
+  const liveScore = now - memory.lastSeen < 3000 ? 8 : 0;
+  return Math.max(1, Math.min(99, ageScore + refreshScore + liveScore));
+}
+
+function heatmapHorizonMs(horizon: DomSettings["heatmapHorizon"]) {
+  switch (horizon) {
+    case "2h": return 2 * 60 * 60 * 1000;
+    case "6h": return 6 * 60 * 60 * 1000;
+    case "12h": return 12 * 60 * 60 * 1000;
+    case "24h": return 24 * 60 * 60 * 1000;
+    case "3d": return 3 * 24 * 60 * 60 * 1000;
+    case "1w": return 7 * 24 * 60 * 60 * 1000;
+    default: return 24 * 60 * 60 * 1000;
+  }
 }
 
 function average(values: number[]) {

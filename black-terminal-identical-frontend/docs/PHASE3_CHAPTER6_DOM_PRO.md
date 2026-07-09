@@ -1,6 +1,6 @@
 # Phase III Chapter VI - DOM Pro+
 
-Status: implemented frontend foundation.
+Status: implemented frontend foundation with institutional liquidity radar redesign.
 
 ## Objective
 
@@ -49,12 +49,20 @@ DOM Pro+ execution panel
   - render stats
 - Added bucket multipliers including `500x` and `1000x`.
 - Added DOM modes:
-  - Micro
   - Scalper
+  - Intraday
   - Standard
-  - Swing
+  - Institutional
   - Macro
   - Custom
+- Changed default DOM Pro+ behavior to institutional mode: wider visible range, larger buckets, lower visual FPS, and a calmer 24H heatmap horizon.
+- Added heatmap history horizons:
+  - 2H
+  - 6H
+  - 12H
+  - 24H
+  - 3D
+  - 1W
 - Added visible range options:
   - Auto
   - +/-0.25%
@@ -64,6 +72,7 @@ DOM Pro+ execution panel
   - +/-5%
   - Custom
 - Added throttled DOM Pro+ rendering with FPS cap settings.
+- Split raw orderbook ingestion from slower visual rendering with frame throttling and persistent heatmap memory.
 - Added detached/expanded DOM Pro+ workspace surface.
 - Compact DOM hides when DOM Pro+ is open.
 - Browser-detached mode opens a popout window that receives parent DOM snapshots through `BroadcastChannel`.
@@ -90,9 +99,21 @@ DOM Pro+ execution panel
 - Added heuristic detection for:
   - sell walls
   - buy walls
+  - wall persistence age and persistence percentage
+  - first-pass liquidity migration
   - pulling / stacking
   - absorption
   - iceberg probability
+- Added institutional heatmap visual treatment:
+  - broader persistent horizontal bands
+  - red extreme sell/supply pressure
+  - white/gray neutral and demand structure
+  - current-price line
+  - right-side price scale
+  - 12H/24H default radar behavior instead of tick-by-tick micro flashing
+- Added a historical OHLCV macro radar layer using cached/fetched daily candles from the existing Market Data Engine.
+- Added macro structure bands for POC, supply, and demand zones across a wider historical range.
+- Redesigned CVD as a larger heuristic CVD panel with current delta, session delta, aggressive buy percentage, aggressive sell percentage, trend label, and a thicker line.
 - Added performance diagnostics:
   - updates/sec
   - render FPS
@@ -106,6 +127,8 @@ DOM Pro+ execution panel
 ## Data Integrity Rules
 
 - No fake DOM liquidity is rendered by the compact DOM or DOM Pro+.
+- Historical macro bands are derived from real OHLCV candles and labeled as historical structure, not as live resting orderbook liquidity.
+- Live DOM walls continue to come from current orderbook depth and persistent DOM memory.
 - If orderbook data is missing, the UI shows `Awaiting live orderbook stream.`
 - If heatmap history is missing, the UI shows `Liquidity heatmap requires depth history.`
 - If trade tape data is missing, the UI shows `Trade stream unavailable for this venue.`

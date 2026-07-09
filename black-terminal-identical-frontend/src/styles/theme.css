@@ -5380,6 +5380,16 @@ body.resizing-layout * {
   background: rgba(245, 159, 24, 0.08);
 }
 
+.positions-confirm-line {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #f2c14d;
+  font: 800 10px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
 .pm-ticket.dex-ticket {
   border-color: rgba(245, 159, 24, 0.32);
 }

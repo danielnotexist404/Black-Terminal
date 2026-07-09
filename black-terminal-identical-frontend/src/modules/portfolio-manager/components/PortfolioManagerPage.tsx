@@ -15,9 +15,11 @@ import { getCapabilities, resolveProductTier, type CapabilityUser } from "../../
 import { blackCoreConnectionManager } from "../../../connectivity/connectionManager";
 import { readActiveExecutionVenueId, setActiveExecutionVenueId } from "../../../connectivity/activeExecutionVenue";
 import type { ConnectionCapability, ConnectionDiagnostics } from "../../../connectivity/types";
+import { submitOrder } from "../../../execution/executionEngine";
 import { submitPortfolioOrderViaApi } from "../../../portfolio/portfolioApiClient";
-import type { ExchangeConnectionDraft, PortfolioSnapshot } from "../../../portfolio/types";
+import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } from "../../../portfolio/types";
 import { getPortfolioSnapshot } from "../../../portfolio/portfolioStore";
+import { defaultRiskControls } from "../../../risk/types";
 import { marketCatalog } from "../../../market-data/marketCatalog";
 import type { ExchangeId } from "../../../market-data/types";
 import { blackCorePositionManager } from "../../../positions/positionManager";
@@ -54,6 +56,9 @@ type ExecutionVenue = {
   capabilities: ConnectionCapability[];
   health: ConnectionDiagnostics["health"];
   unsupportedReason?: string;
+  executionReady?: boolean;
+  readinessReason?: string;
+  network?: "testnet" | "mainnet";
 };
 
 type PositionOrderRow = {
@@ -125,8 +130,31 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
     setPositionMenu(null);
     setPositionActionStatus("SUBMITTING POSITION ACTION");
 
-    const submitOrder = async (draft: Parameters<typeof submitPortfolioOrderViaApi>[0]) => {
-      const update = await submitPortfolioOrderViaApi(draft);
+    const submitPositionOrder = async (draft: Parameters<typeof submitPortfolioOrderViaApi>[0]) => {
+      const update = draft.exchange === "hyperliquid"
+        ? await submitOrder({
+            accountId: draft.accountId,
+            exchange: draft.exchange,
+            symbol: draft.symbol,
+            marketKind: draft.marketKind,
+            side: draft.side,
+            type: draft.orderType,
+            quantity: draft.quantity,
+            sizingMethod: draft.sizingMethod ?? "quantity",
+            limitPrice: draft.limitPrice,
+            stopPrice: draft.stopPrice,
+            referencePrice: draft.referencePrice,
+            leverage: draft.leverage,
+            marginMode: draft.marginMode,
+            takeProfit: draft.takeProfit,
+            stopLoss: draft.stopLoss,
+            reduceOnly: draft.reduceOnly,
+            postOnly: draft.postOnly,
+            timeInForce: draft.timeInForce,
+            source: "positions",
+            destinations: ["personal-portfolio"]
+          }, buildPositionExecutionAccount(position), referencePrice)
+        : await submitPortfolioOrderViaApi(draft);
       if (!update) throw new Error("AUTHENTICATED BROKER SESSION REQUIRED");
       if (update.status === "rejected") throw new Error(update.reason || "ORDER REJECTED");
       return update;
@@ -182,7 +210,7 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
       }
 
       if (action === "close") {
-        await submitOrder({
+        await submitPositionOrder({
           accountId: position.accountId,
           exchange: position.exchange,
           symbol: position.symbol,
@@ -201,7 +229,7 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
       }
 
       if (action === "reverse") {
-        await submitOrder({
+        await submitPositionOrder({
           accountId: position.accountId,
           exchange: position.exchange,
           symbol: position.symbol,
@@ -237,7 +265,7 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
 
       if (takeProfit) {
         blackCorePositionManager.setProtection(position.id, "take-profit", { price: takeProfit, metadata: { source: "positions-panel" } });
-        await submitOrder({
+        await submitPositionOrder({
           accountId: position.accountId,
           exchange: position.exchange,
           symbol: position.symbol,
@@ -256,7 +284,7 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
 
       if (stopLoss) {
         blackCorePositionManager.setProtection(position.id, "stop-loss", { price: stopLoss, metadata: { source: "positions-panel" } });
-        await submitOrder({
+        await submitPositionOrder({
           accountId: position.accountId,
           exchange: position.exchange,
           symbol: position.symbol,
@@ -368,6 +396,9 @@ export function PositionsWorkspace({
     apiSecret: "",
     passphrase: ""
   });
+  const [hyperliquidNetwork, setHyperliquidNetwork] = useState<"testnet" | "mainnet">("testnet");
+  const [hyperliquidAgentPrivateKey, setHyperliquidAgentPrivateKey] = useState("");
+  const [hyperliquidMainnetConfirmed, setHyperliquidMainnetConfirmed] = useState(false);
   const [connectStatus, setConnectStatus] = useState("");
   const [connectionDiagnostics, setConnectionDiagnostics] = useState<ConnectionDiagnostics[]>(() => blackCoreConnectionManager.listDiagnostics());
   const [activeVenueId, setActiveVenueId] = useState<string | null>(() => {
@@ -380,7 +411,8 @@ export function PositionsWorkspace({
   const executionVenues: ExecutionVenue[] = useMemo(() => connectionDiagnostics
     .filter((connection) => !["disconnected", "offline", "unsupported"].includes(connection.status))
     .map((connection) => {
-      const isWallet = connection.category === "wallet" || connection.category === "protocol";
+      const isProtocol = connection.category === "protocol";
+      const isWallet = connection.category === "wallet" || isProtocol;
       const venueLabel = String(connection.metadata.venueLabel || connection.metadata.venue || connection.provider);
       const address = connection.walletAddress;
       return {
@@ -392,12 +424,19 @@ export function PositionsWorkspace({
           ? `${connection.provider.toUpperCase()} ${address.slice(0, 6)}...${address.slice(-4)}`
           : `${connection.provider.toUpperCase()} ${connection.status.toUpperCase()} ${connection.health.latencyMs}ms`,
         accountId: connection.accountId,
-        exchange: isWallet ? undefined : connection.provider as ExchangeId,
+        exchange: isProtocol ? "hyperliquid" as ExchangeId : isWallet ? undefined : connection.provider as ExchangeId,
         walletAddress: address,
         provider: connection.provider,
         capabilities: connection.capabilities,
         health: connection.health,
-        unsupportedReason: typeof connection.metadata.futuresUnsupportedReason === "string" ? connection.metadata.futuresUnsupportedReason : undefined
+        unsupportedReason: typeof connection.metadata.futuresUnsupportedReason === "string"
+          ? connection.metadata.futuresUnsupportedReason
+          : typeof connection.metadata.readinessReason === "string"
+            ? connection.metadata.readinessReason
+            : undefined,
+        executionReady: connection.metadata.executionReady === true,
+        readinessReason: typeof connection.metadata.readinessReason === "string" ? connection.metadata.readinessReason : undefined,
+        network: connection.metadata.network === "mainnet" ? "mainnet" : connection.metadata.network === "testnet" ? "testnet" : undefined
       };
     }), [connectionDiagnostics]);
   const activeExecutionVenue = executionVenues.find((venue) => venue.id === activeVenueId) ?? executionVenues[0] ?? null;
@@ -479,21 +518,44 @@ export function PositionsWorkspace({
   async function handleConnectDex() {
     try {
       const isHyperliquid = selectedDex === "hyperliquid";
+      if (isHyperliquid && !hyperliquidAgentPrivateKey.trim()) {
+        setConnectStatus("HYPERLIQUID AGENT PRIVATE KEY REQUIRED FOR SERVER-SIDE RELAY");
+        return;
+      }
+      if (isHyperliquid && hyperliquidNetwork === "mainnet" && !hyperliquidMainnetConfirmed) {
+        setConnectStatus("MAINNET REQUIRES EXPLICIT CONFIRMATION");
+        return;
+      }
       const nextConnection = await blackCoreConnectionManager.connect({
         adapterId: isHyperliquid ? "protocol:hyperliquid" : `wallet:${walletProvider}`,
         category: isHyperliquid ? "protocol" : "wallet",
         provider: isHyperliquid ? "hyperliquid" : walletProvider,
         label: `${selectedDexVenue.label} / ${walletProvider === "metamask" ? "MetaMask" : "Phantom"}`,
+        credentials: isHyperliquid
+          ? {
+              agentPrivateKey: hyperliquidAgentPrivateKey,
+              network: hyperliquidNetwork,
+              accountName: `${selectedDexVenue.label} ${hyperliquidNetwork}`,
+              mainnetConfirmed: hyperliquidMainnetConfirmed
+            }
+          : undefined,
         metadata: {
           protocol: isHyperliquid ? "hyperliquid" : undefined,
           signer: walletProvider,
           venue: selectedDex,
           venueLabel: selectedDexVenue.label,
-          chain: selectedDexVenue.chain
+          chain: selectedDexVenue.chain,
+          network: isHyperliquid ? hyperliquidNetwork : undefined,
+          mainnetConfirmed: isHyperliquid ? hyperliquidMainnetConfirmed : undefined
         }
       });
       setActiveVenueId(nextConnection.id);
-      setConnectStatus(isHyperliquid ? "HYPERLIQUID PROTOCOL LINKED" : "WALLET LINKED");
+      setHyperliquidAgentPrivateKey("");
+      setConnectStatus(isHyperliquid
+        ? nextConnection.metadata.executionReady === true
+          ? "HYPERLIQUID RELAY READY"
+          : String(nextConnection.metadata.readinessReason || "HYPERLIQUID RELAY LINKED BUT NOT READY").toUpperCase()
+        : "WALLET LINKED");
       setShowConnection(false);
     } catch (error) {
       setConnectStatus(error instanceof Error ? error.message : String(error));
@@ -636,8 +698,28 @@ export function PositionsWorkspace({
                   <span>{selectedDexVenue.label}</span>
                   <b>{selectedDexVenue.chain}</b>
                 </div>
+                {selectedDex === "hyperliquid" && (
+                  <>
+                    <select value={hyperliquidNetwork} onChange={(event) => setHyperliquidNetwork(event.target.value as "testnet" | "mainnet")}>
+                      <option value="testnet">Hyperliquid Testnet</option>
+                      <option value="mainnet">Hyperliquid Mainnet</option>
+                    </select>
+                    <input
+                      placeholder="Agent wallet private key"
+                      type="password"
+                      value={hyperliquidAgentPrivateKey}
+                      onChange={(event) => setHyperliquidAgentPrivateKey(event.target.value)}
+                    />
+                    {hyperliquidNetwork === "mainnet" && (
+                      <label className="positions-confirm-line">
+                        <input type="checkbox" checked={hyperliquidMainnetConfirmed} onChange={(event) => setHyperliquidMainnetConfirmed(event.target.checked)} />
+                        Confirm mainnet live execution
+                      </label>
+                    )}
+                  </>
+                )}
                 {connectStatus && <div className="positions-connect-status">{connectStatus}</div>}
-                <button className="primary" onClick={handleConnectDex}>Link Wallet</button>
+                <button className="primary" onClick={handleConnectDex}>{selectedDex === "hyperliquid" ? "Link Relay" : "Link Wallet"}</button>
               </>
             )}
           </div>
@@ -682,6 +764,7 @@ function ExecutionDock({
 
   const isDex = venue.kind === "dex";
   const isProtocol = venue.category === "protocol";
+  const executionReady = !isProtocol || venue.executionReady === true;
   const supportsSpot = !isDex || venue.capabilities.includes("spot-orders") || venue.capabilities.includes("market-orders");
   const supportsConvert = !isDex || venue.capabilities.includes("swap");
   const supportsFutures = venue.capabilities.includes("perpetual-orders") || venue.capabilities.includes("leverage");
@@ -705,7 +788,12 @@ function ExecutionDock({
   async function handleSubmitOrder() {
     setSubmitStatus("");
 
-    if (venue.kind === "dex") {
+    if (isProtocol && !executionReady) {
+      setSubmitStatus((venue.readinessReason || "HYPERLIQUID RELAY IS NOT READY").toUpperCase());
+      return;
+    }
+
+    if (venue.kind === "dex" && !isProtocol) {
       setSubmitStatus(isProtocol
         ? `${venue.label.toUpperCase()} CONNECTED. LIVE ORDERS REQUIRE SERVER-SIDE SIGNING RELAY.`
         : venue.capabilities.includes("swap")
@@ -754,7 +842,7 @@ function ExecutionDock({
       <div className="execution-head">
         <div>
           <span>Trade</span>
-          <b>{venue.label}</b>
+          <b>{venue.network ? `${venue.label} ${venue.network.toUpperCase()}` : venue.label}</b>
         </div>
         <button onClick={onAddConnection}><Plus size={14} /></button>
       </div>
@@ -775,6 +863,7 @@ function ExecutionDock({
         <span>Latency <b>{venue.health.latencyMs}ms</b></span>
         <span>Auth <b>{venue.health.authentication.toUpperCase()}</b></span>
         <span>Heartbeat <b>{venue.health.heartbeat.toUpperCase()}</b></span>
+        {isProtocol && <span>Relay <b>{executionReady ? "READY" : "BLOCKED"}</b></span>}
         <span>Subs <b>{venue.health.subscriptionCount}</b></span>
         <span>Reconnects <b>{venue.health.reconnectCount}</b></span>
         {venue.health.permissions.withdrawal && <em>WITHDRAWAL API PERMISSION DETECTED. USE TRADING-ONLY KEYS.</em>}
@@ -803,6 +892,9 @@ function ExecutionDock({
             ? venue.unsupportedReason || "This connection only enables features advertised by its adapter."
             : "No executable trading capabilities reported by this connection."}
         </div>
+      )}
+      {isProtocol && venue.readinessReason && !executionReady && (
+        <div className="execution-capability-note">{venue.readinessReason}</div>
       )}
 
       {selectedMode === "futures" && (
@@ -900,6 +992,33 @@ function capabilityReason(mode: TradeMode, venue: ExecutionVenue) {
     return "Convert requires a DEX swap routing adapter. Wallet signing alone is not enough.";
   }
   return "Spot trading requires an executable broker or DEX routing adapter.";
+}
+
+function buildPositionExecutionAccount(position: ManagedPosition): PortfolioAccount {
+  return {
+    id: position.accountId,
+    exchange: position.exchange,
+    label: `${position.exchange.toUpperCase()} ${position.symbol}`,
+    accountName: `${position.exchange.toUpperCase()} ${position.symbol}`,
+    permissions: ["read-account", "read-orders", "read-positions", "place-orders", "cancel-orders", "modify-orders", "withdraw-disabled"],
+    isPaper: false,
+    connectedAt: position.openedAt,
+    lastValidatedAt: Date.now(),
+    status: "connected",
+    apiHealth: "healthy",
+    latencyMs: 0,
+    balanceUsd: 0,
+    equityUsd: 0,
+    marginUsed: position.margin,
+    availableMargin: 0,
+    buyingPower: 0,
+    leverage: position.leverage,
+    dailyPnl: position.unrealizedPnl,
+    monthlyPnl: 0,
+    openPositions: 1,
+    openOrders: 0,
+    riskControls: defaultRiskControls
+  };
 }
 
 export default function PortfolioManagerPage({ onClose, currentUser }: { onClose: () => void; currentUser?: CapabilityUser | null }) {

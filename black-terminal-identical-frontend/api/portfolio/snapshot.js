@@ -7,6 +7,7 @@ import {
   toCamelAccount
 } from "../../server/portfolio-api.js";
 import { syncBybitAccountToSupabase } from "../../server/exchanges/bybit.js";
+import { loadHyperliquidCredential, syncHyperliquidAccount } from "../../server/protocols/hyperliquid.js";
 
 function num(value) {
   return Number(value || 0);
@@ -127,7 +128,6 @@ export default async function handler(req, res) {
 
 async function syncLiveAccounts(supabase, userId, accounts) {
   const bybitAccounts = accounts.filter((account) => account.exchange === "bybit");
-  if (bybitAccounts.length === 0) return;
 
   for (const account of bybitAccounts) {
     try {
@@ -142,6 +142,32 @@ async function syncLiveAccounts(supabase, userId, accounts) {
       await syncBybitAccountToSupabase(supabase, account, credentials);
     } catch (error) {
       console.error(`Bybit sync failed for account ${account.id}`, error);
+      await supabase
+        .from("exchange_accounts")
+        .update({
+          status: "degraded",
+          api_health: "warning"
+        })
+        .eq("id", account.id)
+        .eq("user_id", userId);
+    }
+  }
+
+  const hyperliquidAccounts = accounts.filter((account) => account.exchange === "hyperliquid");
+  for (const account of hyperliquidAccounts) {
+    try {
+      const credential = await loadHyperliquidCredential(supabase, userId, { accountId: account.id });
+      await syncHyperliquidAccount(supabase, account, credential);
+      await supabase
+        .from("exchange_accounts")
+        .update({
+          status: "connected",
+          api_health: "healthy"
+        })
+        .eq("id", account.id)
+        .eq("user_id", userId);
+    } catch (error) {
+      console.error(`Hyperliquid sync failed for account ${account.id}`, error);
       await supabase
         .from("exchange_accounts")
         .update({

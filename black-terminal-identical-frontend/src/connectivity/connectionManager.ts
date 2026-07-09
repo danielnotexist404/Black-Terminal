@@ -64,6 +64,35 @@ export class ConnectionManager {
     return next;
   }
 
+  upsertExternalConnection(connection: ConnectionRecord) {
+    const next: ConnectionRecord = {
+      ...connection,
+      status: connection.status || "connected",
+      health: {
+        ...connection.health,
+        status: connection.status || connection.health.status,
+        lastSuccessfulHeartbeat: Date.now()
+      },
+      createdAt: connection.createdAt || Date.now(),
+      updatedAt: Date.now()
+    };
+
+    this.connections.set(next.id, next);
+    this.emit({
+      type: "connection.established",
+      connectionId: next.id,
+      provider: next.provider,
+      category: next.category,
+      time: Date.now(),
+      health: next.health,
+      diagnostics: this.toDiagnostics(next),
+      message: `${next.label} connected.`
+    });
+    this.startHeartbeat(next.id);
+    this.notify();
+    return next;
+  }
+
   async disconnect(connectionId: string) {
     const connection = this.connections.get(connectionId);
     if (!connection) return;

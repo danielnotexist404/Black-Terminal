@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase";
+import type { ConnectionRecord } from "../connectivity/types";
 import type { ExecutionDestination, ExecutionSource, MarginMode, OrderType, OrderUpdate, SizingMethod } from "../execution/types";
 import type { ExchangeId, MarketKind } from "../market-data/types";
 import type { PortfolioPosition } from "../positions/types";
@@ -61,6 +62,29 @@ export type PortfolioOrderDraft = {
   trailingMode?: "percentage" | "usd" | "ticks" | "atr";
   trailingActivation?: "immediate" | "custom-price" | "offset";
   trailingActivationPrice?: number;
+  internalOrderId?: string;
+  clientOrderId?: string;
+  mainnetConfirmed?: boolean;
+};
+
+export type HyperliquidRelayConnectionDraft = {
+  masterWalletAddress: string;
+  agentPrivateKey: string;
+  network: "testnet" | "mainnet";
+  accountName?: string;
+  mainnetConfirmed?: boolean;
+};
+
+export type HyperliquidSyncPayload = {
+  accountId: string;
+  exchange: "hyperliquid";
+  network: "testnet" | "mainnet";
+  balances: unknown[];
+  positions: unknown[];
+  openOrders: unknown[];
+  fills: unknown[];
+  externalStateChanged: boolean;
+  syncedAt: string;
 };
 
 export async function getPortfolioApiToken() {
@@ -101,7 +125,27 @@ export async function connectExchangeAccountViaApi(draft: ExchangeConnectionDraf
   return mapAccount(data.account);
 }
 
+export async function connectHyperliquidRelayViaApi(draft: HyperliquidRelayConnectionDraft): Promise<ConnectionRecord | null> {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+
+  const response = await fetch("/api/protocols/hyperliquid/connect", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(draft)
+  });
+
+  if (!response.ok) throw new Error(await readApiError(response));
+  const data = await response.json();
+  return data.connection as ConnectionRecord;
+}
+
 export async function submitPortfolioOrderViaApi(draft: PortfolioOrderDraft): Promise<OrderUpdate | null> {
+  if (draft.exchange === "hyperliquid") return submitHyperliquidOrderViaApi(draft);
+
   const token = await getPortfolioApiToken();
   if (!token) return null;
 
@@ -117,6 +161,84 @@ export async function submitPortfolioOrderViaApi(draft: PortfolioOrderDraft): Pr
   if (!response.ok) throw new Error(await readApiError(response));
   const data = await response.json();
   return mapOrder(data.order);
+}
+
+export async function submitHyperliquidOrderViaApi(draft: PortfolioOrderDraft): Promise<OrderUpdate | null> {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+
+  const response = await fetch("/api/protocols/hyperliquid/order", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(draft)
+  });
+
+  if (!response.ok) throw new Error(await readApiError(response));
+  const data = await response.json();
+  return mapOrder(data.report || data.order);
+}
+
+export async function cancelHyperliquidOrderViaApi(draft: {
+  accountId: string;
+  symbol: string;
+  orderId?: string;
+  clientOrderId?: string;
+  mainnetConfirmed?: boolean;
+}): Promise<OrderUpdate | null> {
+  return submitHyperliquidActionViaApi("/api/protocols/hyperliquid/cancel", draft);
+}
+
+export async function modifyHyperliquidOrderViaApi(draft: PortfolioOrderDraft & { orderId?: string }): Promise<OrderUpdate | null> {
+  return submitHyperliquidActionViaApi("/api/protocols/hyperliquid/modify", draft);
+}
+
+export async function closeHyperliquidPositionViaApi(draft: {
+  accountId: string;
+  symbol: string;
+  quantity?: number;
+  referencePrice?: number;
+  mainnetConfirmed?: boolean;
+}): Promise<OrderUpdate | null> {
+  return submitHyperliquidActionViaApi("/api/protocols/hyperliquid/close-position", draft);
+}
+
+export async function syncHyperliquidAccountViaApi(accountId: string): Promise<HyperliquidSyncPayload | null> {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+
+  const response = await fetch("/api/protocols/hyperliquid/sync", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ accountId })
+  });
+
+  if (!response.ok) throw new Error(await readApiError(response));
+  const data = await response.json();
+  return data.sync as HyperliquidSyncPayload;
+}
+
+async function submitHyperliquidActionViaApi(path: string, draft: Record<string, unknown>): Promise<OrderUpdate | null> {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+
+  const response = await fetch(path, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(draft)
+  });
+
+  if (!response.ok) throw new Error(await readApiError(response));
+  const data = await response.json();
+  return mapOrder(data.report);
 }
 
 async function readApiError(response: Response) {

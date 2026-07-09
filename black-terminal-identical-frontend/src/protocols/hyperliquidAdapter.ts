@@ -1,6 +1,7 @@
 import type { ConnectRequest, ConnectionRecord } from "../connectivity/types";
 import { defaultConnectionHealth, defaultPermissionReport } from "../connectivity/types";
 import type { OrderRequest, OrderUpdate } from "../execution/types";
+import { connectHyperliquidRelayViaApi, submitHyperliquidOrderViaApi } from "../portfolio/portfolioApiClient";
 import type { ProtocolAdapter, ProtocolCapabilityProfile } from "./types";
 
 type EthereumProvider = {
@@ -66,6 +67,25 @@ export const hyperliquidProtocolAdapter: ProtocolAdapter = {
     if (!address) throw new Error("MetaMask returned no wallet address for Hyperliquid.");
 
     const profile = await hyperliquidProtocolAdapter.detectCapabilities();
+    const credentials = request.credentials as {
+      agentPrivateKey?: string;
+      network?: "testnet" | "mainnet";
+      accountName?: string;
+      mainnetConfirmed?: boolean;
+    } | undefined;
+
+    if (credentials?.agentPrivateKey && credentials.network) {
+      const relayConnection = await connectHyperliquidRelayViaApi({
+        masterWalletAddress: address,
+        agentPrivateKey: credentials.agentPrivateKey,
+        network: credentials.network,
+        accountName: credentials.accountName || request.label,
+        mainnetConfirmed: credentials.mainnetConfirmed
+      });
+      if (!relayConnection) throw new Error("Supabase session required for Hyperliquid relay onboarding.");
+      return relayConnection;
+    }
+
     return {
       id: `protocol-hyperliquid-${address.toLowerCase()}`,
       adapterId: request.adapterId,
@@ -86,7 +106,7 @@ export const hyperliquidProtocolAdapter: ProtocolAdapter = {
         publicStream: "connected",
         permissions: defaultPermissionReport({
           read: true,
-          trading: true,
+          trading: false,
           withdrawal: false
         })
       }),
@@ -97,6 +117,8 @@ export const hyperliquidProtocolAdapter: ProtocolAdapter = {
         walletAddress: address,
         capabilityProfile: profile,
         executionBridge: "protocol-adapter",
+        executionReady: false,
+        readinessReason: "MetaMask identity is connected. Add an authorized Hyperliquid agent wallet to enable server-side live execution.",
         ...(request.metadata ?? {})
       },
       createdAt: Date.now(),
@@ -114,21 +136,55 @@ export const hyperliquidProtocolAdapter: ProtocolAdapter = {
       status: "connected",
       heartbeat: "ok",
       authentication: "authenticated",
+      permissions: defaultPermissionReport({
+        ...connection.health.permissions,
+        trading: Boolean(connection.metadata.executionReady)
+      }),
       lastSuccessfulHeartbeat: Date.now()
     });
   },
 
-  async executePerpetualOrder(_connection: ConnectionRecord, order: OrderRequest): Promise<OrderUpdate> {
-    return {
-      accountId: order.accountId,
+  async executePerpetualOrder(connection: ConnectionRecord, order: OrderRequest): Promise<OrderUpdate> {
+    if (!connection.metadata.executionReady) {
+      return {
+        accountId: order.accountId,
+        exchange: "hyperliquid",
+        orderId: order.internalOrderId || order.clientOrderId || `hl-blocked-${Date.now()}`,
+        clientOrderId: order.clientOrderId,
+        symbol: order.symbol,
+        status: "rejected",
+        filledQuantity: 0,
+        reason: String(connection.metadata.readinessReason || "Hyperliquid execution relay is not ready."),
+        time: Date.now()
+      };
+    }
+
+    const update = await submitHyperliquidOrderViaApi({
+      accountId: connection.accountId || order.accountId,
       exchange: "hyperliquid",
-      orderId: order.internalOrderId || order.clientOrderId || `hl-${Date.now()}`,
-      clientOrderId: order.clientOrderId,
       symbol: order.symbol,
-      status: "rejected",
-      filledQuantity: 0,
-      reason: "Hyperliquid server-side signing and order relay are not configured yet.",
-      time: Date.now()
-    };
+      marketKind: order.marketKind,
+      side: order.side,
+      orderType: order.type,
+      quantity: order.quantity,
+      sizingMethod: order.sizingMethod,
+      referencePrice: order.referencePrice,
+      limitPrice: order.limitPrice,
+      stopPrice: order.stopPrice,
+      takeProfit: order.takeProfit,
+      stopLoss: order.stopLoss,
+      leverage: order.leverage,
+      marginMode: order.marginMode,
+      postOnly: order.postOnly,
+      reduceOnly: order.reduceOnly,
+      timeInForce: order.timeInForce,
+      source: order.source,
+      destinations: order.destinations,
+      internalOrderId: order.internalOrderId,
+      clientOrderId: order.clientOrderId,
+      mainnetConfirmed: connection.metadata.network === "mainnet" && connection.metadata.mainnetConfirmed === true
+    });
+    if (!update) throw new Error("Supabase session required for Hyperliquid execution.");
+    return update;
   }
 };

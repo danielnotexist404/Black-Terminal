@@ -4,6 +4,9 @@ import { blackCoreConnectionManager } from "../../connectivity/connectionManager
 import { readActiveExecutionVenueId } from "../../connectivity/activeExecutionVenue";
 import type { ConnectionDiagnostics } from "../../connectivity/types";
 import { submitPortfolioOrderViaApi } from "../../portfolio/portfolioApiClient";
+import type { PortfolioAccount } from "../../portfolio/types";
+import { defaultRiskControls } from "../../risk/types";
+import { submitOrder } from "../executionEngine";
 import type { ExecutionDestination, ExecutionSource, MarginMode, OrderSide, OrderType, SizingMethod, TimeInForce } from "../types";
 import type { ExchangeId, MarketKind } from "../../market-data/types";
 import { blackCorePositionManager } from "../../positions/positionManager";
@@ -110,12 +113,12 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
       setStatus(reason.toUpperCase());
       return;
     }
-    if (selectedConnection.category === "protocol") {
-      setStatus(`${selectedConnection.label.toUpperCase()} CONNECTED. LIVE ORDERS REQUIRE SERVER-SIDE SIGNING RELAY.`);
-      return;
-    }
     if (!selectedConnection.accountId) {
       setStatus("CONNECTED VENUE HAS NO BROKER ACCOUNT ID");
+      return;
+    }
+    if (selectedConnection.category === "protocol" && selectedConnection.metadata.executionReady !== true) {
+      setStatus(String(selectedConnection.metadata.readinessReason || "PROTOCOL RELAY IS NOT READY").toUpperCase());
       return;
     }
     if (!parsedQuantity || parsedQuantity <= 0) {
@@ -128,7 +131,7 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
     }
 
     try {
-      const update = await submitPortfolioOrderViaApi({
+      const draft = {
         accountId: selectedConnection.accountId,
         exchange: selectedConnection.provider as ExchangeId,
         symbol: preset.symbol.toUpperCase(),
@@ -155,7 +158,31 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
         trailingActivationPrice: Number(trailingActivationPrice || 0) || undefined,
         source: preset.source,
         destinations
-      });
+      };
+      const update = selectedConnection.category === "protocol"
+        ? await submitOrder({
+            accountId: draft.accountId,
+            exchange: draft.exchange,
+            symbol: draft.symbol,
+            marketKind: draft.marketKind,
+            side: draft.side,
+            type: draft.orderType,
+            quantity: draft.quantity,
+            sizingMethod: draft.sizingMethod,
+            limitPrice: draft.limitPrice,
+            stopPrice: draft.stopPrice,
+            referencePrice: draft.referencePrice,
+            leverage: draft.leverage,
+            marginMode: draft.marginMode,
+            takeProfit: draft.takeProfit,
+            stopLoss: draft.stopLoss,
+            reduceOnly: draft.reduceOnly,
+            postOnly: draft.postOnly,
+            timeInForce: draft.timeInForce,
+            source: draft.source,
+            destinations: draft.destinations
+          }, buildExecutionAccount(selectedConnection), Number(price || stopPrice || 1) || 1)
+        : await submitPortfolioOrderViaApi(draft);
       if (preset.positionId && preset.protectionIntent) {
         if (preset.protectionIntent === "take-profit" && Number(takeProfit)) {
           blackCorePositionManager.setProtection(preset.positionId, "take-profit", { price: Number(takeProfit), metadata: { source: "unified-ticket" } });
@@ -239,7 +266,7 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
 
         <div className="unified-execution-matrix">
           <div><span>Validation Status</span><b>{selectedConnection && Number(quantity) > 0 ? "READY" : "PENDING"}</b></div>
-          <div><span>Risk Status</span><b>{selectedConnection?.category === "wallet" ? "ROUTER REQUIRED" : selectedConnection?.category === "protocol" ? "RELAY REQUIRED" : "SERVER CHECK"}</b></div>
+          <div><span>Risk Status</span><b>{selectedConnection?.category === "wallet" ? "ROUTER REQUIRED" : selectedConnection?.category === "protocol" ? selectedConnection.metadata.executionReady === true ? "SERVER CHECK" : "RELAY BLOCKED" : "SERVER CHECK"}</b></div>
           <div><span>Execution Status</span><b>{status || "NOT SUBMITTED"}</b></div>
         </div>
 
@@ -258,4 +285,31 @@ function formatConnectionOption(connection: ConnectionDiagnostics) {
     return `${connection.label} / ${address} / ${connection.status.toUpperCase()} / ${latency}`;
   }
   return `${connection.label} / ${connection.provider.toUpperCase()} / ${connection.status.toUpperCase()} / ${latency}`;
+}
+
+function buildExecutionAccount(connection: ConnectionDiagnostics): PortfolioAccount {
+  return {
+    id: connection.accountId || connection.id,
+    exchange: connection.provider as ExchangeId,
+    label: connection.label,
+    accountName: connection.label,
+    permissions: ["read-account", "read-orders", "read-positions", "place-orders", "cancel-orders", "modify-orders", "withdraw-disabled"],
+    isPaper: false,
+    connectedAt: connection.createdAt,
+    lastValidatedAt: connection.updatedAt,
+    status: connection.status === "connected" ? "connected" : "degraded",
+    apiHealth: connection.metadata.executionReady === true ? "healthy" : "warning",
+    latencyMs: connection.health.latencyMs,
+    balanceUsd: 0,
+    equityUsd: 0,
+    marginUsed: 0,
+    availableMargin: 0,
+    buyingPower: 0,
+    leverage: 1,
+    dailyPnl: 0,
+    monthlyPnl: 0,
+    openPositions: 0,
+    openOrders: 0,
+    riskControls: defaultRiskControls
+  };
 }

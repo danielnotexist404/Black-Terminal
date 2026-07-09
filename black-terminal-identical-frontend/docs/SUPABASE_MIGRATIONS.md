@@ -291,3 +291,222 @@ create policy "position_timeline_insert_own"
   on public.position_timeline_events for insert
   with check (auth.uid() = user_id);
 ```
+
+## 2026-07-09 - Hyperliquid Server-Side Execution Relay
+
+Status: Required for Phase III Chapter V.
+
+Purpose:
+
+- Store encrypted Hyperliquid agent/API wallet credentials.
+- Keep agent wallet nonces atomic per signer and network.
+- Persist relay audit events.
+- Persist account sync snapshots for reconciliation.
+- Surface execution readiness through `connectivity_connections.metadata`.
+
+SQL:
+
+```sql
+create extension if not exists pgcrypto;
+
+create table if not exists public.hyperliquid_credentials (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  account_id uuid not null references public.exchange_accounts(id) on delete cascade,
+  connection_id uuid references public.connectivity_connections(id) on delete set null,
+  master_wallet_address text not null,
+  agent_wallet_address text not null,
+  encrypted_agent_private_key text not null,
+  network text not null check (network in ('mainnet','testnet')),
+  status text not null default 'pending_authorization'
+    check (status in ('active','pending_authorization','rotated','revoked','failed')),
+  readiness_reason text,
+  vault_address text,
+  key_version integer not null default 1,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  last_used_at timestamptz
+);
+
+create index if not exists idx_hyperliquid_credentials_user_status
+  on public.hyperliquid_credentials(user_id, status);
+
+create index if not exists idx_hyperliquid_credentials_account
+  on public.hyperliquid_credentials(account_id);
+
+create index if not exists idx_hyperliquid_credentials_connection
+  on public.hyperliquid_credentials(connection_id);
+
+create index if not exists idx_hyperliquid_credentials_agent
+  on public.hyperliquid_credentials(agent_wallet_address, network);
+
+alter table public.hyperliquid_credentials enable row level security;
+
+create policy "hyperliquid_credentials_select_own"
+  on public.hyperliquid_credentials for select
+  using (auth.uid() = user_id);
+
+create policy "hyperliquid_credentials_insert_own"
+  on public.hyperliquid_credentials for insert
+  with check (auth.uid() = user_id);
+
+create policy "hyperliquid_credentials_update_own"
+  on public.hyperliquid_credentials for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create policy "hyperliquid_credentials_delete_own"
+  on public.hyperliquid_credentials for delete
+  using (auth.uid() = user_id);
+
+create table if not exists public.hyperliquid_nonce_state (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  credential_id uuid not null references public.hyperliquid_credentials(id) on delete cascade,
+  agent_wallet_address text not null,
+  network text not null check (network in ('mainnet','testnet')),
+  last_nonce bigint not null default 0,
+  updated_at timestamptz not null default now(),
+  unique(agent_wallet_address, network)
+);
+
+create index if not exists idx_hyperliquid_nonce_user
+  on public.hyperliquid_nonce_state(user_id);
+
+create index if not exists idx_hyperliquid_nonce_credential
+  on public.hyperliquid_nonce_state(credential_id);
+
+alter table public.hyperliquid_nonce_state enable row level security;
+
+create policy "hyperliquid_nonce_select_own"
+  on public.hyperliquid_nonce_state for select
+  using (auth.uid() = user_id);
+
+create policy "hyperliquid_nonce_insert_own"
+  on public.hyperliquid_nonce_state for insert
+  with check (auth.uid() = user_id);
+
+create policy "hyperliquid_nonce_update_own"
+  on public.hyperliquid_nonce_state for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create or replace function public.next_hyperliquid_nonce(
+  p_user_id uuid,
+  p_credential_id uuid,
+  p_agent_wallet_address text,
+  p_network text
+)
+returns bigint
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_now bigint := floor(extract(epoch from clock_timestamp()) * 1000)::bigint;
+  v_next bigint;
+begin
+  if p_network not in ('mainnet','testnet') then
+    raise exception 'invalid hyperliquid network';
+  end if;
+
+  insert into public.hyperliquid_nonce_state (
+    user_id,
+    credential_id,
+    agent_wallet_address,
+    network,
+    last_nonce,
+    updated_at
+  )
+  values (
+    p_user_id,
+    p_credential_id,
+    lower(p_agent_wallet_address),
+    p_network,
+    v_now,
+    now()
+  )
+  on conflict (agent_wallet_address, network)
+  do update set
+    user_id = excluded.user_id,
+    credential_id = excluded.credential_id,
+    last_nonce = greatest(public.hyperliquid_nonce_state.last_nonce + 1, floor(extract(epoch from clock_timestamp()) * 1000)::bigint),
+    updated_at = now()
+  returning last_nonce into v_next;
+
+  return v_next;
+end;
+$$;
+
+grant execute on function public.next_hyperliquid_nonce(uuid, uuid, text, text) to authenticated;
+grant execute on function public.next_hyperliquid_nonce(uuid, uuid, text, text) to service_role;
+
+create table if not exists public.hyperliquid_order_relay_events (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  account_id uuid references public.exchange_accounts(id) on delete set null,
+  connection_id uuid references public.connectivity_connections(id) on delete set null,
+  credential_id uuid references public.hyperliquid_credentials(id) on delete set null,
+  event_type text not null,
+  severity text not null default 'info' check (severity in ('info','warning','error')),
+  symbol text,
+  order_id text,
+  client_order_id text,
+  exchange_order_id text,
+  latency_ms integer,
+  message text not null,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_hyperliquid_relay_events_user_time
+  on public.hyperliquid_order_relay_events(user_id, created_at desc);
+
+create index if not exists idx_hyperliquid_relay_events_account_time
+  on public.hyperliquid_order_relay_events(account_id, created_at desc);
+
+create index if not exists idx_hyperliquid_relay_events_order
+  on public.hyperliquid_order_relay_events(order_id, client_order_id, exchange_order_id);
+
+alter table public.hyperliquid_order_relay_events enable row level security;
+
+create policy "hyperliquid_relay_events_select_own"
+  on public.hyperliquid_order_relay_events for select
+  using (auth.uid() = user_id);
+
+create policy "hyperliquid_relay_events_insert_own"
+  on public.hyperliquid_order_relay_events for insert
+  with check (auth.uid() = user_id);
+
+create table if not exists public.hyperliquid_account_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  account_id uuid not null references public.exchange_accounts(id) on delete cascade,
+  credential_id uuid references public.hyperliquid_credentials(id) on delete set null,
+  network text not null check (network in ('mainnet','testnet')),
+  master_wallet_address text not null,
+  margin_summary jsonb not null default '{}'::jsonb,
+  cross_margin_summary jsonb not null default '{}'::jsonb,
+  positions jsonb not null default '[]'::jsonb,
+  open_orders jsonb not null default '[]'::jsonb,
+  fills jsonb not null default '[]'::jsonb,
+  raw_payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_hyperliquid_snapshots_user_time
+  on public.hyperliquid_account_snapshots(user_id, created_at desc);
+
+create index if not exists idx_hyperliquid_snapshots_account_time
+  on public.hyperliquid_account_snapshots(account_id, created_at desc);
+
+alter table public.hyperliquid_account_snapshots enable row level security;
+
+create policy "hyperliquid_snapshots_select_own"
+  on public.hyperliquid_account_snapshots for select
+  using (auth.uid() = user_id);
+
+create policy "hyperliquid_snapshots_insert_own"
+  on public.hyperliquid_account_snapshots for insert
+  with check (auth.uid() = user_id);
+```

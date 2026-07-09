@@ -22,6 +22,7 @@ Every meaningful platform change must update documentation in the same work cycl
 - `PHASE3_CHAPTER2_OMS_EMS.md` - OMS / EMS foundation.
 - `PHASE_III_CONNECTIVITY_INVESTIGATION.md` - Connection Manager, MetaMask futures, and ticket synchronization investigation.
 - `PHASE3_CHAPTER4_POSITION_LIFECYCLE.md` - Position Lifecycle Engine, protection layer, context-aware chart, and protocol framework.
+- `PHASE3_CHAPTER5_HYPERLIQUID_RELAY.md` - Hyperliquid server-side signing relay, credential model, nonce manager, and testnet-first execution flow.
 
 ## Specialist Docs
 

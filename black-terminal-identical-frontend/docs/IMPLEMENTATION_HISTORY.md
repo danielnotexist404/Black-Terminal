@@ -7,6 +7,7 @@ This file records what has been built so far and what must be recorded going for
 Recent pushed commits:
 
 - Current - Implement Phase III Chapter IV position lifecycle foundation.
+- Current - Implement Hyperliquid execution relay routes.
 - `6d57492` - Implement Phase III connectivity source of truth.
 - `d34b423` - Implement Phase III OMS EMS foundation.
 - `17e183b` - Implement Phase III portfolio role separation.
@@ -243,6 +244,43 @@ Remaining:
 Docs:
 
 - `PHASE3_CHAPTER4_POSITION_LIFECYCLE.md`
+
+## Phase III Chapter 5: Hyperliquid Server-Side Execution Relay
+
+Status: Implemented route foundation, pending Supabase migration application and testnet validation
+
+Changed:
+
+- Added Hyperliquid SDK and `viem` local-account signing support.
+- Added server relay helper for encrypted agent credentials, metadata validation, nonce RPC usage, order signing, cancel, modify, close-position, and account sync.
+- Added Vercel API routes:
+  - `/api/protocols/hyperliquid/connect`
+  - `/api/protocols/hyperliquid/order`
+  - `/api/protocols/hyperliquid/cancel`
+  - `/api/protocols/hyperliquid/modify`
+  - `/api/protocols/hyperliquid/close-position`
+  - `/api/protocols/hyperliquid/sync`
+- Updated Hyperliquid onboarding to require MetaMask identity plus an authorized agent/API wallet.
+- Updated Connection Manager to ingest backend-created protocol connections as the single runtime source of truth.
+- Updated Protocol Router and EMS broker routing so ready Hyperliquid protocol accounts execute through OMS -> EMS -> Protocol Router -> relay.
+- Updated Unified Execution Ticket and position TP/SL actions to route Hyperliquid orders through the protocol execution path.
+- Added testnet-first behavior and fail-closed mainnet requirements.
+
+Why:
+
+- MetaMask alone is only identity/signing context. Live Hyperliquid futures execution requires server-side agent-wallet signing against the Hyperliquid `/exchange` endpoint.
+- The frontend must never sign protocol trading actions with raw private keys or store agent credentials in browser storage.
+
+Validation:
+
+- `npm run build` must pass before this chapter is pushed.
+
+Remaining:
+
+- Apply the Chapter V Supabase migration.
+- Configure server environment variables.
+- Validate testnet connect, order, cancel, modify, close-position, and sync flows with an approved Hyperliquid agent wallet.
+- Keep mainnet disabled until testnet flow is confirmed end to end.
 
 ## Future Work Log
 

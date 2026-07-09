@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getPublicMarketDataAdapter } from "../market-data/exchangeRegistry";
+import { getMarketDataEngineAdapter } from "../market-data/engine/marketDataEngine";
 import { MarketDataSubscription, MarketSymbol, TradeTick } from "../market-data/types";
 
 type TradesTapeProps = {
@@ -33,7 +33,7 @@ export function TradesTape({ marketSymbol, exchangeLabel }: TradesTapeProps) {
     let disposed = false;
     const seenTrades = new Set<string>();
     const seenTradeOrder: string[] = [];
-    const adapter = getPublicMarketDataAdapter(marketSymbol.exchange);
+    const adapter = getMarketDataEngineAdapter(marketSymbol.exchange);
 
     const pushTrades = (nextTrades: TradeTick[], status: string) => {
       const unseen = nextTrades.filter((trade) => {
@@ -108,13 +108,7 @@ export function TradesTape({ marketSymbol, exchangeLabel }: TradesTapeProps) {
         TRADES TAPE <span>{status}</span>
       </div>
       {trades.length === 0
-        ? Array.from({ length: 10 }).map((_, index) => (
-            <div className="tape-row" key={index}>
-              <span className={index < 5 ? "red" : "green"}>...</span>
-              <span>...</span>
-              <span>...</span>
-            </div>
-          ))
+        ? <div className="tape-empty">Trade stream unavailable for this venue.</div>
         : trades.map((trade) => (
             <div className="tape-row" key={trade.tradeId}>
               <span className={trade.side === "sell" ? "red" : "green"}>{formatPrice(trade.price)}</span>

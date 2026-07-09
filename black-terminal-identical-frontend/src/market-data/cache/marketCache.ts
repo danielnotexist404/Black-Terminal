@@ -59,6 +59,19 @@ export class MarketCache {
     return this.orderBooks.get(`${symbol.exchange}:${symbol.rawSymbol}`);
   }
 
+  diagnostics() {
+    return {
+      candles: this.candles.size,
+      trades: this.trades.size,
+      tickers: this.tickers.size,
+      orderBooks: this.orderBooks.size,
+      funding: this.funding.size,
+      openInterest: this.openInterest.size,
+      markPrices: this.markPrices.size,
+      totalKeys: this.candles.size + this.trades.size + this.tickers.size + this.orderBooks.size + this.funding.size + this.openInterest.size + this.markPrices.size
+    };
+  }
+
   setFunding(rate: FundingRate) {
     this.funding.set(`${rate.exchange}:${rate.symbol}`, rate);
   }

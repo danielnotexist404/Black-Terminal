@@ -940,3 +940,17 @@ create policy "notification_events_update_own"
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 ```
+
+## 2026-07-09 - DOM Pro+
+
+Status: No Supabase migration required.
+
+Reason:
+
+- DOM Pro+ currently persists settings in local browser storage per workspace and symbol.
+- It consumes live orderbook, trade, and ticker data from the Black Core Market Data Engine.
+- It does not introduce user-owned server records, credentials, audit tables, or permission tables yet.
+
+Future migration trigger:
+
+- Add a Supabase migration only if DOM layouts, detached window geometry, DOM presets, heatmap history, or cross-device order-flow workspaces need server persistence.

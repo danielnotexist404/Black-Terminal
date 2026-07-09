@@ -19,7 +19,17 @@ import { WebSocketManager } from "../websocket/webSocketManager";
 
 export type MarketDataDiagnostics = {
   websocket: ReturnType<WebSocketManager["diagnostics"]>;
-  cacheKeys: number;
+  cache: ReturnType<MarketCache["diagnostics"]>;
+  sharedSubscriptions: {
+    orderBooks: number;
+    trades: number;
+  };
+};
+
+type SharedSubscription<T> = {
+  source: MarketDataSubscription<T>;
+  handlers: Set<(message: T) => void>;
+  errorHandlers: Set<(error: Error) => void>;
 };
 
 export class MarketDataEngine {
@@ -27,6 +37,8 @@ export class MarketDataEngine {
   readonly websockets = new WebSocketManager();
   readonly aggregator = new CandleAggregationEngine();
   private adapterFacades = new Map<ExchangeId, MarketDataAdapter>();
+  private orderBookSubscriptions = new Map<string, SharedSubscription<OrderBookSnapshot>>();
+  private tradeSubscriptions = new Map<string, SharedSubscription<TradeTick>>();
 
   getAdapter(exchange: ExchangeId): MarketDataAdapter {
     const existing = this.adapterFacades.get(exchange);
@@ -41,7 +53,11 @@ export class MarketDataEngine {
   diagnostics(): MarketDataDiagnostics {
     return {
       websocket: this.websockets.diagnostics(),
-      cacheKeys: 0
+      cache: this.cache.diagnostics(),
+      sharedSubscriptions: {
+        orderBooks: this.orderBookSubscriptions.size,
+        trades: this.tradeSubscriptions.size
+      }
     };
   }
 
@@ -99,24 +115,87 @@ export class MarketDataEngine {
           }
         : undefined,
       subscribeTrades: source.subscribeTrades
-        ? (symbol: MarketSymbol, onTrade: (trade: TradeTick) => void) => {
-            return source.subscribeTrades?.(symbol, (trade) => {
-              this.cache.appendTrade(trade);
-              blackCoreEventBus.publish("trade.received", trade);
-              onTrade(trade);
-            }) as MarketDataSubscription<TradeTick>;
-          }
+        ? (symbol: MarketSymbol, onTrade: (trade: TradeTick) => void) => this.subscribeSharedTrade(source, symbol, onTrade)
         : undefined,
       subscribeOrderBook: source.subscribeOrderBook
-        ? (symbol: MarketSymbol, onBook: (book: OrderBookSnapshot) => void) => {
-            return source.subscribeOrderBook?.(symbol, (book) => {
-              this.cache.setOrderBook(book);
-              blackCoreEventBus.publish("orderbook.updated", book);
-              onBook(book);
-            }) as MarketDataSubscription<OrderBookSnapshot>;
-          }
+        ? (symbol: MarketSymbol, onBook: (book: OrderBookSnapshot) => void) => this.subscribeSharedOrderBook(source, symbol, onBook)
         : undefined
     };
+  }
+
+  private subscribeSharedTrade(source: MarketDataAdapter, symbol: MarketSymbol, onTrade: (trade: TradeTick) => void): MarketDataSubscription<TradeTick> {
+    const key = this.subscriptionKey(source.id, symbol, "trades");
+    let shared = this.tradeSubscriptions.get(key);
+
+    if (!shared) {
+      const handlers = new Set<(message: TradeTick) => void>();
+      const errorHandlers = new Set<(error: Error) => void>();
+      const sourceSubscription = source.subscribeTrades?.(symbol, (trade) => {
+              this.cache.appendTrade(trade);
+              blackCoreEventBus.publish("trade.received", trade);
+        handlers.forEach((handler) => handler(trade));
+      }) as MarketDataSubscription<TradeTick>;
+      sourceSubscription.onError((error) => errorHandlers.forEach((handler) => handler(error)));
+      shared = { source: sourceSubscription, handlers, errorHandlers };
+      this.tradeSubscriptions.set(key, shared);
+    }
+
+    return this.attachSharedSubscription(this.tradeSubscriptions, key, shared, onTrade);
+  }
+
+  private subscribeSharedOrderBook(source: MarketDataAdapter, symbol: MarketSymbol, onBook: (book: OrderBookSnapshot) => void): MarketDataSubscription<OrderBookSnapshot> {
+    const key = this.subscriptionKey(source.id, symbol, "orderbook");
+    let shared = this.orderBookSubscriptions.get(key);
+
+    if (!shared) {
+      const handlers = new Set<(message: OrderBookSnapshot) => void>();
+      const errorHandlers = new Set<(error: Error) => void>();
+      const sourceSubscription = source.subscribeOrderBook?.(symbol, (book) => {
+              this.cache.setOrderBook(book);
+              blackCoreEventBus.publish("orderbook.updated", book);
+        handlers.forEach((handler) => handler(book));
+      }) as MarketDataSubscription<OrderBookSnapshot>;
+      sourceSubscription.onError((error) => errorHandlers.forEach((handler) => handler(error)));
+      shared = { source: sourceSubscription, handlers, errorHandlers };
+      this.orderBookSubscriptions.set(key, shared);
+    }
+
+    return this.attachSharedSubscription(this.orderBookSubscriptions, key, shared, onBook);
+  }
+
+  private attachSharedSubscription<T>(
+    registry: Map<string, SharedSubscription<T>>,
+    key: string,
+    shared: SharedSubscription<T>,
+    handler: (message: T) => void
+  ): MarketDataSubscription<T> {
+    const ownedHandlers = new Set<(message: T) => void>([handler]);
+    const localErrorHandlers = new Set<(error: Error) => void>();
+    const errorBridge = (error: Error) => localErrorHandlers.forEach((item) => item(error));
+    shared.handlers.add(handler);
+    shared.errorHandlers.add(errorBridge);
+
+    return {
+      unsubscribe: () => {
+        ownedHandlers.forEach((ownedHandler) => shared.handlers.delete(ownedHandler));
+        shared.errorHandlers.delete(errorBridge);
+        if (shared.handlers.size === 0) {
+          shared.source.unsubscribe();
+          registry.delete(key);
+        }
+      },
+      onMessage: (nextHandler) => {
+        ownedHandlers.add(nextHandler);
+        shared.handlers.add(nextHandler);
+      },
+      onError: (nextHandler) => {
+        localErrorHandlers.add(nextHandler);
+      }
+    };
+  }
+
+  private subscriptionKey(exchange: ExchangeId, symbol: MarketSymbol, stream: string) {
+    return [exchange, symbol.marketKind, symbol.rawSymbol, stream].join(":");
   }
 }
 

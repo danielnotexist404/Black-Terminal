@@ -7,6 +7,7 @@ This file records what has been built so far and what must be recorded going for
 Recent pushed commits:
 
 - Current - Consolidate Vercel API route dispatchers for production deploy.
+- Current - Implement Phase III Chapter VI DOM Pro+ cockpit.
 - Current - Implement Phase IV professional network foundation.
 - Current - Implement Phase III Chapter IV position lifecycle foundation.
 - Current - Implement Hyperliquid execution relay routes.
@@ -41,6 +42,38 @@ Validation:
 - `npm run build` passes.
 - `vercel build --yes` passes locally.
 - Generated Vercel output now contains 10 API functions instead of 20.
+
+## Phase III Chapter VI: DOM Pro+
+
+Status: Implemented frontend foundation
+
+Changed:
+
+- Added Black Core module registry and window/dock manager scaffolding.
+- Added DOM Pro+ as a detachable/expanded module.
+- Added shared Market Data Engine subscription multiplexing for orderbook and trade streams.
+- Added shared DOM Feed Store consumed by compact DOM and DOM Pro+.
+- Removed fake compact DOM liquidity fallback.
+- Added DOM Aggregation Engine with bucket multipliers from 1x through 1000x, DOM modes, visible range settings, wall detection, pulling/stacking, absorption heuristic, iceberg probability heuristic, liquidity delta, heatmap history, CVD input tracking, metrics, and render diagnostics.
+- Added persistent local DOM settings per workspace and symbol.
+- Added DOM Pro+ panels for aggregated ladder, DOM-aligned volume profile, liquidity heatmap, wall detection, trade tape, metrics, depth chart, liquidity flow delta, CVD, diagnostics, and quick execution.
+- DOM quick execution routes through the existing `submitOrder` OMS/EMS path.
+- Compact DOM can open DOM Pro+ from a right-click/header menu and hides while DOM Pro+ is open.
+
+Why:
+
+- The right-side DOM needed to become a professional order-flow cockpit without opening duplicate exchange WebSocket feeds or bypassing OMS/EMS.
+- Black Terminal must distinguish real market structure from decorative/fake liquidity.
+
+Validation:
+
+- `npm run build` passes.
+
+Remaining:
+
+- True separate browser popout still needs a shared worker or BroadcastChannel feed bridge to preserve the no-duplicate-feed rule across windows.
+- Worker/Rust aggregation offload remains future work.
+- No Supabase migration is required until DOM layouts/settings need server persistence.
 
 ## Phase IV Professional Network Foundation
 

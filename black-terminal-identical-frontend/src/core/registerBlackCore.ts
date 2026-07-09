@@ -9,6 +9,7 @@ import { blackCorePortfolioService } from "../portfolio/portfolioService";
 import { blackCorePositionManager } from "../positions/positionManager";
 import { PerformanceMonitor } from "../performance/performanceMonitor";
 import { blackCoreWalletFramework } from "../wallets/walletFramework";
+import { registerDomProModule } from "../modules/dom-pro";
 
 let registered = false;
 
@@ -16,6 +17,7 @@ export function registerBlackCoreServices() {
   if (registered) return;
   registered = true;
   registerConnectivityAdapters();
+  registerDomProModule();
 
   registerBlackCoreService("connections", blackCoreConnectionManager);
   registerBlackCoreService("marketData", blackCoreMarketDataEngine);

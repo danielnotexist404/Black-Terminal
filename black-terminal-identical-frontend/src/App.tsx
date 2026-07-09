@@ -65,6 +65,7 @@ import { StrategyLabPage } from "./modules/strategy-lab/components/StrategyLabPa
 import PortfolioManagerPage, { PositionsWorkspace } from "./modules/portfolio-manager/components/PortfolioManagerPage";
 import { ProfilePage } from "./modules/profile/components/ProfilePage";
 import { InvestmentGroupsPage } from "./modules/investment-groups/components/InvestmentGroupsPage";
+import { DomProWindow } from "./modules/dom-pro";
 import { getPortfolioSnapshot } from "./portfolio/portfolioStore";
 import type { PortfolioPosition } from "./positions/types";
 import type { PortfolioSnapshot } from "./portfolio/types";
@@ -90,6 +91,8 @@ import { blackCoreConnectionManager } from "./connectivity/connectionManager";
 import { readActiveExecutionVenueId, subscribeActiveExecutionVenue } from "./connectivity/activeExecutionVenue";
 import type { ConnectionDiagnostics } from "./connectivity/types";
 import type { CapabilityUser, ProductTier, TerminalCapability } from "./core/permissions/capabilities";
+import { blackCoreWindowDockManager } from "./core/windows/windowDockManager";
+import type { BlackCoreModuleMode } from "./core/modules/moduleRegistry";
 
 const nav = [
   { label: "WATCHLIST", icon: BookOpen },
@@ -406,6 +409,20 @@ export default function App() {
       enabledTimeframes: ["1m", "5m", "15m", "1h", "4h", "1d"]
     };
   });
+  const [domProOpen, setDomProOpen] = useState(false);
+  const showCompactDom = terminalSettings.showDOM && !domProOpen;
+
+  useEffect(() => blackCoreWindowDockManager.subscribe((windows) => {
+    setDomProOpen(Boolean(windows.find((windowState) => windowState.moduleId === "dom-pro" && windowState.isOpen)));
+  }), []);
+
+  const openDomPro = useCallback((mode: BlackCoreModuleMode = "expanded") => {
+    blackCoreWindowDockManager.open("dom-pro", "DOM Pro+", mode);
+  }, []);
+
+  const closeDomPro = useCallback(() => {
+    blackCoreWindowDockManager.close("dom-pro");
+  }, []);
 
   // Bootstrap Database
   useEffect(() => {
@@ -1722,7 +1739,7 @@ export default function App() {
           <InvestmentGroupsPage currentUser={currentUser} onClose={() => setActiveNav("CHART")} />
         </div>
       ) : (
-        <main className={terminalSettings.showDOM ? "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>
+        <main className={showCompactDom ? "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>
         <section className={drawingsEnabled ? "chart-panel drawing-tools-open" : "chart-panel"}>
           <PixiBlackChart
             marketSymbol={symbol}
@@ -1864,9 +1881,15 @@ export default function App() {
             </div>
           )}
         </section>
-        {terminalSettings.showDOM && (
+        {showCompactDom && (
           <aside className="right-panel">
-            <OrderBook marketSymbol={symbol} lastPrice={lastPrice} exchangeLabel={selectedExchange.label} />
+            <OrderBook
+              marketSymbol={symbol}
+              lastPrice={lastPrice}
+              exchangeLabel={selectedExchange.label}
+              onOpenDomPro={openDomPro}
+              onResetDomLayout={() => setLayout((current) => ({ ...current, rightPanelWidth: 366, rightTopHeight: 420, rightStatsWidth: 170 }))}
+            />
             <div className="right-stack-resizer" onPointerDown={(event) => startLayoutResize("rightTop", event)} />
             <div className="right-bottom">
               <MarketStats />
@@ -1899,7 +1922,16 @@ export default function App() {
             <div className="bottom-blank" />
           )}
         </section>
-        {terminalSettings.showDOM && (
+        {domProOpen && (
+          <DomProWindow
+            marketSymbol={symbol}
+            lastPrice={lastPrice}
+            exchangeLabel={selectedExchange.label}
+            workspaceId={workspace}
+            onClose={closeDomPro}
+          />
+        )}
+        {showCompactDom && (
           <div className="layout-resizer resize-main-x" onPointerDown={(event) => startLayoutResize("right", event)} />
         )}
         <div className="layout-resizer resize-main-y" onPointerDown={(event) => startLayoutResize("bottom", event)} />

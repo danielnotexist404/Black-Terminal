@@ -1,19 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import { getPublicMarketDataAdapter } from "../market-data/exchangeRegistry";
 import {
-  MarketDataSubscription,
   MarketSymbol,
   OrderBookLevel,
   OrderBookSnapshot,
   TickerSnapshot,
   TradeTick
 } from "../market-data/types";
+import { useDomFeed } from "../modules/dom-pro/useDomFeed";
 
 type OrderBookProps = {
   marketSymbol: MarketSymbol;
   lastPrice: number;
   exchangeLabel: string;
+  onOpenDomPro?: (mode?: "expanded" | "detached-browser") => void;
+  onResetDomLayout?: () => void;
 };
 
 type BookRow = OrderBookLevel & {
@@ -28,23 +29,6 @@ type BookEnergyStyle = CSSProperties & {
 };
 
 const tabs: ActiveBookTab[] = ["DOM", "ORDER BOOK", "TRADES", "TICKER"];
-
-function fallbackBook(marketSymbol: MarketSymbol, price: number): OrderBookSnapshot {
-  const center = Number.isFinite(price) && price > 0 ? price : 66678.1;
-  return {
-    exchange: marketSymbol.exchange,
-    symbol: marketSymbol.rawSymbol,
-    time: Math.floor(Date.now() / 1000),
-    asks: Array.from({ length: 20 }).map((_, index) => ({
-      price: center + 0.4 + index * 0.4,
-      quantity: 4.2 + index * 0.72
-    })),
-    bids: Array.from({ length: 20 }).map((_, index) => ({
-      price: center - 0.4 - index * 0.4,
-      quantity: 5.6 + index * 0.79
-    }))
-  };
-}
 
 function withTotals(levels: OrderBookLevel[]) {
   let running = 0;
@@ -96,7 +80,7 @@ function signed(value?: number, suffix = "") {
 
 function toTickerFallback(
   marketSymbol: MarketSymbol,
-  book: OrderBookSnapshot,
+  book: OrderBookSnapshot | null,
   trades: TradeTick[],
   lastPrice: number
 ): TickerSnapshot {
@@ -104,178 +88,33 @@ function toTickerFallback(
   return {
     exchange: marketSymbol.exchange,
     symbol: marketSymbol.rawSymbol,
-    time: lastTrade?.time ?? book.time,
+    time: lastTrade?.time ?? book?.time ?? Math.floor(Date.now() / 1000),
     lastPrice: lastTrade?.price ?? lastPrice,
-    bidPrice: book.bids[0]?.price,
-    askPrice: book.asks[0]?.price,
-    bidQuantity: book.bids[0]?.quantity,
-    askQuantity: book.asks[0]?.quantity
+    bidPrice: book?.bids[0]?.price,
+    askPrice: book?.asks[0]?.price,
+    bidQuantity: book?.bids[0]?.quantity,
+    askQuantity: book?.asks[0]?.quantity
   };
 }
 
-export function OrderBook({ marketSymbol, lastPrice, exchangeLabel }: OrderBookProps) {
-  const [book, setBook] = useState<OrderBookSnapshot>(() => fallbackBook(marketSymbol, lastPrice));
-  const [trades, setTrades] = useState<TradeTick[]>([]);
-  const [ticker, setTicker] = useState<TickerSnapshot | null>(null);
-  const [bookStatus, setBookStatus] = useState("CONNECTING");
-  const [tradeStatus, setTradeStatus] = useState("CONNECTING");
-  const [tickerStatus, setTickerStatus] = useState("CONNECTING");
+export function OrderBook({ marketSymbol, lastPrice, exchangeLabel, onOpenDomPro, onResetDomLayout }: OrderBookProps) {
+  const feed = useDomFeed(marketSymbol);
+  const book = feed.book;
+  const trades = feed.trades;
+  const ticker = feed.ticker;
+  const bookStatus = feed.bookStatus;
+  const tradeStatus = feed.tradeStatus;
+  const tickerStatus = feed.tickerStatus;
   const [activeTab, setActiveTab] = useState<ActiveBookTab>("DOM");
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 
-  useEffect(() => {
-    let bookSubscription: MarketDataSubscription<OrderBookSnapshot> | undefined;
-    let tradeSubscription: MarketDataSubscription<TradeTick> | undefined;
-    let bookPollTimer: number | undefined;
-    let tradePollTimer: number | undefined;
-    let tickerPollTimer: number | undefined;
-    let disposed = false;
-    const seenTrades = new Set<string>();
-    const seenTradeOrder: string[] = [];
-    const adapter = getPublicMarketDataAdapter(marketSymbol.exchange);
-
-    setBookStatus("CONNECTING");
-    setTradeStatus("CONNECTING");
-    setTickerStatus("CONNECTING");
-    setBook(fallbackBook(marketSymbol, lastPrice));
-    setTrades([]);
-    setTicker(null);
-
-    const pushTrades = (nextTrades: TradeTick[], status: string) => {
-      const unseen = nextTrades.filter((trade) => {
-        if (seenTrades.has(trade.tradeId)) return false;
-        seenTrades.add(trade.tradeId);
-        seenTradeOrder.push(trade.tradeId);
-        if (seenTradeOrder.length > 3000) {
-          const expired = seenTradeOrder.shift();
-          if (expired) seenTrades.delete(expired);
-        }
-        return true;
-      });
-      if (unseen.length === 0) return;
-
-      setTradeStatus(status);
-      setTrades((current) =>
-        [...unseen, ...current]
-          .sort((a, b) => b.time - a.time || b.tradeId.localeCompare(a.tradeId))
-          .slice(0, 80)
-      );
-    };
-
-    const pollBook = () => {
-      if (!adapter?.getOrderBookSnapshot) {
-        if (!disposed) setBookStatus("BOOK FALLBACK");
-        return;
-      }
-
-      adapter
-        .getOrderBookSnapshot(marketSymbol, 50)
-        .then((snapshot) => {
-          if (disposed) return;
-          setBook(snapshot);
-          setBookStatus((current) => (current === "LIVE BOOK" ? current : "REST BOOK"));
-        })
-        .catch((err: unknown) => {
-          console.error(`${adapter.label} order book REST heartbeat failed`, err);
-          if (!disposed) setBookStatus("BOOK FALLBACK");
-        });
-    };
-
-    const pollTrades = () => {
-      if (!adapter?.getRecentTrades) {
-        if (!disposed) setTradeStatus("TAPE FALLBACK");
-        return;
-      }
-
-      adapter
-        .getRecentTrades(marketSymbol, 50)
-        .then((nextTrades) => {
-          if (!disposed) pushTrades(nextTrades, "REST TRADES");
-        })
-        .catch((err: unknown) => {
-          console.error(`${adapter.label} trades REST heartbeat failed`, err);
-          if (!disposed) setTradeStatus("TRADES FALLBACK");
-        });
-    };
-
-    const pollTicker = () => {
-      if (!adapter?.getTickerSnapshot) {
-        if (!disposed) setTickerStatus("DERIVED");
-        return;
-      }
-
-      adapter
-        .getTickerSnapshot(marketSymbol)
-        .then((snapshot) => {
-          if (disposed) return;
-          setTicker(snapshot);
-          setTickerStatus("REST TICKER");
-        })
-        .catch((err: unknown) => {
-          console.error(`${adapter.label} ticker REST heartbeat failed`, err);
-          if (!disposed) setTickerStatus("DERIVED");
-        });
-    };
-
-    bookSubscription = adapter?.subscribeOrderBook?.(marketSymbol, (nextBook) => {
-      setBook(nextBook);
-      setBookStatus("LIVE BOOK");
-    });
-
-    tradeSubscription = adapter?.subscribeTrades?.(marketSymbol, (trade) => {
-      pushTrades([trade], "LIVE TRADES");
-    });
-
-    bookSubscription?.onError((err) => {
-      console.error(`${adapter?.label ?? exchangeLabel} order book stream failed`, err);
-      if (disposed) return;
-      if (!disposed) setBookStatus("REST BOOK");
-      if (!bookPollTimer) {
-        pollBook();
-        bookPollTimer = window.setInterval(pollBook, 1000);
-      }
-    });
-
-    tradeSubscription?.onError((err) => {
-      console.error(`${adapter?.label ?? exchangeLabel} trades stream failed`, err);
-      if (disposed) return;
-      if (!disposed) setTradeStatus("REST TRADES");
-      if (!tradePollTimer) {
-        pollTrades();
-        tradePollTimer = window.setInterval(pollTrades, 1000);
-      }
-    });
-
-    pollBook();
-    pollTrades();
-    pollTicker();
-    if (!bookSubscription) bookPollTimer = window.setInterval(pollBook, 1000);
-    if (!tradeSubscription) tradePollTimer = window.setInterval(pollTrades, 1000);
-    tickerPollTimer = window.setInterval(pollTicker, 2500);
-
-    return () => {
-      disposed = true;
-      bookSubscription?.unsubscribe();
-      tradeSubscription?.unsubscribe();
-      if (bookPollTimer) window.clearInterval(bookPollTimer);
-      if (tradePollTimer) window.clearInterval(tradePollTimer);
-      if (tickerPollTimer) window.clearInterval(tickerPollTimer);
-    };
-  }, [
-    marketSymbol.exchange,
-    marketSymbol.rawSymbol,
-    marketSymbol.marketKind,
-    marketSymbol.baseAsset,
-    marketSymbol.quoteAsset,
-    exchangeLabel,
-  ]);
-
-  const asksDom = useMemo(() => withTotals(book.asks.slice(0, 8)).reverse(), [book.asks]);
-  const bidsDom = useMemo(() => withTotals(book.bids.slice(0, 8)), [book.bids]);
-  const asksDepth = useMemo(() => withTotals(book.asks.slice(0, 20)), [book.asks]);
-  const bidsDepth = useMemo(() => withTotals(book.bids.slice(0, 20)), [book.bids]);
+  const asksDom = useMemo(() => withTotals(book?.asks.slice(0, 8) ?? []).reverse(), [book]);
+  const bidsDom = useMemo(() => withTotals(book?.bids.slice(0, 8) ?? []), [book]);
+  const asksDepth = useMemo(() => withTotals(book?.asks.slice(0, 20) ?? []), [book]);
+  const bidsDepth = useMemo(() => withTotals(book?.bids.slice(0, 20) ?? []), [book]);
   const tickerView = ticker ?? toTickerFallback(marketSymbol, book, trades, lastPrice);
-  const bestAsk = tickerView.askPrice ?? book.asks[0]?.price ?? lastPrice;
-  const bestBid = tickerView.bidPrice ?? book.bids[0]?.price ?? lastPrice;
+  const bestAsk = tickerView.askPrice ?? book?.asks[0]?.price ?? lastPrice;
+  const bestBid = tickerView.bidPrice ?? book?.bids[0]?.price ?? lastPrice;
   const mid = (bestAsk + bestBid) / 2;
   const spread = Math.max(0, bestAsk - bestBid);
   const domMaxTotal = Math.max(...asksDom.map((row) => row.total), ...bidsDom.map((row) => row.total), 1);
@@ -307,6 +146,7 @@ export function OrderBook({ marketSymbol, lastPrice, exchangeLabel }: OrderBookP
 
   const renderDom = () => (
     <div className="book-view dom-view">
+      {!book && <div className="book-empty">Awaiting live orderbook stream.</div>}
       <div className="book-head">
         <span>Price ({marketSymbol.quoteAsset})</span>
         <span>Size ({marketSymbol.baseAsset})</span>
@@ -328,6 +168,7 @@ export function OrderBook({ marketSymbol, lastPrice, exchangeLabel }: OrderBookP
     const rowCount = Math.max(asksDepth.length, bidsDepth.length, 1);
     return (
       <div className="book-view depth-view">
+        {!book && <div className="book-empty">Awaiting live orderbook stream.</div>}
         <div className="depth-summary">
           <span>BID DEPTH {formatSize(bidDepthQuantity, 2)}</span>
           <i>
@@ -425,15 +266,39 @@ export function OrderBook({ marketSymbol, lastPrice, exchangeLabel }: OrderBookP
   };
 
   return (
-    <div className="orderbook panel-block">
-      <div className="tabs">
+    <div
+      className="orderbook panel-block"
+      onContextMenu={(event) => {
+        event.preventDefault();
+        setMenu({ x: event.clientX, y: event.clientY });
+      }}
+      onMouseLeave={() => setMenu(null)}
+    >
+      <div className="tabs dom-compact-tabs">
         {tabs.map((tab) => (
           <button key={tab} className={tab === activeTab ? "active" : ""} onClick={() => setActiveTab(tab)}>
             {tab}
           </button>
         ))}
+        <button
+          type="button"
+          className="dom-pro-open"
+          title="Open DOM Pro+"
+          onClick={() => onOpenDomPro?.("expanded")}
+        >
+          PRO+
+        </button>
       </div>
       <div className="book-status">{activeStatus}</div>
+      {menu && (
+        <div className="dom-compact-menu" style={{ left: menu.x, top: menu.y }} onClick={(event) => event.stopPropagation()}>
+          <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("expanded"); }}>Open DOM Pro+</button>
+          <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("detached-browser"); }}>Detach DOM</button>
+          <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("expanded"); }}>Send to monitor</button>
+          <button type="button" onClick={() => { setMenu(null); onResetDomLayout?.(); }}>Reset DOM layout</button>
+          <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("expanded"); }}>DOM settings</button>
+        </div>
+      )}
       <div className="book-body">
         {activeTab === "DOM" && renderDom()}
         {activeTab === "ORDER BOOK" && renderDepth()}

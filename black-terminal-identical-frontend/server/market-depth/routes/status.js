@@ -1,4 +1,5 @@
 import { applyCors, getSupabaseAdmin, sendError } from "../../portfolio-api.js";
+import { readCollectorStatus } from "../collector-status.js";
 
 export default async function status(req, res) {
   if (applyCors(req, res)) return;
@@ -12,10 +13,12 @@ export default async function status(req, res) {
       .order("bucket_start", { ascending: false })
       .limit(80);
     if (error) throw error;
+    const collectors = await readCollectorStatus(supabase).catch(() => []);
     return res.status(200).json({
       status: "ok",
       source: "black-core-market-depth-memory",
-      markets: data || []
+      markets: data || [],
+      collectors
     });
   } catch (error) {
     return sendError(res, error);

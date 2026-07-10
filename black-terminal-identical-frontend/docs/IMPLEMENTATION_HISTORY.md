@@ -6,6 +6,7 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
+- Current - Add IMM tiles and collector heartbeat.
 - Current - Add IMM retention and alert surfaces.
 - Current - Implement Black Core Market Depth Memory foundation.
 - Current - Add DOM Pro+ depth memory provider foundation.
@@ -70,6 +71,9 @@ Changed:
 - Added market-memory alert extraction over liquidity events, wall lifecycle state, statistics, and feed diagnostics.
 - Added retention pruning utilities, worker pruning loop, and protected `/api/market-depth/prune` route.
 - Added collector packet-loss and reconnect diagnostics into depth statistics for incremental feeds.
+- Added `/api/market-depth/tiles` for bounded Google-Maps-style replay cells with explicit multi-venue breakdown.
+- Added collector heartbeat persistence through `market_depth_collector_status` and included collector status in `/api/market-depth/status`.
+- Changed browser depth memory so Supabase writes are disabled by default. Local browser memory remains fallback-only, while Black Core replay is the authoritative path.
 
 Why:
 

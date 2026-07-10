@@ -53,14 +53,17 @@ npm run depth:worker
 /api/market-depth/walls
 /api/market-depth/alerts
 /api/market-depth/prune
+/api/market-depth/tiles
 ```
 
 - Added replay API that selects a resolution automatically and returns normalized depth memory points, active walls, events, and statistics.
+- Added tile API for Google-Maps-style loading. It returns bounded time/price cells and supports multi-venue combined responses with explicit per-venue breakdowns.
 - Added token-protected external ingest route using `MARKET_DEPTH_INGEST_TOKEN`.
 - Added token-protected retention pruning route using `MARKET_DEPTH_MAINTENANCE_TOKEN` or `MARKET_DEPTH_INGEST_TOKEN`.
 - Added alert extraction API that converts liquidity events, active walls, depth imbalances, liquidity vacuums, spoof suspicion, gravity zones, and feed degradation into normalized market-memory alerts.
 - Added DOM Pro+ client hydration from `/api/market-depth/replay`.
-- DOM Pro+ still keeps local/browser depth memory as a fallback when the backend tables, worker, or API are unavailable.
+- DOM Pro+ still keeps local browser depth memory as a fallback when the backend tables, worker, or API are unavailable.
+- Browser-built depth memory no longer writes back to Supabase by default. Set `VITE_DOM_DEPTH_BROWSER_SYNC=true` only for legacy debugging.
 - DOM Pro+ diagnostics now label depth memory source as:
   - `BLACK-CORE`
   - `SUPABASE`
@@ -106,6 +109,9 @@ MARKET_DEPTH_RETENTION_DELTA_HOURS=6
 MARKET_DEPTH_RETENTION_1S_DAYS=3
 MARKET_DEPTH_RETENTION_10S_DAYS=21
 MARKET_DEPTH_RETENTION_1M_DAYS=180
+MARKET_DEPTH_COLLECTOR_ID=primary-depth-worker
+VITE_DOM_DEPTH_BROWSER_SYNC=false
+VITE_DOM_DEPTH_LEGACY_HYDRATE=true
 ```
 
 Optional:
@@ -120,6 +126,7 @@ MARKET_DEPTH_SYMBOLS=hyperliquid:perpetual:BTCUSDT,binance:perpetual:BTCUSDT,byb
 - Vercel APIs can replay stored market memory and accept authenticated external ingest, but a separate worker/runtime must run the collector continuously.
 - Packet-loss detection is available for incremental feeds and stored in depth statistics. Full exchange-specific sequence repair/checksum reconciliation remains a follow-up.
 - Replay currently reads compressed rollups and active walls. It does not yet stream tiled map chunks or minimap navigator data.
+- The tile API exposes bounded map cells; DOM Pro+ still consumes replay hydration first and can be moved to tile streaming in a follow-up.
 - Web Worker aggregation inside the browser remains future work; the server compression layer is now in place first.
 
 ## Next Work

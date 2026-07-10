@@ -1368,3 +1368,44 @@ Operational notes:
 - Use `/api/market-depth/alerts` to expose normalized market-memory alerts for Scanner, BlackGPT, Notifications, and future automation.
 - Use `/api/market-depth/prune` with `MARKET_DEPTH_MAINTENANCE_TOKEN` or `MARKET_DEPTH_INGEST_TOKEN` to run retention manually.
 - The persistent worker also runs pruning on `MARKET_DEPTH_PRUNE_INTERVAL_MS`.
+
+## 2026-07-10 - IMM Tiles And Collector Heartbeat
+
+Status: Supabase migration required for collector heartbeat only.
+
+Purpose:
+
+- Track persistent depth collector worker health.
+- Let `/api/market-depth/status` report whether Black Core market memory is actively being collected.
+- Support operations checks without relying only on recent market statistics.
+
+Run this SQL after the Black Core Market Depth Memory migration:
+
+```sql
+create table if not exists public.market_depth_collector_status (
+  collector_id text primary key,
+  status text not null default 'unknown' check (status in ('online', 'degraded', 'offline', 'stale', 'unknown')),
+  symbols jsonb not null default '[]'::jsonb,
+  diagnostics jsonb not null default '[]'::jsonb,
+  last_heartbeat_at timestamptz not null default now(),
+  started_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_market_depth_collector_status_heartbeat
+  on public.market_depth_collector_status(last_heartbeat_at desc);
+
+drop trigger if exists trg_market_depth_collector_status_updated_at on public.market_depth_collector_status;
+create trigger trg_market_depth_collector_status_updated_at
+before update on public.market_depth_collector_status
+for each row
+execute function public.set_market_memory_updated_at();
+
+alter table public.market_depth_collector_status enable row level security;
+```
+
+Notes:
+
+- The table is platform-owned. Direct browser access is intentionally blocked by RLS.
+- `/api/market-depth/tiles` uses the existing rollup tables and does not require extra schema.
+- DOM Pro+ browser depth memory no longer writes to Supabase unless `VITE_DOM_DEPTH_BROWSER_SYNC=true` is explicitly set.

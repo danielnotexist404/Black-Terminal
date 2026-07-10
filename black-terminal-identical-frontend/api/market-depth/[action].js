@@ -3,6 +3,7 @@ import ingest from "../../server/market-depth/routes/ingest.js";
 import prune from "../../server/market-depth/routes/prune.js";
 import replay from "../../server/market-depth/routes/replay.js";
 import status from "../../server/market-depth/routes/status.js";
+import tiles from "../../server/market-depth/routes/tiles.js";
 import walls from "../../server/market-depth/routes/walls.js";
 
 const handlers = {
@@ -11,6 +12,7 @@ const handlers = {
   prune,
   replay,
   status,
+  tiles,
   walls
 };
 

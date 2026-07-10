@@ -44,6 +44,8 @@ const recordThrottleMs = 5000;
 const persistThrottleMs = 15000;
 const remoteSyncThrottleMs = 60000;
 const maxRemotePointsPerSync = 80;
+const allowLegacyDepthHydrate = import.meta.env.VITE_DOM_DEPTH_LEGACY_HYDRATE !== "false";
+const allowBrowserDepthRemoteSync = import.meta.env.VITE_DOM_DEPTH_BROWSER_SYNC === "true";
 
 export class BlackDepthHistoryStore {
   private stores = new Map<string, DepthHistoryData>();
@@ -63,7 +65,7 @@ export class BlackDepthHistoryStore {
     listeners.add(listener);
     this.listeners.set(key, listeners);
     this.load(symbol);
-    void this.hydrateRemote(symbol);
+    if (allowLegacyDepthHydrate) void this.hydrateRemote(symbol);
     return () => {
       const next = this.listeners.get(key);
       if (!next) return;
@@ -127,7 +129,7 @@ export class BlackDepthHistoryStore {
       this.persist(key, data);
       this.lastPersistAt.set(key, now);
     }
-    if (now - (this.lastRemoteSyncAt.get(key) ?? 0) >= remoteSyncThrottleMs) {
+    if (allowBrowserDepthRemoteSync && now - (this.lastRemoteSyncAt.get(key) ?? 0) >= remoteSyncThrottleMs) {
       this.lastRemoteSyncAt.set(key, now);
       void this.syncRemote(symbol, data);
     }
@@ -155,8 +157,8 @@ export class BlackDepthHistoryStore {
         askPoints: data.points.filter((point) => point.side === "ask").length,
         firstSeen,
         lastSeen,
-        localOnly: !isSupabaseConfigured && !this.blackCoreHydrated.has(symbolKey(symbol)),
-        source: this.blackCoreHydrated.has(symbolKey(symbol)) ? "black-core" : isSupabaseConfigured ? "supabase" : "local"
+        localOnly: !this.blackCoreHydrated.has(symbolKey(symbol)) && !allowLegacyDepthHydrate,
+        source: this.blackCoreHydrated.has(symbolKey(symbol)) ? "black-core" : allowLegacyDepthHydrate && isSupabaseConfigured ? "supabase" : "local"
       }
     };
   }

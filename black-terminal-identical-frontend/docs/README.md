@@ -25,6 +25,7 @@ Every meaningful platform change must update documentation in the same work cycl
 - `PHASE3_CHAPTER5_HYPERLIQUID_RELAY.md` - Hyperliquid server-side signing relay, credential model, nonce manager, and testnet-first execution flow.
 - `PHASE3_CHAPTER6_DOM_PRO.md` - DOM Pro+ detachable institutional order-flow cockpit, aggregation engine, shared feed, and diagnostics.
 - `PHASE3_CHAPTER7_MARKET_DEPTH_MEMORY.md` - Black Core Market Depth Memory, server collector, compression, wall lifecycle, replay API, and IMM foundation.
+- `PHASE3_IMM_OPERATIONAL_READINESS.md` - IMM health endpoint, worker heartbeat, integrity validation, verification command, and data-trust readiness.
 - `PHASE4_PROFESSIONAL_NETWORK.md` - Professional Profile, Research Feed, follow graph, Investment Groups, join requests, and Trading Room foundation.
 
 ## Specialist Docs

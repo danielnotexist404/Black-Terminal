@@ -1454,3 +1454,71 @@ Reason:
 
 - `npm run depth:worker:supervise` adds process supervision around the existing market-depth worker.
 - Worker stale-feed exits and supervisor restarts reuse the existing `market_depth_collector_status` heartbeat table and existing market-memory tables.
+
+## 2026-07-10 - IMM Operational Readiness Tables
+
+Status: Supabase migration required.
+
+Purpose:
+
+- Store normalized IMM worker heartbeats independent of the browser.
+- Store orderbook integrity failures and warnings so corrupted depth can be rejected and audited.
+- Support `/api/imm/status` and `npm run depth:verify`.
+
+Run this SQL after the IMM collector heartbeat migration:
+
+```sql
+create table if not exists public.imm_worker_heartbeats (
+  id text primary key,
+  worker_instance_id text not null,
+  hostname text,
+  process_id integer,
+  version integer not null default 1,
+  venue text not null,
+  market_kind text not null,
+  symbol text not null,
+  status text not null default 'unavailable'
+    check (status in ('healthy','degraded','reconnecting','stale','unavailable','misconfigured','error')),
+  started_at timestamptz not null default now(),
+  heartbeat_at timestamptz not null default now(),
+  last_message_at timestamptz,
+  last_persist_at timestamptz,
+  reconnect_count integer not null default 0 check (reconnect_count >= 0),
+  sequence_gap_count integer not null default 0 check (sequence_gap_count >= 0),
+  metadata jsonb not null default '{}'::jsonb
+);
+
+create index if not exists idx_imm_worker_heartbeats_symbol
+  on public.imm_worker_heartbeats(venue, market_kind, symbol, heartbeat_at desc);
+
+create index if not exists idx_imm_worker_heartbeats_status
+  on public.imm_worker_heartbeats(status, heartbeat_at desc);
+
+alter table public.imm_worker_heartbeats enable row level security;
+
+create table if not exists public.imm_integrity_events (
+  id uuid primary key default gen_random_uuid(),
+  venue text not null,
+  market_kind text not null,
+  symbol text not null,
+  severity text not null default 'error' check (severity in ('warning','error')),
+  reason text not null,
+  sequence text,
+  occurred_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb
+);
+
+create index if not exists idx_imm_integrity_events_symbol_time
+  on public.imm_integrity_events(venue, market_kind, symbol, occurred_at desc);
+
+create index if not exists idx_imm_integrity_events_severity_time
+  on public.imm_integrity_events(severity, occurred_at desc);
+
+alter table public.imm_integrity_events enable row level security;
+```
+
+Notes:
+
+- These are platform-owned operational tables.
+- Direct browser access is intentionally blocked by RLS.
+- Server routes and workers access these records through `SUPABASE_SERVICE_ROLE_KEY`.

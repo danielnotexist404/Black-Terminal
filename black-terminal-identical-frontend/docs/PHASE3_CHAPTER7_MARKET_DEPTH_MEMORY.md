@@ -37,6 +37,7 @@ The browser must become a viewer of market memory, not the owner of long-term ma
 ```bash
 npm run depth:worker
 npm run depth:worker:supervise
+npm run depth:verify
 ```
 
 - Worker reads `MARKET_DEPTH_SYMBOLS`, defaulting to `hyperliquid:perpetual:BTCUSDT`.
@@ -64,6 +65,10 @@ npm run depth:worker:supervise
 - Added token-protected retention pruning route using `MARKET_DEPTH_MAINTENANCE_TOKEN` or `MARKET_DEPTH_INGEST_TOKEN`.
 - Added alert extraction API that converts liquidity events, active walls, depth imbalances, liquidity vacuums, spoof suspicion, gravity zones, and feed degradation into normalized market-memory alerts.
 - Added REST snapshot recovery hooks for Hyperliquid, Binance, Bybit, and OKX. The collector now recovers snapshots after connection and after explicit sequence-gap detection.
+- Added normalized orderbook integrity validation. Invalid books are rejected before persistence and can be audited through `imm_integrity_events`.
+- Added richer worker heartbeat support through `imm_worker_heartbeats`.
+- Added authoritative IMM status endpoint at `/api/imm/status`.
+- Added `npm run depth:verify` for operational validation of persisted market memory.
 - Added DOM Pro+ client hydration from `/api/market-depth/replay`.
 - DOM Pro+ now requests bounded `/api/market-depth/tiles` cells for the active camera range before falling back to replay hydration.
 - DOM Pro+ pads tile requests around the active camera range so adjacent liquidity cells are preloaded for smoother map-style pan/zoom.
@@ -110,10 +115,13 @@ Optional maintenance:
 ```text
 MARKET_DEPTH_MAINTENANCE_TOKEN
 MARKET_DEPTH_PRUNE_INTERVAL_MS
+MARKET_DEPTH_HEARTBEAT_INTERVAL_MS=10000
 MARKET_DEPTH_FATAL_STALE_MS=600000
 MARKET_DEPTH_STARTUP_GRACE_MS=120000
 MARKET_DEPTH_WORKER_RESTART_BASE_MS=1500
 MARKET_DEPTH_WORKER_RESTART_MAX_MS=60000
+MARKET_DEPTH_VERIFY_FRESHNESS_MS=900000
+MARKET_DEPTH_VERIFY_MIN_ROLLUPS=5
 MARKET_DEPTH_RETENTION_RAW_HOURS=6
 MARKET_DEPTH_RETENTION_DELTA_HOURS=6
 MARKET_DEPTH_RETENTION_1S_DAYS=3
@@ -135,6 +143,7 @@ MARKET_DEPTH_SYMBOLS=hyperliquid:perpetual:BTCUSDT,binance:perpetual:BTCUSDT,byb
 - The worker is a long-running Node process. Vercel serverless functions cannot continuously own exchange WebSocket sessions.
 - Vercel APIs can replay stored market memory and accept authenticated external ingest, but a separate worker/runtime must run the collector continuously. Use `npm run depth:worker:supervise` in that runtime.
 - Packet-loss detection is available for incremental feeds and stored in depth statistics. When an explicit sequence gap is detected, the collector attempts REST snapshot recovery. Full checksum reconciliation remains a follow-up.
+- `/api/imm/status` is the authoritative backend status surface. DOM Pro+ and future admin panels should consume it rather than building duplicate status state.
 - Replay reads compressed rollups and active walls. DOM Pro+ uses bounded tile cells first for the active camera window, then falls back to replay hydration.
 - The tile API exposes bounded map cells. DOM Pro+ now prefetches padded adjacent camera windows, while minimap/navigator windows remain follow-up work.
 - Web Worker aggregation is started for Black Core replay shaping. The remaining large DOM live aggregation path still needs full worker migration.
@@ -143,6 +152,7 @@ MARKET_DEPTH_SYMBOLS=hyperliquid:perpetual:BTCUSDT,binance:perpetual:BTCUSDT,byb
 
 - Deploy `npm run depth:worker:supervise` in a persistent worker/runtime outside Vercel serverless.
 - Add venue-specific checksum validation and deeper delta reconciliation.
+- Add admin IMM operations panel and user-facing IMM status indicator.
 - Add deployment automation for the retention pruning route if the collector worker is not always running.
 - Add minimap/navigator windows for Google-Maps-style zoom/pan.
 - Move the rest of DOM live aggregation, CVD shaping, and depth chart construction to the IMM worker bridge.

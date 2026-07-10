@@ -31,10 +31,12 @@ npm run check:rust
 npm run check
 npm run depth:worker
 npm run depth:worker:supervise
+npm run depth:verify
 ```
 
 `npm run check` runs TypeScript and Rust checks. Use it before packaging or larger refactors.
 `npm run depth:worker:supervise` is the recommended local/persistent command for the Black Core Market Depth Memory collector because it restarts the worker after stale-feed exits or process failures.
+`npm run depth:verify` checks persisted IMM data quality and returns a non-zero exit code on serious operational failures.
 
 ## Packaging
 

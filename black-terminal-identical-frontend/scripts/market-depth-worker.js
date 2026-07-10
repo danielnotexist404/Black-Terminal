@@ -9,6 +9,7 @@ const symbols = parseEnvSymbols();
 const collectorId = process.env.MARKET_DEPTH_COLLECTOR_ID || `${os.hostname()}:${process.pid}`;
 const fatalStaleMs = Math.max(0, Number(process.env.MARKET_DEPTH_FATAL_STALE_MS || 10 * 60_000));
 const startupGraceMs = Math.max(30_000, Number(process.env.MARKET_DEPTH_STARTUP_GRACE_MS || 2 * 60_000));
+const heartbeatIntervalMs = Math.max(5_000, Math.min(15_000, Number(process.env.MARKET_DEPTH_HEARTBEAT_INTERVAL_MS || 10_000)));
 const startedAt = Date.now();
 let lastHealthyAt = Date.now();
 const collector = new MarketDepthCollector({ supabase, symbols });
@@ -45,7 +46,7 @@ function updateRuntimeHealth(diagnostics) {
 }
 
 publishHeartbeat();
-setInterval(publishHeartbeat, 30_000).unref?.();
+setInterval(publishHeartbeat, heartbeatIntervalMs).unref?.();
 
 const pruneIntervalMs = Math.max(5 * 60_000, Number(process.env.MARKET_DEPTH_PRUNE_INTERVAL_MS || 60 * 60_000));
 setInterval(async () => {

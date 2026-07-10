@@ -84,6 +84,35 @@ Exchange-specific REST/WebSocket payloads must be normalized before reaching the
 
 The chart engine should consume normalized app data only.
 
+## IMM Operational Status Rule
+
+Black Core owns Institutional Market Map operational truth.
+
+The authoritative IMM status path is:
+
+```text
+Depth Worker
+-> Orderbook Integrity Validator
+-> Supabase Market Memory Tables
+-> IMM Worker Heartbeats
+-> server/imm/status-service.js
+-> GET /api/imm/status
+-> DOM Pro+ / Admin Surfaces
+```
+
+DOM Pro+ must consume this status instead of creating duplicate health state. The status service
+normalizes worker health, feed freshness, sequence gaps, persistence evidence, replay readiness,
+wall symmetry, integrity failures, and data quality into one status model.
+
+Operational records are platform-owned:
+
+- `imm_worker_heartbeats`
+- `imm_integrity_events`
+- market-depth snapshots, deltas, rollups, walls, events, and statistics
+
+Direct browser reads are intentionally blocked by RLS. Server routes and the worker use the service
+role key.
+
 ## Python Indicator Runtime Direction
 
 Python should not run inside the React UI thread. Treat indicators as isolated jobs with a stable

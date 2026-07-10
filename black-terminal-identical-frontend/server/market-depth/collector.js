@@ -51,6 +51,12 @@ export class MarketDepthCollector {
       packetLossCount: session.packetLossCount,
       snapshotRecoveryCount: session.snapshotRecoveryCount,
       lastSnapshotAt: session.lastSnapshotAt,
+      lastPersistAt: session.lastPersistAt,
+      lastIntegrityFailureAt: session.lastIntegrityFailureAt,
+      invalidBookCount: session.invalidBookCount,
+      rejectedUpdateCount: session.rejectedUpdateCount,
+      duplicateUpdateCount: session.duplicateUpdateCount,
+      snapshotRebuildCount: session.snapshotRebuildCount,
       lastSequence: session.lastSequence
     }));
   }
@@ -75,7 +81,13 @@ export class MarketDepthCollector {
       ingestCount: 0,
       packetLossCount: 0,
       snapshotRecoveryCount: 0,
+      snapshotRebuildCount: 0,
+      invalidBookCount: 0,
+      rejectedUpdateCount: 0,
+      duplicateUpdateCount: 0,
       lastSnapshotAt: null,
+      lastPersistAt: null,
+      lastIntegrityFailureAt: null,
       repairing: false,
       ws: null,
       reconnectTimer: null
@@ -110,12 +122,20 @@ export class MarketDepthCollector {
             snapshotRecoveryCount: session.snapshotRecoveryCount,
             collectorLatencyMs: Math.max(0, Date.now() - Number(sample.sourceTimestamp || Date.now()))
           };
-          await this.engine.ingest(this.supabase, sample);
+          const ingestResult = await this.engine.ingest(this.supabase, sample);
           session.sampleCount += 1;
           session.ingestCount += 1;
+          session.lastPersistAt = Date.now();
+          if (ingestResult?.integrity?.warnings?.includes("duplicate_sequence")) session.duplicateUpdateCount += 1;
+          if (ingestResult?.snapshotPersisted) session.snapshotRebuildCount += 1;
         }
       } catch (error) {
         session.lastError = error instanceof Error ? error.message : String(error);
+        session.rejectedUpdateCount += 1;
+        if (error?.immIntegrity) {
+          session.invalidBookCount += 1;
+          session.lastIntegrityFailureAt = Date.now();
+        }
         this.logger.error?.(`[MarketDepthCollector] ingest failed ${key}`, error);
       }
     };
@@ -153,11 +173,18 @@ export class MarketDepthCollector {
       await this.engine.ingest(this.supabase, sample);
       session.lastSnapshotAt = Date.now();
       session.snapshotRecoveryCount += 1;
+      session.snapshotRebuildCount += 1;
       session.sampleCount += 1;
       session.ingestCount += 1;
+      session.lastPersistAt = Date.now();
       this.logger.info?.(`[MarketDepthCollector] recovered ${session.key} snapshot after ${reason}`);
     } catch (error) {
       session.lastError = error instanceof Error ? error.message : String(error);
+      session.rejectedUpdateCount += 1;
+      if (error?.immIntegrity) {
+        session.invalidBookCount += 1;
+        session.lastIntegrityFailureAt = Date.now();
+      }
       this.logger.error?.(`[MarketDepthCollector] snapshot recovery failed ${session.key}`, error);
     } finally {
       session.repairing = false;

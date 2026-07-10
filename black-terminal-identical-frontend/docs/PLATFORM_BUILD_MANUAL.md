@@ -151,8 +151,10 @@ Server helpers:
 - `server/portfolio-api.js` - Supabase auth, validation, account loading, and risk helpers.
 - `server/exchanges/bybit.js` - Bybit synchronization and order placement bridge.
 - `server/market-depth/` - Black Core Market Depth Memory, compression, wall lifecycle, replay, tiles, alerts, retention, and collector diagnostics.
+- `server/imm/status-service.js` - authoritative IMM operational status model.
 - `scripts/market-depth-worker.js` - long-running exchange depth collector.
 - `scripts/market-depth-supervisor.js` - persistent supervisor that restarts the depth worker after fatal stale-feed exits or process failures.
+- `scripts/market-depth-verify.js` - operational verification command for persisted depth memory.
 
 Expected Supabase domains:
 
@@ -163,7 +165,9 @@ Expected Supabase domains:
 
 All SQL migrations must be logged in `SUPABASE_MIGRATIONS.md`.
 
-The market-depth collector must run outside Vercel serverless because it owns continuous exchange WebSocket sessions. Use `npm run depth:worker:supervise` in a persistent Node runtime and configure `SUPABASE_SERVICE_ROLE_KEY`, `MARKET_DEPTH_SYMBOLS`, and the market-depth retention/stale-feed environment variables.
+The market-depth collector must run outside Vercel serverless because it owns continuous exchange WebSocket sessions. Use `npm run depth:worker:supervise` in a persistent Node runtime and configure `SUPABASE_SERVICE_ROLE_KEY`, `MARKET_DEPTH_SYMBOLS`, and the market-depth retention/stale-feed/heartbeat environment variables.
+
+IMM operational status is exposed through `GET /api/imm/status`. Verbose diagnostics require `IMM_ADMIN_STATUS_TOKEN` and the `x-imm-admin-token` request header.
 
 ## Wallets And DEXes
 
@@ -205,6 +209,7 @@ npm run typecheck
 npm run build
 npm run depth:worker
 npm run depth:worker:supervise
+npm run depth:verify
 npm run check:rust
 npm run check
 npm run tauri:dev

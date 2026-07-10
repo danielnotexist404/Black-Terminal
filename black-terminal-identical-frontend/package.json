@@ -10,6 +10,7 @@
     "preview": "vite preview --host 127.0.0.1",
     "depth:worker": "node scripts/market-depth-worker.js",
     "depth:worker:supervise": "node scripts/market-depth-supervisor.js",
+    "depth:verify": "node scripts/market-depth-verify.js",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",

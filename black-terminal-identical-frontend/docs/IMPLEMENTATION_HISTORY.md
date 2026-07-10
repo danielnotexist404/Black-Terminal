@@ -6,6 +6,7 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
+- Current - Add IMM operational readiness foundation.
 - Current - Add supervised IMM depth worker.
 - Current - Add IMM progressive tile prefetch.
 - Current - Connect DOM depth memory to Black Core tiles.
@@ -85,6 +86,9 @@ Changed:
 - Added padded tile-window prefetching so DOM Pro+ asks Black Core for adjacent liquidity cells around the current camera and keeps rendering culled to the visible viewport.
 - Added `npm run depth:worker:supervise`, a persistent worker supervisor that restarts the depth collector after fatal stale-feed exits or process failures.
 - Added worker stale-feed health checks controlled by `MARKET_DEPTH_FATAL_STALE_MS` and `MARKET_DEPTH_STARTUP_GRACE_MS`.
+- Added normalized orderbook integrity validation before persistence, with optional audit records in `imm_integrity_events`.
+- Added `imm_worker_heartbeats` support and an authoritative `server/imm/status-service.js` status model exposed through `GET /api/imm/status`.
+- Added `npm run depth:verify` to check recent persisted depth, bid/ask rows, impossible values, wall symmetry, worker heartbeat freshness, and bounded replay windows.
 
 Why:
 
@@ -100,6 +104,7 @@ Remaining:
 
 - The collector must run in a persistent worker/runtime with `npm run depth:worker:supervise`. Vercel serverless cannot own continuous WebSocket collection.
 - Checksum validation and deeper venue-specific delta reconciliation remain future work.
+- Admin operations panel, DOM Pro+ user status indicator, deterministic tests, and load tests remain future work.
 - The remaining live DOM aggregation path still needs full worker migration.
 - DOM Pro+ now consumes tile cells for visible market memory and prefetches adjacent camera windows. Minimap/navigator streaming remains future work.
 

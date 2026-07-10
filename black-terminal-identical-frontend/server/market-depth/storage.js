@@ -1,4 +1,5 @@
 import { buildDepthDeltas, compressDepthSample } from "./compression-engine.js";
+import { recordIntegrityEvent, validateNormalizedDepthSample } from "./integrity.js";
 import { normalizeDepthSample } from "./normalizer.js";
 import { detectWallLifecycle } from "./wall-lifecycle-engine.js";
 
@@ -14,6 +15,16 @@ export class MarketDepthMemoryEngine {
     const sample = normalizeDepthSample(input);
     const key = memoryKey(sample);
     const previous = this.previousSamples.get(key);
+    let integrityReport;
+    try {
+      integrityReport = validateNormalizedDepthSample(sample, previous);
+      if (integrityReport.warnings.length) {
+        await recordIntegrityEvent(supabase, sample, integrityReport).catch(() => null);
+      }
+    } catch (error) {
+      await recordIntegrityEvent(supabase, sample, error.report).catch(() => null);
+      throw error;
+    }
     const compressed = compressDepthSample(sample, options);
     const deltas = buildDepthDeltas(previous, sample);
     const previousWalls = this.wallMemory.get(key) ?? new Map();
@@ -21,7 +32,7 @@ export class MarketDepthMemoryEngine {
     this.previousSamples.set(key, sample);
     this.wallMemory.set(key, lifecycle.nextMemory);
 
-    await persistDepthMemory(supabase, {
+    const persisted = await persistDepthMemory(supabase, {
       sample,
       compressed,
       deltas,
@@ -35,6 +46,8 @@ export class MarketDepthMemoryEngine {
       marketKind: sample.marketKind,
       symbol: sample.symbol,
       capturedAt: new Date(sample.capturedAt).toISOString(),
+      integrity: integrityReport,
+      snapshotPersisted: persisted.snapshotPersisted,
       rollups: compressed.rollups.length,
       deltas: deltas.length,
       walls: lifecycle.walls.length,
@@ -45,8 +58,10 @@ export class MarketDepthMemoryEngine {
 
 export async function persistDepthMemory(supabase, payload) {
   const { sample, compressed, deltas, walls, events, shouldPersistSnapshot } = payload;
+  let snapshotPersisted = false;
   if (shouldPersistSnapshot) {
     await insertRows(supabase, "market_depth_snapshots", [mapSnapshot(compressed.snapshot)]);
+    snapshotPersisted = true;
   }
   if (deltas.length) await insertRows(supabase, "market_depth_deltas", deltas.map(mapDelta));
   if (compressed.rollups.length) {
@@ -74,7 +89,7 @@ export async function persistDepthMemory(supabase, payload) {
     );
   }
   if (events.length) await insertRows(supabase, "market_liquidity_events", events.map(mapEvent));
-  return { sample };
+  return { sample, snapshotPersisted };
 }
 
 export function memoryKey(sample) {

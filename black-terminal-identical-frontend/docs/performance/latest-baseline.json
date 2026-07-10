@@ -1,0 +1,63 @@
+{
+  "generatedAt": "2026-07-10T18:57:15.617Z",
+  "gitCommit": "8854eef",
+  "node": "v22.18.0",
+  "platform": "win32",
+  "sourceFootprint": {
+    "files": 159,
+    "lines": 37543,
+    "requestAnimationFrame": 6,
+    "setInterval": 25,
+    "setTimeout": 15,
+    "addEventListener": 20,
+    "removeEventListener": 20,
+    "newWebSocket": 16,
+    "newWorker": 1,
+    "resizeObserver": 2,
+    "mutationObserver": 0,
+    "performanceMetricPublishers": 10
+  },
+  "bundleFootprint": {
+    "available": true,
+    "totalBytes": 3170448,
+    "largestAssets": [
+      {
+        "name": "index-Cu7gv2nQ.js",
+        "bytes": 1155564
+      },
+      {
+        "name": "chart_preview-C0S4kWWD.jpg",
+        "bytes": 848950
+      },
+      {
+        "name": "terminal_mockup-DSkpidIZ.jpg",
+        "bytes": 758834
+      },
+      {
+        "name": "index-nQkvY4mC.css",
+        "bytes": 154096
+      },
+      {
+        "name": "WebGLRenderer-CVCHvocA.js",
+        "bytes": 68435
+      },
+      {
+        "name": "RenderTargetSystem-CP4JaWxC.js",
+        "bytes": 46307
+      },
+      {
+        "name": "browserAll-DQuDxly2.js",
+        "bytes": 43055
+      },
+      {
+        "name": "WebGPURenderer-fLBKkXGx.js",
+        "bytes": 38200
+      }
+    ]
+  },
+  "notes": [
+    "This is the repeatable static/runtime-ready baseline for Chapter IX.",
+    "Use Ctrl+Shift+P in the app to capture browser HUD snapshots during live sessions.",
+    "Use npm run perf:stress with PERF_STRESS_URL for long-session polling logs."
+  ]
+}

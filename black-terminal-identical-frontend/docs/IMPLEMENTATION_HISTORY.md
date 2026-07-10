@@ -6,6 +6,7 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
+- Current - Add DOM Pro+ depth memory provider foundation.
 - Current - Stabilize DOM Pro+ heatmap drag and downside structure.
 - Current - Fix DOM Pro+ profile domain scaffold and raw-depth curve.
 - Current - Polish DOM Pro+ cockpit rendering and viewport controls.
@@ -100,6 +101,9 @@ Changed:
 - Changed the depth chart to use raw L2 bid/ask levels before aggregated buckets, map the shared price camera horizontally, extend available cumulative curves to the visible domain edges, and keep explicit sparse-source warnings.
 - Added historical structure ribbons inside the heatmap from the shared profile so downside/upside higher-timeframe zones remain visible when panning beyond shallow live L2 depth.
 - Throttled heatmap drag panning with `requestAnimationFrame` and removed the stale drag-ref read that could blank the browser while dragging.
+- Added a Black Depth History Store that samples raw L2 bid/ask levels, compresses them into persistent wall-memory buckets, stores them locally per venue/symbol, and hydrates/upserts Supabase `market_depth_memory` when the migration is applied.
+- Changed live wall detection and heatmap memory to consume raw L2 wall candidates before 1000x rendering buckets, preventing large bucket compression from hiding buy walls below price.
+- Added heatmap depth-memory bands and explicit `Collecting Depth History` coverage zones so empty regions communicate missing depth history while accumulating real observations over time.
 - Slowed heuristic CVD with 15M/1H/4H/12H/24H horizons, EMA smoothing, and sample intervals.
 - Replaced the block-style depth chart with a cumulative bid/ask market-depth curve.
 - Replaced liquidity flow blocks with rolling time-bucket histogram bars using percentile outlier scaling.

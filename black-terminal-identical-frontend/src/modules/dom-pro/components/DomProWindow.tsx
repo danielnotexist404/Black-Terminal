@@ -13,6 +13,7 @@ import type { MarketSymbol } from "../../../market-data/types";
 import type { PortfolioAccount } from "../../../portfolio/types";
 import { defaultRiskControls } from "../../../risk/types";
 import { DomAggregationEngine } from "../domAggregationEngine";
+import { blackDepthHistoryStore, type DepthHistoryPoint, type DepthHistoryRead } from "../depthHistoryStore";
 import { readDomSettings, updateModeSettings, writeDomSettings } from "../domSettingsStore";
 import { useDomFeed } from "../useDomFeed";
 import type {
@@ -77,6 +78,12 @@ type HeatmapStructureRibbon = {
   kind: VolumeProfileNode["kind"];
 };
 
+type CoverageGap = {
+  id: string;
+  low: number;
+  high: number;
+};
+
 type DomDebugStats = {
   domainMin: number;
   domainMax: number;
@@ -104,6 +111,7 @@ type DomDebugStats = {
   profileRowsRendered: number;
   depthBidPoints: number;
   depthAskPoints: number;
+  depthMemoryPoints: number;
   reason: string;
 };
 
@@ -200,8 +208,15 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const [executionStatus, setExecutionStatus] = useState("");
   const [macroCandles, setMacroCandles] = useState<Candle[]>(() => blackCoreMarketDataEngine.cache.getCandles(marketSymbol, "1d"));
   const [macroStatus, setMacroStatus] = useState("HISTORICAL DEPTH");
+  const [depthHistoryRevision, setDepthHistoryRevision] = useState(0);
 
   useEffect(() => blackCoreConnectionManager.subscribe(setConnections), []);
+
+  useEffect(() => {
+    return blackDepthHistoryStore.subscribe(marketSymbol, () => {
+      setDepthHistoryRevision((revision) => revision + 1);
+    });
+  }, [marketSymbol.exchange, marketSymbol.marketKind, marketSymbol.rawSymbol]);
 
   useEffect(() => {
     const next = readDomSettings(workspaceId, symbolKey);
@@ -397,6 +412,10 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     submitQuickOrderRef.current = submitQuickOrder;
   }, [submitQuickOrder]);
 
+  useEffect(() => {
+    blackDepthHistoryStore.record(marketSymbol, snapshot.sourceBook, snapshot.lastPrice ?? lastPrice);
+  }, [lastPrice, marketSymbol, snapshot.generatedAt, snapshot.lastPrice, snapshot.sourceBook]);
+
   const cvdData = engineRef.current.cvdData();
   const macroBands = useMemo(
     () => settings.showMacroRadar ? buildMacroLiquidityBands(macroCandles, snapshot.lastPrice ?? lastPrice, settings) : [],
@@ -428,14 +447,22 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     () => buildHeatmapStructureRibbons(institutionalProfile, maxProfileVolume, heatmapRange, snapshot.lastPrice ?? lastPrice),
     [heatmapRange, institutionalProfile, lastPrice, maxProfileVolume, snapshot.lastPrice]
   );
+  const depthHistory = useMemo(
+    () => blackDepthHistoryStore.read(marketSymbol, heatmapRange, settings.heatmapHorizon),
+    [depthHistoryRevision, heatmapRange, marketSymbol, settings.heatmapHorizon]
+  );
+  const depthCoverageGaps = useMemo(
+    () => buildDepthCoverageGaps(heatmapRange, heatmapFrames, macroBands, heatmapStructureRibbons, depthHistory.points, snapshot.lastPrice ?? lastPrice),
+    [depthHistory.points, heatmapFrames, heatmapRange, heatmapStructureRibbons, lastPrice, macroBands, snapshot.lastPrice]
+  );
   const smoothedCvdData = useMemo(() => buildSmoothedCvd(cvdData, settings), [cvdData, settings]);
   const cvdStats = useMemo(() => buildCvdStats(snapshot.trades, smoothedCvdData, settings), [settings, smoothedCvdData, snapshot.trades]);
   const cvdPath = useMemo(() => buildCvdPath(smoothedCvdData), [smoothedCvdData]);
   const depthChart = useMemo(() => buildDepthChart(snapshot, heatmapRange), [heatmapRange, snapshot]);
   const flowBars = useMemo(() => buildFlowBars(flowSeries, settings), [flowSeries, settings]);
   const debugStats = useMemo(
-    () => buildDomDebugStats(snapshot, macroRange, heatmapRange, settings, heatmapFrames, institutionalProfile, depthChart, snapshot.lastPrice ?? lastPrice),
-    [depthChart, heatmapFrames, heatmapRange, institutionalProfile, lastPrice, macroRange, settings, snapshot]
+    () => buildDomDebugStats(snapshot, macroRange, heatmapRange, settings, heatmapFrames, institutionalProfile, depthChart, depthHistory, snapshot.lastPrice ?? lastPrice),
+    [depthChart, depthHistory, heatmapFrames, heatmapRange, institutionalProfile, lastPrice, macroRange, settings, snapshot]
   );
 
   const centerMarketCamera = useCallback(() => {
@@ -799,6 +826,31 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                     <em>{band.touches} touches / {Math.round(band.strength * 100)}%</em>
                   </div>
                 ))}
+                {depthCoverageGaps.map((gap) => (
+                  <div
+                    key={gap.id}
+                    className="dom-pro-coverage-gap"
+                    style={{
+                      top: priceToTop(gap.high, heatmapRange),
+                      height: `${Math.max(12, priceToHeight(gap.low, gap.high, heatmapRange))}%`
+                    }}
+                  >
+                    <span>Collecting Depth History</span>
+                  </div>
+                ))}
+                {depthHistory.points.map((point) => (
+                  <i
+                    key={point.id}
+                    className={`dom-pro-depth-memory ${point.side}`}
+                    title={`${point.side === "bid" ? "Buy" : "Sell"} depth memory ${formatPrice(point.price)}`}
+                    style={{
+                      top: priceToTop(point.price, heatmapRange),
+                      opacity: Math.max(0.12, Math.min(0.9, point.strength)),
+                      height: `${Math.max(3, Math.min(16, point.strength * 16))}px`,
+                      width: `${Math.max(18, Math.min(96, 18 + point.strength * 66 + Math.log1p(point.observations) * 4))}%`
+                    }}
+                  />
+                ))}
                 {heatmapStructureRibbons.map((ribbon) => (
                   <i
                     key={ribbon.id}
@@ -978,6 +1030,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
               <Metric label="Heatmap Rows" value={String(debugStats.heatmapRowsRendered)} />
               <Metric label="Profile Rows" value={String(debugStats.profileRowsRendered)} />
               <Metric label="Depth Points" value={`${debugStats.depthBidPoints} / ${debugStats.depthAskPoints}`} />
+              <Metric label="Depth Memory" value={`${debugStats.depthMemoryPoints}`} note={`${depthHistory.stats.bidPoints} BID / ${depthHistory.stats.askPoints} ASK`} />
               <Metric label="Debug Reason" value={debugStats.reason} hot={debugStats.reason !== "OK"} />
               {snapshot.renderStats.lastRenderMs > 12 && <div className="dom-pro-warning">DOM Pro+ render load high. Increase bucket size or reduce FPS.</div>}
             </section>
@@ -1281,6 +1334,44 @@ function buildHeatmapStructureRibbons(
     }));
 }
 
+function buildDepthCoverageGaps(
+  range: MacroLiquidityRange,
+  frames: AggregatedDomSnapshot["heatmap"],
+  bands: MacroLiquidityBand[],
+  ribbons: HeatmapStructureRibbon[],
+  memoryPoints: DepthHistoryPoint[],
+  currentPrice: number | null | undefined
+): CoverageGap[] {
+  const segmentCount = 14;
+  const span = rangeSpan(range);
+  const signalPrices = [
+    Number(currentPrice),
+    ...frames.flatMap((frame) => frame.cells.map((cell) => cell.price)),
+    ...bands.flatMap((band) => [band.low, band.high, band.price]),
+    ...ribbons.map((ribbon) => ribbon.price),
+    ...memoryPoints.map((point) => point.price)
+  ].filter((price) => Number.isFinite(price) && price >= range.min && price <= range.max);
+  const minGapHeight = span / segmentCount;
+  const gaps: CoverageGap[] = [];
+  let active: CoverageGap | null = null;
+
+  for (let index = 0; index < segmentCount; index += 1) {
+    const low = range.min + (span / segmentCount) * index;
+    const high = range.min + (span / segmentCount) * (index + 1);
+    const hasSignal = signalPrices.some((price) => price >= low && price <= high);
+    if (hasSignal) {
+      if (active && active.high - active.low >= minGapHeight) gaps.push(active);
+      active = null;
+      continue;
+    }
+    if (!active) active = { id: `gap:${index}`, low, high };
+    else active.high = high;
+  }
+
+  if (active && active.high - active.low >= minGapHeight) gaps.push(active);
+  return gaps.slice(0, 4);
+}
+
 function resolveHorizonFrameCount(settings: DomSettings) {
   const fallback = settings.maxHeatmapHistory;
   switch (settings.heatmapHorizon) {
@@ -1310,6 +1401,11 @@ function priceToX(price: number, range: MacroLiquidityRange) {
   if (!Number.isFinite(price) || range.max <= range.min) return 50;
   const pct = ((price - range.min) / (range.max - range.min)) * 94 + 3;
   return Math.max(3, Math.min(97, pct));
+}
+
+function priceToHeight(low: number, high: number, range: MacroLiquidityRange) {
+  if (range.max <= range.min || high <= low) return 0;
+  return Math.max(0, Math.min(100, ((high - low) / (range.max - range.min)) * 100));
 }
 
 function buildPriceScale(range: MacroLiquidityRange) {
@@ -1709,6 +1805,7 @@ function buildDomDebugStats(
   heatmapFrames: AggregatedDomSnapshot["heatmap"],
   profile: VolumeProfileNode[],
   depthChart: ReturnType<typeof buildDepthChart>,
+  depthHistory: DepthHistoryRead,
   currentPrice: number | null | undefined
 ): DomDebugStats {
   const visibleHeatmapRows = heatmapFrames.reduce(
@@ -1757,6 +1854,7 @@ function buildDomDebugStats(
     profileRowsRendered: profile.length,
     depthBidPoints: depthChart.bidPoints ?? 0,
     depthAskPoints: depthChart.askPoints ?? 0,
+    depthMemoryPoints: depthHistory.stats.totalPoints,
     reason: reasons.length ? reasons.join("; ").toUpperCase() : "OK"
   };
 }

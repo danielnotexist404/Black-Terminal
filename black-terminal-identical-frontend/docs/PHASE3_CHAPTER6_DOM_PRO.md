@@ -14,6 +14,7 @@ Exchange WebSocket / REST
 -> Orderbook Cache
 -> shared DOM Feed Store
 -> DOM Aggregation Engine
+-> Black Depth History Store
 -> Compact DOM / DOM Pro+ Renderer
 ```
 
@@ -47,6 +48,12 @@ DOM Pro+ execution panel
   - absorption signals
   - iceberg estimates
   - render stats
+- Added Black Depth History Store:
+  - samples raw L2 bid/ask levels while DOM Pro+ runs
+  - compresses observations into persistent wall-memory buckets
+  - stores local browser depth memory per venue, market kind, and symbol
+  - hydrates from and upserts compact depth memory into Supabase `market_depth_memory`
+  - lets Black Terminal become more useful over time instead of depending only on the current live book
 - Added bucket multipliers including `500x` and `1000x`.
 - Added DOM modes:
   - Scalper
@@ -114,6 +121,7 @@ DOM Pro+ execution panel
   - right-side price scale
   - 12H/24H default radar behavior instead of tick-by-tick micro flashing
 - Added profile-derived historical structure ribbons inside the heatmap so wide camera views show higher-timeframe liquidity structure above and below current price even when live L2 depth is shallow.
+- Added depth-memory heatmap bands from recorded L2 observations and coverage-gap overlays labeled `Collecting Depth History` for regions where the terminal has not accumulated enough real depth yet.
 - Added heatmap viewport controls:
   - mouse-wheel zoom
   - vertical drag pan
@@ -128,6 +136,7 @@ DOM Pro+ execution panel
 - Prepared the camera model around center price, zoom, offset, and height so a future minimap/navigator can consume the same viewport state.
 - Fixed the aggregation slice that could keep only upper ask-side buckets in wide domains; visible bucket selection now preserves both bid/buy buckets below market and ask/sell buckets above market.
 - Balanced heatmap memory and wall detection by side so buy walls cannot be starved out by stronger sell-side rankings.
+- Live wall detection now uses raw L2 levels before 1000x visual buckets, so large display bucket sizes cannot erase near-market buy walls.
 - Added DOM diagnostics for raw bid/ask levels, aggregated bid/ask buckets, buy/sell wall counts, shared domain min/max, rendered heatmap/profile rows, and depth bid/ask points.
 - Added real price-domain camera fields for center price, domain min/max, zoom factor, mode, and explicit camera domain.
 - Added +/-1%, +/-2%, +/-5%, +/-10%, +/-20%, and Full Data camera presets.

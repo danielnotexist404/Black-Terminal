@@ -1038,3 +1038,84 @@ Reason:
 Future migration trigger:
 
 - Add a migration only if heatmap camera presets, saved DOM layout state, or historical depth snapshots need account-level Supabase persistence.
+
+## 2026-07-10 - DOM Pro+ Depth Memory Provider
+
+Status: Supabase migration required for cloud depth memory. Local browser depth memory works without this migration.
+
+Purpose:
+
+- Store compact, per-user market depth wall memory over time.
+- Preserve observed bid/ask liquidity buckets so DOM Pro+ becomes more powerful the longer it runs.
+- Keep raw market feed data compressed into institutional wall-memory points instead of writing every orderbook tick.
+
+Run this SQL in Supabase:
+
+```sql
+create table if not exists public.market_depth_memory (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  exchange text not null,
+  market_kind text not null,
+  symbol text not null,
+  side text not null check (side in ('bid', 'ask')),
+  price_bucket numeric not null,
+  bucket_size numeric not null,
+  first_seen_at timestamptz not null,
+  last_seen_at timestamptz not null,
+  observations integer not null default 1 check (observations >= 0),
+  peak_size numeric not null default 0,
+  last_size numeric not null default 0,
+  strength numeric not null default 0 check (strength >= 0 and strength <= 1),
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, exchange, market_kind, symbol, side, price_bucket)
+);
+
+create index if not exists idx_market_depth_memory_user_symbol_time
+  on public.market_depth_memory(user_id, exchange, market_kind, symbol, last_seen_at desc);
+
+create index if not exists idx_market_depth_memory_user_symbol_side_price
+  on public.market_depth_memory(user_id, exchange, market_kind, symbol, side, price_bucket);
+
+create or replace function public.set_market_depth_memory_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_market_depth_memory_updated_at on public.market_depth_memory;
+create trigger trg_market_depth_memory_updated_at
+before update on public.market_depth_memory
+for each row
+execute function public.set_market_depth_memory_updated_at();
+
+alter table public.market_depth_memory enable row level security;
+
+create policy "market_depth_memory_select_own"
+  on public.market_depth_memory for select
+  using (auth.uid() = user_id);
+
+create policy "market_depth_memory_insert_own"
+  on public.market_depth_memory for insert
+  with check (auth.uid() = user_id);
+
+create policy "market_depth_memory_update_own"
+  on public.market_depth_memory for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create policy "market_depth_memory_delete_own"
+  on public.market_depth_memory for delete
+  using (auth.uid() = user_id);
+```
+
+Notes:
+
+- DOM Pro+ hydrates previously collected wall memory on startup and writes compact wall-memory points only once per throttled interval.
+- If this table is missing, the frontend silently falls back to local browser depth memory and does not break the terminal.

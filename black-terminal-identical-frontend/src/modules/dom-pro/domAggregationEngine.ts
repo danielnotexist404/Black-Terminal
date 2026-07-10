@@ -80,11 +80,13 @@ export class DomAggregationEngine {
     const tickSize = inferTickSize(input.book, input.marketSymbol);
     const bucketSize = resolveBucketSize(input.settings, tickSize);
     const buckets = buildBuckets(input.book, bucketSize, lastPrice ?? midPrice ?? bestBid ?? bestAsk ?? 0, input.settings);
+    const rawWallBuckets = buildRawWallBuckets(input.book, bucketSize, lastPrice ?? midPrice ?? bestBid ?? bestAsk ?? 0, input.settings);
+    const heatmapBuckets = mergeHeatmapBuckets(buckets, rawWallBuckets);
     const deltas = this.detectLiquidityDelta(buckets);
     const profile = buildVolumeProfile(buckets);
-    const walls = this.detectWalls(buckets, input.settings, lastPrice ?? midPrice ?? 0, now);
+    const walls = this.detectWalls(rawWallBuckets.length ? rawWallBuckets : buckets, input.settings, lastPrice ?? midPrice ?? 0, now);
     const liquidityMigration = this.detectLiquidityMigration(walls, now);
-    const heatmap = this.pushHeatmapFrame(buckets, input.settings, now);
+    const heatmap = this.pushHeatmapFrame(heatmapBuckets, input.settings, now);
     this.updateCvd(input.trades);
     const absorption = detectAbsorption(input.trades, buckets, deltas, lastPrice ?? midPrice ?? 0);
     const iceberg = detectIceberg(input.trades, buckets, deltas, lastPrice ?? midPrice ?? 0);
@@ -408,6 +410,55 @@ function buildBuckets(book: OrderBookSnapshot, bucketSize: number, price: number
   return selected
     .map((bucket) => ({ ...bucket, heat: bucket.totalSize / maxSize }))
     .sort((a, b) => b.price - a.price);
+}
+
+function buildRawWallBuckets(book: OrderBookSnapshot, bucketSize: number, price: number, settings: DomSettings): DomBucket[] {
+  const buildSide = (side: "bid" | "ask") => {
+    const levels = (side === "bid" ? book.bids : book.asks)
+      .filter((level) => level.price > 0 && level.quantity > 0)
+      .filter((level) => price <= 0 || (side === "bid" ? level.price <= price : level.price >= price));
+    const sizes = levels.map((level) => level.quantity);
+    const avg = average(sizes);
+    const threshold = Math.max(avg * Math.max(0.85, settings.liquidityThreshold * 0.22), avg + standardDeviation(sizes) * 0.25);
+    const ranked = levels.slice().sort((a, b) => b.quantity - a.quantity);
+    const accepted = ranked.filter((level) => level.quantity >= threshold).slice(0, 44);
+    const fallback = ranked.slice(0, Math.min(18, ranked.length));
+    return (accepted.length ? accepted : fallback).map((level) => levelToBucket(level.price, side, level.quantity, bucketSize, price));
+  };
+  const raw = [...buildSide("ask"), ...buildSide("bid")];
+  const maxSize = Math.max(...raw.map((bucket) => bucket.totalSize), 1);
+  return raw
+    .map((bucket) => ({ ...bucket, heat: bucket.totalSize / maxSize }))
+    .sort((a, b) => b.price - a.price);
+}
+
+function levelToBucket(price: number, side: "bid" | "ask", size: number, bucketSize: number, lastPrice: number): DomBucket {
+  const rawWidth = Math.max(bucketSize * 0.05, price * 0.00005, 0.00000001);
+  return {
+    price,
+    low: price - rawWidth / 2,
+    high: price + rawWidth / 2,
+    bidSize: side === "bid" ? size : 0,
+    askSize: side === "ask" ? size : 0,
+    totalSize: size,
+    bidDelta: 0,
+    askDelta: 0,
+    heat: 0,
+    isBestBid: false,
+    isBestAsk: false,
+    isCurrentPrice: lastPrice >= price - rawWidth / 2 && lastPrice <= price + rawWidth / 2
+  };
+}
+
+function mergeHeatmapBuckets(buckets: DomBucket[], rawWallBuckets: DomBucket[]) {
+  if (rawWallBuckets.length === 0) return buckets;
+  const map = new Map<string, DomBucket>();
+  for (const bucket of buckets) map.set(bucketKey(bucket), bucket);
+  for (const bucket of rawWallBuckets) {
+    const key = `${bucket.bidSize > 0 ? "raw-bid" : "raw-ask"}:${bucket.price}`;
+    map.set(key, bucket);
+  }
+  return Array.from(map.values()).sort((a, b) => b.price - a.price);
 }
 
 function selectBucketsAroundPrice(buckets: DomBucket[], price: number, limit: number) {

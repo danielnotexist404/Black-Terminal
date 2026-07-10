@@ -1030,7 +1030,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
               <Metric label="Heatmap Rows" value={String(debugStats.heatmapRowsRendered)} />
               <Metric label="Profile Rows" value={String(debugStats.profileRowsRendered)} />
               <Metric label="Depth Points" value={`${debugStats.depthBidPoints} / ${debugStats.depthAskPoints}`} />
-              <Metric label="Depth Memory" value={`${debugStats.depthMemoryPoints}`} note={`${depthHistory.stats.bidPoints} BID / ${depthHistory.stats.askPoints} ASK`} />
+              <Metric label="Depth Memory" value={`${debugStats.depthMemoryPoints}`} note={`${depthHistory.stats.bidPoints} BID / ${depthHistory.stats.askPoints} ASK / ${depthHistory.stats.source.toUpperCase()}`} />
               <Metric label="Debug Reason" value={debugStats.reason} hot={debugStats.reason !== "OK"} />
               {snapshot.renderStats.lastRenderMs > 12 && <div className="dom-pro-warning">DOM Pro+ render load high. Increase bucket size or reduce FPS.</div>}
             </section>

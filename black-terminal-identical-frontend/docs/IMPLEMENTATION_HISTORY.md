@@ -6,6 +6,7 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
+- Current - Implement Black Core Market Depth Memory foundation.
 - Current - Add DOM Pro+ depth memory provider foundation.
 - Current - Stabilize DOM Pro+ heatmap drag and downside structure.
 - Current - Fix DOM Pro+ profile domain scaffold and raw-depth curve.
@@ -50,6 +51,37 @@ Validation:
 - `npm run build` passes.
 - `vercel build --yes` passes locally.
 - Generated Vercel output now contains 10 API functions instead of 20.
+
+## Phase III Chapter VII: Black Core Market Depth Memory
+
+Status: Implemented infrastructure foundation
+
+Changed:
+
+- Added `server/market-depth` as the Black Core Market Depth Memory subsystem.
+- Added server-side depth normalization, compression rollups, delta extraction, wall lifecycle detection, event generation, statistics, and replay reconstruction.
+- Added a long-running collector worker entry at `scripts/market-depth-worker.js`, exposed through `npm run depth:worker`.
+- Added collector adapters for Hyperliquid, Binance, Bybit, and OKX public depth streams.
+- Added dynamic Vercel API route dispatcher at `api/market-depth/[action].js`.
+- Added market-depth routes for replay, ingest, status, and walls.
+- Added DOM Pro+ replay hydration from `/api/market-depth/replay`, with source labeling for Black Core, Supabase fallback, or local fallback memory.
+- Added the platform-owned Supabase migration for snapshots, deltas, rollups, liquidity events, lifecycle walls, and statistics.
+
+Why:
+
+- DOM Pro+ should become one visualization of Black Core market memory instead of being responsible for building all historical liquidity memory in the browser.
+- Black Terminal needs a server-owned IMM foundation that Scanner, BlackGPT, Strategy Lab, Replay, and future automation can consume without duplicating orderbook logic.
+
+Validation:
+
+- Server modules pass `node --check`.
+- `npm run build` must pass before push.
+
+Remaining:
+
+- The collector must run in a persistent worker/runtime. Vercel serverless cannot own continuous WebSocket collection.
+- Venue-specific sequence reconciliation/checksum repair and retention pruning jobs still need dedicated follow-up work.
+- Browser Web Worker rendering/offload remains a separate DOM Pro performance step.
 
 ## Phase III Chapter VI: DOM Pro+
 

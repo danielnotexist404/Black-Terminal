@@ -1,6 +1,7 @@
 import { isSupabaseConfigured, supabase } from "../../lib/supabase";
 import type { MarketSymbol, OrderBookLevel, OrderBookSnapshot } from "../../market-data/types";
 import type { DomHeatmapHorizon, MacroLiquidityRange } from "./types";
+import { fetchBlackCoreDepthReplay } from "./marketDepthMemoryClient";
 
 export type DepthHistorySide = "bid" | "ask";
 
@@ -26,6 +27,7 @@ export type DepthHistoryRead = {
     firstSeen: number | null;
     lastSeen: number | null;
     localOnly: boolean;
+    source: "black-core" | "supabase" | "local";
   };
 };
 
@@ -51,6 +53,9 @@ export class BlackDepthHistoryStore {
   private lastRemoteSyncAt = new Map<string, number>();
   private remoteHydrated = new Set<string>();
   private remoteDisabledUntil = 0;
+  private blackCoreHydrated = new Set<string>();
+  private blackCoreLastQueryAt = new Map<string, number>();
+  private blackCoreDisabledUntil = 0;
 
   subscribe(symbol: MarketSymbol, listener: () => void) {
     const key = symbolKey(symbol);
@@ -132,6 +137,7 @@ export class BlackDepthHistoryStore {
   read(symbol: MarketSymbol, range: MacroLiquidityRange, horizon: DomHeatmapHorizon): DepthHistoryRead {
     const now = Date.now();
     const data = this.load(symbol);
+    void this.hydrateBlackCore(symbol, range, horizon);
     const cutoff = now - horizonMs(horizon);
     const points = data.points
       .filter((point) => point.price >= range.min && point.price <= range.max)
@@ -149,9 +155,55 @@ export class BlackDepthHistoryStore {
         askPoints: data.points.filter((point) => point.side === "ask").length,
         firstSeen,
         lastSeen,
-        localOnly: !isSupabaseConfigured
+        localOnly: !isSupabaseConfigured && !this.blackCoreHydrated.has(symbolKey(symbol)),
+        source: this.blackCoreHydrated.has(symbolKey(symbol)) ? "black-core" : isSupabaseConfigured ? "supabase" : "local"
       }
     };
+  }
+
+  private async hydrateBlackCore(symbol: MarketSymbol, range: MacroLiquidityRange, horizon: DomHeatmapHorizon) {
+    const key = symbolKey(symbol);
+    if (Date.now() < this.blackCoreDisabledUntil) return;
+    const queryKey = `${key}:${horizon}:${Math.round(range.min)}:${Math.round(range.max)}`;
+    if (Date.now() - (this.blackCoreLastQueryAt.get(queryKey) ?? 0) < 45_000) return;
+    this.blackCoreLastQueryAt.set(queryKey, Date.now());
+    try {
+      const replay = await fetchBlackCoreDepthReplay(symbol, range, horizon);
+      if (!replay?.points.length) return;
+      const local = this.load(symbol);
+      const map = new Map(local.points.map((point) => [point.id, point]));
+      for (const point of replay.points) {
+        if (!Number.isFinite(point.price) || point.price <= 0) continue;
+        const side = point.side === "ask" ? "ask" : "bid";
+        const id = `${side}:${point.price.toFixed(8)}`;
+        const existing = map.get(id);
+        const firstSeen = Number(point.firstSeen) || Date.now();
+        const lastSeen = Number(point.lastSeen) || Date.now();
+        if (existing && existing.lastSeen > lastSeen && existing.strength >= point.strength) continue;
+        map.set(id, {
+          id,
+          side,
+          price: point.price,
+          bucketSize: Number(point.bucketSize) || Math.max(point.price * 0.0005, 0.01),
+          firstSeen: existing ? Math.min(existing.firstSeen, firstSeen) : firstSeen,
+          lastSeen: Math.max(existing?.lastSeen ?? 0, lastSeen),
+          observations: Math.max(existing?.observations ?? 0, Number(point.observations) || 1),
+          peakSize: Math.max(existing?.peakSize ?? 0, Number(point.peakSize) || 0),
+          lastSize: Math.max(existing?.lastSize ?? 0, Number(point.lastSize) || 0),
+          strength: Math.max(existing?.strength ?? 0, Math.max(0, Math.min(1, Number(point.strength) || 0)))
+        });
+      }
+      local.points = Array.from(map.values())
+        .sort((a, b) => historyScore(b, Date.now()) - historyScore(a, Date.now()))
+        .slice(0, maxPointsPerSymbol)
+        .sort((a, b) => b.price - a.price);
+      local.updatedAt = Date.now();
+      this.blackCoreHydrated.add(key);
+      this.persist(key, local);
+      this.notify(key);
+    } catch {
+      this.blackCoreDisabledUntil = Date.now() + 60_000;
+    }
   }
 
   private load(symbol: MarketSymbol): DepthHistoryData {

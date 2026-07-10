@@ -54,6 +54,7 @@ DOM Pro+ execution panel
   - stores local browser depth memory per venue, market kind, and symbol
   - hydrates from and upserts compact depth memory into Supabase `market_depth_memory`
   - lets Black Terminal become more useful over time instead of depending only on the current live book
+- Added Black Core Market Depth Memory replay hydration so DOM Pro+ can consume server-owned IMM memory when `/api/market-depth/replay` and the platform depth-memory tables are available.
 - Added bucket multipliers including `500x` and `1000x`.
 - Added DOM modes:
   - Scalper
@@ -170,6 +171,7 @@ DOM Pro+ execution panel
 - No fake DOM liquidity is rendered by the compact DOM or DOM Pro+.
 - Historical macro bands are derived from real OHLCV candles and labeled as historical structure, not as live resting orderbook liquidity.
 - Live DOM walls continue to come from current orderbook depth and persistent DOM memory.
+- Long-term institutional market memory should come from Black Core Market Depth Memory. Browser-local depth memory is a fallback only.
 - If orderbook data is missing, the UI shows `Awaiting live orderbook stream.`
 - If heatmap history is missing, the UI shows `Liquidity heatmap requires depth history.`
 - If trade tape data is missing, the UI shows `Trade stream unavailable for this venue.`
@@ -181,6 +183,7 @@ DOM Pro+ execution panel
 - Wall, absorption, and iceberg readings are first-pass heuristics and are labeled accordingly.
 - DOM Pro+ settings currently persist locally. No Supabase table is required yet.
 - Worker/Rust offload is prepared by keeping aggregation separate from React, but aggregation still runs in the browser thread.
+- Server-side depth collection now has a foundation, but the collector must run in a persistent worker/runtime outside Vercel serverless.
 
 ## Validation
 

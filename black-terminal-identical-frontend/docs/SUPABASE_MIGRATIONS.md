@@ -1409,3 +1409,12 @@ Notes:
 - The table is platform-owned. Direct browser access is intentionally blocked by RLS.
 - `/api/market-depth/tiles` uses the existing rollup tables and does not require extra schema.
 - DOM Pro+ browser depth memory no longer writes to Supabase unless `VITE_DOM_DEPTH_BROWSER_SYNC=true` is explicitly set.
+
+## 2026-07-10 - IMM Replay Worker Bridge
+
+Status: No Supabase migration required.
+
+Reason:
+
+- This is a frontend worker/offload change for shaping replay points before DOM Pro+ consumes them.
+- It does not introduce new persistence, credentials, permissions, or server-owned records.

@@ -6,6 +6,7 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
+- Current - Add IMM replay worker bridge.
 - Current - Add IMM tiles and collector heartbeat.
 - Current - Add IMM retention and alert surfaces.
 - Current - Implement Black Core Market Depth Memory foundation.
@@ -74,6 +75,7 @@ Changed:
 - Added `/api/market-depth/tiles` for bounded Google-Maps-style replay cells with explicit multi-venue breakdown.
 - Added collector heartbeat persistence through `market_depth_collector_status` and included collector status in `/api/market-depth/status`.
 - Changed browser depth memory so Supabase writes are disabled by default. Local browser memory remains fallback-only, while Black Core replay is the authoritative path.
+- Added the first DOM-side IMM aggregation worker bridge for shaping/culling Black Core replay points before they are merged into DOM Pro+ fallback memory.
 
 Why:
 
@@ -89,7 +91,7 @@ Remaining:
 
 - The collector must run in a persistent worker/runtime. Vercel serverless cannot own continuous WebSocket collection.
 - Venue-specific sequence reconciliation/checksum repair still needs dedicated follow-up work.
-- Browser Web Worker rendering/offload remains a separate DOM Pro performance step.
+- The remaining live DOM aggregation path still needs full worker migration.
 
 ## Phase III Chapter VI: DOM Pro+
 

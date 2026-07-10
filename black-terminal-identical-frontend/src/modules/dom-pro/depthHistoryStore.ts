@@ -1,6 +1,7 @@
 import { isSupabaseConfigured, supabase } from "../../lib/supabase";
 import type { MarketSymbol, OrderBookLevel, OrderBookSnapshot } from "../../market-data/types";
 import type { DomHeatmapHorizon, MacroLiquidityRange } from "./types";
+import { shapeBlackCoreReplayPoints } from "./immAggregationClient";
 import { fetchBlackCoreDepthReplay } from "./marketDepthMemoryClient";
 
 export type DepthHistorySide = "bid" | "ask";
@@ -172,9 +173,10 @@ export class BlackDepthHistoryStore {
     try {
       const replay = await fetchBlackCoreDepthReplay(symbol, range, horizon);
       if (!replay?.points.length) return;
+      const shapedPoints = await shapeBlackCoreReplayPoints(replay.points, range, 360);
       const local = this.load(symbol);
       const map = new Map(local.points.map((point) => [point.id, point]));
-      for (const point of replay.points) {
+      for (const point of shapedPoints) {
         if (!Number.isFinite(point.price) || point.price <= 0) continue;
         const side = point.side === "ask" ? "ask" : "bid";
         const id = `${side}:${point.price.toFixed(8)}`;

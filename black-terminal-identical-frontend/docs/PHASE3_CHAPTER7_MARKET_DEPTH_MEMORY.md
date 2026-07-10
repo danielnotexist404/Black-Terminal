@@ -62,6 +62,7 @@ npm run depth:worker
 - Added token-protected retention pruning route using `MARKET_DEPTH_MAINTENANCE_TOKEN` or `MARKET_DEPTH_INGEST_TOKEN`.
 - Added alert extraction API that converts liquidity events, active walls, depth imbalances, liquidity vacuums, spoof suspicion, gravity zones, and feed degradation into normalized market-memory alerts.
 - Added DOM Pro+ client hydration from `/api/market-depth/replay`.
+- Added a DOM-side IMM aggregation worker bridge for Black Core replay shaping/culling. If Worker construction fails, it falls back to the same shaping logic on the main thread.
 - DOM Pro+ still keeps local browser depth memory as a fallback when the backend tables, worker, or API are unavailable.
 - Browser-built depth memory no longer writes back to Supabase by default. Set `VITE_DOM_DEPTH_BROWSER_SYNC=true` only for legacy debugging.
 - DOM Pro+ diagnostics now label depth memory source as:
@@ -127,7 +128,7 @@ MARKET_DEPTH_SYMBOLS=hyperliquid:perpetual:BTCUSDT,binance:perpetual:BTCUSDT,byb
 - Packet-loss detection is available for incremental feeds and stored in depth statistics. Full exchange-specific sequence repair/checksum reconciliation remains a follow-up.
 - Replay currently reads compressed rollups and active walls. It does not yet stream tiled map chunks or minimap navigator data.
 - The tile API exposes bounded map cells; DOM Pro+ still consumes replay hydration first and can be moved to tile streaming in a follow-up.
-- Web Worker aggregation inside the browser remains future work; the server compression layer is now in place first.
+- Web Worker aggregation is started for Black Core replay shaping. The remaining large DOM live aggregation path still needs full worker migration.
 
 ## Next Work
 
@@ -135,4 +136,5 @@ MARKET_DEPTH_SYMBOLS=hyperliquid:perpetual:BTCUSDT,binance:perpetual:BTCUSDT,byb
 - Add venue-specific sequence recovery and checksum validation.
 - Add deployment automation for the retention pruning route if the collector worker is not always running.
 - Add tile-based replay windows for Google-Maps-style zoom/pan.
+- Move the rest of DOM live aggregation, CVD shaping, and depth chart construction to the IMM worker bridge.
 - Feed market-memory alerts into Scanner, BlackGPT, and Notifications.

@@ -474,6 +474,37 @@ Remaining:
 - Validate testnet connect, order, cancel, modify, close-position, and sync flows with an approved Hyperliquid agent wallet.
 - Keep mainnet disabled until testnet flow is confirmed end to end.
 
+## Phase III Chapter 8: IMM Polish And Professional UX
+
+Status: Implemented and build validated
+
+Changed:
+
+- Added DOM Pro+ workspace presets for Scalper, Intraday, Institutional, and Macro.
+- Added persistent camera controls for Center, Fit, Follow, and Explore.
+- Added keyboard shortcuts for centering, fitting, follow mode, reset, heatmap, profile, depth chart, and overlay close.
+- Added `showDepthChart`, `followMarket`, `freeExplore`, and `workspacePreset` to local DOM Pro settings.
+- Added an IMM status strip that consumes `/api/imm/status` and summarizes worker state, replay quality, wall counts, active camera domain, FPS, heartbeat age, and persistence age.
+
+Why:
+
+- DOM Pro+ needs to behave like professional desk software: the trader controls the camera, understands data quality at a glance, and can switch between operating styles without manually tuning every setting.
+
+Validation:
+
+- `npm run build`
+
+Remaining:
+
+- Add inertia/momentum panning.
+- Add user-resizable panel geometry with local persistence.
+- Expand wall and heatmap tooltips with full reliability metadata.
+- Add automated interaction tests for camera/preset keyboard behavior.
+
+Docs:
+
+- `PHASE3_CHAPTER8_IMM_POLISH.md`
+
 ## Future Work Log
 
 Use this format for every future phase, chapter, or major bug sprint.

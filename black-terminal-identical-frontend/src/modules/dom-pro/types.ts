@@ -1,6 +1,7 @@
 import type { MarketSymbol, OrderBookSnapshot, TickerSnapshot, TradeTick } from "../../market-data/types";
 
 export type DomMode = "micro" | "scalper" | "standard" | "intraday" | "institutional" | "swing" | "macro" | "custom";
+export type DomWorkspacePreset = "scalper" | "intraday" | "institutional" | "macro";
 export type DomVisibleRange = "auto" | "0.25" | "0.5" | "1" | "2" | "5" | "10" | "20" | "full" | "custom";
 export type DomProfileSource = "session" | "visible-range" | "rolling-window";
 export type DomHeatmapHorizon = "15m" | "2h" | "6h" | "12h" | "24h" | "3d" | "1w";
@@ -158,6 +159,7 @@ export type AggregatedDomSnapshot = {
 export type DomSettings = {
   workspaceId: string;
   symbolKey: string;
+  workspacePreset: DomWorkspacePreset;
   mode: DomMode;
   bucketMultiplier: 1 | 5 | 10 | 25 | 50 | 100 | 250 | 500 | 1000 | "custom";
   customBucketSize: number;
@@ -168,6 +170,7 @@ export type DomSettings = {
   showHeatmap: boolean;
   showWallDetection: boolean;
   showCvd: boolean;
+  showDepthChart: boolean;
   showExecutionPanel: boolean;
   showDiagnostics: boolean;
   showMacroRadar: boolean;
@@ -188,4 +191,6 @@ export type DomSettings = {
   showPoc: boolean;
   showHvnLvn: boolean;
   showValueArea: boolean;
+  followMarket: boolean;
+  freeExplore: boolean;
 };

@@ -54,6 +54,7 @@ npm run depth:verify
 ```
 
 The verification command checks recent rollups, bid/ask rows, impossible values, expected resolutions, wall symmetry, worker heartbeat freshness, and bounded replay windows.
+- DOM Pro+ now includes a compact IMM status strip that polls `/api/imm/status` and displays worker state, replay confidence, wall symmetry, camera range, FPS, heartbeat age, and persistence age.
 
 ## Status Model
 
@@ -117,7 +118,7 @@ Direct browser access is intentionally blocked by RLS.
 
 - Snapshot/delta reconciliation is started through sequence-gap detection and snapshot recovery, but full venue checksum validation remains future work.
 - Admin operations controls are not implemented yet.
-- DOM Pro+ user-facing IMM status indicator is not implemented yet.
+- DOM Pro+ has an initial user-facing IMM status strip; admin-grade controls and deeper drilldown remain future work.
 - Deterministic tests and load tests still need dedicated fixtures and scripts.
 - Event outcome labeling for machine-learning datasets is not implemented yet.
 

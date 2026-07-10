@@ -104,6 +104,11 @@ DOM Pro+ must consume this status instead of creating duplicate health state. Th
 normalizes worker health, feed freshness, sequence gaps, persistence evidence, replay readiness,
 wall symmetry, integrity failures, and data quality into one status model.
 
+DOM Pro+ displays this operational state in its IMM status strip while keeping viewport state local.
+The heatmap, volume profile, and depth chart share one price-space camera. Follow mode, free-explore
+mode, presets, wheel zoom, drag pan, and fit/center actions must all operate through that shared
+camera rather than creating independent panel scales.
+
 Operational records are platform-owned:
 
 - `imm_worker_heartbeats`

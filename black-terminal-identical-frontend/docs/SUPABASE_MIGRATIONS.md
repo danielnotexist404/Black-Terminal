@@ -1522,3 +1522,17 @@ Notes:
 - These are platform-owned operational tables.
 - Direct browser access is intentionally blocked by RLS.
 - Server routes and workers access these records through `SUPABASE_SERVICE_ROLE_KEY`.
+
+## 2026-07-10 - IMM Polish And Professional UX
+
+Status: No Supabase migration required.
+
+Reason:
+
+- DOM Pro+ workspace presets, follow/free-explore mode, depth-chart visibility, keyboard shortcuts, and the IMM status strip are frontend/local workspace behavior.
+- The status strip consumes the existing `/api/imm/status` service and existing IMM operational tables.
+- No new server-owned records, credentials, execution audit rows, account tables, or market-memory tables were introduced.
+
+Future migration trigger:
+
+- Add a Supabase migration only if DOM Pro+ presets, camera state, resizable panel layouts, or cross-device order-flow workspaces need account-level persistence.

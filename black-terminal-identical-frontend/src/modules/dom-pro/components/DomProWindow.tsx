@@ -22,6 +22,7 @@ import type {
   DomHeatmapHorizon,
   DomMode,
   DomSettings,
+  DomWorkspacePreset,
   DomVisibleRange,
   MacroLiquidityBand,
   MacroLiquidityRange,
@@ -53,6 +54,24 @@ type HeatmapViewportState = {
 type HeatmapCameraPreset = "current" | "range1" | "range2" | "range5" | "range10" | "range20" | "1h" | "6h" | "12h" | "24h" | "3d" | "full" | "fit";
 type HeatmapCameraMode = HeatmapCameraPreset | "manual";
 type HeatmapTimeCameraPreset = "1h" | "6h" | "12h" | "24h" | "3d";
+
+type IMMStatusPayload = {
+  overallStatus?: string;
+  workerStatus?: string;
+  currentVenue?: string | null;
+  currentSymbol?: string | null;
+  lastMessageAt?: string | null;
+  lastPersistAt?: string | null;
+  activeBuyWalls?: number;
+  activeSellWalls?: number;
+  staleForMs?: number | null;
+  quality?: {
+    coverageScore?: number;
+    replayConfidence?: string;
+    bidAskBalance?: string;
+  };
+  warnings?: string[];
+};
 
 type DomHoverInfo = {
   x: number;
@@ -160,6 +179,12 @@ const cvdHorizons: Array<{ value: DomCvdHorizon; label: string }> = [
   { value: "12h", label: "12H" },
   { value: "24h", label: "24H" }
 ];
+const workspacePresets: Array<{ value: DomWorkspacePreset; label: string; title: string }> = [
+  { value: "scalper", label: "Scalper", title: "Fast near-price tape, tighter range, higher refresh" },
+  { value: "intraday", label: "Intraday", title: "Balanced 6H desk view for active sessions" },
+  { value: "institutional", label: "Institutional", title: "24H liquidity map with calmer rendering" },
+  { value: "macro", label: "Macro", title: "Wide liquidity memory and longer historical context" }
+];
 
 export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspaceId, windowMode, settingsOpenSignal = 0, onClose }: DomProWindowProps) {
   const symbolKey = `${marketSymbol.exchange}:${marketSymbol.marketKind}:${marketSymbol.rawSymbol}`;
@@ -209,6 +234,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const [macroCandles, setMacroCandles] = useState<Candle[]>(() => blackCoreMarketDataEngine.cache.getCandles(marketSymbol, "1d"));
   const [macroStatus, setMacroStatus] = useState("HISTORICAL DEPTH");
   const [depthHistoryRevision, setDepthHistoryRevision] = useState(0);
+  const [immStatus, setImmStatus] = useState<IMMStatusPayload | null>(null);
 
   useEffect(() => blackCoreConnectionManager.subscribe(setConnections), []);
 
@@ -233,6 +259,26 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   useEffect(() => {
     if (settingsOpenSignal > 0) setSettingsOpen(true);
   }, [settingsOpenSignal]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadStatus = async () => {
+      try {
+        const response = await fetch("/api/imm/status", { headers: { accept: "application/json" } });
+        if (!response.ok) throw new Error(`IMM status ${response.status}`);
+        const payload = await response.json() as IMMStatusPayload;
+        if (!cancelled) setImmStatus(payload);
+      } catch {
+        if (!cancelled) setImmStatus({ overallStatus: "unavailable", workerStatus: "unavailable", warnings: ["status_endpoint_unavailable"] });
+      }
+    };
+    void loadStatus();
+    const interval = window.setInterval(loadStatus, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -467,13 +513,81 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
 
   const centerMarketCamera = useCallback(() => {
     setHeatmapViewport(createCameraFromRange(macroRange, macroRange, "current", snapshot.lastPrice ?? lastPrice));
+    patchSettings({ followMarket: false, freeExplore: false });
     setDomHover(null);
   }, [lastPrice, macroRange, snapshot.lastPrice]);
 
   const fitVisibleDataCamera = useCallback(() => {
     setHeatmapViewport(createCameraFromRange(liquidityDataRange, macroRange, "fit"));
+    patchSettings({ followMarket: false, freeExplore: true });
     setDomHover(null);
   }, [liquidityDataRange, macroRange]);
+
+  const applyWorkspacePreset = useCallback((preset: DomWorkspacePreset) => {
+    const patch: Partial<DomSettings> = {
+      workspacePreset: preset,
+      mode: preset,
+      followMarket: false,
+      freeExplore: preset !== "scalper"
+    };
+    if (preset === "scalper") {
+      Object.assign(patch, {
+        bucketMultiplier: 25,
+        visibleRange: "0.5",
+        fpsCap: 24,
+        heatmapHorizon: "15m",
+        cvdHorizon: "15m",
+        maxVisibleBuckets: 90,
+        maxHeatmapHistory: 140,
+        cvdSampleIntervalSec: 5,
+        cvdSmoothingLength: 14
+      } satisfies Partial<DomSettings>);
+      setHeatmapViewport(createCameraFromRange(rangeFromPricePct(snapshot.lastPrice ?? lastPrice ?? midpoint(macroRange), 0.5, macroRange.source), macroRange, "range1", snapshot.lastPrice ?? lastPrice));
+    } else if (preset === "intraday") {
+      Object.assign(patch, {
+        bucketMultiplier: 100,
+        visibleRange: "2",
+        fpsCap: 15,
+        heatmapHorizon: "6h",
+        cvdHorizon: "1h",
+        maxVisibleBuckets: 150,
+        maxHeatmapHistory: 300,
+        cvdSampleIntervalSec: 10,
+        cvdSmoothingLength: 24
+      } satisfies Partial<DomSettings>);
+      setHeatmapViewport(createCameraFromRange(resolveCameraPresetRange("6h", snapshot, macroBands, macroRange, snapshot.lastPrice ?? lastPrice), macroRange, "6h"));
+    } else if (preset === "macro") {
+      Object.assign(patch, {
+        bucketMultiplier: 1000,
+        visibleRange: "full",
+        fpsCap: 7,
+        heatmapHorizon: "1w",
+        cvdHorizon: "24h",
+        maxVisibleBuckets: 220,
+        maxHeatmapHistory: 720,
+        cvdSampleIntervalSec: 30,
+        cvdSmoothingLength: 50,
+        macroLookbackDays: 720
+      } satisfies Partial<DomSettings>);
+      setHeatmapViewport(createCameraFromRange(liquidityDataRange, macroRange, "full"));
+    } else {
+      Object.assign(patch, {
+        bucketMultiplier: 500,
+        visibleRange: "5",
+        fpsCap: 12,
+        heatmapHorizon: "24h",
+        cvdHorizon: "4h",
+        maxVisibleBuckets: 180,
+        maxHeatmapHistory: 520,
+        cvdSampleIntervalSec: 10,
+        cvdSmoothingLength: 34,
+        macroLookbackDays: 365
+      } satisfies Partial<DomSettings>);
+      setHeatmapViewport(createCameraFromRange(resolveCameraPresetRange("24h", snapshot, macroBands, macroRange, snapshot.lastPrice ?? lastPrice), macroRange, "24h"));
+    }
+    patchSettings(patch);
+    setDomHover(null);
+  }, [lastPrice, liquidityDataRange, macroBands, macroRange, snapshot]);
 
   const handleCameraPreset = useCallback((preset: HeatmapCameraPreset) => {
     if (preset === "current") {
@@ -486,7 +600,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     }
     if (preset === "full") {
       setHeatmapViewport(createCameraFromRange(liquidityDataRange, macroRange, "full"));
-      patchSettings({ visibleRange: "full" });
+      patchSettings({ visibleRange: "full", followMarket: false, freeExplore: true });
       setDomHover(null);
       return;
     }
@@ -495,19 +609,32 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
       const marketPrice = snapshot.lastPrice ?? lastPrice ?? midpoint(macroRange);
       const nextRange = rangeFromPricePct(marketPrice, rangePct, macroRange.source);
       setHeatmapViewport(createCameraFromRange(nextRange, macroRange, preset, marketPrice));
-      patchSettings({ visibleRange: String(rangePct) as DomVisibleRange });
+      patchSettings({ visibleRange: String(rangePct) as DomVisibleRange, followMarket: false, freeExplore: true });
       setDomHover(null);
       return;
     }
     const nextRange = resolveCameraPresetRange(preset as HeatmapTimeCameraPreset, snapshot, macroBands, macroRange, snapshot.lastPrice ?? lastPrice);
     setHeatmapViewport(createCameraFromRange(nextRange, macroRange, preset));
     const horizonPatch = cameraPresetToHeatmapHorizon(preset);
-    if (horizonPatch && horizonPatch !== settings.heatmapHorizon) patchSettings({ heatmapHorizon: horizonPatch });
+    patchSettings({ ...(horizonPatch && horizonPatch !== settings.heatmapHorizon ? { heatmapHorizon: horizonPatch } : {}), followMarket: false, freeExplore: true });
     setDomHover(null);
   }, [centerMarketCamera, fitVisibleDataCamera, lastPrice, macroBands, macroRange, settings.heatmapHorizon, snapshot]);
 
+  useEffect(() => {
+    if (!settings.followMarket || settings.freeExplore) return;
+    const marketPrice = snapshot.lastPrice ?? lastPrice;
+    if (!Number.isFinite(marketPrice)) return;
+    setHeatmapViewport((current) => normalizeCamera({
+      ...current,
+      cameraCenterPrice: Number(marketPrice),
+      cameraHeight: resolveCameraHeight(current, macroRange),
+      mode: "current"
+    }, macroRange));
+  }, [lastPrice, macroRange, settings.followMarket, settings.freeExplore, snapshot.lastPrice]);
+
   const handleHeatmapWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
     event.preventDefault();
+    if (settings.followMarket || !settings.freeExplore) patchSettings({ followMarket: false, freeExplore: true });
     const rect = event.currentTarget.getBoundingClientRect();
     setHeatmapViewport((current) => {
       const cameraHeight = resolveCameraHeight(current, macroRange);
@@ -537,15 +664,16 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
         mode: "manual"
       }, macroRange);
     });
-  }, [lastPrice, liquidityDataRange, macroRange, snapshot.lastPrice]);
+  }, [lastPrice, liquidityDataRange, macroRange, settings.followMarket, settings.freeExplore, snapshot.lastPrice]);
 
   const handleHeatmapMouseDown = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (settings.followMarket || !settings.freeExplore) patchSettings({ followMarket: false, freeExplore: true });
     heatmapDragRef.current = {
       startY: event.clientY,
       startCenterPrice: heatmapViewport.cameraCenterPrice ?? snapshot.lastPrice ?? lastPrice ?? midpoint(macroRange),
       cameraHeight: resolveCameraHeight(heatmapViewport, macroRange)
     };
-  }, [heatmapViewport, lastPrice, macroRange, snapshot.lastPrice]);
+  }, [heatmapViewport, lastPrice, macroRange, settings.followMarket, settings.freeExplore, snapshot.lastPrice]);
 
   const handleHeatmapMouseMove = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -593,6 +721,42 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
       if (heatmapDragRafRef.current !== null) window.cancelAnimationFrame(heatmapDragRafRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target)) return;
+      const key = event.key.toLowerCase();
+      if (event.code === "Space") {
+        event.preventDefault();
+        centerMarketCamera();
+      } else if (key === "f") {
+        event.preventDefault();
+        fitVisibleDataCamera();
+      } else if (key === "m") {
+        event.preventDefault();
+        patchSettings({ followMarket: !settings.followMarket, freeExplore: settings.followMarket });
+      } else if (key === "r") {
+        event.preventDefault();
+        setHeatmapViewport(defaultHeatmapCamera());
+        patchSettings({ followMarket: false, freeExplore: false });
+        setDomHover(null);
+      } else if (key === "h") {
+        event.preventDefault();
+        patchSettings({ showHeatmap: !settings.showHeatmap });
+      } else if (key === "p") {
+        event.preventDefault();
+        patchSettings({ showVolumeProfile: !settings.showVolumeProfile });
+      } else if (key === "d") {
+        event.preventDefault();
+        patchSettings({ showDepthChart: !settings.showDepthChart });
+      } else if (event.key === "Escape") {
+        setDomHover(null);
+        setSettingsOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [centerMarketCamera, fitVisibleDataCamera, settings.followMarket, settings.showDepthChart, settings.showHeatmap, settings.showVolumeProfile]);
 
   useEffect(() => {
     if (windowMode !== "detached-browser") return;
@@ -665,9 +829,22 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     <div className="dom-pro-shell" role="dialog" aria-label="DOM Pro plus institutional order flow terminal">
       <div className={`dom-pro-window ${settingsOpen ? "settings-open" : ""}`}>
         <header className="dom-pro-header">
-          <div>
+          <div className="dom-pro-title-area">
             <b>DOM PRO+</b>
             <span>Institutional Depth & Order Flow Terminal</span>
+            <nav className="dom-pro-preset-strip" aria-label="DOM Pro workspace presets">
+              {workspacePresets.map((preset) => (
+                <button
+                  key={preset.value}
+                  type="button"
+                  title={preset.title}
+                  className={settings.workspacePreset === preset.value ? "active" : ""}
+                  onClick={() => applyWorkspacePreset(preset.value)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </nav>
           </div>
           <div className="dom-pro-window-controls">
             <button type="button" title="Detach DOM"><ExternalLink size={15} /></button>
@@ -710,6 +887,25 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             </select>
           </label>
           <Stat label="FPS Cap" value={`${settings.fpsCap} FPS`} />
+          <div className="dom-pro-camera-switches" aria-label="DOM Pro camera controls">
+            <button type="button" title="Space" onClick={centerMarketCamera}>Center</button>
+            <button type="button" title="F" onClick={fitVisibleDataCamera}>Fit</button>
+            <button
+              type="button"
+              title="M"
+              className={settings.followMarket ? "active" : ""}
+              onClick={() => patchSettings({ followMarket: !settings.followMarket, freeExplore: settings.followMarket })}
+            >
+              Follow
+            </button>
+            <button
+              type="button"
+              className={settings.freeExplore ? "active" : ""}
+              onClick={() => patchSettings({ freeExplore: !settings.freeExplore, followMarket: false })}
+            >
+              Explore
+            </button>
+          </div>
           <button type="button" className="dom-pro-settings-btn" onClick={() => setSettingsOpen((value) => !value)}><Settings size={15} /> Settings</button>
         </section>
 
@@ -719,9 +915,12 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             <Toggle label="Heatmap" checked={settings.showHeatmap} onChange={(value) => patchSettings({ showHeatmap: value })} />
             <Toggle label="Wall Detection" checked={settings.showWallDetection} onChange={(value) => patchSettings({ showWallDetection: value })} />
             <Toggle label="CVD" checked={settings.showCvd} onChange={(value) => patchSettings({ showCvd: value })} />
+            <Toggle label="Depth Chart" checked={settings.showDepthChart} onChange={(value) => patchSettings({ showDepthChart: value })} />
             <Toggle label="Execution" checked={settings.showExecutionPanel} onChange={(value) => patchSettings({ showExecutionPanel: value })} />
             <Toggle label="Diagnostics" checked={settings.showDiagnostics} onChange={(value) => patchSettings({ showDiagnostics: value })} />
             <Toggle label="Macro Radar" checked={settings.showMacroRadar} onChange={(value) => patchSettings({ showMacroRadar: value })} />
+            <Toggle label="Follow Market" checked={settings.followMarket} onChange={(value) => patchSettings({ followMarket: value, freeExplore: !value })} />
+            <Toggle label="Free Explore" checked={settings.freeExplore} onChange={(value) => patchSettings({ freeExplore: value, followMarket: false })} />
             <Field label="FPS" value={settings.fpsCap} min={5} max={30} onChange={(value) => patchSettings({ fpsCap: value })} />
             <Field label="Max Buckets" value={settings.maxVisibleBuckets} min={20} max={180} onChange={(value) => patchSettings({ maxVisibleBuckets: value })} />
             <Field label="Heatmap Frames" value={settings.maxHeatmapHistory} min={60} max={720} onChange={(value) => patchSettings({ maxHeatmapHistory: value })} />
@@ -940,7 +1139,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
 
           <section className="dom-pro-panel dom-pro-depth-chart">
             <PanelTitle title="Depth Chart" status="AGGREGATED" />
-            {depthChart.empty ? <EmptyState text="Depth chart awaiting bid/ask buckets." /> : (
+            {!settings.showDepthChart ? <EmptyState text="Depth chart hidden in DOM settings." /> : depthChart.empty ? <EmptyState text="Depth chart awaiting bid/ask buckets." /> : (
               <div className="dom-pro-depth-wrap">
                 <svg className="dom-pro-depth-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Cumulative market depth">
                   <line className="axis" x1="50" y1="8" x2="50" y2="94" />
@@ -1062,6 +1261,15 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             </section>
           )}
         </main>
+        <IMMStatusBar
+          status={immStatus}
+          snapshot={snapshot}
+          settings={settings}
+          marketSymbol={marketSymbol}
+          exchangeLabel={exchangeLabel}
+          heatmapRange={heatmapRange}
+          depthHistory={depthHistory}
+        />
       </div>
     </div>
   );
@@ -1079,6 +1287,50 @@ function Metric({ label, value, note, hot }: { label: string; value: string; not
   return <div className="dom-pro-metric"><span>{label}</span><b className={hot ? "hot" : ""}>{value}</b>{note && <em>{note}</em>}</div>;
 }
 
+function IMMStatusBar({
+  status,
+  snapshot,
+  settings,
+  marketSymbol,
+  exchangeLabel,
+  heatmapRange,
+  depthHistory
+}: {
+  status: IMMStatusPayload | null;
+  snapshot: AggregatedDomSnapshot;
+  settings: DomSettings;
+  marketSymbol: MarketSymbol;
+  exchangeLabel: string;
+  heatmapRange: MacroLiquidityRange;
+  depthHistory: DepthHistoryRead;
+}) {
+  const overall = String(status?.overallStatus || snapshot.status || "unavailable").toUpperCase();
+  const worker = String(status?.workerStatus || "browser-feed").toUpperCase();
+  const coverage = Number(status?.quality?.coverageScore ?? 0);
+  const staleFor = Number(status?.staleForMs ?? 0);
+  const persistAge = status?.lastPersistAt ? formatDuration(Date.now() - Date.parse(status.lastPersistAt)) : "NO PERSIST";
+  const lastMessageAge = status?.lastMessageAt ? formatDuration(Date.now() - Date.parse(status.lastMessageAt)) : "NO HEARTBEAT";
+  const cameraMode = settings.followMarket ? "FOLLOW" : settings.freeExplore ? "FREE EXPLORE" : "CENTERED";
+  const statusClass = ["HEALTHY", "LIVE"].includes(overall) ? "healthy" : ["DEGRADED", "STALE", "RECONNECTING"].includes(overall) ? "degraded" : "offline";
+  return (
+    <footer className="dom-pro-statusbar" aria-label="IMM operational status">
+      <span className={`dom-pro-status-pill ${statusClass}`}>IMM {overall}</span>
+      <span>{exchangeLabel.toUpperCase()} / {marketSymbol.rawSymbol}</span>
+      <span>{settings.heatmapHorizon.toUpperCase()} HORIZON</span>
+      <span>{cameraMode}</span>
+      <span>{settings.bucketMultiplier}x BUCKET</span>
+      <span>{snapshot.renderStats.renderFps.toFixed(1)} FPS</span>
+      <span>{worker}</span>
+      <span>{coverage ? `${coverage.toFixed(0)}% QUALITY` : depthHistory.stats.source.toUpperCase()}</span>
+      <span>{status?.quality?.replayConfidence ? `${status.quality.replayConfidence.toUpperCase()} REPLAY` : `${depthHistory.stats.totalPoints} MEMORY POINTS`}</span>
+      <span>{formatPrice(heatmapRange.min)} - {formatPrice(heatmapRange.max)}</span>
+      <span>{status?.activeBuyWalls ?? snapshot.walls.filter((wall) => wall.side === "buy").length} BUY / {status?.activeSellWalls ?? snapshot.walls.filter((wall) => wall.side === "sell").length} SELL WALLS</span>
+      <span>{staleFor > 0 ? `${formatDuration(staleFor)} STALE` : `${lastMessageAge} MSG`}</span>
+      <span>{persistAge} PERSIST</span>
+    </footer>
+  );
+}
+
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
   return <label className="dom-pro-toggle"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /> {label}</label>;
 }
@@ -1089,6 +1341,12 @@ function Field({ label, value, min, max, step = 1, onChange }: { label: string; 
 
 function EmptyState({ text }: { text: string }) {
   return <div className="dom-pro-empty">{text}</div>;
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  const tagName = target.tagName.toLowerCase();
+  return target.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select";
 }
 
 function HoverTooltip({ hover }: { hover: DomHoverInfo }) {

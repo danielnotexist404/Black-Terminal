@@ -6691,7 +6691,7 @@ body.resizing-layout * {
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-rows: 44px minmax(72px, max-content) min-content minmax(0, 1fr);
+  grid-template-rows: 44px minmax(72px, max-content) min-content minmax(0, 1fr) 28px;
   overflow: hidden;
   pointer-events: auto;
   background: radial-gradient(circle at 50% 20%, rgba(110, 0, 0, 0.11), transparent 34%), rgba(5, 6, 7, 0.992);
@@ -6700,7 +6700,7 @@ body.resizing-layout * {
 }
 
 .dom-pro-window:not(.settings-open) .dom-pro-grid {
-  grid-row: 3 / -1;
+  grid-row: 3 / 5;
 }
 
 .dom-pro-window.settings-open .dom-pro-settings-panel {
@@ -6708,7 +6708,7 @@ body.resizing-layout * {
 }
 
 .dom-pro-window.settings-open .dom-pro-grid {
-  grid-row: 4 / -1;
+  grid-row: 4 / 5;
 }
 
 .dom-pro-detached-controller {
@@ -6771,10 +6771,11 @@ body.resizing-layout * {
   background: linear-gradient(180deg, rgba(18, 20, 23, 0.96), rgba(6, 7, 8, 0.98));
 }
 
-.dom-pro-header div:first-child {
+.dom-pro-title-area {
   display: flex;
   align-items: center;
   gap: 18px;
+  min-width: 0;
 }
 
 .dom-pro-header b {
@@ -6789,6 +6790,31 @@ body.resizing-layout * {
   text-transform: uppercase;
 }
 
+.dom-pro-preset-strip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.dom-pro-preset-strip button {
+  height: 22px;
+  padding: 0 8px;
+  color: #9da3ad;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(11, 13, 15, 0.9);
+  font: 900 8px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dom-pro-preset-strip button.active {
+  color: #fff;
+  border-color: rgba(255, 0, 0, 0.5);
+  background: rgba(135, 0, 0, 0.34);
+  box-shadow: inset 0 -2px 0 var(--red-hot);
+}
+
 .dom-pro-window-controls {
   display: flex;
   align-items: center;
@@ -6797,6 +6823,7 @@ body.resizing-layout * {
 
 .dom-pro-window-controls button,
 .dom-pro-settings-btn,
+.dom-pro-camera-switches button,
 .dom-pro-order-types button,
 .dom-pro-side-buttons button,
 .dom-pro-submit-row button {
@@ -6821,19 +6848,39 @@ body.resizing-layout * {
 
 .dom-pro-stats {
   display: grid;
-  grid-template-columns: repeat(6, minmax(104px, 1fr)) minmax(128px, 0.88fr) minmax(120px, 0.78fr) minmax(136px, 0.86fr) minmax(112px, 0.72fr) 84px 116px;
+  grid-template-columns: repeat(6, minmax(104px, 1fr)) minmax(128px, 0.88fr) minmax(120px, 0.78fr) minmax(136px, 0.86fr) minmax(112px, 0.72fr) 84px minmax(236px, 1.35fr) 116px;
   min-height: 72px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .dom-pro-stat,
-.dom-pro-stats label {
+.dom-pro-stats label,
+.dom-pro-camera-switches {
   min-width: 0;
   display: grid;
   align-content: center;
   gap: 6px;
   padding: 9px 12px;
   border-right: 1px solid rgba(255, 255, 255, 0.075);
+}
+
+.dom-pro-camera-switches {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: center;
+  gap: 6px;
+}
+
+.dom-pro-camera-switches button {
+  height: 30px;
+  color: #aeb4bd;
+  font: 900 9px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.dom-pro-camera-switches button.active {
+  color: #fff;
+  border-color: rgba(255, 0, 0, 0.55);
+  background: rgba(120, 0, 0, 0.34);
 }
 
 .dom-pro-stat span,
@@ -6915,6 +6962,58 @@ body.resizing-layout * {
   gap: 8px;
   padding: 8px;
   overflow: hidden;
+}
+
+.dom-pro-statusbar {
+  grid-row: 5;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 10px;
+  overflow: hidden;
+  border-top: 1px solid rgba(255, 0, 0, 0.2);
+  background: linear-gradient(180deg, rgba(10, 12, 14, 0.96), rgba(3, 4, 5, 0.98));
+  color: #8f959e;
+  font: 900 8px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dom-pro-statusbar span {
+  flex: 0 0 auto;
+}
+
+.dom-pro-statusbar span:not(.dom-pro-status-pill) {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dom-pro-status-pill {
+  min-width: 86px;
+  padding: 4px 7px;
+  text-align: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+  background: rgba(62, 66, 72, 0.36);
+}
+
+.dom-pro-status-pill.healthy {
+  border-color: rgba(35, 214, 112, 0.42);
+  color: #8dffba;
+  box-shadow: 0 0 14px rgba(35, 214, 112, 0.12);
+}
+
+.dom-pro-status-pill.degraded {
+  border-color: rgba(255, 0, 0, 0.48);
+  color: #ff7c7c;
+  background: rgba(125, 0, 0, 0.28);
+}
+
+.dom-pro-status-pill.offline {
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #7f858e;
 }
 
 .dom-pro-panel {

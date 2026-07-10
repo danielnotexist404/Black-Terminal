@@ -17,6 +17,7 @@ export function defaultDomSettings(workspaceId: string, symbolKey: string): DomS
   return {
     workspaceId,
     symbolKey,
+    workspacePreset: "institutional",
     mode: "institutional",
     bucketMultiplier: 500,
     customBucketSize: 50,
@@ -27,6 +28,7 @@ export function defaultDomSettings(workspaceId: string, symbolKey: string): DomS
     showHeatmap: true,
     showWallDetection: true,
     showCvd: true,
+    showDepthChart: true,
     showExecutionPanel: true,
     showDiagnostics: true,
     showMacroRadar: true,
@@ -46,7 +48,9 @@ export function defaultDomSettings(workspaceId: string, symbolKey: string): DomS
     profileWidth: 42,
     showPoc: true,
     showHvnLvn: true,
-    showValueArea: false
+    showValueArea: false,
+    followMarket: false,
+    freeExplore: true
   };
 }
 
@@ -77,6 +81,7 @@ export function updateModeSettings(settings: DomSettings, mode: DomMode): DomSet
   return {
     ...settings,
     mode: nextMode,
+    workspacePreset: nextMode === "scalper" || nextMode === "intraday" || nextMode === "macro" ? nextMode : "institutional",
     bucketMultiplier,
     fpsCap: nextMode === "scalper" ? 24 : nextMode === "macro" ? 7 : nextMode === "institutional" ? 10 : 15,
     visibleRange: nextMode === "macro" ? "5" : nextMode === "institutional" || nextMode === "standard" ? "2" : nextMode === "scalper" ? "0.25" : "1",

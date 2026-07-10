@@ -45,6 +45,9 @@ const recordThrottleMs = 5000;
 const persistThrottleMs = 15000;
 const remoteSyncThrottleMs = 60000;
 const maxRemotePointsPerSync = 80;
+const blackCoreQueryThrottleMs = 45_000;
+const blackCoreTilePrefetchPadding = 0.75;
+const blackCoreTilePrefetchCells = 2400;
 const allowLegacyDepthHydrate = import.meta.env.VITE_DOM_DEPTH_LEGACY_HYDRATE !== "false";
 const allowBrowserDepthRemoteSync = import.meta.env.VITE_DOM_DEPTH_BROWSER_SYNC === "true";
 
@@ -174,16 +177,17 @@ export class BlackDepthHistoryStore {
   private async hydrateBlackCore(symbol: MarketSymbol, range: MacroLiquidityRange, horizon: DomHeatmapHorizon) {
     const key = symbolKey(symbol);
     if (Date.now() < this.blackCoreDisabledUntil) return;
-    const queryKey = `${key}:${horizon}:${Math.round(range.min)}:${Math.round(range.max)}`;
-    if (Date.now() - (this.blackCoreLastQueryAt.get(queryKey) ?? 0) < 45_000) return;
+    const requestRange = expandPrefetchRange(range, blackCoreTilePrefetchPadding);
+    const queryKey = buildBlackCoreQueryKey(key, horizon, requestRange);
+    if (Date.now() - (this.blackCoreLastQueryAt.get(queryKey) ?? 0) < blackCoreQueryThrottleMs) return;
     this.blackCoreLastQueryAt.set(queryKey, Date.now());
     try {
-      const tiles = await fetchBlackCoreDepthTiles(symbol, range, horizon, 1800);
+      const tiles = await fetchBlackCoreDepthTiles(symbol, requestRange, horizon, blackCoreTilePrefetchCells);
       const tilePoints = tiles?.cells.length ? pointsFromTileCells(tiles.cells) : [];
-      const replay = tilePoints.length ? null : await fetchBlackCoreDepthReplay(symbol, range, horizon);
+      const replay = tilePoints.length ? null : await fetchBlackCoreDepthReplay(symbol, requestRange, horizon);
       const sourcePoints = tilePoints.length ? tilePoints : replay?.points ?? [];
       if (!sourcePoints.length) return;
-      const shapedPoints = await shapeBlackCoreReplayPoints(sourcePoints, range, tilePoints.length ? 520 : 360);
+      const shapedPoints = await shapeBlackCoreReplayPoints(sourcePoints, requestRange, tilePoints.length ? 720 : 420);
       const local = this.load(symbol);
       const map = new Map(local.points.map((point) => [point.id, point]));
       for (const point of shapedPoints) {
@@ -351,6 +355,30 @@ export class BlackDepthHistoryStore {
     if (!listeners) return;
     for (const listener of listeners) listener();
   }
+}
+
+function expandPrefetchRange(range: MacroLiquidityRange, padding: number): MacroLiquidityRange {
+  const min = Number(range.min);
+  const max = Number(range.max);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min || min <= 0) return range;
+  const span = max - min;
+  const expandedMin = Math.max(0.00000001, min - span * padding);
+  const expandedMax = max + span * padding;
+  return {
+    min: expandedMin,
+    max: expandedMax,
+    source: range.source
+  };
+}
+
+function buildBlackCoreQueryKey(key: string, horizon: DomHeatmapHorizon, range: MacroLiquidityRange) {
+  const min = Number.isFinite(Number(range.min)) ? Number(range.min) : 0;
+  const max = Number.isFinite(Number(range.max)) && Number(range.max) > min ? Number(range.max) : min + 1;
+  const span = Math.max(1, max - min);
+  const bucket = Math.max(1, span / 8);
+  const minBucket = Math.floor(min / bucket);
+  const maxBucket = Math.ceil(max / bucket);
+  return `${key}:${horizon}:${Math.round(bucket)}:${minBucket}:${maxBucket}`;
 }
 
 function pointsFromTileCells(cells: BlackCoreDepthTileCell[]): BlackCoreDepthReplayPoint[] {

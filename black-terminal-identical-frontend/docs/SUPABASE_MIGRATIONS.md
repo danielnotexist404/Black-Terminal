@@ -1436,3 +1436,12 @@ Reason:
 
 - DOM Pro+ now requests `/api/market-depth/tiles` for the active camera range before falling back to replay hydration.
 - The tile route reads existing `market_depth_rollups` records and does not introduce new persisted fields, policies, tables, or indexes.
+
+## 2026-07-10 - IMM Progressive Tile Prefetch
+
+Status: No Supabase migration required.
+
+Reason:
+
+- DOM Pro+ now pads tile requests around the active camera window to preload adjacent market-memory cells for map-style pan/zoom.
+- This only changes the client query window against existing `market_depth_rollups` data.

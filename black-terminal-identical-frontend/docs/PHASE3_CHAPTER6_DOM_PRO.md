@@ -113,6 +113,7 @@ DOM Pro+ execution panel
   - current-price line
   - right-side price scale
   - 12H/24H default radar behavior instead of tick-by-tick micro flashing
+- Added profile-derived historical structure ribbons inside the heatmap so wide camera views show higher-timeframe liquidity structure above and below current price even when live L2 depth is shallow.
 - Added heatmap viewport controls:
   - mouse-wheel zoom
   - vertical drag pan
@@ -120,6 +121,7 @@ DOM Pro+ execution panel
   - double-click reset
   - Reset View button
   - hover readout for price, time, intensity, wall, and persistence context
+- Heatmap drag panning is now throttled through `requestAnimationFrame` and clears pending drag work on mouseup/unmount to prevent blank-screen crashes during fast mouse navigation.
 - Replaced the old bounded heatmap viewport with a shared price-space camera used by both the heatmap and volume profile.
 - Added camera presets for Current, 1H, 6H, 12H, 24H, 3D, and Fit to Visible Data.
 - Allowed broad zoom-out up to macro liquidity map scale without snapping back to current price.

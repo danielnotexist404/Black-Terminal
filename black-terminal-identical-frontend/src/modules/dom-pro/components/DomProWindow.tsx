@@ -69,6 +69,14 @@ type FlowPoint = {
   net: number;
 };
 
+type HeatmapStructureRibbon = {
+  id: string;
+  price: number;
+  intensity: number;
+  side: "supply" | "demand" | "poc";
+  kind: VolumeProfileNode["kind"];
+};
+
 type DomDebugStats = {
   domainMin: number;
   domainMax: number;
@@ -158,6 +166,8 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const droppedFramesRef = useRef(0);
   const renderCooldownUntilRef = useRef(0);
   const heatmapDragRef = useRef<{ startY: number; startCenterPrice: number; cameraHeight: number } | null>(null);
+  const heatmapDragRafRef = useRef<number | null>(null);
+  const pendingHeatmapDragRef = useRef<{ centerPrice: number; cameraHeight: number } | null>(null);
   const [settings, setSettings] = useState<DomSettings>(() => readDomSettings(workspaceId, symbolKey));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [heatmapViewport, setHeatmapViewport] = useState<HeatmapViewportState>(() => defaultHeatmapCamera());
@@ -414,6 +424,10 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     () => buildProfileOutline(institutionalProfile, maxProfileVolume, heatmapRange),
     [heatmapRange, institutionalProfile, maxProfileVolume]
   );
+  const heatmapStructureRibbons = useMemo(
+    () => buildHeatmapStructureRibbons(institutionalProfile, maxProfileVolume, heatmapRange, snapshot.lastPrice ?? lastPrice),
+    [heatmapRange, institutionalProfile, lastPrice, maxProfileVolume, snapshot.lastPrice]
+  );
   const smoothedCvdData = useMemo(() => buildSmoothedCvd(cvdData, settings), [cvdData, settings]);
   const cvdStats = useMemo(() => buildCvdStats(snapshot.trades, smoothedCvdData, settings), [settings, smoothedCvdData, snapshot.trades]);
   const cvdPath = useMemo(() => buildCvdPath(smoothedCvdData), [smoothedCvdData]);
@@ -508,15 +522,29 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
 
   const handleHeatmapMouseMove = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    if (heatmapDragRef.current) {
-      const delta = (event.clientY - heatmapDragRef.current.startY) / Math.max(1, rect.height);
-      const nextCenter = heatmapDragRef.current.startCenterPrice + delta * heatmapDragRef.current.cameraHeight;
-      setHeatmapViewport((current) => normalizeCamera({
-        ...current,
-        cameraCenterPrice: nextCenter,
-        cameraHeight: heatmapDragRef.current!.cameraHeight,
-        mode: "manual"
-      }, macroRange));
+    const activeDrag = heatmapDragRef.current;
+    if (activeDrag) {
+      const delta = (event.clientY - activeDrag.startY) / Math.max(1, rect.height);
+      const nextCenter = activeDrag.startCenterPrice + delta * activeDrag.cameraHeight;
+      pendingHeatmapDragRef.current = {
+        centerPrice: nextCenter,
+        cameraHeight: activeDrag.cameraHeight
+      };
+      if (heatmapDragRafRef.current === null && typeof window !== "undefined") {
+        heatmapDragRafRef.current = window.requestAnimationFrame(() => {
+          heatmapDragRafRef.current = null;
+          const pending = pendingHeatmapDragRef.current;
+          pendingHeatmapDragRef.current = null;
+          if (!pending) return;
+          setHeatmapViewport((current) => normalizeCamera({
+            ...current,
+            cameraCenterPrice: pending.centerPrice,
+            cameraHeight: pending.cameraHeight,
+            mode: "manual"
+          }, macroRange));
+        });
+      }
+      setDomHover(null);
       return;
     }
     setDomHover(buildHeatmapHover(event, rect, heatmapRange, heatmapFrames, macroBands, snapshot.walls));
@@ -530,9 +558,13 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   useEffect(() => {
     const clearDrag = () => {
       heatmapDragRef.current = null;
+      pendingHeatmapDragRef.current = null;
     };
     window.addEventListener("mouseup", clearDrag);
-    return () => window.removeEventListener("mouseup", clearDrag);
+    return () => {
+      window.removeEventListener("mouseup", clearDrag);
+      if (heatmapDragRafRef.current !== null) window.cancelAnimationFrame(heatmapDragRafRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -766,6 +798,17 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                     <b>{formatPrice(band.price)}</b>
                     <em>{band.touches} touches / {Math.round(band.strength * 100)}%</em>
                   </div>
+                ))}
+                {heatmapStructureRibbons.map((ribbon) => (
+                  <i
+                    key={ribbon.id}
+                    className={`dom-pro-structure-ribbon ${ribbon.side} ${ribbon.kind}`}
+                    style={{
+                      top: priceToTop(ribbon.price, heatmapRange),
+                      opacity: Math.max(0.1, Math.min(0.82, ribbon.intensity)),
+                      height: `${Math.max(3, Math.min(14, ribbon.intensity * 14))}px`
+                    }}
+                  />
                 ))}
                 {heatmapFrames.map((frame, frameIndex) => frame.cells.filter((cell) => cell.price >= heatmapRange.min && cell.price <= heatmapRange.max).slice(0, 260).map((cell, cellIndex) => (
                   <i
@@ -1078,13 +1121,23 @@ function buildMacroLiquidityBands(candles: Candle[], currentPrice: number | null
     pushCandidate(candidate);
     if (selected.filter((node) => node.price > price).length >= perSideTarget) break;
   }
+  const zoneCount = 10;
+  for (let index = 0; index < zoneCount; index += 1) {
+    const zoneLow = min + (span / zoneCount) * index;
+    const zoneHigh = min + (span / zoneCount) * (index + 1);
+    const candidate = ranked
+      .filter((bin) => bin.price >= zoneLow && bin.price <= zoneHigh && bin.strength >= 0.1)
+      .sort((a, b) => b.strength - a.strength)[0];
+    if (candidate) pushCandidate(candidate);
+  }
   for (const candidate of ranked) {
     pushCandidate(candidate);
-    if (selected.length >= Math.max(4, settings.macroBandCount)) break;
+    if (selected.length >= Math.max(18, settings.macroBandCount)) break;
   }
 
-  return selected.map((bin, index) => {
-    const isPoc = index === 0;
+  const pocPrice = ranked[0]?.price ?? selected[0]?.price ?? price;
+  return selected.map((bin) => {
+    const isPoc = Math.abs(bin.price - pocPrice) <= step * 0.5;
     const side: MacroLiquidityBand["side"] = isPoc ? "poc" : bin.price > price ? "supply" : "demand";
     return {
       id: `macro:${side}:${Math.round(bin.price / Math.max(step, 0.0001))}`,
@@ -1198,6 +1251,34 @@ function buildProfileOutline(profile: VolumeProfileNode[], maxVolume: number, ra
   const line = rows.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
   const area = `4,${rows[0].y.toFixed(2)} ${line} 4,${rows[rows.length - 1].y.toFixed(2)}`;
   return { line, area };
+}
+
+function buildHeatmapStructureRibbons(
+  profile: VolumeProfileNode[],
+  maxVolume: number,
+  range: MacroLiquidityRange,
+  currentPrice: number | null | undefined
+): HeatmapStructureRibbon[] {
+  const price = Number(currentPrice ?? midpoint(range));
+  const visible = profile
+    .filter((node) => node.price >= range.min && node.price <= range.max && node.volume > 0)
+    .map((node) => ({
+      node,
+      intensity: Math.sqrt(node.volume / Math.max(1, maxVolume))
+    }))
+    .filter(({ intensity, node }) => intensity >= 0.16 || node.kind === "poc" || node.kind === "hvn")
+    .sort((a, b) => b.intensity - a.intensity);
+  const below = visible.filter(({ node }) => node.price < price).slice(0, 34);
+  const above = visible.filter(({ node }) => node.price >= price).slice(0, 34);
+  return [...below, ...above]
+    .sort((a, b) => b.node.price - a.node.price)
+    .map(({ node, intensity }) => ({
+      id: `profile-ribbon:${Math.round(node.price * 100)}`,
+      price: node.price,
+      intensity,
+      side: node.kind === "poc" ? "poc" : node.price >= price ? "supply" : "demand",
+      kind: node.kind
+    }));
 }
 
 function resolveHorizonFrameCount(settings: DomSettings) {

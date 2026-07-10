@@ -7289,6 +7289,7 @@ body.resizing-layout * {
   transform: translateY(-50%);
   background: rgba(195, 200, 208, 0.58);
   box-shadow: 0 0 8px rgba(255, 255, 255, 0.08);
+  z-index: 2;
 }
 
 .dom-pro-heatmap-cell.ask {
@@ -7307,6 +7308,7 @@ body.resizing-layout * {
   height: 1px;
   background: rgba(255, 255, 255, 0.75);
   box-shadow: 0 0 8px rgba(255, 255, 255, 0.42);
+  z-index: 5;
 }
 
 .dom-pro-heatmap-scale {
@@ -7340,6 +7342,7 @@ body.resizing-layout * {
   color: #fff;
   font: 900 9px "IBM Plex Mono", monospace;
   pointer-events: none;
+  z-index: 3;
 }
 
 .dom-pro-macro-band.supply {
@@ -7363,6 +7366,33 @@ body.resizing-layout * {
   color: inherit;
   font-style: normal;
   opacity: 0.78;
+}
+
+.dom-pro-structure-ribbon {
+  position: absolute;
+  left: 5px;
+  right: 78px;
+  display: block;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 1;
+  background: linear-gradient(90deg, rgba(210, 215, 224, 0.02), rgba(230, 234, 240, 0.58), rgba(210, 215, 224, 0.03));
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.12);
+}
+
+.dom-pro-structure-ribbon.supply {
+  background: linear-gradient(90deg, rgba(255, 0, 0, 0.02), rgba(255, 0, 0, 0.54), rgba(255, 0, 0, 0.03));
+  box-shadow: 0 0 14px rgba(255, 0, 0, 0.26);
+}
+
+.dom-pro-structure-ribbon.demand {
+  background: linear-gradient(90deg, rgba(210, 215, 224, 0.02), rgba(240, 244, 252, 0.56), rgba(210, 215, 224, 0.03));
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.16);
+}
+
+.dom-pro-structure-ribbon.poc {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.88), rgba(255, 0, 0, 0.16));
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.28), 0 0 12px rgba(255, 0, 0, 0.2);
 }
 
 .dom-pro-heatmap-footer {

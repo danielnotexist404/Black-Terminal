@@ -6,6 +6,7 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
+- Current - Stabilize DOM Pro+ heatmap drag and downside structure.
 - Current - Fix DOM Pro+ profile domain scaffold and raw-depth curve.
 - Current - Polish DOM Pro+ cockpit rendering and viewport controls.
 - Current - Refine DOM Pro+ heatmap camera and remove artificial zoom-out limit.
@@ -97,6 +98,8 @@ Changed:
 - Aligned Volume Profile with the heatmap viewport and added hover inspection.
 - Changed Volume Profile rendering from sparse populated rows into a full camera-domain scaffold with a continuous outline, right-side price scale, and zero-volume rows hidden instead of collapsing the visible range.
 - Changed the depth chart to use raw L2 bid/ask levels before aggregated buckets, map the shared price camera horizontally, extend available cumulative curves to the visible domain edges, and keep explicit sparse-source warnings.
+- Added historical structure ribbons inside the heatmap from the shared profile so downside/upside higher-timeframe zones remain visible when panning beyond shallow live L2 depth.
+- Throttled heatmap drag panning with `requestAnimationFrame` and removed the stale drag-ref read that could blank the browser while dragging.
 - Slowed heuristic CVD with 15M/1H/4H/12H/24H horizons, EMA smoothing, and sample intervals.
 - Replaced the block-style depth chart with a cumulative bid/ask market-depth curve.
 - Replaced liquidity flow blocks with rolling time-bucket histogram bars using percentile outlier scaling.

@@ -1025,3 +1025,16 @@ Reason:
 Future migration trigger:
 
 - Add a migration only if per-user saved DOM camera layouts, DOM diagnostics snapshots, or cross-device order-flow workspace presets need Supabase persistence.
+
+## 2026-07-10 - DOM Pro+ Heatmap Drag And Downside Structure Fix
+
+Status: No Supabase migration required.
+
+Reason:
+
+- The change is limited to frontend heatmap rendering, profile-derived historical structure ribbons, and drag/pan event safety.
+- It does not introduce stored user settings, credentials, execution records, account records, or audit tables.
+
+Future migration trigger:
+
+- Add a migration only if heatmap camera presets, saved DOM layout state, or historical depth snapshots need account-level Supabase persistence.

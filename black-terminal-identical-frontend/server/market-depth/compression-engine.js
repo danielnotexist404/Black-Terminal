@@ -171,11 +171,15 @@ function buildStatistics(sample, rollups, bucketSize) {
       imbalance: (totalBidSize - totalAskSize) / denominator,
       liquidityScore: Math.min(1, rollups.reduce((max, row) => Math.max(max, row.liquidityScore), 0)),
       updateCount: 1,
-      packetLossCount: 0,
       packetLossCount: Number(sample.metadata?.packetLossCount) || 0,
       reconnectCount: Number(sample.metadata?.reconnectCount) || 0,
       latencyMs: Math.max(0, Number(sample.metadata?.collectorLatencyMs) || Date.now() - sample.sourceTimestamp),
-      metadata: { bucketSize }
+      metadata: {
+        bucketSize,
+        recoveredSnapshot: sample.metadata?.recoveredSnapshot === true,
+        snapshotRecoveryReason: sample.metadata?.snapshotRecoveryReason || null,
+        snapshotRecoveryCount: Number(sample.metadata?.snapshotRecoveryCount) || 0
+      }
     };
   });
 }

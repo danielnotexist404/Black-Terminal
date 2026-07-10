@@ -1418,3 +1418,12 @@ Reason:
 
 - This is a frontend worker/offload change for shaping replay points before DOM Pro+ consumes them.
 - It does not introduce new persistence, credentials, permissions, or server-owned records.
+
+## 2026-07-10 - IMM Collector Snapshot Recovery
+
+Status: No Supabase migration required.
+
+Reason:
+
+- Snapshot recovery writes through existing `market_depth_snapshots`, `market_depth_rollups`, `market_depth_statistics`, `market_liquidity_walls`, and `market_liquidity_events`.
+- Recovery counters and reasons are stored inside existing statistics metadata.

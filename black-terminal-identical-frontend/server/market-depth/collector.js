@@ -49,6 +49,8 @@ export class MarketDepthCollector {
       sampleCount: session.sampleCount,
       ingestCount: session.ingestCount,
       packetLossCount: session.packetLossCount,
+      snapshotRecoveryCount: session.snapshotRecoveryCount,
+      lastSnapshotAt: session.lastSnapshotAt,
       lastSequence: session.lastSequence
     }));
   }
@@ -72,6 +74,9 @@ export class MarketDepthCollector {
       sampleCount: 0,
       ingestCount: 0,
       packetLossCount: 0,
+      snapshotRecoveryCount: 0,
+      lastSnapshotAt: null,
+      repairing: false,
       ws: null,
       reconnectTimer: null
     };
@@ -86,6 +91,7 @@ export class MarketDepthCollector {
       session.lastError = null;
       adapter.subscribe(ws, symbol);
       this.logger.info?.(`[MarketDepthCollector] subscribed ${key}`);
+      void this.recoverSnapshot(session, adapter, "connect");
     };
 
     ws.onmessage = async (event) => {
@@ -96,10 +102,12 @@ export class MarketDepthCollector {
         session.messageCount += 1;
         for (const sample of samples) {
           const diagnostics = updateSequenceDiagnostics(session, sample);
+          if (diagnostics.gapDetected) void this.recoverSnapshot(session, adapter, "sequence-gap");
           sample.metadata = {
             ...sample.metadata,
             packetLossCount: diagnostics.packetLossCount,
             reconnectCount: session.reconnects,
+            snapshotRecoveryCount: session.snapshotRecoveryCount,
             collectorLatencyMs: Math.max(0, Date.now() - Number(sample.sourceTimestamp || Date.now()))
           };
           await this.engine.ingest(this.supabase, sample);
@@ -126,6 +134,34 @@ export class MarketDepthCollector {
       session.reconnectTimer = setTimeout(() => this.connect(symbol), delay);
       this.logger.warn?.(`[MarketDepthCollector] reconnecting ${key} in ${delay}ms`);
     };
+  }
+
+  async recoverSnapshot(session, adapter, reason) {
+    if (!adapter.fetchSnapshot || session.repairing) return;
+    session.repairing = true;
+    try {
+      const sample = await adapter.fetchSnapshot(session.symbol);
+      sample.metadata = {
+        ...sample.metadata,
+        recoveredSnapshot: true,
+        snapshotRecoveryReason: reason,
+        snapshotRecoveryCount: session.snapshotRecoveryCount + 1,
+        packetLossCount: session.packetLossCount,
+        reconnectCount: session.reconnects,
+        collectorLatencyMs: Math.max(0, Date.now() - Number(sample.sourceTimestamp || Date.now()))
+      };
+      await this.engine.ingest(this.supabase, sample);
+      session.lastSnapshotAt = Date.now();
+      session.snapshotRecoveryCount += 1;
+      session.sampleCount += 1;
+      session.ingestCount += 1;
+      this.logger.info?.(`[MarketDepthCollector] recovered ${session.key} snapshot after ${reason}`);
+    } catch (error) {
+      session.lastError = error instanceof Error ? error.message : String(error);
+      this.logger.error?.(`[MarketDepthCollector] snapshot recovery failed ${session.key}`, error);
+    } finally {
+      session.repairing = false;
+    }
   }
 }
 
@@ -180,6 +216,22 @@ const collectorAdapters = {
         sequence: payload.data.time,
         sequenceKind: "timestamp"
       })];
+    },
+    fetchSnapshot: async (symbol) => {
+      const payload = await fetchJson("https://api.hyperliquid.xyz/info", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "l2Book", coin: hyperliquidCoin(symbol.symbol) })
+      });
+      const levels = payload.levels;
+      if (!Array.isArray(levels) || levels.length < 2) throw new Error("Hyperliquid snapshot missing levels.");
+      return baseSample(symbol, {
+        sourceTimestamp: payload.time || Date.now(),
+        bids: levels[0].map((level) => [level.px, level.sz]),
+        asks: levels[1].map((level) => [level.px, level.sz]),
+        sequence: payload.time,
+        sequenceKind: "snapshot"
+      });
     }
   },
   binance: {
@@ -195,10 +247,25 @@ const collectorAdapters = {
       return [baseSample(symbol, {
         sourceTimestamp: payload.T || payload.E || Date.now(),
         sequence: payload.u || payload.lastUpdateId,
+        sequencePrevious: payload.pu,
         sequenceKind: "incremental",
         bids,
         asks
       })];
+    },
+    fetchSnapshot: async (symbol) => {
+      const clean = normalizeSymbol(symbol.symbol);
+      const base = symbol.marketKind === "spot" || symbol.marketKind === "margin"
+        ? "https://api.binance.com/api/v3/depth"
+        : "https://fapi.binance.com/fapi/v1/depth";
+      const payload = await fetchJson(`${base}?symbol=${clean}&limit=1000`);
+      return baseSample(symbol, {
+        sourceTimestamp: payload.T || payload.E || Date.now(),
+        sequence: payload.lastUpdateId,
+        sequenceKind: "snapshot",
+        bids: payload.bids || [],
+        asks: payload.asks || []
+      });
     }
   },
   bybit: {
@@ -222,6 +289,19 @@ const collectorAdapters = {
         bids: payload.data.b || [],
         asks: payload.data.a || []
       })];
+    },
+    fetchSnapshot: async (symbol) => {
+      const category = symbol.marketKind === "spot" || symbol.marketKind === "margin" ? "spot" : "linear";
+      const limit = category === "spot" ? 50 : 200;
+      const payload = await fetchJson(`https://api.bybit.com/v5/market/orderbook?category=${category}&symbol=${normalizeSymbol(symbol.symbol)}&limit=${limit}`);
+      if (payload.retCode !== 0) throw new Error(`Bybit snapshot failed: ${payload.retMsg}`);
+      return baseSample(symbol, {
+        sourceTimestamp: Number(payload.result?.ts) || payload.time || Date.now(),
+        sequence: payload.result?.u || payload.result?.seq,
+        sequenceKind: "snapshot",
+        bids: payload.result?.b || [],
+        asks: payload.result?.a || []
+      });
     }
   },
   okx: {
@@ -240,8 +320,21 @@ const collectorAdapters = {
         .map((book) => baseSample(symbol, {
           sourceTimestamp: book.ts || Date.now(),
           bids: book.bids,
-          asks: book.asks
+          asks: book.asks,
+          sequenceKind: "snapshot"
         }));
+    },
+    fetchSnapshot: async (symbol) => {
+      const payload = await fetchJson(`https://www.okx.com/api/v5/market/books?instId=${encodeURIComponent(okxInstId(symbol.symbol))}&sz=400`);
+      if (payload.code !== "0") throw new Error(`OKX snapshot failed: ${payload.msg}`);
+      const book = payload.data?.[0];
+      if (!book) throw new Error("OKX snapshot missing book.");
+      return baseSample(symbol, {
+        sourceTimestamp: book.ts || Date.now(),
+        sequenceKind: "snapshot",
+        bids: book.bids || [],
+        asks: book.asks || []
+      });
     }
   }
 };
@@ -255,6 +348,7 @@ function baseSample(symbol, data) {
     capturedAt: Date.now(),
     sourceTimestamp: data.sourceTimestamp,
     sequence: data.sequence,
+    sequencePrevious: data.sequencePrevious,
     bids: data.bids,
     asks: data.asks,
     metadata: {
@@ -263,6 +357,12 @@ function baseSample(symbol, data) {
       sequenceKind: data.sequenceKind || "none"
     }
   };
+}
+
+async function fetchJson(url, options) {
+  const response = await fetch(url, options);
+  if (!response.ok) throw new Error(`Depth snapshot request failed ${response.status}: ${url}`);
+  return response.json();
 }
 
 function hyperliquidCoin(symbol) {
@@ -282,17 +382,20 @@ function symbolKey(symbol) {
 
 function updateSequenceDiagnostics(session, sample) {
   if (sample.metadata?.sequenceKind !== "incremental") {
-    return { packetLossCount: session.packetLossCount };
+    return { packetLossCount: session.packetLossCount, gapDetected: false };
   }
   const sequence = Number(sample.sequence);
   if (!Number.isFinite(sequence)) {
-    return { packetLossCount: session.packetLossCount };
+    return { packetLossCount: session.packetLossCount, gapDetected: false };
   }
+  const expectedPrevious = Number(sample.sequencePrevious);
   const previous = Number(session.lastSequence);
-  if (Number.isFinite(previous) && sequence > previous + 1) {
+  if (Number.isFinite(expectedPrevious) && Number.isFinite(previous) && expectedPrevious !== previous) {
     session.packetLossCount += 1;
     session.lastError = `Sequence gap ${previous} -> ${sequence}`;
+    session.lastSequence = sequence;
+    return { packetLossCount: session.packetLossCount, gapDetected: true };
   }
   session.lastSequence = sequence;
-  return { packetLossCount: session.packetLossCount };
+  return { packetLossCount: session.packetLossCount, gapDetected: false };
 }

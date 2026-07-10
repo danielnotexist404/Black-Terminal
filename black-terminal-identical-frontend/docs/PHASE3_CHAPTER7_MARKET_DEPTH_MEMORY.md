@@ -63,6 +63,7 @@ npm run depth:worker
 - Added alert extraction API that converts liquidity events, active walls, depth imbalances, liquidity vacuums, spoof suspicion, gravity zones, and feed degradation into normalized market-memory alerts.
 - Added REST snapshot recovery hooks for Hyperliquid, Binance, Bybit, and OKX. The collector now recovers snapshots after connection and after explicit sequence-gap detection.
 - Added DOM Pro+ client hydration from `/api/market-depth/replay`.
+- DOM Pro+ now requests bounded `/api/market-depth/tiles` cells for the active camera range before falling back to replay hydration.
 - Added a DOM-side IMM aggregation worker bridge for Black Core replay shaping/culling. If Worker construction fails, it falls back to the same shaping logic on the main thread.
 - DOM Pro+ still keeps local browser depth memory as a fallback when the backend tables, worker, or API are unavailable.
 - Browser-built depth memory no longer writes back to Supabase by default. Set `VITE_DOM_DEPTH_BROWSER_SYNC=true` only for legacy debugging.
@@ -127,8 +128,8 @@ MARKET_DEPTH_SYMBOLS=hyperliquid:perpetual:BTCUSDT,binance:perpetual:BTCUSDT,byb
 - The worker is a long-running Node process. Vercel serverless functions cannot continuously own exchange WebSocket sessions.
 - Vercel APIs can replay stored market memory and accept authenticated external ingest, but a separate worker/runtime must run the collector continuously.
 - Packet-loss detection is available for incremental feeds and stored in depth statistics. When an explicit sequence gap is detected, the collector attempts REST snapshot recovery. Full checksum reconciliation remains a follow-up.
-- Replay currently reads compressed rollups and active walls. It does not yet stream tiled map chunks or minimap navigator data.
-- The tile API exposes bounded map cells; DOM Pro+ still consumes replay hydration first and can be moved to tile streaming in a follow-up.
+- Replay reads compressed rollups and active walls. DOM Pro+ uses bounded tile cells first for the active camera window, then falls back to replay hydration.
+- The tile API exposes bounded map cells; minimap/navigator windows and progressive adjacent-tile prefetching remain follow-up work.
 - Web Worker aggregation is started for Black Core replay shaping. The remaining large DOM live aggregation path still needs full worker migration.
 
 ## Next Work
@@ -136,6 +137,6 @@ MARKET_DEPTH_SYMBOLS=hyperliquid:perpetual:BTCUSDT,binance:perpetual:BTCUSDT,byb
 - Deploy the collector as a persistent worker outside Vercel serverless.
 - Add venue-specific checksum validation and deeper delta reconciliation.
 - Add deployment automation for the retention pruning route if the collector worker is not always running.
-- Add tile-based replay windows for Google-Maps-style zoom/pan.
+- Add minimap/navigator windows and progressive adjacent-tile prefetching for Google-Maps-style zoom/pan.
 - Move the rest of DOM live aggregation, CVD shaping, and depth chart construction to the IMM worker bridge.
 - Feed market-memory alerts into Scanner, BlackGPT, and Notifications.

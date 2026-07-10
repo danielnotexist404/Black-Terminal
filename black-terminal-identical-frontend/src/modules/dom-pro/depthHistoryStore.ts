@@ -2,7 +2,7 @@ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
 import type { MarketSymbol, OrderBookLevel, OrderBookSnapshot } from "../../market-data/types";
 import type { DomHeatmapHorizon, MacroLiquidityRange } from "./types";
 import { shapeBlackCoreReplayPoints } from "./immAggregationClient";
-import { fetchBlackCoreDepthReplay } from "./marketDepthMemoryClient";
+import { fetchBlackCoreDepthReplay, fetchBlackCoreDepthTiles, type BlackCoreDepthReplayPoint, type BlackCoreDepthTileCell } from "./marketDepthMemoryClient";
 
 export type DepthHistorySide = "bid" | "ask";
 
@@ -28,7 +28,7 @@ export type DepthHistoryRead = {
     firstSeen: number | null;
     lastSeen: number | null;
     localOnly: boolean;
-    source: "black-core" | "supabase" | "local";
+    source: "black-core" | "black-core-tiles" | "supabase" | "local";
   };
 };
 
@@ -57,6 +57,7 @@ export class BlackDepthHistoryStore {
   private remoteHydrated = new Set<string>();
   private remoteDisabledUntil = 0;
   private blackCoreHydrated = new Set<string>();
+  private blackCoreTileHydrated = new Set<string>();
   private blackCoreLastQueryAt = new Map<string, number>();
   private blackCoreDisabledUntil = 0;
 
@@ -159,7 +160,13 @@ export class BlackDepthHistoryStore {
         firstSeen,
         lastSeen,
         localOnly: !this.blackCoreHydrated.has(symbolKey(symbol)) && !allowLegacyDepthHydrate,
-        source: this.blackCoreHydrated.has(symbolKey(symbol)) ? "black-core" : allowLegacyDepthHydrate && isSupabaseConfigured ? "supabase" : "local"
+        source: this.blackCoreTileHydrated.has(symbolKey(symbol))
+          ? "black-core-tiles"
+          : this.blackCoreHydrated.has(symbolKey(symbol))
+            ? "black-core"
+            : allowLegacyDepthHydrate && isSupabaseConfigured
+              ? "supabase"
+              : "local"
       }
     };
   }
@@ -171,9 +178,12 @@ export class BlackDepthHistoryStore {
     if (Date.now() - (this.blackCoreLastQueryAt.get(queryKey) ?? 0) < 45_000) return;
     this.blackCoreLastQueryAt.set(queryKey, Date.now());
     try {
-      const replay = await fetchBlackCoreDepthReplay(symbol, range, horizon);
-      if (!replay?.points.length) return;
-      const shapedPoints = await shapeBlackCoreReplayPoints(replay.points, range, 360);
+      const tiles = await fetchBlackCoreDepthTiles(symbol, range, horizon, 1800);
+      const tilePoints = tiles?.cells.length ? pointsFromTileCells(tiles.cells) : [];
+      const replay = tilePoints.length ? null : await fetchBlackCoreDepthReplay(symbol, range, horizon);
+      const sourcePoints = tilePoints.length ? tilePoints : replay?.points ?? [];
+      if (!sourcePoints.length) return;
+      const shapedPoints = await shapeBlackCoreReplayPoints(sourcePoints, range, tilePoints.length ? 520 : 360);
       const local = this.load(symbol);
       const map = new Map(local.points.map((point) => [point.id, point]));
       for (const point of shapedPoints) {
@@ -202,6 +212,7 @@ export class BlackDepthHistoryStore {
         .slice(0, maxPointsPerSymbol)
         .sort((a, b) => b.price - a.price);
       local.updatedAt = Date.now();
+      if (tilePoints.length) this.blackCoreTileHydrated.add(key);
       this.blackCoreHydrated.add(key);
       this.persist(key, local);
       this.notify(key);
@@ -340,6 +351,55 @@ export class BlackDepthHistoryStore {
     if (!listeners) return;
     for (const listener of listeners) listener();
   }
+}
+
+function pointsFromTileCells(cells: BlackCoreDepthTileCell[]): BlackCoreDepthReplayPoint[] {
+  const map = new Map<string, BlackCoreDepthReplayPoint>();
+  for (const cell of cells) {
+    addTilePoint(map, cell, "bid");
+    addTilePoint(map, cell, "ask");
+  }
+  return Array.from(map.values())
+    .sort((a, b) => scoreBlackCorePoint(b) - scoreBlackCorePoint(a))
+    .slice(0, 900)
+    .sort((a, b) => b.price - a.price);
+}
+
+function addTilePoint(map: Map<string, BlackCoreDepthReplayPoint>, cell: BlackCoreDepthTileCell, side: DepthHistorySide) {
+  const size = Number(side === "bid" ? cell.bidSize : cell.askSize);
+  const peakSize = Number(side === "bid" ? cell.bidPeakSize : cell.askPeakSize);
+  const price = Number(cell.price);
+  if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(size) || size <= 0) return;
+  const key = `${side}:${price.toFixed(8)}`;
+  const now = Date.now();
+  const firstSeenRaw = Date.parse(cell.time);
+  const lastSeenRaw = Date.parse(cell.bucketEnd || cell.time);
+  const firstSeen = Number.isFinite(firstSeenRaw) ? firstSeenRaw : now;
+  const lastSeen = Number.isFinite(lastSeenRaw) ? lastSeenRaw : firstSeen;
+  const existing = map.get(key);
+  map.set(key, {
+    id: key,
+    side,
+    price,
+    bucketSize: Number(cell.bucketSize) || Math.max(price * 0.0005, 0.01),
+    firstSeen: existing ? Math.min(existing.firstSeen, firstSeen) : firstSeen,
+    lastSeen: existing ? Math.max(existing.lastSeen, lastSeen) : lastSeen,
+    observations: (existing?.observations ?? 0) + Math.max(1, Number(cell.observations) || 1),
+    peakSize: Math.max(existing?.peakSize ?? 0, peakSize || size),
+    lastSize: Math.max(existing?.lastSize ?? 0, size),
+    strength: Math.max(
+      existing?.strength ?? 0,
+      Math.max(0, Math.min(1, Number(cell.liquidityScore) || 0)),
+      Math.max(0, Math.min(1, Number(cell.gravityScore) || 0)) * 0.92
+    ),
+    source: "black-core-tile"
+  });
+}
+
+function scoreBlackCorePoint(point: BlackCoreDepthReplayPoint) {
+  const ageHours = Math.max(0, (Date.now() - point.lastSeen) / 3600000);
+  const persistenceHours = Math.max(0.1, (point.lastSeen - point.firstSeen) / 3600000);
+  return point.strength * (1 + Math.log1p(point.observations) * 0.2 + Math.min(0.6, persistenceHours * 0.04)) / (1 + ageHours / 96);
 }
 
 function selectCandidateLevels(levels: OrderBookLevel[], side: DepthHistorySide, mid: number) {

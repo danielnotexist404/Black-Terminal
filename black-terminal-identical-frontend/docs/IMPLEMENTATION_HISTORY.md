@@ -6,6 +6,7 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
+- Current - Connect DOM depth memory to Black Core tiles.
 - Current - Add IMM collector snapshot recovery.
 - Current - Add IMM replay worker bridge.
 - Current - Add IMM tiles and collector heartbeat.
@@ -78,6 +79,7 @@ Changed:
 - Changed browser depth memory so Supabase writes are disabled by default. Local browser memory remains fallback-only, while Black Core replay is the authoritative path.
 - Added the first DOM-side IMM aggregation worker bridge for shaping/culling Black Core replay points before they are merged into DOM Pro+ fallback memory.
 - Added REST snapshot recovery hooks for Hyperliquid, Binance, Bybit, and OKX. The collector now recovers a snapshot after connection and after explicit sequence-gap detection.
+- Changed DOM Pro+ depth-history hydration to request bounded `/api/market-depth/tiles` cells for the active camera range before falling back to broad replay hydration.
 
 Why:
 
@@ -94,6 +96,7 @@ Remaining:
 - The collector must run in a persistent worker/runtime. Vercel serverless cannot own continuous WebSocket collection.
 - Checksum validation and deeper venue-specific delta reconciliation remain future work.
 - The remaining live DOM aggregation path still needs full worker migration.
+- DOM Pro+ now consumes tile cells for visible market memory, but minimap/navigator streaming and progressive tile prefetching are still future work.
 
 ## Phase III Chapter VI: DOM Pro+
 

@@ -1427,3 +1427,12 @@ Reason:
 
 - Snapshot recovery writes through existing `market_depth_snapshots`, `market_depth_rollups`, `market_depth_statistics`, `market_liquidity_walls`, and `market_liquidity_events`.
 - Recovery counters and reasons are stored inside existing statistics metadata.
+
+## 2026-07-10 - DOM Pro Tile Hydration
+
+Status: No Supabase migration required.
+
+Reason:
+
+- DOM Pro+ now requests `/api/market-depth/tiles` for the active camera range before falling back to replay hydration.
+- The tile route reads existing `market_depth_rollups` records and does not introduce new persisted fields, policies, tables, or indexes.

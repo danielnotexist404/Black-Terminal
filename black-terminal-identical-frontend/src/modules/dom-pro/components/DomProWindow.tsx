@@ -90,6 +90,24 @@ type FlowPoint = {
   net: number;
 };
 
+type DomLadderRow = {
+  price: number;
+  bidSize: number;
+  askSize: number;
+  totalSize: number;
+  isCurrentPrice: boolean;
+  isBestBid: boolean;
+  isBestAsk: boolean;
+};
+
+type CvdCandle = {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+};
+
 type HeatmapStructureRibbon = {
   id: string;
   price: number;
@@ -507,7 +525,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   );
   const smoothedCvdData = useMemo(() => buildSmoothedCvd(cvdData, settings), [cvdData, settings]);
   const cvdStats = useMemo(() => buildCvdStats(snapshot.trades, smoothedCvdData, settings), [settings, smoothedCvdData, snapshot.trades]);
-  const cvdPath = useMemo(() => buildCvdPath(smoothedCvdData), [smoothedCvdData]);
+  const cvdCandles = useMemo(() => buildCvdCandles(smoothedCvdData, settings), [settings, smoothedCvdData]);
   const depthChart = useMemo(() => buildDepthChart(snapshot, heatmapRange), [heatmapRange, snapshot]);
   const flowBars = useMemo(() => buildFlowBars(flowSeries, settings), [flowSeries, settings]);
   const debugStats = useMemo(
@@ -814,7 +832,10 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     });
   }, [cvdData, exchangeLabel, executionStatus, heatmapRange, lastPrice, macroBands, marketSymbol, settings, snapshot, windowMode]);
 
-  const priceRows = snapshot.buckets;
+  const priceRows = useMemo(() => buildLadderRows(snapshot, heatmapRange, settings), [heatmapRange, settings, snapshot]);
+  const currentLadderPrice = snapshot.midPrice ?? snapshot.lastPrice ?? lastPrice ?? midpoint(heatmapRange);
+  const priceRowsAbove = priceRows.filter((row) => row.price > currentLadderPrice);
+  const priceRowsBelow = priceRows.filter((row) => row.price <= currentLadderPrice);
   const maxTotal = Math.max(...priceRows.map((row) => row.totalSize), 1);
 
   if (windowMode === "detached-browser") {
@@ -944,8 +965,9 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             {snapshot.status === "awaiting-book" ? <EmptyState text="Awaiting live orderbook stream." /> : (
               <>
                 <div className="dom-pro-ladder-head"><span>Price ({marketSymbol.quoteAsset})</span><span>Bid Size ({marketSymbol.baseAsset})</span><span>Ask Size ({marketSymbol.baseAsset})</span></div>
-                <div className="dom-pro-ladder-rows">
-                  {priceRows.map((row) => (
+                <div className="dom-pro-ladder-book">
+                <div className="dom-pro-ladder-rows upper">
+                  {priceRowsAbove.map((row) => (
                     <div className={`dom-pro-ladder-row ${row.isCurrentPrice ? "current" : ""}`} key={row.price}>
                       <span>{formatPrice(row.price)}</span>
                       <span>{formatSize(row.bidSize)}</span>
@@ -959,6 +981,18 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                   <b>{formatPrice(snapshot.lastPrice)}</b>
                   <span>Spread {formatPrice(snapshot.spread ?? 0)}</span>
                   <em>Mid {formatPrice(snapshot.midPrice)}</em>
+                </div>
+                <div className="dom-pro-ladder-rows lower">
+                  {priceRowsBelow.map((row) => (
+                    <div className={`dom-pro-ladder-row ${row.isCurrentPrice ? "current" : ""}`} key={row.price}>
+                      <span>{formatPrice(row.price)}</span>
+                      <span>{formatSize(row.bidSize)}</span>
+                      <span className="red">{formatSize(row.askSize)}</span>
+                      <i className="bid-depth" style={{ transform: `scaleX(${row.bidSize / maxTotal})` }} />
+                      <i className="ask-depth" style={{ transform: `scaleX(${row.askSize / maxTotal})` }} />
+                    </div>
+                  ))}
+                </div>
                 </div>
               </>
             )}
@@ -1198,7 +1232,22 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                       <span>Divergence <b>WATCH</b></span>
                     </div>
                     <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Heuristic cumulative volume delta">
-                      <polyline points={cvdPath} />
+                      {buildCvdAxis(cvdCandles).map((level) => (
+                        <g key={level.label}>
+                          <line className="cvd-grid" x1="0" x2="100" y1={level.y} y2={level.y} />
+                          <text x="1.5" y={Math.max(7, level.y - 1.5)}>{level.label}</text>
+                        </g>
+                      ))}
+                      {cvdCandles.map((candle, index) => {
+                        const geometry = cvdCandleGeometry(candle, index, cvdCandles);
+                        return (
+                          <g key={`${candle.time}-${index}`} className={candle.close >= candle.open ? "up" : "down"}>
+                            <line className="wick" x1={geometry.x} x2={geometry.x} y1={geometry.highY} y2={geometry.lowY} />
+                            <rect className="body" x={geometry.bodyX} y={geometry.bodyY} width={geometry.bodyWidth} height={geometry.bodyHeight} />
+                          </g>
+                        );
+                      })}
+                      <polyline className="cvd-close-line" points={buildCvdClosePath(cvdCandles)} />
                     </svg>
                   </>
                 )}
@@ -1675,6 +1724,96 @@ function buildPriceScale(range: MacroLiquidityRange) {
   return Array.from({ length: 6 }, (_, index) => range.max - step * index);
 }
 
+function buildLadderRows(snapshot: AggregatedDomSnapshot, range: MacroLiquidityRange, settings: DomSettings): DomLadderRow[] {
+  const currentPrice = snapshot.midPrice ?? snapshot.lastPrice ?? midpoint(range);
+  const visibleSpan = Math.max(rangeSpan(range), currentPrice * 0.01);
+  const desiredRows = settings.mode === "scalper" ? 36 : settings.mode === "macro" ? 44 : 40;
+  const rawStep = visibleSpan / desiredRows;
+  const bookStep = inferLadderBookStep(snapshot);
+  const step = nicePriceStep(Math.max(rawStep, bookStep));
+  const min = Math.max(0.00000001, Math.floor(range.min / step) * step);
+  const max = Math.max(min + step, Math.ceil(range.max / step) * step);
+  const rawRows = aggregateBookForLadder(snapshot, step, currentPrice);
+  const rows: DomLadderRow[] = [];
+  for (let price = max; price >= min && rows.length < 92; price = Number((price - step).toFixed(8))) {
+    const aggregate = rawRows.get(ladderPriceKey(price)) ?? { bidSize: 0, askSize: 0 };
+    const low = price - step / 2;
+    const high = price + step / 2;
+    rows.push({
+      price,
+      bidSize: aggregate.bidSize,
+      askSize: aggregate.askSize,
+      totalSize: aggregate.bidSize + aggregate.askSize,
+      isCurrentPrice: currentPrice >= low && currentPrice <= high,
+      isBestBid: snapshot.bestBid !== null && snapshot.bestBid >= low && snapshot.bestBid <= high,
+      isBestAsk: snapshot.bestAsk !== null && snapshot.bestAsk >= low && snapshot.bestAsk <= high
+    });
+  }
+  if (rows.some((row) => row.totalSize > 0)) return rows;
+  return snapshot.buckets.slice(0, 80).map((bucket) => ({
+    price: bucket.price,
+    bidSize: bucket.bidSize,
+    askSize: bucket.askSize,
+    totalSize: bucket.totalSize,
+    isCurrentPrice: bucket.isCurrentPrice,
+    isBestBid: bucket.isBestBid,
+    isBestAsk: bucket.isBestAsk
+  }));
+}
+
+function aggregateBookForLadder(snapshot: AggregatedDomSnapshot, step: number, currentPrice: number) {
+  const map = new Map<string, { bidSize: number; askSize: number }>();
+  const add = (price: number, side: "bid" | "ask", size: number) => {
+    if (!Number.isFinite(price) || !Number.isFinite(size) || size <= 0) return;
+    const rowPrice = roundToLadderPrice(price, step);
+    const key = ladderPriceKey(rowPrice);
+    const row = map.get(key) ?? { bidSize: 0, askSize: 0 };
+    if (side === "bid") row.bidSize += size;
+    else row.askSize += size;
+    map.set(key, row);
+  };
+  const bids = snapshot.sourceBook?.bids?.length ? snapshot.sourceBook.bids : snapshot.bids.map((bucket) => ({ price: bucket.price, quantity: bucket.bidSize }));
+  const asks = snapshot.sourceBook?.asks?.length ? snapshot.sourceBook.asks : snapshot.asks.map((bucket) => ({ price: bucket.price, quantity: bucket.askSize }));
+  for (const level of bids.slice(0, 1500)) add(level.price, "bid", level.quantity);
+  for (const level of asks.slice(0, 1500)) add(level.price, "ask", level.quantity);
+  for (const bucket of snapshot.buckets) {
+    if (Math.abs(bucket.price - currentPrice) / Math.max(1, currentPrice) > 0.12) continue;
+    add(bucket.price, "bid", bucket.bidSize);
+    add(bucket.price, "ask", bucket.askSize);
+  }
+  return map;
+}
+
+function inferLadderBookStep(snapshot: AggregatedDomSnapshot) {
+  const prices = [
+    ...(snapshot.sourceBook?.bids ?? []).slice(0, 80).map((level) => level.price),
+    ...(snapshot.sourceBook?.asks ?? []).slice(0, 80).map((level) => level.price)
+  ].filter((price) => Number.isFinite(price) && price > 0).sort((a, b) => a - b);
+  let minDiff = Number.POSITIVE_INFINITY;
+  for (let index = 1; index < prices.length; index += 1) {
+    const diff = Math.abs(prices[index] - prices[index - 1]);
+    if (diff > 0) minDiff = Math.min(minDiff, diff);
+  }
+  return Number.isFinite(minDiff) ? minDiff : Math.max(0.01, snapshot.renderStats.bucketSize / 20);
+}
+
+function nicePriceStep(value: number) {
+  const raw = Math.max(0.00000001, value);
+  const exponent = Math.floor(Math.log10(raw));
+  const base = Math.pow(10, exponent);
+  const normalized = raw / base;
+  const multiplier = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10;
+  return Number((multiplier * base).toFixed(8));
+}
+
+function roundToLadderPrice(price: number, step: number) {
+  return Number((Math.round(price / step) * step).toFixed(8));
+}
+
+function ladderPriceKey(price: number) {
+  return price.toFixed(8);
+}
+
 function defaultHeatmapCamera(): HeatmapViewportState {
   return {
     centerPrice: null,
@@ -1974,17 +2113,99 @@ function buildCvdStats(trades: AggregatedDomSnapshot["trades"], cvdData: Array<{
   };
 }
 
-function buildCvdPath(points: Array<{ value: number }>) {
-  if (points.length < 2) return "0,50 100,50";
-  const values = points.map((point) => point.value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = Math.max(1, max - min);
-  return points.map((point, index) => {
-    const x = index / Math.max(1, points.length - 1) * 100;
-    const y = 92 - ((point.value - min) / span) * 82;
+function buildCvdCandles(points: Array<{ time: number; value: number }>, settings: DomSettings): CvdCandle[] {
+  if (points.length === 0) return [];
+  const horizon = horizonSeconds(settings.cvdHorizon);
+  const targetCandles = settings.cvdHorizon === "15m" ? 36 : settings.cvdHorizon === "1h" ? 42 : 56;
+  const bucketSeconds = Math.max(settings.cvdSampleIntervalSec, Math.floor(horizon / targetCandles));
+  const ordered = points
+    .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value))
+    .sort((a, b) => a.time - b.time);
+  const candles: CvdCandle[] = [];
+  let activeBucket = Number.NaN;
+  let active: CvdCandle | null = null;
+  let previousClose = ordered[0]?.value ?? 0;
+
+  for (const point of ordered) {
+    const bucket = Math.floor(point.time / bucketSeconds) * bucketSeconds;
+    if (!active || bucket !== activeBucket) {
+      if (active) candles.push(active);
+      activeBucket = bucket;
+      active = {
+        time: bucket,
+        open: previousClose,
+        high: Math.max(previousClose, point.value),
+        low: Math.min(previousClose, point.value),
+        close: point.value
+      };
+    } else {
+      active.high = Math.max(active.high, point.value);
+      active.low = Math.min(active.low, point.value);
+      active.close = point.value;
+    }
+    previousClose = point.value;
+  }
+  if (active) candles.push(active);
+  return candles.slice(-targetCandles);
+}
+
+function buildCvdAxis(candles: CvdCandle[]) {
+  const range = cvdValueRange(candles);
+  return [
+    { value: range.max, y: cvdValueToY(range.max, range), label: formatSignedCompact(range.max) },
+    { value: 0, y: cvdValueToY(0, range), label: "0" },
+    { value: range.min, y: cvdValueToY(range.min, range), label: formatSignedCompact(range.min) }
+  ].filter((level, index, all) => index === 0 || Math.abs(level.y - all[index - 1].y) > 8);
+}
+
+function buildCvdClosePath(candles: CvdCandle[]) {
+  if (candles.length < 2) return "";
+  const range = cvdValueRange(candles);
+  return candles.map((candle, index) => {
+    const x = cvdCandleX(index, candles.length);
+    const y = cvdValueToY(candle.close, range);
     return `${x.toFixed(2)},${y.toFixed(2)}`;
   }).join(" ");
+}
+
+function cvdCandleGeometry(candle: CvdCandle, index: number, candles: CvdCandle[]) {
+  const range = cvdValueRange(candles);
+  const x = cvdCandleX(index, candles.length);
+  const spacing = 88 / Math.max(1, candles.length);
+  const bodyWidth = Math.max(0.8, Math.min(3.6, spacing * 0.62));
+  const openY = cvdValueToY(candle.open, range);
+  const closeY = cvdValueToY(candle.close, range);
+  const highY = cvdValueToY(candle.high, range);
+  const lowY = cvdValueToY(candle.low, range);
+  return {
+    x,
+    bodyX: x - bodyWidth / 2,
+    bodyY: Math.min(openY, closeY),
+    bodyWidth,
+    bodyHeight: Math.max(0.8, Math.abs(closeY - openY)),
+    highY,
+    lowY
+  };
+}
+
+function cvdCandleX(index: number, count: number) {
+  return 8 + (index / Math.max(1, count - 1)) * 88;
+}
+
+function cvdValueRange(candles: CvdCandle[]) {
+  const values = candles.flatMap((candle) => [candle.open, candle.high, candle.low, candle.close, 0]);
+  const minRaw = Math.min(...values);
+  const maxRaw = Math.max(...values);
+  const span = Math.max(1, maxRaw - minRaw);
+  return {
+    min: minRaw - span * 0.12,
+    max: maxRaw + span * 0.12
+  };
+}
+
+function cvdValueToY(value: number, range: { min: number; max: number }) {
+  const span = Math.max(1, range.max - range.min);
+  return 94 - ((value - range.min) / span) * 84;
 }
 
 function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityRange) {
@@ -2024,26 +2245,26 @@ function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityR
   const startX = priceToX(currentPrice, range);
   bidLevels.forEach((level, index) => {
     const x = priceToX(level.price, range);
-    const y = 94 - Math.sqrt(bidTotals[index] / maxTotal) * 82;
+    const y = 94 - Math.pow(bidTotals[index] / maxTotal, 0.72) * 80;
     bidCumulative.push({ x, y });
   });
   askLevels.forEach((level, index) => {
     const x = priceToX(level.price, range);
-    const y = 94 - Math.sqrt(askTotals[index] / maxTotal) * 82;
+    const y = 94 - Math.pow(askTotals[index] / maxTotal, 0.72) * 80;
     askCumulative.push({ x, y });
   });
   const bidLinePoints = bidCumulative.length
-    ? extendDepthSide([{ x: startX, y: 94 }, ...bidCumulative].sort((a, b) => a.x - b.x), "bid")
+    ? buildDepthStepPath([{ x: startX, y: 94 }, ...bidCumulative], "bid")
     : [];
   const askLinePoints = askCumulative.length
-    ? extendDepthSide([{ x: startX, y: 94 }, ...askCumulative].sort((a, b) => a.x - b.x), "ask")
+    ? buildDepthStepPath([{ x: startX, y: 94 }, ...askCumulative], "ask")
     : [];
   const pointString = (points: Array<{ x: number; y: number }>) => points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
   return {
     empty: false,
     bidLine: pointString(bidLinePoints),
     askLine: pointString(askLinePoints),
-    bidArea: bidLinePoints.length ? `${pointString(bidLinePoints)} ${startX.toFixed(2)},94 ${bidLinePoints[0].x.toFixed(2)},94` : "",
+    bidArea: bidLinePoints.length ? `${pointString(bidLinePoints)} ${bidLinePoints[bidLinePoints.length - 1].x.toFixed(2)},94 ${startX.toFixed(2)},94` : "",
     askArea: askLinePoints.length ? `${pointString(askLinePoints)} ${askLinePoints[askLinePoints.length - 1].x.toFixed(2)},94 ${startX.toFixed(2)},94` : "",
     bidPoints: bidLinePoints.length,
     askPoints: askLinePoints.length,
@@ -2051,12 +2272,17 @@ function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityR
   };
 }
 
-function extendDepthSide(points: Array<{ x: number; y: number }>, side: "bid" | "ask") {
-  if (points.length === 0) return points;
-  const next = points.slice();
-  if (side === "bid" && next[0].x > 3.5) next.unshift({ x: 3, y: next[0].y });
-  if (side === "ask" && next[next.length - 1].x < 96.5) next.push({ x: 97, y: next[next.length - 1].y });
-  return next;
+function buildDepthStepPath(points: Array<{ x: number; y: number }>, side: "bid" | "ask") {
+  const ordered = side === "bid"
+    ? points.slice().sort((a, b) => b.x - a.x)
+    : points.slice().sort((a, b) => a.x - b.x);
+  const stepped: Array<{ x: number; y: number }> = [];
+  for (const point of ordered) {
+    const previous = stepped[stepped.length - 1];
+    if (previous) stepped.push({ x: point.x, y: previous.y });
+    stepped.push(point);
+  }
+  return stepped;
 }
 
 function buildDomDebugStats(
@@ -2382,6 +2608,13 @@ function formatSize(value?: number | null) {
 function formatCompact(value?: number | null) {
   if (!Number.isFinite(value ?? NaN)) return "--";
   return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 2 }).format(Number(value));
+}
+
+function formatSignedCompact(value?: number | null) {
+  if (!Number.isFinite(value ?? NaN)) return "--";
+  const numeric = Number(value);
+  const sign = numeric > 0 ? "+" : "";
+  return `${sign}${formatCompact(numeric)}`;
 }
 
 function signed(value?: number, suffix = "") {

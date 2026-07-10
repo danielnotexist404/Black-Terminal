@@ -542,6 +542,31 @@ Docs:
 - `PHASE3_CHAPTER9_PERFORMANCE.md`
 - `docs/performance/latest-baseline.md`
 
+## DOM Pro+ Ladder, CVD, And Depth Chart Refinement
+
+Status: Implemented and build validated
+
+Changed:
+
+- Aggregated DOM Ladder now uses an adaptive display step from the active camera domain and raw orderbook levels instead of reusing the large institutional heatmap aggregation bucket.
+- DOM Ladder now separates rows above and below the mid-price block.
+- CVD now renders candle-style delta bodies, wicks, value-axis labels, and a close trace.
+- Depth Chart now renders bid/ask cumulative step curves from mid price outward and avoids filling sparse source data into solid rectangular blocks.
+
+Why:
+
+- 500x/1000x institutional heatmap buckets could collapse the ladder into one row.
+- The previous CVD summary line hid useful structure.
+- The previous depth fill could look like two large blocks when the source had sparse or heavily aggregated depth points.
+
+Validation:
+
+- `npm run build`
+
+Docs:
+
+- `PHASE3_CHAPTER6_DOM_PRO.md`
+
 ## Future Work Log
 
 Use this format for every future phase, chapter, or major bug sprint.

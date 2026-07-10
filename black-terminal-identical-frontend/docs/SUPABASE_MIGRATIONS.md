@@ -1550,3 +1550,16 @@ Reason:
 Future migration trigger:
 
 - Add a migration only if performance snapshots, long-session benchmark history, GPU diagnostics, or fleet telemetry need server-side persistence.
+
+## 2026-07-10 - DOM Pro+ Ladder, CVD, And Depth Chart Refinement
+
+Status: No Supabase migration required.
+
+Reason:
+
+- The change is limited to frontend DOM Pro+ rendering and data shaping.
+- No server-owned records, account tables, execution audit rows, credentials, market-memory tables, or RLS policies were introduced.
+
+Future migration trigger:
+
+- Add a migration only if order-flow panel layouts, CVD presets, or DOM visualization preferences need cross-device persistence.

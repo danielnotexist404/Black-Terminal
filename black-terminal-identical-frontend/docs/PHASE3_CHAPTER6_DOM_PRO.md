@@ -151,10 +151,12 @@ DOM Pro+ execution panel
 - Replaced the depth chart block bars with a cumulative bid/ask depth curve.
 - Made the depth chart inherit the same visible price camera as the heatmap.
 - Restored the depth chart around a current-price center reference with bid cumulative depth on the lower-price side and ask cumulative depth on the higher-price side.
-- Depth chart now prefers raw L2 levels over aggregated buckets, maps price to the shared camera domain, and extends available curves to the viewport edges instead of disappearing when institutional buckets collapse into one row.
+- Depth chart now prefers raw L2 levels over aggregated buckets, maps price to the shared camera domain, and renders true cumulative step curves from mid price outward instead of extending sparse data into solid rectangular blocks.
 - Depth chart now renders one available side with an explicit source warning instead of going blank.
 - Replaced liquidity flow blocks with rolling time-bucket histogram bars and percentile outlier scaling.
 - Redesigned CVD as a larger heuristic CVD panel with current delta, session delta, aggressive buy percentage, aggressive sell percentage, trend label, horizon controls, EMA smoothing, and a thicker line.
+- Refined CVD into a candle-style oscillator with delta bodies, wicks, value-axis labels, and a close trace so it shows structure rather than only a compressed summary line.
+- Decoupled the aggregated DOM ladder display step from the institutional heatmap bucket size, so 500x/1000x heatmap modes no longer collapse the ladder into one giant price row.
 - Updated institutional defaults to 500x buckets, +/-2% visible range, 24H heatmap, 4H smoothed CVD, and 10-12 FPS behavior.
 - Added performance diagnostics:
   - updates/sec

@@ -27,6 +27,7 @@ Every meaningful platform change must update documentation in the same work cycl
 - `PHASE3_CHAPTER7_MARKET_DEPTH_MEMORY.md` - Black Core Market Depth Memory, server collector, compression, wall lifecycle, replay API, and IMM foundation.
 - `PHASE3_IMM_OPERATIONAL_READINESS.md` - IMM health endpoint, worker heartbeat, integrity validation, verification command, and data-trust readiness.
 - `PHASE3_CHAPTER8_IMM_POLISH.md` - DOM Pro+ workspace presets, camera controls, keyboard shortcuts, and IMM status strip.
+- `PHASE3_CHAPTER9_PERFORMANCE.md` - Black Core performance monitor, hidden HUD, baseline report, and long-session stress harness.
 - `PHASE4_PROFESSIONAL_NETWORK.md` - Professional Profile, Research Feed, follow graph, Investment Groups, join requests, and Trading Room foundation.
 
 ## Specialist Docs

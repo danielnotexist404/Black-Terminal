@@ -1,5 +1,6 @@
 import { blackCoreMarketDataEngine } from "../../market-data/engine/marketDataEngine";
 import type { MarketDataSubscription, MarketSymbol, OrderBookSnapshot, TickerSnapshot, TradeTick } from "../../market-data/types";
+import { blackCorePerformanceMonitor } from "../../performance/performanceMonitor";
 
 export type DomFeedSnapshot = {
   marketSymbol: MarketSymbol;
@@ -125,6 +126,11 @@ export class DomFeedStore {
       if (entry.tradePollTimer) window.clearInterval(entry.tradePollTimer);
       if (entry.tickerPollTimer) window.clearInterval(entry.tickerPollTimer);
     }
+    entry.bookPollTimer = undefined;
+    entry.tradePollTimer = undefined;
+    entry.tickerPollTimer = undefined;
+    entry.bookSubscription = undefined;
+    entry.tradeSubscription = undefined;
     this.entries.delete(key);
   }
 
@@ -157,6 +163,7 @@ export class DomFeedStore {
         this.notify(entry);
       })
       .catch((error: unknown) => {
+        if (!this.entries.has(entry.key)) return;
         entry.snapshot = { ...entry.snapshot, bookStatus: "BOOK UNAVAILABLE", lastError: error instanceof Error ? error.message : String(error), updatedAt: Date.now() };
         this.notify(entry);
       });
@@ -175,6 +182,7 @@ export class DomFeedStore {
         this.pushTrades(entry, trades, entry.tradeSubscription ? entry.snapshot.tradeStatus : "REST TRADES");
       })
       .catch((error: unknown) => {
+        if (!this.entries.has(entry.key)) return;
         entry.snapshot = { ...entry.snapshot, tradeStatus: "TAPE UNAVAILABLE", lastError: error instanceof Error ? error.message : String(error), updatedAt: Date.now() };
         this.notify(entry);
       });
@@ -194,6 +202,7 @@ export class DomFeedStore {
         this.notify(entry);
       })
       .catch((error: unknown) => {
+        if (!this.entries.has(entry.key)) return;
         entry.snapshot = { ...entry.snapshot, tickerStatus: "TICKER UNAVAILABLE", lastError: error instanceof Error ? error.message : String(error), updatedAt: Date.now() };
         this.notify(entry);
       });
@@ -222,7 +231,9 @@ export class DomFeedStore {
   }
 
   private notify(entry: FeedEntry) {
+    if (!this.entries.has(entry.key)) return;
     entry.snapshot.subscriptionCount = entry.listeners.size;
+    blackCorePerformanceMonitor.recordMetric("dom_feed.listeners", entry.listeners.size, "count", { feed: entry.key });
     for (const listener of entry.listeners) listener(entry.snapshot);
   }
 }

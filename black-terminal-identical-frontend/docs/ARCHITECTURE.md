@@ -118,6 +118,27 @@ Operational records are platform-owned:
 Direct browser reads are intentionally blocked by RLS. Server routes and the worker use the service
 role key.
 
+## Performance Telemetry Rule
+
+Black Core owns runtime performance telemetry.
+
+The performance path is:
+
+```text
+Pixi chart ticker / DOM Pro render loop / browser PerformanceObserver
+-> src/performance/performanceMonitor.ts
+-> throttled performance.metric events
+-> hidden Performance HUD
+-> docs/performance baseline and stress reports
+```
+
+High-frequency frame samples stay in memory and are summarized into FPS, average frame time, p99
+frame time, worst frame, dropped frames, long tasks, heap, DOM node count, and event-bus diagnostics.
+Do not publish every market tick or animation frame into the event bus.
+
+The Performance HUD is hidden by default and toggled with `Ctrl+Shift+P`. It exists for admin and
+engineering profiling, not as part of the normal trading surface.
+
 ## Python Indicator Runtime Direction
 
 Python should not run inside the React UI thread. Treat indicators as isolated jobs with a stable

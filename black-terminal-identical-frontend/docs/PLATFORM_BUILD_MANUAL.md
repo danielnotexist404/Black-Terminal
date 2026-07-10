@@ -192,6 +192,18 @@ Hyperliquid is registered as a protocol adapter behind MetaMask signing. The ada
 perpetual capabilities but live order placement remains blocked until the server-side signing and
 order relay is implemented.
 
+## Performance
+
+Chapter IX adds Black Core runtime telemetry:
+
+- `src/performance/performanceMonitor.ts` - shared frame, long-task, heap, DOM node, and event-bus diagnostics.
+- `src/performance/PerformanceHud.tsx` - hidden engineering HUD toggled with `Ctrl+Shift+P`.
+- `scripts/performance-baseline.js` - writes repeatable source/bundle footprint reports.
+- `scripts/performance-stress.js` - writes long-session polling logs for running deployments.
+
+Telemetry must remain lower frequency than market data. Keep high-frequency frame samples in memory
+and publish only throttled metrics through `performance.metric`.
+
 ## Security Boundaries
 
 - Never store plain API secrets in frontend localStorage.
@@ -210,6 +222,8 @@ npm run build
 npm run depth:worker
 npm run depth:worker:supervise
 npm run depth:verify
+npm run perf:baseline
+npm run perf:stress
 npm run check:rust
 npm run check
 npm run tauri:dev

@@ -16,6 +16,7 @@ import type { CompiledPlot } from "../components/ScriptCompiler";
 import { OrderBookSnapshot } from "../market-data/types";
 import { createAdaptiveSwingSignals } from "../modules/strategy-lab/adapters/signalAdapter";
 import type { StrategySettings, StrategySignal } from "../modules/strategy-lab/types/strategy.types";
+import { blackCorePerformanceMonitor } from "../performance/performanceMonitor";
 import {
   AdaptiveSwingStrategySettings,
   Candle,
@@ -266,6 +267,7 @@ export class BlackChartEngine {
   private lastOrderBookDrawAt = 0;
   private frameCount = 0;
   private lastFpsTime = performance.now();
+  private lastTickerFrameAt = performance.now();
 
   constructor(options: ChartEngineOptions) {
     this.host = options.host;
@@ -906,9 +908,13 @@ export class BlackChartEngine {
   private tickFps() {
     this.frameCount++;
     const now = performance.now();
+    const frameDelta = now - this.lastTickerFrameAt;
+    this.lastTickerFrameAt = now;
+    blackCorePerformanceMonitor.recordFrame(frameDelta, { surface: "pixi-chart" });
     if (now - this.lastFpsTime > 500) {
       const fps = Math.round((this.frameCount * 1000) / (now - this.lastFpsTime));
       this.onFps?.(fps);
+      blackCorePerformanceMonitor.recordMetric("chart.fps", fps, "fps", { surface: "pixi-chart" });
       this.frameCount = 0;
       this.lastFpsTime = now;
     }

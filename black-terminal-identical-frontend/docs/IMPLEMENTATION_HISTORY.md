@@ -505,6 +505,43 @@ Docs:
 
 - `PHASE3_CHAPTER8_IMM_POLISH.md`
 
+## Phase III Chapter 9: Black Core Performance And Long-Session Stability
+
+Status: Instrumentation foundation implemented and build validated
+
+Changed:
+
+- Expanded the Black Core performance monitor with FPS, frame time, p99, worst frame, dropped frames, long tasks, heap, DOM node, and event-bus diagnostics.
+- Added a hidden Performance HUD toggled by `Ctrl+Shift+P`.
+- Connected Pixi chart and DOM Pro+ render metrics into the shared monitor.
+- Throttled high-frequency metric publishing to prevent telemetry from creating an event storm.
+- Added event-bus listener and publish diagnostics.
+- Hardened DOM Pro feed cleanup so stopped entries ignore late async fallback responses.
+- Added `npm run perf:baseline` and `npm run perf:stress`.
+- Generated `docs/performance/latest-baseline.md` and `docs/performance/latest-baseline.json`.
+
+Why:
+
+- Chapter IX requires measurement before optimization. The platform now has the runtime instrumentation needed to compare long-session behavior before and after deeper Pixi, worker, and DOM optimizations.
+
+Validation:
+
+- `npm run build`
+- `npm run perf:baseline`
+
+Remaining:
+
+- Run an actual 12-hour browser session and store before/after HUD snapshots.
+- Add browser automation for UI long-session profiling once a browser test dependency is approved.
+- Move more IMM analytics into workers.
+- Add Pixi draw-call and GPU-resource diagnostics.
+- Add object pooling for frequently recreated chart and DOM Pro primitives.
+
+Docs:
+
+- `PHASE3_CHAPTER9_PERFORMANCE.md`
+- `docs/performance/latest-baseline.md`
+
 ## Future Work Log
 
 Use this format for every future phase, chapter, or major bug sprint.

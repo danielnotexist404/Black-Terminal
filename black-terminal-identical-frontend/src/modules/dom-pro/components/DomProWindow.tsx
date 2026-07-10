@@ -10,6 +10,7 @@ import { submitOrder } from "../../../execution/executionEngine";
 import type { MarginMode, OrderSide, OrderType, TimeInForce } from "../../../execution/types";
 import { blackCoreMarketDataEngine } from "../../../market-data/engine/marketDataEngine";
 import type { MarketSymbol } from "../../../market-data/types";
+import { blackCorePerformanceMonitor } from "../../../performance/performanceMonitor";
 import type { PortfolioAccount } from "../../../portfolio/types";
 import { defaultRiskControls } from "../../../risk/types";
 import { DomAggregationEngine } from "../domAggregationEngine";
@@ -387,6 +388,9 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
       subscriptionCount: feed.subscriptionCount
     });
     next.renderStats.lastRenderMs = performance.now() - started;
+    blackCorePerformanceMonitor.recordFrame(next.renderStats.lastRenderMs, { surface: "dom-pro" });
+    blackCorePerformanceMonitor.recordMetric("dom_pro.render_ms", next.renderStats.lastRenderMs, "ms", { surface: "dom-pro" });
+    blackCorePerformanceMonitor.recordMetric("dom_pro.visible_buckets", next.renderStats.visibleBuckets, "count", { surface: "dom-pro" });
     if (next.renderStats.lastRenderMs > 18) {
       renderCooldownUntilRef.current = performance.now() + 1000 / Math.max(1, settings.fpsCap);
       droppedFramesRef.current += 1;

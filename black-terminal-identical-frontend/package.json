@@ -11,6 +11,8 @@
     "depth:worker": "node scripts/market-depth-worker.js",
     "depth:worker:supervise": "node scripts/market-depth-supervisor.js",
     "depth:verify": "node scripts/market-depth-verify.js",
+    "perf:baseline": "node scripts/performance-baseline.js",
+    "perf:stress": "node scripts/performance-stress.js",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",

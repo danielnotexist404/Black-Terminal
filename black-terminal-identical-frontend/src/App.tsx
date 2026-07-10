@@ -93,6 +93,7 @@ import type { ConnectionDiagnostics } from "./connectivity/types";
 import type { CapabilityUser, ProductTier, TerminalCapability } from "./core/permissions/capabilities";
 import { blackCoreWindowDockManager } from "./core/windows/windowDockManager";
 import type { BlackCoreModuleMode } from "./core/modules/moduleRegistry";
+import { PerformanceHud } from "./performance/PerformanceHud";
 
 const nav = [
   { label: "WATCHLIST", icon: BookOpen },
@@ -2065,6 +2066,7 @@ export default function App() {
           </div>
         </div>
       )}
+      <PerformanceHud />
     </div>
   );
 }

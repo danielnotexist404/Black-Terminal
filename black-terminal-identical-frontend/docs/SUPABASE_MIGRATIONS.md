@@ -1536,3 +1536,17 @@ Reason:
 Future migration trigger:
 
 - Add a Supabase migration only if DOM Pro+ presets, camera state, resizable panel layouts, or cross-device order-flow workspaces need account-level persistence.
+
+## 2026-07-10 - Black Core Performance Instrumentation
+
+Status: No Supabase migration required.
+
+Reason:
+
+- Performance HUD snapshots, baseline reports, event-bus diagnostics, frame timing, long-task counts, and DOM Pro cleanup guards are frontend/runtime instrumentation.
+- The long-session stress harness writes local JSONL files under `docs/performance/`.
+- No server-owned records, credentials, execution audit rows, account tables, market-memory tables, or RLS policies were introduced.
+
+Future migration trigger:
+
+- Add a migration only if performance snapshots, long-session benchmark history, GPU diagnostics, or fleet telemetry need server-side persistence.

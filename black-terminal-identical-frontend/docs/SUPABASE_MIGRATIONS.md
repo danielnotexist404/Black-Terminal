@@ -1563,3 +1563,17 @@ Reason:
 Future migration trigger:
 
 - Add a migration only if order-flow panel layouts, CVD presets, or DOM visualization preferences need cross-device persistence.
+
+## 2026-07-10 - DOM Pro+ Depth And CVD Camera Decoupling
+
+Status: No Supabase migration required.
+
+Reason:
+
+- The change is limited to frontend DOM Pro+ rendering and data shaping.
+- Depth Chart now uses a local market-centered L2 domain, while CVD uses real trade-sequence fallback candles when the smoothed series is sparse.
+- No server-owned records, account tables, execution audit rows, credentials, market-memory tables, or RLS policies were introduced.
+
+Future migration trigger:
+
+- Add a migration only if CVD history, depth-chart camera state, or DOM panel preferences need cross-device/server-side persistence.

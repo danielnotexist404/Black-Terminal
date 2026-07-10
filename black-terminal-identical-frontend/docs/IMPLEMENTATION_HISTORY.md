@@ -567,6 +567,31 @@ Docs:
 
 - `PHASE3_CHAPTER6_DOM_PRO.md`
 
+## DOM Pro+ Depth And CVD Camera Decoupling
+
+Status: Implemented and build validated
+
+Changed:
+
+- Depth Chart no longer consumes the Liquidity Heatmap camera domain.
+- Depth Chart now resolves a separate market-centered L2 domain from raw bid/ask depth around current price.
+- CVD now falls back to real trade-sequence candles when the pre-bucketed CVD series is too sparse.
+- CVD stats now consume the candle fallback when the smoothed series has insufficient samples.
+
+Why:
+
+- Heatmap wheel zoom and Full Data exploration were crushing the depth curve into a vertical spike.
+- CVD could collapse into a single unreadable candle when the venue supplied only a short recent trade tape window.
+- Depth and CVD are diagnostic panels, while the heatmap/profile pair are the free macro liquidity camera.
+
+Validation:
+
+- `npm run build`
+
+Docs:
+
+- `PHASE3_CHAPTER6_DOM_PRO.md`
+
 ## Future Work Log
 
 Use this format for every future phase, chapter, or major bug sprint.

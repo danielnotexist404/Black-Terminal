@@ -149,13 +149,15 @@ DOM Pro+ execution panel
 - Aligned the volume profile to the same vertical viewport used by the heatmap.
 - Volume Profile now renders a continuous camera-domain scaffold with an outline and price scale, so zoomed-out views preserve the visible range even when liquidity only exists in part of the domain.
 - Replaced the depth chart block bars with a cumulative bid/ask depth curve.
-- Made the depth chart inherit the same visible price camera as the heatmap.
+- Decoupled the depth chart from the user-controlled heatmap camera so mouse-wheel zoom and full-domain exploration no longer crush cumulative depth into a vertical spike.
 - Restored the depth chart around a current-price center reference with bid cumulative depth on the lower-price side and ask cumulative depth on the higher-price side.
-- Depth chart now prefers raw L2 levels over aggregated buckets, maps price to the shared camera domain, and renders true cumulative step curves from mid price outward instead of extending sparse data into solid rectangular blocks.
+- Depth chart now prefers raw L2 levels over aggregated buckets, maps price to its own market-centered depth domain, and renders true cumulative step curves from mid price outward instead of extending sparse data into solid rectangular blocks.
 - Depth chart now renders one available side with an explicit source warning instead of going blank.
+- Depth chart now resolves its own current-market L2 domain from raw depth around mid price, keeping the V-shaped bid/ask balance stable while the heatmap and volume profile act as a free macro camera.
 - Replaced liquidity flow blocks with rolling time-bucket histogram bars and percentile outlier scaling.
 - Redesigned CVD as a larger heuristic CVD panel with current delta, session delta, aggressive buy percentage, aggressive sell percentage, trend label, horizon controls, EMA smoothing, and a thicker line.
 - Refined CVD into a candle-style oscillator with delta bodies, wicks, value-axis labels, and a close trace so it shows structure rather than only a compressed summary line.
+- Hardened CVD rendering with a real trade-sequence fallback so sparse pre-bucketed CVD feeds no longer collapse the oscillator into one unreadable candle.
 - Decoupled the aggregated DOM ladder display step from the institutional heatmap bucket size, so 500x/1000x heatmap modes no longer collapse the ladder into one giant price row.
 - Updated institutional defaults to 500x buckets, +/-2% visible range, 24H heatmap, 4H smoothed CVD, and 10-12 FPS behavior.
 - Added performance diagnostics:

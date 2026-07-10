@@ -524,9 +524,14 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     [depthHistory.points, heatmapFrames, heatmapRange, heatmapStructureRibbons, lastPrice, macroBands, snapshot.lastPrice]
   );
   const smoothedCvdData = useMemo(() => buildSmoothedCvd(cvdData, settings), [cvdData, settings]);
-  const cvdStats = useMemo(() => buildCvdStats(snapshot.trades, smoothedCvdData, settings), [settings, smoothedCvdData, snapshot.trades]);
-  const cvdCandles = useMemo(() => buildCvdCandles(smoothedCvdData, settings), [settings, smoothedCvdData]);
-  const depthChart = useMemo(() => buildDepthChart(snapshot, heatmapRange), [heatmapRange, snapshot]);
+  const cvdCandles = useMemo(() => buildCvdCandles(smoothedCvdData, settings, snapshot.trades), [settings, smoothedCvdData, snapshot.trades]);
+  const cvdStatsData = useMemo(
+    () => smoothedCvdData.length >= 2 ? smoothedCvdData : cvdCandles.map((candle) => ({ time: candle.time, value: candle.close })),
+    [cvdCandles, smoothedCvdData]
+  );
+  const cvdStats = useMemo(() => buildCvdStats(snapshot.trades, cvdStatsData, settings), [settings, cvdStatsData, snapshot.trades]);
+  const depthChartRange = useMemo(() => resolveDepthChartRange(snapshot), [snapshot]);
+  const depthChart = useMemo(() => buildDepthChart(snapshot, depthChartRange), [depthChartRange, snapshot]);
   const flowBars = useMemo(() => buildFlowBars(flowSeries, settings), [flowSeries, settings]);
   const debugStats = useMemo(
     () => buildDomDebugStats(snapshot, macroRange, heatmapRange, settings, heatmapFrames, institutionalProfile, depthChart, depthHistory, snapshot.lastPrice ?? lastPrice),
@@ -1176,7 +1181,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
           </section>
 
           <section className="dom-pro-panel dom-pro-depth-chart">
-            <PanelTitle title="Depth Chart" status="AGGREGATED" />
+            <PanelTitle title="Depth Chart" status="MARKET CENTERED" />
             {!settings.showDepthChart ? <EmptyState text="Depth chart hidden in DOM settings." /> : depthChart.empty ? <EmptyState text="Depth chart awaiting bid/ask buckets." /> : (
               <div className="dom-pro-depth-wrap">
                 <svg className="dom-pro-depth-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Cumulative market depth">
@@ -1222,7 +1227,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                 ))}
               </div>
               <div className="dom-pro-cvd-card">
-                {smoothedCvdData.length === 0 ? <EmptyState text="Trade stream unavailable for this venue." /> : (
+                {cvdCandles.length === 0 ? <EmptyState text="Trade stream unavailable for this venue." /> : (
                   <>
                     <div className="dom-pro-cvd-stats">
                       <span>Current <b>{formatSize(cvdStats.current)}</b></span>
@@ -2113,10 +2118,17 @@ function buildCvdStats(trades: AggregatedDomSnapshot["trades"], cvdData: Array<{
   };
 }
 
-function buildCvdCandles(points: Array<{ time: number; value: number }>, settings: DomSettings): CvdCandle[] {
+function buildCvdCandles(points: Array<{ time: number; value: number }>, settings: DomSettings, trades: AggregatedDomSnapshot["trades"]): CvdCandle[] {
+  const targetCandles = cvdTargetCandles(settings);
+  const pointCandles = buildCvdCandlesFromPoints(points, settings, targetCandles);
+  if (pointCandles.length >= Math.min(12, Math.floor(targetCandles * 0.35))) return pointCandles;
+  const tradeCandles = buildCvdCandlesFromTrades(trades, settings, targetCandles);
+  return tradeCandles.length > pointCandles.length ? tradeCandles : pointCandles;
+}
+
+function buildCvdCandlesFromPoints(points: Array<{ time: number; value: number }>, settings: DomSettings, targetCandles: number): CvdCandle[] {
   if (points.length === 0) return [];
   const horizon = horizonSeconds(settings.cvdHorizon);
-  const targetCandles = settings.cvdHorizon === "15m" ? 36 : settings.cvdHorizon === "1h" ? 42 : 56;
   const bucketSeconds = Math.max(settings.cvdSampleIntervalSec, Math.floor(horizon / targetCandles));
   const ordered = points
     .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value))
@@ -2147,6 +2159,98 @@ function buildCvdCandles(points: Array<{ time: number; value: number }>, setting
   }
   if (active) candles.push(active);
   return candles.slice(-targetCandles);
+}
+
+function buildCvdCandlesFromTrades(trades: AggregatedDomSnapshot["trades"], settings: DomSettings, targetCandles: number): CvdCandle[] {
+  const tradePoints = trades
+    .map((trade, index) => ({
+      index,
+      time: normalizeEpochSeconds(trade.time),
+      quantity: Number(trade.quantity),
+      side: trade.side === "buy" || trade.side === "sell" ? trade.side : null
+    }))
+    .filter((trade): trade is { index: number; time: number; quantity: number; side: "buy" | "sell" } =>
+      Number.isFinite(trade.time) && Number.isFinite(trade.quantity) && trade.quantity > 0 && trade.side !== null
+    )
+    .sort((a, b) => a.time === b.time ? a.index - b.index : a.time - b.time);
+  if (tradePoints.length === 0) return [];
+  const now = Math.max(Date.now() / 1000, tradePoints[tradePoints.length - 1].time);
+  const cutoff = now - horizonSeconds(settings.cvdHorizon);
+  const horizonTrades = tradePoints.filter((trade) => trade.time >= cutoff);
+  const source = (horizonTrades.length >= 8 ? horizonTrades : tradePoints).slice(-Math.max(120, targetCandles * 10));
+  const firstTime = source[0]?.time ?? now;
+  const lastTime = source[source.length - 1]?.time ?? firstTime;
+  const timeSpan = Math.max(0, lastTime - firstTime);
+  if (timeSpan < Math.max(settings.cvdSampleIntervalSec * 6, targetCandles * 0.35)) {
+    return buildIndexedTradeCvdCandles(source, targetCandles);
+  }
+
+  const bucketSeconds = Math.max(settings.cvdSampleIntervalSec, Math.ceil(timeSpan / targetCandles));
+  const candles: CvdCandle[] = [];
+  let activeBucket = Number.NaN;
+  let active: CvdCandle | null = null;
+  let cumulative = 0;
+  let previousClose = 0;
+
+  for (const trade of source) {
+    const delta = trade.side === "buy" ? trade.quantity : -trade.quantity;
+    const nextValue = cumulative + delta;
+    const bucket = Math.floor(trade.time / bucketSeconds) * bucketSeconds;
+    if (!active || bucket !== activeBucket) {
+      if (active) candles.push(active);
+      activeBucket = bucket;
+      active = {
+        time: bucket,
+        open: previousClose,
+        high: Math.max(previousClose, nextValue),
+        low: Math.min(previousClose, nextValue),
+        close: nextValue
+      };
+    } else {
+      active.high = Math.max(active.high, nextValue);
+      active.low = Math.min(active.low, nextValue);
+      active.close = nextValue;
+    }
+    cumulative = nextValue;
+    previousClose = nextValue;
+  }
+  if (active) candles.push(active);
+  return candles.slice(-targetCandles);
+}
+
+function buildIndexedTradeCvdCandles(
+  trades: Array<{ time: number; quantity: number; side: "buy" | "sell"; index: number }>,
+  targetCandles: number
+): CvdCandle[] {
+  if (trades.length === 0) return [];
+  const chunkSize = Math.max(1, Math.ceil(trades.length / targetCandles));
+  const candles: CvdCandle[] = [];
+  let cumulative = 0;
+  for (let cursor = 0; cursor < trades.length; cursor += chunkSize) {
+    const chunk = trades.slice(cursor, cursor + chunkSize);
+    const open = cumulative;
+    let high = open;
+    let low = open;
+    for (const trade of chunk) {
+      cumulative += trade.side === "buy" ? trade.quantity : -trade.quantity;
+      high = Math.max(high, cumulative);
+      low = Math.min(low, cumulative);
+    }
+    candles.push({
+      time: chunk[0]?.time ?? cursor,
+      open,
+      high,
+      low,
+      close: cumulative
+    });
+  }
+  return candles.slice(-targetCandles);
+}
+
+function cvdTargetCandles(settings: DomSettings) {
+  if (settings.cvdHorizon === "15m") return 36;
+  if (settings.cvdHorizon === "1h") return 42;
+  return 56;
 }
 
 function buildCvdAxis(candles: CvdCandle[]) {
@@ -2206,6 +2310,40 @@ function cvdValueRange(candles: CvdCandle[]) {
 function cvdValueToY(value: number, range: { min: number; max: number }) {
   const span = Math.max(1, range.max - range.min);
   return 94 - ((value - range.min) / span) * 84;
+}
+
+function resolveDepthChartRange(snapshot: AggregatedDomSnapshot): MacroLiquidityRange {
+  const rawBids = (snapshot.sourceBook?.bids ?? []).filter((level) => Number.isFinite(level.price) && level.price > 0 && level.quantity > 0);
+  const rawAsks = (snapshot.sourceBook?.asks ?? []).filter((level) => Number.isFinite(level.price) && level.price > 0 && level.quantity > 0);
+  const bidPrices = rawBids.length >= 2
+    ? rawBids.map((level) => level.price)
+    : snapshot.bids.filter((level) => level.bidSize > 0).map((level) => level.price);
+  const askPrices = rawAsks.length >= 2
+    ? rawAsks.map((level) => level.price)
+    : snapshot.asks.filter((level) => level.askSize > 0).map((level) => level.price);
+  const finitePrices = [...bidPrices, ...askPrices].filter((price) => Number.isFinite(price) && price > 0);
+  const bookMid = snapshot.bestBid && snapshot.bestAsk ? (snapshot.bestBid + snapshot.bestAsk) / 2 : null;
+  const currentPrice = snapshot.midPrice ?? snapshot.lastPrice ?? bookMid ?? (finitePrices.length ? (Math.min(...finitePrices) + Math.max(...finitePrices)) / 2 : 1);
+  const lowerLevels = bidPrices
+    .filter((price) => price > 0 && price <= currentPrice)
+    .sort((a, b) => b - a)
+    .slice(0, 180);
+  const upperLevels = askPrices
+    .filter((price) => price > 0 && price >= currentPrice)
+    .sort((a, b) => a - b)
+    .slice(0, 180);
+  const lowerSpan = lowerLevels.length ? currentPrice - lowerLevels[lowerLevels.length - 1] : 0;
+  const upperSpan = upperLevels.length ? upperLevels[upperLevels.length - 1] - currentPrice : 0;
+  const spreadSpan = Number.isFinite(snapshot.spread ?? NaN) ? Number(snapshot.spread) * 80 : 0;
+  const naturalHalfSpan = Math.max(lowerSpan, upperSpan, spreadSpan, currentPrice * 0.006);
+  const minHalfSpan = Math.max(currentPrice * 0.0025, spreadSpan, 1);
+  const maxHalfSpan = currentPrice * 0.05;
+  const halfSpan = Math.max(minHalfSpan, Math.min(naturalHalfSpan, maxHalfSpan));
+  return {
+    min: Math.max(0.00000001, currentPrice - halfSpan),
+    max: Math.max(currentPrice + halfSpan, currentPrice + 0.00000002),
+    source: rawBids.length >= 2 || rawAsks.length >= 2 ? "live-depth" : finitePrices.length ? "fallback" : "fallback"
+  };
 }
 
 function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityRange) {

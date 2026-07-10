@@ -56,6 +56,20 @@ type HeatmapCameraPreset = "current" | "range1" | "range2" | "range5" | "range10
 type HeatmapCameraMode = HeatmapCameraPreset | "manual";
 type HeatmapTimeCameraPreset = "1h" | "6h" | "12h" | "24h" | "3d";
 
+type CvdViewportState = {
+  startIndex: number | null;
+  visibleCount: number | null;
+  followLatest: boolean;
+};
+
+type CvdResolvedCamera = {
+  start: number;
+  end: number;
+  visibleCount: number;
+  total: number;
+  followLatest: boolean;
+};
+
 type IMMStatusPayload = {
   overallStatus?: string;
   workerStatus?: string;
@@ -196,7 +210,9 @@ const cvdHorizons: Array<{ value: DomCvdHorizon; label: string }> = [
   { value: "1h", label: "1H" },
   { value: "4h", label: "4H" },
   { value: "12h", label: "12H" },
-  { value: "24h", label: "24H" }
+  { value: "24h", label: "24H" },
+  { value: "3d", label: "3D" },
+  { value: "1w", label: "1W" }
 ];
 const workspacePresets: Array<{ value: DomWorkspacePreset; label: string; title: string }> = [
   { value: "scalper", label: "Scalper", title: "Fast near-price tape, tighter range, higher refresh" },
@@ -220,9 +236,11 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const heatmapDragRef = useRef<{ startY: number; startCenterPrice: number; cameraHeight: number } | null>(null);
   const heatmapDragRafRef = useRef<number | null>(null);
   const pendingHeatmapDragRef = useRef<{ centerPrice: number; cameraHeight: number } | null>(null);
+  const cvdDragStartRef = useRef<{ x: number; startIndex: number; visibleCount: number; total: number; width: number } | null>(null);
   const [settings, setSettings] = useState<DomSettings>(() => readDomSettings(workspaceId, symbolKey));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [heatmapViewport, setHeatmapViewport] = useState<HeatmapViewportState>(() => defaultHeatmapCamera());
+  const [cvdViewport, setCvdViewport] = useState<CvdViewportState>(() => defaultCvdCamera());
   const [domHover, setDomHover] = useState<DomHoverInfo | null>(null);
   const [flowSeries, setFlowSeries] = useState<FlowPoint[]>([]);
   const [snapshot, setSnapshot] = useState<AggregatedDomSnapshot>(() =>
@@ -530,6 +548,9 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     [cvdCandles, smoothedCvdData]
   );
   const cvdStats = useMemo(() => buildCvdStats(snapshot.trades, cvdStatsData, settings), [settings, cvdStatsData, snapshot.trades]);
+  const cvdCamera = useMemo(() => resolveCvdCamera(cvdViewport, cvdCandles.length, settings), [cvdCandles.length, cvdViewport, settings]);
+  const cvdVisibleCandles = useMemo(() => cvdCandles.slice(cvdCamera.start, cvdCamera.end), [cvdCamera.end, cvdCamera.start, cvdCandles]);
+  const cvdCameraLabel = cvdCamera.total > 0 ? `${cvdCamera.start + 1}-${cvdCamera.end} / ${cvdCamera.total}` : "No tape";
   const depthChartRange = useMemo(() => resolveDepthChartRange(snapshot), [snapshot]);
   const depthChart = useMemo(() => buildDepthChart(snapshot, depthChartRange), [depthChartRange, snapshot]);
   const flowBars = useMemo(() => buildFlowBars(flowSeries, settings), [flowSeries, settings]);
@@ -567,7 +588,9 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
         maxVisibleBuckets: 90,
         maxHeatmapHistory: 140,
         cvdSampleIntervalSec: 5,
-        cvdSmoothingLength: 14
+        cvdSmoothingLength: 14,
+        cvdCandleSeconds: 30,
+        cvdVisibleCandles: 36
       } satisfies Partial<DomSettings>);
       setHeatmapViewport(createCameraFromRange(rangeFromPricePct(snapshot.lastPrice ?? lastPrice ?? midpoint(macroRange), 0.5, macroRange.source), macroRange, "range1", snapshot.lastPrice ?? lastPrice));
     } else if (preset === "intraday") {
@@ -580,7 +603,9 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
         maxVisibleBuckets: 150,
         maxHeatmapHistory: 300,
         cvdSampleIntervalSec: 10,
-        cvdSmoothingLength: 24
+        cvdSmoothingLength: 24,
+        cvdCandleSeconds: 120,
+        cvdVisibleCandles: 42
       } satisfies Partial<DomSettings>);
       setHeatmapViewport(createCameraFromRange(resolveCameraPresetRange("6h", snapshot, macroBands, macroRange, snapshot.lastPrice ?? lastPrice), macroRange, "6h"));
     } else if (preset === "macro") {
@@ -594,6 +619,8 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
         maxHeatmapHistory: 720,
         cvdSampleIntervalSec: 30,
         cvdSmoothingLength: 50,
+        cvdCandleSeconds: 900,
+        cvdVisibleCandles: 72,
         macroLookbackDays: 720
       } satisfies Partial<DomSettings>);
       setHeatmapViewport(createCameraFromRange(liquidityDataRange, macroRange, "full"));
@@ -608,10 +635,13 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
         maxHeatmapHistory: 520,
         cvdSampleIntervalSec: 10,
         cvdSmoothingLength: 34,
+        cvdCandleSeconds: 300,
+        cvdVisibleCandles: 48,
         macroLookbackDays: 365
       } satisfies Partial<DomSettings>);
       setHeatmapViewport(createCameraFromRange(resolveCameraPresetRange("24h", snapshot, macroBands, macroRange, snapshot.lastPrice ?? lastPrice), macroRange, "24h"));
     }
+    setCvdViewport(defaultCvdCamera());
     patchSettings(patch);
     setDomHover(null);
   }, [lastPrice, liquidityDataRange, macroBands, macroRange, snapshot]);
@@ -732,6 +762,56 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     setDomHover(buildHeatmapHover(event, rect, heatmapRange, heatmapFrames, macroBands, snapshot.walls));
   }, [heatmapFrames, heatmapRange, macroBands, macroRange, snapshot.walls]);
 
+  const handleCvdWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
+    if (cvdCandles.length <= 2) return;
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const anchor = Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width)));
+    const current = resolveCvdCamera(cvdViewport, cvdCandles.length, settings);
+    const factor = event.deltaY > 0 ? 1.24 : 1 / 1.24;
+    const nextVisible = clampCvdVisibleCount(Math.round(current.visibleCount * factor), current.total);
+    const anchorIndex = current.start + anchor * current.visibleCount;
+    const nextStart = clampCvdStart(Math.round(anchorIndex - anchor * nextVisible), current.total, nextVisible);
+    setCvdViewport({ startIndex: nextStart, visibleCount: nextVisible, followLatest: false });
+  }, [cvdCandles.length, cvdViewport, settings]);
+
+  const handleCvdMouseDown = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || cvdCandles.length <= 2) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const current = resolveCvdCamera(cvdViewport, cvdCandles.length, settings);
+    cvdDragStartRef.current = {
+      x: event.clientX,
+      startIndex: current.start,
+      visibleCount: current.visibleCount,
+      total: current.total,
+      width: Math.max(1, rect.width)
+    };
+  }, [cvdCandles.length, cvdViewport, settings]);
+
+  const handleCvdMouseMove = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    const activeDrag = cvdDragStartRef.current;
+    if (!activeDrag) return;
+    const deltaCandles = Math.round(((event.clientX - activeDrag.x) / activeDrag.width) * activeDrag.visibleCount);
+    const nextStart = clampCvdStart(activeDrag.startIndex - deltaCandles, activeDrag.total, activeDrag.visibleCount);
+    setCvdViewport({ startIndex: nextStart, visibleCount: activeDrag.visibleCount, followLatest: false });
+  }, []);
+
+  const handleCvdMouseUp = useCallback(() => {
+    cvdDragStartRef.current = null;
+  }, []);
+
+  const handleCvdDoubleClick = useCallback(() => {
+    setCvdViewport(defaultCvdCamera());
+  }, []);
+
+  const fitCvdCamera = useCallback(() => {
+    setCvdViewport({ startIndex: 0, visibleCount: Math.max(1, cvdCandles.length), followLatest: false });
+  }, [cvdCandles.length]);
+
+  const liveCvdCamera = useCallback(() => {
+    setCvdViewport(defaultCvdCamera());
+  }, []);
+
   const handleProfileMouseMove = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     setDomHover(buildProfileHover(event, rect, heatmapRange, institutionalProfile));
@@ -741,6 +821,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     const clearDrag = () => {
       heatmapDragRef.current = null;
       pendingHeatmapDragRef.current = null;
+      cvdDragStartRef.current = null;
     };
     window.addEventListener("mouseup", clearDrag);
     return () => {
@@ -960,6 +1041,11 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             <Field label="Smoothing" value={settings.persistenceSmoothing} min={40} max={97} onChange={(value) => patchSettings({ persistenceSmoothing: value })} />
             <Field label="CVD Sample" value={settings.cvdSampleIntervalSec} min={5} max={60} onChange={(value) => patchSettings({ cvdSampleIntervalSec: value })} />
             <Field label="CVD Smooth" value={settings.cvdSmoothingLength} min={8} max={80} onChange={(value) => patchSettings({ cvdSmoothingLength: value })} />
+            <Field label="CVD TF Sec" value={settings.cvdCandleSeconds} min={15} max={3600} onChange={(value) => patchSettings({ cvdCandleSeconds: value })} />
+            <Field label="CVD Candles" value={settings.cvdVisibleCandles} min={16} max={140} onChange={(value) => {
+              patchSettings({ cvdVisibleCandles: value });
+              setCvdViewport({ startIndex: null, visibleCount: value, followLatest: true });
+            }} />
             {settings.bucketMultiplier === "custom" && <Field label="Custom Bucket" value={settings.customBucketSize} min={0.01} max={10000} step={0.01} onChange={(value) => patchSettings({ customBucketSize: value })} />}
           </section>
         )}
@@ -1223,8 +1309,17 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
               <PanelTitle title="Heuristic CVD" status={`${settings.cvdHorizon.toUpperCase()} / ${cvdStats.trend.toUpperCase()}`} />
               <div className="dom-pro-cvd-controls">
                 {cvdHorizons.map((horizon) => (
-                  <button key={horizon.value} type="button" className={settings.cvdHorizon === horizon.value ? "active" : ""} onClick={() => patchSettings({ cvdHorizon: horizon.value })}>{horizon.label}</button>
+                  <button key={horizon.value} type="button" className={settings.cvdHorizon === horizon.value ? "active" : ""} onClick={() => {
+                    patchSettings({ cvdHorizon: horizon.value });
+                    setCvdViewport(defaultCvdCamera());
+                  }}>{horizon.label}</button>
                 ))}
+              </div>
+              <div className="dom-pro-cvd-camera-controls">
+                <button type="button" className={cvdCamera.followLatest ? "active" : ""} onClick={liveCvdCamera}>Live</button>
+                <button type="button" onClick={fitCvdCamera}>Fit</button>
+                <span>{cvdCameraLabel}</span>
+                <span>{formatDuration(settings.cvdCandleSeconds * 1000)} candles</span>
               </div>
               <div className="dom-pro-cvd-card">
                 {cvdCandles.length === 0 ? <EmptyState text="Trade stream unavailable for this venue." /> : (
@@ -1236,24 +1331,34 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                       <span>Sell <b>{cvdStats.sellPct.toFixed(0)}%</b></span>
                       <span>Divergence <b>WATCH</b></span>
                     </div>
-                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Heuristic cumulative volume delta">
-                      {buildCvdAxis(cvdCandles).map((level) => (
-                        <g key={level.label}>
-                          <line className="cvd-grid" x1="0" x2="100" y1={level.y} y2={level.y} />
-                          <text x="1.5" y={Math.max(7, level.y - 1.5)}>{level.label}</text>
-                        </g>
-                      ))}
-                      {cvdCandles.map((candle, index) => {
-                        const geometry = cvdCandleGeometry(candle, index, cvdCandles);
-                        return (
-                          <g key={`${candle.time}-${index}`} className={candle.close >= candle.open ? "up" : "down"}>
-                            <line className="wick" x1={geometry.x} x2={geometry.x} y1={geometry.highY} y2={geometry.lowY} />
-                            <rect className="body" x={geometry.bodyX} y={geometry.bodyY} width={geometry.bodyWidth} height={geometry.bodyHeight} />
+                    <div
+                      className="dom-pro-cvd-chart"
+                      onWheel={handleCvdWheel}
+                      onMouseDown={handleCvdMouseDown}
+                      onMouseMove={handleCvdMouseMove}
+                      onMouseUp={handleCvdMouseUp}
+                      onMouseLeave={handleCvdMouseUp}
+                      onDoubleClick={handleCvdDoubleClick}
+                    >
+                      <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Heuristic cumulative volume delta">
+                        {buildCvdAxis(cvdVisibleCandles).map((level) => (
+                          <g key={level.label}>
+                            <line className="cvd-grid" x1="0" x2="100" y1={level.y} y2={level.y} />
+                            <text x="1.5" y={Math.max(7, level.y - 1.5)}>{level.label}</text>
                           </g>
-                        );
-                      })}
-                      <polyline className="cvd-close-line" points={buildCvdClosePath(cvdCandles)} />
-                    </svg>
+                        ))}
+                        {cvdVisibleCandles.map((candle, index) => {
+                          const geometry = cvdCandleGeometry(candle, index, cvdVisibleCandles);
+                          return (
+                            <g key={`${candle.time}-${index}`} className={candle.close >= candle.open ? "up" : "down"}>
+                              <line className="wick" x1={geometry.x} x2={geometry.x} y1={geometry.highY} y2={geometry.lowY} />
+                              <rect className="body" x={geometry.bodyX} y={geometry.bodyY} width={geometry.bodyWidth} height={geometry.bodyHeight} />
+                            </g>
+                          );
+                        })}
+                        <polyline className="cvd-close-line" points={buildCvdClosePath(cvdVisibleCandles)} />
+                      </svg>
+                    </div>
                   </>
                 )}
               </div>
@@ -1833,6 +1938,45 @@ function defaultHeatmapCamera(): HeatmapViewportState {
   };
 }
 
+function defaultCvdCamera(): CvdViewportState {
+  return {
+    startIndex: null,
+    visibleCount: null,
+    followLatest: true
+  };
+}
+
+function resolveCvdCamera(camera: CvdViewportState, total: number, settings: DomSettings): CvdResolvedCamera {
+  if (total <= 0) {
+    return { start: 0, end: 0, visibleCount: 0, total: 0, followLatest: camera.followLatest };
+  }
+  const preferredVisible = camera.visibleCount ?? settings.cvdVisibleCandles ?? cvdTargetCandles(settings);
+  const visibleCount = clampCvdVisibleCount(preferredVisible, total);
+  const maxStart = Math.max(0, total - visibleCount);
+  const start = camera.followLatest || camera.startIndex === null
+    ? maxStart
+    : clampCvdStart(camera.startIndex, total, visibleCount);
+  return {
+    start,
+    end: Math.min(total, start + visibleCount),
+    visibleCount,
+    total,
+    followLatest: camera.followLatest
+  };
+}
+
+function clampCvdVisibleCount(value: number, total: number) {
+  if (total <= 0) return 0;
+  const minVisible = Math.min(total, 8);
+  const maxVisible = Math.max(minVisible, total);
+  return Math.max(minVisible, Math.min(maxVisible, Math.round(value)));
+}
+
+function clampCvdStart(value: number, total: number, visibleCount: number) {
+  const maxStart = Math.max(0, total - visibleCount);
+  return Math.max(0, Math.min(maxStart, Math.round(value)));
+}
+
 function resolveVisibleRangePct(settings: DomSettings) {
   if (settings.visibleRange === "custom") return Math.max(0.05, settings.customVisibleRangePct);
   if (settings.visibleRange === "full") return 20;
@@ -2129,7 +2273,7 @@ function buildCvdCandles(points: Array<{ time: number; value: number }>, setting
 function buildCvdCandlesFromPoints(points: Array<{ time: number; value: number }>, settings: DomSettings, targetCandles: number): CvdCandle[] {
   if (points.length === 0) return [];
   const horizon = horizonSeconds(settings.cvdHorizon);
-  const bucketSeconds = Math.max(settings.cvdSampleIntervalSec, Math.floor(horizon / targetCandles));
+  const bucketSeconds = Math.max(settings.cvdSampleIntervalSec, settings.cvdCandleSeconds, Math.floor(horizon / targetCandles));
   const ordered = points
     .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value))
     .sort((a, b) => a.time - b.time);
@@ -2181,11 +2325,11 @@ function buildCvdCandlesFromTrades(trades: AggregatedDomSnapshot["trades"], sett
   const firstTime = source[0]?.time ?? now;
   const lastTime = source[source.length - 1]?.time ?? firstTime;
   const timeSpan = Math.max(0, lastTime - firstTime);
-  if (timeSpan < Math.max(settings.cvdSampleIntervalSec * 6, targetCandles * 0.35)) {
+  if (timeSpan < Math.max(settings.cvdCandleSeconds * 3, settings.cvdSampleIntervalSec * 6, targetCandles * 0.35)) {
     return buildIndexedTradeCvdCandles(source, targetCandles);
   }
 
-  const bucketSeconds = Math.max(settings.cvdSampleIntervalSec, Math.ceil(timeSpan / targetCandles));
+  const bucketSeconds = Math.max(settings.cvdSampleIntervalSec, settings.cvdCandleSeconds, Math.ceil(timeSpan / targetCandles));
   const candles: CvdCandle[] = [];
   let activeBucket = Number.NaN;
   let active: CvdCandle | null = null;
@@ -2223,7 +2367,8 @@ function buildIndexedTradeCvdCandles(
   targetCandles: number
 ): CvdCandle[] {
   if (trades.length === 0) return [];
-  const chunkSize = Math.max(1, Math.ceil(trades.length / targetCandles));
+  const structuralTarget = Math.max(8, Math.min(targetCandles, Math.ceil(trades.length / 4)));
+  const chunkSize = Math.max(1, Math.ceil(trades.length / structuralTarget));
   const candles: CvdCandle[] = [];
   let cumulative = 0;
   for (let cursor = 0; cursor < trades.length; cursor += chunkSize) {
@@ -2248,6 +2393,7 @@ function buildIndexedTradeCvdCandles(
 }
 
 function cvdTargetCandles(settings: DomSettings) {
+  if (Number.isFinite(settings.cvdVisibleCandles)) return Math.max(16, Math.min(140, Math.round(settings.cvdVisibleCandles)));
   if (settings.cvdHorizon === "15m") return 36;
   if (settings.cvdHorizon === "1h") return 42;
   return 56;
@@ -2334,10 +2480,12 @@ function resolveDepthChartRange(snapshot: AggregatedDomSnapshot): MacroLiquidity
     .slice(0, 180);
   const lowerSpan = lowerLevels.length ? currentPrice - lowerLevels[lowerLevels.length - 1] : 0;
   const upperSpan = upperLevels.length ? upperLevels[upperLevels.length - 1] - currentPrice : 0;
-  const spreadSpan = Number.isFinite(snapshot.spread ?? NaN) ? Number(snapshot.spread) * 80 : 0;
-  const naturalHalfSpan = Math.max(lowerSpan, upperSpan, spreadSpan, currentPrice * 0.006);
-  const minHalfSpan = Math.max(currentPrice * 0.0025, spreadSpan, 1);
-  const maxHalfSpan = currentPrice * 0.05;
+  const sourceHalfSpan = Math.max(lowerSpan, upperSpan);
+  const spreadSpan = Number.isFinite(snapshot.spread ?? NaN) ? Number(snapshot.spread) * 12 : 0;
+  const fallbackHalfSpan = currentPrice * 0.0015;
+  const naturalHalfSpan = sourceHalfSpan > 0 ? sourceHalfSpan * 1.18 : fallbackHalfSpan;
+  const minHalfSpan = Math.max(spreadSpan, currentPrice * 0.00005, 1);
+  const maxHalfSpan = currentPrice * 0.025;
   const halfSpan = Math.max(minHalfSpan, Math.min(naturalHalfSpan, maxHalfSpan));
   return {
     min: Math.max(0.00000001, currentPrice - halfSpan),
@@ -2367,6 +2515,9 @@ function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityR
   if (bidLevels.length === 0 && askLevels.length === 0) {
     return { empty: true, bidLine: "", askLine: "", bidArea: "", askArea: "", bidPoints: 0, askPoints: 0, warning: "Depth chart awaiting bid/ask buckets." };
   }
+  const bidPriceSpan = bidLevels.length ? Math.max(...bidLevels.map((level) => level.price)) - Math.min(...bidLevels.map((level) => level.price)) : 0;
+  const askPriceSpan = askLevels.length ? Math.max(...askLevels.map((level) => level.price)) - Math.min(...askLevels.map((level) => level.price)) : 0;
+  const useIndexProjection = Math.max(bidPriceSpan, askPriceSpan) < rangeSpan(range) * 0.18;
   const bidCumulative: Array<{ x: number; y: number }> = [];
   const askCumulative: Array<{ x: number; y: number }> = [];
   let bidTotal = 0;
@@ -2380,14 +2531,14 @@ function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityR
     return askTotal;
   });
   const maxTotal = Math.max(1, bidTotal, askTotal);
-  const startX = priceToX(currentPrice, range);
+  const startX = useIndexProjection ? 50 : priceToX(currentPrice, range);
   bidLevels.forEach((level, index) => {
-    const x = priceToX(level.price, range);
+    const x = useIndexProjection ? 50 - ((index + 1) / Math.max(1, bidLevels.length)) * 47 : priceToX(level.price, range);
     const y = 94 - Math.pow(bidTotals[index] / maxTotal, 0.72) * 80;
     bidCumulative.push({ x, y });
   });
   askLevels.forEach((level, index) => {
-    const x = priceToX(level.price, range);
+    const x = useIndexProjection ? 50 + ((index + 1) / Math.max(1, askLevels.length)) * 47 : priceToX(level.price, range);
     const y = 94 - Math.pow(askTotals[index] / maxTotal, 0.72) * 80;
     askCumulative.push({ x, y });
   });
@@ -2406,7 +2557,7 @@ function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityR
     askArea: askLinePoints.length ? `${pointString(askLinePoints)} ${askLinePoints[askLinePoints.length - 1].x.toFixed(2)},94 ${startX.toFixed(2)},94` : "",
     bidPoints: bidLinePoints.length,
     askPoints: askLinePoints.length,
-    warning: bidLinePoints.length === 0 ? "Only ask side available from source." : askLinePoints.length === 0 ? "Only bid side available from source." : rawBidSource.length < 2 || rawAskSource.length < 2 ? "Raw depth sparse; using aggregated fallback." : ""
+    warning: bidLinePoints.length === 0 ? "Only ask side available from source." : askLinePoints.length === 0 ? "Only bid side available from source." : rawBidSource.length < 2 || rawAskSource.length < 2 ? "Raw depth sparse; using aggregated fallback." : useIndexProjection ? "Depth projected by L2 level rank for readability." : ""
   };
 }
 

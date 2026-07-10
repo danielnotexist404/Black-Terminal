@@ -154,10 +154,14 @@ DOM Pro+ execution panel
 - Depth chart now prefers raw L2 levels over aggregated buckets, maps price to its own market-centered depth domain, and renders true cumulative step curves from mid price outward instead of extending sparse data into solid rectangular blocks.
 - Depth chart now renders one available side with an explicit source warning instead of going blank.
 - Depth chart now resolves its own current-market L2 domain from raw depth around mid price, keeping the V-shaped bid/ask balance stable while the heatmap and volume profile act as a free macro camera.
+- Depth chart now uses adaptive L2 rank projection when the exchange book range is too shallow for the selected price span, preventing the cumulative curve from collapsing into a center spike.
 - Replaced liquidity flow blocks with rolling time-bucket histogram bars and percentile outlier scaling.
 - Redesigned CVD as a larger heuristic CVD panel with current delta, session delta, aggressive buy percentage, aggressive sell percentage, trend label, horizon controls, EMA smoothing, and a thicker line.
 - Refined CVD into a candle-style oscillator with delta bodies, wicks, value-axis labels, and a close trace so it shows structure rather than only a compressed summary line.
 - Hardened CVD rendering with a real trade-sequence fallback so sparse pre-bucketed CVD feeds no longer collapse the oscillator into one unreadable candle.
+- Added CVD candle-duration and visible-candle settings so the oscillator can be slowed into structural flow instead of fast tape noise.
+- Added a separate CVD camera with Live/Fit controls, mouse-wheel zoom, horizontal drag navigation, and double-click reset.
+- Expanded CVD horizons to 3D and 1W for wider order-flow structure views.
 - Decoupled the aggregated DOM ladder display step from the institutional heatmap bucket size, so 500x/1000x heatmap modes no longer collapse the ladder into one giant price row.
 - Updated institutional defaults to 500x buckets, +/-2% visible range, 24H heatmap, 4H smoothed CVD, and 10-12 FPS behavior.
 - Added performance diagnostics:

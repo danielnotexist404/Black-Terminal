@@ -5,7 +5,7 @@ export type DomWorkspacePreset = "scalper" | "intraday" | "institutional" | "mac
 export type DomVisibleRange = "auto" | "0.25" | "0.5" | "1" | "2" | "5" | "10" | "20" | "full" | "custom";
 export type DomProfileSource = "session" | "visible-range" | "rolling-window";
 export type DomHeatmapHorizon = "15m" | "2h" | "6h" | "12h" | "24h" | "3d" | "1w";
-export type DomCvdHorizon = "15m" | "1h" | "4h" | "12h" | "24h";
+export type DomCvdHorizon = "15m" | "1h" | "4h" | "12h" | "24h" | "3d" | "1w";
 
 export type DomLevel = {
   price: number;
@@ -182,6 +182,8 @@ export type DomSettings = {
   cvdHorizon: DomCvdHorizon;
   cvdSampleIntervalSec: number;
   cvdSmoothingLength: number;
+  cvdCandleSeconds: number;
+  cvdVisibleCandles: number;
   macroLookbackDays: number;
   macroBandCount: number;
   persistenceSmoothing: number;

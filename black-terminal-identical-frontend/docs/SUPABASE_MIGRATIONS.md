@@ -1577,3 +1577,17 @@ Reason:
 Future migration trigger:
 
 - Add a migration only if CVD history, depth-chart camera state, or DOM panel preferences need cross-device/server-side persistence.
+
+## 2026-07-10 - DOM Pro+ CVD Camera And Depth Projection Fix
+
+Status: No Supabase migration required.
+
+Reason:
+
+- The change is limited to frontend DOM Pro+ settings, panel camera state, and rendering/data-shaping logic.
+- CVD candle duration, visible candle count, and panel camera state persist through the existing local DOM Pro settings path.
+- No server-owned records, account tables, execution audit rows, credentials, market-memory tables, or RLS policies were introduced.
+
+Future migration trigger:
+
+- Add a migration only if CVD candles, panel cameras, or DOM visualization settings need account-level cross-device persistence.

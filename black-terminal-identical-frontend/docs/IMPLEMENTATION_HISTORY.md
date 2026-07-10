@@ -592,6 +592,32 @@ Docs:
 
 - `PHASE3_CHAPTER6_DOM_PRO.md`
 
+## DOM Pro+ CVD Camera And Depth Projection Fix
+
+Status: Implemented and build validated
+
+Changed:
+
+- Added CVD candle-duration and visible-candle settings.
+- Expanded CVD horizons to 3D and 1W.
+- Added an independent CVD camera with Live/Fit controls, mouse-wheel zoom, horizontal drag pan, and double-click reset.
+- CVD rendering now uses the camera-selected candle window instead of always forcing the latest compressed sequence.
+- Depth Chart now uses adaptive L2 rank projection when available live depth is too narrow for the market-centered price range.
+
+Why:
+
+- The CVD panel was visually better but still too fast and noisy for structural reading.
+- The user needed the same style of mouse navigation inside CVD that exists in the Liquidity Heatmap.
+- The depth curve was centered but still compressed when the exchange only supplied a narrow live L2 range.
+
+Validation:
+
+- `npm run build`
+
+Docs:
+
+- `PHASE3_CHAPTER6_DOM_PRO.md`
+
 ## Future Work Log
 
 Use this format for every future phase, chapter, or major bug sprint.

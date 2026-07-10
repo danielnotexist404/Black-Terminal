@@ -184,6 +184,9 @@ export type DomSettings = {
   cvdSmoothingLength: number;
   cvdCandleSeconds: number;
   cvdVisibleCandles: number;
+  depthDisplayLevels: number;
+  depthSmoothingLevels: number;
+  depthCurvePower: number;
   macroLookbackDays: number;
   macroBandCount: number;
   persistenceSmoothing: number;

@@ -6898,6 +6898,7 @@ body.resizing-layout * {
 .dom-pro-stat b,
 .dom-pro-stats select,
 .dom-pro-field input,
+.dom-pro-field select,
 .dom-pro-execution input,
 .dom-pro-execution select {
   min-width: 0;
@@ -6950,6 +6951,45 @@ body.resizing-layout * {
 .dom-pro-field {
   display: grid;
   gap: 4px;
+}
+
+.dom-pro-settings-actions {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px 42px;
+  gap: 4px;
+  align-items: center;
+  color: #c6c9cf;
+  font-size: 10px;
+}
+
+.dom-pro-settings-actions span,
+.dom-pro-settings-actions b {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dom-pro-settings-actions b {
+  grid-column: 1 / -1;
+  color: #8d939c;
+  font: 800 8px "IBM Plex Mono", monospace;
+}
+
+.dom-pro-settings-actions button {
+  height: 22px;
+  color: #c7ccd4;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+  font: 900 8px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.dom-pro-settings-actions button.active,
+.dom-pro-settings-actions button:hover {
+  color: #fff;
+  border-color: rgba(255, 0, 0, 0.5);
+  background: rgba(105, 0, 0, 0.36);
 }
 
 .dom-pro-grid {
@@ -7959,7 +7999,7 @@ body.resizing-layout * {
 }
 
 .dom-pro-cvd-card {
-  height: calc(100% - 94px);
+  height: calc(100% - 34px);
   display: grid;
   grid-template-rows: 56px minmax(0, 1fr);
   background:

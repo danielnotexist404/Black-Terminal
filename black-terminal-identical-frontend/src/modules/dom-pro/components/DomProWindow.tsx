@@ -552,7 +552,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const cvdVisibleCandles = useMemo(() => cvdCandles.slice(cvdCamera.start, cvdCamera.end), [cvdCamera.end, cvdCamera.start, cvdCandles]);
   const cvdCameraLabel = cvdCamera.total > 0 ? `${cvdCamera.start + 1}-${cvdCamera.end} / ${cvdCamera.total}` : "No tape";
   const depthChartRange = useMemo(() => resolveDepthChartRange(snapshot), [snapshot]);
-  const depthChart = useMemo(() => buildDepthChart(snapshot, depthChartRange), [depthChartRange, snapshot]);
+  const depthChart = useMemo(() => buildDepthChart(snapshot, depthChartRange, settings), [depthChartRange, settings, snapshot]);
   const flowBars = useMemo(() => buildFlowBars(flowSeries, settings), [flowSeries, settings]);
   const debugStats = useMemo(
     () => buildDomDebugStats(snapshot, macroRange, heatmapRange, settings, heatmapFrames, institutionalProfile, depthChart, depthHistory, snapshot.lastPrice ?? lastPrice),
@@ -590,7 +590,10 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
         cvdSampleIntervalSec: 5,
         cvdSmoothingLength: 14,
         cvdCandleSeconds: 30,
-        cvdVisibleCandles: 36
+        cvdVisibleCandles: 36,
+        depthDisplayLevels: 80,
+        depthSmoothingLevels: 2,
+        depthCurvePower: 0.82
       } satisfies Partial<DomSettings>);
       setHeatmapViewport(createCameraFromRange(rangeFromPricePct(snapshot.lastPrice ?? lastPrice ?? midpoint(macroRange), 0.5, macroRange.source), macroRange, "range1", snapshot.lastPrice ?? lastPrice));
     } else if (preset === "intraday") {
@@ -605,7 +608,10 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
         cvdSampleIntervalSec: 10,
         cvdSmoothingLength: 24,
         cvdCandleSeconds: 120,
-        cvdVisibleCandles: 42
+        cvdVisibleCandles: 42,
+        depthDisplayLevels: 140,
+        depthSmoothingLevels: 3,
+        depthCurvePower: 0.76
       } satisfies Partial<DomSettings>);
       setHeatmapViewport(createCameraFromRange(resolveCameraPresetRange("6h", snapshot, macroBands, macroRange, snapshot.lastPrice ?? lastPrice), macroRange, "6h"));
     } else if (preset === "macro") {
@@ -621,6 +627,9 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
         cvdSmoothingLength: 50,
         cvdCandleSeconds: 900,
         cvdVisibleCandles: 72,
+        depthDisplayLevels: 240,
+        depthSmoothingLevels: 8,
+        depthCurvePower: 0.62,
         macroLookbackDays: 720
       } satisfies Partial<DomSettings>);
       setHeatmapViewport(createCameraFromRange(liquidityDataRange, macroRange, "full"));
@@ -637,6 +646,9 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
         cvdSmoothingLength: 34,
         cvdCandleSeconds: 300,
         cvdVisibleCandles: 48,
+        depthDisplayLevels: 180,
+        depthSmoothingLevels: 4,
+        depthCurvePower: 0.72,
         macroLookbackDays: 365
       } satisfies Partial<DomSettings>);
       setHeatmapViewport(createCameraFromRange(resolveCameraPresetRange("24h", snapshot, macroBands, macroRange, snapshot.lastPrice ?? lastPrice), macroRange, "24h"));
@@ -1039,6 +1051,15 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             <Field label="Macro Lookback" value={settings.macroLookbackDays} min={90} max={1000} onChange={(value) => patchSettings({ macroLookbackDays: value })} />
             <Field label="Macro Bands" value={settings.macroBandCount} min={4} max={18} onChange={(value) => patchSettings({ macroBandCount: value })} />
             <Field label="Smoothing" value={settings.persistenceSmoothing} min={40} max={97} onChange={(value) => patchSettings({ persistenceSmoothing: value })} />
+            <label className="dom-pro-field">
+              <span>CVD Horizon</span>
+              <select value={settings.cvdHorizon} onChange={(event) => {
+                patchSettings({ cvdHorizon: event.target.value as DomCvdHorizon });
+                setCvdViewport(defaultCvdCamera());
+              }}>
+                {cvdHorizons.map((horizon) => <option key={horizon.value} value={horizon.value}>{horizon.label}</option>)}
+              </select>
+            </label>
             <Field label="CVD Sample" value={settings.cvdSampleIntervalSec} min={5} max={60} onChange={(value) => patchSettings({ cvdSampleIntervalSec: value })} />
             <Field label="CVD Smooth" value={settings.cvdSmoothingLength} min={8} max={80} onChange={(value) => patchSettings({ cvdSmoothingLength: value })} />
             <Field label="CVD TF Sec" value={settings.cvdCandleSeconds} min={15} max={3600} onChange={(value) => patchSettings({ cvdCandleSeconds: value })} />
@@ -1046,6 +1067,15 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
               patchSettings({ cvdVisibleCandles: value });
               setCvdViewport({ startIndex: null, visibleCount: value, followLatest: true });
             }} />
+            <div className="dom-pro-settings-actions">
+              <span>CVD Camera</span>
+              <button type="button" className={cvdCamera.followLatest ? "active" : ""} onClick={liveCvdCamera}>Live</button>
+              <button type="button" onClick={fitCvdCamera}>Fit</button>
+              <b>{cvdCameraLabel}</b>
+            </div>
+            <Field label="Depth Levels" value={settings.depthDisplayLevels} min={20} max={420} onChange={(value) => patchSettings({ depthDisplayLevels: value })} />
+            <Field label="Depth Smooth" value={settings.depthSmoothingLevels} min={1} max={24} onChange={(value) => patchSettings({ depthSmoothingLevels: value })} />
+            <Field label="Depth Curve" value={settings.depthCurvePower} min={0.45} max={1.4} step={0.05} onChange={(value) => patchSettings({ depthCurvePower: value })} />
             {settings.bucketMultiplier === "custom" && <Field label="Custom Bucket" value={settings.customBucketSize} min={0.01} max={10000} step={0.01} onChange={(value) => patchSettings({ customBucketSize: value })} />}
           </section>
         )}
@@ -1272,7 +1302,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
               <div className="dom-pro-depth-wrap">
                 <svg className="dom-pro-depth-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Cumulative market depth">
                   <line className="axis" x1="50" y1="8" x2="50" y2="94" />
-                  <line className="axis zero" x1="3" y1="94" x2="97" y2="94" />
+                  <line className="axis zero" x1="0" y1="94" x2="100" y2="94" />
                   {depthChart.bidArea && <polygon className="bid-fill" points={depthChart.bidArea} />}
                   {depthChart.askArea && <polygon className="ask-fill" points={depthChart.askArea} />}
                   {depthChart.bidLine && <polyline className="bid-line" points={depthChart.bidLine} />}
@@ -1307,20 +1337,6 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
           {settings.showCvd && (
             <section className="dom-pro-panel dom-pro-cvd">
               <PanelTitle title="Heuristic CVD" status={`${settings.cvdHorizon.toUpperCase()} / ${cvdStats.trend.toUpperCase()}`} />
-              <div className="dom-pro-cvd-controls">
-                {cvdHorizons.map((horizon) => (
-                  <button key={horizon.value} type="button" className={settings.cvdHorizon === horizon.value ? "active" : ""} onClick={() => {
-                    patchSettings({ cvdHorizon: horizon.value });
-                    setCvdViewport(defaultCvdCamera());
-                  }}>{horizon.label}</button>
-                ))}
-              </div>
-              <div className="dom-pro-cvd-camera-controls">
-                <button type="button" className={cvdCamera.followLatest ? "active" : ""} onClick={liveCvdCamera}>Live</button>
-                <button type="button" onClick={fitCvdCamera}>Fit</button>
-                <span>{cvdCameraLabel}</span>
-                <span>{formatDuration(settings.cvdCandleSeconds * 1000)} candles</span>
-              </div>
               <div className="dom-pro-cvd-card">
                 {cvdCandles.length === 0 ? <EmptyState text="Trade stream unavailable for this venue." /> : (
                   <>
@@ -2494,7 +2510,7 @@ function resolveDepthChartRange(snapshot: AggregatedDomSnapshot): MacroLiquidity
   };
 }
 
-function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityRange) {
+function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityRange, settings: DomSettings) {
   const currentPrice = snapshot.midPrice ?? snapshot.lastPrice ?? midpoint(range);
   const rawBidSource = (snapshot.sourceBook?.bids ?? [])
     .map((level) => ({ price: level.price, bidSize: level.quantity, askSize: 0 }))
@@ -2504,20 +2520,22 @@ function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityR
     .filter((level) => level.price > 0 && level.askSize > 0);
   const bidSource = rawBidSource.length >= 2 ? rawBidSource : snapshot.bids;
   const askSource = rawAskSource.length >= 2 ? rawAskSource : snapshot.asks;
-  const bidLevels = bidSource
+  const depthLevelLimit = Math.max(20, Math.min(420, Math.round(settings.depthDisplayLevels)));
+  const smoothingGroupSize = Math.max(1, Math.min(24, Math.round(settings.depthSmoothingLevels)));
+  const curvePower = Math.max(0.45, Math.min(1.4, settings.depthCurvePower));
+  const rawBidLevels = bidSource
     .filter((level) => level.price >= range.min && level.price <= Math.min(currentPrice, range.max) && level.bidSize > 0)
     .sort((a, b) => b.price - a.price)
-    .slice(0, 420);
-  const askLevels = askSource
+    .slice(0, depthLevelLimit);
+  const rawAskLevels = askSource
     .filter((level) => level.price <= range.max && level.price >= Math.max(currentPrice, range.min) && level.askSize > 0)
     .sort((a, b) => a.price - b.price)
-    .slice(0, 420);
+    .slice(0, depthLevelLimit);
+  const bidLevels = aggregateDepthLevels(rawBidLevels, "bid", smoothingGroupSize);
+  const askLevels = aggregateDepthLevels(rawAskLevels, "ask", smoothingGroupSize);
   if (bidLevels.length === 0 && askLevels.length === 0) {
     return { empty: true, bidLine: "", askLine: "", bidArea: "", askArea: "", bidPoints: 0, askPoints: 0, warning: "Depth chart awaiting bid/ask buckets." };
   }
-  const bidPriceSpan = bidLevels.length ? Math.max(...bidLevels.map((level) => level.price)) - Math.min(...bidLevels.map((level) => level.price)) : 0;
-  const askPriceSpan = askLevels.length ? Math.max(...askLevels.map((level) => level.price)) - Math.min(...askLevels.map((level) => level.price)) : 0;
-  const useIndexProjection = Math.max(bidPriceSpan, askPriceSpan) < rangeSpan(range) * 0.18;
   const bidCumulative: Array<{ x: number; y: number }> = [];
   const askCumulative: Array<{ x: number; y: number }> = [];
   let bidTotal = 0;
@@ -2531,15 +2549,15 @@ function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityR
     return askTotal;
   });
   const maxTotal = Math.max(1, bidTotal, askTotal);
-  const startX = useIndexProjection ? 50 : priceToX(currentPrice, range);
+  const startX = 50;
   bidLevels.forEach((level, index) => {
-    const x = useIndexProjection ? 50 - ((index + 1) / Math.max(1, bidLevels.length)) * 47 : priceToX(level.price, range);
-    const y = 94 - Math.pow(bidTotals[index] / maxTotal, 0.72) * 80;
+    const x = 50 - ((index + 1) / Math.max(1, bidLevels.length)) * 50;
+    const y = 94 - Math.pow(bidTotals[index] / maxTotal, curvePower) * 82;
     bidCumulative.push({ x, y });
   });
   askLevels.forEach((level, index) => {
-    const x = useIndexProjection ? 50 + ((index + 1) / Math.max(1, askLevels.length)) * 47 : priceToX(level.price, range);
-    const y = 94 - Math.pow(askTotals[index] / maxTotal, 0.72) * 80;
+    const x = 50 + ((index + 1) / Math.max(1, askLevels.length)) * 50;
+    const y = 94 - Math.pow(askTotals[index] / maxTotal, curvePower) * 82;
     askCumulative.push({ x, y });
   });
   const bidLinePoints = bidCumulative.length
@@ -2557,8 +2575,27 @@ function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityR
     askArea: askLinePoints.length ? `${pointString(askLinePoints)} ${askLinePoints[askLinePoints.length - 1].x.toFixed(2)},94 ${startX.toFixed(2)},94` : "",
     bidPoints: bidLinePoints.length,
     askPoints: askLinePoints.length,
-    warning: bidLinePoints.length === 0 ? "Only ask side available from source." : askLinePoints.length === 0 ? "Only bid side available from source." : rawBidSource.length < 2 || rawAskSource.length < 2 ? "Raw depth sparse; using aggregated fallback." : useIndexProjection ? "Depth projected by L2 level rank for readability." : ""
+    warning: bidLinePoints.length === 0 ? "Only ask side available from source." : askLinePoints.length === 0 ? "Only bid side available from source." : rawBidSource.length < 2 || rawAskSource.length < 2 ? "Raw depth sparse; using aggregated fallback." : smoothingGroupSize > 1 ? `Depth smoothed ${smoothingGroupSize} levels per step.` : ""
   };
+}
+
+function aggregateDepthLevels(
+  levels: Array<{ price: number; bidSize: number; askSize: number }>,
+  side: "bid" | "ask",
+  groupSize: number
+) {
+  if (groupSize <= 1) return levels;
+  const grouped: Array<{ price: number; bidSize: number; askSize: number }> = [];
+  for (let index = 0; index < levels.length; index += groupSize) {
+    const group = levels.slice(index, index + groupSize);
+    if (group.length === 0) continue;
+    grouped.push({
+      price: group[group.length - 1].price,
+      bidSize: side === "bid" ? group.reduce((sum, level) => sum + level.bidSize, 0) : 0,
+      askSize: side === "ask" ? group.reduce((sum, level) => sum + level.askSize, 0) : 0
+    });
+  }
+  return grouped;
 }
 
 function buildDepthStepPath(points: Array<{ x: number; y: number }>, side: "bid" | "ask") {

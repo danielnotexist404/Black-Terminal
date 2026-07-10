@@ -618,6 +618,31 @@ Docs:
 
 - `PHASE3_CHAPTER6_DOM_PRO.md`
 
+## DOM Pro+ CVD Visibility And Depth Controls
+
+Status: Implemented and build validated
+
+Changed:
+
+- Moved CVD horizon, Live, Fit, and camera readout controls from the CVD panel into the DOM Pro settings panel.
+- Restored the CVD panel to stats plus chart content so the oscillator remains visible.
+- Added Depth Levels, Depth Smooth, and Depth Curve settings.
+- Depth Chart now uses a side-normalized projection where bids extend to the left edge and asks extend to the right edge.
+- Depth smoothing groups adjacent L2 levels before cumulative rendering to reduce noisy stair-stepping.
+
+Why:
+
+- CVD controls were consuming too much of the small panel and hiding the oscillator.
+- Depth needed user-tunable noise reduction and fuller use of the chart panel width.
+
+Validation:
+
+- `npm run build`
+
+Docs:
+
+- `PHASE3_CHAPTER6_DOM_PRO.md`
+
 ## Future Work Log
 
 Use this format for every future phase, chapter, or major bug sprint.

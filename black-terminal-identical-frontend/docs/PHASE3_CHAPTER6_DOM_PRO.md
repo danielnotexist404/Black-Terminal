@@ -162,6 +162,10 @@ DOM Pro+ execution panel
 - Added CVD candle-duration and visible-candle settings so the oscillator can be slowed into structural flow instead of fast tape noise.
 - Added a separate CVD camera with Live/Fit controls, mouse-wheel zoom, horizontal drag navigation, and double-click reset.
 - Expanded CVD horizons to 3D and 1W for wider order-flow structure views.
+- Moved CVD horizon/camera controls out of the CVD panel and into the DOM Pro settings panel so the CVD chart remains visible.
+- Added Depth Levels, Depth Smooth, and Depth Curve controls to DOM Pro settings.
+- Changed the depth chart projection to fill the full panel width from left-edge bids to center market to right-edge asks.
+- Depth smoothing now groups adjacent L2 levels before cumulative rendering to reduce microstructure noise and reveal broader direction.
 - Decoupled the aggregated DOM ladder display step from the institutional heatmap bucket size, so 500x/1000x heatmap modes no longer collapse the ladder into one giant price row.
 - Updated institutional defaults to 500x buckets, +/-2% visible range, 24H heatmap, 4H smoothed CVD, and 10-12 FPS behavior.
 - Added performance diagnostics:

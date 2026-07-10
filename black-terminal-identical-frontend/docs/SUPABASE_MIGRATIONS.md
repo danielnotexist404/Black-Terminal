@@ -1591,3 +1591,17 @@ Reason:
 Future migration trigger:
 
 - Add a migration only if CVD candles, panel cameras, or DOM visualization settings need account-level cross-device persistence.
+
+## 2026-07-10 - DOM Pro+ CVD Visibility And Depth Controls
+
+Status: No Supabase migration required.
+
+Reason:
+
+- The change is limited to frontend DOM Pro+ layout, local visualization settings, and depth/CVD rendering logic.
+- Depth Levels, Depth Smooth, Depth Curve, CVD horizon, and CVD camera controls use the existing local DOM Pro settings path.
+- No server-owned records, account tables, execution audit rows, credentials, market-memory tables, or RLS policies were introduced.
+
+Future migration trigger:
+
+- Add a migration only if DOM Pro visualization settings need cross-device account persistence.

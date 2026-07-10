@@ -44,7 +44,12 @@ export class MarketDepthCollector {
       status: session.status,
       reconnects: session.reconnects,
       lastMessageAt: session.lastMessageAt,
-      lastError: session.lastError
+      lastError: session.lastError,
+      messageCount: session.messageCount,
+      sampleCount: session.sampleCount,
+      ingestCount: session.ingestCount,
+      packetLossCount: session.packetLossCount,
+      lastSequence: session.lastSequence
     }));
   }
 
@@ -62,6 +67,11 @@ export class MarketDepthCollector {
       status: "connecting",
       lastMessageAt: null,
       lastError: null,
+      lastSequence: null,
+      messageCount: 0,
+      sampleCount: 0,
+      ingestCount: 0,
+      packetLossCount: 0,
       ws: null,
       reconnectTimer: null
     };
@@ -83,8 +93,18 @@ export class MarketDepthCollector {
         const samples = adapter.parse(event.data, symbol);
         if (!samples.length) return;
         session.lastMessageAt = Date.now();
+        session.messageCount += 1;
         for (const sample of samples) {
+          const diagnostics = updateSequenceDiagnostics(session, sample);
+          sample.metadata = {
+            ...sample.metadata,
+            packetLossCount: diagnostics.packetLossCount,
+            reconnectCount: session.reconnects,
+            collectorLatencyMs: Math.max(0, Date.now() - Number(sample.sourceTimestamp || Date.now()))
+          };
           await this.engine.ingest(this.supabase, sample);
+          session.sampleCount += 1;
+          session.ingestCount += 1;
         }
       } catch (error) {
         session.lastError = error instanceof Error ? error.message : String(error);
@@ -157,7 +177,8 @@ const collectorAdapters = {
         sourceTimestamp: payload.data.time || Date.now(),
         bids: levels[0].map((level) => [level.px, level.sz]),
         asks: levels[1].map((level) => [level.px, level.sz]),
-        sequence: payload.data.time
+        sequence: payload.data.time,
+        sequenceKind: "timestamp"
       })];
     }
   },
@@ -174,6 +195,7 @@ const collectorAdapters = {
       return [baseSample(symbol, {
         sourceTimestamp: payload.T || payload.E || Date.now(),
         sequence: payload.u || payload.lastUpdateId,
+        sequenceKind: "incremental",
         bids,
         asks
       })];
@@ -196,6 +218,7 @@ const collectorAdapters = {
       return [baseSample(symbol, {
         sourceTimestamp: payload.ts || Date.now(),
         sequence: payload.data.u || payload.data.seq,
+        sequenceKind: "incremental",
         bids: payload.data.b || [],
         asks: payload.data.a || []
       })];
@@ -236,7 +259,8 @@ function baseSample(symbol, data) {
     asks: data.asks,
     metadata: {
       source: "black-core-depth-collector",
-      collectorVersion: 1
+      collectorVersion: 1,
+      sequenceKind: data.sequenceKind || "none"
     }
   };
 }
@@ -254,4 +278,21 @@ function okxInstId(symbol) {
 
 function symbolKey(symbol) {
   return [symbol.venue, symbol.marketKind, symbol.symbol].join(":");
+}
+
+function updateSequenceDiagnostics(session, sample) {
+  if (sample.metadata?.sequenceKind !== "incremental") {
+    return { packetLossCount: session.packetLossCount };
+  }
+  const sequence = Number(sample.sequence);
+  if (!Number.isFinite(sequence)) {
+    return { packetLossCount: session.packetLossCount };
+  }
+  const previous = Number(session.lastSequence);
+  if (Number.isFinite(previous) && sequence > previous + 1) {
+    session.packetLossCount += 1;
+    session.lastError = `Sequence gap ${previous} -> ${sequence}`;
+  }
+  session.lastSequence = sequence;
+  return { packetLossCount: session.packetLossCount };
 }

@@ -1352,3 +1352,19 @@ Notes:
 - These are platform market-memory tables, not user-owned portfolio/account tables.
 - Direct browser access is intentionally blocked by RLS. The Vercel API and collector worker read/write through `SUPABASE_SERVICE_ROLE_KEY`.
 - Run a persistent worker with `npm run depth:worker`; Vercel serverless routes cannot own continuous WebSocket sessions.
+
+## 2026-07-10 - IMM Retention And Alert Surfaces
+
+Status: No additional Supabase migration required.
+
+Reason:
+
+- Retention pruning deletes from the existing IMM tables created by the Black Core Market Depth Memory migration.
+- Alert extraction reads from existing `market_liquidity_events`, `market_liquidity_walls`, and `market_depth_statistics`.
+- Collector packet-loss/reconnect diagnostics are stored in existing `market_depth_statistics` columns.
+
+Operational notes:
+
+- Use `/api/market-depth/alerts` to expose normalized market-memory alerts for Scanner, BlackGPT, Notifications, and future automation.
+- Use `/api/market-depth/prune` with `MARKET_DEPTH_MAINTENANCE_TOKEN` or `MARKET_DEPTH_INGEST_TOKEN` to run retention manually.
+- The persistent worker also runs pruning on `MARKET_DEPTH_PRUNE_INTERVAL_MS`.

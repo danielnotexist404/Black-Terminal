@@ -6,6 +6,7 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
+- Current - Add IMM retention and alert surfaces.
 - Current - Implement Black Core Market Depth Memory foundation.
 - Current - Add DOM Pro+ depth memory provider foundation.
 - Current - Stabilize DOM Pro+ heatmap drag and downside structure.
@@ -66,6 +67,9 @@ Changed:
 - Added market-depth routes for replay, ingest, status, and walls.
 - Added DOM Pro+ replay hydration from `/api/market-depth/replay`, with source labeling for Black Core, Supabase fallback, or local fallback memory.
 - Added the platform-owned Supabase migration for snapshots, deltas, rollups, liquidity events, lifecycle walls, and statistics.
+- Added market-memory alert extraction over liquidity events, wall lifecycle state, statistics, and feed diagnostics.
+- Added retention pruning utilities, worker pruning loop, and protected `/api/market-depth/prune` route.
+- Added collector packet-loss and reconnect diagnostics into depth statistics for incremental feeds.
 
 Why:
 
@@ -80,7 +84,7 @@ Validation:
 Remaining:
 
 - The collector must run in a persistent worker/runtime. Vercel serverless cannot own continuous WebSocket collection.
-- Venue-specific sequence reconciliation/checksum repair and retention pruning jobs still need dedicated follow-up work.
+- Venue-specific sequence reconciliation/checksum repair still needs dedicated follow-up work.
 - Browser Web Worker rendering/offload remains a separate DOM Pro performance step.
 
 ## Phase III Chapter VI: DOM Pro+

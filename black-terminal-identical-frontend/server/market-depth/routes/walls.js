@@ -7,7 +7,7 @@ export default async function walls(req, res) {
 
   try {
     const venue = normalizeVenue(req.query?.venue || req.query?.exchange);
-    const marketKind = normalizeMarketKind(req.query?.marketKind);
+    const marketKind = req.query?.marketKind ? normalizeMarketKind(req.query.marketKind) : "";
     const symbol = normalizeSymbol(req.query?.symbol);
     const supabase = getSupabaseAdmin();
     let builder = supabase

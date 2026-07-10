@@ -172,8 +172,9 @@ function buildStatistics(sample, rollups, bucketSize) {
       liquidityScore: Math.min(1, rollups.reduce((max, row) => Math.max(max, row.liquidityScore), 0)),
       updateCount: 1,
       packetLossCount: 0,
-      reconnectCount: 0,
-      latencyMs: Math.max(0, Date.now() - sample.sourceTimestamp),
+      packetLossCount: Number(sample.metadata?.packetLossCount) || 0,
+      reconnectCount: Number(sample.metadata?.reconnectCount) || 0,
+      latencyMs: Math.max(0, Number(sample.metadata?.collectorLatencyMs) || Date.now() - sample.sourceTimestamp),
       metadata: { bucketSize }
     };
   });

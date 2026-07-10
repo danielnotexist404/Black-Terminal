@@ -36,9 +36,11 @@ The browser must become a viewer of market memory, not the owner of long-term ma
 
 ```bash
 npm run depth:worker
+npm run depth:worker:supervise
 ```
 
 - Worker reads `MARKET_DEPTH_SYMBOLS`, defaulting to `hyperliquid:perpetual:BTCUSDT`.
+- `depth:worker:supervise` is the recommended persistent deployment command. It restarts the collector if the worker exits after stale feed detection, runtime failures, or process errors.
 - Worker supports collector adapters for:
   - Hyperliquid
   - Binance
@@ -108,6 +110,10 @@ Optional maintenance:
 ```text
 MARKET_DEPTH_MAINTENANCE_TOKEN
 MARKET_DEPTH_PRUNE_INTERVAL_MS
+MARKET_DEPTH_FATAL_STALE_MS=600000
+MARKET_DEPTH_STARTUP_GRACE_MS=120000
+MARKET_DEPTH_WORKER_RESTART_BASE_MS=1500
+MARKET_DEPTH_WORKER_RESTART_MAX_MS=60000
 MARKET_DEPTH_RETENTION_RAW_HOURS=6
 MARKET_DEPTH_RETENTION_DELTA_HOURS=6
 MARKET_DEPTH_RETENTION_1S_DAYS=3
@@ -127,7 +133,7 @@ MARKET_DEPTH_SYMBOLS=hyperliquid:perpetual:BTCUSDT,binance:perpetual:BTCUSDT,byb
 ## Current Limits
 
 - The worker is a long-running Node process. Vercel serverless functions cannot continuously own exchange WebSocket sessions.
-- Vercel APIs can replay stored market memory and accept authenticated external ingest, but a separate worker/runtime must run the collector continuously.
+- Vercel APIs can replay stored market memory and accept authenticated external ingest, but a separate worker/runtime must run the collector continuously. Use `npm run depth:worker:supervise` in that runtime.
 - Packet-loss detection is available for incremental feeds and stored in depth statistics. When an explicit sequence gap is detected, the collector attempts REST snapshot recovery. Full checksum reconciliation remains a follow-up.
 - Replay reads compressed rollups and active walls. DOM Pro+ uses bounded tile cells first for the active camera window, then falls back to replay hydration.
 - The tile API exposes bounded map cells. DOM Pro+ now prefetches padded adjacent camera windows, while minimap/navigator windows remain follow-up work.
@@ -135,7 +141,7 @@ MARKET_DEPTH_SYMBOLS=hyperliquid:perpetual:BTCUSDT,binance:perpetual:BTCUSDT,byb
 
 ## Next Work
 
-- Deploy the collector as a persistent worker outside Vercel serverless.
+- Deploy `npm run depth:worker:supervise` in a persistent worker/runtime outside Vercel serverless.
 - Add venue-specific checksum validation and deeper delta reconciliation.
 - Add deployment automation for the retention pruning route if the collector worker is not always running.
 - Add minimap/navigator windows for Google-Maps-style zoom/pan.

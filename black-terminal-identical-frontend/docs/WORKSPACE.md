@@ -29,9 +29,12 @@ npm run tauri:dev
 npm run typecheck
 npm run check:rust
 npm run check
+npm run depth:worker
+npm run depth:worker:supervise
 ```
 
 `npm run check` runs TypeScript and Rust checks. Use it before packaging or larger refactors.
+`npm run depth:worker:supervise` is the recommended local/persistent command for the Black Core Market Depth Memory collector because it restarts the worker after stale-feed exits or process failures.
 
 ## Packaging
 

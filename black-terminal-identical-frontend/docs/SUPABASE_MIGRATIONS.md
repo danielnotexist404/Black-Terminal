@@ -1445,3 +1445,12 @@ Reason:
 
 - DOM Pro+ now pads tile requests around the active camera window to preload adjacent market-memory cells for map-style pan/zoom.
 - This only changes the client query window against existing `market_depth_rollups` data.
+
+## 2026-07-10 - Supervised IMM Depth Worker
+
+Status: No Supabase migration required.
+
+Reason:
+
+- `npm run depth:worker:supervise` adds process supervision around the existing market-depth worker.
+- Worker stale-feed exits and supervisor restarts reuse the existing `market_depth_collector_status` heartbeat table and existing market-memory tables.

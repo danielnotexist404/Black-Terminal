@@ -672,6 +672,25 @@ Docs:
 - `WORKSPACE.md`
 - `SUPABASE_MIGRATIONS.md`
 
+## Hyperliquid MetaMask Connector Flow
+
+Status: Implemented
+
+Changed:
+
+- MetaMask wallet selection now defaults to the Hyperliquid protocol connection instead of Uniswap.
+- Hyperliquid can connect MetaMask as the master wallet/signing identity without requiring an agent key first.
+- Adding an agent key upgrades the same Hyperliquid connector flow into relay execution onboarding.
+- Mainnet relay onboarding still requires explicit mainnet confirmation and the Chapter X Developer Mainnet Validation Mode for actual orders.
+
+Why:
+
+- In Black Terminal, MetaMask should behave as the signer wallet for the Hyperliquid chart/protocol workflow. Users should not have to manually choose Hyperliquid after choosing MetaMask.
+
+Validation:
+
+- `npm run build`
+
 ## Future Work Log
 
 Use this format for every future phase, chapter, or major bug sprint.

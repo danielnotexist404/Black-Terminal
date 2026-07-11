@@ -89,7 +89,7 @@ const dexVenues: Array<{ id: DexVenueId; label: string; chain: string; defaultPr
 ];
 
 const walletProviders: Array<{ id: WalletProviderId; label: string; chainHint: string; defaultDex: DexVenueId }> = [
-  { id: "metamask", label: "MetaMask", chainHint: "Ethereum / BNB Chain", defaultDex: "uniswap" },
+  { id: "metamask", label: "MetaMask", chainHint: "Ethereum / Hyperliquid", defaultDex: "hyperliquid" },
   { id: "phantom", label: "Phantom", chainHint: "Solana", defaultDex: "jupiter" }
 ];
 
@@ -522,11 +522,8 @@ export function PositionsWorkspace({
   async function handleConnectDex() {
     try {
       const isHyperliquid = selectedDex === "hyperliquid";
-      if (isHyperliquid && !hyperliquidAgentPrivateKey.trim()) {
-        setConnectStatus("HYPERLIQUID AGENT PRIVATE KEY REQUIRED FOR SERVER-SIDE RELAY");
-        return;
-      }
-      if (isHyperliquid && hyperliquidNetwork === "mainnet" && !hyperliquidMainnetConfirmed) {
+      const hasHyperliquidAgentKey = hyperliquidAgentPrivateKey.trim().length > 0;
+      if (isHyperliquid && hasHyperliquidAgentKey && hyperliquidNetwork === "mainnet" && !hyperliquidMainnetConfirmed) {
         setConnectStatus("MAINNET REQUIRES EXPLICIT CONFIRMATION");
         return;
       }
@@ -537,10 +534,10 @@ export function PositionsWorkspace({
         label: `${selectedDexVenue.label} / ${walletProvider === "metamask" ? "MetaMask" : "Phantom"}`,
         credentials: isHyperliquid
           ? {
-              agentPrivateKey: hyperliquidAgentPrivateKey,
+              agentPrivateKey: hasHyperliquidAgentKey ? hyperliquidAgentPrivateKey : undefined,
               network: hyperliquidNetwork,
               accountName: `${selectedDexVenue.label} ${hyperliquidNetwork}`,
-              mainnetConfirmed: hyperliquidMainnetConfirmed
+              mainnetConfirmed: hasHyperliquidAgentKey ? hyperliquidMainnetConfirmed : undefined
             }
           : undefined,
         metadata: {
@@ -550,7 +547,7 @@ export function PositionsWorkspace({
           venueLabel: selectedDexVenue.label,
           chain: selectedDexVenue.chain,
           network: isHyperliquid ? hyperliquidNetwork : undefined,
-          mainnetConfirmed: isHyperliquid ? hyperliquidMainnetConfirmed : undefined
+          mainnetConfirmed: isHyperliquid && hasHyperliquidAgentKey ? hyperliquidMainnetConfirmed : undefined
         }
       });
       setActiveVenueId(nextConnection.id);
@@ -695,8 +692,8 @@ export function PositionsWorkspace({
             ) : (
               <>
                 <div className="pm-segment">
-                  <button className={walletProvider === "metamask" ? "active" : ""} onClick={() => setWalletProvider("metamask")}>MetaMask</button>
-                  <button className={walletProvider === "phantom" ? "active" : ""} onClick={() => setWalletProvider("phantom")}>Phantom</button>
+                  <button className={walletProvider === "metamask" ? "active" : ""} onClick={() => { setWalletProvider("metamask"); setSelectedDex("hyperliquid"); }}>MetaMask</button>
+                  <button className={walletProvider === "phantom" ? "active" : ""} onClick={() => { setWalletProvider("phantom"); setSelectedDex("jupiter"); }}>Phantom</button>
                 </div>
                 <div className="positions-dex-card">
                   <span>{selectedDexVenue.label}</span>
@@ -723,7 +720,11 @@ export function PositionsWorkspace({
                   </>
                 )}
                 {connectStatus && <div className="positions-connect-status">{connectStatus}</div>}
-                <button className="primary" onClick={handleConnectDex}>{selectedDex === "hyperliquid" ? "Link Relay" : "Link Wallet"}</button>
+                <button className="primary" onClick={handleConnectDex}>
+                  {selectedDex === "hyperliquid"
+                    ? hyperliquidAgentPrivateKey.trim() ? "Link Relay" : "Connect MetaMask / Hyperliquid"
+                    : "Link Wallet"}
+                </button>
               </>
             )}
           </div>

@@ -24,45 +24,62 @@ interface LandingPageProps {
 
 type ViewState = "landing" | "signin" | "signup";
 
-const countryDialCodes: Record<string, string> = {
-  "IL": "+972",
-  "US": "+1",
-  "CA": "+1",
-  "GB": "+44",
-  "AU": "+61",
-  "DE": "+49",
-  "FR": "+33",
-  "IT": "+39",
-  "ES": "+34",
-  "RU": "+7",
-  "IN": "+91",
-  "CN": "+86",
-  "JP": "+81",
-  "BR": "+55",
-  "ZA": "+27",
-  "SG": "+65",
-  "AE": "+971",
-  "UA": "+380",
-  "PL": "+48",
-  "NL": "+31",
-  "BE": "+32",
-  "CH": "+41",
-  "SE": "+46",
-  "NO": "+47",
-  "FI": "+358",
-  "DK": "+45",
-  "IE": "+353",
-  "NZ": "+64",
-  "MX": "+52",
-  "AR": "+54",
-  "CL": "+56",
-  "CO": "+57",
-  "TR": "+90",
-  "SA": "+966",
-  "CY": "+357",
-  "GR": "+30",
-  "PT": "+351"
-};
+const phoneDialOptions = [
+  { code: "IL", label: "IL Israel", dial: "+972" },
+  { code: "GR", label: "GR Greece", dial: "+30" },
+  { code: "CY", label: "CY Cyprus", dial: "+357" },
+  { code: "US", label: "US United States", dial: "+1" },
+  { code: "CA", label: "CA Canada", dial: "+1" },
+  { code: "GB", label: "GB United Kingdom", dial: "+44" },
+  { code: "DE", label: "DE Germany", dial: "+49" },
+  { code: "FR", label: "FR France", dial: "+33" },
+  { code: "IT", label: "IT Italy", dial: "+39" },
+  { code: "ES", label: "ES Spain", dial: "+34" },
+  { code: "PT", label: "PT Portugal", dial: "+351" },
+  { code: "NL", label: "NL Netherlands", dial: "+31" },
+  { code: "BE", label: "BE Belgium", dial: "+32" },
+  { code: "CH", label: "CH Switzerland", dial: "+41" },
+  { code: "AT", label: "AT Austria", dial: "+43" },
+  { code: "SE", label: "SE Sweden", dial: "+46" },
+  { code: "NO", label: "NO Norway", dial: "+47" },
+  { code: "FI", label: "FI Finland", dial: "+358" },
+  { code: "DK", label: "DK Denmark", dial: "+45" },
+  { code: "IE", label: "IE Ireland", dial: "+353" },
+  { code: "PL", label: "PL Poland", dial: "+48" },
+  { code: "CZ", label: "CZ Czechia", dial: "+420" },
+  { code: "SK", label: "SK Slovakia", dial: "+421" },
+  { code: "HU", label: "HU Hungary", dial: "+36" },
+  { code: "RO", label: "RO Romania", dial: "+40" },
+  { code: "BG", label: "BG Bulgaria", dial: "+359" },
+  { code: "HR", label: "HR Croatia", dial: "+385" },
+  { code: "RS", label: "RS Serbia", dial: "+381" },
+  { code: "SI", label: "SI Slovenia", dial: "+386" },
+  { code: "UA", label: "UA Ukraine", dial: "+380" },
+  { code: "TR", label: "TR Turkey", dial: "+90" },
+  { code: "AE", label: "AE United Arab Emirates", dial: "+971" },
+  { code: "SA", label: "SA Saudi Arabia", dial: "+966" },
+  { code: "QA", label: "QA Qatar", dial: "+974" },
+  { code: "KW", label: "KW Kuwait", dial: "+965" },
+  { code: "AU", label: "AU Australia", dial: "+61" },
+  { code: "NZ", label: "NZ New Zealand", dial: "+64" },
+  { code: "SG", label: "SG Singapore", dial: "+65" },
+  { code: "IN", label: "IN India", dial: "+91" },
+  { code: "JP", label: "JP Japan", dial: "+81" },
+  { code: "KR", label: "KR South Korea", dial: "+82" },
+  { code: "CN", label: "CN China", dial: "+86" },
+  { code: "HK", label: "HK Hong Kong", dial: "+852" },
+  { code: "TH", label: "TH Thailand", dial: "+66" },
+  { code: "ZA", label: "ZA South Africa", dial: "+27" },
+  { code: "BR", label: "BR Brazil", dial: "+55" },
+  { code: "MX", label: "MX Mexico", dial: "+52" },
+  { code: "AR", label: "AR Argentina", dial: "+54" },
+  { code: "CL", label: "CL Chile", dial: "+56" },
+  { code: "CO", label: "CO Colombia", dial: "+57" }
+];
+
+const countryDialCodes: Record<string, string> = Object.fromEntries(
+  phoneDialOptions.map((option) => [option.code, option.dial])
+);
 
 
 export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
@@ -601,9 +618,9 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                          onChange={(e: any) => setPurposeOfUse(e.target.value)}
                          disabled={loading}
                        >
-                         <option value="personal">Personal Use</option>
-                         <option value="commercial">Commercial Use</option>
-                       </select>
+                          <option value="personal">Personal Use</option>
+                          <option value="commercial">Commercial Use</option>
+                        </select>
                      </div>
 
                      <div className="login-field">
@@ -615,9 +632,9 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                          disabled={loading}
                        >
                          <option value="google">Google Search</option>
-                         <option value="social">Social Media</option>
-                         <option value="friend">Friend / Colleague</option>
-                         <option value="other">Other (Please specify)</option>
+                          <option value="social">Social Media</option>
+                          <option value="friend">Friend / Colleague</option>
+                          <option value="other">Other (Please specify)</option>
                        </select>
                      </div>
                    </div>
@@ -642,9 +659,16 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                        <select
                          className="signup-phone-prefix"
                          value={phonePrefix}
-                         onChange={(e) => setPhonePrefix(e.target.value)}
-                         disabled={loading}
-                       >
+                          onChange={(e) => setPhonePrefix(e.target.value)}
+                          disabled={loading}
+                        >
+                          {phoneDialOptions.map((option) => (
+                            <option key={`${option.code}-${option.dial}`} value={option.dial}>
+                              {option.label} {option.dial}
+                            </option>
+                          ))}
+                          {false && (
+                            <>
                          <option value="+972">🇮🇱 +972</option>
                          <option value="+1">🇺🇸 +1</option>
                          <option value="+44">🇬🇧 +44</option>
@@ -653,6 +677,8 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                          <option value="+971">🇦🇪 +971</option>
                          <option value="+39">🇮🇹 +39</option>
                          <option value="+34">🇪🇸 +34</option>
+                            </>
+                          )}
                        </select>
                        <input
                          className="login-input"

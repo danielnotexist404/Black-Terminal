@@ -163,9 +163,9 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
 
         const secureSession = await establishSupabaseAuthSession(userObj, cleanPass);
         if (!secureSession.success) {
-          setErrorMsg(secureSession.error || "Secure Supabase Auth session failed.");
-          setLoading(false);
-          return;
+          await dbUpdateUser(cleanUser, { emailVerified: false });
+        } else if (!userObj.emailVerified) {
+          await dbUpdateUser(cleanUser, { emailVerified: true });
         }
 
         await dbAddAuditLog("LOGIN", `User ${cleanUser} logged in from landing page.`);
@@ -336,7 +336,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
           phone: `${phonePrefix} ${phone.trim()}`,
           newsletterOptIn: newsletterOptIn,
           referredBy: referredBy === "other" ? otherReferral.trim() : referredBy,
-          emailVerified: true
+          emailVerified: false
         };
 
         const regResult = await dbRegisterUser(newUser, cleanPass);
@@ -350,9 +350,9 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
         await dbAddAuditLog("LOGIN", `User ${cleanUser} logged in automatically.`);
         const secureSession = await establishSupabaseAuthSession(newUser, cleanPass, { allowCreate: true });
         if (!secureSession.success) {
-          setErrorMsg(secureSession.error || "Secure Supabase Auth session failed.");
-          setLoading(false);
-          return;
+          await dbAddAuditLog("ERROR", `Supabase Auth session pending for ${cleanUser}: ${secureSession.error || "Unknown auth bridge error"}`);
+        } else {
+          await dbUpdateUser(cleanUser, { emailVerified: true });
         }
 
         setSuccessMsg("Handshake successful! Terminal ready...");

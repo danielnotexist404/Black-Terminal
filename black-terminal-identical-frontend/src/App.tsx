@@ -370,6 +370,11 @@ function loadWorkspaceSnapshots(): Record<string, WorkspaceSnapshot> {
 
 type AppUser = CapabilityUser & {
     allowedIndicators: string[];
+    displayName?: string;
+    email?: string;
+    emailVerified?: boolean;
+    authSessionReady?: boolean;
+    authSessionWarning?: string;
     productTier?: ProductTier;
     permissions?: TerminalCapability[];
     aiMessagesCount?: number;
@@ -1221,6 +1226,10 @@ export default function App() {
           
           setCurrentUser({
             username,
+            displayName: matched?.displayName,
+            email: matched?.email,
+            emailVerified: matched?.emailVerified,
+            authSessionReady: matched?.emailVerified,
             role: resolvedRole,
             allowedIndicators: allowed,
             productTier: (matched as any)?.productTier,

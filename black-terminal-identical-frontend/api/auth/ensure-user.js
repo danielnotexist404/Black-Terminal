@@ -48,6 +48,7 @@ export default async function handler(req, res) {
 
     if (existingUser) {
       const { error } = await supabase.auth.admin.updateUserById(existingUser.id, {
+        password,
         email_confirm: true,
         user_metadata: {
           ...(existingUser.user_metadata || {}),

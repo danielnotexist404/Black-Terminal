@@ -75,6 +75,7 @@ export function ProfilePage({ currentUser, onClose, onOpenInvestmentGroups }: Pr
   const snapshot = useMemo(() => getProfessionalNetworkSnapshot(currentUser), [currentUser, revision]);
   const { profile } = snapshot;
   const tier = resolveProductTier(currentUser);
+  const emailVerified = currentUser.emailVerified === true;
   const capabilities = useMemo(() => getCapabilities(currentUser), [currentUser]);
   const [status, setStatus] = useState("");
   const [profileDraft, setProfileDraft] = useState({
@@ -245,6 +246,18 @@ export function ProfilePage({ currentUser, onClose, onOpenInvestmentGroups }: Pr
       </nav>
 
       {status && <div className="network-status">{status}</div>}
+
+      {!emailVerified && (
+        <section className="network-panel" style={{ margin: "10px 14px 0" }}>
+          <div className="network-panel-title"><ShieldCheck size={14} /> Confirm Your Email</div>
+          <p className="network-muted">
+            Your Black Terminal account can open the workspace, but secure broker credentials and live execution require a confirmed Supabase Auth session.
+          </p>
+          <p className="network-muted">
+            Email: <strong>{currentUser.email || "not recorded"}</strong>. Confirm it from Supabase/Auth email flow, then sign out and sign back in to refresh this status.
+          </p>
+        </section>
+      )}
 
       <main className="network-body">
         {activeTab === "Overview" && (

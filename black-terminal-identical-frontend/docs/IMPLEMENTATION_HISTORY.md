@@ -28,6 +28,7 @@ Recent pushed commits:
 - Current - Expand registration phone country dial-code selector.
 - Current - Add registration display name separate from login username.
 - Current - Create confirmed Supabase Auth users server-side after Black Terminal verification.
+- Current - Move email-confirmation blocking out of login and into Profile readiness.
 - Current - Prevent normal sign-in from triggering Supabase confirmation email retries.
 - Current - Redesign DOM Pro+ as institutional liquidity radar.
 - Current - Implement Phase III Chapter VI DOM Pro+ cockpit.

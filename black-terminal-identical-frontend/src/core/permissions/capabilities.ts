@@ -24,6 +24,11 @@ export type TerminalCapability =
 
 export type CapabilityUser = {
   username: string;
+  displayName?: string;
+  email?: string;
+  emailVerified?: boolean;
+  authSessionReady?: boolean;
+  authSessionWarning?: string;
   role: "admin" | "user";
   productTier?: ProductTier;
   permissions?: TerminalCapability[];

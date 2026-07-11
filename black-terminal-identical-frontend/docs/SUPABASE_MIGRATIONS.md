@@ -1620,3 +1620,192 @@ Reason:
 Future migration trigger:
 
 - Add a migration only if mainnet validation approvals, operator attestations, or compliance-grade live-trading approvals must be persisted server-side.
+
+## 2026-07-11 - Phase III Chapter XI Universal Connectivity Certification
+
+Status: Supabase migration required before server-side certification history, health snapshots, metadata cache, and mainnet validation records can be persisted.
+
+Apply after existing connectivity, execution, Hyperliquid, and IMM migrations.
+
+```sql
+create table if not exists public.adapter_certifications (
+  id uuid primary key default gen_random_uuid(),
+  venue_id text not null,
+  provider text not null,
+  category text not null check (category in ('centralized-exchange','protocol','wallet','market-data','institutional')),
+  execution_mode text not null check (execution_mode in ('full-live','read-only','market-data-only','signer-only','unavailable')),
+  network text not null default 'mainnet' check (network in ('mainnet','sandbox','testnet','unsupported')),
+  readiness text not null check (readiness in ('disconnected','authenticating','connected','synchronizing','connected-read-only','execution-blocked','execution-ready','degraded','reconnecting','error')),
+  implementation_status text not null check (implementation_status in ('implemented','partial','market-data-only','signer-only','blocked','deferred')),
+  market_data_ready boolean not null default false,
+  auth_ready boolean not null default false,
+  account_read_ready boolean not null default false,
+  balances_ready boolean not null default false,
+  positions_ready boolean not null default false,
+  open_orders_ready boolean not null default false,
+  fills_ready boolean not null default false,
+  private_streams_ready boolean not null default false,
+  market_order_certified boolean not null default false,
+  limit_order_certified boolean not null default false,
+  cancel_certified boolean not null default false,
+  modify_certified boolean not null default false,
+  tpsl_certified boolean not null default false,
+  reconnect_certified boolean not null default false,
+  mainnet_validated boolean not null default false,
+  supported_products text[] not null default '{}',
+  supported_order_types text[] not null default '{}',
+  capabilities jsonb not null default '{}'::jsonb,
+  limitations jsonb not null default '[]'::jsonb,
+  last_validated_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (venue_id, network)
+);
+
+create index if not exists idx_adapter_certifications_mode
+  on public.adapter_certifications(execution_mode, implementation_status);
+
+alter table public.adapter_certifications enable row level security;
+
+create table if not exists public.connection_health_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  connection_id uuid,
+  account_id uuid,
+  venue_id text not null,
+  provider text not null,
+  category text not null,
+  network text not null default 'mainnet',
+  readiness text not null,
+  execution_mode text not null,
+  public_stream text,
+  private_stream text,
+  authentication text,
+  synchronization text,
+  latency_ms integer not null default 0,
+  reconnect_count integer not null default 0,
+  clock_skew_ms integer,
+  metadata_freshness_ms integer,
+  rate_limit_usage text,
+  last_error text,
+  health jsonb not null default '{}'::jsonb,
+  captured_at timestamptz not null default now()
+);
+
+create index if not exists idx_connection_health_snapshots_user_time
+  on public.connection_health_snapshots(user_id, captured_at desc);
+
+create index if not exists idx_connection_health_snapshots_venue_time
+  on public.connection_health_snapshots(venue_id, captured_at desc);
+
+alter table public.connection_health_snapshots enable row level security;
+
+create table if not exists public.venue_metadata_cache (
+  id uuid primary key default gen_random_uuid(),
+  venue_id text not null,
+  network text not null default 'mainnet',
+  native_symbol text not null,
+  canonical_base text not null,
+  canonical_quote text not null,
+  settlement_asset text,
+  market_type text not null,
+  contract_type text,
+  expiry timestamptz,
+  contract_multiplier numeric,
+  tick_size numeric,
+  quantity_step numeric,
+  min_quantity numeric,
+  min_notional numeric,
+  max_quantity numeric,
+  price_precision integer,
+  quantity_precision integer,
+  leverage_limits jsonb not null default '{}'::jsonb,
+  supported_margin_modes text[] not null default '{}',
+  supported_time_in_force text[] not null default '{}',
+  supported_trigger_behavior jsonb not null default '{}'::jsonb,
+  trading_status text,
+  raw_metadata jsonb not null default '{}'::jsonb,
+  loaded_at timestamptz not null default now(),
+  expires_at timestamptz,
+  unique (venue_id, network, native_symbol, market_type)
+);
+
+create index if not exists idx_venue_metadata_cache_symbol
+  on public.venue_metadata_cache(venue_id, network, native_symbol);
+
+alter table public.venue_metadata_cache enable row level security;
+
+create table if not exists public.mainnet_validation_records (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  connection_id uuid,
+  account_id uuid,
+  venue_id text not null,
+  network text not null default 'mainnet',
+  symbol text not null,
+  max_notional_usd numeric,
+  requested_notional_usd numeric,
+  validation_stage text not null,
+  status text not null check (status in ('started','passed','failed','blocked','cancelled')),
+  live_confirmation text not null default 'required',
+  order_id uuid,
+  exchange_order_id text,
+  risk_check_status text,
+  failure_reason text,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  completed_at timestamptz
+);
+
+create index if not exists idx_mainnet_validation_records_user_time
+  on public.mainnet_validation_records(user_id, created_at desc);
+
+create index if not exists idx_mainnet_validation_records_venue_status
+  on public.mainnet_validation_records(venue_id, status, created_at desc);
+
+alter table public.mainnet_validation_records enable row level security;
+
+create table if not exists public.venue_time_sync_status (
+  id uuid primary key default gen_random_uuid(),
+  venue_id text not null,
+  network text not null default 'mainnet',
+  server_time timestamptz,
+  local_time timestamptz not null default now(),
+  clock_skew_ms integer not null default 0,
+  request_window_ms integer,
+  status text not null default 'unknown' check (status in ('ok','resync-required','failed','unknown')),
+  last_successful_sync_at timestamptz,
+  metadata jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now(),
+  unique (venue_id, network)
+);
+
+alter table public.venue_time_sync_status enable row level security;
+
+create table if not exists public.venue_rate_limit_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  venue_id text not null,
+  network text not null default 'mainnet',
+  connection_id uuid,
+  account_id uuid,
+  rest_remaining integer,
+  rest_limit integer,
+  websocket_subscriptions integer,
+  retry_after_ms integer,
+  priority_lane text,
+  status text not null default 'unknown' check (status in ('ok','throttled','limited','blocked','unknown')),
+  metadata jsonb not null default '{}'::jsonb,
+  captured_at timestamptz not null default now()
+);
+
+create index if not exists idx_venue_rate_limit_snapshots_venue_time
+  on public.venue_rate_limit_snapshots(venue_id, captured_at desc);
+
+alter table public.venue_rate_limit_snapshots enable row level security;
+```
+
+Security notes:
+
+- These are platform-owned operational tables.
+- Direct browser access is intentionally blocked by RLS until explicit read policies are designed.
+- Server routes, workers, and admin diagnostics should write/read through `SUPABASE_SERVICE_ROLE_KEY`.

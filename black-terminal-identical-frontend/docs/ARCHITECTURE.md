@@ -208,6 +208,26 @@ broker or wallet account stores:
 Wallets such as MetaMask and Phantom are signer connections. They do not become futures venues until
 a protocol adapter reports executable perpetual capabilities.
 
+## Phase III Chapter XI Venue Certification Rule
+
+Every visible venue must have a truthful certification record.
+
+Certification records live in `src/connectivity/venueRegistry.ts` and classify each venue as:
+
+- full-live
+- read-only
+- market-data-only
+- signer-only
+- unavailable
+
+The connection UI, adapters, and server credential routes must consume this truth layer. A venue may
+not store credentials, show execution-ready status, or expose order controls unless its certification
+and dynamic connection state both allow that capability.
+
+Public candles are not account connectivity. Read-only account sync is not order execution. Wallet
+signature capability is not derivatives execution. Unsupported actions must fail closed with an
+explicit reason.
+
 ## Phase III Position Rule
 
 OMS owns orders.

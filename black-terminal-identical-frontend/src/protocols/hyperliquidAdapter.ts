@@ -1,5 +1,6 @@
 import type { ConnectRequest, ConnectionRecord } from "../connectivity/types";
 import { defaultConnectionHealth, defaultPermissionReport } from "../connectivity/types";
+import { getVenueCertification } from "../connectivity/venueRegistry";
 import { shouldSendMainnetConfirmed, validateMainnetOrderReadiness } from "../execution/mainnetValidationMode";
 import type { OrderRequest, OrderUpdate } from "../execution/types";
 import { connectHyperliquidRelayViaApi, submitHyperliquidOrderViaApi } from "../portfolio/portfolioApiClient";
@@ -68,6 +69,7 @@ export const hyperliquidProtocolAdapter: ProtocolAdapter = {
     if (!address) throw new Error("MetaMask returned no wallet address for Hyperliquid.");
 
     const profile = await hyperliquidProtocolAdapter.detectCapabilities();
+    const certification = getVenueCertification("hyperliquid");
     const credentials = request.credentials as {
       agentPrivateKey?: string;
       network?: "testnet" | "mainnet";
@@ -118,6 +120,12 @@ export const hyperliquidProtocolAdapter: ProtocolAdapter = {
         walletAddress: address,
         capabilityProfile: profile,
         executionBridge: "protocol-adapter",
+        executionMode: credentials?.agentPrivateKey ? "full-live" : "signer-only",
+        readiness: "execution-blocked",
+        mainnetValidated: certification?.mainnetValidated ?? false,
+        supportedProducts: certification?.supportedProducts ?? ["perpetual"],
+        supportedOrderTypes: profile.supportedOrderTypes,
+        limitations: certification?.limitations ?? [],
         executionReady: false,
         readinessReason: "MetaMask identity is connected. Add an authorized Hyperliquid agent wallet to enable server-side live execution.",
         ...(request.metadata ?? {})

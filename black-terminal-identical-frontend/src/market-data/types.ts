@@ -18,7 +18,7 @@ export type ExchangeId =
   | "bitmex"
   | "mock";
 
-export type MarketKind = "spot" | "margin" | "perpetual" | "futures" | "options";
+export type MarketKind = "spot" | "margin" | "perpetual" | "futures" | "options" | "swap";
 
 export type Timeframe =
   | "1s"

@@ -3,27 +3,11 @@ import { connectExchangeAccount } from "../../portfolio/portfolioStore";
 import type { ExchangeId } from "../../market-data/types";
 import type { ConnectionAdapter, ConnectRequest, ConnectionRecord } from "../types";
 import { defaultConnectionHealth, defaultPermissionReport } from "../types";
+import { getVenueCertification } from "../venueRegistry";
 
 export function createCentralizedExchangeConnectionAdapter(exchange: ExchangeId, label: string): ConnectionAdapter {
-  const capabilities: ConnectionAdapter["capabilities"] = [
-    "market-orders",
-    "spot-orders",
-    "limit-orders",
-    "conditional-orders",
-    "cancel-orders",
-    "modify-orders",
-    "leverage",
-    "cross-margin",
-    "isolated-margin",
-    "reduce-only",
-    "post-only",
-    "balances",
-    "positions",
-    "orders",
-    "trades",
-    "private-websocket",
-    "public-websocket"
-  ];
+  const certification = getVenueCertification(exchange);
+  const capabilities: ConnectionAdapter["capabilities"] = certification?.connectionCapabilities ?? [];
 
   return {
     id: `cex:${exchange}`,
@@ -35,6 +19,9 @@ export function createCentralizedExchangeConnectionAdapter(exchange: ExchangeId,
       const startedAt = Date.now();
       const credentials = request.credentials as ExchangeConnectionDraft | undefined;
       if (!credentials) throw new Error(`${label} credentials missing.`);
+      if (!certification?.authReady) {
+        throw new Error(`${label} credential validation is not certified yet. This venue is ${certification?.executionMode ?? "unavailable"} in Black Terminal.`);
+      }
       const account = await connectExchangeAccount(credentials);
       const tradingEnabled = account.permissions.includes("place-orders");
       const withdrawalEnabled = account.permissions.includes("withdraw-disabled") === false && Boolean((request.metadata as any)?.withdrawalPermission);
@@ -68,6 +55,12 @@ export function createCentralizedExchangeConnectionAdapter(exchange: ExchangeId,
           exchange,
           apiHealth: account.apiHealth,
           status: account.status,
+          executionMode: certification.executionMode,
+          readiness: tradingEnabled ? "execution-ready" : certification.readiness,
+          mainnetValidated: certification.mainnetValidated,
+          supportedProducts: certification.supportedProducts,
+          supportedOrderTypes: certification.supportedOrderTypes,
+          limitations: certification.limitations,
           ...(request.metadata ?? {})
         },
         createdAt: Date.now(),

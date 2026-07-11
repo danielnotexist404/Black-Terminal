@@ -98,7 +98,7 @@ examples/
 ## Current Gaps
 
 - Market data has a Black Core adapter foundation, but more venue paths still need production hardening.
-- Exchange adapters are typed and partially wired; duplicated venue WebSocket logic should continue moving into the shared manager.
+- Exchange adapters are now certification-gated. Bybit is read-only account validation, most CEX venues are market-data-only, wallets are signer-only, and unsupported protocol/institutional adapters stay deferred until real implementations exist.
 - Indicator execution is documented and typed but not implemented.
 - Account trading has Vercel/Supabase and Bybit foundations, but more broker adapters and DEX protocol adapters are still required.
 - Hyperliquid has a server relay and controlled mainnet validation guard, but production-ready status requires real testnet and small-order mainnet validation evidence.

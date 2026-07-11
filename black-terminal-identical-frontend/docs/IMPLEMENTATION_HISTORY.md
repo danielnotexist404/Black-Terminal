@@ -691,6 +691,40 @@ Validation:
 
 - `npm run build`
 
+## Phase III Chapter XI Universal Connectivity Foundation
+
+Status: Implemented and build validated
+
+Changed:
+
+- Added `src/connectivity/venueRegistry.ts` as the machine-readable adapter certification matrix.
+- Added normalized connection vocabulary for execution mode, network, and readiness.
+- Gated centralized exchange adapters through certification records.
+- Positions connection wizard now shows truthful support mode, readiness, products, limitations, and mainnet certification state.
+- Removed Hyperliquid from the CEX broker path by filtering CEX options through the certification matrix.
+- Added GMX, dYdX, Vertex, and Drift as deferred protocol entries instead of executable placeholders.
+- Prevented uncertified exchanges from storing credentials through both frontend adapter logic and the Vercel API route.
+- Removed local mock credential fallback for real exchanges when secure server validation fails.
+- Added Run Diagnostics in the execution dock for connection mode, readiness, auth, stream, trading, and limitation state.
+- Added `swap` to the normalized market kind vocabulary.
+
+Why:
+
+- Black Terminal must not imply that every listed venue can execute live orders.
+- Venue logos and public candles are not enough; every connection must report a truthful state: full-live, read-only, market-data-only, signer-only, unavailable, or deferred.
+
+Validation:
+
+- `npm run build`
+
+Docs:
+
+- `PHASE3_CHAPTER11_UNIVERSAL_CONNECTIVITY.md`
+- `ARCHITECTURE.md`
+- `PLATFORM_BUILD_MANUAL.md`
+- `WORKSPACE.md`
+- `SUPABASE_MIGRATIONS.md`
+
 ## Future Work Log
 
 Use this format for every future phase, chapter, or major bug sprint.

@@ -153,6 +153,14 @@ export default async function handler(req, res) {
           protocol: "hyperliquid",
           signer: "metamask",
           network,
+          executionMode: executionReady ? "full-live" : "read-only",
+          readiness: executionReady ? "execution-ready" : "execution-blocked",
+          mainnetValidated: false,
+          supportedProducts: ["perpetual"],
+          supportedOrderTypes: ["market", "limit", "stop-market", "stop-limit"],
+          limitations: executionReady
+            ? ["Hyperliquid relay is ready. Mainnet orders still require Developer Mainnet Validation Mode."]
+            : [readinessReason],
           executionReady,
           readinessReason,
           masterWalletAddress,

@@ -1,5 +1,6 @@
 import type { ConnectionAdapter, ConnectRequest, ConnectionRecord } from "../types";
 import { defaultConnectionHealth, defaultPermissionReport } from "../types";
+import { getVenueCertification } from "../venueRegistry";
 
 type EthereumProvider = {
   request?: (request: { method: string; params?: unknown[] }) => Promise<unknown>;
@@ -28,6 +29,7 @@ export const metaMaskConnectionAdapter: ConnectionAdapter = {
     const chainId = await ethereum.request({ method: "eth_chainId" }) as string;
     const address = accounts?.[0];
     if (!address) throw new Error("MetaMask returned no wallet address.");
+    const certification = getVenueCertification("metamask");
 
     return {
       id: `wallet-metamask-${address.toLowerCase()}`,
@@ -51,6 +53,12 @@ export const metaMaskConnectionAdapter: ConnectionAdapter = {
       metadata: {
         chainId,
         walletAddress: address,
+        executionMode: certification?.executionMode ?? "signer-only",
+        readiness: certification?.readiness ?? "execution-blocked",
+        mainnetValidated: false,
+        supportedProducts: certification?.supportedProducts ?? ["swap"],
+        supportedOrderTypes: [],
+        limitations: certification?.limitations ?? [],
         futuresUnsupportedReason: "MetaMask is a wallet signer. Futures require a connected perpetual DEX adapter such as Hyperliquid or GMX.",
         ...(request.metadata ?? {})
       },
@@ -88,6 +96,7 @@ export const phantomConnectionAdapter: ConnectionAdapter = {
     const response = await solana.connect();
     const address = response?.publicKey?.toString();
     if (!address) throw new Error("Phantom returned no wallet address.");
+    const certification = getVenueCertification("phantom");
 
     return {
       id: `wallet-phantom-${address}`,
@@ -111,6 +120,12 @@ export const phantomConnectionAdapter: ConnectionAdapter = {
       metadata: {
         chainId: "solana",
         walletAddress: address,
+        executionMode: certification?.executionMode ?? "signer-only",
+        readiness: certification?.readiness ?? "execution-blocked",
+        mainnetValidated: false,
+        supportedProducts: certification?.supportedProducts ?? ["swap"],
+        supportedOrderTypes: [],
+        limitations: certification?.limitations ?? [],
         futuresUnsupportedReason: "Phantom is a wallet signer. Futures require a connected perpetual DEX adapter.",
         ...(request.metadata ?? {})
       },

@@ -1,4 +1,5 @@
 import { getBrokerAdapter } from "../broker/brokerRegistry";
+import { getVenueCertification } from "../connectivity/venueRegistry";
 import { createId } from "../core/ids";
 import { TauriSecureCredentialStore } from "../core/secureCredentialStore";
 import type { AccountConnection, OrderUpdate } from "../execution/types";
@@ -70,11 +71,24 @@ export async function getPortfolioSnapshot(): Promise<PortfolioSnapshot> {
 }
 
 export async function connectExchangeAccount(draft: ExchangeConnectionDraft): Promise<PortfolioAccount> {
+  const certification = getVenueCertification(draft.exchange);
+  if (draft.exchange !== "mock" && !certification?.authReady) {
+    throw new Error(`${draft.exchange.toUpperCase()} credential validation is not certified yet. This venue is ${certification?.executionMode ?? "unavailable"}.`);
+  }
+
   try {
     const remoteAccount = await connectExchangeAccountViaApi(draft);
     if (remoteAccount) return remoteAccount;
   } catch (error) {
-    console.error("Portfolio API connect failed, using local fallback.", error);
+    if (draft.exchange !== "mock") {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Secure server credential validation failed: ${message}`);
+    }
+    console.error("Mock portfolio API connect failed, using local fallback.", error);
+  }
+
+  if (draft.exchange !== "mock") {
+    throw new Error("Authenticated Supabase session required for secure credential validation.");
   }
 
   const id = createId("acct");

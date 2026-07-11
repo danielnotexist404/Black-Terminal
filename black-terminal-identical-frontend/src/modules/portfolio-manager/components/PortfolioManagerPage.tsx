@@ -15,6 +15,7 @@ import { getCapabilities, resolveProductTier, type CapabilityUser } from "../../
 import { blackCoreConnectionManager } from "../../../connectivity/connectionManager";
 import { readActiveExecutionVenueId, setActiveExecutionVenueId } from "../../../connectivity/activeExecutionVenue";
 import type { ConnectionCapability, ConnectionDiagnostics } from "../../../connectivity/types";
+import { formatExecutionMode, getVenueCertification, type VenueCertificationRecord } from "../../../connectivity/venueRegistry";
 import { submitOrder } from "../../../execution/executionEngine";
 import { disableMainnetValidationMode, promptEnableMainnetValidationMode, readMainnetValidationMode, validateMainnetOrderReadiness } from "../../../execution/mainnetValidationMode";
 import { submitPortfolioOrderViaApi, type PortfolioOrderDraft } from "../../../portfolio/portfolioApiClient";
@@ -39,7 +40,7 @@ type PortfolioManagerTab =
   | "Permissions";
 type VenueKind = "cex" | "dex";
 type VenueSelectorKind = VenueKind | "wallet";
-type DexVenueId = "hyperliquid" | "uniswap" | "jupiter" | "raydium" | "pancakeswap";
+type DexVenueId = "hyperliquid" | "gmx" | "dydx" | "vertex" | "drift" | "uniswap" | "jupiter" | "raydium" | "pancakeswap";
 type WalletProviderId = "metamask" | "phantom";
 type TradeMode = "spot" | "convert" | "futures";
 type ExecutionSide = "buy" | "sell";
@@ -62,6 +63,10 @@ type ExecutionVenue = {
   readinessReason?: string;
   network?: "testnet" | "mainnet";
   mainnetConfirmed?: boolean;
+  executionMode?: string;
+  readiness?: string;
+  mainnetValidated?: boolean;
+  limitations?: string[];
 };
 
 type PositionOrderRow = {
@@ -82,6 +87,10 @@ const compact = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 
 const dexVenues: Array<{ id: DexVenueId; label: string; chain: string; defaultProvider: WalletProviderId }> = [
   { id: "hyperliquid", label: "Hyperliquid", chain: "Arbitrum / Hyperliquid", defaultProvider: "metamask" },
+  { id: "gmx", label: "GMX", chain: "Arbitrum / Avalanche", defaultProvider: "metamask" },
+  { id: "dydx", label: "dYdX", chain: "dYdX Chain", defaultProvider: "metamask" },
+  { id: "vertex", label: "Vertex", chain: "Arbitrum", defaultProvider: "metamask" },
+  { id: "drift", label: "Drift", chain: "Solana", defaultProvider: "phantom" },
   { id: "uniswap", label: "Uniswap", chain: "Ethereum", defaultProvider: "metamask" },
   { id: "jupiter", label: "Jupiter", chain: "Solana", defaultProvider: "phantom" },
   { id: "raydium", label: "Raydium", chain: "Solana", defaultProvider: "phantom" },
@@ -440,7 +449,11 @@ export function PositionsWorkspace({
         executionReady: connection.metadata.executionReady === true,
         readinessReason: typeof connection.metadata.readinessReason === "string" ? connection.metadata.readinessReason : undefined,
         network: connection.metadata.network === "mainnet" ? "mainnet" : connection.metadata.network === "testnet" ? "testnet" : undefined,
-        mainnetConfirmed: connection.metadata.mainnetConfirmed === true
+        mainnetConfirmed: connection.metadata.mainnetConfirmed === true,
+        executionMode: typeof connection.metadata.executionMode === "string" ? connection.metadata.executionMode : undefined,
+        readiness: typeof connection.metadata.readiness === "string" ? connection.metadata.readiness : undefined,
+        mainnetValidated: connection.metadata.mainnetValidated === true,
+        limitations: Array.isArray(connection.metadata.limitations) ? connection.metadata.limitations.map(String) : undefined
       };
     }), [connectionDiagnostics]);
   const activeExecutionVenue = executionVenues.find((venue) => venue.id === activeVenueId) ?? executionVenues[0] ?? null;
@@ -457,6 +470,8 @@ export function PositionsWorkspace({
   }, [activeVenueId, executionVenues]);
 
   const selectedDexVenue = dexVenues.find((venue) => venue.id === selectedDex) ?? dexVenues[0];
+  const selectedCexCertification = getVenueCertification(selectedCex);
+  const selectedDexCertification = getVenueCertification(selectedDex);
   const venueValue = `${venueKind}:${venueKind === "cex" ? selectedCex : selectedDex}`;
   const centralizedConnectionCount = connectionDiagnostics.filter((connection) => connection.category === "centralized-exchange").length;
   const walletConnectionCount = connectionDiagnostics.filter((connection) => connection.category === "wallet").length;
@@ -489,6 +504,10 @@ export function PositionsWorkspace({
   }
 
   async function handleConnectCex() {
+    if (!selectedCexCertification?.authReady) {
+      setConnectStatus((selectedCexCertification?.limitations[0] || `${selectedCex.toUpperCase()} credential validation is not certified yet.`).toUpperCase());
+      return;
+    }
     const accountName = connection.accountName.trim() || marketCatalog.find((exchange) => exchange.id === selectedCex)?.label || selectedCex;
     if (!connection.apiKey.trim() || !connection.apiSecret.trim()) {
       setConnectStatus("API KEY AND SECRET REQUIRED");
@@ -522,6 +541,10 @@ export function PositionsWorkspace({
   async function handleConnectDex() {
     try {
       const isHyperliquid = selectedDex === "hyperliquid";
+      if (selectedDexCertification?.connectorVisible === false) {
+        setConnectStatus((selectedDexCertification.limitations[0] || `${selectedDexVenue.label} is deferred.`).toUpperCase());
+        return;
+      }
       const hasHyperliquidAgentKey = hyperliquidAgentPrivateKey.trim().length > 0;
       if (isHyperliquid && hasHyperliquidAgentKey && hyperliquidNetwork === "mainnet" && !hyperliquidMainnetConfirmed) {
         setConnectStatus("MAINNET REQUIRES EXPLICIT CONFIRMATION");
@@ -660,16 +683,26 @@ export function PositionsWorkspace({
             </div>
             <select value={venueValue} onChange={(event) => updateVenue(event.target.value)}>
               <optgroup label="Centralized Exchanges">
-                {marketCatalog.map((exchange) => (
-                  <option key={exchange.id} value={`cex:${exchange.id}`}>{exchange.label}</option>
-                ))}
+                {marketCatalog
+                  .filter((exchange) => getVenueCertification(exchange.id)?.category === "centralized-exchange")
+                  .map((exchange) => {
+                    const certification = getVenueCertification(exchange.id);
+                    return (
+                      <option key={exchange.id} value={`cex:${exchange.id}`} disabled={!certification?.authReady}>
+                        {exchange.label} - {certification?.authReady ? "Read-only auth" : "Market data only"}
+                      </option>
+                    );
+                  })}
               </optgroup>
               <optgroup label="DEX">
-                {dexVenues.map((venue) => (
-                  <option key={venue.id} value={`dex:${venue.id}`}>
-                    {venue.label} / {venue.defaultProvider === "metamask" ? "MetaMask" : "Phantom"}
-                  </option>
-                ))}
+                {dexVenues.map((venue) => {
+                  const certification = getVenueCertification(venue.id);
+                  return (
+                    <option key={venue.id} value={`dex:${venue.id}`} disabled={certification?.connectorVisible === false}>
+                      {venue.label} / {venue.defaultProvider === "metamask" ? "MetaMask" : "Phantom"} - {certification ? formatExecutionMode(certification.executionMode) : "UNAVAILABLE"}
+                    </option>
+                  );
+                })}
               </optgroup>
               <optgroup label="Wallet Connectors">
                 {walletProviders.map((provider) => (
@@ -682,12 +715,15 @@ export function PositionsWorkspace({
 
             {venueKind === "cex" ? (
               <>
+                <ConnectionSupportCard certification={selectedCexCertification} />
                 <input placeholder="Account name" value={connection.accountName} onChange={(event) => setConnection((current) => ({ ...current, accountName: event.target.value }))} />
                 <input placeholder="API key" value={connection.apiKey} onChange={(event) => setConnection((current) => ({ ...current, apiKey: event.target.value }))} />
                 <input placeholder="API secret" type="password" value={connection.apiSecret} onChange={(event) => setConnection((current) => ({ ...current, apiSecret: event.target.value }))} />
                 <input placeholder="Passphrase, if required" type="password" value={connection.passphrase} onChange={(event) => setConnection((current) => ({ ...current, passphrase: event.target.value }))} />
                 {connectStatus && <div className="positions-connect-status">{connectStatus}</div>}
-                <button className="primary" onClick={handleConnectCex}>Store Secure Reference</button>
+                <button className="primary" disabled={!selectedCexCertification?.authReady} onClick={handleConnectCex}>
+                  {selectedCexCertification?.authReady ? "Validate Read-Only Account" : "Adapter Not Certified"}
+                </button>
               </>
             ) : (
               <>
@@ -699,6 +735,7 @@ export function PositionsWorkspace({
                   <span>{selectedDexVenue.label}</span>
                   <b>{selectedDexVenue.chain}</b>
                 </div>
+                <ConnectionSupportCard certification={selectedDexCertification} />
                 {selectedDex === "hyperliquid" && (
                   <>
                     <select value={hyperliquidNetwork} onChange={(event) => setHyperliquidNetwork(event.target.value as "testnet" | "mainnet")}>
@@ -730,6 +767,36 @@ export function PositionsWorkspace({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function ConnectionSupportCard({ certification }: { certification?: VenueCertificationRecord }) {
+  if (!certification) {
+    return (
+      <div className="connection-support-card blocked">
+        <div><span>Certification</span><b>Unknown</b></div>
+        <p>This venue is not registered in the Black Terminal certification matrix.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`connection-support-card ${certification.executionMode}`}>
+      <div>
+        <span>{certification.label}</span>
+        <b>{formatExecutionMode(certification.executionMode)}</b>
+      </div>
+      <div>
+        <span>Readiness</span>
+        <b>{certification.readiness.replace(/-/g, " ").toUpperCase()}</b>
+      </div>
+      <div>
+        <span>Products</span>
+        <b>{certification.supportedProducts.length ? certification.supportedProducts.join(", ").toUpperCase() : "NONE"}</b>
+      </div>
+      <p>{certification.limitations[0]}</p>
+      {!certification.mainnetValidated && <em>MAINNET CERTIFICATION NOT RECORDED</em>}
     </div>
   );
 }
@@ -791,6 +858,18 @@ function ExecutionDock({
     : side === "buy"
       ? selectedMode === "futures" ? "Long" : "Buy"
       : selectedMode === "futures" ? "Short" : "Sell";
+
+  function runDiagnostics() {
+    const items = [
+      `MODE ${String(venue.executionMode || "unknown").toUpperCase()}`,
+      `READY ${String(venue.readiness || (executionReady ? "execution-ready" : "execution-blocked")).toUpperCase()}`,
+      `AUTH ${venue.health.authentication.toUpperCase()}`,
+      `STREAM ${venue.health.privateStream.toUpperCase()}`,
+      `TRADING ${venue.health.permissions.trading ? "YES" : "NO"}`,
+      venue.limitations?.[0] ? `LIMIT ${venue.limitations[0]}` : ""
+    ].filter(Boolean);
+    setSubmitStatus(items.join(" | "));
+  }
 
   async function handleSubmitOrder() {
     setSubmitStatus("");
@@ -887,6 +966,7 @@ function ExecutionDock({
       <div className="execution-connection-actions">
         <button onClick={onSwitchVenue}>Switch</button>
         <button className="danger" onClick={onDisconnectVenue}>Disconnect</button>
+        <button className="wide" onClick={runDiagnostics}>Run Diagnostics</button>
       </div>
 
       <select className="execution-venue-select" value={activeVenueId} onChange={(event) => onVenueChange(event.target.value)}>
@@ -900,6 +980,8 @@ function ExecutionDock({
         <span>Latency <b>{venue.health.latencyMs}ms</b></span>
         <span>Auth <b>{venue.health.authentication.toUpperCase()}</b></span>
         <span>Heartbeat <b>{venue.health.heartbeat.toUpperCase()}</b></span>
+        <span>Mode <b>{String(venue.executionMode || "UNKNOWN").replace(/-/g, " ").toUpperCase()}</b></span>
+        <span>Ready <b>{String(venue.readiness || (executionReady ? "execution-ready" : "execution-blocked")).replace(/-/g, " ").toUpperCase()}</b></span>
         {isProtocol && <span>Relay <b>{executionReady ? "READY" : "BLOCKED"}</b></span>}
         <span>Subs <b>{venue.health.subscriptionCount}</b></span>
         <span>Reconnects <b>{venue.health.reconnectCount}</b></span>

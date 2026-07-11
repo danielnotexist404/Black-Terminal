@@ -9,6 +9,13 @@ import {
 } from "../../server/portfolio-api.js";
 import { syncBybitAccountToSupabase, validateBybitCredentials } from "../../server/exchanges/bybit.js";
 
+const certifiedCredentialAdapters = {
+  bybit: {
+    executionMode: "read-only",
+    reason: "Bybit credential validation and account snapshot sync are certified read-only. Live trading remains disabled until adapter certification is complete."
+  }
+};
+
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
 
@@ -19,6 +26,12 @@ export default async function handler(req, res) {
     requireFields(req.body, ["exchange", "accountName", "apiKey", "apiSecret"]);
 
     const exchange = String(req.body.exchange).trim().toLowerCase();
+    const certification = certifiedCredentialAdapters[exchange];
+    if (!certification) {
+      const unsupported = new Error(`${exchange} credential validation is not certified yet. This venue is market-data-only until a production adapter is implemented.`);
+      unsupported.statusCode = 501;
+      throw unsupported;
+    }
     const accountName = String(req.body.accountName).trim();
     const rawCredentials = {
       exchange,

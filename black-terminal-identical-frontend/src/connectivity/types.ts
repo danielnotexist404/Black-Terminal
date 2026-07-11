@@ -5,6 +5,22 @@ import type { PortfolioPosition } from "../positions/types";
 
 export type ConnectionCategory = "centralized-exchange" | "wallet" | "protocol" | "market-data" | "institutional";
 
+export type ExecutionMode = "full-live" | "read-only" | "market-data-only" | "signer-only" | "unavailable";
+
+export type ConnectionNetwork = "mainnet" | "sandbox" | "testnet" | "unsupported";
+
+export type ConnectionReadiness =
+  | "disconnected"
+  | "authenticating"
+  | "connected"
+  | "synchronizing"
+  | "connected-read-only"
+  | "execution-blocked"
+  | "execution-ready"
+  | "degraded"
+  | "reconnecting"
+  | "error";
+
 export type ConnectionStatus =
   | "connecting"
   | "connected"

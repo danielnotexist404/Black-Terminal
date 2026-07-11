@@ -5465,6 +5465,60 @@ body.resizing-layout * {
   background: rgba(255, 255, 255, 0.025);
 }
 
+.connection-support-card {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.025);
+  color: #8d939c;
+  font: 800 9px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.connection-support-card.full-live {
+  border-color: rgba(0, 255, 136, 0.22);
+  background: rgba(0, 255, 136, 0.035);
+}
+
+.connection-support-card.read-only,
+.connection-support-card.signer-only {
+  border-color: rgba(245, 188, 67, 0.22);
+  background: rgba(245, 188, 67, 0.035);
+}
+
+.connection-support-card.market-data-only,
+.connection-support-card.unavailable,
+.connection-support-card.blocked {
+  border-color: rgba(255, 0, 0, 0.22);
+  background: rgba(255, 0, 0, 0.035);
+}
+
+.connection-support-card div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.connection-support-card b {
+  color: var(--strong);
+  text-align: right;
+}
+
+.connection-support-card p,
+.connection-support-card em {
+  margin: 0;
+  color: #a5abb4;
+  line-height: 1.45;
+}
+
+.connection-support-card em {
+  color: #f5bc43;
+  font-style: normal;
+}
+
 .positions-connect-status {
   min-height: 28px;
   display: grid;
@@ -5621,6 +5675,10 @@ body.resizing-layout * {
   gap: 6px;
 }
 
+.execution-connection-actions .wide {
+  grid-column: 1 / -1;
+}
+
 .execution-connection-actions button {
   height: 28px;
   border: 1px solid rgba(255, 255, 255, 0.09);
@@ -5635,6 +5693,12 @@ body.resizing-layout * {
 .execution-connection-actions button:hover {
   border-color: rgba(255, 255, 255, 0.16);
   color: var(--strong);
+}
+
+.pm-ticket button:disabled,
+.execution-connection-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .execution-connection-actions button.danger {

@@ -181,6 +181,29 @@ Capability detection controls the UI:
 - Centralized exchange: spot, limit, conditional, leverage, positions, balances, orders, and private/public streams depending on adapter support.
 - Future DEX adapter: should report swap and/or perpetual capabilities only when real protocol execution is implemented.
 
+## Venue Certification Matrix
+
+Chapter XI introduces a certification registry at `src/connectivity/venueRegistry.ts`.
+
+Before a venue can appear as more than market-data-only or signer-only, it must declare:
+
+- category
+- execution mode
+- supported network
+- readiness state
+- supported products
+- supported order types
+- market-data readiness
+- account-read readiness
+- execution readiness
+- private-stream readiness
+- mainnet validation status
+- known limitations
+
+The Positions connection wizard reads this registry. The server credential route rejects exchanges
+without certified credential validation. The frontend must not fall back to local credential storage
+for real exchanges when server validation fails.
+
 Protocol framework files:
 
 - `src/protocols/types.ts`

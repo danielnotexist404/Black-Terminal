@@ -3,7 +3,17 @@ import React, { useState } from "react";
 import { Check, Activity, Bell, Code2, Shield, Lock, X, ArrowLeft, Chrome, Layers, Cpu, TrendingUp, Users } from "lucide-react";
 import "../styles/landing.css";
 import "../styles/login.css";
-import { dbGetUsers, dbVerifyUser, dbRegisterUser, dbUpdateUser, dbAddAuditLog, establishSupabaseAuthSession, getGeoIPInfo } from "../lib/supabase";
+import {
+  BLACK_TERMINAL_ADMIN_EMAIL,
+  BLACK_TERMINAL_ADMIN_USERNAME,
+  dbGetUsers,
+  dbVerifyUser,
+  dbRegisterUser,
+  dbUpdateUser,
+  dbAddAuditLog,
+  establishSupabaseAuthSession,
+  getGeoIPInfo
+} from "../lib/supabase";
 import { sendVerificationEmail } from "../lib/resend";
 
 // Import generated images
@@ -146,7 +156,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
         onLoginSuccess(cleanUser, userObj.role);
       } else {
         // Fallback for special black_terminal_admin case if not in DB yet
-        const isUserAdmin = cleanUser === "black_terminal_admin";
+        const isUserAdmin = cleanUser === BLACK_TERMINAL_ADMIN_USERNAME;
         const defaultAllowed = [
           "orderBookHeatmap",
           "liquidationHeatmap",
@@ -167,7 +177,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
         const adminAllowed = [...defaultAllowed, "volumeProfile"];
         const newUser = {
           username: cleanUser,
-          email: isUserAdmin ? "admin@blackterminal.com" : "imported@blackterminal.com",
+          email: isUserAdmin ? BLACK_TERMINAL_ADMIN_EMAIL : "imported@blackterminal.com",
           role: (isUserAdmin ? "admin" : "user") as any,
           status: "online" as const,
           createdAt: new Date().toISOString(),
@@ -330,7 +340,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
         const newUser = {
           username: cleanUser,
           email: cleanEmail,
-          role: (cleanUser === "black_terminal_admin" ? "admin" : "user") as any,
+          role: (cleanUser === BLACK_TERMINAL_ADMIN_USERNAME ? "admin" : "user") as any,
           status: "online" as const,
           createdAt: new Date().toISOString(),
           lastLogin: new Date().toISOString(),

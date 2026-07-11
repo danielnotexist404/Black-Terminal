@@ -2,6 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
+export const BLACK_TERMINAL_ADMIN_USERNAME = "black_terminal_admin";
+export const BLACK_TERMINAL_ADMIN_EMAIL = "blacktrianglecorp@gmail.com";
 
 export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
 
@@ -56,7 +58,7 @@ const AUDIT_LOGS_KEY = "bt_audit_logs";
 
 // Pre-populate admin user in local storage if not exists
 if (typeof window !== "undefined") {
-  const adminUser = "black_terminal_admin";
+  const adminUser = BLACK_TERMINAL_ADMIN_USERNAME;
   const storedCreds = localStorage.getItem(CREDS_DB_KEY);
   const creds = storedCreds ? JSON.parse(storedCreds) : {};
   if (!creds[adminUser]) {
@@ -69,7 +71,7 @@ if (typeof window !== "undefined") {
   if (!users.find((u: any) => u.username === adminUser)) {
     users.push({
       username: adminUser,
-      email: "admin@blackterminal.com",
+      email: BLACK_TERMINAL_ADMIN_EMAIL,
       role: "admin",
       status: "offline",
       createdAt: new Date().toISOString(),
@@ -223,7 +225,9 @@ export async function establishSupabaseAuthSession(
 ): Promise<{ success: boolean; error?: string; needsEmailConfirmation?: boolean }> {
   if (!isSupabaseConfigured || !supabase) return { success: true };
 
-  const email = user.email?.trim();
+  const email = user.username === BLACK_TERMINAL_ADMIN_USERNAME
+    ? BLACK_TERMINAL_ADMIN_EMAIL
+    : user.email?.trim();
   const password = accessCode.trim();
   if (!email || !password) {
     return { success: false, error: "Supabase Auth requires the user's email and access code." };

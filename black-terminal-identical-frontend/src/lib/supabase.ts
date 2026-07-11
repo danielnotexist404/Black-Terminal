@@ -178,7 +178,7 @@ export async function dbVerifyUser(username: string, accessCode: string): Promis
 }
 
 export async function establishSupabaseAuthSession(
-  user: Pick<DBUser, "username" | "email" | "role">,
+  user: Pick<DBUser, "username" | "displayName" | "email" | "role">,
   accessCode: string,
   options: { allowCreate?: boolean } = {}
 ): Promise<{ success: boolean; error?: string; needsEmailConfirmation?: boolean }> {
@@ -207,7 +207,7 @@ export async function establishSupabaseAuthSession(
   }
 
   const signInMessage = signedIn.error?.message || "Unknown Supabase Auth error.";
-  if (signInMessage.toLowerCase().includes("email not confirmed")) {
+  if (!options.allowCreate && signInMessage.toLowerCase().includes("email not confirmed")) {
     return {
       success: false,
       needsEmailConfirmation: true,
@@ -222,32 +222,40 @@ export async function establishSupabaseAuthSession(
     };
   }
 
-  const signedUp = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        username: user.username,
-        role: user.role
-      }
-    }
+  const ensured = await fetch("/api/auth/ensure-user", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email,
+      password,
+      username: user.username,
+      displayName: user.displayName || user.username
+    })
   });
 
-  if (signedUp.error) {
+  if (!ensured.ok) {
+    let errorMessage = "Server-side Supabase Auth user creation failed.";
+    try {
+      const errorPayload = await ensured.json();
+      errorMessage = errorPayload.error || errorMessage;
+    } catch {
+      // Keep generic error.
+    }
+
     return {
       success: false,
-      error: `Supabase Auth sign-in failed. Create or update the Authentication user for ${email} with the same Black Terminal access code. ${signedIn.error?.message || signedUp.error.message}`
+      error: `${errorMessage} ${signInMessage}`
     };
   }
 
-  if (signedUp.data.session) {
+  const retrySignIn = await supabase.auth.signInWithPassword({ email, password });
+  if (!retrySignIn.error && retrySignIn.data.session) {
     return { success: true };
   }
 
   return {
     success: false,
-    needsEmailConfirmation: true,
-    error: `Supabase Auth user for ${email} exists or was created, but no active session was returned. Confirm the email or disable email confirmation for this project, then sign in again.`
+    error: `Supabase Auth user for ${email} was confirmed server-side, but sign-in still failed. ${retrySignIn.error?.message || signInMessage}`
   };
 }
 

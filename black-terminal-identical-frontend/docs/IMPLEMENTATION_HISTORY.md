@@ -27,6 +27,7 @@ Recent pushed commits:
 - Current - Remove hardcoded default admin bootstrap for clean user reset.
 - Current - Expand registration phone country dial-code selector.
 - Current - Add registration display name separate from login username.
+- Current - Create confirmed Supabase Auth users server-side after Black Terminal verification.
 - Current - Prevent normal sign-in from triggering Supabase confirmation email retries.
 - Current - Redesign DOM Pro+ as institutional liquidity radar.
 - Current - Implement Phase III Chapter VI DOM Pro+ cockpit.

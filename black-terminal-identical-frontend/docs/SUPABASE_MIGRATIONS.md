@@ -1894,3 +1894,23 @@ npm run verify:bybit-infrastructure
 ```
 
 If this verifier fails, apply the missing migration section named in the command output before running live certification.
+
+## 2026-07-12 - Registration Display Name
+
+Status: Optional but recommended before fresh user onboarding.
+
+Reason:
+
+- Registration now separates public display name from the login username/handle.
+- If this column is not applied, registration still falls back to the existing schema, but the display name will not persist in `bt_users`.
+
+SQL:
+
+```sql
+alter table public.bt_users
+  add column if not exists display_name text;
+
+update public.bt_users
+set display_name = coalesce(nullif(display_name, ''), username)
+where display_name is null or display_name = '';
+```

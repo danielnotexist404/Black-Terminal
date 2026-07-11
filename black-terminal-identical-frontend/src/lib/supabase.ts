@@ -11,6 +11,7 @@ export const supabase = isSupabaseConfigured
 
 export interface DBUser {
   username: string;
+  displayName?: string;
   email: string;
   role: "admin" | "user";
   status: "online" | "offline" | "suspended";
@@ -65,6 +66,7 @@ export async function dbGetUsers(): Promise<DBUser[]> {
       if (data) {
         return data.map((u: any) => ({
           username: u.username,
+          displayName: u.display_name || u.displayName || u.username,
           email: u.email,
           role: u.role,
           status: u.status,
@@ -103,6 +105,7 @@ export async function dbGetUsers(): Promise<DBUser[]> {
   const parsed = stored ? JSON.parse(stored) : [];
   return parsed.map((u: any) => ({
     ...u,
+    displayName: u.displayName || u.display_name || u.username,
     ip: u.ip || "127.0.0.1",
     countryCode: u.countryCode || u.country_code || "IL",
     countryName: u.countryName || u.country_name || "Israel",
@@ -277,38 +280,49 @@ export async function dbRegisterUser(user: DBUser, accessCode: string): Promise<
         return { success: false, error: "Username already exists" };
       }
 
-      const { error } = await supabase
-        .from("bt_users")
-        .insert({
-          username: user.username,
-          email: user.email,
-          password: accessCode.trim(),
-          role: user.role,
-          status: user.status,
-          created_at: user.createdAt,
-          last_login: user.lastLogin,
-          allowed_indicators: user.allowedIndicators,
-          active_indicators: user.activeIndicators,
-          workspaces: user.workspaces || ["Quant Desk", "Scalp Layout", "Strategy Lab"],
-          workspace_snapshots: user.workspaceSnapshots || {},
-          active_workspace: user.activeWorkspace || "Quant Desk",
-          alerts: user.alerts || [],
-          scripts: user.scripts || [],
-          alert_event_logs: user.alertEventLogs || [],
-          ip: ip,
-          country_code: countryCode,
-          country_name: countryName,
-          first_name: user.firstName || "",
-          last_name: user.lastName || "",
-          organization: user.organization || "",
-          billing_address: user.billingAddress || "",
-          purpose_of_use: user.purposeOfUse || "personal",
-          phone: user.phone || "",
-          newsletter_opt_in: user.newsletterOptIn || false,
-          referred_by: user.referredBy || "",
-          email_verified: user.emailVerified || false
-        });
-      if (error) throw error;
+      const payload = {
+        username: user.username,
+        display_name: user.displayName || user.username,
+        email: user.email,
+        password: accessCode.trim(),
+        role: user.role,
+        status: user.status,
+        created_at: user.createdAt,
+        last_login: user.lastLogin,
+        allowed_indicators: user.allowedIndicators,
+        active_indicators: user.activeIndicators,
+        workspaces: user.workspaces || ["Quant Desk", "Scalp Layout", "Strategy Lab"],
+        workspace_snapshots: user.workspaceSnapshots || {},
+        active_workspace: user.activeWorkspace || "Quant Desk",
+        alerts: user.alerts || [],
+        scripts: user.scripts || [],
+        alert_event_logs: user.alertEventLogs || [],
+        ip: ip,
+        country_code: countryCode,
+        country_name: countryName,
+        first_name: user.firstName || "",
+        last_name: user.lastName || "",
+        organization: user.organization || "",
+        billing_address: user.billingAddress || "",
+        purpose_of_use: user.purposeOfUse || "personal",
+        phone: user.phone || "",
+        newsletter_opt_in: user.newsletterOptIn || false,
+        referred_by: user.referredBy || "",
+        email_verified: user.emailVerified || false
+      };
+
+      const { error } = await supabase.from("bt_users").insert(payload);
+      if (error) {
+        const message = error.message || "";
+        if (message.includes("display_name") || error.code === "PGRST204") {
+          const compatiblePayload: any = { ...payload };
+          delete compatiblePayload.display_name;
+          const retry = await supabase.from("bt_users").insert(compatiblePayload);
+          if (retry.error) throw retry.error;
+        } else {
+          throw error;
+        }
+      }
       return { success: true };
     } catch (e: any) {
       console.error("Supabase register error:", e);
@@ -344,6 +358,7 @@ export async function dbUpdateUser(username: string, patch: Partial<DBUser> & { 
     try {
       const dbPatch: any = {};
       if (patch.email !== undefined) dbPatch.email = patch.email;
+      if (patch.displayName !== undefined) dbPatch.display_name = patch.displayName;
       if (patch.role !== undefined) dbPatch.role = patch.role;
       if (patch.status !== undefined) dbPatch.status = patch.status;
       if (patch.lastLogin !== undefined) dbPatch.last_login = patch.lastLogin;

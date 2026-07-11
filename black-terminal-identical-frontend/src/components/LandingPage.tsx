@@ -86,6 +86,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
   const [view, setView] = useState<ViewState>("landing");
 
   // Form states
+  const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -185,11 +186,12 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
     setSuccessMsg("");
 
     const cleanUser = username.trim();
+    const cleanDisplayName = displayName.trim();
     const cleanEmail = email.trim();
     const cleanPass = password.trim();
 
     if (signUpStep === 1) {
-      if (!cleanUser || !cleanEmail || !cleanPass || !confirmPassword.trim()) {
+      if (!cleanDisplayName || !cleanUser || !cleanEmail || !cleanPass || !confirmPassword.trim()) {
         setErrorMsg("Please fill all fields");
         return;
       }
@@ -318,6 +320,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
         ];
         const newUser = {
           username: cleanUser,
+          displayName: cleanDisplayName,
           email: cleanEmail,
           role: "user" as const,
           status: "online" as const,
@@ -366,6 +369,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
   const handleOpenSignIn = () => {
     setErrorMsg("");
     setUsername("");
+    setDisplayName("");
     setEmail("");
     setPassword("");
     setView("signin");
@@ -374,6 +378,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
   const handleOpenSignUp = () => {
     setErrorMsg("");
     setUsername("");
+    setDisplayName("");
     setEmail("");
     setPassword("");
     setConfirmPassword("");
@@ -500,6 +505,21 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                {/* SIGN UP STEP 1: CREDENTIALS */}
                {!isSignIn && signUpStep === 1 && (
                  <>
+                   <div className="login-field">
+                     <label className="login-label">Display Name</label>
+                     <input
+                       className="login-input"
+                       type="text"
+                       value={displayName}
+                       placeholder="DISPLAY NAME"
+                       onChange={(e) => setDisplayName(e.target.value)}
+                       disabled={loading}
+                       autoComplete="name"
+                     />
+                     <span style={{ fontSize: '9px', color: 'var(--dim)', marginTop: '4px', display: 'block' }}>
+                       Public profile name. Spaces are allowed.
+                     </span>
+                   </div>
                    <div className="login-field">
                      <label className="login-label">Identity (Username)</label>
                      <input

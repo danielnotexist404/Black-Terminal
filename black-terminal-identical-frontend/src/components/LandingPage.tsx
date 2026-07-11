@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { Check, Activity, Bell, Code2, Shield, Lock, X, ArrowLeft, Chrome, Layers, Cpu, TrendingUp, Users } from "lucide-react";
 import "../styles/landing.css";
 import "../styles/login.css";
-import { dbGetUsers, dbVerifyUser, dbRegisterUser, dbUpdateUser, dbAddAuditLog, getGeoIPInfo } from "../lib/supabase";
+import { dbGetUsers, dbVerifyUser, dbRegisterUser, dbUpdateUser, dbAddAuditLog, establishSupabaseAuthSession, getGeoIPInfo } from "../lib/supabase";
 import { sendVerificationEmail } from "../lib/resend";
 
 // Import generated images
@@ -135,6 +135,13 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
           countryName: geo.countryName
         });
 
+        const secureSession = await establishSupabaseAuthSession(userObj, cleanPass);
+        if (!secureSession.success) {
+          setErrorMsg(secureSession.error || "Secure Supabase Auth session failed.");
+          setLoading(false);
+          return;
+        }
+
         await dbAddAuditLog("LOGIN", `User ${cleanUser} logged in from landing page.`);
         onLoginSuccess(cleanUser, userObj.role);
       } else {
@@ -169,6 +176,12 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
           activeIndicators: []
         };
         await dbRegisterUser(newUser, cleanPass);
+        const secureSession = await establishSupabaseAuthSession(newUser, cleanPass);
+        if (!secureSession.success) {
+          setErrorMsg(secureSession.error || "Secure Supabase Auth session failed.");
+          setLoading(false);
+          return;
+        }
         onLoginSuccess(cleanUser, newUser.role);
       }
     } catch (err: any) {
@@ -343,6 +356,12 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
 
         await dbAddAuditLog("CREATE", `New secure account registered: ${cleanUser} (${cleanEmail})`);
         await dbAddAuditLog("LOGIN", `User ${cleanUser} logged in automatically.`);
+        const secureSession = await establishSupabaseAuthSession(newUser, cleanPass);
+        if (!secureSession.success) {
+          setErrorMsg(secureSession.error || "Secure Supabase Auth session failed.");
+          setLoading(false);
+          return;
+        }
 
         setSuccessMsg("Handshake successful! Terminal ready...");
         setTimeout(() => {

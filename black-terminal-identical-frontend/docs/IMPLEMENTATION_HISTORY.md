@@ -23,6 +23,7 @@ Recent pushed commits:
 - Current - Fix DOM Pro+ full price domain, buy walls, and depth diagnostics.
 - Current - Build DOM Pro+ real price-domain liquidity camera.
 - Current - Consolidate Vercel API route dispatchers for production deploy.
+- Current - Bridge Black Terminal login to Supabase Auth for secure credential routes.
 - Current - Redesign DOM Pro+ as institutional liquidity radar.
 - Current - Implement Phase III Chapter VI DOM Pro+ cockpit.
 - Current - Implement Phase IV professional network foundation.

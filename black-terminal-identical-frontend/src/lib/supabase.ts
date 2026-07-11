@@ -217,6 +217,68 @@ export async function dbVerifyUser(username: string, accessCode: string): Promis
   return { success: false, error: "Access denied: Invalid credentials" };
 }
 
+export async function establishSupabaseAuthSession(
+  user: Pick<DBUser, "username" | "email" | "role">,
+  accessCode: string
+): Promise<{ success: boolean; error?: string; needsEmailConfirmation?: boolean }> {
+  if (!isSupabaseConfigured || !supabase) return { success: true };
+
+  const email = user.email?.trim();
+  const password = accessCode.trim();
+  if (!email || !password) {
+    return { success: false, error: "Supabase Auth requires the user's email and access code." };
+  }
+
+  const normalizedEmail = email.toLowerCase();
+  const existing = await supabase.auth.getSession();
+  const existingEmail = existing.data.session?.user?.email?.toLowerCase();
+  if (existing.data.session && existingEmail === normalizedEmail) {
+    return { success: true };
+  }
+
+  if (existing.data.session) {
+    await supabase.auth.signOut();
+  }
+
+  const signedIn = await supabase.auth.signInWithPassword({ email, password });
+  if (!signedIn.error && signedIn.data.session) {
+    return { success: true };
+  }
+
+  const signedUp = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        username: user.username,
+        role: user.role
+      }
+    }
+  });
+
+  if (signedUp.error) {
+    return {
+      success: false,
+      error: `Supabase Auth sign-in failed. Create or update the Authentication user for ${email} with the same Black Terminal access code. ${signedIn.error?.message || signedUp.error.message}`
+    };
+  }
+
+  if (signedUp.data.session) {
+    return { success: true };
+  }
+
+  return {
+    success: false,
+    needsEmailConfirmation: true,
+    error: `Supabase Auth user for ${email} exists or was created, but no active session was returned. Confirm the email or disable email confirmation for this project, then sign in again.`
+  };
+}
+
+export async function clearSupabaseAuthSession(): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) return;
+  await supabase.auth.signOut();
+}
+
 // Helper: Register user
 export async function dbRegisterUser(user: DBUser, accessCode: string): Promise<{ success: boolean; error?: string }> {
   let ip = user.ip;

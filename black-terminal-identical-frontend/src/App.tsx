@@ -83,7 +83,7 @@ import type {
   VisibleIndicators
 } from "./chart-engine/types";
 import { defaultIndicatorAdvancedSettings } from "./chart-engine/profile/volumeProfileDefaults";
-import { dbGetUsers, dbUpdateUser, dbAddAuditLog } from "./lib/supabase";
+import { clearSupabaseAuthSession, dbGetUsers, dbUpdateUser, dbAddAuditLog } from "./lib/supabase";
 import { getMarketDataEngineAdapter } from "./market-data/engine/marketDataEngine";
 import { ExchangeOption, MarketSymbolOption, getExchangeOption, marketCatalog } from "./market-data/marketCatalog";
 import type { ExchangeId, MarketSymbol, Timeframe } from "./market-data/types";
@@ -470,6 +470,7 @@ export default function App() {
       await dbUpdateUser(currentUser.username, { status: "offline" });
       await dbAddAuditLog("LOGOUT", `User ${currentUser.username} logged out.`);
     }
+    await clearSupabaseAuthSession();
     setCurrentUser(null);
     setActiveNav("CHART");
   };

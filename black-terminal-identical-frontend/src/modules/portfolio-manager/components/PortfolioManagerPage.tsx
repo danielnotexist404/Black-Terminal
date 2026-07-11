@@ -18,7 +18,7 @@ import type { ConnectionCapability, ConnectionDiagnostics } from "../../../conne
 import { formatExecutionMode, getVenueCertification, type VenueCertificationRecord } from "../../../connectivity/venueRegistry";
 import { submitOrder } from "../../../execution/executionEngine";
 import { disableMainnetValidationMode, promptEnableMainnetValidationMode, readMainnetValidationMode, validateMainnetOrderReadiness } from "../../../execution/mainnetValidationMode";
-import { submitPortfolioOrderViaApi, type PortfolioOrderDraft } from "../../../portfolio/portfolioApiClient";
+import { runExchangeAccountDiagnosticsViaApi, submitPortfolioOrderViaApi, type PortfolioOrderDraft } from "../../../portfolio/portfolioApiClient";
 import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } from "../../../portfolio/types";
 import { getPortfolioSnapshot } from "../../../portfolio/portfolioStore";
 import { defaultRiskControls } from "../../../risk/types";
@@ -859,7 +859,7 @@ function ExecutionDock({
       ? selectedMode === "futures" ? "Long" : "Buy"
       : selectedMode === "futures" ? "Short" : "Sell";
 
-  function runDiagnostics() {
+  async function runDiagnostics() {
     const items = [
       `MODE ${String(venue.executionMode || "unknown").toUpperCase()}`,
       `READY ${String(venue.readiness || (executionReady ? "execution-ready" : "execution-blocked")).toUpperCase()}`,
@@ -869,6 +869,28 @@ function ExecutionDock({
       venue.limitations?.[0] ? `LIMIT ${venue.limitations[0]}` : ""
     ].filter(Boolean);
     setSubmitStatus(items.join(" | "));
+
+    if (venue.category !== "centralized-exchange" || !venue.accountId) return;
+
+    try {
+      setSubmitStatus("RUNNING SERVER DIAGNOSTICS");
+      const diagnostics = await runExchangeAccountDiagnosticsViaApi(venue.accountId);
+      if (!diagnostics) {
+        setSubmitStatus("SUPABASE SESSION REQUIRED FOR SERVER DIAGNOSTICS");
+        return;
+      }
+      setSubmitStatus([
+        `READY ${diagnostics.readiness.toUpperCase()}`,
+        `LATENCY ${diagnostics.latencyMs}MS`,
+        `CLOCK ${diagnostics.time?.clockSkewMs ?? "?"}MS`,
+        `BAL ${diagnostics.balances?.length ?? 0}`,
+        `POS ${diagnostics.positions?.length ?? 0}`,
+        `ORD ${diagnostics.openOrders?.length ?? 0}`,
+        diagnostics.permissions.warnings[0] || ""
+      ].filter(Boolean).join(" | "));
+    } catch (error) {
+      setSubmitStatus(error instanceof Error ? error.message.toUpperCase() : String(error));
+    }
   }
 
   async function handleSubmitOrder() {

@@ -1,4 +1,5 @@
-import { applyCors, requireFields, requireMethod, requireUser, sendError } from "../../server/portfolio-api.js";
+import { applyCors, decryptCredentialPayload, requireFields, requireMethod, requireUser, sendError } from "../../server/portfolio-api.js";
+import { cancelBybitOrder } from "../../server/exchanges/bybit.js";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -11,7 +12,7 @@ export default async function handler(req, res) {
 
     const { data: existingOrder, error: lookupError } = await supabase
       .from("execution_orders")
-      .select("*")
+      .select("*, exchange_accounts(exchange)")
       .eq("id", req.body.orderId)
       .eq("user_id", user.id)
       .single();
@@ -20,6 +21,25 @@ export default async function handler(req, res) {
       const error = new Error("Order not found.");
       error.statusCode = 404;
       throw error;
+    }
+
+    let venueCancelResult = null;
+    const exchange = existingOrder.exchange_accounts?.exchange || existingOrder.exchange;
+    if (exchange === "bybit" && existingOrder.exchange_order_id) {
+      const { data: credential, error: credentialError } = await supabase
+        .from("exchange_credentials")
+        .select("encrypted_payload")
+        .eq("account_id", existingOrder.account_id)
+        .single();
+
+      if (credentialError || !credential) throw credentialError || new Error("Missing encrypted credentials for venue cancel.");
+      const credentials = decryptCredentialPayload(credential.encrypted_payload);
+      venueCancelResult = await cancelBybitOrder(credentials, {
+        marketKind: existingOrder.market_kind || "perpetual",
+        symbol: existingOrder.symbol,
+        orderId: existingOrder.exchange_order_id,
+        clientOrderId: existingOrder.client_order_id
+      });
     }
 
     const { data: order, error } = await supabase
@@ -42,7 +62,7 @@ export default async function handler(req, res) {
       event_type: "order_cancelled",
       severity: "info",
       message: `Order ${order.id} was cancelled.`,
-      metadata: { previousStatus: existingOrder.status }
+      metadata: { previousStatus: existingOrder.status, venueCancelResult }
     });
 
     return res.status(200).json({ order });

@@ -42,6 +42,14 @@ npm run perf:stress
 `npm run perf:baseline` writes the current Chapter IX performance footprint to `docs/performance/latest-baseline.md` and `.json`.
 `npm run perf:stress` requires `PERF_STRESS_URL` and writes a long-session JSONL log under `docs/performance/`.
 
+Bybit diagnostics and controlled live validation use:
+
+```bash
+BYBIT_MAINNET_VALIDATION_ENABLED=true
+```
+
+Keep it unset unless deliberately validating tiny live orders through the existing OMS/EMS/Risk path.
+
 For controlled Hyperliquid live validation, keep mainnet disabled unless the relay environment is
 intentionally configured:
 

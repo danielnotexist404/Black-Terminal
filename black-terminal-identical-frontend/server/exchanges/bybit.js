@@ -5,12 +5,128 @@ const RECV_WINDOW = "5000";
 
 export async function validateBybitCredentials(credentials) {
   const startedAt = Date.now();
-  await bybitRequest(credentials, "GET", "/v5/account/wallet-balance", { accountType: "UNIFIED" });
+  const diagnostics = await getBybitDiagnostics(credentials, { symbol: "BTCUSDT" });
 
   return {
     status: "connected",
     apiHealth: "healthy",
-    latencyMs: Date.now() - startedAt
+    latencyMs: Date.now() - startedAt,
+    diagnostics
+  };
+}
+
+export async function getBybitServerTime() {
+  const response = await bybitPublicRequest("/v5/market/time");
+  const serverTimeMs = Number(response?.timeNano ? Math.floor(Number(response.timeNano) / 1_000_000) : response?.timeSecond ? Number(response.timeSecond) * 1000 : Date.now());
+  return {
+    serverTimeMs,
+    serverTime: new Date(serverTimeMs).toISOString(),
+    localTimeMs: Date.now(),
+    clockSkewMs: Date.now() - serverTimeMs
+  };
+}
+
+export async function getBybitInstrumentMetadata({ category = "linear", symbol = "BTCUSDT" } = {}) {
+  const response = await bybitPublicRequest("/v5/market/instruments-info", { category, symbol });
+  const list = response?.list || [];
+  return list.map((instrument) => ({
+    venueId: "bybit",
+    nativeSymbol: instrument.symbol,
+    canonicalBase: instrument.baseCoin || symbol.replace(/USDT$/, ""),
+    canonicalQuote: instrument.quoteCoin || "USDT",
+    settlementAsset: instrument.settleCoin || instrument.quoteCoin || "USDT",
+    marketType: category === "spot" ? "spot" : "perpetual",
+    contractType: instrument.contractType || null,
+    expiry: instrument.deliveryTime ? new Date(Number(instrument.deliveryTime)).toISOString() : null,
+    contractMultiplier: nullableNumber(instrument.lotSizeFilter?.qtyStep) || 1,
+    tickSize: nullableNumber(instrument.priceFilter?.tickSize),
+    quantityStep: nullableNumber(instrument.lotSizeFilter?.qtyStep),
+    minQuantity: nullableNumber(instrument.lotSizeFilter?.minOrderQty),
+    minNotional: nullableNumber(instrument.lotSizeFilter?.minNotionalValue),
+    maxQuantity: nullableNumber(instrument.lotSizeFilter?.maxOrderQty),
+    pricePrecision: precisionFromStep(instrument.priceFilter?.tickSize),
+    quantityPrecision: precisionFromStep(instrument.lotSizeFilter?.qtyStep),
+    leverageLimits: {
+      min: nullableNumber(instrument.leverageFilter?.minLeverage),
+      max: nullableNumber(instrument.leverageFilter?.maxLeverage),
+      step: nullableNumber(instrument.leverageFilter?.leverageStep)
+    },
+    supportedMarginModes: category === "spot" ? [] : ["cross", "isolated"],
+    supportedTimeInForce: ["GTC", "IOC", "FOK", "PostOnly"],
+    supportedTriggerBehavior: { triggerOrders: category !== "spot", takeProfitStopLoss: category !== "spot" },
+    tradingStatus: instrument.status || "unknown",
+    raw: instrument
+  }));
+}
+
+export async function getBybitOpenOrders(credentials, { category = "linear", symbol } = {}) {
+  const response = await bybitRequest(credentials, "GET", "/v5/order/realtime", {
+    category,
+    symbol,
+    limit: "50",
+    openOnly: "0"
+  });
+  return (response?.list || []).map((order) => ({
+    orderId: order.orderId,
+    clientOrderId: order.orderLinkId,
+    symbol: order.symbol,
+    side: String(order.side || "").toLowerCase() === "sell" ? "sell" : "buy",
+    type: String(order.orderType || "").toLowerCase(),
+    status: normalizeBybitOrderStatus(order.orderStatus),
+    quantity: Number(order.qty || 0),
+    filledQuantity: Number(order.cumExecQty || 0),
+    averageFillPrice: nullableNumber(order.avgPrice),
+    price: nullableNumber(order.price),
+    reduceOnly: Boolean(order.reduceOnly),
+    timeInForce: order.timeInForce,
+    updatedAt: Number(order.updatedTime || Date.now())
+  }));
+}
+
+export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = {}) {
+  const startedAt = Date.now();
+  const [time, metadata, balances, positions, openOrders] = await Promise.all([
+    getBybitServerTime(),
+    getBybitInstrumentMetadata({ category: "linear", symbol }),
+    getBybitBalances(credentials),
+    getBybitPositions(credentials),
+    getBybitOpenOrders(credentials, { category: "linear", symbol })
+  ]);
+
+  return {
+    venueId: "bybit",
+    provider: "bybit",
+    network: "mainnet",
+    executionMode: "read-only",
+    readiness: "connected-read-only",
+    latencyMs: Date.now() - startedAt,
+    authentication: "authenticated",
+    synchronization: "synced",
+    publicStream: "connected",
+    privateStream: "not-supported",
+    permissions: {
+      read: true,
+      trading: false,
+      withdrawal: false,
+      warnings: ["Bybit trading remains disabled until private stream, precision, execution, cancel/modify, reconciliation, and mainnet validation certification are complete."]
+    },
+    time,
+    metadata,
+    balances,
+    positions,
+    openOrders,
+    rateLimitUsage: "unknown",
+    certification: {
+      marketDataReady: true,
+      authReady: true,
+      accountReadReady: true,
+      balancesReady: true,
+      positionsReady: true,
+      openOrdersReady: true,
+      privateStreamsReady: false,
+      executionReady: false,
+      mainnetValidated: false
+    }
   };
 }
 
@@ -127,6 +243,42 @@ export async function placeBybitOrder(credentials, order) {
   };
 }
 
+export async function cancelBybitOrder(credentials, { marketKind = "perpetual", symbol, orderId, clientOrderId }) {
+  if (!orderId && !clientOrderId) throw new Error("Bybit cancel requires orderId or clientOrderId.");
+  const category = marketKind === "spot" ? "spot" : "linear";
+  const response = await bybitRequest(credentials, "POST", "/v5/order/cancel", {}, {
+    category,
+    symbol,
+    orderId,
+    orderLinkId: clientOrderId
+  });
+  return {
+    exchangeOrderId: response?.orderId || orderId,
+    clientOrderId: response?.orderLinkId || clientOrderId
+  };
+}
+
+export async function modifyBybitOrder(credentials, patch) {
+  if (!patch.orderId && !patch.clientOrderId) throw new Error("Bybit modify requires orderId or clientOrderId.");
+  const category = patch.marketKind === "spot" ? "spot" : "linear";
+  const body = {
+    category,
+    symbol: patch.symbol,
+    orderId: patch.orderId,
+    orderLinkId: patch.clientOrderId,
+    qty: patch.quantity ? String(patch.quantity) : undefined,
+    price: patch.limitPrice ? String(patch.limitPrice) : undefined,
+    triggerPrice: patch.stopPrice ? String(patch.stopPrice) : undefined,
+    takeProfit: patch.takeProfit ? String(patch.takeProfit) : undefined,
+    stopLoss: patch.stopLoss ? String(patch.stopLoss) : undefined
+  };
+  const response = await bybitRequest(credentials, "POST", "/v5/order/amend", {}, body);
+  return {
+    exchangeOrderId: response?.orderId || patch.orderId,
+    clientOrderId: response?.orderLinkId || patch.clientOrderId
+  };
+}
+
 async function getBybitBalances(credentials) {
   const response = await bybitRequest(credentials, "GET", "/v5/account/wallet-balance", { accountType: "UNIFIED" });
   const account = response?.list?.[0];
@@ -216,6 +368,21 @@ async function bybitRequest(credentials, method, path, query = {}, body) {
   return data.result;
 }
 
+async function bybitPublicRequest(path, query = {}) {
+  const queryString = buildQueryString(query);
+  const response = await fetch(`${BYBIT_BASE_URL}${path}${queryString ? `?${queryString}` : ""}`);
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok || data?.retCode !== 0) {
+    const error = new Error(data?.retMsg || `Bybit public request failed with HTTP ${response.status}`);
+    error.statusCode = response.status === 404 ? 404 : 502;
+    error.bybit = data;
+    throw error;
+  }
+
+  return data.result;
+}
+
 function buildQueryString(query) {
   return Object.entries(query)
     .filter(([, value]) => value !== undefined && value !== null && value !== "")
@@ -243,4 +410,20 @@ function nullableNumber(value) {
   if (value === undefined || value === null || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function precisionFromStep(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const text = String(value);
+  if (!text.includes(".")) return 0;
+  return text.split(".")[1].replace(/0+$/, "").length;
+}
+
+function normalizeBybitOrderStatus(status) {
+  const value = String(status || "").toLowerCase();
+  if (value.includes("filled")) return "filled";
+  if (value.includes("cancel")) return "cancelled";
+  if (value.includes("reject")) return "rejected";
+  if (value.includes("new") || value.includes("created")) return "accepted";
+  return value || "pending";
 }

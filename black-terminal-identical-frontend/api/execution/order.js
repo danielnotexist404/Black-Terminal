@@ -55,6 +55,11 @@ export default async function handler(req, res) {
     if (risk.status === "approved") {
       if (account.exchange === "bybit") {
         try {
+          if (process.env.BYBIT_MAINNET_VALIDATION_ENABLED !== "true" || req.body.mainnetConfirmed !== true) {
+            const validationError = new Error("Bybit live execution requires BYBIT_MAINNET_VALIDATION_ENABLED=true and explicit Developer Mainnet Validation confirmation.");
+            validationError.statusCode = 403;
+            throw validationError;
+          }
           const { data: credential, error: credentialError } = await supabase
             .from("exchange_credentials")
             .select("encrypted_payload")

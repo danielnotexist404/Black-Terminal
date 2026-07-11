@@ -87,6 +87,33 @@ export type HyperliquidSyncPayload = {
   syncedAt: string;
 };
 
+export type ExchangeDiagnosticsPayload = {
+  venueId: string;
+  provider: string;
+  network: string;
+  executionMode: string;
+  readiness: string;
+  latencyMs: number;
+  authentication: string;
+  synchronization: string;
+  publicStream: string;
+  privateStream: string;
+  permissions: {
+    read: boolean;
+    trading: boolean;
+    withdrawal: boolean;
+    warnings: string[];
+  };
+  time?: {
+    serverTime?: string;
+    clockSkewMs?: number;
+  };
+  metadata?: unknown[];
+  balances?: unknown[];
+  positions?: unknown[];
+  openOrders?: unknown[];
+};
+
 export async function getPortfolioApiToken() {
   if (!supabase) return null;
   const { data } = await supabase.auth.getSession();
@@ -161,6 +188,24 @@ export async function submitPortfolioOrderViaApi(draft: PortfolioOrderDraft): Pr
   if (!response.ok) throw new Error(await readApiError(response));
   const data = await response.json();
   return mapOrder(data.order);
+}
+
+export async function runExchangeAccountDiagnosticsViaApi(accountId: string, symbol = "BTCUSDT"): Promise<ExchangeDiagnosticsPayload | null> {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+
+  const response = await fetch("/api/exchange-accounts/diagnostics", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ accountId, symbol })
+  });
+
+  if (!response.ok) throw new Error(await readApiError(response));
+  const data = await response.json();
+  return data.diagnostics as ExchangeDiagnosticsPayload;
 }
 
 export async function submitHyperliquidOrderViaApi(draft: PortfolioOrderDraft): Promise<OrderUpdate | null> {

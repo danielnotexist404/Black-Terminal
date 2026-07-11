@@ -204,6 +204,19 @@ The Positions connection wizard reads this registry. The server credential route
 without certified credential validation. The frontend must not fall back to local credential storage
 for real exchanges when server validation fails.
 
+Chapter XII adds the first certification workflow for Bybit. `Run Diagnostics` calls the server to
+validate server time, metadata, balances, positions, and open orders, then writes certification,
+health, time-sync, and metadata records when the Chapter XI migration exists.
+
+Bybit live validation requires:
+
+- authenticated Supabase user,
+- stored encrypted Bybit credential,
+- account and risk controls allowing trading,
+- `BYBIT_MAINNET_VALIDATION_ENABLED=true`,
+- per-order mainnet confirmation,
+- OMS/EMS/Risk approval.
+
 Protocol framework files:
 
 - `src/protocols/types.ts`

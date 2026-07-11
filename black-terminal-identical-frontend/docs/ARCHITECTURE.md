@@ -228,6 +228,11 @@ Public candles are not account connectivity. Read-only account sync is not order
 signature capability is not derivatives execution. Unsupported actions must fail closed with an
 explicit reason.
 
+Chapter XII starts the certification workflow. Bybit now has real server diagnostics for time sync,
+instrument metadata, balances, positions, and open orders. These diagnostics can persist into the
+Chapter XI certification tables. Bybit order placement remains fail-closed unless controlled mainnet
+validation is explicitly enabled server-side and per order.
+
 ## Phase III Position Rule
 
 OMS owns orders.

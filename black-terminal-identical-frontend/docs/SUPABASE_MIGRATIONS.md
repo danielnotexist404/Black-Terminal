@@ -1809,3 +1809,20 @@ Security notes:
 - These are platform-owned operational tables.
 - Direct browser access is intentionally blocked by RLS until explicit read policies are designed.
 - Server routes, workers, and admin diagnostics should write/read through `SUPABASE_SERVICE_ROLE_KEY`.
+
+## 2026-07-11 - Phase III Chapter XII Exchange Certification Start
+
+Status: No additional Supabase migration required.
+
+Reason:
+
+- Bybit diagnostics write to the Chapter XI tables:
+  - `adapter_certifications`
+  - `connection_health_snapshots`
+  - `venue_time_sync_status`
+  - `venue_metadata_cache`
+- No new tables, columns, indexes, policies, or triggers were introduced in this sprint.
+
+Required prior migration:
+
+- Apply `2026-07-11 - Phase III Chapter XI Universal Connectivity Certification` before expecting server diagnostics persistence to succeed.

@@ -725,6 +725,37 @@ Docs:
 - `WORKSPACE.md`
 - `SUPABASE_MIGRATIONS.md`
 
+## Phase III Chapter XII Exchange Certification Start
+
+Status: Implemented and build validated
+
+Changed:
+
+- Added Bybit diagnostics primitives for server time, instrument metadata, balances, positions, and open orders.
+- Added authenticated `/api/exchange-accounts/diagnostics` route.
+- Persisted diagnostics into Chapter XI operational tables when available.
+- Wired Positions `Run Diagnostics` to the server diagnostics route for centralized exchange accounts.
+- Added Bybit cancel and modify adapter primitives.
+- Updated Bybit cancel flow so accepted venue orders attempt venue cancellation before local OMS cancellation.
+- Added Bybit live-execution fail-closed gate: `BYBIT_MAINNET_VALIDATION_ENABLED=true` plus explicit mainnet confirmation are required.
+
+Why:
+
+- Chapter XII begins converting the truth layer into real adapter certification workflows.
+- Bybit can now be measured as an account-verified/read-only adapter without pretending it is production execution certified.
+
+Validation:
+
+- `npm run build`
+
+Docs:
+
+- `PHASE3_CHAPTER12_EXCHANGE_CERTIFICATION.md`
+- `ARCHITECTURE.md`
+- `PLATFORM_BUILD_MANUAL.md`
+- `WORKSPACE.md`
+- `SUPABASE_MIGRATIONS.md`
+
 ## Future Work Log
 
 Use this format for every future phase, chapter, or major bug sprint.

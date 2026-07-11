@@ -163,8 +163,6 @@ export default function AdminPanel() {
   };
 
   const toggleSuspend = async (username: string) => {
-    if (username === "black_terminal_admin") return;
-
     const matchedUser = users.find(u => u.username === username);
     if (!matchedUser) return;
 
@@ -179,8 +177,6 @@ export default function AdminPanel() {
   };
 
   const handleDeleteUser = async (username: string) => {
-    if (username === "black_terminal_admin") return;
-
     await dbDeleteUser(username);
     await dbAddAuditLog("DELETE", `User ${username} deleted from database.`);
 
@@ -369,26 +365,22 @@ export default function AdminPanel() {
                             >
                               PERMISSIONS
                             </button>
-                            {u.username !== "black_terminal_admin" && (
-                              <>
-                                <button
-                                  className={
-                                    u.status === "suspended"
-                                      ? "btn-action-reactivate"
-                                      : "btn-action-suspend"
-                                  }
-                                  onClick={() => toggleSuspend(u.username)}
-                                >
-                                  {u.status === "suspended" ? "REACTIVATE" : "SUSPEND"}
-                                </button>
-                                <button
-                                  className="btn-action-delete"
-                                  onClick={() => handleDeleteUser(u.username)}
-                                >
-                                  DELETE
-                                </button>
-                              </>
-                            )}
+                            <button
+                              className={
+                                u.status === "suspended"
+                                  ? "btn-action-reactivate"
+                                  : "btn-action-suspend"
+                              }
+                              onClick={() => toggleSuspend(u.username)}
+                            >
+                              {u.status === "suspended" ? "REACTIVATE" : "SUSPEND"}
+                            </button>
+                            <button
+                              className="btn-action-delete"
+                              onClick={() => handleDeleteUser(u.username)}
+                            >
+                              DELETE
+                            </button>
                           </div>
                         </td>
                       </tr>

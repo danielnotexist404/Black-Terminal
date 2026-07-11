@@ -27,8 +27,7 @@ const tierCapabilities = {
 };
 
 export function resolveNetworkTier(user) {
-  const username = String(user?.user_metadata?.username || user?.email || "").toLowerCase();
-  if (username === "black_terminal_admin" || user?.app_metadata?.role === "admin") return "admin";
+  if (user?.app_metadata?.role === "admin") return "admin";
   const tier = user?.app_metadata?.productTier || user?.user_metadata?.productTier || "retail";
   return ["retail", "professional", "enterprise", "admin"].includes(tier) ? tier : "retail";
 }

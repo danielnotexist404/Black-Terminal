@@ -2,8 +2,6 @@ import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
-export const BLACK_TERMINAL_ADMIN_USERNAME = "black_terminal_admin";
-export const BLACK_TERMINAL_ADMIN_EMAIL = "blacktrianglecorp@gmail.com";
 
 export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
 
@@ -55,49 +53,6 @@ export interface DBAuditLog {
 const USERS_DB_KEY = "bt_users_db";
 const CREDS_DB_KEY = "bt_users_creds";
 const AUDIT_LOGS_KEY = "bt_audit_logs";
-
-// Pre-populate admin user in local storage if not exists
-if (typeof window !== "undefined") {
-  const adminUser = BLACK_TERMINAL_ADMIN_USERNAME;
-  const storedCreds = localStorage.getItem(CREDS_DB_KEY);
-  const creds = storedCreds ? JSON.parse(storedCreds) : {};
-  if (!creds[adminUser]) {
-    creds[adminUser] = "admin123";
-    localStorage.setItem(CREDS_DB_KEY, JSON.stringify(creds));
-  }
-
-  const storedUsers = localStorage.getItem(USERS_DB_KEY);
-  const users = storedUsers ? JSON.parse(storedUsers) : [];
-  if (!users.find((u: any) => u.username === adminUser)) {
-    users.push({
-      username: adminUser,
-      email: BLACK_TERMINAL_ADMIN_EMAIL,
-      role: "admin",
-      status: "offline",
-      createdAt: new Date().toISOString(),
-      lastLogin: new Date().toISOString(),
-      allowedIndicators: [
-        "hdlx",
-        "liquidationHeatmap",
-        "volatilityHeatmap",
-        "adaptiveSwingStrategy",
-        "vwap",
-        "ema20",
-        "ema50",
-        "ema200",
-        "sma20",
-        "sma50",
-        "bollinger",
-        "openInterestOscillator",
-        "zScoreOscillator",
-        "waveTrendOscillator",
-        "volume"
-      ],
-      activeIndicators: []
-    });
-    localStorage.setItem(USERS_DB_KEY, JSON.stringify(users));
-  }
-}
 
 // Helper: Get all users
 export async function dbGetUsers(): Promise<DBUser[]> {
@@ -226,9 +181,7 @@ export async function establishSupabaseAuthSession(
 ): Promise<{ success: boolean; error?: string; needsEmailConfirmation?: boolean }> {
   if (!isSupabaseConfigured || !supabase) return { success: true };
 
-  const email = user.username === BLACK_TERMINAL_ADMIN_USERNAME
-    ? BLACK_TERMINAL_ADMIN_EMAIL
-    : user.email?.trim();
+  const email = user.email?.trim();
   const password = accessCode.trim();
   if (!email || !password) {
     return { success: false, error: "Supabase Auth requires the user's email and access code." };

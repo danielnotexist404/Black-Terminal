@@ -4,8 +4,6 @@ import { Check, Activity, Bell, Code2, Shield, Lock, X, ArrowLeft, Chrome, Layer
 import "../styles/landing.css";
 import "../styles/login.css";
 import {
-  BLACK_TERMINAL_ADMIN_EMAIL,
-  BLACK_TERMINAL_ADMIN_USERNAME,
   dbGetUsers,
   dbVerifyUser,
   dbRegisterUser,
@@ -155,44 +153,8 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
         await dbAddAuditLog("LOGIN", `User ${cleanUser} logged in from landing page.`);
         onLoginSuccess(cleanUser, userObj.role);
       } else {
-        // Fallback for special black_terminal_admin case if not in DB yet
-        const isUserAdmin = cleanUser === BLACK_TERMINAL_ADMIN_USERNAME;
-        const defaultAllowed = [
-          "orderBookHeatmap",
-          "liquidationHeatmap",
-          "volatilityHeatmap",
-          "adaptiveSwingStrategy",
-          "vwap",
-          "ema20",
-          "ema50",
-          "ema200",
-          "sma20",
-          "sma50",
-          "bollinger",
-          "openInterestOscillator",
-          "zScoreOscillator",
-          "waveTrendOscillator",
-          "volume"
-        ];
-        const adminAllowed = [...defaultAllowed, "volumeProfile"];
-        const newUser = {
-          username: cleanUser,
-          email: isUserAdmin ? BLACK_TERMINAL_ADMIN_EMAIL : "imported@blackterminal.com",
-          role: (isUserAdmin ? "admin" : "user") as any,
-          status: "online" as const,
-          createdAt: new Date().toISOString(),
-          lastLogin: new Date().toISOString(),
-          allowedIndicators: isUserAdmin ? adminAllowed : defaultAllowed,
-          activeIndicators: []
-        };
-        await dbRegisterUser(newUser, cleanPass);
-        const secureSession = await establishSupabaseAuthSession(newUser, cleanPass);
-        if (!secureSession.success) {
-          setErrorMsg(secureSession.error || "Secure Supabase Auth session failed.");
-          setLoading(false);
-          return;
-        }
-        onLoginSuccess(cleanUser, newUser.role);
+        setErrorMsg("User profile not found. Please register a fresh account.");
+        setLoading(false);
       }
     } catch (err: any) {
       setErrorMsg(err.message || "Database connection error");
@@ -340,7 +302,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
         const newUser = {
           username: cleanUser,
           email: cleanEmail,
-          role: (cleanUser === BLACK_TERMINAL_ADMIN_USERNAME ? "admin" : "user") as any,
+          role: "user" as const,
           status: "online" as const,
           createdAt: new Date().toISOString(),
           lastLogin: new Date().toISOString(),

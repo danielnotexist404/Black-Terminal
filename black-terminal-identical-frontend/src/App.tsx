@@ -1197,7 +1197,7 @@ export default function App() {
     return (
       <LandingPage
         onLoginSuccess={async (username, role) => {
-          const resolvedRole = username === "black_terminal_admin" ? "admin" as const : role;
+          const resolvedRole = role;
           const users = await dbGetUsers();
           const matched = users.find((u: any) => u.username === username);
           const allowed = matched?.allowedIndicators || (resolvedRole === "admin" ? ADMIN_ALLOWED : DEFAULT_ALLOWED);

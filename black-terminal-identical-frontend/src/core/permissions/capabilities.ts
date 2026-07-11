@@ -97,7 +97,7 @@ const tierCapabilities: Record<ProductTier, TerminalCapability[]> = {
 
 export function resolveProductTier(user: CapabilityUser | null | undefined): ProductTier {
   if (!user) return "retail";
-  if (user.role === "admin" || user.username.toLowerCase() === "black_terminal_admin") return "admin";
+  if (user.role === "admin") return "admin";
   return user.productTier ?? "retail";
 }
 

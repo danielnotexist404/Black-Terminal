@@ -24,7 +24,7 @@ Recent pushed commits:
 - Current - Build DOM Pro+ real price-domain liquidity camera.
 - Current - Consolidate Vercel API route dispatchers for production deploy.
 - Current - Bridge Black Terminal login to Supabase Auth for secure credential routes.
-- Current - Replace default admin Auth email with blacktrianglecorp@gmail.com.
+- Current - Remove hardcoded default admin bootstrap for clean user reset.
 - Current - Prevent normal sign-in from triggering Supabase confirmation email retries.
 - Current - Redesign DOM Pro+ as institutional liquidity radar.
 - Current - Implement Phase III Chapter VI DOM Pro+ cockpit.

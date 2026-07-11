@@ -6,8 +6,8 @@ import {
   requireUser,
   sendError,
   toCamelAccount
-} from "../../server/portfolio-api.js";
-import { syncBybitAccountToSupabase, validateBybitCredentials } from "../../server/exchanges/bybit.js";
+} from "../../portfolio-api.js";
+import { syncBybitAccountToSupabase, validateBybitCredentials } from "../../exchanges/bybit.js";
 
 const certifiedCredentialAdapters = {
   bybit: {
@@ -43,6 +43,12 @@ export default async function handler(req, res) {
     const validation = exchange === "bybit"
       ? await validateBybitCredentials(rawCredentials)
       : { status: "read-only", apiHealth: "unknown", latencyMs: 0 };
+    const bybitDiagnostics = exchange === "bybit" ? validation.diagnostics : null;
+    if (bybitDiagnostics?.permissions?.withdrawal) {
+      const blocked = new Error("Bybit API key has withdrawal permission. Create a trading/read-only key with withdrawals disabled before connecting.");
+      blocked.statusCode = 403;
+      throw blocked;
+    }
     const credentialRef = `exchange:${exchange}:${user.id}:${Date.now()}`;
     const encryptedPayload = encryptCredentialPayload(rawCredentials);
 
@@ -104,7 +110,11 @@ export default async function handler(req, res) {
       event_type: "exchange_account_connected",
       severity: "info",
       message: `Stored secure credential reference for ${exchange}.`,
-      metadata: { exchange, credentialRef }
+      metadata: {
+        exchange,
+        credentialRef,
+        connectionResult: buildConnectionResult(exchange, bybitDiagnostics)
+      }
     });
 
     return res.status(200).json({
@@ -113,9 +123,24 @@ export default async function handler(req, res) {
         status: validation.status,
         api_health: validation.apiHealth,
         latency_ms: validation.latencyMs
-      }, riskControls)
+      }, riskControls),
+      connectionResult: buildConnectionResult(exchange, bybitDiagnostics)
     });
   } catch (error) {
     return sendError(res, error);
   }
+}
+
+function buildConnectionResult(exchange, diagnostics) {
+  if (exchange !== "bybit" || !diagnostics) return null;
+  const executionReady = diagnostics.certification?.executionReady === true;
+  return {
+    headline: "BYBIT MAINNET ACCOUNT CONNECTED",
+    readAccess: diagnostics.permissions?.read === true,
+    tradingAccess: diagnostics.permissions?.trading === true,
+    withdrawalAccess: diagnostics.permissions?.withdrawal === true,
+    derivativesAccess: diagnostics.metadata?.some((item) => item.marketType === "perpetual") === true,
+    executionReady,
+    blocker: executionReady ? null : diagnostics.readinessReason || diagnostics.permissions?.warnings?.[0] || "Bybit account is connected read-only until controlled validation is enabled."
+  };
 }

@@ -5669,6 +5669,70 @@ body.resizing-layout * {
   text-align: center;
 }
 
+.bybit-cert-panel {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid rgba(245, 159, 24, 0.24);
+  border-radius: 3px;
+  background: rgba(245, 159, 24, 0.045);
+  color: #aeb4bd;
+  font: 800 9px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.bybit-cert-panel.ready {
+  border-color: rgba(0, 255, 136, 0.24);
+  background: rgba(0, 255, 136, 0.04);
+}
+
+.bybit-cert-head,
+.bybit-cert-grid span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bybit-cert-head span {
+  color: var(--strong);
+  font-size: 10px;
+}
+
+.bybit-cert-head b,
+.bybit-cert-grid b {
+  color: #fff;
+  text-align: right;
+}
+
+.bybit-cert-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+}
+
+.bybit-cert-panel p {
+  margin: 0;
+  color: #f2c14d;
+  line-height: 1.45;
+}
+
+.bybit-cert-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.bybit-cert-actions button {
+  min-height: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  background: #080a0d;
+  color: #c8ced6;
+  font: 800 9px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
 .execution-connection-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;

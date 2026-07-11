@@ -94,11 +94,12 @@ export const venueCertificationRegistry: VenueCertificationRecord[] = [
     marketDataReady: true,
     mainnetValidated: false,
     supportedProducts: ["spot", "perpetual"],
-    connectionCapabilities: [...accountReadCapabilities, ...marketDataCapabilities],
-    supportedOrderTypes: [],
+    connectionCapabilities: [...accountReadCapabilities, ...marketDataCapabilities, "market-orders", "limit-orders", "cancel-orders", "modify-orders", "reduce-only", "post-only", "leverage", "cross-margin", "isolated-margin", "private-websocket"],
+    supportedOrderTypes: ["market", "limit", "post-only", "reduce-only", "gtc", "ioc", "fok"],
     limitations: [
       "Bybit credentials are validated against the mainnet account endpoint and account balances/positions can sync.",
-      "Trading remains disabled until permission detection, symbol metadata validation, private stream reconciliation, and adapter certification are complete."
+      "Bybit order, cancel, modify, close, TP/SL, leverage, and explicit mode-control primitives exist behind controlled mainnet validation gates.",
+      "Production certification remains blocked until private stream runtime is live, reconnect reconciliation is validated, and small-order mainnet evidence is recorded."
     ]
   },
   cexMarketDataOnly("binance", "Binance", ["spot", "perpetual"]),

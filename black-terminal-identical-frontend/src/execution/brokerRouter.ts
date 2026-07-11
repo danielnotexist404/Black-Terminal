@@ -1,4 +1,5 @@
 import { getBrokerAdapter } from "../broker/brokerRegistry";
+import { ServerExchangeBrokerAdapter } from "../broker/serverExchangeBroker";
 import type { ExchangeBrokerAdapter } from "../broker/types";
 import { blackCoreConnectionManager } from "../connectivity/connectionManager";
 import type { ConnectionRecord } from "../connectivity/types";
@@ -50,6 +51,14 @@ export class BrokerRouter {
           getBalances: async () => protocolAdapter.syncBalances?.(connection) ?? [],
           getPositions: async () => (await protocolAdapter.syncPositions?.(connection) ?? []) as any
         }
+      };
+    }
+
+    if (connection?.category === "centralized-exchange") {
+      return {
+        adapterType: "centralized-exchange",
+        adapter: new ServerExchangeBrokerAdapter(connection),
+        connection
       };
     }
 

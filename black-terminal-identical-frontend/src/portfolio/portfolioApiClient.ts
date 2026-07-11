@@ -65,6 +65,7 @@ export type PortfolioOrderDraft = {
   internalOrderId?: string;
   clientOrderId?: string;
   mainnetConfirmed?: boolean;
+  liveConfirmation?: string;
 };
 
 export type HyperliquidRelayConnectionDraft = {
@@ -112,6 +113,63 @@ export type ExchangeDiagnosticsPayload = {
   balances?: unknown[];
   positions?: unknown[];
   openOrders?: unknown[];
+};
+
+export type BybitRuntimeStatusPayload = {
+  venueId: "bybit";
+  network: "mainnet";
+  account: {
+    found: boolean;
+    id: string;
+    label: string;
+    maskedIdentifier: string;
+    status: string;
+    accountMode: string;
+    permissions: string[];
+    tradingEnabled: boolean;
+    readOnly: boolean;
+  };
+  runtime: {
+    credentialsDecryptable: boolean;
+    serverTimeReachable: boolean;
+    clockSkewMs: number | null;
+    metadataLoaded: boolean;
+    publicApiReachable: boolean;
+    privateStreamRunning: boolean;
+    privateStreamAuthenticated: boolean;
+    lastPrivateEventAt: number | string | null;
+    privateStreamAgeMs: number | null;
+    balanceSyncHealthy: boolean;
+    positionSyncHealthy: boolean;
+    orderSyncHealthy: boolean;
+    executionEndpointAvailable: boolean;
+    reconnectCount: number;
+    lastError: string | null;
+  };
+  safety: {
+    validationModeEnabled: boolean;
+    accountAllowlisted: boolean;
+    symbolAllowlisted: boolean;
+    maxNotionalConfigured: boolean;
+    maxNotionalUsd: number;
+    withdrawalPermissionAbsent: boolean;
+    readPermissionPresent: boolean;
+    tradePermissionPresent: boolean;
+  };
+  readiness: {
+    executionReady: boolean;
+    readinessReason: string;
+    blockers: string[];
+  };
+  certification: {
+    latestStatus: string;
+    latestReadiness: string;
+    mainnetValidated: boolean;
+    decision: string;
+    missingMandatory: string[];
+    failed: string[];
+    evidenceRows: number;
+  };
 };
 
 export async function getPortfolioApiToken() {
@@ -206,6 +264,39 @@ export async function runExchangeAccountDiagnosticsViaApi(accountId: string, sym
   if (!response.ok) throw new Error(await readApiError(response));
   const data = await response.json();
   return data.diagnostics as ExchangeDiagnosticsPayload;
+}
+
+export async function syncExchangeAccountViaApi(accountId: string, symbol = "BTCUSDT"): Promise<unknown | null> {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+
+  const response = await fetch("/api/exchange-accounts/sync", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ accountId, symbol })
+  });
+
+  if (!response.ok) throw new Error(await readApiError(response));
+  const data = await response.json();
+  return data.sync;
+}
+
+export async function getBybitRuntimeStatusViaApi(accountId: string, symbol = "BTCUSDT"): Promise<BybitRuntimeStatusPayload | null> {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+
+  const params = new URLSearchParams({ accountId, symbol });
+  const response = await fetch(`/api/exchange-accounts/bybit-runtime-status?${params.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) throw new Error(await readApiError(response));
+  return await response.json() as BybitRuntimeStatusPayload;
 }
 
 export async function submitHyperliquidOrderViaApi(draft: PortfolioOrderDraft): Promise<OrderUpdate | null> {

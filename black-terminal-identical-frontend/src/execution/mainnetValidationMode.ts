@@ -1,6 +1,7 @@
 const STORAGE_KEY = "black-terminal:mainnet-validation-mode:v1";
 
 export const MAINNET_VALIDATION_CONFIRMATION = "ENABLE LIVE MAINNET VALIDATION";
+export const MAINNET_ORDER_CONFIRMATION = "LIVE";
 
 export type MainnetValidationStatus = {
   enabled: boolean;
@@ -81,8 +82,8 @@ export function promptEnableMainnetValidationMode(): MainnetValidationStatus {
 
   const response = window.prompt([
     "LIVE MAINNET TRADING WARNING",
-    "This enables developer validation for real Hyperliquid mainnet orders in this browser session only.",
-    "Risk checks, relay readiness, wallet authorization, trading permissions, and OMS/EMS routing still apply.",
+    "This enables developer validation for real supported mainnet orders in this browser session only.",
+    "Risk checks, venue readiness, wallet/API authorization, trading permissions, allowlists, and OMS/EMS routing still apply.",
     `Type ${MAINNET_VALIDATION_CONFIRMATION} to enable.`
   ].join("\n\n"));
 
@@ -99,19 +100,23 @@ export function validateMainnetOrderReadiness(target: MainnetValidationTarget | 
   const network = resolveNetwork(target);
   if (network !== "mainnet") return { allowed: true, mainnet: false };
 
-  if (target.category !== "protocol" || target.provider !== "hyperliquid") {
+  const provider = String(target.provider || target.metadata?.provider || "").toLowerCase();
+  const isHyperliquid = target.category === "protocol" && provider === "hyperliquid";
+  const isBybit = target.category === "centralized-exchange" && provider === "bybit";
+
+  if (!isHyperliquid && !isBybit) {
     return {
       allowed: false,
       mainnet: true,
-      reason: "Mainnet validation is currently enabled only for Hyperliquid protocol relay connections."
+      reason: "Mainnet validation is currently enabled only for Hyperliquid and Bybit certification paths."
     };
   }
 
   if (target.accountId === undefined || target.accountId === "") {
-    return { allowed: false, mainnet: true, reason: "Hyperliquid mainnet connection has no executable account id." };
+    return { allowed: false, mainnet: true, reason: `${provider.toUpperCase()} mainnet connection has no executable account id.` };
   }
 
-  if (!resolveBoolean(target, "executionReady")) {
+  if (isHyperliquid && !resolveBoolean(target, "executionReady")) {
     return {
       allowed: false,
       mainnet: true,
@@ -119,7 +124,11 @@ export function validateMainnetOrderReadiness(target: MainnetValidationTarget | 
     };
   }
 
-  if (!resolveBoolean(target, "mainnetConfirmed")) {
+  if (isBybit && target.health?.permissions?.trading !== true) {
+    return { allowed: false, mainnet: true, reason: "Bybit account is not enabled for controlled mainnet validation." };
+  }
+
+  if (isHyperliquid && !resolveBoolean(target, "mainnetConfirmed")) {
     return {
       allowed: false,
       mainnet: true,

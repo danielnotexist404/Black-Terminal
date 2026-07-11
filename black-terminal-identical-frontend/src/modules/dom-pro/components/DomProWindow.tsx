@@ -482,23 +482,23 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
 
     try {
       const update = await submitOrder({
-        accountId: selectedConnection.accountId,
-        exchange: selectedConnection.provider as MarketSymbol["exchange"],
-        symbol: marketSymbol.rawSymbol.toUpperCase(),
-        marketKind: marketSymbol.marketKind,
-        side: targetSide,
-        type: nextOrderType,
-        quantity: parsedQuantity,
-        sizingMethod: "quantity",
-        limitPrice: nextOrderType === "limit" || nextOrderType === "iceberg" || nextOrderType === "twap" ? parsedPrice : undefined,
-        referencePrice: parsedPrice,
-        reduceOnly: nextReduceOnly,
-        postOnly: nextPostOnly,
-        marginMode,
-        timeInForce,
-        source: "order-ticket",
-        destinations: ["personal-portfolio"]
-      }, buildExecutionAccount(selectedConnection), parsedPrice || 1);
+            accountId: selectedConnection.accountId,
+            exchange: selectedConnection.provider as MarketSymbol["exchange"],
+            symbol: marketSymbol.rawSymbol.toUpperCase(),
+            marketKind: marketSymbol.marketKind,
+            side: targetSide,
+            type: nextOrderType,
+            quantity: parsedQuantity,
+            sizingMethod: "quantity",
+            limitPrice: nextOrderType === "limit" || nextOrderType === "iceberg" || nextOrderType === "twap" ? parsedPrice : undefined,
+            referencePrice: parsedPrice,
+            reduceOnly: nextReduceOnly,
+            postOnly: nextPostOnly,
+            marginMode,
+            timeInForce,
+            source: "order-ticket",
+            destinations: ["personal-portfolio"]
+          }, buildExecutionAccount(selectedConnection), parsedPrice || 1);
       setExecutionStatus(`${update.status.toUpperCase()}: ${update.reason || update.orderId}`);
     } catch (error) {
       setExecutionStatus(error instanceof Error ? error.message.toUpperCase() : String(error));

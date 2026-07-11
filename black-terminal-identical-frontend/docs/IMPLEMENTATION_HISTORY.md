@@ -756,6 +756,104 @@ Docs:
 - `WORKSPACE.md`
 - `SUPABASE_MIGRATIONS.md`
 
+## Phase III Chapter XII Bybit Certification Layer
+
+Status: Implemented and build validated. Production certification remains blocked by required live validation evidence.
+
+Changed:
+
+- Added Bybit private WebSocket client and private-stream worker for orders, executions, positions, and wallet updates.
+- Added private-stream heartbeat, reconnect, resubscribe, stale detection, diagnostics, and event normalization.
+- Added Bybit snapshot plus stream reconciliation service and `/api/exchange-accounts/sync`.
+- Added metadata-backed validation for tick size, quantity step, minimum quantity, minimum notional, max quantity, leverage, margin mode, and time in force.
+- Added Bybit live order gate with account allowlist, symbol allowlist, max notional, browser mainnet mode, and per-order `LIVE` confirmation.
+- Added admin-only `/api/exchange-accounts/mainnet-validation` to explicitly enable or disable controlled validation on an allowlisted Bybit account.
+- Added order-management routes for cancel-all, modify, close, reverse, partial close, TP/SL/trailing protection, leverage, margin mode, and position mode.
+- Routed DOM Pro+ centralized exchange quick orders through the server portfolio execution API instead of the local mock broker.
+- Added deterministic Bybit certification tests.
+- Added `ws` as a direct runtime dependency.
+
+Why:
+
+- One complete certified adapter is more valuable than multiple partial adapters.
+- Bybit needed live-stream reconciliation and explicit live-validation controls before any production certification claim could be truthful.
+
+Validation:
+
+- `npm run test:bybit-certification`
+- `npm run build`
+
+Remaining:
+
+- Run `npm run bybit:private-stream` in a persistent worker runtime with real allowlisted credentials.
+- Record tiny live validation for market, limit, cancel, modify, close, TP/SL, reconnect, and reconciliation before promoting Bybit to production-certified.
+
+## Phase III Chapter XII-B Bybit Mainnet Operational Certification
+
+Status: Certification runner implemented. Live certification is blocked in this environment until real Bybit/Supabase runtime env is provided.
+
+Changed:
+
+- Added `npm run certify:bybit-mainnet`.
+- Added `scripts/bybit-mainnet-certification-runner.js`.
+- Added `docs/BYBIT_MAINNET_CERTIFICATION_REPORT.md`.
+- Added server-backed broker adapter so centralized exchange UI submissions flow through local OMS, EMS, Risk, Broker Router, then authenticated server execution.
+- Updated Unified Execution Ticket, Portfolio execution dock, DOM Pro+, and position actions to avoid direct CEX execution shortcuts.
+- Runner performs preflight, requires typed `LIVE`, pauses between exposure-changing steps, records evidence, writes the final report, and returns non-zero unless certification is complete.
+
+Why:
+
+- Chapter XII-B is production validation, not feature expansion.
+- Bybit cannot be promoted until real private-stream runtime, tiny live order flow, and reconciliation evidence exist.
+
+Validation:
+
+- Pending live runtime validation.
+
+Remaining:
+
+- Provide real allowlisted account env, start the Bybit private-stream worker, run `npm run certify:bybit-mainnet`, and review persisted evidence before updating the venue registry.
+
+## Phase III Chapter XII-C Bybit Mainnet Activation Checkpoint
+
+Status: Operational activation tooling implemented. Bybit remains blocked for live certification until real runtime evidence is produced.
+
+Changed:
+
+- Added `.env.bybit-mainnet.example`.
+- Added `docs/BYBIT_MAINNET_ENVIRONMENT_SETUP.md`.
+- Added `server/exchanges/bybit-certification.js` deterministic certification evaluator.
+- Added `npm run verify:bybit-infrastructure`.
+- Added `npm run bybit:private-stream:supervise`.
+- Added `npm run bybit:private-stream:status`.
+- Added `GET /api/exchange-accounts/bybit-runtime-status`.
+- Added Bybit runtime/certification panel inside the Positions execution dock.
+- Updated the Bybit private-stream worker with duplicate-event suppression, reconnect-triggered reconciliation, and supervisor-safe runtime health.
+- Updated the certification runner to print preflight checks, require `LIVE BYBIT MAINNET` for activation, require `LIVE` for exposure-changing steps, block unexpected existing exposure by default, persist certification evidence rows, and compute a deterministic final decision.
+- Updated Bybit credential onboarding to reject withdrawal-enabled keys and return an explicit connection result.
+- Consolidated exchange-account and execution API routes behind catch-all Vercel handlers so production deploys stay under the Hobby plan 12-function limit while preserving existing URL paths.
+- Linked and deployed the local worktree to `danielnotexist404s-projects/black-terminal`.
+
+Why:
+
+- Chapter XII-C is about operational proof, not adding another partially wired adapter.
+- Certification must be computed from runtime checks and persisted evidence, not manually inferred from code completion.
+- Vercel serverless function count is an infrastructure boundary; route consolidation keeps the architecture deployable without changing the OMS/EMS/Risk path.
+
+Validation:
+
+- `npm run test:bybit-certification`
+- `npm run build`
+- Vercel production deployment `dpl_CjnB7H8V6E6oWasz93hCUj6aSeQ4` reached `READY` and was aliased to `https://www.black-terminal.live`.
+
+Remaining:
+
+- Add `SUPABASE_SERVICE_ROLE_KEY` to Vercel production/preview. It is still missing and blocks authenticated server routes.
+- After connecting Bybit, add the created `exchange_accounts.id` to `BYBIT_MAINNET_ALLOWED_CONNECTIONS`.
+- Start the persistent Bybit private-stream worker outside Vercel.
+- Run `npm run certify:bybit-mainnet -- --interactive` with a real allowlisted Bybit account.
+- Keep `src/connectivity/venueRegistry.ts` partial until the certification report and Supabase evidence show every mandatory stage passed.
+
 ## Future Work Log
 
 Use this format for every future phase, chapter, or major bug sprint.

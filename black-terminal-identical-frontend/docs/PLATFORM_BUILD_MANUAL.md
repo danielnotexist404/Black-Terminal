@@ -214,8 +214,56 @@ Bybit live validation requires:
 - stored encrypted Bybit credential,
 - account and risk controls allowing trading,
 - `BYBIT_MAINNET_VALIDATION_ENABLED=true`,
-- per-order mainnet confirmation,
+- account id in `BYBIT_MAINNET_ALLOWED_CONNECTIONS`,
+- symbol in `BYBIT_MAINNET_ALLOWED_SYMBOLS`,
+- `BYBIT_MAINNET_MAX_NOTIONAL_USD`,
+- admin email in `BYBIT_MAINNET_VALIDATION_ADMIN_EMAILS`,
+- browser Developer Mainnet Validation Mode,
+- per-order `LIVE` confirmation,
 - OMS/EMS/Risk approval.
+
+Bybit private streams require a long-running Node worker, not a Vercel serverless request:
+
+```bash
+BYBIT_PRIVATE_STREAM_RUNTIME_ENABLED=true
+BYBIT_STREAM_ACCOUNT_ID=<exchange_accounts.id>
+BYBIT_STREAM_SYMBOL=BTCUSDT
+npm run bybit:private-stream:supervise
+```
+
+Check the worker:
+
+```bash
+npm run bybit:private-stream:status
+```
+
+Verify Supabase prerequisites:
+
+```bash
+npm run verify:bybit-infrastructure
+```
+
+Run deterministic adapter checks with:
+
+```bash
+npm run test:bybit-certification
+```
+
+Run the operator-controlled Bybit mainnet certification only in the prepared validation runtime:
+
+```bash
+BYBIT_CERTIFY_ACCOUNT_ID=<exchange_accounts.id>
+BYBIT_CERTIFY_API_BASE_URL=https://<deployment-host>
+BYBIT_CERTIFY_USER_TOKEN=<short-lived-user-jwt>
+BYBIT_CERTIFY_SYMBOL=BTCUSDT
+npm run certify:bybit-mainnet
+```
+
+The runner requires `LIVE BYBIT MAINNET` to begin, `LIVE` before exposure-changing stages, and stops
+on `ABORT` or the first critical failure. It writes
+`docs/BYBIT_MAINNET_CERTIFICATION_REPORT.md` and evidence rows to Supabase once live steps run.
+
+Operational setup is documented in `docs/BYBIT_MAINNET_ENVIRONMENT_SETUP.md`.
 
 Protocol framework files:
 
@@ -274,8 +322,11 @@ npm run build
 npm run depth:worker
 npm run depth:worker:supervise
 npm run depth:verify
+npm run bybit:private-stream
 npm run perf:baseline
 npm run perf:stress
+npm run test:bybit-certification
+npm run certify:bybit-mainnet
 npm run check:rust
 npm run check
 npm run tauri:dev

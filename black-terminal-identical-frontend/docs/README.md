@@ -13,6 +13,7 @@ Every meaningful platform change must update documentation in the same work cycl
 - `WORKSPACE.md` - local setup, commands, and directory guide.
 - `ROADMAP.md` - milestone sequence and future direction.
 - `SUPABASE_MIGRATIONS.md` - database migration ledger and rules.
+- `BYBIT_MAINNET_ENVIRONMENT_SETUP.md` - Bybit mainnet validation env, worker, verifier, and emergency-disable guide.
 
 ## Phase Docs
 

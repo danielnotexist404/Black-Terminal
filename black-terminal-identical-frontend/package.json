@@ -11,8 +11,14 @@
     "depth:worker": "node scripts/market-depth-worker.js",
     "depth:worker:supervise": "node scripts/market-depth-supervisor.js",
     "depth:verify": "node scripts/market-depth-verify.js",
+    "bybit:private-stream": "node scripts/bybit-private-stream-worker.js",
+    "bybit:private-stream:supervise": "node scripts/bybit-private-stream-supervisor.js",
+    "bybit:private-stream:status": "node scripts/bybit-private-stream-status.js",
+    "verify:bybit-infrastructure": "node scripts/verify-bybit-infrastructure.js",
     "perf:baseline": "node scripts/performance-baseline.js",
     "perf:stress": "node scripts/performance-stress.js",
+    "test:bybit-certification": "node scripts/bybit-certification-tests.js",
+    "certify:bybit-mainnet": "node scripts/bybit-mainnet-certification-runner.js",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
@@ -31,7 +37,8 @@
     "pixi.js": "^8.12.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "viem": "^2.54.3"
+    "viem": "^2.54.3",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.5.0",

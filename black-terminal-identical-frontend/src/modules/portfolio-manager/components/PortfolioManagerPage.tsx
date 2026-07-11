@@ -17,8 +17,8 @@ import { readActiveExecutionVenueId, setActiveExecutionVenueId } from "../../../
 import type { ConnectionCapability, ConnectionDiagnostics } from "../../../connectivity/types";
 import { formatExecutionMode, getVenueCertification, type VenueCertificationRecord } from "../../../connectivity/venueRegistry";
 import { submitOrder } from "../../../execution/executionEngine";
-import { disableMainnetValidationMode, promptEnableMainnetValidationMode, readMainnetValidationMode, validateMainnetOrderReadiness } from "../../../execution/mainnetValidationMode";
-import { runExchangeAccountDiagnosticsViaApi, submitPortfolioOrderViaApi, type PortfolioOrderDraft } from "../../../portfolio/portfolioApiClient";
+import { MAINNET_ORDER_CONFIRMATION, disableMainnetValidationMode, promptEnableMainnetValidationMode, readMainnetValidationMode, validateMainnetOrderReadiness } from "../../../execution/mainnetValidationMode";
+import { getBybitRuntimeStatusViaApi, runExchangeAccountDiagnosticsViaApi, type BybitRuntimeStatusPayload, type PortfolioOrderDraft } from "../../../portfolio/portfolioApiClient";
 import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } from "../../../portfolio/types";
 import { getPortfolioSnapshot } from "../../../portfolio/portfolioStore";
 import { defaultRiskControls } from "../../../risk/types";
@@ -142,9 +142,8 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
     setPositionMenu(null);
     setPositionActionStatus("SUBMITTING POSITION ACTION");
 
-    const submitPositionOrder = async (draft: Parameters<typeof submitPortfolioOrderViaApi>[0]) => {
-      const update = draft.exchange === "hyperliquid"
-        ? await submitOrder({
+    const submitPositionOrder = async (draft: PortfolioOrderDraft) => {
+      const update = await submitOrder({
             accountId: draft.accountId,
             exchange: draft.exchange,
             symbol: draft.symbol,
@@ -165,9 +164,7 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
             timeInForce: draft.timeInForce,
             source: "positions",
             destinations: ["personal-portfolio"]
-          }, buildPositionExecutionAccount(position), referencePrice)
-        : await submitPortfolioOrderViaApi(draft);
-      if (!update) throw new Error("AUTHENTICATED BROKER SESSION REQUIRED");
+          }, buildPositionExecutionAccount(position), referencePrice);
       if (update.status === "rejected") throw new Error(update.reason || "ORDER REJECTED");
       return update;
     };
@@ -834,9 +831,11 @@ function ExecutionDock({
   const [timeInForce, setTimeInForce] = useState<"gtc" | "ioc" | "fok">("gtc");
   const [submitStatus, setSubmitStatus] = useState("");
   const [mainnetValidation, setMainnetValidation] = useState(() => readMainnetValidationMode());
+  const [bybitRuntimeStatus, setBybitRuntimeStatus] = useState<BybitRuntimeStatusPayload | null>(null);
 
   const isDex = venue.kind === "dex";
   const isProtocol = venue.category === "protocol";
+  const isBybit = venue.category === "centralized-exchange" && venue.exchange === "bybit" && Boolean(venue.accountId);
   const executionReady = !isProtocol || venue.executionReady === true;
   const mainnetReadiness = useMemo(() => validateMainnetOrderReadiness(venue), [venue, mainnetValidation]);
   const supportsSpot = !isDex || venue.capabilities.includes("spot-orders") || venue.capabilities.includes("market-orders");
@@ -879,7 +878,7 @@ function ExecutionDock({
         setSubmitStatus("SUPABASE SESSION REQUIRED FOR SERVER DIAGNOSTICS");
         return;
       }
-      setSubmitStatus([
+      setSubmitStatus([        
         `READY ${diagnostics.readiness.toUpperCase()}`,
         `LATENCY ${diagnostics.latencyMs}MS`,
         `CLOCK ${diagnostics.time?.clockSkewMs ?? "?"}MS`,
@@ -888,6 +887,24 @@ function ExecutionDock({
         `ORD ${diagnostics.openOrders?.length ?? 0}`,
         diagnostics.permissions.warnings[0] || ""
       ].filter(Boolean).join(" | "));
+      if (venue.exchange === "bybit" && venue.accountId) {
+        await refreshBybitRuntimeStatus();
+      }
+    } catch (error) {
+      setSubmitStatus(error instanceof Error ? error.message.toUpperCase() : String(error));
+    }
+  }
+
+  async function refreshBybitRuntimeStatus() {
+    if (!venue.accountId) return;
+    try {
+      const status = await getBybitRuntimeStatusViaApi(venue.accountId);
+      setBybitRuntimeStatus(status);
+      if (status) {
+        setSubmitStatus(status.readiness.executionReady
+          ? "BYBIT RUNTIME READY FOR CONTROLLED VALIDATION"
+          : status.readiness.readinessReason.toUpperCase());
+      }
     } catch (error) {
       setSubmitStatus(error instanceof Error ? error.message.toUpperCase() : String(error));
     }
@@ -945,10 +962,11 @@ function ExecutionDock({
         marginMode: selectedMode === "futures" ? marginMode : undefined,
         postOnly,
         reduceOnly,
-        timeInForce
+        timeInForce,
+        mainnetConfirmed: mainnetReadiness.mainnet && mainnetReadiness.allowed,
+        liveConfirmation: mainnetReadiness.mainnet && mainnetReadiness.allowed ? MAINNET_ORDER_CONFIRMATION : undefined
       };
-      const update = isProtocol
-        ? await submitOrder({
+      const update = await submitOrder({
             accountId: draft.accountId,
             exchange: draft.exchange,
             symbol: draft.symbol,
@@ -959,6 +977,9 @@ function ExecutionDock({
             sizingMethod: draft.sizingMethod,
             referencePrice: draft.referencePrice,
             limitPrice: draft.limitPrice,
+            stopPrice: draft.stopPrice,
+            takeProfit: draft.takeProfit,
+            stopLoss: draft.stopLoss,
             leverage: draft.leverage,
             marginMode: draft.marginMode,
             postOnly: draft.postOnly,
@@ -966,8 +987,7 @@ function ExecutionDock({
             timeInForce: draft.timeInForce,
             source: "order-ticket",
             destinations: ["personal-portfolio"]
-          }, buildVenueExecutionAccount(venue), parsedPrice || 1)
-        : await submitPortfolioOrderViaApi(draft);
+          }, buildVenueExecutionAccount(venue), parsedPrice || 1);
 
       setSubmitStatus(update ? `${update.status.toUpperCase()}: ${update.reason || update.orderId}` : "NO SUPABASE SESSION");
     } catch (error) {
@@ -1009,6 +1029,26 @@ function ExecutionDock({
         <span>Reconnects <b>{venue.health.reconnectCount}</b></span>
         {venue.health.permissions.withdrawal && <em>WITHDRAWAL API PERMISSION DETECTED. USE TRADING-ONLY KEYS.</em>}
       </div>
+
+      {isBybit && (
+        <div className={bybitRuntimeStatus?.readiness.executionReady ? "bybit-cert-panel ready" : "bybit-cert-panel"}>
+          <div className="bybit-cert-head">
+            <span>Bybit Certification</span>
+            <b>{bybitRuntimeStatus?.certification.decision || "NOT CHECKED"}</b>
+          </div>
+          <div className="bybit-cert-grid">
+            <span>Worker <b>{bybitRuntimeStatus?.runtime.privateStreamAuthenticated ? "AUTH" : "BLOCKED"}</b></span>
+            <span>Clock <b>{bybitRuntimeStatus?.runtime.clockSkewMs ?? "?"}ms</b></span>
+            <span>Allowlist <b>{bybitRuntimeStatus?.safety.accountAllowlisted ? "YES" : "NO"}</b></span>
+            <span>Max Notional <b>{bybitRuntimeStatus?.safety.maxNotionalUsd || "?"}</b></span>
+          </div>
+          {bybitRuntimeStatus?.readiness.blockers?.[0] && <p>{bybitRuntimeStatus.readiness.blockers[0]}</p>}
+          <div className="bybit-cert-actions">
+            <button type="button" onClick={refreshBybitRuntimeStatus}>Refresh Runtime Status</button>
+            <button type="button" onClick={runDiagnostics}>Run Pre-flight</button>
+          </div>
+        </div>
+      )}
 
       {mainnetReadiness.mainnet && (
         <div className={mainnetValidation.enabled ? "mainnet-validation-panel active compact" : "mainnet-validation-panel compact"}>

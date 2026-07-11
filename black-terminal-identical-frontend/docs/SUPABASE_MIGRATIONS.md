@@ -1826,3 +1826,71 @@ Reason:
 Required prior migration:
 
 - Apply `2026-07-11 - Phase III Chapter XI Universal Connectivity Certification` before expecting server diagnostics persistence to succeed.
+
+## 2026-07-11 - Phase III Chapter XII Bybit Certification Layer
+
+Status: No additional Supabase migration required.
+
+Reason:
+
+- The Bybit private-stream, reconciliation, diagnostics, and mainnet-validation harness use existing tables:
+  - `adapter_certifications`
+  - `connection_health_snapshots`
+  - `venue_time_sync_status`
+  - `venue_metadata_cache`
+  - `venue_rate_limit_snapshots`
+  - `mainnet_validation_records`
+  - `execution_audit_logs`
+  - `account_balances`
+  - `account_positions`
+  - `execution_orders`
+- No new tables, columns, indexes, policies, or triggers were introduced.
+
+Operational note:
+
+- Production certification still requires a long-running Bybit private-stream worker and recorded validation events. That is runtime configuration, not a schema migration.
+
+## 2026-07-11 - Phase III Chapter XII-B Bybit Mainnet Operational Certification
+
+Status: No additional Supabase migration required.
+
+Reason:
+
+- The certification runner writes evidence into existing tables:
+  - `mainnet_validation_records`
+  - `execution_audit_logs`
+  - `connection_health_snapshots`
+  - `adapter_certifications`
+- Detailed per-step evidence is stored in existing JSON metadata fields.
+- No new tables, columns, indexes, policies, or triggers were introduced.
+
+## 2026-07-11 - Phase III Chapter XII-C Bybit Mainnet Activation Checkpoint
+
+Status: No additional Supabase migration required.
+
+Reason:
+
+- The runtime status endpoint, infrastructure verifier, private-stream supervisor, credential onboarding summary, and certification decision engine use the existing Chapter XI and execution tables:
+  - `adapter_certifications`
+  - `connection_health_snapshots`
+  - `venue_metadata_cache`
+  - `venue_time_sync_status`
+  - `venue_rate_limit_snapshots`
+  - `mainnet_validation_records`
+  - `execution_audit_logs`
+  - `exchange_accounts`
+  - `exchange_credentials`
+  - `account_risk_controls`
+  - `account_balances`
+  - `account_positions`
+  - `execution_orders`
+- Chapter XII-C stores certification-run identifiers, stage details, REST/private-stream/OMS evidence, and masked diagnostics inside existing JSON metadata columns.
+- No new tables, columns, indexes, policies, triggers, or functions were introduced.
+
+Operational command:
+
+```bash
+npm run verify:bybit-infrastructure
+```
+
+If this verifier fails, apply the missing migration section named in the command output before running live certification.

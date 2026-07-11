@@ -32,8 +32,14 @@ npm run check
 npm run depth:worker
 npm run depth:worker:supervise
 npm run depth:verify
+npm run bybit:private-stream
+npm run bybit:private-stream:supervise
+npm run bybit:private-stream:status
+npm run verify:bybit-infrastructure
 npm run perf:baseline
 npm run perf:stress
+npm run test:bybit-certification
+npm run certify:bybit-mainnet
 ```
 
 `npm run check` runs TypeScript and Rust checks. Use it before packaging or larger refactors.
@@ -46,9 +52,40 @@ Bybit diagnostics and controlled live validation use:
 
 ```bash
 BYBIT_MAINNET_VALIDATION_ENABLED=true
+BYBIT_MAINNET_VALIDATION_ADMIN_EMAILS=owner@example.com
+BYBIT_MAINNET_ALLOWED_CONNECTIONS=<exchange_accounts.id>
+BYBIT_MAINNET_ALLOWED_SYMBOLS=BTCUSDT
+BYBIT_MAINNET_MAX_NOTIONAL_USD=5
 ```
 
-Keep it unset unless deliberately validating tiny live orders through the existing OMS/EMS/Risk path.
+Keep these unset unless deliberately validating tiny live orders through the existing OMS/EMS/Risk path.
+Persistent Bybit private streams also need:
+
+```bash
+BYBIT_PRIVATE_STREAM_RUNTIME_ENABLED=true
+BYBIT_STREAM_ACCOUNT_ID=<exchange_accounts.id>
+BYBIT_STREAM_SYMBOL=BTCUSDT
+npm run bybit:private-stream:supervise
+```
+
+The live certification runner is operator-only:
+
+```bash
+BYBIT_CERTIFY_ACCOUNT_ID=<exchange_accounts.id>
+BYBIT_CERTIFY_API_BASE_URL=https://<deployment-host>
+BYBIT_CERTIFY_USER_TOKEN=<short-lived-user-jwt>
+BYBIT_CERTIFY_SYMBOL=BTCUSDT
+npm run certify:bybit-mainnet
+```
+
+Do not run it as CI. It requires typed `LIVE BYBIT MAINNET` activation, typed `LIVE` before exposure-changing stages, and can submit real mainnet orders.
+
+Before running it, verify infrastructure:
+
+```bash
+npm run verify:bybit-infrastructure
+npm run bybit:private-stream:status
+```
 
 For controlled Hyperliquid live validation, keep mainnet disabled unless the relay environment is
 intentionally configured:
@@ -108,10 +145,10 @@ examples/
 - Market data has a Black Core adapter foundation, but more venue paths still need production hardening.
 - Exchange adapters are now certification-gated. Bybit is read-only account validation, most CEX venues are market-data-only, wallets are signer-only, and unsupported protocol/institutional adapters stay deferred until real implementations exist.
 - Indicator execution is documented and typed but not implemented.
-- Account trading has Vercel/Supabase and Bybit foundations, but more broker adapters and DEX protocol adapters are still required.
+- Account trading has Vercel/Supabase and Bybit certification foundations, but Bybit is not production-certified until the private-stream worker and tiny live validation evidence are recorded. More broker adapters and DEX protocol adapters are still required.
 - Hyperliquid has a server relay and controlled mainnet validation guard, but production-ready status requires real testnet and small-order mainnet validation evidence.
 - Chart rendering is custom, but candle geometry is still immediate-mode drawing rather than
   batched geometry.
-- There are no automated tests yet for scale math, candle buffers, or protocol validation.
+- Bybit adapter certification has deterministic tests. Scale math, candle buffers, and broader protocol validation still need automated tests.
 - Tauri permissions and content security should be tightened before external data or community
   content ships.

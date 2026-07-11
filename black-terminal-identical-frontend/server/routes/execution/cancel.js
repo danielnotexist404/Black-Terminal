@@ -1,5 +1,5 @@
-import { applyCors, decryptCredentialPayload, requireFields, requireMethod, requireUser, sendError } from "../../server/portfolio-api.js";
-import { cancelBybitOrder } from "../../server/exchanges/bybit.js";
+import { applyCors, decryptCredentialPayload, getOwnedAccount, requireFields, requireMethod, requireUser, sendError } from "../../portfolio-api.js";
+import { cancelBybitOrder, validateBybitManagementGate } from "../../exchanges/bybit.js";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -26,6 +26,17 @@ export default async function handler(req, res) {
     let venueCancelResult = null;
     const exchange = existingOrder.exchange_accounts?.exchange || existingOrder.exchange;
     if (exchange === "bybit" && existingOrder.exchange_order_id) {
+      const account = await getOwnedAccount(supabase, user.id, existingOrder.account_id);
+      const gate = validateBybitManagementGate({
+        account,
+        body: req.body,
+        symbol: existingOrder.symbol
+      });
+      if (!gate.ok) {
+        const blocked = new Error(gate.reasons.join(" "));
+        blocked.statusCode = 403;
+        throw blocked;
+      }
       const { data: credential, error: credentialError } = await supabase
         .from("exchange_credentials")
         .select("encrypted_payload")

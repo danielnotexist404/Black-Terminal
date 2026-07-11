@@ -6,8 +6,8 @@ import {
   requireMethod,
   requireUser,
   sendError
-} from "../../server/portfolio-api.js";
-import { getBybitDiagnostics } from "../../server/exchanges/bybit.js";
+} from "../../portfolio-api.js";
+import { getBybitDiagnostics } from "../../exchanges/bybit.js";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -68,7 +68,7 @@ async function persistDiagnostics(supabase, userId, account, diagnostics) {
       balances_ready: diagnostics.certification.balancesReady,
       positions_ready: diagnostics.certification.positionsReady,
       open_orders_ready: diagnostics.certification.openOrdersReady,
-      fills_ready: false,
+      fills_ready: diagnostics.certification.fillsReady || false,
       private_streams_ready: diagnostics.certification.privateStreamsReady,
       market_order_certified: false,
       limit_order_certified: false,
@@ -78,8 +78,12 @@ async function persistDiagnostics(supabase, userId, account, diagnostics) {
       reconnect_certified: false,
       mainnet_validated: diagnostics.certification.mainnetValidated,
       supported_products: ["spot", "perpetual"],
-      supported_order_types: [],
-      capabilities: diagnostics.certification,
+      supported_order_types: diagnostics.permissions.trading ? ["market", "limit", "post-only", "reduce-only", "gtc", "ioc", "fok"] : [],
+      capabilities: {
+        ...diagnostics.certification,
+        endpoints: diagnostics.endpoints,
+        privateStreamRuntime: diagnostics.privateStreamRuntime
+      },
       limitations: diagnostics.permissions.warnings,
       last_validated_at: now,
       updated_at: now

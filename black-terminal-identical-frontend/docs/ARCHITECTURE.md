@@ -228,10 +228,38 @@ Public candles are not account connectivity. Read-only account sync is not order
 signature capability is not derivatives execution. Unsupported actions must fail closed with an
 explicit reason.
 
-Chapter XII starts the certification workflow. Bybit now has real server diagnostics for time sync,
-instrument metadata, balances, positions, and open orders. These diagnostics can persist into the
-Chapter XI certification tables. Bybit order placement remains fail-closed unless controlled mainnet
-validation is explicitly enabled server-side and per order.
+Chapter XII expands the certification workflow for Bybit. Bybit now has server diagnostics,
+metadata-backed venue validation, private-stream client architecture, snapshot reconciliation,
+server-backed order placement, order management, TP/SL protection, explicit leverage/margin/position
+mode controls, and deterministic certification tests. These capabilities still do not make Bybit
+production-certified. Certification requires a long-running private-stream worker, reconnect
+reconciliation evidence, and recorded tiny-order mainnet validation in the Chapter XI validation
+ledger.
+
+Bybit controlled validation fails closed unless the server env enables it, the account and symbol are
+allowlisted, the max notional is configured, an admin explicitly enables the account, the browser
+session enables Developer Mainnet Validation Mode, and each live action carries the `LIVE`
+confirmation. Normal order placement must never silently switch margin or position mode.
+
+Chapter XII-B adds the operator certification runner. `npm run certify:bybit-mainnet` verifies
+preflight, private-stream health, account snapshots, metadata, and allowlists before any live order.
+It then executes the certification sequence one step at a time through the deployed API and records
+evidence. The venue registry must not be promoted until this report and Supabase evidence prove the
+full path. Browser submissions now route centralized-exchange orders through local OMS, EMS, Risk,
+and Broker Router before the server-backed Bybit execution adapter is called.
+
+Chapter XII-C adds operational activation tooling around that runner. The Bybit private-stream worker
+must run as a supervised persistent process, while Vercel serverless routes expose non-secret runtime
+status by reading Supabase health snapshots. Certification decisions are deterministic and live in
+`server/exchanges/bybit-certification.js`; a venue can only become certified when mandatory stages and
+persisted evidence pass. `.env.bybit-mainnet.example` and `docs/BYBIT_MAINNET_ENVIRONMENT_SETUP.md`
+define the production environment boundary. No browser or chart component may bypass the existing
+OMS -> EMS -> Risk -> Broker Router -> server route flow.
+
+Vercel deploys on the Hobby plan, so API entrypoints are consolidated where route families share an
+execution domain. `api/exchange-accounts/[...path].js` and `api/execution/[...path].js` preserve the
+existing external URLs while delegating to server-owned route modules under `server/routes/`. This
+keeps the function count below the platform limit without introducing alternate execution paths.
 
 ## Phase III Position Rule
 

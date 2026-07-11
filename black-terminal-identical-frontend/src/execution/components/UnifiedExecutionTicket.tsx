@@ -3,11 +3,10 @@ import { Play, X } from "lucide-react";
 import { blackCoreConnectionManager } from "../../connectivity/connectionManager";
 import { readActiveExecutionVenueId } from "../../connectivity/activeExecutionVenue";
 import type { ConnectionDiagnostics } from "../../connectivity/types";
-import { submitPortfolioOrderViaApi } from "../../portfolio/portfolioApiClient";
 import type { PortfolioAccount } from "../../portfolio/types";
 import { defaultRiskControls } from "../../risk/types";
 import { submitOrder } from "../executionEngine";
-import { disableMainnetValidationMode, promptEnableMainnetValidationMode, readMainnetValidationMode, validateMainnetOrderReadiness } from "../mainnetValidationMode";
+import { MAINNET_ORDER_CONFIRMATION, disableMainnetValidationMode, promptEnableMainnetValidationMode, readMainnetValidationMode, validateMainnetOrderReadiness } from "../mainnetValidationMode";
 import type { ExecutionDestination, ExecutionSource, MarginMode, OrderSide, OrderType, SizingMethod, TimeInForce } from "../types";
 import type { ExchangeId, MarketKind } from "../../market-data/types";
 import { blackCorePositionManager } from "../../positions/positionManager";
@@ -168,11 +167,12 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
         trailingMode,
         trailingActivation,
         trailingActivationPrice: Number(trailingActivationPrice || 0) || undefined,
+        mainnetConfirmed: liveReadiness.mainnet && liveReadiness.allowed,
+        liveConfirmation: liveReadiness.mainnet && liveReadiness.allowed ? MAINNET_ORDER_CONFIRMATION : undefined,
         source: preset.source,
         destinations
       };
-      const update = selectedConnection.category === "protocol"
-        ? await submitOrder({
+      const update = await submitOrder({
             accountId: draft.accountId,
             exchange: draft.exchange,
             symbol: draft.symbol,
@@ -193,8 +193,7 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
             timeInForce: draft.timeInForce,
             source: draft.source,
             destinations: draft.destinations
-          }, buildExecutionAccount(selectedConnection), Number(price || stopPrice || 1) || 1)
-        : await submitPortfolioOrderViaApi(draft);
+          }, buildExecutionAccount(selectedConnection), Number(price || stopPrice || 1) || 1);
       if (preset.positionId && preset.protectionIntent) {
         if (preset.protectionIntent === "take-profit" && Number(takeProfit)) {
           blackCorePositionManager.setProtection(preset.positionId, "take-profit", { price: Number(takeProfit), metadata: { source: "unified-ticket" } });

@@ -6,7 +6,7 @@ import {
   sendError,
   toCamelAccount
 } from "../../server/portfolio-api.js";
-import { syncBybitAccountToSupabase } from "../../server/exchanges/bybit.js";
+import { syncBybitSnapshotAndReconcile } from "../../server/exchanges/bybit-reconciliation.js";
 import { loadHyperliquidCredential, syncHyperliquidAccount } from "../../server/protocols/hyperliquid.js";
 
 function num(value) {
@@ -139,7 +139,7 @@ async function syncLiveAccounts(supabase, userId, accounts) {
 
       if (error || !credential) continue;
       const credentials = decryptCredentialPayload(credential.encrypted_payload);
-      await syncBybitAccountToSupabase(supabase, account, credentials);
+      await syncBybitSnapshotAndReconcile(supabase, userId, account, credentials, { symbol: "BTCUSDT" });
     } catch (error) {
       console.error(`Bybit sync failed for account ${account.id}`, error);
       await supabase

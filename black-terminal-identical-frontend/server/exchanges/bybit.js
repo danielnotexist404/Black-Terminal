@@ -1,7 +1,21 @@
 import crypto from "node:crypto";
+import { getBybitPrivateStreamRuntimeDiagnostics } from "./bybit-private-stream.js";
 
 const BYBIT_BASE_URL = process.env.BYBIT_BASE_URL || "https://api.bybit.com";
 const RECV_WINDOW = "5000";
+const BYBIT_MAINNET_LIVE_CONFIRMATION = "LIVE";
+const BYBIT_ORDER_STATUS_TO_EXECUTION_STATUS = {
+  created: "submitted",
+  new: "working",
+  partiallyfilled: "partially-filled",
+  filled: "filled",
+  cancelled: "cancelled",
+  canceled: "cancelled",
+  rejected: "rejected",
+  deactivated: "cancelled",
+  untriggered: "working",
+  triggered: "working"
+};
 
 export async function validateBybitCredentials(credentials) {
   const startedAt = Date.now();
@@ -85,36 +99,66 @@ export async function getBybitOpenOrders(credentials, { category = "linear", sym
 
 export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = {}) {
   const startedAt = Date.now();
-  const [time, metadata, balances, positions, openOrders] = await Promise.all([
+  const [time, metadata, balances, positions, openOrders, apiKeyInfo] = await Promise.all([
     getBybitServerTime(),
     getBybitInstrumentMetadata({ category: "linear", symbol }),
     getBybitBalances(credentials),
     getBybitPositions(credentials),
-    getBybitOpenOrders(credentials, { category: "linear", symbol })
+    getBybitOpenOrders(credentials, { category: "linear", symbol }),
+    getBybitApiKeyInformation(credentials).catch((error) => ({
+      readOnly: true,
+      permissions: {},
+      error: error instanceof Error ? error.message : String(error)
+    }))
   ]);
+  const permissionReport = normalizeBybitPermissionReport(apiKeyInfo);
+  const privateStreamRuntime = getBybitPrivateStreamRuntimeDiagnostics();
+  const privateStreamsReady = privateStreamRuntime.status === "connected" && privateStreamRuntime.authenticated === true;
+  const mainnetValidationEnabled = process.env.BYBIT_MAINNET_VALIDATION_ENABLED === "true";
+  const executionReady = Boolean(mainnetValidationEnabled && permissionReport.trading && privateStreamsReady);
+  const readinessReason = executionReady
+    ? "Bybit execution readiness checks passed for controlled mainnet validation."
+    : [
+        !mainnetValidationEnabled ? "BYBIT_MAINNET_VALIDATION_ENABLED is not true." : "",
+        !permissionReport.trading ? "Bybit API key is read-only or lacks order/position trading permission." : "",
+        !privateStreamsReady ? "Bybit private stream runtime is not authenticated and connected." : ""
+      ].filter(Boolean).join(" ");
 
   return {
     venueId: "bybit",
     provider: "bybit",
     network: "mainnet",
-    executionMode: "read-only",
-    readiness: "connected-read-only",
+    executionMode: executionReady ? "full-live" : "read-only",
+    readiness: executionReady ? "execution-ready" : "execution-blocked",
     latencyMs: Date.now() - startedAt,
     authentication: "authenticated",
-    synchronization: "synced",
+    synchronization: "snapshot-synced",
     publicStream: "connected",
-    privateStream: "not-supported",
+    privateStream: privateStreamRuntime.status,
     permissions: {
       read: true,
-      trading: false,
-      withdrawal: false,
-      warnings: ["Bybit trading remains disabled until private stream, precision, execution, cancel/modify, reconciliation, and mainnet validation certification are complete."]
+      trading: permissionReport.trading,
+      withdrawal: permissionReport.withdrawal,
+      warnings: [
+        ...permissionReport.warnings,
+        executionReady ? "" : readinessReason,
+        "Bybit is not production-certified until market, limit, cancel, modify, close, TP/SL, reconnect reconciliation, and recorded mainnet validation all pass."
+      ].filter(Boolean)
     },
+    readinessReason,
     time,
     metadata,
     balances,
     positions,
     openOrders,
+    apiKeyInfo,
+    privateStreamRuntime,
+    endpoints: {
+      order: permissionReport.trading ? "available-gated" : "blocked-permission",
+      cancel: permissionReport.trading ? "available-gated" : "blocked-permission",
+      modify: permissionReport.trading ? "available-gated" : "blocked-permission",
+      positionProtection: permissionReport.trading ? "available-gated" : "blocked-permission"
+    },
     rateLimitUsage: "unknown",
     certification: {
       marketDataReady: true,
@@ -123,9 +167,16 @@ export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = 
       balancesReady: true,
       positionsReady: true,
       openOrdersReady: true,
-      privateStreamsReady: false,
-      executionReady: false,
-      mainnetValidated: false
+      fillsReady: privateStreamsReady,
+      privateStreamsReady,
+      orderEndpointReady: permissionReport.trading,
+      cancelEndpointReady: permissionReport.trading,
+      modifyEndpointReady: permissionReport.trading,
+      metadataFresh: metadata.length > 0,
+      executionReady,
+      mainnetValidated: false,
+      certificationStatus: executionReady ? "validation-ready" : "blocked",
+      readinessReason
     }
   };
 }
@@ -204,6 +255,14 @@ export async function syncBybitAccountToSupabase(supabase, account, credentials)
 }
 
 export async function placeBybitOrder(credentials, order) {
+  const validation = await validateBybitOrderDraft(credentials, order);
+  if (!validation.ok) {
+    const error = new Error(validation.reasons.join(" "));
+    error.statusCode = 400;
+    error.validation = validation;
+    throw error;
+  }
+
   const category = order.marketKind === "spot" ? "spot" : "linear";
   const orderType = normalizeBybitOrderType(order.orderType);
   const body = {
@@ -211,36 +270,51 @@ export async function placeBybitOrder(credentials, order) {
     symbol: order.symbol,
     side: order.side === "buy" ? "Buy" : "Sell",
     orderType,
-    qty: String(order.quantity),
-    timeInForce: normalizeBybitTimeInForce(order.timeInForce)
+    qty: formatBybitNumber(order.quantity, validation.metadata?.quantityPrecision),
+    timeInForce: normalizeBybitTimeInForce(order.timeInForce, order),
+    orderLinkId: order.clientOrderId || order.internalOrderId || createBybitClientOrderId()
   };
 
   if (orderType === "Limit" && order.limitPrice) {
-    body.price = String(order.limitPrice);
+    body.price = formatBybitNumber(order.limitPrice, validation.metadata?.pricePrecision);
   }
 
   if (order.stopPrice) {
-    body.triggerPrice = String(order.stopPrice);
+    body.triggerPrice = formatBybitNumber(order.stopPrice, validation.metadata?.pricePrecision);
     body.triggerDirection = Number(order.stopPrice) >= Number(order.referencePrice || order.limitPrice || 0) ? 1 : 2;
   }
 
   if (order.takeProfit) {
-    body.takeProfit = String(order.takeProfit);
+    body.takeProfit = formatBybitNumber(order.takeProfit, validation.metadata?.pricePrecision);
   }
 
   if (order.stopLoss) {
-    body.stopLoss = String(order.stopLoss);
+    body.stopLoss = formatBybitNumber(order.stopLoss, validation.metadata?.pricePrecision);
   }
 
   if (category !== "spot" && order.reduceOnly) {
     body.reduceOnly = true;
   }
 
+  if (category !== "spot" && order.leverage) {
+    await setBybitLeverage(credentials, {
+      category,
+      symbol: order.symbol,
+      leverage: order.leverage
+    });
+  }
+
   const response = await bybitRequest(credentials, "POST", "/v5/order/create", {}, body);
-  return {
-    exchangeOrderId: response?.orderId,
-    clientOrderId: response?.orderLinkId
-  };
+  return normalizeBybitExecutionReport({
+    accountId: order.accountId,
+    exchange: "bybit",
+    symbol: order.symbol,
+    status: "accepted",
+    orderId: response?.orderId,
+    clientOrderId: response?.orderLinkId || body.orderLinkId,
+    filledQuantity: 0,
+    raw: response
+  });
 }
 
 export async function cancelBybitOrder(credentials, { marketKind = "perpetual", symbol, orderId, clientOrderId }) {
@@ -252,9 +326,29 @@ export async function cancelBybitOrder(credentials, { marketKind = "perpetual", 
     orderId,
     orderLinkId: clientOrderId
   });
+  return normalizeBybitExecutionReport({
+    exchange: "bybit",
+    symbol,
+    status: "cancelled",
+    exchangeOrderId: response?.orderId,
+    orderId: response?.orderId || orderId,
+    clientOrderId: response?.orderLinkId || clientOrderId,
+    filledQuantity: 0,
+    raw: response
+  });
+}
+
+export async function cancelAllBybitOrders(credentials, { marketKind = "perpetual", symbol } = {}) {
+  const category = marketKind === "spot" ? "spot" : "linear";
+  const response = await bybitRequest(credentials, "POST", "/v5/order/cancel-all", {}, {
+    category,
+    symbol
+  });
   return {
-    exchangeOrderId: response?.orderId || orderId,
-    clientOrderId: response?.orderLinkId || clientOrderId
+    status: "accepted",
+    symbol,
+    cancelled: response?.list || [],
+    raw: response
   };
 }
 
@@ -273,13 +367,281 @@ export async function modifyBybitOrder(credentials, patch) {
     stopLoss: patch.stopLoss ? String(patch.stopLoss) : undefined
   };
   const response = await bybitRequest(credentials, "POST", "/v5/order/amend", {}, body);
-  return {
-    exchangeOrderId: response?.orderId || patch.orderId,
+  return normalizeBybitExecutionReport({
+    exchange: "bybit",
+    symbol: patch.symbol,
+    status: "working",
+    orderId: response?.orderId || patch.orderId,
     clientOrderId: response?.orderLinkId || patch.clientOrderId
+  });
+}
+
+export async function closeBybitPosition(credentials, { marketKind = "perpetual", symbol, direction, quantity, positionIdx, clientOrderId }) {
+  if (!symbol) throw new Error("Bybit close position requires a symbol.");
+  const side = direction === "short" || direction === "sell" ? "Buy" : "Sell";
+  const response = await bybitRequest(credentials, "POST", "/v5/order/create", {}, {
+    category: marketKind === "spot" ? "spot" : "linear",
+    symbol,
+    side,
+    orderType: "Market",
+    qty: String(quantity || 0),
+    reduceOnly: true,
+    orderLinkId: clientOrderId || createBybitClientOrderId("bt-close"),
+    positionIdx
+  });
+  return normalizeBybitExecutionReport({
+    exchange: "bybit",
+    symbol,
+    status: "accepted",
+    orderId: response?.orderId,
+    clientOrderId: response?.orderLinkId,
+    filledQuantity: 0,
+    raw: response
+  });
+}
+
+export async function reverseBybitPosition(credentials, { marketKind = "perpetual", symbol, direction, quantity, clientOrderId }) {
+  const closeReport = await closeBybitPosition(credentials, {
+    marketKind,
+    symbol,
+    direction,
+    quantity,
+    clientOrderId: clientOrderId ? `${clientOrderId}-close` : undefined
+  });
+  const openSide = direction === "short" || direction === "sell" ? "buy" : "sell";
+  const openReport = await placeBybitOrder(credentials, {
+    marketKind,
+    symbol,
+    side: openSide,
+    orderType: "market",
+    quantity,
+    clientOrderId: clientOrderId ? `${clientOrderId}-reverse` : undefined,
+    reduceOnly: false
+  });
+  return {
+    status: openReport.status,
+    closeReport,
+    openReport,
+    orderId: openReport.orderId,
+    clientOrderId: openReport.clientOrderId
   };
 }
 
-async function getBybitBalances(credentials) {
+export async function setBybitPositionProtection(credentials, patch) {
+  const category = patch.marketKind === "spot" ? "spot" : "linear";
+  if (category === "spot") throw new Error("Bybit spot does not support native futures TP/SL protection.");
+  const body = {
+    category,
+    symbol: patch.symbol,
+    tpslMode: patch.tpslMode || "Full",
+    positionIdx: patch.positionIdx,
+    takeProfit: patch.takeProfit !== undefined ? String(patch.takeProfit || 0) : undefined,
+    stopLoss: patch.stopLoss !== undefined ? String(patch.stopLoss || 0) : undefined,
+    trailingStop: patch.trailingStop !== undefined ? String(patch.trailingStop || 0) : undefined,
+    activePrice: patch.trailingActivationPrice !== undefined ? String(patch.trailingActivationPrice || 0) : undefined,
+    tpTriggerBy: patch.tpTriggerBy || "LastPrice",
+    slTriggerBy: patch.slTriggerBy || "LastPrice"
+  };
+  const response = await bybitRequest(credentials, "POST", "/v5/position/trading-stop", {}, body);
+  return {
+    status: "accepted",
+    protectionMode: "native",
+    symbol: patch.symbol,
+    takeProfit: patch.takeProfit ?? null,
+    stopLoss: patch.stopLoss ?? null,
+    trailingStop: patch.trailingStop ?? null,
+    raw: response
+  };
+}
+
+export async function setBybitLeverage(credentials, { category = "linear", symbol, leverage, buyLeverage, sellLeverage }) {
+  if (!symbol) throw new Error("Bybit leverage update requires a symbol.");
+  if (!leverage && !buyLeverage && !sellLeverage) throw new Error("Bybit leverage update requires leverage.");
+  const nextBuyLeverage = String(buyLeverage || leverage);
+  const nextSellLeverage = String(sellLeverage || leverage);
+  const response = await bybitRequest(credentials, "POST", "/v5/position/set-leverage", {}, {
+    category,
+    symbol,
+    buyLeverage: nextBuyLeverage,
+    sellLeverage: nextSellLeverage
+  });
+  return {
+    status: "accepted",
+    symbol,
+    buyLeverage: Number(nextBuyLeverage),
+    sellLeverage: Number(nextSellLeverage),
+    raw: response
+  };
+}
+
+export async function switchBybitMarginMode(credentials, { category = "linear", symbol, marginMode, leverage, buyLeverage, sellLeverage }) {
+  if (!symbol) throw new Error("Bybit margin-mode update requires a symbol.");
+  if (!["cross", "isolated"].includes(marginMode)) throw new Error("Bybit margin mode must be cross or isolated.");
+  const nextLeverage = leverage || buyLeverage || sellLeverage;
+  if (!nextLeverage) throw new Error("Bybit margin-mode switch requires explicit leverage.");
+  const response = await bybitRequest(credentials, "POST", "/v5/position/switch-isolated", {}, {
+    category,
+    symbol,
+    tradeMode: marginMode === "cross" ? 0 : 1,
+    buyLeverage: String(buyLeverage || nextLeverage),
+    sellLeverage: String(sellLeverage || nextLeverage)
+  });
+  return {
+    status: "accepted",
+    symbol,
+    marginMode,
+    buyLeverage: Number(buyLeverage || nextLeverage),
+    sellLeverage: Number(sellLeverage || nextLeverage),
+    raw: response
+  };
+}
+
+export async function switchBybitPositionMode(credentials, { category = "linear", symbol, settleCoin, positionMode }) {
+  if (!["one-way", "hedge"].includes(positionMode)) throw new Error("Bybit position mode must be one-way or hedge.");
+  if (!symbol && !settleCoin) throw new Error("Bybit position-mode switch requires symbol or settleCoin.");
+  const response = await bybitRequest(credentials, "POST", "/v5/position/switch-mode", {}, {
+    category,
+    symbol,
+    coin: settleCoin,
+    mode: positionMode === "hedge" ? 3 : 0
+  });
+  return {
+    status: "accepted",
+    symbol,
+    settleCoin,
+    positionMode,
+    raw: response
+  };
+}
+
+export async function validateBybitOrderDraft(credentials, order) {
+  const category = order.marketKind === "spot" ? "spot" : "linear";
+  const symbol = normalizeBybitSymbol(order.symbol);
+  const metadata = (await getBybitInstrumentMetadata({ category, symbol }))[0];
+  return evaluateBybitOrderDraftAgainstMetadata(metadata, order, { category, symbol });
+}
+
+export function evaluateBybitOrderDraftAgainstMetadata(metadata, order, context = {}) {
+  const category = context.category || (order.marketKind === "spot" ? "spot" : "linear");
+  const symbol = context.symbol || normalizeBybitSymbol(order.symbol);
+  const reasons = [];
+  const quantity = Number(order.quantity || 0);
+  const referencePrice = Number(order.referencePrice || order.limitPrice || order.stopPrice || 0);
+  const notional = Math.abs(quantity * referencePrice);
+  const orderType = normalizeBybitOrderType(order.orderType);
+
+  if (!metadata) reasons.push(`Bybit metadata is unavailable for ${symbol}.`);
+  if (metadata?.tradingStatus && !["Trading", "trading"].includes(String(metadata.tradingStatus))) {
+    reasons.push(`${symbol} is not trading on Bybit (${metadata.tradingStatus}).`);
+  }
+  if (!quantity || quantity <= 0) reasons.push("Quantity must be greater than zero.");
+  if (metadata?.minQuantity && quantity < metadata.minQuantity) {
+    reasons.push(`Quantity is below Bybit minimum ${metadata.minQuantity}.`);
+  }
+  if (metadata?.maxQuantity && quantity > metadata.maxQuantity) {
+    reasons.push(`Quantity exceeds Bybit maximum ${metadata.maxQuantity}.`);
+  }
+  if (metadata?.quantityStep && !isStepAligned(quantity, metadata.quantityStep)) {
+    reasons.push(`Quantity must align to Bybit quantity step ${metadata.quantityStep}.`);
+  }
+  if (orderType === "Limit") {
+    if (!order.limitPrice || Number(order.limitPrice) <= 0) reasons.push("Limit order requires a positive limit price.");
+    if (metadata?.tickSize && order.limitPrice && !isStepAligned(Number(order.limitPrice), metadata.tickSize)) {
+      reasons.push(`Limit price must align to Bybit tick size ${metadata.tickSize}.`);
+    }
+  }
+  if (order.stopPrice && metadata?.tickSize && !isStepAligned(Number(order.stopPrice), metadata.tickSize)) {
+    reasons.push(`Stop price must align to Bybit tick size ${metadata.tickSize}.`);
+  }
+  if (metadata?.minNotional && referencePrice > 0 && notional < metadata.minNotional) {
+    reasons.push(`Order notional ${notional.toFixed(4)} is below Bybit minimum notional ${metadata.minNotional}.`);
+  }
+  if (category !== "spot" && order.leverage && metadata?.leverageLimits?.max && Number(order.leverage) > metadata.leverageLimits.max) {
+    reasons.push(`Leverage exceeds Bybit maximum ${metadata.leverageLimits.max}x.`);
+  }
+  if (category !== "spot" && order.marginMode && !metadata?.supportedMarginModes?.includes(order.marginMode)) {
+    reasons.push(`Margin mode ${order.marginMode} is not supported for ${symbol}.`);
+  }
+  if (order.postOnly && order.timeInForce && order.timeInForce !== "gtc") {
+    reasons.push("Bybit post-only orders must use GTC/PostOnly behavior.");
+  }
+
+  return {
+    ok: reasons.length === 0,
+    reasons,
+    category,
+    symbol,
+    metadata,
+    normalized: {
+      orderType,
+      timeInForce: normalizeBybitTimeInForce(order.timeInForce, order),
+      quantity,
+      referencePrice,
+      notional
+    }
+  };
+}
+
+export function validateBybitMainnetValidationRequest({ account, order, risk, validation }) {
+  const reasons = [];
+  const allowedConnections = splitCsv(process.env.BYBIT_MAINNET_ALLOWED_CONNECTIONS);
+  const allowedSymbols = splitCsv(process.env.BYBIT_MAINNET_ALLOWED_SYMBOLS).map((item) => item.toUpperCase());
+  const maxNotional = Number(process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD || 0);
+
+  if (process.env.BYBIT_MAINNET_VALIDATION_ENABLED !== "true") {
+    reasons.push("BYBIT_MAINNET_VALIDATION_ENABLED must be true.");
+  }
+  if (order.mainnetConfirmed !== true || order.liveConfirmation !== BYBIT_MAINNET_LIVE_CONFIRMATION) {
+    reasons.push(`Each Bybit mainnet validation order requires explicit per-order confirmation: ${BYBIT_MAINNET_LIVE_CONFIRMATION}.`);
+  }
+  if (!allowedConnections.length || !allowedConnections.includes(account.id)) {
+    reasons.push("Bybit account is not in BYBIT_MAINNET_ALLOWED_CONNECTIONS.");
+  }
+  if (!allowedSymbols.length || !allowedSymbols.includes(String(order.symbol || "").toUpperCase())) {
+    reasons.push("Bybit symbol is not in BYBIT_MAINNET_ALLOWED_SYMBOLS.");
+  }
+  if (!Number.isFinite(maxNotional) || maxNotional <= 0) {
+    reasons.push("BYBIT_MAINNET_MAX_NOTIONAL_USD must be configured.");
+  } else if (risk.notional > maxNotional) {
+    reasons.push(`Order notional exceeds BYBIT_MAINNET_MAX_NOTIONAL_USD (${maxNotional}).`);
+  }
+  if (!validation?.ok) {
+    reasons.push(...(validation?.reasons || ["Bybit venue validation failed."]));
+  }
+
+  return {
+    ok: reasons.length === 0,
+    reasons,
+    maxNotionalUsd: maxNotional
+  };
+}
+
+export function validateBybitManagementGate({ account, body, symbol }) {
+  const reasons = [];
+  const allowedConnections = splitCsv(process.env.BYBIT_MAINNET_ALLOWED_CONNECTIONS);
+  const allowedSymbols = splitCsv(process.env.BYBIT_MAINNET_ALLOWED_SYMBOLS).map((item) => item.toUpperCase());
+  const nativeSymbol = String(symbol || body.symbol || "").toUpperCase();
+
+  if (process.env.BYBIT_MAINNET_VALIDATION_ENABLED !== "true") {
+    reasons.push("BYBIT_MAINNET_VALIDATION_ENABLED must be true.");
+  }
+  if (body.mainnetConfirmed !== true || body.liveConfirmation !== BYBIT_MAINNET_LIVE_CONFIRMATION) {
+    reasons.push(`Bybit live management action requires explicit confirmation: ${BYBIT_MAINNET_LIVE_CONFIRMATION}.`);
+  }
+  if (!allowedConnections.length || !allowedConnections.includes(account.id)) {
+    reasons.push("Bybit account is not in BYBIT_MAINNET_ALLOWED_CONNECTIONS.");
+  }
+  if (!allowedSymbols.length || !allowedSymbols.includes(nativeSymbol)) {
+    reasons.push("Bybit symbol is not in BYBIT_MAINNET_ALLOWED_SYMBOLS.");
+  }
+
+  return {
+    ok: reasons.length === 0,
+    reasons
+  };
+}
+
+export async function getBybitBalances(credentials) {
   const response = await bybitRequest(credentials, "GET", "/v5/account/wallet-balance", { accountType: "UNIFIED" });
   const account = response?.list?.[0];
   const coins = account?.coin || [];
@@ -302,7 +664,7 @@ async function getBybitBalances(credentials) {
     .filter((coin) => coin.total > 0 || coin.usdValue > 0);
 }
 
-async function getBybitPositions(credentials) {
+export async function getBybitPositions(credentials) {
   const response = await bybitRequest(credentials, "GET", "/v5/position/list", {
     category: "linear",
     settleCoin: "USDT",
@@ -368,6 +730,10 @@ async function bybitRequest(credentials, method, path, query = {}, body) {
   return data.result;
 }
 
+export async function getBybitApiKeyInformation(credentials) {
+  return bybitRequest(credentials, "GET", "/v5/user/query-api", {});
+}
+
 async function bybitPublicRequest(path, query = {}) {
   const queryString = buildQueryString(query);
   const response = await fetch(`${BYBIT_BASE_URL}${path}${queryString ? `?${queryString}` : ""}`);
@@ -391,7 +757,11 @@ function buildQueryString(query) {
     .join("&");
 }
 
-function normalizeBybitOrderType(orderType) {
+function normalizeBybitSymbol(symbol) {
+  return String(symbol || "").replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+}
+
+export function normalizeBybitOrderType(orderType) {
   if (orderType === "market") return "Market";
   if (orderType === "stop-market") return "Market";
   if (["trailing-stop", "twap", "iceberg"].includes(orderType)) {
@@ -400,7 +770,8 @@ function normalizeBybitOrderType(orderType) {
   return "Limit";
 }
 
-function normalizeBybitTimeInForce(timeInForce) {
+export function normalizeBybitTimeInForce(timeInForce, order = {}) {
+  if (order.postOnly || order.orderType === "post-only") return "PostOnly";
   if (timeInForce === "ioc") return "IOC";
   if (timeInForce === "fok") return "FOK";
   return "GTC";
@@ -412,18 +783,107 @@ function nullableNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function precisionFromStep(value) {
+export function precisionFromStep(value) {
   if (value === undefined || value === null || value === "") return null;
   const text = String(value);
   if (!text.includes(".")) return 0;
   return text.split(".")[1].replace(/0+$/, "").length;
 }
 
-function normalizeBybitOrderStatus(status) {
-  const value = String(status || "").toLowerCase();
+export function normalizeBybitOrderStatus(status) {
+  const value = String(status || "").replace(/[^a-zA-Z]/g, "").toLowerCase();
+  if (value.includes("partiallyfilled")) return "partially-filled";
   if (value.includes("filled")) return "filled";
   if (value.includes("cancel")) return "cancelled";
   if (value.includes("reject")) return "rejected";
-  if (value.includes("new") || value.includes("created")) return "accepted";
-  return value || "pending";
+  if (value.includes("expired")) return "expired";
+  if (value.includes("new") || value.includes("created")) return "working";
+  if (value.includes("untriggered") || value.includes("triggered")) return "working";
+  return BYBIT_ORDER_STATUS_TO_EXECUTION_STATUS[value] || value || "pending";
+}
+
+export function normalizeBybitExecutionReport(report) {
+  const status = normalizeExecutionStatus(report.status);
+  const orderId = report.orderId || report.exchangeOrderId || report.raw?.orderId || "bybit-order";
+  return {
+    accountId: report.accountId,
+    exchange: report.exchange || "bybit",
+    orderId,
+    exchangeOrderId: orderId,
+    clientOrderId: report.clientOrderId || report.raw?.orderLinkId || undefined,
+    symbol: report.symbol,
+    status,
+    filledQuantity: Number(report.filledQuantity || 0),
+    averageFillPrice: nullableNumber(report.averageFillPrice),
+    reason: report.reason || report.raw?.rejectReason || undefined,
+    time: Number(report.time || Date.now()),
+    raw: report.raw
+  };
+}
+
+export function normalizeBybitPermissionReport(apiKeyInfo = {}) {
+  const permissions = apiKeyInfo.permissions || {};
+  const readOnly = apiKeyInfo.readOnly === 1 || apiKeyInfo.readOnly === "1" || apiKeyInfo.readOnly === true;
+  const contract = normalizePermissionList(permissions.ContractTrade || permissions.contractTrade || permissions.Derivatives || []);
+  const spot = normalizePermissionList(permissions.Spot || permissions.spot || []);
+  const wallet = normalizePermissionList(permissions.Wallet || permissions.wallet || []);
+  const trading = !readOnly && (
+    contract.some((item) => ["order", "position", "trade"].includes(item)) ||
+    spot.some((item) => ["spottrade", "trade"].includes(item))
+  );
+  const withdrawal = wallet.some((item) => ["withdraw", "withdrawal"].includes(item));
+  const warnings = [];
+
+  if (readOnly) warnings.push("Bybit API key is read-only.");
+  if (!trading) warnings.push("Bybit API key does not advertise trading permission.");
+  if (withdrawal) warnings.push("Withdrawal permission detected. Use trading-only API keys.");
+  if (apiKeyInfo.error) warnings.push(`Bybit API-key permission probe failed: ${apiKeyInfo.error}`);
+
+  return {
+    read: true,
+    trading,
+    withdrawal,
+    warnings,
+    raw: apiKeyInfo
+  };
+}
+
+function normalizePermissionList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item || "").replace(/[^a-zA-Z]/g, "").toLowerCase());
+}
+
+function normalizeExecutionStatus(status) {
+  const value = String(status || "").replace(/[^a-zA-Z]/g, "").toLowerCase();
+  if (value === "submitted") return "pending";
+  if (value === "working") return "accepted";
+  if (value === "partiallyfilled") return "partially-filled";
+  if (["pending", "accepted", "partially-filled", "filled", "cancelled", "rejected", "expired"].includes(status)) return status;
+  return BYBIT_ORDER_STATUS_TO_EXECUTION_STATUS[value] || "accepted";
+}
+
+function isStepAligned(value, step) {
+  const numericValue = Number(value);
+  const numericStep = Number(step);
+  if (!Number.isFinite(numericValue) || !Number.isFinite(numericStep) || numericStep <= 0) return false;
+  const quotient = numericValue / numericStep;
+  return Math.abs(quotient - Math.round(quotient)) < 1e-8;
+}
+
+function formatBybitNumber(value, precision) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return String(value);
+  if (typeof precision === "number" && precision >= 0) return numeric.toFixed(precision).replace(/\.?0+$/, "");
+  return String(numeric);
+}
+
+function createBybitClientOrderId(prefix = "bt") {
+  return `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+}
+
+function splitCsv(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }

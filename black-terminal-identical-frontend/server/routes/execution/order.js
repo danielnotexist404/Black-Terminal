@@ -7,8 +7,12 @@ import {
   requireMethod,
   requireUser,
   sendError
-} from "../../server/portfolio-api.js";
-import { placeBybitOrder } from "../../server/exchanges/bybit.js";
+} from "../../portfolio-api.js";
+import {
+  placeBybitOrder,
+  validateBybitMainnetValidationRequest,
+  validateBybitOrderDraft
+} from "../../exchanges/bybit.js";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -51,15 +55,11 @@ export default async function handler(req, res) {
     let rejectionReason = risk.reasons.join(" ");
     let exchangeOrderId = null;
     let clientOrderId = null;
+    let mainnetValidationRecordId = null;
 
     if (risk.status === "approved") {
       if (account.exchange === "bybit") {
         try {
-          if (process.env.BYBIT_MAINNET_VALIDATION_ENABLED !== "true" || req.body.mainnetConfirmed !== true) {
-            const validationError = new Error("Bybit live execution requires BYBIT_MAINNET_VALIDATION_ENABLED=true and explicit Developer Mainnet Validation confirmation.");
-            validationError.statusCode = 403;
-            throw validationError;
-          }
           const { data: credential, error: credentialError } = await supabase
             .from("exchange_credentials")
             .select("encrypted_payload")
@@ -68,6 +68,31 @@ export default async function handler(req, res) {
 
           if (credentialError || !credential) throw credentialError || new Error("Missing encrypted credentials.");
           const credentials = decryptCredentialPayload(credential.encrypted_payload);
+          const venueValidation = await validateBybitOrderDraft(credentials, {
+            ...req.body,
+            marketKind: req.body.marketKind || "perpetual",
+            limitPrice: req.body.limitPrice,
+            timeInForce: req.body.timeInForce || "gtc"
+          });
+          const mainnetGate = validateBybitMainnetValidationRequest({
+            account,
+            order: req.body,
+            risk,
+            validation: venueValidation
+          });
+          mainnetValidationRecordId = await recordBybitValidationAttempt(supabase, user.id, account, req.body, {
+            status: mainnetGate.ok ? "started" : "blocked",
+            stage: "pre_order_gate",
+            risk,
+            maxNotionalUsd: mainnetGate.maxNotionalUsd,
+            failureReason: mainnetGate.ok ? null : mainnetGate.reasons.join(" "),
+            venueValidation
+          });
+          if (!mainnetGate.ok) {
+            const validationError = new Error(mainnetGate.reasons.join(" "));
+            validationError.statusCode = 403;
+            throw validationError;
+          }
           const exchangeResult = await placeBybitOrder(credentials, {
             ...req.body,
             marketKind: req.body.marketKind || "perpetual",
@@ -80,9 +105,18 @@ export default async function handler(req, res) {
           rejectionReason = null;
           exchangeOrderId = exchangeResult.exchangeOrderId || null;
           clientOrderId = exchangeResult.clientOrderId || null;
+          await completeBybitValidationAttempt(supabase, mainnetValidationRecordId, {
+            status: "passed",
+            exchangeOrderId,
+            metadata: { exchangeResult }
+          });
         } catch (exchangeError) {
           status = "rejected";
           rejectionReason = exchangeError instanceof Error ? exchangeError.message : String(exchangeError);
+          await completeBybitValidationAttempt(supabase, mainnetValidationRecordId, {
+            status: exchangeError?.statusCode === 403 ? "blocked" : "failed",
+            failureReason: rejectionReason
+          });
         }
       } else {
         rejectionReason = "No live exchange execution adapter is configured for this venue yet.";
@@ -133,6 +167,7 @@ export default async function handler(req, res) {
       metadata: {
         riskStatus: risk.status,
         notional: risk.notional,
+        mainnetValidationRecordId,
         source: req.body.source || "order-ticket",
         destinations: req.body.destinations || ["personal-portfolio"],
         sizingMethod: req.body.sizingMethod || req.body.quantityMode || "quantity",
@@ -145,4 +180,61 @@ export default async function handler(req, res) {
   } catch (error) {
     return sendError(res, error);
   }
+}
+
+async function recordBybitValidationAttempt(supabase, userId, account, order, payload) {
+  const requestedNotional = Number(order.quantity || 0) * Number(order.referencePrice || order.limitPrice || order.stopPrice || 0);
+  const { data, error } = await supabase
+    .from("mainnet_validation_records")
+    .insert({
+      user_id: userId,
+      account_id: account.id,
+      venue_id: "bybit",
+      network: "mainnet",
+      symbol: String(order.symbol || "").toUpperCase(),
+      max_notional_usd: payload.maxNotionalUsd || null,
+      requested_notional_usd: Math.abs(requestedNotional) || payload.risk?.notional || null,
+      validation_stage: payload.stage,
+      status: payload.status,
+      live_confirmation: order.liveConfirmation || "required",
+      risk_check_status: payload.risk?.status || null,
+      failure_reason: payload.failureReason,
+      metadata: {
+        venueValidation: payload.venueValidation,
+        orderType: order.orderType,
+        marketKind: order.marketKind || "perpetual",
+        timeInForce: order.timeInForce || "gtc"
+      }
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    await supabase.from("execution_audit_logs").insert({
+      user_id: userId,
+      account_id: account.id,
+      event_type: "mainnet_validation_record_failed",
+      severity: "warning",
+      message: error.message,
+      metadata: { venueId: "bybit", symbol: order.symbol }
+    }).catch(() => null);
+    return null;
+  }
+
+  return data?.id || null;
+}
+
+async function completeBybitValidationAttempt(supabase, recordId, payload) {
+  if (!recordId) return;
+  await supabase
+    .from("mainnet_validation_records")
+    .update({
+      status: payload.status,
+      exchange_order_id: payload.exchangeOrderId || null,
+      failure_reason: payload.failureReason || null,
+      metadata: payload.metadata || {},
+      completed_at: new Date().toISOString()
+    })
+    .eq("id", recordId)
+    .catch(() => null);
 }

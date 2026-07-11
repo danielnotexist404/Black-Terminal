@@ -366,7 +366,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
 
         await dbAddAuditLog("CREATE", `New secure account registered: ${cleanUser} (${cleanEmail})`);
         await dbAddAuditLog("LOGIN", `User ${cleanUser} logged in automatically.`);
-        const secureSession = await establishSupabaseAuthSession(newUser, cleanPass);
+        const secureSession = await establishSupabaseAuthSession(newUser, cleanPass, { allowCreate: true });
         if (!secureSession.success) {
           setErrorMsg(secureSession.error || "Secure Supabase Auth session failed.");
           setLoading(false);

@@ -221,7 +221,8 @@ export async function dbVerifyUser(username: string, accessCode: string): Promis
 
 export async function establishSupabaseAuthSession(
   user: Pick<DBUser, "username" | "email" | "role">,
-  accessCode: string
+  accessCode: string,
+  options: { allowCreate?: boolean } = {}
 ): Promise<{ success: boolean; error?: string; needsEmailConfirmation?: boolean }> {
   if (!isSupabaseConfigured || !supabase) return { success: true };
 
@@ -247,6 +248,22 @@ export async function establishSupabaseAuthSession(
   const signedIn = await supabase.auth.signInWithPassword({ email, password });
   if (!signedIn.error && signedIn.data.session) {
     return { success: true };
+  }
+
+  const signInMessage = signedIn.error?.message || "Unknown Supabase Auth error.";
+  if (signInMessage.toLowerCase().includes("email not confirmed")) {
+    return {
+      success: false,
+      needsEmailConfirmation: true,
+      error: `Supabase Auth email is not confirmed for ${email}. Manually confirm this user in Supabase Authentication, then sign in again.`
+    };
+  }
+
+  if (!options.allowCreate) {
+    return {
+      success: false,
+      error: `Supabase Auth sign-in failed for ${email}. Create or update this Authentication user with the same Black Terminal access code. ${signInMessage}`
+    };
   }
 
   const signedUp = await supabase.auth.signUp({

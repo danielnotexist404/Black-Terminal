@@ -1,5 +1,6 @@
 import type { ConnectRequest, ConnectionRecord } from "../connectivity/types";
 import { defaultConnectionHealth, defaultPermissionReport } from "../connectivity/types";
+import { shouldSendMainnetConfirmed, validateMainnetOrderReadiness } from "../execution/mainnetValidationMode";
 import type { OrderRequest, OrderUpdate } from "../execution/types";
 import { connectHyperliquidRelayViaApi, submitHyperliquidOrderViaApi } from "../portfolio/portfolioApiClient";
 import type { ProtocolAdapter, ProtocolCapabilityProfile } from "./types";
@@ -159,6 +160,21 @@ export const hyperliquidProtocolAdapter: ProtocolAdapter = {
       };
     }
 
+    const mainnetReadiness = validateMainnetOrderReadiness(connection);
+    if (!mainnetReadiness.allowed) {
+      return {
+        accountId: order.accountId,
+        exchange: "hyperliquid",
+        orderId: order.internalOrderId || order.clientOrderId || `hl-blocked-${Date.now()}`,
+        clientOrderId: order.clientOrderId,
+        symbol: order.symbol,
+        status: "rejected",
+        filledQuantity: 0,
+        reason: mainnetReadiness.reason || "Hyperliquid mainnet validation is not enabled.",
+        time: Date.now()
+      };
+    }
+
     const update = await submitHyperliquidOrderViaApi({
       accountId: connection.accountId || order.accountId,
       exchange: "hyperliquid",
@@ -182,7 +198,7 @@ export const hyperliquidProtocolAdapter: ProtocolAdapter = {
       destinations: order.destinations,
       internalOrderId: order.internalOrderId,
       clientOrderId: order.clientOrderId,
-      mainnetConfirmed: connection.metadata.network === "mainnet" && connection.metadata.mainnetConfirmed === true
+      mainnetConfirmed: shouldSendMainnetConfirmed(connection)
     });
     if (!update) throw new Error("Supabase session required for Hyperliquid execution.");
     return update;

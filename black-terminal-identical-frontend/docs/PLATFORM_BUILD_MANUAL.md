@@ -189,8 +189,24 @@ Protocol framework files:
 - `src/protocols/registerProtocols.ts`
 
 Hyperliquid is registered as a protocol adapter behind MetaMask signing. The adapter reports
-perpetual capabilities but live order placement remains blocked until the server-side signing and
-order relay is implemented.
+perpetual capabilities and routes executable orders through the server-side signing relay when the
+relay, credential, network, risk, and validation gates are all satisfied.
+
+Current Hyperliquid relay rule:
+
+- Testnet is the default validation path.
+- Mainnet is disabled unless `HYPERLIQUID_MAINNET_VALIDATION_ENABLED=true` is set server-side.
+- The user must connect a mainnet Hyperliquid relay with explicit confirmation.
+- The browser session must enable Developer Mainnet Validation Mode with the required confirmation phrase.
+- Orders still flow through OMS, EMS, Risk, Broker Router, Protocol Router, and the relay.
+- The amount is always taken from the execution ticket or execution panel. No order size is hard-coded.
+
+Required relay environment:
+
+- `HYPERLIQUID_RELAY_ENABLED=true`
+- `HYPERLIQUID_CREDENTIAL_ENCRYPTION_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `HYPERLIQUID_MAINNET_VALIDATION_ENABLED=true` only for controlled mainnet validation.
 
 ## Performance
 

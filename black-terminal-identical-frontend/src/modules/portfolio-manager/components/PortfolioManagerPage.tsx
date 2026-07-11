@@ -16,7 +16,8 @@ import { blackCoreConnectionManager } from "../../../connectivity/connectionMana
 import { readActiveExecutionVenueId, setActiveExecutionVenueId } from "../../../connectivity/activeExecutionVenue";
 import type { ConnectionCapability, ConnectionDiagnostics } from "../../../connectivity/types";
 import { submitOrder } from "../../../execution/executionEngine";
-import { submitPortfolioOrderViaApi } from "../../../portfolio/portfolioApiClient";
+import { disableMainnetValidationMode, promptEnableMainnetValidationMode, readMainnetValidationMode, validateMainnetOrderReadiness } from "../../../execution/mainnetValidationMode";
+import { submitPortfolioOrderViaApi, type PortfolioOrderDraft } from "../../../portfolio/portfolioApiClient";
 import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } from "../../../portfolio/types";
 import { getPortfolioSnapshot } from "../../../portfolio/portfolioStore";
 import { defaultRiskControls } from "../../../risk/types";
@@ -60,6 +61,7 @@ type ExecutionVenue = {
   executionReady?: boolean;
   readinessReason?: string;
   network?: "testnet" | "mainnet";
+  mainnetConfirmed?: boolean;
 };
 
 type PositionOrderRow = {
@@ -437,7 +439,8 @@ export function PositionsWorkspace({
             : undefined,
         executionReady: connection.metadata.executionReady === true,
         readinessReason: typeof connection.metadata.readinessReason === "string" ? connection.metadata.readinessReason : undefined,
-        network: connection.metadata.network === "mainnet" ? "mainnet" : connection.metadata.network === "testnet" ? "testnet" : undefined
+        network: connection.metadata.network === "mainnet" ? "mainnet" : connection.metadata.network === "testnet" ? "testnet" : undefined,
+        mainnetConfirmed: connection.metadata.mainnetConfirmed === true
       };
     }), [connectionDiagnostics]);
   const activeExecutionVenue = executionVenues.find((venue) => venue.id === activeVenueId) ?? executionVenues[0] ?? null;
@@ -762,10 +765,12 @@ function ExecutionDock({
   const [reduceOnly, setReduceOnly] = useState(false);
   const [timeInForce, setTimeInForce] = useState<"gtc" | "ioc" | "fok">("gtc");
   const [submitStatus, setSubmitStatus] = useState("");
+  const [mainnetValidation, setMainnetValidation] = useState(() => readMainnetValidationMode());
 
   const isDex = venue.kind === "dex";
   const isProtocol = venue.category === "protocol";
   const executionReady = !isProtocol || venue.executionReady === true;
+  const mainnetReadiness = useMemo(() => validateMainnetOrderReadiness(venue), [venue, mainnetValidation]);
   const supportsSpot = !isDex || venue.capabilities.includes("spot-orders") || venue.capabilities.includes("market-orders");
   const supportsConvert = !isDex || venue.capabilities.includes("swap");
   const supportsFutures = venue.capabilities.includes("perpetual-orders") || venue.capabilities.includes("leverage");
@@ -793,6 +798,10 @@ function ExecutionDock({
       setSubmitStatus((venue.readinessReason || "HYPERLIQUID RELAY IS NOT READY").toUpperCase());
       return;
     }
+    if (isProtocol && !mainnetReadiness.allowed) {
+      setSubmitStatus((mainnetReadiness.reason || "MAINNET VALIDATION BLOCKED").toUpperCase());
+      return;
+    }
 
     if (venue.kind === "dex" && !isProtocol) {
       setSubmitStatus(isProtocol
@@ -807,6 +816,8 @@ function ExecutionDock({
       setSubmitStatus("NO BROKER ACCOUNT SELECTED");
       return;
     }
+    const accountId = venue.accountId;
+    const exchange = venue.exchange;
 
     const parsedQuantity = Number(quantity || orderValue || 0);
     const parsedPrice = Number(price || 0);
@@ -816,21 +827,45 @@ function ExecutionDock({
     }
 
     try {
-      const update = await submitPortfolioOrderViaApi({
-        accountId: venue.accountId,
-        exchange: venue.exchange,
+      const draft: PortfolioOrderDraft = {
+        accountId,
+        exchange,
         symbol: "BTCUSDT",
         marketKind: selectedMode === "spot" ? "spot" : "perpetual",
         side,
         orderType: orderType === "tpSl" ? "stop-limit" : orderType,
         quantity: parsedQuantity,
         quantityMode: orderValue ? "usd" : "quantity",
+        sizingMethod: orderValue ? "usd" : "quantity",
         referencePrice: parsedPrice || undefined,
         limitPrice: orderType === "limit" ? parsedPrice : undefined,
+        leverage: selectedMode === "futures" ? leverage : undefined,
+        marginMode: selectedMode === "futures" ? marginMode : undefined,
         postOnly,
         reduceOnly,
         timeInForce
-      });
+      };
+      const update = isProtocol
+        ? await submitOrder({
+            accountId: draft.accountId,
+            exchange: draft.exchange,
+            symbol: draft.symbol,
+            marketKind: draft.marketKind,
+            side: draft.side,
+            type: draft.orderType,
+            quantity: draft.quantity,
+            sizingMethod: draft.sizingMethod,
+            referencePrice: draft.referencePrice,
+            limitPrice: draft.limitPrice,
+            leverage: draft.leverage,
+            marginMode: draft.marginMode,
+            postOnly: draft.postOnly,
+            reduceOnly: draft.reduceOnly,
+            timeInForce: draft.timeInForce,
+            source: "order-ticket",
+            destinations: ["personal-portfolio"]
+          }, buildVenueExecutionAccount(venue), parsedPrice || 1)
+        : await submitPortfolioOrderViaApi(draft);
 
       setSubmitStatus(update ? `${update.status.toUpperCase()}: ${update.reason || update.orderId}` : "NO SUPABASE SESSION");
     } catch (error) {
@@ -869,6 +904,22 @@ function ExecutionDock({
         <span>Reconnects <b>{venue.health.reconnectCount}</b></span>
         {venue.health.permissions.withdrawal && <em>WITHDRAWAL API PERMISSION DETECTED. USE TRADING-ONLY KEYS.</em>}
       </div>
+
+      {mainnetReadiness.mainnet && (
+        <div className={mainnetValidation.enabled ? "mainnet-validation-panel active compact" : "mainnet-validation-panel compact"}>
+          <div>
+            <span>Live Mainnet Validation</span>
+            <b>{mainnetValidation.enabled ? "ENABLED" : "OFF"}</b>
+          </div>
+          <p>Live Hyperliquid orders stay blocked until this browser session is explicitly enabled.</p>
+          <button
+            type="button"
+            onClick={() => setMainnetValidation(mainnetValidation.enabled ? disableMainnetValidationMode() : promptEnableMainnetValidationMode())}
+          >
+            {mainnetValidation.enabled ? "Disable" : "Enable"}
+          </button>
+        </div>
+      )}
 
       <div className="execution-mode-row">
         {(["spot", "convert", "futures"] as TradeMode[]).map((item) => (
@@ -993,6 +1044,33 @@ function capabilityReason(mode: TradeMode, venue: ExecutionVenue) {
     return "Convert requires a DEX swap routing adapter. Wallet signing alone is not enough.";
   }
   return "Spot trading requires an executable broker or DEX routing adapter.";
+}
+
+function buildVenueExecutionAccount(venue: ExecutionVenue): PortfolioAccount {
+  return {
+    id: venue.accountId || venue.id,
+    exchange: (venue.exchange || venue.provider) as ExchangeId,
+    label: venue.label,
+    accountName: venue.label,
+    permissions: ["read-account", "read-orders", "read-positions", "place-orders", "cancel-orders", "modify-orders", "withdraw-disabled"],
+    isPaper: false,
+    connectedAt: Date.now(),
+    lastValidatedAt: Date.now(),
+    status: venue.health.status === "connected" ? "connected" : "degraded",
+    apiHealth: venue.executionReady === true || venue.category !== "protocol" ? "healthy" : "warning",
+    latencyMs: venue.health.latencyMs,
+    balanceUsd: 0,
+    equityUsd: 0,
+    marginUsed: 0,
+    availableMargin: 0,
+    buyingPower: 0,
+    leverage: 1,
+    dailyPnl: 0,
+    monthlyPnl: 0,
+    openPositions: 0,
+    openOrders: 0,
+    riskControls: defaultRiskControls
+  };
 }
 
 function buildPositionExecutionAccount(position: ManagedPosition): PortfolioAccount {

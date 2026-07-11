@@ -3441,6 +3441,56 @@ body.resizing-layout * {
   gap: 6px;
 }
 
+.mainnet-validation-panel {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid rgba(245, 159, 24, 0.34);
+  border-radius: 3px;
+  background: linear-gradient(180deg, rgba(245, 159, 24, 0.1), rgba(255, 0, 0, 0.055));
+  color: #f5bc43;
+  font: 800 10px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.mainnet-validation-panel.active {
+  border-color: rgba(0, 255, 136, 0.34);
+  background: linear-gradient(180deg, rgba(0, 255, 136, 0.09), rgba(255, 0, 0, 0.04));
+  color: #8fffd0;
+}
+
+.mainnet-validation-panel.compact {
+  padding: 7px;
+}
+
+.mainnet-validation-panel div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mainnet-validation-panel b {
+  color: var(--strong);
+}
+
+.mainnet-validation-panel p {
+  margin: 0;
+  color: #a2a8b1;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.mainnet-validation-panel button {
+  height: 27px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--strong);
+  font: 900 10px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
 .unified-ticket-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -7,6 +7,7 @@ import { readActiveExecutionVenueId } from "../../../connectivity/activeExecutio
 import type { ConnectionDiagnostics } from "../../../connectivity/types";
 import type { BlackCoreModuleMode } from "../../../core/modules/moduleRegistry";
 import { submitOrder } from "../../../execution/executionEngine";
+import { disableMainnetValidationMode, promptEnableMainnetValidationMode, readMainnetValidationMode, validateMainnetOrderReadiness } from "../../../execution/mainnetValidationMode";
 import type { MarginMode, OrderSide, OrderType, TimeInForce } from "../../../execution/types";
 import { blackCoreMarketDataEngine } from "../../../market-data/engine/marketDataEngine";
 import type { MarketSymbol } from "../../../market-data/types";
@@ -259,6 +260,11 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     const activeVenueId = readActiveExecutionVenueId();
     return activeConnections.find((connection) => connection.id === activeVenueId) ?? activeConnections[0] ?? null;
   }, [activeConnections]);
+  const [mainnetValidation, setMainnetValidation] = useState(() => readMainnetValidationMode());
+  const mainnetReadiness = useMemo(
+    () => validateMainnetOrderReadiness(selectedConnection),
+    [selectedConnection, mainnetValidation]
+  );
   const [side, setSide] = useState<OrderSide>("buy");
   const [orderType, setOrderType] = useState<OrderType>("limit");
   const [quantity, setQuantity] = useState("0.001");
@@ -462,6 +468,11 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     }
     if (selectedConnection.category === "protocol" && selectedConnection.metadata.executionReady !== true) {
       setExecutionStatus(String(selectedConnection.metadata.readinessReason || "PROTOCOL RELAY IS NOT READY").toUpperCase());
+      return;
+    }
+    const liveReadiness = validateMainnetOrderReadiness(selectedConnection);
+    if (!liveReadiness.allowed) {
+      setExecutionStatus((liveReadiness.reason || "MAINNET VALIDATION BLOCKED").toUpperCase());
       return;
     }
     if (!parsedQuantity || parsedQuantity <= 0) {
@@ -1417,6 +1428,21 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
           {settings.showExecutionPanel && (
             <section className="dom-pro-panel dom-pro-execution">
               <PanelTitle title="Execution" status={selectedConnection ? selectedConnection.label.toUpperCase() : "NO ACCOUNT"} />
+              {mainnetReadiness.mainnet && (
+                <div className={mainnetValidation.enabled ? "mainnet-validation-panel active compact" : "mainnet-validation-panel compact"}>
+                  <div>
+                    <span>Live Mainnet Validation</span>
+                    <b>{mainnetValidation.enabled ? "ENABLED" : "OFF"}</b>
+                  </div>
+                  <p>DOM Pro orders stay inside OMS / EMS / Risk and require this session opt-in before Hyperliquid mainnet.</p>
+                  <button
+                    type="button"
+                    onClick={() => setMainnetValidation(mainnetValidation.enabled ? disableMainnetValidationMode() : promptEnableMainnetValidationMode())}
+                  >
+                    {mainnetValidation.enabled ? "Disable" : "Enable"}
+                  </button>
+                </div>
+              )}
               <div className="dom-pro-order-types">
                 {orderTypes.map((type) => <button key={type} type="button" className={orderType === type ? "active" : ""} onClick={() => setOrderType(type)}>{type.toUpperCase()}</button>)}
               </div>

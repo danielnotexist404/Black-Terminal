@@ -42,6 +42,17 @@ npm run perf:stress
 `npm run perf:baseline` writes the current Chapter IX performance footprint to `docs/performance/latest-baseline.md` and `.json`.
 `npm run perf:stress` requires `PERF_STRESS_URL` and writes a long-session JSONL log under `docs/performance/`.
 
+For controlled Hyperliquid live validation, keep mainnet disabled unless the relay environment is
+intentionally configured:
+
+```bash
+HYPERLIQUID_RELAY_ENABLED=true
+HYPERLIQUID_MAINNET_VALIDATION_ENABLED=true
+```
+
+The browser still requires session-scoped Developer Mainnet Validation Mode before any mainnet order
+can pass through the Hyperliquid protocol adapter.
+
 ## Packaging
 
 ```bash
@@ -90,6 +101,7 @@ examples/
 - Exchange adapters are typed and partially wired; duplicated venue WebSocket logic should continue moving into the shared manager.
 - Indicator execution is documented and typed but not implemented.
 - Account trading has Vercel/Supabase and Bybit foundations, but more broker adapters and DEX protocol adapters are still required.
+- Hyperliquid has a server relay and controlled mainnet validation guard, but production-ready status requires real testnet and small-order mainnet validation evidence.
 - Chart rendering is custom, but candle geometry is still immediate-mode drawing rather than
   batched geometry.
 - There are no automated tests yet for scale math, candle buffers, or protocol validation.

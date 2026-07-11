@@ -168,6 +168,28 @@ webhook handling:
 - Keep full logs for trigger, action, decision, exchange response, and timestamp.
 - Treat inbound webhooks as untrusted until signed and validated.
 
+## Developer Mainnet Validation Rule
+
+Mainnet validation is a controlled developer workflow, not a bypass.
+
+Hyperliquid mainnet orders can be submitted only when all of the following are true:
+
+- The selected connection is a Hyperliquid protocol connection from the Black Core Connection Manager.
+- MetaMask/master wallet is connected.
+- The server has an encrypted active agent credential for the account.
+- Hyperliquid agent authorization validates.
+- Metadata is loaded.
+- Nonce state is ready.
+- The relay is enabled.
+- The selected network is mainnet.
+- The account reports trading permission.
+- The user enabled session-scoped Developer Mainnet Validation Mode by typing the explicit confirmation phrase.
+- Server env explicitly enables mainnet validation with `HYPERLIQUID_MAINNET_VALIDATION_ENABLED=true`.
+
+The browser switch is stored only in `sessionStorage` and is off by default. It only allows the existing
+OMS -> EMS -> Risk -> Broker Router -> Protocol Router -> Relay path to proceed. It must never create
+a second execution path.
+
 ## Phase III Connection Rule
 
 The Black Core Connection Manager is the single runtime source of truth for connected accounts.

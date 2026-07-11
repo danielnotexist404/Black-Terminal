@@ -53,8 +53,11 @@ export function assertHyperliquidRelayConfigured(options = {}) {
   getHyperliquidEncryptionKey();
 
   if (network === "mainnet") {
-    if (process.env.HYPERLIQUID_MAINNET_ENABLED !== "true") {
-      const error = new Error("Hyperliquid mainnet relay is disabled. Set HYPERLIQUID_MAINNET_ENABLED=true only after testnet validation.");
+    const mainnetValidationEnabled =
+      process.env.HYPERLIQUID_MAINNET_VALIDATION_ENABLED === "true" ||
+      process.env.HYPERLIQUID_MAINNET_ENABLED === "true";
+    if (!mainnetValidationEnabled) {
+      const error = new Error("Hyperliquid mainnet relay is disabled. Set HYPERLIQUID_MAINNET_VALIDATION_ENABLED=true only for controlled live validation after testnet validation.");
       error.statusCode = 403;
       throw error;
     }

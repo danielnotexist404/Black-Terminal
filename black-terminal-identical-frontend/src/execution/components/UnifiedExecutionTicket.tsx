@@ -7,6 +7,7 @@ import { submitPortfolioOrderViaApi } from "../../portfolio/portfolioApiClient";
 import type { PortfolioAccount } from "../../portfolio/types";
 import { defaultRiskControls } from "../../risk/types";
 import { submitOrder } from "../executionEngine";
+import { disableMainnetValidationMode, promptEnableMainnetValidationMode, readMainnetValidationMode, validateMainnetOrderReadiness } from "../mainnetValidationMode";
 import type { ExecutionDestination, ExecutionSource, MarginMode, OrderSide, OrderType, SizingMethod, TimeInForce } from "../types";
 import type { ExchangeId, MarketKind } from "../../market-data/types";
 import { blackCorePositionManager } from "../../positions/positionManager";
@@ -79,8 +80,14 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
   const [personalDestination, setPersonalDestination] = useState(true);
   const [allocationDestination, setAllocationDestination] = useState(Boolean(preset.allocationEnabled));
   const [status, setStatus] = useState("");
+  const [mainnetValidation, setMainnetValidation] = useState(() => readMainnetValidationMode());
 
   useEffect(() => blackCoreConnectionManager.subscribe(setConnections), []);
+
+  const mainnetReadiness = useMemo(
+    () => validateMainnetOrderReadiness(selectedConnection),
+    [selectedConnection, mainnetValidation]
+  );
 
   useEffect(() => {
     if (activeConnections.length === 0) {
@@ -119,6 +126,11 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
     }
     if (selectedConnection.category === "protocol" && selectedConnection.metadata.executionReady !== true) {
       setStatus(String(selectedConnection.metadata.readinessReason || "PROTOCOL RELAY IS NOT READY").toUpperCase());
+      return;
+    }
+    const liveReadiness = validateMainnetOrderReadiness(selectedConnection);
+    if (!liveReadiness.allowed) {
+      setStatus((liveReadiness.reason || "MAINNET VALIDATION BLOCKED").toUpperCase());
       return;
     }
     if (!parsedQuantity || parsedQuantity <= 0) {
@@ -231,6 +243,22 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
           <label><input type="checkbox" checked={personalDestination} onChange={(event) => setPersonalDestination(event.target.checked)} /> Personal Portfolio</label>
           <label><input type="checkbox" checked={allocationDestination} onChange={(event) => setAllocationDestination(event.target.checked)} /> Allocation Engine</label>
         </div>
+
+        {mainnetReadiness.mainnet && (
+          <div className={mainnetValidation.enabled ? "mainnet-validation-panel active" : "mainnet-validation-panel"}>
+            <div>
+              <span>Live Mainnet Validation</span>
+              <b>{mainnetValidation.enabled ? "ENABLED" : "OFF"}</b>
+            </div>
+            <p>Real Hyperliquid mainnet orders require this session opt-in plus relay readiness, trading permission, and risk approval.</p>
+            <button
+              type="button"
+              onClick={() => setMainnetValidation(mainnetValidation.enabled ? disableMainnetValidationMode() : promptEnableMainnetValidationMode())}
+            >
+              {mainnetValidation.enabled ? "Disable Live Mode" : "Enable Live Mode"}
+            </button>
+          </div>
+        )}
 
         <div className="pm-segment">
           <button type="button" className={side === "buy" ? "active" : ""} onClick={() => setSide("buy")}>Buy / Long</button>

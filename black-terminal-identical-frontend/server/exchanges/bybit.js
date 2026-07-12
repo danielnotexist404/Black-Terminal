@@ -20,6 +20,22 @@ const BYBIT_ORDER_STATUS_TO_EXECUTION_STATUS = {
 export async function validateBybitCredentials(credentials) {
   const startedAt = Date.now();
   const diagnostics = await getBybitDiagnostics(credentials, { symbol: "BTCUSDT" });
+  const failedRequiredChecks = (diagnostics.checks || []).filter((check) => check.required && check.status === "failed");
+
+  if (failedRequiredChecks.length > 0) {
+    const message = failedRequiredChecks.map((check) => check.message).join(" ");
+    const error = new Error(`Bybit credential validation failed. ${message}`);
+    error.statusCode = failedRequiredChecks.some((check) => check.statusCode === 401 || isBybitAuthFailure(check.bybitCode, check.message)) ? 401 : 502;
+    error.code = "BYBIT_CREDENTIAL_VALIDATION_FAILED";
+    error.publicDetails = {
+      failedChecks: failedRequiredChecks.map((check) => ({
+        name: check.name,
+        bybitCode: check.bybitCode,
+        message: check.message
+      }))
+    };
+    throw error;
+  }
 
   return {
     status: "connected",
@@ -99,26 +115,40 @@ export async function getBybitOpenOrders(credentials, { category = "linear", sym
 
 export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = {}) {
   const startedAt = Date.now();
-  const [time, metadata, balances, positions, openOrders, apiKeyInfo] = await Promise.all([
-    getBybitServerTime(),
-    getBybitInstrumentMetadata({ category: "linear", symbol }),
-    getBybitBalances(credentials),
-    getBybitPositions(credentials),
-    getBybitOpenOrders(credentials, { category: "linear", symbol }),
-    getBybitApiKeyInformation(credentials).catch((error) => ({
-      readOnly: true,
-      permissions: {},
-      error: error instanceof Error ? error.message : String(error)
-    }))
+  const checks = await Promise.all([
+    runBybitDiagnosticCheck("server-time", () => getBybitServerTime(), true),
+    runBybitDiagnosticCheck("instrument-metadata", () => getBybitInstrumentMetadata({ category: "linear", symbol }), true),
+    runBybitDiagnosticCheck("balances", () => getBybitBalances(credentials), true),
+    runBybitDiagnosticCheck("positions", () => getBybitPositions(credentials), true),
+    runBybitDiagnosticCheck("open-orders", () => getBybitOpenOrders(credentials, { category: "linear", symbol }), false),
+    runBybitDiagnosticCheck("api-key-permissions", () => getBybitApiKeyInformation(credentials), false)
   ]);
+  const requiredFailures = checks.filter((check) => check.required && check.status === "failed");
+  const time = diagnosticData(checks, "server-time", {
+    serverTimeMs: Date.now(),
+    serverTime: new Date().toISOString(),
+    localTimeMs: Date.now(),
+    clockSkewMs: 0
+  });
+  const metadata = diagnosticData(checks, "instrument-metadata", []);
+  const balances = diagnosticData(checks, "balances", []);
+  const positions = diagnosticData(checks, "positions", []);
+  const openOrders = diagnosticData(checks, "open-orders", []);
+  const apiKeyInfo = diagnosticData(checks, "api-key-permissions", {
+    readOnly: true,
+    permissions: {},
+    error: checks.find((check) => check.name === "api-key-permissions")?.message || "Bybit API-key permission probe did not complete."
+  });
   const permissionReport = normalizeBybitPermissionReport(apiKeyInfo);
   const privateStreamRuntime = getBybitPrivateStreamRuntimeDiagnostics();
   const privateStreamsReady = privateStreamRuntime.status === "connected" && privateStreamRuntime.authenticated === true;
   const mainnetValidationEnabled = process.env.BYBIT_MAINNET_VALIDATION_ENABLED === "true";
-  const executionReady = Boolean(mainnetValidationEnabled && permissionReport.trading && privateStreamsReady);
+  const accountReadReady = requiredFailures.length === 0;
+  const executionReady = Boolean(accountReadReady && mainnetValidationEnabled && permissionReport.trading && privateStreamsReady);
   const readinessReason = executionReady
     ? "Bybit execution readiness checks passed for controlled mainnet validation."
     : [
+        !accountReadReady ? `Bybit account read validation failed: ${requiredFailures.map((check) => check.message).join(" ")}` : "",
         !mainnetValidationEnabled ? "BYBIT_MAINNET_VALIDATION_ENABLED is not true." : "",
         !permissionReport.trading ? "Bybit API key is read-only or lacks order/position trading permission." : "",
         !privateStreamsReady ? "Bybit private stream runtime is not authenticated and connected." : ""
@@ -132,11 +162,12 @@ export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = 
     readiness: executionReady ? "execution-ready" : "execution-blocked",
     latencyMs: Date.now() - startedAt,
     authentication: "authenticated",
-    synchronization: "snapshot-synced",
+    synchronization: accountReadReady ? "snapshot-synced" : "failed",
     publicStream: "connected",
     privateStream: privateStreamRuntime.status,
+    checks: checks.map(({ data, ...check }) => check),
     permissions: {
-      read: true,
+      read: accountReadReady,
       trading: permissionReport.trading,
       withdrawal: permissionReport.withdrawal,
       warnings: [
@@ -163,10 +194,10 @@ export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = 
     certification: {
       marketDataReady: true,
       authReady: true,
-      accountReadReady: true,
-      balancesReady: true,
-      positionsReady: true,
-      openOrdersReady: true,
+      accountReadReady,
+      balancesReady: checks.find((check) => check.name === "balances")?.status === "ok",
+      positionsReady: checks.find((check) => check.name === "positions")?.status === "ok",
+      openOrdersReady: checks.find((check) => check.name === "open-orders")?.status === "ok",
       fillsReady: privateStreamsReady,
       privateStreamsReady,
       orderEndpointReady: permissionReport.trading,
@@ -721,9 +752,12 @@ async function bybitRequest(credentials, method, path, query = {}, body) {
   const data = await response.json().catch(() => null);
 
   if (!response.ok || data?.retCode !== 0) {
-    const error = new Error(data?.retMsg || `Bybit request failed with HTTP ${response.status}`);
+    const bybitCode = data?.retCode;
+    const bybitMessage = String(data?.retMsg || "").trim();
+    const error = new Error(bybitMessage || `Bybit request failed${bybitCode !== undefined ? ` with retCode ${bybitCode}` : ""} at ${path} (HTTP ${response.status})`);
     error.statusCode = response.status === 401 ? 401 : 502;
     error.bybit = data;
+    error.bybitEndpoint = path;
     throw error;
   }
 
@@ -755,6 +789,75 @@ function buildQueryString(query) {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
     .join("&");
+}
+
+async function runBybitDiagnosticCheck(name, fn, required) {
+  const startedAt = Date.now();
+  try {
+    const data = await fn();
+    return {
+      name,
+      required,
+      status: "ok",
+      latencyMs: Date.now() - startedAt,
+      data
+    };
+  } catch (error) {
+    const message = formatBybitDiagnosticFailure(name, error);
+    return {
+      name,
+      required,
+      status: "failed",
+      latencyMs: Date.now() - startedAt,
+      message,
+      statusCode: error?.statusCode || 502,
+      bybitCode: error?.bybit?.retCode,
+      endpoint: error?.bybitEndpoint || null
+    };
+  }
+}
+
+function diagnosticData(checks, name, fallback) {
+  const check = checks.find((item) => item.name === name);
+  return check?.status === "ok" ? check.data : fallback;
+}
+
+function formatBybitDiagnosticFailure(name, error) {
+  const bybitCode = error?.bybit?.retCode;
+  const baseMessage = String(error?.bybit?.retMsg || error?.message || "Unknown Bybit validation failure.").trim() || "Unknown Bybit validation failure.";
+  const hint = bybitFailureHint(bybitCode, baseMessage);
+  return `${name} failed${bybitCode !== undefined ? ` (Bybit ${bybitCode})` : ""}: ${baseMessage}${hint ? ` ${hint}` : ""}`;
+}
+
+function isBybitAuthFailure(code, message = "") {
+  const text = String(message || "").toLowerCase();
+  return [10003, 10004, 10005, 10006, 10007, 10010, 10016].includes(Number(code)) ||
+    text.includes("api key") ||
+    text.includes("signature") ||
+    text.includes("permission") ||
+    text.includes("ip");
+}
+
+function bybitFailureHint(code, message = "") {
+  const numericCode = Number(code);
+  const text = String(message || "").toLowerCase();
+
+  if (numericCode === 10003 || text.includes("api key is invalid") || text.includes("apikey")) {
+    return "Check that the key is a Bybit mainnet V5 system-generated HMAC key, not testnet or RSA/self-generated.";
+  }
+  if (numericCode === 10004 || text.includes("signature")) {
+    return "Check that the API secret was copied exactly; extra spaces or the wrong key type will break HMAC signing.";
+  }
+  if (numericCode === 10005 || text.includes("permission")) {
+    return "Enable read access for Unified wallet, contract/derivatives positions, and order reads.";
+  }
+  if (numericCode === 10010 || text.includes("ip")) {
+    return "Your Bybit key appears IP restricted; allow Vercel outbound access or create an unrestricted validation key with withdrawals disabled.";
+  }
+  if (text.includes("recv_window") || text.includes("timestamp")) {
+    return "The server clock or Bybit recv window check failed; retry after server-time sync.";
+  }
+  return "";
 }
 
 function normalizeBybitSymbol(symbol) {

@@ -380,9 +380,9 @@ async function submitHyperliquidActionViaApi(path: string, draft: Record<string,
 async function readApiError(response: Response) {
   try {
     const data = await response.json();
-    return data.error || response.statusText;
+    return data.error || data.message || response.statusText || `HTTP ${response.status}`;
   } catch {
-    return response.statusText;
+    return response.statusText || `HTTP ${response.status}`;
   }
 }
 

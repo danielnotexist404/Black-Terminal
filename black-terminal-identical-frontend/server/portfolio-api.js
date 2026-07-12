@@ -62,9 +62,15 @@ export async function requireUser(req) {
 
 export function sendError(res, error) {
   const statusCode = error?.statusCode || 500;
-  const message = statusCode === 500 ? "Server error" : error.message;
+  const rawMessage = String(error?.message || error?.publicMessage || "").trim();
+  const message = statusCode === 500
+    ? "Server error"
+    : rawMessage || "Request failed without a diagnostic message.";
   if (statusCode === 500) console.error(error);
-  return res.status(statusCode).json({ error: message });
+  const payload = { error: message };
+  if (error?.code) payload.code = error.code;
+  if (error?.publicDetails) payload.details = error.publicDetails;
+  return res.status(statusCode).json(payload);
 }
 
 export function requireMethod(req, method) {

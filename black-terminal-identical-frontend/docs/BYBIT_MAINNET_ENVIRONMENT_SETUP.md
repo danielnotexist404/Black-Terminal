@@ -6,7 +6,7 @@ Bybit remains fail-closed until the runtime configuration, Supabase prerequisite
 
 ## Vercel Environment
 
-Bybit rejects API requests originating from US IP addresses. Black Terminal therefore pins Vercel Functions to the Dubai region (`dxb1`) in `vercel.json`. Do not move exchange-account or execution functions back to a restricted region such as the default Washington, D.C. region (`iad1`). After deployment, verify the function build region in `vercel inspect` before testing credentials.
+Bybit rejects API requests originating from US IP addresses. Black Terminal therefore pins Vercel Functions to the Frankfurt region (`fra1`) in `vercel.json`. Do not move exchange-account or execution functions back to a restricted region such as the default Washington, D.C. region (`iad1`). After deployment, verify the function build region in `vercel inspect` before testing credentials.
 
 Set these in Vercel for API routes:
 

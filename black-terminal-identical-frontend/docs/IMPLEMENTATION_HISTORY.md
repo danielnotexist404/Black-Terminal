@@ -895,7 +895,7 @@ Status: Implemented.
 
 Changed:
 
-- Added `vercel.json` and pinned serverless functions to `dxb1` (Dubai).
+- Added `vercel.json` and pinned serverless functions to `fra1` (Frankfurt).
 - Preserved upstream Bybit HTTP status, endpoint, and runtime-region diagnostics during credential validation.
 - Added an explicit message when Bybit returns HTTP 403 because the execution backend is running in a restricted region.
 
@@ -909,7 +909,7 @@ Validation:
 
 - `npm run test:bybit-certification`
 - `npm run build`
-- Verify the production function region is `dxb1` with `vercel inspect`.
+- Verify the production function region is `fra1` with `vercel inspect`.
 
 ## Future Work Log
 

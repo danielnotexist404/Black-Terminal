@@ -27,6 +27,7 @@ export async function submitOrder(
     tpslMode: order.tpslMode,
     positionIdx: order.positionIdx,
     slippageTolerancePercent: order.slippageTolerancePercent,
+    strategyParameters: order.strategyParameters,
     leverage: order.leverage,
     marginMode: order.marginMode,
     takeProfit: order.takeProfit,

@@ -20,7 +20,7 @@ export type AccountConnection = {
 };
 
 export type OrderSide = "buy" | "sell";
-export type OrderType = "market" | "limit" | "stop-market" | "stop-limit" | "trailing-stop" | "bracket" | "twap" | "iceberg" | "post-only";
+export type OrderType = "market" | "limit" | "stop-market" | "stop-limit" | "trailing-stop" | "bracket" | "chase-limit" | "twap" | "iceberg" | "pov" | "scaled" | "post-only";
 export type TimeInForce = "gtc" | "ioc" | "fok";
 export type OrderLifecycleState =
   | "created"
@@ -53,6 +53,22 @@ export type ExecutionDestination = "personal-portfolio" | "allocation-engine" | 
 export type SizingMethod = "quantity" | "contracts" | "coin" | "usd" | "portfolioPct" | "equityPct" | "riskPct" | "fixedDollarRisk";
 export type MarginMode = "cross" | "isolated" | "portfolio";
 export type TriggerSource = "last" | "mark" | "index";
+export type VenueStrategyParameters = {
+  durationSeconds?: number;
+  intervalSeconds?: number;
+  randomize?: boolean;
+  triggerPrice?: number;
+  maxChasePrice?: number;
+  chaseDistance?: number;
+  chasePercent?: number;
+  subSize?: number;
+  orderCount?: number;
+  icebergPreference?: "maker" | "taker" | "offset" | "fixed";
+  povMode?: "TradedVolume" | "OppositeSideLiquidity" | "SameSideLiquidity";
+  participationRate?: number;
+  referenceWindowSeconds?: number;
+  depthReference?: number;
+};
 
 export type OrderRequest = {
   accountId: string;
@@ -79,6 +95,7 @@ export type OrderRequest = {
   tpslMode?: "full" | "partial";
   positionIdx?: number;
   slippageTolerancePercent?: number;
+  strategyParameters?: VenueStrategyParameters;
   clientOrderId?: string;
   internalOrderId?: string;
   source?: ExecutionSource;
@@ -128,6 +145,7 @@ export type ExecutionRequest = {
   tpslMode?: "full" | "partial";
   positionIdx?: number;
   slippageTolerancePercent?: number;
+  strategyParameters?: VenueStrategyParameters;
   leverage?: number;
   marginMode?: MarginMode;
   takeProfit?: number;

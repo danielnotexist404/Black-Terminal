@@ -8,8 +8,10 @@ import {
   requireUser,
   sendError
 } from "../../portfolio-api.js";
+import { settleSupabaseQuery } from "../../supabase-query.js";
 import {
   placeBybitOrder,
+  placeBybitStrategyOrder,
   getBybitWalletSnapshot,
   validateBybitMainnetValidationRequest,
   validateBybitOrderDraft
@@ -108,7 +110,7 @@ export default async function handler(req, res) {
             validationError.statusCode = 403;
             throw validationError;
           }
-          const exchangeResult = await placeBybitOrder(credentials, {
+          const normalizedVenueOrder = {
             ...venueOrderDraft,
             quantity: venueValidation.normalized.quantity,
             quantityMode: "quantity",
@@ -118,7 +120,11 @@ export default async function handler(req, res) {
             timeInForce: req.body.timeInForce || "gtc",
             source: req.body.source || "order-ticket",
             destinations: req.body.destinations || ["personal-portfolio"]
-          }, venueValidation);
+          };
+          const strategyOrder = ["chase-limit", "twap", "iceberg", "pov"].includes(req.body.orderType);
+          const exchangeResult = strategyOrder
+            ? await placeBybitStrategyOrder(credentials, normalizedVenueOrder, venueValidation)
+            : await placeBybitOrder(credentials, normalizedVenueOrder, venueValidation);
           status = "accepted";
           rejectionReason = null;
           exchangeOrderId = exchangeResult.exchangeOrderId || null;
@@ -190,7 +196,9 @@ export default async function handler(req, res) {
         destinations: req.body.destinations || ["personal-portfolio"],
         sizingMethod: req.body.sizingMethod || req.body.quantityMode || "quantity",
         leverage: req.body.leverage ?? null,
-        marginMode: req.body.marginMode ?? null
+        marginMode: req.body.marginMode ?? null,
+        strategyType: ["chase-limit", "twap", "iceberg", "pov"].includes(req.body.orderType) ? req.body.orderType : null,
+        strategyParameters: req.body.strategyParameters || null
       }
     });
 
@@ -228,14 +236,14 @@ async function recordBybitValidationAttempt(supabase, userId, account, order, pa
     .single();
 
   if (error) {
-    await supabase.from("execution_audit_logs").insert({
+    await settleSupabaseQuery(supabase.from("execution_audit_logs").insert({
       user_id: userId,
       account_id: account.id,
       event_type: "mainnet_validation_record_failed",
       severity: "warning",
       message: error.message,
       metadata: { venueId: "bybit", symbol: order.symbol }
-    }).catch(() => null);
+    }));
     return null;
   }
 
@@ -244,7 +252,7 @@ async function recordBybitValidationAttempt(supabase, userId, account, order, pa
 
 async function completeBybitValidationAttempt(supabase, recordId, payload) {
   if (!recordId) return;
-  await supabase
+  await settleSupabaseQuery(supabase
     .from("mainnet_validation_records")
     .update({
       status: payload.status,
@@ -253,6 +261,5 @@ async function completeBybitValidationAttempt(supabase, recordId, payload) {
       metadata: payload.metadata || {},
       completed_at: new Date().toISOString()
     })
-    .eq("id", recordId)
-    .catch(() => null);
+    .eq("id", recordId));
 }

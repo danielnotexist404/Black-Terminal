@@ -1,6 +1,6 @@
 import { supabase } from "../lib/supabase";
 import type { ConnectionRecord } from "../connectivity/types";
-import type { ExecutionDestination, ExecutionSource, MarginMode, OrderType, OrderUpdate, SizingMethod, TriggerSource } from "../execution/types";
+import type { ExecutionDestination, ExecutionSource, MarginMode, OrderType, OrderUpdate, SizingMethod, TriggerSource, VenueStrategyParameters } from "../execution/types";
 import type { ExchangeId, MarketKind } from "../market-data/types";
 import type { PortfolioPosition } from "../positions/types";
 import { defaultRiskControls } from "../risk/types";
@@ -63,6 +63,7 @@ export type PortfolioOrderDraft = {
   tpslMode?: "full" | "partial";
   positionIdx?: number;
   slippageTolerancePercent?: number;
+  strategyParameters?: VenueStrategyParameters;
   trailingStopEnabled?: boolean;
   trailingTrailBy?: number;
   trailingMode?: "percentage" | "usd" | "ticks" | "atr";
@@ -162,6 +163,22 @@ export type ExchangeAccountSyncPayload = {
     openedAt: number;
   }>;
   openOrders: unknown[];
+  strategies: Array<{
+    strategyId: string;
+    strategyType: "chaseOrder" | "twap" | "iceberg" | "pov";
+    symbol: string;
+    side: "buy" | "sell";
+    status: string;
+    quantity: number;
+    filledQuantity: number;
+    averageFillPrice: number | null;
+    reduceOnly: boolean;
+    duration: number;
+    interval: number;
+    reason?: string;
+    createdAt: number;
+    updatedAt: number;
+  }>;
   accountMetrics: BybitAccountMetrics;
   executionState: {
     tradingEnabled: boolean;
@@ -368,6 +385,24 @@ export async function updateBybitAccountModeViaApi(draft: {
   });
   if (!response.ok) throw new Error(await readApiError(response));
   return response.json();
+}
+
+export async function stopBybitStrategyViaApi(draft: {
+  accountId: string;
+  strategyId: string;
+  symbol: string;
+  mainnetConfirmed: boolean;
+  liveConfirmation: string;
+}) {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+  const response = await fetch("/api/execution/strategy", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(draft)
+  });
+  if (!response.ok) throw new Error(await readApiError(response));
+  return (await response.json()).report as { strategyId: string; status: string };
 }
 
 export async function runExchangeAccountDiagnosticsViaApi(accountId: string, symbol = "BTCUSDT"): Promise<ExchangeDiagnosticsPayload | null> {

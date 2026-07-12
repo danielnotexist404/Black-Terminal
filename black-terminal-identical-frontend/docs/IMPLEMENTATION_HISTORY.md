@@ -951,7 +951,19 @@ Changed:
 - Moved runtime/certification controls out of Unified Ticket and DOM Pro into collapsed connection administration.
 - Replaced the obsolete symbol-level UTA margin call with Bybit V5 account-level margin mode.
 - Removed silent leverage mutation from ordinary order placement; margin and leverage changes are explicit server actions.
-- Registered Chase Limit, Scaled, TWAP, POV and Iceberg as unavailable until supervised persistent workers exist.
+- Registered Scaled Order as unavailable until a supervised persistent Black Core worker exists.
+
+## 2026-07-13 - Chapter XIII Bybit Readiness And Native Strategies
+
+Status: Implemented.
+
+Changed:
+
+- Fixed production account synchronization failure caused by calling `.catch()` directly on a Supabase query builder.
+- Applied the safe best-effort query wrapper to reconciliation and execution audit writes.
+- Integrated Bybit V5-native Chase Limit, TWAP, Iceberg and POV strategy creation through OMS, EMS, Risk and the existing server adapter.
+- Added native strategy REST synchronization, private WebSocket event normalization and authenticated strategy stop routing.
+- Replaced the misleading pre-sync `UNAVAILABLE` badge with explicit `SYNCING`, `SYNC FAILED`, `BLOCKED` and `TRADING READY` states.
 
 Validation:
 

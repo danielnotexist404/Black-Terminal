@@ -7,6 +7,7 @@ import {
   requireUser,
   sendError
 } from "../../portfolio-api.js";
+import { settleSupabaseQuery } from "../../supabase-query.js";
 import {
   closeBybitPosition,
   getBybitPositions,
@@ -70,14 +71,14 @@ export default async function handler(req, res) {
           clientOrderId: req.body.clientOrderId
         });
 
-    await supabase.from("execution_audit_logs").insert({
+    await settleSupabaseQuery(supabase.from("execution_audit_logs").insert({
       user_id: user.id,
       account_id: account.id,
       event_type: action === "reverse" ? "position_reverse_submitted" : quantity < currentPosition.quantity ? "partial_close_submitted" : "close_position_submitted",
       severity: "warning",
       message: `Bybit ${action} submitted for ${symbol}.`,
       metadata: { report, currentPosition, quantity }
-    }).catch(() => null);
+    }));
 
     return res.status(200).json({ report });
   } catch (error) {

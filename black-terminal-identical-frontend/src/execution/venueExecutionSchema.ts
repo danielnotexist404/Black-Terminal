@@ -2,7 +2,7 @@ import type { ConnectionDiagnostics } from "../connectivity/types";
 import type { MarketKind } from "../market-data/types";
 import type { ExchangeAccountSyncPayload } from "../portfolio/portfolioApiClient";
 import { listReadyExecutionAlgorithms, type ExecutionAlgorithmDefinition } from "./executionAlgorithmRegistry.ts";
-import type { MarginMode, OrderType, SizingMethod, TimeInForce } from "./types";
+import type { MarginMode, OrderType, SizingMethod, TimeInForce, VenueStrategyParameters } from "./types";
 
 export type VenueInstrumentRules = {
   symbol: string;
@@ -26,11 +26,11 @@ export type VenueInstrumentRules = {
 };
 
 export type VenueOrderMode = {
-  id: "market" | "limit" | "conditional";
+  id: "market" | "limit" | "conditional" | "chase-limit" | "twap" | "iceberg" | "pov";
   label: string;
   orderTypes: OrderType[];
   nativeOrSynthetic: "native" | "black-core";
-  fields: Array<"quantity" | "price" | "triggerPrice" | "triggerBy" | "executionType" | "timeInForce" | "postOnly" | "reduceOnly" | "tpSl" | "slippageTolerance">;
+  fields: Array<"quantity" | "price" | "triggerPrice" | "triggerBy" | "executionType" | "timeInForce" | "postOnly" | "reduceOnly" | "tpSl" | "slippageTolerance" | "duration" | "interval" | "randomize" | "chaseDistance" | "maxChasePrice" | "subSize" | "orderCount" | "preference" | "participationRate" | "volumeReference">;
 };
 
 export type VenueExecutionSchema = {
@@ -162,6 +162,7 @@ export function validateVenueOrderDraft(input: {
   side: "buy" | "sell";
   reduceOnly: boolean;
   tpSlEnabled: boolean;
+  strategyParameters?: VenueStrategyParameters;
 }) {
   const reasons: string[] = [];
   const rules = input.schema.instrumentRules;
@@ -185,6 +186,20 @@ export function validateVenueOrderDraft(input: {
   if (input.leverage < rules.minLeverage || input.leverage > rules.maxLeverage) reasons.push(`Leverage must be between ${rules.minLeverage}x and ${rules.maxLeverage}x.`);
   if (rules.leverageStep > 0 && !isStepAligned(input.leverage, rules.leverageStep)) reasons.push(`Leverage must use increments of ${rules.leverageStep}x.`);
   if (input.reduceOnly && input.tpSlEnabled) reasons.push("Bybit does not allow attached TP/SL on a Reduce-Only order.");
+  if (input.orderType === "chase-limit" && input.strategyParameters?.chaseDistance === undefined && input.strategyParameters?.chasePercent === undefined) reasons.push("Enter a Chase distance or percentage.");
+  if (input.orderType === "twap") {
+    const duration = Number(input.strategyParameters?.durationSeconds || 0);
+    const interval = Number(input.strategyParameters?.intervalSeconds || 0);
+    if (duration < 300 || duration > 86400) reasons.push("TWAP duration must be between 5 minutes and 24 hours.");
+    if (![5, 10, 15, 30, 60, 120].includes(interval)) reasons.push("Select a supported TWAP interval.");
+    if (interval > 0 && duration % interval !== 0) reasons.push("TWAP duration must be divisible by its interval.");
+  }
+  if (input.orderType === "iceberg" && !Number(input.strategyParameters?.subSize || 0) && !Number(input.strategyParameters?.orderCount || 0)) reasons.push("Enter an Iceberg visible size or order count.");
+  if (input.orderType === "pov") {
+    if (input.schema.product === "spot") reasons.push("Bybit POV is available for perpetual and futures products only.");
+    const participation = Number(input.strategyParameters?.participationRate || 0);
+    if (participation < 1 || participation > 100) reasons.push("POV participation must be between 1% and 100%.");
+  }
 
   return { valid: reasons.length === 0, reasons, normalizedQuantity: quantity, notional };
 }
@@ -214,6 +229,10 @@ function buildBybitSchema(input: VenueExecutionSchemaInput): VenueExecutionSchem
       if (algorithm.id === "bybit.market") return [{ id: "market", label: "Market", orderTypes: ["market"], nativeOrSynthetic: "native", fields: ["quantity", "slippageTolerance", "reduceOnly", "tpSl"] }];
       if (algorithm.id === "bybit.limit") return [{ id: "limit", label: "Limit", orderTypes: ["limit"], nativeOrSynthetic: "native", fields: ["quantity", "price", "timeInForce", "postOnly", "reduceOnly", "tpSl"] }];
       if (algorithm.id === "bybit.conditional") return [{ id: "conditional", label: "Conditional", orderTypes: ["stop-market", "stop-limit"], nativeOrSynthetic: "native", fields: ["quantity", "triggerPrice", "triggerBy", "executionType", "price", "timeInForce", "postOnly", "reduceOnly", "tpSl"] }];
+      if (algorithm.id === "bybit.chase-limit") return [{ id: "chase-limit", label: "Chase", orderTypes: ["chase-limit"], nativeOrSynthetic: "native", fields: ["quantity", "chaseDistance", "maxChasePrice", "triggerPrice", "reduceOnly"] }];
+      if (algorithm.id === "bybit.twap") return [{ id: "twap", label: "TWAP", orderTypes: ["twap"], nativeOrSynthetic: "native", fields: ["quantity", "duration", "interval", "randomize", "maxChasePrice", "reduceOnly"] }];
+      if (algorithm.id === "bybit.iceberg") return [{ id: "iceberg", label: "Iceberg", orderTypes: ["iceberg"], nativeOrSynthetic: "native", fields: ["quantity", "subSize", "orderCount", "preference", "maxChasePrice", "reduceOnly"] }];
+      if (algorithm.id === "bybit.pov") return [{ id: "pov", label: "POV", orderTypes: ["pov"], nativeOrSynthetic: "native", fields: ["quantity", "duration", "interval", "participationRate", "volumeReference", "reduceOnly"] }];
       return [];
     }),
     supportedSizingModes: ["quantity", "usd", "equityPct"],

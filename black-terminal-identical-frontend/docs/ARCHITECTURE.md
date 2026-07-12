@@ -301,6 +301,8 @@ exchange orders are required to enforce it.
 
 The Unified Execution Ticket is driven by `VenueExecutionSchema`, not by a universal collection of exchange fields. A provider resolves product capabilities, order modes, sizing modes, protection, margin and position modes, live account metrics, instrument rules and execution readiness.
 
-`executionAlgorithmRegistry` exposes only ready native or Black Core algorithms. Bybit currently exposes native Market, Limit and Conditional modes. Chase Limit, Scaled Order, TWAP, POV and Iceberg remain registered but hidden because their persistent workers are not deployed.
+`executionAlgorithmRegistry` exposes only ready native or Black Core algorithms. Bybit exposes Market, Limit and Conditional order modes plus its V5-native Chase Limit, TWAP, Iceberg and POV strategies. Strategy creation still flows through OMS, EMS, Risk and the Bybit adapter; Bybit supervises child execution. Scaled Order remains hidden because Black Core does not yet have a persistent parent-child scheduler.
+
+Bybit reconciliation reads wallet, position, open-order and native-strategy snapshots. The private stream normalizer supports `order`, `execution`, `position`, `wallet` and `strategy`; Vercel deployments use REST reconciliation until the persistent private-stream worker is active.
 
 Certification controls are administrative connection diagnostics and do not appear in Unified Ticket or DOM Pro. Bybit margin changes use the V5 account-level margin endpoint, leverage changes are explicit and confirmed, and ordinary order placement never silently changes either setting.

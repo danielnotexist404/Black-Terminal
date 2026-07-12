@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-const BYBIT_PRIVATE_TOPICS = ["order", "execution", "position", "wallet"];
+const BYBIT_PRIVATE_TOPICS = ["order", "execution", "position", "wallet", "strategy"];
 const DEFAULT_STALE_AFTER_MS = 45_000;
 const DEFAULT_PING_MS = 20_000;
 
@@ -16,6 +16,7 @@ const runtimeState = {
   lastExecutionAt: null,
   lastPositionAt: null,
   lastWalletAt: null,
+  lastStrategyAt: null,
   lastError: process.env.BYBIT_PRIVATE_STREAM_RUNTIME_ENABLED === "true"
     ? null
     : "BYBIT_PRIVATE_STREAM_RUNTIME_ENABLED is not true. Persistent private streams require a long-running worker runtime."
@@ -101,6 +102,16 @@ export function normalizeBybitPrivateStreamMessage(input) {
       wallet,
       raw: row
     })));
+  }
+
+  if (topic.startsWith("strategy")) {
+    return rows.map((row) => ({
+      type: "strategy",
+      topic,
+      time,
+      strategy: normalizeBybitStrategyEvent(row, time),
+      raw: row
+    }));
   }
 
   return [];
@@ -222,6 +233,7 @@ export class BybitPrivateStreamClient {
       if (event.type === "execution") runtimeState.lastExecutionAt = event.time;
       if (event.type === "position") runtimeState.lastPositionAt = event.time;
       if (event.type === "wallet") runtimeState.lastWalletAt = event.time;
+      if (event.type === "strategy") runtimeState.lastStrategyAt = event.time;
       for (const handler of this.handlers) handler(event);
     }
   }
@@ -350,6 +362,25 @@ function normalizeBybitWalletEvent(row, time) {
       updatedAt: time
     };
   });
+}
+
+function normalizeBybitStrategyEvent(row, time) {
+  const statusMap = { 2: "working", 3: "filled", 4: "cancelled", 5: "paused", 6: "pending" };
+  return {
+    exchange: "bybit",
+    strategyId: row.strategyId,
+    strategyType: row.strategyType,
+    symbol: row.symbol,
+    side: String(row.side || "").toLowerCase() === "sell" ? "sell" : "buy",
+    status: statusMap[Number(row.status)] || "pending",
+    quantity: Number(row.size || 0),
+    filledQuantity: Number(row.executedSize || 0),
+    averageFillPrice: nullableNumber(row.executedAvgPrice),
+    reduceOnly: Boolean(row.reduceOnly),
+    terminateType: Number(row.terminateType || 0),
+    reason: row.terminateRemark || undefined,
+    updatedAt: Number(row.updatedTimeE3 || time)
+  };
 }
 
 function normalizeBybitOrderStatus(status) {

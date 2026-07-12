@@ -6,12 +6,14 @@ import {
   normalizeBybitSizing,
   precisionFromStep,
   resolveBybitExecutionPolicy,
-  validateBybitMainnetValidationRequest
+  validateBybitMainnetValidationRequest,
+  validateBybitStrategyParameters
 } from "../server/exchanges/bybit.js";
 import {
   createBybitWsAuthPayload,
   normalizeBybitPrivateStreamMessage
 } from "../server/exchanges/bybit-private-stream.js";
+import { settleSupabaseQuery } from "../server/supabase-query.js";
 
 const metadata = {
   nativeSymbol: "BTCUSDT",
@@ -26,6 +28,10 @@ const metadata = {
   leverageLimits: { min: 1, max: 100, step: 0.01 },
   supportedMarginModes: ["cross", "isolated"]
 };
+
+const thenableQueryBuilder = { then(resolve) { resolve({ data: null, error: null }); } };
+assert.deepEqual(await settleSupabaseQuery(thenableQueryBuilder), { data: null, error: null });
+console.log("ok - Supabase thenable queries settle without native Promise catch");
 
 test("clock skew math is deterministic", () => {
   const localTimeMs = 1_000_000;
@@ -81,6 +87,26 @@ test("USD sizing converts to metadata-aligned base quantity", () => {
   assert.equal(normalized.quantity, 0.001);
 });
 
+test("Bybit native strategy parameters are validated deterministically", () => {
+  const valid = validateBybitStrategyParameters({
+    orderType: "twap",
+    marketKind: "perpetual",
+    quantity: 0.01,
+    strategyParameters: { durationSeconds: 1800, intervalSeconds: 30, randomize: true }
+  });
+  assert.equal(valid.ok, true);
+  assert.equal(valid.strategyType, "twap");
+
+  const invalid = validateBybitStrategyParameters({
+    orderType: "pov",
+    marketKind: "spot",
+    quantity: 1,
+    strategyParameters: { povMode: "TradedVolume", participationRate: 101, intervalSeconds: 5, referenceWindowSeconds: 30 }
+  });
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.reasons.join(" "), /perpetual|participation|window/i);
+});
+
 test("execution report mapping preserves legal OMS statuses", () => {
   assert.equal(normalizeBybitOrderStatus("PartiallyFilled"), "partially-filled");
   const report = normalizeBybitExecutionReport({
@@ -95,7 +121,7 @@ test("execution report mapping preserves legal OMS statuses", () => {
   assert.equal(report.filledQuantity, 0.01);
 });
 
-test("private stream events normalize order, fill, position, and wallet topics", () => {
+test("private stream events normalize order, fill, position, wallet, and strategy topics", () => {
   const orderEvents = normalizeBybitPrivateStreamMessage({
     topic: "order",
     creationTime: 1,
@@ -123,6 +149,14 @@ test("private stream events normalize order, fill, position, and wallet topics",
     data: [{ accountType: "UNIFIED", coin: [{ coin: "USDT", walletBalance: "100", locked: "5", usdValue: "100" }] }]
   });
   assert.equal(walletEvents[0].wallet.free, 95);
+
+  const strategyEvents = normalizeBybitPrivateStreamMessage({
+    topic: "strategy",
+    creationTime: 5,
+    data: [{ strategyId: "s1", strategyType: "twap", symbol: "BTCUSDT", side: "Buy", status: 2, size: "0.1", executedSize: "0.02" }]
+  });
+  assert.equal(strategyEvents[0].strategy.status, "working");
+  assert.equal(strategyEvents[0].strategy.filledQuantity, 0.02);
 });
 
 test("private websocket auth payload is shaped for Bybit v5", () => {

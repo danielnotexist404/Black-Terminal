@@ -4,6 +4,10 @@ This file records database migrations required by Black Terminal.
 
 Rule: every new table, column, policy, trigger, function, or index must be added here before it is applied in Supabase.
 
+## 2026-07-13 - Chapter XIII readiness and native strategy hotfix
+
+No migration is required. The synchronization repair, native Bybit strategy routing and strategy snapshots use the existing account, order, validation and audit schema.
+
 ## Existing Database Domains
 
 The current Vercel API routes expect these Supabase domains:

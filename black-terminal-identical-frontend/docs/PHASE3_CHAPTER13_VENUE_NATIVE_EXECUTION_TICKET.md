@@ -1,8 +1,8 @@
 # Phase III Chapter XIII - Venue-Native Execution Ticket
 
-Date: 2026-07-12
+Date: 2026-07-13
 
-Status: Implemented foundation and Bybit Market/Limit/Conditional parity. Advanced server algorithms remain hidden until persistent workers exist.
+Status: Implemented Bybit venue-native order and strategy execution. Scaled Order remains hidden until a persistent Black Core scheduler exists.
 
 ## Architecture
 
@@ -27,6 +27,8 @@ Implemented controls:
 
 - Spot and USDT perpetual product selection
 - Market, Limit and Conditional orders
+- native Bybit Chase Limit, TWAP, Iceberg and POV strategy orders
+- native strategy snapshot synchronization, private-stream normalization and stop action
 - Last, Mark and Index conditional trigger sources
 - Quantity, notional and equity-percentage sizing
 - venue-step-aligned 0/25/50/75/100 allocation slider
@@ -57,11 +59,11 @@ The normal ticket receives only normalized execution readiness and a trader-safe
 | Conditional | Bybit native | ready |
 | Post-Only | Bybit native TIF semantics | ready |
 | Attached TP/SL | Bybit native | ready |
-| Chase Limit | Black Core worker required | hidden |
+| Chase Limit | Bybit V5 native strategy | ready |
 | Scaled Order | OMS parent-child scheduler required | hidden |
-| TWAP | persistent worker required | hidden |
-| POV | persistent sampler/worker required | hidden |
-| Iceberg | persistent replenishment worker required | hidden |
+| TWAP | Bybit V5 native strategy | ready |
+| POV | Bybit V5 native strategy; perpetual/futures only | ready |
+| Iceberg | Bybit V5 native strategy | ready |
 
 No advanced mode silently falls back to Market or Limit.
 
@@ -77,11 +79,16 @@ No advanced mode silently falls back to Market or Limit.
 - V5 Set Leverage: https://bybit-exchange.github.io/docs/v5/position/leverage
 - V5 Position Mode: https://bybit-exchange.github.io/docs/v5/position/position-mode
 - V5 Trading Stop: https://bybit-exchange.github.io/docs/v5/position/trading-stop
+- V5 Create Strategy: https://bybit-exchange.github.io/docs/v5/strategy/create-strategy
+- V5 Strategy List: https://bybit-exchange.github.io/docs/v5/strategy/strategy-list
+- V5 Stop Strategy: https://bybit-exchange.github.io/docs/v5/strategy/stop-strategy
+- V5 Private Strategy Stream: https://bybit-exchange.github.io/docs/v5/websocket/private/strategy
 
 ## Current Limitations
 
 - Production certification still requires recorded tiny-order, modify, cancel, protection and reconnect evidence.
 - Persistent private WebSocket processing requires the long-running worker outside Vercel.
+- Strategy state is reconciled through Bybit REST snapshots while that persistent worker is unavailable.
 - Spot Margin, USDC, inverse, dated futures and options stay hidden until their product schemas and routes are certified.
 - Estimated liquidation impact is omitted until venue risk-tier and complete post-fill portfolio state are available.
 - Trailing stop remains a Position Manager action and is not misrepresented as an order-create field.
@@ -94,4 +101,4 @@ npm run test:bybit-certification
 npm run build
 ```
 
-No Supabase schema migration is required for Chapter XIII.
+No Supabase schema migration is required for Chapter XIII or its 2026-07-13 readiness hotfix.

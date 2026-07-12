@@ -341,7 +341,7 @@ npm run tauri:build
 
 Add a venue by supplying a `VenueExecutionSchema` provider and truthful algorithm definitions. The provider maps venue/account/product state into normalized order modes, sizing, protection, margin, position, metric and instrument-rule capabilities. Do not add venue conditionals throughout the ticket.
 
-An advanced execution mode is production-visible only after its server worker, OMS lifecycle, recovery behavior, risk controls and deterministic tests are complete. Synthetic modes must be labeled Black Core algorithms.
+An advanced execution mode is production-visible only after its venue-native endpoint or server worker, OMS lifecycle, recovery behavior, risk controls and deterministic tests are complete. Bybit-native strategies use `/v5/strategy/create`, `/v5/strategy/list`, `/v5/strategy/stop` and the private `strategy` topic. Synthetic modes must be labeled Black Core algorithms.
 
 Operational readiness and certification controls belong in Connections -> Runtime & Certification. Normal order entry receives only normalized readiness and a concise blocker.
 

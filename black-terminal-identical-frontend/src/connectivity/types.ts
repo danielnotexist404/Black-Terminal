@@ -57,8 +57,11 @@ export type ConnectionCapability =
   | "positions"
   | "orders"
   | "trades"
+  | "strategy-orders"
+  | "chase-limit"
   | "twap"
-  | "iceberg";
+  | "iceberg"
+  | "pov";
 
 export type ApiPermissionReport = {
   read: boolean;

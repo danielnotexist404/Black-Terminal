@@ -18,8 +18,8 @@ export class ServerExchangeBrokerAdapter implements ExchangeBrokerAdapter {
       orderSync: true,
       balanceSync: true,
       tradeHistory: true,
-      twap: false,
-      iceberg: false
+      twap: connection.provider === "bybit",
+      iceberg: connection.provider === "bybit"
     };
   }
 
@@ -92,6 +92,7 @@ export class ServerExchangeBrokerAdapter implements ExchangeBrokerAdapter {
       tpslMode: order.tpslMode,
       positionIdx: order.positionIdx,
       slippageTolerancePercent: order.slippageTolerancePercent,
+      strategyParameters: order.strategyParameters,
       source: order.source,
       destinations: order.destinations,
       internalOrderId: order.internalOrderId,

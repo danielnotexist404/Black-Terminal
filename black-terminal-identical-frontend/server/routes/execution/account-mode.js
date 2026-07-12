@@ -7,6 +7,7 @@ import {
   requireUser,
   sendError
 } from "../../portfolio-api.js";
+import { settleSupabaseQuery } from "../../supabase-query.js";
 import {
   setBybitLeverage,
   switchBybitMarginMode,
@@ -70,14 +71,14 @@ export default async function handler(req, res) {
           sellLeverage: req.body.sellLeverage
         });
 
-    await supabase.from("execution_audit_logs").insert({
+    await settleSupabaseQuery(supabase.from("execution_audit_logs").insert({
       user_id: user.id,
       account_id: account.id,
       event_type: action === "set-leverage" ? "leverage_change_submitted" : action === "switch-position-mode" ? "position_mode_switch_submitted" : "margin_mode_switch_submitted",
       severity: "warning",
       message: `Bybit ${action} submitted explicitly.`,
       metadata: report
-    }).catch(() => null);
+    }));
 
     return res.status(200).json({ report });
   } catch (error) {

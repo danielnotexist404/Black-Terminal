@@ -145,7 +145,8 @@ examples/
 - Venue-native execution schemas: `src/execution/venueExecutionSchema.ts`
 - Execution algorithm truth registry: `src/execution/executionAlgorithmRegistry.ts`
 - Deterministic ticket tests: `scripts/venue-execution-tests.js`
-- Bybit Market, Limit and Conditional controls are schema-driven.
+- Bybit Market, Limit, Conditional, Chase Limit, TWAP, Iceberg and POV controls are schema-driven and venue-native.
+- Active Bybit strategies synchronize through REST and can be stopped from the execution ticket; private strategy events are normalized for the future persistent worker.
 - Runtime/certification controls are collapsed under the Positions connection panel.
 - No Chapter XIII Supabase migration is required.
 

@@ -7,6 +7,7 @@ import {
   requireUser,
   sendError
 } from "../../portfolio-api.js";
+import { settleSupabaseQuery } from "../../supabase-query.js";
 import { getBybitDiagnostics } from "../../exchanges/bybit.js";
 
 export default async function handler(req, res) {
@@ -153,17 +154,17 @@ async function persistDiagnostics(supabase, userId, account, diagnostics) {
   const results = await Promise.allSettled(writes);
   const failed = results.find((result) => result.status === "fulfilled" && result.value?.error);
   if (failed?.status === "fulfilled") {
-    await supabase.from("execution_audit_logs").insert({
+    await settleSupabaseQuery(supabase.from("execution_audit_logs").insert({
       user_id: userId,
       account_id: account.id,
       event_type: "connection_diagnostics_persist_failed",
       severity: "warning",
       message: failed.value.error.message,
       metadata: { venueId: diagnostics.venueId }
-    }).catch(() => null);
+    }));
   }
 
-  await supabase.from("execution_audit_logs").insert({
+  await settleSupabaseQuery(supabase.from("execution_audit_logs").insert({
     user_id: userId,
     account_id: account.id,
     event_type: "connection_diagnostics_run",
@@ -178,5 +179,5 @@ async function persistDiagnostics(supabase, userId, account, diagnostics) {
       balances: diagnostics.balances.length,
       positions: diagnostics.positions.length
     }
-  }).catch(() => null);
+  }));
 }

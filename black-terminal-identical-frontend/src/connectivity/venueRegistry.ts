@@ -94,8 +94,8 @@ export const venueCertificationRegistry: VenueCertificationRecord[] = [
     marketDataReady: true,
     mainnetValidated: false,
     supportedProducts: ["spot", "perpetual"],
-    connectionCapabilities: [...accountReadCapabilities, ...marketDataCapabilities, "market-orders", "limit-orders", "cancel-orders", "modify-orders", "reduce-only", "post-only", "leverage", "cross-margin", "isolated-margin", "private-websocket"],
-    supportedOrderTypes: ["market", "limit", "stop-market", "stop-limit", "post-only", "reduce-only", "gtc", "ioc", "fok"],
+    connectionCapabilities: [...accountReadCapabilities, ...marketDataCapabilities, "market-orders", "limit-orders", "strategy-orders", "chase-limit", "twap", "iceberg", "pov", "cancel-orders", "modify-orders", "reduce-only", "post-only", "leverage", "cross-margin", "isolated-margin", "private-websocket"],
+    supportedOrderTypes: ["market", "limit", "stop-market", "stop-limit", "chase-limit", "twap", "iceberg", "pov", "post-only", "reduce-only", "gtc", "ioc", "fok"],
     limitations: [
       "Bybit credentials are validated against the mainnet account endpoint and account balances/positions can sync.",
       "Bybit order, cancel, modify, close, TP/SL, leverage, and explicit mode-control primitives exist behind controlled mainnet validation gates.",

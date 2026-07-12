@@ -1,5 +1,6 @@
 import {
   getBybitOpenOrders,
+  getBybitStrategies,
   getBybitPositions,
   getBybitInstrumentMetadata,
   getBybitAccountInfo,
@@ -8,6 +9,7 @@ import {
   getBybitWalletSnapshot
 } from "./bybit.js";
 import { replaceBybitBalances, replaceBybitPositions } from "./bybit-snapshot-store.js";
+import { settleSupabaseQuery } from "../supabase-query.js";
 
 const ACTIVE_ORDER_STATUSES = ["pending", "accepted", "working", "partially-filled"];
 
@@ -15,10 +17,11 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
   const startedAt = Date.now();
   const symbol = String(options.symbol || "BTCUSDT").toUpperCase();
   const marketKind = options.marketKind === "spot" ? "spot" : "perpetual";
-  const [walletSnapshot, positionRows, openOrders, metadata, accountState, riskLimits, priceLimit] = await Promise.all([
+  const [walletSnapshot, positionRows, openOrders, strategies, metadata, accountState, riskLimits, priceLimit] = await Promise.all([
     getBybitWalletSnapshot(credentials),
     getBybitPositions(credentials, { symbol, includeEmpty: true }),
     getBybitOpenOrders(credentials, { category: marketKind === "spot" ? "spot" : "linear", symbol }),
+    getBybitStrategies(credentials, { marketKind, symbol }).catch(() => []),
     getBybitInstrumentMetadata({ category: marketKind === "spot" ? "spot" : "linear", symbol }),
     getBybitAccountInfo(credentials),
     marketKind === "spot" ? Promise.resolve([]) : getBybitRiskLimits({ category: "linear", symbol }),
@@ -81,7 +84,7 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     latency_ms: Date.now() - startedAt
   }).eq("id", account.id).eq("user_id", userId);
 
-  await supabase.from("execution_audit_logs").insert({
+  await settleSupabaseQuery(supabase.from("execution_audit_logs").insert({
     user_id: userId,
     account_id: account.id,
     event_type: externalStateChanged ? "external_state_change_detected" : "position_synced",
@@ -96,9 +99,10 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
       balances: balances.length,
       positions: positions.length,
       openOrders: openOrders.length,
+      strategies: strategies.length,
       latencyMs: Date.now() - startedAt
     }
-  }).catch(() => null);
+  }));
 
   return {
     accountId: account.id,
@@ -113,6 +117,7 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     priceLimit,
     positions,
     openOrders,
+    strategies,
     externalStateChanged,
     changes,
     syncedAt: new Date().toISOString(),

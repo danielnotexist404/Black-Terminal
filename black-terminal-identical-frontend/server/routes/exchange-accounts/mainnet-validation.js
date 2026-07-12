@@ -7,6 +7,7 @@ import {
   requireUser,
   sendError
 } from "../../portfolio-api.js";
+import { settleSupabaseQuery } from "../../supabase-query.js";
 import { getBybitApiKeyInformation, normalizeBybitPermissionReport } from "../../exchanges/bybit.js";
 
 const ENABLE_CONFIRMATION = "ENABLE BYBIT LIVE VALIDATION";
@@ -94,7 +95,7 @@ export default async function handler(req, res) {
     const failed = updates.find((result) => result.error);
     if (failed?.error) throw failed.error;
 
-    await supabase.from("execution_audit_logs").insert({
+    await settleSupabaseQuery(supabase.from("execution_audit_logs").insert({
       user_id: user.id,
       account_id: account.id,
       event_type: enable ? "mainnet_validation_enabled" : "mainnet_validation_disabled",
@@ -108,7 +109,7 @@ export default async function handler(req, res) {
         allowedSymbols: splitCsv(process.env.BYBIT_MAINNET_ALLOWED_SYMBOLS).map((item) => item.toUpperCase()),
         maxNotionalUsd: Number(process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD || 0)
       }
-    }).catch(() => null);
+    }));
 
     return res.status(200).json({
       status: enable ? "enabled" : "disabled",

@@ -7,6 +7,7 @@ import {
   requireUser,
   sendError
 } from "../../portfolio-api.js";
+import { settleSupabaseQuery } from "../../supabase-query.js";
 import { cancelAllBybitOrders, validateBybitManagementGate } from "../../exchanges/bybit.js";
 
 export default async function handler(req, res) {
@@ -52,14 +53,14 @@ export default async function handler(req, res) {
       .eq("symbol", String(req.body.symbol).toUpperCase())
       .in("status", ["pending", "accepted", "working", "partially-filled"]);
 
-    await supabase.from("execution_audit_logs").insert({
+    await settleSupabaseQuery(supabase.from("execution_audit_logs").insert({
       user_id: user.id,
       account_id: account.id,
       event_type: "cancel_all_submitted",
       severity: "warning",
       message: `Bybit cancel-all submitted for ${req.body.symbol}.`,
       metadata: result
-    }).catch(() => null);
+    }));
 
     return res.status(200).json({ result });
   } catch (error) {

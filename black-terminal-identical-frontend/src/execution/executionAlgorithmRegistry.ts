@@ -50,11 +50,11 @@ export const executionAlgorithmRegistry: ExecutionAlgorithmDefinition[] = [
     readiness: true,
     knownLimitations: []
   },
-  deferred("bybit.chase-limit", "bybit", "Chase Limit", "A supervised cancel-replace worker and persistent strategy state are not deployed."),
+  nativeStrategy("bybit.chase-limit", "Chase Limit", ["spot", "perpetual", "futures"], ["quantity", "chaseDistance", "maxChasePrice", "triggerPrice", "reduceOnly"]),
+  nativeStrategy("bybit.twap", "TWAP", ["spot", "perpetual", "futures"], ["quantity", "duration", "interval", "randomize", "priceProtection", "reduceOnly"]),
+  nativeStrategy("bybit.iceberg", "Iceberg", ["spot", "perpetual", "futures"], ["quantity", "subSize", "orderCount", "preference", "priceProtection", "reduceOnly"]),
+  nativeStrategy("bybit.pov", "POV", ["perpetual", "futures"], ["quantity", "duration", "interval", "participationRate", "volumeReference", "reduceOnly"]),
   deferred("blackcore.scaled-order", "bybit", "Scaled Order", "OMS parent-child scheduling and atomic preview persistence are not deployed."),
-  deferred("blackcore.twap", "bybit", "TWAP", "A persistent execution worker is required; browser timers are prohibited."),
-  deferred("blackcore.pov", "bybit", "POV", "A persistent market-volume sampler and execution worker are required."),
-  deferred("blackcore.iceberg", "bybit", "Iceberg", "A persistent child-order replenishment worker is required.")
 ];
 
 export function listReadyExecutionAlgorithms(venue: string, product: MarketKind) {
@@ -75,5 +75,20 @@ function deferred(id: string, venue: string, label: string, limitation: string):
     supportedParameters: [],
     readiness: false,
     knownLimitations: [limitation]
+  };
+}
+
+function nativeStrategy(id: string, label: string, supportedProducts: MarketKind[], supportedParameters: string[]): ExecutionAlgorithmDefinition {
+  return {
+    id,
+    venue: "bybit",
+    label,
+    nativeOrSynthetic: "native",
+    supportedProducts,
+    requiredCapabilities: ["strategy-orders"],
+    requiredWorker: false,
+    supportedParameters,
+    readiness: true,
+    knownLimitations: ["Availability remains subject to Bybit account, product, region, and strategy eligibility."]
   };
 }

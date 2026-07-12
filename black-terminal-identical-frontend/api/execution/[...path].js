@@ -5,6 +5,7 @@ import cancelAll from "../../server/routes/execution/cancel-all.js";
 import positionAction from "../../server/routes/execution/position-action.js";
 import protection from "../../server/routes/execution/protection.js";
 import accountMode from "../../server/routes/execution/account-mode.js";
+import strategy from "../../server/routes/execution/strategy.js";
 import { applyCors, sendError } from "../../server/portfolio-api.js";
 
 const routes = new Map([
@@ -14,7 +15,8 @@ const routes = new Map([
   ["cancel-all", cancelAll],
   ["position-action", positionAction],
   ["protection", protection],
-  ["account-mode", accountMode]
+  ["account-mode", accountMode],
+  ["strategy", strategy]
 ]);
 
 export default async function handler(req, res) {

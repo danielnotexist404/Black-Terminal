@@ -3599,6 +3599,11 @@ body.resizing-layout * {
   background: #ef3340;
 }
 
+.venue-ready-state i.syncing {
+  background: #e5a824;
+  box-shadow: 0 0 6px rgba(229, 168, 36, 0.45);
+}
+
 .bybit-product-tabs,
 .bybit-side-tabs,
 .bybit-order-tabs {
@@ -3629,6 +3634,15 @@ body.resizing-layout * {
   color: #737984;
   font: 800 8px "IBM Plex Mono", monospace;
   text-transform: uppercase;
+}
+
+.bybit-order-tabs {
+  flex-wrap: wrap;
+}
+
+.bybit-order-tabs button {
+  flex: 1 1 70px;
+  padding: 0 8px;
 }
 
 .venue-execution-origin {
@@ -3714,10 +3728,55 @@ body.resizing-layout * {
 
 .bybit-position-settings,
 .bybit-condition-row,
+.bybit-strategy-grid,
 .bybit-tpsl-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.bybit-strategy-grid {
+  padding: 8px;
+  border: 1px solid rgba(229, 168, 36, 0.18);
+  background: rgba(229, 168, 36, 0.025);
+}
+
+.bybit-strategy-grid .bybit-check {
+  align-self: end;
+  min-height: 27px;
+}
+
+.bybit-active-strategies {
+  display: grid;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid rgba(229, 168, 36, 0.2);
+  background: #090b0e;
+}
+
+.bybit-active-strategies > strong {
+  color: #e5a824;
+  font: 800 8px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.bybit-active-strategies > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #8c929c;
+  font: 700 8px "IBM Plex Mono", monospace;
+}
+
+.bybit-active-strategies button {
+  height: 23px;
+  padding: 0 9px;
+  border: 1px solid #8f1821;
+  background: #21080b;
+  color: #ff606a;
+  font: 800 8px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
 }
 
 .bybit-position-settings {

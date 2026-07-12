@@ -61,13 +61,14 @@ test("schema selects the Bybit provider", () => {
 });
 
 test("Bybit product capabilities render only ready modes", () => {
-  assert.deepEqual(schema.supportedOrderModes.map((mode) => mode.id), ["market", "limit", "conditional"]);
+  assert.deepEqual(schema.supportedOrderModes.map((mode) => mode.id), ["market", "limit", "conditional", "chase-limit", "twap", "iceberg", "pov"]);
   assert.equal(schema.featureFlags.showLeverage, true);
 });
 
 test("unsupported server algorithms stay hidden", () => {
-  assert.equal(schema.supportedAlgoStrategies.some((item) => item.id === "blackcore.twap"), false);
-  assert.equal(executionAlgorithmRegistry.find((item) => item.id === "blackcore.twap")?.readiness, false);
+  assert.equal(schema.supportedAlgoStrategies.some((item) => item.id === "blackcore.scaled-order"), false);
+  assert.equal(executionAlgorithmRegistry.find((item) => item.id === "blackcore.scaled-order")?.readiness, false);
+  assert.equal(schema.supportedAlgoStrategies.find((item) => item.id === "bybit.twap")?.nativeOrSynthetic, "native");
 });
 
 test("equity slider converts to a venue-step quantity", () => {
@@ -96,6 +97,13 @@ test("order-mode fields remain product-specific", () => {
   assert.deepEqual(schema.supportedOrderModes.find((mode) => mode.id === "market")?.fields, ["quantity", "slippageTolerance", "reduceOnly", "tpSl"]);
   assert.equal(schema.supportedOrderModes.find((mode) => mode.id === "limit")?.fields.includes("price"), true);
   assert.equal(schema.supportedOrderModes.find((mode) => mode.id === "conditional")?.fields.includes("triggerBy"), true);
+  assert.equal(schema.supportedOrderModes.find((mode) => mode.id === "pov")?.fields.includes("participationRate"), true);
+});
+
+test("native strategy validation rejects incomplete TWAP", () => {
+  const result = validateVenueOrderDraft({ schema, orderType: "twap", sizingMethod: "quantity", size: 1, referencePrice: 100, leverage: 5, side: "buy", reduceOnly: false, tpSlEnabled: false, strategyParameters: { durationSeconds: 60, intervalSeconds: 7 } });
+  assert.equal(result.valid, false);
+  assert.match(result.reasons.join(" "), /TWAP duration|TWAP interval/);
 });
 
 test("reduce-only and attached TP/SL are rejected", () => {

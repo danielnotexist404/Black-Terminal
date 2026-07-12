@@ -115,6 +115,7 @@ export class EmsService {
       tpslMode: request.tpslMode,
       positionIdx: request.positionIdx,
       slippageTolerancePercent: request.slippageTolerancePercent,
+      strategyParameters: request.strategyParameters,
       clientOrderId: request.internalOrderId,
       internalOrderId: request.internalOrderId,
       source: request.source,

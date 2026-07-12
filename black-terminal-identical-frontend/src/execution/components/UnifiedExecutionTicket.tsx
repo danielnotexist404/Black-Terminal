@@ -4,11 +4,11 @@ import { blackCoreConnectionManager } from "../../connectivity/connectionManager
 import { readActiveExecutionVenueId } from "../../connectivity/activeExecutionVenue";
 import type { ConnectionDiagnostics } from "../../connectivity/types";
 import type { PortfolioAccount } from "../../portfolio/types";
-import { syncExchangeAccountViaApi, updateBybitAccountModeViaApi, type ExchangeAccountSyncPayload } from "../../portfolio/portfolioApiClient";
+import { stopBybitStrategyViaApi, syncExchangeAccountViaApi, updateBybitAccountModeViaApi, type ExchangeAccountSyncPayload } from "../../portfolio/portfolioApiClient";
 import { defaultRiskControls } from "../../risk/types";
 import { submitOrder } from "../executionEngine";
 import { MAINNET_ORDER_CONFIRMATION, validateMainnetOrderReadiness } from "../mainnetValidationMode";
-import type { ExecutionDestination, ExecutionSource, MarginMode, OrderSide, OrderType, SizingMethod, TimeInForce, TriggerSource } from "../types";
+import type { ExecutionDestination, ExecutionSource, MarginMode, OrderSide, OrderType, SizingMethod, TimeInForce, TriggerSource, VenueStrategyParameters } from "../types";
 import type { ExchangeId, MarketKind } from "../../market-data/types";
 import { blackCorePositionManager } from "../../positions/positionManager";
 import type { PositionProtectionType } from "../../positions/types";
@@ -41,7 +41,7 @@ type UnifiedExecutionTicketProps = {
   onClose: () => void;
 };
 
-const orderTypes: OrderType[] = ["market", "limit", "stop-market", "stop-limit", "trailing-stop", "bracket", "twap", "iceberg"];
+const orderTypes: OrderType[] = ["market", "limit", "stop-market", "stop-limit", "trailing-stop", "bracket", "chase-limit", "twap", "iceberg", "pov"];
 const sizingMethods: Array<{ value: SizingMethod; label: string }> = [
   { value: "quantity", label: "Quantity" },
   { value: "contracts", label: "Contracts" },
@@ -97,6 +97,21 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
   const [balancesVisible, setBalancesVisible] = useState(true);
   const [modeUpdatePending, setModeUpdatePending] = useState(false);
   const [slippageTolerance, setSlippageTolerance] = useState(0.5);
+  const [strategyDurationSeconds, setStrategyDurationSeconds] = useState(1800);
+  const [strategyIntervalSeconds, setStrategyIntervalSeconds] = useState(30);
+  const [strategyRandomize, setStrategyRandomize] = useState(false);
+  const [strategyTriggerPrice, setStrategyTriggerPrice] = useState("");
+  const [strategyMaxChasePrice, setStrategyMaxChasePrice] = useState("");
+  const [strategyChaseUnit, setStrategyChaseUnit] = useState<"distance" | "percent">("distance");
+  const [strategyChaseValue, setStrategyChaseValue] = useState("0.5");
+  const [strategySubSize, setStrategySubSize] = useState("");
+  const [strategyOrderCount, setStrategyOrderCount] = useState(10);
+  const [icebergPreference, setIcebergPreference] = useState<"maker" | "taker" | "offset" | "fixed">("maker");
+  const [povMode, setPovMode] = useState<"TradedVolume" | "OppositeSideLiquidity" | "SameSideLiquidity">("TradedVolume");
+  const [povParticipationRate, setPovParticipationRate] = useState(10);
+  const [povReferenceWindow, setPovReferenceWindow] = useState(300);
+  const [povDepthReference, setPovDepthReference] = useState(5);
+  const [stoppingStrategyId, setStoppingStrategyId] = useState("");
   const hydratedAccountRef = useRef("");
 
   useEffect(() => blackCoreConnectionManager.subscribe(setConnections), []);
@@ -209,6 +224,24 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
   }, [orderType, sizingMethod, venueOrderTypes, venueSizingMethods]);
 
   const accountMetrics = venueSchema?.accountMetrics ?? accountSync?.accountMetrics ?? null;
+  const strategyOrder = ["chase-limit", "twap", "iceberg", "pov"].includes(orderType);
+  const strategyParameters: VenueStrategyParameters | undefined = strategyOrder ? {
+    durationSeconds: ["twap", "pov"].includes(orderType) ? strategyDurationSeconds : undefined,
+    intervalSeconds: ["twap", "pov"].includes(orderType) ? strategyIntervalSeconds : undefined,
+    randomize: orderType === "twap" ? strategyRandomize : undefined,
+    triggerPrice: Number(strategyTriggerPrice || 0) || undefined,
+    maxChasePrice: Number(strategyMaxChasePrice || 0) || undefined,
+    chaseDistance: (orderType === "chase-limit" || orderType === "iceberg" && icebergPreference === "offset") && strategyChaseUnit === "distance" ? Number(strategyChaseValue || 0) : undefined,
+    chasePercent: (orderType === "chase-limit" || orderType === "iceberg" && icebergPreference === "offset") && strategyChaseUnit === "percent" ? Number(strategyChaseValue || 0) : undefined,
+    subSize: orderType === "iceberg" ? Number(strategySubSize || 0) || undefined : undefined,
+    orderCount: orderType === "iceberg" && !Number(strategySubSize || 0) ? strategyOrderCount : undefined,
+    icebergPreference: orderType === "iceberg" ? icebergPreference : undefined,
+    povMode: orderType === "pov" ? povMode : undefined,
+    participationRate: orderType === "pov" ? povParticipationRate : undefined,
+    referenceWindowSeconds: orderType === "pov" && povMode === "TradedVolume" ? povReferenceWindow : undefined,
+    depthReference: orderType === "pov" && povMode !== "TradedVolume" ? povDepthReference : undefined
+  } : undefined;
+  const activeStrategies = (accountSync?.strategies || []).filter((strategy) => ["working", "pending", "paused"].includes(strategy.status));
   const availableBalance = Number(accountMetrics?.availableBalanceUsd || 0);
   const executionPrice = Number(price || stopPrice || preset.price || 0);
   const requestedValue = Number(quantity || 0);
@@ -246,7 +279,8 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
     leverage: marketKind === "spot" ? 1 : leverage,
     side,
     reduceOnly,
-    tpSlEnabled
+    tpSlEnabled: strategyOrder ? false : tpSlEnabled,
+    strategyParameters
   }) : { valid: true, reasons: [], normalizedQuantity: effectiveSize, notional: estimatedNotional };
   const activeOrderMode = venueSchema?.supportedOrderModes.find((mode) => mode.orderTypes.includes(orderType)) || null;
   const ticketMessage = status || (accountSyncError ? formatExecutionError(accountSyncError) : "") ||
@@ -374,10 +408,10 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
         quantityMode: effectiveSizingMethod,
         sizingMethod: effectiveSizingMethod,
         referencePrice: Number(price || stopPrice || 0) || undefined,
-        limitPrice: ["limit", "stop-limit", "bracket", "twap", "iceberg"].includes(orderType) ? Number(price || 0) || undefined : undefined,
+        limitPrice: ["limit", "stop-limit", "bracket"].includes(orderType) || orderType === "iceberg" && icebergPreference === "fixed" ? Number(price || 0) || undefined : undefined,
         stopPrice: ["stop-market", "stop-limit", "trailing-stop"].includes(orderType) ? Number(stopPrice || price || 0) || undefined : undefined,
-        takeProfit: tpSlEnabled ? Number(takeProfit || 0) || undefined : undefined,
-        stopLoss: tpSlEnabled ? Number(stopLoss || 0) || undefined : undefined,
+        takeProfit: !strategyOrder && tpSlEnabled ? Number(takeProfit || 0) || undefined : undefined,
+        stopLoss: !strategyOrder && tpSlEnabled ? Number(stopLoss || 0) || undefined : undefined,
         leverage: marketKind === "spot" ? 1 : leverage,
         marginMode,
         postOnly: ["limit", "stop-limit"].includes(orderType) && postOnly,
@@ -389,6 +423,7 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
         tpslMode: "full" as const,
         positionIdx: venueSchema?.currentPositionMode === "hedge" ? side === "buy" ? 1 : 2 : 0,
         slippageTolerancePercent: orderType === "market" ? slippageTolerance : undefined,
+        strategyParameters,
         trailingStopEnabled,
         trailingTrailBy: Number(trailingTrailBy || 0) || undefined,
         trailingMode,
@@ -424,6 +459,7 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
             tpslMode: draft.tpslMode,
             positionIdx: draft.positionIdx,
             slippageTolerancePercent: draft.slippageTolerancePercent,
+            strategyParameters: draft.strategyParameters,
             source: draft.source,
             destinations: draft.destinations
           }, buildExecutionAccount(selectedConnection, accountSync), executionPrice || 1);
@@ -448,6 +484,28 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
       setStatus(update ? update.reason ? formatExecutionError(update.reason) : `${formatOrderStatus(update.status)}: ${update.orderId}` : "Authenticated broker session required.");
     } catch (error) {
       setStatus(formatExecutionError(error));
+    }
+  }
+
+  async function stopStrategy(strategyId: string) {
+    if (!selectedConnection?.accountId || !window.confirm(`Stop Bybit strategy ${strategyId}? Remaining child orders will be cancelled by Bybit.`)) return;
+    setStoppingStrategyId(strategyId);
+    setStatus("");
+    try {
+      await stopBybitStrategyViaApi({
+        accountId: selectedConnection.accountId,
+        strategyId,
+        symbol: preset.symbol.toUpperCase(),
+        mainnetConfirmed: true,
+        liveConfirmation: MAINNET_ORDER_CONFIRMATION
+      });
+      setStatus("Bybit strategy stop accepted.");
+      const next = await syncExchangeAccountViaApi(selectedConnection.accountId, preset.symbol, marketKind);
+      if (next) setAccountSync(next);
+    } catch (error) {
+      setStatus(formatExecutionError(error));
+    } finally {
+      setStoppingStrategyId("");
     }
   }
 
@@ -477,8 +535,8 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
               <div><span>Product</span><b>{venueSchema.instrumentRules.symbol} {venueSchema.marketType.toUpperCase()}</b></div>
               <div><span>Network</span><b>{venueSchema.network.toUpperCase()}</b></div>
               <div className="venue-ready-state" title={venueSchema.readinessReason || "Account and venue checks passed."}>
-                <i className={venueSchema.executionReady ? "ready" : "blocked"} />
-                <b>{venueSchema.executionReady ? "TRADING READY" : "UNAVAILABLE"}</b>
+                <i className={venueSchema.executionReady ? "ready" : accountSyncError ? "blocked" : "syncing"} />
+                <b>{venueSchema.executionReady ? "TRADING READY" : accountSyncError ? "SYNC FAILED" : accountSync ? "BLOCKED" : "SYNCING"}</b>
               </div>
             </div>
 
@@ -533,6 +591,46 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
               </div>
             )}
 
+            {orderType === "chase-limit" && (
+              <div className="bybit-strategy-grid">
+                <label><span>Chase Unit</span><select value={strategyChaseUnit} onChange={(event) => setStrategyChaseUnit(event.target.value as "distance" | "percent")}><option value="distance">Price Distance</option><option value="percent">Percentage</option></select></label>
+                <label><span>Chase {strategyChaseUnit === "distance" ? "Distance" : "%"}</span><input value={strategyChaseValue} onChange={(event) => setStrategyChaseValue(event.target.value)} inputMode="decimal" /></label>
+                <label><span>Trigger Price</span><input value={strategyTriggerPrice} onChange={(event) => setStrategyTriggerPrice(event.target.value)} placeholder="Optional" inputMode="decimal" /></label>
+                <label><span>Maximum Chase Price</span><input value={strategyMaxChasePrice} onChange={(event) => setStrategyMaxChasePrice(event.target.value)} placeholder="Optional" inputMode="decimal" /></label>
+              </div>
+            )}
+
+            {orderType === "twap" && (
+              <div className="bybit-strategy-grid">
+                <label><span>Running Time</span><select value={strategyDurationSeconds} onChange={(event) => setStrategyDurationSeconds(Number(event.target.value))}><option value={600}>10 minutes</option><option value={1800}>30 minutes</option><option value={3600}>1 hour</option><option value={14400}>4 hours</option><option value={28800}>8 hours</option></select></label>
+                <label><span>Child Interval</span><select value={strategyIntervalSeconds} onChange={(event) => setStrategyIntervalSeconds(Number(event.target.value))}><option value={5}>5 seconds</option><option value={10}>10 seconds</option><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={60}>60 seconds</option><option value={120}>120 seconds</option></select></label>
+                <label><span>Trigger Price</span><input value={strategyTriggerPrice} onChange={(event) => setStrategyTriggerPrice(event.target.value)} placeholder="Optional" inputMode="decimal" /></label>
+                <label><span>Price Protection</span><input value={strategyMaxChasePrice} onChange={(event) => setStrategyMaxChasePrice(event.target.value)} placeholder="Optional" inputMode="decimal" /></label>
+                <label className="bybit-check"><input type="checkbox" checked={strategyRandomize} onChange={(event) => setStrategyRandomize(event.target.checked)} /> Randomize child size</label>
+              </div>
+            )}
+
+            {orderType === "iceberg" && (
+              <div className="bybit-strategy-grid">
+                <label><span>Order Preference</span><select value={icebergPreference} onChange={(event) => setIcebergPreference(event.target.value as typeof icebergPreference)}><option value="maker">Chase Limit / Maker</option><option value="taker">Chase Limit / Taker</option><option value="offset">Chase Limit / Offset</option><option value="fixed">Fixed Price</option></select></label>
+                <label><span>Visible Child Size</span><input value={strategySubSize} onChange={(event) => setStrategySubSize(event.target.value)} placeholder="Uses count when empty" inputMode="decimal" /></label>
+                <label><span>Order Count</span><input value={strategyOrderCount} min="2" step="1" onChange={(event) => setStrategyOrderCount(Math.max(2, Number(event.target.value || 2)))} inputMode="numeric" /></label>
+                {icebergPreference === "fixed" && <label><span>Fixed Price</span><input value={price} onChange={(event) => setPrice(event.target.value)} inputMode="decimal" /></label>}
+                {icebergPreference === "offset" && <label><span>Chase Offset</span><input value={strategyChaseValue} onChange={(event) => setStrategyChaseValue(event.target.value)} inputMode="decimal" /></label>}
+                <label><span>Price Protection</span><input value={strategyMaxChasePrice} onChange={(event) => setStrategyMaxChasePrice(event.target.value)} placeholder="Optional" inputMode="decimal" /></label>
+              </div>
+            )}
+
+            {orderType === "pov" && (
+              <div className="bybit-strategy-grid">
+                <label><span>Volume Reference</span><select value={povMode} onChange={(event) => setPovMode(event.target.value as typeof povMode)}><option value="TradedVolume">Traded Volume</option><option value="OppositeSideLiquidity">Opposite Liquidity</option><option value="SameSideLiquidity">Same-side Liquidity</option></select></label>
+                <label><span>Participation</span><div className="bybit-suffix-input"><input value={povParticipationRate} min="1" max="100" step="0.1" onChange={(event) => setPovParticipationRate(clampNumber(Number(event.target.value || 1), 1, 100))} inputMode="decimal" /><b>%</b></div></label>
+                <label><span>Sampling Interval</span><input value={strategyIntervalSeconds} min="0" max="3600" step="1" onChange={(event) => setStrategyIntervalSeconds(Number(event.target.value || 0))} inputMode="numeric" /></label>
+                <label><span>Maximum Duration</span><input value={strategyDurationSeconds} min="900" max="86400" step="60" onChange={(event) => setStrategyDurationSeconds(Number(event.target.value || 900))} inputMode="numeric" /></label>
+                {povMode === "TradedVolume" ? <label><span>Reference Window</span><input value={povReferenceWindow} min="60" max="14400" step="60" onChange={(event) => setPovReferenceWindow(Number(event.target.value || 60))} inputMode="numeric" /></label> : <label><span>Book Depth</span><input value={povDepthReference} min="1" max="10" step="1" onChange={(event) => setPovDepthReference(clampNumber(Number(event.target.value || 1), 1, 10))} inputMode="numeric" /></label>}
+              </div>
+            )}
+
             {["limit", "stop-limit"].includes(orderType) && (
               <label><span>Price</span><div className="bybit-suffix-input"><input value={price} onChange={(event) => setPrice(event.target.value)} inputMode="decimal" /><b>USDT</b></div></label>
             )}
@@ -561,8 +659,8 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
               <span>Risk / Reward <b>{preview?.rewardRiskRatio ? `${preview.rewardRiskRatio.toFixed(2)} R` : "--"}</b></span>
             </div>
 
-            <label className="bybit-check"><input type="checkbox" disabled={reduceOnly} checked={tpSlEnabled && !reduceOnly} onChange={(event) => setTpSlEnabled(event.target.checked)} /> TP/SL</label>
-            {tpSlEnabled && (
+            {!strategyOrder && <label className="bybit-check"><input type="checkbox" disabled={reduceOnly} checked={tpSlEnabled && !reduceOnly} onChange={(event) => setTpSlEnabled(event.target.checked)} /> TP/SL</label>}
+            {!strategyOrder && tpSlEnabled && (
               <div className="bybit-tpsl-row">
                 <label><span>Take Profit</span><div className="bybit-suffix-input"><input value={takeProfit} onChange={(event) => setTakeProfit(event.target.value)} inputMode="decimal" /><b>USDT</b></div></label>
                 <label><span>TP Trigger</span><select value={tpTriggerBy} onChange={(event) => setTpTriggerBy(event.target.value as TriggerSource)}><option value="last">Last Price</option><option value="mark">Mark Price</option><option value="index">Index Price</option></select></label>
@@ -574,12 +672,12 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
             <details className="bybit-advanced" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
               <summary>Advanced Settings</summary>
               <div className="bybit-order-options">
-                <label className="bybit-check"><input type="checkbox" disabled={!["limit", "stop-limit"].includes(orderType)} checked={postOnly && ["limit", "stop-limit"].includes(orderType)} onChange={(event) => setPostOnly(event.target.checked)} /> Post-Only</label>
+                {!strategyOrder && <label className="bybit-check"><input type="checkbox" disabled={!["limit", "stop-limit"].includes(orderType)} checked={postOnly && ["limit", "stop-limit"].includes(orderType)} onChange={(event) => setPostOnly(event.target.checked)} /> Post-Only</label>}
                 {venueSchema.featureFlags.showReduceOnly && <label className="bybit-check"><input type="checkbox" checked={reduceOnly} onChange={(event) => setReduceOnly(event.target.checked)} /> Reduce-Only</label>}
                 {["limit", "stop-limit"].includes(orderType) && <select aria-label="Time in force" value={timeInForce} onChange={(event) => setTimeInForce(event.target.value as TimeInForce)}>{venueSchema.supportedTimeInForce.map((tif) => <option key={tif} value={tif}>{tif.toUpperCase()}</option>)}</select>}
               </div>
               {orderType === "market" && <label className="bybit-slippage"><span>Slippage Tolerance</span><div className="bybit-suffix-input"><input value={slippageTolerance} min="0.01" max="10" step="0.01" onChange={(event) => setSlippageTolerance(clampNumber(Number(event.target.value || 0.01), 0.01, 10))} inputMode="decimal" /><b>%</b></div></label>}
-              <p>{orderType === "market" ? `${venueSchema.venueLabel} executes market orders using venue-protected IOC behavior.` : "Post-Only cancels instead of taking liquidity."}</p>
+              <p>{strategyOrder ? "This strategy is created and supervised by Bybit's native strategy engine." : orderType === "market" ? `${venueSchema.venueLabel} executes market orders using venue-protected IOC behavior.` : "Post-Only cancels instead of taking liquidity."}</p>
             </details>
 
             <div className="venue-account-metrics">
@@ -591,6 +689,18 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
               <div><span>Unrealized PnL</span><b>{maskMetric(accountMetrics?.unrealizedPnlUsd, balancesVisible)}</b></div>
               <div><span>Risk Ratio</span><b>{!balancesVisible ? "HIDDEN" : accountMetrics?.accountMmRate === null || accountMetrics?.accountMmRate === undefined ? "--" : `${(accountMetrics.accountMmRate * 100).toFixed(2)}%`}</b></div>
             </div>
+
+            {activeStrategies.length > 0 && (
+              <div className="bybit-active-strategies">
+                <strong>Active Bybit Strategies</strong>
+                {activeStrategies.map((strategy) => (
+                  <div key={strategy.strategyId}>
+                    <span><b>{strategy.strategyType.toUpperCase()}</b> {strategy.filledQuantity}/{strategy.quantity} {venueSchema.instrumentRules.baseAsset}</span>
+                    <button type="button" disabled={stoppingStrategyId === strategy.strategyId} onClick={() => void stopStrategy(strategy.strategyId)}>{stoppingStrategyId === strategy.strategyId ? "Stopping" : "Stop"}</button>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {ticketMessage && <div className="bybit-ticket-status">{ticketMessage}</div>}
 
@@ -605,7 +715,7 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
               className={side === "buy" ? "bybit-submit buy" : "bybit-submit sell"}
               onClick={submit}
             >
-              {marketKind === "spot" ? `${side === "buy" ? "Buy" : "Sell"} ${venueSchema.instrumentRules.baseAsset}` : side === "buy" ? "Long / Buy" : "Short / Sell"}
+              {strategyOrder ? `Start ${activeOrderMode?.label || "Strategy"}` : marketKind === "spot" ? `${side === "buy" ? "Buy" : "Sell"} ${venueSchema.instrumentRules.baseAsset}` : side === "buy" ? "Long / Buy" : "Short / Sell"}
             </button>
           </div>
         ) : (

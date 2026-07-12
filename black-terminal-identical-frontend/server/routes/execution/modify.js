@@ -7,6 +7,7 @@ import {
   requireUser,
   sendError
 } from "../../portfolio-api.js";
+import { settleSupabaseQuery } from "../../supabase-query.js";
 import { modifyBybitOrder, validateBybitManagementGate } from "../../exchanges/bybit.js";
 
 export default async function handler(req, res) {
@@ -67,7 +68,7 @@ export default async function handler(req, res) {
         .eq("user_id", user.id);
     }
 
-    await supabase.from("execution_audit_logs").insert({
+    await settleSupabaseQuery(supabase.from("execution_audit_logs").insert({
       user_id: user.id,
       account_id: account.id,
       order_id: existingOrder?.id || null,
@@ -75,7 +76,7 @@ export default async function handler(req, res) {
       severity: "info",
       message: "Bybit modify submitted through certified adapter path.",
       metadata: { report, symbol: req.body.symbol }
-    }).catch(() => null);
+    }));
 
     return res.status(200).json({ report });
   } catch (error) {

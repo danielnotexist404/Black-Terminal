@@ -153,6 +153,44 @@ export async function getBybitOpenOrders(credentials, { category = "linear", sym
   }));
 }
 
+export async function getBybitStrategies(credentials, { marketKind = "perpetual", symbol } = {}) {
+  const response = await bybitRequest(credentials, "GET", "/v5/strategy/list", {
+    category: marketKind === "spot" ? "UTA_SPOT" : "UTA_USDT",
+    symbol: symbol ? normalizeBybitSymbol(symbol) : undefined,
+    pageSize: "50"
+  });
+  return (response?.list || []).map((strategy) => ({
+    strategyId: strategy.strategyId,
+    strategyType: strategy.strategyType,
+    symbol: strategy.symbol,
+    side: String(strategy.side || "").toLowerCase() === "sell" ? "sell" : "buy",
+    status: normalizeBybitStrategyStatus(strategy.status),
+    quantity: Number(strategy.size || 0),
+    filledQuantity: Number(strategy.executedSize || 0),
+    averageFillPrice: nullableNumber(strategy.executedAvgPrice),
+    reduceOnly: Boolean(strategy.reduceOnly),
+    duration: Number(strategy.duration || 0),
+    interval: Number(strategy.interval || 0),
+    terminateType: Number(strategy.terminateType || 0),
+    reason: strategy.terminateRemark || undefined,
+    createdAt: Number(strategy.createdTimeE3 || Date.now()),
+    updatedAt: Number(strategy.updatedTimeE3 || Date.now()),
+    raw: strategy
+  }));
+}
+
+export async function stopBybitStrategy(credentials, strategyId) {
+  if (!strategyId) throw new Error("Bybit strategy stop requires a strategy ID.");
+  const response = await bybitRequest(credentials, "POST", "/v5/strategy/stop", {}, { strategyId });
+  return {
+    exchange: "bybit",
+    strategyId: response?.strategyId || strategyId,
+    status: "cancelled",
+    time: Date.now(),
+    raw: response
+  };
+}
+
 export async function getBybitAccountInfo(credentials) {
   const response = await bybitRequest(credentials, "GET", "/v5/account/info", {});
   const marginMode = String(response?.marginMode || "REGULAR_MARGIN");
@@ -361,6 +399,119 @@ export async function placeBybitOrder(credentials, order, prevalidated = null) {
     filledQuantity: 0,
     raw: response
   });
+}
+
+export async function placeBybitStrategyOrder(credentials, order, prevalidated = null) {
+  const validation = prevalidated || await validateBybitOrderDraft(credentials, { ...order, orderType: "market" });
+  const strategyValidation = validateBybitStrategyParameters(order);
+  const reasons = [...(validation.reasons || []), ...strategyValidation.reasons];
+  if (reasons.length > 0) {
+    const error = new Error(reasons.join(" "));
+    error.statusCode = 400;
+    error.validation = { ...validation, ok: false, reasons };
+    throw error;
+  }
+
+  const parameters = order.strategyParameters || {};
+  const strategyType = strategyValidation.strategyType;
+  const body = {
+    category: order.marketKind === "spot" ? "UTA_SPOT" : "UTA_USDT",
+    symbol: normalizeBybitSymbol(order.symbol),
+    side: order.side === "buy" ? "Buy" : "Sell",
+    size: formatBybitNumber(validation.normalized.quantity, validation.metadata?.quantityPrecision),
+    strategyType
+  };
+  if (order.marketKind !== "spot") {
+    body.reduceOnly = Boolean(order.reduceOnly);
+    body.positionIdx = Number(order.positionIdx || 0);
+  }
+
+  if (parameters.triggerPrice) body.triggerPrice = formatBybitNumber(parameters.triggerPrice, validation.metadata?.pricePrecision);
+  if (parameters.maxChasePrice) body.maxChasePrice = formatBybitNumber(parameters.maxChasePrice, validation.metadata?.pricePrecision);
+  if (parameters.chaseDistance !== undefined) body.chaseDistance = String(parameters.chaseDistance);
+  if (parameters.chasePercent !== undefined) body.chasePercentE4 = Math.round(Number(parameters.chasePercent) * 100);
+
+  if (strategyType === "twap") {
+    body.duration = Number(parameters.durationSeconds);
+    body.interval = Number(parameters.intervalSeconds);
+    body.isRandom = Boolean(parameters.randomize);
+  }
+
+  if (strategyType === "iceberg") {
+    if (parameters.subSize) body.subSize = formatBybitNumber(parameters.subSize, validation.metadata?.quantityPrecision);
+    if (parameters.orderCount) body.orderCount = Math.floor(Number(parameters.orderCount));
+    body.postOnly = parameters.icebergPreference === "taker" ? 1 : 0;
+    if (parameters.icebergPreference === "maker") body.chaseDistance = "0";
+    if (parameters.icebergPreference === "taker") body.chaseDistance = "-1";
+    if (parameters.icebergPreference === "fixed") {
+      delete body.chaseDistance;
+      delete body.chasePercentE4;
+      body.limitPrice = formatBybitNumber(order.limitPrice, validation.metadata?.pricePrecision);
+    }
+  }
+
+  if (strategyType === "pov") {
+    body.interval = Number(parameters.intervalSeconds || 0);
+    if (parameters.durationSeconds) body.duration = Number(parameters.durationSeconds);
+    body.povParams = {
+      mode: parameters.povMode,
+      participationRate: String(parameters.participationRate),
+      ...(parameters.povMode === "TradedVolume" ? { referenceWindow: String(parameters.referenceWindowSeconds) } : { depthReference: Number(parameters.depthReference) })
+    };
+  }
+
+  const response = await bybitRequest(credentials, "POST", "/v5/strategy/create", {}, body);
+  return normalizeBybitExecutionReport({
+    accountId: order.accountId,
+    exchange: "bybit",
+    symbol: order.symbol,
+    status: "accepted",
+    orderId: response?.strategyId,
+    filledQuantity: 0,
+    raw: { ...response, strategyType, request: body }
+  });
+}
+
+export function validateBybitStrategyParameters(order) {
+  const parameters = order.strategyParameters || {};
+  const strategyType = order.orderType === "chase-limit" ? "chaseOrder" : order.orderType;
+  const reasons = [];
+
+  if (!["chaseOrder", "twap", "iceberg", "pov"].includes(strategyType)) reasons.push(`Unsupported Bybit strategy ${order.orderType}.`);
+  if (strategyType === "twap") {
+    const duration = Number(parameters.durationSeconds || 0);
+    const interval = Number(parameters.intervalSeconds || 0);
+    if (duration < 300 || duration > 86400) reasons.push("Bybit TWAP duration must be between 5 minutes and 24 hours.");
+    if (![5, 10, 15, 30, 60, 120].includes(interval)) reasons.push("Bybit TWAP interval must be 5, 10, 15, 30, 60, or 120 seconds.");
+    if (interval > 0 && duration % interval !== 0) reasons.push("Bybit TWAP duration must be divisible by its interval.");
+  }
+  if (strategyType === "chaseOrder" && parameters.chaseDistance === undefined && parameters.chasePercent === undefined) {
+    reasons.push("Bybit Chase requires a chase distance or percentage.");
+  }
+  if (parameters.chasePercent !== undefined && (Number(parameters.chasePercent) < 0 || Number(parameters.chasePercent) > 5)) {
+    reasons.push("Bybit Chase percentage must be between 0% and 5%.");
+  }
+  if (strategyType === "iceberg") {
+    if (!Number(parameters.subSize || 0) && !Number(parameters.orderCount || 0)) reasons.push("Bybit Iceberg requires a visible sub-order size or order count.");
+    if (parameters.icebergPreference === "fixed" && !Number(order.limitPrice || 0)) reasons.push("Fixed-price Iceberg requires a limit price.");
+  }
+  if (strategyType === "pov") {
+    if (order.marketKind === "spot") reasons.push("Bybit POV supports perpetual and futures products only.");
+    const participation = Number(parameters.participationRate || 0);
+    const interval = Number(parameters.intervalSeconds || 0);
+    if (participation < 1 || participation > 100) reasons.push("Bybit POV participation must be between 1% and 100%.");
+    if (interval !== 0 && (interval < 5 || interval > 3600)) reasons.push("Bybit POV interval must be zero or between 5 and 3600 seconds.");
+    if (!Number(order.quantity || 0) && !Number(parameters.durationSeconds || 0)) reasons.push("Bybit POV requires a maximum quantity or duration.");
+    if (parameters.povMode === "TradedVolume") {
+      const window = Number(parameters.referenceWindowSeconds || 0);
+      if (window < 60 || window > 14400) reasons.push("Bybit POV traded-volume window must be between 60 and 14,400 seconds.");
+    } else {
+      const depth = Number(parameters.depthReference || 0);
+      if (depth < 1 || depth > 10) reasons.push("Bybit POV depth reference must be between 1 and 10 levels.");
+    }
+  }
+
+  return { ok: reasons.length === 0, reasons, strategyType };
 }
 
 export async function cancelBybitOrder(credentials, { marketKind = "perpetual", symbol, orderId, clientOrderId }) {
@@ -1097,7 +1248,8 @@ function emptyBybitAccountMetrics() {
 export function normalizeBybitOrderType(orderType) {
   if (orderType === "market") return "Market";
   if (orderType === "stop-market") return "Market";
-  if (["trailing-stop", "twap", "iceberg"].includes(orderType)) {
+  if (["chase-limit", "twap", "iceberg", "pov"].includes(orderType)) return "Market";
+  if (["trailing-stop"].includes(orderType)) {
     throw new Error(`${orderType} execution algorithm is not configured for Bybit yet.`);
   }
   return "Limit";
@@ -1152,6 +1304,16 @@ export function normalizeBybitOrderStatus(status) {
   if (value.includes("new") || value.includes("created")) return "working";
   if (value.includes("untriggered") || value.includes("triggered")) return "working";
   return BYBIT_ORDER_STATUS_TO_EXECUTION_STATUS[value] || value || "pending";
+}
+
+export function normalizeBybitStrategyStatus(status) {
+  const value = Number(status);
+  if (value === 2) return "working";
+  if (value === 3) return "filled";
+  if (value === 4) return "cancelled";
+  if (value === 5) return "paused";
+  if (value === 6) return "pending";
+  return "pending";
 }
 
 export function normalizeBybitExecutionReport(report) {

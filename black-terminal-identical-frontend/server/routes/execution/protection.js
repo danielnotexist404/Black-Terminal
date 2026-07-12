@@ -7,6 +7,7 @@ import {
   requireUser,
   sendError
 } from "../../portfolio-api.js";
+import { settleSupabaseQuery } from "../../supabase-query.js";
 import { setBybitPositionProtection, validateBybitManagementGate } from "../../exchanges/bybit.js";
 
 export default async function handler(req, res) {
@@ -52,14 +53,14 @@ export default async function handler(req, res) {
       slTriggerBy: req.body.slTriggerBy
     });
 
-    await supabase.from("execution_audit_logs").insert({
+    await settleSupabaseQuery(supabase.from("execution_audit_logs").insert({
       user_id: user.id,
       account_id: account.id,
       event_type: "position_protection_submitted",
       severity: "info",
       message: `Bybit native TP/SL protection submitted for ${req.body.symbol}.`,
       metadata: { report, mode: "native" }
-    }).catch(() => null);
+    }));
 
     return res.status(200).json({ report });
   } catch (error) {

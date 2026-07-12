@@ -5,6 +5,7 @@ import {
   normalizeBybitOrderStatus,
   normalizeBybitSizing,
   precisionFromStep,
+  resolveBybitExecutionPolicy,
   validateBybitMainnetValidationRequest
 } from "../server/exchanges/bybit.js";
 import {
@@ -153,6 +154,28 @@ test("mainnet validation gate fails closed without env allowlists", () => {
   assert.equal(result.ok, false);
   assert.match(result.reasons.join(" "), /BYBIT_MAINNET_VALIDATION_ENABLED|ALLOWED_CONNECTIONS|MAX_NOTIONAL/);
 
+  restoreEnv(previous);
+});
+
+test("execution policy follows Bybit permissions and server limits", () => {
+  const previous = {
+    enabled: process.env.BYBIT_MAINNET_VALIDATION_ENABLED,
+    allowedConnections: process.env.BYBIT_MAINNET_ALLOWED_CONNECTIONS,
+    allowedSymbols: process.env.BYBIT_MAINNET_ALLOWED_SYMBOLS,
+    maxNotional: process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD
+  };
+  process.env.BYBIT_MAINNET_VALIDATION_ENABLED = "true";
+  process.env.BYBIT_MAINNET_ALLOWED_SYMBOLS = "BTCUSDT,SOLUSDT";
+  process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD = "5";
+
+  const enabled = resolveBybitExecutionPolicy({ trading: true, withdrawal: false });
+  assert.equal(enabled.tradingEnabled, true);
+  assert.equal(enabled.maxNotionalUsd, 5);
+  assert.deepEqual(enabled.allowedSymbols, ["BTCUSDT", "SOLUSDT"]);
+
+  const blocked = resolveBybitExecutionPolicy({ trading: true, withdrawal: true });
+  assert.equal(blocked.tradingEnabled, false);
+  assert.match(blocked.readinessReason, /Withdrawal-enabled/i);
   restoreEnv(previous);
 });
 

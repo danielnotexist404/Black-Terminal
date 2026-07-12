@@ -236,10 +236,12 @@ production-certified. Certification requires a long-running private-stream worke
 reconciliation evidence, and recorded tiny-order mainnet validation in the Chapter XI validation
 ledger.
 
-Bybit controlled validation fails closed unless the server env enables it, the account and symbol are
-allowlisted, the max notional is configured, an admin explicitly enables the account, the browser
-session enables Developer Mainnet Validation Mode, and each live action carries the `LIVE`
-confirmation. Normal order placement must never silently switch margin or position mode.
+Bybit execution fails closed unless the server env enables it, the connected API key advertises
+trading permission without withdrawal permission, the symbol policy and max notional are configured,
+and account reconciliation confirms the venue state. The venue-native ticket does not expose these
+operator controls. Every order still carries the server confirmation fields internally and flows
+through OMS, EMS, Risk, Broker Router, metadata validation, and audit. Normal order placement never
+silently switches margin or position mode.
 
 Chapter XII-B adds the operator certification runner. `npm run certify:bybit-mainnet` verifies
 preflight, private-stream health, account snapshots, metadata, and allowlists before any live order.

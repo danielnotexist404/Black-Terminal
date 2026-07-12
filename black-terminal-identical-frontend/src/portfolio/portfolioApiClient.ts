@@ -137,6 +137,13 @@ export type ExchangeAccountSyncPayload = {
   positions: unknown[];
   openOrders: unknown[];
   accountMetrics: BybitAccountMetrics;
+  executionState: {
+    tradingEnabled: boolean;
+    readOnly: boolean;
+    allowedSymbols: string[];
+    maxNotionalUsd: number;
+    readinessReason: string;
+  };
   externalStateChanged: boolean;
   syncedAt: string;
   latencyMs: number;

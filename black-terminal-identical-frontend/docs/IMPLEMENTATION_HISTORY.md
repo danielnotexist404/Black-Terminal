@@ -921,6 +921,23 @@ Validation:
 - `npm run build`
 - Verify the production function region is `fra1` with `vercel inspect`.
 
+## 2026-07-12 - Venue-Native Bybit Execution Ticket
+
+Status: Implemented.
+
+Changed:
+
+- Replaced the generic Bybit execution matrix and duplicate live-mode controls with a compact Bybit-native order ticket.
+- Added Spot/Futures, Limit/Market/Conditional, Buy/Sell or Long/Short, quantity/order-value sizing, collateral slider, TP/SL, Post-Only, Reduce-Only, Cross/Isolated, leverage, and GTC/IOC/FOK controls according to venue support.
+- Made connection and reconciliation derive trading readiness directly from Bybit API-key permissions plus server symbol/notional policy.
+- Existing read-only Bybit records are repaired automatically during authenticated reconciliation when the key and server policy permit trading.
+- Kept OMS, EMS, Risk, Broker Router, server metadata validation, collateral checks, audit logging, and normalized reports in the execution path.
+
+Validation:
+
+- `npm run test:bybit-certification`
+- `npm run build`
+
 ## Future Work Log
 
 Use this format for every future phase, chapter, or major bug sprint.

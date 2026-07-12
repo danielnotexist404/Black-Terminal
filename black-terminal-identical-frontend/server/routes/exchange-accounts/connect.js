@@ -7,13 +7,13 @@ import {
   sendError,
   toCamelAccount
 } from "../../portfolio-api.js";
-import { syncBybitAccountToSupabase, validateBybitCredentials } from "../../exchanges/bybit.js";
+import { resolveBybitExecutionPolicy, syncBybitAccountToSupabase, validateBybitCredentials } from "../../exchanges/bybit.js";
 import { describeSupabaseError } from "../../exchanges/bybit-snapshot-store.js";
 
 const certifiedCredentialAdapters = {
   bybit: {
-    executionMode: "read-only",
-    reason: "Bybit credential validation and account snapshot sync are certified read-only. Live trading remains disabled until adapter certification is complete."
+    executionMode: "venue-native",
+    reason: "Bybit account access and order routing are derived from the connected API key and server execution policy."
   }
 };
 
@@ -50,6 +50,7 @@ export default async function handler(req, res) {
       blocked.statusCode = 403;
       throw blocked;
     }
+    const executionPolicy = resolveBybitExecutionPolicy(bybitDiagnostics?.permissions);
     const credentialRef = `exchange:${exchange}:${user.id}:${Date.now()}`;
     const encryptedPayload = encryptCredentialPayload(rawCredentials);
 
@@ -62,9 +63,9 @@ export default async function handler(req, res) {
         status: validation.status,
         api_health: validation.apiHealth,
         latency_ms: validation.latencyMs,
-        permissions: ["read-account", "read-orders", "read-positions"],
-        is_read_only: true,
-        trading_enabled: false,
+        permissions: executionPolicy.permissions,
+        is_read_only: !executionPolicy.tradingEnabled,
+        trading_enabled: executionPolicy.tradingEnabled,
         credential_ref: credentialRef
       })
       .select("*")
@@ -85,14 +86,17 @@ export default async function handler(req, res) {
       throw credentialError;
     }
 
+    const riskControlInsert = {
+      account_id: account.id,
+      read_only_mode: !executionPolicy.tradingEnabled,
+      trading_enabled: executionPolicy.tradingEnabled,
+      allowed_symbols: executionPolicy.allowedSymbols
+    };
+    if (executionPolicy.maxNotionalUsd > 0) riskControlInsert.max_position_usd = executionPolicy.maxNotionalUsd;
+
     const { data: riskControls, error: riskError } = await supabase
       .from("account_risk_controls")
-      .insert({
-        account_id: account.id,
-        read_only_mode: true,
-        trading_enabled: false,
-        allowed_symbols: ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
-      })
+      .insert(riskControlInsert)
       .select("*")
       .single();
 
@@ -129,7 +133,7 @@ export default async function handler(req, res) {
       metadata: {
         exchange,
         credentialRef,
-        connectionResult: buildConnectionResult(exchange, bybitDiagnostics, snapshotWarning)
+        connectionResult: buildConnectionResult(exchange, bybitDiagnostics, snapshotWarning, executionPolicy)
       }
     });
 
@@ -140,16 +144,16 @@ export default async function handler(req, res) {
         api_health: snapshotWarning ? "warning" : validation.apiHealth,
         latency_ms: validation.latencyMs
       }, riskControls),
-      connectionResult: buildConnectionResult(exchange, bybitDiagnostics, snapshotWarning)
+      connectionResult: buildConnectionResult(exchange, bybitDiagnostics, snapshotWarning, executionPolicy)
     });
   } catch (error) {
     return sendError(res, error);
   }
 }
 
-function buildConnectionResult(exchange, diagnostics, snapshotWarning = null) {
+function buildConnectionResult(exchange, diagnostics, snapshotWarning = null, executionPolicy = null) {
   if (exchange !== "bybit" || !diagnostics) return null;
-  const executionReady = diagnostics.certification?.executionReady === true;
+  const executionReady = executionPolicy?.tradingEnabled === true;
   return {
     headline: "BYBIT MAINNET ACCOUNT CONNECTED",
     readAccess: diagnostics.permissions?.read === true,
@@ -159,6 +163,6 @@ function buildConnectionResult(exchange, diagnostics, snapshotWarning = null) {
     snapshotSynced: !snapshotWarning,
     snapshotWarning,
     executionReady,
-    blocker: executionReady ? null : diagnostics.readinessReason || diagnostics.permissions?.warnings?.[0] || "Bybit account is connected read-only until controlled validation is enabled."
+    blocker: executionReady ? null : executionPolicy?.readinessReason || diagnostics.permissions?.warnings?.[0] || "Bybit trading permission is unavailable."
   };
 }

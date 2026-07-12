@@ -613,6 +613,30 @@ export function validateBybitMainnetValidationRequest({ account, order, risk, va
   };
 }
 
+export function resolveBybitExecutionPolicy(permissionReport = {}) {
+  const allowedSymbols = splitCsv(process.env.BYBIT_MAINNET_ALLOWED_SYMBOLS).map((item) => item.toUpperCase());
+  const maxNotionalUsd = Number(process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD || 0);
+  const reasons = [];
+
+  if (process.env.BYBIT_MAINNET_VALIDATION_ENABLED !== "true") reasons.push("Server-side Bybit trading is disabled.");
+  if (permissionReport.trading !== true) reasons.push("The Bybit API key does not have trading permission.");
+  if (permissionReport.withdrawal === true) reasons.push("Withdrawal-enabled API keys cannot trade through Black Terminal.");
+  if (allowedSymbols.length === 0) reasons.push("No Bybit symbols are enabled by server policy.");
+  if (!Number.isFinite(maxNotionalUsd) || maxNotionalUsd <= 0) reasons.push("The server order-notional limit is not configured.");
+
+  const tradingEnabled = reasons.length === 0;
+  return {
+    tradingEnabled,
+    readOnly: !tradingEnabled,
+    allowedSymbols,
+    maxNotionalUsd,
+    readinessReason: reasons.join(" "),
+    permissions: tradingEnabled
+      ? ["read-account", "read-orders", "read-positions", "place-orders", "cancel-orders", "modify-orders", "withdraw-disabled"]
+      : ["read-account", "read-orders", "read-positions"]
+  };
+}
+
 export function validateBybitManagementGate({ account, body, symbol }) {
   const reasons = [];
   const allowedConnections = splitCsv(process.env.BYBIT_MAINNET_ALLOWED_CONNECTIONS);

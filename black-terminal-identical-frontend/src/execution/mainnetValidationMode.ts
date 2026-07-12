@@ -148,6 +148,10 @@ export function validateMainnetOrderReadiness(target: MainnetValidationTarget | 
     return { allowed: false, mainnet: true, reason: "Trading permission is not confirmed for this account." };
   }
 
+  // Bybit mainnet policy is established when the API key is connected and is
+  // revalidated by the server on every account reconciliation and order.
+  if (isBybit) return { allowed: true, mainnet: true };
+
   const mode = readMainnetValidationMode();
   if (!mode.enabled) {
     return { allowed: false, mainnet: true, reason: "Developer Mainnet Validation Mode is off." };

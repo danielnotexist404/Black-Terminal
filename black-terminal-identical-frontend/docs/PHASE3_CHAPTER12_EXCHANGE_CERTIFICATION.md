@@ -36,7 +36,8 @@ Chapter XII converts the Chapter XI truth layer into executable exchange certifi
 - Unified Execution Ticket consumes Bybit Unified Account `totalAvailableBalance`, equity, and margin state from authenticated account sync.
 - USD-value order sizing is converted to metadata-aligned base quantity before venue validation and submission.
 - Both browser risk preview and server execution reject orders whose required collateral plus estimated fees exceeds venue-reported available balance.
-- Account owners can explicitly activate a trade-authorized Bybit key through the existing mainnet-validation route; withdrawal-enabled keys remain blocked.
+- Trading readiness is derived automatically from the connected API key and server execution policy; withdrawal-enabled keys remain blocked.
+- The venue-native Bybit ticket exposes only Bybit-supported controls and does not expose certification toggles to traders.
 
 ## Validation Harness
 
@@ -47,15 +48,14 @@ Bybit live validation is fail-closed unless all are true:
 - account id is in `BYBIT_MAINNET_ALLOWED_CONNECTIONS` when an operator allowlist is configured
 - symbol is in `BYBIT_MAINNET_ALLOWED_SYMBOLS`
 - `BYBIT_MAINNET_MAX_NOTIONAL_USD` is configured
-- user is admin or in `BYBIT_MAINNET_VALIDATION_ADMIN_EMAILS`
-- account has explicitly been enabled with `ENABLE BYBIT LIVE VALIDATION`
-- browser session has Developer Mainnet Validation Mode enabled
+- the API key advertises Bybit trading permission and has no withdrawal permission
+- account reconciliation has synchronized the server execution state
 - each order includes `mainnetConfirmed=true`
 - each order includes `liveConfirmation=LIVE`
 - OMS/EMS/Risk approve the order
 - venue metadata validation passes
 
-Disable account validation with `DISABLE BYBIT LIVE VALIDATION`.
+The legacy mainnet-validation route remains available for operator remediation, but normal users do not interact with it from the order ticket.
 
 ## Private Stream Runtime
 

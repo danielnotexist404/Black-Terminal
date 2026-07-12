@@ -3518,6 +3518,255 @@ body.resizing-layout * {
   color: #fff;
 }
 
+.unified-ticket.bybit-venue-ticket {
+  width: min(430px, calc(100vw - 24px));
+  max-height: min(820px, calc(100vh - 32px));
+  gap: 8px;
+  padding: 0 10px 10px;
+  border-color: rgba(230, 31, 45, 0.52);
+  background: #08090b;
+}
+
+.bybit-venue-ticket .unified-ticket-head {
+  height: 38px;
+  margin: 0 -10px;
+  padding: 0 10px;
+}
+
+.bybit-mark {
+  min-width: 24px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #e5a824;
+  color: #e5a824;
+  font: 900 9px "IBM Plex Mono", monospace;
+}
+
+.bybit-order-ticket {
+  display: grid;
+  gap: 9px;
+}
+
+.bybit-product-tabs,
+.bybit-side-tabs,
+.bybit-order-tabs {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.bybit-product-tabs button,
+.bybit-order-tabs button {
+  height: 31px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #8f949d;
+  font: 800 10px "IBM Plex Mono", monospace;
+}
+
+.bybit-product-tabs button.active,
+.bybit-order-tabs button.active {
+  border-bottom-color: #ef2334;
+  color: #fff;
+}
+
+.bybit-product-tabs > span {
+  margin-left: auto;
+  color: #737984;
+  font: 800 8px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.bybit-symbol-row,
+.bybit-balance-row,
+.bybit-order-summary,
+.bybit-order-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bybit-symbol-row b {
+  color: #f2f3f5;
+  font: 900 13px "IBM Plex Mono", monospace;
+}
+
+.bybit-symbol-row strong {
+  color: #e7e9ed;
+  font: 900 14px "IBM Plex Mono", monospace;
+}
+
+.bybit-side-tabs {
+  gap: 4px;
+  border-bottom: 0;
+}
+
+.bybit-side-tabs button {
+  width: 50%;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  background: #171a1f;
+  color: #9fa5ae;
+  font: 900 11px "IBM Plex Mono", monospace;
+}
+
+.bybit-side-tabs button.active.buy,
+.bybit-submit.buy {
+  border-color: #20b982;
+  background: #20b982;
+  color: #04120d;
+}
+
+.bybit-side-tabs button.active.sell,
+.bybit-submit.sell {
+  border-color: #ef3340;
+  background: #ef3340;
+  color: #fff;
+}
+
+.bybit-balance-row {
+  color: #888e98;
+  font: 800 9px "IBM Plex Mono", monospace;
+}
+
+.bybit-balance-row b {
+  color: #f0f2f5;
+}
+
+.bybit-position-settings,
+.bybit-condition-row,
+.bybit-tpsl-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.bybit-suffix-input,
+.bybit-split-input {
+  height: 34px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 3px;
+  background: #111318;
+}
+
+.bybit-venue-ticket .bybit-suffix-input input,
+.bybit-venue-ticket .bybit-split-input input,
+.bybit-venue-ticket .bybit-split-input select {
+  height: 32px;
+  border: 0;
+  background: transparent;
+}
+
+.bybit-suffix-input b {
+  padding: 0 9px;
+  color: #b9bec6;
+  font: 800 9px "IBM Plex Mono", monospace;
+}
+
+.bybit-split-input select {
+  width: 82px;
+  color: #fff;
+}
+
+.bybit-size-slider {
+  display: grid;
+  gap: 2px;
+}
+
+.bybit-size-slider input {
+  width: 100%;
+  height: 18px;
+  padding: 0;
+  accent-color: #e6a91f;
+}
+
+.bybit-size-slider div {
+  display: flex;
+  justify-content: space-between;
+  color: #6f7580;
+  font: 700 8px "IBM Plex Mono", monospace;
+}
+
+.bybit-order-summary {
+  align-items: stretch;
+  padding: 7px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.bybit-order-summary span {
+  display: grid;
+  gap: 3px;
+  color: #747a84;
+  font: 700 8px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.bybit-order-summary b {
+  color: #d9dde3;
+  font-size: 9px;
+}
+
+.bybit-order-summary b.negative {
+  color: #ff4a55;
+}
+
+.bybit-check {
+  display: inline-flex !important;
+  grid-template-columns: none !important;
+  align-items: center;
+  gap: 6px !important;
+  color: #c1c5cc !important;
+}
+
+.bybit-check input {
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  accent-color: #e82c39;
+}
+
+.bybit-order-options {
+  min-height: 30px;
+}
+
+.bybit-order-options select {
+  width: 82px;
+  margin-left: auto;
+}
+
+.bybit-ticket-status {
+  padding: 7px 8px;
+  border: 1px solid rgba(239, 51, 64, 0.26);
+  background: #13090b;
+  color: #f18b92;
+  font: 800 9px/1.4 "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.bybit-submit {
+  height: 38px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font: 900 11px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.bybit-submit:disabled {
+  cursor: not-allowed;
+  border-color: rgba(255, 255, 255, 0.08);
+  background: #25282e;
+  color: #777d86;
+}
+
 .mainnet-validation-panel {
   display: grid;
   gap: 7px;

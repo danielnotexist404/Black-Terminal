@@ -378,11 +378,15 @@ async function submitHyperliquidActionViaApi(path: string, draft: Record<string,
 }
 
 async function readApiError(response: Response) {
+  const text = await response.text().catch(() => "");
+  if (!text) return response.statusText || `HTTP ${response.status}`;
+
   try {
-    const data = await response.json();
+    const data = JSON.parse(text);
     return data.error || data.message || response.statusText || `HTTP ${response.status}`;
   } catch {
-    return response.statusText || `HTTP ${response.status}`;
+    const diagnostic = text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 240);
+    return diagnostic || response.statusText || `HTTP ${response.status}`;
   }
 }
 

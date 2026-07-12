@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { getBybitPrivateStreamRuntimeDiagnostics } from "./bybit-private-stream.js";
 
-const BYBIT_BASE_URL = process.env.BYBIT_BASE_URL || "https://api.bybit.com";
+const BYBIT_DEFAULT_BASE_URLS = ["https://api.bybit.com", "https://api.bytick.com"];
 const RECV_WINDOW = "5000";
 const BYBIT_REQUEST_TIMEOUT_MS = Math.max(1500, Math.min(8000, Number(process.env.BYBIT_REQUEST_TIMEOUT_MS || 4500)));
 const BYBIT_RUNTIME_REGION = process.env.VERCEL_REGION || process.env.AWS_REGION || "local";
@@ -731,26 +731,28 @@ export async function getBybitPositions(credentials) {
 }
 
 async function bybitRequest(credentials, method, path, query = {}, body) {
-  const timestamp = String(Date.now());
   const queryString = buildQueryString(query);
   const bodyString = body ? JSON.stringify(body) : "";
-  const payload = method === "GET"
-    ? `${timestamp}${credentials.apiKey}${RECV_WINDOW}${queryString}`
-    : `${timestamp}${credentials.apiKey}${RECV_WINDOW}${bodyString}`;
-  const signature = crypto.createHmac("sha256", credentials.apiSecret).update(payload).digest("hex");
-  const url = `${BYBIT_BASE_URL}${path}${queryString ? `?${queryString}` : ""}`;
+  const { response, baseUrl } = await fetchBybitWithFallback(path, queryString, () => {
+    const timestamp = String(Date.now());
+    const payload = method === "GET"
+      ? `${timestamp}${credentials.apiKey}${RECV_WINDOW}${queryString}`
+      : `${timestamp}${credentials.apiKey}${RECV_WINDOW}${bodyString}`;
+    const signature = crypto.createHmac("sha256", credentials.apiSecret).update(payload).digest("hex");
 
-  const response = await fetchWithTimeout(url, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      "X-BAPI-API-KEY": credentials.apiKey,
-      "X-BAPI-SIGN": signature,
-      "X-BAPI-TIMESTAMP": timestamp,
-      "X-BAPI-RECV-WINDOW": RECV_WINDOW
-    },
-    body: method === "GET" ? undefined : bodyString
-  }, path);
+    return {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        "X-BAPI-API-KEY": credentials.apiKey,
+        "X-BAPI-SIGN": signature,
+        "X-BAPI-TIMESTAMP": timestamp,
+        "X-BAPI-RECV-WINDOW": RECV_WINDOW,
+        "cdn-request-id": createBybitRequestId()
+      },
+      body: method === "GET" ? undefined : bodyString
+    };
+  });
 
   const data = await readBybitResponse(response);
 
@@ -765,6 +767,7 @@ async function bybitRequest(credentials, method, path, query = {}, body) {
     error.bybit = data;
     error.bybitEndpoint = path;
     error.bybitHttpStatus = response.status;
+    error.bybitBaseUrl = baseUrl;
     error.runtimeRegion = BYBIT_RUNTIME_REGION;
     throw error;
   }
@@ -778,7 +781,11 @@ export async function getBybitApiKeyInformation(credentials) {
 
 async function bybitPublicRequest(path, query = {}) {
   const queryString = buildQueryString(query);
-  const response = await fetchWithTimeout(`${BYBIT_BASE_URL}${path}${queryString ? `?${queryString}` : ""}`, {}, path);
+  const { response, baseUrl } = await fetchBybitWithFallback(path, queryString, {
+    headers: {
+      "cdn-request-id": createBybitRequestId()
+    }
+  });
   const data = await readBybitResponse(response);
 
   if (!response.ok || data?.retCode !== 0) {
@@ -790,6 +797,7 @@ async function bybitPublicRequest(path, query = {}) {
     error.bybit = data;
     error.bybitEndpoint = path;
     error.bybitHttpStatus = response.status;
+    error.bybitBaseUrl = baseUrl;
     error.runtimeRegion = BYBIT_RUNTIME_REGION;
     throw error;
   }
@@ -819,6 +827,42 @@ async function fetchWithTimeout(url, options = {}, endpoint = "bybit") {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function fetchBybitWithFallback(path, queryString, options) {
+  const baseUrls = getBybitBaseUrls();
+  let lastError = null;
+
+  for (let index = 0; index < baseUrls.length; index += 1) {
+    const baseUrl = baseUrls[index];
+    const url = `${baseUrl}${path}${queryString ? `?${queryString}` : ""}`;
+
+    try {
+      const requestOptions = typeof options === "function" ? options() : options;
+      const response = await fetchWithTimeout(url, requestOptions, path);
+      const canRetry = response.status === 403 || response.status >= 500;
+      if (canRetry && index < baseUrls.length - 1) continue;
+      return { response, baseUrl };
+    } catch (error) {
+      lastError = error;
+      if (index >= baseUrls.length - 1) {
+        error.bybitBaseUrl = baseUrl;
+        error.runtimeRegion = BYBIT_RUNTIME_REGION;
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error("No Bybit API endpoint is configured.");
+}
+
+function getBybitBaseUrls() {
+  const configured = String(process.env.BYBIT_BASE_URL || "").trim().replace(/\/$/, "");
+  return [...new Set([configured, ...BYBIT_DEFAULT_BASE_URLS].filter(Boolean))];
+}
+
+function createBybitRequestId() {
+  return `bt-${Date.now()}-${crypto.randomBytes(6).toString("hex")}`;
 }
 
 async function readBybitResponse(response) {
@@ -863,6 +907,7 @@ async function runBybitDiagnosticCheck(name, fn, required) {
       bybitCode: error?.bybit?.retCode,
       httpStatus: error?.bybitHttpStatus || null,
       endpoint: error?.bybitEndpoint || null,
+      baseUrl: error?.bybitBaseUrl || null,
       runtimeRegion: error?.runtimeRegion || BYBIT_RUNTIME_REGION
     };
   }

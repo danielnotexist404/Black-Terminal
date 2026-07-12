@@ -66,7 +66,14 @@ export function sendError(res, error) {
   const message = statusCode === 500
     ? "Server error"
     : rawMessage || "Request failed without a diagnostic message.";
-  if (statusCode === 500) console.error(error);
+  if (statusCode >= 500) {
+    console.error("[black-terminal-api-error]", {
+      statusCode,
+      code: error?.code || null,
+      message: rawMessage || "Request failed without a diagnostic message.",
+      details: error?.publicDetails || null
+    });
+  }
   const payload = { error: message };
   if (error?.code) payload.code = error.code;
   if (error?.publicDetails) payload.details = error.publicDetails;

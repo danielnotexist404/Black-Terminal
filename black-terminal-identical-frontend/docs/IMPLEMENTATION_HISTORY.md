@@ -898,6 +898,8 @@ Changed:
 - Added `vercel.json` and pinned serverless functions to `fra1` (Frankfurt).
 - Preserved upstream Bybit HTTP status, endpoint, and runtime-region diagnostics during credential validation.
 - Added an explicit message when Bybit returns HTTP 403 because the execution backend is running in a restricted region.
+- Added automatic failover between Bybit's official `api.bybit.com` and `api.bytick.com` mainnet hosts.
+- Added safe server-side diagnostics for upstream failures without logging API credentials.
 
 Why:
 

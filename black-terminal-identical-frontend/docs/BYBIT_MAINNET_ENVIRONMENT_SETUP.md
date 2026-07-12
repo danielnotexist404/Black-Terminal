@@ -8,6 +8,8 @@ Bybit remains fail-closed until the runtime configuration, Supabase prerequisite
 
 Bybit rejects API requests originating from US IP addresses. Black Terminal therefore pins Vercel Functions to the Frankfurt region (`fra1`) in `vercel.json`. Do not move exchange-account or execution functions back to a restricted region such as the default Washington, D.C. region (`iad1`). After deployment, verify the function build region in `vercel inspect` before testing credentials.
 
+The Bybit transport uses the two official global mainnet hosts, `api.bybit.com` and `api.bytick.com`, with automatic failover for network errors, HTTP 403, and upstream HTTP 5xx responses. A non-empty `BYBIT_BASE_URL` is attempted first for regional Bybit domains.
+
 Set these in Vercel for API routes:
 
 ```bash

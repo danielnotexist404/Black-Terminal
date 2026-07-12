@@ -48,6 +48,15 @@ export default async function handler(req, res) {
 async function reconcileBybitExecutionState(supabase, userId, account, credentials) {
   const permissions = normalizeBybitPermissionReport(await getBybitApiKeyInformation(credentials));
   const policy = resolveBybitExecutionPolicy(permissions);
+  console.info("[bybit-execution-policy]", {
+    account: String(account.id || "").slice(-6),
+    tradingEnabled: policy.tradingEnabled,
+    readinessReason: policy.readinessReason || "ready",
+    venueTradingPermission: permissions.trading,
+    withdrawalPermission: permissions.withdrawal,
+    allowedSymbols: policy.allowedSymbols,
+    maxNotionalUsd: policy.maxNotionalUsd
+  });
   const accountPatch = {
     is_read_only: policy.readOnly,
     trading_enabled: policy.tradingEnabled,

@@ -3,6 +3,7 @@ import { getBybitPrivateStreamRuntimeDiagnostics } from "./bybit-private-stream.
 
 const BYBIT_BASE_URL = process.env.BYBIT_BASE_URL || "https://api.bybit.com";
 const RECV_WINDOW = "5000";
+const BYBIT_REQUEST_TIMEOUT_MS = Math.max(1500, Math.min(8000, Number(process.env.BYBIT_REQUEST_TIMEOUT_MS || 4500)));
 const BYBIT_MAINNET_LIVE_CONFIRMATION = "LIVE";
 const BYBIT_ORDER_STATUS_TO_EXECUTION_STATUS = {
   created: "submitted",
@@ -212,11 +213,9 @@ export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = 
   };
 }
 
-export async function syncBybitAccountToSupabase(supabase, account, credentials) {
-  const [balances, positions] = await Promise.all([
-    getBybitBalances(credentials),
-    getBybitPositions(credentials)
-  ]);
+export async function syncBybitAccountToSupabase(supabase, account, credentials, snapshot = {}) {
+  const balances = Array.isArray(snapshot.balances) ? snapshot.balances : await getBybitBalances(credentials);
+  const positions = Array.isArray(snapshot.positions) ? snapshot.positions : await getBybitPositions(credentials);
 
   if (balances.length > 0) {
     const { error } = await supabase
@@ -737,7 +736,7 @@ async function bybitRequest(credentials, method, path, query = {}, body) {
   const signature = crypto.createHmac("sha256", credentials.apiSecret).update(payload).digest("hex");
   const url = `${BYBIT_BASE_URL}${path}${queryString ? `?${queryString}` : ""}`;
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method,
     headers: {
       "Content-Type": "application/json",
@@ -747,7 +746,7 @@ async function bybitRequest(credentials, method, path, query = {}, body) {
       "X-BAPI-RECV-WINDOW": RECV_WINDOW
     },
     body: method === "GET" ? undefined : bodyString
-  });
+  }, path);
 
   const data = await response.json().catch(() => null);
 
@@ -770,7 +769,7 @@ export async function getBybitApiKeyInformation(credentials) {
 
 async function bybitPublicRequest(path, query = {}) {
   const queryString = buildQueryString(query);
-  const response = await fetch(`${BYBIT_BASE_URL}${path}${queryString ? `?${queryString}` : ""}`);
+  const response = await fetchWithTimeout(`${BYBIT_BASE_URL}${path}${queryString ? `?${queryString}` : ""}`, {}, path);
   const data = await response.json().catch(() => null);
 
   if (!response.ok || data?.retCode !== 0) {
@@ -781,6 +780,30 @@ async function bybitPublicRequest(path, query = {}) {
   }
 
   return data.result;
+}
+
+async function fetchWithTimeout(url, options = {}, endpoint = "bybit") {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), BYBIT_REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+  } catch (error) {
+    const timedOut = error?.name === "AbortError";
+    const wrapped = new Error(
+      timedOut
+        ? `Bybit request timed out after ${BYBIT_REQUEST_TIMEOUT_MS}ms at ${endpoint}.`
+        : `Bybit request failed at ${endpoint}: ${error instanceof Error ? error.message : String(error)}`
+    );
+    wrapped.statusCode = timedOut ? 504 : 502;
+    wrapped.bybitEndpoint = endpoint;
+    throw wrapped;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function buildQueryString(query) {

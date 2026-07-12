@@ -5,7 +5,7 @@ import cancelAll from "../../server/routes/execution/cancel-all.js";
 import positionAction from "../../server/routes/execution/position-action.js";
 import protection from "../../server/routes/execution/protection.js";
 import accountMode from "../../server/routes/execution/account-mode.js";
-import { applyCors } from "../../server/portfolio-api.js";
+import { applyCors, sendError } from "../../server/portfolio-api.js";
 
 const routes = new Map([
   ["order", order],
@@ -18,12 +18,17 @@ const routes = new Map([
 ]);
 
 export default async function handler(req, res) {
-  const path = normalizePath(req.query.path, req, "execution");
-  const route = routes.get(path[0]);
-  if (route) return route(req, res);
+  try {
+    const path = normalizePath(req.query.path, req, "execution");
+    const route = routes.get(path[0]);
+    if (route) return route(req, res);
 
-  if (applyCors(req, res)) return;
-  return res.status(404).json({ error: "Execution route not found." });
+    if (applyCors(req, res)) return;
+    return res.status(404).json({ error: "Execution route not found." });
+  } catch (error) {
+    if (res.headersSent) throw error;
+    return sendError(res, error);
+  }
 }
 
 function normalizePath(value, req, baseSegment) {

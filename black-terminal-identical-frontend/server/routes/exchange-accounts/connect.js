@@ -101,7 +101,15 @@ export default async function handler(req, res) {
     }
 
     if (exchange === "bybit") {
-      await syncBybitAccountToSupabase(supabase, account, rawCredentials);
+      try {
+        await syncBybitAccountToSupabase(supabase, account, rawCredentials, bybitDiagnostics);
+      } catch (syncError) {
+        await supabase.from("exchange_accounts").delete().eq("id", account.id);
+        const error = new Error(`Bybit account snapshot sync failed after credential validation: ${syncError instanceof Error ? syncError.message : String(syncError)}`);
+        error.statusCode = syncError?.statusCode || 502;
+        error.code = "BYBIT_ACCOUNT_SYNC_FAILED";
+        throw error;
+      }
     }
 
     await supabase.from("execution_audit_logs").insert({

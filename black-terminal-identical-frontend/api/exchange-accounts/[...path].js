@@ -4,7 +4,7 @@ import sync from "../../server/routes/exchange-accounts/sync.js";
 import mainnetValidation from "../../server/routes/exchange-accounts/mainnet-validation.js";
 import bybitRuntimeStatus from "../../server/routes/exchange-accounts/bybit-runtime-status.js";
 import account from "../../server/routes/exchange-accounts/account.js";
-import { applyCors } from "../../server/portfolio-api.js";
+import { applyCors, sendError } from "../../server/portfolio-api.js";
 
 const routes = new Map([
   ["connect", connect],
@@ -15,14 +15,19 @@ const routes = new Map([
 ]);
 
 export default async function handler(req, res) {
-  const path = normalizePath(req.query.path, req, "exchange-accounts");
-  const route = routes.get(path[0]);
+  try {
+    const path = normalizePath(req.query.path, req, "exchange-accounts");
+    const route = routes.get(path[0]);
 
-  if (route) return route(req, res);
-  if (path.length === 1 && path[0]) return account(req, res);
+    if (route) return route(req, res);
+    if (path.length === 1 && path[0]) return account(req, res);
 
-  if (applyCors(req, res)) return;
-  return res.status(404).json({ error: "Exchange account route not found." });
+    if (applyCors(req, res)) return;
+    return res.status(404).json({ error: "Exchange account route not found." });
+  } catch (error) {
+    if (res.headersSent) throw error;
+    return sendError(res, error);
+  }
 }
 
 function normalizePath(value, req, baseSegment) {

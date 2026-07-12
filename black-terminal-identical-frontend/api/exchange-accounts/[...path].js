@@ -15,7 +15,7 @@ const routes = new Map([
 ]);
 
 export default async function handler(req, res) {
-  const path = normalizePath(req.query.path);
+  const path = normalizePath(req.query.path, req, "exchange-accounts");
   const route = routes.get(path[0]);
 
   if (route) return route(req, res);
@@ -25,8 +25,24 @@ export default async function handler(req, res) {
   return res.status(404).json({ error: "Exchange account route not found." });
 }
 
-function normalizePath(value) {
+function normalizePath(value, req, baseSegment) {
   if (Array.isArray(value)) return value.map(String).filter(Boolean);
   if (value) return [String(value)];
+
+  try {
+    const pathname = new URL(req.url || "", "https://black-terminal.local").pathname;
+    const marker = `/api/${baseSegment}/`;
+    const markerIndex = pathname.indexOf(marker);
+    const remainder = markerIndex >= 0
+      ? pathname.slice(markerIndex + marker.length)
+      : pathname.replace(/^\/+/, "");
+    return remainder
+      .split("/")
+      .map((segment) => decodeURIComponent(segment))
+      .filter(Boolean)
+      .filter((segment, index, all) => !(index === 0 && segment === "api") && !(index === 1 && all[0] === "api" && segment === baseSegment));
+  } catch {
+    return [];
+  }
   return [];
 }

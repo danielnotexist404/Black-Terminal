@@ -26,6 +26,8 @@ BYBIT_MAINNET_MAX_NOTIONAL_USD=
 BYBIT_MAINNET_VALIDATION_ADMIN_EMAILS=
 ```
 
+Leave `BYBIT_MAINNET_ALLOWED_CONNECTIONS` empty to permit authenticated owners to activate only their own trade-authorized accounts, or populate it with comma-separated account ids for an operator-managed allowlist. `*` explicitly allows every owned account while the remaining confirmation, permission, risk, symbol, and notional gates still apply.
+
 Secrets:
 
 - `SUPABASE_SERVICE_ROLE_KEY`

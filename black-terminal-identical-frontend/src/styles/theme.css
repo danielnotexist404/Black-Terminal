@@ -3441,6 +3441,83 @@ body.resizing-layout * {
   gap: 6px;
 }
 
+.unified-account-state,
+.unified-order-estimate {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.unified-account-state > div,
+.unified-order-estimate > div:not(.unified-balance-presets) {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  background: #050607;
+}
+
+.unified-account-state span,
+.unified-order-estimate span {
+  color: #777e88;
+  font: 800 8px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.unified-account-state b,
+.unified-order-estimate b {
+  overflow: hidden;
+  color: var(--strong);
+  font: 900 11px "IBM Plex Mono", monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unified-account-state b.positive {
+  color: #5de4a5;
+}
+
+.unified-account-state p {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 7px 8px;
+  background: #130b02;
+  color: #f5bc43;
+  font: 800 9px/1.4 "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.unified-order-estimate.blocked {
+  border-color: rgba(255, 0, 0, 0.5);
+}
+
+.unified-order-estimate.blocked b {
+  color: #ff5a62;
+}
+
+.unified-balance-presets {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.unified-balance-presets button {
+  height: 25px;
+  border: 0;
+  background: #080a0c;
+  color: #aeb4bd;
+  font: 900 9px "IBM Plex Mono", monospace;
+}
+
+.unified-balance-presets button:hover {
+  background: #15181c;
+  color: #fff;
+}
+
 .mainnet-validation-panel {
   display: grid;
   gap: 7px;
@@ -3495,6 +3572,20 @@ body.resizing-layout * {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 9px;
+}
+
+.execution-submit:disabled,
+.mainnet-validation-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+@media (max-width: 720px) {
+  .unified-account-state,
+  .unified-order-estimate,
+  .unified-ticket-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .unified-ticket-checks {

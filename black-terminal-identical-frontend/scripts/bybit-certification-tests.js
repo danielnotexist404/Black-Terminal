@@ -3,6 +3,7 @@ import {
   evaluateBybitOrderDraftAgainstMetadata,
   normalizeBybitExecutionReport,
   normalizeBybitOrderStatus,
+  normalizeBybitSizing,
   precisionFromStep,
   validateBybitMainnetValidationRequest
 } from "../server/exchanges/bybit.js";
@@ -68,6 +69,15 @@ test("valid order passes metadata-backed venue validation", () => {
   });
   assert.equal(result.ok, true);
   assert.equal(result.normalized.timeInForce, "GTC");
+});
+
+test("USD sizing converts to metadata-aligned base quantity", () => {
+  const normalized = normalizeBybitSizing({
+    quantity: 62,
+    sizingMethod: "usd",
+    referencePrice: 62000
+  }, metadata);
+  assert.equal(normalized.quantity, 0.001);
 });
 
 test("execution report mapping preserves legal OMS statuses", () => {

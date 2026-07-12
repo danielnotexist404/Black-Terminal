@@ -111,8 +111,35 @@ export type ExchangeDiagnosticsPayload = {
   };
   metadata?: unknown[];
   balances?: unknown[];
+  accountMetrics?: BybitAccountMetrics;
   positions?: unknown[];
   openOrders?: unknown[];
+};
+
+export type BybitAccountMetrics = {
+  accountType: string;
+  walletBalanceUsd: number;
+  equityUsd: number;
+  marginBalanceUsd: number;
+  availableBalanceUsd: number;
+  initialMarginUsd: number;
+  maintenanceMarginUsd: number;
+  accountImRate: number | null;
+  accountMmRate: number | null;
+  updatedAt: number;
+};
+
+export type ExchangeAccountSyncPayload = {
+  accountId: string;
+  exchange: "bybit";
+  network: "mainnet";
+  balances: Array<{ asset: string; free: number; locked: number; total: number; usdValue: number }>;
+  positions: unknown[];
+  openOrders: unknown[];
+  accountMetrics: BybitAccountMetrics;
+  externalStateChanged: boolean;
+  syncedAt: string;
+  latencyMs: number;
 };
 
 export type BybitRuntimeStatusPayload = {
@@ -266,7 +293,7 @@ export async function runExchangeAccountDiagnosticsViaApi(accountId: string, sym
   return data.diagnostics as ExchangeDiagnosticsPayload;
 }
 
-export async function syncExchangeAccountViaApi(accountId: string, symbol = "BTCUSDT"): Promise<unknown | null> {
+export async function syncExchangeAccountViaApi(accountId: string, symbol = "BTCUSDT"): Promise<ExchangeAccountSyncPayload | null> {
   const token = await getPortfolioApiToken();
   if (!token) return null;
 
@@ -281,7 +308,28 @@ export async function syncExchangeAccountViaApi(accountId: string, symbol = "BTC
 
   if (!response.ok) throw new Error(await readApiError(response));
   const data = await response.json();
-  return data.sync;
+  return data.sync as ExchangeAccountSyncPayload;
+}
+
+export async function setBybitTradingEnabledViaApi(accountId: string, enabled: boolean, confirmation: string): Promise<{ status: "enabled" | "disabled"; accountId: string } | null> {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+
+  const response = await fetch("/api/exchange-accounts/mainnet-validation", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      accountId,
+      action: enabled ? "enable" : "disable",
+      confirmation
+    })
+  });
+
+  if (!response.ok) throw new Error(await readApiError(response));
+  return response.json();
 }
 
 export async function getBybitRuntimeStatusViaApi(accountId: string, symbol = "BTCUSDT"): Promise<BybitRuntimeStatusPayload | null> {

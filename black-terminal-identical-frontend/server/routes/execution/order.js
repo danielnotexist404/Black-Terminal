@@ -10,6 +10,7 @@ import {
 } from "../../portfolio-api.js";
 import {
   placeBybitOrder,
+  getBybitWalletSnapshot,
   validateBybitMainnetValidationRequest,
   validateBybitOrderDraft
 } from "../../exchanges/bybit.js";
@@ -68,12 +69,24 @@ export default async function handler(req, res) {
 
           if (credentialError || !credential) throw credentialError || new Error("Missing encrypted credentials.");
           const credentials = decryptCredentialPayload(credential.encrypted_payload);
-          const venueValidation = await validateBybitOrderDraft(credentials, {
+          const venueOrderDraft = {
             ...req.body,
             marketKind: req.body.marketKind || "perpetual",
             limitPrice: req.body.limitPrice,
             timeInForce: req.body.timeInForce || "gtc"
-          });
+          };
+          const [venueValidation, walletSnapshot] = await Promise.all([
+            validateBybitOrderDraft(credentials, venueOrderDraft),
+            getBybitWalletSnapshot(credentials)
+          ]);
+          const leverage = Math.max(1, Number(req.body.leverage || 1));
+          const requiredMargin = req.body.marketKind === "spot" ? risk.notional : risk.notional / leverage;
+          const requiredCollateral = requiredMargin + estimatedFees;
+          if (!req.body.reduceOnly && requiredCollateral > walletSnapshot.accountMetrics.availableBalanceUsd) {
+            const balanceError = new Error(`Order requires approximately ${requiredCollateral.toFixed(2)} USD collateral, but Bybit reports ${walletSnapshot.accountMetrics.availableBalanceUsd.toFixed(2)} USD available.`);
+            balanceError.statusCode = 403;
+            throw balanceError;
+          }
           const mainnetGate = validateBybitMainnetValidationRequest({
             account,
             order: req.body,
@@ -94,7 +107,10 @@ export default async function handler(req, res) {
             throw validationError;
           }
           const exchangeResult = await placeBybitOrder(credentials, {
-            ...req.body,
+            ...venueOrderDraft,
+            quantity: venueValidation.normalized.quantity,
+            quantityMode: "quantity",
+            sizingMethod: "quantity",
             marketKind: req.body.marketKind || "perpetual",
             limitPrice: req.body.limitPrice,
             timeInForce: req.body.timeInForce || "gtc",

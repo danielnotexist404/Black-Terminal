@@ -214,7 +214,7 @@ Bybit live validation requires:
 - stored encrypted Bybit credential,
 - account and risk controls allowing trading,
 - `BYBIT_MAINNET_VALIDATION_ENABLED=true`,
-- account id in `BYBIT_MAINNET_ALLOWED_CONNECTIONS`,
+- account id in `BYBIT_MAINNET_ALLOWED_CONNECTIONS` when the optional operator allowlist is configured,
 - symbol in `BYBIT_MAINNET_ALLOWED_SYMBOLS`,
 - `BYBIT_MAINNET_MAX_NOTIONAL_USD`,
 - admin email in `BYBIT_MAINNET_VALIDATION_ADMIN_EMAILS`,

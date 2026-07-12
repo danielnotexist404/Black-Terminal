@@ -903,6 +903,11 @@ Changed:
 - Confirmed live Bybit credential authentication and isolated the remaining failure to Supabase snapshot persistence.
 - Replaced conflict-target-dependent snapshot upserts with authoritative account-scoped balance and position replacement.
 - Preserved authenticated Bybit connections in a degraded state when optional initial snapshot persistence fails instead of deleting the account and credential.
+- Replaced Unified Execution Ticket zero-value account placeholders with live Bybit Unified Account equity, available balance, initial margin, order-value, required-margin, fee, and remaining-balance data.
+- Added 25/50/75/100 percent collateral sizing controls and blocked submissions above venue-reported available collateral in both the ticket and server route.
+- Added owner-confirmed Bybit trading activation that revalidates venue trade permissions and rejects withdrawal-enabled keys.
+- Limited Bybit ticket controls to certified market/limit orders and quantity/USD sizing instead of displaying unimplemented algorithms.
+- Corrected USD-value sizing so Bybit receives metadata-aligned base quantity rather than treating a USD amount as contracts.
 
 Why:
 

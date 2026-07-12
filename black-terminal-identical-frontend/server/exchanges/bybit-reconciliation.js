@@ -1,7 +1,7 @@
 import {
-  getBybitBalances,
   getBybitOpenOrders,
-  getBybitPositions
+  getBybitPositions,
+  getBybitWalletSnapshot
 } from "./bybit.js";
 import { replaceBybitBalances, replaceBybitPositions } from "./bybit-snapshot-store.js";
 
@@ -10,11 +10,12 @@ const ACTIVE_ORDER_STATUSES = ["pending", "accepted", "working", "partially-fill
 export async function syncBybitSnapshotAndReconcile(supabase, userId, account, credentials, options = {}) {
   const startedAt = Date.now();
   const symbol = String(options.symbol || "BTCUSDT").toUpperCase();
-  const [balances, positions, openOrders] = await Promise.all([
-    getBybitBalances(credentials),
+  const [walletSnapshot, positions, openOrders] = await Promise.all([
+    getBybitWalletSnapshot(credentials),
     getBybitPositions(credentials),
     getBybitOpenOrders(credentials, { category: options.marketKind === "spot" ? "spot" : "linear", symbol })
   ]);
+  const balances = walletSnapshot.balances;
 
   const [localBalancesResult, localPositionsResult, localOrdersResult] = await Promise.all([
     supabase.from("account_balances").select("*").eq("account_id", account.id),
@@ -94,6 +95,7 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     exchange: "bybit",
     network: "mainnet",
     balances,
+    accountMetrics: walletSnapshot.accountMetrics,
     positions,
     openOrders,
     externalStateChanged,

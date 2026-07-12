@@ -31,8 +31,12 @@ Chapter XII converts the Chapter XI truth layer into executable exchange certifi
 - Native Bybit TP/SL/trailing-stop protection route.
 - Normalized Bybit execution reports.
 - Mainnet validation record creation for Bybit order attempts.
-- Admin-only controlled validation route: `POST /api/exchange-accounts/mainnet-validation`.
+- Account-owner controlled validation route: `POST /api/exchange-accounts/mainnet-validation`, with server-side trade-permission revalidation.
 - Unified Execution Ticket, Portfolio execution panel, and DOM Pro+ send Bybit orders through the server-backed portfolio route.
+- Unified Execution Ticket consumes Bybit Unified Account `totalAvailableBalance`, equity, and margin state from authenticated account sync.
+- USD-value order sizing is converted to metadata-aligned base quantity before venue validation and submission.
+- Both browser risk preview and server execution reject orders whose required collateral plus estimated fees exceeds venue-reported available balance.
+- Account owners can explicitly activate a trade-authorized Bybit key through the existing mainnet-validation route; withdrawal-enabled keys remain blocked.
 
 ## Validation Harness
 
@@ -40,7 +44,7 @@ Bybit live validation is fail-closed unless all are true:
 
 - `BYBIT_MAINNET_VALIDATION_ENABLED=true`
 - authenticated Supabase session
-- account id is in `BYBIT_MAINNET_ALLOWED_CONNECTIONS`
+- account id is in `BYBIT_MAINNET_ALLOWED_CONNECTIONS` when an operator allowlist is configured
 - symbol is in `BYBIT_MAINNET_ALLOWED_SYMBOLS`
 - `BYBIT_MAINNET_MAX_NOTIONAL_USD` is configured
 - user is admin or in `BYBIT_MAINNET_VALIDATION_ADMIN_EMAILS`
@@ -125,9 +129,11 @@ HYPERLIQUID_RELAY_ENABLED=true
 HYPERLIQUID_MAINNET_VALIDATION_ENABLED=true
 ```
 
+`BYBIT_MAINNET_ALLOWED_CONNECTIONS` is an optional operator restriction. When non-empty, only listed account ids (or `*`) can be activated. When empty, an authenticated owner may activate only their own account after the API key's trading and withdrawal permissions are revalidated.
+
 ## Remaining Blocker
 
-The current code is ready for controlled Bybit validation, but it cannot honestly mark Bybit production-certified until a real Bybit credential with trade permission is allowlisted, the private-stream worker is running, and tiny live orders validate market, limit, cancel, modify, close, TP/SL, reconnect, and reconciliation.
+The current code is ready for controlled Bybit validation, but it cannot honestly mark Bybit production-certified until a real Bybit credential with trade permission is activated, the private-stream worker is running, and tiny live orders validate market, limit, cancel, modify, close, TP/SL, reconnect, and reconciliation.
 
 ## Chapter XII-B Mainnet Certification Runner
 

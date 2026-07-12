@@ -124,7 +124,7 @@ export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = 
   const checks = await Promise.all([
     runBybitDiagnosticCheck("server-time", () => getBybitServerTime(), true),
     runBybitDiagnosticCheck("instrument-metadata", () => getBybitInstrumentMetadata({ category: "linear", symbol }), true),
-    runBybitDiagnosticCheck("balances", () => getBybitBalances(credentials), true),
+    runBybitDiagnosticCheck("balances", () => getBybitWalletSnapshot(credentials), true),
     runBybitDiagnosticCheck("positions", () => getBybitPositions(credentials), true),
     runBybitDiagnosticCheck("open-orders", () => getBybitOpenOrders(credentials, { category: "linear", symbol }), false),
     runBybitDiagnosticCheck("api-key-permissions", () => getBybitApiKeyInformation(credentials), false)
@@ -137,7 +137,8 @@ export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = 
     clockSkewMs: 0
   });
   const metadata = diagnosticData(checks, "instrument-metadata", []);
-  const balances = diagnosticData(checks, "balances", []);
+  const walletSnapshot = diagnosticData(checks, "balances", { balances: [], accountMetrics: emptyBybitAccountMetrics() });
+  const balances = walletSnapshot.balances;
   const positions = diagnosticData(checks, "positions", []);
   const openOrders = diagnosticData(checks, "open-orders", []);
   const apiKeyInfo = diagnosticData(checks, "api-key-permissions", {
@@ -186,6 +187,7 @@ export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = 
     time,
     metadata,
     balances,
+    accountMetrics: walletSnapshot.accountMetrics,
     positions,
     openOrders,
     apiKeyInfo,
@@ -261,7 +263,7 @@ export async function placeBybitOrder(credentials, order) {
     symbol: order.symbol,
     side: order.side === "buy" ? "Buy" : "Sell",
     orderType,
-    qty: formatBybitNumber(order.quantity, validation.metadata?.quantityPrecision),
+    qty: formatBybitNumber(validation.normalized.quantity, validation.metadata?.quantityPrecision),
     timeInForce: normalizeBybitTimeInForce(order.timeInForce, order),
     orderLinkId: order.clientOrderId || order.internalOrderId || createBybitClientOrderId()
   };
@@ -509,7 +511,11 @@ export async function validateBybitOrderDraft(credentials, order) {
   const category = order.marketKind === "spot" ? "spot" : "linear";
   const symbol = normalizeBybitSymbol(order.symbol);
   const metadata = (await getBybitInstrumentMetadata({ category, symbol }))[0];
-  return evaluateBybitOrderDraftAgainstMetadata(metadata, order, { category, symbol });
+  const normalizedOrder = normalizeBybitSizing(order, metadata);
+  return {
+    ...evaluateBybitOrderDraftAgainstMetadata(metadata, normalizedOrder, { category, symbol }),
+    requestedSizingMethod: order.sizingMethod || order.quantityMode || "quantity"
+  };
 }
 
 export function evaluateBybitOrderDraftAgainstMetadata(metadata, order, context = {}) {
@@ -585,7 +591,7 @@ export function validateBybitMainnetValidationRequest({ account, order, risk, va
   if (order.mainnetConfirmed !== true || order.liveConfirmation !== BYBIT_MAINNET_LIVE_CONFIRMATION) {
     reasons.push(`Each Bybit mainnet validation order requires explicit per-order confirmation: ${BYBIT_MAINNET_LIVE_CONFIRMATION}.`);
   }
-  if (!allowedConnections.length || !allowedConnections.includes(account.id)) {
+  if (allowedConnections.length > 0 && !allowedConnections.includes("*") && !allowedConnections.includes(account.id)) {
     reasons.push("Bybit account is not in BYBIT_MAINNET_ALLOWED_CONNECTIONS.");
   }
   if (!allowedSymbols.length || !allowedSymbols.includes(String(order.symbol || "").toUpperCase())) {
@@ -619,7 +625,7 @@ export function validateBybitManagementGate({ account, body, symbol }) {
   if (body.mainnetConfirmed !== true || body.liveConfirmation !== BYBIT_MAINNET_LIVE_CONFIRMATION) {
     reasons.push(`Bybit live management action requires explicit confirmation: ${BYBIT_MAINNET_LIVE_CONFIRMATION}.`);
   }
-  if (!allowedConnections.length || !allowedConnections.includes(account.id)) {
+  if (allowedConnections.length > 0 && !allowedConnections.includes("*") && !allowedConnections.includes(account.id)) {
     reasons.push("Bybit account is not in BYBIT_MAINNET_ALLOWED_CONNECTIONS.");
   }
   if (!allowedSymbols.length || !allowedSymbols.includes(nativeSymbol)) {
@@ -632,12 +638,11 @@ export function validateBybitManagementGate({ account, body, symbol }) {
   };
 }
 
-export async function getBybitBalances(credentials) {
+export async function getBybitWalletSnapshot(credentials) {
   const response = await bybitRequest(credentials, "GET", "/v5/account/wallet-balance", { accountType: "UNIFIED" });
   const account = response?.list?.[0];
   const coins = account?.coin || [];
-
-  return coins
+  const balances = coins
     .map((coin) => {
       const total = Number(coin.walletBalance || 0);
       const usdValue = Number(coin.usdValue || 0);
@@ -653,6 +658,28 @@ export async function getBybitBalances(credentials) {
       };
     })
     .filter((coin) => coin.total > 0 || coin.usdValue > 0);
+
+  const walletBalanceUsd = nullableNumber(account?.totalWalletBalance) ?? balances.reduce((sum, balance) => sum + balance.usdValue, 0);
+  const initialMarginUsd = nullableNumber(account?.totalInitialMargin) ?? 0;
+  return {
+    balances,
+    accountMetrics: {
+      accountType: String(account?.accountType || "UNIFIED"),
+      walletBalanceUsd,
+      equityUsd: nullableNumber(account?.totalEquity) ?? walletBalanceUsd,
+      marginBalanceUsd: nullableNumber(account?.totalMarginBalance) ?? walletBalanceUsd,
+      availableBalanceUsd: nullableNumber(account?.totalAvailableBalance) ?? Math.max(0, walletBalanceUsd - initialMarginUsd),
+      initialMarginUsd,
+      maintenanceMarginUsd: nullableNumber(account?.totalMaintenanceMargin) ?? 0,
+      accountImRate: nullableNumber(account?.accountIMRate),
+      accountMmRate: nullableNumber(account?.accountMMRate),
+      updatedAt: Date.now()
+    }
+  };
+}
+
+export async function getBybitBalances(credentials) {
+  return (await getBybitWalletSnapshot(credentials)).balances;
 }
 
 export async function getBybitPositions(credentials) {
@@ -918,6 +945,39 @@ function bybitFailureHint(code, message = "") {
 
 function normalizeBybitSymbol(symbol) {
   return String(symbol || "").replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+}
+
+export function normalizeBybitSizing(order, metadata) {
+  const sizingMethod = String(order.sizingMethod || order.quantityMode || "quantity");
+  if (sizingMethod !== "usd") return order;
+
+  const usdValue = Number(order.quantity || 0);
+  const referencePrice = Number(order.referencePrice || order.limitPrice || order.stopPrice || 0);
+  if (!Number.isFinite(usdValue) || usdValue <= 0 || !Number.isFinite(referencePrice) || referencePrice <= 0) {
+    return { ...order, quantity: 0 };
+  }
+
+  const rawQuantity = usdValue / referencePrice;
+  const step = Number(metadata?.quantityStep || 0);
+  const quantity = step > 0
+    ? Number((Math.floor((rawQuantity + 1e-12) / step) * step).toFixed(metadata?.quantityPrecision ?? 8))
+    : rawQuantity;
+  return { ...order, quantity };
+}
+
+function emptyBybitAccountMetrics() {
+  return {
+    accountType: "UNIFIED",
+    walletBalanceUsd: 0,
+    equityUsd: 0,
+    marginBalanceUsd: 0,
+    availableBalanceUsd: 0,
+    initialMarginUsd: 0,
+    maintenanceMarginUsd: 0,
+    accountImRate: null,
+    accountMmRate: null,
+    updatedAt: Date.now()
+  };
 }
 
 export function normalizeBybitOrderType(orderType) {

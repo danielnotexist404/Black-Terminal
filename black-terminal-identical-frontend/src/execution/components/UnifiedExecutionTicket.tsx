@@ -4,6 +4,7 @@ import { blackCoreConnectionManager } from "../../connectivity/connectionManager
 import { readActiveExecutionVenueId } from "../../connectivity/activeExecutionVenue";
 import type { ConnectionDiagnostics } from "../../connectivity/types";
 import type { PortfolioAccount } from "../../portfolio/types";
+import { setBybitTradingEnabledViaApi, syncExchangeAccountViaApi, type ExchangeAccountSyncPayload } from "../../portfolio/portfolioApiClient";
 import { defaultRiskControls } from "../../risk/types";
 import { submitOrder } from "../executionEngine";
 import { MAINNET_ORDER_CONFIRMATION, disableMainnetValidationMode, promptEnableMainnetValidationMode, readMainnetValidationMode, validateMainnetOrderReadiness } from "../mainnetValidationMode";
@@ -80,8 +81,38 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
   const [allocationDestination, setAllocationDestination] = useState(Boolean(preset.allocationEnabled));
   const [status, setStatus] = useState("");
   const [mainnetValidation, setMainnetValidation] = useState(() => readMainnetValidationMode());
+  const [accountSync, setAccountSync] = useState<ExchangeAccountSyncPayload | null>(null);
+  const [accountSyncError, setAccountSyncError] = useState("");
+  const [accountActionPending, setAccountActionPending] = useState(false);
 
   useEffect(() => blackCoreConnectionManager.subscribe(setConnections), []);
+
+  useEffect(() => {
+    if (!selectedConnection?.accountId || selectedConnection.provider !== "bybit") {
+      setAccountSync(null);
+      setAccountSyncError("");
+      return;
+    }
+
+    let active = true;
+    const load = async () => {
+      try {
+        const next = await syncExchangeAccountViaApi(selectedConnection.accountId!, preset.symbol);
+        if (active) {
+          setAccountSync(next);
+          setAccountSyncError("");
+        }
+      } catch (error) {
+        if (active) setAccountSyncError(error instanceof Error ? error.message : String(error));
+      }
+    };
+    void load();
+    const timer = window.setInterval(load, 5000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [preset.symbol, selectedConnection?.accountId, selectedConnection?.provider]);
 
   const mainnetReadiness = useMemo(
     () => validateMainnetOrderReadiness(selectedConnection),
@@ -104,6 +135,86 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
     if (allocationDestination) next.push("allocation-engine");
     return next;
   }, [personalDestination, allocationDestination]);
+
+  const venueOrderTypes = useMemo<OrderType[]>(() => {
+    if (selectedConnection?.provider === "bybit") return ["market", "limit"];
+    const supported = Array.isArray(selectedConnection?.metadata.supportedOrderTypes)
+      ? selectedConnection.metadata.supportedOrderTypes.map(String)
+      : [];
+    const normalized = orderTypes.filter((type) => supported.includes(type));
+    return normalized.length > 0 ? normalized : ["market", "limit"];
+  }, [selectedConnection]);
+
+  const venueSizingMethods = useMemo(() => {
+    if (selectedConnection?.provider === "bybit") {
+      return sizingMethods.filter((method) => ["usd", "quantity"].includes(method.value));
+    }
+    return sizingMethods.filter((method) => ["quantity", "usd"].includes(method.value));
+  }, [selectedConnection]);
+
+  useEffect(() => {
+    if (!venueOrderTypes.includes(orderType)) setOrderType(venueOrderTypes[0]);
+    if (!venueSizingMethods.some((method) => method.value === sizingMethod)) setSizingMethod(venueSizingMethods[0].value);
+  }, [orderType, sizingMethod, venueOrderTypes, venueSizingMethods]);
+
+  const accountMetrics = accountSync?.accountMetrics ?? null;
+  const availableBalance = Number(accountMetrics?.availableBalanceUsd || 0);
+  const executionPrice = Number(price || stopPrice || preset.price || 0);
+  const requestedValue = Number(quantity || 0);
+  const estimatedNotional = sizingMethod === "usd" ? requestedValue : requestedValue * executionPrice;
+  const estimatedMargin = (preset.marketKind ?? "perpetual") === "spot"
+    ? estimatedNotional
+    : estimatedNotional / Math.max(1, leverage);
+  const estimatedFees = estimatedNotional * 0.0006;
+  const estimatedCollateral = estimatedMargin + estimatedFees;
+  const remainingBalance = availableBalance - estimatedCollateral;
+  const exceedsAvailableBalance = Boolean(accountMetrics && !reduceOnly && estimatedCollateral > availableBalance);
+  const bybitTradingEnabled = selectedConnection?.provider === "bybit" && selectedConnection.health.permissions.trading === true;
+
+  function applyBalancePercent(percent: number) {
+    if (!accountMetrics || availableBalance <= 0 || executionPrice <= 0) return;
+    const collateral = availableBalance * percent;
+    const value = (preset.marketKind ?? "perpetual") === "spot" ? collateral : collateral * Math.max(1, leverage);
+    const next = sizingMethod === "usd" ? value : value / executionPrice;
+    setQuantity(String(Number(next.toFixed(sizingMethod === "usd" ? 2 : 8))));
+  }
+
+  async function toggleBybitTrading(enable: boolean) {
+    if (!selectedConnection?.accountId || selectedConnection.provider !== "bybit") return;
+    const phrase = enable ? "ENABLE BYBIT LIVE VALIDATION" : "DISABLE BYBIT LIVE VALIDATION";
+    const confirmation = window.prompt(`${enable ? "ENABLE" : "DISABLE"} LIVE BYBIT TRADING\n\nType exactly: ${phrase}`);
+    if (confirmation !== phrase) {
+      setStatus("CONFIRMATION PHRASE DID NOT MATCH");
+      return;
+    }
+
+    setAccountActionPending(true);
+    try {
+      const result = await setBybitTradingEnabledViaApi(selectedConnection.accountId, enable, confirmation);
+      if (!result) throw new Error("Authenticated account session is required.");
+      const connection = blackCoreConnectionManager.getConnection(selectedConnection.id);
+      if (connection) {
+        blackCoreConnectionManager.upsertExternalConnection({
+          ...connection,
+          health: {
+            ...connection.health,
+            permissions: { ...connection.health.permissions, trading: enable }
+          },
+          metadata: {
+            ...connection.metadata,
+            network: "mainnet",
+            executionMode: enable ? "full-live" : "read-only",
+            readiness: enable ? "execution-ready" : "connected-read-only"
+          }
+        });
+      }
+      setStatus(enable ? "BYBIT TRADING ENABLED. ENABLE LIVE MODE FOR THIS SESSION." : "BYBIT TRADING DISABLED");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message.toUpperCase() : String(error));
+    } finally {
+      setAccountActionPending(false);
+    }
+  }
 
   async function submit() {
     setStatus("");
@@ -134,6 +245,10 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
     }
     if (!parsedQuantity || parsedQuantity <= 0) {
       setStatus("ENTER A VALID SIZE");
+      return;
+    }
+    if (exceedsAvailableBalance) {
+      setStatus(`INSUFFICIENT AVAILABLE BALANCE. REQUIRED ${estimatedCollateral.toFixed(2)} USD / AVAILABLE ${availableBalance.toFixed(2)} USD`);
       return;
     }
     if (destinations.length === 0) {
@@ -193,7 +308,7 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
             timeInForce: draft.timeInForce,
             source: draft.source,
             destinations: draft.destinations
-          }, buildExecutionAccount(selectedConnection), Number(price || stopPrice || 1) || 1);
+          }, buildExecutionAccount(selectedConnection, accountSync), executionPrice || 1);
       if (preset.positionId && preset.protectionIntent) {
         if (preset.protectionIntent === "take-profit" && Number(takeProfit)) {
           blackCorePositionManager.setProtection(preset.positionId, "take-profit", { price: Number(takeProfit), metadata: { source: "unified-ticket" } });
@@ -237,6 +352,16 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
           </select>
         </label>
 
+        {selectedConnection?.provider === "bybit" && (
+          <div className="unified-account-state">
+            <div><span>Unified Equity</span><b>{accountMetrics ? formatUsd(accountMetrics.equityUsd) : "SYNCING"}</b></div>
+            <div><span>Available Balance</span><b className="positive">{accountMetrics ? formatUsd(availableBalance) : "SYNCING"}</b></div>
+            <div><span>Initial Margin</span><b>{accountMetrics ? formatUsd(accountMetrics.initialMarginUsd) : "--"}</b></div>
+            <div><span>Account</span><b>{accountMetrics?.accountType || "UNIFIED"}</b></div>
+            {accountSyncError && <p>{accountSyncError}</p>}
+          </div>
+        )}
+
         <div className="unified-destination-panel">
           <span>Execution Destination</span>
           <label><input type="checkbox" checked={personalDestination} onChange={(event) => setPersonalDestination(event.target.checked)} /> Personal Portfolio</label>
@@ -249,7 +374,12 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
               <span>Live Mainnet Validation</span>
               <b>{mainnetValidation.enabled ? "ENABLED" : "OFF"}</b>
             </div>
-            <p>Real Hyperliquid mainnet orders require this session opt-in plus relay readiness, trading permission, and risk approval.</p>
+            <p>{selectedConnection?.provider === "bybit" ? "Real Bybit orders require venue trading permission, account activation, this session opt-in, available collateral, and risk approval." : "Real Hyperliquid mainnet orders require this session opt-in plus relay readiness, trading permission, and risk approval."}</p>
+            {selectedConnection?.provider === "bybit" && (
+              <button type="button" disabled={accountActionPending} onClick={() => void toggleBybitTrading(!bybitTradingEnabled)}>
+                {bybitTradingEnabled ? "Disable Bybit Trading" : "Enable Bybit Trading"}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setMainnetValidation(mainnetValidation.enabled ? disableMainnetValidationMode() : promptEnableMainnetValidationMode())}
@@ -266,8 +396,8 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
 
         <div className="unified-ticket-grid">
           <label><span>Symbol</span><input value={preset.symbol.toUpperCase()} readOnly /></label>
-          <label><span>Order Type</span><select value={orderType} onChange={(event) => setOrderType(event.target.value as OrderType)}>{orderTypes.map((type) => <option key={type}>{type}</option>)}</select></label>
-          <label><span>Sizing</span><select value={sizingMethod} onChange={(event) => setSizingMethod(event.target.value as SizingMethod)}>{sizingMethods.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+          <label><span>Order Type</span><select value={orderType} onChange={(event) => setOrderType(event.target.value as OrderType)}>{venueOrderTypes.map((type) => <option key={type}>{type}</option>)}</select></label>
+          <label><span>Sizing</span><select value={sizingMethod} onChange={(event) => setSizingMethod(event.target.value as SizingMethod)}>{venueSizingMethods.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
           <label><span>Size</span><input value={quantity} onChange={(event) => setQuantity(event.target.value)} inputMode="decimal" /></label>
           <label><span>Limit / Ref Price</span><input value={price} onChange={(event) => setPrice(event.target.value)} inputMode="decimal" /></label>
           <label><span>Stop Price</span><input value={stopPrice} onChange={(event) => setStopPrice(event.target.value)} inputMode="decimal" /></label>
@@ -277,6 +407,18 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
           <label><span>Margin Mode</span><select value={marginMode} onChange={(event) => setMarginMode(event.target.value as MarginMode)}><option value="cross">Cross</option><option value="isolated">Isolated</option></select></label>
           <label><span>TIF</span><select value={timeInForce} onChange={(event) => setTimeInForce(event.target.value as TimeInForce)}><option value="gtc">GTC</option><option value="ioc">IOC</option><option value="fok">FOK</option></select></label>
         </div>
+
+        {selectedConnection?.provider === "bybit" && (
+          <div className={exceedsAvailableBalance ? "unified-order-estimate blocked" : "unified-order-estimate"}>
+            <div><span>Order Value</span><b>{formatUsd(estimatedNotional)}</b></div>
+            <div><span>Required Margin</span><b>{formatUsd(estimatedMargin)}</b></div>
+            <div><span>Est. Fees</span><b>{formatUsd(estimatedFees)}</b></div>
+            <div><span>Balance After</span><b>{accountMetrics ? formatUsd(remainingBalance) : "--"}</b></div>
+            <div className="unified-balance-presets">
+              {[0.25, 0.5, 0.75, 1].map((percent) => <button type="button" key={percent} onClick={() => applyBalancePercent(percent)}>{percent * 100}%</button>)}
+            </div>
+          </div>
+        )}
 
         <div className="unified-trailing-panel">
           <label><input type="checkbox" checked={trailingStopEnabled} onChange={(event) => setTrailingStopEnabled(event.target.checked)} /> Enable Trailing Stop</label>
@@ -297,7 +439,7 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
           <div><span>Execution Status</span><b>{status || "NOT SUBMITTED"}</b></div>
         </div>
 
-        <button type="button" className={side === "buy" ? "execution-submit buy" : "execution-submit sell"} onClick={submit}>
+        <button type="button" disabled={exceedsAvailableBalance || accountActionPending} className={side === "buy" ? "execution-submit buy" : "execution-submit sell"} onClick={submit}>
           Submit Through EMS
         </button>
       </div>
@@ -314,7 +456,15 @@ function formatConnectionOption(connection: ConnectionDiagnostics) {
   return `${connection.label} / ${connection.provider.toUpperCase()} / ${connection.status.toUpperCase()} / ${latency}`;
 }
 
-function buildExecutionAccount(connection: ConnectionDiagnostics): PortfolioAccount {
+function buildExecutionAccount(connection: ConnectionDiagnostics, sync: ExchangeAccountSyncPayload | null): PortfolioAccount {
+  const metrics = sync?.accountMetrics;
+  const tradingEnabled = connection.health.permissions.trading === true;
+  const storedControls = connection.metadata.accountRiskControls as PortfolioAccount["riskControls"] | undefined;
+  const riskControls = {
+    ...(storedControls || defaultRiskControls),
+    readOnlyMode: !tradingEnabled,
+    tradingEnabled
+  };
   return {
     id: connection.accountId || connection.id,
     exchange: connection.provider as ExchangeId,
@@ -327,16 +477,20 @@ function buildExecutionAccount(connection: ConnectionDiagnostics): PortfolioAcco
     status: connection.status === "connected" ? "connected" : "degraded",
     apiHealth: connection.metadata.executionReady === true ? "healthy" : "warning",
     latencyMs: connection.health.latencyMs,
-    balanceUsd: 0,
-    equityUsd: 0,
-    marginUsed: 0,
-    availableMargin: 0,
-    buyingPower: 0,
+    balanceUsd: metrics?.walletBalanceUsd ?? 0,
+    equityUsd: metrics?.equityUsd ?? 0,
+    marginUsed: metrics?.initialMarginUsd ?? 0,
+    availableMargin: metrics?.availableBalanceUsd ?? 0,
+    buyingPower: (metrics?.availableBalanceUsd ?? 0) * Math.max(1, Number(storedControls?.maxLeverage || 1)),
     leverage: 1,
     dailyPnl: 0,
     monthlyPnl: 0,
     openPositions: 0,
     openOrders: 0,
-    riskControls: defaultRiskControls
+    riskControls
   };
+}
+
+function formatUsd(value: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0);
 }

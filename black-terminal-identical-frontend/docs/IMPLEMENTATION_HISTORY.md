@@ -938,6 +938,27 @@ Validation:
 - `npm run test:bybit-certification`
 - `npm run build`
 
+## 2026-07-12 - Chapter XIII Venue-Native Execution Architecture
+
+Status: Implemented.
+
+Changed:
+
+- Added normalized `VenueExecutionSchema` providers and a truthful execution algorithm registry.
+- Made the Bybit ticket product-, capability-, account- and instrument-aware.
+- Added live Bybit account info, instrument rules, position mode, margin mode and risk metrics to reconciliation.
+- Added metadata-valid quantity/equity sizing, conditional trigger sources, compact account metrics and cost/risk preview.
+- Moved runtime/certification controls out of Unified Ticket and DOM Pro into collapsed connection administration.
+- Replaced the obsolete symbol-level UTA margin call with Bybit V5 account-level margin mode.
+- Removed silent leverage mutation from ordinary order placement; margin and leverage changes are explicit server actions.
+- Registered Chase Limit, Scaled, TWAP, POV and Iceberg as unavailable until supervised persistent workers exist.
+
+Validation:
+
+- `npm run test:venue-execution`
+- `npm run test:bybit-certification`
+- `npm run build`
+
 ## Future Work Log
 
 Use this format for every future phase, chapter, or major bug sprint.

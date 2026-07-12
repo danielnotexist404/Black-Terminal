@@ -1,0 +1,97 @@
+# Phase III Chapter XIII - Venue-Native Execution Ticket
+
+Date: 2026-07-12
+
+Status: Implemented foundation and Bybit Market/Limit/Conditional parity. Advanced server algorithms remain hidden until persistent workers exist.
+
+## Architecture
+
+The Unified Execution Ticket is a venue-native shell. It does not contain a hard-coded union of every exchange feature.
+
+```text
+Connection Manager
+  -> VenueExecutionSchema provider
+  -> capability/product/instrument filtered controls
+  -> OMS -> EMS -> Risk -> Broker Router
+  -> server venue adapter
+  -> normalized execution report
+```
+
+`src/execution/venueExecutionSchema.ts` normalizes venue/product identity, readiness, supported controls, live account metrics, instrument rules, current account modes and ready execution algorithms.
+
+`src/execution/executionAlgorithmRegistry.ts` is the source of truth for advanced execution visibility. An algorithm appears only when `readiness=true` for the venue and product.
+
+## Bybit Production Ticket
+
+Implemented controls:
+
+- Spot and USDT perpetual product selection
+- Market, Limit and Conditional orders
+- Last, Mark and Index conditional trigger sources
+- Quantity, notional and equity-percentage sizing
+- venue-step-aligned 0/25/50/75/100 allocation slider
+- position-aware reduce-only sizing
+- account-level Cross/Isolated margin changes with confirmation
+- metadata-bounded leverage changes with confirmation
+- GTC, IOC, FOK and Post-Only combinations where valid
+- attached TP/SL with independent trigger sources
+- Reduce-Only and attached TP/SL incompatibility enforcement
+- live equity, available margin, margin balance, IM, MM, unrealized PnL and risk ratio
+- local balance privacy toggle
+- estimated notional, margin, entry/exit fees, available balance and reward/risk
+
+All order submissions continue through OMS, EMS, Risk and Broker Router. The order ticket does not call the Bybit API directly.
+
+## Operational Controls
+
+Certification and mainnet-validation controls are not rendered in Unified Ticket or DOM Pro. They live in the collapsed `Runtime & Certification` section of the Positions connection panel.
+
+The normal ticket receives only normalized execution readiness and a trader-safe blocker. Full technical diagnostics remain in connection administration.
+
+## Native And Synthetic Truth
+
+| Mode | Implementation | Visibility |
+| --- | --- | --- |
+| Market | Bybit native | ready |
+| Limit | Bybit native | ready |
+| Conditional | Bybit native | ready |
+| Post-Only | Bybit native TIF semantics | ready |
+| Attached TP/SL | Bybit native | ready |
+| Chase Limit | Black Core worker required | hidden |
+| Scaled Order | OMS parent-child scheduler required | hidden |
+| TWAP | persistent worker required | hidden |
+| POV | persistent sampler/worker required | hidden |
+| Iceberg | persistent replenishment worker required | hidden |
+
+No advanced mode silently falls back to Market or Limit.
+
+## Official Bybit Sources
+
+- V5 Place Order: https://bybit-exchange.github.io/docs/v5/order/create-order
+- V5 Instruments Info: https://bybit-exchange.github.io/docs/v5/market/instrument
+- V5 Risk Limit: https://bybit-exchange.github.io/docs/v5/market/risk-limit
+- V5 Order Price Limit: https://bybit-exchange.github.io/docs/v5/market/order-price-limit
+- V5 Wallet Balance: https://bybit-exchange.github.io/docs/v5/account/wallet-balance
+- V5 Account Info: https://bybit-exchange.github.io/docs/v5/account/account-info
+- V5 Set Margin Mode: https://bybit-exchange.github.io/docs/v5/account/set-margin-mode
+- V5 Set Leverage: https://bybit-exchange.github.io/docs/v5/position/leverage
+- V5 Position Mode: https://bybit-exchange.github.io/docs/v5/position/position-mode
+- V5 Trading Stop: https://bybit-exchange.github.io/docs/v5/position/trading-stop
+
+## Current Limitations
+
+- Production certification still requires recorded tiny-order, modify, cancel, protection and reconnect evidence.
+- Persistent private WebSocket processing requires the long-running worker outside Vercel.
+- Spot Margin, USDC, inverse, dated futures and options stay hidden until their product schemas and routes are certified.
+- Estimated liquidation impact is omitted until venue risk-tier and complete post-fill portfolio state are available.
+- Trailing stop remains a Position Manager action and is not misrepresented as an order-create field.
+
+## Verification
+
+```bash
+npm run test:venue-execution
+npm run test:bybit-certification
+npm run build
+```
+
+No Supabase schema migration is required for Chapter XIII.

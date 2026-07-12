@@ -1,6 +1,10 @@
 import {
   getBybitOpenOrders,
   getBybitPositions,
+  getBybitInstrumentMetadata,
+  getBybitAccountInfo,
+  getBybitRiskLimits,
+  getBybitOrderPriceLimit,
   getBybitWalletSnapshot
 } from "./bybit.js";
 import { replaceBybitBalances, replaceBybitPositions } from "./bybit-snapshot-store.js";
@@ -10,11 +14,17 @@ const ACTIVE_ORDER_STATUSES = ["pending", "accepted", "working", "partially-fill
 export async function syncBybitSnapshotAndReconcile(supabase, userId, account, credentials, options = {}) {
   const startedAt = Date.now();
   const symbol = String(options.symbol || "BTCUSDT").toUpperCase();
-  const [walletSnapshot, positions, openOrders] = await Promise.all([
+  const marketKind = options.marketKind === "spot" ? "spot" : "perpetual";
+  const [walletSnapshot, positionRows, openOrders, metadata, accountState, riskLimits, priceLimit] = await Promise.all([
     getBybitWalletSnapshot(credentials),
-    getBybitPositions(credentials),
-    getBybitOpenOrders(credentials, { category: options.marketKind === "spot" ? "spot" : "linear", symbol })
+    getBybitPositions(credentials, { symbol, includeEmpty: true }),
+    getBybitOpenOrders(credentials, { category: marketKind === "spot" ? "spot" : "linear", symbol }),
+    getBybitInstrumentMetadata({ category: marketKind === "spot" ? "spot" : "linear", symbol }),
+    getBybitAccountInfo(credentials),
+    marketKind === "spot" ? Promise.resolve([]) : getBybitRiskLimits({ category: "linear", symbol }),
+    getBybitOrderPriceLimit({ category: marketKind === "spot" ? "spot" : "linear", symbol })
   ]);
+  const positions = positionRows.filter((position) => position.quantity > 0 && position.direction !== "flat");
   const balances = walletSnapshot.balances;
 
   const [localBalancesResult, localPositionsResult, localOrdersResult] = await Promise.all([
@@ -96,6 +106,11 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     network: "mainnet",
     balances,
     accountMetrics: walletSnapshot.accountMetrics,
+    instrumentRules: metadata[0] || null,
+    selectedPosition: positionRows.find((position) => position.symbol === symbol && position.positionIdx === 0) || positionRows.find((position) => position.symbol === symbol) || null,
+    accountState,
+    riskLimits,
+    priceLimit,
     positions,
     openOrders,
     externalStateChanged,

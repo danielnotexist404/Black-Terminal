@@ -1,17 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
-import { Play, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Eye, EyeOff, Play, X } from "lucide-react";
 import { blackCoreConnectionManager } from "../../connectivity/connectionManager";
 import { readActiveExecutionVenueId } from "../../connectivity/activeExecutionVenue";
 import type { ConnectionDiagnostics } from "../../connectivity/types";
 import type { PortfolioAccount } from "../../portfolio/types";
-import { syncExchangeAccountViaApi, type ExchangeAccountSyncPayload } from "../../portfolio/portfolioApiClient";
+import { syncExchangeAccountViaApi, updateBybitAccountModeViaApi, type ExchangeAccountSyncPayload } from "../../portfolio/portfolioApiClient";
 import { defaultRiskControls } from "../../risk/types";
 import { submitOrder } from "../executionEngine";
-import { MAINNET_ORDER_CONFIRMATION, disableMainnetValidationMode, promptEnableMainnetValidationMode, readMainnetValidationMode, validateMainnetOrderReadiness } from "../mainnetValidationMode";
-import type { ExecutionDestination, ExecutionSource, MarginMode, OrderSide, OrderType, SizingMethod, TimeInForce } from "../types";
+import { MAINNET_ORDER_CONFIRMATION, validateMainnetOrderReadiness } from "../mainnetValidationMode";
+import type { ExecutionDestination, ExecutionSource, MarginMode, OrderSide, OrderType, SizingMethod, TimeInForce, TriggerSource } from "../types";
 import type { ExchangeId, MarketKind } from "../../market-data/types";
 import { blackCorePositionManager } from "../../positions/positionManager";
 import type { PositionProtectionType } from "../../positions/types";
+import { buildVenueExecutionSchema, calculateVenueOrderPreview, sizeFromEquityPercent, sizeFromPositionPercent, validateVenueOrderDraft } from "../venueExecutionSchema";
 
 export type UnifiedExecutionTicketPreset = {
   symbol: string;
@@ -54,12 +55,15 @@ const sizingMethods: Array<{ value: SizingMethod; label: string }> = [
 
 export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTicketProps) {
   const [connections, setConnections] = useState<ConnectionDiagnostics[]>(() => blackCoreConnectionManager.listDiagnostics());
-  const activeConnections = useMemo(() => connections.filter((connection) => !["disconnected", "offline", "unsupported"].includes(connection.status)), [connections]);
+  const activeConnections = useMemo(() => connections.filter((connection) =>
+    ["centralized-exchange", "protocol"].includes(connection.category) &&
+    !["disconnected", "offline", "unsupported"].includes(connection.status)
+  ), [connections]);
   const activeVenueId = readActiveExecutionVenueId();
   const defaultConnection = activeConnections.find((connection) => connection.id === activeVenueId) ?? activeConnections[0] ?? null;
   const [connectionId, setConnectionId] = useState(defaultConnection?.id ?? "");
   const selectedConnection = activeConnections.find((connection) => connection.id === connectionId) ?? defaultConnection;
-  const isBybit = selectedConnection?.provider === "bybit";
+  const usesVenueNativeTicket = selectedConnection?.category === "centralized-exchange";
   const [marketKind, setMarketKind] = useState<MarketKind>(preset.marketKind ?? "perpetual");
   const [side, setSide] = useState<OrderSide>(preset.side ?? "buy");
   const [orderType, setOrderType] = useState<OrderType>(preset.orderType ?? "market");
@@ -84,9 +88,16 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
   const [tpSlEnabled, setTpSlEnabled] = useState(Boolean(preset.takeProfit || preset.stopLoss));
   const [balancePercent, setBalancePercent] = useState(0);
   const [status, setStatus] = useState("");
-  const [mainnetValidation, setMainnetValidation] = useState(() => readMainnetValidationMode());
   const [accountSync, setAccountSync] = useState<ExchangeAccountSyncPayload | null>(null);
   const [accountSyncError, setAccountSyncError] = useState("");
+  const [triggerBy, setTriggerBy] = useState<TriggerSource>("last");
+  const [tpTriggerBy, setTpTriggerBy] = useState<TriggerSource>("last");
+  const [slTriggerBy, setSlTriggerBy] = useState<TriggerSource>("mark");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [balancesVisible, setBalancesVisible] = useState(true);
+  const [modeUpdatePending, setModeUpdatePending] = useState(false);
+  const [slippageTolerance, setSlippageTolerance] = useState(0.5);
+  const hydratedAccountRef = useRef("");
 
   useEffect(() => blackCoreConnectionManager.subscribe(setConnections), []);
 
@@ -100,7 +111,7 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
     let active = true;
     const load = async () => {
       try {
-        const next = await syncExchangeAccountViaApi(selectedConnection.accountId!, preset.symbol);
+        const next = await syncExchangeAccountViaApi(selectedConnection.accountId!, preset.symbol, marketKind);
         if (active) {
           setAccountSync(next);
           setAccountSyncError("");
@@ -134,11 +145,30 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
       active = false;
       window.clearInterval(timer);
     };
-  }, [preset.symbol, selectedConnection?.accountId, selectedConnection?.id, selectedConnection?.provider]);
+  }, [marketKind, preset.symbol, selectedConnection?.accountId, selectedConnection?.id, selectedConnection?.provider]);
+
+  const venueSchema = useMemo(() => selectedConnection
+    ? buildVenueExecutionSchema({ connection: selectedConnection, product: marketKind, symbol: preset.symbol, sync: accountSync })
+    : null,
+  [accountSync, marketKind, preset.symbol, selectedConnection]);
+
+  useEffect(() => {
+    if (!venueSchema || !selectedConnection?.accountId) return;
+    const key = `${selectedConnection.accountId}:${marketKind}:${preset.symbol}`;
+    if (hydratedAccountRef.current === key) return;
+    hydratedAccountRef.current = key;
+    setLeverage(venueSchema.currentLeverage || venueSchema.instrumentRules.minLeverage || 1);
+    setMarginMode(venueSchema.currentMarginMode);
+  }, [marketKind, preset.symbol, selectedConnection?.accountId, venueSchema]);
+
+  useEffect(() => {
+    if (reduceOnly && tpSlEnabled) setTpSlEnabled(false);
+    if (reduceOnly && sizingMethod !== "quantity") setSizingMethod("quantity");
+  }, [reduceOnly, sizingMethod, tpSlEnabled]);
 
   const mainnetReadiness = useMemo(
     () => validateMainnetOrderReadiness(selectedConnection),
-    [selectedConnection, mainnetValidation]
+    [selectedConnection]
   );
 
   useEffect(() => {
@@ -152,62 +182,141 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
   }, [activeConnections, connectionId, defaultConnection]);
 
   const destinations = useMemo(() => {
-    if (isBybit) return ["personal-portfolio"] as ExecutionDestination[];
+    if (usesVenueNativeTicket) return ["personal-portfolio"] as ExecutionDestination[];
     const next: ExecutionDestination[] = [];
     if (personalDestination) next.push("personal-portfolio");
     if (allocationDestination) next.push("allocation-engine");
     return next;
-  }, [allocationDestination, isBybit, personalDestination]);
+  }, [allocationDestination, personalDestination, usesVenueNativeTicket]);
 
   const venueOrderTypes = useMemo<OrderType[]>(() => {
-    if (selectedConnection?.provider === "bybit") return ["market", "limit", "stop-market", "stop-limit"];
+    if (venueSchema) return venueSchema.supportedOrderModes.flatMap((mode) => mode.orderTypes);
     const supported = Array.isArray(selectedConnection?.metadata.supportedOrderTypes)
       ? selectedConnection.metadata.supportedOrderTypes.map(String)
       : [];
     const normalized = orderTypes.filter((type) => supported.includes(type));
     return normalized.length > 0 ? normalized : ["market", "limit"];
-  }, [selectedConnection]);
+  }, [selectedConnection, venueSchema]);
 
   const venueSizingMethods = useMemo(() => {
-    if (selectedConnection?.provider === "bybit") {
-      return sizingMethods.filter((method) => ["usd", "quantity"].includes(method.value));
-    }
+    if (venueSchema) return sizingMethods.filter((method) => venueSchema.supportedSizingModes.includes(method.value));
     return sizingMethods.filter((method) => ["quantity", "usd"].includes(method.value));
-  }, [selectedConnection]);
+  }, [venueSchema]);
 
   useEffect(() => {
     if (!venueOrderTypes.includes(orderType)) setOrderType(venueOrderTypes[0]);
     if (!venueSizingMethods.some((method) => method.value === sizingMethod)) setSizingMethod(venueSizingMethods[0].value);
   }, [orderType, sizingMethod, venueOrderTypes, venueSizingMethods]);
 
-  const accountMetrics = accountSync?.accountMetrics ?? null;
+  const accountMetrics = venueSchema?.accountMetrics ?? accountSync?.accountMetrics ?? null;
   const availableBalance = Number(accountMetrics?.availableBalanceUsd || 0);
   const executionPrice = Number(price || stopPrice || preset.price || 0);
   const requestedValue = Number(quantity || 0);
-  const estimatedNotional = sizingMethod === "usd" ? requestedValue : requestedValue * executionPrice;
-  const estimatedMargin = marketKind === "spot"
-    ? estimatedNotional
-    : estimatedNotional / Math.max(1, leverage);
-  const estimatedFees = estimatedNotional * 0.0006;
+  const normalizedEquityQuantity = venueSchema && sizingMethod === "equityPct"
+    ? sizeFromEquityPercent({ schema: venueSchema, percent: requestedValue / 100, referencePrice: executionPrice, leverage, sizingMethod: "quantity" })
+    : requestedValue;
+  const effectiveSizingMethod: SizingMethod = sizingMethod === "equityPct" ? "quantity" : sizingMethod;
+  const effectiveSize = sizingMethod === "equityPct" ? normalizedEquityQuantity : requestedValue;
+  const preview = venueSchema ? calculateVenueOrderPreview({
+    schema: venueSchema,
+    sizingMethod: effectiveSizingMethod,
+    size: effectiveSize,
+    referencePrice: executionPrice,
+    leverage,
+    side,
+    stopLoss: Number(stopLoss || 0) || undefined,
+    takeProfit: Number(takeProfit || 0) || undefined
+  }) : null;
+  const estimatedNotional = preview?.notional ?? (effectiveSizingMethod === "usd" ? effectiveSize : effectiveSize * executionPrice);
+  const estimatedMargin = preview?.requiredMargin ?? estimatedNotional / Math.max(1, leverage);
+  const estimatedFees = preview?.entryFee ?? estimatedNotional * 0.0006;
   const estimatedCollateral = estimatedMargin + estimatedFees;
-  const remainingBalance = availableBalance - estimatedCollateral;
+  const remainingBalance = preview?.availableAfter ?? availableBalance - estimatedCollateral;
   const exceedsAvailableBalance = Boolean(accountMetrics && !reduceOnly && estimatedCollateral > availableBalance);
-  const serverMaxNotional = Number(accountSync?.executionState?.maxNotionalUsd || 0);
+  const serverMaxNotional = Number(venueSchema?.maxOrderNotionalUsd || 0);
   const exceedsServerNotional = serverMaxNotional > 0 && estimatedNotional > serverMaxNotional;
+  const orderValidation = venueSchema ? validateVenueOrderDraft({
+    schema: venueSchema,
+    orderType,
+    sizingMethod: effectiveSizingMethod,
+    size: effectiveSize,
+    referencePrice: executionPrice,
+    limitPrice: Number(price || 0) || undefined,
+    triggerPrice: Number(stopPrice || 0) || undefined,
+    leverage: marketKind === "spot" ? 1 : leverage,
+    side,
+    reduceOnly,
+    tpSlEnabled
+  }) : { valid: true, reasons: [], normalizedQuantity: effectiveSize, notional: estimatedNotional };
+  const activeOrderMode = venueSchema?.supportedOrderModes.find((mode) => mode.orderTypes.includes(orderType)) || null;
+  const ticketMessage = status || (accountSyncError ? formatExecutionError(accountSyncError) : "") ||
+    (venueSchema && !venueSchema.executionReady ? venueSchema.readinessReason || "Trading is unavailable." : "") ||
+    (requestedValue > 0 && !orderValidation.valid ? orderValidation.reasons[0] : "");
 
   function applyBalancePercent(percent: number) {
-    if (!accountMetrics || availableBalance <= 0 || executionPrice <= 0) return;
-    const venueBuyingPower = marketKind === "spot" ? availableBalance : availableBalance * Math.max(1, leverage);
-    const usableNotional = serverMaxNotional > 0 ? Math.min(venueBuyingPower, serverMaxNotional) : venueBuyingPower;
-    const value = usableNotional * percent;
-    const next = sizingMethod === "usd" ? value : value / executionPrice;
-    setQuantity(String(Number(next.toFixed(sizingMethod === "usd" ? 2 : 8))));
+    if (!venueSchema || !accountMetrics || availableBalance <= 0 || executionPrice <= 0) return;
+    const next = reduceOnly && accountSync?.selectedPosition
+      ? sizeFromPositionPercent(venueSchema, accountSync.selectedPosition.quantity, percent)
+      : sizingMethod === "equityPct"
+      ? Number((percent * 100).toFixed(2))
+      : sizeFromEquityPercent({ schema: venueSchema, percent, referencePrice: executionPrice, leverage, sizingMethod });
+    setQuantity(String(next));
     setBalancePercent(Math.round(percent * 100));
+  }
+
+  async function applyVenueAccountSettings() {
+    if (!venueSchema || !selectedConnection?.accountId || venueSchema.venue !== "bybit") return;
+    const leverageChanged = venueSchema.featureFlags.showLeverage && Math.abs(leverage - venueSchema.currentLeverage) > 1e-8;
+    const marginChanged = marginMode !== venueSchema.currentMarginMode;
+    if (!leverageChanged && !marginChanged) return;
+    const change = marginChanged
+      ? `Change the Bybit Unified Account to ${marginMode} margin and set ${preset.symbol.toUpperCase()} leverage to ${leverage}x?`
+      : `Set ${preset.symbol.toUpperCase()} leverage to ${leverage}x?`;
+    if (!window.confirm(change)) return;
+
+    setModeUpdatePending(true);
+    setStatus("");
+    try {
+      if (marginChanged) {
+        const result = await updateBybitAccountModeViaApi({
+          accountId: selectedConnection.accountId,
+          action: "switch-margin-mode",
+          symbol: preset.symbol.toUpperCase(),
+          category: "linear",
+          marginMode,
+          mainnetConfirmed: true,
+          liveConfirmation: MAINNET_ORDER_CONFIRMATION
+        });
+        if (!result) throw new Error("Authenticated account session required.");
+      }
+      if (leverageChanged) {
+        const result = await updateBybitAccountModeViaApi({
+          accountId: selectedConnection.accountId,
+          action: "set-leverage",
+          symbol: preset.symbol.toUpperCase(),
+          category: "linear",
+          leverage,
+          mainnetConfirmed: true,
+          liveConfirmation: MAINNET_ORDER_CONFIRMATION
+        });
+        if (!result) throw new Error("Authenticated account session required.");
+      }
+      const next = await syncExchangeAccountViaApi(selectedConnection.accountId, preset.symbol, marketKind);
+      setAccountSync(next);
+      hydratedAccountRef.current = "";
+      setStatus("Account settings updated by Bybit.");
+    } catch (error) {
+      setStatus(formatExecutionError(error));
+      const next = await syncExchangeAccountViaApi(selectedConnection.accountId, preset.symbol, marketKind).catch(() => null);
+      if (next) setAccountSync(next);
+    } finally {
+      setModeUpdatePending(false);
+    }
   }
 
   async function submit() {
     setStatus("");
-    const parsedQuantity = Number(quantity);
+    const parsedQuantity = Number(effectiveSize);
     if (!selectedConnection) {
       setStatus("CONNECT AN ACCOUNT IN POSITIONS FIRST");
       return;
@@ -233,15 +342,19 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
       return;
     }
     if (!parsedQuantity || parsedQuantity <= 0) {
-      setStatus("ENTER A VALID SIZE");
+      setStatus("Enter a valid order size.");
+      return;
+    }
+    if (!orderValidation.valid) {
+      setStatus(orderValidation.reasons[0]);
       return;
     }
     if (exceedsAvailableBalance) {
-      setStatus(`INSUFFICIENT AVAILABLE BALANCE. REQUIRED ${estimatedCollateral.toFixed(2)} USD / AVAILABLE ${availableBalance.toFixed(2)} USD`);
+      setStatus(`Insufficient available margin. Required ${estimatedCollateral.toFixed(2)} USD; available ${availableBalance.toFixed(2)} USD.`);
       return;
     }
     if (exceedsServerNotional) {
-      setStatus(`ORDER VALUE EXCEEDS THE ACCOUNT LIMIT OF ${formatUsd(serverMaxNotional)}`);
+      setStatus(`Order value exceeds the account limit of ${formatUsd(serverMaxNotional)}.`);
       return;
     }
     if (destinations.length === 0) {
@@ -257,9 +370,9 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
         marketKind,
         side,
         orderType,
-        quantity: parsedQuantity,
-        quantityMode: sizingMethod,
-        sizingMethod,
+        quantity: effectiveSizingMethod === "usd" ? parsedQuantity : orderValidation.normalizedQuantity,
+        quantityMode: effectiveSizingMethod,
+        sizingMethod: effectiveSizingMethod,
         referencePrice: Number(price || stopPrice || 0) || undefined,
         limitPrice: ["limit", "stop-limit", "bracket", "twap", "iceberg"].includes(orderType) ? Number(price || 0) || undefined : undefined,
         stopPrice: ["stop-market", "stop-limit", "trailing-stop"].includes(orderType) ? Number(stopPrice || price || 0) || undefined : undefined,
@@ -270,6 +383,12 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
         postOnly: ["limit", "stop-limit"].includes(orderType) && postOnly,
         reduceOnly: marketKind !== "spot" && reduceOnly,
         timeInForce,
+        triggerBy,
+        tpTriggerBy,
+        slTriggerBy,
+        tpslMode: "full" as const,
+        positionIdx: venueSchema?.currentPositionMode === "hedge" ? side === "buy" ? 1 : 2 : 0,
+        slippageTolerancePercent: orderType === "market" ? slippageTolerance : undefined,
         trailingStopEnabled,
         trailingTrailBy: Number(trailingTrailBy || 0) || undefined,
         trailingMode,
@@ -299,6 +418,12 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
             reduceOnly: draft.reduceOnly,
             postOnly: draft.postOnly,
             timeInForce: draft.timeInForce,
+            triggerBy: draft.triggerBy,
+            tpTriggerBy: draft.tpTriggerBy,
+            slTriggerBy: draft.slTriggerBy,
+            tpslMode: draft.tpslMode,
+            positionIdx: draft.positionIdx,
+            slippageTolerancePercent: draft.slippageTolerancePercent,
             source: draft.source,
             destinations: draft.destinations
           }, buildExecutionAccount(selectedConnection, accountSync), executionPrice || 1);
@@ -320,18 +445,18 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
           });
         }
       }
-      setStatus(update ? `${update.status.toUpperCase()}: ${update.reason || update.orderId}` : "AUTHENTICATED BROKER SESSION REQUIRED");
+      setStatus(update ? update.reason ? formatExecutionError(update.reason) : `${formatOrderStatus(update.status)}: ${update.orderId}` : "Authenticated broker session required.");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message.toUpperCase() : String(error));
+      setStatus(formatExecutionError(error));
     }
   }
 
   return (
     <div className="unified-ticket-overlay" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
-      <div className={isBybit ? "unified-ticket bybit-venue-ticket" : "unified-ticket"}>
+      <div className={usesVenueNativeTicket ? "unified-ticket bybit-venue-ticket" : "unified-ticket"}>
         <div className="unified-ticket-head">
-          {isBybit ? <b className="bybit-mark">BY</b> : <Play size={15} />}
-          <span>{isBybit ? "Bybit Trade" : "Unified Execution Ticket"}</span>
+          {usesVenueNativeTicket ? <b className="bybit-mark">{String(venueSchema?.venueLabel || "EX").slice(0, 2).toUpperCase()}</b> : <Play size={15} />}
+          <span>Unified Execution Ticket</span>
           <button type="button" onClick={onClose}><X size={14} /></button>
         </div>
 
@@ -340,21 +465,31 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
           <select value={connectionId} onChange={(event) => setConnectionId(event.target.value)}>
             {activeConnections.length === 0 && <option value="">Connect account in Positions</option>}
             {activeConnections.map((connection) => (
-              <option key={connection.id} value={connection.id}>{formatConnectionOption(connection)}</option>
+              <option key={connection.id} value={connection.id}>{formatConnectionOption(connection, connection.id === selectedConnection?.id ? accountSync : null)}</option>
             ))}
           </select>
         </label>
 
-        {isBybit ? (
+        {usesVenueNativeTicket && venueSchema ? (
           <div className="bybit-order-ticket">
+            <div className="venue-ticket-summary">
+              <div><span>Venue</span><b>{venueSchema.venueLabel.toUpperCase()}</b></div>
+              <div><span>Product</span><b>{venueSchema.instrumentRules.symbol} {venueSchema.marketType.toUpperCase()}</b></div>
+              <div><span>Network</span><b>{venueSchema.network.toUpperCase()}</b></div>
+              <div className="venue-ready-state" title={venueSchema.readinessReason || "Account and venue checks passed."}>
+                <i className={venueSchema.executionReady ? "ready" : "blocked"} />
+                <b>{venueSchema.executionReady ? "TRADING READY" : "UNAVAILABLE"}</b>
+              </div>
+            </div>
+
             <div className="bybit-product-tabs" role="tablist" aria-label="Bybit product">
               <button type="button" className={marketKind === "spot" ? "active" : ""} onClick={() => setMarketKind("spot")}>Spot</button>
               <button type="button" className={marketKind === "perpetual" ? "active" : ""} onClick={() => setMarketKind("perpetual")}>Futures</button>
-              <span>{accountMetrics?.accountType || "Unified"}</span>
+              <span>{venueSchema.accountType} / {venueSchema.currentPositionMode}</span>
             </div>
 
             <div className="bybit-symbol-row">
-              <b>{formatBybitSymbol(preset.symbol)}</b>
+              <b>{formatBybitSymbol(venueSchema.instrumentRules.symbol)}</b>
               <strong>{executionPrice > 0 ? formatPrice(executionPrice) : "--"}</strong>
             </div>
 
@@ -363,28 +498,38 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
               <button type="button" className={side === "sell" ? "active sell" : ""} onClick={() => setSide("sell")}>{marketKind === "spot" ? "Sell" : "Short"}</button>
             </div>
 
-            <div className="bybit-order-tabs" role="tablist" aria-label="Bybit order type">
-              <button type="button" className={orderType === "limit" ? "active" : ""} onClick={() => setOrderType("limit")}>Limit</button>
-              <button type="button" className={orderType === "market" ? "active" : ""} onClick={() => setOrderType("market")}>Market</button>
-              <button type="button" className={["stop-market", "stop-limit"].includes(orderType) ? "active" : ""} onClick={() => setOrderType("stop-market")}>Conditional</button>
+            <div className="bybit-order-tabs" role="tablist" aria-label={`${venueSchema.venueLabel} order type`}>
+              {venueSchema.supportedOrderModes.map((mode) => (
+                <button type="button" key={mode.id} className={mode.orderTypes.includes(orderType) ? "active" : ""} onClick={() => setOrderType(mode.orderTypes[0])}>
+                  {mode.label}
+                </button>
+              ))}
             </div>
+            {activeOrderMode && <div className="venue-execution-origin">{venueSchema.venueLabel.toUpperCase()} NATIVE / {activeOrderMode.label.toUpperCase()}</div>}
 
             <div className="bybit-balance-row">
               <span>Available Balance</span>
-              <b>{accountMetrics ? `${formatVenueNumber(availableBalance)} USDT` : "Syncing"}</b>
+              <span className="bybit-balance-value">
+                <b>{accountMetrics ? balancesVisible ? `${formatVenueNumber(availableBalance)} ${venueSchema.instrumentRules.settlementAsset}` : "HIDDEN" : "Syncing"}</b>
+                <button type="button" title={balancesVisible ? "Hide balances" : "Show balances"} onClick={() => setBalancesVisible((visible) => !visible)}>{balancesVisible ? <EyeOff size={13} /> : <Eye size={13} />}</button>
+              </span>
             </div>
 
-            {marketKind === "perpetual" && (
+            {venueSchema.featureFlags.showMarginMode && (
               <div className="bybit-position-settings">
-                <label><span>Margin</span><select value={marginMode} onChange={(event) => setMarginMode(event.target.value as MarginMode)}><option value="cross">Cross</option><option value="isolated">Isolated</option></select></label>
-                <label><span>Leverage</span><div className="bybit-suffix-input"><input value={leverage} min="1" onChange={(event) => setLeverage(Math.max(1, Number(event.target.value || 1)))} inputMode="numeric" /><b>x</b></div></label>
+                <label><span>Margin</span><select value={marginMode} onChange={(event) => setMarginMode(event.target.value as MarginMode)}>{venueSchema.supportedMarginModes.map((mode) => <option key={mode} value={mode}>{titleCase(mode)}</option>)}</select></label>
+                {venueSchema.featureFlags.showLeverage && <label><span>Leverage (max {venueSchema.instrumentRules.maxLeverage}x)</span><div className="bybit-suffix-input"><input value={leverage} min={venueSchema.instrumentRules.minLeverage} max={venueSchema.instrumentRules.maxLeverage} step={venueSchema.instrumentRules.leverageStep} onChange={(event) => setLeverage(clampNumber(Number(event.target.value || 1), venueSchema.instrumentRules.minLeverage, venueSchema.instrumentRules.maxLeverage))} inputMode="decimal" /><b>x</b></div></label>}
+                <span className="bybit-position-mode">Position Mode <b>{venueSchema.currentPositionMode.toUpperCase()}</b></span>
+                <button type="button" className="bybit-apply-settings" disabled={modeUpdatePending || (!venueSchema.featureFlags.showLeverage || leverage === venueSchema.currentLeverage) && marginMode === venueSchema.currentMarginMode} onClick={() => void applyVenueAccountSettings()}>{modeUpdatePending ? "Applying" : "Apply"}</button>
               </div>
             )}
 
             {["stop-market", "stop-limit"].includes(orderType) && (
               <div className="bybit-condition-row">
                 <label><span>Trigger Price</span><div className="bybit-suffix-input"><input value={stopPrice} onChange={(event) => setStopPrice(event.target.value)} inputMode="decimal" /><b>USDT</b></div></label>
+                <label><span>Trigger By</span><select value={triggerBy} onChange={(event) => setTriggerBy(event.target.value as TriggerSource)}><option value="last">Last Price</option><option value="mark">Mark Price</option><option value="index">Index Price</option></select></label>
                 <label><span>Order</span><select value={orderType} onChange={(event) => setOrderType(event.target.value as OrderType)}><option value="stop-market">Market</option><option value="stop-limit">Limit</option></select></label>
+                <span className="bybit-trigger-direction">{Number(stopPrice || 0) > 0 ? Number(stopPrice) >= executionPrice ? "Triggers when price rises" : "Triggers when price falls" : "Enter trigger price"}</span>
               </div>
             )}
 
@@ -393,12 +538,11 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
             )}
 
             <label>
-              <span>{sizingMethod === "usd" ? "Order Value" : "Quantity"}</span>
+              <span>{sizingMethod === "usd" ? "Notional" : sizingMethod === "equityPct" ? "Equity Allocation" : "Quantity"}</span>
               <div className="bybit-split-input">
                 <input value={quantity} onChange={(event) => { setQuantity(event.target.value); setBalancePercent(0); }} inputMode="decimal" />
                 <select value={sizingMethod} onChange={(event) => setSizingMethod(event.target.value as SizingMethod)}>
-                  <option value="quantity">{baseAsset(preset.symbol)}</option>
-                  <option value="usd">USDT</option>
+                  {venueSizingMethods.map((method) => <option key={method.value} value={method.value}>{method.value === "quantity" ? venueSchema.instrumentRules.baseAsset : method.value === "usd" ? venueSchema.instrumentRules.quoteAsset : "Equity %"}</option>)}
                 </select>
               </div>
             </label>
@@ -411,34 +555,57 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
             <div className="bybit-order-summary">
               <span>Order Value <b>{formatUsd(estimatedNotional)}</b></span>
               <span>Required Margin <b>{marketKind === "spot" ? "--" : formatUsd(estimatedMargin)}</b></span>
+              <span>Entry Fee <b>{formatUsd(preview?.entryFee || 0)}</b></span>
+              <span>Exit Fee <b>{formatUsd(preview?.exitFee || 0)}</b></span>
               <span>Available After <b className={remainingBalance < 0 ? "negative" : ""}>{accountMetrics ? formatUsd(remainingBalance) : "--"}</b></span>
+              <span>Risk / Reward <b>{preview?.rewardRiskRatio ? `${preview.rewardRiskRatio.toFixed(2)} R` : "--"}</b></span>
             </div>
 
-            <label className="bybit-check"><input type="checkbox" checked={tpSlEnabled} onChange={(event) => setTpSlEnabled(event.target.checked)} /> TP/SL</label>
+            <label className="bybit-check"><input type="checkbox" disabled={reduceOnly} checked={tpSlEnabled && !reduceOnly} onChange={(event) => setTpSlEnabled(event.target.checked)} /> TP/SL</label>
             {tpSlEnabled && (
               <div className="bybit-tpsl-row">
                 <label><span>Take Profit</span><div className="bybit-suffix-input"><input value={takeProfit} onChange={(event) => setTakeProfit(event.target.value)} inputMode="decimal" /><b>USDT</b></div></label>
+                <label><span>TP Trigger</span><select value={tpTriggerBy} onChange={(event) => setTpTriggerBy(event.target.value as TriggerSource)}><option value="last">Last Price</option><option value="mark">Mark Price</option><option value="index">Index Price</option></select></label>
                 <label><span>Stop Loss</span><div className="bybit-suffix-input"><input value={stopLoss} onChange={(event) => setStopLoss(event.target.value)} inputMode="decimal" /><b>USDT</b></div></label>
+                <label><span>SL Trigger</span><select value={slTriggerBy} onChange={(event) => setSlTriggerBy(event.target.value as TriggerSource)}><option value="last">Last Price</option><option value="mark">Mark Price</option><option value="index">Index Price</option></select></label>
               </div>
             )}
 
-            <div className="bybit-order-options">
-              <label className="bybit-check"><input type="checkbox" disabled={!["limit", "stop-limit"].includes(orderType)} checked={postOnly && ["limit", "stop-limit"].includes(orderType)} onChange={(event) => setPostOnly(event.target.checked)} /> Post-Only</label>
-              {marketKind === "perpetual" && <label className="bybit-check"><input type="checkbox" checked={reduceOnly} onChange={(event) => setReduceOnly(event.target.checked)} /> Reduce-Only</label>}
-              {["limit", "stop-limit"].includes(orderType) && <select aria-label="Time in force" value={timeInForce} onChange={(event) => setTimeInForce(event.target.value as TimeInForce)}><option value="gtc">GTC</option><option value="ioc">IOC</option><option value="fok">FOK</option></select>}
+            <details className="bybit-advanced" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
+              <summary>Advanced Settings</summary>
+              <div className="bybit-order-options">
+                <label className="bybit-check"><input type="checkbox" disabled={!["limit", "stop-limit"].includes(orderType)} checked={postOnly && ["limit", "stop-limit"].includes(orderType)} onChange={(event) => setPostOnly(event.target.checked)} /> Post-Only</label>
+                {venueSchema.featureFlags.showReduceOnly && <label className="bybit-check"><input type="checkbox" checked={reduceOnly} onChange={(event) => setReduceOnly(event.target.checked)} /> Reduce-Only</label>}
+                {["limit", "stop-limit"].includes(orderType) && <select aria-label="Time in force" value={timeInForce} onChange={(event) => setTimeInForce(event.target.value as TimeInForce)}>{venueSchema.supportedTimeInForce.map((tif) => <option key={tif} value={tif}>{tif.toUpperCase()}</option>)}</select>}
+              </div>
+              {orderType === "market" && <label className="bybit-slippage"><span>Slippage Tolerance</span><div className="bybit-suffix-input"><input value={slippageTolerance} min="0.01" max="10" step="0.01" onChange={(event) => setSlippageTolerance(clampNumber(Number(event.target.value || 0.01), 0.01, 10))} inputMode="decimal" /><b>%</b></div></label>}
+              <p>{orderType === "market" ? `${venueSchema.venueLabel} executes market orders using venue-protected IOC behavior.` : "Post-Only cancels instead of taking liquidity."}</p>
+            </details>
+
+            <div className="venue-account-metrics">
+              <div><span>Total Equity</span><b>{maskMetric(accountMetrics?.equityUsd, balancesVisible)}</b></div>
+              <div><span>Available Margin</span><b>{maskMetric(accountMetrics?.availableBalanceUsd, balancesVisible)}</b></div>
+              <div><span>Margin Balance</span><b>{maskMetric(accountMetrics?.marginBalanceUsd, balancesVisible)}</b></div>
+              <div><span>Initial Margin</span><b>{maskMetric(accountMetrics?.initialMarginUsd, balancesVisible)}</b></div>
+              <div><span>Maintenance</span><b>{maskMetric(accountMetrics?.maintenanceMarginUsd, balancesVisible)}</b></div>
+              <div><span>Unrealized PnL</span><b>{maskMetric(accountMetrics?.unrealizedPnlUsd, balancesVisible)}</b></div>
+              <div><span>Risk Ratio</span><b>{!balancesVisible ? "HIDDEN" : accountMetrics?.accountMmRate === null || accountMetrics?.accountMmRate === undefined ? "--" : `${(accountMetrics.accountMmRate * 100).toFixed(2)}%`}</b></div>
             </div>
 
-            {(status || accountSyncError || accountSync?.executionState?.readinessReason || exceedsServerNotional) && (
-              <div className="bybit-ticket-status">{status || accountSyncError || accountSync?.executionState?.readinessReason || `Order value exceeds the account limit of ${formatUsd(serverMaxNotional)}.`}</div>
-            )}
+            {ticketMessage && <div className="bybit-ticket-status">{ticketMessage}</div>}
+
+            <div className="venue-order-intent">
+              <b>{side === "buy" ? "BUY" : "SELL"} {venueSchema.instrumentRules.symbol} {venueSchema.marketType.toUpperCase()}</b>
+              <span>{formatOrderStatus(orderType)} / {effectiveSizingMethod === "usd" ? formatUsd(effectiveSize) : `${orderValidation.normalizedQuantity || 0} ${venueSchema.instrumentRules.baseAsset}`} / {marketKind === "spot" ? "Spot" : `${leverage}x ${titleCase(marginMode)}`}</span>
+            </div>
 
             <button
               type="button"
-              disabled={exceedsAvailableBalance || exceedsServerNotional || !accountMetrics || selectedConnection.health.permissions.trading !== true}
+              disabled={!orderValidation.valid || exceedsAvailableBalance || exceedsServerNotional || !accountMetrics || !venueSchema.executionReady || modeUpdatePending}
               className={side === "buy" ? "bybit-submit buy" : "bybit-submit sell"}
               onClick={submit}
             >
-              {marketKind === "spot" ? `${side === "buy" ? "Buy" : "Sell"} ${baseAsset(preset.symbol)}` : side === "buy" ? "Open Long" : "Open Short"}
+              {marketKind === "spot" ? `${side === "buy" ? "Buy" : "Sell"} ${venueSchema.instrumentRules.baseAsset}` : side === "buy" ? "Long / Buy" : "Short / Sell"}
             </button>
           </div>
         ) : (
@@ -448,14 +615,6 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
               <label><input type="checkbox" checked={personalDestination} onChange={(event) => setPersonalDestination(event.target.checked)} /> Personal Portfolio</label>
               <label><input type="checkbox" checked={allocationDestination} onChange={(event) => setAllocationDestination(event.target.checked)} /> Allocation Engine</label>
             </div>
-
-            {mainnetReadiness.mainnet && (
-              <div className={mainnetValidation.enabled ? "mainnet-validation-panel active" : "mainnet-validation-panel"}>
-                <div><span>Live Mainnet Validation</span><b>{mainnetValidation.enabled ? "ENABLED" : "OFF"}</b></div>
-                <p>Real protocol orders require session opt-in, relay readiness, trading permission, and risk approval.</p>
-                <button type="button" onClick={() => setMainnetValidation(mainnetValidation.enabled ? disableMainnetValidationMode() : promptEnableMainnetValidationMode())}>{mainnetValidation.enabled ? "Disable Live Mode" : "Enable Live Mode"}</button>
-              </div>
-            )}
 
             <div className="pm-segment">
               <button type="button" className={side === "buy" ? "active" : ""} onClick={() => setSide("buy")}>Buy / Long</button>
@@ -491,13 +650,15 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
   );
 }
 
-function formatConnectionOption(connection: ConnectionDiagnostics) {
+function formatConnectionOption(connection: ConnectionDiagnostics, sync: ExchangeAccountSyncPayload | null = null) {
   const latency = `${connection.health.latencyMs}ms`;
   if (connection.category === "wallet") {
     const address = connection.walletAddress ? `${connection.walletAddress.slice(0, 6)}...${connection.walletAddress.slice(-4)}` : "wallet";
     return `${connection.label} / ${address} / ${connection.status.toUpperCase()} / ${latency}`;
   }
-  return `${connection.label} / ${connection.provider.toUpperCase()} / ${connection.status.toUpperCase()} / ${latency}`;
+  const accountType = sync?.accountMetrics.accountType || String(connection.metadata.accountMode || "ACCOUNT");
+  const balance = sync ? ` / ${formatVenueNumber(sync.accountMetrics.availableBalanceUsd)} USDT` : "";
+  return `${connection.label} / ${connection.provider.toUpperCase()} / ${accountType} / ${connection.status.toUpperCase()}${balance} / ${latency}`;
 }
 
 function buildExecutionAccount(connection: ConnectionDiagnostics, sync: ExchangeAccountSyncPayload | null): PortfolioAccount {
@@ -556,4 +717,35 @@ function formatBybitSymbol(symbol: string) {
   const base = baseAsset(normalized);
   const quote = normalized.slice(base.length) || "USDT";
   return `${base}/${quote}`;
+}
+
+function maskMetric(value: number | undefined, visible: boolean) {
+  if (!visible) return "HIDDEN";
+  return value === undefined ? "--" : formatUsd(value);
+}
+
+function titleCase(value: string) {
+  return value ? `${value[0].toUpperCase()}${value.slice(1)}` : value;
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
+function formatOrderStatus(status: string) {
+  return status.replace(/-/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function formatExecutionError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "Order unavailable.");
+  if (/minimum.*notional|below Bybit minimum notional/i.test(message)) return message.replace(/^.*?Order notional/i, "Order value");
+  if (/quantity step/i.test(message)) return "Order quantity does not match the venue quantity increment.";
+  if (/tick size/i.test(message)) return "Order price does not match the venue price increment.";
+  if (/insufficient|available balance|available margin/i.test(message)) return message;
+  if (/private.*stream|reconnect/i.test(message)) return "Order unavailable: Bybit account synchronization is reconnecting.";
+  if (/trading.*disabled|read-only/i.test(message)) return "Order unavailable: this Bybit API key is not enabled for trading.";
+  if (/service.?role|allowlist|environment|supabase|validation mode/i.test(message)) return "Order unavailable. Open Runtime & Certification in Connections for details.";
+  if (/HTTP 5\d\d|server error/i.test(message)) return "Order unavailable: the venue connection is temporarily unavailable.";
+  return message;
 }

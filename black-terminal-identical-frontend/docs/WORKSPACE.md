@@ -140,10 +140,19 @@ examples/
   indicators/python/          Example Python indicator scripts
 ```
 
+## Chapter XIII Workspace State
+
+- Venue-native execution schemas: `src/execution/venueExecutionSchema.ts`
+- Execution algorithm truth registry: `src/execution/executionAlgorithmRegistry.ts`
+- Deterministic ticket tests: `scripts/venue-execution-tests.js`
+- Bybit Market, Limit and Conditional controls are schema-driven.
+- Runtime/certification controls are collapsed under the Positions connection panel.
+- No Chapter XIII Supabase migration is required.
+
 ## Current Gaps
 
 - Market data has a Black Core adapter foundation, but more venue paths still need production hardening.
-- Exchange adapters are now certification-gated. Bybit is read-only account validation, most CEX venues are market-data-only, wallets are signer-only, and unsupported protocol/institutional adapters stay deferred until real implementations exist.
+- Exchange adapters are certification-gated. Bybit has venue-native order routing but remains partially certified pending live evidence; most CEX venues are market-data-only, wallets are signer-only, and unsupported protocol/institutional adapters stay deferred.
 - Indicator execution is documented and typed but not implemented.
 - Account trading has Vercel/Supabase and Bybit certification foundations, but Bybit is not production-certified until the private-stream worker and tiny live validation evidence are recorded. More broker adapters and DEX protocol adapters are still required.
 - Hyperliquid has a server relay and controlled mainnet validation guard, but production-ready status requires real testnet and small-order mainnet validation evidence.

@@ -51,7 +51,9 @@ export default async function handler(req, res) {
       dailyPnl
     });
     const estimatedFees = risk.notional * 0.0004;
-    const estimatedMargin = risk.notional / Math.max(1, Number(riskControls.max_leverage || 1));
+    const estimatedMargin = req.body.marketKind === "spot"
+      ? risk.notional
+      : risk.notional / Math.max(1, Number(req.body.leverage || 1));
     let status = "rejected";
     let rejectionReason = risk.reasons.join(" ");
     let exchangeOrderId = null;
@@ -116,7 +118,7 @@ export default async function handler(req, res) {
             timeInForce: req.body.timeInForce || "gtc",
             source: req.body.source || "order-ticket",
             destinations: req.body.destinations || ["personal-portfolio"]
-          });
+          }, venueValidation);
           status = "accepted";
           rejectionReason = null;
           exchangeOrderId = exchangeResult.exchangeOrderId || null;

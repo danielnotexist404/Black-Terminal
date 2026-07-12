@@ -6,6 +6,7 @@ const BYBIT_DEFAULT_BASE_URLS = ["https://api.bybit.com", "https://api.bytick.co
 const RECV_WINDOW = "5000";
 const BYBIT_REQUEST_TIMEOUT_MS = Math.max(1500, Math.min(8000, Number(process.env.BYBIT_REQUEST_TIMEOUT_MS || 4500)));
 const BYBIT_RUNTIME_REGION = process.env.VERCEL_REGION || process.env.AWS_REGION || "local";
+const bybitPublicMetadataCache = new Map();
 const BYBIT_MAINNET_LIVE_CONFIRMATION = "LIVE";
 const BYBIT_ORDER_STATUS_TO_EXECUTION_STATUS = {
   created: "submitted",
@@ -63,9 +64,12 @@ export async function getBybitServerTime() {
 }
 
 export async function getBybitInstrumentMetadata({ category = "linear", symbol = "BTCUSDT" } = {}) {
+  const cacheKey = `instrument:${category}:${symbol}`;
+  const cached = readBybitPublicCache(cacheKey);
+  if (cached) return cached;
   const response = await bybitPublicRequest("/v5/market/instruments-info", { category, symbol });
   const list = response?.list || [];
-  return list.map((instrument) => ({
+  const metadata = list.map((instrument) => ({
     venueId: "bybit",
     nativeSymbol: instrument.symbol,
     canonicalBase: instrument.baseCoin || symbol.replace(/USDT$/, ""),
@@ -76,23 +80,53 @@ export async function getBybitInstrumentMetadata({ category = "linear", symbol =
     expiry: instrument.deliveryTime ? new Date(Number(instrument.deliveryTime)).toISOString() : null,
     contractMultiplier: nullableNumber(instrument.lotSizeFilter?.qtyStep) || 1,
     tickSize: nullableNumber(instrument.priceFilter?.tickSize),
-    quantityStep: nullableNumber(instrument.lotSizeFilter?.qtyStep),
+    quantityStep: nullableNumber(instrument.lotSizeFilter?.qtyStep || instrument.lotSizeFilter?.basePrecision),
     minQuantity: nullableNumber(instrument.lotSizeFilter?.minOrderQty),
-    minNotional: nullableNumber(instrument.lotSizeFilter?.minNotionalValue),
-    maxQuantity: nullableNumber(instrument.lotSizeFilter?.maxOrderQty),
+    minNotional: nullableNumber(instrument.lotSizeFilter?.minNotionalValue || instrument.lotSizeFilter?.minOrderAmt),
+    maxQuantity: nullableNumber(instrument.lotSizeFilter?.maxOrderQty || instrument.lotSizeFilter?.maxLimitOrderQty),
     pricePrecision: precisionFromStep(instrument.priceFilter?.tickSize),
-    quantityPrecision: precisionFromStep(instrument.lotSizeFilter?.qtyStep),
+    quantityPrecision: precisionFromStep(instrument.lotSizeFilter?.qtyStep || instrument.lotSizeFilter?.basePrecision),
     leverageLimits: {
       min: nullableNumber(instrument.leverageFilter?.minLeverage),
       max: nullableNumber(instrument.leverageFilter?.maxLeverage),
       step: nullableNumber(instrument.leverageFilter?.leverageStep)
     },
-    supportedMarginModes: category === "spot" ? [] : ["cross", "isolated"],
+    supportedMarginModes: category === "spot" ? [] : ["cross", "isolated", "portfolio"],
     supportedTimeInForce: ["GTC", "IOC", "FOK", "PostOnly"],
     supportedTriggerBehavior: { triggerOrders: category !== "spot", takeProfitStopLoss: category !== "spot" },
     tradingStatus: instrument.status || "unknown",
     raw: instrument
   }));
+  writeBybitPublicCache(cacheKey, metadata, 60_000);
+  return metadata;
+}
+
+export async function getBybitRiskLimits({ category = "linear", symbol = "BTCUSDT" } = {}) {
+  const cacheKey = `risk:${category}:${symbol}`;
+  const cached = readBybitPublicCache(cacheKey);
+  if (cached) return cached;
+  const response = await bybitPublicRequest("/v5/market/risk-limit", { category, symbol });
+  const riskLimits = (response?.list || []).map((tier) => ({
+    id: Number(tier.id || 0),
+    symbol: tier.symbol,
+    riskLimitValue: Number(tier.riskLimitValue || 0),
+    maintenanceMargin: Number(tier.maintenanceMargin || 0),
+    initialMargin: Number(tier.initialMargin || 0),
+    maxLeverage: Number(tier.maxLeverage || 0),
+    lowestRisk: Number(tier.isLowestRisk || 0) === 1
+  }));
+  writeBybitPublicCache(cacheKey, riskLimits, 60_000);
+  return riskLimits;
+}
+
+export async function getBybitOrderPriceLimit({ category = "linear", symbol = "BTCUSDT" } = {}) {
+  const response = await bybitPublicRequest("/v5/market/price-limit", { category, symbol });
+  return {
+    symbol: response?.symbol || symbol,
+    maximumBuyPrice: Number(response?.buyLmt || 0),
+    minimumSellPrice: Number(response?.sellLmt || 0),
+    updatedAt: Number(response?.ts || Date.now())
+  };
 }
 
 export async function getBybitOpenOrders(credentials, { category = "linear", symbol } = {}) {
@@ -117,6 +151,18 @@ export async function getBybitOpenOrders(credentials, { category = "linear", sym
     timeInForce: order.timeInForce,
     updatedAt: Number(order.updatedTime || Date.now())
   }));
+}
+
+export async function getBybitAccountInfo(credentials) {
+  const response = await bybitRequest(credentials, "GET", "/v5/account/info", {});
+  const marginMode = String(response?.marginMode || "REGULAR_MARGIN");
+  return {
+    unifiedMarginStatus: Number(response?.unifiedMarginStatus || 0),
+    accountGeneration: Number(response?.unifiedMarginStatus || 0) >= 5 ? "UTA2.0" : "UTA",
+    marginMode: marginMode === "ISOLATED_MARGIN" ? "isolated" : marginMode === "PORTFOLIO_MARGIN" ? "portfolio" : "cross",
+    rawMarginMode: marginMode,
+    updatedAt: Number(response?.updatedTime || Date.now())
+  };
 }
 
 export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = {}) {
@@ -247,8 +293,8 @@ export async function syncBybitAccountToSupabase(supabase, account, credentials,
   };
 }
 
-export async function placeBybitOrder(credentials, order) {
-  const validation = await validateBybitOrderDraft(credentials, order);
+export async function placeBybitOrder(credentials, order, prevalidated = null) {
+  const validation = prevalidated || await validateBybitOrderDraft(credentials, order);
   if (!validation.ok) {
     const error = new Error(validation.reasons.join(" "));
     error.statusCode = 400;
@@ -267,6 +313,11 @@ export async function placeBybitOrder(credentials, order) {
     timeInForce: normalizeBybitTimeInForce(order.timeInForce, order),
     orderLinkId: order.clientOrderId || order.internalOrderId || createBybitClientOrderId()
   };
+  if (category === "spot" && orderType === "Market") body.marketUnit = "baseCoin";
+  if (orderType === "Market" && Number(order.slippageTolerancePercent) > 0) {
+    body.slippageToleranceType = "Percent";
+    body.slippageTolerance = String(order.slippageTolerancePercent);
+  }
 
   if (orderType === "Limit" && order.limitPrice) {
     body.price = formatBybitNumber(order.limitPrice, validation.metadata?.pricePrecision);
@@ -275,26 +326,28 @@ export async function placeBybitOrder(credentials, order) {
   if (order.stopPrice) {
     body.triggerPrice = formatBybitNumber(order.stopPrice, validation.metadata?.pricePrecision);
     body.triggerDirection = Number(order.stopPrice) >= Number(order.referencePrice || order.limitPrice || 0) ? 1 : 2;
+    if (category !== "spot") body.triggerBy = normalizeBybitTriggerSource(order.triggerBy);
   }
 
   if (order.takeProfit) {
     body.takeProfit = formatBybitNumber(order.takeProfit, validation.metadata?.pricePrecision);
+    if (category !== "spot") body.tpTriggerBy = normalizeBybitTriggerSource(order.tpTriggerBy);
   }
 
   if (order.stopLoss) {
     body.stopLoss = formatBybitNumber(order.stopLoss, validation.metadata?.pricePrecision);
+    if (category !== "spot") body.slTriggerBy = normalizeBybitTriggerSource(order.slTriggerBy);
   }
 
   if (category !== "spot" && order.reduceOnly) {
     body.reduceOnly = true;
   }
 
-  if (category !== "spot" && order.leverage) {
-    await setBybitLeverage(credentials, {
-      category,
-      symbol: order.symbol,
-      leverage: order.leverage
-    });
+  if (category !== "spot" && order.positionIdx !== undefined) {
+    body.positionIdx = Number(order.positionIdx);
+  }
+  if (category !== "spot" && (order.takeProfit || order.stopLoss)) {
+    body.tpslMode = order.tpslMode === "partial" ? "Partial" : "Full";
   }
 
   const response = await bybitRequest(credentials, "POST", "/v5/order/create", {}, body);
@@ -468,23 +521,25 @@ export async function setBybitLeverage(credentials, { category = "linear", symbo
 }
 
 export async function switchBybitMarginMode(credentials, { category = "linear", symbol, marginMode, leverage, buyLeverage, sellLeverage }) {
-  if (!symbol) throw new Error("Bybit margin-mode update requires a symbol.");
-  if (!["cross", "isolated"].includes(marginMode)) throw new Error("Bybit margin mode must be cross or isolated.");
-  const nextLeverage = leverage || buyLeverage || sellLeverage;
-  if (!nextLeverage) throw new Error("Bybit margin-mode switch requires explicit leverage.");
-  const response = await bybitRequest(credentials, "POST", "/v5/position/switch-isolated", {}, {
-    category,
-    symbol,
-    tradeMode: marginMode === "cross" ? 0 : 1,
-    buyLeverage: String(buyLeverage || nextLeverage),
-    sellLeverage: String(sellLeverage || nextLeverage)
+  if (!["cross", "isolated", "portfolio"].includes(marginMode)) throw new Error("Bybit margin mode must be cross, isolated or portfolio.");
+  const response = await bybitRequest(credentials, "POST", "/v5/account/set-margin-mode", {}, {
+    setMarginMode: marginMode === "cross" ? "REGULAR_MARGIN" : marginMode === "isolated" ? "ISOLATED_MARGIN" : "PORTFOLIO_MARGIN"
   });
+  const reasons = Array.isArray(response?.reasons) ? response.reasons.filter((reason) => reason?.reasonCode || reason?.reasonMsg) : [];
+  if (reasons.length > 0) {
+    const error = new Error(reasons.map((reason) => reason.reasonMsg || reason.reasonCode).join(" "));
+    error.statusCode = 400;
+    throw error;
+  }
+  const nextLeverage = leverage || buyLeverage || sellLeverage;
+  const leverageReport = symbol && nextLeverage
+    ? await setBybitLeverage(credentials, { category, symbol, leverage: nextLeverage, buyLeverage, sellLeverage })
+    : null;
   return {
     status: "accepted",
-    symbol,
     marginMode,
-    buyLeverage: Number(buyLeverage || nextLeverage),
-    sellLeverage: Number(sellLeverage || nextLeverage),
+    accountWide: true,
+    leverageReport,
     raw: response
   };
 }
@@ -510,10 +565,32 @@ export async function switchBybitPositionMode(credentials, { category = "linear"
 export async function validateBybitOrderDraft(credentials, order) {
   const category = order.marketKind === "spot" ? "spot" : "linear";
   const symbol = normalizeBybitSymbol(order.symbol);
-  const metadata = (await getBybitInstrumentMetadata({ category, symbol }))[0];
+  const [metadataRows, priceLimit, riskLimits, positionRows] = await Promise.all([
+    getBybitInstrumentMetadata({ category, symbol }),
+    getBybitOrderPriceLimit({ category, symbol }),
+    category === "spot" ? Promise.resolve([]) : getBybitRiskLimits({ category, symbol }),
+    category === "spot" ? Promise.resolve([]) : getBybitPositions(credentials, { symbol, includeEmpty: true })
+  ]);
+  const metadata = metadataRows[0];
   const normalizedOrder = normalizeBybitSizing(order, metadata);
+  const result = evaluateBybitOrderDraftAgainstMetadata(metadata, normalizedOrder, { category, symbol });
+  const position = positionRows.find((row) => row.positionIdx === Number(order.positionIdx || 0)) || positionRows[0];
+  const riskTier = riskLimits.find((tier) => tier.id === position?.riskId) || riskLimits.find((tier) => tier.lowestRisk) || null;
+  const limitPrice = Number(normalizedOrder.limitPrice || 0);
+  if (normalizedOrder.side === "buy" && limitPrice > 0 && priceLimit.maximumBuyPrice > 0 && limitPrice > priceLimit.maximumBuyPrice) {
+    result.reasons.push(`Buy price exceeds Bybit current price limit ${priceLimit.maximumBuyPrice}.`);
+  }
+  if (normalizedOrder.side === "sell" && limitPrice > 0 && priceLimit.minimumSellPrice > 0 && limitPrice < priceLimit.minimumSellPrice) {
+    result.reasons.push(`Sell price is below Bybit current price limit ${priceLimit.minimumSellPrice}.`);
+  }
+  if (normalizedOrder.leverage && riskTier?.maxLeverage && Number(normalizedOrder.leverage) > riskTier.maxLeverage) {
+    result.reasons.push(`Leverage exceeds the current Bybit risk-tier maximum ${riskTier.maxLeverage}x.`);
+  }
   return {
-    ...evaluateBybitOrderDraftAgainstMetadata(metadata, normalizedOrder, { category, symbol }),
+    ...result,
+    ok: result.reasons.length === 0,
+    priceLimit,
+    riskTier,
     requestedSizingMethod: order.sizingMethod || order.quantityMode || "quantity"
   };
 }
@@ -561,6 +638,12 @@ export function evaluateBybitOrderDraftAgainstMetadata(metadata, order, context 
   }
   if (order.postOnly && order.timeInForce && order.timeInForce !== "gtc") {
     reasons.push("Bybit post-only orders must use GTC/PostOnly behavior.");
+  }
+  if (order.reduceOnly && (order.takeProfit || order.stopLoss)) {
+    reasons.push("Bybit does not allow attached take-profit or stop-loss on a reduce-only order.");
+  }
+  if (order.slippageTolerancePercent !== undefined && (Number(order.slippageTolerancePercent) < 0.01 || Number(order.slippageTolerancePercent) > 10)) {
+    reasons.push("Bybit market-order slippage tolerance must be between 0.01% and 10%.");
   }
 
   return {
@@ -695,6 +778,7 @@ export async function getBybitWalletSnapshot(credentials) {
       availableBalanceUsd: nullableNumber(account?.totalAvailableBalance) ?? Math.max(0, walletBalanceUsd - initialMarginUsd),
       initialMarginUsd,
       maintenanceMarginUsd: nullableNumber(account?.totalMaintenanceMargin) ?? 0,
+      unrealizedPnlUsd: nullableNumber(account?.totalPerpUPL) ?? 0,
       accountImRate: nullableNumber(account?.accountIMRate),
       accountMmRate: nullableNumber(account?.accountMMRate),
       updatedAt: Date.now()
@@ -706,10 +790,10 @@ export async function getBybitBalances(credentials) {
   return (await getBybitWalletSnapshot(credentials)).balances;
 }
 
-export async function getBybitPositions(credentials) {
+export async function getBybitPositions(credentials, options = {}) {
   const response = await bybitRequest(credentials, "GET", "/v5/position/list", {
     category: "linear",
-    settleCoin: "USDT",
+    ...(options.symbol ? { symbol: String(options.symbol).toUpperCase() } : { settleCoin: "USDT" }),
     limit: "200"
   });
   const rows = response?.list || [];
@@ -732,10 +816,15 @@ export async function getBybitPositions(credentials) {
         liquidationPrice: nullableNumber(position.liqPrice),
         stopLoss: nullableNumber(position.stopLoss),
         takeProfit: nullableNumber(position.takeProfit),
+        positionIdx: Number(position.positionIdx || 0),
+        positionMode: Number(position.positionIdx || 0) === 0 ? "one-way" : "hedge",
+        marginMode: Number(position.tradeMode || 0) === 1 ? "isolated" : "cross",
+        riskId: Number(position.riskId || 0),
+        positionValue: Number(position.positionValue || 0),
         openedAt: Number(position.createdTime || position.updatedTime || Date.now())
       };
     })
-    .filter((position) => position.quantity > 0 && position.direction !== "flat");
+    .filter((position) => options.includeEmpty || (position.quantity > 0 && position.direction !== "flat"));
 }
 
 async function bybitRequest(credentials, method, path, query = {}, body) {
@@ -998,6 +1087,7 @@ function emptyBybitAccountMetrics() {
     availableBalanceUsd: 0,
     initialMarginUsd: 0,
     maintenanceMarginUsd: 0,
+    unrealizedPnlUsd: 0,
     accountImRate: null,
     accountMmRate: null,
     updatedAt: Date.now()
@@ -1020,10 +1110,29 @@ export function normalizeBybitTimeInForce(timeInForce, order = {}) {
   return "GTC";
 }
 
+export function normalizeBybitTriggerSource(value) {
+  if (value === "mark") return "MarkPrice";
+  if (value === "index") return "IndexPrice";
+  return "LastPrice";
+}
+
 function nullableNumber(value) {
   if (value === undefined || value === null || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readBybitPublicCache(key) {
+  const cached = bybitPublicMetadataCache.get(key);
+  if (!cached || cached.expiresAt <= Date.now()) {
+    bybitPublicMetadataCache.delete(key);
+    return null;
+  }
+  return cached.value;
+}
+
+function writeBybitPublicCache(key, value, ttlMs) {
+  bybitPublicMetadataCache.set(key, { value, expiresAt: Date.now() + ttlMs });
 }
 
 export function precisionFromStep(value) {

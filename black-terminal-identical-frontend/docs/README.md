@@ -32,6 +32,7 @@ Every meaningful platform change must update documentation in the same work cycl
 - `PHASE3_CHAPTER10_AUDIT_AND_LIVE_READINESS.md` - architectural audit, integration review, controlled Hyperliquid mainnet validation mode, and production-readiness checklist.
 - `PHASE3_CHAPTER11_UNIVERSAL_CONNECTIVITY.md` - venue certification matrix, universal connectivity truth states, and production adapter gating.
 - `PHASE3_CHAPTER12_EXCHANGE_CERTIFICATION.md` - Wave 1 exchange certification implementation, Bybit diagnostics, and mainnet execution gates.
+- `PHASE3_CHAPTER13_VENUE_NATIVE_EXECUTION_TICKET.md` - capability-driven venue ticket, Bybit functional parity, live instrument rules, and execution algorithm registry.
 - `PHASE4_PROFESSIONAL_NETWORK.md` - Professional Profile, Research Feed, follow graph, Investment Groups, join requests, and Trading Room foundation.
 
 ## Specialist Docs

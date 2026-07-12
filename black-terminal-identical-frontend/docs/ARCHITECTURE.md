@@ -297,3 +297,10 @@ exchange orders are required to enforce it.
 - Keep generated market data and sample indicators under `examples/`.
 - Add real tests once scale math, candle aggregation, and indicator protocol become shared code.
 - Prefer typed arrays for large candle/history buffers when the mock feed is replaced.
+## Phase III Chapter XIII Venue-Native Ticket
+
+The Unified Execution Ticket is driven by `VenueExecutionSchema`, not by a universal collection of exchange fields. A provider resolves product capabilities, order modes, sizing modes, protection, margin and position modes, live account metrics, instrument rules and execution readiness.
+
+`executionAlgorithmRegistry` exposes only ready native or Black Core algorithms. Bybit currently exposes native Market, Limit and Conditional modes. Chase Limit, Scaled Order, TWAP, POV and Iceberg remain registered but hidden because their persistent workers are not deployed.
+
+Certification controls are administrative connection diagnostics and do not appear in Unified Ticket or DOM Pro. Bybit margin changes use the V5 account-level margin endpoint, leverage changes are explicit and confirmed, and ordinary order placement never silently changes either setting.

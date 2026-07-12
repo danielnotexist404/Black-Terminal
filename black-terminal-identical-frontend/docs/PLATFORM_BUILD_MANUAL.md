@@ -329,12 +329,21 @@ npm run bybit:private-stream
 npm run perf:baseline
 npm run perf:stress
 npm run test:bybit-certification
+npm run test:venue-execution
 npm run certify:bybit-mainnet
 npm run check:rust
 npm run check
 npm run tauri:dev
 npm run tauri:build
 ```
+
+## Venue-Native Execution Development
+
+Add a venue by supplying a `VenueExecutionSchema` provider and truthful algorithm definitions. The provider maps venue/account/product state into normalized order modes, sizing, protection, margin, position, metric and instrument-rule capabilities. Do not add venue conditionals throughout the ticket.
+
+An advanced execution mode is production-visible only after its server worker, OMS lifecycle, recovery behavior, risk controls and deterministic tests are complete. Synthetic modes must be labeled Black Core algorithms.
+
+Operational readiness and certification controls belong in Connections -> Runtime & Certification. Normal order entry receives only normalized readiness and a concise blocker.
 
 ## Definition Of Done For Future Platform Work
 

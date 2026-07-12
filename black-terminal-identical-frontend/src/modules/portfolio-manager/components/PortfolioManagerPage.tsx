@@ -686,7 +686,7 @@ export function PositionsWorkspace({
                     const certification = getVenueCertification(exchange.id);
                     return (
                       <option key={exchange.id} value={`cex:${exchange.id}`} disabled={!certification?.authReady}>
-                        {exchange.label} - {certification?.authReady ? "Read-only auth" : "Market data only"}
+                        {exchange.label} - {certification?.authReady ? "Secure account auth" : "Market data only"}
                       </option>
                     );
                   })}
@@ -719,7 +719,7 @@ export function PositionsWorkspace({
                 <input placeholder="Passphrase, if required" type="password" value={connection.passphrase} onChange={(event) => setConnection((current) => ({ ...current, passphrase: event.target.value }))} />
                 {connectStatus && <div className="positions-connect-status">{connectStatus}</div>}
                 <button className="primary" disabled={!selectedCexCertification?.authReady} onClick={handleConnectCex}>
-                  {selectedCexCertification?.authReady ? "Validate Read-Only Account" : "Adapter Not Certified"}
+                  {selectedCexCertification?.authReady ? "Connect Account" : "Adapter Not Certified"}
                 </button>
               </>
             ) : (
@@ -1030,40 +1030,35 @@ function ExecutionDock({
         {venue.health.permissions.withdrawal && <em>WITHDRAWAL API PERMISSION DETECTED. USE TRADING-ONLY KEYS.</em>}
       </div>
 
-      {isBybit && (
-        <div className={bybitRuntimeStatus?.readiness.executionReady ? "bybit-cert-panel ready" : "bybit-cert-panel"}>
-          <div className="bybit-cert-head">
-            <span>Bybit Certification</span>
-            <b>{bybitRuntimeStatus?.certification.decision || "NOT CHECKED"}</b>
-          </div>
-          <div className="bybit-cert-grid">
-            <span>Worker <b>{bybitRuntimeStatus?.runtime.privateStreamAuthenticated ? "AUTH" : "BLOCKED"}</b></span>
-            <span>Clock <b>{bybitRuntimeStatus?.runtime.clockSkewMs ?? "?"}ms</b></span>
-            <span>Allowlist <b>{bybitRuntimeStatus?.safety.accountAllowlisted ? "YES" : "NO"}</b></span>
-            <span>Max Notional <b>{bybitRuntimeStatus?.safety.maxNotionalUsd || "?"}</b></span>
-          </div>
-          {bybitRuntimeStatus?.readiness.blockers?.[0] && <p>{bybitRuntimeStatus.readiness.blockers[0]}</p>}
-          <div className="bybit-cert-actions">
-            <button type="button" onClick={refreshBybitRuntimeStatus}>Refresh Runtime Status</button>
-            <button type="button" onClick={runDiagnostics}>Run Pre-flight</button>
-          </div>
-        </div>
-      )}
-
-      {mainnetReadiness.mainnet && (
-        <div className={mainnetValidation.enabled ? "mainnet-validation-panel active compact" : "mainnet-validation-panel compact"}>
-          <div>
-            <span>Live Mainnet Validation</span>
-            <b>{mainnetValidation.enabled ? "ENABLED" : "OFF"}</b>
-          </div>
-          <p>Live Hyperliquid orders stay blocked until this browser session is explicitly enabled.</p>
-          <button
-            type="button"
-            onClick={() => setMainnetValidation(mainnetValidation.enabled ? disableMainnetValidationMode() : promptEnableMainnetValidationMode())}
-          >
-            {mainnetValidation.enabled ? "Disable" : "Enable"}
-          </button>
-        </div>
+      {(isBybit || (mainnetReadiness.mainnet && !isBybit)) && (
+        <details className="connection-runtime-panel">
+          <summary>Runtime &amp; Certification</summary>
+          {isBybit && (
+            <div className={bybitRuntimeStatus?.readiness.executionReady ? "bybit-cert-panel ready" : "bybit-cert-panel"}>
+              <div className="bybit-cert-head">
+                <span>Bybit Certification</span>
+                <b>{bybitRuntimeStatus?.certification.decision || "NOT CHECKED"}</b>
+              </div>
+              <div className="bybit-cert-grid">
+                <span>Worker <b>{bybitRuntimeStatus?.runtime.privateStreamAuthenticated ? "AUTH" : "BLOCKED"}</b></span>
+                <span>Clock <b>{bybitRuntimeStatus?.runtime.clockSkewMs ?? "?"}ms</b></span>
+                <span>Allowlist <b>{bybitRuntimeStatus?.safety.accountAllowlisted ? "YES" : "NO"}</b></span>
+                <span>Max Notional <b>{bybitRuntimeStatus?.safety.maxNotionalUsd || "?"}</b></span>
+              </div>
+              {bybitRuntimeStatus?.readiness.blockers?.[0] && <p>{bybitRuntimeStatus.readiness.blockers[0]}</p>}
+              <div className="bybit-cert-actions">
+                <button type="button" onClick={refreshBybitRuntimeStatus}>Refresh Runtime Status</button>
+                <button type="button" onClick={runDiagnostics}>Run Pre-flight</button>
+              </div>
+            </div>
+          )}
+          {mainnetReadiness.mainnet && !isBybit && (
+            <div className={mainnetValidation.enabled ? "mainnet-validation-panel active compact" : "mainnet-validation-panel compact"}>
+              <div><span>Protocol Mainnet Validation</span><b>{mainnetValidation.enabled ? "ENABLED" : "OFF"}</b></div>
+              <button type="button" onClick={() => setMainnetValidation(mainnetValidation.enabled ? disableMainnetValidationMode() : promptEnableMainnetValidationMode())}>{mainnetValidation.enabled ? "Disable" : "Enable"}</button>
+            </div>
+          )}
+        </details>
       )}
 
       <div className="execution-mode-row">

@@ -51,7 +51,8 @@ export type ExecutionSource =
 
 export type ExecutionDestination = "personal-portfolio" | "allocation-engine" | "simulation" | "replay" | "paper-trading";
 export type SizingMethod = "quantity" | "contracts" | "coin" | "usd" | "portfolioPct" | "equityPct" | "riskPct" | "fixedDollarRisk";
-export type MarginMode = "cross" | "isolated";
+export type MarginMode = "cross" | "isolated" | "portfolio";
+export type TriggerSource = "last" | "mark" | "index";
 
 export type OrderRequest = {
   accountId: string;
@@ -72,6 +73,12 @@ export type OrderRequest = {
   reduceOnly?: boolean;
   postOnly?: boolean;
   timeInForce?: TimeInForce;
+  triggerBy?: TriggerSource;
+  tpTriggerBy?: TriggerSource;
+  slTriggerBy?: TriggerSource;
+  tpslMode?: "full" | "partial";
+  positionIdx?: number;
+  slippageTolerancePercent?: number;
   clientOrderId?: string;
   internalOrderId?: string;
   source?: ExecutionSource;
@@ -115,6 +122,12 @@ export type ExecutionRequest = {
   stopPrice?: number;
   referencePrice?: number;
   timeInForce: TimeInForce;
+  triggerBy?: TriggerSource;
+  tpTriggerBy?: TriggerSource;
+  slTriggerBy?: TriggerSource;
+  tpslMode?: "full" | "partial";
+  positionIdx?: number;
+  slippageTolerancePercent?: number;
   leverage?: number;
   marginMode?: MarginMode;
   takeProfit?: number;

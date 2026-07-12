@@ -8,6 +8,7 @@ import {
   sendError
 } from "../../portfolio-api.js";
 import {
+  setBybitLeverage,
   switchBybitMarginMode,
   switchBybitPositionMode,
   validateBybitManagementGate
@@ -45,14 +46,22 @@ export default async function handler(req, res) {
     if (credentialError || !credential) throw credentialError || new Error("Missing encrypted credentials for account-mode action.");
     const credentials = decryptCredentialPayload(credential.encrypted_payload);
     const action = String(req.body.action);
-    const report = action === "switch-position-mode"
-      ? await switchBybitPositionMode(credentials, {
+    const report = action === "set-leverage"
+      ? await setBybitLeverage(credentials, {
+          category: req.body.category || "linear",
+          symbol: req.body.symbol,
+          leverage: req.body.leverage,
+          buyLeverage: req.body.buyLeverage,
+          sellLeverage: req.body.sellLeverage
+        })
+      : action === "switch-position-mode"
+        ? await switchBybitPositionMode(credentials, {
           category: req.body.category || "linear",
           symbol: req.body.symbol,
           settleCoin: req.body.settleCoin,
           positionMode: req.body.positionMode
         })
-      : await switchBybitMarginMode(credentials, {
+        : await switchBybitMarginMode(credentials, {
           category: req.body.category || "linear",
           symbol: req.body.symbol,
           marginMode: req.body.marginMode,
@@ -64,7 +73,7 @@ export default async function handler(req, res) {
     await supabase.from("execution_audit_logs").insert({
       user_id: user.id,
       account_id: account.id,
-      event_type: action === "switch-position-mode" ? "position_mode_switch_submitted" : "margin_mode_switch_submitted",
+      event_type: action === "set-leverage" ? "leverage_change_submitted" : action === "switch-position-mode" ? "position_mode_switch_submitted" : "margin_mode_switch_submitted",
       severity: "warning",
       message: `Bybit ${action} submitted explicitly.`,
       metadata: report

@@ -1964,3 +1964,7 @@ Capability rules:
 - `role = 'admin'` enables DOM Pro+ and HDLX Profile.
 - HDLX Profile user access is granted from Admin Panel by enabling `volumeProfile` for that user.
 - Optional direct capability grant: add `proprietary.hdlxProfile` to `bt_users.permissions`.
+
+## Phase III Chapter XIII
+
+No migration is required. Venue execution schemas, algorithm readiness, instrument rules and account metrics are runtime adapter data. Existing execution orders, audit logs, account snapshots and certification tables remain authoritative.

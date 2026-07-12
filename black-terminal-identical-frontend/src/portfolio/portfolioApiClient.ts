@@ -1,6 +1,6 @@
 import { supabase } from "../lib/supabase";
 import type { ConnectionRecord } from "../connectivity/types";
-import type { ExecutionDestination, ExecutionSource, MarginMode, OrderType, OrderUpdate, SizingMethod } from "../execution/types";
+import type { ExecutionDestination, ExecutionSource, MarginMode, OrderType, OrderUpdate, SizingMethod, TriggerSource } from "../execution/types";
 import type { ExchangeId, MarketKind } from "../market-data/types";
 import type { PortfolioPosition } from "../positions/types";
 import { defaultRiskControls } from "../risk/types";
@@ -57,6 +57,12 @@ export type PortfolioOrderDraft = {
   postOnly?: boolean;
   reduceOnly?: boolean;
   timeInForce?: "gtc" | "ioc" | "fok";
+  triggerBy?: TriggerSource;
+  tpTriggerBy?: TriggerSource;
+  slTriggerBy?: TriggerSource;
+  tpslMode?: "full" | "partial";
+  positionIdx?: number;
+  slippageTolerancePercent?: number;
   trailingStopEnabled?: boolean;
   trailingTrailBy?: number;
   trailingMode?: "percentage" | "usd" | "ticks" | "atr";
@@ -124,6 +130,7 @@ export type BybitAccountMetrics = {
   availableBalanceUsd: number;
   initialMarginUsd: number;
   maintenanceMarginUsd: number;
+  unrealizedPnlUsd: number;
   accountImRate: number | null;
   accountMmRate: number | null;
   updatedAt: number;
@@ -134,7 +141,26 @@ export type ExchangeAccountSyncPayload = {
   exchange: "bybit";
   network: "mainnet";
   balances: Array<{ asset: string; free: number; locked: number; total: number; usdValue: number }>;
-  positions: unknown[];
+  positions: Array<{
+    symbol: string;
+    direction: "long" | "short" | "flat";
+    quantity: number;
+    averagePrice: number;
+    currentPrice: number;
+    unrealizedPnl: number;
+    realizedPnl: number;
+    margin: number;
+    leverage: number;
+    liquidationPrice: number | null;
+    stopLoss: number | null;
+    takeProfit: number | null;
+    positionIdx: number;
+    positionMode: "one-way" | "hedge";
+    marginMode: "cross" | "isolated";
+    riskId: number;
+    positionValue: number;
+    openedAt: number;
+  }>;
   openOrders: unknown[];
   accountMetrics: BybitAccountMetrics;
   executionState: {
@@ -143,6 +169,46 @@ export type ExchangeAccountSyncPayload = {
     allowedSymbols: string[];
     maxNotionalUsd: number;
     readinessReason: string;
+  };
+  instrumentRules: {
+    nativeSymbol: string;
+    canonicalBase: string;
+    canonicalQuote: string;
+    settlementAsset: string;
+    tickSize: number;
+    quantityStep: number;
+    minQuantity: number;
+    minNotional: number;
+    maxQuantity: number;
+    pricePrecision: number;
+    quantityPrecision: number;
+    leverageLimits: { min: number; max: number; step: number };
+    supportedMarginModes: string[];
+    supportedTimeInForce: string[];
+    tradingStatus: string;
+  } | null;
+  selectedPosition: ExchangeAccountSyncPayload["positions"][number] | null;
+  accountState: {
+    unifiedMarginStatus: number;
+    accountGeneration: string;
+    marginMode: MarginMode;
+    rawMarginMode: string;
+    updatedAt: number;
+  };
+  riskLimits: Array<{
+    id: number;
+    symbol: string;
+    riskLimitValue: number;
+    maintenanceMargin: number;
+    initialMargin: number;
+    maxLeverage: number;
+    lowestRisk: boolean;
+  }>;
+  priceLimit: {
+    symbol: string;
+    maximumBuyPrice: number;
+    minimumSellPrice: number;
+    updatedAt: number;
   };
   externalStateChanged: boolean;
   syncedAt: string;
@@ -282,6 +348,28 @@ export async function submitPortfolioOrderViaApi(draft: PortfolioOrderDraft): Pr
   return mapOrder(data.order);
 }
 
+export async function updateBybitAccountModeViaApi(draft: {
+  accountId: string;
+  action: "set-leverage" | "switch-margin-mode" | "switch-position-mode";
+  symbol: string;
+  category?: "linear" | "inverse";
+  leverage?: number;
+  marginMode?: MarginMode;
+  positionMode?: "one-way" | "hedge";
+  mainnetConfirmed: boolean;
+  liveConfirmation: string;
+}): Promise<{ report: Record<string, unknown> } | null> {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+  const response = await fetch("/api/execution/account-mode", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(draft)
+  });
+  if (!response.ok) throw new Error(await readApiError(response));
+  return response.json();
+}
+
 export async function runExchangeAccountDiagnosticsViaApi(accountId: string, symbol = "BTCUSDT"): Promise<ExchangeDiagnosticsPayload | null> {
   const token = await getPortfolioApiToken();
   if (!token) return null;
@@ -300,7 +388,7 @@ export async function runExchangeAccountDiagnosticsViaApi(accountId: string, sym
   return data.diagnostics as ExchangeDiagnosticsPayload;
 }
 
-export async function syncExchangeAccountViaApi(accountId: string, symbol = "BTCUSDT"): Promise<ExchangeAccountSyncPayload | null> {
+export async function syncExchangeAccountViaApi(accountId: string, symbol = "BTCUSDT", marketKind: MarketKind = "perpetual"): Promise<ExchangeAccountSyncPayload | null> {
   const token = await getPortfolioApiToken();
   if (!token) return null;
 
@@ -310,7 +398,7 @@ export async function syncExchangeAccountViaApi(accountId: string, symbol = "BTC
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ accountId, symbol })
+    body: JSON.stringify({ accountId, symbol, marketKind })
   });
 
   if (!response.ok) throw new Error(await readApiError(response));

@@ -1,12 +1,15 @@
 import {
   getBybitOpenOrders,
   getBybitStrategies,
+  getBybitApiKeyInformation,
   getBybitPositions,
   getBybitInstrumentMetadata,
   getBybitAccountInfo,
   getBybitRiskLimits,
   getBybitOrderPriceLimit,
-  getBybitWalletSnapshot
+  getBybitWalletSnapshot,
+  normalizeBybitPermissionReport,
+  resolveBybitExecutionPolicy
 } from "./bybit.js";
 import { replaceBybitBalances, replaceBybitPositions } from "./bybit-snapshot-store.js";
 import { settleSupabaseQuery } from "../supabase-query.js";
@@ -17,7 +20,7 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
   const startedAt = Date.now();
   const symbol = String(options.symbol || "BTCUSDT").toUpperCase();
   const marketKind = options.marketKind === "spot" ? "spot" : "perpetual";
-  const [walletSnapshot, positionRows, openOrders, strategies, metadata, accountState, riskLimits, priceLimit] = await Promise.all([
+  const [walletSnapshot, positionRows, openOrders, strategies, metadata, accountState, riskLimits, priceLimit, apiKeyInfo] = await Promise.all([
     getBybitWalletSnapshot(credentials),
     getBybitPositions(credentials, { symbol, includeEmpty: true }),
     getBybitOpenOrders(credentials, { category: marketKind === "spot" ? "spot" : "linear", symbol }),
@@ -25,10 +28,13 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     getBybitInstrumentMetadata({ category: marketKind === "spot" ? "spot" : "linear", symbol }),
     getBybitAccountInfo(credentials),
     marketKind === "spot" ? Promise.resolve([]) : getBybitRiskLimits({ category: "linear", symbol }),
-    getBybitOrderPriceLimit({ category: marketKind === "spot" ? "spot" : "linear", symbol })
+    getBybitOrderPriceLimit({ category: marketKind === "spot" ? "spot" : "linear", symbol }),
+    getBybitApiKeyInformation(credentials)
   ]);
   const positions = positionRows.filter((position) => position.quantity > 0 && position.direction !== "flat");
   const balances = walletSnapshot.balances;
+  const permissionReport = normalizeBybitPermissionReport(apiKeyInfo);
+  const executionState = resolveBybitExecutionPolicy(permissionReport);
 
   const [localBalancesResult, localPositionsResult, localOrdersResult] = await Promise.all([
     supabase.from("account_balances").select("*").eq("account_id", account.id),
@@ -78,11 +84,37 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
   }
 
   const externalStateChanged = changes.length > 0;
-  await supabase.from("exchange_accounts").update({
+  const accountPatch = {
     status: "connected",
     api_health: "healthy",
-    latency_ms: Date.now() - startedAt
-  }).eq("id", account.id).eq("user_id", userId);
+    latency_ms: Date.now() - startedAt,
+    is_read_only: executionState.readOnly,
+    trading_enabled: executionState.tradingEnabled,
+    permissions: executionState.permissions
+  };
+  const riskPatch = {
+    read_only_mode: executionState.readOnly,
+    trading_enabled: executionState.tradingEnabled,
+    allowed_symbols: executionState.allowedSymbols
+  };
+  if (executionState.maxNotionalUsd > 0) riskPatch.max_position_usd = executionState.maxNotionalUsd;
+  const [accountUpdate, riskUpdate] = await Promise.all([
+    supabase.from("exchange_accounts").update(accountPatch).eq("id", account.id).eq("user_id", userId),
+    supabase.from("account_risk_controls").update(riskPatch).eq("account_id", account.id)
+  ]);
+  if (accountUpdate.error) throw accountUpdate.error;
+  if (riskUpdate.error) throw riskUpdate.error;
+  Object.assign(account, accountPatch);
+
+  console.info("[bybit-execution-policy]", {
+    account: String(account.id || "").slice(-6),
+    tradingEnabled: executionState.tradingEnabled,
+    readinessReason: executionState.readinessReason || "ready",
+    venueTradingPermission: permissionReport.trading,
+    withdrawalPermission: permissionReport.withdrawal,
+    allowedSymbols: executionState.allowedSymbols,
+    maxNotionalUsd: executionState.maxNotionalUsd
+  });
 
   await settleSupabaseQuery(supabase.from("execution_audit_logs").insert({
     user_id: userId,
@@ -115,6 +147,7 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     accountState,
     riskLimits,
     priceLimit,
+    executionState,
     positions,
     openOrders,
     strategies,

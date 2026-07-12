@@ -7,6 +7,7 @@ const RECV_WINDOW = "5000";
 const BYBIT_REQUEST_TIMEOUT_MS = Math.max(1500, Math.min(8000, Number(process.env.BYBIT_REQUEST_TIMEOUT_MS || 4500)));
 const BYBIT_RUNTIME_REGION = process.env.VERCEL_REGION || process.env.AWS_REGION || "local";
 const bybitPublicMetadataCache = new Map();
+const bybitPermissionCache = new Map();
 const BYBIT_MAINNET_LIVE_CONFIRMATION = "LIVE";
 const BYBIT_ORDER_STATUS_TO_EXECUTION_STATUS = {
   created: "submitted",
@@ -1024,7 +1025,12 @@ async function bybitRequest(credentials, method, path, query = {}, body) {
 }
 
 export async function getBybitApiKeyInformation(credentials) {
-  return bybitRequest(credentials, "GET", "/v5/user/query-api", {});
+  const cacheKey = crypto.createHash("sha256").update(String(credentials.apiKey || "")).digest("hex").slice(0, 16);
+  const cached = bybitPermissionCache.get(cacheKey);
+  if (cached && Date.now() - cached.storedAt < 60_000) return cached.value;
+  const value = await bybitRequest(credentials, "GET", "/v5/user/query-api", {});
+  bybitPermissionCache.set(cacheKey, { storedAt: Date.now(), value });
+  return value;
 }
 
 async function bybitPublicRequest(path, query = {}) {

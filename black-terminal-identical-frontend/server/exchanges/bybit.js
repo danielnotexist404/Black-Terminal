@@ -4,6 +4,7 @@ import { getBybitPrivateStreamRuntimeDiagnostics } from "./bybit-private-stream.
 const BYBIT_BASE_URL = process.env.BYBIT_BASE_URL || "https://api.bybit.com";
 const RECV_WINDOW = "5000";
 const BYBIT_REQUEST_TIMEOUT_MS = Math.max(1500, Math.min(8000, Number(process.env.BYBIT_REQUEST_TIMEOUT_MS || 4500)));
+const BYBIT_RUNTIME_REGION = process.env.VERCEL_REGION || process.env.AWS_REGION || "local";
 const BYBIT_MAINNET_LIVE_CONFIRMATION = "LIVE";
 const BYBIT_ORDER_STATUS_TO_EXECUTION_STATUS = {
   created: "submitted",
@@ -29,9 +30,12 @@ export async function validateBybitCredentials(credentials) {
     error.statusCode = failedRequiredChecks.some((check) => check.statusCode === 401 || isBybitAuthFailure(check.bybitCode, check.message)) ? 401 : 502;
     error.code = "BYBIT_CREDENTIAL_VALIDATION_FAILED";
     error.publicDetails = {
+      runtimeRegion: BYBIT_RUNTIME_REGION,
       failedChecks: failedRequiredChecks.map((check) => ({
         name: check.name,
         bybitCode: check.bybitCode,
+        httpStatus: check.httpStatus,
+        endpoint: check.endpoint,
         message: check.message
       }))
     };
@@ -748,15 +752,20 @@ async function bybitRequest(credentials, method, path, query = {}, body) {
     body: method === "GET" ? undefined : bodyString
   }, path);
 
-  const data = await response.json().catch(() => null);
+  const data = await readBybitResponse(response);
 
   if (!response.ok || data?.retCode !== 0) {
     const bybitCode = data?.retCode;
     const bybitMessage = String(data?.retMsg || "").trim();
-    const error = new Error(bybitMessage || `Bybit request failed${bybitCode !== undefined ? ` with retCode ${bybitCode}` : ""} at ${path} (HTTP ${response.status})`);
-    error.statusCode = response.status === 401 ? 401 : 502;
+    const regionalMessage = response.status === 403
+      ? `Bybit rejected the request from server region ${BYBIT_RUNTIME_REGION} (HTTP 403). The execution backend must run outside Bybit-restricted regions.`
+      : "";
+    const error = new Error(regionalMessage || bybitMessage || `Bybit request failed${bybitCode !== undefined ? ` with retCode ${bybitCode}` : ""} at ${path} (HTTP ${response.status})`);
+    error.statusCode = response.status === 401 ? 401 : response.status === 403 ? 503 : 502;
     error.bybit = data;
     error.bybitEndpoint = path;
+    error.bybitHttpStatus = response.status;
+    error.runtimeRegion = BYBIT_RUNTIME_REGION;
     throw error;
   }
 
@@ -770,12 +779,18 @@ export async function getBybitApiKeyInformation(credentials) {
 async function bybitPublicRequest(path, query = {}) {
   const queryString = buildQueryString(query);
   const response = await fetchWithTimeout(`${BYBIT_BASE_URL}${path}${queryString ? `?${queryString}` : ""}`, {}, path);
-  const data = await response.json().catch(() => null);
+  const data = await readBybitResponse(response);
 
   if (!response.ok || data?.retCode !== 0) {
-    const error = new Error(data?.retMsg || `Bybit public request failed with HTTP ${response.status}`);
-    error.statusCode = response.status === 404 ? 404 : 502;
+    const regionalMessage = response.status === 403
+      ? `Bybit rejected the public request from server region ${BYBIT_RUNTIME_REGION} (HTTP 403).`
+      : "";
+    const error = new Error(regionalMessage || data?.retMsg || `Bybit public request failed with HTTP ${response.status}`);
+    error.statusCode = response.status === 404 ? 404 : response.status === 403 ? 503 : 502;
     error.bybit = data;
+    error.bybitEndpoint = path;
+    error.bybitHttpStatus = response.status;
+    error.runtimeRegion = BYBIT_RUNTIME_REGION;
     throw error;
   }
 
@@ -803,6 +818,17 @@ async function fetchWithTimeout(url, options = {}, endpoint = "bybit") {
     throw wrapped;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+async function readBybitResponse(response) {
+  const text = await response.text();
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
   }
 }
 
@@ -835,7 +861,9 @@ async function runBybitDiagnosticCheck(name, fn, required) {
       message,
       statusCode: error?.statusCode || 502,
       bybitCode: error?.bybit?.retCode,
-      endpoint: error?.bybitEndpoint || null
+      httpStatus: error?.bybitHttpStatus || null,
+      endpoint: error?.bybitEndpoint || null,
+      runtimeRegion: error?.runtimeRegion || BYBIT_RUNTIME_REGION
     };
   }
 }
@@ -848,6 +876,9 @@ function diagnosticData(checks, name, fallback) {
 function formatBybitDiagnosticFailure(name, error) {
   const bybitCode = error?.bybit?.retCode;
   const baseMessage = String(error?.bybit?.retMsg || error?.message || "Unknown Bybit validation failure.").trim() || "Unknown Bybit validation failure.";
+  if (Number(error?.bybitHttpStatus) === 403) {
+    return `${name} failed (HTTP 403): ${baseMessage} Bybit blocks API traffic from restricted server regions; current runtime region: ${error?.runtimeRegion || BYBIT_RUNTIME_REGION}.`;
+  }
   const hint = bybitFailureHint(bybitCode, baseMessage);
   return `${name} failed${bybitCode !== undefined ? ` (Bybit ${bybitCode})` : ""}: ${baseMessage}${hint ? ` ${hint}` : ""}`;
 }

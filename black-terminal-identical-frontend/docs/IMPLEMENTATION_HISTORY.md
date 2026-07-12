@@ -889,6 +889,28 @@ Remaining:
 
 - For true source secrecy, move proprietary calculations and classifiers behind server-side workers/private API routes. Browser-side JavaScript should be treated as inspectable even when entitlement-gated.
 
+## 2026-07-12 - Bybit Vercel Region Correction
+
+Status: Implemented.
+
+Changed:
+
+- Added `vercel.json` and pinned serverless functions to `dxb1` (Dubai).
+- Preserved upstream Bybit HTTP status, endpoint, and runtime-region diagnostics during credential validation.
+- Added an explicit message when Bybit returns HTTP 403 because the execution backend is running in a restricted region.
+
+Why:
+
+- Vercel deployed the Bybit credential route to its default `iad1` region in Washington, D.C.
+- Bybit rejects API traffic from US IP addresses, so valid credentials could never complete validation from that deployment.
+- The regional HTTP 403 was previously normalized into an opaque HTTP 502 in the connection modal.
+
+Validation:
+
+- `npm run test:bybit-certification`
+- `npm run build`
+- Verify the production function region is `dxb1` with `vercel inspect`.
+
 ## Future Work Log
 
 Use this format for every future phase, chapter, or major bug sprint.

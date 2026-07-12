@@ -861,6 +861,34 @@ Remaining:
 - Run `npm run certify:bybit-mainnet -- --interactive` with a real allowlisted Bybit account.
 - Keep `src/connectivity/venueRegistry.ts` partial until the certification report and Supabase evidence show every mandatory stage passed.
 
+## 2026-07-12 - Proprietary Feature Gatekeeping
+
+Status: Implemented.
+
+Changed:
+
+- Added `proprietary.domPro` and `proprietary.hdlxProfile` to the shared capability registry.
+- Gated DOM Pro+ to Enterprise/Admin accounts and disabled the PRO+ compact DOM launcher for unauthorized users.
+- Split the full DOM Pro+ cockpit into a lazy entitlement-loaded chunk.
+- Kept HDLX Profile controlled by Admin role or explicit Admin Panel `volumeProfile` grant.
+- Added workspace and live-poll sanitizers so revoked HDLX access cannot persist through saved chart state.
+- Added `product_tier` and `permissions` persistence support for `bt_users`.
+- Added Admin Panel product-tier controls for retail, professional, and enterprise users.
+
+Why:
+
+- Retail accounts must not access proprietary DOM Pro+ or HDLX Profile surfaces.
+- Admins need a clean way to grant Enterprise DOM Pro+ access without making a user an admin.
+- HDLX Profile remains founder/admin-controlled unless explicitly granted.
+
+Validation:
+
+- `npm run build`
+
+Remaining:
+
+- For true source secrecy, move proprietary calculations and classifiers behind server-side workers/private API routes. Browser-side JavaScript should be treated as inspectable even when entitlement-gated.
+
 ## Future Work Log
 
 Use this format for every future phase, chapter, or major bug sprint.

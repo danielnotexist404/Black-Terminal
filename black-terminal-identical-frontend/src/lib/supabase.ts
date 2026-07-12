@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import type { ProductTier, TerminalCapability } from "../core/permissions/capabilities";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
@@ -19,6 +20,8 @@ export interface DBUser {
   lastLogin: string;
   allowedIndicators: string[];
   activeIndicators: string[];
+  productTier?: ProductTier;
+  permissions?: TerminalCapability[];
   password?: string;
 
   // Configuration persistence fields
@@ -55,6 +58,16 @@ const USERS_DB_KEY = "bt_users_db";
 const CREDS_DB_KEY = "bt_users_creds";
 const AUDIT_LOGS_KEY = "bt_audit_logs";
 
+function normalizeProductTier(value: unknown, role?: "admin" | "user"): ProductTier {
+  if (role === "admin") return "admin";
+  if (value === "professional" || value === "enterprise" || value === "admin") return value;
+  return "retail";
+}
+
+function normalizePermissions(value: unknown): TerminalCapability[] {
+  return Array.isArray(value) ? value.filter((item): item is TerminalCapability => typeof item === "string") : [];
+}
+
 // Helper: Get all users
 export async function dbGetUsers(): Promise<DBUser[]> {
   if (isSupabaseConfigured && supabase) {
@@ -74,6 +87,8 @@ export async function dbGetUsers(): Promise<DBUser[]> {
           lastLogin: u.last_login || u.lastLogin || new Date().toISOString(),
           allowedIndicators: u.allowed_indicators || u.allowedIndicators || [],
           activeIndicators: u.active_indicators || u.activeIndicators || [],
+          productTier: normalizeProductTier(u.product_tier || u.productTier, u.role),
+          permissions: normalizePermissions(u.permissions),
           workspaces: u.workspaces || [],
           workspaceSnapshots: u.workspace_snapshots || {},
           activeWorkspace: u.active_workspace || "Quant Desk",
@@ -106,6 +121,8 @@ export async function dbGetUsers(): Promise<DBUser[]> {
   return parsed.map((u: any) => ({
     ...u,
     displayName: u.displayName || u.display_name || u.username,
+    productTier: normalizeProductTier(u.productTier || u.product_tier, u.role),
+    permissions: normalizePermissions(u.permissions),
     ip: u.ip || "127.0.0.1",
     countryCode: u.countryCode || u.country_code || "IL",
     countryName: u.countryName || u.country_name || "Israel",
@@ -299,6 +316,8 @@ export async function dbRegisterUser(user: DBUser, accessCode: string): Promise<
         last_login: user.lastLogin,
         allowed_indicators: user.allowedIndicators,
         active_indicators: user.activeIndicators,
+        product_tier: user.productTier || (user.role === "admin" ? "admin" : "retail"),
+        permissions: user.permissions || [],
         workspaces: user.workspaces || ["Quant Desk", "Scalp Layout", "Strategy Lab"],
         workspace_snapshots: user.workspaceSnapshots || {},
         active_workspace: user.activeWorkspace || "Quant Desk",
@@ -322,9 +341,11 @@ export async function dbRegisterUser(user: DBUser, accessCode: string): Promise<
       const { error } = await supabase.from("bt_users").insert(payload);
       if (error) {
         const message = error.message || "";
-        if (message.includes("display_name") || error.code === "PGRST204") {
+        if (message.includes("display_name") || message.includes("product_tier") || message.includes("permissions") || error.code === "PGRST204") {
           const compatiblePayload: any = { ...payload };
           delete compatiblePayload.display_name;
+          delete compatiblePayload.product_tier;
+          delete compatiblePayload.permissions;
           const retry = await supabase.from("bt_users").insert(compatiblePayload);
           if (retry.error) throw retry.error;
         } else {
@@ -372,6 +393,8 @@ export async function dbUpdateUser(username: string, patch: Partial<DBUser> & { 
       if (patch.lastLogin !== undefined) dbPatch.last_login = patch.lastLogin;
       if (patch.allowedIndicators !== undefined) dbPatch.allowed_indicators = patch.allowedIndicators;
       if (patch.activeIndicators !== undefined) dbPatch.active_indicators = patch.activeIndicators;
+      if (patch.productTier !== undefined) dbPatch.product_tier = patch.productTier;
+      if (patch.permissions !== undefined) dbPatch.permissions = patch.permissions;
       if (patch.password !== undefined) dbPatch.password = patch.password;
       if (patch.workspaces !== undefined) dbPatch.workspaces = patch.workspaces;
       if (patch.workspaceSnapshots !== undefined) dbPatch.workspace_snapshots = patch.workspaceSnapshots;

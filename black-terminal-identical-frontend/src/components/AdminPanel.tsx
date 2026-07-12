@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { X } from "lucide-react";
 import "../styles/admin.css";
 import { dbGetUsers, dbRegisterUser, dbUpdateUser, dbDeleteUser, dbGetAuditLogs, dbAddAuditLog } from "../lib/supabase";
+import type { ProductTier } from "../core/permissions/capabilities";
 
 interface User {
   username: string;
@@ -11,6 +12,8 @@ interface User {
   lastLogin: string;
   allowedIndicators: string[];
   activeIndicators: string[];
+  productTier?: ProductTier;
+  permissions?: string[];
   email?: string;
   ip?: string;
   countryCode?: string;
@@ -72,6 +75,7 @@ const DEFAULT_ALLOWED = [
 ];
 
 const ADMIN_ALLOWED = [...DEFAULT_ALLOWED, "volumeProfile"];
+const ASSIGNABLE_PRODUCT_TIERS = ["retail", "professional", "enterprise"] as const;
 
 export default function AdminPanel() {
   const [users, setUsers] = useState<User[]>([]);
@@ -90,7 +94,9 @@ export default function AdminPanel() {
         const normalized = parsed.map((u: any) => ({
           ...u,
           allowedIndicators: u.allowedIndicators || (u.role === "admin" ? ADMIN_ALLOWED : DEFAULT_ALLOWED),
-          activeIndicators: u.activeIndicators || []
+          activeIndicators: u.activeIndicators || [],
+          productTier: u.productTier || (u.role === "admin" ? "admin" : "retail"),
+          permissions: u.permissions || []
         }));
         setUsers(normalized);
 
@@ -143,7 +149,9 @@ export default function AdminPanel() {
       createdAt: new Date().toISOString(),
       lastLogin: "Never",
       allowedIndicators: [...DEFAULT_ALLOWED],
-      activeIndicators: []
+      activeIndicators: [],
+      productTier: "retail" as const,
+      permissions: []
     };
 
     const regResult = await dbRegisterUser(newUser, cleanPass);
@@ -206,6 +214,21 @@ export default function AdminPanel() {
 
     await dbUpdateUser(selectedUser.username, { allowedIndicators: nextAllowed });
     await dbAddAuditLog(tag as any, msg);
+
+    const updatedUsers = await dbGetUsers();
+    setUsers(updatedUsers);
+
+    const updatedSelected = updatedUsers.find(u => u.username === selectedUser.username);
+    if (updatedSelected) {
+      setSelectedUser(updatedSelected);
+    }
+  };
+
+  const handleProductTierChange = async (tier: (typeof ASSIGNABLE_PRODUCT_TIERS)[number]) => {
+    if (!selectedUser || selectedUser.role === "admin") return;
+
+    await dbUpdateUser(selectedUser.username, { productTier: tier });
+    await dbAddAuditLog("SYSTEM", `User ${selectedUser.username} product tier changed to ${tier.toUpperCase()}.`);
 
     const updatedUsers = await dbGetUsers();
     setUsers(updatedUsers);
@@ -471,6 +494,34 @@ export default function AdminPanel() {
                     <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px dashed rgba(255,255,255,0.04)", paddingBottom: "6px" }}>
                       <span style={{ color: "var(--dim)" }}>Use Category:</span>
                       <span style={{ color: selectedUser.purposeOfUse === "commercial" ? "#f59f18" : "#00ff66", fontWeight: 700, textTransform: "uppercase" }}>{selectedUser.purposeOfUse || "personal"}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px dashed rgba(255,255,255,0.04)", paddingBottom: "6px", gap: "12px" }}>
+                      <span style={{ color: "var(--dim)" }}>Product Tier:</span>
+                      {selectedUser.role === "admin" ? (
+                        <span style={{ color: "var(--red-hot)", fontWeight: 800, textTransform: "uppercase" }}>ADMIN OVERRIDE</span>
+                      ) : (
+                        <select
+                          value={(selectedUser.productTier === "admin" ? "enterprise" : selectedUser.productTier) || "retail"}
+                          onChange={(event) => handleProductTierChange(event.target.value as (typeof ASSIGNABLE_PRODUCT_TIERS)[number])}
+                          style={{
+                            background: "rgba(0,0,0,0.45)",
+                            border: "1px solid rgba(255,255,255,0.14)",
+                            color: "#fff",
+                            fontFamily: "IBM Plex Mono",
+                            fontSize: "10px",
+                            height: "24px",
+                            padding: "0 8px",
+                            textTransform: "uppercase"
+                          }}
+                        >
+                          {ASSIGNABLE_PRODUCT_TIERS.map((tier) => (
+                            <option key={tier} value={tier}>{tier.toUpperCase()}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                    <div style={{ border: "1px solid rgba(255,0,68,0.28)", background: "rgba(255,0,68,0.06)", color: "var(--dim)", padding: "8px", fontSize: "9px", lineHeight: "1.45" }}>
+                      DOM PRO+ requires ENTERPRISE or ADMIN. HDLX Profile remains ADMIN-only unless granted below.
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px dashed rgba(255,255,255,0.04)", paddingBottom: "6px" }}>
                       <span style={{ color: "var(--dim)" }}>Acquisition Source:</span>

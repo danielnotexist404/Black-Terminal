@@ -9,7 +9,7 @@ import { blackCorePortfolioService } from "../portfolio/portfolioService";
 import { blackCorePositionManager } from "../positions/positionManager";
 import { PerformanceMonitor } from "../performance/performanceMonitor";
 import { blackCoreWalletFramework } from "../wallets/walletFramework";
-import { registerDomProModule } from "../modules/dom-pro";
+import { registerDomProModule } from "../modules/dom-pro/moduleDefinition";
 
 let registered = false;
 

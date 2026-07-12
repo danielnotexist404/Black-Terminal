@@ -311,6 +311,9 @@ and publish only throttled metrics through `performance.metric`.
 - Withdrawal permissions should be warned against and rejected where possible.
 - Live order placement must pass through backend auth, permission checks, risk checks, and audit.
 - Webhooks and strategy automation must be treated as untrusted until signed and validated.
+- DOM Pro+ requires Enterprise/Admin entitlement through `proprietary.domPro`.
+- HDLX Profile is Admin-owned and can only be granted to a user through the Admin Panel `volumeProfile` permission or an explicit `proprietary.hdlxProfile` capability.
+- Browser-side module gating reduces exposure, but truly secret logic belongs in server workers/private APIs, not client bundles.
 
 ## Local Commands
 

@@ -13,6 +13,7 @@ type OrderBookProps = {
   marketSymbol: MarketSymbol;
   lastPrice: number;
   exchangeLabel: string;
+  domProAllowed?: boolean;
   onOpenDomPro?: (mode?: "expanded" | "detached-browser", options?: { openSettings?: boolean }) => void;
   onResetDomLayout?: () => void;
 };
@@ -97,7 +98,7 @@ function toTickerFallback(
   };
 }
 
-export function OrderBook({ marketSymbol, lastPrice, exchangeLabel, onOpenDomPro, onResetDomLayout }: OrderBookProps) {
+export function OrderBook({ marketSymbol, lastPrice, exchangeLabel, domProAllowed = false, onOpenDomPro, onResetDomLayout }: OrderBookProps) {
   const feed = useDomFeed(marketSymbol);
   const book = feed.book;
   const trades = feed.trades;
@@ -125,6 +126,7 @@ export function OrderBook({ marketSymbol, lastPrice, exchangeLabel, onOpenDomPro
   const depthTotal = bidDepthQuantity + askDepthQuantity;
   const bidImbalance = depthTotal ? (bidDepthQuantity / depthTotal) * 100 : 50;
   const activeStatus = activeTab === "TRADES" ? tradeStatus : activeTab === "TICKER" ? tickerStatus : bookStatus;
+  const canOpenDomPro = domProAllowed && Boolean(onOpenDomPro);
 
   const renderDomRow = (row: BookRow, side: "ask" | "bid") => {
     const totalRatio = Math.max(0.002, Math.min(1, row.total / domMaxTotal));
@@ -276,8 +278,9 @@ export function OrderBook({ marketSymbol, lastPrice, exchangeLabel, onOpenDomPro
         <button
           type="button"
           className="dom-pro-open"
-          title="Open DOM Pro+"
-          onClick={() => onOpenDomPro?.("expanded")}
+          title={canOpenDomPro ? "Open DOM Pro+" : "DOM Pro+ requires Enterprise or Admin access"}
+          disabled={!canOpenDomPro}
+          onClick={() => canOpenDomPro && onOpenDomPro?.("expanded")}
         >
           PRO+
         </button>
@@ -285,11 +288,17 @@ export function OrderBook({ marketSymbol, lastPrice, exchangeLabel, onOpenDomPro
       <div className="book-status">{activeStatus}</div>
       {menu && (
         <div className="dom-compact-menu" style={{ left: menu.x, top: menu.y }} onClick={(event) => event.stopPropagation()}>
-          <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("expanded"); }}>Open DOM Pro+</button>
-          <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("detached-browser"); }}>Detach DOM</button>
-          <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("detached-browser"); }}>Send to monitor</button>
+          {canOpenDomPro ? (
+            <>
+              <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("expanded"); }}>Open DOM Pro+</button>
+              <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("detached-browser"); }}>Detach DOM</button>
+              <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("detached-browser"); }}>Send to monitor</button>
+            </>
+          ) : (
+            <button type="button" disabled>DOM Pro+ enterprise/admin only</button>
+          )}
           <button type="button" onClick={() => { setMenu(null); onResetDomLayout?.(); }}>Reset DOM layout</button>
-          <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("expanded", { openSettings: true }); }}>DOM settings</button>
+          {canOpenDomPro && <button type="button" onClick={() => { setMenu(null); onOpenDomPro?.("expanded", { openSettings: true }); }}>DOM settings</button>}
         </div>
       )}
       <div className="book-body">

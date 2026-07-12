@@ -20,6 +20,8 @@ export type TerminalCapability =
   | "can_publish_indicators"
   | "can_publish_strategies"
   | "can_follow_users"
+  | "proprietary.domPro"
+  | "proprietary.hdlxProfile"
   | "admin.override";
 
 export type CapabilityUser = {
@@ -74,7 +76,8 @@ const tierCapabilities: Record<ProductTier, TerminalCapability[]> = {
     "can_publish_research",
     "can_publish_indicators",
     "can_publish_strategies",
-    "can_follow_users"
+    "can_follow_users",
+    "proprietary.domPro"
   ],
   admin: [
     "execution.connectBroker",
@@ -96,6 +99,8 @@ const tierCapabilities: Record<ProductTier, TerminalCapability[]> = {
     "can_publish_indicators",
     "can_publish_strategies",
     "can_follow_users",
+    "proprietary.domPro",
+    "proprietary.hdlxProfile",
     "admin.override"
   ]
 };

@@ -261,6 +261,19 @@ execution domain. `api/exchange-accounts/[...path].js` and `api/execution/[...pa
 existing external URLs while delegating to server-owned route modules under `server/routes/`. This
 keeps the function count below the platform limit without introducing alternate execution paths.
 
+## Proprietary Feature Entitlements
+
+Black Terminal gates proprietary modules through the shared capability registry:
+
+- DOM Pro+ requires `proprietary.domPro`, available to Enterprise and Admin accounts.
+- HDLX Profile requires Admin access or an explicit Admin Panel grant for the `volumeProfile` indicator.
+- Saved workspaces are sanitized on load and during live permission polling so revoked proprietary indicators turn off automatically.
+- The DOM Pro+ cockpit component is code-split and mounted only after the entitlement check passes.
+
+Client-side gating prevents normal retail access and accidental feature exposure. Truly secret
+algorithms must continue moving behind server-side workers or private API routes because any
+browser-delivered JavaScript should be treated as inspectable by a determined user.
+
 ## Phase III Position Rule
 
 OMS owns orders.

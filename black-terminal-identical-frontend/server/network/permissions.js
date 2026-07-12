@@ -10,7 +10,8 @@ const tierCapabilities = {
     "can_publish_research",
     "can_publish_indicators",
     "can_publish_strategies",
-    "can_follow_users"
+    "can_follow_users",
+    "proprietary.domPro"
   ],
   admin: [
     "can_create_investment_group",
@@ -22,6 +23,8 @@ const tierCapabilities = {
     "can_publish_indicators",
     "can_publish_strategies",
     "can_follow_users",
+    "proprietary.domPro",
+    "proprietary.hdlxProfile",
     "admin.override"
   ]
 };

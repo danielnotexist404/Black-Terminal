@@ -1914,3 +1914,53 @@ update public.bt_users
 set display_name = coalesce(nullif(display_name, ''), username)
 where display_name is null or display_name = '';
 ```
+
+## 2026-07-12 - Proprietary Feature Entitlements
+
+Status: Required before granting DOM Pro+ to enterprise users from Supabase.
+
+Reason:
+
+- DOM Pro+ is now gated to Enterprise/Admin accounts through `product_tier`.
+- HDLX Profile remains Admin-controlled through the indicator permission grid, with an optional explicit capability grant path.
+- Retail and Professional users must not inherit proprietary terminal modules from stale local workspace state.
+
+SQL:
+
+```sql
+alter table public.bt_users
+  add column if not exists product_tier text not null default 'retail';
+
+alter table public.bt_users
+  add column if not exists permissions text[] not null default '{}'::text[];
+
+alter table public.bt_users
+  drop constraint if exists bt_users_product_tier_check;
+
+alter table public.bt_users
+  add constraint bt_users_product_tier_check
+  check (product_tier in ('retail', 'professional', 'enterprise', 'admin'));
+
+update public.bt_users
+set product_tier = 'admin'
+where role = 'admin';
+
+update public.bt_users
+set product_tier = 'retail'
+where role <> 'admin'
+  and (product_tier is null or product_tier = '');
+
+update public.bt_users
+set permissions = '{}'::text[]
+where permissions is null;
+
+create index if not exists idx_bt_users_product_tier
+  on public.bt_users(product_tier);
+```
+
+Capability rules:
+
+- `product_tier = 'enterprise'` enables DOM Pro+ without admin role.
+- `role = 'admin'` enables DOM Pro+ and HDLX Profile.
+- HDLX Profile user access is granted from Admin Panel by enabling `volumeProfile` for that user.
+- Optional direct capability grant: add `proprietary.hdlxProfile` to `bt_users.permissions`.

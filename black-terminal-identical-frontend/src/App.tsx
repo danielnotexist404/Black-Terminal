@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, SVGProps } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { LucideIcon } from "lucide-react";
@@ -65,7 +65,6 @@ import { StrategyLabPage } from "./modules/strategy-lab/components/StrategyLabPa
 import PortfolioManagerPage, { PositionsWorkspace } from "./modules/portfolio-manager/components/PortfolioManagerPage";
 import { ProfilePage } from "./modules/profile/components/ProfilePage";
 import { InvestmentGroupsPage } from "./modules/investment-groups/components/InvestmentGroupsPage";
-import { DomProWindow } from "./modules/dom-pro";
 import { getPortfolioSnapshot } from "./portfolio/portfolioStore";
 import type { PortfolioPosition } from "./positions/types";
 import type { PortfolioSnapshot } from "./portfolio/types";
@@ -90,10 +89,14 @@ import type { ExchangeId, MarketSymbol, Timeframe } from "./market-data/types";
 import { blackCoreConnectionManager } from "./connectivity/connectionManager";
 import { readActiveExecutionVenueId, subscribeActiveExecutionVenue } from "./connectivity/activeExecutionVenue";
 import type { ConnectionDiagnostics } from "./connectivity/types";
-import type { CapabilityUser, ProductTier, TerminalCapability } from "./core/permissions/capabilities";
+import { getCapabilities, type CapabilityUser, type ProductTier, type TerminalCapability } from "./core/permissions/capabilities";
 import { blackCoreWindowDockManager } from "./core/windows/windowDockManager";
 import type { BlackCoreModuleMode } from "./core/modules/moduleRegistry";
 import { PerformanceHud } from "./performance/PerformanceHud";
+
+const DomProWindow = lazy(() =>
+  import("./modules/dom-pro/components/DomProWindow").then((module) => ({ default: module.DomProWindow }))
+);
 
 const nav = [
   { label: "WATCHLIST", icon: BookOpen },
@@ -169,6 +172,9 @@ const DEFAULT_ALLOWED = [
   "volume"
 ];
 const ADMIN_ALLOWED = [...DEFAULT_ALLOWED, "volumeProfile"];
+const PROPRIETARY_HDLX_INDICATOR = "volumeProfile";
+const DOM_PRO_CAPABILITY: TerminalCapability = "proprietary.domPro";
+const HDLX_PROFILE_CAPABILITY: TerminalCapability = "proprietary.hdlxProfile";
 
 const defaultWorkspaces = ["Quant Desk", "Scalp Layout", "Strategy Lab"] as const;
 const workspaceStorageKey = "bt_workspaces_v1";
@@ -415,6 +421,21 @@ export default function App() {
       enabledTimeframes: ["1m", "5m", "15m", "1h", "4h", "1d"]
     };
   });
+  const currentUserCapabilities = useMemo(() => getCapabilities(currentUser), [currentUser]);
+  const canUseDomPro = currentUserCapabilities.has(DOM_PRO_CAPABILITY) || currentUserCapabilities.has("admin.override");
+  const canUseHdlxProfile =
+    currentUserCapabilities.has(HDLX_PROFILE_CAPABILITY) ||
+    currentUserCapabilities.has("admin.override") ||
+    Boolean(currentUser?.allowedIndicators.includes(PROPRIETARY_HDLX_INDICATOR));
+  const effectiveAllowedIndicators = useMemo(() => {
+    const allowed = new Set(currentUser?.allowedIndicators || []);
+    if (canUseHdlxProfile) {
+      allowed.add(PROPRIETARY_HDLX_INDICATOR);
+    } else {
+      allowed.delete(PROPRIETARY_HDLX_INDICATOR);
+    }
+    return Array.from(allowed);
+  }, [canUseHdlxProfile, currentUser?.allowedIndicators]);
   const [domProOpen, setDomProOpen] = useState(false);
   const [domProMode, setDomProMode] = useState<BlackCoreModuleMode>("expanded");
   const [domProSettingsSignal, setDomProSettingsSignal] = useState(0);
@@ -427,13 +448,30 @@ export default function App() {
   }), []);
 
   const openDomPro = useCallback((mode: BlackCoreModuleMode = "expanded", options?: { openSettings?: boolean }) => {
+    if (!canUseDomPro) {
+      setShowRevokedPopup(true);
+      void dbAddAuditLog("SYSTEM", `Blocked DOM Pro+ access attempt by ${currentUser?.username || "anonymous"}.`);
+      return;
+    }
     blackCoreWindowDockManager.open("dom-pro", "DOM Pro+", mode);
     if (options?.openSettings) setDomProSettingsSignal((value) => value + 1);
-  }, []);
+  }, [canUseDomPro, currentUser?.username]);
 
   const closeDomPro = useCallback(() => {
     blackCoreWindowDockManager.close("dom-pro");
   }, []);
+
+  useEffect(() => {
+    if (domProOpen && !canUseDomPro) closeDomPro();
+  }, [canUseDomPro, closeDomPro, domProOpen]);
+
+  useEffect(() => {
+    if (canUseHdlxProfile) return;
+    setVisibleIndicators((current) => {
+      if (!current.volumeProfile) return current;
+      return { ...current, volumeProfile: false };
+    });
+  }, [canUseHdlxProfile]);
 
   // Bootstrap Database
   useEffect(() => {
@@ -812,8 +850,14 @@ export default function App() {
               
               // Sanitize active indicators against allowed list on boot
               const nextVisible = { ...snapshot.visibleIndicators };
+              const recordPermissions = new Set(record.permissions || []);
+              const recordCanUseHdlx =
+                record.role === "admin" ||
+                record.allowedIndicators.includes(PROPRIETARY_HDLX_INDICATOR) ||
+                recordPermissions.has(HDLX_PROFILE_CAPABILITY);
               Object.keys(nextVisible).forEach((k) => {
-                if (nextVisible[k as keyof VisibleIndicators] && !record.allowedIndicators.includes(k)) {
+                const allowed = k === PROPRIETARY_HDLX_INDICATOR ? recordCanUseHdlx : record.allowedIndicators.includes(k);
+                if (nextVisible[k as keyof VisibleIndicators] && !allowed) {
                   nextVisible[k as keyof VisibleIndicators] = false;
                 }
               });
@@ -850,15 +894,35 @@ export default function App() {
         const users = await dbGetUsers();
         const record = users.find((u) => u.username === currentUser.username);
         if (record) {
-          if (JSON.stringify(record.allowedIndicators) !== JSON.stringify(currentUser.allowedIndicators)) {
-            setCurrentUser(prev => prev ? { ...prev, allowedIndicators: record.allowedIndicators } : null);
+          const nextProductTier = record.productTier || (record.role === "admin" ? "admin" : "retail");
+          const nextPermissions = record.permissions || [];
+          const accessChanged =
+            JSON.stringify(record.allowedIndicators) !== JSON.stringify(currentUser.allowedIndicators) ||
+            nextProductTier !== currentUser.productTier ||
+            JSON.stringify(nextPermissions) !== JSON.stringify(currentUser.permissions || []) ||
+            record.role !== currentUser.role;
+
+          if (accessChanged) {
+            setCurrentUser(prev => prev ? {
+              ...prev,
+              role: record.role,
+              allowedIndicators: record.allowedIndicators,
+              productTier: nextProductTier,
+              permissions: nextPermissions
+            } : null);
             
             let wasRevoked = false;
+            const recordPermissionSet = new Set(nextPermissions);
+            const recordCanUseHdlx =
+              record.role === "admin" ||
+              record.allowedIndicators.includes(PROPRIETARY_HDLX_INDICATOR) ||
+              recordPermissionSet.has(HDLX_PROFILE_CAPABILITY);
             setVisibleIndicators(current => {
               const next = { ...current };
               let changed = false;
               Object.keys(next).forEach((key) => {
-                if (next[key as keyof VisibleIndicators] && !record.allowedIndicators.includes(key)) {
+                const allowed = key === PROPRIETARY_HDLX_INDICATOR ? recordCanUseHdlx : record.allowedIndicators.includes(key);
+                if (next[key as keyof VisibleIndicators] && !allowed) {
                   next[key as keyof VisibleIndicators] = false;
                   changed = true;
                   wasRevoked = true;
@@ -1852,7 +1916,7 @@ export default function App() {
               onAddCommunityStrategy={addCommunityStrategy}
               onClose={() => setActiveNav("CHART")}
               onOpenScriptEditor={() => setActiveNav("SCRIPT EDITOR")}
-              allowedIndicators={currentUser?.allowedIndicators || []}
+              allowedIndicators={effectiveAllowedIndicators}
             />
           )}
           {activeNav === "STRATEGY LAB" && (
@@ -1903,6 +1967,7 @@ export default function App() {
               marketSymbol={symbol}
               lastPrice={lastPrice}
               exchangeLabel={selectedExchange.label}
+              domProAllowed={canUseDomPro}
               onOpenDomPro={openDomPro}
               onResetDomLayout={() => setLayout((current) => ({ ...current, rightPanelWidth: 366, rightTopHeight: 420, rightStatsWidth: 170 }))}
             />
@@ -1938,16 +2003,18 @@ export default function App() {
             <div className="bottom-blank" />
           )}
         </section>
-        {domProOpen && (
-          <DomProWindow
-            marketSymbol={symbol}
-            lastPrice={lastPrice}
-            exchangeLabel={selectedExchange.label}
-            workspaceId={workspace}
-            windowMode={domProMode}
-            settingsOpenSignal={domProSettingsSignal}
-            onClose={closeDomPro}
-          />
+        {domProOpen && canUseDomPro && (
+          <Suspense fallback={null}>
+            <DomProWindow
+              marketSymbol={symbol}
+              lastPrice={lastPrice}
+              exchangeLabel={selectedExchange.label}
+              workspaceId={workspace}
+              windowMode={domProMode}
+              settingsOpenSignal={domProSettingsSignal}
+              onClose={closeDomPro}
+            />
+          </Suspense>
         )}
         {showCompactDom && (
           <div className="layout-resizer resize-main-x" onPointerDown={(event) => startLayoutResize("right", event)} />

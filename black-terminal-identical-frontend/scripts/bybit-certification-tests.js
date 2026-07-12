@@ -213,6 +213,27 @@ test("execution policy follows Bybit permissions and server limits", () => {
   restoreEnv(previous);
 });
 
+test("wildcard symbol policy still enforces venue and notional validation", () => {
+  const previous = {
+    enabled: process.env.BYBIT_MAINNET_VALIDATION_ENABLED,
+    allowedConnections: process.env.BYBIT_MAINNET_ALLOWED_CONNECTIONS,
+    allowedSymbols: process.env.BYBIT_MAINNET_ALLOWED_SYMBOLS,
+    maxNotional: process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD
+  };
+  process.env.BYBIT_MAINNET_VALIDATION_ENABLED = "true";
+  process.env.BYBIT_MAINNET_ALLOWED_SYMBOLS = "*";
+  process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD = "5";
+
+  const result = validateBybitMainnetValidationRequest({
+    account: { id: "acct-1" },
+    order: { symbol: "SOLUSDT", mainnetConfirmed: true, liveConfirmation: "LIVE" },
+    risk: { notional: 3 },
+    validation: { ok: true, reasons: [] }
+  });
+  assert.equal(result.ok, true);
+  restoreEnv(previous);
+});
+
 function test(name, fn) {
   try {
     fn();

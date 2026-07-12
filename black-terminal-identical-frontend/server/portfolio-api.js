@@ -189,7 +189,7 @@ export function checkOrderRisk({ account, riskControls, order, accountExposureUs
   if (riskControls?.read_only_mode) reasons.push("Risk controls are in read-only mode.");
   if (!riskControls?.trading_enabled) reasons.push("Risk controls disable trading.");
   if (riskControls?.emergency_stop) reasons.push("Emergency stop is active.");
-  if (riskControls?.allowed_symbols?.length > 0 && !riskControls.allowed_symbols.includes(order.symbol)) {
+  if (riskControls?.allowed_symbols?.length > 0 && !riskControls.allowed_symbols.includes("*") && !riskControls.allowed_symbols.includes(order.symbol)) {
     reasons.push(`${order.symbol} is not in the allowed symbols list.`);
   }
   if (riskControls && notional > Number(riskControls.max_position_usd)) {

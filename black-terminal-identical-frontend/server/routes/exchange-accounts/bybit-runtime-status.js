@@ -188,8 +188,8 @@ function buildEnvStatus(accountId, symbol) {
   const maxNotionalUsd = Number(process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD || 0);
   return {
     validationModeEnabled: process.env.BYBIT_MAINNET_VALIDATION_ENABLED === "true",
-    accountAllowlisted: allowedConnections.includes(accountId),
-    symbolAllowlisted: allowedSymbols.includes(symbol),
+    accountAllowlisted: allowedConnections.length === 0 || allowedConnections.includes("*") || allowedConnections.includes(accountId),
+    symbolAllowlisted: allowedSymbols.includes("*") || allowedSymbols.includes(symbol),
     maxNotionalConfigured: Number.isFinite(maxNotionalUsd) && maxNotionalUsd > 0,
     maxNotionalUsd,
     allowedSymbols

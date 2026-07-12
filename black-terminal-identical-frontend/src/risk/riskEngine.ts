@@ -16,7 +16,7 @@ export function evaluateOrderRisk(
   if (controls.emergencyStop) reasons.push("Emergency stop is active.");
   if (controls.readOnlyMode) reasons.push("Account is in read-only mode.");
   if (!controls.tradingEnabled) reasons.push("Trading is disabled for this account.");
-  if (controls.allowedSymbols.length > 0 && !controls.allowedSymbols.includes(order.symbol)) {
+  if (controls.allowedSymbols.length > 0 && !controls.allowedSymbols.includes("*") && !controls.allowedSymbols.includes(order.symbol)) {
     reasons.push(`${order.symbol} is not in the allowed symbols list.`);
   }
   if (notional > controls.maxPositionUsd) {

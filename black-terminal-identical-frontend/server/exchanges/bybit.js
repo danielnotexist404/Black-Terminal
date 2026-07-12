@@ -828,7 +828,7 @@ export function validateBybitMainnetValidationRequest({ account, order, risk, va
   if (allowedConnections.length > 0 && !allowedConnections.includes("*") && !allowedConnections.includes(account.id)) {
     reasons.push("Bybit account is not in BYBIT_MAINNET_ALLOWED_CONNECTIONS.");
   }
-  if (!allowedSymbols.length || !allowedSymbols.includes(String(order.symbol || "").toUpperCase())) {
+  if (!allowedSymbols.length || !allowedSymbols.includes("*") && !allowedSymbols.includes(String(order.symbol || "").toUpperCase())) {
     reasons.push("Bybit symbol is not in BYBIT_MAINNET_ALLOWED_SYMBOLS.");
   }
   if (!Number.isFinite(maxNotional) || maxNotional <= 0) {
@@ -886,7 +886,7 @@ export function validateBybitManagementGate({ account, body, symbol }) {
   if (allowedConnections.length > 0 && !allowedConnections.includes("*") && !allowedConnections.includes(account.id)) {
     reasons.push("Bybit account is not in BYBIT_MAINNET_ALLOWED_CONNECTIONS.");
   }
-  if (!allowedSymbols.length || !allowedSymbols.includes(nativeSymbol)) {
+  if (!allowedSymbols.length || !allowedSymbols.includes("*") && !allowedSymbols.includes(nativeSymbol)) {
     reasons.push("Bybit symbol is not in BYBIT_MAINNET_ALLOWED_SYMBOLS.");
   }
 

@@ -8,6 +8,7 @@ import {
   toCamelAccount
 } from "../../portfolio-api.js";
 import { syncBybitAccountToSupabase, validateBybitCredentials } from "../../exchanges/bybit.js";
+import { describeSupabaseError } from "../../exchanges/bybit-snapshot-store.js";
 
 const certifiedCredentialAdapters = {
   bybit: {
@@ -100,15 +101,22 @@ export default async function handler(req, res) {
       throw riskError;
     }
 
+    let snapshotWarning = null;
     if (exchange === "bybit") {
       try {
         await syncBybitAccountToSupabase(supabase, account, rawCredentials, bybitDiagnostics);
       } catch (syncError) {
-        await supabase.from("exchange_accounts").delete().eq("id", account.id);
-        const error = new Error(`Bybit account snapshot sync failed after credential validation: ${syncError instanceof Error ? syncError.message : String(syncError)}`);
-        error.statusCode = syncError?.statusCode || 502;
-        error.code = "BYBIT_ACCOUNT_SYNC_FAILED";
-        throw error;
+        snapshotWarning = `Bybit authenticated successfully, but initial snapshot persistence is degraded: ${describeSupabaseError(syncError)}`;
+        console.error("[bybit-connect-snapshot-warning]", {
+          accountId: account.id,
+          code: syncError?.code || null,
+          message: snapshotWarning
+        });
+        await supabase
+          .from("exchange_accounts")
+          .update({ status: "degraded", api_health: "warning" })
+          .eq("id", account.id)
+          .eq("user_id", user.id);
       }
     }
 
@@ -121,25 +129,25 @@ export default async function handler(req, res) {
       metadata: {
         exchange,
         credentialRef,
-        connectionResult: buildConnectionResult(exchange, bybitDiagnostics)
+        connectionResult: buildConnectionResult(exchange, bybitDiagnostics, snapshotWarning)
       }
     });
 
     return res.status(200).json({
       account: toCamelAccount({
         ...account,
-        status: validation.status,
-        api_health: validation.apiHealth,
+        status: snapshotWarning ? "degraded" : validation.status,
+        api_health: snapshotWarning ? "warning" : validation.apiHealth,
         latency_ms: validation.latencyMs
       }, riskControls),
-      connectionResult: buildConnectionResult(exchange, bybitDiagnostics)
+      connectionResult: buildConnectionResult(exchange, bybitDiagnostics, snapshotWarning)
     });
   } catch (error) {
     return sendError(res, error);
   }
 }
 
-function buildConnectionResult(exchange, diagnostics) {
+function buildConnectionResult(exchange, diagnostics, snapshotWarning = null) {
   if (exchange !== "bybit" || !diagnostics) return null;
   const executionReady = diagnostics.certification?.executionReady === true;
   return {
@@ -148,6 +156,8 @@ function buildConnectionResult(exchange, diagnostics) {
     tradingAccess: diagnostics.permissions?.trading === true,
     withdrawalAccess: diagnostics.permissions?.withdrawal === true,
     derivativesAccess: diagnostics.metadata?.some((item) => item.marketType === "perpetual") === true,
+    snapshotSynced: !snapshotWarning,
+    snapshotWarning,
     executionReady,
     blocker: executionReady ? null : diagnostics.readinessReason || diagnostics.permissions?.warnings?.[0] || "Bybit account is connected read-only until controlled validation is enabled."
   };

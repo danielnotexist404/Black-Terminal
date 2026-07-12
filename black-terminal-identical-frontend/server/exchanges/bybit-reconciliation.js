@@ -3,6 +3,7 @@ import {
   getBybitOpenOrders,
   getBybitPositions
 } from "./bybit.js";
+import { replaceBybitBalances, replaceBybitPositions } from "./bybit-snapshot-store.js";
 
 const ACTIVE_ORDER_STATUSES = ["pending", "accepted", "working", "partially-filled"];
 
@@ -103,46 +104,11 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
 }
 
 async function upsertBalances(supabase, accountId, balances) {
-  if (balances.length === 0) return;
-  const { error } = await supabase.from("account_balances").upsert(
-    balances.map((balance) => ({
-      account_id: accountId,
-      asset: balance.asset,
-      free: balance.free,
-      locked: balance.locked,
-      total: balance.total,
-      usd_value: balance.usdValue,
-      updated_at: new Date().toISOString()
-    })),
-    { onConflict: "account_id,asset" }
-  );
-  if (error) throw error;
+  await replaceBybitBalances(supabase, accountId, balances);
 }
 
 async function upsertPositions(supabase, accountId, positions) {
-  if (positions.length === 0) return;
-  const { error } = await supabase.from("account_positions").upsert(
-    positions.map((position) => ({
-      account_id: accountId,
-      exchange: "bybit",
-      symbol: position.symbol,
-      direction: position.direction,
-      quantity: position.quantity,
-      average_price: position.averagePrice,
-      current_price: position.currentPrice,
-      unrealized_pnl: position.unrealizedPnl,
-      realized_pnl: position.realizedPnl,
-      margin: position.margin,
-      leverage: position.leverage,
-      liquidation_price: position.liquidationPrice,
-      stop_loss: position.stopLoss,
-      take_profit: position.takeProfit,
-      opened_at: position.openedAt ? new Date(position.openedAt).toISOString() : null,
-      updated_at: new Date().toISOString()
-    })),
-    { onConflict: "account_id,symbol,direction" }
-  );
-  if (error) throw error;
+  await replaceBybitPositions(supabase, accountId, positions);
 }
 
 async function updateKnownOrders(supabase, userId, accountId, openOrders) {

@@ -900,6 +900,9 @@ Changed:
 - Added an explicit message when Bybit returns HTTP 403 because the execution backend is running in a restricted region.
 - Added automatic failover between Bybit's official `api.bybit.com` and `api.bytick.com` mainnet hosts.
 - Added safe server-side diagnostics for upstream failures without logging API credentials.
+- Confirmed live Bybit credential authentication and isolated the remaining failure to Supabase snapshot persistence.
+- Replaced conflict-target-dependent snapshot upserts with authoritative account-scoped balance and position replacement.
+- Preserved authenticated Bybit connections in a degraded state when optional initial snapshot persistence fails instead of deleting the account and credential.
 
 Why:
 

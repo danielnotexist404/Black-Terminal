@@ -964,6 +964,8 @@ Changed:
 - Integrated Bybit V5-native Chase Limit, TWAP, Iceberg and POV strategy creation through OMS, EMS, Risk and the existing server adapter.
 - Added native strategy REST synchronization, private WebSocket event normalization and authenticated strategy stop routing.
 - Replaced the misleading pre-sync `UNAVAILABLE` badge with explicit `SYNCING`, `SYNC FAILED`, `BLOCKED` and `TRADING READY` states.
+- Activated the production Bybit mainnet policy with venue-validated wildcard symbols and a 5 USDT maximum order-notional safety cap.
+- Consolidated permission and execution-policy evaluation into snapshot reconciliation so Portfolio, Connections and Unified Ticket consume the same readiness state.
 
 Validation:
 

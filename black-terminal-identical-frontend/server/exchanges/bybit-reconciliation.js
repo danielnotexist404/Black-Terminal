@@ -106,15 +106,16 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
   if (riskUpdate.error) throw riskUpdate.error;
   Object.assign(account, accountPatch);
 
-  console.info("[bybit-execution-policy]", {
-    account: String(account.id || "").slice(-6),
-    tradingEnabled: executionState.tradingEnabled,
-    readinessReason: executionState.readinessReason || "ready",
-    venueTradingPermission: permissionReport.trading,
-    withdrawalPermission: permissionReport.withdrawal,
-    allowedSymbols: executionState.allowedSymbols,
-    maxNotionalUsd: executionState.maxNotionalUsd
-  });
+  if (!executionState.tradingEnabled) {
+    console.warn("[bybit-execution-policy-blocked]", {
+      account: String(account.id || "").slice(-6),
+      readinessReason: executionState.readinessReason,
+      venueTradingPermission: permissionReport.trading,
+      withdrawalPermission: permissionReport.withdrawal,
+      allowedSymbols: executionState.allowedSymbols,
+      maxNotionalUsd: executionState.maxNotionalUsd
+    });
+  }
 
   await settleSupabaseQuery(supabase.from("execution_audit_logs").insert({
     user_id: userId,

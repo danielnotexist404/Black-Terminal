@@ -8003,6 +8003,203 @@ body.resizing-layout * {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.dom-pro-panel-title-main,
+.dom-pro-panel-title-status {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.dom-pro-panel-title-main {
+  flex: 1 1 55%;
+  max-width: 62%;
+}
+
+.dom-pro-panel-title-status {
+  flex: 0 1 45%;
+  justify-content: flex-end;
+}
+
+.dom-pro-panel-title-status b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dom-pro-panel-title-status em {
+  color: #58bd7d;
+  font: 800 7px "IBM Plex Mono", monospace;
+  font-style: normal;
+}
+
+.dom-pro-panel-cog {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: #8d939c;
+  border: 1px solid transparent;
+  background: transparent;
+  opacity: 0.42;
+}
+
+.dom-pro-panel:hover .dom-pro-panel-cog,
+.dom-pro-panel-cog:focus-visible,
+.dom-pro-panel-cog[aria-expanded="true"] {
+  color: #f1f3f5;
+  border-color: rgba(255, 0, 0, 0.38);
+  opacity: 1;
+}
+
+.dom-pro-panel-popover {
+  position: fixed;
+  z-index: 10050;
+  width: min(340px, calc(100vw - 20px));
+  max-height: min(430px, calc(100vh - 20px));
+  overflow: auto;
+  color: #d9dce1;
+  border: 1px solid rgba(255, 0, 0, 0.58);
+  border-radius: 2px;
+  background: rgba(5, 6, 7, 0.985);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.72);
+  font: 800 9px "IBM Plex Mono", monospace;
+}
+
+.dom-pro-panel-popover header,
+.dom-pro-panel-popover footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.dom-pro-panel-popover header {
+  justify-content: space-between;
+  color: #fff;
+  text-transform: uppercase;
+}
+
+.dom-pro-panel-popover header button {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.dom-pro-panel-popover footer {
+  position: sticky;
+  bottom: 0;
+  justify-content: flex-end;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  border-bottom: 0;
+  background: #070809;
+}
+
+.dom-pro-panel-popover button,
+.dom-pro-panel-popover input,
+.dom-pro-panel-popover select {
+  min-height: 27px;
+  color: #e6e8eb;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 1px;
+  background: #111317;
+  font: 800 9px "IBM Plex Mono", monospace;
+}
+
+.dom-pro-panel-popover button:focus-visible,
+.dom-pro-panel-popover input:focus-visible,
+.dom-pro-panel-popover select:focus-visible {
+  outline: 1px solid #ff2b2b;
+  outline-offset: 1px;
+}
+
+.dom-pro-panel-setting-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  padding: 8px;
+}
+
+.dom-pro-panel-setting {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  color: #9da3ac;
+  text-transform: uppercase;
+}
+
+.dom-pro-panel-setting-grid .dom-pro-panel-setting {
+  padding: 0;
+}
+
+.dom-pro-panel-setting.toggle {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.dom-pro-panel-setting.toggle input {
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  accent-color: #d80000;
+}
+
+.dom-pro-panel-popover details {
+  margin: 2px 8px 8px;
+  padding: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.dom-pro-panel-popover summary {
+  cursor: pointer;
+  color: #aeb3bb;
+  text-transform: uppercase;
+}
+
+.dom-pro-panel-popover dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 10px;
+  margin: 8px 0 0;
+}
+
+.dom-pro-panel-popover dt { color: #747b85; }
+.dom-pro-panel-popover dd { margin: 0; color: #d5d8dc; text-align: right; }
+
+.dom-pro-depth-summary {
+  position: absolute;
+  top: 42px;
+  right: 10px;
+  z-index: 2;
+  display: grid;
+  gap: 2px;
+  padding: 5px 7px;
+  color: #aeb3bb;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.68);
+  font: 800 8px "IBM Plex Mono", monospace;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.dom-pro-depth-summary b { color: #f0f2f4; }
+
+.dom-pro-global-reset {
+  min-height: 28px;
+  color: #c9cdd3;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.35);
+  font: 800 8px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
 .dom-pro-panel-title span {
   overflow: hidden;
   color: #e2e4e8;

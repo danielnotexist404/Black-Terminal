@@ -172,3 +172,6 @@ Chapter XIV performance workflow:
 - Bybit adapter certification has deterministic tests. Scale math, candle buffers, and broader protocol validation still need automated tests.
 - Tauri permissions and content security should be tightened before external data or community
   content ships.
+# DOM Pro Workspace Presets
+
+Scalper, Intraday, Institutional, and Macro now coordinate per-panel presets through the DOM panel registry. Selecting a global preset changes panel defaults once; subsequent panel-cog changes are retained as explicit user overrides for that workspace/symbol.

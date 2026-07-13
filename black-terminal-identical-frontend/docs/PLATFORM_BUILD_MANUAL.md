@@ -355,3 +355,6 @@ Operational readiness and certification controls belong in Connections -> Runtim
 - Relevant docs are updated.
 - Supabase migrations are recorded when schema changes.
 - Git commit explains the architectural change, not only the UI symptom.
+# DOM Pro Refinement Verification
+
+Run `npm run test:dom-pro-panels`, `npm run test:performance`, and `npm run build`. Panel settings use a versioned browser fallback scoped by workspace and symbol. No database migration or new runtime secret is required.

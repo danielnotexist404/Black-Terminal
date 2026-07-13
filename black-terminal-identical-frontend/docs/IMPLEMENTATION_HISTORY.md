@@ -1025,3 +1025,11 @@ Validation:
 Remaining:
 - ...
 ```
+# 2026-07-13 - Phase III Final DOM Pro Refinement
+
+- Added a versioned ten-panel settings registry with migration, presets, per-workspace/symbol persistence, reset, and save-as-default behavior.
+- Added panel header cogs, accessible viewport-safe popovers, live panel controls, data-quality badges, and collapsed diagnostics.
+- Added the centralized panel cadence scheduler without adding subscriptions, workers, or per-panel timers.
+- Stabilized structural depth, wall lifecycle/order, heuristic CVD, DOM metrics, aggregated tape, and clipped flow delta.
+- Added deterministic DOM Pro panel tests and retained the Chapter XIV performance regression suite.
+- Captured 14 visual-regression states and passed the full one-hour cockpit soak with all bounded-resource checks green.

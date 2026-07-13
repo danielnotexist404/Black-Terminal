@@ -1976,3 +1976,6 @@ No migration is required. Venue execution schemas, algorithm readiness, instrume
 ## Phase III Chapter XIV
 
 No migration is required. Performance telemetry, resource ownership, worker queues, account request deduplication and soak reports are runtime/browser diagnostics. Metrics are not persisted to Supabase by this chapter, avoiding collection of workstation telemetry without an explicit observability policy.
+# Phase III Final DOM Pro Refinement
+
+No Supabase migration is required. The new panel registry is versioned and currently persists through the documented browser fallback. Server-side user preference persistence is intentionally deferred until a dedicated preference contract is introduced.

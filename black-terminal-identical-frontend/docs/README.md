@@ -77,3 +77,6 @@ Validation:
 Remaining:
 - ...
 ```
+# Latest DOM Pro Chapter
+
+The final Phase III DOM Pro refinement adds independent panel settings, coordinated cockpit presets, stable structural depth/walls/CVD/metrics, one centralized panel scheduler, and deterministic regression coverage. Start with `PHASE3_FINAL_DOM_PRO_FIXES_OPTIMIZATION.md`.

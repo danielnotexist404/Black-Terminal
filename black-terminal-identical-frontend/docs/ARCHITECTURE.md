@@ -316,3 +316,6 @@ Market adapters own raw ingestion. `MarketCache` owns bounded market history. `D
 Every hardened timer, listener, observer, worker, socket and Pixi resource has an explicit owner and teardown. Hidden chart and DOM visual work suspends while account and execution truth remains active. Simulation data requires an explicit mock venue or `VITE_ALLOW_SIMULATED_MARKET_FALLBACK=true`; production failures otherwise remain visibly unavailable/live-only.
 
 See `PHASE3_CHAPTER14_PERFORMANCE_STABILITY.md` for cadence, retention, soak testing and known limits.
+# DOM Pro Panel Control Plane (2026-07-13)
+
+DOM Pro uses one shared normalized orderbook/trade snapshot and one latest-wins aggregation worker. A versioned `DomPanelSettingsRegistry` owns all panel preferences, while `DomPanelUpdateScheduler` separates source ingestion from each panel's calculation and render cadence. Structural processors are stateful consumers of the shared snapshot; they never subscribe to venues directly. See `DOM_PRO_PANEL_SETTINGS.md` and `DOM_PRO_SIGNAL_STABILIZATION.md`.

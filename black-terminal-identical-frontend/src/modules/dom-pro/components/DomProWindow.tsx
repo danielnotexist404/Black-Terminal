@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, WheelEvent as ReactWheelEvent } from "react";
+import { createPortal } from "react-dom";
 import { ExternalLink, Maximize2, Minus, Settings, X } from "lucide-react";
 import type { Candle } from "../../../chart-engine/types";
 import { blackCoreConnectionManager } from "../../../connectivity/connectionManager";
@@ -17,6 +18,33 @@ import { defaultRiskControls } from "../../../risk/types";
 import { DomAggregationEngine } from "../domAggregationEngine";
 import { aggregateDomSnapshot } from "../domAggregationClient";
 import { blackDepthHistoryStore, type DepthHistoryPoint, type DepthHistoryRead } from "../depthHistoryStore";
+import {
+  applyDomPanelPreset,
+  applyDomWorkspacePreset,
+  domPanelFields,
+  domPanelPresets,
+  exportDomPanelSettings,
+  importDomPanelSettings,
+  patchDomPanel,
+  readDomPanelRegistry,
+  resetAllDomPanels,
+  resetDomPanel,
+  writeDomPanelRegistry,
+  type DomPanelId,
+  type DomPanelSettingsRegistry,
+  type DomPanelValues
+} from "../domPanelSettingsStore";
+import { DomPanelUpdateScheduler } from "../domPanelUpdateScheduler";
+import { placePanelPopover } from "../domPanelPopover";
+import {
+  aggregateTradeTape,
+  bucketAndSmoothCvd,
+  clipAndSmoothSeries,
+  MetricsStabilizer,
+  PersistentDepthProcessor,
+  StableWallProcessor,
+  type StabilizedMetrics
+} from "../domSignalStabilizers";
 import { readDomSettings, updateModeSettings, writeDomSettings } from "../domSettingsStore";
 import { useDomFeed } from "../useDomFeed";
 import type {
@@ -222,6 +250,7 @@ const workspacePresets: Array<{ value: DomWorkspacePreset; label: string; title:
   { value: "institutional", label: "Institutional", title: "24H liquidity map with calmer rendering" },
   { value: "macro", label: "Macro", title: "Wide liquidity memory and longer historical context" }
 ];
+const configurablePanelIds: DomPanelId[] = ["ladder", "volume-profile", "liquidity-heatmap", "wall-detection", "trade-tape", "dom-metrics", "heuristic-cvd", "depth-chart", "liquidity-flow-delta", "execution"];
 
 export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspaceId, windowMode, settingsOpenSignal = 0, onClose }: DomProWindowProps) {
   const symbolKey = `${marketSymbol.exchange}:${marketSymbol.marketKind}:${marketSymbol.rawSymbol}`;
@@ -241,7 +270,17 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const pendingHeatmapDragRef = useRef<{ centerPrice: number; cameraHeight: number } | null>(null);
   const cvdDragStartRef = useRef<{ x: number; startIndex: number; visibleCount: number; total: number; width: number } | null>(null);
   const [settings, setSettings] = useState<DomSettings>(() => readDomSettings(workspaceId, symbolKey));
+  const [panelRegistry, setPanelRegistry] = useState<DomPanelSettingsRegistry>(() => readDomPanelRegistry(workspaceId, symbolKey));
+  const panelSchedulerRef = useRef(new DomPanelUpdateScheduler());
+  const depthProcessorRef = useRef(new PersistentDepthProcessor());
+  const wallProcessorRef = useRef(new StableWallProcessor());
+  const metricsProcessorRef = useRef(new MetricsStabilizer());
+  const [stableWalls, setStableWalls] = useState<Array<AggregatedDomSnapshot["walls"][number] & { reliability?: number; lifecycle?: string; observations?: number }>>([]);
+  const [stableTrades, setStableTrades] = useState<AggregatedDomSnapshot["trades"]>([]);
+  const [stableMetrics, setStableMetrics] = useState<StabilizedMetrics | null>(null);
+  const [depthModelRevision, setDepthModelRevision] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTransferStatus, setSettingsTransferStatus] = useState("");
   const [heatmapViewport, setHeatmapViewport] = useState<HeatmapViewportState>(() => defaultHeatmapCamera());
   const [cvdViewport, setCvdViewport] = useState<CvdViewportState>(() => defaultCvdCamera());
   const [domHover, setDomHover] = useState<DomHoverInfo | null>(null);
@@ -257,6 +296,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
       subscriptionCount: feed.subscriptionCount
     })
   );
+  const [panelSnapshots, setPanelSnapshots] = useState<Record<DomPanelId, AggregatedDomSnapshot>>(() => createPanelSnapshotMap(snapshot));
   const [connections, setConnections] = useState<ConnectionDiagnostics[]>(() => blackCoreConnectionManager.listDiagnostics());
   const activeConnections = useMemo(() => connections.filter((connection) => !["disconnected", "offline", "unsupported"].includes(connection.status)), [connections]);
   const selectedConnection = useMemo(() => {
@@ -288,7 +328,12 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   useEffect(() => {
     const next = readDomSettings(workspaceId, symbolKey);
     setSettings(next);
+    setPanelRegistry(readDomPanelRegistry(workspaceId, symbolKey));
     engineRef.current = new DomAggregationEngine();
+    depthProcessorRef.current = new PersistentDepthProcessor();
+    wallProcessorRef.current = new StableWallProcessor();
+    metricsProcessorRef.current = new MetricsStabilizer();
+    setPanelSnapshots(createPanelSnapshotMap(snapshot));
     renderGenerationRef.current += 1;
     setHeatmapViewport(defaultHeatmapCamera());
     setDomHover(null);
@@ -297,6 +342,16 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   useEffect(() => {
     writeDomSettings(settings);
   }, [settings]);
+
+  useEffect(() => {
+    writeDomPanelRegistry(panelRegistry);
+    for (const panelId of Object.keys(panelRegistry.panels) as DomPanelId[]) {
+      const values = panelRegistry.panels[panelId].settings;
+      panelSchedulerRef.current.setCadence(panelId, numberSetting(values, "updateIntervalMs", 1000), 1000 / numberSetting(values, "renderFps", 4));
+      if (booleanSetting(values, "visible", true)) panelSchedulerRef.current.resumePanel(panelId);
+      else panelSchedulerRef.current.suspendPanel(panelId);
+    }
+  }, [panelRegistry]);
 
   useEffect(() => {
     if (settingsOpenSignal > 0) setSettingsOpen(true);
@@ -397,9 +452,12 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
 
   useEffect(() => {
     if (!snapshot.liquidityDelta.length) return;
-    if (snapshot.generatedAt - lastFlowUiUpdateAtRef.current < 1000) return;
+    const flowValues = panelRegistry.panels["liquidity-flow-delta"].settings;
+    const flowCadence = numberSetting(flowValues, "updateIntervalMs", 2000);
+    if (snapshot.generatedAt - lastFlowUiUpdateAtRef.current < flowCadence) return;
     lastFlowUiUpdateAtRef.current = snapshot.generatedAt;
-    const bucketTime = Math.floor((snapshot.generatedAt / 1000) / settings.cvdSampleIntervalSec) * settings.cvdSampleIntervalSec;
+    const bucketSeconds = numberSetting(flowValues, "timeBucketSec", 10);
+    const bucketTime = Math.floor((snapshot.generatedAt / 1000) / bucketSeconds) * bucketSeconds;
     const nextPoint: FlowPoint = {
       time: bucketTime,
       bidAdded: snapshot.liquidityDelta.reduce((sum, delta) => sum + delta.bidAdded, 0),
@@ -413,7 +471,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
       const withoutCurrent = current.filter((point) => point.time !== bucketTime && point.time >= cutoff);
       return [...withoutCurrent, nextPoint].slice(-420);
     });
-  }, [settings.cvdHorizon, settings.cvdSampleIntervalSec, snapshot.generatedAt, snapshot.liquidityDelta]);
+  }, [panelRegistry, settings.cvdHorizon, snapshot.generatedAt, snapshot.liquidityDelta]);
 
   function renderSnapshot() {
     const started = performance.now();
@@ -448,6 +506,33 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
 
   function patchSettings(patch: Partial<DomSettings>) {
     setSettings((current) => ({ ...current, ...patch }));
+  }
+
+  function patchPanelSettings(panelId: DomPanelId, patch: Partial<DomPanelValues>) {
+    setPanelRegistry((current) => patchDomPanel(current, panelId, patch));
+    panelSchedulerRef.current.requestImmediateUpdate(panelId);
+  }
+
+  function setPanelHoverFreeze(panelId: DomPanelId, hovering: boolean) {
+    if (!booleanSetting(panelRegistry.panels[panelId].settings, "freezeOnHover", false)) return;
+    if (hovering) panelSchedulerRef.current.suspendPanel(panelId);
+    else panelSchedulerRef.current.resumePanel(panelId);
+  }
+
+  async function exportPanelSettings() {
+    await navigator.clipboard.writeText(exportDomPanelSettings(panelRegistry));
+    setSettingsTransferStatus("Panel settings copied");
+  }
+
+  function importPanelSettings() {
+    const raw = window.prompt("Paste DOM Pro panel settings JSON");
+    if (!raw) return;
+    try {
+      setPanelRegistry(importDomPanelSettings(raw, workspaceId, symbolKey));
+      setSettingsTransferStatus("Panel settings imported");
+    } catch {
+      setSettingsTransferStatus("Invalid settings JSON");
+    }
   }
 
   const submitQuickOrder = useCallback(async (targetSide: OrderSide, override: Partial<{ quantity: string; price: string; orderType: OrderType; reduceOnly: boolean; postOnly: boolean }> = {}) => {
@@ -518,7 +603,77 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     blackDepthHistoryStore.record(marketSymbol, snapshot.sourceBook, snapshot.lastPrice ?? lastPrice);
   }, [lastPrice, marketSymbol, snapshot.generatedAt, snapshot.lastPrice, snapshot.sourceBook]);
 
-  const cvdData = snapshot.cvdSeries;
+  const cvdPanelValues = panelRegistry.panels["heuristic-cvd"].settings;
+  const depthPanelValues = panelRegistry.panels["depth-chart"].settings;
+  const wallPanelValues = panelRegistry.panels["wall-detection"].settings;
+  const tapePanelValues = panelRegistry.panels["trade-tape"].settings;
+  const metricsPanelValues = panelRegistry.panels["dom-metrics"].settings;
+  const flowPanelValues = panelRegistry.panels["liquidity-flow-delta"].settings;
+  const analyticalSettings = useMemo<DomSettings>(() => ({
+    ...settings,
+    cvdHorizon: stringSetting(cvdPanelValues, "horizon", settings.cvdHorizon) as DomCvdHorizon,
+    cvdSampleIntervalSec: numberSetting(cvdPanelValues, "sourceBucketSec", settings.cvdSampleIntervalSec),
+    cvdSmoothingLength: numberSetting(cvdPanelValues, "smoothingLength", settings.cvdSmoothingLength),
+    cvdCandleSeconds: numberSetting(cvdPanelValues, "candleSeconds", settings.cvdCandleSeconds),
+    cvdVisibleCandles: numberSetting(cvdPanelValues, "visibleCandles", settings.cvdVisibleCandles),
+    depthDisplayLevels: numberSetting(depthPanelValues, "levels", settings.depthDisplayLevels),
+    depthSmoothingLevels: numberSetting(depthPanelValues, "bucketAggregation", settings.depthSmoothingLevels),
+    depthCurvePower: numberSetting(depthPanelValues, "curvePower", settings.depthCurvePower)
+  }), [cvdPanelValues, depthPanelValues, settings]);
+
+  useEffect(() => {
+    const rawBids = (snapshot.sourceBook?.bids ?? []).map((level) => ({ price: level.price, quantity: level.quantity }));
+    const rawAsks = (snapshot.sourceBook?.asks ?? []).map((level) => ({ price: level.price, quantity: level.quantity }));
+    if (rawBids.length || rawAsks.length) {
+      depthProcessorRef.current.ingest(rawBids, rawAsks, numberSetting(depthPanelValues, "smoothingWindow", 12));
+    }
+    const scheduler = panelSchedulerRef.current;
+    const due = new Set(configurablePanelIds.filter((panelId) => scheduler.coalesceUpdates(panelId, snapshot.generatedAt)));
+    if (due.size) {
+      setPanelSnapshots((current) => {
+        const next = { ...current };
+        for (const panelId of due) next[panelId] = snapshot;
+        return next;
+      });
+    }
+    if (due.has("depth-chart")) setDepthModelRevision((value) => value + 1);
+    if (due.has("wall-detection")) {
+      const minimumWallSize = numberSetting(wallPanelValues, "minimumWallSize", 0);
+      setStableWalls(wallProcessorRef.current.update(snapshot.walls.filter((wall) => wall.size >= minimumWallSize), {
+        activationScore: numberSetting(wallPanelValues, "activationScore", 62),
+        deactivationScore: numberSetting(wallPanelValues, "deactivationScore", 44),
+        minimumPersistenceMs: numberSetting(wallPanelValues, "minimumPersistenceMs", 8000),
+        minimumObservations: numberSetting(wallPanelValues, "minimumObservations", 3),
+        maximumRows: numberSetting(wallPanelValues, "maximumRows", 8),
+        sortMode: stringSetting(wallPanelValues, "sortMode", "reliability"),
+        majorOnly: booleanSetting(wallPanelValues, "majorOnly", false)
+      }, snapshot.generatedAt));
+    }
+    if (due.has("trade-tape")) {
+      setStableTrades(aggregateTradeTape(snapshot.trades, {
+        minimumTradeSize: numberSetting(tapePanelValues, "minimumTradeSize", 0),
+        groupingIntervalMs: numberSetting(tapePanelValues, "groupingIntervalMs", 1000),
+        aggregateSamePrice: booleanSetting(tapePanelValues, "aggregateSamePrice", true),
+        displayRows: numberSetting(tapePanelValues, "displayRows", 22)
+      }));
+    }
+    if (due.has("dom-metrics")) {
+      setStableMetrics(metricsProcessorRef.current.update(
+        snapshot.metrics,
+        numberSetting(metricsPanelValues, "smoothingLength", 12),
+        numberSetting(metricsPanelValues, "hysteresisPct", 5),
+        numberSetting(metricsPanelValues, "stateChangeDelayMs", 5000),
+        snapshot.generatedAt
+      ));
+    }
+  }, [depthPanelValues, metricsPanelValues, snapshot.generatedAt, snapshot.metrics, snapshot.sourceBook, snapshot.trades, snapshot.walls, tapePanelValues, wallPanelValues]);
+
+  const cvdSnapshot = panelSnapshots["heuristic-cvd"];
+  const depthSnapshot = panelSnapshots["depth-chart"];
+  const profileSnapshot = panelSnapshots["volume-profile"];
+  const heatmapSnapshot = panelSnapshots["liquidity-heatmap"];
+  const ladderSnapshot = panelSnapshots.ladder;
+  const cvdData = cvdSnapshot.cvdSeries;
   const macroBands = useMemo(
     () => settings.showMacroRadar ? buildMacroLiquidityBands(macroCandles, snapshot.lastPrice ?? lastPrice, settings) : [],
     [lastPrice, macroCandles, settings.macroBandCount, settings.macroLookbackDays, settings.showMacroRadar, snapshot.lastPrice]
@@ -527,18 +682,18 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     () => resolveMacroLiquidityRange(snapshot, macroCandles, macroBands, snapshot.lastPrice ?? lastPrice, settings),
     [lastPrice, macroBands, macroCandles, settings, snapshot]
   );
-  const heatmapFrames = useMemo(() => snapshot.heatmap.slice(-resolveHorizonFrameCount(settings)), [settings, snapshot.heatmap]);
+  const heatmapFrames = useMemo(() => heatmapSnapshot.heatmap.slice(-resolveHorizonFrameCount(settings)), [heatmapSnapshot.heatmap, settings]);
   const liquidityDataRange = useMemo(
-    () => resolveLiquidityDataRange(snapshot, macroBands, snapshot.heatmap, macroRange),
-    [macroBands, macroRange, snapshot]
+    () => resolveLiquidityDataRange(heatmapSnapshot, macroBands, heatmapSnapshot.heatmap, macroRange),
+    [heatmapSnapshot, macroBands, macroRange]
   );
   const heatmapRange = useMemo(
     () => applyHeatmapCamera(macroRange, liquidityDataRange, heatmapViewport, snapshot.lastPrice ?? lastPrice),
     [heatmapViewport, lastPrice, liquidityDataRange, macroRange, snapshot.lastPrice]
   );
   const institutionalProfile = useMemo(
-    () => buildInstitutionalProfile(snapshot.volumeProfile, macroCandles, heatmapRange),
-    [heatmapRange, macroCandles, snapshot.volumeProfile]
+    () => buildInstitutionalProfile(profileSnapshot.volumeProfile, macroCandles, heatmapRange),
+    [heatmapRange, macroCandles, profileSnapshot.volumeProfile]
   );
   const maxProfileVolume = Math.max(...institutionalProfile.map((node) => node.volume), 1);
   const profileOutline = useMemo(
@@ -557,19 +712,24 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     () => buildDepthCoverageGaps(heatmapRange, heatmapFrames, macroBands, heatmapStructureRibbons, depthHistory.points, snapshot.lastPrice ?? lastPrice),
     [depthHistory.points, heatmapFrames, heatmapRange, heatmapStructureRibbons, lastPrice, macroBands, snapshot.lastPrice]
   );
-  const smoothedCvdData = useMemo(() => buildSmoothedCvd(cvdData, settings), [cvdData, settings]);
-  const cvdCandles = useMemo(() => buildCvdCandles(smoothedCvdData, settings, snapshot.trades), [settings, smoothedCvdData, snapshot.trades]);
+  const smoothedCvdData = useMemo(() => buildSmoothedCvd(cvdData, analyticalSettings), [analyticalSettings, cvdData]);
+  const cvdCandles = useMemo(() => buildCvdCandles(smoothedCvdData, analyticalSettings, cvdSnapshot.trades), [analyticalSettings, cvdSnapshot.trades, smoothedCvdData]);
   const cvdStatsData = useMemo(
     () => smoothedCvdData.length >= 2 ? smoothedCvdData : cvdCandles.map((candle) => ({ time: candle.time, value: candle.close })),
     [cvdCandles, smoothedCvdData]
   );
-  const cvdStats = useMemo(() => buildCvdStats(snapshot.trades, cvdStatsData, settings), [settings, cvdStatsData, snapshot.trades]);
-  const cvdCamera = useMemo(() => resolveCvdCamera(cvdViewport, cvdCandles.length, settings), [cvdCandles.length, cvdViewport, settings]);
+  const cvdStats = useMemo(() => buildCvdStats(cvdSnapshot.trades, cvdStatsData, analyticalSettings), [analyticalSettings, cvdSnapshot.trades, cvdStatsData]);
+  const cvdCamera = useMemo(() => resolveCvdCamera(cvdViewport, cvdCandles.length, analyticalSettings), [analyticalSettings, cvdCandles.length, cvdViewport]);
   const cvdVisibleCandles = useMemo(() => cvdCandles.slice(cvdCamera.start, cvdCamera.end), [cvdCamera.end, cvdCamera.start, cvdCandles]);
   const cvdCameraLabel = cvdCamera.total > 0 ? `${cvdCamera.start + 1}-${cvdCamera.end} / ${cvdCamera.total}` : "No tape";
-  const depthChartRange = useMemo(() => resolveDepthChartRange(snapshot), [snapshot]);
-  const depthChart = useMemo(() => buildDepthChart(snapshot, depthChartRange, settings), [depthChartRange, settings, snapshot]);
-  const flowBars = useMemo(() => buildFlowBars(flowSeries, settings), [flowSeries, settings]);
+  const depthChartRange = useMemo(() => resolveDepthChartRange(depthSnapshot), [depthSnapshot]);
+  const structuralDepth = useMemo(() => ({
+    bids: depthProcessorRef.current.structural("bid", numberSetting(depthPanelValues, "persistenceThreshold", 55), numberSetting(depthPanelValues, "minimumVisibleSize", 0)),
+    asks: depthProcessorRef.current.structural("ask", numberSetting(depthPanelValues, "persistenceThreshold", 55), numberSetting(depthPanelValues, "minimumVisibleSize", 0))
+  }), [depthModelRevision, depthPanelValues]);
+  const depthChart = useMemo(() => buildDepthChart(depthSnapshot, depthChartRange, analyticalSettings, stringSetting(depthPanelValues, "mode", "structural"), structuralDepth), [analyticalSettings, depthChartRange, depthPanelValues, depthSnapshot, structuralDepth]);
+  const stabilizedFlowSeries = useMemo(() => clipAndSmoothSeries(flowSeries, numberSetting(flowPanelValues, "outlierPercentile", 95), numberSetting(flowPanelValues, "smoothingLength", 10)), [flowPanelValues, flowSeries]);
+  const flowBars = useMemo(() => buildFlowBars(stabilizedFlowSeries, analyticalSettings), [analyticalSettings, stabilizedFlowSeries]);
   const debugStats = useMemo(
     () => buildDomDebugStats(snapshot, macroRange, heatmapRange, settings, heatmapFrames, institutionalProfile, depthChart, depthHistory, snapshot.lastPrice ?? lastPrice),
     [depthChart, depthHistory, heatmapFrames, heatmapRange, institutionalProfile, lastPrice, macroRange, settings, snapshot]
@@ -670,6 +830,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
       setHeatmapViewport(createCameraFromRange(resolveCameraPresetRange("24h", snapshot, macroBands, macroRange, snapshot.lastPrice ?? lastPrice), macroRange, "24h"));
     }
     setCvdViewport(defaultCvdCamera());
+    setPanelRegistry((current) => applyDomWorkspacePreset(current, preset));
     patchSettings(patch);
     setDomHover(null);
   }, [lastPrice, liquidityDataRange, macroBands, macroRange, snapshot]);
@@ -946,11 +1107,24 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     });
   }, [cvdData, exchangeLabel, executionStatus, heatmapRange, lastPrice, macroBands, marketSymbol, settings, snapshot, windowMode]);
 
-  const priceRows = useMemo(() => buildLadderRows(snapshot, heatmapRange, settings), [heatmapRange, settings, snapshot]);
-  const currentLadderPrice = snapshot.midPrice ?? snapshot.lastPrice ?? lastPrice ?? midpoint(heatmapRange);
+  const priceRows = useMemo(() => buildLadderRows(ladderSnapshot, heatmapRange, settings), [heatmapRange, ladderSnapshot, settings]);
+  const currentLadderPrice = ladderSnapshot.midPrice ?? ladderSnapshot.lastPrice ?? lastPrice ?? midpoint(heatmapRange);
   const priceRowsAbove = priceRows.filter((row) => row.price > currentLadderPrice);
   const priceRowsBelow = priceRows.filter((row) => row.price <= currentLadderPrice);
   const maxTotal = Math.max(...priceRows.map((row) => row.totalSize), 1);
+  const panelHeaderProps = (panelId: DomPanelId) => ({
+    panelId,
+    panel: panelRegistry.panels[panelId],
+    scheduler: panelSchedulerRef.current.reportMetrics(panelId)[0],
+    dataQuality: snapshot.status === "live" ? "LIVE" : snapshot.status === "degraded" ? "PARTIAL" : "STALE",
+    onPatch: (patch: Partial<DomPanelValues>) => patchPanelSettings(panelId, patch),
+    onPreset: (preset: string) => setPanelRegistry((current) => applyDomPanelPreset(current, panelId, preset)),
+    onReset: () => setPanelRegistry((current) => resetDomPanel(current, panelId)),
+    onSaveDefault: () => setPanelRegistry((current) => ({
+      ...current,
+      panels: { ...current.panels, [panelId]: { ...current.panels[panelId], defaultSettings: { ...current.panels[panelId].settings }, updatedAt: Date.now() } }
+    }))
+  });
 
   if (windowMode === "detached-browser") {
     return (
@@ -1061,45 +1235,20 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             <Toggle label="Follow Market" checked={settings.followMarket} onChange={(value) => patchSettings({ followMarket: value, freeExplore: !value })} />
             <Toggle label="Free Explore" checked={settings.freeExplore} onChange={(value) => patchSettings({ freeExplore: value, followMarket: false })} />
             <Field label="FPS" value={settings.fpsCap} min={5} max={30} onChange={(value) => patchSettings({ fpsCap: value })} />
-            <Field label="Max Buckets" value={settings.maxVisibleBuckets} min={20} max={180} onChange={(value) => patchSettings({ maxVisibleBuckets: value })} />
-            <Field label="Heatmap Frames" value={settings.maxHeatmapHistory} min={60} max={720} onChange={(value) => patchSettings({ maxHeatmapHistory: value })} />
-            <Field label="Liquidity Threshold" value={settings.liquidityThreshold} min={1} max={8} step={0.1} onChange={(value) => patchSettings({ liquidityThreshold: value })} />
             <Field label="Macro Lookback" value={settings.macroLookbackDays} min={90} max={1000} onChange={(value) => patchSettings({ macroLookbackDays: value })} />
             <Field label="Macro Bands" value={settings.macroBandCount} min={4} max={18} onChange={(value) => patchSettings({ macroBandCount: value })} />
-            <Field label="Smoothing" value={settings.persistenceSmoothing} min={40} max={97} onChange={(value) => patchSettings({ persistenceSmoothing: value })} />
-            <label className="dom-pro-field">
-              <span>CVD Horizon</span>
-              <select value={settings.cvdHorizon} onChange={(event) => {
-                patchSettings({ cvdHorizon: event.target.value as DomCvdHorizon });
-                setCvdViewport(defaultCvdCamera());
-              }}>
-                {cvdHorizons.map((horizon) => <option key={horizon.value} value={horizon.value}>{horizon.label}</option>)}
-              </select>
-            </label>
-            <Field label="CVD Sample" value={settings.cvdSampleIntervalSec} min={5} max={60} onChange={(value) => patchSettings({ cvdSampleIntervalSec: value })} />
-            <Field label="CVD Smooth" value={settings.cvdSmoothingLength} min={8} max={80} onChange={(value) => patchSettings({ cvdSmoothingLength: value })} />
-            <Field label="CVD TF Sec" value={settings.cvdCandleSeconds} min={15} max={3600} onChange={(value) => patchSettings({ cvdCandleSeconds: value })} />
-            <Field label="CVD Candles" value={settings.cvdVisibleCandles} min={16} max={140} onChange={(value) => {
-              patchSettings({ cvdVisibleCandles: value });
-              setCvdViewport({ startIndex: null, visibleCount: value, followLatest: true });
-            }} />
-            <div className="dom-pro-settings-actions">
-              <span>CVD Camera</span>
-              <button type="button" className={cvdCamera.followLatest ? "active" : ""} onClick={liveCvdCamera}>Live</button>
-              <button type="button" onClick={fitCvdCamera}>Fit</button>
-              <b>{cvdCameraLabel}</b>
-            </div>
-            <Field label="Depth Levels" value={settings.depthDisplayLevels} min={20} max={420} onChange={(value) => patchSettings({ depthDisplayLevels: value })} />
-            <Field label="Depth Smooth" value={settings.depthSmoothingLevels} min={1} max={24} onChange={(value) => patchSettings({ depthSmoothingLevels: value })} />
-            <Field label="Depth Curve" value={settings.depthCurvePower} min={0.45} max={1.4} step={0.05} onChange={(value) => patchSettings({ depthCurvePower: value })} />
+            <button type="button" className="dom-pro-global-reset" onClick={() => setPanelRegistry((current) => resetAllDomPanels(current))}>Reset All Panels</button>
+            <button type="button" className="dom-pro-global-reset" onClick={() => void exportPanelSettings()}>Export Settings</button>
+            <button type="button" className="dom-pro-global-reset" onClick={importPanelSettings}>Import Settings</button>
+            {settingsTransferStatus && <span className="dom-pro-settings-status">{settingsTransferStatus}</span>}
             {settings.bucketMultiplier === "custom" && <Field label="Custom Bucket" value={settings.customBucketSize} min={0.01} max={10000} step={0.01} onChange={(value) => patchSettings({ customBucketSize: value })} />}
           </section>
         )}
 
         <main className="dom-pro-grid">
           <section className="dom-pro-panel dom-pro-ladder">
-            <PanelTitle title="Aggregated DOM Ladder" status={snapshot.statusMessage} />
-            {snapshot.status === "awaiting-book" ? <EmptyState text="Awaiting live orderbook stream." /> : (
+            <PanelTitle title="Aggregated DOM Ladder" status={ladderSnapshot.statusMessage} {...panelHeaderProps("ladder")} />
+            {ladderSnapshot.status === "awaiting-book" ? <EmptyState text="Awaiting live orderbook stream." /> : (
               <>
                 <div className="dom-pro-ladder-head"><span>Price ({marketSymbol.quoteAsset})</span><span>Bid Size ({marketSymbol.baseAsset})</span><span>Ask Size ({marketSymbol.baseAsset})</span></div>
                 <div className="dom-pro-ladder-book">
@@ -1115,9 +1264,9 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                   ))}
                 </div>
                 <div className="dom-pro-mid">
-                  <b>{formatPrice(snapshot.lastPrice)}</b>
-                  <span>Spread {formatPrice(snapshot.spread ?? 0)}</span>
-                  <em>Mid {formatPrice(snapshot.midPrice)}</em>
+                  <b>{formatPrice(ladderSnapshot.lastPrice)}</b>
+                  <span>Spread {formatPrice(ladderSnapshot.spread ?? 0)}</span>
+                  <em>Mid {formatPrice(ladderSnapshot.midPrice)}</em>
                 </div>
                 <div className="dom-pro-ladder-rows lower">
                   {priceRowsBelow.map((row) => (
@@ -1136,7 +1285,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
           </section>
 
           <section className="dom-pro-panel dom-pro-profile">
-            <PanelTitle title="Volume Profile" status="VISIBLE RANGE" />
+            <PanelTitle title="Volume Profile" status="ESTIMATED / VISIBLE RANGE" {...panelHeaderProps("volume-profile")} />
             {!settings.showVolumeProfile ? <EmptyState text="Volume profile hidden in DOM settings." /> : institutionalProfile.length === 0 ? <EmptyState text="Awaiting live orderbook or historical candles." /> : (
                   <div className="dom-pro-profile-scale" onMouseMove={handleProfileMouseMove} onMouseLeave={() => setDomHover(null)} onDoubleClick={centerMarketCamera}>
                 <div className="dom-pro-profile-axis">
@@ -1159,7 +1308,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
           </section>
 
           <section className="dom-pro-panel dom-pro-heatmap">
-            <PanelTitle title="Liquidity Heatmap" status={`${settings.heatmapHorizon.toUpperCase()} HISTORICAL DEPTH`} />
+            <PanelTitle title="Liquidity Heatmap" status={`${settings.heatmapHorizon.toUpperCase()} HISTORICAL DEPTH`} {...panelHeaderProps("liquidity-heatmap")} />
             <div className="dom-pro-horizon-controls">
               {cameraPresets.map((preset) => (
                 <button
@@ -1256,17 +1405,17 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             )}
           </section>
 
-          <section className="dom-pro-panel dom-pro-walls">
-            <PanelTitle title="Wall Detection" status="PERSISTENCE" />
-            {!settings.showWallDetection ? <EmptyState text="Wall detection hidden in DOM settings." /> : snapshot.walls.length === 0 ? <EmptyState text="No persistent liquidity wall detected." /> : (
+          <section className="dom-pro-panel dom-pro-walls" onMouseEnter={() => setPanelHoverFreeze("wall-detection", true)} onMouseLeave={() => setPanelHoverFreeze("wall-detection", false)}>
+            <PanelTitle title="Wall Detection" status="DERIVED / PERSISTENCE" {...panelHeaderProps("wall-detection")} />
+            {!settings.showWallDetection ? <EmptyState text="Wall detection hidden in DOM settings." /> : stableWalls.length === 0 ? <EmptyState text="No walls meet current persistence threshold." /> : (
               <>
                 <div className="dom-pro-wall-head"><span>Type</span><span>Price</span><span>Size</span><span>Age</span></div>
-                {snapshot.walls.map((wall) => (
+                {stableWalls.map((wall) => (
                   <div className={`dom-pro-wall ${wall.side}`} key={wall.id}>
                     <b>{wall.side === "sell" ? "SELL WALL" : "BUY WALL"}</b>
                     <span>{formatPrice(wall.price)}</span>
                     <em>{formatSize(wall.size)} {marketSymbol.baseAsset}</em>
-                    <small>{formatDuration(wall.persistenceMs)} / {wall.persistencePct.toFixed(0)}% / {wall.distancePct.toFixed(2)}%</small>
+                    <small>{formatDuration(wall.persistenceMs)} / {wall.persistencePct.toFixed(0)}% / {wall.lifecycle?.toUpperCase() ?? "ACTIVE"} / R{(wall.reliability ?? wall.score).toFixed(0)}</small>
                   </div>
                 ))}
                 {snapshot.liquidityMigration.length > 0 && (
@@ -1283,12 +1432,12 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             )}
           </section>
 
-          <section className="dom-pro-panel dom-pro-tape">
-            <PanelTitle title="Trade Tape" status={feed.tradeStatus} />
-            {snapshot.trades.length === 0 ? <EmptyState text="Trade stream unavailable for this venue." /> : (
+          <section className="dom-pro-panel dom-pro-tape" onMouseEnter={() => setPanelHoverFreeze("trade-tape", true)} onMouseLeave={() => setPanelHoverFreeze("trade-tape", false)}>
+            <PanelTitle title="Trade Tape" status={feed.tradeStatus} {...panelHeaderProps("trade-tape")} />
+            {stableTrades.length === 0 ? <EmptyState text="Trade classification unavailable." /> : (
               <>
                 <div className="dom-pro-tape-head"><span>Time</span><span>Price</span><span>Size</span><span>Side</span></div>
-                {snapshot.trades.slice(0, 22).map((trade) => (
+                {stableTrades.map((trade) => (
                   <div className={`dom-pro-tape-row ${trade.side}`} key={trade.tradeId}>
                     <span>{formatTime(trade.time)}</span>
                     <span>{formatPrice(trade.price)}</span>
@@ -1300,20 +1449,20 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             )}
           </section>
 
-          <section className="dom-pro-panel dom-pro-metrics">
-            <PanelTitle title="DOM Metrics" status={exchangeLabel.toUpperCase()} />
-            <Metric label="Orderbook Imbalance" value={`${snapshot.metrics.orderBookImbalance.toFixed(2)}%`} note={snapshot.metrics.orderBookImbalance >= 0 ? "BID HEAVY" : "ASK HEAVY"} />
-            <Metric label="Depth Imbalance" value={`${snapshot.metrics.depthImbalance.toFixed(1)}%`} note="VISIBLE" />
-            <Metric label="Liquidity Score" value={`${snapshot.metrics.liquidityScore.toFixed(0)} / 100`} note="STRUCTURE" />
+          <section className="dom-pro-panel dom-pro-metrics" onMouseEnter={() => setPanelHoverFreeze("dom-metrics", true)} onMouseLeave={() => setPanelHoverFreeze("dom-metrics", false)}>
+            <PanelTitle title="DOM Metrics" status={`SMOOTHED / ${exchangeLabel.toUpperCase()}`} {...panelHeaderProps("dom-metrics")} />
+            <Metric label="Orderbook Imbalance" value={`${(stableMetrics?.orderBookImbalance ?? snapshot.metrics.orderBookImbalance).toFixed(2)}%`} note={(stableMetrics?.orderBookImbalance ?? snapshot.metrics.orderBookImbalance) >= 0 ? "BID HEAVY" : "ASK HEAVY"} />
+            <Metric label="Depth Imbalance" value={`${(stableMetrics?.depthImbalance ?? snapshot.metrics.depthImbalance).toFixed(1)}%`} note="VISIBLE" />
+            <Metric label="Derived Liquidity Score" value={`${(stableMetrics?.liquidityScore ?? snapshot.metrics.liquidityScore).toFixed(0)} / 100`} note="STRUCTURE" />
             <Metric label="Absorption" value={snapshot.absorption.detected ? "DETECTED" : "NONE"} note={snapshot.absorption.label} hot={snapshot.absorption.detected} />
-            <Metric label="Pulling / Stacking" value={snapshot.metrics.bidStacked + snapshot.metrics.askStacked >= snapshot.metrics.bidPulled + snapshot.metrics.askPulled ? "STACKING" : "PULLING"} note="NET LIQUIDITY" hot />
-            <Metric label="Large Trades (1m)" value={String(snapshot.metrics.largeTradesLastMinute)} note="LAST 60S" />
+            <Metric label="Pulling / Stacking" value={stableMetrics?.liquidityState ?? "BALANCED"} note={`${(stableMetrics?.confidence ?? 0).toFixed(0)}% CONFIDENCE`} hot />
+            <Metric label="Large Trades (1m)" value={String(Math.round(stableMetrics?.largeTradesLastMinute ?? snapshot.metrics.largeTradesLastMinute))} note="LAST 60S" />
             <Metric label="Est. Icebergs" value={`${snapshot.iceberg.estimatedCount}`} note={`${snapshot.iceberg.probability.toUpperCase()} PROBABILITY`} hot={snapshot.iceberg.probability !== "low"} />
             <Metric label="Latency" value={`${snapshot.metrics.latencyMs.toFixed(0)} ms`} note={feed.bookStatus} />
           </section>
 
           <section className="dom-pro-panel dom-pro-depth-chart">
-            <PanelTitle title="Depth Chart" status="MARKET CENTERED" />
+            <PanelTitle title="Depth Chart" status={`${stringSetting(depthPanelValues, "mode", "structural").toUpperCase()} DEPTH`} {...panelHeaderProps("depth-chart")} />
             {!settings.showDepthChart ? <EmptyState text="Depth chart hidden in DOM settings." /> : depthChart.empty ? <EmptyState text="Depth chart awaiting bid/ask buckets." /> : (
               <div className="dom-pro-depth-wrap">
                 <svg className="dom-pro-depth-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Cumulative market depth">
@@ -1324,13 +1473,14 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                   {depthChart.bidLine && <polyline className="bid-line" points={depthChart.bidLine} />}
                   {depthChart.askLine && <polyline className="ask-line" points={depthChart.askLine} />}
                 </svg>
+                <div className="dom-pro-depth-summary"><b>Structural Bias {depthChart.bias}</b><span>Bid {depthChart.bidPct.toFixed(0)}% / Ask {depthChart.askPct.toFixed(0)}%</span></div>
                 {depthChart.warning && <span>{depthChart.warning}</span>}
               </div>
             )}
           </section>
 
           <section className="dom-pro-panel dom-pro-flow">
-            <PanelTitle title="Liquidity Flow Delta" status="PULL / STACK" />
+            <PanelTitle title="Liquidity Flow Delta" status="DERIVED / PULL / STACK" {...panelHeaderProps("liquidity-flow-delta")} />
             {flowBars.length === 0 ? <EmptyState text="Awaiting rolling liquidity delta." /> : (
               <div className="dom-pro-flow-histogram">
                 <b />
@@ -1352,7 +1502,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
 
           {settings.showCvd && (
             <section className="dom-pro-panel dom-pro-cvd">
-              <PanelTitle title="Heuristic CVD" status={`${settings.cvdHorizon.toUpperCase()} / ${cvdStats.trend.toUpperCase()}`} />
+              <PanelTitle title="Heuristic CVD" status={`${analyticalSettings.cvdHorizon.toUpperCase()} / ${cvdStats.trend.toUpperCase()}`} {...panelHeaderProps("heuristic-cvd")} />
               <div className="dom-pro-cvd-card">
                 {cvdCandles.length === 0 ? <EmptyState text="Trade stream unavailable for this venue." /> : (
                   <>
@@ -1432,7 +1582,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
 
           {settings.showExecutionPanel && (
             <section className="dom-pro-panel dom-pro-execution">
-              <PanelTitle title="Execution" status={selectedConnection ? selectedConnection.label.toUpperCase() : "NO ACCOUNT"} />
+              <PanelTitle title="Execution" status={selectedConnection ? selectedConnection.label.toUpperCase() : "NO ACCOUNT"} {...panelHeaderProps("execution")} />
               <div className="dom-pro-order-types">
                 {orderTypes.map((type) => <button key={type} type="button" className={orderType === type ? "active" : ""} onClick={() => setOrderType(type)}>{type.toUpperCase()}</button>)}
               </div>
@@ -1470,8 +1620,121 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   );
 }
 
-function PanelTitle({ title, status }: { title: string; status?: string }) {
-  return <div className="dom-pro-panel-title"><span>{title}</span>{status && <b>{status}</b>}</div>;
+function PanelTitle({
+  title,
+  status,
+  panelId,
+  panel,
+  scheduler,
+  dataQuality,
+  onPatch,
+  onPreset,
+  onReset,
+  onSaveDefault
+}: {
+  title: string;
+  status?: string;
+  panelId?: DomPanelId;
+  panel?: DomPanelSettingsRegistry["panels"][DomPanelId];
+  scheduler?: ReturnType<DomPanelUpdateScheduler["reportMetrics"]>[number];
+  dataQuality?: string;
+  onPatch?: (patch: Partial<DomPanelValues>) => void;
+  onPreset?: (preset: string) => void;
+  onReset?: () => void;
+  onSaveDefault?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+
+  const positionPopover = useCallback(() => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setPosition(placePanelPopover(rect, { width: window.innerWidth, height: window.innerHeight }));
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    positionPopover();
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!popoverRef.current?.contains(target) && !buttonRef.current?.contains(target)) setOpen(false);
+    };
+    const closeEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        buttonRef.current?.focus();
+      }
+    };
+    window.addEventListener("resize", positionPopover);
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeEscape);
+    return () => {
+      window.removeEventListener("resize", positionPopover);
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeEscape);
+    };
+  }, [open, positionPopover]);
+
+  return (
+    <div className="dom-pro-panel-title">
+      <div className="dom-pro-panel-title-main">
+        <span>{title}</span>
+        {panelId && panel && (
+          <button
+            ref={buttonRef}
+            type="button"
+            className="dom-pro-panel-cog"
+            title="Panel Settings"
+            aria-label={`${title} panel settings`}
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+          >
+            <Settings size={13} />
+          </button>
+        )}
+      </div>
+      <div className="dom-pro-panel-title-status">
+        {dataQuality && <em title="Panel data quality">{dataQuality}</em>}
+        {status && <b>{status}</b>}
+      </div>
+      {open && panelId && panel && onPatch && createPortal(
+        <div ref={popoverRef} className="dom-pro-panel-popover" role="dialog" aria-label={`${title} settings`} style={position}>
+          <header><b>{title} Settings</b><button type="button" aria-label="Close panel settings" onClick={() => setOpen(false)}><X size={14} /></button></header>
+          <label className="dom-pro-panel-setting"><span>Preset</span><select value={panel.preset} onChange={(event) => onPreset?.(event.target.value)}>{Object.keys(domPanelPresets[panelId]).map((preset) => <option key={preset}>{preset}</option>)}</select></label>
+          <div className="dom-pro-panel-setting-grid">
+            {domPanelFields[panelId].map((field) => <PanelSettingControl key={field.key} field={field} value={panel.settings[field.key]} onChange={(value) => onPatch({ [field.key]: value })} />)}
+          </div>
+          <details>
+            <summary>Diagnostics</summary>
+            <dl>
+              <dt>Source</dt><dd>Shared Black Core feed</dd>
+              <dt>Quality</dt><dd>{dataQuality ?? "UNKNOWN"}</dd>
+              <dt>Calculation</dt><dd>{scheduler?.calculationMs ?? 0} ms</dd>
+              <dt>Render</dt><dd>{scheduler?.renderMs?.toFixed(0) ?? 0} ms</dd>
+              <dt>Calculations</dt><dd>{scheduler?.calculations ?? 0}</dd>
+              <dt>Coalesced</dt><dd>{scheduler?.coalesced ?? 0}</dd>
+              <dt>Visibility</dt><dd>{scheduler?.suspended ? "SUSPENDED" : "ACTIVE"}</dd>
+              <dt>Worker</dt><dd>SHARED / LATEST-WINS</dd>
+            </dl>
+          </details>
+          <footer><button type="button" onClick={onReset}>Reset</button><button type="button" onClick={onSaveDefault}>Save as Default</button><button type="button" onClick={() => setOpen(false)}>Close</button></footer>
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
+
+function PanelSettingControl({ field, value, onChange }: { field: (typeof domPanelFields)[DomPanelId][number]; value: string | number | boolean | undefined; onChange: (value: string | number | boolean) => void }) {
+  if (field.kind === "toggle") {
+    return <label className="dom-pro-panel-setting toggle"><span>{field.label}</span><input type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} /></label>;
+  }
+  if (field.kind === "select") {
+    return <label className="dom-pro-panel-setting"><span>{field.label}</span><select value={String(value ?? "")} onChange={(event) => onChange(event.target.value)}>{field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
+  }
+  return <label className="dom-pro-panel-setting"><span>{field.label}</span><input type="number" value={Number(value ?? 0)} min={field.min} max={field.max} step={field.step} onChange={(event) => onChange(Number(event.target.value))} /></label>;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -2257,19 +2520,7 @@ function buildSmoothedCvd(points: Array<{ time: number; value: number }>, settin
     .filter((point) => point.time >= cutoff)
     .sort((a, b) => a.time - b.time);
   const source = ordered.length ? ordered : points.slice(-180).map((point) => ({ time: normalizeEpochSeconds(point.time), value: point.value }));
-  const interval = Math.max(1, settings.cvdSampleIntervalSec);
-  const bucketed = new Map<number, number>();
-  for (const point of source) {
-    bucketed.set(Math.floor(point.time / interval) * interval, point.value);
-  }
-  const samples = Array.from(bucketed.entries()).map(([time, value]) => ({ time, value })).sort((a, b) => a.time - b.time);
-  if (samples.length <= 1) return samples;
-  const alpha = 2 / (Math.max(2, settings.cvdSmoothingLength) + 1);
-  let ema = samples[0].value;
-  return samples.map((point) => {
-    ema = ema + alpha * (point.value - ema);
-    return { time: point.time, value: ema };
-  });
+  return bucketAndSmoothCvd(source, Math.max(1, settings.cvdSampleIntervalSec), settings.cvdSmoothingLength);
 }
 
 function buildCvdStats(trades: AggregatedDomSnapshot["trades"], cvdData: Array<{ time?: number; value: number }>, settings: DomSettings) {
@@ -2526,7 +2777,13 @@ function resolveDepthChartRange(snapshot: AggregatedDomSnapshot): MacroLiquidity
   };
 }
 
-function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityRange, settings: DomSettings) {
+function buildDepthChart(
+  snapshot: AggregatedDomSnapshot,
+  range: MacroLiquidityRange,
+  settings: DomSettings,
+  mode = "raw",
+  structural?: { bids: Array<{ price: number; quantity: number }>; asks: Array<{ price: number; quantity: number }> }
+) {
   const currentPrice = snapshot.midPrice ?? snapshot.lastPrice ?? midpoint(range);
   const rawBidSource = (snapshot.sourceBook?.bids ?? [])
     .map((level) => ({ price: level.price, bidSize: level.quantity, askSize: 0 }))
@@ -2534,8 +2791,11 @@ function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityR
   const rawAskSource = (snapshot.sourceBook?.asks ?? [])
     .map((level) => ({ price: level.price, askSize: level.quantity, bidSize: 0 }))
     .filter((level) => level.price > 0 && level.askSize > 0);
-  const bidSource = rawBidSource.length >= 2 ? rawBidSource : snapshot.bids;
-  const askSource = rawAskSource.length >= 2 ? rawAskSource : snapshot.asks;
+  const structuralMode = mode === "structural" || mode === "macro";
+  const structuralBids = structural?.bids.map((level) => ({ price: level.price, bidSize: level.quantity, askSize: 0 })) ?? [];
+  const structuralAsks = structural?.asks.map((level) => ({ price: level.price, askSize: level.quantity, bidSize: 0 })) ?? [];
+  const bidSource = structuralMode && structuralBids.length >= 2 ? structuralBids : rawBidSource.length >= 2 ? rawBidSource : snapshot.bids;
+  const askSource = structuralMode && structuralAsks.length >= 2 ? structuralAsks : rawAskSource.length >= 2 ? rawAskSource : snapshot.asks;
   const depthLevelLimit = Math.max(20, Math.min(420, Math.round(settings.depthDisplayLevels)));
   const smoothingGroupSize = Math.max(1, Math.min(24, Math.round(settings.depthSmoothingLevels)));
   const curvePower = Math.max(0.45, Math.min(1.4, settings.depthCurvePower));
@@ -2550,7 +2810,7 @@ function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityR
   const bidLevels = aggregateDepthLevels(rawBidLevels, "bid", smoothingGroupSize);
   const askLevels = aggregateDepthLevels(rawAskLevels, "ask", smoothingGroupSize);
   if (bidLevels.length === 0 && askLevels.length === 0) {
-    return { empty: true, bidLine: "", askLine: "", bidArea: "", askArea: "", bidPoints: 0, askPoints: 0, warning: "Depth chart awaiting bid/ask buckets." };
+    return { empty: true, bidLine: "", askLine: "", bidArea: "", askArea: "", bidPoints: 0, askPoints: 0, bidPct: 0, askPct: 0, bias: "UNAVAILABLE", warning: "Awaiting valid bid/ask depth." };
   }
   const bidCumulative: Array<{ x: number; y: number }> = [];
   const askCumulative: Array<{ x: number; y: number }> = [];
@@ -2565,6 +2825,9 @@ function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityR
     return askTotal;
   });
   const maxTotal = Math.max(1, bidTotal, askTotal);
+  const combinedTotal = Math.max(1, bidTotal + askTotal);
+  const bidPct = bidTotal / combinedTotal * 100;
+  const askPct = askTotal / combinedTotal * 100;
   const startX = 50;
   bidLevels.forEach((level, index) => {
     const x = 50 - ((index + 1) / Math.max(1, bidLevels.length)) * 50;
@@ -2591,6 +2854,9 @@ function buildDepthChart(snapshot: AggregatedDomSnapshot, range: MacroLiquidityR
     askArea: askLinePoints.length ? `${pointString(askLinePoints)} ${askLinePoints[askLinePoints.length - 1].x.toFixed(2)},94 ${startX.toFixed(2)},94` : "",
     bidPoints: bidLinePoints.length,
     askPoints: askLinePoints.length,
+    bidPct,
+    askPct,
+    bias: bidPct > 55 ? "BID HEAVY" : askPct > 55 ? "ASK HEAVY" : "BALANCED",
     warning: bidLinePoints.length === 0 ? "Only ask side available from source." : askLinePoints.length === 0 ? "Only bid side available from source." : rawBidSource.length < 2 || rawAskSource.length < 2 ? "Raw depth sparse; using aggregated fallback." : smoothingGroupSize > 1 ? `Depth smoothed ${smoothingGroupSize} levels per step.` : ""
   };
 }
@@ -2715,6 +2981,25 @@ function percentile(values: number[], pct: number) {
 
 function normalizeEpochSeconds(time: number) {
   return time > 100000000000 ? Math.floor(time / 1000) : time;
+}
+
+function createPanelSnapshotMap(snapshot: AggregatedDomSnapshot): Record<DomPanelId, AggregatedDomSnapshot> {
+  return Object.fromEntries(configurablePanelIds.map((panelId) => [panelId, snapshot])) as Record<DomPanelId, AggregatedDomSnapshot>;
+}
+
+function numberSetting(settings: DomPanelValues, key: string, fallback: number) {
+  const value = Number(settings[key]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function stringSetting(settings: DomPanelValues, key: string, fallback: string) {
+  const value = settings[key];
+  return typeof value === "string" ? value : fallback;
+}
+
+function booleanSetting(settings: DomPanelValues, key: string, fallback: boolean) {
+  const value = settings[key];
+  return typeof value === "boolean" ? value : fallback;
 }
 
 function formatHeatmapTime(time: number) {

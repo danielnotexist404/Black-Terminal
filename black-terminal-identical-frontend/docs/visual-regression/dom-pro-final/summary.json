@@ -1,0 +1,22 @@
+{
+  "capturedAt": "2026-07-13T19:03:30.574Z",
+  "viewport": "1920x1080",
+  "panelCogs": 10,
+  "presets": [
+    "Scalper",
+    "Institutional",
+    "Macro"
+  ],
+  "popovers": [
+    "Aggregated DOM Ladder panel settings",
+    "Volume Profile panel settings",
+    "Liquidity Heatmap panel settings",
+    "Wall Detection panel settings",
+    "Trade Tape panel settings",
+    "DOM Metrics panel settings",
+    "Depth Chart panel settings",
+    "Liquidity Flow Delta panel settings",
+    "Heuristic CVD panel settings",
+    "Execution panel settings"
+  ]
+}

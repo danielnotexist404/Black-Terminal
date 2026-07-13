@@ -361,3 +361,5 @@ Run `npm run test:dom-pro-panels`, `npm run test:performance`, and `npm run buil
 # A.I.F. Validation
 
 Run `npm run test:aif` for profile mathematics, coverage, registry/readiness, node/event contracts, bounded cache and the HDLX non-regression fixture. Run `npm run benchmark:aif` to profile 5k-100k bar workloads. A.I.F. is admin-gated in the native Indicators panel and stores versioned settings/research memory by workspace and symbol.
+
+For the Chapter I-A camera contract, also run `npm run test:aif-visual`. The browser test vertically pans the chart, verifies exact profile displacement, and asserts that the analytical calculation timestamp remains unchanged. `npm run test:performance` and `npm run build` remain release gates.

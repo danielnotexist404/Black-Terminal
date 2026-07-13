@@ -1,10 +1,25 @@
 {
-  "capturedAt": "2026-07-13T22:11:51.180Z",
-  "captures": 7,
+  "capturedAt": "2026-07-13T23:17:13.388Z",
+  "captures": 8,
+  "cameraSynchronization": {
+    "beforeCamera": {
+      "x": 1027.35,
+      "y": 426.45,
+      "rowIndex": "50",
+      "rowTop": 445.734375,
+      "revision": 3,
+      "calculatedAt": "1783984628394"
+    },
+    "afterCamera": {
+      "rowTop": 517.734375,
+      "revision": 4,
+      "calculatedAt": "1783984628394"
+    }
+  },
   "overlay": true,
   "settings": true,
   "timeline": true,
-  "workerQuality": "ESTIMATED | REQUESTED 20,000 | USED 20,000",
+  "workerQuality": "AUCTION PROFILE READY | 20,000 BARS LOADED | ESTIMATED | REQUESTED 20,000",
   "viewport": {
     "w": 1920,
     "h": 1080

@@ -37,9 +37,19 @@ try {
   await waitFor(() => cdp.eval(`Boolean(document.querySelector(".aif-overlay"))`), 15000);
   await waitFor(() => cdp.eval(`Boolean(document.querySelector(".aif-summary"))`), 90000);
   await shot("01-primary-volume.png");
+  const beforeCamera = await cdp.eval(`(() => { const host=document.querySelector(".pixi-chart-host"); const rows=[...document.querySelectorAll(".aif-profile > div")]; const row=rows[Math.floor(rows.length/2)]; const overlay=document.querySelector(".aif-overlay"); const r=host?.getBoundingClientRect(); return {x:r?.left+(r?.width||0)*0.55,y:r?.top+(r?.height||0)*0.45,rowIndex:row?.dataset.rowIndex||null,rowTop:row?.getBoundingClientRect().top||null,revision:Number(overlay?.dataset.transformRevision||0),calculatedAt:overlay?.dataset.calculatedAt||""}; })()`);
+  if (beforeCamera.rowTop == null) throw new Error("A.I.F. camera regression requires a visible profile row");
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: beforeCamera.x, y: beforeCamera.y, button: "left", buttons: 1, clickCount: 1 });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: beforeCamera.x, y: beforeCamera.y + 72, button: "left", buttons: 1 });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: beforeCamera.x, y: beforeCamera.y + 72, button: "left", buttons: 0, clickCount: 1 });
+  await waitFor(() => cdp.eval(`Number(document.querySelector(".aif-overlay")?.dataset.transformRevision||0) > ${beforeCamera.revision}`), 5000);
+  const afterCamera = await cdp.eval(`(() => { const row=document.querySelector('.aif-profile > div[data-row-index="${beforeCamera.rowIndex}"]'); const overlay=document.querySelector(".aif-overlay"); return {rowTop:row?.getBoundingClientRect().top||null,revision:Number(overlay?.dataset.transformRevision||0),calculatedAt:overlay?.dataset.calculatedAt||""}; })()`);
+  if (afterCamera.rowTop == null || Math.abs((afterCamera.rowTop - beforeCamera.rowTop) - 72) > 2) throw new Error(`A.I.F. profile did not track chart pan: ${JSON.stringify({beforeCamera,afterCamera})}`);
+  if (afterCamera.calculatedAt !== beforeCamera.calculatedAt) throw new Error("A.I.F. recalculated during a camera-only movement");
+  await shot("02-camera-pan-synchronized.png");
   await cdp.eval(`([...document.querySelectorAll(".indicator-row")].find((node)=>node.textContent?.includes("A.I.F.")))?.click()`);
   await waitFor(() => cdp.eval(`Boolean(document.querySelector(".aif-settings"))`), 10000);
-  await shot("02-full-settings.png");
+  await shot("03-full-settings.png");
   const profiles = ["delta", "tpo", "volatility", "pressure"];
   for (const value of profiles) {
     await cdp.eval(`(() => { const selects=document.querySelectorAll(".aif-settings select"); const select=selects[0]; select.value=${JSON.stringify(value)}; select.dispatchEvent(new Event("change",{bubbles:true})); })()`);
@@ -49,8 +59,8 @@ try {
   await cdp.eval(`(() => { const select=document.querySelectorAll(".aif-settings select")[1]; select.value="volume"; select.dispatchEvent(new Event("change",{bubbles:true})); })()`);
   await sleep(500); await shot("07-primary-secondary.png");
   const summary = await cdp.eval(`({overlay:Boolean(document.querySelector(".aif-overlay")),settings:Boolean(document.querySelector(".aif-settings")),timeline:Boolean(document.querySelector(".aif-timeline")),workerQuality:document.querySelector(".aif-quality")?.textContent||"loading",viewport:{w:innerWidth,h:innerHeight}})`);
-  writeFileSync(join(output, "summary.json"), `${JSON.stringify({ capturedAt: new Date().toISOString(), captures: 7, ...summary }, null, 2)}\n`);
-  console.log("A.I.F. visual regression captured 7 chart-native states.");
+  writeFileSync(join(output, "summary.json"), `${JSON.stringify({ capturedAt: new Date().toISOString(), captures: 8, cameraSynchronization: { beforeCamera, afterCamera }, ...summary }, null, 2)}\n`);
+  console.log("A.I.F. visual regression captured 8 chart-native states with camera synchronization.");
 } finally { cdp?.close(); browser?.kill(); await new Promise((resolve) => server.httpServer.close(resolve)); await sleep(400); remove(profile); }
 
 async function shot(name) { const result = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }); writeFileSync(join(output, name), Buffer.from(result.data, "base64")); }

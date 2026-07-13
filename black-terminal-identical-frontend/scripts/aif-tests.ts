@@ -12,6 +12,9 @@ import { VolumeProfileModel } from "../src/chart-engine/profile/VolumeProfileMod
 import { defaultVolumeProfileSettings } from "../src/chart-engine/profile/volumeProfileDefaults.ts";
 import { buildAifTimeline } from "../src/modules/aif/events/aifEventEngine.ts";
 import { mergeAifResearchMemory } from "../src/modules/aif/nodes/aifNodeMemory.ts";
+import { priceToScreenY, screenYToPrice, type ChartPriceTransformSnapshot } from "../src/chart-engine/priceTransform.ts";
+import { projectAifPriceLine, projectAifProfileRows } from "../src/modules/aif/rendering/aifPriceGeometry.ts";
+import { selectCompletedAifCandles } from "../src/modules/aif/core/aifTime.ts";
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -22,6 +25,7 @@ class MemoryStorage {
 const symbol: MarketSymbol = { exchange: "bybit", rawSymbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", marketKind: "perpetual" };
 const candles = syntheticCandles(4000);
 const settings = defaultAifSettings();
+assert.equal(settings.lookbackBars, 20_000, "A.I.F. automatically initializes with a 20,000-bar horizon");
 settings.lookbackBars = 5000;
 settings.rowCount = 180;
 const normalized = normalizeAifCandles(candles, settings.lookbackBars, 60);
@@ -80,6 +84,35 @@ assert.equal(migrateAifSettings({ lookbackBars: 30000 }).lookbackBars, 30000);
 const memoryStorage = new MemoryStorage();
 const memory = mergeAifResearchMemory("fixture", comparison.primaryNodes.slice(0, 2), comparison.timelineEvents, memoryStorage);
 assert.ok(memory.nodes.length <= 300 && memory.events.length <= 500, "research memory remains bounded");
+
+const linearTransform: ChartPriceTransformSnapshot = {
+  revision: 1, width: 1200, height: 700, plotLeft: 0, plotRight: 1112, plotTop: 38, plotBottom: 642,
+  priceMin: 20_000, priceMax: 30_000, scaleMode: "linear", firstIndex: 0, lastIndex: 500
+};
+const linearY = priceToScreenY(25_000, linearTransform);
+assert.equal(linearY, 340, "linear price transform uses the chart plot bounds");
+assert.ok(Math.abs((screenYToPrice(linearY!, linearTransform) ?? 0) - 25_000) < 1e-9, "linear transform round-trips");
+const logTransform = { ...linearTransform, scaleMode: "logarithmic" as const };
+const logY = priceToScreenY(25_000, logTransform);
+assert.ok(logY != null && Math.abs((screenYToPrice(logY, logTransform) ?? 0) - 25_000) < 1e-8, "logarithmic transform round-trips");
+
+const modelBeforeGeometry = JSON.stringify(comparison);
+const projected = projectAifProfileRows(volume.rows, linearTransform, (price) => priceToScreenY(price, linearTransform));
+assert.ok(projected.length > 0 && projected.every((row) => row.top >= linearTransform.plotTop && row.top + row.height <= linearTransform.plotBottom + 1), "profile geometry is clipped to the chart plot");
+const shiftedTransform = { ...linearTransform, revision: 2, priceMin: 21_000, priceMax: 31_000 };
+const testPrice = 25_000;
+const originalLineY = projectAifPriceLine(testPrice, linearTransform, (price) => priceToScreenY(price, linearTransform));
+const shiftedLineY = projectAifPriceLine(testPrice, shiftedTransform, (price) => priceToScreenY(price, shiftedTransform));
+assert.ok(originalLineY != null && shiftedLineY != null && Math.abs((shiftedLineY - originalLineY) - 60.4) < 1e-9, "A.I.F. levels follow vertical chart panning exactly");
+assert.equal(JSON.stringify(comparison), modelBeforeGeometry, "camera geometry does not mutate or recalculate the A.I.F. model");
+
+const now = 1_700_000_125;
+const completionFixture: Candle[] = [
+  { time: 1_700_000_000, open: 1, high: 2, low: 1, close: 2, volume: 1 },
+  { time: 1_700_000_060, open: 2, high: 3, low: 2, close: 3, volume: 1 },
+  { time: 1_700_000_120, open: 3, high: 4, low: 3, close: 4, volume: 1 }
+];
+assert.deepEqual(selectCompletedAifCandles(completionFixture, "1m", now).map((candle) => candle.time), [1_700_000_000, 1_700_000_060], "automatic anchor excludes the incomplete candle");
 
 const hdlx = new VolumeProfileModel().calculate(candles.slice(0, 600), 0, 599, { ...defaultVolumeProfileSettings, fixedRangeLength: 500, rows: 72 }, { startIndex: 100, endIndex: 599 });
 assert.ok(hdlx, "HDLX deterministic fixture calculates");

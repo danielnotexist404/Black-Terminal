@@ -19,6 +19,14 @@ import type { StrategySettings, StrategySignal } from "../modules/strategy-lab/t
 import { blackCorePerformanceMonitor } from "../performance/performanceMonitor";
 import { blackCoreResourceTracker } from "../performance/resourceTracker";
 import {
+  fromAxisValue,
+  priceToScreenY as mapPriceToScreenY,
+  screenYToPrice as mapScreenYToPrice,
+  toAxisValue,
+  type ChartPriceScaleMode,
+  type ChartPriceTransformSnapshot
+} from "./priceTransform";
+import {
   AdaptiveSwingStrategySettings,
   Candle,
   ChartDisplayType,
@@ -140,6 +148,7 @@ export class BlackChartEngine {
   private chartType: ChartDisplayType = "candlesticks";
   private onPriceChange?: (price: number) => void;
   private onCandleChange?: (candle: Candle) => void;
+  private onPriceTransformChange?: (transform: ChartPriceTransformSnapshot) => void;
   private onNeedMoreHistory?: (oldestCandle: Candle) => void;
   private onFps?: (fps: number) => void;
   private onAlertEditRequest?: (alertId: string) => void;
@@ -255,6 +264,9 @@ export class BlackChartEngine {
   private priceScaleDragStartMin = 0;
   private priceScaleDragStartMax = 0;
   private manualPriceRange?: { min: number; max: number };
+  private priceScaleMode: ChartPriceScaleMode = "linear";
+  private priceTransformRevision = 0;
+  private lastPriceTransformKey = "";
   private activeDrawingTool: DrawingToolId = "cursor";
   private drawingsVisible = true;
   private drawingsLocked = false;
@@ -287,6 +299,7 @@ export class BlackChartEngine {
     this.setHeatmapSource(options.candles);
     this.onPriceChange = options.onPriceChange;
     this.onCandleChange = options.onCandleChange;
+    this.onPriceTransformChange = options.onPriceTransformChange;
     this.onNeedMoreHistory = options.onNeedMoreHistory;
     this.onFps = options.onFps;
     this.alertDefinitions = options.alertDefinitions ?? [];
@@ -553,9 +566,41 @@ export class BlackChartEngine {
     };
   }
 
+  priceToScreenY(price: number) {
+    return mapPriceToScreenY(price, this.getPriceTransformSnapshot());
+  }
+
   getScreenYForPrice(price: number) {
-    if (!Number.isFinite(price)) return null;
-    return this.yForPrice(price);
+    return this.priceToScreenY(price);
+  }
+
+  screenYToPrice(localY: number) {
+    return mapScreenYToPrice(localY, this.getPriceTransformSnapshot());
+  }
+
+  getPriceTransformSnapshot(): ChartPriceTransformSnapshot {
+    const plotBottom = this.view.topPadding + this.getPricePlotHeight();
+    return {
+      revision: this.priceTransformRevision,
+      width: this.view.width,
+      height: this.view.height,
+      plotLeft: 0,
+      plotRight: this.view.width - this.view.rightAxisWidth,
+      plotTop: this.view.topPadding,
+      plotBottom,
+      priceMin: this.view.priceMin,
+      priceMax: this.view.priceMax,
+      scaleMode: this.priceScaleMode,
+      firstIndex: this.view.firstIndex,
+      lastIndex: this.view.lastIndex
+    };
+  }
+
+  setPriceScaleMode(mode: ChartPriceScaleMode) {
+    if (this.priceScaleMode === mode) return;
+    this.priceScaleMode = mode;
+    this.manualPriceRange = undefined;
+    this.queueDraw();
   }
 
   getPriceFromClientY(clientY: number) {
@@ -817,27 +862,32 @@ export class BlackChartEngine {
   }
 
   private scalePriceAxis(y: number) {
-    const startRange = this.priceScaleDragStartMax - this.priceScaleDragStartMin;
-    const center = (this.priceScaleDragStartMax + this.priceScaleDragStartMin) / 2;
+    const startMin = toAxisValue(this.priceScaleDragStartMin, this.priceScaleMode);
+    const startMax = toAxisValue(this.priceScaleDragStartMax, this.priceScaleMode);
+    if (!Number.isFinite(startMin) || !Number.isFinite(startMax)) return;
+    const startRange = startMax - startMin;
+    const center = (startMax + startMin) / 2;
     const factor = Math.max(0.08, Math.min(16, Math.exp((y - this.priceScaleDragStartY) * 0.006)));
     const halfRange = (startRange * factor) / 2;
 
     this.manualPriceRange = {
-      min: center - halfRange,
-      max: center + halfRange
+      min: fromAxisValue(center - halfRange, this.priceScaleMode),
+      max: fromAxisValue(center + halfRange, this.priceScaleMode)
     };
     this.queueDraw();
   }
 
   private panPriceAxis(dy: number) {
     if (Math.abs(dy) < 1) return;
-    const plotHeight = Math.max(1, this.view.height - this.view.bottomAxisHeight - this.view.topPadding);
-    const startRange = this.dragStartPriceMax - this.dragStartPriceMin;
-    const priceDelta = (dy / plotHeight) * startRange;
+    const plotHeight = this.getPricePlotHeight();
+    const startMin = toAxisValue(this.dragStartPriceMin, this.priceScaleMode);
+    const startMax = toAxisValue(this.dragStartPriceMax, this.priceScaleMode);
+    if (!Number.isFinite(startMin) || !Number.isFinite(startMax)) return;
+    const priceDelta = (dy / plotHeight) * (startMax - startMin);
 
     this.manualPriceRange = {
-      min: this.dragStartPriceMin + priceDelta,
-      max: this.dragStartPriceMax + priceDelta
+      min: fromAxisValue(startMin + priceDelta, this.priceScaleMode),
+      max: fromAxisValue(startMax + priceDelta, this.priceScaleMode)
     };
   }
 
@@ -1138,18 +1188,16 @@ export class BlackChartEngine {
     return paneHeight + 20;
   }
 
+  private getPricePlotHeight() {
+    return Math.max(1, this.view.height - this.view.bottomAxisHeight - this.view.topPadding - this.getOscillatorPaneHeight());
+  }
+
   private yForPrice(price: number) {
-    const oscHeight = this.getOscillatorPaneHeight();
-    const plotHeight = this.view.height - this.view.bottomAxisHeight - this.view.topPadding - oscHeight;
-    const n = (price - this.view.priceMin) / (this.view.priceMax - this.view.priceMin);
-    return this.view.topPadding + (1 - n) * plotHeight;
+    return this.priceToScreenY(price) ?? this.view.topPadding;
   }
 
   private priceForY(y: number) {
-    const oscHeight = this.getOscillatorPaneHeight();
-    const plotHeight = this.view.height - this.view.bottomAxisHeight - this.view.topPadding - oscHeight;
-    const n = 1 - (y - this.view.topPadding) / plotHeight;
-    return this.view.priceMin + n * (this.view.priceMax - this.view.priceMin);
+    return this.screenYToPrice(y) ?? this.view.priceMin;
   }
 
   private indexForX(x: number) {
@@ -1355,6 +1403,7 @@ export class BlackChartEngine {
     this.drawPriceAlertLines();
     this.drawAxes();
     this.drawCrosshair();
+    this.emitPriceTransformIfChanged();
     blackCoreResourceTracker.setGauge(
       "pixi-text",
       this.resourceOwner,
@@ -1362,6 +1411,20 @@ export class BlackChartEngine {
         + this.crosshairTexts.length + this.drawingTexts.length + this.profileTexts.length
         + this.heatmapTexts.length + this.alertTexts.length
     );
+  }
+
+  private emitPriceTransformIfChanged() {
+    if (!this.onPriceTransformChange) return;
+    const snapshot = this.getPriceTransformSnapshot();
+    const key = [
+      snapshot.width, snapshot.height, snapshot.plotTop, snapshot.plotBottom,
+      snapshot.plotRight, snapshot.priceMin, snapshot.priceMax, snapshot.scaleMode,
+      snapshot.firstIndex, snapshot.lastIndex
+    ].join(":");
+    if (key === this.lastPriceTransformKey) return;
+    this.lastPriceTransformKey = key;
+    this.priceTransformRevision += 1;
+    this.onPriceTransformChange({ ...snapshot, revision: this.priceTransformRevision });
   }
 
   private drawGrid() {

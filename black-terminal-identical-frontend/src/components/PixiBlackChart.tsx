@@ -3,6 +3,7 @@ import type { Dispatch, MouseEvent as ReactMouseEvent, SetStateAction } from "re
 import { Bell, Brush, Columns3, Copy, Eye, EyeOff, Minus, Play, Plus, SlidersHorizontal, Square, TrendingUp, Type, X } from "lucide-react";
 import { BlackChartEngine } from "../chart-engine/BlackChartEngine";
 import type { ChartPoint, IndicatorAlertLevel, IndicatorAlertLine } from "../chart-engine/BlackChartEngine";
+import type { ChartPriceTransformSnapshot } from "../chart-engine/priceTransform";
 import {
   AdaptiveSwingStrategySettings,
   Candle,
@@ -280,8 +281,10 @@ export function PixiBlackChart({
 }: PixiBlackChartProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<BlackChartEngine | null>(null);
+  const aifActiveRef = useRef(visibleIndicators.aif);
   const [lastPrice, setLastPrice] = useState(66678.1);
   const [lastCandle, setLastCandle] = useState<Candle | null>(null);
+  const [aifPriceTransform, setAifPriceTransform] = useState<ChartPriceTransformSnapshot | null>(null);
   const [dataStatus, setDataStatus] = useState("CONNECTING");
   const [activeIndicator, setActiveIndicator] = useState<IndicatorKey | null>(null);
   const [volumeProfileSettingsTab, setVolumeProfileSettingsTab] = useState<VolumeProfileSettingsTab>("inputs");
@@ -310,6 +313,7 @@ export function PixiBlackChart({
   const lastAlertSentAtRef = useRef(new Map<string, number>());
   const configuredAlertRuntimeRef = useRef(new Map<string, { lastFiredAt: number; fired: boolean }>());
   const alertToastTimerRef = useRef<number | undefined>(undefined);
+  aifActiveRef.current = visibleIndicators.aif;
 
   const scopedChartAlerts = useMemo(() => {
     return alertDefinitions.filter((definition) =>
@@ -826,6 +830,9 @@ export function PixiBlackChart({
         setLastCandle(candle);
         onCandleChange?.(candle);
       },
+      onPriceTransformChange: (transform) => {
+        if (aifActiveRef.current) setAifPriceTransform(transform);
+      },
       priceLineColor,
       priceLineIntensity
     });
@@ -920,6 +927,7 @@ export function PixiBlackChart({
         engine.destroy();
       }
       engineRef.current = null;
+      setAifPriceTransform(null);
     };
   }, [
     marketSymbol.exchange,
@@ -1093,6 +1101,15 @@ export function PixiBlackChart({
   useEffect(() => {
     engineRef.current?.setIndicatorState(visibleIndicators, indicatorPeriods, indicatorVisualSettings, indicatorAdvancedSettings);
   }, [visibleIndicators, indicatorPeriods, indicatorVisualSettings, indicatorAdvancedSettings]);
+
+  useEffect(() => {
+    if (!visibleIndicators.aif) {
+      setAifPriceTransform(null);
+      return;
+    }
+    const engine = engineRef.current;
+    if (engine) setAifPriceTransform(engine.getPriceTransformSnapshot());
+  }, [visibleIndicators.aif]);
 
   useEffect(() => {
     engineRef.current?.setPriceLineSettings(priceLineColor ?? "", priceLineIntensity ?? 75);
@@ -3302,6 +3319,8 @@ export function PixiBlackChart({
         timeframe={timeframe}
         currentPrice={lastPrice}
         latestCandle={lastCandle}
+        chartEngine={engineRef.current}
+        priceTransform={aifPriceTransform}
       />
     </div>
   );

@@ -3081,8 +3081,8 @@ body.resizing-layout * {
 
 .aif-profile {
   position: absolute;
-  top: 15%;
-  bottom: 15%;
+  top: 0;
+  bottom: 0;
   width: min(25%, 310px);
   display: flex;
   flex-direction: column;
@@ -3090,7 +3090,7 @@ body.resizing-layout * {
   opacity: 0.9;
 }
 
-.aif-profile-right { right: 0; align-items: flex-end; }
+.aif-profile-right { right: var(--aif-axis-width, 0); align-items: flex-end; }
 .aif-profile-left { left: 0; align-items: flex-start; }
 .aif-profile > div {
   position: absolute;
@@ -3104,11 +3104,11 @@ body.resizing-layout * {
 .aif-profile.aif-secondary { width: min(14%, 170px); opacity: 0.42; }
 .aif-profile.aif-secondary > div { background: rgba(210, 215, 224, 0.62); }
 
-.aif-levels { position: absolute; inset: 15% 0; }
+.aif-levels { position: absolute; inset: 0; }
 .aif-levels > span {
   position: absolute;
   left: 3%;
-  right: 2%;
+  width: calc(var(--aif-plot-right, 100%) - 5%);
   height: 1px;
   border-top: 1px solid rgba(222,222,222,0.5);
   color: #aaa;
@@ -3117,6 +3117,10 @@ body.resizing-layout * {
 }
 .aif-levels > span.resistance { border-color: rgba(255,20,55,0.65); color: #ff2945; }
 .aif-levels > span.future-lvn { border-top-style: dashed; border-color: rgba(255,255,255,0.42); color: #ddd; }
+.aif-levels > span.auction-node { left: 8%; border-color: rgba(165,170,180,0.32); color: #aaa; }
+.aif-levels > span.auction-node.lvn { border-top-style: dotted; }
+.aif-levels > span.chob-marker { left: 12%; border-top-style: dashed; border-color: rgba(255,70,90,0.55); color: #ff536a; }
+.aif-levels > span.chob-marker.confirmed { border-top-width: 2px; border-color: #ff1639; color: #fff; }
 .aif-levels > span.poc { border-color: #fff; color: #fff; border-top-width: 2px; }
 .aif-levels > span.value-boundary { border-color: rgba(185,190,200,0.62); color: #aaa; }
 .aif-levels i { color: #666; font-style: normal; }
@@ -3124,7 +3128,7 @@ body.resizing-layout * {
 .aif-summary {
   position: absolute;
   top: 12px;
-  right: 14px;
+  right: calc(var(--aif-axis-width, 0px) + 14px);
   width: 206px;
   display: grid;
   gap: 4px;

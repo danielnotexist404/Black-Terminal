@@ -1,6 +1,6 @@
 import type { AifSettings } from "../core/aifTypes";
 
-export const AIF_SETTINGS_VERSION = 1;
+export const AIF_SETTINGS_VERSION = 2;
 
 export function defaultAifSettings(): AifSettings {
   return {

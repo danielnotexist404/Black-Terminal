@@ -1,4 +1,5 @@
 import type { IndicatorAlertDefinition } from "../automation/alerts";
+import type { ChartPriceTransformSnapshot } from "./priceTransform";
 
 export type Candle = {
   time: number;
@@ -105,6 +106,7 @@ export type ChartEngineOptions = {
   onNeedMoreHistory?: (oldestCandle: Candle) => void;
   onPriceChange?: (price: number) => void;
   onCandleChange?: (candle: Candle) => void;
+  onPriceTransformChange?: (transform: ChartPriceTransformSnapshot) => void;
   onFps?: (fps: number) => void;
   priceLineColor?: string;
   priceLineIntensity?: number;

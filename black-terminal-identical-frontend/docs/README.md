@@ -84,3 +84,5 @@ The final Phase III DOM Pro refinement adds independent panel settings, coordina
 # A.I.F. Auction Intelligence
 
 Phase IV begins with the chart-native A.I.F. long-horizon auction engine. Start with `PHASE4_CHAPTER1_AIF_LONG_HORIZON_PROFILE_ENGINE.md`, then use the profile, timeline, CHoB, provenance and benchmark references alongside it.
+
+The critical chart-coordinate and automatic 20,000-bar initialization contract is documented in `PHASE4_CHAPTER1A_AIF_PRICE_SYNCHRONIZATION.md`.

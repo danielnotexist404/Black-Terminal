@@ -322,3 +322,5 @@ DOM Pro uses one shared normalized orderbook/trade snapshot and one latest-wins 
 # A.I.F. Auction Intelligence Framework
 
 A.I.F. is a separate native chart module under `src/modules/aif`. It does not mutate or wrap HDLX. Its ownership path is historical market adapter -> A.I.F. normalizer/domain -> dedicated latest-wins worker -> profile registry -> node/event models -> immutable render model. It has no dependency on OMS, EMS, Risk, or Protocol Router and emits no execution commands. Settings and bounded research memory are keyed by workspace and symbol. See `PHASE4_CHAPTER1_AIF_LONG_HORIZON_PROFILE_ENGINE.md`.
+
+A.I.F. market coordinates are rendered exclusively through `BlackChartEngine.priceToScreenY`. The engine emits one versioned price-transform snapshot from its existing draw cycle; React projects and clips cached profile geometry without recalculating the worker model. Automatic initialization anchors to the latest completed candle and pages up to the persisted 20,000-bar factory horizon. See `PHASE4_CHAPTER1A_AIF_PRICE_SYNCHRONIZATION.md`.

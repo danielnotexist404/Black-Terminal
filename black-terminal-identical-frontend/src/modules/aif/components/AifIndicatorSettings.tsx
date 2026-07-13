@@ -6,6 +6,8 @@ type Props = { settings: AifSettings; onChange: (next: AifSettings) => void; onC
 export function AifIndicatorSettings({ settings, onChange, onClose }: Props) {
   const patch = (value: Partial<AifSettings>) => onChange({ ...settings, ...value });
   const profiles = implementedAifProfiles();
+  const horizonPresets = [2000, 5000, 20000, 50000, 100000];
+  const horizonPreset = horizonPresets.includes(settings.lookbackBars) ? String(settings.lookbackBars) : "custom";
   return (
     <div className="indicator-settings profile-settings aif-settings" data-testid="aif-settings">
       <div className="indicator-settings-title"><span>A.I.F. SETTINGS</span><button type="button" onClick={onClose}>DONE</button></div>
@@ -14,7 +16,8 @@ export function AifIndicatorSettings({ settings, onChange, onClose }: Props) {
         <label>Secondary Profile<select value={settings.secondaryProfile} onChange={(event) => patch({ secondaryProfile: event.target.value as AifSettings["secondaryProfile"] })}><option value="off">Off</option>{profiles.filter((profile) => profile.id !== settings.primaryProfile).map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
       </section>
       <section className="indicator-settings-section"><b>CALCULATION</b>
-        <label>Lookback Bars<select value={settings.lookbackBars} onChange={(event) => patch({ lookbackBars: Number(event.target.value) })}>{[5000, 10000, 20000, 30000, 50000, 100000].map((value) => <option key={value} value={value}>{value.toLocaleString()}</option>)}</select></label>
+        <label>History Horizon<select value={horizonPreset} onChange={(event) => event.target.value !== "custom" && patch({ lookbackBars: Number(event.target.value) })}>{horizonPresets.map((value) => <option key={value} value={value}>{value.toLocaleString()} bars</option>)}<option value="custom">Custom</option></select></label>
+        {horizonPreset === "custom" && <label>Custom Bars<input type="number" min={100} max={100000} step={100} value={settings.lookbackBars} onChange={(event) => patch({ lookbackBars: Math.max(100, Math.min(100000, Number(event.target.value))) })} /></label>}
         <label>Bucket Mode<select value={settings.bucketMode} onChange={(event) => patch({ bucketMode: event.target.value as AifSettings["bucketMode"], logarithmic: event.target.value === "logarithmic" })}><option value="fixed-rows">Fixed Row Count</option><option value="fixed-price">Fixed Price Size</option><option value="tick">Tick Size</option><option value="percentage">Percentage</option><option value="logarithmic">Logarithmic</option><option value="atr-normalized">ATR Normalized</option><option value="adaptive">Adaptive Multi-Resolution</option></select></label>
         {(settings.bucketMode === "fixed-rows" || settings.bucketMode === "logarithmic") && <label>Rows<input type="number" min={40} max={2000} value={settings.rowCount} onChange={(event) => patch({ rowCount: Number(event.target.value) })} /></label>}
         {(settings.bucketMode === "fixed-price" || settings.bucketMode === "tick") && <label>{settings.bucketMode === "tick" ? "Tick Size" : "Price Size"}<input type="number" min={0.00000001} step="any" value={settings.fixedPriceSize} onChange={(event) => patch({ fixedPriceSize: Number(event.target.value) })} /></label>}

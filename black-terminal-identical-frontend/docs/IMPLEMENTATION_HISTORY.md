@@ -1040,3 +1040,11 @@ Remaining:
 - Added long-history paging through venue adapters, truthful coverage, worker calculation, bounded cache, five production profile lenses, structural node/stability/confluence extraction, projected LVNs, auction events, CHoB lifecycle, optional IMM boundary, chart overlay, settings, summary and timeline.
 - Added deterministic A.I.F. tests, a frozen HDLX fixture, 5k-100k bar benchmarks, and Chapter XIV performance gates.
 - Absorption remains intentionally blocked until classified flow and persistent depth are available.
+
+# 2026-07-14 - Phase IV Chapter I-A A.I.F. Hotfix
+
+- Removed the detached profile percentage scale and bound all A.I.F. price geometry to the Black chart engine's authoritative transform.
+- Added transform revision publication through the existing RAF draw, plot clipping, linear/log transform utilities, and camera-only geometry invalidation.
+- Added automatic latest-completed-candle initialization, a 20,000-bar factory horizon, history exhaustion fallback, and persisted horizon presets/custom input.
+- Added deterministic transform/anchor/culling coverage and a browser regression proving exact vertical-pan synchronization without analytical recalculation.
+- Re-ran A.I.F., Black Core performance, 100,000-bar benchmark, visual regression, and production build gates. No Supabase migration is required.

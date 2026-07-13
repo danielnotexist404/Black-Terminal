@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import type { BlackChartEngine } from "../../../chart-engine/BlackChartEngine";
+import type { ChartPriceTransformSnapshot } from "../../../chart-engine/priceTransform";
 import type { Candle } from "../../../chart-engine/types";
 import type { MarketSymbol, Timeframe } from "../../../market-data/types";
 import type { AifProgressStage, AifRenderModel, AifSettings } from "../core/aifTypes";
@@ -9,10 +12,11 @@ import { AifIndicatorSettings } from "./AifIndicatorSettings";
 import { AifEventTimeline } from "./AifEventTimeline";
 import { AifProfileSummary } from "./AifProfileSummary";
 import { mergeAifResearchMemory } from "../nodes/aifNodeMemory";
+import { projectAifPriceLine, projectAifProfileRows } from "../rendering/aifPriceGeometry";
 
-type Props = { active: boolean; settingsOpen: boolean; onCloseSettings: () => void; workspaceId: string; marketSymbol: MarketSymbol; timeframe: Timeframe; currentPrice: number; latestCandle: Candle | null };
+type Props = { active: boolean; settingsOpen: boolean; onCloseSettings: () => void; workspaceId: string; marketSymbol: MarketSymbol; timeframe: Timeframe; currentPrice: number; latestCandle: Candle | null; chartEngine: BlackChartEngine | null; priceTransform: ChartPriceTransformSnapshot | null };
 
-export function AifIndicatorOverlay({ active, settingsOpen, onCloseSettings, workspaceId, marketSymbol, timeframe, currentPrice, latestCandle }: Props) {
+export function AifIndicatorOverlay({ active, settingsOpen, onCloseSettings, workspaceId, marketSymbol, timeframe, currentPrice, latestCandle, chartEngine, priceTransform }: Props) {
   const symbolKey = `${marketSymbol.exchange}:${marketSymbol.rawSymbol}:${timeframe}`;
   const [settings, setSettings] = useState<AifSettings>(() => readAifSettings(workspaceId, symbolKey));
   const [model, setModel] = useState<AifRenderModel | null>(null);
@@ -79,23 +83,43 @@ export function AifIndicatorOverlay({ active, settingsOpen, onCloseSettings, wor
     clientRef.current?.dispose(); clientRef.current = null; setModel(null);
   }, [active]);
   useEffect(() => () => { if (currentBarTimerRef.current != null) window.clearTimeout(currentBarTimerRef.current); clientRef.current?.dispose(); }, []);
-  const domain = model?.profileHistogram;
-  const max = useMemo(() => domain?.rows.reduce((value, row) => Math.max(value, row.normalized), 0) || 1, [domain]);
+  const geometry = useMemo(() => {
+    if (!model || !chartEngine || !priceTransform) return null;
+    const priceToY = (price: number) => chartEngine.priceToScreenY(price);
+    return {
+      primaryRows: projectAifProfileRows(model.profileHistogram.rows, priceTransform, priceToY),
+      secondaryRows: model.secondaryProfile ? projectAifProfileRows(model.secondaryProfile.rows, priceTransform, priceToY, 55) : [],
+      lineY: (price: number) => projectAifPriceLine(price, priceTransform, priceToY)
+    };
+  }, [chartEngine, model, priceTransform]);
+  const overlayStyle = priceTransform ? {
+    "--aif-plot-right": `${priceTransform.plotRight}px`,
+    "--aif-axis-width": `${Math.max(0, priceTransform.width - priceTransform.plotRight)}px`
+  } as CSSProperties : undefined;
+  const labeledNodeLimit = settings.labelDensity === "high" ? 24 : settings.labelDensity === "medium" ? 12 : 6;
+  const specializedNodeIds = new Set([...(model?.supportResistanceZones ?? []), ...(model?.projectedLvns ?? [])].map((node) => node.id));
+  const standaloneNodes = model?.primaryNodes
+    .filter((node) => !specializedNodeIds.has(node.id) && node.confidence >= settings.minimumConfidence)
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, labeledNodeLimit) ?? [];
+  const chobEvents = model?.timelineEvents.filter((event) => event.price != null && (event.type === "chob-candidate" || event.type === "chob-confirmed")).slice(-6) ?? [];
   if (!active && !settingsOpen) return null;
   return <>
-    {active && <div className="aif-overlay" data-testid="aif-overlay">
-      {!model && <div className="aif-progress"><b>{error ? "A.I.F. UNAVAILABLE" : stage}</b><span>{error || `${loaded.toLocaleString()} / ${settings.lookbackBars.toLocaleString()} BARS`}</span></div>}
-      {model && <>
-        <div className={`aif-profile aif-profile-${settings.profilePlacement}`} aria-label="A.I.F. primary profile">{model.profileHistogram.rows.map((row) => <div key={row.index} className={row.valueArea ? "value-area" : ""} style={{ bottom: `${row.index / model.profileHistogram.rows.length * 100}%`, height: `${100 / model.profileHistogram.rows.length + 0.08}%`, width: `${Math.max(0.5, row.normalized / max * 100)}%`, opacity: settings.opacity / 100 }} />)}</div>
-        {model.secondaryProfile && <div className={`aif-profile aif-secondary aif-profile-${settings.profilePlacement === "right" ? "left" : "right"}`} aria-label="A.I.F. secondary profile">{model.secondaryProfile.rows.map((row) => <div key={row.index} style={{ bottom: `${row.index / model.secondaryProfile!.rows.length * 100}%`, height: `${100 / model.secondaryProfile!.rows.length + 0.08}%`, width: `${Math.max(0.4, row.normalized * 55)}%` }} />)}</div>}
+    {active && <div className="aif-overlay" data-testid="aif-overlay" data-transform-revision={priceTransform?.revision ?? 0} data-calculated-at={model?.provenance.calculatedAt ?? 0} style={overlayStyle}>
+      {!model && <div className="aif-progress"><b>{error ? "A.I.F. UNAVAILABLE" : stage === "LOADING HISTORY" ? "LOADING LONG HORIZON AUCTION..." : stage}</b><span>{error || `${loaded.toLocaleString()} / ${settings.lookbackBars.toLocaleString()} BARS`}</span></div>}
+      {model && geometry && priceTransform && <>
+        <div className={`aif-profile aif-profile-${settings.profilePlacement}`} aria-label="A.I.F. primary profile">{geometry.primaryRows.map((row) => <div key={row.index} data-row-index={row.index} className={row.valueArea ? "value-area" : ""} style={{ top: row.top, height: row.height, width: `${row.width}%`, opacity: settings.opacity / 100 }} />)}</div>
+        {model.secondaryProfile && <div className={`aif-profile aif-secondary aif-profile-${settings.profilePlacement === "right" ? "left" : "right"}`} aria-label="A.I.F. secondary profile">{geometry.secondaryRows.map((row) => <div key={row.index} style={{ top: row.top, height: row.height, width: `${row.width}%` }} />)}</div>}
         <div className="aif-levels">
-          {settings.showPoc && model.profileHistogram.poc != null && <span className="poc" style={{ bottom: `${pricePercent(model, model.profileHistogram.poc)}%` }}><b>POC</b> {model.profileHistogram.poc.toFixed(2)}</span>}
-          {settings.showValueArea && model.profileHistogram.vah != null && <span className="value-boundary" style={{ bottom: `${pricePercent(model, model.profileHistogram.vah)}%` }}><b>VAH</b> {model.profileHistogram.vah.toFixed(2)}</span>}
-          {settings.showValueArea && model.profileHistogram.val != null && <span className="value-boundary" style={{ bottom: `${pricePercent(model, model.profileHistogram.val)}%` }}><b>VAL</b> {model.profileHistogram.val.toFixed(2)}</span>}
-          {settings.showSupportResistance && model.supportResistanceZones.map((node) => <span key={node.id} className={node.center >= currentPrice ? "resistance" : "support"} style={{ bottom: `${pricePercent(model, node.center)}%` }}><b>{node.nodeType.toUpperCase()}</b> {node.center.toFixed(2)} <i>{node.confidence}%</i></span>)}
-          {settings.showFutureLvns && model.projectedLvns.map((node) => <span key={node.id} className="future-lvn" style={{ bottom: `${pricePercent(model, node.center)}%` }}><b>FUTURE LVN</b> {node.center.toFixed(2)}</span>)}
+          {settings.showPoc && model.profileHistogram.poc != null && <AifLevel price={model.profileHistogram.poc} y={geometry.lineY(model.profileHistogram.poc)} className="poc" label="POC" />}
+          {settings.showValueArea && model.profileHistogram.vah != null && <AifLevel price={model.profileHistogram.vah} y={geometry.lineY(model.profileHistogram.vah)} className="value-boundary" label="VAH" />}
+          {settings.showValueArea && model.profileHistogram.val != null && <AifLevel price={model.profileHistogram.val} y={geometry.lineY(model.profileHistogram.val)} className="value-boundary" label="VAL" />}
+          {settings.showSupportResistance && model.supportResistanceZones.map((node) => <AifLevel key={node.id} price={node.center} y={geometry.lineY(node.center)} className={node.center >= currentPrice ? "resistance" : "support"} label={node.nodeType.toUpperCase()} detail={`${node.confidence}%`} />)}
+          {settings.showFutureLvns && model.projectedLvns.map((node) => <AifLevel key={node.id} price={node.center} y={geometry.lineY(node.center)} className="future-lvn" label="FUTURE LVN" />)}
+          {settings.showNodes && standaloneNodes.map((node) => <AifLevel key={node.id} price={node.center} y={geometry.lineY(node.center)} className={`auction-node ${node.nodeType}`} label={node.nodeType.toUpperCase()} detail={`${node.confidence}%`} />)}
+          {chobEvents.map((event) => <AifLevel key={event.id} price={event.price!} y={geometry.lineY(event.price!)} className={`chob-marker ${event.type === "chob-confirmed" ? "confirmed" : ""}`} label={event.type === "chob-confirmed" ? "CHoB" : "CHoB?"} detail={`${event.confidence}%`} />)}
         </div>
-        {settings.showDataQuality && <div className="aif-quality">{model.provenance.quality.toUpperCase()} | REQUESTED {model.provenance.requestedLookbackBars.toLocaleString()} | USED {model.provenance.effectiveLookbackBars.toLocaleString()}{model.provenance.wasClamped ? ` | ${model.provenance.clampReason}` : ""}</div>}
+        {settings.showDataQuality && <div className="aif-quality">AUCTION PROFILE READY | {model.provenance.effectiveLookbackBars.toLocaleString()} BARS LOADED | {model.provenance.quality.toUpperCase()} | REQUESTED {model.provenance.requestedLookbackBars.toLocaleString()}{model.provenance.wasClamped ? ` | ${model.provenance.clampReason}` : ""}</div>}
         <AifProfileSummary model={model} />
         {settings.showTimeline && <AifEventTimeline events={model.timelineEvents} />}
       </>}
@@ -104,9 +128,7 @@ export function AifIndicatorOverlay({ active, settingsOpen, onCloseSettings, wor
   </>;
 }
 
-function pricePercent(model: AifRenderModel, price: number) {
-  const rows = model.profileHistogram.rows;
-  const min = rows[0]?.low ?? price;
-  const max = rows.at(-1)?.high ?? price + 1;
-  return Math.max(0, Math.min(100, (price - min) / Math.max(1e-12, max - min) * 100));
+function AifLevel({ price, y, className, label, detail }: { price: number; y: number | null; className: string; label: string; detail?: string }) {
+  if (y == null) return null;
+  return <span className={className} style={{ top: y }}><b>{label}</b> {price.toFixed(2)} {detail && <i>{detail}</i>}</span>;
 }

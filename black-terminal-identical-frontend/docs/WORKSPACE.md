@@ -178,3 +178,5 @@ Scalper, Intraday, Institutional, and Macro now coordinate per-panel presets thr
 # A.I.F. Workspace State
 
 A.I.F. settings use `bt_aif_settings:<workspace>:<venue-symbol-timeframe>`. Bounded node/event research memory uses `bt_aif_memory:<workspace>:<venue-symbol-timeframe>`. Removing or hiding the indicator suspends rendering and disposes the dedicated worker; persisted preferences remain for the next mount.
+
+Settings schema version 2 persists the automatic calculation horizon. New workspaces default to 20,000 completed bars; supported presets are 2,000, 5,000, 20,000, 50,000 and 100,000 bars plus a bounded custom value. Camera transform state is transient and is never persisted as analytical state.

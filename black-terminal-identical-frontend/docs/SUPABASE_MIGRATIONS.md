@@ -1983,3 +1983,7 @@ No Supabase migration is required. The new panel registry is versioned and curre
 # Phase IV Chapter I - A.I.F.
 
 No Supabase migration is required. A.I.F. calculations are browser-worker research outputs; versioned settings and bounded node/event memory currently use the documented workspace/symbol browser store. A future server research-memory contract must receive its own reviewed schema and RLS migration rather than reusing execution tables.
+
+## Phase IV Chapter I-A - A.I.F. Price Synchronization
+
+No Supabase migration is required. This hotfix changes chart transforms, browser-worker initialization, and versioned workspace-local settings only.

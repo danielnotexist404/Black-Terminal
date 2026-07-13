@@ -1979,3 +1979,7 @@ No migration is required. Performance telemetry, resource ownership, worker queu
 # Phase III Final DOM Pro Refinement
 
 No Supabase migration is required. The new panel registry is versioned and currently persists through the documented browser fallback. Server-side user preference persistence is intentionally deferred until a dedicated preference contract is introduced.
+
+# Phase IV Chapter I - A.I.F.
+
+No Supabase migration is required. A.I.F. calculations are browser-worker research outputs; versioned settings and bounded node/event memory currently use the documented workspace/symbol browser store. A future server research-memory contract must receive its own reviewed schema and RLS migration rather than reusing execution tables.

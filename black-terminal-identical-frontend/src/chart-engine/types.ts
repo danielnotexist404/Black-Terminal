@@ -115,6 +115,7 @@ export type VisibleIndicators = {
   liquidationHeatmap: boolean;
   volatilityHeatmap: boolean;
   volumeProfile: boolean;
+  aif: boolean;
   adaptiveSwingStrategy: boolean;
   vwap: boolean;
   ema20: boolean;

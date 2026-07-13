@@ -319,3 +319,6 @@ See `PHASE3_CHAPTER14_PERFORMANCE_STABILITY.md` for cadence, retention, soak tes
 # DOM Pro Panel Control Plane (2026-07-13)
 
 DOM Pro uses one shared normalized orderbook/trade snapshot and one latest-wins aggregation worker. A versioned `DomPanelSettingsRegistry` owns all panel preferences, while `DomPanelUpdateScheduler` separates source ingestion from each panel's calculation and render cadence. Structural processors are stateful consumers of the shared snapshot; they never subscribe to venues directly. See `DOM_PRO_PANEL_SETTINGS.md` and `DOM_PRO_SIGNAL_STABILIZATION.md`.
+# A.I.F. Auction Intelligence Framework
+
+A.I.F. is a separate native chart module under `src/modules/aif`. It does not mutate or wrap HDLX. Its ownership path is historical market adapter -> A.I.F. normalizer/domain -> dedicated latest-wins worker -> profile registry -> node/event models -> immutable render model. It has no dependency on OMS, EMS, Risk, or Protocol Router and emits no execution commands. Settings and bounded research memory are keyed by workspace and symbol. See `PHASE4_CHAPTER1_AIF_LONG_HORIZON_PROFILE_ENGINE.md`.

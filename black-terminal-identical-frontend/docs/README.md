@@ -80,3 +80,7 @@ Remaining:
 # Latest DOM Pro Chapter
 
 The final Phase III DOM Pro refinement adds independent panel settings, coordinated cockpit presets, stable structural depth/walls/CVD/metrics, one centralized panel scheduler, and deterministic regression coverage. Start with `PHASE3_FINAL_DOM_PRO_FIXES_OPTIMIZATION.md`.
+
+# A.I.F. Auction Intelligence
+
+Phase IV begins with the chart-native A.I.F. long-horizon auction engine. Start with `PHASE4_CHAPTER1_AIF_LONG_HORIZON_PROFILE_ENGINE.md`, then use the profile, timeline, CHoB, provenance and benchmark references alongside it.

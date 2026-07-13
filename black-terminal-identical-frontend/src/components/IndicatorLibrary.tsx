@@ -47,6 +47,14 @@ type CommunityScript = {
 
 const builtInIndicators: BuiltInIndicator[] = [
   {
+    key: "aif",
+    title: "A.I.F. Auction Intelligence Framework",
+    group: "Proprietary / Auction Intelligence",
+    type: "Overlay + Timeline",
+    signal: "Long-horizon auction structure, future LVNs and event lifecycle",
+    runtime: "Native"
+  },
+  {
     key: "orderBookHeatmap",
     title: "Order Book Heatmap",
     group: "Orderflow",

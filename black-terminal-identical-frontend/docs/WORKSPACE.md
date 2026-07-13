@@ -175,3 +175,6 @@ Chapter XIV performance workflow:
 # DOM Pro Workspace Presets
 
 Scalper, Intraday, Institutional, and Macro now coordinate per-panel presets through the DOM panel registry. Selecting a global preset changes panel defaults once; subsequent panel-cog changes are retained as explicit user overrides for that workspace/symbol.
+# A.I.F. Workspace State
+
+A.I.F. settings use `bt_aif_settings:<workspace>:<venue-symbol-timeframe>`. Bounded node/event research memory uses `bt_aif_memory:<workspace>:<venue-symbol-timeframe>`. Removing or hiding the indicator suspends rendering and disposes the dedicated worker; persisted preferences remain for the next mount.

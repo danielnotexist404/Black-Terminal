@@ -1033,3 +1033,10 @@ Remaining:
 - Stabilized structural depth, wall lifecycle/order, heuristic CVD, DOM metrics, aggregated tape, and clipped flow delta.
 - Added deterministic DOM Pro panel tests and retained the Chapter XIV performance regression suite.
 - Captured 14 visual-regression states and passed the full one-hour cockpit soak with all bounded-resource checks green.
+
+# 2026-07-14 - Phase IV Chapter I A.I.F.
+
+- Added the native proprietary Auction Intelligence Framework without changing HDLX.
+- Added long-history paging through venue adapters, truthful coverage, worker calculation, bounded cache, five production profile lenses, structural node/stability/confluence extraction, projected LVNs, auction events, CHoB lifecycle, optional IMM boundary, chart overlay, settings, summary and timeline.
+- Added deterministic A.I.F. tests, a frozen HDLX fixture, 5k-100k bar benchmarks, and Chapter XIV performance gates.
+- Absorption remains intentionally blocked until classified flow and persistent depth are available.

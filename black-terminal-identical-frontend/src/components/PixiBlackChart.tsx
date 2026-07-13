@@ -31,8 +31,10 @@ import { UnifiedExecutionTicket, type UnifiedExecutionTicketPreset } from "../ex
 import type { ExecutionSource, OrderSide, OrderType } from "../execution/types";
 import { blackCorePositionManager } from "../positions/positionManager";
 import type { ManagedPosition, PositionProtectionOrder, PositionProtectionType } from "../positions/types";
+import { AifIndicatorOverlay } from "../modules/aif/components/AifIndicatorOverlay";
 
 type PixiBlackChartProps = {
+  workspaceId: string;
   marketSymbol: MarketSymbol;
   displaySymbol: string;
   exchangeLabel: string;
@@ -242,6 +244,7 @@ function formatReplayLabel(time?: number) {
 }
 
 export function PixiBlackChart({
+  workspaceId,
   marketSymbol,
   displaySymbol,
   exchangeLabel,
@@ -1731,6 +1734,7 @@ export function PixiBlackChart({
   const change = displayCandle.close - displayCandle.open;
   const changePercent = displayCandle.open ? (change / displayCandle.open) * 100 : 0;
   const indicatorRows: { key: IndicatorKey; label: string; value: string }[] = [
+    { key: "aif", label: "A.I.F.", value: "auction intelligence" },
     { key: "orderBookHeatmap", label: "Book Heatmap", value: "L2 live" },
     { key: "liquidationHeatmap", label: "Liq Heatmap", value: "model" },
     { key: "volatilityHeatmap", label: "VAE Clusters", value: "top zones" },
@@ -2925,7 +2929,7 @@ export function PixiBlackChart({
               }}
             >
               <span>{indicator.label}</span>
-              <b className={indicator.key === "ema200" || indicator.key === "volume" || indicator.key === "liquidationHeatmap" || indicator.key === "orderBookHeatmap" || indicator.key === "volatilityHeatmap" || indicator.key === "volumeProfile" || indicator.key === "adaptiveSwingStrategy" ? "red" : ""}>{indicator.value}</b>
+              <b className={indicator.key === "aif" || indicator.key === "ema200" || indicator.key === "volume" || indicator.key === "liquidationHeatmap" || indicator.key === "orderBookHeatmap" || indicator.key === "volatilityHeatmap" || indicator.key === "volumeProfile" || indicator.key === "adaptiveSwingStrategy" ? "red" : ""}>{indicator.value}</b>
               <button
                 type="button"
                 className="indicator-action"
@@ -2970,7 +2974,7 @@ export function PixiBlackChart({
       {activeIndicator === "volumeProfile" && renderVolumeProfileSettings()}
       {activeIndicator === "adaptiveSwingStrategy" && renderAdaptiveSwingSettings()}
 
-      {activeIndicator && activeIndicator !== "volumeProfile" && activeIndicator !== "adaptiveSwingStrategy" && (
+      {activeIndicator && activeIndicator !== "aif" && activeIndicator !== "volumeProfile" && activeIndicator !== "adaptiveSwingStrategy" && (
         <div className="indicator-settings">
           <div className="indicator-settings-title">
             <span>{indicatorRows.find((indicator) => indicator.key === activeIndicator)?.label}</span>
@@ -3289,6 +3293,16 @@ export function PixiBlackChart({
         {indicatorsCollapsed ? "v" : "^"}
       </button>
       <div ref={hostRef} className="pixi-chart-host" onContextMenu={handleChartContextMenu} onClick={() => setChartContextMenu(null)} />
+      <AifIndicatorOverlay
+        active={visibleIndicators.aif}
+        settingsOpen={activeIndicator === "aif"}
+        onCloseSettings={() => setActiveIndicator(null)}
+        workspaceId={workspaceId}
+        marketSymbol={marketSymbol}
+        timeframe={timeframe}
+        currentPrice={lastPrice}
+        latestCandle={lastCandle}
+      />
     </div>
   );
 }

@@ -3052,6 +3052,127 @@ body.resizing-layout * {
   opacity: 0.55;
 }
 
+.aif-overlay {
+  position: absolute;
+  inset: 44px 0 0;
+  z-index: 3;
+  pointer-events: none;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+}
+
+.aif-progress {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  display: grid;
+  gap: 4px;
+  min-width: 220px;
+  padding: 9px 11px;
+  border: 1px solid rgba(255, 20, 55, 0.55);
+  background: rgba(3, 4, 5, 0.94);
+  color: #ddd;
+  font-size: 9px;
+}
+
+.aif-progress b { color: var(--red-hot); }
+.aif-progress span { color: #777; }
+
+.aif-profile {
+  position: absolute;
+  top: 15%;
+  bottom: 15%;
+  width: min(25%, 310px);
+  display: flex;
+  flex-direction: column;
+  justify-content: stretch;
+  opacity: 0.9;
+}
+
+.aif-profile-right { right: 0; align-items: flex-end; }
+.aif-profile-left { left: 0; align-items: flex-start; }
+.aif-profile > div {
+  position: absolute;
+  right: 0;
+  min-width: 1px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.08), rgba(228,228,228,0.68));
+  border-right: 1px solid rgba(255,255,255,0.6);
+}
+.aif-profile-left > div { left: 0; right: auto; transform: scaleX(-1); }
+.aif-profile > div.value-area { background: linear-gradient(90deg, rgba(135,0,18,0.12), rgba(255,19,48,0.68)); }
+.aif-profile.aif-secondary { width: min(14%, 170px); opacity: 0.42; }
+.aif-profile.aif-secondary > div { background: rgba(210, 215, 224, 0.62); }
+
+.aif-levels { position: absolute; inset: 15% 0; }
+.aif-levels > span {
+  position: absolute;
+  left: 3%;
+  right: 2%;
+  height: 1px;
+  border-top: 1px solid rgba(222,222,222,0.5);
+  color: #aaa;
+  font-size: 8px;
+  text-align: right;
+}
+.aif-levels > span.resistance { border-color: rgba(255,20,55,0.65); color: #ff2945; }
+.aif-levels > span.future-lvn { border-top-style: dashed; border-color: rgba(255,255,255,0.42); color: #ddd; }
+.aif-levels > span.poc { border-color: #fff; color: #fff; border-top-width: 2px; }
+.aif-levels > span.value-boundary { border-color: rgba(185,190,200,0.62); color: #aaa; }
+.aif-levels i { color: #666; font-style: normal; }
+
+.aif-summary {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  width: 206px;
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 20, 55, 0.35);
+  background: rgba(3,4,5,0.9);
+  font-size: 8px;
+  color: #777;
+}
+.aif-summary strong { color: #e7e7e7; border-bottom: 1px solid #252525; padding-bottom: 5px; }
+.aif-summary span { display: flex; justify-content: space-between; gap: 8px; }
+.aif-summary b { color: #ddd; text-align: right; }
+
+.aif-quality {
+  position: absolute;
+  left: 12px;
+  bottom: 54px;
+  max-width: calc(100% - 24px);
+  color: #777;
+  font-size: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.aif-timeline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 46px;
+  display: grid;
+  grid-template-columns: 104px 1fr;
+  align-items: stretch;
+  border-top: 1px solid rgba(255,20,55,0.28);
+  background: rgba(2,3,4,0.92);
+  pointer-events: auto;
+}
+.aif-timeline-title { display: grid; place-items: center; color: #999; font-size: 8px; border-right: 1px solid #242424; }
+.aif-timeline-track { display: flex; align-items: stretch; overflow: hidden; }
+.aif-timeline-track button { min-width: 105px; border: 0; border-right: 1px solid #191919; background: transparent; color: #888; font: inherit; font-size: 7px; display: grid; grid-template-columns: 6px 1fr; grid-template-rows: 1fr 1fr; align-items: center; text-align: left; padding: 5px 8px; }
+.aif-timeline-track button i { grid-row: 1 / 3; width: 3px; height: 3px; background: #999; }
+.aif-timeline-track button b { color: #ccc; font-size: 7px; }
+.aif-timeline-track button.critical { color: #ff2945; }
+.aif-timeline-track button.critical i { background: #ff1639; box-shadow: 0 0 7px #ff1639; }
+.aif-empty { margin: auto; color: #555; font-size: 8px; }
+.aif-settings { z-index: 12; max-height: calc(100% - 58px); }
+
 .chart-header {
   position: relative;
   z-index: 4;

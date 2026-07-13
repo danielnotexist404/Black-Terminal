@@ -358,3 +358,6 @@ Operational readiness and certification controls belong in Connections -> Runtim
 # DOM Pro Refinement Verification
 
 Run `npm run test:dom-pro-panels`, `npm run test:performance`, and `npm run build`. Panel settings use a versioned browser fallback scoped by workspace and symbol. No database migration or new runtime secret is required.
+# A.I.F. Validation
+
+Run `npm run test:aif` for profile mathematics, coverage, registry/readiness, node/event contracts, bounded cache and the HDLX non-regression fixture. Run `npm run benchmark:aif` to profile 5k-100k bar workloads. A.I.F. is admin-gated in the native Indicators panel and stores versioned settings/research memory by workspace and symbol.

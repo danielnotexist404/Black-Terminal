@@ -171,7 +171,7 @@ const DEFAULT_ALLOWED = [
   "waveTrendOscillator",
   "volume"
 ];
-const ADMIN_ALLOWED = [...DEFAULT_ALLOWED, "volumeProfile"];
+const ADMIN_ALLOWED = [...DEFAULT_ALLOWED, "volumeProfile", "aif"];
 const PROPRIETARY_HDLX_INDICATOR = "volumeProfile";
 const DOM_PRO_CAPABILITY: TerminalCapability = "proprietary.domPro";
 const HDLX_PROFILE_CAPABILITY: TerminalCapability = "proprietary.hdlxProfile";
@@ -185,6 +185,7 @@ const defaultVisibleIndicators: VisibleIndicators = {
   liquidationHeatmap: false,
   volatilityHeatmap: false,
   volumeProfile: false,
+  aif: false,
   adaptiveSwingStrategy: false,
   vwap: true,
   ema20: true,
@@ -218,6 +219,7 @@ const defaultIndicatorVisualSettings: IndicatorVisualSettings = {
   liquidationHeatmap: { color: "red", intensity: 78 },
   volatilityHeatmap: { color: "green", intensity: 86 },
   volumeProfile: { color: "red", intensity: 72 },
+  aif: { color: "red", intensity: 78 },
   adaptiveSwingStrategy: { color: "green", intensity: 86 },
   vwap: { color: "gray", intensity: 58 },
   ema20: { color: "white", intensity: 62 },
@@ -434,8 +436,9 @@ export default function App() {
     } else {
       allowed.delete(PROPRIETARY_HDLX_INDICATOR);
     }
+    if (currentUser?.role === "admin") allowed.add("aif");
     return Array.from(allowed);
-  }, [canUseHdlxProfile, currentUser?.allowedIndicators]);
+  }, [canUseHdlxProfile, currentUser?.allowedIndicators, currentUser?.role]);
   const [domProOpen, setDomProOpen] = useState(false);
   const [domProMode, setDomProMode] = useState<BlackCoreModuleMode>("expanded");
   const [domProSettingsSignal, setDomProSettingsSignal] = useState(0);
@@ -1822,6 +1825,7 @@ export default function App() {
         <main className={showCompactDom ? "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>
         <section className={drawingsEnabled ? "chart-panel drawing-tools-open" : "chart-panel"}>
           <PixiBlackChart
+            workspaceId={workspace}
             marketSymbol={symbol}
             displaySymbol={symbol.label}
             exchangeLabel={selectedExchange.label}

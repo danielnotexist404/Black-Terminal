@@ -5,6 +5,7 @@ import type { ExchangeId, MarketKind } from "../market-data/types";
 import type { PortfolioPosition } from "../positions/types";
 import { defaultRiskControls } from "../risk/types";
 import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } from "./types";
+import { blackCorePerformanceMonitor } from "../performance/performanceMonitor";
 
 type ApiAccount = {
   id: string;
@@ -304,6 +305,7 @@ export async function fetchPortfolioSnapshotFromApi(): Promise<PortfolioSnapshot
       Authorization: `Bearer ${token}`
     }
   });
+  recordResponseTiming("portfolio.snapshot", response);
 
   if (!response.ok) throw new Error(await readApiError(response));
   return mapSnapshot(await response.json());
@@ -359,6 +361,7 @@ export async function submitPortfolioOrderViaApi(draft: PortfolioOrderDraft): Pr
     },
     body: JSON.stringify(draft)
   });
+  recordResponseTiming("execution.server_route", response);
 
   if (!response.ok) throw new Error(await readApiError(response));
   const data = await response.json();
@@ -435,6 +438,7 @@ export async function syncExchangeAccountViaApi(accountId: string, symbol = "BTC
     },
     body: JSON.stringify({ accountId, symbol, marketKind })
   });
+  recordResponseTiming("account.sync_route", response);
 
   if (!response.ok) throw new Error(await readApiError(response));
   const data = await response.json();
@@ -674,4 +678,9 @@ function toMillis(value?: string | number | null) {
     return Number.isFinite(parsed) ? parsed : Date.now();
   }
   return Date.now();
+}
+
+function recordResponseTiming(name: string, response: Response) {
+  const routeMs = Number(response.headers.get("x-black-terminal-route-ms"));
+  if (Number.isFinite(routeMs)) blackCorePerformanceMonitor.recordMetric(`${name}_ms`, routeMs, "ms");
 }

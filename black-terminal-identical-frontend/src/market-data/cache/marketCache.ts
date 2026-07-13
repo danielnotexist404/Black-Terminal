@@ -3,6 +3,9 @@ import type { FundingRate, MarketSymbol, OpenInterest, OrderBookSnapshot, Ticker
 
 const maxCandlesPerKey = 5000;
 const maxTradesPerKey = 1000;
+const maxCandleKeys = 24;
+const maxTradeKeys = 16;
+const maxSnapshotKeys = 32;
 
 export class MarketCache {
   private candles = new Map<string, Candle[]>();
@@ -18,15 +21,17 @@ export class MarketCache {
   }
 
   setCandles(symbol: MarketSymbol, timeframe: string, candles: Candle[]) {
-    this.candles.set(this.key(symbol, timeframe), candles.slice(-maxCandlesPerKey));
+    setBoundedMap(this.candles, this.key(symbol, timeframe), candles.slice(-maxCandlesPerKey), maxCandleKeys);
   }
 
   appendCandle(symbol: MarketSymbol, timeframe: string, candle: Candle) {
     const key = this.key(symbol, timeframe);
     const current = this.candles.get(key) ?? [];
     const last = current[current.length - 1];
-    const next = last?.time === candle.time ? [...current.slice(0, -1), candle] : [...current, candle];
-    this.candles.set(key, next.slice(-maxCandlesPerKey));
+    if (last?.time === candle.time) current[current.length - 1] = candle;
+    else current.push(candle);
+    if (current.length > maxCandlesPerKey) current.splice(0, current.length - maxCandlesPerKey);
+    setBoundedMap(this.candles, key, current, maxCandleKeys);
   }
 
   getCandles(symbol: MarketSymbol, timeframe: string) {
@@ -36,7 +41,9 @@ export class MarketCache {
   appendTrade(trade: TradeTick) {
     const key = `${trade.exchange}:${trade.symbol}:trades`;
     const current = this.trades.get(key) ?? [];
-    this.trades.set(key, [...current, trade].slice(-maxTradesPerKey));
+    current.push(trade);
+    if (current.length > maxTradesPerKey) current.splice(0, current.length - maxTradesPerKey);
+    setBoundedMap(this.trades, key, current, maxTradeKeys);
   }
 
   getTrades(symbol: MarketSymbol) {
@@ -44,7 +51,7 @@ export class MarketCache {
   }
 
   setTicker(ticker: TickerSnapshot) {
-    this.tickers.set(`${ticker.exchange}:${ticker.symbol}`, ticker);
+    setBoundedMap(this.tickers, `${ticker.exchange}:${ticker.symbol}`, ticker, maxSnapshotKeys);
   }
 
   getTicker(symbol: MarketSymbol) {
@@ -52,7 +59,7 @@ export class MarketCache {
   }
 
   setOrderBook(book: OrderBookSnapshot) {
-    this.orderBooks.set(`${book.exchange}:${book.symbol}`, book);
+    setBoundedMap(this.orderBooks, `${book.exchange}:${book.symbol}`, book, maxSnapshotKeys);
   }
 
   getOrderBook(symbol: MarketSymbol) {
@@ -73,14 +80,24 @@ export class MarketCache {
   }
 
   setFunding(rate: FundingRate) {
-    this.funding.set(`${rate.exchange}:${rate.symbol}`, rate);
+    setBoundedMap(this.funding, `${rate.exchange}:${rate.symbol}`, rate, maxSnapshotKeys);
   }
 
   setOpenInterest(value: OpenInterest) {
-    this.openInterest.set(`${value.exchange}:${value.symbol}`, value);
+    setBoundedMap(this.openInterest, `${value.exchange}:${value.symbol}`, value, maxSnapshotKeys);
   }
 
   setMarkPrice(symbol: MarketSymbol, price: number) {
-    this.markPrices.set(this.key(symbol), price);
+    setBoundedMap(this.markPrices, this.key(symbol), price, maxSnapshotKeys);
+  }
+}
+
+function setBoundedMap<K, V>(map: Map<K, V>, key: K, value: V, limit: number) {
+  if (map.has(key)) map.delete(key);
+  map.set(key, value);
+  while (map.size > limit) {
+    const oldest = map.keys().next().value as K | undefined;
+    if (oldest === undefined) break;
+    map.delete(oldest);
   }
 }

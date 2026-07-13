@@ -33,6 +33,11 @@ Every meaningful platform change must update documentation in the same work cycl
 - `PHASE3_CHAPTER11_UNIVERSAL_CONNECTIVITY.md` - venue certification matrix, universal connectivity truth states, and production adapter gating.
 - `PHASE3_CHAPTER12_EXCHANGE_CERTIFICATION.md` - Wave 1 exchange certification implementation, Bybit diagnostics, and mainnet execution gates.
 - `PHASE3_CHAPTER13_VENUE_NATIVE_EXECUTION_TICKET.md` - capability-driven venue ticket, Bybit functional parity, live instrument rules, and execution algorithm registry.
+- `PHASE3_CHAPTER14_PERFORMANCE_STABILITY.md` - Black Core telemetry, bounded workers/resources, execution priority, hidden-panel suspension, and soak testing.
+- `PERFORMANCE_BASELINE_CHAPTER14.md` - pre-change source/build baseline and scenario measurement boundaries.
+- `PERFORMANCE_RESULTS_CHAPTER14.md` - measured post-change results, regressions, soak status, and remaining bottlenecks.
+- `REACT_RENDER_AUDIT.md` - high-frequency React ownership and render-path findings.
+- `MEMORY_LEAK_AUDIT.md` - resource lifecycle, retention rules, fixes, and repeatable leak procedure.
 - `PHASE4_PROFESSIONAL_NETWORK.md` - Professional Profile, Research Feed, follow graph, Investment Groups, join requests, and Trading Room foundation.
 
 ## Specialist Docs

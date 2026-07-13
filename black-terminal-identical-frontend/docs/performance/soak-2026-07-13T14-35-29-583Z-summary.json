@@ -1,0 +1,34 @@
+{
+  "generatedAt": "2026-07-13T15:35:47.152Z",
+  "requestedHours": 1,
+  "actualDurationMs": 3610226,
+  "url": "http://127.0.0.1:4173/?perfHarness=1",
+  "sampleCount": 120,
+  "heapGrowthMb": 440.84090518951416,
+  "domGrowth": 40,
+  "resourceGrowth": {
+    "listener": 0,
+    "interval": 0,
+    "animation-frame": 0,
+    "observer": 0,
+    "pixi-text": 7,
+    "pixi-container": 0,
+    "pixi-graphics": 0,
+    "pixi-texture": 0,
+    "pixi-geometry": 0,
+    "worker-queue": 0
+  },
+  "p95OfFrameP95Ms": 97.20000000018626,
+  "checks": {
+    "samplesCollected": true,
+    "cockpitStayedReady": true,
+    "heapBounded": false,
+    "domBounded": true,
+    "websocketBounded": true,
+    "workerBounded": true,
+    "listenersBounded": true,
+    "p95FrameBounded": true
+  },
+  "pass": false,
+  "note": "The harness performs chart/panel interactions and never invokes order submission."
+}

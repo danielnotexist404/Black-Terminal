@@ -306,3 +306,13 @@ The Unified Execution Ticket is driven by `VenueExecutionSchema`, not by a unive
 Bybit reconciliation reads wallet, position, open-order and native-strategy snapshots. The private stream normalizer supports `order`, `execution`, `position`, `wallet` and `strategy`; Vercel deployments use REST reconciliation until the persistent private-stream worker is active.
 
 Certification controls are administrative connection diagnostics and do not appear in Unified Ticket or DOM Pro. Bybit margin changes use the V5 account-level margin endpoint, leverage changes are explicit and confirmed, and ordinary order placement never silently changes either setting.
+
+## Phase III Chapter XIV Performance Ownership
+
+Black Core owns one performance monitor, one resource tracker, and one workload scheduler. Visual analytics do not share a queue with execution. Priority 0/1 execution work proceeds immediately; account work is priority 2, interaction priority 3, visual analytics priority 4, and historical work priority 5 with bounded frame-budget scheduling.
+
+Market adapters own raw ingestion. `MarketCache` owns bounded market history. `DomFeedStore` owns browser DOM snapshots. DOM/IMM workers own aggregation, CVD and visual analytics. React receives bounded render snapshots; it does not own raw orderbook cadence. `PortfolioStore` owns the shared account snapshot consumed by Positions, Portfolio and Unified Ticket.
+
+Every hardened timer, listener, observer, worker, socket and Pixi resource has an explicit owner and teardown. Hidden chart and DOM visual work suspends while account and execution truth remains active. Simulation data requires an explicit mock venue or `VITE_ALLOW_SIMULATED_MARKET_FALLBACK=true`; production failures otherwise remain visibly unavailable/live-only.
+
+See `PHASE3_CHAPTER14_PERFORMANCE_STABILITY.md` for cadence, retention, soak testing and known limits.

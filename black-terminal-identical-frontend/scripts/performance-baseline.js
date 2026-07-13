@@ -9,6 +9,7 @@ const docsDir = join(root, "docs", "performance");
 mkdirSync(docsDir, { recursive: true });
 
 const baseline = {
+  chapter: "Phase III Chapter XIV",
   generatedAt,
   gitCommit: safeExec("git", ["rev-parse", "--short", "HEAD"]),
   node: process.version,
@@ -16,9 +17,9 @@ const baseline = {
   sourceFootprint: scanSourceFootprint(join(root, "src")),
   bundleFootprint: scanBundleFootprint(join(root, "dist")),
   notes: [
-    "This is the repeatable static/runtime-ready baseline for Chapter IX.",
-    "Use Ctrl+Shift+P in the app to capture browser HUD snapshots during live sessions.",
-    "Use npm run perf:stress with PERF_STRESS_URL for long-session polling logs."
+    "This is the repeatable static and bundle footprint for Chapter XIV.",
+    "Admin users can use Ctrl+Shift+P to capture browser HUD snapshots.",
+    "Use npm run perf:soak -- --hours=1 for the browser long-session harness."
   ]
 };
 
@@ -48,7 +49,9 @@ function scanSourceFootprint(srcDir) {
     newWorker: 0,
     resizeObserver: 0,
     mutationObserver: 0,
-    performanceMetricPublishers: 0
+    performanceMetricPublishers: 0,
+    coalescedPublishers: 0,
+    resourceAcquisitions: 0
   };
   for (const file of files) {
     const text = readFileSync(file, "utf8");
@@ -63,6 +66,8 @@ function scanSourceFootprint(srcDir) {
     counters.resizeObserver += count(text, "ResizeObserver");
     counters.mutationObserver += count(text, "MutationObserver");
     counters.performanceMetricPublishers += count(text, "performance.metric") + count(text, "recordMetric(");
+    counters.coalescedPublishers += count(text, "publishLatest(");
+    counters.resourceAcquisitions += count(text, "blackCoreResourceTracker.acquire(");
   }
   return counters;
 }
@@ -116,6 +121,8 @@ Platform: ${report.platform}
 | ResizeObserver references | ${source.resizeObserver} |
 | MutationObserver references | ${source.mutationObserver} |
 | Performance metric publishers | ${source.performanceMetricPublishers} |
+| Coalesced event publishers | ${source.coalescedPublishers} |
+| Explicit resource acquisitions | ${source.resourceAcquisitions} |
 
 ## Bundle Footprint
 
@@ -132,7 +139,8 @@ ${bundle.largestAssets.map((asset) => `| ${asset.name} | ${asset.bytes} |`).join
 - Open Black Terminal.
 - Press \`Ctrl+Shift+P\` to show the Performance HUD.
 - Use \`Copy Snapshot\` before and after long DOM Pro+ sessions.
-- Run \`npm run perf:stress\` with \`PERF_STRESS_URL\` to record long-session endpoint health.
+- Run \`npm run perf:soak -- --hours=1\` for deterministic browser interaction and resource-growth checks.
+- Run \`npm run perf:stress\` with \`PERF_STRESS_URL\` for server endpoint and IMM health sampling.
 `;
 }
 

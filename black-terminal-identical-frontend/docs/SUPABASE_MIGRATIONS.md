@@ -1972,3 +1972,7 @@ Capability rules:
 ## Phase III Chapter XIII
 
 No migration is required. Venue execution schemas, algorithm readiness, instrument rules and account metrics are runtime adapter data. Existing execution orders, audit logs, account snapshots and certification tables remain authoritative.
+
+## Phase III Chapter XIV
+
+No migration is required. Performance telemetry, resource ownership, worker queues, account request deduplication and soak reports are runtime/browser diagnostics. Metrics are not persisted to Supabase by this chapter, avoiding collection of workstation telemetry without an explicit observability policy.

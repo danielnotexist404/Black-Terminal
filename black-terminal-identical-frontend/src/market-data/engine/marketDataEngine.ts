@@ -16,6 +16,7 @@ import type {
 import { CandleAggregationEngine } from "../aggregation/candleAggregator";
 import { MarketCache } from "../cache/marketCache";
 import { WebSocketManager } from "../websocket/webSocketManager";
+import { blackCorePerformanceMonitor } from "../../performance/performanceMonitor";
 
 export type MarketDataDiagnostics = {
   websocket: ReturnType<WebSocketManager["diagnostics"]>;
@@ -39,6 +40,8 @@ export class MarketDataEngine {
   private adapterFacades = new Map<ExchangeId, MarketDataAdapter>();
   private orderBookSubscriptions = new Map<string, SharedSubscription<OrderBookSnapshot>>();
   private tradeSubscriptions = new Map<string, SharedSubscription<TradeTick>>();
+  private publicMessageTimes: number[] = [];
+  private lastPublicRateMetricAt = 0;
 
   getAdapter(exchange: ExchangeId): MarketDataAdapter {
     const existing = this.adapterFacades.get(exchange);
@@ -79,7 +82,7 @@ export class MarketDataEngine {
             const book = await source.getOrderBookSnapshot?.(symbol, limit);
             if (book) {
               this.cache.setOrderBook(book);
-              blackCoreEventBus.publish("orderbook.updated", book);
+              blackCoreEventBus.publishLatest("orderbook.updated", book, 50);
             }
             return book as OrderBookSnapshot;
           }
@@ -89,7 +92,7 @@ export class MarketDataEngine {
             const trades = await source.getRecentTrades?.(symbol, limit);
             trades?.forEach((trade) => {
               this.cache.appendTrade(trade);
-              blackCoreEventBus.publish("trade.received", trade);
+              blackCoreEventBus.publishLatest("trade.received", trade, 50);
             });
             return trades ?? [];
           }
@@ -99,7 +102,7 @@ export class MarketDataEngine {
             const ticker = await source.getTickerSnapshot?.(symbol);
             if (ticker) {
               this.cache.setTicker(ticker);
-              blackCoreEventBus.publish("ticker.updated", ticker);
+              blackCoreEventBus.publishLatest("ticker.updated", ticker, 100);
             }
             return ticker as TickerSnapshot;
           }
@@ -108,8 +111,9 @@ export class MarketDataEngine {
         ? (query: CandleQuery, onCandle: (candle: Candle) => void) => {
             const symbol = symbolFromQuery(query);
             return source.subscribeCandles?.(query, (candle) => {
+              this.recordPublicMessage();
               this.cache.appendCandle(symbol, query.timeframe, candle);
-              blackCoreEventBus.publish("candle.updated", { ...candle, symbol });
+              blackCoreEventBus.publishLatest("candle.updated", { ...candle, symbol }, 100);
               onCandle(candle);
             }) as MarketDataSubscription<Candle>;
           }
@@ -131,8 +135,9 @@ export class MarketDataEngine {
       const handlers = new Set<(message: TradeTick) => void>();
       const errorHandlers = new Set<(error: Error) => void>();
       const sourceSubscription = source.subscribeTrades?.(symbol, (trade) => {
-              this.cache.appendTrade(trade);
-              blackCoreEventBus.publish("trade.received", trade);
+        this.recordPublicMessage();
+        this.cache.appendTrade(trade);
+        blackCoreEventBus.publishLatest("trade.received", trade, 50);
         handlers.forEach((handler) => handler(trade));
       }) as MarketDataSubscription<TradeTick>;
       sourceSubscription.onError((error) => errorHandlers.forEach((handler) => handler(error)));
@@ -151,8 +156,9 @@ export class MarketDataEngine {
       const handlers = new Set<(message: OrderBookSnapshot) => void>();
       const errorHandlers = new Set<(error: Error) => void>();
       const sourceSubscription = source.subscribeOrderBook?.(symbol, (book) => {
-              this.cache.setOrderBook(book);
-              blackCoreEventBus.publish("orderbook.updated", book);
+        this.recordPublicMessage();
+        this.cache.setOrderBook(book);
+        blackCoreEventBus.publishLatest("orderbook.updated", book, 50);
         handlers.forEach((handler) => handler(book));
       }) as MarketDataSubscription<OrderBookSnapshot>;
       sourceSubscription.onError((error) => errorHandlers.forEach((handler) => handler(error)));
@@ -196,6 +202,15 @@ export class MarketDataEngine {
 
   private subscriptionKey(exchange: ExchangeId, symbol: MarketSymbol, stream: string) {
     return [exchange, symbol.marketKind, symbol.rawSymbol, stream].join(":");
+  }
+
+  private recordPublicMessage() {
+    const now = Date.now();
+    this.publicMessageTimes.push(now);
+    while (this.publicMessageTimes.length && this.publicMessageTimes[0] < now - 1000) this.publicMessageTimes.shift();
+    if (now - this.lastPublicRateMetricAt < 1000) return;
+    this.lastPublicRateMetricAt = now;
+    blackCorePerformanceMonitor.recordMetric("stream.public_messages_per_second", this.publicMessageTimes.length, "msg/s");
   }
 }
 

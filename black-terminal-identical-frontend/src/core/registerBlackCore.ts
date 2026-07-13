@@ -7,7 +7,7 @@ import { blackCoreNotificationCenter } from "../notifications/notificationCenter
 import { blackCoreOrderSyncService } from "../orders/orderSyncService";
 import { blackCorePortfolioService } from "../portfolio/portfolioService";
 import { blackCorePositionManager } from "../positions/positionManager";
-import { PerformanceMonitor } from "../performance/performanceMonitor";
+import { blackCorePerformanceMonitor } from "../performance/performanceMonitor";
 import { blackCoreWalletFramework } from "../wallets/walletFramework";
 import { registerDomProModule } from "../modules/dom-pro/moduleDefinition";
 
@@ -27,5 +27,5 @@ export function registerBlackCoreServices() {
   registerBlackCoreService("positions", blackCorePositionManager);
   registerBlackCoreService("orders", blackCoreOrderSyncService);
   registerBlackCoreService("notifications", blackCoreNotificationCenter);
-  registerBlackCoreService("performance", new PerformanceMonitor());
+  registerBlackCoreService("performance", blackCorePerformanceMonitor);
 }

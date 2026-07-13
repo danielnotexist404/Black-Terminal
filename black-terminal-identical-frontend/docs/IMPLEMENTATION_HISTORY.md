@@ -973,6 +973,34 @@ Validation:
 - `npm run test:bybit-certification`
 - `npm run build`
 
+## 2026-07-13 - Chapter XIV Performance And Long-Session Hardening
+
+Status: Implemented and one-hour soak validated.
+
+Changed:
+
+- Expanded Black Core telemetry with frame percentiles, long tasks, memory, stream, queue, resource and execution spans.
+- Added an Admin-only capture HUD and deterministic resource ownership counters.
+- Moved DOM aggregation into a bounded worker and added stale-result rejection to DOM and IMM workers.
+- Coalesced broad market events and chart camera redraws without reducing raw adapter accuracy.
+- Added shared account snapshot deduplication, bounded histories, hidden-tab suspension and hardened reconnect ownership.
+- Isolated simulated chart candles from production live-data failures.
+- Added deterministic performance tests and a safe production soak harness that never submits orders.
+
+Validation:
+
+- `npm run typecheck`
+- `npm run test:performance`
+- `npm run test:venue-execution`
+- `npm run test:bybit-certification`
+- `npm run build`
+- Final one-hour cockpit soak passed all readiness, heap, DOM, resource and frame thresholds across 120 samples.
+
+Remaining:
+
+- Full chart dirty layers, batched candle geometry and transferable DOM matrices remain profiling-led future work.
+- No 4h, 8h or 12h pass is claimed.
+
 ## Future Work Log
 
 Use this format for every future phase, chapter, or major bug sprint.

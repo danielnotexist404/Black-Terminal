@@ -17,6 +17,8 @@
     "verify:bybit-infrastructure": "node scripts/verify-bybit-infrastructure.js",
     "perf:baseline": "node scripts/performance-baseline.js",
     "perf:stress": "node scripts/performance-stress.js",
+    "perf:soak": "node scripts/performance-soak.js",
+    "test:performance": "node --experimental-strip-types scripts/performance-regression-tests.js",
     "test:bybit-certification": "node scripts/bybit-certification-tests.js",
     "test:venue-execution": "node --experimental-strip-types scripts/venue-execution-tests.js",
     "certify:bybit-mainnet": "node scripts/bybit-mainnet-certification-runner.js",

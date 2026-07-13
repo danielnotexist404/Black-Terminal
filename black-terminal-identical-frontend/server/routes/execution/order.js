@@ -19,28 +19,31 @@ import {
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
+  const routeStartedAt = performance.now();
+  const timings = [];
 
   try {
     requireMethod(req, "POST");
 
+    let stageStartedAt = performance.now();
     const { supabase, user } = await requireUser(req);
     requireFields(req.body, ["accountId", "exchange", "symbol", "side", "orderType", "quantity"]);
+    timings.push(["auth", performance.now() - stageStartedAt]);
 
+    stageStartedAt = performance.now();
     const account = await getOwnedAccount(supabase, user.id, req.body.accountId);
+    timings.push(["account", performance.now() - stageStartedAt]);
 
-    const { data: riskControls, error: riskError } = await supabase
-      .from("account_risk_controls")
-      .select("*")
-      .eq("account_id", account.id)
-      .single();
+    stageStartedAt = performance.now();
+    const [riskResult, positionsResult] = await Promise.all([
+      supabase.from("account_risk_controls").select("*").eq("account_id", account.id).single(),
+      supabase.from("account_positions").select("margin,unrealized_pnl").eq("account_id", account.id)
+    ]);
+    const { data: riskControls, error: riskError } = riskResult;
+    const { data: positions, error: positionsError } = positionsResult;
+    timings.push(["account_state", performance.now() - stageStartedAt]);
 
     if (riskError) throw riskError;
-
-    const { data: positions, error: positionsError } = await supabase
-      .from("account_positions")
-      .select("margin,unrealized_pnl")
-      .eq("account_id", account.id);
-
     if (positionsError) throw positionsError;
 
     const accountExposureUsd = positions.reduce((sum, row) => sum + Number(row.margin || 0), 0);
@@ -65,6 +68,7 @@ export default async function handler(req, res) {
     if (risk.status === "approved") {
       if (account.exchange === "bybit") {
         try {
+          stageStartedAt = performance.now();
           const { data: credential, error: credentialError } = await supabase
             .from("exchange_credentials")
             .select("encrypted_payload")
@@ -83,6 +87,7 @@ export default async function handler(req, res) {
             validateBybitOrderDraft(credentials, venueOrderDraft),
             getBybitWalletSnapshot(credentials)
           ]);
+          timings.push(["venue_prepare", performance.now() - stageStartedAt]);
           const leverage = Math.max(1, Number(req.body.leverage || 1));
           const requiredMargin = req.body.marketKind === "spot" ? risk.notional : risk.notional / leverage;
           const requiredCollateral = requiredMargin + estimatedFees;
@@ -122,9 +127,11 @@ export default async function handler(req, res) {
             destinations: req.body.destinations || ["personal-portfolio"]
           };
           const strategyOrder = ["chase-limit", "twap", "iceberg", "pov"].includes(req.body.orderType);
+          stageStartedAt = performance.now();
           const exchangeResult = strategyOrder
             ? await placeBybitStrategyOrder(credentials, normalizedVenueOrder, venueValidation)
             : await placeBybitOrder(credentials, normalizedVenueOrder, venueValidation);
+          timings.push(["venue_submit", performance.now() - stageStartedAt]);
           status = "accepted";
           rejectionReason = null;
           exchangeOrderId = exchangeResult.exchangeOrderId || null;
@@ -147,6 +154,7 @@ export default async function handler(req, res) {
       }
     }
 
+    stageStartedAt = performance.now();
     const { data: order, error: orderError } = await supabase
       .from("execution_orders")
       .insert({
@@ -180,7 +188,9 @@ export default async function handler(req, res) {
       .single();
 
     if (orderError) throw orderError;
+    timings.push(["persist_order", performance.now() - stageStartedAt]);
 
+    stageStartedAt = performance.now();
     await supabase.from("execution_audit_logs").insert({
       user_id: user.id,
       account_id: account.id,
@@ -201,11 +211,23 @@ export default async function handler(req, res) {
         strategyParameters: req.body.strategyParameters || null
       }
     });
+    timings.push(["audit", performance.now() - stageStartedAt]);
 
+    setServerTiming(res, timings, routeStartedAt);
     return res.status(200).json({ order });
   } catch (error) {
+    setServerTiming(res, timings, routeStartedAt);
     return sendError(res, error);
   }
+}
+
+function setServerTiming(res, timings, routeStartedAt) {
+  const total = performance.now() - routeStartedAt;
+  const values = [...timings, ["total", total]]
+    .map(([name, duration]) => `${name};dur=${Number(duration).toFixed(1)}`)
+    .join(", ");
+  res.setHeader("Server-Timing", values);
+  res.setHeader("X-Black-Terminal-Route-Ms", total.toFixed(1));
 }
 
 async function recordBybitValidationAttempt(supabase, userId, account, order, payload) {

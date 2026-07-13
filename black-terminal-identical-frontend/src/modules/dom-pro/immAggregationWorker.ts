@@ -14,6 +14,9 @@ type ReplayPoint = {
 
 type ShapeReplayMessage = {
   id: string;
+  requestId?: string;
+  version?: number;
+  startedAt?: number;
   type: "shape-depth-replay";
   points: ReplayPoint[];
   range: { min: number; max: number };
@@ -22,10 +25,12 @@ type ShapeReplayMessage = {
 
 type WorkerResponse = {
   id: string;
+  version?: number;
   type: "shape-depth-replay:done" | "error";
   points?: ReplayPoint[];
   scars?: Array<{ id: string; side: "bid" | "ask"; price: number; strength: number; lastSeen: number }>;
   error?: string;
+  metrics?: { processingMs: number };
 };
 
 const ctx = self as unknown as {
@@ -37,11 +42,13 @@ ctx.onmessage = (event: MessageEvent<ShapeReplayMessage>) => {
   const message = event.data;
   try {
     if (message.type !== "shape-depth-replay") return;
+    const startedAt = performance.now();
     const result = shapeReplay(message.points, message.range, message.maxPoints);
-    post({ id: message.id, type: "shape-depth-replay:done", ...result });
+    post({ id: message.id, version: message.version, type: "shape-depth-replay:done", metrics: { processingMs: performance.now() - startedAt }, ...result });
   } catch (error) {
     post({
       id: message.id,
+      version: message.version,
       type: "error",
       error: error instanceof Error ? error.message : String(error)
     });

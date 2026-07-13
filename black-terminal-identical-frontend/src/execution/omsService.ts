@@ -4,6 +4,11 @@ import { blackCoreOrderSyncService } from "../orders/orderSyncService";
 import { assertOrderTransition } from "./orderLifecycle";
 import { lifecycleEventName } from "./executionEvents";
 import type { ExecutionReport, ExecutionRequest, OrderLifecycleState, OrderUpdate } from "./types";
+import { blackCorePerformanceMonitor } from "../performance/performanceMonitor";
+
+const maxOmsOrders = 2000;
+const maxReportsPerOrder = 50;
+const terminalStates = new Set<OrderLifecycleState>(["filled", "cancelled", "rejected", "expired", "risk-rejected"]);
 
 export type OmsOrderRecord = {
   request: ExecutionRequest;
@@ -17,6 +22,7 @@ export class OmsService {
   private orders = new Map<string, OmsOrderRecord>();
 
   createOrder(draft: Omit<ExecutionRequest, "internalOrderId" | "timestamp"> & { internalOrderId?: string; timestamp?: number }) {
+    const finish = blackCorePerformanceMonitor.startSpan("execution.oms_ms", { stage: "create" });
     const request: ExecutionRequest = {
       ...draft,
       internalOrderId: draft.internalOrderId ?? createId("ord"),
@@ -36,10 +42,13 @@ export class OmsService {
       request,
       time: Date.now()
     });
+    this.pruneOrders();
+    finish();
     return request;
   }
 
   transition(orderId: string, nextState: OrderLifecycleState, metadata?: Record<string, unknown>) {
+    const finish = blackCorePerformanceMonitor.startSpan("execution.oms_ms", { stage: "transition" });
     const record = this.requireOrder(orderId);
     assertOrderTransition(record.state, nextState);
     record.state = nextState;
@@ -51,6 +60,7 @@ export class OmsService {
       time: record.updatedAt,
       metadata
     });
+    finish();
     return record;
   }
 
@@ -59,7 +69,7 @@ export class OmsService {
     if (record.state !== report.lifecycleState) {
       this.transition(report.internalOrderId, report.lifecycleState, report.diagnosticContext);
     }
-    record.reports = [report, ...record.reports];
+    record.reports = [report, ...record.reports].slice(0, maxReportsPerOrder);
     record.updatedAt = Date.now();
     blackCoreOrderSyncService.upsert(report as OrderUpdate);
     blackCoreEventBus.publish("execution.event", {
@@ -83,6 +93,17 @@ export class OmsService {
     const record = this.orders.get(orderId);
     if (!record) throw new Error(`OMS order not found: ${orderId}`);
     return record;
+  }
+
+  private pruneOrders() {
+    if (this.orders.size <= maxOmsOrders) return;
+    const removable = [...this.orders.entries()]
+      .filter(([, record]) => terminalStates.has(record.state))
+      .sort((a, b) => a[1].updatedAt - b[1].updatedAt);
+    for (const [orderId] of removable) {
+      if (this.orders.size <= maxOmsOrders) break;
+      this.orders.delete(orderId);
+    }
   }
 }
 

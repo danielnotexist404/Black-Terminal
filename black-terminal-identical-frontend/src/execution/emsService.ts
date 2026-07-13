@@ -6,6 +6,7 @@ import { auditExecutionReport, auditExecutionRequest } from "./executionAudit";
 import { blackCoreOmsService } from "./omsService";
 import { blackCorePositionManager } from "../positions/positionManager";
 import type { ExecutionMatrixPreviewRow, ExecutionReport, ExecutionRequest, OrderRequest } from "./types";
+import { blackCorePerformanceMonitor } from "../performance/performanceMonitor";
 
 export type ExecutionSubmissionContext = {
   account: PortfolioAccount;
@@ -15,15 +16,19 @@ export type ExecutionSubmissionContext = {
 export class EmsService {
   async submit(request: ExecutionRequest, context: ExecutionSubmissionContext): Promise<ExecutionReport> {
     const startedAt = Date.now();
+    const finishRoundTrip = blackCorePerformanceMonitor.startSpan("execution.round_trip_ms", { exchange: request.exchange });
 
     blackCoreOmsService.transition(request.internalOrderId, "validated");
+    const finishRisk = blackCorePerformanceMonitor.startSpan("execution.risk_ms", { exchange: request.exchange });
     const risk = evaluateOrderRisk(this.toOrderRequest(request), context.account, context.account.riskControls, request.referencePrice || request.limitPrice || request.stopPrice || 1);
+    finishRisk();
 
     if (risk.status === "blocked") {
       blackCoreOmsService.transition(request.internalOrderId, "risk-rejected", { reasons: risk.reasons });
       const report = this.buildReport(request, "rejected", "risk-rejected", startedAt, risk.reasons.join(" "));
       blackCoreOmsService.applyReport(report);
       auditExecutionReport(report, request, { riskDecision: "blocked" });
+      finishRoundTrip();
       return report;
     }
 
@@ -35,10 +40,14 @@ export class EmsService {
     }
 
     blackCoreOmsService.transition(request.internalOrderId, "submitted");
+    const finishRouter = blackCorePerformanceMonitor.startSpan("execution.router_ms", { exchange: request.exchange });
     const route = blackCoreBrokerRouter.resolve(request);
+    finishRouter();
 
+    const finishVenue = blackCorePerformanceMonitor.startSpan("execution.venue_ms", { exchange: request.exchange });
     try {
       const update = await route.adapter.placeOrder(this.toOrderRequest(request));
+      finishVenue();
       const report = this.buildReport(
         request,
         update.status,
@@ -58,12 +67,15 @@ export class EmsService {
         orderId: request.internalOrderId,
         time: Date.now()
       });
+      finishRoundTrip();
       return report;
     } catch (error) {
+      finishVenue();
       const message = error instanceof Error ? error.message : String(error);
       const report = this.buildReport(request, "rejected", "rejected", startedAt, message);
       blackCoreOmsService.applyReport(report);
       auditExecutionReport(report, request, { riskDecision: "approved", errors: [message] });
+      finishRoundTrip();
       return report;
     }
   }

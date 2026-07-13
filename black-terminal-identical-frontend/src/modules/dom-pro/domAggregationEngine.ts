@@ -45,6 +45,16 @@ const emptyAbsorption: AbsorptionSignal = {
   label: "NO ABSORPTION"
 };
 
+export type DomAggregationInput = {
+  marketSymbol: MarketSymbol;
+  book: OrderBookSnapshot | null;
+  ticker: TickerSnapshot | null;
+  trades: TradeTick[];
+  settings: DomSettings;
+  renderStats?: Partial<DomRenderStats>;
+  subscriptionCount: number;
+};
+
 export class DomAggregationEngine {
   private previousBuckets = new Map<string, DomBucket>();
   private wallMemory = new Map<string, WallMemory>();
@@ -55,16 +65,9 @@ export class DomAggregationEngine {
   private cvdSeries: Array<{ time: number; value: number }> = [];
   private cvdTradeIds = new Set<string>();
   private updateTimes: number[] = [];
+  private lastHeatmapFrameAt = 0;
 
-  aggregate(input: {
-    marketSymbol: MarketSymbol;
-    book: OrderBookSnapshot | null;
-    ticker: TickerSnapshot | null;
-    trades: TradeTick[];
-    settings: DomSettings;
-    renderStats?: Partial<DomRenderStats>;
-    subscriptionCount: number;
-  }): AggregatedDomSnapshot {
+  aggregate(input: DomAggregationInput): AggregatedDomSnapshot {
     const now = Date.now();
     this.updateTimes.push(now);
     this.updateTimes = this.updateTimes.filter((time) => now - time < 1000);
@@ -107,6 +110,7 @@ export class DomAggregationEngine {
       walls,
       liquidityMigration,
       liquidityDelta: deltas,
+      cvdSeries: this.cvdData(),
       absorption,
       iceberg,
       metrics,
@@ -173,6 +177,7 @@ export class DomAggregationEngine {
       walls: [],
       liquidityMigration: [],
       liquidityDelta: [],
+      cvdSeries: this.cvdData(),
       absorption: emptyAbsorption,
       iceberg: { estimatedCount: 0, probability: "low", score: 0 },
       metrics: {
@@ -339,6 +344,17 @@ export class DomAggregationEngine {
       }
     }
 
+    if (this.heatmapMemory.size > 3000) {
+      const retained = [...this.heatmapMemory.entries()]
+        .sort((a, b) => (b[1].intensity + b[1].peak) - (a[1].intensity + a[1].peak))
+        .slice(0, 3000);
+      this.heatmapMemory = new Map(retained);
+    }
+
+    // Historical depth belongs to IMM persistence. Keep only a compact browser-local
+    // high-resolution tail and do not clone a full frame on every raw book update.
+    if (time - this.lastHeatmapFrameAt < 250) return this.heatmap;
+    this.lastHeatmapFrameAt = time;
     this.heatmap.push({
       time,
       cells: selectBalancedHeatmapCells(Array.from(this.heatmapMemory.values()), settings)
@@ -348,7 +364,7 @@ export class DomAggregationEngine {
           intensity: Math.min(1, Math.max(0.035, cell.intensity))
         }))
     });
-    this.heatmap = this.heatmap.slice(-settings.maxHeatmapHistory);
+    this.heatmap = this.heatmap.slice(-Math.min(180, settings.maxHeatmapHistory));
     return this.heatmap;
   }
 }
@@ -506,7 +522,7 @@ function buildHeatmapCandidates(buckets: DomBucket[], settings: DomSettings) {
 }
 
 function selectBalancedHeatmapCells(cells: HeatmapMemory[], settings: DomSettings) {
-  const perSideLimit = Math.max(40, Math.floor(Math.min(320, settings.maxVisibleBuckets * 1.5) / 2));
+  const perSideLimit = Math.max(24, Math.floor(Math.min(96, settings.maxVisibleBuckets) / 2));
   const ask = cells.filter((cell) => cell.side === "ask").sort((a, b) => b.intensity - a.intensity).slice(0, perSideLimit);
   const bid = cells.filter((cell) => cell.side === "bid").sort((a, b) => b.intensity - a.intensity).slice(0, perSideLimit);
   return [...ask, ...bid].sort((a, b) => b.intensity - a.intensity);

@@ -8,11 +8,16 @@ import type { PortfolioPosition } from "../positions/types";
 import { defaultRiskControls } from "../risk/types";
 import { connectExchangeAccountViaApi, fetchPortfolioSnapshotFromApi } from "./portfolioApiClient";
 import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } from "./types";
+import { blackCoreEventBus } from "../core/blackCore";
+import { blackCorePerformanceMonitor } from "../performance/performanceMonitor";
 
 const credentialStore = new TauriSecureCredentialStore();
 
 let accounts: PortfolioAccount[] = [];
 let orders: OrderUpdate[] = [];
+let snapshotCache: { value: PortfolioSnapshot; loadedAt: number } | null = null;
+let snapshotRequest: Promise<PortfolioSnapshot> | null = null;
+const snapshotFreshMs = 2000;
 
 function buildCurves() {
   return {
@@ -24,6 +29,29 @@ function buildCurves() {
 }
 
 export async function getPortfolioSnapshot(): Promise<PortfolioSnapshot> {
+  if (snapshotCache && Date.now() - snapshotCache.loadedAt < snapshotFreshMs) {
+    blackCorePerformanceMonitor.recordMetric("account.freshness_ms", Date.now() - snapshotCache.loadedAt, "ms");
+    return snapshotCache.value;
+  }
+  if (snapshotRequest) return snapshotRequest;
+  const finish = blackCorePerformanceMonitor.startSpan("account.snapshot_ms");
+  snapshotRequest = loadPortfolioSnapshot()
+    .then((value) => {
+      snapshotCache = { value, loadedAt: Date.now() };
+      return value;
+    })
+    .finally(() => {
+      finish();
+      snapshotRequest = null;
+    });
+  return snapshotRequest;
+}
+
+export function invalidatePortfolioSnapshot() {
+  snapshotCache = null;
+}
+
+async function loadPortfolioSnapshot(): Promise<PortfolioSnapshot> {
   try {
     const remoteSnapshot = await fetchPortfolioSnapshotFromApi();
     if (remoteSnapshot) return remoteSnapshot;
@@ -69,6 +97,9 @@ export async function getPortfolioSnapshot(): Promise<PortfolioSnapshot> {
     curves: buildCurves()
   };
 }
+
+blackCoreEventBus.subscribe("execution.event", () => invalidatePortfolioSnapshot());
+blackCoreEventBus.subscribe("position.updated", () => invalidatePortfolioSnapshot());
 
 export async function connectExchangeAccount(draft: ExchangeConnectionDraft): Promise<PortfolioAccount> {
   const certification = getVenueCertification(draft.exchange);

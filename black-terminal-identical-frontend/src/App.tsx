@@ -2143,7 +2143,7 @@ export default function App() {
           </div>
         </div>
       )}
-      <PerformanceHud />
+      <PerformanceHud isAdmin={currentUser?.role === "admin"} />
     </div>
   );
 }

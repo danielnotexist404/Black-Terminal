@@ -328,6 +328,8 @@ npm run depth:verify
 npm run bybit:private-stream
 npm run perf:baseline
 npm run perf:stress
+npm run test:performance
+npm run perf:soak -- --hours=1
 npm run test:bybit-certification
 npm run test:venue-execution
 npm run certify:bybit-mainnet

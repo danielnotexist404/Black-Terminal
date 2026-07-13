@@ -142,6 +142,7 @@ export type AggregatedDomSnapshot = {
   walls: WallDetection[];
   liquidityMigration: LiquidityMigration[];
   liquidityDelta: LiquidityDelta[];
+  cvdSeries: Array<{ time: number; value: number }>;
   absorption: AbsorptionSignal;
   iceberg: IcebergEstimate;
   metrics: DomMetrics;

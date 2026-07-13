@@ -1,12 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { Download, Flag, Pause, Play, RotateCcw, X } from "lucide-react";
 import { blackCorePerformanceMonitor, type PerformanceSnapshot } from "./performanceMonitor";
 
 const storageKey = "bt_performance_hud_visible";
 
-export function PerformanceHud() {
+export function PerformanceHud({ isAdmin }: { isAdmin: boolean }) {
+  if (!isAdmin) return null;
+  return <AdminPerformanceHud />;
+}
+
+function AdminPerformanceHud() {
   const [visible, setVisible] = useState(() => typeof localStorage !== "undefined" && localStorage.getItem(storageKey) === "true");
   const [snapshot, setSnapshot] = useState<PerformanceSnapshot>(() => blackCorePerformanceMonitor.snapshot());
-  const [copyStatus, setCopyStatus] = useState("");
+  const [capturing, setCapturing] = useState(() => blackCorePerformanceMonitor.isCapturing());
+  const [actionStatus, setActionStatus] = useState("");
 
   useEffect(() => blackCorePerformanceMonitor.subscribe(setSnapshot), []);
 
@@ -24,72 +32,130 @@ export function PerformanceHud() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const status = useMemo(() => {
-    if (snapshot.p99FrameMs > 50 || snapshot.longTaskCount > 0) return "DEGRADED";
-    if (snapshot.averageFrameMs > 22) return "WATCH";
-    return "STABLE";
-  }, [snapshot.averageFrameMs, snapshot.longTaskCount, snapshot.p99FrameMs]);
+  const resourceSummary = useMemo(() => {
+    const active = snapshot.resources.active;
+    return {
+      sockets: active.websocket ?? 0,
+      workers: active.worker ?? 0,
+      timers: (active.interval ?? 0) + (active.timeout ?? 0),
+      listeners: active.listener ?? snapshot.eventBus.listenerCount,
+      observers: active.observer ?? 0,
+      subscriptions: active["supabase-subscription"] ?? 0,
+      pixi: (active["pixi-container"] ?? 0) + (active["pixi-graphics"] ?? 0) + (active["pixi-text"] ?? 0),
+      textures: active["pixi-texture"] ?? 0,
+      geometries: active["pixi-geometry"] ?? 0
+    };
+  }, [snapshot]);
 
   if (!visible) return null;
 
-  const copySnapshot = async () => {
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(snapshot, null, 2));
-      setCopyStatus("COPIED");
-      window.setTimeout(() => setCopyStatus(""), 1600);
-    } catch {
-      setCopyStatus("COPY FAILED");
-    }
+  const showStatus = (value: string) => {
+    setActionStatus(value);
+    window.setTimeout(() => setActionStatus(""), 1600);
+  };
+
+  const exportJson = (name: string, value: unknown) => {
+    const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${name}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    showStatus("EXPORTED");
   };
 
   return (
     <aside className="performance-hud" aria-label="Black Core performance HUD">
       <header>
-        <div>
-          <b>PERFORMANCE HUD</b>
-          <span>{status}</span>
-        </div>
-        <button type="button" onClick={() => {
+        <div><b>BLACK CORE PERFORMANCE</b><span className={snapshot.status}>{snapshot.status.toUpperCase()}</span></div>
+        <button type="button" title="Close performance HUD" onClick={() => {
           localStorage.setItem(storageKey, "false");
           setVisible(false);
-        }}>Close</button>
+        }}><X size={13} /></button>
       </header>
-      <main>
-        <HudMetric label="FPS" value={snapshot.fps.toFixed(1)} />
-        <HudMetric label="Avg Frame" value={`${snapshot.averageFrameMs.toFixed(2)} ms`} />
-        <HudMetric label="P99 Frame" value={`${snapshot.p99FrameMs.toFixed(2)} ms`} hot={snapshot.p99FrameMs > 50} />
-        <HudMetric label="Worst Frame" value={`${snapshot.worstFrameMs.toFixed(2)} ms`} hot={snapshot.worstFrameMs > 80} />
+
+      <HudSection title="Render">
+        <HudMetric label="Chart FPS" value={format(snapshot.chartFps)} />
+        <HudMetric label="IMM FPS" value={format(snapshot.immFps)} />
+        <HudMetric label="Frame Avg" value={ms(snapshot.averageFrameMs)} />
+        <HudMetric label="Frame P95" value={ms(snapshot.p95FrameMs)} hot={snapshot.p95FrameMs > 32} />
+        <HudMetric label="Frame P99" value={ms(snapshot.p99FrameMs)} hot={snapshot.p99FrameMs > 50} />
+        <HudMetric label="Longest" value={ms(snapshot.worstFrameMs)} hot={snapshot.worstFrameMs > 80} />
         <HudMetric label="Dropped" value={String(snapshot.droppedFrames)} hot={snapshot.droppedFrames > 0} />
-        <HudMetric label="Long Tasks" value={String(snapshot.longTaskCount)} hot={snapshot.longTaskCount > 0} />
-        <HudMetric label="Heap" value={snapshot.heapUsedMb === null ? "N/A" : `${snapshot.heapUsedMb.toFixed(1)} MB`} />
-        <HudMetric label="Heap Limit" value={snapshot.heapLimitMb === null ? "N/A" : `${snapshot.heapLimitMb.toFixed(0)} MB`} />
-        <HudMetric label="DOM Nodes" value={snapshot.domNodes === null ? "N/A" : String(snapshot.domNodes)} />
-        <HudMetric label="Listeners" value={String(snapshot.eventBus.listenerCount)} hot={snapshot.eventBus.listenerCount > 80} />
-        <HudMetric label="Event Types" value={String(snapshot.eventBus.eventTypeCount)} />
-        <HudMetric label="Publishes" value={String(snapshot.eventBus.totalPublishes)} />
-      </main>
-      <section>
-        {snapshot.latestMetrics.slice(0, 6).map((metric) => (
-          <div key={`${metric.name}-${metric.time}`}>
-            <span>{metric.name}</span>
-            <b>{metric.value.toFixed(metric.value >= 100 ? 0 : 2)} {metric.unit}</b>
-          </div>
-        ))}
-      </section>
+      </HudSection>
+
+      <HudSection title="Memory">
+        <HudMetric label="JS Heap" value={mb(snapshot.heapUsedMb)} />
+        <HudMetric label="Heap Growth" value={signedMb(snapshot.heapGrowthMb)} hot={(snapshot.heapGrowthMb ?? 0) > 128} />
+        <HudMetric label="DOM Nodes" value={nullable(snapshot.domNodes)} />
+        <HudMetric label="Pixi Objects" value={String(resourceSummary.pixi)} />
+        <HudMetric label="Textures" value={String(resourceSummary.textures)} />
+        <HudMetric label="Geometries" value={String(resourceSummary.geometries)} />
+      </HudSection>
+
+      <HudSection title="Pipelines">
+        <HudMetric label="Public msg/s" value={format(snapshot.publicMessagesPerSecond)} />
+        <HudMetric label="Private msg/s" value={format(snapshot.privateMessagesPerSecond)} />
+        <HudMetric label="Events/s" value={format(snapshot.eventBusEventsPerSecond)} />
+        <HudMetric label="Worker Queue" value={String(snapshot.workerQueueDepth)} hot={snapshot.workerQueueDepth > 2} />
+        <HudMetric label="Render Queue" value={String(snapshot.renderQueueDepth)} hot={snapshot.renderQueueDepth > 8} />
+      </HudSection>
+
+      <HudSection title="Execution">
+        <LatestMetric snapshot={snapshot} name="execution.oms_ms" label="OMS" />
+        <LatestMetric snapshot={snapshot} name="execution.risk_ms" label="EMS Risk" />
+        <LatestMetric snapshot={snapshot} name="execution.router_ms" label="Broker Router" />
+        <LatestMetric snapshot={snapshot} name="execution.round_trip_ms" label="Round Trip" />
+        <LatestMetric snapshot={snapshot} name="account.freshness_ms" label="Account Freshness" />
+      </HudSection>
+
+      <HudSection title="Resources">
+        <HudMetric label="WebSockets" value={String(resourceSummary.sockets)} />
+        <HudMetric label="Workers" value={String(resourceSummary.workers)} />
+        <HudMetric label="Timers" value={String(resourceSummary.timers)} />
+        <HudMetric label="Listeners" value={String(resourceSummary.listeners)} />
+        <HudMetric label="Observers" value={String(resourceSummary.observers)} />
+        <HudMetric label="Supabase" value={String(resourceSummary.subscriptions)} />
+      </HudSection>
+
       <footer>
-        <button type="button" onClick={copySnapshot}>Copy Snapshot</button>
-        <span>Ctrl+Shift+P</span>
-        {copyStatus && <em>{copyStatus}</em>}
+        <button type="button" onClick={() => {
+          if (capturing) {
+            blackCorePerformanceMonitor.stopCapture();
+            setCapturing(false);
+            showStatus("CAPTURE STOPPED");
+          } else {
+            blackCorePerformanceMonitor.startCapture();
+            setCapturing(true);
+            showStatus("CAPTURE STARTED");
+          }
+        }}>{capturing ? <Pause size={12} /> : <Play size={12} />}{capturing ? "Stop Capture" : "Start Capture"}</button>
+        <button type="button" onClick={() => exportJson("black-terminal-performance-snapshot", snapshot)}><Download size={12} />Snapshot</button>
+        <button type="button" onClick={() => exportJson("black-terminal-performance-session", blackCorePerformanceMonitor.sessionReport())}><Download size={12} />Session</button>
+        <button type="button" onClick={() => { blackCorePerformanceMonitor.mark("ADMIN MARK"); showStatus("MARKED"); }}><Flag size={12} />Mark</button>
+        <button type="button" onClick={() => { blackCorePerformanceMonitor.resetCounters(); showStatus("RESET"); }}><RotateCcw size={12} />Reset</button>
+        {actionStatus && <em>{actionStatus}</em>}
       </footer>
     </aside>
   );
 }
 
-function HudMetric({ label, value, hot }: { label: string; value: string; hot?: boolean }) {
-  return (
-    <div className={hot ? "hot" : ""}>
-      <span>{label}</span>
-      <b>{value}</b>
-    </div>
-  );
+function HudSection({ title, children }: { title: string; children: ReactNode }) {
+  return <section><h4>{title}</h4><div>{children}</div></section>;
 }
+
+function LatestMetric({ snapshot, name, label }: { snapshot: PerformanceSnapshot; name: string; label: string }) {
+  const metric = snapshot.latestMetrics.find((item) => item.name === name);
+  return <HudMetric label={label} value={metric ? `${format(metric.value)} ${metric.unit}` : "--"} />;
+}
+
+function HudMetric({ label, value, hot }: { label: string; value: string; hot?: boolean }) {
+  return <div className={hot ? "hot" : ""}><span>{label}</span><b>{value}</b></div>;
+}
+
+function format(value: number) { return Number.isFinite(value) ? value.toFixed(1) : "--"; }
+function ms(value: number) { return `${format(value)} ms`; }
+function mb(value: number | null) { return value === null ? "N/A" : `${value.toFixed(1)} MB`; }
+function signedMb(value: number | null) { return value === null ? "N/A" : `${value >= 0 ? "+" : ""}${value.toFixed(1)} MB`; }
+function nullable(value: number | null) { return value === null ? "N/A" : String(value); }

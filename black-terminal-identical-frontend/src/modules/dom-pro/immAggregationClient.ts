@@ -1,14 +1,22 @@
+import { blackCorePerformanceMonitor } from "../../performance/performanceMonitor";
+import { blackCoreResourceTracker } from "../../performance/resourceTracker";
 import type { BlackCoreDepthReplayPoint } from "./marketDepthMemoryClient";
 import type { MacroLiquidityRange } from "./types";
 
 type PendingRequest = {
+  version: number;
   resolve: (points: BlackCoreDepthReplayPoint[]) => void;
-  reject: (error: Error) => void;
   timeout: number;
+  startedAt: number;
 };
 
 let worker: Worker | null = null;
+let releaseWorker: (() => void) | null = null;
+let idleTimer: number | null = null;
+let version = 0;
+let coalescedTasks = 0;
 const pending = new Map<string, PendingRequest>();
+const maxPendingVisualTasks = 2;
 
 export async function shapeBlackCoreReplayPoints(
   points: BlackCoreDepthReplayPoint[],
@@ -16,52 +24,101 @@ export async function shapeBlackCoreReplayPoints(
   maxPoints = 360
 ): Promise<BlackCoreDepthReplayPoint[]> {
   if (typeof Worker === "undefined") return shapeOnMainThread(points, range, maxPoints);
+  const requestVersion = ++version;
+  coalesceObsoleteTasks(requestVersion);
   try {
     const instance = ensureWorker();
     const id = crypto.randomUUID?.() ?? `${Date.now()}:${Math.random()}`;
-    return await new Promise<BlackCoreDepthReplayPoint[]>((resolve, reject) => {
+    return await new Promise<BlackCoreDepthReplayPoint[]>((resolve) => {
+      const startedAt = performance.now();
       const timeout = window.setTimeout(() => {
         pending.delete(id);
-        resolve(shapeOnMainThread(points, range, maxPoints));
+        updateQueueMetric();
+        scheduleIdleShutdown();
+        resolve(requestVersion === version ? shapeOnMainThread(points, range, maxPoints) : []);
       }, 1500);
-      pending.set(id, { resolve, reject, timeout });
+      pending.set(id, { version: requestVersion, resolve, timeout, startedAt });
+      updateQueueMetric();
       instance.postMessage({
+        requestId: id,
         id,
+        taskType: "shape-depth-replay",
         type: "shape-depth-replay",
+        version: requestVersion,
+        startedAt: Date.now(),
         points,
         range: { min: range.min, max: range.max },
         maxPoints
       });
     });
   } catch {
-    return shapeOnMainThread(points, range, maxPoints);
+    return requestVersion === version ? shapeOnMainThread(points, range, maxPoints) : [];
   }
 }
 
+export function immWorkerDiagnostics() {
+  return { running: Boolean(worker), queueDepth: pending.size, version, coalescedTasks };
+}
+
+export function shutdownImmAggregationWorker() {
+  if (idleTimer !== null) window.clearTimeout(idleTimer);
+  idleTimer = null;
+  for (const [id, request] of pending) {
+    window.clearTimeout(request.timeout);
+    pending.delete(id);
+    request.resolve([]);
+  }
+  worker?.terminate();
+  worker = null;
+  releaseWorker?.();
+  releaseWorker = null;
+  updateQueueMetric();
+}
+
 function ensureWorker() {
+  if (idleTimer !== null) window.clearTimeout(idleTimer);
+  idleTimer = null;
   if (worker) return worker;
   worker = new Worker(new URL("./immAggregationWorker.ts", import.meta.url), { type: "module" });
-  worker.onmessage = (event: MessageEvent<{ id: string; type: string; points?: BlackCoreDepthReplayPoint[]; error?: string }>) => {
+  releaseWorker = blackCoreResourceTracker.acquire("worker", "dom-pro-imm-aggregation");
+  worker.onmessage = (event: MessageEvent<{ id: string; version?: number; type: string; points?: BlackCoreDepthReplayPoint[]; metrics?: { processingMs?: number }; error?: string }>) => {
     const request = pending.get(event.data.id);
     if (!request) return;
     window.clearTimeout(request.timeout);
     pending.delete(event.data.id);
-    if (event.data.type === "error") {
-      request.reject(new Error(event.data.error || "IMM worker failed."));
-      return;
-    }
-    request.resolve(event.data.points || []);
+    updateQueueMetric();
+    const stale = request.version !== version || (event.data.version !== undefined && event.data.version !== request.version);
+    if (!stale && event.data.type !== "error") request.resolve(event.data.points || []);
+    else request.resolve([]);
+    blackCorePerformanceMonitor.recordMetric("worker.imm_processing_ms", event.data.metrics?.processingMs ?? performance.now() - request.startedAt, "ms");
+    scheduleIdleShutdown();
   };
-  worker.onerror = (event) => {
-    for (const [id, request] of pending.entries()) {
-      window.clearTimeout(request.timeout);
-      pending.delete(id);
-      request.reject(new Error(event.message || "IMM worker error."));
-    }
-    worker?.terminate();
-    worker = null;
-  };
+  worker.onerror = () => shutdownImmAggregationWorker();
   return worker;
+}
+
+function coalesceObsoleteTasks(nextVersion: number) {
+  const obsolete = [...pending.entries()].filter(([, request]) => request.version < nextVersion);
+  const removeCount = Math.max(0, pending.size - maxPendingVisualTasks + 1);
+  for (const [id, request] of obsolete.slice(0, Math.max(removeCount, obsolete.length))) {
+    window.clearTimeout(request.timeout);
+    pending.delete(id);
+    request.resolve([]);
+    coalescedTasks += 1;
+  }
+  updateQueueMetric();
+}
+
+function scheduleIdleShutdown() {
+  if (pending.size || typeof window === "undefined") return;
+  if (idleTimer !== null) window.clearTimeout(idleTimer);
+  idleTimer = window.setTimeout(() => shutdownImmAggregationWorker(), 30_000);
+}
+
+function updateQueueMetric() {
+  blackCoreResourceTracker.setGauge("worker-queue", "dom-pro-imm-aggregation", pending.size);
+  blackCorePerformanceMonitor.recordMetric("worker.imm_queue_depth", pending.size, "count");
+  blackCorePerformanceMonitor.recordMetric("worker.imm_coalesced", coalescedTasks, "count");
 }
 
 function shapeOnMainThread(points: BlackCoreDepthReplayPoint[], range: MacroLiquidityRange, maxPoints: number) {

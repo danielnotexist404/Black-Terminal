@@ -38,7 +38,8 @@ function niceBucketSize(value: number) {
 export class OrderBookHeatmapModel {
   private candles: Candle[] = [];
   private snapshots: StoredSnapshot[] = [];
-  private maxSnapshots = 1800;
+  private maxSnapshots = 360;
+  private maxLevelsPerSide = 240;
 
   setCandles(candles: Candle[]) {
     this.candles = candles;
@@ -53,9 +54,11 @@ export class OrderBookHeatmapModel {
   ingest(snapshot: OrderBookSnapshot) {
     const bids = snapshot.bids
       .filter((level) => Number.isFinite(level.price) && Number.isFinite(level.quantity) && level.quantity > 0)
+      .slice(0, this.maxLevelsPerSide)
       .map((level) => [level.price, level.quantity] as [number, number]);
     const asks = snapshot.asks
       .filter((level) => Number.isFinite(level.price) && Number.isFinite(level.quantity) && level.quantity > 0)
+      .slice(0, this.maxLevelsPerSide)
       .map((level) => [level.price, level.quantity] as [number, number]);
 
     if (bids.length === 0 && asks.length === 0) return;

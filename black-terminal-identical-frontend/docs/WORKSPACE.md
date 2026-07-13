@@ -38,6 +38,8 @@ npm run bybit:private-stream:status
 npm run verify:bybit-infrastructure
 npm run perf:baseline
 npm run perf:stress
+npm run test:performance
+npm run perf:soak -- --hours=1
 npm run test:bybit-certification
 npm run certify:bybit-mainnet
 ```
@@ -45,8 +47,10 @@ npm run certify:bybit-mainnet
 `npm run check` runs TypeScript and Rust checks. Use it before packaging or larger refactors.
 `npm run depth:worker:supervise` is the recommended local/persistent command for the Black Core Market Depth Memory collector because it restarts the worker after stale-feed exits or process failures.
 `npm run depth:verify` checks persisted IMM data quality and returns a non-zero exit code on serious operational failures.
-`npm run perf:baseline` writes the current Chapter IX performance footprint to `docs/performance/latest-baseline.md` and `.json`.
+`npm run perf:baseline` writes the current Chapter XIV performance footprint to `docs/performance/latest-baseline.md` and `.json`.
 `npm run perf:stress` requires `PERF_STRESS_URL` and writes a long-session JSONL log under `docs/performance/`.
+`npm run test:performance` verifies registration, cleanup, coalescing and retention invariants.
+`npm run perf:soak -- --hours=1` launches a local production preview, exercises safe cockpit interactions, and writes a JSONL report without submitting orders.
 
 Bybit diagnostics and controlled live validation use:
 
@@ -151,6 +155,12 @@ examples/
 - No Chapter XIII Supabase migration is required.
 
 ## Current Gaps
+
+Chapter XIV performance workflow:
+
+- Admin `Ctrl+Shift+P` opens the optional Performance HUD. Capture reports contain metrics only and no secrets.
+- Keep `VITE_ALLOW_SIMULATED_MARKET_FALLBACK` unset in production; set it only in an explicit simulation environment.
+- One-hour and longer soak reports live under `docs/performance/` and must be interpreted alongside the documented hardware/runtime context.
 
 - Market data has a Black Core adapter foundation, but more venue paths still need production hardening.
 - Exchange adapters are certification-gated. Bybit has venue-native order routing but remains partially certified pending live evidence; most CEX venues are market-data-only, wallets are signer-only, and unsupported protocol/institutional adapters stay deferred.

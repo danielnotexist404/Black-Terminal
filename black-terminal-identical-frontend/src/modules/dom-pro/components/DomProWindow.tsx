@@ -15,6 +15,7 @@ import { blackCorePerformanceMonitor } from "../../../performance/performanceMon
 import type { PortfolioAccount } from "../../../portfolio/types";
 import { defaultRiskControls } from "../../../risk/types";
 import { DomAggregationEngine } from "../domAggregationEngine";
+import { aggregateDomSnapshot } from "../domAggregationClient";
 import { blackDepthHistoryStore, type DepthHistoryPoint, type DepthHistoryRead } from "../depthHistoryStore";
 import { readDomSettings, updateModeSettings, writeDomSettings } from "../domSettingsStore";
 import { useDomFeed } from "../useDomFeed";
@@ -228,6 +229,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const feed = useDomFeed(marketSymbol);
   const engineRef = useRef(new DomAggregationEngine());
   const frameRef = useRef<number | null>(null);
+  const renderGenerationRef = useRef(0);
   const popoutRef = useRef<Window | null>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
   const submitQuickOrderRef = useRef<(targetSide: OrderSide, override?: Partial<{ quantity: string; price: string; orderType: OrderType; reduceOnly: boolean; postOnly: boolean }>) => Promise<void>>();
@@ -244,6 +246,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const [cvdViewport, setCvdViewport] = useState<CvdViewportState>(() => defaultCvdCamera());
   const [domHover, setDomHover] = useState<DomHoverInfo | null>(null);
   const [flowSeries, setFlowSeries] = useState<FlowPoint[]>([]);
+  const lastFlowUiUpdateAtRef = useRef(0);
   const [snapshot, setSnapshot] = useState<AggregatedDomSnapshot>(() =>
     engineRef.current.aggregate({
       marketSymbol,
@@ -286,6 +289,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     const next = readDomSettings(workspaceId, symbolKey);
     setSettings(next);
     engineRef.current = new DomAggregationEngine();
+    renderGenerationRef.current += 1;
     setHeatmapViewport(defaultHeatmapCamera());
     setDomHover(null);
   }, [workspaceId, symbolKey]);
@@ -393,6 +397,8 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
 
   useEffect(() => {
     if (!snapshot.liquidityDelta.length) return;
+    if (snapshot.generatedAt - lastFlowUiUpdateAtRef.current < 1000) return;
+    lastFlowUiUpdateAtRef.current = snapshot.generatedAt;
     const bucketTime = Math.floor((snapshot.generatedAt / 1000) / settings.cvdSampleIntervalSec) * settings.cvdSampleIntervalSec;
     const nextPoint: FlowPoint = {
       time: bucketTime,
@@ -411,7 +417,8 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
 
   function renderSnapshot() {
     const started = performance.now();
-    const next = engineRef.current.aggregate({
+    const generation = ++renderGenerationRef.current;
+    const input = {
       marketSymbol,
       book: feed.book,
       ticker: feed.ticker,
@@ -423,17 +430,20 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
         lastRenderMs: 0
       },
       subscriptionCount: feed.subscriptionCount
+    };
+    void aggregateDomSnapshot(input, engineRef.current).then((next) => {
+      if (!next || generation !== renderGenerationRef.current) return;
+      next.renderStats.lastRenderMs = performance.now() - started;
+      blackCorePerformanceMonitor.recordFrame(next.renderStats.lastRenderMs, { surface: "dom-pro" });
+      blackCorePerformanceMonitor.recordMetric("dom_pro.render_ms", next.renderStats.lastRenderMs, "ms", { surface: "dom-pro" });
+      blackCorePerformanceMonitor.recordMetric("dom_pro.visible_buckets", next.renderStats.visibleBuckets, "count", { surface: "dom-pro" });
+      if (next.renderStats.lastRenderMs > 18) {
+        renderCooldownUntilRef.current = performance.now() + 1000 / Math.max(1, settings.fpsCap);
+        droppedFramesRef.current += 1;
+      }
+      lastRenderAtRef.current = performance.now();
+      setSnapshot(next);
     });
-    next.renderStats.lastRenderMs = performance.now() - started;
-    blackCorePerformanceMonitor.recordFrame(next.renderStats.lastRenderMs, { surface: "dom-pro" });
-    blackCorePerformanceMonitor.recordMetric("dom_pro.render_ms", next.renderStats.lastRenderMs, "ms", { surface: "dom-pro" });
-    blackCorePerformanceMonitor.recordMetric("dom_pro.visible_buckets", next.renderStats.visibleBuckets, "count", { surface: "dom-pro" });
-    if (next.renderStats.lastRenderMs > 18) {
-      renderCooldownUntilRef.current = performance.now() + 1000 / Math.max(1, settings.fpsCap);
-      droppedFramesRef.current += 1;
-    }
-    lastRenderAtRef.current = performance.now();
-    setSnapshot(next);
   }
 
   function patchSettings(patch: Partial<DomSettings>) {
@@ -508,7 +518,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     blackDepthHistoryStore.record(marketSymbol, snapshot.sourceBook, snapshot.lastPrice ?? lastPrice);
   }, [lastPrice, marketSymbol, snapshot.generatedAt, snapshot.lastPrice, snapshot.sourceBook]);
 
-  const cvdData = engineRef.current.cvdData();
+  const cvdData = snapshot.cvdSeries;
   const macroBands = useMemo(
     () => settings.showMacroRadar ? buildMacroLiquidityBands(macroCandles, snapshot.lastPrice ?? lastPrice, settings) : [],
     [lastPrice, macroCandles, settings.macroBandCount, settings.macroLookbackDays, settings.showMacroRadar, snapshot.lastPrice]

@@ -511,6 +511,8 @@ export function PixiBlackChart({
     const host = hostRef.current;
     if (!host) return;
     const adapter = getMarketDataEngineAdapter(marketSymbol.exchange);
+    const allowSimulatedFallback =
+      marketSymbol.exchange === "mock" || import.meta.env.VITE_ALLOW_SIMULATED_MARKET_FALLBACK === "true";
     replaySourceRef.current = [];
     replayCursorRef.current = 0;
     replayAppliedRef.current = false;
@@ -520,7 +522,7 @@ export function PixiBlackChart({
     let historySymbol = marketSymbol.rawSymbol;
     let historyLabel = adapter?.label ?? "Mock";
     setLastCandle(null);
-    setDataStatus(adapter ? `${adapter.label.toUpperCase()} CONNECTING` : "MOCK FALLBACK");
+    setDataStatus(adapter ? `${adapter.label.toUpperCase()} CONNECTING` : allowSimulatedFallback ? "SIMULATION" : "MARKET DATA UNAVAILABLE");
     synthesizeCandlesFromTrades = !adapter?.subscribeCandles;
 
     const chartQuery = {
@@ -796,7 +798,9 @@ export function PixiBlackChart({
 
     const engine = new BlackChartEngine({
       host,
-      candles: adapter ? [] : createMockCandles(historyDepth, timeframeSeconds[timeframe], lastPrice),
+      candles: !adapter && allowSimulatedFallback
+        ? createMockCandles(historyDepth, timeframeSeconds[timeframe], lastPrice)
+        : [],
       chartType,
       visibleIndicators,
       indicatorPeriods,
@@ -838,7 +842,8 @@ export function PixiBlackChart({
         }
 
         if (!adapter) {
-          startMockFallback();
+          if (allowSimulatedFallback) startMockFallback();
+          else setDataStatus("MARKET DATA UNAVAILABLE - NO ADAPTER");
           return;
         }
 
@@ -875,20 +880,25 @@ export function PixiBlackChart({
                 startPrimaryLiveFeeds();
               })
               .catch((fallbackErr: unknown) => {
-                console.error(`${adapter.label} cross-exchange history failed; using mock feed`, fallbackErr);
-                startMockFallback(undefined, (event) => {
-                  if (event.type === "alert") {
-                    sendWebhook({
-                      terminal: "Black-Terminal",
-                      engine: "PixiJS GPU renderer",
-                      symbol: displaySymbol,
-                      timeframe,
-                      signal: event.signal,
-                      price: event.price,
-                      timestamp: new Date().toISOString()
-                    });
-                  }
-                });
+                console.error(`${adapter.label} cross-exchange history failed`, fallbackErr);
+                if (allowSimulatedFallback) {
+                  startMockFallback(undefined, (event) => {
+                    if (event.type === "alert") {
+                      sendWebhook({
+                        terminal: "Black-Terminal",
+                        engine: "PixiJS GPU renderer",
+                        symbol: displaySymbol,
+                        timeframe,
+                        signal: event.signal,
+                        price: event.price,
+                        timestamp: new Date().toISOString()
+                      });
+                    }
+                  });
+                  return;
+                }
+                setDataStatus(`${adapter.label.toUpperCase()} LIVE - HISTORY UNAVAILABLE`);
+                startPrimaryLiveFeeds();
               });
           });
       })

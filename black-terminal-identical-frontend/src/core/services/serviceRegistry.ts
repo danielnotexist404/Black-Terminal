@@ -5,10 +5,17 @@ export class ServiceRegistry {
   private factories = new Map<string, ServiceFactory<unknown>>();
 
   register<T>(key: string, service: T) {
+    const existing = this.instances.get(key);
+    if (existing !== undefined && existing !== service) {
+      throw new Error(`Black Core service already registered: ${key}`);
+    }
     this.instances.set(key, service);
   }
 
   registerFactory<T>(key: string, factory: ServiceFactory<T>) {
+    if (this.factories.has(key) || this.instances.has(key)) {
+      throw new Error(`Black Core service already registered: ${key}`);
+    }
     this.factories.set(key, factory as ServiceFactory<unknown>);
   }
 

@@ -17,6 +17,7 @@ import { OrderBookSnapshot } from "../market-data/types";
 import { createAdaptiveSwingSignals } from "../modules/strategy-lab/adapters/signalAdapter";
 import type { StrategySettings, StrategySignal } from "../modules/strategy-lab/types/strategy.types";
 import { blackCorePerformanceMonitor } from "../performance/performanceMonitor";
+import { blackCoreResourceTracker } from "../performance/resourceTracker";
 import {
   AdaptiveSwingStrategySettings,
   Candle,
@@ -262,12 +263,16 @@ export class BlackChartEngine {
   private replaySelectionMode?: (selection: ReplaySelection) => void;
   private resizeObserver?: ResizeObserver;
   private resizeRaf?: number;
+  private drawRaf?: number;
   private mockTimer?: number;
   private orderBookDrawTimer?: number;
   private lastOrderBookDrawAt = 0;
   private frameCount = 0;
   private lastFpsTime = performance.now();
   private lastTickerFrameAt = performance.now();
+  private readonly resourceOwner = `pixi-chart:${Math.random().toString(36).slice(2)}`;
+  private releaseVisibilityListener?: () => void;
+  private releaseResizeObserver?: () => void;
 
   constructor(options: ChartEngineOptions) {
     this.host = options.host;
@@ -316,6 +321,9 @@ export class BlackChartEngine {
       this.crosshairLayer
     );
     this.drawingLayer.addChild(this.drawingGraphics);
+    blackCoreResourceTracker.setGauge("pixi-container", this.resourceOwner, 4);
+    blackCoreResourceTracker.setGauge("pixi-graphics", this.resourceOwner, 11);
+    blackCoreResourceTracker.setGauge("pixi-text", this.resourceOwner, 0);
 
     this.app.stage.eventMode = "static";
     this.app.stage.hitArea = this.app.screen;
@@ -335,7 +343,7 @@ export class BlackChartEngine {
           const factor = dist / this.lastPinchDistance;
           const centerX = (coords[0].x + coords[1].x) / 2;
           this.zoomTimeAxis(factor, centerX);
-          this.draw();
+          this.queueDraw();
         }
         this.lastPinchDistance = dist;
         return;
@@ -351,7 +359,7 @@ export class BlackChartEngine {
         const maxScroll = Math.max(0, (this.getDisplayCandles().length - 1) * this.timeStep());
         this.view.scrollX = Math.max(0, Math.min(maxScroll, this.dragStartScroll + dx));
         this.panPriceAxis(dy);
-        this.draw();
+        this.queueDraw();
       } else {
         this.drawCrosshair();
       }
@@ -416,8 +424,11 @@ export class BlackChartEngine {
     this.host.addEventListener("contextmenu", this.onContextMenu);
 
     this.resizeObserver = new ResizeObserver(() => this.queueResize());
+    this.releaseResizeObserver = blackCoreResourceTracker.acquire("observer", `${this.resourceOwner}:resize`);
     this.resizeObserver.observe(this.host);
     window.addEventListener("black-terminal-layout-resize", this.queueResize);
+    window.addEventListener("visibilitychange", this.handleVisibilityChange);
+    this.releaseVisibilityListener = blackCoreResourceTracker.acquire("listener", `${this.resourceOwner}:visibility`);
 
     this.app.ticker.add(() => this.tickFps());
     this.resize();
@@ -758,16 +769,25 @@ export class BlackChartEngine {
     this.host.removeEventListener("dblclick", this.onDoubleClick);
     this.host.removeEventListener("contextmenu", this.onContextMenu);
     window.removeEventListener("black-terminal-layout-resize", this.queueResize);
+    window.removeEventListener("visibilitychange", this.handleVisibilityChange);
     if (this.resizeRaf) window.cancelAnimationFrame(this.resizeRaf);
+    if (this.drawRaf) window.cancelAnimationFrame(this.drawRaf);
     if (this.orderBookDrawTimer) window.clearTimeout(this.orderBookDrawTimer);
     this.host.classList.remove("price-scale-dragging", "price-scale-hover", "drawing-eraser");
     this.setReplaySelectionMode(false);
     this.resizeObserver?.disconnect();
+    this.releaseResizeObserver?.();
+    this.releaseVisibilityListener?.();
     this.clearDrawingTexts();
     this.clearAlertTexts();
     this.clearProfileTexts();
     this.clearHeatmapTexts();
     this.app.destroy(true, { children: true, texture: true });
+    blackCoreResourceTracker.clearGauge("pixi-container", this.resourceOwner);
+    blackCoreResourceTracker.clearGauge("pixi-graphics", this.resourceOwner);
+    blackCoreResourceTracker.clearGauge("pixi-text", this.resourceOwner);
+    blackCoreResourceTracker.clearGauge("pixi-texture", this.resourceOwner);
+    blackCoreResourceTracker.clearGauge("pixi-geometry", this.resourceOwner);
   }
 
   private stopDragging() {
@@ -804,7 +824,7 @@ export class BlackChartEngine {
       min: center - halfRange,
       max: center + halfRange
     };
-    this.draw();
+    this.queueDraw();
   }
 
   private panPriceAxis(dy: number) {
@@ -833,7 +853,26 @@ export class BlackChartEngine {
     if (!this.isInsidePriceAxis(x, y)) return;
 
     this.manualPriceRange = undefined;
-    this.draw();
+    this.queueDraw();
+  };
+
+  private queueDraw() {
+    if (this.drawRaf || document.visibilityState !== "visible") return;
+    this.drawRaf = window.requestAnimationFrame(() => {
+      this.drawRaf = undefined;
+      this.draw();
+    });
+  }
+
+  private handleVisibilityChange = () => {
+    if (document.visibilityState === "visible") {
+      this.app.ticker.start();
+      this.queueDraw();
+    } else {
+      this.app.ticker.stop();
+      if (this.drawRaf) window.cancelAnimationFrame(this.drawRaf);
+      this.drawRaf = undefined;
+    }
   };
 
   private onContextMenu = (e: MouseEvent) => {
@@ -855,7 +894,7 @@ export class BlackChartEngine {
       this.zoomTimeAxis(factor, x);
     }
 
-    this.draw();
+    this.queueDraw();
   };
 
   private panTimeAxis(delta: number) {
@@ -915,6 +954,9 @@ export class BlackChartEngine {
       const fps = Math.round((this.frameCount * 1000) / (now - this.lastFpsTime));
       this.onFps?.(fps);
       blackCorePerformanceMonitor.recordMetric("chart.fps", fps, "fps", { surface: "pixi-chart" });
+      blackCoreResourceTracker.setGauge("pixi-texture", this.resourceOwner, 0);
+      blackCoreResourceTracker.setGauge("pixi-geometry", this.resourceOwner, 11);
+      blackCorePerformanceMonitor.recordMetric("chart.draw_calls", 11, "count", { surface: "pixi-chart" });
       this.frameCount = 0;
       this.lastFpsTime = now;
     }
@@ -1311,6 +1353,13 @@ export class BlackChartEngine {
     this.drawPriceAlertLines();
     this.drawAxes();
     this.drawCrosshair();
+    blackCoreResourceTracker.setGauge(
+      "pixi-text",
+      this.resourceOwner,
+      this.priceTexts.length + this.timeTexts.length + this.labelTexts.length + this.hudTexts.length
+        + this.crosshairTexts.length + this.drawingTexts.length + this.profileTexts.length
+        + this.heatmapTexts.length + this.alertTexts.length
+    );
   }
 
   private drawGrid() {

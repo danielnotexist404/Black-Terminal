@@ -3,6 +3,7 @@ import { blackCoreEventBus } from "../core/blackCore";
 import { blackCoreConnectionAudit } from "./connectionAudit";
 import type { ConnectivityEvent } from "./connectionEvents";
 import type { ConnectRequest, ConnectionAdapter, ConnectionDiagnostics, ConnectionRecord, ConnectionSubscription } from "./types";
+import { blackCoreResourceTracker } from "../performance/resourceTracker";
 
 type ConnectionListener = (diagnostics: ConnectionDiagnostics[]) => void;
 
@@ -11,6 +12,8 @@ export class ConnectionManager {
   private connections = new Map<string, ConnectionRecord>();
   private subscriptions = new Map<string, ConnectionSubscription[]>();
   private heartbeatTimers = new Map<string, number>();
+  private heartbeatReleases = new Map<string, () => void>();
+  private heartbeatInFlight = new Set<string>();
   private listeners = new Set<ConnectionListener>();
 
   registerAdapter(adapter: ConnectionAdapter) {
@@ -165,9 +168,11 @@ export class ConnectionManager {
   }
 
   async heartbeat(connectionId: string) {
+    if (this.heartbeatInFlight.has(connectionId)) return this.connections.get(connectionId) ?? null;
     const connection = this.connections.get(connectionId);
     if (!connection) return null;
     const adapter = this.getAdapter(connection.adapterId);
+    this.heartbeatInFlight.add(connectionId);
 
     try {
       const health = await adapter.heartbeat(connection);
@@ -218,6 +223,8 @@ export class ConnectionManager {
       }
       this.notify();
       return failed;
+    } finally {
+      this.heartbeatInFlight.delete(connectionId);
     }
   }
 
@@ -297,12 +304,16 @@ export class ConnectionManager {
       void this.heartbeat(connectionId);
     }, 30000);
     this.heartbeatTimers.set(connectionId, timer);
+    this.heartbeatReleases.set(connectionId, blackCoreResourceTracker.acquire("interval", `connection:${connectionId}:heartbeat`));
   }
 
   private stopHeartbeat(connectionId: string) {
     const timer = this.heartbeatTimers.get(connectionId);
     if (typeof window !== "undefined" && timer) window.clearInterval(timer);
     this.heartbeatTimers.delete(connectionId);
+    this.heartbeatReleases.get(connectionId)?.();
+    this.heartbeatReleases.delete(connectionId);
+    this.heartbeatInFlight.delete(connectionId);
   }
 
   private toDiagnostics(connection: ConnectionRecord): ConnectionDiagnostics {

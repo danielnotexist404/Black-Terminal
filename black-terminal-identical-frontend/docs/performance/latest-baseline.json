@@ -1,29 +1,32 @@
 {
-  "generatedAt": "2026-07-10T18:57:15.617Z",
-  "gitCommit": "8854eef",
+  "chapter": "Phase III Chapter XIV",
+  "generatedAt": "2026-07-13T17:31:11.832Z",
+  "gitCommit": "12848ab",
   "node": "v22.18.0",
   "platform": "win32",
   "sourceFootprint": {
-    "files": 159,
-    "lines": 37543,
-    "requestAnimationFrame": 6,
-    "setInterval": 25,
-    "setTimeout": 15,
-    "addEventListener": 20,
-    "removeEventListener": 20,
+    "files": 169,
+    "lines": 41604,
+    "requestAnimationFrame": 8,
+    "setInterval": 26,
+    "setTimeout": 21,
+    "addEventListener": 22,
+    "removeEventListener": 22,
     "newWebSocket": 16,
-    "newWorker": 1,
-    "resizeObserver": 2,
+    "newWorker": 2,
+    "resizeObserver": 5,
     "mutationObserver": 0,
-    "performanceMetricPublishers": 10
+    "performanceMetricPublishers": 23,
+    "coalescedPublishers": 6,
+    "resourceAcquisitions": 14
   },
   "bundleFootprint": {
     "available": true,
-    "totalBytes": 3170448,
+    "totalBytes": 3297052,
     "largestAssets": [
       {
-        "name": "index-Cu7gv2nQ.js",
-        "bytes": 1155564
+        "name": "index-CHQcHtFf.js",
+        "bytes": 1134608
       },
       {
         "name": "chart_preview-C0S4kWWD.jpg",
@@ -34,30 +37,30 @@
         "bytes": 758834
       },
       {
-        "name": "index-nQkvY4mC.css",
-        "bytes": 154096
+        "name": "index-C3mjXgzD.css",
+        "bytes": 169085
       },
       {
-        "name": "WebGLRenderer-CVCHvocA.js",
-        "bytes": 68435
+        "name": "DomProWindow-Ca5iCpHd.js",
+        "bytes": 118852
       },
       {
-        "name": "RenderTargetSystem-CP4JaWxC.js",
-        "bytes": 46307
+        "name": "WebGLRenderer-CEaN39Wy.js",
+        "bytes": 68437
       },
       {
-        "name": "browserAll-DQuDxly2.js",
+        "name": "RenderTargetSystem-Ctmk6lZO.js",
+        "bytes": 46308
+      },
+      {
+        "name": "browserAll-Cfg7kCn6.js",
         "bytes": 43055
-      },
-      {
-        "name": "WebGPURenderer-fLBKkXGx.js",
-        "bytes": 38200
       }
     ]
   },
   "notes": [
-    "This is the repeatable static/runtime-ready baseline for Chapter IX.",
-    "Use Ctrl+Shift+P in the app to capture browser HUD snapshots during live sessions.",
-    "Use npm run perf:stress with PERF_STRESS_URL for long-session polling logs."
+    "This is the repeatable static and bundle footprint for Chapter XIV.",
+    "Admin users can use Ctrl+Shift+P to capture browser HUD snapshots.",
+    "Use npm run perf:soak -- --hours=1 for the browser long-session harness."
   ]
 }

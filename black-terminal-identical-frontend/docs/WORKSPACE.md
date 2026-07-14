@@ -59,10 +59,10 @@ BYBIT_MAINNET_VALIDATION_ENABLED=true
 BYBIT_MAINNET_VALIDATION_ADMIN_EMAILS=owner@example.com
 BYBIT_MAINNET_ALLOWED_CONNECTIONS=<exchange_accounts.id>
 BYBIT_MAINNET_ALLOWED_SYMBOLS=BTCUSDT
-BYBIT_MAINNET_MAX_NOTIONAL_USD=5
+BYBIT_MAINNET_MAX_NOTIONAL_USD= # optional; unset uses live account-margin capacity
 ```
 
-Keep these unset unless deliberately validating tiny live orders through the existing OMS/EMS/Risk path.
+The validation enablement and allowlists remain deliberate production controls. Keep a positive notional value only when an operator-wide ceiling is required; an unset value delegates sizing to synchronized available margin, venue rules and per-account risk controls through the existing OMS/EMS/Risk path.
 Persistent Bybit private streams also need:
 
 ```bash

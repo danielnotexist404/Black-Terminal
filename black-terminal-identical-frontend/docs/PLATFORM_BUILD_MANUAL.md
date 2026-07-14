@@ -216,7 +216,7 @@ Bybit live validation requires:
 - `BYBIT_MAINNET_VALIDATION_ENABLED=true`,
 - account id in `BYBIT_MAINNET_ALLOWED_CONNECTIONS` when the optional operator allowlist is configured,
 - symbol in `BYBIT_MAINNET_ALLOWED_SYMBOLS`,
-- `BYBIT_MAINNET_MAX_NOTIONAL_USD`,
+- optional positive `BYBIT_MAINNET_MAX_NOTIONAL_USD` operator ceiling; unset uses synchronized account-margin capacity,
 - admin email in `BYBIT_MAINNET_VALIDATION_ADMIN_EMAILS`,
 - browser Developer Mainnet Validation Mode,
 - per-order `LIVE` confirmation,

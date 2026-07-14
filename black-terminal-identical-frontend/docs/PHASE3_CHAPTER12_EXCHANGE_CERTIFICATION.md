@@ -47,7 +47,7 @@ Bybit live validation is fail-closed unless all are true:
 - authenticated Supabase session
 - account id is in `BYBIT_MAINNET_ALLOWED_CONNECTIONS` when an operator allowlist is configured
 - symbol is in `BYBIT_MAINNET_ALLOWED_SYMBOLS`
-- `BYBIT_MAINNET_MAX_NOTIONAL_USD` is configured
+- optional `BYBIT_MAINNET_MAX_NOTIONAL_USD` operator ceiling is respected when positive
 - the API key advertises Bybit trading permission and has no withdrawal permission
 - account reconciliation has synchronized the server execution state
 - each order includes `mainnetConfirmed=true`
@@ -116,7 +116,7 @@ BYBIT_MAINNET_VALIDATION_ENABLED=true
 BYBIT_MAINNET_VALIDATION_ADMIN_EMAILS=owner@example.com
 BYBIT_MAINNET_ALLOWED_CONNECTIONS=<exchange_accounts.id>
 BYBIT_MAINNET_ALLOWED_SYMBOLS=BTCUSDT,ETHUSDT
-BYBIT_MAINNET_MAX_NOTIONAL_USD=5
+BYBIT_MAINNET_MAX_NOTIONAL_USD= # optional operator ceiling
 BYBIT_PRIVATE_STREAM_RUNTIME_ENABLED=true
 BYBIT_STREAM_ACCOUNT_ID=<exchange_accounts.id>
 BYBIT_STREAM_SYMBOL=BTCUSDT
@@ -156,7 +156,7 @@ The runner refuses to continue unless all required safety inputs exist:
 - `BYBIT_CERTIFY_USER_TOKEN`
 - `BYBIT_MAINNET_ALLOWED_CONNECTIONS`
 - `BYBIT_MAINNET_ALLOWED_SYMBOLS`
-- `BYBIT_MAINNET_MAX_NOTIONAL_USD`
+- optional positive `BYBIT_MAINNET_MAX_NOTIONAL_USD`, otherwise account-margin capacity
 - fresh private-stream health from `npm run bybit:private-stream`
 - typed `LIVE` confirmation
 

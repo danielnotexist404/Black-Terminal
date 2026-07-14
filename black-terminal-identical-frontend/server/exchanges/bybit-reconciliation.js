@@ -95,9 +95,9 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
   const riskPatch = {
     read_only_mode: executionState.readOnly,
     trading_enabled: executionState.tradingEnabled,
-    allowed_symbols: executionState.allowedSymbols
+    allowed_symbols: executionState.allowedSymbols,
+    max_position_usd: executionState.maxNotionalUsd
   };
-  if (executionState.maxNotionalUsd > 0) riskPatch.max_position_usd = executionState.maxNotionalUsd;
   const [accountUpdate, riskUpdate] = await Promise.all([
     supabase.from("exchange_accounts").update(accountPatch).eq("id", account.id).eq("user_id", userId),
     supabase.from("account_risk_controls").update(riskPatch).eq("account_id", account.id)

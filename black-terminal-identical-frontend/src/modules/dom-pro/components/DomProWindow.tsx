@@ -3567,7 +3567,14 @@ function buildExecutionAccount(connection: ConnectionDiagnostics, sync: Exchange
   const metrics = sync?.accountMetrics;
   const tradingEnabled = connection.health.permissions.trading === true;
   const storedControls = connection.metadata.accountRiskControls as PortfolioAccount["riskControls"] | undefined;
-  const riskControls = { ...(storedControls || defaultRiskControls), readOnlyMode: !tradingEnabled, tradingEnabled };
+  const accountDrivenBybit = connection.provider === "bybit" && Number(sync?.executionState.maxNotionalUsd || 0) <= 0;
+  const riskControls = {
+    ...(storedControls || defaultRiskControls),
+    maxPositionUsd: accountDrivenBybit ? 0 : storedControls?.maxPositionUsd ?? defaultRiskControls.maxPositionUsd,
+    maxPortfolioExposureUsd: storedControls?.maxPortfolioExposureUsd ?? (accountDrivenBybit ? 0 : defaultRiskControls.maxPortfolioExposureUsd),
+    readOnlyMode: !tradingEnabled,
+    tradingEnabled
+  };
   return {
     id: connection.accountId || connection.id,
     exchange: connection.provider as MarketSymbol["exchange"],

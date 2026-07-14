@@ -136,7 +136,6 @@ async function runPreflight() {
     "SUPABASE_SERVICE_ROLE_KEY",
     "BYBIT_MAINNET_ALLOWED_CONNECTIONS",
     "BYBIT_MAINNET_ALLOWED_SYMBOLS",
-    "BYBIT_MAINNET_MAX_NOTIONAL_USD",
     "BYBIT_CERTIFY_API_BASE_URL",
     "BYBIT_CERTIFY_USER_TOKEN"
   ];
@@ -168,8 +167,8 @@ async function runPreflight() {
     pass("allowlist:symbol", `${config.symbol} allowlisted`);
   }
   const maxNotional = Number(process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD || 0);
-  if (!Number.isFinite(maxNotional) || maxNotional <= 0) fail("risk:max-notional", "BYBIT_MAINNET_MAX_NOTIONAL_USD must be a positive number.");
-  else pass("risk:max-notional", `${maxNotional} USDT`);
+  if (Number.isFinite(maxNotional) && maxNotional > 0) pass("risk:max-notional", `${maxNotional} USDT operator cap`);
+  else pass("risk:max-notional", "account-margin capacity");
 
   if (reasons.length > 0) {
     printPreflightChecks(checks);
@@ -656,7 +655,7 @@ function buildOrderPlan(metadata, lastPrice) {
   const quantity = Math.max(minQuantity, minQtyForNotional);
   const notional = quantity * lastPrice;
 
-  if (notional > maxNotional) {
+  if (Number.isFinite(maxNotional) && maxNotional > 0 && notional > maxNotional) {
     throw new Error(`Smallest valid ${config.symbol} order requires ${notional.toFixed(4)} USDT, above BYBIT_MAINNET_MAX_NOTIONAL_USD=${maxNotional}.`);
   }
 

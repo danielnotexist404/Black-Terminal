@@ -22,6 +22,7 @@ BYBIT_NETWORK=mainnet
 BYBIT_MAINNET_VALIDATION_ENABLED=false
 BYBIT_MAINNET_ALLOWED_CONNECTIONS=
 BYBIT_MAINNET_ALLOWED_SYMBOLS=*
+# Optional absolute operator ceiling. Leave unset for live account-margin capacity.
 BYBIT_MAINNET_MAX_NOTIONAL_USD=
 BYBIT_MAINNET_VALIDATION_ADMIN_EMAILS=
 ```
@@ -29,6 +30,8 @@ BYBIT_MAINNET_VALIDATION_ADMIN_EMAILS=
 Leave `BYBIT_MAINNET_ALLOWED_CONNECTIONS` empty to permit authenticated owners to activate only their own trade-authorized accounts, or populate it with comma-separated account ids for an operator-managed allowlist. `*` explicitly allows every owned account while the remaining confirmation, permission, risk, symbol, and notional gates still apply.
 
 Set `BYBIT_MAINNET_ALLOWED_SYMBOLS=*` to permit every symbol that passes live Bybit metadata, product, quantity, price, balance and risk validation. Use a comma-separated symbol list when an operator wants a narrower production universe.
+
+`BYBIT_MAINNET_MAX_NOTIONAL_USD` is optional. A positive value is an absolute operator ceiling. When it is unset or zero, Black Terminal derives order capacity from Bybit Unified Account `totalAvailableBalance`, selected leverage, estimated fees, venue quantity/notional rules, risk tier and any positive per-account risk limits. Zero risk ceilings mean venue/account capacity; they do not disable authentication, venue validation, collateral checks, confirmations, emergency stops or withdrawal-permission blocking.
 
 Secrets:
 

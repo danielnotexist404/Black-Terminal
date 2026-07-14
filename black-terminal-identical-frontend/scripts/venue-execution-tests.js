@@ -9,6 +9,8 @@ import {
   validateVenueOrderDraft
 } from "../src/execution/venueExecutionSchema.ts";
 import { executionAlgorithmRegistry } from "../src/execution/executionAlgorithmRegistry.ts";
+import { evaluateOrderRisk } from "../src/risk/riskEngine.ts";
+import { checkOrderRisk } from "../server/portfolio-api.js";
 
 const connection = {
   id: "cex-acct",
@@ -137,6 +139,46 @@ test("preview calculates margin, fees, and reward-risk", () => {
   assert.equal(preview.notional, 100);
   assert.equal(preview.requiredMargin, 20);
   assert.equal(preview.rewardRiskRatio, 2);
+});
+
+test("zero risk ceilings delegate capacity to live account margin", () => {
+  const controls = {
+    maxLeverage: 100,
+    maxPositionUsd: 0,
+    maxDailyLossUsd: 10000,
+    maxPortfolioExposureUsd: 0,
+    allowedSymbols: ["BTCUSDT"],
+    readOnlyMode: false,
+    tradingEnabled: true,
+    emergencyStop: false
+  };
+  const account = {
+    id: "acct", exchange: "bybit", label: "Bybit", accountName: "Bybit", permissions: [], isPaper: false,
+    connectedAt: 1, lastValidatedAt: 1, status: "connected", apiHealth: "healthy", latencyMs: 1,
+    balanceUsd: 20000, equityUsd: 20000, marginUsed: 0, availableMargin: 20000, buyingPower: 700000,
+    leverage: 35, dailyPnl: 0, monthlyPnl: 0, openPositions: 0, openOrders: 0, riskControls: controls
+  };
+  const order = {
+    clientOrderId: "order", accountId: "acct", exchange: "bybit", symbol: "BTCUSDT", marketKind: "perpetual",
+    side: "buy", orderType: "limit", quantity: 680000, sizingMethod: "usd", limitPrice: 65000,
+    referencePrice: 65000, timeInForce: "gtc", leverage: 35, destinations: ["personal-portfolio"], source: "order-ticket"
+  };
+  assert.equal(evaluateOrderRisk(order, account, controls, 65000).status, "approved");
+});
+
+test("portfolio exposure compares margin to margin instead of notional", () => {
+  const result = checkOrderRisk({
+    account: { is_read_only: false, trading_enabled: true },
+    riskControls: {
+      read_only_mode: false, trading_enabled: true, emergency_stop: false, allowed_symbols: ["BTCUSDT"],
+      max_position_usd: 0, max_portfolio_exposure_usd: 25000, max_daily_loss_usd: 10000
+    },
+    order: { symbol: "BTCUSDT", marketKind: "perpetual", quantity: 680000, quantityMode: "usd", referencePrice: 65000, leverage: 35 },
+    accountExposureUsd: 1000,
+    dailyPnl: 0
+  });
+  assert.equal(result.status, "approved");
+  assert.equal(Number(result.requiredMargin.toFixed(2)), 19428.57);
 });
 
 test("normal ticket contains no certification activation controls", () => {

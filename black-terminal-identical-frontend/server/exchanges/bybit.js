@@ -832,9 +832,7 @@ export function validateBybitMainnetValidationRequest({ account, order, risk, va
   if (!allowedSymbols.length || !allowedSymbols.includes("*") && !allowedSymbols.includes(String(order.symbol || "").toUpperCase())) {
     reasons.push("Bybit symbol is not in BYBIT_MAINNET_ALLOWED_SYMBOLS.");
   }
-  if (!Number.isFinite(maxNotional) || maxNotional <= 0) {
-    reasons.push("BYBIT_MAINNET_MAX_NOTIONAL_USD must be configured.");
-  } else if (risk.notional > maxNotional) {
+  if (Number.isFinite(maxNotional) && maxNotional > 0 && risk.notional > maxNotional) {
     reasons.push(`Order notional exceeds BYBIT_MAINNET_MAX_NOTIONAL_USD (${maxNotional}).`);
   }
   if (!validation?.ok) {
@@ -844,7 +842,7 @@ export function validateBybitMainnetValidationRequest({ account, order, risk, va
   return {
     ok: reasons.length === 0,
     reasons,
-    maxNotionalUsd: maxNotional
+    maxNotionalUsd: Number.isFinite(maxNotional) && maxNotional > 0 ? maxNotional : 0
   };
 }
 
@@ -857,14 +855,13 @@ export function resolveBybitExecutionPolicy(permissionReport = {}) {
   if (permissionReport.trading !== true) reasons.push("The Bybit API key does not have trading permission.");
   if (permissionReport.withdrawal === true) reasons.push("Withdrawal-enabled API keys cannot trade through Black Terminal.");
   if (allowedSymbols.length === 0) reasons.push("No Bybit symbols are enabled by server policy.");
-  if (!Number.isFinite(maxNotionalUsd) || maxNotionalUsd <= 0) reasons.push("The server order-notional limit is not configured.");
-
   const tradingEnabled = reasons.length === 0;
   return {
     tradingEnabled,
     readOnly: !tradingEnabled,
     allowedSymbols,
-    maxNotionalUsd,
+    maxNotionalUsd: Number.isFinite(maxNotionalUsd) && maxNotionalUsd > 0 ? maxNotionalUsd : 0,
+    capacityMode: Number.isFinite(maxNotionalUsd) && maxNotionalUsd > 0 ? "operator-cap" : "account-margin",
     readinessReason: reasons.join(" "),
     permissions: tradingEnabled
       ? ["read-account", "read-orders", "read-positions", "place-orders", "cancel-orders", "modify-orders", "withdraw-disabled"]

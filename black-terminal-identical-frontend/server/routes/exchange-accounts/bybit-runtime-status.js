@@ -71,6 +71,7 @@ export default async function handler(req, res) {
         symbolAllowlisted: envStatus.symbolAllowlisted,
         maxNotionalConfigured: envStatus.maxNotionalConfigured,
         maxNotionalUsd: envStatus.maxNotionalUsd,
+        capacityMode: envStatus.capacityMode,
         withdrawalPermissionAbsent: diagnostics.data?.permissions?.withdrawal === false,
         readPermissionPresent: diagnostics.data?.permissions?.read === true,
         tradePermissionPresent: diagnostics.data?.permissions?.trading === true
@@ -191,7 +192,8 @@ function buildEnvStatus(accountId, symbol) {
     accountAllowlisted: allowedConnections.length === 0 || allowedConnections.includes("*") || allowedConnections.includes(accountId),
     symbolAllowlisted: allowedSymbols.includes("*") || allowedSymbols.includes(symbol),
     maxNotionalConfigured: Number.isFinite(maxNotionalUsd) && maxNotionalUsd > 0,
-    maxNotionalUsd,
+    maxNotionalUsd: Number.isFinite(maxNotionalUsd) && maxNotionalUsd > 0 ? maxNotionalUsd : 0,
+    capacityMode: Number.isFinite(maxNotionalUsd) && maxNotionalUsd > 0 ? "operator-cap" : "account-margin",
     allowedSymbols
   };
 }
@@ -215,7 +217,6 @@ function buildReadinessBlockers({ envStatus, credentialStatus, diagnostics, stre
   if (!envStatus.validationModeEnabled) blockers.push("BYBIT_MAINNET_VALIDATION_ENABLED is not true.");
   if (!envStatus.accountAllowlisted) blockers.push("Bybit account is not in BYBIT_MAINNET_ALLOWED_CONNECTIONS.");
   if (!envStatus.symbolAllowlisted) blockers.push("Bybit symbol is not in BYBIT_MAINNET_ALLOWED_SYMBOLS.");
-  if (!envStatus.maxNotionalConfigured) blockers.push("BYBIT_MAINNET_MAX_NOTIONAL_USD must be configured.");
   if (!credentialStatus.ok) blockers.push(credentialStatus.error || "Encrypted credential cannot be decrypted.");
   if (!diagnostics.ok) blockers.push(diagnostics.error || "Bybit diagnostics failed.");
   if (diagnostics.data?.permissions?.withdrawal) blockers.push("Bybit API key has withdrawal permission. Use a trading-only key.");

@@ -167,7 +167,7 @@ test("private websocket auth payload is shaped for Bybit v5", () => {
   assert.equal(typeof payload.args[2], "string");
 });
 
-test("mainnet validation gate fails closed without env allowlists", () => {
+test("mainnet validation gate fails closed without execution mode and symbol allowlist", () => {
   const previous = {
     enabled: process.env.BYBIT_MAINNET_VALIDATION_ENABLED,
     allowedConnections: process.env.BYBIT_MAINNET_ALLOWED_CONNECTIONS,
@@ -186,7 +186,7 @@ test("mainnet validation gate fails closed without env allowlists", () => {
     validation: { ok: true, reasons: [] }
   });
   assert.equal(result.ok, false);
-  assert.match(result.reasons.join(" "), /BYBIT_MAINNET_VALIDATION_ENABLED|ALLOWED_CONNECTIONS|MAX_NOTIONAL/);
+  assert.match(result.reasons.join(" "), /BYBIT_MAINNET_VALIDATION_ENABLED|ALLOWED_SYMBOLS/);
 
   restoreEnv(previous);
 });
@@ -210,6 +210,32 @@ test("execution policy follows Bybit permissions and server limits", () => {
   const blocked = resolveBybitExecutionPolicy({ trading: true, withdrawal: true });
   assert.equal(blocked.tradingEnabled, false);
   assert.match(blocked.readinessReason, /Withdrawal-enabled/i);
+  restoreEnv(previous);
+});
+
+test("account-margin capacity is ready without a fixed operator notional cap", () => {
+  const previous = {
+    enabled: process.env.BYBIT_MAINNET_VALIDATION_ENABLED,
+    allowedSymbols: process.env.BYBIT_MAINNET_ALLOWED_SYMBOLS,
+    maxNotional: process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD
+  };
+  process.env.BYBIT_MAINNET_VALIDATION_ENABLED = "true";
+  process.env.BYBIT_MAINNET_ALLOWED_SYMBOLS = "*";
+  delete process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD;
+
+  const policy = resolveBybitExecutionPolicy({ trading: true, withdrawal: false });
+  assert.equal(policy.tradingEnabled, true);
+  assert.equal(policy.maxNotionalUsd, 0);
+  assert.equal(policy.capacityMode, "account-margin");
+
+  const gate = validateBybitMainnetValidationRequest({
+    account: { id: "acct-1" },
+    order: { symbol: "BTCUSDT", mainnetConfirmed: true, liveConfirmation: "LIVE" },
+    risk: { notional: 700000 },
+    validation: { ok: true, reasons: [] }
+  });
+  assert.equal(gate.ok, true);
+  assert.equal(gate.maxNotionalUsd, 0);
   restoreEnv(previous);
 });
 

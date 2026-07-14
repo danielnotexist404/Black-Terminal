@@ -1043,7 +1043,7 @@ function ExecutionDock({
                 <span>Worker <b>{bybitRuntimeStatus?.runtime.privateStreamAuthenticated ? "AUTH" : "BLOCKED"}</b></span>
                 <span>Clock <b>{bybitRuntimeStatus?.runtime.clockSkewMs ?? "?"}ms</b></span>
                 <span>Allowlist <b>{bybitRuntimeStatus?.safety.accountAllowlisted ? "YES" : "NO"}</b></span>
-                <span>Max Notional <b>{bybitRuntimeStatus?.safety.maxNotionalUsd || "?"}</b></span>
+                <span>Capacity <b>{bybitRuntimeStatus?.safety.capacityMode === "account-margin" ? "ACCOUNT" : bybitRuntimeStatus?.safety.maxNotionalUsd || "?"}</b></span>
               </div>
               {bybitRuntimeStatus?.readiness.blockers?.[0] && <p>{bybitRuntimeStatus.readiness.blockers[0]}</p>}
               <div className="bybit-cert-actions">

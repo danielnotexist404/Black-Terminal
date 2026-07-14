@@ -68,11 +68,9 @@ export default async function handler(req, res) {
     const riskPatch = {
       read_only_mode: !enable,
       trading_enabled: enable,
-      allowed_symbols: splitCsv(process.env.BYBIT_MAINNET_ALLOWED_SYMBOLS).map((item) => item.toUpperCase())
+      allowed_symbols: splitCsv(process.env.BYBIT_MAINNET_ALLOWED_SYMBOLS).map((item) => item.toUpperCase()),
+      max_position_usd: positiveNumber(process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD)
     };
-    if (process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD) {
-      riskPatch.max_position_usd = Number(process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD);
-    }
 
     const updates = await Promise.all([
       supabase
@@ -107,7 +105,8 @@ export default async function handler(req, res) {
         venueId: "bybit",
         accountId: account.id,
         allowedSymbols: splitCsv(process.env.BYBIT_MAINNET_ALLOWED_SYMBOLS).map((item) => item.toUpperCase()),
-        maxNotionalUsd: Number(process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD || 0)
+        maxNotionalUsd: positiveNumber(process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD),
+        capacityMode: positiveNumber(process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD) > 0 ? "operator-cap" : "account-margin"
       }
     }));
 
@@ -124,18 +123,20 @@ export default async function handler(req, res) {
 function validateAllowlists(accountId) {
   const allowedConnections = splitCsv(process.env.BYBIT_MAINNET_ALLOWED_CONNECTIONS);
   const allowedSymbols = splitCsv(process.env.BYBIT_MAINNET_ALLOWED_SYMBOLS);
-  const maxNotional = Number(process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD || 0);
   const reasons = [];
 
   if (allowedConnections.length > 0 && !allowedConnections.includes("*") && !allowedConnections.includes(accountId)) reasons.push("Account id is not in BYBIT_MAINNET_ALLOWED_CONNECTIONS.");
   if (allowedSymbols.length === 0) reasons.push("BYBIT_MAINNET_ALLOWED_SYMBOLS must contain at least one symbol.");
-  if (!Number.isFinite(maxNotional) || maxNotional <= 0) reasons.push("BYBIT_MAINNET_MAX_NOTIONAL_USD must be configured.");
-
   if (reasons.length > 0) {
     const error = new Error(reasons.join(" "));
     error.statusCode = 403;
     throw error;
   }
+}
+
+function positiveNumber(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
 function splitCsv(value) {

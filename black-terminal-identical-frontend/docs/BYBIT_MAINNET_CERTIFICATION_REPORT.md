@@ -1,5 +1,7 @@
 # Bybit Mainnet Certification Report
 
+> Historical generated evidence: this report predates account-margin capacity mode. Re-run the certification harness for current readiness; an unset fixed notional cap is no longer a failure by itself.
+
 Date: 2026-07-11T18:33:22.541Z
 
 Certification Run ID: bybit-cert-1783794802541-016ed8

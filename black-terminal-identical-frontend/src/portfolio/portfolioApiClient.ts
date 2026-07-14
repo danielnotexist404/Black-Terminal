@@ -270,6 +270,7 @@ export type BybitRuntimeStatusPayload = {
     symbolAllowlisted: boolean;
     maxNotionalConfigured: boolean;
     maxNotionalUsd: number;
+    capacityMode: "operator-cap" | "account-margin";
     withdrawalPermissionAbsent: boolean;
     readPermissionPresent: boolean;
     tradePermissionPresent: boolean;

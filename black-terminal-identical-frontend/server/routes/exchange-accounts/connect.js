@@ -90,9 +90,9 @@ export default async function handler(req, res) {
       account_id: account.id,
       read_only_mode: !executionPolicy.tradingEnabled,
       trading_enabled: executionPolicy.tradingEnabled,
-      allowed_symbols: executionPolicy.allowedSymbols
+      allowed_symbols: executionPolicy.allowedSymbols,
+      max_position_usd: executionPolicy.maxNotionalUsd
     };
-    if (executionPolicy.maxNotionalUsd > 0) riskControlInsert.max_position_usd = executionPolicy.maxNotionalUsd;
 
     const { data: riskControls, error: riskError } = await supabase
       .from("account_risk_controls")

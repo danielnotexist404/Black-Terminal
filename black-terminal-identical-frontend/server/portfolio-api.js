@@ -182,6 +182,10 @@ export function checkOrderRisk({ account, riskControls, order, accountExposureUs
   const referencePrice = Number(order.referencePrice || order.limitPrice || order.stopPrice || 1);
   const quantity = Number(order.quantity || 0);
   const notional = order.quantityMode === "usd" ? Math.abs(quantity) : Math.abs(quantity * referencePrice);
+  const leverage = Math.max(1, Number(order.leverage || 1));
+  const requiredMargin = order.marketKind === "spot" ? notional : notional / leverage;
+  const maxPositionUsd = Number(riskControls?.max_position_usd || 0);
+  const maxPortfolioExposureUsd = Number(riskControls?.max_portfolio_exposure_usd || 0);
 
   if (!account) reasons.push("Account not found.");
   if (account?.is_read_only) reasons.push("Account is read-only.");
@@ -192,10 +196,10 @@ export function checkOrderRisk({ account, riskControls, order, accountExposureUs
   if (riskControls?.allowed_symbols?.length > 0 && !riskControls.allowed_symbols.includes("*") && !riskControls.allowed_symbols.includes(order.symbol)) {
     reasons.push(`${order.symbol} is not in the allowed symbols list.`);
   }
-  if (riskControls && notional > Number(riskControls.max_position_usd)) {
+  if (maxPositionUsd > 0 && notional > maxPositionUsd) {
     reasons.push("Order exceeds maximum position size.");
   }
-  if (riskControls && accountExposureUsd + notional > Number(riskControls.max_portfolio_exposure_usd)) {
+  if (maxPortfolioExposureUsd > 0 && accountExposureUsd + requiredMargin > maxPortfolioExposureUsd) {
     reasons.push("Order would exceed maximum portfolio exposure.");
   }
   if (riskControls && dailyPnl <= -Math.abs(Number(riskControls.max_daily_loss_usd))) {
@@ -206,7 +210,8 @@ export function checkOrderRisk({ account, riskControls, order, accountExposureUs
     status: reasons.length ? "blocked" : "approved",
     reasons,
     notional,
-    referencePrice
+    referencePrice,
+    requiredMargin
   };
 }
 

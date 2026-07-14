@@ -12,7 +12,7 @@ import type { ExecutionDestination, ExecutionSource, MarginMode, OrderSide, Orde
 import type { ExchangeId, MarketKind } from "../../market-data/types";
 import { blackCorePositionManager } from "../../positions/positionManager";
 import type { PositionProtectionType } from "../../positions/types";
-import { buildVenueExecutionSchema, calculateVenueOrderPreview, sizeFromEquityPercent, sizeFromPositionPercent, validateVenueOrderDraft } from "../venueExecutionSchema";
+import { buildVenueExecutionSchema, calculateVenueOrderPreview, calculateVenueSizingCapacity, sizeFromEquityPercent, sizeFromPositionPercent, validateVenueOrderDraft } from "../venueExecutionSchema";
 
 export type UnifiedExecutionTicketPreset = {
   symbol: string;
@@ -245,6 +245,12 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
   const availableBalance = Number(accountMetrics?.availableBalanceUsd || 0);
   const executionPrice = Number(price || stopPrice || preset.price || 0);
   const requestedValue = Number(quantity || 0);
+  const sizingCapacity = venueSchema ? calculateVenueSizingCapacity({
+    schema: venueSchema,
+    percent: balancePercent / 100,
+    referencePrice: executionPrice,
+    leverage
+  }) : null;
   const normalizedEquityQuantity = venueSchema && sizingMethod === "equityPct"
     ? sizeFromEquityPercent({ schema: venueSchema, percent: requestedValue / 100, referencePrice: executionPrice, leverage, sizingMethod: "quantity" })
     : requestedValue;
@@ -268,6 +274,7 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
   const exceedsAvailableBalance = Boolean(accountMetrics && !reduceOnly && estimatedCollateral > availableBalance);
   const serverMaxNotional = Number(venueSchema?.maxOrderNotionalUsd || 0);
   const exceedsServerNotional = serverMaxNotional > 0 && estimatedNotional > serverMaxNotional;
+  const instrumentBlockedByServerCap = Boolean(!reduceOnly && sizingCapacity?.blockedByServerCap);
   const orderValidation = venueSchema ? validateVenueOrderDraft({
     schema: venueSchema,
     orderType,
@@ -285,6 +292,9 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
   const activeOrderMode = venueSchema?.supportedOrderModes.find((mode) => mode.orderTypes.includes(orderType)) || null;
   const ticketMessage = status || (accountSyncError ? formatExecutionError(accountSyncError) : "") ||
     (venueSchema && !venueSchema.executionReady ? venueSchema.readinessReason || "Trading is unavailable." : "") ||
+    (instrumentBlockedByServerCap && sizingCapacity
+      ? `Server order cap ${formatUsd(sizingCapacity.serverNotionalCap)} is below the ${venueSchema?.instrumentRules.symbol} executable minimum ${formatUsd(sizingCapacity.venueMinimumNotional)}.`
+      : "") ||
     (requestedValue > 0 && !orderValidation.valid ? orderValidation.reasons[0] : "");
 
   function applyBalancePercent(percent: number) {
@@ -646,7 +656,11 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
             </label>
 
             <div className="bybit-size-slider">
-              <input type="range" min="0" max="100" step="1" value={balancePercent} onChange={(event) => applyBalancePercent(Number(event.target.value) / 100)} aria-label="Percent of available balance" />
+              <div className="bybit-size-slider-head">
+                <span>Equity Allocation <b>{balancePercent}%</b></span>
+                <span>{sizingCapacity?.serverNotionalCap ? `Safety cap ${formatUsd(sizingCapacity.serverNotionalCap)}` : "Venue capacity"}</span>
+              </div>
+              <input type="range" min="0" max="100" step="1" value={balancePercent} onChange={(event) => applyBalancePercent(Number(event.target.value) / 100)} aria-label="Equity allocation percentage" />
               <div><span>0</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></div>
             </div>
 
@@ -711,7 +725,7 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
 
             <button
               type="button"
-              disabled={!orderValidation.valid || exceedsAvailableBalance || exceedsServerNotional || !accountMetrics || !venueSchema.executionReady || modeUpdatePending}
+              disabled={!orderValidation.valid || exceedsAvailableBalance || exceedsServerNotional || instrumentBlockedByServerCap || !accountMetrics || !venueSchema.executionReady || modeUpdatePending}
               className={side === "buy" ? "bybit-submit buy" : "bybit-submit sell"}
               onClick={submit}
             >

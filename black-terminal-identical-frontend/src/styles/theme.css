@@ -4055,6 +4055,15 @@ body.resizing-layout * {
   font: 700 8px "IBM Plex Mono", monospace;
 }
 
+.bybit-size-slider .bybit-size-slider-head {
+  color: #8f96a0;
+  text-transform: uppercase;
+}
+
+.bybit-size-slider-head b {
+  color: #e5a824;
+}
+
 .bybit-order-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

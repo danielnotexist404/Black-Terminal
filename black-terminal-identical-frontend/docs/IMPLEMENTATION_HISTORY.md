@@ -6,6 +6,7 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
+- Current - Correct Bybit equity-allocation sizing and detect safety caps below venue minimums.
 - Current - Add IMM operational readiness foundation.
 - Current - Add supervised IMM depth worker.
 - Current - Add IMM progressive tile prefetch.

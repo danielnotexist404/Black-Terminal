@@ -3,6 +3,7 @@ import fs from "node:fs";
 import {
   buildVenueExecutionSchema,
   calculateVenueOrderPreview,
+  calculateVenueSizingCapacity,
   sizeFromEquityPercent,
   sizeFromPositionPercent,
   validateVenueOrderDraft
@@ -74,6 +75,25 @@ test("unsupported server algorithms stay hidden", () => {
 test("equity slider converts to a venue-step quantity", () => {
   assert.equal(sizeFromEquityPercent({ schema, percent: 0.5, referencePrice: 100, leverage: 5, sizingMethod: "quantity" }), 0.2);
   assert.equal(sizeFromEquityPercent({ schema, percent: 0.5, referencePrice: 100, leverage: 5, sizingMethod: "usd" }), 24.93);
+});
+
+test("equity allocation is calculated before the server safety cap", () => {
+  const cappedSchema = { ...schema, maxOrderNotionalUsd: 20 };
+  const capacity = calculateVenueSizingCapacity({ schema: cappedSchema, percent: 0.1, referencePrice: 100, leverage: 5 });
+  assert.equal(Number(capacity.allocatedNotional.toFixed(2)), 4.99);
+  assert.equal(sizeFromEquityPercent({ schema: cappedSchema, percent: 0.1, referencePrice: 100, leverage: 5, sizingMethod: "usd" }), 4.99);
+});
+
+test("an impossible server cap is distinguished from account balance", () => {
+  const btcSchema = {
+    ...schema,
+    maxOrderNotionalUsd: 5,
+    instrumentRules: { ...schema.instrumentRules, symbol: "BTCUSDT", minQuantity: 0.001, minNotional: 5, quantityStep: 0.001 }
+  };
+  const capacity = calculateVenueSizingCapacity({ schema: btcSchema, percent: 1, referencePrice: 65759.4, leverage: 35 });
+  assert.equal(capacity.venueMinimumNotional, 65.7594);
+  assert.equal(capacity.blockedByServerCap, true);
+  assert.equal(capacity.availableMargin, 10);
 });
 
 test("reduce-only slider sizes from the current position", () => {

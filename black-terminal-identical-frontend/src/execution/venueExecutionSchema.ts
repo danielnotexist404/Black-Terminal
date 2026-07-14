@@ -129,17 +129,46 @@ export function sizeFromEquityPercent(input: {
   leverage: number;
   sizingMethod: SizingMethod;
 }) {
-  const available = Number(input.schema.accountMetrics?.availableBalanceUsd || 0);
-  const feeRate = 0.0006;
-  const marginRate = input.schema.product === "spot" ? 1 : 1 / Math.max(1, input.leverage);
-  const buyingPower = available / (marginRate + feeRate);
-  const cappedBuyingPower = input.schema.maxOrderNotionalUsd > 0
-    ? Math.min(buyingPower, input.schema.maxOrderNotionalUsd)
-    : buyingPower;
-  const notional = Math.max(0, cappedBuyingPower * clamp(input.percent, 0, 1));
+  const capacity = calculateVenueSizingCapacity(input);
+  const notional = Math.max(0, capacity.allocatedNotional);
   if (input.sizingMethod === "usd") return roundToPrecision(notional, 2);
   if (input.referencePrice <= 0) return 0;
   return floorToStep(notional / input.referencePrice, input.schema.instrumentRules.quantityStep, input.schema.instrumentRules.quantityPrecision);
+}
+
+export function calculateVenueSizingCapacity(input: {
+  schema: VenueExecutionSchema;
+  percent: number;
+  referencePrice: number;
+  leverage: number;
+}) {
+  const availableMargin = Number(input.schema.accountMetrics?.availableBalanceUsd || 0);
+  const feeRate = 0.0006;
+  const marginRate = input.schema.product === "spot" ? 1 : 1 / Math.max(1, input.leverage);
+  const buyingPower = availableMargin / (marginRate + feeRate);
+  const allocationPercent = clamp(input.percent, 0, 1);
+  const allocatedBuyingPower = buyingPower * allocationPercent;
+  const serverNotionalCap = Math.max(0, Number(input.schema.maxOrderNotionalUsd || 0));
+  const maximumNotional = serverNotionalCap > 0 ? Math.min(buyingPower, serverNotionalCap) : buyingPower;
+  const allocatedNotional = serverNotionalCap > 0
+    ? Math.min(allocatedBuyingPower, serverNotionalCap)
+    : allocatedBuyingPower;
+  const quantityMinimumNotional = input.referencePrice > 0
+    ? input.schema.instrumentRules.minQuantity * input.referencePrice
+    : 0;
+  const venueMinimumNotional = Math.max(input.schema.instrumentRules.minNotional, quantityMinimumNotional);
+  const blockedByServerCap = serverNotionalCap > 0 && venueMinimumNotional > serverNotionalCap + 1e-8;
+
+  return {
+    availableMargin,
+    buyingPower,
+    allocationPercent,
+    allocatedNotional,
+    maximumNotional,
+    serverNotionalCap,
+    venueMinimumNotional,
+    blockedByServerCap
+  };
 }
 
 export function sizeFromPositionPercent(schema: VenueExecutionSchema, positionQuantity: number, percent: number) {

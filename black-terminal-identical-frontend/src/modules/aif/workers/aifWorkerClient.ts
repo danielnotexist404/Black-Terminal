@@ -63,5 +63,5 @@ export class AifWorkerClient {
 function cacheKey(input: Omit<AifCalculationRequest, "id" | "generation">) {
   const first = input.candles[0]?.time ?? 0;
   const last = input.candles.at(-1)?.time ?? 0;
-  return `aif-engine/1.0.0:profiles/1.0.0:${input.marketSymbol.exchange}:${input.marketSymbol.rawSymbol}:${input.marketSymbol.marketKind}:${input.timeframe}:${first}:${last}:${input.candles.length}:${input.sourceVersion}:${JSON.stringify(input.settings)}`;
+  return `aif-engine/1.1.0:profiles/1.1.0:${input.marketSymbol.exchange}:${input.marketSymbol.rawSymbol}:${input.marketSymbol.marketKind}:${input.timeframe}:${first}:${last}:${input.candles.length}:${input.sourceVersion}:${JSON.stringify(input.settings)}`;
 }

@@ -1,5 +1,6 @@
 import type { Candle } from "../../../chart-engine/types";
 import type { MarketSymbol, Timeframe } from "../../../market-data/types";
+import type { StructuralZoneMethod } from "../../../profile-core/structuralZones";
 
 export type AifProfileType = "volume" | "delta" | "tpo" | "volatility" | "pressure" | "absorption";
 export type AifImplementedProfileType = Exclude<AifProfileType, "absorption">;
@@ -8,13 +9,16 @@ export type AifReadiness = "implemented" | "experimental" | "research-only" | "b
 export type AifDataQuality = "exact" | "estimated" | "partial" | "blocked-data";
 export type AifNodeType = "hvn" | "lvn" | "positive-delta" | "negative-delta" | "balance" | "compression" | "expansion" | "buy-pressure" | "sell-pressure";
 export type AifNodeStatus = "untested" | "approaching" | "first-test" | "rejected" | "accepted" | "broken" | "reclaimed" | "invalidated";
+export type AifLvnLifecycle = "detected" | "qualified" | "projected" | "approaching" | "first-test" | "rejected" | "accepted" | "retest" | "second-rejection" | "chob-candidate" | "chob-confirmed" | "broken" | "reclaimed" | "invalidated" | "expired";
 export type AifChobState = "UNTESTED" | "FIRST_TEST" | "FIRST_REJECTION" | "INTERMEDIATE_SWING" | "RETEST" | "SECOND_REJECTION" | "CHOB_CANDIDATE" | "CHOB_CONFIRMED" | "ACCEPTED" | "BROKEN" | "INVALIDATED" | "EXPIRED" | "INSUFFICIENT_SWING" | "SECOND_TEST_FAILED";
 
 export type AifSettings = {
   version: number;
   primaryProfile: AifImplementedProfileType;
   secondaryProfile: "off" | AifImplementedProfileType;
-  profilePlacement: "right" | "left";
+  profilePlacement: "right" | "left" | "both" | "overlay";
+  profileHorizontalOffset: number;
+  profileNormalization: "raw" | "percent-max" | "percentile" | "z-score" | "robust-z-score" | "log";
   comparisonMode: "shared-domain" | "independent";
   lookbackBars: number;
   rangeMode: "lookback" | "visible" | "anchored";
@@ -27,12 +31,51 @@ export type AifSettings = {
   sourceResolution: "best" | "chart" | "lower-timeframe";
   showPoc: boolean;
   showValueArea: boolean;
+  valueAreaPercent: number;
+  pocMode: "fixed" | "developing" | "both";
+  showVah: boolean;
+  showVal: boolean;
+  valueAreaOpacity: number;
   showNodes: boolean;
   showFutureLvns: boolean;
   showSupportResistance: boolean;
   extendLevels: boolean;
   nodeSensitivity: number;
+  nodeMethod: StructuralZoneMethod;
+  lvnPercentileThreshold: number;
+  lvnRelativePocThreshold: number;
+  lvnRobustZThreshold: number;
+  lvnNeighborWindow: number;
+  lvnMinimumContiguousRows: number;
+  lvnInternalGapRows: number;
+  lvnMinimumWidthRows: number;
+  lvnMaximumWidthRows: number;
+  lvnMergeDistanceRows: number;
+  lvnMinimumContrast: number;
+  lvnMinimumStrength: number;
+  lvnEdgeExclusionRows: number;
+  showHvns: boolean;
+  showLvns: boolean;
+  showMinorNodes: boolean;
+  futureLvnPolicy: "major-untested" | "untested-first-test" | "all-qualified" | "active-lifecycle";
+  futureLvnMinimumStability: number;
+  futureLvnMinimumContrast: number;
+  futureLvnMinimumConfidence: number;
+  futureLvnMaxAbove: number;
+  futureLvnMaxBelow: number;
+  futureLvnMaxTotal: number;
+  futureLvnMinimumScore: number;
+  futureLvnZoneOpacity: number;
+  futureLvnBoundaryOpacity: number;
+  futureLvnShowCenter: boolean;
+  futureLvnShowMinimumActivity: boolean;
+  futureLvnShowScore: boolean;
+  futureLvnShowLookback: boolean;
+  futureLvnShowState: boolean;
+  futureLvnKeepTested: boolean;
+  futureLvnKeepInvalidated: "off" | "faded" | "timeline-only";
   showTimeline: boolean;
+  timelineHeight: number;
   minimumConfidence: number;
   timelineHorizon: number;
   enableImmConfirmation: boolean;
@@ -43,9 +86,56 @@ export type AifSettings = {
   profileWidth: number;
   zoneIntensity: number;
   showDataQuality: boolean;
+  showStatisticsCard: boolean;
+  showLabels: boolean;
+  calculationMode: "balanced" | "performance" | "maximum-detail";
+  maximumVisibleNodes: number;
+  maximumTimelineEvents: number;
+  multiLookbackStability: "off" | "major" | "all";
+  resolutionStability: "off" | "major" | "all";
   volatilityEstimator: "true-range" | "log-return-variance" | "realized" | "range-expansion" | "atr-normalized" | "parkinson" | "composite";
   volatilityAllocation: "uniform-range" | "body-weighted" | "close-location" | "lower-timeframe-path";
   tpoPeriodMinutes: number;
+};
+
+export type AifLvnZone = {
+  id: string;
+  venue: string;
+  symbol: string;
+  timeframe: string;
+  profileType: AifProfileType;
+  low: number;
+  high: number;
+  center: number;
+  weightedCenter: number;
+  minimumActivityPrice: number;
+  widthAbsolute: number;
+  widthPercent: number;
+  widthTicks: number;
+  rawActivity: number;
+  normalizedActivity: number;
+  activityPercentile: number;
+  neighborContrast: number;
+  valleyDepth: number;
+  strength: number;
+  stability: number;
+  confidence: number;
+  score: number;
+  requestedLookback: number;
+  effectiveLookback: number;
+  sourceResolution: string;
+  dataQuality: AifDataQuality;
+  detectionMethod: StructuralZoneMethod;
+  algorithmVersion: "hybrid-structural-v1";
+  firstObserved: number;
+  lastObserved: number;
+  touchCount: number;
+  rejectionCount: number;
+  acceptanceCount: number;
+  state: AifLvnLifecycle;
+  projected: boolean;
+  invalidated: boolean;
+  provenance: AifProvenance;
 };
 
 export type AifCoverage = {
@@ -149,7 +239,7 @@ export type AifProfileConfluence = {
   confidence: number;
 };
 
-export type AifEventType = "profile-calculated" | "node-created" | "node-strengthened" | "node-weakened" | "node-tested" | "node-rejected" | "node-accepted" | "node-broken" | "node-reclaimed" | "node-invalidated" | "poc-migrated" | "value-area-shifted" | "volatility-compression-detected" | "volatility-expansion-detected" | "imm-wall-confluence" | "absorption-candidate" | "chob-candidate" | "chob-confirmed";
+export type AifEventType = "profile-calculated" | "node-created" | "node-strengthened" | "node-weakened" | "node-tested" | "node-rejected" | "node-accepted" | "node-broken" | "node-reclaimed" | "node-invalidated" | "lvn-zone-created" | "lvn-zone-projected" | "lvn-zone-first-test" | "lvn-zone-rejected" | "lvn-zone-accepted" | "lvn-zone-invalidated" | "poc-migrated" | "value-area-shifted" | "volatility-compression-detected" | "volatility-expansion-detected" | "imm-wall-confluence" | "absorption-candidate" | "chob-candidate" | "chob-confirmed";
 
 export type AifTimelineEvent = {
   id: string;
@@ -177,13 +267,15 @@ export type AifAuctionStateSummary = {
 };
 
 export type AifRenderModel = {
+  currentPrice: number;
   profileHistogram: AifProfileResult;
   primaryNodes: AifAuctionNode[];
   secondaryProfile?: AifProfileResult;
   secondaryNodes: AifAuctionNode[];
   confluenceMarkers: AifProfileConfluence[];
   supportResistanceZones: AifAuctionNode[];
-  projectedLvns: AifAuctionNode[];
+  lvnZones: AifLvnZone[];
+  projectedLvns: AifLvnZone[];
   activeNode: AifAuctionNode | null;
   auctionStateSummary: AifAuctionStateSummary;
   timelineEvents: AifTimelineEvent[];

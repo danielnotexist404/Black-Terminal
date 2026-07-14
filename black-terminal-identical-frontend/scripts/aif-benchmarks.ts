@@ -22,7 +22,7 @@ for (const bars of sizes) for (const secondaryProfile of ["delta", "tpo", "volat
   results.push(record(bars, 300, "volume", secondaryProfile, started, before, model));
 }
 console.table(results);
-console.log(JSON.stringify({ generatedAt: new Date().toISOString(), engine: "aif-engine/1.0.0", results }));
+console.log(JSON.stringify({ generatedAt: new Date().toISOString(), engine: "aif-engine/1.1.0", results }));
 
 function record(bars: number, rowCount: number, profile: string, pair: string, started: number, before: number, model: ReturnType<typeof calculateAif>) {
   return { bars, rows: rowCount, profile, pair, ms: Number((performance.now() - started).toFixed(2)), normalizeMs: Number(model.timings.normalizationMs.toFixed(2)), profileMs: Number(model.timings.profileMs.toFixed(2)), nodesMs: Number(model.timings.nodeAndStabilityMs.toFixed(2)), eventsMs: Number(model.timings.eventMs.toFixed(2)), renderMs: Number(model.timings.renderModelMs.toFixed(2)), nodes: model.primaryNodes.length, memoryMb: Number(((process.memoryUsage().heapUsed - before) / 1048576).toFixed(2)) };

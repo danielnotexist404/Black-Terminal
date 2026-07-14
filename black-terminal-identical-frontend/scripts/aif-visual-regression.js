@@ -52,11 +52,11 @@ try {
   await shot("03-full-settings.png");
   const profiles = ["delta", "tpo", "volatility", "pressure"];
   for (const value of profiles) {
-    await cdp.eval(`(() => { const selects=document.querySelectorAll(".aif-settings select"); const select=selects[0]; select.value=${JSON.stringify(value)}; select.dispatchEvent(new Event("change",{bubbles:true})); })()`);
+    await cdp.eval(`(() => { const label=[...document.querySelectorAll(".aif-settings label")].find((node)=>node.firstChild?.textContent?.trim()==="Primary Profile"); const select=label?.querySelector("select"); if(!select) throw new Error("Primary Profile control missing"); select.value=${JSON.stringify(value)}; select.dispatchEvent(new Event("change",{bubbles:true})); })()`);
     await sleep(500);
     await shot(`profile-${value}.png`);
   }
-  await cdp.eval(`(() => { const select=document.querySelectorAll(".aif-settings select")[1]; select.value="volume"; select.dispatchEvent(new Event("change",{bubbles:true})); })()`);
+  await cdp.eval(`(() => { const group=[...document.querySelectorAll(".aif-settings-group")].find((node)=>node.querySelector("summary")?.textContent?.includes("SECONDARY PROFILE")); group.open=true; const label=[...group.querySelectorAll("label")].find((node)=>node.firstChild?.textContent?.trim()==="Secondary Profile"); const select=label?.querySelector("select"); if(!select) throw new Error("Secondary Profile control missing"); select.value="volume"; select.dispatchEvent(new Event("change",{bubbles:true})); })()`);
   await sleep(500); await shot("07-primary-secondary.png");
   const summary = await cdp.eval(`({overlay:Boolean(document.querySelector(".aif-overlay")),settings:Boolean(document.querySelector(".aif-settings")),timeline:Boolean(document.querySelector(".aif-timeline")),workerQuality:document.querySelector(".aif-quality")?.textContent||"loading",viewport:{w:innerWidth,h:innerHeight}})`);
   writeFileSync(join(output, "summary.json"), `${JSON.stringify({ capturedAt: new Date().toISOString(), captures: 8, cameraSynchronization: { beforeCamera, afterCamera }, ...summary }, null, 2)}\n`);

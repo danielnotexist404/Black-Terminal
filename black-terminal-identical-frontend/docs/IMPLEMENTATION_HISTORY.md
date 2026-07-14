@@ -1048,3 +1048,11 @@ Remaining:
 - Added automatic latest-completed-candle initialization, a 20,000-bar factory horizon, history exhaustion fallback, and persisted horizon presets/custom input.
 - Added deterministic transform/anchor/culling coverage and a browser regression proving exact vertical-pan synchronization without analytical recalculation.
 - Re-ran A.I.F., Black Core performance, 100,000-bar benchmark, visual regression, and production build gates. No Supabase migration is required.
+
+# 2026-07-14 - Phase IV Chapter I-C A.I.F. Structural LVN Zones
+
+- Replaced isolated future-LVN center lines with formally detected, merged, ranked and lifecycle-aware bounded auction zones.
+- Added a neutral structural-zone numerical primitive, A.I.F. stability/projection logic, persistent zone identity, timeline references, chart-native strips, detailed zone metadata and tooltip inspection.
+- Rebuilt A.I.F. controls around HDLX-proven profile ergonomics while leaving HDLX source and behavior unchanged.
+- Added settings schema v3, presets, import/export, normalization modes, deterministic zone/settings/lifecycle tests, visual regression and 5k-100k performance coverage.
+- Build and targeted verification passed. No Supabase migration is required; a fresh one-hour A.I.F.-active soak remains a release-evidence follow-up.

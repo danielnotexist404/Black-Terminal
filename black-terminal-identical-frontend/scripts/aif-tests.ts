@@ -3,7 +3,8 @@ import type { Candle } from "../src/chart-engine/types.ts";
 import type { MarketSymbol } from "../src/market-data/types.ts";
 import { normalizeAifCandles } from "../src/modules/aif/core/aifDataNormalizer.ts";
 import { createAuctionDomain, bucketIndexForPrice } from "../src/modules/aif/core/aifAuctionDomain.ts";
-import { defaultAifSettings, migrateAifSettings } from "../src/modules/aif/state/aifStore.ts";
+import { AIF_SETTINGS_PRESETS, defaultAifSettings, migrateAifSettings } from "../src/modules/aif/state/aifStore.ts";
+import type { AifLvnZone } from "../src/modules/aif/core/aifTypes.ts";
 import { calculateAifProfile, pressureShare } from "../src/modules/aif/profiles/profileCalculators.ts";
 import { calculateAif } from "../src/modules/aif/core/aifEngine.ts";
 import { AifBoundedCache } from "../src/modules/aif/state/aifCache.ts";
@@ -11,10 +12,12 @@ import { AIF_PROFILE_REGISTRY, implementedAifProfiles } from "../src/modules/aif
 import { VolumeProfileModel } from "../src/chart-engine/profile/VolumeProfileModel.ts";
 import { defaultVolumeProfileSettings } from "../src/chart-engine/profile/volumeProfileDefaults.ts";
 import { buildAifTimeline } from "../src/modules/aif/events/aifEventEngine.ts";
-import { mergeAifResearchMemory } from "../src/modules/aif/nodes/aifNodeMemory.ts";
+import { mergeAifLvnZoneMemory, mergeAifResearchMemory } from "../src/modules/aif/nodes/aifNodeMemory.ts";
 import { priceToScreenY, screenYToPrice, type ChartPriceTransformSnapshot } from "../src/chart-engine/priceTransform.ts";
-import { projectAifPriceLine, projectAifProfileRows } from "../src/modules/aif/rendering/aifPriceGeometry.ts";
+import { normalizeWidths, projectAifPriceLine, projectAifProfileRows } from "../src/modules/aif/rendering/aifPriceGeometry.ts";
 import { selectCompletedAifCandles } from "../src/modules/aif/core/aifTime.ts";
+import { extractStructuralLowActivityZones, type StructuralZoneSettings } from "../src/profile-core/structuralZones.ts";
+import { applyAifLvnLifecycle, selectProjectedAifLvns } from "../src/modules/aif/nodes/aifLvnZones.ts";
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -81,6 +84,11 @@ for (let index = 0; index < 10; index += 1) cache.set(String(index), index);
 assert.equal(cache.size, 3, "A.I.F. cache is bounded");
 assert.equal(cache.get("0"), undefined, "old cache entries are evicted");
 assert.equal(migrateAifSettings({ lookbackBars: 30000 }).lookbackBars, 30000);
+const migrated = migrateAifSettings({ rowCount: 99999, lvnMinimumWidthRows: 8, lvnMaximumWidthRows: 2, secondaryProfile: "volume", primaryProfile: "volume" });
+assert.equal(migrated.rowCount, 2000, "settings migration clamps pathological row counts");
+assert.equal(migrated.lvnMaximumWidthRows, 8, "maximum LVN width cannot fall below minimum width");
+assert.equal(migrated.secondaryProfile, "off", "duplicate profile comparison is rejected");
+assert.ok(Object.keys(AIF_SETTINGS_PRESETS).includes("HDLX-Inspired Structural"), "documented structural preset is available");
 const memoryStorage = new MemoryStorage();
 const memory = mergeAifResearchMemory("fixture", comparison.primaryNodes.slice(0, 2), comparison.timelineEvents, memoryStorage);
 assert.ok(memory.nodes.length <= 300 && memory.events.length <= 500, "research memory remains bounded");
@@ -105,6 +113,61 @@ const originalLineY = projectAifPriceLine(testPrice, linearTransform, (price) =>
 const shiftedLineY = projectAifPriceLine(testPrice, shiftedTransform, (price) => priceToScreenY(price, shiftedTransform));
 assert.ok(originalLineY != null && shiftedLineY != null && Math.abs((shiftedLineY - originalLineY) - 60.4) < 1e-9, "A.I.F. levels follow vertical chart panning exactly");
 assert.equal(JSON.stringify(comparison), modelBeforeGeometry, "camera geometry does not mutate or recalculate the A.I.F. model");
+for (const mode of ["raw", "percent-max", "percentile", "z-score", "robust-z-score", "log"] as const) {
+  const widths = normalizeWidths([1, 4, 16, 64], mode);
+  assert.equal(widths.length, 4);
+  assert.ok(widths.every((value) => Number.isFinite(value) && value >= 0 && value <= 1), `${mode} normalization remains bounded`);
+  assert.ok(widths[3] >= widths[0], `${mode} normalization preserves activity ordering`);
+}
+
+const structuralSettings: StructuralZoneSettings = {
+  method: "percentile", percentileThreshold: 45, relativePocThreshold: 0.2, robustZThreshold: -0.8,
+  neighborWindow: 2, minimumNeighborContrast: 2, minimumContiguousRows: 2, maximumInternalGapRows: 0,
+  minimumWidthRows: 2, maximumWidthRows: 8, mergeDistanceRows: 1, edgeExclusionRows: 1, minimumScore: 40
+};
+const structuralRows = [100, 90, 8, 5, 7, 92, 105].map((activity, index) => ({ index, low: 100 + index, high: 101 + index, center: 100.5 + index, activity }));
+const structuralZones = extractStructuralLowActivityZones(structuralRows, structuralSettings);
+assert.equal(structuralZones.length, 1, "contiguous low-activity rows merge into one bounded LVN zone");
+assert.deepEqual([structuralZones[0].low, structuralZones[0].high, structuralZones[0].widthRows], [102, 105, 3]);
+assert.equal(structuralZones[0].minimumActivityPrice, 103.5, "zone retains its minimum-activity price");
+assert.ok(structuralZones[0].weightedCenter >= structuralZones[0].low && structuralZones[0].weightedCenter <= structuralZones[0].high);
+assert.equal(extractStructuralLowActivityZones(structuralRows, { ...structuralSettings, minimumNeighborContrast: 100 }).length, 0, "weak structural contrast is rejected");
+
+const fixtureStructure = structuralZones[0];
+const zoneTemplate: AifLvnZone = {
+  id: "fixture-zone", venue: "bybit", symbol: "BTCUSDT", timeframe: "1m", profileType: "volume",
+  low: fixtureStructure.low, high: fixtureStructure.high, center: fixtureStructure.center, weightedCenter: fixtureStructure.weightedCenter,
+  minimumActivityPrice: fixtureStructure.minimumActivityPrice, widthAbsolute: fixtureStructure.widthAbsolute, widthPercent: fixtureStructure.widthPercent,
+  widthTicks: fixtureStructure.widthRows, rawActivity: fixtureStructure.rawActivity, normalizedActivity: fixtureStructure.normalizedActivity,
+  activityPercentile: fixtureStructure.activityPercentile, neighborContrast: fixtureStructure.neighborContrast, valleyDepth: fixtureStructure.valleyDepth,
+  strength: fixtureStructure.structuralScore, stability: 90, confidence: 90, score: 0, requestedLookback: 5000, effectiveLookback: 4000,
+  sourceResolution: "1m", dataQuality: "estimated", detectionMethod: fixtureStructure.method, algorithmVersion: fixtureStructure.algorithmVersion,
+  firstObserved: 1, lastObserved: 1, touchCount: 0, rejectionCount: 0, acceptanceCount: 0, state: "qualified", projected: false,
+  invalidated: false, provenance
+};
+const rankedZones = Array.from({ length: 8 }, (_, index) => ({ ...zoneTemplate, id: `ranked-${index}`, low: 100 + index * 4, high: 102 + index * 4, center: 101 + index * 4, widthAbsolute: 2, strength: 92 - index, stability: 90, confidence: 90, neighborContrast: 3, score: 0, state: "qualified" as const, invalidated: false }));
+const projectionSettings = { ...settings, futureLvnMaxAbove: 2, futureLvnMaxBelow: 1, futureLvnMaxTotal: 3, futureLvnMinimumScore: 0, futureLvnMinimumStability: 0, futureLvnMinimumConfidence: 0, futureLvnMinimumContrast: 1, lvnMinimumStrength: 0 };
+const projectedZones = selectProjectedAifLvns(rankedZones, 112, projectionSettings);
+assert.equal(projectedZones.length, 3, "future LVN projection obeys independent above/below and total caps");
+assert.equal(projectedZones.filter((zone) => zone.center < 112).length, 1);
+
+const lifecycleZone = { ...zoneTemplate, id: "lifecycle-zone", low: 99, high: 101, center: 100, widthAbsolute: 2, state: "qualified" as const, touchCount: 0, rejectionCount: 0, acceptanceCount: 0, invalidated: false };
+const lifecycleCandles: Candle[] = [
+  { time: 1, open: 103, high: 104, low: 102, close: 103, volume: 1 },
+  { time: 2, open: 102, high: 102.5, low: 100, close: 102, volume: 1 },
+  { time: 3, open: 102, high: 102.5, low: 100.5, close: 102, volume: 1 },
+  { time: 4, open: 103, high: 104, low: 102, close: 103, volume: 1 },
+  { time: 5, open: 104, high: 105, low: 103, close: 104, volume: 1 }
+];
+const lifecycleZoneResult = applyAifLvnLifecycle([lifecycleZone], lifecycleCandles, { ...settings, timelineHorizon: 100 })[0];
+assert.equal(lifecycleZoneResult.touchCount, 1, "multiple candles in one interaction session count as one LVN test");
+assert.equal(lifecycleZoneResult.rejectionCount, 1, "a separated failed traversal records one rejection");
+
+const zoneMemoryStorage = new MemoryStorage();
+const firstZoneMemory = mergeAifLvnZoneMemory("fixture", [rankedZones[0]], zoneMemoryStorage as unknown as Storage);
+const shiftedZone = { ...rankedZones[0], id: "new-quantized-id", low: rankedZones[0].low + 0.2, high: rankedZones[0].high + 0.2, center: rankedZones[0].center + 0.2 };
+const secondZoneMemory = mergeAifLvnZoneMemory("fixture", [shiftedZone], zoneMemoryStorage as unknown as Storage);
+assert.equal(secondZoneMemory.zones[0].id, firstZoneMemory.zones[0].id, "zone memory preserves identity across small bucket shifts");
 
 const now = 1_700_000_125;
 const completionFixture: Candle[] = [

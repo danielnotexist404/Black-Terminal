@@ -1987,3 +1987,7 @@ No Supabase migration is required. A.I.F. calculations are browser-worker resear
 ## Phase IV Chapter I-A - A.I.F. Price Synchronization
 
 No Supabase migration is required. This hotfix changes chart transforms, browser-worker initialization, and versioned workspace-local settings only.
+
+## Phase IV Chapter I-C - A.I.F. Structural LVN Zones
+
+No Supabase migration is required. Structural zones, lifecycle events, settings schema v3, presets and bounded identity memory are calculated or persisted in the existing browser-worker/workspace layer. A future shared research-memory service requires a dedicated reviewed schema and RLS policy rather than writing research state into execution tables.

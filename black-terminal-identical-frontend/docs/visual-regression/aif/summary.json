@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-07-13T23:17:13.388Z",
+  "capturedAt": "2026-07-14T00:21:29.727Z",
   "captures": 8,
   "cameraSynchronization": {
     "beforeCamera": {
@@ -8,12 +8,12 @@
       "rowIndex": "50",
       "rowTop": 445.734375,
       "revision": 3,
-      "calculatedAt": "1783984628394"
+      "calculatedAt": "1783988484799"
     },
     "afterCamera": {
       "rowTop": 517.734375,
       "revision": 4,
-      "calculatedAt": "1783984628394"
+      "calculatedAt": "1783988484799"
     }
   },
   "overlay": true,

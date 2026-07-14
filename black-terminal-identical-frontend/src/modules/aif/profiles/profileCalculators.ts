@@ -12,7 +12,8 @@ export function calculateAifProfile(type: AifImplementedProfileType, data: AifNo
   if (type === "pressure") calculatePressure(rows, domain, data.candles);
   finalizeRows(rows);
   const total = rows.reduce((sum, row) => sum + Math.abs(row.value), 0);
-  const { poc, vah, val } = markValueArea(rows, 0.7);
+  const valueAreaFraction = Math.max(0.01, Math.min(1, settings.valueAreaPercent / 100));
+  const { poc, vah, val } = markValueArea(rows, valueAreaFraction);
   return {
     profileType: type,
     rows,
@@ -20,7 +21,7 @@ export function calculateAifProfile(type: AifImplementedProfileType, data: AifNo
     vah,
     val,
     total,
-    valueAreaPercent: 70,
+    valueAreaPercent: settings.valueAreaPercent,
     quality: type === "volume" || type === "tpo" ? "estimated" : "estimated",
     allocationMethod: allocationMethod(type, settings),
     statistics: profileStatistics(type, rows, data.candles),

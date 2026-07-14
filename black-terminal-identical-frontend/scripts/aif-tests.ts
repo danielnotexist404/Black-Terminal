@@ -24,6 +24,9 @@ class MemoryStorage {
   getItem(key: string) { return this.values.get(key) ?? null; }
   setItem(key: string, value: string) { this.values.set(key, value); }
 }
+class QuotaStorage extends MemoryStorage {
+  override setItem(_key: string, _value: string) { throw new DOMException("quota", "QuotaExceededError"); }
+}
 
 const symbol: MarketSymbol = { exchange: "bybit", rawSymbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", marketKind: "perpetual" };
 const candles = syntheticCandles(4000);
@@ -88,10 +91,12 @@ const migrated = migrateAifSettings({ rowCount: 99999, lvnMinimumWidthRows: 8, l
 assert.equal(migrated.rowCount, 2000, "settings migration clamps pathological row counts");
 assert.equal(migrated.lvnMaximumWidthRows, 8, "maximum LVN width cannot fall below minimum width");
 assert.equal(migrated.secondaryProfile, "off", "duplicate profile comparison is rejected");
+assert.equal(migrateAifSettings({ valueAreaColor: "invalid" }).valueAreaColor, "#ff1738", "invalid persisted colors migrate safely");
 assert.ok(Object.keys(AIF_SETTINGS_PRESETS).includes("HDLX-Inspired Structural"), "documented structural preset is available");
 const memoryStorage = new MemoryStorage();
 const memory = mergeAifResearchMemory("fixture", comparison.primaryNodes.slice(0, 2), comparison.timelineEvents, memoryStorage);
 assert.ok(memory.nodes.length <= 300 && memory.events.length <= 500, "research memory remains bounded");
+assert.doesNotThrow(() => mergeAifResearchMemory("quota", comparison.primaryNodes, comparison.timelineEvents, new QuotaStorage()), "storage quota cannot disable A.I.F. calculation");
 
 const linearTransform: ChartPriceTransformSnapshot = {
   revision: 1, width: 1200, height: 700, plotLeft: 0, plotRight: 1112, plotTop: 38, plotBottom: 642,
@@ -168,6 +173,7 @@ const firstZoneMemory = mergeAifLvnZoneMemory("fixture", [rankedZones[0]], zoneM
 const shiftedZone = { ...rankedZones[0], id: "new-quantized-id", low: rankedZones[0].low + 0.2, high: rankedZones[0].high + 0.2, center: rankedZones[0].center + 0.2 };
 const secondZoneMemory = mergeAifLvnZoneMemory("fixture", [shiftedZone], zoneMemoryStorage as unknown as Storage);
 assert.equal(secondZoneMemory.zones[0].id, firstZoneMemory.zones[0].id, "zone memory preserves identity across small bucket shifts");
+assert.doesNotThrow(() => mergeAifLvnZoneMemory("quota", rankedZones, new QuotaStorage()), "zone persistence fails soft under storage pressure");
 
 const now = 1_700_000_125;
 const completionFixture: Candle[] = [

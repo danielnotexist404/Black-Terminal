@@ -1,6 +1,6 @@
 import type { AifSettings } from "../core/aifTypes";
 
-export const AIF_SETTINGS_VERSION = 3;
+export const AIF_SETTINGS_VERSION = 4;
 
 export const AIF_SETTINGS_PRESETS: Record<string, Partial<AifSettings>> = {
   "HDLX-Inspired Structural": { rowCount: 150, valueAreaPercent: 68, profileWidth: 31, nodeMethod: "neighbor-contrast", lvnNeighborWindow: 4, lvnMinimumContrast: 1.45, showSupportResistance: true, showMinorNodes: false, futureLvnMaxTotal: 6 },
@@ -34,6 +34,7 @@ export function defaultAifSettings(): AifSettings {
     pocMode: "fixed",
     showVah: true,
     showVal: true,
+    valueAreaColor: "#ff1738",
     valueAreaOpacity: 18,
     showNodes: true,
     showFutureLvns: true,
@@ -116,7 +117,7 @@ export function readAifSettings(workspaceId: string, symbolKey: string): AifSett
 
 export function writeAifSettings(workspaceId: string, symbolKey: string, settings: AifSettings) {
   if (typeof localStorage === "undefined") return;
-  localStorage.setItem(aifSettingsKey(workspaceId, symbolKey), JSON.stringify(settings));
+  try { localStorage.setItem(aifSettingsKey(workspaceId, symbolKey), JSON.stringify(settings)); } catch { /* Storage pressure must never disable calculation or in-memory settings. */ }
 }
 
 export function migrateAifSettings(input: unknown): AifSettings {
@@ -132,6 +133,7 @@ export function migrateAifSettings(input: unknown): AifSettings {
   merged.sourceResolution = "best";
   merged.pocMode = "fixed";
   merged.resolutionStability = "off";
+  if (!/^#[0-9a-f]{6}$/i.test(merged.valueAreaColor)) merged.valueAreaColor = fallback.valueAreaColor;
   merged.lookbackBars = clampInteger(merged.lookbackBars, 100, 100_000);
   merged.rowCount = clampInteger(merged.rowCount, 50, 2_000);
   merged.lvnNeighborWindow = clampInteger(merged.lvnNeighborWindow, 1, 30);

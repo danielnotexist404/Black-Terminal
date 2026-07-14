@@ -1056,3 +1056,9 @@ Remaining:
 - Rebuilt A.I.F. controls around HDLX-proven profile ergonomics while leaving HDLX source and behavior unchanged.
 - Added settings schema v3, presets, import/export, normalization modes, deterministic zone/settings/lifecycle tests, visual regression and 5k-100k performance coverage.
 - Build and targeted verification passed. No Supabase migration is required; a fresh one-hour A.I.F.-active soak remains a release-evidence follow-up.
+
+# 2026-07-14 - A.I.F. Profile Switching And Storage Hotfix
+
+- Made A.I.F. settings and research-memory persistence fail-soft under browser quota pressure so storage cannot interrupt worker results or profile switching.
+- Reduced browser research snapshots and added compact retry behavior while preserving in-memory calculation.
+- Added HDLX-style value-area color and opacity controls and browser assertions for Volume, Delta, TPO, Volatility and Pressure switching.

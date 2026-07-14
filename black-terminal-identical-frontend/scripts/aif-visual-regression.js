@@ -50,17 +50,19 @@ try {
   await cdp.eval(`([...document.querySelectorAll(".indicator-row")].find((node)=>node.textContent?.includes("A.I.F.")))?.click()`);
   await waitFor(() => cdp.eval(`Boolean(document.querySelector(".aif-settings"))`), 10000);
   await shot("03-full-settings.png");
+  await cdp.eval(`(() => { const labels=[...document.querySelectorAll(".aif-settings label")]; const color=labels.find((node)=>node.firstChild?.textContent?.trim()==="Value Area Color")?.querySelector("input"); const opacity=labels.find((node)=>node.firstChild?.textContent?.trim()==="Value Area Opacity")?.querySelector("input"); if(!color||!opacity) throw new Error("Value area appearance controls missing"); color.value="#00b7ff"; color.dispatchEvent(new Event("change",{bubbles:true})); opacity.value="52"; opacity.dispatchEvent(new Event("change",{bubbles:true})); })()`);
+  await sleep(250); await shot("04-value-area-custom.png");
   const profiles = ["delta", "tpo", "volatility", "pressure"];
   for (const value of profiles) {
     await cdp.eval(`(() => { const label=[...document.querySelectorAll(".aif-settings label")].find((node)=>node.firstChild?.textContent?.trim()==="Primary Profile"); const select=label?.querySelector("select"); if(!select) throw new Error("Primary Profile control missing"); select.value=${JSON.stringify(value)}; select.dispatchEvent(new Event("change",{bubbles:true})); })()`);
-    await sleep(500);
+    await waitFor(() => cdp.eval(`Boolean(document.querySelector(".aif-summary")?.textContent?.includes(${JSON.stringify(value.toUpperCase())}))`), 15000);
     await shot(`profile-${value}.png`);
   }
   await cdp.eval(`(() => { const group=[...document.querySelectorAll(".aif-settings-group")].find((node)=>node.querySelector("summary")?.textContent?.includes("SECONDARY PROFILE")); group.open=true; const label=[...group.querySelectorAll("label")].find((node)=>node.firstChild?.textContent?.trim()==="Secondary Profile"); const select=label?.querySelector("select"); if(!select) throw new Error("Secondary Profile control missing"); select.value="volume"; select.dispatchEvent(new Event("change",{bubbles:true})); })()`);
   await sleep(500); await shot("07-primary-secondary.png");
   const summary = await cdp.eval(`({overlay:Boolean(document.querySelector(".aif-overlay")),settings:Boolean(document.querySelector(".aif-settings")),timeline:Boolean(document.querySelector(".aif-timeline")),workerQuality:document.querySelector(".aif-quality")?.textContent||"loading",viewport:{w:innerWidth,h:innerHeight}})`);
-  writeFileSync(join(output, "summary.json"), `${JSON.stringify({ capturedAt: new Date().toISOString(), captures: 8, cameraSynchronization: { beforeCamera, afterCamera }, ...summary }, null, 2)}\n`);
-  console.log("A.I.F. visual regression captured 8 chart-native states with camera synchronization.");
+  writeFileSync(join(output, "summary.json"), `${JSON.stringify({ capturedAt: new Date().toISOString(), captures: 9, profileSwitching: profiles, valueAreaAppearance: true, cameraSynchronization: { beforeCamera, afterCamera }, ...summary }, null, 2)}\n`);
+  console.log("A.I.F. visual regression captured 9 chart-native states with profile switching, value-area appearance, and camera synchronization.");
 } finally { cdp?.close(); browser?.kill(); await new Promise((resolve) => server.httpServer.close(resolve)); await sleep(400); remove(profile); }
 
 async function shot(name) { const result = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }); writeFileSync(join(output, name), Buffer.from(result.data, "base64")); }

@@ -45,13 +45,14 @@ export function AifIndicatorSettings({ settings, onChange, onClose }: Props) {
       <Select label="Source Resolution" value={settings.sourceResolution} onChange={() => {}} options={[["best","Best Available From Adapter"]]} disabled />
       {settings.rowCount > 500 && <span className="aif-settings-warning">VERIFY ADAPTER RESOLUTION BEFORE INTERPRETING FINE PROFILE ROWS</span>}
     </Group>}
-    {visible("Value Area") && <Group title="VALUE AREA" onReset={() => reset(["showValueArea", "valueAreaPercent", "showPoc", "pocMode", "showVah", "showVal", "valueAreaOpacity"])}>
+    {visible("Value Area") && <Group title="VALUE AREA" onReset={() => reset(["showValueArea", "valueAreaPercent", "showPoc", "pocMode", "showVah", "showVal", "valueAreaColor", "valueAreaOpacity"])} open>
       <Toggle label="Show Value Area" checked={settings.showValueArea} onChange={(showValueArea) => patch({ showValueArea })} />
       <NumberField label="Value Area Percent" value={settings.valueAreaPercent} min={1} max={99} onChange={(valueAreaPercent) => patch({ valueAreaPercent })} />
       <Toggle label="Show POC" checked={settings.showPoc} onChange={(showPoc) => patch({ showPoc })} />
       <Select label="POC Mode" value={settings.pocMode} onChange={() => {}} options={[["fixed","Fixed Completed Profile"]]} disabled />
       <span className="aif-settings-note">DEVELOPING POC SERIES IS NOT PUBLISHED BY THE CURRENT WORKER MODEL</span>
       <Toggle label="Show VAH" checked={settings.showVah} onChange={(showVah) => patch({ showVah })} /><Toggle label="Show VAL" checked={settings.showVal} onChange={(showVal) => patch({ showVal })} />
+      <ColorField label="Value Area Color" value={settings.valueAreaColor} onChange={(valueAreaColor) => patch({ valueAreaColor })} />
       <RangeField label="Value Area Opacity" value={settings.valueAreaOpacity} onChange={(valueAreaOpacity) => patch({ valueAreaOpacity })} />
     </Group>}
     {visible("Node Detection") && <Group title="NODE DETECTION" onReset={() => reset(["nodeMethod", "lvnPercentileThreshold", "lvnNeighborWindow", "lvnMinimumContiguousRows", "lvnInternalGapRows", "lvnMinimumWidthRows", "lvnMaximumWidthRows", "lvnMergeDistanceRows", "lvnMinimumContrast", "lvnMinimumStrength", "lvnEdgeExclusionRows"])}>
@@ -96,4 +97,5 @@ function Group({ title, children, onReset, open = false }: { title: string; chil
 function Select({ label, value, options, onChange, disabled = false }: { label: string; value: string | number; options: Array<Array<string | number>>; onChange: (value: string) => void; disabled?: boolean }) { return <label>{label}<select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>{options.map(([value, name]) => <option key={String(value)} value={value}>{name}</option>)}</select></label>; }
 function NumberField({ label, value, min, max, step = 1, onChange, disabled = false }: { label: string; value: number; min: number; max: number; step?: number; onChange: (value: number) => void; disabled?: boolean }) { return <label>{label}<input type="number" value={value} min={min} max={max} step={step} disabled={disabled} onChange={(event) => onChange(Math.max(min, Math.min(max, Number(event.target.value))))} /></label>; }
 function RangeField({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) { return <label>{label}<input type="range" min={0} max={100} value={value} onChange={(event) => onChange(Number(event.target.value))} /><span>{value}</span></label>; }
+function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) { return <label>{label}<input type="color" value={value} onChange={(event) => onChange(event.target.value)} /><span>{value.toUpperCase()}</span></label>; }
 function Toggle({ label, checked, onChange, disabled = false }: { label: string; checked: boolean; onChange: (value: boolean) => void; disabled?: boolean }) { return <label>{label}<input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} /></label>; }

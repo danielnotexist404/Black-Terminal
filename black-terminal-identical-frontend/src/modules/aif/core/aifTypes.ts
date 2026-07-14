@@ -35,6 +35,7 @@ export type AifSettings = {
   pocMode: "fixed" | "developing" | "both";
   showVah: boolean;
   showVal: boolean;
+  valueAreaColor: string;
   valueAreaOpacity: number;
   showNodes: boolean;
   showFutureLvns: boolean;

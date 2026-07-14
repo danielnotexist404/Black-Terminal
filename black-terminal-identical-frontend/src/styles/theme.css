@@ -3100,7 +3100,7 @@ body.resizing-layout * {
   border-right: 1px solid rgba(255,255,255,0.6);
 }
 .aif-profile-left > div { left: 0; right: auto; transform: scaleX(-1); }
-.aif-profile > div.value-area { background: linear-gradient(90deg, rgba(135,0,18,0.12), rgba(255,19,48,0.68)); }
+.aif-profile > div.value-area { background: var(--aif-value-area-color, #ff1738); }
 .aif-profile.aif-secondary { width: min(14%, 170px); opacity: 0.42; }
 .aif-profile.aif-secondary > div { background: rgba(210, 215, 224, 0.62); }
 

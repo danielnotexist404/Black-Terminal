@@ -11,8 +11,8 @@ export function mergeAifResearchMemory(key: string, nodes: AifAuctionNode[], eve
   }
   const eventMap = new Map(previous.events.map((event) => [event.id, event]));
   for (const event of events) eventMap.set(event.id, event);
-  const memory: AifResearchMemory = { version: 1, nodes: [...nodeMap.values()].sort((a, b) => b.lastObserved - a.lastObserved).slice(0, 300), events: [...eventMap.values()].sort((a, b) => a.time - b.time).slice(-500), updatedAt: Date.now() };
-  storage.setItem(`bt_aif_memory:${key}`, JSON.stringify(memory));
+  const memory: AifResearchMemory = { version: 1, nodes: [...nodeMap.values()].sort((a, b) => b.lastObserved - a.lastObserved).slice(0, 120), events: [...eventMap.values()].sort((a, b) => a.time - b.time).slice(-180), updatedAt: Date.now() };
+  persistWithFallback(storage, `bt_aif_memory:${key}`, memory, { ...memory, nodes: memory.nodes.slice(0, 24), events: memory.events.slice(-60) });
   return memory;
 }
 
@@ -36,9 +36,9 @@ export function mergeAifLvnZoneMemory(key: string, zones: AifLvnZone[], storage:
       invalidated: old.invalidated || zone.invalidated
     };
   });
-  const retained = unmatched.filter((zone) => !zone.invalidated).slice(0, 80);
-  const memory: AifZoneMemory = { version: 1, zones: [...merged, ...retained].sort((a, b) => b.lastObserved - a.lastObserved).slice(0, 160), updatedAt: Date.now() };
-  storage.setItem(`bt_aif_zone_memory:${key}`, JSON.stringify(memory));
+  const retained = unmatched.filter((zone) => !zone.invalidated).slice(0, 24);
+  const memory: AifZoneMemory = { version: 1, zones: [...merged, ...retained].sort((a, b) => b.lastObserved - a.lastObserved).slice(0, 48), updatedAt: Date.now() };
+  persistWithFallback(storage, `bt_aif_zone_memory:${key}`, memory, { ...memory, zones: memory.zones.slice(0, 16) });
   return memory;
 }
 
@@ -53,6 +53,11 @@ export function readAifLvnZoneMemory(key: string, storage: Pick<Storage, "getIte
 
 function zoneOverlap(left: AifLvnZone, right: AifLvnZone) { const overlap = Math.max(0, Math.min(left.high, right.high) - Math.max(left.low, right.low)); const union = Math.max(left.high, right.high) - Math.min(left.low, right.low); return union > 0 ? overlap / union : 0; }
 function normalizedCenterDistance(left: AifLvnZone, right: AifLvnZone) { return Math.abs(left.center - right.center) / Math.max(left.widthAbsolute, right.widthAbsolute, 1e-12); }
+
+function persistWithFallback<T>(storage: Pick<Storage, "setItem">, key: string, value: T, fallback: T) {
+  try { storage.setItem(key, JSON.stringify(value)); return; } catch { /* Retry with a compact snapshot. */ }
+  try { storage.setItem(key, JSON.stringify(fallback)); } catch { /* Research persistence is optional; live calculation is not. */ }
+}
 
 export function readAifResearchMemory(key: string, storage: Pick<Storage, "getItem"> = localStorage): AifResearchMemory {
   try {

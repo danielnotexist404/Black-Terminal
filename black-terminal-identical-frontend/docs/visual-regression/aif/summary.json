@@ -1,6 +1,13 @@
 {
-  "capturedAt": "2026-07-14T00:21:29.727Z",
-  "captures": 8,
+  "capturedAt": "2026-07-14T00:41:13.786Z",
+  "captures": 9,
+  "profileSwitching": [
+    "delta",
+    "tpo",
+    "volatility",
+    "pressure"
+  ],
+  "valueAreaAppearance": true,
   "cameraSynchronization": {
     "beforeCamera": {
       "x": 1027.35,
@@ -8,12 +15,12 @@
       "rowIndex": "50",
       "rowTop": 445.734375,
       "revision": 3,
-      "calculatedAt": "1783988484799"
+      "calculatedAt": "1783989669860"
     },
     "afterCamera": {
       "rowTop": 517.734375,
       "revision": 4,
-      "calculatedAt": "1783988484799"
+      "calculatedAt": "1783989669860"
     }
   },
   "overlay": true,

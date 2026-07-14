@@ -26,6 +26,11 @@ class DomVisualScheduler {
     this.requestFrame();
   }
 
+  markAllDirty() {
+    for (const entry of this.entries.values()) entry.dirty = true;
+    this.requestFrame();
+  }
+
   setVisible(id: string, visible: boolean) {
     const entry = this.entries.get(id);
     if (!entry) return;

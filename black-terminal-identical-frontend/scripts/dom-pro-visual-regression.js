@@ -59,6 +59,29 @@ try {
   await cdp.evaluate(`document.querySelector('button[title="Open DOM Pro+"]')?.click()`);
   await waitFor(() => cdp.evaluate(`Boolean(document.querySelector(".dom-pro-window"))`), 20_000);
   await screenshot("panel-headers.png");
+  const cockpitContract = await cdp.evaluate(`(() => ({ camera:[...document.querySelectorAll('.dom-pro-camera-switches button')].map((node)=>node.textContent.trim()), handles:document.querySelectorAll('.dom-pro-resize-handle').length, orderType:Boolean(document.querySelector('.dom-pro-execution-form select')), tif:Boolean([...document.querySelectorAll('.dom-pro-execution-form span')].find((node)=>node.textContent==='TIF')), allocation:Boolean([...document.querySelectorAll('.dom-pro-equity-allocation span')].find((node)=>node.textContent==='Equity Allocation')) }))()`);
+  if (cockpitContract.camera.join("|") !== "Center|Fit|Follow|Explore") throw new Error(`Camera controls are incomplete: ${JSON.stringify(cockpitContract.camera)}`);
+  if (cockpitContract.handles !== 8 || !cockpitContract.orderType || !cockpitContract.tif || !cockpitContract.allocation) throw new Error(`Workspace contract failed: ${JSON.stringify(cockpitContract)}`);
+  await screenshot("compact-execution.png");
+
+  await cdp.evaluate(`(() => { const handle=document.querySelector('.dom-pro-resize-handle.horizontal'); const rect=handle.getBoundingClientRect(); handle.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId:1,clientX:rect.left+10,clientY:rect.top+4})); window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerId:1,clientX:rect.left+10,clientY:rect.top+55})); window.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerId:1,clientX:rect.left+10,clientY:rect.top+55})); })()`);
+  await sleep(250);
+  await screenshot("compressed-bottom-row.png");
+
+  await cdp.evaluate(`document.querySelector('.dom-pro-execution .dom-pro-panel-layout-action')?.click()`);
+  await sleep(150);
+  await screenshot("collapsed-execution.png");
+  await cdp.evaluate(`document.querySelector('.dom-pro-execution .dom-pro-panel-layout-action')?.click()`);
+  await cdp.evaluate(`document.querySelector('.dom-pro-heatmap .dom-pro-panel-layout-action:last-child')?.click()`);
+  await sleep(150);
+  await screenshot("maximized-heatmap.png");
+  await cdp.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+
+  await cdp.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(250);
+  await screenshot("narrow-camera-controls.png");
+  await cdp.send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
+  await sleep(250);
 
   const presetNames = ["Scalper", "Institutional", "Macro"];
   for (const preset of presetNames) {
@@ -78,8 +101,8 @@ try {
     await cdp.evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", {key:"Escape", bubbles:true}))`);
   }
 
-  writeFileSync(join(output, "summary.json"), `${JSON.stringify({ capturedAt: new Date().toISOString(), viewport: "1920x1080", panelCogs: labels.length, presets: presetNames, popovers: labels }, null, 2)}\n`);
-  console.log(`DOM Pro visual regression captured ${labels.length + presetNames.length + 1} snapshots.`);
+  writeFileSync(join(output, "summary.json"), `${JSON.stringify({ capturedAt: new Date().toISOString(), viewport: "1920x1080 + 1280x800", panelCogs: labels.length, cockpitContract, presets: presetNames, popovers: labels }, null, 2)}\n`);
+  console.log(`DOM Pro visual regression captured ${labels.length + presetNames.length + 6} snapshots.`);
 } finally {
   cdp?.close();
   browser?.kill();

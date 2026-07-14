@@ -332,3 +332,9 @@ Chapter I-C adds the neutral `profile-core/structuralZones` numerical layer. Pro
 DOM Pro retains one `DomFeedStore` source per market key and one latest-wins aggregation worker. Depth is transferred into the worker as typed buffers; worker responses contain derived state and one changed heatmap column, not mirrored source books or full historical matrices. The main thread owns a bounded heatmap ring.
 
 Heatmap rendering is one canvas surface registered with the shared dirty visual scheduler. There are no per-cell React or Pixi objects. Panel calculations use clamped independent cadences, offscreen panels suspend, hidden tabs stop visual aggregation, and A.I.F. yields to active DOM camera interaction. Execution and account streams remain outside this adaptive visual path. See `DOM_PRO_RENDER_PIPELINE.md` and `DOM_PRO_WORKER_BACKPRESSURE.md`.
+
+## DOM Pro Workspace Geometry
+
+DOM Pro geometry is owned by a versioned normalized split tree in `domWorkspaceLayout.ts`. The root controls upper/bottom height, while independent nested trees control upper analytics and the bottom Depth/Flow/Execution row. Resize events alter viewport geometry only, are RAF-coalesced, and use the existing interaction coordinator to lower visual detail temporarily. Canvas surfaces redraw from retained data after release; aggregation and camera state are preserved.
+
+The compact execution panel consumes `VenueExecutionSchema`, account sync and venue sizing preview. Equity allocation and leverage remain independent. All orders continue through `submitOrder` and the OMS -> EMS -> Risk -> Broker Router path. See `DOM_PRO_RESIZABLE_WORKSPACE.md` and `DOM_PRO_COMPACT_EXECUTION_PANEL.md`.

@@ -1,7 +1,19 @@
 {
-  "capturedAt": "2026-07-14T05:49:43.898Z",
-  "viewport": "1920x1080",
+  "capturedAt": "2026-07-14T13:57:20.527Z",
+  "viewport": "1920x1080 + 1280x800",
   "panelCogs": 10,
+  "cockpitContract": {
+    "camera": [
+      "Center",
+      "Fit",
+      "Follow",
+      "Explore"
+    ],
+    "handles": 8,
+    "orderType": true,
+    "tif": true,
+    "allocation": true
+  },
   "presets": [
     "Scalper",
     "Institutional",
@@ -14,9 +26,9 @@
     "Wall Detection panel settings",
     "Trade Tape panel settings",
     "DOM Metrics panel settings",
+    "Heuristic CVD panel settings",
     "Depth Chart panel settings",
     "Liquidity Flow Delta panel settings",
-    "Heuristic CVD panel settings",
     "Execution panel settings"
   ]
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MouseEvent as ReactMouseEvent, WheelEvent as ReactWheelEvent } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { createPortal } from "react-dom";
-import { ExternalLink, Maximize2, Minus, Settings, X } from "lucide-react";
+import { ChevronDown, ChevronUp, ExternalLink, Maximize2, Minimize2, Minus, Settings, X } from "lucide-react";
 import type { Candle } from "../../../chart-engine/types";
 import { blackCoreConnectionManager } from "../../../connectivity/connectionManager";
 import { validateMainnetOrderReadiness } from "../../../execution/mainnetValidationMode";
@@ -14,7 +14,9 @@ import { blackCoreMarketDataEngine } from "../../../market-data/engine/marketDat
 import type { MarketSymbol } from "../../../market-data/types";
 import { blackCorePerformanceMonitor } from "../../../performance/performanceMonitor";
 import type { PortfolioAccount } from "../../../portfolio/types";
+import { syncExchangeAccountViaApi, type ExchangeAccountSyncPayload } from "../../../portfolio/portfolioApiClient";
 import { defaultRiskControls } from "../../../risk/types";
+import { buildVenueExecutionSchema, calculateVenueOrderPreview, sizeFromEquityPercent, validateVenueOrderDraft } from "../../../execution/venueExecutionSchema";
 import { DomAggregationEngine } from "../domAggregationEngine";
 import { aggregateDomSnapshot } from "../domAggregationClient";
 import { DomAdaptiveQualityController, type DomVisualQuality } from "../domAdaptiveQuality";
@@ -40,6 +42,25 @@ import {
   type DomPanelValues
 } from "../domPanelSettingsStore";
 import { DomPanelUpdateScheduler } from "../domPanelUpdateScheduler";
+import {
+  applyDomProLayoutPreset,
+  createDomProLayout,
+  domWorkspaceTracks,
+  findDomSplit,
+  listDomProLayoutPresets,
+  maximizeDomPanel,
+  patchDomPanelLayout,
+  readDomProLayout,
+  readDomProLayoutPreset,
+  resizeDomSplit,
+  saveDomProLayoutPreset,
+  splitSpanRatio,
+  writeDomProLayout,
+  type DomProLayoutPreset,
+  type DomProLayoutState,
+  type DomWorkspacePanelId
+} from "../domWorkspaceLayout";
+import { availableDomOrderTypes, availableDomTimeInForce, DOM_EQUITY_ALLOCATION_MARKERS, nearestLeverageOptions } from "../domExecutionPresentation";
 import { placePanelPopover } from "../domPanelPopover";
 import {
   aggregateTradeTape,
@@ -204,7 +225,6 @@ type DomDebugStats = {
   reason: string;
 };
 
-const orderTypes: OrderType[] = ["limit", "market", "twap", "iceberg"];
 const visibleRanges: Array<{ value: DomVisibleRange; label: string }> = [
   { value: "auto", label: "Auto" },
   { value: "0.25", label: "+/-0.25%" },
@@ -284,8 +304,15 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const pendingHeatmapWheelRef = useRef<{ deltaY: number; shiftKey: boolean; cursorY: number; height: number } | null>(null);
   const pendingHoverRef = useRef<{ x: number; y: number; rect: DOMRect } | null>(null);
   const cvdDragStartRef = useRef<{ x: number; startIndex: number; visibleCount: number; total: number; width: number } | null>(null);
+  const gridRef = useRef<HTMLElement | null>(null);
+  const upperWorkspaceRef = useRef<HTMLDivElement | null>(null);
+  const bottomWorkspaceRef = useRef<HTMLDivElement | null>(null);
+  const layoutResizeFrameRef = useRef<number | null>(null);
   const [settings, setSettings] = useState<DomSettings>(() => readDomSettings(workspaceId, symbolKey));
   const [panelRegistry, setPanelRegistry] = useState<DomPanelSettingsRegistry>(() => readDomPanelRegistry(workspaceId, symbolKey));
+  const [layout, setLayout] = useState<DomProLayoutState>(() => readDomProLayout(workspaceId, windowMode));
+  const [customLayoutPresets, setCustomLayoutPresets] = useState<string[]>(() => listDomProLayoutPresets(workspaceId));
+  const [resizeActive, setResizeActive] = useState(false);
   const panelSchedulerRef = useRef(new DomPanelUpdateScheduler());
   const depthProcessorRef = useRef(new PersistentDepthProcessor());
   const wallProcessorRef = useRef(new StableWallProcessor());
@@ -327,6 +354,13 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const [postOnly, setPostOnly] = useState(false);
   const [marginMode, setMarginMode] = useState<MarginMode>("cross");
   const [timeInForce, setTimeInForce] = useState<TimeInForce>("gtc");
+  const [leverage, setLeverage] = useState(1);
+  const [equityAllocation, setEquityAllocation] = useState(0);
+  const [tpSlEnabled, setTpSlEnabled] = useState(false);
+  const [takeProfit, setTakeProfit] = useState("");
+  const [stopLoss, setStopLoss] = useState("");
+  const [accountSync, setAccountSync] = useState<ExchangeAccountSyncPayload | null>(null);
+  const [accountSyncError, setAccountSyncError] = useState("");
   const [executionStatus, setExecutionStatus] = useState("");
   const [macroCandles, setMacroCandles] = useState<Candle[]>(() => blackCoreMarketDataEngine.cache.getCandles(marketSymbol, "1d"));
   const [macroStatus, setMacroStatus] = useState("HISTORICAL DEPTH");
@@ -336,6 +370,48 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const [visualQuality, setVisualQuality] = useState<DomVisualQuality>("full");
   const [documentVisible, setDocumentVisible] = useState(() => typeof document === "undefined" || document.visibilityState !== "hidden");
   const effectiveVisualQuality = resolveVisualQuality(settings.performanceMode, visualQuality);
+  const venueSchema = useMemo(() => selectedConnection
+    ? buildVenueExecutionSchema({ connection: selectedConnection, product: marketSymbol.marketKind, symbol: marketSymbol.rawSymbol, sync: accountSync })
+    : null,
+  [accountSync, marketSymbol.marketKind, marketSymbol.rawSymbol, selectedConnection]);
+  const venueOrderTypes = useMemo(() => availableDomOrderTypes(venueSchema), [venueSchema]);
+  const venueTimeInForce = useMemo(() => availableDomTimeInForce(venueSchema, orderType, postOnly), [orderType, postOnly, venueSchema]);
+  const leverageOptions = useMemo(() => nearestLeverageOptions(
+    venueSchema?.instrumentRules.minLeverage ?? 1,
+    venueSchema?.instrumentRules.maxLeverage ?? 1,
+    venueSchema?.instrumentRules.leverageStep ?? 1,
+    leverage
+  ), [leverage, venueSchema]);
+  const executionPrice = Number(price || snapshot.lastPrice || lastPrice || 0);
+  const executionQuantity = Number(quantity || 0);
+  const executionPreview = venueSchema ? calculateVenueOrderPreview({
+    schema: venueSchema,
+    sizingMethod: "quantity",
+    size: executionQuantity,
+    referencePrice: executionPrice,
+    leverage,
+    side,
+    takeProfit: Number(takeProfit || 0) || undefined,
+    stopLoss: Number(stopLoss || 0) || undefined
+  }) : null;
+  const executionValidation = venueSchema ? validateVenueOrderDraft({
+    schema: venueSchema,
+    orderType,
+    sizingMethod: "quantity",
+    size: executionQuantity,
+    referencePrice: executionPrice,
+    limitPrice: orderType === "limit" ? executionPrice : undefined,
+    leverage,
+    side,
+    reduceOnly,
+    tpSlEnabled
+  }) : { valid: false, reasons: ["Connect a supported execution account."] };
+  const upperTracks = useMemo(() => domWorkspaceTracks(layout.upperSplit, layout.panelStates), [layout.panelStates, layout.upperSplit]);
+  const bottomTracks = useMemo(() => domWorkspaceTracks(layout.bottomSplit, layout.panelStates), [layout.bottomSplit, layout.panelStates]);
+  const upperColumns = upperTracks.columns;
+  const bottomColumns = bottomTracks.columns;
+  const upperSeparators = upperTracks.separators;
+  const bottomSeparators = bottomTracks.separators;
 
   useEffect(() => blackCoreConnectionManager.subscribe(setConnections), []);
 
@@ -381,6 +457,66 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   useEffect(() => {
     writeDomSettings(settings);
   }, [settings]);
+
+  useEffect(() => {
+    setLayout(readDomProLayout(workspaceId, windowMode));
+    setCustomLayoutPresets(listDomProLayoutPresets(workspaceId));
+  }, [windowMode, workspaceId]);
+
+  useEffect(() => {
+    if (!layout.autoSave || resizeActive) return;
+    const timer = window.setTimeout(() => writeDomProLayout(layout, windowMode), 500);
+    return () => window.clearTimeout(timer);
+  }, [layout, resizeActive, windowMode]);
+
+  useEffect(() => {
+    const restoreMaximized = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && layout.maximizedPanel) setLayout((current) => maximizeDomPanel(current, null));
+    };
+    document.addEventListener("keydown", restoreMaximized);
+    return () => document.removeEventListener("keydown", restoreMaximized);
+  }, [layout.maximizedPanel]);
+
+  useEffect(() => {
+    if (!selectedConnection?.accountId || selectedConnection.provider !== "bybit") {
+      setAccountSync(null);
+      setAccountSyncError("");
+      return;
+    }
+    let active = true;
+    const load = async () => {
+      try {
+        const next = await syncExchangeAccountViaApi(selectedConnection.accountId!, marketSymbol.rawSymbol, marketSymbol.marketKind);
+        if (active) { setAccountSync(next); setAccountSyncError(""); }
+      } catch (error) {
+        if (active) setAccountSyncError(error instanceof Error ? error.message : String(error));
+      }
+    };
+    void load();
+    const timer = window.setInterval(load, 10000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [marketSymbol.marketKind, marketSymbol.rawSymbol, selectedConnection?.accountId, selectedConnection?.provider]);
+
+  useEffect(() => {
+    if (!venueSchema) return;
+    setLeverage((current) => current === 1 ? venueSchema.currentLeverage || venueSchema.instrumentRules.minLeverage || 1 : current);
+    setMarginMode(venueSchema.currentMarginMode);
+  }, [selectedConnection?.accountId, venueSchema]);
+
+  useEffect(() => {
+    if (!venueOrderTypes.includes(orderType)) setOrderType(venueOrderTypes[0] ?? "market");
+  }, [orderType, venueOrderTypes]);
+
+  useEffect(() => {
+    if (venueTimeInForce.length > 0 && !venueTimeInForce.includes(timeInForce)) setTimeInForce(venueTimeInForce[0]);
+    if (venueTimeInForce.length === 0 && timeInForce !== "gtc") setTimeInForce("gtc");
+  }, [timeInForce, venueTimeInForce]);
+
+  useEffect(() => {
+    if (!venueSchema || equityAllocation <= 0 || executionPrice <= 0) return;
+    const nextQuantity = sizeFromEquityPercent({ schema: venueSchema, percent: equityAllocation / 100, referencePrice: executionPrice, leverage, sizingMethod: "quantity" });
+    setQuantity(String(nextQuantity));
+  }, [equityAllocation, executionPrice, leverage, venueSchema]);
 
   useEffect(() => {
     const persistTimer = window.setTimeout(() => writeDomPanelRegistry(panelRegistry), 250);
@@ -601,6 +737,86 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     }
   }
 
+  function applyEquityAllocation(percent: number) {
+    setEquityAllocation(percent);
+    if (!venueSchema || executionPrice <= 0) return;
+    const nextQuantity = sizeFromEquityPercent({
+      schema: venueSchema,
+      percent: percent / 100,
+      referencePrice: executionPrice,
+      leverage,
+      sizingMethod: "quantity"
+    });
+    setQuantity(String(nextQuantity));
+  }
+
+  function panelLayoutClass(panelId: DomWorkspacePanelId, base: string) {
+    const state = layout.panelStates[panelId];
+    return ["dom-pro-panel", base, state?.collapsed ? "is-collapsed" : "", layout.maximizedPanel === panelId ? "is-maximized" : ""].filter(Boolean).join(" ");
+  }
+
+  function beginLayoutResize(region: "root" | "upper" | "bottom", splitId: string, event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const element = region === "root" ? gridRef.current : region === "upper" ? upperWorkspaceRef.current : bottomWorkspaceRef.current;
+    if (!element) return;
+    const tree = region === "root" ? layout.rootSplit : region === "upper" ? layout.upperSplit : layout.bottomSplit;
+    const split = findDomSplit(tree, splitId);
+    if (!split) return;
+    const rect = element.getBoundingClientRect();
+    const vertical = split.direction === "vertical";
+    const startPointer = vertical ? event.clientX : event.clientY;
+    const totalSize = Math.max(1, (vertical ? rect.width : rect.height) * splitSpanRatio(tree, splitId));
+    const startLayout = layout;
+    const pointerId = event.pointerId;
+    let latestDelta = 0;
+    event.currentTarget.setPointerCapture?.(pointerId);
+    setResizeActive(true);
+    domInteractionCoordinator.begin();
+    document.body.classList.add("dom-pro-resize-active");
+
+    const move = (moveEvent: PointerEvent) => {
+      const delta = (vertical ? moveEvent.clientX : moveEvent.clientY) - startPointer;
+      latestDelta = delta;
+      if (layoutResizeFrameRef.current !== null) window.cancelAnimationFrame(layoutResizeFrameRef.current);
+      layoutResizeFrameRef.current = window.requestAnimationFrame(() => {
+        layoutResizeFrameRef.current = null;
+        setLayout(resizeDomSplit(startLayout, region, splitId, delta / totalSize));
+      });
+    };
+    const end = () => {
+      if (layoutResizeFrameRef.current !== null) window.cancelAnimationFrame(layoutResizeFrameRef.current);
+      layoutResizeFrameRef.current = null;
+      setLayout(resizeDomSplit(startLayout, region, splitId, latestDelta / totalSize));
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      document.body.classList.remove("dom-pro-resize-active");
+      setResizeActive(false);
+      domInteractionCoordinator.endAfter(80);
+      domVisualScheduler.markAllDirty();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end, { once: true });
+    window.addEventListener("pointercancel", end, { once: true });
+  }
+
+  function keyboardResize(region: "root" | "upper" | "bottom", splitId: string, event: ReactKeyboardEvent<HTMLDivElement>) {
+    const negative = event.key === "ArrowLeft" || event.key === "ArrowUp";
+    const positive = event.key === "ArrowRight" || event.key === "ArrowDown";
+    if (!negative && !positive) return;
+    event.preventDefault();
+    setLayout((current) => resizeDomSplit(current, region, splitId, (negative ? -1 : 1) * (event.shiftKey ? 0.05 : 0.015)));
+  }
+
+  function resetLayoutSplit(region: "root" | "upper" | "bottom", splitId: string) {
+    const factory = createDomProLayout(workspaceId, layout.preset);
+    const currentTree = region === "root" ? layout.rootSplit : region === "upper" ? layout.upperSplit : layout.bottomSplit;
+    const factoryTree = region === "root" ? factory.rootSplit : region === "upper" ? factory.upperSplit : factory.bottomSplit;
+    const current = findDomSplit(currentTree, splitId);
+    const target = findDomSplit(factoryTree, splitId);
+    if (current && target) setLayout((state) => resizeDomSplit(state, region, splitId, target.ratio - current.ratio));
+  }
+
   const submitQuickOrder = useCallback(async (targetSide: OrderSide, override: Partial<{ quantity: string; price: string; orderType: OrderType; reduceOnly: boolean; postOnly: boolean }> = {}) => {
     setExecutionStatus("");
     const nextQuantity = override.quantity ?? quantity;
@@ -651,15 +867,18 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             reduceOnly: nextReduceOnly,
             postOnly: nextPostOnly,
             marginMode,
-            timeInForce,
+            timeInForce: venueTimeInForce.length > 0 ? timeInForce : undefined,
+            leverage,
+            takeProfit: tpSlEnabled ? Number(takeProfit || 0) || undefined : undefined,
+            stopLoss: tpSlEnabled ? Number(stopLoss || 0) || undefined : undefined,
             source: "order-ticket",
             destinations: ["personal-portfolio"]
-          }, buildExecutionAccount(selectedConnection), parsedPrice || 1);
+          }, buildExecutionAccount(selectedConnection, accountSync), parsedPrice || 1);
       setExecutionStatus(`${update.status.toUpperCase()}: ${update.reason || update.orderId}`);
     } catch (error) {
       setExecutionStatus(error instanceof Error ? error.message.toUpperCase() : String(error));
     }
-  }, [lastPrice, marginMode, marketSymbol.marketKind, marketSymbol.rawSymbol, orderType, postOnly, price, quantity, reduceOnly, selectedConnection, snapshot.lastPrice, timeInForce]);
+  }, [accountSync, lastPrice, leverage, marginMode, marketSymbol.marketKind, marketSymbol.rawSymbol, orderType, postOnly, price, quantity, reduceOnly, selectedConnection, snapshot.lastPrice, stopLoss, takeProfit, timeInForce, tpSlEnabled, venueTimeInForce.length]);
 
   useEffect(() => {
     submitQuickOrderRef.current = submitQuickOrder;
@@ -1219,7 +1438,11 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     onSaveDefault: () => setPanelRegistry((current) => ({
       ...current,
       panels: { ...current.panels, [panelId]: { ...current.panels[panelId], defaultSettings: { ...current.panels[panelId].settings }, updatedAt: Date.now() } }
-    }))
+    })),
+    collapsed: layout.panelStates[panelId].collapsed,
+    maximized: layout.maximizedPanel === panelId,
+    onCollapse: () => setLayout((current) => patchDomPanelLayout(current, panelId, { collapsed: !current.panelStates[panelId].collapsed })),
+    onMaximize: () => setLayout((current) => maximizeDomPanel(current, current.maximizedPanel === panelId ? null : panelId))
   });
 
   if (windowMode === "detached-browser") {
@@ -1341,6 +1564,13 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             <Field label="FPS" value={settings.fpsCap} min={5} max={30} onChange={(value) => patchSettings({ fpsCap: value })} />
             <Field label="Macro Lookback" value={settings.macroLookbackDays} min={90} max={1000} onChange={(value) => patchSettings({ macroLookbackDays: value })} />
             <Field label="Macro Bands" value={settings.macroBandCount} min={4} max={18} onChange={(value) => patchSettings({ macroBandCount: value })} />
+            <label className="dom-pro-layout-preset-field"><span>Workspace Layout</span><select value={layout.preset} onChange={(event) => setLayout((current) => applyDomProLayoutPreset(current, event.target.value as DomProLayoutPreset))}><option value="scalper">Scalper</option><option value="intraday">Intraday</option><option value="institutional">Institutional</option><option value="macro">Macro</option><option value="compact-execution">Compact Execution</option><option value="analysis-focus">Analysis Focus</option></select></label>
+            {customLayoutPresets.length > 0 && <label className="dom-pro-layout-preset-field"><span>Custom Preset</span><select defaultValue="" onChange={(event) => { const next = readDomProLayoutPreset(workspaceId, event.target.value); if (next) setLayout(next); event.currentTarget.value = ""; }}><option value="" disabled>Load preset</option>{customLayoutPresets.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>}
+            <Toggle label="Auto-Save Layout" checked={layout.autoSave} onChange={(value) => setLayout((current) => ({ ...current, autoSave: value, updatedAt: Date.now() }))} />
+            <button type="button" className="dom-pro-global-reset" onClick={() => { writeDomProLayout(layout, windowMode); setSettingsTransferStatus("Workspace layout saved"); }}>Save Layout</button>
+            <button type="button" className="dom-pro-global-reset" onClick={() => { const name = window.prompt("Preset name"); if (name) { saveDomProLayoutPreset(layout, name); setCustomLayoutPresets(listDomProLayoutPresets(workspaceId)); setSettingsTransferStatus(`Saved layout preset: ${name.trim()}`); } }}>Save as New Preset</button>
+            <button type="button" className="dom-pro-global-reset" onClick={() => setLayout((current) => { const target = createDomProLayout(workspaceId, current.preset).rootSplit.ratio; return resizeDomSplit(current, "root", "workspace-upper-bottom", target - current.rootSplit.ratio); })}>Reset Bottom Row</button>
+            <button type="button" className="dom-pro-global-reset" onClick={() => { if (window.confirm("Reset the complete DOM Pro layout to its factory preset?")) setLayout(createDomProLayout(workspaceId, layout.preset)); }}>Restore Factory Layout</button>
             <button type="button" className="dom-pro-global-reset" onClick={() => setPanelRegistry((current) => resetAllDomPanels(current))}>Reset All Panels</button>
             <button type="button" className="dom-pro-global-reset" onClick={() => void exportPanelSettings()}>Export Settings</button>
             <button type="button" className="dom-pro-global-reset" onClick={importPanelSettings}>Import Settings</button>
@@ -1349,8 +1579,17 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
           </section>
         )}
 
-        <main className="dom-pro-grid">
-          <section className="dom-pro-panel dom-pro-ladder">
+        <main
+          ref={gridRef}
+          className={`dom-pro-grid ${resizeActive ? "resize-active" : ""} ${layout.maximizedPanel ? "has-maximized" : ""}`}
+          style={{ "--dom-upper-height": `${layout.rootSplit.ratio * 100}%` } as CSSProperties}
+        >
+          <div
+            ref={upperWorkspaceRef}
+            className={`dom-pro-workspace-region dom-pro-upper-workspace ${layout.maximizedPanel && ["depth-chart", "liquidity-flow-delta", "execution"].includes(layout.maximizedPanel) ? "workspace-hidden" : ""} ${layout.maximizedPanel ? "workspace-maximized" : ""}`}
+            style={{ gridTemplateColumns: upperColumns }}
+          >
+          <section className={panelLayoutClass("ladder", "dom-pro-ladder")}>
             <PanelTitle title="Aggregated DOM Ladder" status={ladderSnapshot.statusMessage} {...panelHeaderProps("ladder")} />
             {ladderSnapshot.status === "awaiting-book" ? <EmptyState text="Awaiting live orderbook stream." /> : (
               <>
@@ -1388,7 +1627,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             )}
           </section>
 
-          <section className="dom-pro-panel dom-pro-profile">
+          <section className={panelLayoutClass("volume-profile", "dom-pro-profile")}>
             <PanelTitle title="Volume Profile" status="ESTIMATED / VISIBLE RANGE" {...panelHeaderProps("volume-profile")} />
             {!settings.showVolumeProfile ? <EmptyState text="Volume profile hidden in DOM settings." /> : institutionalProfile.length === 0 ? <EmptyState text="Awaiting live orderbook or historical candles." /> : (
                   <div className="dom-pro-profile-scale" onMouseMove={handleProfileMouseMove} onMouseLeave={() => setDomHover(null)} onDoubleClick={centerMarketCamera}>
@@ -1411,7 +1650,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             )}
           </section>
 
-          <section className="dom-pro-panel dom-pro-heatmap">
+          <section className={panelLayoutClass("liquidity-heatmap", "dom-pro-heatmap")}>
             <PanelTitle title="Liquidity Heatmap" status={`${settings.heatmapHorizon.toUpperCase()} HISTORICAL DEPTH`} {...panelHeaderProps("liquidity-heatmap")} />
             <div className="dom-pro-horizon-controls">
               {cameraPresets.map((preset) => (
@@ -1452,7 +1691,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             )}
           </section>
 
-          <section className="dom-pro-panel dom-pro-walls" onMouseEnter={() => setPanelHoverFreeze("wall-detection", true)} onMouseLeave={() => setPanelHoverFreeze("wall-detection", false)}>
+          <section className={panelLayoutClass("wall-detection", "dom-pro-walls")} onMouseEnter={() => setPanelHoverFreeze("wall-detection", true)} onMouseLeave={() => setPanelHoverFreeze("wall-detection", false)}>
             <PanelTitle title="Wall Detection" status="DERIVED / PERSISTENCE" {...panelHeaderProps("wall-detection")} />
             {!settings.showWallDetection ? <EmptyState text="Wall detection hidden in DOM settings." /> : stableWalls.length === 0 ? <EmptyState text="No walls meet current persistence threshold." /> : (
               <>
@@ -1479,7 +1718,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             )}
           </section>
 
-          <section className="dom-pro-panel dom-pro-tape" onMouseEnter={() => setPanelHoverFreeze("trade-tape", true)} onMouseLeave={() => setPanelHoverFreeze("trade-tape", false)}>
+          <section className={panelLayoutClass("trade-tape", "dom-pro-tape")} onMouseEnter={() => setPanelHoverFreeze("trade-tape", true)} onMouseLeave={() => setPanelHoverFreeze("trade-tape", false)}>
             <PanelTitle title="Trade Tape" status={feed.tradeStatus} {...panelHeaderProps("trade-tape")} />
             {stableTrades.length === 0 ? <EmptyState text="Trade classification unavailable." /> : (
               <>
@@ -1496,7 +1735,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             )}
           </section>
 
-          <section className="dom-pro-panel dom-pro-metrics" onMouseEnter={() => setPanelHoverFreeze("dom-metrics", true)} onMouseLeave={() => setPanelHoverFreeze("dom-metrics", false)}>
+          <section className={panelLayoutClass("dom-metrics", "dom-pro-metrics")} onMouseEnter={() => setPanelHoverFreeze("dom-metrics", true)} onMouseLeave={() => setPanelHoverFreeze("dom-metrics", false)}>
             <PanelTitle title="DOM Metrics" status={`SMOOTHED / ${exchangeLabel.toUpperCase()}`} {...panelHeaderProps("dom-metrics")} />
             <Metric label="Orderbook Imbalance" value={`${(stableMetrics?.orderBookImbalance ?? snapshot.metrics.orderBookImbalance).toFixed(2)}%`} note={(stableMetrics?.orderBookImbalance ?? snapshot.metrics.orderBookImbalance) >= 0 ? "BID HEAVY" : "ASK HEAVY"} />
             <Metric label="Depth Imbalance" value={`${(stableMetrics?.depthImbalance ?? snapshot.metrics.depthImbalance).toFixed(1)}%`} note="VISIBLE" />
@@ -1508,47 +1747,8 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             <Metric label="Latency" value={`${snapshot.metrics.latencyMs.toFixed(0)} ms`} note={feed.bookStatus} />
           </section>
 
-          <section className="dom-pro-panel dom-pro-depth-chart">
-            <PanelTitle title="Depth Chart" status={`${stringSetting(depthPanelValues, "mode", "structural").toUpperCase()} DEPTH`} {...panelHeaderProps("depth-chart")} />
-            {!settings.showDepthChart ? <EmptyState text="Depth chart hidden in DOM settings." /> : depthChart.empty ? <EmptyState text="Depth chart awaiting bid/ask buckets." /> : (
-              <div className="dom-pro-depth-wrap">
-                <svg className="dom-pro-depth-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Cumulative market depth">
-                  <line className="axis" x1="50" y1="8" x2="50" y2="94" />
-                  <line className="axis zero" x1="0" y1="94" x2="100" y2="94" />
-                  {depthChart.bidArea && <polygon className="bid-fill" points={depthChart.bidArea} />}
-                  {depthChart.askArea && <polygon className="ask-fill" points={depthChart.askArea} />}
-                  {depthChart.bidLine && <polyline className="bid-line" points={depthChart.bidLine} />}
-                  {depthChart.askLine && <polyline className="ask-line" points={depthChart.askLine} />}
-                </svg>
-                <div className="dom-pro-depth-summary"><b>Structural Bias {depthChart.bias}</b><span>Bid {depthChart.bidPct.toFixed(0)}% / Ask {depthChart.askPct.toFixed(0)}%</span></div>
-                {depthChart.warning && <span>{depthChart.warning}</span>}
-              </div>
-            )}
-          </section>
-
-          <section className="dom-pro-panel dom-pro-flow">
-            <PanelTitle title="Liquidity Flow Delta" status="DERIVED / PULL / STACK" {...panelHeaderProps("liquidity-flow-delta")} />
-            {flowBars.length === 0 ? <EmptyState text="Awaiting rolling liquidity delta." /> : (
-              <div className="dom-pro-flow-histogram">
-                <b />
-                {flowBars.map((bar, index) => (
-                  <i
-                    key={`${bar.time}-${index}`}
-                    className={bar.net >= 0 ? "positive" : "negative"}
-                    style={{
-                      left: `${bar.left}%`,
-                      width: `${bar.width}%`,
-                      height: `${bar.height}%`,
-                      bottom: bar.net >= 0 ? "50%" : `${50 - bar.height}%`
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-
           {settings.showCvd && (
-            <section className="dom-pro-panel dom-pro-cvd">
+            <section className={panelLayoutClass("heuristic-cvd", "dom-pro-cvd")}>
               <PanelTitle title="Heuristic CVD" status={`${analyticalSettings.cvdHorizon.toUpperCase()} / ${cvdStats.trend.toUpperCase()}`} {...panelHeaderProps("heuristic-cvd")} />
               <div className="dom-pro-cvd-card">
                 {cvdCandles.length === 0 ? <EmptyState text="Trade stream unavailable for this venue." /> : (
@@ -1560,30 +1760,14 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                       <span>Sell <b>{cvdStats.sellPct.toFixed(0)}%</b></span>
                       <span>Divergence <b>WATCH</b></span>
                     </div>
-                    <div
-                      className="dom-pro-cvd-chart"
-                      onWheel={handleCvdWheel}
-                      onMouseDown={handleCvdMouseDown}
-                      onMouseMove={handleCvdMouseMove}
-                      onMouseUp={handleCvdMouseUp}
-                      onMouseLeave={handleCvdMouseUp}
-                      onDoubleClick={handleCvdDoubleClick}
-                    >
+                    <div className="dom-pro-cvd-chart" onWheel={handleCvdWheel} onMouseDown={handleCvdMouseDown} onMouseMove={handleCvdMouseMove} onMouseUp={handleCvdMouseUp} onMouseLeave={handleCvdMouseUp} onDoubleClick={handleCvdDoubleClick}>
                       <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Heuristic cumulative volume delta">
                         {buildCvdAxis(cvdVisibleCandles).map((level) => (
-                          <g key={level.label}>
-                            <line className="cvd-grid" x1="0" x2="100" y1={level.y} y2={level.y} />
-                            <text x="1.5" y={Math.max(7, level.y - 1.5)}>{level.label}</text>
-                          </g>
+                          <g key={level.label}><line className="cvd-grid" x1="0" x2="100" y1={level.y} y2={level.y} /><text x="1.5" y={Math.max(7, level.y - 1.5)}>{level.label}</text></g>
                         ))}
                         {cvdVisibleCandles.map((candle, index) => {
                           const geometry = cvdCandleGeometry(candle, index, cvdVisibleCandles);
-                          return (
-                            <g key={`${candle.time}-${index}`} className={candle.close >= candle.open ? "up" : "down"}>
-                              <line className="wick" x1={geometry.x} x2={geometry.x} y1={geometry.highY} y2={geometry.lowY} />
-                              <rect className="body" x={geometry.bodyX} y={geometry.bodyY} width={geometry.bodyWidth} height={geometry.bodyHeight} />
-                            </g>
-                          );
+                          return <g key={`${candle.time}-${index}`} className={candle.close >= candle.open ? "up" : "down"}><line className="wick" x1={geometry.x} x2={geometry.x} y1={geometry.highY} y2={geometry.lowY} /><rect className="body" x={geometry.bodyX} y={geometry.bodyY} width={geometry.bodyWidth} height={geometry.bodyHeight} /></g>;
                         })}
                         <polyline className="cvd-close-line" points={buildCvdClosePath(cvdVisibleCandles)} />
                       </svg>
@@ -1595,7 +1779,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
           )}
 
           {settings.showDiagnostics && (
-            <section className="dom-pro-panel dom-pro-performance">
+            <section className={panelLayoutClass("performance", "dom-pro-performance")}>
               <PanelTitle title="Performance" status={snapshot.renderStats.lastRenderMs > 12 ? "LOAD HIGH" : "OK"} />
               <Metric label="DOM Updates / Sec" value={snapshot.renderStats.updateRate.toFixed(1)} />
               <Metric label="DOM Render FPS" value={snapshot.renderStats.renderFps.toFixed(1)} />
@@ -1627,31 +1811,96 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             </section>
           )}
 
+          {upperSeparators.map((separator) => <DomResizeHandle key={separator.splitId} region="upper" splitId={separator.splitId} position={separator.position} orientation="vertical" onPointerDown={beginLayoutResize} onKeyDown={keyboardResize} onReset={resetLayoutSplit} />)}
+          </div>
+
+          <DomResizeHandle region="root" splitId="workspace-upper-bottom" position={layout.rootSplit.ratio} orientation="horizontal" onPointerDown={beginLayoutResize} onKeyDown={keyboardResize} onReset={resetLayoutSplit} />
+
+          <div
+            ref={bottomWorkspaceRef}
+            className={`dom-pro-workspace-region dom-pro-bottom-workspace ${layout.maximizedPanel && !["depth-chart", "liquidity-flow-delta", "execution"].includes(layout.maximizedPanel) ? "workspace-hidden" : ""} ${layout.maximizedPanel ? "workspace-maximized" : ""}`}
+            style={{ gridTemplateColumns: bottomColumns }}
+          >
+
+          <section className={panelLayoutClass("depth-chart", "dom-pro-depth-chart")}>
+            <PanelTitle title="Depth Chart" status={`${stringSetting(depthPanelValues, "mode", "structural").toUpperCase()} DEPTH`} {...panelHeaderProps("depth-chart")} />
+            {!settings.showDepthChart ? <EmptyState text="Depth chart hidden in DOM settings." /> : depthChart.empty ? <EmptyState text="Depth chart awaiting bid/ask buckets." /> : (
+              <div className="dom-pro-depth-wrap">
+                <svg className="dom-pro-depth-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Cumulative market depth">
+                  <line className="axis" x1="50" y1="8" x2="50" y2="94" />
+                  <line className="axis zero" x1="0" y1="94" x2="100" y2="94" />
+                  {depthChart.bidArea && <polygon className="bid-fill" points={depthChart.bidArea} />}
+                  {depthChart.askArea && <polygon className="ask-fill" points={depthChart.askArea} />}
+                  {depthChart.bidLine && <polyline className="bid-line" points={depthChart.bidLine} />}
+                  {depthChart.askLine && <polyline className="ask-line" points={depthChart.askLine} />}
+                </svg>
+                <div className="dom-pro-depth-summary"><b>Structural Bias {depthChart.bias}</b><span>Bid {depthChart.bidPct.toFixed(0)}% / Ask {depthChart.askPct.toFixed(0)}%</span></div>
+                {depthChart.warning && <span>{depthChart.warning}</span>}
+              </div>
+            )}
+          </section>
+
+          <section className={panelLayoutClass("liquidity-flow-delta", "dom-pro-flow")}>
+            <PanelTitle title="Liquidity Flow Delta" status="DERIVED / PULL / STACK" {...panelHeaderProps("liquidity-flow-delta")} />
+            {flowBars.length === 0 ? <EmptyState text="Awaiting rolling liquidity delta." /> : (
+              <div className="dom-pro-flow-histogram">
+                <b />
+                {flowBars.map((bar, index) => (
+                  <i
+                    key={`${bar.time}-${index}`}
+                    className={bar.net >= 0 ? "positive" : "negative"}
+                    style={{
+                      left: `${bar.left}%`,
+                      width: `${bar.width}%`,
+                      height: `${bar.height}%`,
+                      bottom: bar.net >= 0 ? "50%" : `${50 - bar.height}%`
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+
           {settings.showExecutionPanel && (
-            <section className="dom-pro-panel dom-pro-execution">
+            <section className={panelLayoutClass("execution", "dom-pro-execution")}>
               <PanelTitle title="Execution" status={selectedConnection ? selectedConnection.label.toUpperCase() : "NO ACCOUNT"} {...panelHeaderProps("execution")} />
-              <div className="dom-pro-order-types">
-                {orderTypes.map((type) => <button key={type} type="button" className={orderType === type ? "active" : ""} onClick={() => setOrderType(type)}>{type.toUpperCase()}</button>)}
+              <div className="dom-pro-execution-form">
+                <label><span>Order Type</span><select value={orderType} onChange={(event) => setOrderType(event.target.value as OrderType)}>{venueOrderTypes.map((type) => <option key={type} value={type}>{formatOrderTypeLabel(type)}</option>)}</select></label>
+                {venueTimeInForce.length > 0 ? (
+                  <label><span>TIF</span><select value={timeInForce} onChange={(event) => setTimeInForce(event.target.value as TimeInForce)}>{venueTimeInForce.map((tif) => <option key={tif} value={tif}>{tif.toUpperCase()}</option>)}</select></label>
+                ) : <label className="read-only"><span>TIF</span><b>Venue Default</b></label>}
+                <label><span>Margin</span><select value={marginMode} onChange={(event) => setMarginMode(event.target.value as MarginMode)}>{(venueSchema?.supportedMarginModes.length ? venueSchema.supportedMarginModes : ["cross", "isolated"]).map((mode) => <option key={mode} value={mode}>{titleCase(String(mode))}</option>)}</select></label>
+                <label><span>Leverage</span><select value={leverage} onChange={(event) => setLeverage(Number(event.target.value))}>{leverageOptions.map((value) => <option key={value} value={value}>{value}x</option>)}</select></label>
+                <label><span>Qty ({marketSymbol.baseAsset})</span><input value={quantity} onChange={(event) => { setQuantity(event.target.value); setEquityAllocation(0); }} inputMode="decimal" /></label>
+                {orderType !== "market" && <label><span>Price ({marketSymbol.quoteAsset})</span><input value={price} placeholder={formatPrice(executionPrice)} onChange={(event) => setPrice(event.target.value)} inputMode="decimal" /></label>}
               </div>
-              <div className="dom-pro-side-buttons">
-                <button type="button" className={side === "buy" ? "active" : ""} onClick={() => setSide("buy")}>BUY</button>
-                <button type="button" className={side === "sell" ? "active sell" : "sell"} onClick={() => setSide("sell")}>SELL</button>
+              <div className="dom-pro-equity-allocation">
+                <div><span>Equity Allocation</span><b>{equityAllocation}%</b></div>
+                <input aria-label="Equity allocation percentage" type="range" min="0" max="100" step="1" value={equityAllocation} onChange={(event) => applyEquityAllocation(Number(event.target.value))} />
+                <div className="dom-pro-allocation-markers">{DOM_EQUITY_ALLOCATION_MARKERS.map((marker) => <button key={marker} type="button" style={{ left: `${marker}%` }} onClick={() => applyEquityAllocation(marker)}><i />{marker}%</button>)}</div>
               </div>
-              <label><span>Qty ({marketSymbol.baseAsset})</span><input value={quantity} onChange={(event) => setQuantity(event.target.value)} inputMode="decimal" /></label>
-              <label><span>Price ({marketSymbol.quoteAsset})</span><input value={price} onChange={(event) => setPrice(event.target.value)} inputMode="decimal" /></label>
-              <label><span>Margin</span><select value={marginMode} onChange={(event) => setMarginMode(event.target.value as MarginMode)}><option value="cross">Cross</option><option value="isolated">Isolated</option></select></label>
-              <label><span>TIF</span><select value={timeInForce} onChange={(event) => setTimeInForce(event.target.value as TimeInForce)}><option value="gtc">GTC</option><option value="ioc">IOC</option><option value="fok">FOK</option></select></label>
               <div className="dom-pro-checks">
                 <label><input type="checkbox" checked={postOnly} onChange={(event) => setPostOnly(event.target.checked)} /> Post Only</label>
                 <label><input type="checkbox" checked={reduceOnly} onChange={(event) => setReduceOnly(event.target.checked)} /> Reduce Only</label>
+                <label><input type="checkbox" checked={tpSlEnabled} disabled={reduceOnly} onChange={(event) => setTpSlEnabled(event.target.checked)} /> TP/SL</label>
+              </div>
+              {tpSlEnabled && <div className="dom-pro-protection-fields"><label><span>TP</span><input value={takeProfit} onChange={(event) => setTakeProfit(event.target.value)} inputMode="decimal" /></label><label><span>SL</span><input value={stopLoss} onChange={(event) => setStopLoss(event.target.value)} inputMode="decimal" /></label></div>}
+              <div className="dom-pro-execution-preview">
+                <span>Available Equity <b>{formatUsd(venueSchema?.accountMetrics?.availableBalanceUsd)}</b></span>
+                <span>Order Value <b>{formatUsd(executionPreview?.notional)}</b></span>
+                <span>Required Margin <b>{formatUsd(executionPreview?.requiredMargin)}</b></span>
+                <span>Estimated Fee <b>{formatUsd(executionPreview?.entryFee)}</b></span>
+                <span>Balance After <b>{formatUsd(executionPreview?.availableAfter)}</b></span>
               </div>
               <div className="dom-pro-submit-row">
-                <button type="button" onClick={() => submitQuickOrder("buy")}>Place Buy</button>
-                <button type="button" className="sell" onClick={() => submitQuickOrder("sell")}>Place Sell</button>
+                <button type="button" disabled={!executionValidation.valid} onClick={() => { setSide("buy"); void submitQuickOrder("buy"); }}>Buy</button>
+                <button type="button" className="sell" disabled={!executionValidation.valid} onClick={() => { setSide("sell"); void submitQuickOrder("sell"); }}>Sell</button>
               </div>
-              <p>{executionStatus || "Orders route through OMS / EMS / Risk."}</p>
+              <p>{executionStatus || accountSyncError || executionValidation.reasons[0] || "Orders route through OMS / EMS / Risk."}</p>
             </section>
           )}
+          {bottomSeparators.map((separator) => <DomResizeHandle key={separator.splitId} region="bottom" splitId={separator.splitId} position={separator.position} orientation="vertical" onPointerDown={beginLayoutResize} onKeyDown={keyboardResize} onReset={resetLayoutSplit} />)}
+          </div>
         </main>
         <IMMStatusBar
           status={immStatus}
@@ -1667,6 +1916,34 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   );
 }
 
+function DomResizeHandle({ region, splitId, position, orientation, onPointerDown, onKeyDown, onReset }: {
+  region: "root" | "upper" | "bottom";
+  splitId: string;
+  position: number;
+  orientation: "horizontal" | "vertical";
+  onPointerDown: (region: "root" | "upper" | "bottom", splitId: string, event: ReactPointerEvent<HTMLDivElement>) => void;
+  onKeyDown: (region: "root" | "upper" | "bottom", splitId: string, event: ReactKeyboardEvent<HTMLDivElement>) => void;
+  onReset: (region: "root" | "upper" | "bottom", splitId: string) => void;
+}) {
+  const style = orientation === "vertical" ? { left: `${position * 100}%` } : undefined;
+  return (
+    <div
+      className={`dom-pro-resize-handle ${orientation}`}
+      style={style}
+      role="separator"
+      aria-orientation={orientation}
+      aria-valuemin={8}
+      aria-valuemax={92}
+      aria-valuenow={Math.round(position * 100)}
+      tabIndex={0}
+      title="Drag to resize. Double-click to reset."
+      onPointerDown={(event) => onPointerDown(region, splitId, event)}
+      onKeyDown={(event) => onKeyDown(region, splitId, event)}
+      onDoubleClick={() => onReset(region, splitId)}
+    />
+  );
+}
+
 function PanelTitle({
   title,
   status,
@@ -1677,7 +1954,11 @@ function PanelTitle({
   onPatch,
   onPreset,
   onReset,
-  onSaveDefault
+  onSaveDefault,
+  collapsed,
+  maximized,
+  onCollapse,
+  onMaximize
 }: {
   title: string;
   status?: string;
@@ -1689,6 +1970,10 @@ function PanelTitle({
   onPreset?: (preset: string) => void;
   onReset?: () => void;
   onSaveDefault?: () => void;
+  collapsed?: boolean;
+  maximized?: boolean;
+  onCollapse?: () => void;
+  onMaximize?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
@@ -1745,6 +2030,8 @@ function PanelTitle({
       <div className="dom-pro-panel-title-status">
         {dataQuality && <em title="Panel data quality">{dataQuality}</em>}
         {status && <b>{status}</b>}
+        {onCollapse && <button type="button" className="dom-pro-panel-layout-action" title={collapsed ? "Restore panel" : "Collapse panel"} aria-label={collapsed ? `Restore ${title}` : `Collapse ${title}`} onClick={onCollapse}>{collapsed ? <ChevronDown size={12} /> : <ChevronUp size={12} />}</button>}
+        {onMaximize && <button type="button" className="dom-pro-panel-layout-action" title={maximized ? "Restore workspace" : "Maximize panel"} aria-label={maximized ? `Restore ${title}` : `Maximize ${title}`} onClick={onMaximize}>{maximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}</button>}
       </div>
       {open && panelId && panel && onPatch && createPortal(
         <div ref={popoverRef} className="dom-pro-panel-popover" role="dialog" aria-label={`${title} settings`} style={position}>
@@ -3276,7 +3563,11 @@ function buildDomProPopoutDocument(channelName: string) {
 </html>`;
 }
 
-function buildExecutionAccount(connection: ConnectionDiagnostics): PortfolioAccount {
+function buildExecutionAccount(connection: ConnectionDiagnostics, sync: ExchangeAccountSyncPayload | null): PortfolioAccount {
+  const metrics = sync?.accountMetrics;
+  const tradingEnabled = connection.health.permissions.trading === true;
+  const storedControls = connection.metadata.accountRiskControls as PortfolioAccount["riskControls"] | undefined;
+  const riskControls = { ...(storedControls || defaultRiskControls), readOnlyMode: !tradingEnabled, tradingEnabled };
   return {
     id: connection.accountId || connection.id,
     exchange: connection.provider as MarketSymbol["exchange"],
@@ -3289,23 +3580,35 @@ function buildExecutionAccount(connection: ConnectionDiagnostics): PortfolioAcco
     status: connection.status === "connected" ? "connected" : "degraded",
     apiHealth: connection.metadata.executionReady === true ? "healthy" : "warning",
     latencyMs: connection.health.latencyMs,
-    balanceUsd: 0,
-    equityUsd: 0,
-    marginUsed: 0,
-    availableMargin: 0,
-    buyingPower: 0,
-    leverage: 1,
+    balanceUsd: metrics?.walletBalanceUsd ?? 0,
+    equityUsd: metrics?.equityUsd ?? 0,
+    marginUsed: metrics?.initialMarginUsd ?? 0,
+    availableMargin: metrics?.availableBalanceUsd ?? 0,
+    buyingPower: (metrics?.availableBalanceUsd ?? 0) * Math.max(1, Number(storedControls?.maxLeverage || 1)),
+    leverage: sync?.selectedPosition?.leverage ?? 1,
     dailyPnl: 0,
     monthlyPnl: 0,
-    openPositions: 0,
-    openOrders: 0,
-    riskControls: defaultRiskControls
+    openPositions: sync?.positions.length ?? 0,
+    openOrders: sync?.openOrders.length ?? 0,
+    riskControls
   };
 }
 
 function formatPrice(value?: number | null) {
   if (!Number.isFinite(value ?? NaN)) return "--";
   return Number(value).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+function formatUsd(value?: number | null) {
+  return Number.isFinite(value) ? `${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD` : "--";
+}
+
+function formatOrderTypeLabel(value: OrderType) {
+  return value.split("-").map(titleCase).join(" ");
+}
+
+function titleCase(value: string) {
+  return value ? `${value[0].toUpperCase()}${value.slice(1)}` : value;
 }
 
 function formatSize(value?: number | null) {

@@ -1073,3 +1073,11 @@ Remaining:
 - Added incremental CVD buckets, safe panel cadences, offscreen/hidden suspension, interaction priority, A.I.F. yielding, adaptive visual quality and a freeze watchdog.
 - Added DOM/A.I.F. smoke and long-soak commands plus deterministic panel/performance regression coverage.
 - No Supabase migration is required.
+
+# 2026-07-14 - DOM Pro Resizable Workspace And Compact Execution
+
+- Replaced the rigid six-column cockpit geometry with a versioned root/upper/bottom split model, draggable keyboard-accessible separators, constraints, collapse, maximize, factory layouts, custom presets and debounced workspace persistence.
+- Set the default bottom row to a compact 30% and made Depth Chart, Liquidity Flow Delta and Execution independently resizable.
+- Rebuilt DOM execution as a container-responsive venue-schema ticket with compact Order Type and TIF selectors, separate leverage, account-backed Equity Allocation, live margin/fee/balance preview and existing OMS/EMS/Risk routing.
+- Corrected the missing stats-grid track that clipped camera controls and moved wall labels inside measured/clipped liquidity strips.
+- Added deterministic layout/presentation tests and expanded browser visual regression states. No Supabase migration is required.

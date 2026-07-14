@@ -372,3 +372,10 @@ Chapter I-C adds structural-zone assertions to `npm run test:aif`: contiguous me
 # DOM Pro Performance Validation
 
 Use `perf:dom-pro-smoke` for the deterministic scenario matrix. Release evidence requires both the 30-minute and one-hour `perf:dom-pro-soak` runs. The harness activates DOM Pro and A.I.F., changes presets, opens settings, pans/zooms, mounts/unmounts and exercises visibility recovery without placing orders. `?domPerfTrace=1` enables bounded span and watchdog diagnostics.
+# DOM Pro Resizable Workspace Build Note (2026-07-14)
+
+DOM Pro panel geometry is a versioned, normalized split tree. UI separators update ratios through one RAF-coalesced interaction path and must never restart feeds, workers or analytics. Workspace layouts and custom presets are browser-local and keyed by workspace/window.
+
+The compact DOM execution panel must consume `VenueExecutionSchema`, account sync and venue sizing preview. Do not duplicate exchange rules in the component and do not bypass `submitOrder`. Equity Allocation sizes from usable margin; leverage remains a separate venue-bounded control.
+
+Release gates: `npm run test:dom-pro-panels`, `npm run test:venue-execution`, `npm run test:performance`, `npm run test:dom-pro-visual`, `npm run perf:dom-pro-smoke`, and `npm run build`.

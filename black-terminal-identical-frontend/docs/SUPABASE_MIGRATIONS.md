@@ -1995,3 +1995,6 @@ No Supabase migration is required. Structural zones, lifecycle events, settings 
 ## Phase III DOM Pro Final Performance Recovery
 
 No Supabase migration is required. The chapter changes browser rendering, worker transport, bounded runtime caches, scheduler behavior and local settings persistence only. Performance trace and watchdog data remain session/test diagnostics and are not written to Supabase.
+# 2026-07-14 - DOM Pro Resizable Workspace
+
+No migration required. Split ratios, panel collapse state, auto-save preference and custom layout presets are workspace/window presentation preferences stored in bounded browser local storage. No account, execution, market-memory or entitlement schema changed.

@@ -94,3 +94,9 @@ The critical chart-coordinate and automatic 20,000-bar initialization contract i
 - `DOM_PRO_FINAL_PERFORMANCE_RESULTS.md` - before/after trace and soak evidence.
 - `DOM_PRO_RENDER_PIPELINE.md` - source, worker, scheduler, canvas and retention ownership.
 - `DOM_PRO_WORKER_BACKPRESSURE.md` - latest-wins queue and transfer contract.
+
+# DOM Pro Resizable Cockpit
+
+- `DOM_PRO_RESIZABLE_WORKSPACE.md` - split-tree ownership, resize interaction, presets and persistence.
+- `DOM_PRO_COMPACT_EXECUTION_PANEL.md` - venue-driven controls, equity allocation, leverage and execution routing.
+- `DOM_PRO_FINAL_COSMETIC_FIXES.md` - camera controls, in-strip wall labels, responsive proof and limits.

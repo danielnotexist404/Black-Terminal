@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   DOM_PANEL_SETTINGS_VERSION,
   applyDomPanelPreset,
@@ -21,15 +22,67 @@ import {
   StableWallProcessor
 } from "../src/modules/dom-pro/domSignalStabilizers.ts";
 import type { DomMetrics, WallDetection } from "../src/modules/dom-pro/types.ts";
+import {
+  applyDomProLayoutPreset,
+  createDomProLayout,
+  domLeafWeights,
+  domSeparatorPositions,
+  listDomProLayoutPresets,
+  maximizeDomPanel,
+  patchDomPanelLayout,
+  readDomProLayout,
+  readDomProLayoutPreset,
+  resizeDomSplit,
+  saveDomProLayoutPreset,
+  splitSpanRatio,
+  writeDomProLayout
+} from "../src/modules/dom-pro/domWorkspaceLayout.ts";
+import { availableDomTimeInForce, DOM_EQUITY_ALLOCATION_MARKERS, domExecutionLayoutMode, nearestLeverageOptions } from "../src/modules/dom-pro/domExecutionPresentation.ts";
+import { computeDomWallLabelLayout } from "../src/modules/dom-pro/domWallLabelLayout.ts";
 
 class MemoryStorage {
   private values = new Map<string, string>();
+  get length() { return this.values.size; }
+  key(index: number) { return [...this.values.keys()][index] ?? null; }
   getItem(key: string) { return this.values.get(key) ?? null; }
   setItem(key: string, value: string) { this.values.set(key, value); }
   removeItem(key: string) { this.values.delete(key); }
 }
 
 const storage = new MemoryStorage();
+const layout = createDomProLayout("desk");
+assert.equal(layout.rootSplit.ratio, 0.70, "factory layout reserves a compact 30 percent bottom row");
+assert.ok(Math.abs(domLeafWeights(layout.upperSplit).reduce((sum, leaf) => sum + leaf.weight, 0) - 1) < 1e-9, "upper split weights remain normalized");
+assert.equal(domSeparatorPositions(layout.upperSplit).length, 5, "every upper panel boundary has a separator");
+assert.equal(domSeparatorPositions(layout.bottomSplit).length, 2, "every bottom panel boundary has a separator");
+assert.ok(splitSpanRatio(layout.upperSplit, "upper-volume-profile") < 1, "nested split reports its allocated viewport span");
+const resized = resizeDomSplit(layout, "root", "workspace-upper-bottom", -0.1);
+assert.equal(resized.rootSplit.ratio, 0.60, "horizontal resize changes only workspace geometry");
+assert.equal(resizeDomSplit(layout, "root", "workspace-upper-bottom", -10).rootSplit.ratio, 0.56, "minimum row constraint is enforced");
+assert.equal(resizeDomSplit(layout, "root", "workspace-upper-bottom", 10).rootSplit.ratio, 0.86, "maximum row constraint is enforced");
+const collapsedLayout = patchDomPanelLayout(layout, "execution", { collapsed: true });
+assert.equal(collapsedLayout.panelStates.execution.collapsed, true, "panel collapse is represented in layout state");
+assert.equal(maximizeDomPanel(layout, "liquidity-heatmap").maximizedPanel, "liquidity-heatmap", "panel maximize preserves underlying layout");
+assert.ok(applyDomProLayoutPreset(layout, "analysis-focus").rootSplit.ratio > layout.rootSplit.ratio, "analysis preset expands the upper workspace");
+assert.deepEqual(availableDomTimeInForce(null, "limit", false), ["gtc", "ioc", "fok"]);
+assert.deepEqual(availableDomTimeInForce(null, "market", false), [], "market orders use venue-default TIF");
+assert.deepEqual(availableDomTimeInForce(null, "limit", true), ["gtc"], "post-only rejects incompatible TIF modes");
+assert.ok(nearestLeverageOptions(1, 20, 1, 17).includes(17), "current venue leverage remains selectable");
+assert.deepEqual(DOM_EQUITY_ALLOCATION_MARKERS, [0, 1, 5, 10, 15, 25, 35, 50, 65, 75, 100]);
+assert.equal(domExecutionLayoutMode(280), "minimal");
+assert.equal(domExecutionLayoutMode(760), "wide");
+const wallLabel = computeDomWallLabelLayout({ top: 20, height: 16, width: 300, measuredWidth: 92 });
+assert.equal(wallLabel.y, 28, "wall label is vertically centered inside its strip");
+assert.ok(wallLabel.y >= wallLabel.clipY && wallLabel.y <= wallLabel.clipY + wallLabel.clipHeight, "wall label cannot escape strip bounds");
+assert.equal(writeDomProLayout(resized, "primary", storage), true);
+assert.equal(readDomProLayout("desk", "primary", storage).rootSplit.ratio, 0.60, "layout ratios persist and restore");
+assert.equal(saveDomProLayoutPreset(resized, "My Desk", storage), true);
+assert.deepEqual(listDomProLayoutPresets("desk", storage), ["My Desk"]);
+assert.equal(readDomProLayoutPreset("desk", "My Desk", storage)?.rootSplit.ratio, 0.60, "custom layout preset restores");
+storage.setItem("bt:dom-pro-layout:v1:legacy:primary", JSON.stringify({ version: 0, workspaceId: "legacy" }));
+assert.equal(readDomProLayout("legacy", "primary", storage).version, 1, "unsupported layout schemas reset through migration boundary");
+const layoutSource = readFileSync(new URL("../src/modules/dom-pro/domWorkspaceLayout.ts", import.meta.url), "utf8");
+assert.ok(!/DomAggregationEngine|aggregateDomSnapshot|useDomFeed/.test(layoutSource), "layout resizing cannot import or recalculate market analytics");
 const defaults = defaultDomPanelRegistry("desk", "bybit:perpetual:BTCUSDT");
 assert.equal(Object.keys(defaults.panels).length, 10, "all configurable panels have defaults");
 assert.equal(defaults.schemaVersion, DOM_PANEL_SETTINGS_VERSION);

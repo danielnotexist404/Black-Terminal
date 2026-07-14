@@ -3,6 +3,7 @@ import type { DepthHistoryPoint } from "../depthHistoryStore";
 import { domPerformanceTrace } from "../domPerformanceTrace";
 import type { DomVisualQuality } from "../domAdaptiveQuality";
 import { domVisualScheduler } from "../domVisualScheduler";
+import { computeDomWallLabelLayout } from "../domWallLabelLayout";
 import type { DomHeatmapFrame, MacroLiquidityBand, MacroLiquidityRange, VolumeProfileNode } from "../types";
 
 type Ribbon = { id: string; price: number; intensity: number; side: "supply" | "demand" | "poc"; kind: VolumeProfileNode["kind"] };
@@ -144,8 +145,23 @@ function drawBands(context: CanvasRenderingContext2D, bands: MacroLiquidityBand[
     const color = band.side === "supply" ? "255,0,10" : "238,242,250";
     const gradient = context.createLinearGradient(0, 0, width, 0);
     gradient.addColorStop(0, `rgba(${color},.02)`); gradient.addColorStop(.55, `rgba(${color},${Math.max(.18, band.strength * .72)})`); gradient.addColorStop(1, `rgba(${color},.03)`);
-    context.fillStyle = gradient; context.fillRect(0, y - half, width, half * 2);
-    if (!simple && band.strength > .42) { context.fillStyle = `rgba(${color},.9)`; context.font = "700 9px IBM Plex Mono, monospace"; context.fillText(`${band.label}  ${formatPrice(band.price)}`, 8, y - half - 3); }
+    const top = y - half;
+    const stripHeight = half * 2;
+    context.fillStyle = gradient; context.fillRect(0, top, width, stripHeight);
+    if (!simple) {
+      const fullLabel = `${band.side === "supply" ? "SELL WALL" : "BUY WALL"} · ${formatPrice(band.price)}`;
+      context.font = "700 9px IBM Plex Mono, monospace";
+      const layout = computeDomWallLabelLayout({ top, height: stripHeight, width, measuredWidth: context.measureText(fullLabel).width });
+      if (!layout.visible) continue;
+      context.save();
+      context.beginPath();
+      context.rect(layout.clipX, layout.clipY, layout.clipWidth, layout.clipHeight);
+      context.clip();
+      context.textBaseline = "middle";
+      context.fillStyle = band.side === "supply" ? "rgba(255,255,255,.96)" : "rgba(10,12,15,.94)";
+      context.fillText(layout.compact ? (band.side === "supply" ? "SELL" : "BUY") : fullLabel, layout.x, layout.y);
+      context.restore();
+    }
   }
 }
 

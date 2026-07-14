@@ -1062,3 +1062,14 @@ Remaining:
 - Made A.I.F. settings and research-memory persistence fail-soft under browser quota pressure so storage cannot interrupt worker results or profile switching.
 - Reduced browser research snapshots and added compact retry behavior while preserving in-memory calculation.
 - Added HDLX-style value-area color and opacity controls and browser assertions for Volume, Delta, TPO, Volatility and Pressure switching.
+- Added priority settings persistence that prunes only disposable A.I.F. research caches under quota pressure, then retries the selected mode so reload cannot silently restore an older profile.
+- Moved profile-specific controls and truthful data-source descriptions into the open Profile group; menu state, worker output and persisted state are now verified together.
+
+# 2026-07-14 - DOM Pro Final Performance Recovery
+
+- Reproduced the live cockpit freeze with deterministic DOM, Macro, settings, camera, mount and A.I.F. scenarios; baseline p95 reached 354.1 ms while 4,444 DOM nodes accumulated.
+- Replaced per-cell React heatmap rendering with one culled canvas and master dirty-frame scheduler.
+- Added delta-only reverse worker messages, transferable typed depth inputs, bounded client heatmap history and complete backpressure telemetry.
+- Added incremental CVD buckets, safe panel cadences, offscreen/hidden suspension, interaction priority, A.I.F. yielding, adaptive visual quality and a freeze watchdog.
+- Added DOM/A.I.F. smoke and long-soak commands plus deterministic panel/performance regression coverage.
+- No Supabase migration is required.

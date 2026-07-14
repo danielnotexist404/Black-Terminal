@@ -6,6 +6,7 @@ export type DomVisibleRange = "auto" | "0.25" | "0.5" | "1" | "2" | "5" | "10" |
 export type DomProfileSource = "session" | "visible-range" | "rolling-window";
 export type DomHeatmapHorizon = "15m" | "2h" | "6h" | "12h" | "24h" | "3d" | "1w";
 export type DomCvdHorizon = "15m" | "1h" | "4h" | "12h" | "24h" | "3d" | "1w";
+export type DomPerformanceMode = "maximum-performance" | "balanced" | "maximum-detail";
 
 export type DomLevel = {
   price: number;
@@ -155,6 +156,12 @@ export type AggregatedDomSnapshot = {
   status: "awaiting-book" | "live" | "rest" | "degraded";
   statusMessage: string;
   generatedAt: number;
+  trace?: Record<string, { durationMs: number; inputSize: number; outputSize: number }>;
+  transport?: {
+    heatmapMode: "full" | "delta";
+    heatmapRevision: number;
+    heatmapMaxFrames: number;
+  };
 };
 
 export type DomSettings = {
@@ -167,6 +174,7 @@ export type DomSettings = {
   visibleRange: DomVisibleRange;
   customVisibleRangePct: number;
   fpsCap: number;
+  performanceMode: DomPerformanceMode;
   showVolumeProfile: boolean;
   showHeatmap: boolean;
   showWallDetection: boolean;

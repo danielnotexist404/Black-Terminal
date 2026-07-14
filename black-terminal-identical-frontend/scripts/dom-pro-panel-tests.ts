@@ -63,6 +63,8 @@ scheduler.suspendPanel("trade-tape");
 assert.equal(scheduler.shouldCalculate("trade-tape", 5000), false, "hidden panel suspends calculation");
 scheduler.resumePanel("trade-tape");
 assert.equal(scheduler.shouldCalculate("trade-tape", 5001), true, "resume requests immediate calculation");
+scheduler.registerPanel("depth-chart", 1, 1);
+assert.equal(scheduler.reportMetrics("depth-chart")[0].calculationMs, 250, "unsafe panel cadence is clamped");
 
 const depth = new PersistentDepthProcessor();
 for (let index = 0; index < 12; index += 1) {

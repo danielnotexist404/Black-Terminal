@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-07-14T00:41:13.786Z",
+  "capturedAt": "2026-07-14T04:53:31.498Z",
   "captures": 9,
   "profileSwitching": [
     "delta",
@@ -15,12 +15,12 @@
       "rowIndex": "50",
       "rowTop": 445.734375,
       "revision": 3,
-      "calculatedAt": "1783989669860"
+      "calculatedAt": "1784004807456"
     },
     "afterCamera": {
       "rowTop": 517.734375,
       "revision": 4,
-      "calculatedAt": "1783989669860"
+      "calculatedAt": "1784004807456"
     }
   },
   "overlay": true,

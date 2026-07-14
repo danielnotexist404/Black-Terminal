@@ -20,8 +20,8 @@ export class DomPanelUpdateScheduler {
   registerPanel(panelId: DomPanelId, calculationMs: number, renderMs = calculationMs) {
     const existing = this.panels.get(panelId);
     this.panels.set(panelId, {
-      calculationMs: boundedCadence(calculationMs),
-      renderMs: boundedCadence(renderMs),
+      calculationMs: boundedCadence(panelId, calculationMs),
+      renderMs: boundedCadence(panelId, renderMs),
       lastCalculationAt: existing?.lastCalculationAt ?? 0,
       lastRenderAt: existing?.lastRenderAt ?? 0,
       calculations: existing?.calculations ?? 0,
@@ -86,8 +86,20 @@ export class DomPanelUpdateScheduler {
   }
 }
 
-function boundedCadence(value: number) {
-  return Math.max(16, Math.min(60_000, Number.isFinite(value) ? value : 1000));
+function boundedCadence(panelId: DomPanelId, value: number) {
+  const safeMinimums: Record<DomPanelId, number> = {
+    ladder: 50,
+    "volume-profile": 500,
+    "liquidity-heatmap": 100,
+    "wall-detection": 500,
+    "trade-tape": 100,
+    "dom-metrics": 250,
+    "heuristic-cvd": 250,
+    "depth-chart": 250,
+    "liquidity-flow-delta": 250,
+    execution: 250
+  };
+  return Math.max(safeMinimums[panelId], Math.min(60_000, Number.isFinite(value) ? value : 1000));
 }
 
 function performanceNow() {

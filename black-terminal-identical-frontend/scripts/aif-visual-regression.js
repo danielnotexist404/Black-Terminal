@@ -56,6 +56,8 @@ try {
   for (const value of profiles) {
     await cdp.eval(`(() => { const label=[...document.querySelectorAll(".aif-settings label")].find((node)=>node.firstChild?.textContent?.trim()==="Primary Profile"); const select=label?.querySelector("select"); if(!select) throw new Error("Primary Profile control missing"); select.value=${JSON.stringify(value)}; select.dispatchEvent(new Event("change",{bubbles:true})); })()`);
     await waitFor(() => cdp.eval(`Boolean(document.querySelector(".aif-summary")?.textContent?.includes(${JSON.stringify(value.toUpperCase())}))`), 15000);
+    const switched = await cdp.eval(`({menu:document.querySelector(".aif-profile-mode-controls")?.dataset.profileMode||"",overlay:document.querySelector(".aif-overlay")?.dataset.profileType||"",persisted:[...Object.keys(localStorage)].filter((key)=>key.startsWith("bt_aif_settings:")).map((key)=>JSON.parse(localStorage.getItem(key)||"{}").primaryProfile).includes(${JSON.stringify(value)})})`);
+    if (switched.menu !== value || switched.overlay !== value || !switched.persisted) throw new Error(`A.I.F. profile mode did not synchronize menu, overlay and persistence: ${JSON.stringify(switched)}`);
     await shot(`profile-${value}.png`);
   }
   await cdp.eval(`(() => { const group=[...document.querySelectorAll(".aif-settings-group")].find((node)=>node.querySelector("summary")?.textContent?.includes("SECONDARY PROFILE")); group.open=true; const label=[...group.querySelectorAll("label")].find((node)=>node.firstChild?.textContent?.trim()==="Secondary Profile"); const select=label?.querySelector("select"); if(!select) throw new Error("Secondary Profile control missing"); select.value="volume"; select.dispatchEvent(new Event("change",{bubbles:true})); })()`);

@@ -330,6 +330,9 @@ npm run perf:baseline
 npm run perf:stress
 npm run test:performance
 npm run perf:soak -- --hours=1
+npm run perf:dom-pro-smoke
+npm run perf:dom-pro-soak -- --minutes=30
+npm run perf:dom-pro-soak -- --hours=1
 npm run test:bybit-certification
 npm run test:venue-execution
 npm run certify:bybit-mainnet
@@ -365,3 +368,7 @@ Run `npm run test:aif` for profile mathematics, coverage, registry/readiness, no
 For the Chapter I-A camera contract, also run `npm run test:aif-visual`. The browser test vertically pans the chart, verifies exact profile displacement, and asserts that the analytical calculation timestamp remains unchanged. `npm run test:performance` and `npm run build` remain release gates.
 
 Chapter I-C adds structural-zone assertions to `npm run test:aif`: contiguous merging, weak-zone rejection, weighted/minimum centers, lifecycle interaction deduplication, projection caps, stable memory identity, settings migration, normalization and the frozen HDLX result. Run `npm run benchmark:aif`, `npm run test:aif-visual`, and `npm run build` before release. A fresh A.I.F.-active soak should accompany production certification when the soak harness gains an A.I.F. activation flag.
+
+# DOM Pro Performance Validation
+
+Use `perf:dom-pro-smoke` for the deterministic scenario matrix. Release evidence requires both the 30-minute and one-hour `perf:dom-pro-soak` runs. The harness activates DOM Pro and A.I.F., changes presets, opens settings, pans/zooms, mounts/unmounts and exercises visibility recovery without placing orders. `?domPerfTrace=1` enables bounded span and watchdog diagnostics.

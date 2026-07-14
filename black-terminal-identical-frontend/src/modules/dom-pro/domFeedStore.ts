@@ -2,6 +2,7 @@ import { blackCoreMarketDataEngine } from "../../market-data/engine/marketDataEn
 import type { MarketDataSubscription, MarketSymbol, OrderBookSnapshot, TickerSnapshot, TradeTick } from "../../market-data/types";
 import { blackCorePerformanceMonitor } from "../../performance/performanceMonitor";
 import { blackCoreResourceTracker } from "../../performance/resourceTracker";
+import { domPerformanceTrace } from "./domPerformanceTrace";
 
 export type DomFeedSnapshot = {
   marketSymbol: MarketSymbol;
@@ -100,7 +101,9 @@ export class DomFeedStore {
     const adapter = blackCoreMarketDataEngine.getAdapter(entry.snapshot.marketSymbol.exchange);
     if (!entry.bookSubscription && adapter.subscribeOrderBook) {
       entry.bookSubscription = adapter.subscribeOrderBook(entry.snapshot.marketSymbol, (book) => {
+        const startedAt = performance.now();
         entry.snapshot = { ...entry.snapshot, book, bookStatus: "LIVE BOOK", updatedAt: Date.now() };
+        domPerformanceTrace.record("feed.receive_book", performance.now() - startedAt, book.bids.length + book.asks.length, 1);
         this.notify(entry);
       });
       entry.bookSubscription.onError((error) => {
@@ -240,6 +243,7 @@ export class DomFeedStore {
   }
 
   private pushTrades(entry: FeedEntry, trades: TradeTick[], status: string) {
+    const startedAt = performance.now();
     const unseen = trades.filter((trade) => {
       if (entry.seenTrades.has(trade.tradeId)) return false;
       entry.seenTrades.add(trade.tradeId);
@@ -258,6 +262,7 @@ export class DomFeedStore {
       tradeStatus: status,
       updatedAt: Date.now()
     };
+    domPerformanceTrace.record("feed.receive_trades", performance.now() - startedAt, trades.length, unseen.length);
     this.notify(entry);
   }
 
@@ -285,7 +290,9 @@ export class DomFeedStore {
     entry.lastNotifiedAt = performance.now();
     entry.snapshot.subscriptionCount = entry.listeners.size;
     blackCorePerformanceMonitor.recordMetric("dom_feed.listeners", entry.listeners.size, "count", { feed: entry.key });
+    const startedAt = performance.now();
     for (const listener of entry.listeners) listener(entry.snapshot);
+    domPerformanceTrace.record("feed.snapshot_publish", performance.now() - startedAt, entry.listeners.size, 1);
   }
 
   private ensureVisibilityListener() {

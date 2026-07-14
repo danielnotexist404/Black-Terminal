@@ -1991,3 +1991,7 @@ No Supabase migration is required. This hotfix changes chart transforms, browser
 ## Phase IV Chapter I-C - A.I.F. Structural LVN Zones
 
 No Supabase migration is required. Structural zones, lifecycle events, settings schema v3, presets and bounded identity memory are calculated or persisted in the existing browser-worker/workspace layer. A future shared research-memory service requires a dedicated reviewed schema and RLS policy rather than writing research state into execution tables.
+
+## Phase III DOM Pro Final Performance Recovery
+
+No Supabase migration is required. The chapter changes browser rendering, worker transport, bounded runtime caches, scheduler behavior and local settings persistence only. Performance trace and watchdog data remain session/test diagnostics and are not written to Supabase.

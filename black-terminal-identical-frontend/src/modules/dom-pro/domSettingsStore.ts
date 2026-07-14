@@ -24,6 +24,7 @@ export function defaultDomSettings(workspaceId: string, symbolKey: string): DomS
     visibleRange: "2",
     customVisibleRangePct: 2,
     fpsCap: 12,
+    performanceMode: "balanced",
     showVolumeProfile: true,
     showHeatmap: true,
     showWallDetection: true,
@@ -35,7 +36,7 @@ export function defaultDomSettings(workspaceId: string, symbolKey: string): DomS
     colorIntensity: 82,
     liquidityThreshold: 2.8,
     maxVisibleBuckets: 180,
-    maxHeatmapHistory: 520,
+    maxHeatmapHistory: 160,
     heatmapHorizon: "24h",
     cvdHorizon: "4h",
     cvdSampleIntervalSec: 10,
@@ -77,7 +78,11 @@ export function readDomSettings(workspaceId: string, symbolKey: string): DomSett
 
 export function writeDomSettings(settings: DomSettings) {
   if (typeof localStorage === "undefined") return;
-  localStorage.setItem(domSettingsKey(settings.workspaceId, settings.symbolKey), JSON.stringify(settings));
+  try {
+    localStorage.setItem(domSettingsKey(settings.workspaceId, settings.symbolKey), JSON.stringify(settings));
+  } catch {
+    // Storage pressure must not interrupt a live DOM session.
+  }
 }
 
 export function updateModeSettings(settings: DomSettings, mode: DomMode): DomSettings {
@@ -100,7 +105,7 @@ export function updateModeSettings(settings: DomSettings, mode: DomMode): DomSet
     depthSmoothingLevels: nextMode === "scalper" ? 2 : nextMode === "macro" ? 8 : 4,
     depthCurvePower: nextMode === "scalper" ? 0.82 : nextMode === "macro" ? 0.62 : 0.72,
     maxVisibleBuckets: nextMode === "macro" ? 220 : nextMode === "institutional" ? 180 : nextMode === "intraday" ? 150 : 90,
-    maxHeatmapHistory: nextMode === "macro" ? 720 : nextMode === "institutional" ? 520 : nextMode === "intraday" ? 300 : 120,
+    maxHeatmapHistory: nextMode === "macro" ? 180 : nextMode === "institutional" ? 160 : nextMode === "intraday" ? 140 : 100,
     macroLookbackDays: nextMode === "macro" ? 720 : 365,
     persistenceSmoothing: nextMode === "scalper" ? 68 : nextMode === "macro" ? 94 : 88
   };

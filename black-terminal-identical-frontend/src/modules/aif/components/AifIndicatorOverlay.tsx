@@ -48,6 +48,7 @@ export function AifIndicatorOverlay({ active, settingsOpen, onCloseSettings, wor
     const client = clientRef.current ?? new AifWorkerClient();
     clientRef.current = client;
     setStage("NORMALIZING");
+    setError("");
     const calculationTimer = window.setTimeout(() => !cancelled && setStage("CALCULATING PROFILE"), 0);
     const extractTimer = window.setTimeout(() => !cancelled && setStage("EXTRACTING NODES"), 80);
     const timelineTimer = window.setTimeout(() => !cancelled && setStage("BUILDING TIMELINE"), 180);
@@ -65,6 +66,7 @@ export function AifIndicatorOverlay({ active, settingsOpen, onCloseSettings, wor
         });
         const memory = mergeAifResearchMemory(`${workspaceId}:${symbolKey}`, result.primaryNodes, reconciledEvents);
         setStage("READY");
+        setError("");
         setModel({ ...result, primaryNodes: memory.nodes.filter((node) => node.profileType === result.profileHistogram.profileType), lvnZones: reconciledZones, projectedLvns: reconciledZones.filter((zone) => result.projectedLvns.some((projected) => lvnOverlap(zone.low, zone.high, projected.low, projected.high) >= 0.35)), timelineEvents: memory.events });
       })
       .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); })
@@ -120,7 +122,7 @@ export function AifIndicatorOverlay({ active, settingsOpen, onCloseSettings, wor
   const chobEvents = model?.timelineEvents.filter((event) => event.price != null && (event.type === "chob-candidate" || event.type === "chob-confirmed")).slice(-6) ?? [];
   if (!active && !settingsOpen) return null;
   return <>
-    {active && <div className="aif-overlay" data-testid="aif-overlay" data-transform-revision={priceTransform?.revision ?? 0} data-calculated-at={model?.provenance.calculatedAt ?? 0} style={overlayStyle}>
+    {active && <div className="aif-overlay" data-testid="aif-overlay" data-profile-type={model?.profileHistogram.profileType ?? settings.primaryProfile} data-transform-revision={priceTransform?.revision ?? 0} data-calculated-at={model?.provenance.calculatedAt ?? 0} style={overlayStyle}>
       {!model && <div className="aif-progress"><b>{error ? "A.I.F. UNAVAILABLE" : stage === "LOADING HISTORY" ? "LOADING LONG HORIZON AUCTION..." : stage}</b><span>{error || `${loaded.toLocaleString()} / ${settings.lookbackBars.toLocaleString()} BARS`}</span></div>}
       {model && geometry && priceTransform && <>
         {(settings.profilePlacement === "right" || settings.profilePlacement === "overlay" || settings.profilePlacement === "both") && <div className="aif-profile aif-profile-right" aria-label="A.I.F. primary profile">{geometry.primaryRows.map((row) => <div key={row.index} data-row-index={row.index} className={row.valueArea && settings.showValueArea ? "value-area" : ""} style={{ top: row.top, height: row.height, width: `${row.width}%`, opacity: settings.opacity / 100 * (row.valueArea && settings.showValueArea ? settings.valueAreaOpacity / 100 : 1) }} />)}</div>}

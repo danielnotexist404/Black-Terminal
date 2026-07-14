@@ -3,6 +3,9 @@ import { TypedEventBus } from "../src/core/events/eventBus.ts";
 import { ServiceRegistry } from "../src/core/services/serviceRegistry.ts";
 import { MarketCache } from "../src/market-data/cache/marketCache.ts";
 import { blackCoreResourceTracker } from "../src/performance/resourceTracker.ts";
+import { DomAggregationEngine } from "../src/modules/dom-pro/domAggregationEngine.ts";
+import { defaultDomSettings } from "../src/modules/dom-pro/domSettingsStore.ts";
+import { readFileSync } from "node:fs";
 
 const tests = [];
 const test = (name, run) => tests.push({ name, run });
@@ -53,6 +56,28 @@ test("resource releases are idempotent and return to baseline", () => {
   release();
   release();
   assert.equal(blackCoreResourceTracker.snapshot().totalActive, before);
+});
+
+test("DOM aggregation uses bounded CVD buckets and bounded heatmap history", () => {
+  const engine = new DomAggregationEngine();
+  const marketSymbol = { exchange: "bybit", rawSymbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", marketKind: "perpetual" };
+  const settings = { ...defaultDomSettings("test", "bybit:perpetual:BTCUSDT"), cvdSampleIntervalSec: 10, maxHeatmapHistory: 32 };
+  const book = {
+    exchange: "bybit", symbol: "BTCUSDT", time: Date.now() / 1000,
+    bids: Array.from({ length: 80 }, (_, index) => ({ price: 100 - index * .1, quantity: index + 1 })),
+    asks: Array.from({ length: 80 }, (_, index) => ({ price: 100.1 + index * .1, quantity: index + 1 }))
+  };
+  const trades = Array.from({ length: 200 }, (_, index) => ({ exchange: "bybit", symbol: "BTCUSDT", tradeId: `t${index}`, price: 100, quantity: 1, side: index % 2 ? "sell" : "buy", time: index }));
+  const snapshot = engine.aggregate({ marketSymbol, book, ticker: null, trades, settings, subscriptionCount: 1 });
+  assert.ok(snapshot.cvdSeries.length <= 21, `expected time-bucketed CVD, received ${snapshot.cvdSeries.length}`);
+  assert.ok(snapshot.heatmap.length <= 32);
+  assert.ok(snapshot.trace?.aggregate_total.durationMs >= 0);
+});
+
+test("DOM heatmap hot path does not create per-cell React elements", () => {
+  const source = readFileSync(new URL("../src/modules/dom-pro/components/DomProWindow.tsx", import.meta.url), "utf8");
+  assert.equal(source.includes('className={`dom-pro-heatmap-cell'), false);
+  assert.ok(source.includes("<DomHeatmapCanvas"));
 });
 
 for (const item of tests) {

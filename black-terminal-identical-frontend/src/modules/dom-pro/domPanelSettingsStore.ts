@@ -134,7 +134,12 @@ export function readDomPanelRegistry(workspaceId: string, symbolKey: string, sto
 }
 
 export function writeDomPanelRegistry(registry: DomPanelSettingsRegistry, storage = browserStorage()) {
-  storage?.setItem(domPanelSettingsKey(registry.workspaceId, registry.symbolKey), JSON.stringify(registry));
+  if (!storage) return;
+  try {
+    storage.setItem(domPanelSettingsKey(registry.workspaceId, registry.symbolKey), JSON.stringify(registry));
+  } catch {
+    // Settings persistence must never interrupt the live rendering or execution surfaces.
+  }
 }
 
 export function migrateDomPanelRegistry(input: unknown, workspaceId: string, symbolKey: string): DomPanelSettingsRegistry {

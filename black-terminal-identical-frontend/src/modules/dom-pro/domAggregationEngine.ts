@@ -66,8 +66,11 @@ export class DomAggregationEngine {
   private cvdTradeIds = new Set<string>();
   private updateTimes: number[] = [];
   private lastHeatmapFrameAt = 0;
+  private cvdTradeIdQueue: string[] = [];
 
   aggregate(input: DomAggregationInput): AggregatedDomSnapshot {
+    const aggregateStartedAt = performanceNow();
+    const trace: NonNullable<AggregatedDomSnapshot["trace"]> = {};
     const now = Date.now();
     this.updateTimes.push(now);
     this.updateTimes = this.updateTimes.filter((time) => now - time < 1000);
@@ -82,18 +85,30 @@ export class DomAggregationEngine {
     const lastPrice = input.ticker?.lastPrice ?? midPrice;
     const tickSize = inferTickSize(input.book, input.marketSymbol);
     const bucketSize = resolveBucketSize(input.settings, tickSize);
+    let stageStartedAt = performanceNow();
     const buckets = buildBuckets(input.book, bucketSize, lastPrice ?? midPrice ?? bestBid ?? bestAsk ?? 0, input.settings);
     const rawWallBuckets = buildRawWallBuckets(input.book, bucketSize, lastPrice ?? midPrice ?? bestBid ?? bestAsk ?? 0, input.settings);
     const heatmapBuckets = mergeHeatmapBuckets(buckets, rawWallBuckets);
+    trace["bucket_aggregation"] = traceSpan(stageStartedAt, input.book.bids.length + input.book.asks.length, buckets.length);
+    stageStartedAt = performanceNow();
     const deltas = this.detectLiquidityDelta(buckets);
     const profile = buildVolumeProfile(buckets);
+    trace["profile_and_delta"] = traceSpan(stageStartedAt, buckets.length, deltas.length + profile.length);
+    stageStartedAt = performanceNow();
     const walls = this.detectWalls(rawWallBuckets.length ? rawWallBuckets : buckets, input.settings, lastPrice ?? midPrice ?? 0, now);
     const liquidityMigration = this.detectLiquidityMigration(walls, now);
+    trace["wall_calculation"] = traceSpan(stageStartedAt, rawWallBuckets.length || buckets.length, walls.length);
+    stageStartedAt = performanceNow();
     const heatmap = this.pushHeatmapFrame(heatmapBuckets, input.settings, now);
-    this.updateCvd(input.trades);
+    trace["heatmap_shaping"] = traceSpan(stageStartedAt, heatmapBuckets.length, heatmap.at(-1)?.cells.length ?? 0);
+    stageStartedAt = performanceNow();
+    this.updateCvd(input.trades, input.settings);
+    trace["cvd_calculation"] = traceSpan(stageStartedAt, input.trades.length, this.cvdSeries.length);
+    stageStartedAt = performanceNow();
     const absorption = detectAbsorption(input.trades, buckets, deltas, lastPrice ?? midPrice ?? 0);
     const iceberg = detectIceberg(input.trades, buckets, deltas, lastPrice ?? midPrice ?? 0);
     const metrics = buildMetrics(buckets, deltas, input.trades, this.updateTimes.length, input.book.time);
+    trace["derived_metrics"] = traceSpan(stageStartedAt, buckets.length + input.trades.length, 1);
 
     this.previousBuckets = new Map(buckets.map((bucket) => [bucketKey(bucket), bucket]));
 
@@ -132,7 +147,8 @@ export class DomAggregationEngine {
       spread: bestBid && bestAsk ? bestAsk - bestBid : null,
       status: input.book.time ? "live" : "rest",
       statusMessage: "LIVE ORDERBOOK STREAM",
-      generatedAt: now
+      generatedAt: now,
+      trace: { ...trace, aggregate_total: traceSpan(aggregateStartedAt, input.book.bids.length + input.book.asks.length + input.trades.length, buckets.length + walls.length + profile.length) }
     };
   }
 
@@ -140,20 +156,23 @@ export class DomAggregationEngine {
     return this.cvdSeries.slice(-1200);
   }
 
-  private updateCvd(trades: TradeTick[]) {
-    const ordered = trades.slice().sort((a, b) => a.time - b.time);
-    for (const trade of ordered) {
+  private updateCvd(trades: TradeTick[], settings: DomSettings) {
+    const ascending = (trades[0]?.time ?? 0) <= (trades.at(-1)?.time ?? 0);
+    const bucketSeconds = Math.max(1, settings.cvdSampleIntervalSec);
+    for (let offset = 0; offset < trades.length; offset += 1) {
+      const trade = trades[ascending ? offset : trades.length - 1 - offset];
       if (this.cvdTradeIds.has(trade.tradeId)) continue;
       this.cvdTradeIds.add(trade.tradeId);
-      if (this.cvdTradeIds.size > 3000) {
-        const keep = new Set(trades.slice(0, 1200).map((item) => item.tradeId));
-        this.cvdTradeIds = keep;
-      }
+      this.cvdTradeIdQueue.push(trade.tradeId);
+      while (this.cvdTradeIdQueue.length > 3000) this.cvdTradeIds.delete(this.cvdTradeIdQueue.shift()!);
       if (trade.side === "buy") this.cvd += trade.quantity;
       if (trade.side === "sell") this.cvd -= trade.quantity;
-      this.cvdSeries.push({ time: trade.time, value: this.cvd });
+      const bucketTime = Math.floor(trade.time / bucketSeconds) * bucketSeconds;
+      const latest = this.cvdSeries.at(-1);
+      if (latest?.time === bucketTime) latest.value = this.cvd;
+      else this.cvdSeries.push({ time: bucketTime, value: this.cvd });
     }
-    this.cvdSeries = this.cvdSeries.slice(-2400);
+    if (this.cvdSeries.length > 2400) this.cvdSeries.splice(0, this.cvdSeries.length - 2400);
   }
 
   private emptySnapshot(
@@ -367,6 +386,14 @@ export class DomAggregationEngine {
     this.heatmap = this.heatmap.slice(-Math.min(180, settings.maxHeatmapHistory));
     return this.heatmap;
   }
+}
+
+function performanceNow() {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
+}
+
+function traceSpan(startedAt: number, inputSize: number, outputSize: number) {
+  return { durationMs: performanceNow() - startedAt, inputSize, outputSize };
 }
 
 function buildBuckets(book: OrderBookSnapshot, bucketSize: number, price: number, settings: DomSettings): DomBucket[] {

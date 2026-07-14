@@ -1,5 +1,6 @@
 import type { AifCalculationRequest, AifRenderModel } from "../core/aifTypes";
 import { AifBoundedCache } from "../state/aifCache";
+import { domInteractionCoordinator } from "../../dom-pro/domInteractionCoordinator";
 
 type Pending = { generation: number; sourceVersion: string; resolve: (result: AifRenderModel | null) => void; reject: (error: Error) => void };
 
@@ -10,7 +11,12 @@ export class AifWorkerClient {
   private pending = new Map<number, Pending>();
   private cache = new AifBoundedCache<AifRenderModel>(8);
 
-  calculate(input: Omit<AifCalculationRequest, "id" | "generation">) {
+  async calculate(input: Omit<AifCalculationRequest, "id" | "generation">) {
+    if (domInteractionCoordinator.isActive()) await waitForDomInteraction();
+    return this.calculateNow(input);
+  }
+
+  private calculateNow(input: Omit<AifCalculationRequest, "id" | "generation">) {
     const key = cacheKey(input);
     const cached = this.cache.get(key);
     if (cached) return Promise.resolve({ ...cached, cacheState: "hit" } as AifRenderModel);
@@ -57,6 +63,13 @@ export class AifWorkerClient {
       this.worker = null;
     };
     return this.worker;
+  }
+}
+
+async function waitForDomInteraction() {
+  const startedAt = Date.now();
+  while (domInteractionCoordinator.isActive() && Date.now() - startedAt < 1200) {
+    await new Promise((resolve) => window.setTimeout(resolve, 80));
   }
 }
 

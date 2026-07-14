@@ -1,4 +1,5 @@
 import type { AifAuctionNode, AifLvnZone, AifTimelineEvent } from "../core/aifTypes";
+import { writeAifResearchStorage } from "../state/aifStorage.ts";
 
 type AifResearchMemory = { version: 1; nodes: AifAuctionNode[]; events: AifTimelineEvent[]; updatedAt: number };
 
@@ -55,8 +56,7 @@ function zoneOverlap(left: AifLvnZone, right: AifLvnZone) { const overlap = Math
 function normalizedCenterDistance(left: AifLvnZone, right: AifLvnZone) { return Math.abs(left.center - right.center) / Math.max(left.widthAbsolute, right.widthAbsolute, 1e-12); }
 
 function persistWithFallback<T>(storage: Pick<Storage, "setItem">, key: string, value: T, fallback: T) {
-  try { storage.setItem(key, JSON.stringify(value)); return; } catch { /* Retry with a compact snapshot. */ }
-  try { storage.setItem(key, JSON.stringify(fallback)); } catch { /* Research persistence is optional; live calculation is not. */ }
+  writeAifResearchStorage(key, JSON.stringify(value), JSON.stringify(fallback), storage);
 }
 
 export function readAifResearchMemory(key: string, storage: Pick<Storage, "getItem"> = localStorage): AifResearchMemory {

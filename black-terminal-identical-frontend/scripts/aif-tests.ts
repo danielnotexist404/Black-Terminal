@@ -4,6 +4,7 @@ import type { MarketSymbol } from "../src/market-data/types.ts";
 import { normalizeAifCandles } from "../src/modules/aif/core/aifDataNormalizer.ts";
 import { createAuctionDomain, bucketIndexForPrice } from "../src/modules/aif/core/aifAuctionDomain.ts";
 import { AIF_SETTINGS_PRESETS, defaultAifSettings, migrateAifSettings } from "../src/modules/aif/state/aifStore.ts";
+import { writeAifSettingsStorage } from "../src/modules/aif/state/aifStorage.ts";
 import type { AifLvnZone } from "../src/modules/aif/core/aifTypes.ts";
 import { calculateAifProfile, pressureShare } from "../src/modules/aif/profiles/profileCalculators.ts";
 import { calculateAif } from "../src/modules/aif/core/aifEngine.ts";
@@ -26,6 +27,16 @@ class MemoryStorage {
 }
 class QuotaStorage extends MemoryStorage {
   override setItem(_key: string, _value: string) { throw new DOMException("quota", "QuotaExceededError"); }
+}
+class RecoveringQuotaStorage extends MemoryStorage {
+  length = 1;
+  key(index: number) { return index === 0 ? "bt_aif_zone_memory:old" : null; }
+  removeItem(key: string) { if (key === "bt_aif_zone_memory:old") this.length = 0; }
+  clear() { this.length = 0; }
+  override setItem(key: string, value: string) {
+    if (this.length > 0) throw new DOMException("quota", "QuotaExceededError");
+    super.setItem(key, value);
+  }
 }
 
 const symbol: MarketSymbol = { exchange: "bybit", rawSymbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", marketKind: "perpetual" };
@@ -97,6 +108,9 @@ const memoryStorage = new MemoryStorage();
 const memory = mergeAifResearchMemory("fixture", comparison.primaryNodes.slice(0, 2), comparison.timelineEvents, memoryStorage);
 assert.ok(memory.nodes.length <= 300 && memory.events.length <= 500, "research memory remains bounded");
 assert.doesNotThrow(() => mergeAifResearchMemory("quota", comparison.primaryNodes, comparison.timelineEvents, new QuotaStorage()), "storage quota cannot disable A.I.F. calculation");
+const recoveringStorage = new RecoveringQuotaStorage();
+assert.equal(writeAifSettingsStorage("bt_aif_settings:desk:bybit", JSON.stringify({ primaryProfile: "delta" }), recoveringStorage as unknown as Storage), true, "settings persistence prunes disposable A.I.F. research memory and retries after quota pressure");
+assert.match(recoveringStorage.getItem("bt_aif_settings:desk:bybit") ?? "", /delta/, "the selected profile survives quota recovery");
 
 const linearTransform: ChartPriceTransformSnapshot = {
   revision: 1, width: 1200, height: 700, plotLeft: 0, plotRight: 1112, plotTop: 38, plotBottom: 642,

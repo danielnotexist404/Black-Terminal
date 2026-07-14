@@ -1,4 +1,5 @@
 import type { AifSettings } from "../core/aifTypes";
+import { readAifStorage, writeAifSettingsStorage } from "./aifStorage.ts";
 
 export const AIF_SETTINGS_VERSION = 4;
 
@@ -107,7 +108,7 @@ export function readAifSettings(workspaceId: string, symbolKey: string): AifSett
   const fallback = defaultAifSettings();
   if (typeof localStorage === "undefined") return fallback;
   try {
-    const raw = localStorage.getItem(aifSettingsKey(workspaceId, symbolKey));
+    const raw = readAifStorage(aifSettingsKey(workspaceId, symbolKey));
     if (!raw) return fallback;
     return migrateAifSettings(JSON.parse(raw));
   } catch {
@@ -117,7 +118,7 @@ export function readAifSettings(workspaceId: string, symbolKey: string): AifSett
 
 export function writeAifSettings(workspaceId: string, symbolKey: string, settings: AifSettings) {
   if (typeof localStorage === "undefined") return;
-  try { localStorage.setItem(aifSettingsKey(workspaceId, symbolKey), JSON.stringify(settings)); } catch { /* Storage pressure must never disable calculation or in-memory settings. */ }
+  writeAifSettingsStorage(aifSettingsKey(workspaceId, symbolKey), JSON.stringify(settings));
 }
 
 export function migrateAifSettings(input: unknown): AifSettings {

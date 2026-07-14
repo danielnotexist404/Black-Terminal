@@ -326,3 +326,9 @@ A.I.F. is a separate native chart module under `src/modules/aif`. It does not mu
 A.I.F. market coordinates are rendered exclusively through `BlackChartEngine.priceToScreenY`. The engine emits one versioned price-transform snapshot from its existing draw cycle; React projects and clips cached profile geometry without recalculating the worker model. Automatic initialization anchors to the latest completed candle and pages up to the persisted 20,000-bar factory horizon. See `PHASE4_CHAPTER1A_AIF_PRICE_SYNCHRONIZATION.md`.
 
 Chapter I-C adds the neutral `profile-core/structuralZones` numerical layer. Profile rows flow through bounded structural extraction, A.I.F.-owned stability/lifecycle/ranking, browser-local identity reconciliation, immutable render-model zones, and chart-native strip projection. Detection and projection are deliberately separate. HDLX remains an independent frozen consumer of its original `VolumeProfileModel`; no A.I.F. state or behavior is imported into it. See `PHASE4_CHAPTER1C_AIF_STRUCTURAL_LVN_ZONES.md`.
+
+## DOM Pro Final Performance Recovery
+
+DOM Pro retains one `DomFeedStore` source per market key and one latest-wins aggregation worker. Depth is transferred into the worker as typed buffers; worker responses contain derived state and one changed heatmap column, not mirrored source books or full historical matrices. The main thread owns a bounded heatmap ring.
+
+Heatmap rendering is one canvas surface registered with the shared dirty visual scheduler. There are no per-cell React or Pixi objects. Panel calculations use clamped independent cadences, offscreen panels suspend, hidden tabs stop visual aggregation, and A.I.F. yields to active DOM camera interaction. Execution and account streams remain outside this adaptive visual path. See `DOM_PRO_RENDER_PIPELINE.md` and `DOM_PRO_WORKER_BACKPRESSURE.md`.

@@ -1,0 +1,4285 @@
+{
+  "generatedAt": "2026-07-14T05:15:42.652Z",
+  "mode": "recovery-validation",
+  "requestedDurationMs": 12000,
+  "actualDurationMs": 12451,
+  "sampleCount": 13,
+  "p95FrameMs": 48.70000000000073,
+  "p99FrameMs": 83.30000000000109,
+  "longestTaskMs": 63,
+  "heapGrowthMb": 25.06883716583252,
+  "domGrowth": 142,
+  "resourceGrowth": {
+    "workers": 0,
+    "websockets": 0,
+    "listeners": 0,
+    "timers": 0
+  },
+  "workerQueuePeak": 1,
+  "peakHeatmapDomCells": 0,
+  "messagesPerSecondPeak": 11,
+  "scenarios": {
+    "B_CHART_DOM": {
+      "samples": 2,
+      "frameP95Ms": 48.600000000000364,
+      "maxLongTaskMs": 63
+    },
+    "D_MACRO_3D": {
+      "samples": 2,
+      "frameP95Ms": 48.600000000000364,
+      "maxLongTaskMs": 63
+    },
+    "E_PRESET_SWITCH": {
+      "samples": 2,
+      "frameP95Ms": 48.69999999999982,
+      "maxLongTaskMs": 63
+    },
+    "F_SETTINGS": {
+      "samples": 2,
+      "frameP95Ms": 48.70000000000073,
+      "maxLongTaskMs": 63
+    },
+    "G_PAN_ZOOM": {
+      "samples": 2,
+      "frameP95Ms": 48.70000000000073,
+      "maxLongTaskMs": 63
+    },
+    "H_MOUNT_UNMOUNT": {
+      "samples": 1,
+      "frameP95Ms": 48.600000000000364,
+      "maxLongTaskMs": 63
+    },
+    "C_AIF_DOM": {
+      "samples": 1,
+      "frameP95Ms": 48.600000000000364,
+      "maxLongTaskMs": 63
+    },
+    "VISIBILITY_RECOVERY": {
+      "samples": 1,
+      "frameP95Ms": 48.600000000000364,
+      "maxLongTaskMs": 63
+    }
+  },
+  "checks": {
+    "samplesCollected": true,
+    "cockpitStayedReady": true,
+    "aifExercised": true,
+    "heapBounded": true,
+    "domBounded": true,
+    "heatmapHistoryBounded": true,
+    "noPerCellReactNodes": true,
+    "workerQueueBounded": true,
+    "workersBounded": true,
+    "websocketsBounded": true,
+    "listenersBounded": true,
+    "timersBounded": true,
+    "frameP95Bounded": true,
+    "noMultiSecondLock": true
+  },
+  "pass": true,
+  "retainedSampleCount": 13,
+  "samples": [
+    {
+      "time": "2026-07-14T05:15:31.070Z",
+      "index": 1,
+      "scenario": "B_CHART_DOM",
+      "heapUsedMb": 14.955770492553711,
+      "domNodes": 1734,
+      "heatmapCells": 0,
+      "heatmapFrames": 5,
+      "canvasCount": 2,
+      "workerCount": 1,
+      "websocketCount": 0,
+      "listenerCount": 2,
+      "timerCount": 2,
+      "workerQueue": 0,
+      "cockpit": true,
+      "aifActive": false,
+      "telemetry": {
+        "fps": 78.97793263646922,
+        "averageFrameMs": 12.661764705882353,
+        "p95FrameMs": 41.59999999999991,
+        "p99FrameMs": 118,
+        "longestTaskMs": 0,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-text": 34,
+            "worker-queue": 0,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11
+          },
+          "created": {
+            "animation-frame": 12,
+            "timeout": 2
+          },
+          "highWater": {
+            "animation-frame": 2,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 1,
+            "pixi-text": 34,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "dom-pro-live-aggregation": 1,
+            "pixi-chart:idzhbv8wp2m:resize": 1,
+            "pixi-chart:idzhbv8wp2m:visibility": 1,
+            "pixi-chart:idzhbv8wp2m": 60
+          },
+          "totalActive": 67
+        }
+      },
+      "trace": {
+        "startedAt": 1784006130200,
+        "generatedAt": 1784006131067,
+        "spans": {
+          "react.dom_pro_commit": {
+            "calls": 20,
+            "callsPerSecond": 0.3333333333333333,
+            "averageMs": 23.084999999403955,
+            "p95Ms": 64.79999999701977,
+            "p99Ms": 70.19999999552965,
+            "maxMs": 70.19999999552965,
+            "averageInputSize": 11,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate": {
+            "calls": 8,
+            "callsPerSecond": 0.13333333333333333,
+            "averageMs": 1.7375000016763806,
+            "p95Ms": 3.899999998509884,
+            "p99Ms": 3.899999998509884,
+            "maxMs": 3.899999998509884,
+            "averageInputSize": 2100,
+            "averageOutputSize": 27
+          },
+          "worker.transfer_roundtrip": {
+            "calls": 8,
+            "callsPerSecond": 0.13333333333333333,
+            "averageMs": 3.687499998137355,
+            "p95Ms": 14.600000001490116,
+            "p99Ms": 14.600000001490116,
+            "maxMs": 14.600000001490116,
+            "averageInputSize": 32000,
+            "averageOutputSize": 27
+          },
+          "worker.bucket_aggregation": {
+            "calls": 8,
+            "callsPerSecond": 0.13333333333333333,
+            "averageMs": 1.3875000001862645,
+            "p95Ms": 3.100000001490116,
+            "p99Ms": 3.100000001490116,
+            "maxMs": 3.100000001490116,
+            "averageInputSize": 2000,
+            "averageOutputSize": 6.5
+          },
+          "worker.profile_and_delta": {
+            "calls": 8,
+            "callsPerSecond": 0.13333333333333333,
+            "averageMs": 0.037500000558793545,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 6.5,
+            "averageOutputSize": 13
+          },
+          "worker.wall_calculation": {
+            "calls": 8,
+            "callsPerSecond": 0.13333333333333333,
+            "averageMs": 0.0625,
+            "p95Ms": 0.19999999552965164,
+            "p99Ms": 0.19999999552965164,
+            "maxMs": 0.19999999552965164,
+            "averageInputSize": 88,
+            "averageOutputSize": 5
+          },
+          "worker.heatmap_shaping": {
+            "calls": 8,
+            "callsPerSecond": 0.13333333333333333,
+            "averageMs": 0.0625,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 94.5,
+            "averageOutputSize": 14.5
+          },
+          "worker.cvd_calculation": {
+            "calls": 8,
+            "callsPerSecond": 0.13333333333333333,
+            "averageMs": 0.05000000074505806,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 100,
+            "averageOutputSize": 1
+          },
+          "worker.derived_metrics": {
+            "calls": 8,
+            "callsPerSecond": 0.13333333333333333,
+            "averageMs": 0.08749999944120646,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 106.5,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate_total": {
+            "calls": 8,
+            "callsPerSecond": 0.13333333333333333,
+            "averageMs": 1.7250000014901161,
+            "p95Ms": 3.899999998509884,
+            "p99Ms": 3.899999998509884,
+            "maxMs": 3.899999998509884,
+            "averageInputSize": 2100,
+            "averageOutputSize": 18
+          },
+          "panel.volume_profile": {
+            "calls": 11,
+            "callsPerSecond": 0.18333333333333332,
+            "averageMs": 0.18181818181818182,
+            "p95Ms": 0.30000000447034836,
+            "p99Ms": 0.30000000447034836,
+            "maxMs": 0.30000000447034836,
+            "averageInputSize": 368.8181818181818,
+            "averageOutputSize": 129
+          },
+          "canvas.master_frame": {
+            "calls": 12,
+            "callsPerSecond": 0.2,
+            "averageMs": 1.408333333209157,
+            "p95Ms": 8.399999998509884,
+            "p99Ms": 8.399999998509884,
+            "maxMs": 8.399999998509884,
+            "averageInputSize": 1.0833333333333333,
+            "averageOutputSize": 1.0833333333333333
+          },
+          "panel.snapshot_commit": {
+            "calls": 7,
+            "callsPerSecond": 0.11666666666666667,
+            "averageMs": 1.485714285501412,
+            "p95Ms": 2.899999998509884,
+            "p99Ms": 2.899999998509884,
+            "maxMs": 2.899999998509884,
+            "averageInputSize": 1.4285714285714286,
+            "averageOutputSize": 1.4285714285714286
+          },
+          "canvas.heatmap_draw": {
+            "calls": 11,
+            "callsPerSecond": 0.18333333333333332,
+            "averageMs": 1.4818181815472515,
+            "p95Ms": 8.399999998509884,
+            "p99Ms": 8.399999998509884,
+            "maxMs": 8.399999998509884,
+            "averageInputSize": 46.90909090909091,
+            "averageOutputSize": 32.90909090909091
+          },
+          "feed.receive_book": {
+            "calls": 8,
+            "callsPerSecond": 0.13333333333333333,
+            "averageMs": 0,
+            "p95Ms": 0,
+            "p99Ms": 0,
+            "maxMs": 0,
+            "averageInputSize": 2000,
+            "averageOutputSize": 1
+          },
+          "feed.snapshot_publish": {
+            "calls": 8,
+            "callsPerSecond": 0.13333333333333333,
+            "averageMs": 0.01249999925494194,
+            "p95Ms": 0.09999999403953552,
+            "p99Ms": 0.09999999403953552,
+            "maxMs": 0.09999999403953552,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.trade_tape": {
+            "calls": 2,
+            "callsPerSecond": 0.03333333333333333,
+            "averageMs": 0.15000000223517418,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 100,
+            "averageOutputSize": 22
+          },
+          "panel.metric_stabilization": {
+            "calls": 1,
+            "callsPerSecond": 0.016666666666666666,
+            "averageMs": 0.5,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_smoothing": {
+            "calls": 1,
+            "callsPerSecond": 0.016666666666666666,
+            "averageMs": 0.3999999985098839,
+            "p95Ms": 0.3999999985098839,
+            "p99Ms": 0.3999999985098839,
+            "maxMs": 0.3999999985098839,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_candles": {
+            "calls": 1,
+            "callsPerSecond": 0.016666666666666666,
+            "averageMs": 0.5,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 101,
+            "averageOutputSize": 25
+          },
+          "panel.flow_delta": {
+            "calls": 1,
+            "callsPerSecond": 0.016666666666666666,
+            "averageMs": 0,
+            "p95Ms": 0,
+            "p99Ms": 0,
+            "maxMs": 0,
+            "averageInputSize": 2,
+            "averageOutputSize": 2
+          }
+        },
+        "counters": {
+          "react.dom_pro_renders": 20,
+          "worker.submitted": 17,
+          "worker.processed": 15,
+          "worker.coalesced": 0,
+          "worker.dropped": 0,
+          "worker.stale": 2,
+          "worker.queue_peak": 1,
+          "worker.transfer_input_units": 31300,
+          "worker.transfer_output_units": 377,
+          "worker.transfer_input_bytes": 480000,
+          "canvas.heatmap_draw_calls": 362
+        }
+      }
+    },
+    {
+      "time": "2026-07-14T05:15:31.980Z",
+      "index": 2,
+      "scenario": "D_MACRO_3D",
+      "heapUsedMb": 31.564252853393555,
+      "domNodes": 1853,
+      "heatmapCells": 0,
+      "heatmapFrames": 7,
+      "canvasCount": 2,
+      "workerCount": 1,
+      "websocketCount": 0,
+      "listenerCount": 2,
+      "timerCount": 2,
+      "workerQueue": 0,
+      "cockpit": true,
+      "aifActive": false,
+      "telemetry": {
+        "fps": 77.93087869889315,
+        "averageFrameMs": 12.831884057971015,
+        "p95FrameMs": 41.600000000000364,
+        "p99FrameMs": 118,
+        "longestTaskMs": 0,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 2,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-text": 34,
+            "worker-queue": 0,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11
+          },
+          "created": {
+            "animation-frame": 23,
+            "timeout": 4
+          },
+          "highWater": {
+            "animation-frame": 2,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 1,
+            "pixi-text": 34,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "dom-pro-live-aggregation": 1,
+            "pixi-chart:idzhbv8wp2m:resize": 1,
+            "pixi-chart:idzhbv8wp2m:visibility": 1,
+            "dom-pro-master-visual": 1,
+            "pixi-chart:idzhbv8wp2m": 60
+          },
+          "totalActive": 68
+        }
+      },
+      "trace": {
+        "startedAt": 1784006130200,
+        "generatedAt": 1784006131977,
+        "spans": {
+          "react.dom_pro_commit": {
+            "calls": 40,
+            "callsPerSecond": 0.6666666666666666,
+            "averageMs": 24.08249999973923,
+            "p95Ms": 58.70000000298023,
+            "p99Ms": 70.19999999552965,
+            "maxMs": 70.19999999552965,
+            "averageInputSize": 11,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate": {
+            "calls": 14,
+            "callsPerSecond": 0.23333333333333334,
+            "averageMs": 1.7500000005321843,
+            "p95Ms": 3.899999998509884,
+            "p99Ms": 3.899999998509884,
+            "maxMs": 3.899999998509884,
+            "averageInputSize": 2100,
+            "averageOutputSize": 26.857142857142858
+          },
+          "worker.transfer_roundtrip": {
+            "calls": 14,
+            "callsPerSecond": 0.23333333333333334,
+            "averageMs": 5.892857142857143,
+            "p95Ms": 27.80000000447035,
+            "p99Ms": 27.80000000447035,
+            "maxMs": 27.80000000447035,
+            "averageInputSize": 32000,
+            "averageOutputSize": 26.857142857142858
+          },
+          "worker.bucket_aggregation": {
+            "calls": 14,
+            "callsPerSecond": 0.23333333333333334,
+            "averageMs": 1.4285714280392443,
+            "p95Ms": 3.100000001490116,
+            "p99Ms": 3.100000001490116,
+            "maxMs": 3.100000001490116,
+            "averageInputSize": 2000,
+            "averageOutputSize": 5.357142857142857
+          },
+          "worker.profile_and_delta": {
+            "calls": 14,
+            "callsPerSecond": 0.23333333333333334,
+            "averageMs": 0.021428571747882024,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 5.357142857142857,
+            "averageOutputSize": 10.714285714285714
+          },
+          "worker.wall_calculation": {
+            "calls": 14,
+            "callsPerSecond": 0.23333333333333334,
+            "averageMs": 0.05000000021287373,
+            "p95Ms": 0.19999999552965164,
+            "p99Ms": 0.19999999552965164,
+            "maxMs": 0.19999999552965164,
+            "averageInputSize": 88,
+            "averageOutputSize": 5
+          },
+          "worker.heatmap_shaping": {
+            "calls": 14,
+            "callsPerSecond": 0.23333333333333334,
+            "averageMs": 0.06428571471146174,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 93.35714285714286,
+            "averageOutputSize": 15.5
+          },
+          "worker.cvd_calculation": {
+            "calls": 14,
+            "callsPerSecond": 0.23333333333333334,
+            "averageMs": 0.04285714349576405,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 100,
+            "averageOutputSize": 1
+          },
+          "worker.derived_metrics": {
+            "calls": 14,
+            "callsPerSecond": 0.23333333333333334,
+            "averageMs": 0.08571428539497512,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 105.35714285714286,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate_total": {
+            "calls": 14,
+            "callsPerSecond": 0.23333333333333334,
+            "averageMs": 1.7428571432828903,
+            "p95Ms": 3.899999998509884,
+            "p99Ms": 3.899999998509884,
+            "maxMs": 3.899999998509884,
+            "averageInputSize": 2100,
+            "averageOutputSize": 15.714285714285714
+          },
+          "panel.volume_profile": {
+            "calls": 22,
+            "callsPerSecond": 0.36666666666666664,
+            "averageMs": 0.32727272740819235,
+            "p95Ms": 0.6000000014901161,
+            "p99Ms": 2.2999999970197678,
+            "maxMs": 2.2999999970197678,
+            "averageInputSize": 451.04545454545456,
+            "averageOutputSize": 129
+          },
+          "canvas.master_frame": {
+            "calls": 22,
+            "callsPerSecond": 0.36666666666666664,
+            "averageMs": 1.8227272731336681,
+            "p95Ms": 8.399999998509884,
+            "p99Ms": 15.200000002980232,
+            "maxMs": 15.200000002980232,
+            "averageInputSize": 1.0454545454545454,
+            "averageOutputSize": 1.0454545454545454
+          },
+          "panel.snapshot_commit": {
+            "calls": 15,
+            "callsPerSecond": 0.25,
+            "averageMs": 1.5266666665673256,
+            "p95Ms": 2.899999998509884,
+            "p99Ms": 2.899999998509884,
+            "maxMs": 2.899999998509884,
+            "averageInputSize": 1.2,
+            "averageOutputSize": 1.2
+          },
+          "canvas.heatmap_draw": {
+            "calls": 21,
+            "callsPerSecond": 0.35,
+            "averageMs": 1.8761904764743078,
+            "p95Ms": 8.399999998509884,
+            "p99Ms": 15.200000002980232,
+            "maxMs": 15.200000002980232,
+            "averageInputSize": 63.523809523809526,
+            "averageOutputSize": 24.952380952380953
+          },
+          "feed.receive_book": {
+            "calls": 17,
+            "callsPerSecond": 0.2833333333333333,
+            "averageMs": 0,
+            "p95Ms": 0,
+            "p99Ms": 0,
+            "maxMs": 0,
+            "averageInputSize": 2000,
+            "averageOutputSize": 1
+          },
+          "feed.snapshot_publish": {
+            "calls": 18,
+            "callsPerSecond": 0.3,
+            "averageMs": 0.038888889054457344,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.trade_tape": {
+            "calls": 2,
+            "callsPerSecond": 0.03333333333333333,
+            "averageMs": 0.15000000223517418,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 100,
+            "averageOutputSize": 22
+          },
+          "panel.metric_stabilization": {
+            "calls": 2,
+            "callsPerSecond": 0.03333333333333333,
+            "averageMs": 0.25,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_smoothing": {
+            "calls": 4,
+            "callsPerSecond": 0.06666666666666667,
+            "averageMs": 0.125,
+            "p95Ms": 0.3999999985098839,
+            "p99Ms": 0.3999999985098839,
+            "maxMs": 0.3999999985098839,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_candles": {
+            "calls": 4,
+            "callsPerSecond": 0.06666666666666667,
+            "averageMs": 0.19999999925494194,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 101,
+            "averageOutputSize": 25
+          },
+          "panel.flow_delta": {
+            "calls": 3,
+            "callsPerSecond": 0.05,
+            "averageMs": 0,
+            "p95Ms": 0,
+            "p99Ms": 0,
+            "maxMs": 0,
+            "averageInputSize": 2,
+            "averageOutputSize": 2
+          },
+          "settings.update": {
+            "calls": 2,
+            "callsPerSecond": 0.03333333333333333,
+            "averageMs": 0,
+            "p95Ms": 0,
+            "p99Ms": 0,
+            "maxMs": 0,
+            "averageInputSize": 11,
+            "averageOutputSize": 1
+          },
+          "panel.depth_chart": {
+            "calls": 3,
+            "callsPerSecond": 0.05,
+            "averageMs": 1.366666667163372,
+            "p95Ms": 1.6000000014901161,
+            "p99Ms": 1.6000000014901161,
+            "maxMs": 1.6000000014901161,
+            "averageInputSize": 1988,
+            "averageOutputSize": 1
+          }
+        },
+        "counters": {
+          "react.dom_pro_renders": 40,
+          "worker.submitted": 23,
+          "worker.processed": 21,
+          "worker.coalesced": 0,
+          "worker.dropped": 0,
+          "worker.stale": 2,
+          "worker.queue_peak": 1,
+          "worker.transfer_input_units": 43900,
+          "worker.transfer_output_units": 537,
+          "worker.transfer_input_bytes": 672000,
+          "canvas.heatmap_draw_calls": 524
+        }
+      }
+    },
+    {
+      "time": "2026-07-14T05:15:32.779Z",
+      "index": 3,
+      "scenario": "E_PRESET_SWITCH",
+      "heapUsedMb": 24.545724868774414,
+      "domNodes": 1844,
+      "heatmapCells": 0,
+      "heatmapFrames": 12,
+      "canvasCount": 2,
+      "workerCount": 1,
+      "websocketCount": 0,
+      "listenerCount": 2,
+      "timerCount": 2,
+      "workerQueue": 0,
+      "cockpit": true,
+      "aifActive": false,
+      "telemetry": {
+        "fps": 70.8336576632677,
+        "averageFrameMs": 14.117582417582415,
+        "p95FrameMs": 41.600000000000364,
+        "p99FrameMs": 118,
+        "longestTaskMs": 52,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-text": 34,
+            "worker-queue": 0,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11
+          },
+          "created": {
+            "animation-frame": 36,
+            "timeout": 5
+          },
+          "highWater": {
+            "animation-frame": 2,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 1,
+            "pixi-text": 34,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "dom-pro-live-aggregation": 1,
+            "pixi-chart:idzhbv8wp2m:resize": 1,
+            "pixi-chart:idzhbv8wp2m:visibility": 1,
+            "pixi-chart:idzhbv8wp2m": 60
+          },
+          "totalActive": 67
+        }
+      },
+      "trace": {
+        "startedAt": 1784006130200,
+        "generatedAt": 1784006132775,
+        "spans": {
+          "react.dom_pro_commit": {
+            "calls": 62,
+            "callsPerSecond": 1.0333333333333334,
+            "averageMs": 23.75806451600886,
+            "p95Ms": 53.399999998509884,
+            "p99Ms": 70.19999999552965,
+            "maxMs": 70.19999999552965,
+            "averageInputSize": 11,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate": {
+            "calls": 23,
+            "callsPerSecond": 0.38333333333333336,
+            "averageMs": 2.0304347830622094,
+            "p95Ms": 3.899999998509884,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2100,
+            "averageOutputSize": 71.3913043478261
+          },
+          "worker.transfer_roundtrip": {
+            "calls": 23,
+            "callsPerSecond": 0.38333333333333336,
+            "averageMs": 6.3043478251151415,
+            "p95Ms": 27.80000000447035,
+            "p99Ms": 48.099999994039536,
+            "maxMs": 48.099999994039536,
+            "averageInputSize": 32000,
+            "averageOutputSize": 71.3913043478261
+          },
+          "worker.bucket_aggregation": {
+            "calls": 23,
+            "callsPerSecond": 0.38333333333333336,
+            "averageMs": 1.5869565214151922,
+            "p95Ms": 3.1999999955296516,
+            "p99Ms": 3.3000000044703484,
+            "maxMs": 3.3000000044703484,
+            "averageInputSize": 2000,
+            "averageOutputSize": 43.130434782608695
+          },
+          "worker.profile_and_delta": {
+            "calls": 23,
+            "callsPerSecond": 0.38333333333333336,
+            "averageMs": 0.05652173900085947,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.29999999701976776,
+            "maxMs": 0.29999999701976776,
+            "averageInputSize": 43.130434782608695,
+            "averageOutputSize": 86.26086956521739
+          },
+          "worker.wall_calculation": {
+            "calls": 23,
+            "callsPerSecond": 0.38333333333333336,
+            "averageMs": 0.07391304425571275,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 88,
+            "averageOutputSize": 5
+          },
+          "worker.heatmap_shaping": {
+            "calls": 23,
+            "callsPerSecond": 0.38333333333333336,
+            "averageMs": 0.09565217371868051,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.29999999701976776,
+            "maxMs": 0.29999999701976776,
+            "averageInputSize": 131.1304347826087,
+            "averageOutputSize": 22.26086956521739
+          },
+          "worker.cvd_calculation": {
+            "calls": 23,
+            "callsPerSecond": 0.38333333333333336,
+            "averageMs": 0.03913043536569761,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 100,
+            "averageOutputSize": 1
+          },
+          "worker.derived_metrics": {
+            "calls": 23,
+            "callsPerSecond": 0.38333333333333336,
+            "averageMs": 0.10434782569823058,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 143.1304347826087,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate_total": {
+            "calls": 23,
+            "callsPerSecond": 0.38333333333333336,
+            "averageMs": 2.021739131082659,
+            "p95Ms": 3.899999998509884,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2100,
+            "averageOutputSize": 91.26086956521739
+          },
+          "panel.volume_profile": {
+            "calls": 35,
+            "callsPerSecond": 0.5833333333333334,
+            "averageMs": 0.26285714315516606,
+            "p95Ms": 0.6000000014901161,
+            "p99Ms": 2.2999999970197678,
+            "maxMs": 2.2999999970197678,
+            "averageInputSize": 561,
+            "averageOutputSize": 129
+          },
+          "canvas.master_frame": {
+            "calls": 36,
+            "callsPerSecond": 0.6,
+            "averageMs": 2.5805555563420057,
+            "p95Ms": 15.200000002980232,
+            "p99Ms": 26.200000002980232,
+            "maxMs": 26.200000002980232,
+            "averageInputSize": 1.0277777777777777,
+            "averageOutputSize": 1.0277777777777777
+          },
+          "panel.snapshot_commit": {
+            "calls": 25,
+            "callsPerSecond": 0.4166666666666667,
+            "averageMs": 1.7040000000596047,
+            "p95Ms": 3.600000001490116,
+            "p99Ms": 4.299999997019768,
+            "maxMs": 4.299999997019768,
+            "averageInputSize": 1.68,
+            "averageOutputSize": 1.68
+          },
+          "canvas.heatmap_draw": {
+            "calls": 35,
+            "callsPerSecond": 0.5833333333333334,
+            "averageMs": 2.614285715137209,
+            "p95Ms": 15.200000002980232,
+            "p99Ms": 26.100000001490116,
+            "maxMs": 26.100000001490116,
+            "averageInputSize": 104.45714285714286,
+            "averageOutputSize": 68.71428571428571
+          },
+          "feed.receive_book": {
+            "calls": 25,
+            "callsPerSecond": 0.4166666666666667,
+            "averageMs": 0,
+            "p95Ms": 0,
+            "p99Ms": 0,
+            "maxMs": 0,
+            "averageInputSize": 2000,
+            "averageOutputSize": 1
+          },
+          "feed.snapshot_publish": {
+            "calls": 26,
+            "callsPerSecond": 0.43333333333333335,
+            "averageMs": 0.0576923074057469,
+            "p95Ms": 0.19999999552965164,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.trade_tape": {
+            "calls": 6,
+            "callsPerSecond": 0.1,
+            "averageMs": 0.05000000074505806,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 100,
+            "averageOutputSize": 22
+          },
+          "panel.metric_stabilization": {
+            "calls": 4,
+            "callsPerSecond": 0.06666666666666667,
+            "averageMs": 0.14999999850988388,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_smoothing": {
+            "calls": 7,
+            "callsPerSecond": 0.11666666666666667,
+            "averageMs": 0.10000000042574746,
+            "p95Ms": 0.3999999985098839,
+            "p99Ms": 0.3999999985098839,
+            "maxMs": 0.3999999985098839,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_candles": {
+            "calls": 7,
+            "callsPerSecond": 0.11666666666666667,
+            "averageMs": 0.1857142863529069,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 101,
+            "averageOutputSize": 25
+          },
+          "panel.flow_delta": {
+            "calls": 7,
+            "callsPerSecond": 0.11666666666666667,
+            "averageMs": 0.014285714498588018,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 2.7142857142857144,
+            "averageOutputSize": 2.7142857142857144
+          },
+          "settings.update": {
+            "calls": 3,
+            "callsPerSecond": 0.05,
+            "averageMs": 0,
+            "p95Ms": 0,
+            "p99Ms": 0,
+            "maxMs": 0,
+            "averageInputSize": 13.333333333333334,
+            "averageOutputSize": 1
+          },
+          "panel.depth_chart": {
+            "calls": 6,
+            "callsPerSecond": 0.1,
+            "averageMs": 1.5,
+            "p95Ms": 2.2999999970197678,
+            "p99Ms": 2.2999999970197678,
+            "maxMs": 2.2999999970197678,
+            "averageInputSize": 1988.1666666666667,
+            "averageOutputSize": 1
+          }
+        },
+        "counters": {
+          "react.dom_pro_renders": 62,
+          "worker.submitted": 32,
+          "worker.processed": 30,
+          "worker.coalesced": 0,
+          "worker.dropped": 0,
+          "worker.stale": 2,
+          "worker.queue_peak": 1,
+          "worker.transfer_input_units": 62800,
+          "worker.transfer_output_units": 1803,
+          "worker.transfer_input_bytes": 960000,
+          "canvas.heatmap_draw_calls": 2405
+        }
+      }
+    },
+    {
+      "time": "2026-07-14T05:15:33.731Z",
+      "index": 4,
+      "scenario": "F_SETTINGS",
+      "heapUsedMb": 34.454495429992676,
+      "domNodes": 1845,
+      "heatmapCells": 0,
+      "heatmapFrames": 15,
+      "canvasCount": 2,
+      "workerCount": 1,
+      "websocketCount": 0,
+      "listenerCount": 2,
+      "timerCount": 2,
+      "workerQueue": 0,
+      "cockpit": true,
+      "aifActive": false,
+      "telemetry": {
+        "fps": 67.69936890418819,
+        "averageFrameMs": 14.771186440677965,
+        "p95FrameMs": 41.70000000000073,
+        "p99FrameMs": 69.39999999999964,
+        "longestTaskMs": 52,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-text": 34,
+            "worker-queue": 0,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11
+          },
+          "created": {
+            "animation-frame": 49,
+            "timeout": 5
+          },
+          "highWater": {
+            "animation-frame": 2,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 1,
+            "pixi-text": 34,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "dom-pro-live-aggregation": 1,
+            "pixi-chart:idzhbv8wp2m:resize": 1,
+            "pixi-chart:idzhbv8wp2m:visibility": 1,
+            "pixi-chart:idzhbv8wp2m": 60
+          },
+          "totalActive": 67
+        }
+      },
+      "trace": {
+        "startedAt": 1784006130200,
+        "generatedAt": 1784006133716,
+        "spans": {
+          "react.dom_pro_commit": {
+            "calls": 86,
+            "callsPerSecond": 1.4333333333333333,
+            "averageMs": 23.1813953487679,
+            "p95Ms": 49.5,
+            "p99Ms": 70.19999999552965,
+            "maxMs": 70.19999999552965,
+            "averageInputSize": 11,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate": {
+            "calls": 32,
+            "callsPerSecond": 0.5333333333333333,
+            "averageMs": 2.096875000046566,
+            "p95Ms": 4.399999998509884,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2100,
+            "averageOutputSize": 92.0625
+          },
+          "worker.transfer_roundtrip": {
+            "calls": 32,
+            "callsPerSecond": 0.5333333333333333,
+            "averageMs": 5.140624999767169,
+            "p95Ms": 27.80000000447035,
+            "p99Ms": 48.099999994039536,
+            "maxMs": 48.099999994039536,
+            "averageInputSize": 32000,
+            "averageOutputSize": 92.0625
+          },
+          "worker.bucket_aggregation": {
+            "calls": 32,
+            "callsPerSecond": 0.5333333333333333,
+            "averageMs": 1.6093749995343387,
+            "p95Ms": 3.3000000044703484,
+            "p99Ms": 3.5999999940395355,
+            "maxMs": 3.5999999940395355,
+            "averageInputSize": 2000,
+            "averageOutputSize": 59.28125
+          },
+          "worker.profile_and_delta": {
+            "calls": 32,
+            "callsPerSecond": 0.5333333333333333,
+            "averageMs": 0.046875,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.29999999701976776,
+            "maxMs": 0.29999999701976776,
+            "averageInputSize": 59.28125,
+            "averageOutputSize": 118.5625
+          },
+          "worker.wall_calculation": {
+            "calls": 32,
+            "callsPerSecond": 0.5333333333333333,
+            "averageMs": 0.0750000006519258,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 88,
+            "averageOutputSize": 5
+          },
+          "worker.heatmap_shaping": {
+            "calls": 32,
+            "callsPerSecond": 0.5333333333333333,
+            "averageMs": 0.14062499976716936,
+            "p95Ms": 0.6000000014901161,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 147.28125,
+            "averageOutputSize": 26.78125
+          },
+          "worker.cvd_calculation": {
+            "calls": 32,
+            "callsPerSecond": 0.5333333333333333,
+            "averageMs": 0.046875,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.19999999552965164,
+            "maxMs": 0.19999999552965164,
+            "averageInputSize": 100,
+            "averageOutputSize": 1
+          },
+          "worker.derived_metrics": {
+            "calls": 32,
+            "callsPerSecond": 0.5333333333333333,
+            "averageMs": 0.10000000009313226,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.30000000447034836,
+            "maxMs": 0.30000000447034836,
+            "averageInputSize": 159.28125,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate_total": {
+            "calls": 32,
+            "callsPerSecond": 0.5333333333333333,
+            "averageMs": 2.0843750000931323,
+            "p95Ms": 4.299999997019768,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2100,
+            "averageOutputSize": 123.5625
+          },
+          "panel.volume_profile": {
+            "calls": 49,
+            "callsPerSecond": 0.8166666666666667,
+            "averageMs": 0.2387755107210607,
+            "p95Ms": 0.5,
+            "p99Ms": 2.2999999970197678,
+            "maxMs": 2.2999999970197678,
+            "averageInputSize": 635.4081632653061,
+            "averageOutputSize": 129
+          },
+          "canvas.master_frame": {
+            "calls": 49,
+            "callsPerSecond": 0.8166666666666667,
+            "averageMs": 2.1285714291188182,
+            "p95Ms": 12.199999995529652,
+            "p99Ms": 26.200000002980232,
+            "maxMs": 26.200000002980232,
+            "averageInputSize": 1.0204081632653061,
+            "averageOutputSize": 1.0204081632653061
+          },
+          "panel.snapshot_commit": {
+            "calls": 33,
+            "callsPerSecond": 0.55,
+            "averageMs": 1.8212121217088266,
+            "p95Ms": 3.600000001490116,
+            "p99Ms": 4.299999997019768,
+            "maxMs": 4.299999997019768,
+            "averageInputSize": 1.878787878787879,
+            "averageOutputSize": 1.878787878787879
+          },
+          "canvas.heatmap_draw": {
+            "calls": 48,
+            "callsPerSecond": 0.8,
+            "averageMs": 2.1354166672875485,
+            "p95Ms": 12.199999995529652,
+            "p99Ms": 26.100000001490116,
+            "maxMs": 26.100000001490116,
+            "averageInputSize": 153.4375,
+            "averageOutputSize": 112.6875
+          },
+          "feed.receive_book": {
+            "calls": 34,
+            "callsPerSecond": 0.5666666666666667,
+            "averageMs": 0,
+            "p95Ms": 0,
+            "p99Ms": 0,
+            "maxMs": 0,
+            "averageInputSize": 2000,
+            "averageOutputSize": 1
+          },
+          "feed.snapshot_publish": {
+            "calls": 35,
+            "callsPerSecond": 0.5833333333333334,
+            "averageMs": 0.05714285650423595,
+            "p95Ms": 0.19999999552965164,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.trade_tape": {
+            "calls": 10,
+            "callsPerSecond": 0.16666666666666666,
+            "averageMs": 0.04000000059604645,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 100,
+            "averageOutputSize": 22
+          },
+          "panel.metric_stabilization": {
+            "calls": 5,
+            "callsPerSecond": 0.08333333333333333,
+            "averageMs": 0.13999999910593033,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_smoothing": {
+            "calls": 8,
+            "callsPerSecond": 0.13333333333333333,
+            "averageMs": 0.08750000037252903,
+            "p95Ms": 0.3999999985098839,
+            "p99Ms": 0.3999999985098839,
+            "maxMs": 0.3999999985098839,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_candles": {
+            "calls": 8,
+            "callsPerSecond": 0.13333333333333333,
+            "averageMs": 0.17500000074505806,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 101,
+            "averageOutputSize": 25
+          },
+          "panel.flow_delta": {
+            "calls": 10,
+            "callsPerSecond": 0.16666666666666666,
+            "averageMs": 0.020000000298023225,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 3.3,
+            "averageOutputSize": 3.3
+          },
+          "settings.update": {
+            "calls": 3,
+            "callsPerSecond": 0.05,
+            "averageMs": 0,
+            "p95Ms": 0,
+            "p99Ms": 0,
+            "maxMs": 0,
+            "averageInputSize": 13.333333333333334,
+            "averageOutputSize": 1
+          },
+          "panel.depth_chart": {
+            "calls": 7,
+            "callsPerSecond": 0.11666666666666667,
+            "averageMs": 1.5285714289971761,
+            "p95Ms": 2.2999999970197678,
+            "p99Ms": 2.2999999970197678,
+            "maxMs": 2.2999999970197678,
+            "averageInputSize": 1988.142857142857,
+            "averageOutputSize": 1
+          }
+        },
+        "counters": {
+          "react.dom_pro_renders": 86,
+          "worker.submitted": 41,
+          "worker.processed": 39,
+          "worker.coalesced": 0,
+          "worker.dropped": 0,
+          "worker.stale": 2,
+          "worker.queue_peak": 1,
+          "worker.transfer_input_units": 81700,
+          "worker.transfer_output_units": 3107,
+          "worker.transfer_input_bytes": 1248000,
+          "canvas.heatmap_draw_calls": 5409
+        }
+      }
+    },
+    {
+      "time": "2026-07-14T05:15:34.699Z",
+      "index": 5,
+      "scenario": "G_PAN_ZOOM",
+      "heapUsedMb": 43.48663806915283,
+      "domNodes": 1846,
+      "heatmapCells": 0,
+      "heatmapFrames": 18,
+      "canvasCount": 2,
+      "workerCount": 1,
+      "websocketCount": 0,
+      "listenerCount": 2,
+      "timerCount": 2,
+      "workerQueue": 0,
+      "cockpit": true,
+      "aifActive": false,
+      "telemetry": {
+        "fps": 60.52696712643161,
+        "averageFrameMs": 16.521561338289963,
+        "p95FrameMs": 48.600000000000364,
+        "p99FrameMs": 69.5,
+        "longestTaskMs": 52,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 2,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-text": 34,
+            "worker-queue": 0,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11
+          },
+          "created": {
+            "animation-frame": 64,
+            "timeout": 8
+          },
+          "highWater": {
+            "animation-frame": 2,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 1,
+            "pixi-text": 34,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "dom-pro-live-aggregation": 1,
+            "pixi-chart:idzhbv8wp2m:resize": 1,
+            "pixi-chart:idzhbv8wp2m:visibility": 1,
+            "dom-pro-master-visual": 1,
+            "pixi-chart:idzhbv8wp2m": 60
+          },
+          "totalActive": 68
+        }
+      },
+      "trace": {
+        "startedAt": 1784006130200,
+        "generatedAt": 1784006134695,
+        "spans": {
+          "react.dom_pro_commit": {
+            "calls": 111,
+            "callsPerSecond": 1.85,
+            "averageMs": 25.663963963722324,
+            "p95Ms": 53.399999998509884,
+            "p99Ms": 70.19999999552965,
+            "maxMs": 77.60000000149012,
+            "averageInputSize": 11,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate": {
+            "calls": 41,
+            "callsPerSecond": 0.6833333333333333,
+            "averageMs": 2.160975610155885,
+            "p95Ms": 3.899999998509884,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2100,
+            "averageOutputSize": 103.70731707317073
+          },
+          "worker.transfer_roundtrip": {
+            "calls": 41,
+            "callsPerSecond": 0.6833333333333333,
+            "averageMs": 8.656097560575823,
+            "p95Ms": 29.600000001490116,
+            "p99Ms": 84.09999999403954,
+            "maxMs": 84.09999999403954,
+            "averageInputSize": 32000,
+            "averageOutputSize": 103.70731707317073
+          },
+          "worker.bucket_aggregation": {
+            "calls": 41,
+            "callsPerSecond": 0.6833333333333333,
+            "averageMs": 1.6317073170368264,
+            "p95Ms": 3.1999999955296516,
+            "p99Ms": 3.5999999940395355,
+            "maxMs": 3.5999999940395355,
+            "averageInputSize": 2000,
+            "averageOutputSize": 68.26829268292683
+          },
+          "worker.profile_and_delta": {
+            "calls": 41,
+            "callsPerSecond": 0.6833333333333333,
+            "averageMs": 0.0609756093926546,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.29999999701976776,
+            "maxMs": 0.29999999701976776,
+            "averageInputSize": 68.26829268292683,
+            "averageOutputSize": 136.53658536585365
+          },
+          "worker.wall_calculation": {
+            "calls": 41,
+            "callsPerSecond": 0.6833333333333333,
+            "averageMs": 0.07560975649734823,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 88,
+            "averageOutputSize": 5
+          },
+          "worker.heatmap_shaping": {
+            "calls": 41,
+            "callsPerSecond": 0.6833333333333333,
+            "averageMs": 0.15365853633095578,
+            "p95Ms": 0.5,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 156.26829268292684,
+            "averageOutputSize": 29.4390243902439
+          },
+          "worker.cvd_calculation": {
+            "calls": 41,
+            "callsPerSecond": 0.6833333333333333,
+            "averageMs": 0.04634146356001133,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 100,
+            "averageOutputSize": 1
+          },
+          "worker.derived_metrics": {
+            "calls": 41,
+            "callsPerSecond": 0.6833333333333333,
+            "averageMs": 0.10731707349783037,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.30000000447034836,
+            "maxMs": 0.30000000447034836,
+            "averageInputSize": 168.26829268292684,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate_total": {
+            "calls": 41,
+            "callsPerSecond": 0.6833333333333333,
+            "averageMs": 2.1512195126312537,
+            "p95Ms": 3.899999998509884,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2100,
+            "averageOutputSize": 141.53658536585365
+          },
+          "panel.volume_profile": {
+            "calls": 62,
+            "callsPerSecond": 1.0333333333333334,
+            "averageMs": 0.2354838714724587,
+            "p95Ms": 0.5,
+            "p99Ms": 2.2999999970197678,
+            "maxMs": 2.2999999970197678,
+            "averageInputSize": 674.1129032258065,
+            "averageOutputSize": 129
+          },
+          "canvas.master_frame": {
+            "calls": 63,
+            "callsPerSecond": 1.05,
+            "averageMs": 1.9761904765452658,
+            "p95Ms": 8.399999998509884,
+            "p99Ms": 26.200000002980232,
+            "maxMs": 26.200000002980232,
+            "averageInputSize": 1.0158730158730158,
+            "averageOutputSize": 1.0158730158730158
+          },
+          "panel.snapshot_commit": {
+            "calls": 43,
+            "callsPerSecond": 0.7166666666666667,
+            "averageMs": 1.8465116282188616,
+            "p95Ms": 3.2000000029802322,
+            "p99Ms": 4.299999997019768,
+            "maxMs": 4.299999997019768,
+            "averageInputSize": 2.0232558139534884,
+            "averageOutputSize": 2.0232558139534884
+          },
+          "canvas.heatmap_draw": {
+            "calls": 60,
+            "callsPerSecond": 1,
+            "averageMs": 2.0350000005215407,
+            "p95Ms": 8.399999998509884,
+            "p99Ms": 26.100000001490116,
+            "maxMs": 26.100000001490116,
+            "averageInputSize": 203.33333333333334,
+            "averageOutputSize": 154.33333333333334
+          },
+          "feed.receive_book": {
+            "calls": 44,
+            "callsPerSecond": 0.7333333333333333,
+            "averageMs": 0,
+            "p95Ms": 0,
+            "p99Ms": 0,
+            "maxMs": 0,
+            "averageInputSize": 2000,
+            "averageOutputSize": 1
+          },
+          "feed.snapshot_publish": {
+            "calls": 46,
+            "callsPerSecond": 0.7666666666666667,
+            "averageMs": 0.04782608653540197,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.trade_tape": {
+            "calls": 14,
+            "callsPerSecond": 0.23333333333333334,
+            "averageMs": 0.028571428997176036,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 100,
+            "averageOutputSize": 22
+          },
+          "panel.metric_stabilization": {
+            "calls": 7,
+            "callsPerSecond": 0.11666666666666667,
+            "averageMs": 0.09999999936137881,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_smoothing": {
+            "calls": 11,
+            "callsPerSecond": 0.18333333333333332,
+            "averageMs": 0.07272727313366803,
+            "p95Ms": 0.3999999985098839,
+            "p99Ms": 0.3999999985098839,
+            "maxMs": 0.3999999985098839,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_candles": {
+            "calls": 11,
+            "callsPerSecond": 0.18333333333333332,
+            "averageMs": 0.14545454491268506,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 101,
+            "averageOutputSize": 25
+          },
+          "panel.flow_delta": {
+            "calls": 14,
+            "callsPerSecond": 0.23333333333333334,
+            "averageMs": 0.014285714498588018,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 3.9285714285714284,
+            "averageOutputSize": 3.9285714285714284
+          },
+          "settings.update": {
+            "calls": 5,
+            "callsPerSecond": 0.08333333333333333,
+            "averageMs": 0.020000000298023225,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 8.8,
+            "averageOutputSize": 1
+          },
+          "panel.depth_chart": {
+            "calls": 10,
+            "callsPerSecond": 0.16666666666666666,
+            "averageMs": 1.6400000005960464,
+            "p95Ms": 2.2999999970197678,
+            "p99Ms": 2.2999999970197678,
+            "maxMs": 2.2999999970197678,
+            "averageInputSize": 1987.5,
+            "averageOutputSize": 1
+          }
+        },
+        "counters": {
+          "react.dom_pro_renders": 111,
+          "worker.submitted": 50,
+          "worker.processed": 48,
+          "worker.coalesced": 0,
+          "worker.dropped": 0,
+          "worker.stale": 2,
+          "worker.queue_peak": 1,
+          "worker.transfer_input_units": 100600,
+          "worker.transfer_output_units": 4413,
+          "worker.transfer_input_bytes": 1536000,
+          "canvas.heatmap_draw_calls": 9260
+        }
+      }
+    },
+    {
+      "time": "2026-07-14T05:15:35.806Z",
+      "index": 6,
+      "scenario": "H_MOUNT_UNMOUNT",
+      "heapUsedMb": 39.23072052001953,
+      "domNodes": 1824,
+      "heatmapCells": 0,
+      "heatmapFrames": 20,
+      "canvasCount": 2,
+      "workerCount": 1,
+      "websocketCount": 0,
+      "listenerCount": 2,
+      "timerCount": 2,
+      "workerQueue": 0,
+      "cockpit": true,
+      "aifActive": false,
+      "telemetry": {
+        "fps": 58.24548865463641,
+        "averageFrameMs": 17.16871165644172,
+        "p95FrameMs": 48.600000000000364,
+        "p99FrameMs": 83.29999999999927,
+        "longestTaskMs": 63,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "worker": 1,
+            "observer": 1,
+            "listener": 2,
+            "pixi-text": 32,
+            "worker-queue": 0,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11
+          },
+          "created": {
+            "animation-frame": 80,
+            "timeout": 12,
+            "listener": 2,
+            "interval": 2
+          },
+          "highWater": {
+            "animation-frame": 2,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 1,
+            "pixi-text": 34,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "dom-pro-live-aggregation": 1,
+            "pixi-chart:idzhbv8wp2m:resize": 1,
+            "pixi-chart:idzhbv8wp2m:visibility": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "pixi-chart:idzhbv8wp2m": 58
+          },
+          "totalActive": 65
+        }
+      },
+      "trace": {
+        "startedAt": 1784006130200,
+        "generatedAt": 1784006135803,
+        "spans": {
+          "react.dom_pro_commit": {
+            "calls": 136,
+            "callsPerSecond": 2.2666666666666666,
+            "averageMs": 25.857352940968294,
+            "p95Ms": 58.70000000298023,
+            "p99Ms": 77.60000000149012,
+            "maxMs": 88.39999999850988,
+            "averageInputSize": 11,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate": {
+            "calls": 51,
+            "callsPerSecond": 0.85,
+            "averageMs": 2.0882352945559166,
+            "p95Ms": 3.899999998509884,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2101.470588235294,
+            "averageOutputSize": 113.25490196078431
+          },
+          "worker.transfer_roundtrip": {
+            "calls": 51,
+            "callsPerSecond": 0.85,
+            "averageMs": 9.331372548552121,
+            "p95Ms": 35,
+            "p99Ms": 84.09999999403954,
+            "maxMs": 84.09999999403954,
+            "averageInputSize": 32000,
+            "averageOutputSize": 113.25490196078431
+          },
+          "worker.bucket_aggregation": {
+            "calls": 51,
+            "callsPerSecond": 0.85,
+            "averageMs": 1.5647058822945052,
+            "p95Ms": 3.1999999955296516,
+            "p99Ms": 3.5999999940395355,
+            "maxMs": 3.5999999940395355,
+            "averageInputSize": 2000,
+            "averageOutputSize": 74.6470588235294
+          },
+          "worker.profile_and_delta": {
+            "calls": 51,
+            "callsPerSecond": 0.85,
+            "averageMs": 0.05882352926567489,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.29999999701976776,
+            "maxMs": 0.29999999701976776,
+            "averageInputSize": 74.6470588235294,
+            "averageOutputSize": 149.2941176470588
+          },
+          "worker.wall_calculation": {
+            "calls": 51,
+            "callsPerSecond": 0.85,
+            "averageMs": 0.07058823546942543,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 88,
+            "averageOutputSize": 5.333333333333333
+          },
+          "worker.heatmap_shaping": {
+            "calls": 51,
+            "callsPerSecond": 0.85,
+            "averageMs": 0.1529411762660625,
+            "p95Ms": 0.5,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 162.64705882352942,
+            "averageOutputSize": 32.09803921568628
+          },
+          "worker.cvd_calculation": {
+            "calls": 51,
+            "callsPerSecond": 0.85,
+            "averageMs": 0.03921568642059962,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 101.47058823529412,
+            "averageOutputSize": 1.1764705882352942
+          },
+          "worker.derived_metrics": {
+            "calls": 51,
+            "callsPerSecond": 0.85,
+            "averageMs": 0.1117647062329685,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.30000000447034836,
+            "maxMs": 0.30000000447034836,
+            "averageInputSize": 176.11764705882354,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate_total": {
+            "calls": 51,
+            "callsPerSecond": 0.85,
+            "averageMs": 2.078431372987289,
+            "p95Ms": 3.899999998509884,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2101.470588235294,
+            "averageOutputSize": 154.62745098039215
+          },
+          "panel.volume_profile": {
+            "calls": 77,
+            "callsPerSecond": 1.2833333333333334,
+            "averageMs": 0.2467532472370507,
+            "p95Ms": 0.6000000014901161,
+            "p99Ms": 2.2999999970197678,
+            "maxMs": 2.2999999970197678,
+            "averageInputSize": 702.6363636363636,
+            "averageOutputSize": 129
+          },
+          "canvas.master_frame": {
+            "calls": 80,
+            "callsPerSecond": 1.3333333333333333,
+            "averageMs": 2.261250000540167,
+            "p95Ms": 8.399999998509884,
+            "p99Ms": 26.600000001490116,
+            "maxMs": 26.600000001490116,
+            "averageInputSize": 1.0125,
+            "averageOutputSize": 1.0125
+          },
+          "panel.snapshot_commit": {
+            "calls": 55,
+            "callsPerSecond": 0.9166666666666666,
+            "averageMs": 1.812727272916924,
+            "p95Ms": 3.600000001490116,
+            "p99Ms": 4.299999997019768,
+            "maxMs": 4.299999997019768,
+            "averageInputSize": 2.018181818181818,
+            "averageOutputSize": 2.018181818181818
+          },
+          "canvas.heatmap_draw": {
+            "calls": 77,
+            "callsPerSecond": 1.2833333333333334,
+            "averageMs": 2.309090909826291,
+            "p95Ms": 12.199999995529652,
+            "p99Ms": 26.600000001490116,
+            "maxMs": 26.600000001490116,
+            "averageInputSize": 238.35064935064935,
+            "averageOutputSize": 188.06493506493507
+          },
+          "feed.receive_book": {
+            "calls": 55,
+            "callsPerSecond": 0.9166666666666666,
+            "averageMs": 0,
+            "p95Ms": 0,
+            "p99Ms": 0,
+            "maxMs": 0,
+            "averageInputSize": 2000,
+            "averageOutputSize": 1
+          },
+          "feed.snapshot_publish": {
+            "calls": 60,
+            "callsPerSecond": 1,
+            "averageMs": 0.04999999987582366,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 0.9666666666666667,
+            "averageOutputSize": 1
+          },
+          "panel.trade_tape": {
+            "calls": 18,
+            "callsPerSecond": 0.3,
+            "averageMs": 0.027777778191698924,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 101.38888888888889,
+            "averageOutputSize": 22
+          },
+          "panel.metric_stabilization": {
+            "calls": 9,
+            "callsPerSecond": 0.15,
+            "averageMs": 0.08888888855775197,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_smoothing": {
+            "calls": 14,
+            "callsPerSecond": 0.23333333333333334,
+            "averageMs": 0.05714285746216774,
+            "p95Ms": 0.3999999985098839,
+            "p99Ms": 0.3999999985098839,
+            "maxMs": 0.3999999985098839,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_candles": {
+            "calls": 14,
+            "callsPerSecond": 0.23333333333333334,
+            "averageMs": 0.12857142782637052,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 101,
+            "averageOutputSize": 25
+          },
+          "panel.flow_delta": {
+            "calls": 18,
+            "callsPerSecond": 0.3,
+            "averageMs": 0.011111111276679568,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 3.3333333333333335,
+            "averageOutputSize": 3.3333333333333335
+          },
+          "settings.update": {
+            "calls": 5,
+            "callsPerSecond": 0.08333333333333333,
+            "averageMs": 0.020000000298023225,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 8.8,
+            "averageOutputSize": 1
+          },
+          "panel.depth_chart": {
+            "calls": 13,
+            "callsPerSecond": 0.21666666666666667,
+            "averageMs": 1.6923076928808138,
+            "p95Ms": 2.399999998509884,
+            "p99Ms": 2.399999998509884,
+            "maxMs": 2.399999998509884,
+            "averageInputSize": 1835.6153846153845,
+            "averageOutputSize": 1
+          },
+          "feed.receive_trades": {
+            "calls": 2,
+            "callsPerSecond": 0.03333333333333333,
+            "averageMs": 0.15000000223517418,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 100,
+            "averageOutputSize": 23.5
+          }
+        },
+        "counters": {
+          "react.dom_pro_renders": 136,
+          "worker.submitted": 60,
+          "worker.processed": 58,
+          "worker.coalesced": 0,
+          "worker.dropped": 0,
+          "worker.stale": 2,
+          "worker.queue_peak": 1,
+          "worker.transfer_input_units": 121675,
+          "worker.transfer_output_units": 5937,
+          "worker.transfer_input_bytes": 1856000,
+          "canvas.heatmap_draw_calls": 14481
+        }
+      }
+    },
+    {
+      "time": "2026-07-14T05:15:37.070Z",
+      "index": 7,
+      "scenario": "C_AIF_DOM",
+      "heapUsedMb": 45.21369457244873,
+      "domNodes": 1852,
+      "heatmapCells": 0,
+      "heatmapFrames": 25,
+      "canvasCount": 2,
+      "workerCount": 1,
+      "websocketCount": 0,
+      "listenerCount": 2,
+      "timerCount": 3,
+      "workerQueue": 1,
+      "cockpit": true,
+      "aifActive": true,
+      "telemetry": {
+        "fps": 57.28014532456307,
+        "averageFrameMs": 17.458056265984656,
+        "p95FrameMs": 48.600000000000364,
+        "p99FrameMs": 83.30000000000109,
+        "longestTaskMs": 63,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 1,
+        "resources": {
+          "active": {
+            "animation-frame": 2,
+            "interval": 2,
+            "worker": 1,
+            "observer": 1,
+            "listener": 2,
+            "timeout": 1,
+            "pixi-text": 32,
+            "worker-queue": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11
+          },
+          "created": {
+            "animation-frame": 95,
+            "timeout": 18,
+            "listener": 4,
+            "interval": 4
+          },
+          "highWater": {
+            "animation-frame": 2,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "pixi-text": 34,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "dom-pro-live-aggregation": 2,
+            "pixi-chart:idzhbv8wp2m:resize": 1,
+            "pixi-chart:idzhbv8wp2m:visibility": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:notify": 1,
+            "dom-pro-master-visual": 1,
+            "pixi-chart:idzhbv8wp2m": 58
+          },
+          "totalActive": 68
+        }
+      },
+      "trace": {
+        "startedAt": 1784006130200,
+        "generatedAt": 1784006137065,
+        "spans": {
+          "react.dom_pro_commit": {
+            "calls": 160,
+            "callsPerSecond": 2.6666666666666665,
+            "averageMs": 26.281874999729915,
+            "p95Ms": 53.399999998509884,
+            "p99Ms": 88.39999999850988,
+            "maxMs": 90.60000000149012,
+            "averageInputSize": 11,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate": {
+            "calls": 61,
+            "callsPerSecond": 1.0166666666666666,
+            "averageMs": 2.178688524810017,
+            "p95Ms": 4,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2101.4262295081967,
+            "averageOutputSize": 119.90163934426229
+          },
+          "worker.transfer_roundtrip": {
+            "calls": 61,
+            "callsPerSecond": 1.0166666666666666,
+            "averageMs": 10.268852458869825,
+            "p95Ms": 45.5,
+            "p99Ms": 84.09999999403954,
+            "maxMs": 84.09999999403954,
+            "averageInputSize": 32000,
+            "averageOutputSize": 119.90163934426229
+          },
+          "worker.bucket_aggregation": {
+            "calls": 61,
+            "callsPerSecond": 1.0166666666666666,
+            "averageMs": 1.6327868852703298,
+            "p95Ms": 3.3000000044703484,
+            "p99Ms": 3.5999999940395355,
+            "maxMs": 3.5999999940395355,
+            "averageInputSize": 2000,
+            "averageOutputSize": 79.08196721311475
+          },
+          "worker.profile_and_delta": {
+            "calls": 61,
+            "callsPerSecond": 1.0166666666666666,
+            "averageMs": 0.06557377049180328,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 79.08196721311475,
+            "averageOutputSize": 158.1639344262295
+          },
+          "worker.wall_calculation": {
+            "calls": 61,
+            "callsPerSecond": 1.0166666666666666,
+            "averageMs": 0.0754098360900019,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 88,
+            "averageOutputSize": 5.60655737704918
+          },
+          "worker.heatmap_shaping": {
+            "calls": 61,
+            "callsPerSecond": 1.0166666666666666,
+            "averageMs": 0.1524590162224457,
+            "p95Ms": 0.5,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 167.08196721311475,
+            "averageOutputSize": 33.57377049180328
+          },
+          "worker.cvd_calculation": {
+            "calls": 61,
+            "callsPerSecond": 1.0166666666666666,
+            "averageMs": 0.039344262392794496,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 101.42622950819673,
+            "averageOutputSize": 1.639344262295082
+          },
+          "worker.derived_metrics": {
+            "calls": 61,
+            "callsPerSecond": 1.0166666666666666,
+            "averageMs": 0.11639344301380095,
+            "p95Ms": 0.29999999701976776,
+            "p99Ms": 0.30000000447034836,
+            "maxMs": 0.30000000447034836,
+            "averageInputSize": 180.50819672131146,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate_total": {
+            "calls": 61,
+            "callsPerSecond": 1.0166666666666666,
+            "averageMs": 2.1688524592118186,
+            "p95Ms": 3.899999998509884,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2101.4262295081967,
+            "averageOutputSize": 163.7704918032787
+          },
+          "panel.volume_profile": {
+            "calls": 92,
+            "callsPerSecond": 1.5333333333333334,
+            "averageMs": 0.24565217433416325,
+            "p95Ms": 0.5,
+            "p99Ms": 2.2999999970197678,
+            "maxMs": 2.2999999970197678,
+            "averageInputSize": 721.9891304347826,
+            "averageOutputSize": 129
+          },
+          "canvas.master_frame": {
+            "calls": 94,
+            "callsPerSecond": 1.5666666666666667,
+            "averageMs": 2.524468085312463,
+            "p95Ms": 12.199999995529652,
+            "p99Ms": 30.200000002980232,
+            "maxMs": 30.200000002980232,
+            "averageInputSize": 1.0106382978723405,
+            "averageOutputSize": 1.0106382978723405
+          },
+          "panel.snapshot_commit": {
+            "calls": 66,
+            "callsPerSecond": 1.1,
+            "averageMs": 1.9530303032335006,
+            "p95Ms": 3.600000001490116,
+            "p99Ms": 11.5,
+            "maxMs": 11.5,
+            "averageInputSize": 2.0757575757575757,
+            "averageOutputSize": 2.0757575757575757
+          },
+          "canvas.heatmap_draw": {
+            "calls": 91,
+            "callsPerSecond": 1.5166666666666666,
+            "averageMs": 2.565934066589062,
+            "p95Ms": 12.199999995529652,
+            "p99Ms": 30.200000002980232,
+            "maxMs": 30.200000002980232,
+            "averageInputSize": 267.8131868131868,
+            "averageOutputSize": 214.65934065934067
+          },
+          "feed.receive_book": {
+            "calls": 67,
+            "callsPerSecond": 1.1166666666666667,
+            "averageMs": 0,
+            "p95Ms": 0,
+            "p99Ms": 0,
+            "maxMs": 0,
+            "averageInputSize": 2000,
+            "averageOutputSize": 1
+          },
+          "feed.snapshot_publish": {
+            "calls": 75,
+            "callsPerSecond": 1.25,
+            "averageMs": 0.046666666467984515,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 0.9466666666666667,
+            "averageOutputSize": 1
+          },
+          "panel.trade_tape": {
+            "calls": 22,
+            "callsPerSecond": 0.36666666666666664,
+            "averageMs": 0.022727273065935482,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 101.27272727272727,
+            "averageOutputSize": 22
+          },
+          "panel.metric_stabilization": {
+            "calls": 11,
+            "callsPerSecond": 0.18333333333333332,
+            "averageMs": 0.08181818168271672,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_smoothing": {
+            "calls": 17,
+            "callsPerSecond": 0.2833333333333333,
+            "averageMs": 0.06470588244059507,
+            "p95Ms": 0.3999999985098839,
+            "p99Ms": 0.3999999985098839,
+            "maxMs": 0.3999999985098839,
+            "averageInputSize": 1.411764705882353,
+            "averageOutputSize": 1.411764705882353
+          },
+          "panel.cvd_candles": {
+            "calls": 17,
+            "callsPerSecond": 0.2833333333333333,
+            "averageMs": 0.1352941170334816,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 101.58823529411765,
+            "averageOutputSize": 25.058823529411764
+          },
+          "panel.flow_delta": {
+            "calls": 23,
+            "callsPerSecond": 0.38333333333333336,
+            "averageMs": 0.01304347813129425,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 2.782608695652174,
+            "averageOutputSize": 2.782608695652174
+          },
+          "settings.update": {
+            "calls": 5,
+            "callsPerSecond": 0.08333333333333333,
+            "averageMs": 0.020000000298023225,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 8.8,
+            "averageOutputSize": 1
+          },
+          "panel.depth_chart": {
+            "calls": 16,
+            "callsPerSecond": 0.26666666666666666,
+            "averageMs": 1.6500000008381903,
+            "p95Ms": 2.399999998509884,
+            "p99Ms": 2.399999998509884,
+            "maxMs": 2.399999998509884,
+            "averageInputSize": 1741.25,
+            "averageOutputSize": 1
+          },
+          "feed.receive_trades": {
+            "calls": 4,
+            "callsPerSecond": 0.06666666666666667,
+            "averageMs": 0.10000000149011612,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 100,
+            "averageOutputSize": 13
+          }
+        },
+        "counters": {
+          "react.dom_pro_renders": 160,
+          "worker.submitted": 71,
+          "worker.processed": 67,
+          "worker.coalesced": 0,
+          "worker.dropped": 0,
+          "worker.stale": 3,
+          "worker.queue_peak": 1,
+          "worker.transfer_input_units": 142687,
+          "worker.transfer_output_units": 7475,
+          "worker.transfer_input_bytes": 2208000,
+          "canvas.heatmap_draw_calls": 19534
+        }
+      }
+    },
+    {
+      "time": "2026-07-14T05:15:38.159Z",
+      "index": 8,
+      "scenario": "VISIBILITY_RECOVERY",
+      "heapUsedMb": 52.448537826538086,
+      "domNodes": 1853,
+      "heatmapCells": 0,
+      "heatmapFrames": 28,
+      "canvasCount": 2,
+      "workerCount": 1,
+      "websocketCount": 0,
+      "listenerCount": 2,
+      "timerCount": 2,
+      "workerQueue": 0,
+      "cockpit": true,
+      "aifActive": true,
+      "telemetry": {
+        "fps": 56.01641469770018,
+        "averageFrameMs": 17.85191011235955,
+        "p95FrameMs": 48.600000000000364,
+        "p99FrameMs": 83.29999999999927,
+        "longestTaskMs": 63,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "worker": 1,
+            "observer": 1,
+            "listener": 2,
+            "pixi-text": 32,
+            "worker-queue": 0,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11
+          },
+          "created": {
+            "animation-frame": 110,
+            "timeout": 18,
+            "listener": 4,
+            "interval": 4
+          },
+          "highWater": {
+            "animation-frame": 2,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "pixi-text": 34,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "dom-pro-live-aggregation": 1,
+            "pixi-chart:idzhbv8wp2m:resize": 1,
+            "pixi-chart:idzhbv8wp2m:visibility": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "pixi-chart:idzhbv8wp2m": 58
+          },
+          "totalActive": 65
+        }
+      },
+      "trace": {
+        "startedAt": 1784006130200,
+        "generatedAt": 1784006138154,
+        "spans": {
+          "react.dom_pro_commit": {
+            "calls": 190,
+            "callsPerSecond": 3.1666666666666665,
+            "averageMs": 26.408947368279883,
+            "p95Ms": 53.70000000298023,
+            "p99Ms": 88.39999999850988,
+            "maxMs": 90.60000000149012,
+            "averageInputSize": 11,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate": {
+            "calls": 72,
+            "callsPerSecond": 1.2,
+            "averageMs": 2.150000000062088,
+            "p95Ms": 4,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2101.6666666666665,
+            "averageOutputSize": 125.04166666666667
+          },
+          "worker.transfer_roundtrip": {
+            "calls": 72,
+            "callsPerSecond": 1.2,
+            "averageMs": 10.251388888806105,
+            "p95Ms": 45.5,
+            "p99Ms": 84.09999999403954,
+            "maxMs": 84.09999999403954,
+            "averageInputSize": 32000,
+            "averageOutputSize": 125.04166666666667
+          },
+          "worker.bucket_aggregation": {
+            "calls": 72,
+            "callsPerSecond": 1.2,
+            "averageMs": 1.6125000000206962,
+            "p95Ms": 3.3000000044703484,
+            "p99Ms": 3.5999999940395355,
+            "maxMs": 3.5999999940395355,
+            "averageInputSize": 2000,
+            "averageOutputSize": 82.55555555555556
+          },
+          "worker.profile_and_delta": {
+            "calls": 72,
+            "callsPerSecond": 1.2,
+            "averageMs": 0.059722222180830106,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 82.55555555555556,
+            "averageOutputSize": 165.11111111111111
+          },
+          "worker.wall_calculation": {
+            "calls": 72,
+            "callsPerSecond": 1.2,
+            "averageMs": 0.08749999995860788,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 88,
+            "averageOutputSize": 5.819444444444445
+          },
+          "worker.heatmap_shaping": {
+            "calls": 72,
+            "callsPerSecond": 1.2,
+            "averageMs": 0.14583333312637276,
+            "p95Ms": 0.5,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 170.55555555555554,
+            "averageOutputSize": 34.666666666666664
+          },
+          "worker.cvd_calculation": {
+            "calls": 72,
+            "callsPerSecond": 1.2,
+            "averageMs": 0.03750000004139212,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 101.66666666666667,
+            "averageOutputSize": 2
+          },
+          "worker.derived_metrics": {
+            "calls": 72,
+            "callsPerSecond": 1.2,
+            "averageMs": 0.11250000053809749,
+            "p95Ms": 0.29999999701976776,
+            "p99Ms": 0.30000000447034836,
+            "maxMs": 0.30000000447034836,
+            "averageInputSize": 184.22222222222223,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate_total": {
+            "calls": 72,
+            "callsPerSecond": 1.2,
+            "averageMs": 2.141666666708059,
+            "p95Ms": 3.899999998509884,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2101.6666666666665,
+            "averageOutputSize": 170.93055555555554
+          },
+          "panel.volume_profile": {
+            "calls": 106,
+            "callsPerSecond": 1.7666666666666666,
+            "averageMs": 0.23679245291453488,
+            "p95Ms": 0.5,
+            "p99Ms": 1,
+            "maxMs": 2.2999999970197678,
+            "averageInputSize": 735.1981132075472,
+            "averageOutputSize": 129
+          },
+          "canvas.master_frame": {
+            "calls": 110,
+            "callsPerSecond": 1.8333333333333333,
+            "averageMs": 2.410000000216744,
+            "p95Ms": 9.200000002980232,
+            "p99Ms": 26.600000001490116,
+            "maxMs": 30.200000002980232,
+            "averageInputSize": 1.009090909090909,
+            "averageOutputSize": 1.009090909090909
+          },
+          "panel.snapshot_commit": {
+            "calls": 77,
+            "callsPerSecond": 1.2833333333333334,
+            "averageMs": 1.933766234037164,
+            "p95Ms": 3.600000001490116,
+            "p99Ms": 11.5,
+            "maxMs": 11.5,
+            "averageInputSize": 2.116883116883117,
+            "averageOutputSize": 2.116883116883117
+          },
+          "canvas.heatmap_draw": {
+            "calls": 107,
+            "callsPerSecond": 1.7833333333333334,
+            "averageMs": 2.4392523370752826,
+            "p95Ms": 9.200000002980232,
+            "p99Ms": 26.600000001490116,
+            "maxMs": 30.200000002980232,
+            "averageInputSize": 347.61682242990656,
+            "averageOutputSize": 279.23364485981307
+          },
+          "feed.receive_book": {
+            "calls": 78,
+            "callsPerSecond": 1.3,
+            "averageMs": 0.0012820512056350708,
+            "p95Ms": 0,
+            "p99Ms": 0.09999999403953552,
+            "maxMs": 0.09999999403953552,
+            "averageInputSize": 2000,
+            "averageOutputSize": 1
+          },
+          "feed.snapshot_publish": {
+            "calls": 87,
+            "callsPerSecond": 1.45,
+            "averageMs": 0.04597701132297516,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 0.9540229885057471,
+            "averageOutputSize": 1
+          },
+          "panel.trade_tape": {
+            "calls": 26,
+            "callsPerSecond": 0.43333333333333335,
+            "averageMs": 0.023076923134235237,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 101.53846153846153,
+            "averageOutputSize": 22
+          },
+          "panel.metric_stabilization": {
+            "calls": 13,
+            "callsPerSecond": 0.21666666666666667,
+            "averageMs": 0.07692307692307693,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_smoothing": {
+            "calls": 19,
+            "callsPerSecond": 0.31666666666666665,
+            "averageMs": 0.05789473692053243,
+            "p95Ms": 0.3999999985098839,
+            "p99Ms": 0.3999999985098839,
+            "maxMs": 0.3999999985098839,
+            "averageInputSize": 1.6842105263157894,
+            "averageOutputSize": 1.6842105263157894
+          },
+          "panel.cvd_candles": {
+            "calls": 19,
+            "callsPerSecond": 0.31666666666666665,
+            "averageMs": 0.12631578900312124,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 102.15789473684211,
+            "averageOutputSize": 25.157894736842106
+          },
+          "panel.flow_delta": {
+            "calls": 26,
+            "callsPerSecond": 0.43333333333333335,
+            "averageMs": 0.011538461423837222,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 2.6923076923076925,
+            "averageOutputSize": 2.6923076923076925
+          },
+          "settings.update": {
+            "calls": 5,
+            "callsPerSecond": 0.08333333333333333,
+            "averageMs": 0.020000000298023225,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 8.8,
+            "averageOutputSize": 1
+          },
+          "panel.depth_chart": {
+            "calls": 18,
+            "callsPerSecond": 0.3,
+            "averageMs": 1.733333333912823,
+            "p95Ms": 2.5,
+            "p99Ms": 2.5,
+            "maxMs": 2.5,
+            "averageInputSize": 1769.4444444444443,
+            "averageOutputSize": 1
+          },
+          "feed.receive_trades": {
+            "calls": 4,
+            "callsPerSecond": 0.06666666666666667,
+            "averageMs": 0.10000000149011612,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 100,
+            "averageOutputSize": 13
+          }
+        },
+        "counters": {
+          "react.dom_pro_renders": 190,
+          "worker.submitted": 81,
+          "worker.processed": 78,
+          "worker.coalesced": 0,
+          "worker.dropped": 0,
+          "worker.stale": 3,
+          "worker.queue_peak": 1,
+          "worker.transfer_input_units": 165820,
+          "worker.transfer_output_units": 9164,
+          "worker.transfer_input_bytes": 2528000,
+          "canvas.heatmap_draw_calls": 29878
+        }
+      }
+    },
+    {
+      "time": "2026-07-14T05:15:39.007Z",
+      "index": 9,
+      "scenario": "B_CHART_DOM",
+      "heapUsedMb": 53.4957218170166,
+      "domNodes": 1854,
+      "heatmapCells": 0,
+      "heatmapFrames": 31,
+      "canvasCount": 2,
+      "workerCount": 1,
+      "websocketCount": 0,
+      "listenerCount": 2,
+      "timerCount": 2,
+      "workerQueue": 0,
+      "cockpit": true,
+      "aifActive": true,
+      "telemetry": {
+        "fps": 55.850670549293056,
+        "averageFrameMs": 17.90488798370672,
+        "p95FrameMs": 48.600000000000364,
+        "p99FrameMs": 83.29999999999927,
+        "longestTaskMs": 63,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "worker": 1,
+            "observer": 1,
+            "listener": 2,
+            "pixi-text": 34,
+            "worker-queue": 0,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11
+          },
+          "created": {
+            "animation-frame": 125,
+            "timeout": 19,
+            "listener": 4,
+            "interval": 4
+          },
+          "highWater": {
+            "animation-frame": 2,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "pixi-text": 34,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "dom-pro-live-aggregation": 1,
+            "pixi-chart:idzhbv8wp2m:resize": 1,
+            "pixi-chart:idzhbv8wp2m:visibility": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "pixi-chart:idzhbv8wp2m": 60
+          },
+          "totalActive": 67
+        }
+      },
+      "trace": {
+        "startedAt": 1784006130200,
+        "generatedAt": 1784006138997,
+        "spans": {
+          "react.dom_pro_commit": {
+            "calls": 214,
+            "callsPerSecond": 3.566666666666667,
+            "averageMs": 26.407009345662093,
+            "p95Ms": 58.70000000298023,
+            "p99Ms": 77.60000000149012,
+            "maxMs": 90.60000000149012,
+            "averageInputSize": 11,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate": {
+            "calls": 80,
+            "callsPerSecond": 1.3333333333333333,
+            "averageMs": 2.1912500001490116,
+            "p95Ms": 3.899999998509884,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2101.8,
+            "averageOutputSize": 127.7125
+          },
+          "worker.transfer_roundtrip": {
+            "calls": 80,
+            "callsPerSecond": 1.3333333333333333,
+            "averageMs": 9.399999999813735,
+            "p95Ms": 35,
+            "p99Ms": 84.09999999403954,
+            "maxMs": 84.09999999403954,
+            "averageInputSize": 32000,
+            "averageOutputSize": 127.7125
+          },
+          "worker.bucket_aggregation": {
+            "calls": 80,
+            "callsPerSecond": 1.3333333333333333,
+            "averageMs": 1.6500000000931323,
+            "p95Ms": 3.1999999955296516,
+            "p99Ms": 3.5999999940395355,
+            "maxMs": 3.5999999940395355,
+            "averageInputSize": 2000,
+            "averageOutputSize": 84.6625
+          },
+          "worker.profile_and_delta": {
+            "calls": 80,
+            "callsPerSecond": 1.3333333333333333,
+            "averageMs": 0.06124999998137355,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 84.6625,
+            "averageOutputSize": 169.325
+          },
+          "worker.wall_calculation": {
+            "calls": 80,
+            "callsPerSecond": 1.3333333333333333,
+            "averageMs": 0.08999999994412064,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 88,
+            "averageOutputSize": 5.95
+          },
+          "worker.heatmap_shaping": {
+            "calls": 80,
+            "callsPerSecond": 1.3333333333333333,
+            "averageMs": 0.14499999973922967,
+            "p95Ms": 0.4000000059604645,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 172.6625,
+            "averageOutputSize": 34.9
+          },
+          "worker.cvd_calculation": {
+            "calls": 80,
+            "callsPerSecond": 1.3333333333333333,
+            "averageMs": 0.038750000018626454,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 101.8,
+            "averageOutputSize": 2.2
+          },
+          "worker.derived_metrics": {
+            "calls": 80,
+            "callsPerSecond": 1.3333333333333333,
+            "averageMs": 0.1150000006891787,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.30000000447034836,
+            "maxMs": 0.30000000447034836,
+            "averageInputSize": 186.4625,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate_total": {
+            "calls": 80,
+            "callsPerSecond": 1.3333333333333333,
+            "averageMs": 2.1825000001117587,
+            "p95Ms": 3.899999998509884,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2101.8,
+            "averageOutputSize": 175.275
+          },
+          "panel.volume_profile": {
+            "calls": 120,
+            "callsPerSecond": 2,
+            "averageMs": 0.23083333342025678,
+            "p95Ms": 0.5,
+            "p99Ms": 1,
+            "maxMs": 2.2999999970197678,
+            "averageInputSize": 745.4416666666667,
+            "averageOutputSize": 129
+          },
+          "canvas.master_frame": {
+            "calls": 125,
+            "callsPerSecond": 2.0833333333333335,
+            "averageMs": 2.5200000002384186,
+            "p95Ms": 9.200000002980232,
+            "p99Ms": 26.600000001490116,
+            "maxMs": 30.200000002980232,
+            "averageInputSize": 1.016,
+            "averageOutputSize": 1.016
+          },
+          "panel.snapshot_commit": {
+            "calls": 85,
+            "callsPerSecond": 1.4166666666666667,
+            "averageMs": 1.892941176891327,
+            "p95Ms": 3.2000000029802322,
+            "p99Ms": 11.5,
+            "maxMs": 11.5,
+            "averageInputSize": 2.1411764705882352,
+            "averageOutputSize": 2.1411764705882352
+          },
+          "canvas.heatmap_draw": {
+            "calls": 121,
+            "callsPerSecond": 2.0166666666666666,
+            "averageMs": 2.566942149326821,
+            "p95Ms": 9.200000002980232,
+            "p99Ms": 26.600000001490116,
+            "maxMs": 30.200000002980232,
+            "averageInputSize": 415.27272727272725,
+            "averageOutputSize": 334.1735537190083
+          },
+          "feed.receive_book": {
+            "calls": 86,
+            "callsPerSecond": 1.4333333333333333,
+            "averageMs": 0.0023255813433680425,
+            "p95Ms": 0,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 2000,
+            "averageOutputSize": 1
+          },
+          "feed.snapshot_publish": {
+            "calls": 95,
+            "callsPerSecond": 1.5833333333333333,
+            "averageMs": 0.046315789222717285,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 0.9578947368421052,
+            "averageOutputSize": 1
+          },
+          "panel.trade_tape": {
+            "calls": 29,
+            "callsPerSecond": 0.48333333333333334,
+            "averageMs": 0.020689655223797107,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 101.6896551724138,
+            "averageOutputSize": 22
+          },
+          "panel.metric_stabilization": {
+            "calls": 14,
+            "callsPerSecond": 0.23333333333333334,
+            "averageMs": 0.07142857142857142,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_smoothing": {
+            "calls": 20,
+            "callsPerSecond": 0.3333333333333333,
+            "averageMs": 0.055000000074505805,
+            "p95Ms": 0.19999999552965164,
+            "p99Ms": 0.3999999985098839,
+            "maxMs": 0.3999999985098839,
+            "averageInputSize": 1.8,
+            "averageOutputSize": 1.8
+          },
+          "panel.cvd_candles": {
+            "calls": 20,
+            "callsPerSecond": 0.3333333333333333,
+            "averageMs": 0.12499999962747096,
+            "p95Ms": 0.29999999701976776,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 102.4,
+            "averageOutputSize": 25.2
+          },
+          "panel.flow_delta": {
+            "calls": 29,
+            "callsPerSecond": 0.48333333333333334,
+            "averageMs": 0.010344827483440268,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 2.7241379310344827,
+            "averageOutputSize": 2.7241379310344827
+          },
+          "settings.update": {
+            "calls": 5,
+            "callsPerSecond": 0.08333333333333333,
+            "averageMs": 0.020000000298023225,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 8.8,
+            "averageOutputSize": 1
+          },
+          "panel.depth_chart": {
+            "calls": 19,
+            "callsPerSecond": 0.31666666666666665,
+            "averageMs": 1.7526315795747858,
+            "p95Ms": 2.5,
+            "p99Ms": 2.5,
+            "maxMs": 2.5,
+            "averageInputSize": 1781.3684210526317,
+            "averageOutputSize": 1
+          },
+          "feed.receive_trades": {
+            "calls": 4,
+            "callsPerSecond": 0.06666666666666667,
+            "averageMs": 0.10000000149011612,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 100,
+            "averageOutputSize": 13
+          }
+        },
+        "counters": {
+          "react.dom_pro_renders": 214,
+          "worker.submitted": 89,
+          "worker.processed": 86,
+          "worker.coalesced": 0,
+          "worker.dropped": 0,
+          "worker.stale": 3,
+          "worker.queue_peak": 1,
+          "worker.transfer_input_units": 182644,
+          "worker.transfer_output_units": 10378,
+          "worker.transfer_input_bytes": 2784000,
+          "canvas.heatmap_draw_calls": 40435
+        }
+      }
+    },
+    {
+      "time": "2026-07-14T05:15:39.933Z",
+      "index": 10,
+      "scenario": "D_MACRO_3D",
+      "heapUsedMb": 40.63540172576904,
+      "domNodes": 1903,
+      "heatmapCells": 0,
+      "heatmapFrames": 31,
+      "canvasCount": 2,
+      "workerCount": 1,
+      "websocketCount": 0,
+      "listenerCount": 2,
+      "timerCount": 2,
+      "workerQueue": 0,
+      "cockpit": true,
+      "aifActive": true,
+      "telemetry": {
+        "fps": 55.49824633794099,
+        "averageFrameMs": 18.018587360594797,
+        "p95FrameMs": 48.600000000000364,
+        "p99FrameMs": 83.29999999999927,
+        "longestTaskMs": 63,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "worker": 1,
+            "observer": 1,
+            "listener": 2,
+            "pixi-text": 34,
+            "worker-queue": 0,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11
+          },
+          "created": {
+            "animation-frame": 133,
+            "timeout": 21,
+            "listener": 4,
+            "interval": 4
+          },
+          "highWater": {
+            "animation-frame": 2,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "pixi-text": 34,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "dom-pro-live-aggregation": 1,
+            "pixi-chart:idzhbv8wp2m:resize": 1,
+            "pixi-chart:idzhbv8wp2m:visibility": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "pixi-chart:idzhbv8wp2m": 60
+          },
+          "totalActive": 67
+        }
+      },
+      "trace": {
+        "startedAt": 1784006130200,
+        "generatedAt": 1784006139924,
+        "spans": {
+          "react.dom_pro_commit": {
+            "calls": 231,
+            "callsPerSecond": 3.85,
+            "averageMs": 26.544155844168746,
+            "p95Ms": 57.100000001490116,
+            "p99Ms": 77.60000000149012,
+            "maxMs": 90.60000000149012,
+            "averageInputSize": 11,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate": {
+            "calls": 86,
+            "callsPerSecond": 1.4333333333333333,
+            "averageMs": 2.1697674419644266,
+            "p95Ms": 3.899999998509884,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2101.8837209302324,
+            "averageOutputSize": 124.26744186046511
+          },
+          "worker.transfer_roundtrip": {
+            "calls": 86,
+            "callsPerSecond": 1.4333333333333333,
+            "averageMs": 10.562790697570456,
+            "p95Ms": 47,
+            "p99Ms": 100.50000000745058,
+            "maxMs": 100.50000000745058,
+            "averageInputSize": 32000,
+            "averageOutputSize": 124.26744186046511
+          },
+          "worker.bucket_aggregation": {
+            "calls": 86,
+            "callsPerSecond": 1.4333333333333333,
+            "averageMs": 1.6453488373825715,
+            "p95Ms": 3.1999999955296516,
+            "p99Ms": 3.5999999940395355,
+            "maxMs": 3.5999999940395355,
+            "averageInputSize": 2000,
+            "averageOutputSize": 80.37209302325581
+          },
+          "worker.profile_and_delta": {
+            "calls": 86,
+            "callsPerSecond": 1.4333333333333333,
+            "averageMs": 0.05697674416871958,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 80.37209302325581,
+            "averageOutputSize": 160.74418604651163
+          },
+          "worker.wall_calculation": {
+            "calls": 86,
+            "callsPerSecond": 1.4333333333333333,
+            "averageMs": 0.08953488375558409,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 88,
+            "averageOutputSize": 5.988372093023256
+          },
+          "worker.heatmap_shaping": {
+            "calls": 86,
+            "callsPerSecond": 1.4333333333333333,
+            "averageMs": 0.1418604648043943,
+            "p95Ms": 0.4000000059604645,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 168.37209302325581,
+            "averageOutputSize": 35.58139534883721
+          },
+          "worker.cvd_calculation": {
+            "calls": 86,
+            "callsPerSecond": 1.4333333333333333,
+            "averageMs": 0.0372093022736006,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 101.88372093023256,
+            "averageOutputSize": 2.3255813953488373
+          },
+          "worker.derived_metrics": {
+            "calls": 86,
+            "callsPerSecond": 1.4333333333333333,
+            "averageMs": 0.11046511679887772,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.30000000447034836,
+            "maxMs": 0.30000000447034836,
+            "averageInputSize": 182.25581395348837,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate_total": {
+            "calls": 86,
+            "callsPerSecond": 1.4333333333333333,
+            "averageMs": 2.161627907046052,
+            "p95Ms": 3.899999998509884,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2101.8837209302324,
+            "averageOutputSize": 166.7325581395349
+          },
+          "panel.volume_profile": {
+            "calls": 128,
+            "callsPerSecond": 2.1333333333333333,
+            "averageMs": 0.2296875001047738,
+            "p95Ms": 0.5,
+            "p99Ms": 1,
+            "maxMs": 2.2999999970197678,
+            "averageInputSize": 751.1015625,
+            "averageOutputSize": 129
+          },
+          "canvas.master_frame": {
+            "calls": 133,
+            "callsPerSecond": 2.216666666666667,
+            "averageMs": 2.7586466168102466,
+            "p95Ms": 12.5,
+            "p99Ms": 26.600000001490116,
+            "maxMs": 30.200000002980232,
+            "averageInputSize": 1.0150375939849625,
+            "averageOutputSize": 1.0150375939849625
+          },
+          "panel.snapshot_commit": {
+            "calls": 92,
+            "callsPerSecond": 1.5333333333333334,
+            "averageMs": 1.9032608699863371,
+            "p95Ms": 3.2000000029802322,
+            "p99Ms": 11.5,
+            "maxMs": 11.5,
+            "averageInputSize": 2.0217391304347827,
+            "averageOutputSize": 2.0217391304347827
+          },
+          "canvas.heatmap_draw": {
+            "calls": 129,
+            "callsPerSecond": 2.15,
+            "averageMs": 2.8093023261474084,
+            "p95Ms": 12.5,
+            "p99Ms": 26.600000001490116,
+            "maxMs": 30.200000002980232,
+            "averageInputSize": 449.7984496124031,
+            "averageOutputSize": 316.26356589147287
+          },
+          "feed.receive_book": {
+            "calls": 95,
+            "callsPerSecond": 1.5833333333333333,
+            "averageMs": 0.0021052631108384383,
+            "p95Ms": 0,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 2000,
+            "averageOutputSize": 1
+          },
+          "feed.snapshot_publish": {
+            "calls": 105,
+            "callsPerSecond": 1.75,
+            "averageMs": 0.0447619045774142,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 0.9619047619047619,
+            "averageOutputSize": 1
+          },
+          "panel.trade_tape": {
+            "calls": 29,
+            "callsPerSecond": 0.48333333333333334,
+            "averageMs": 0.020689655223797107,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 101.6896551724138,
+            "averageOutputSize": 22
+          },
+          "panel.metric_stabilization": {
+            "calls": 14,
+            "callsPerSecond": 0.23333333333333334,
+            "averageMs": 0.07142857142857142,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_smoothing": {
+            "calls": 23,
+            "callsPerSecond": 0.38333333333333336,
+            "averageMs": 0.052173913173053574,
+            "p95Ms": 0.19999999552965164,
+            "p99Ms": 0.3999999985098839,
+            "maxMs": 0.3999999985098839,
+            "averageInputSize": 2.0869565217391304,
+            "averageOutputSize": 1.6956521739130435
+          },
+          "panel.cvd_candles": {
+            "calls": 23,
+            "callsPerSecond": 0.38333333333333336,
+            "averageMs": 0.1304347819608191,
+            "p95Ms": 0.29999999701976776,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 102.6086956521739,
+            "averageOutputSize": 25.304347826086957
+          },
+          "panel.flow_delta": {
+            "calls": 31,
+            "callsPerSecond": 0.5166666666666667,
+            "averageMs": 0.01290322551804204,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 2.7419354838709675,
+            "averageOutputSize": 2.7419354838709675
+          },
+          "settings.update": {
+            "calls": 7,
+            "callsPerSecond": 0.11666666666666667,
+            "averageMs": 0.028571428997176036,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 9.428571428571429,
+            "averageOutputSize": 1
+          },
+          "panel.depth_chart": {
+            "calls": 22,
+            "callsPerSecond": 0.36666666666666664,
+            "averageMs": 1.6818181824955074,
+            "p95Ms": 2.399999998509884,
+            "p99Ms": 2.5,
+            "maxMs": 2.5,
+            "averageInputSize": 1810.5,
+            "averageOutputSize": 1
+          },
+          "feed.receive_trades": {
+            "calls": 4,
+            "callsPerSecond": 0.06666666666666667,
+            "averageMs": 0.10000000149011612,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 100,
+            "averageOutputSize": 13
+          }
+        },
+        "counters": {
+          "react.dom_pro_renders": 231,
+          "worker.submitted": 95,
+          "worker.processed": 92,
+          "worker.coalesced": 0,
+          "worker.dropped": 0,
+          "worker.stale": 3,
+          "worker.queue_peak": 1,
+          "worker.transfer_input_units": 195262,
+          "worker.transfer_output_units": 10848,
+          "worker.transfer_input_bytes": 2976000,
+          "canvas.heatmap_draw_calls": 40798
+        }
+      }
+    },
+    {
+      "time": "2026-07-14T05:15:40.738Z",
+      "index": 11,
+      "scenario": "E_PRESET_SWITCH",
+      "heapUsedMb": 47.44713306427002,
+      "domNodes": 1874,
+      "heatmapCells": 0,
+      "heatmapFrames": 36,
+      "canvasCount": 2,
+      "workerCount": 1,
+      "websocketCount": 0,
+      "listenerCount": 2,
+      "timerCount": 2,
+      "workerQueue": 0,
+      "cockpit": true,
+      "aifActive": true,
+      "telemetry": {
+        "fps": 53.930660579255246,
+        "averageFrameMs": 18.54232804232804,
+        "p95FrameMs": 48.69999999999982,
+        "p99FrameMs": 83.39999999999964,
+        "longestTaskMs": 63,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "worker": 1,
+            "observer": 1,
+            "listener": 2,
+            "pixi-text": 34,
+            "worker-queue": 0,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11
+          },
+          "created": {
+            "animation-frame": 142,
+            "timeout": 22,
+            "listener": 4,
+            "interval": 4
+          },
+          "highWater": {
+            "animation-frame": 2,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "pixi-text": 34,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "dom-pro-live-aggregation": 1,
+            "pixi-chart:idzhbv8wp2m:resize": 1,
+            "pixi-chart:idzhbv8wp2m:visibility": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "pixi-chart:idzhbv8wp2m": 60
+          },
+          "totalActive": 67
+        }
+      },
+      "trace": {
+        "startedAt": 1784006130200,
+        "generatedAt": 1784006140733,
+        "spans": {
+          "react.dom_pro_commit": {
+            "calls": 249,
+            "callsPerSecond": 4.15,
+            "averageMs": 26.998393574363018,
+            "p95Ms": 57.100000001490116,
+            "p99Ms": 88.39999999850988,
+            "maxMs": 98,
+            "averageInputSize": 11,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate": {
+            "calls": 91,
+            "callsPerSecond": 1.5166666666666666,
+            "averageMs": 2.2032967032967035,
+            "p95Ms": 4,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2101.945054945055,
+            "averageOutputSize": 126.93406593406593
+          },
+          "worker.transfer_roundtrip": {
+            "calls": 91,
+            "callsPerSecond": 1.5166666666666666,
+            "averageMs": 10.527472527390653,
+            "p95Ms": 47,
+            "p99Ms": 100.50000000745058,
+            "maxMs": 100.50000000745058,
+            "averageInputSize": 32000,
+            "averageOutputSize": 126.93406593406593
+          },
+          "worker.bucket_aggregation": {
+            "calls": 91,
+            "callsPerSecond": 1.5166666666666666,
+            "averageMs": 1.672527472642097,
+            "p95Ms": 3.3000000044703484,
+            "p99Ms": 3.5999999940395355,
+            "maxMs": 3.5999999940395355,
+            "averageInputSize": 2000,
+            "averageOutputSize": 82.04395604395604
+          },
+          "worker.profile_and_delta": {
+            "calls": 91,
+            "callsPerSecond": 1.5166666666666666,
+            "averageMs": 0.05714285717560695,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 82.04395604395604,
+            "averageOutputSize": 164.0879120879121
+          },
+          "worker.wall_calculation": {
+            "calls": 91,
+            "callsPerSecond": 1.5166666666666666,
+            "averageMs": 0.09230769237319192,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 88,
+            "averageOutputSize": 6.043956043956044
+          },
+          "worker.heatmap_shaping": {
+            "calls": 91,
+            "callsPerSecond": 1.5166666666666666,
+            "averageMs": 0.1439560435630463,
+            "p95Ms": 0.4000000059604645,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 170.04395604395606,
+            "averageOutputSize": 36.42857142857143
+          },
+          "worker.cvd_calculation": {
+            "calls": 91,
+            "callsPerSecond": 1.5166666666666666,
+            "averageMs": 0.03626373623098646,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 101.94505494505495,
+            "averageOutputSize": 2.4175824175824174
+          },
+          "worker.derived_metrics": {
+            "calls": 91,
+            "callsPerSecond": 1.5166666666666666,
+            "averageMs": 0.11098901141475845,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.30000000447034836,
+            "maxMs": 0.30000000447034836,
+            "averageInputSize": 183.98901098901098,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate_total": {
+            "calls": 91,
+            "callsPerSecond": 1.5166666666666666,
+            "averageMs": 2.192307692225818,
+            "p95Ms": 3.899999998509884,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2101.945054945055,
+            "averageOutputSize": 170.13186813186815
+          },
+          "panel.volume_profile": {
+            "calls": 137,
+            "callsPerSecond": 2.283333333333333,
+            "averageMs": 0.21970802931672465,
+            "p95Ms": 0.5,
+            "p99Ms": 1,
+            "maxMs": 2.2999999970197678,
+            "averageInputSize": 753.3065693430657,
+            "averageOutputSize": 129
+          },
+          "canvas.master_frame": {
+            "calls": 142,
+            "callsPerSecond": 2.3666666666666667,
+            "averageMs": 2.9450704227660744,
+            "p95Ms": 12.5,
+            "p99Ms": 28.100000001490116,
+            "maxMs": 30.200000002980232,
+            "averageInputSize": 1.0140845070422535,
+            "averageOutputSize": 1.0140845070422535
+          },
+          "panel.snapshot_commit": {
+            "calls": 98,
+            "callsPerSecond": 1.6333333333333333,
+            "averageMs": 1.9010204084369602,
+            "p95Ms": 3.2000000029802322,
+            "p99Ms": 11.5,
+            "maxMs": 11.5,
+            "averageInputSize": 2.1530612244897958,
+            "averageOutputSize": 2.1530612244897958
+          },
+          "canvas.heatmap_draw": {
+            "calls": 138,
+            "callsPerSecond": 2.3,
+            "averageMs": 2.9971014498260575,
+            "p95Ms": 15.200000002980232,
+            "p99Ms": 28.100000001490116,
+            "maxMs": 30.200000002980232,
+            "averageInputSize": 495.5,
+            "averageOutputSize": 355.0652173913044
+          },
+          "feed.receive_book": {
+            "calls": 103,
+            "callsPerSecond": 1.7166666666666666,
+            "averageMs": 0.0019417475294140937,
+            "p95Ms": 0,
+            "p99Ms": 0.09999999403953552,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 2000,
+            "averageOutputSize": 1
+          },
+          "feed.snapshot_publish": {
+            "calls": 113,
+            "callsPerSecond": 1.8833333333333333,
+            "averageMs": 0.04513274324415004,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 0.9646017699115044,
+            "averageOutputSize": 1
+          },
+          "panel.trade_tape": {
+            "calls": 33,
+            "callsPerSecond": 0.55,
+            "averageMs": 0.02727272722757224,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 101.84848484848484,
+            "averageOutputSize": 22
+          },
+          "panel.metric_stabilization": {
+            "calls": 16,
+            "callsPerSecond": 0.26666666666666666,
+            "averageMs": 0.07499999972060323,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_smoothing": {
+            "calls": 26,
+            "callsPerSecond": 0.43333333333333335,
+            "averageMs": 0.050000000171936475,
+            "p95Ms": 0.19999999552965164,
+            "p99Ms": 0.3999999985098839,
+            "maxMs": 0.3999999985098839,
+            "averageInputSize": 2.3076923076923075,
+            "averageOutputSize": 1.9615384615384615
+          },
+          "panel.cvd_candles": {
+            "calls": 26,
+            "callsPerSecond": 0.43333333333333335,
+            "averageMs": 0.12307692233186501,
+            "p95Ms": 0.29999999701976776,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 103.11538461538461,
+            "averageOutputSize": 25.384615384615383
+          },
+          "panel.flow_delta": {
+            "calls": 35,
+            "callsPerSecond": 0.5833333333333334,
+            "averageMs": 0.014285714072840554,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 2.914285714285714,
+            "averageOutputSize": 2.914285714285714
+          },
+          "settings.update": {
+            "calls": 8,
+            "callsPerSecond": 0.13333333333333333,
+            "averageMs": 0.02500000037252903,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 10.5,
+            "averageOutputSize": 1
+          },
+          "panel.depth_chart": {
+            "calls": 25,
+            "callsPerSecond": 0.4166666666666667,
+            "averageMs": 1.7040000003576279,
+            "p95Ms": 2.5,
+            "p99Ms": 2.5,
+            "maxMs": 2.5,
+            "averageInputSize": 1830.56,
+            "averageOutputSize": 1
+          },
+          "feed.receive_trades": {
+            "calls": 4,
+            "callsPerSecond": 0.06666666666666667,
+            "averageMs": 0.10000000149011612,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 100,
+            "averageOutputSize": 13
+          }
+        },
+        "counters": {
+          "react.dom_pro_renders": 249,
+          "worker.submitted": 100,
+          "worker.processed": 97,
+          "worker.coalesced": 0,
+          "worker.dropped": 0,
+          "worker.stale": 3,
+          "worker.queue_peak": 1,
+          "worker.transfer_input_units": 205777,
+          "worker.transfer_output_units": 11712,
+          "worker.transfer_input_bytes": 3136000,
+          "canvas.heatmap_draw_calls": 48999
+        }
+      }
+    },
+    {
+      "time": "2026-07-14T05:15:41.673Z",
+      "index": 12,
+      "scenario": "F_SETTINGS",
+      "heapUsedMb": 32.541303634643555,
+      "domNodes": 1876,
+      "heatmapCells": 0,
+      "heatmapFrames": 39,
+      "canvasCount": 2,
+      "workerCount": 1,
+      "websocketCount": 0,
+      "listenerCount": 2,
+      "timerCount": 2,
+      "workerQueue": 0,
+      "cockpit": true,
+      "aifActive": true,
+      "telemetry": {
+        "fps": 52.46085108987418,
+        "averageFrameMs": 19.061833333333333,
+        "p95FrameMs": 48.70000000000073,
+        "p99FrameMs": 83.30000000000109,
+        "longestTaskMs": 63,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "worker": 1,
+            "observer": 1,
+            "listener": 2,
+            "pixi-text": 34,
+            "worker-queue": 0,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11
+          },
+          "created": {
+            "animation-frame": 152,
+            "timeout": 23,
+            "listener": 4,
+            "interval": 4
+          },
+          "highWater": {
+            "animation-frame": 2,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "pixi-text": 34,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "dom-pro-live-aggregation": 1,
+            "pixi-chart:idzhbv8wp2m:resize": 1,
+            "pixi-chart:idzhbv8wp2m:visibility": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "pixi-chart:idzhbv8wp2m": 60
+          },
+          "totalActive": 67
+        }
+      },
+      "trace": {
+        "startedAt": 1784006130200,
+        "generatedAt": 1784006141668,
+        "spans": {
+          "react.dom_pro_commit": {
+            "calls": 271,
+            "callsPerSecond": 4.516666666666667,
+            "averageMs": 26.983025830390268,
+            "p95Ms": 56,
+            "p99Ms": 88.39999999850988,
+            "maxMs": 98,
+            "averageInputSize": 11,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate": {
+            "calls": 100,
+            "callsPerSecond": 1.6666666666666667,
+            "averageMs": 2.282999999895692,
+            "p95Ms": 4.100000001490116,
+            "p99Ms": 4.5,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2102.04,
+            "averageOutputSize": 134.14
+          },
+          "worker.transfer_roundtrip": {
+            "calls": 100,
+            "callsPerSecond": 1.6666666666666667,
+            "averageMs": 9.965000000074506,
+            "p95Ms": 45.5,
+            "p99Ms": 84.09999999403954,
+            "maxMs": 100.50000000745058,
+            "averageInputSize": 32000,
+            "averageOutputSize": 134.14
+          },
+          "worker.bucket_aggregation": {
+            "calls": 100,
+            "callsPerSecond": 1.6666666666666667,
+            "averageMs": 1.716000000089407,
+            "p95Ms": 3.3000000044703484,
+            "p99Ms": 3.5,
+            "maxMs": 3.5999999940395355,
+            "averageInputSize": 2000,
+            "averageOutputSize": 87.09
+          },
+          "worker.profile_and_delta": {
+            "calls": 100,
+            "callsPerSecond": 1.6666666666666667,
+            "averageMs": 0.06900000005960465,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8999999985098839,
+            "averageInputSize": 87.09,
+            "averageOutputSize": 174.18
+          },
+          "worker.wall_calculation": {
+            "calls": 100,
+            "callsPerSecond": 1.6666666666666667,
+            "averageMs": 0.0930000001192093,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 88,
+            "averageOutputSize": 6.03
+          },
+          "worker.heatmap_shaping": {
+            "calls": 100,
+            "callsPerSecond": 1.6666666666666667,
+            "averageMs": 0.15599999956786634,
+            "p95Ms": 0.4000000059604645,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8999999985098839,
+            "averageInputSize": 175.09,
+            "averageOutputSize": 38.46
+          },
+          "worker.cvd_calculation": {
+            "calls": 100,
+            "callsPerSecond": 1.6666666666666667,
+            "averageMs": 0.03800000004470348,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 102.04,
+            "averageOutputSize": 2.56
+          },
+          "worker.derived_metrics": {
+            "calls": 100,
+            "callsPerSecond": 1.6666666666666667,
+            "averageMs": 0.11500000022351742,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.30000000447034836,
+            "maxMs": 0.30000000447034836,
+            "averageInputSize": 189.13,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate_total": {
+            "calls": 100,
+            "callsPerSecond": 1.6666666666666667,
+            "averageMs": 2.2709999997913837,
+            "p95Ms": 4.100000001490116,
+            "p99Ms": 4.399999998509884,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2102.04,
+            "averageOutputSize": 180.21
+          },
+          "panel.volume_profile": {
+            "calls": 150,
+            "callsPerSecond": 2.5,
+            "averageMs": 0.21200000017881393,
+            "p95Ms": 0.3999999985098839,
+            "p99Ms": 1,
+            "maxMs": 2.2999999970197678,
+            "averageInputSize": 762.62,
+            "averageOutputSize": 129
+          },
+          "canvas.master_frame": {
+            "calls": 152,
+            "callsPerSecond": 2.533333333333333,
+            "averageMs": 2.9914473685386933,
+            "p95Ms": 12.5,
+            "p99Ms": 28.100000001490116,
+            "maxMs": 30.200000002980232,
+            "averageInputSize": 1.013157894736842,
+            "averageOutputSize": 1.013157894736842
+          },
+          "panel.snapshot_commit": {
+            "calls": 106,
+            "callsPerSecond": 1.7666666666666666,
+            "averageMs": 1.9066037737395403,
+            "p95Ms": 3.100000001490116,
+            "p99Ms": 4.299999997019768,
+            "maxMs": 11.5,
+            "averageInputSize": 2.169811320754717,
+            "averageOutputSize": 2.169811320754717
+          },
+          "canvas.heatmap_draw": {
+            "calls": 148,
+            "callsPerSecond": 2.466666666666667,
+            "averageMs": 3.0405405409936166,
+            "p95Ms": 12.5,
+            "p99Ms": 28.100000001490116,
+            "maxMs": 30.200000002980232,
+            "averageInputSize": 551.1756756756756,
+            "averageOutputSize": 401.35135135135135
+          },
+          "feed.receive_book": {
+            "calls": 112,
+            "callsPerSecond": 1.8666666666666667,
+            "averageMs": 0.002678571401962212,
+            "p95Ms": 0,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 2000,
+            "averageOutputSize": 1
+          },
+          "feed.snapshot_publish": {
+            "calls": 122,
+            "callsPerSecond": 2.033333333333333,
+            "averageMs": 0.04590163929540603,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 0.9672131147540983,
+            "averageOutputSize": 1
+          },
+          "panel.trade_tape": {
+            "calls": 37,
+            "callsPerSecond": 0.6166666666666667,
+            "averageMs": 0.02702702702702703,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 101.97297297297297,
+            "averageOutputSize": 22
+          },
+          "panel.metric_stabilization": {
+            "calls": 17,
+            "callsPerSecond": 0.2833333333333333,
+            "averageMs": 0.07647058762171689,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_smoothing": {
+            "calls": 27,
+            "callsPerSecond": 0.45,
+            "averageMs": 0.0481481483137166,
+            "p95Ms": 0.19999999552965164,
+            "p99Ms": 0.3999999985098839,
+            "maxMs": 0.3999999985098839,
+            "averageInputSize": 2.3703703703703702,
+            "averageOutputSize": 2.037037037037037
+          },
+          "panel.cvd_candles": {
+            "calls": 27,
+            "callsPerSecond": 0.45,
+            "averageMs": 0.12222222155994839,
+            "p95Ms": 0.29999999701976776,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 103.25925925925925,
+            "averageOutputSize": 25.40740740740741
+          },
+          "panel.flow_delta": {
+            "calls": 38,
+            "callsPerSecond": 0.6333333333333333,
+            "averageMs": 0.013157894540774194,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 3.1315789473684212,
+            "averageOutputSize": 3.1315789473684212
+          },
+          "settings.update": {
+            "calls": 8,
+            "callsPerSecond": 0.13333333333333333,
+            "averageMs": 0.02500000037252903,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 10.5,
+            "averageOutputSize": 1
+          },
+          "panel.depth_chart": {
+            "calls": 26,
+            "callsPerSecond": 0.43333333333333335,
+            "averageMs": 1.684615384787321,
+            "p95Ms": 2.5,
+            "p99Ms": 2.5,
+            "maxMs": 2.5,
+            "averageInputSize": 1834.4615384615386,
+            "averageOutputSize": 1
+          },
+          "feed.receive_trades": {
+            "calls": 4,
+            "callsPerSecond": 0.06666666666666667,
+            "averageMs": 0.10000000149011612,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 100,
+            "averageOutputSize": 13
+          }
+        },
+        "counters": {
+          "react.dom_pro_renders": 271,
+          "worker.submitted": 109,
+          "worker.processed": 106,
+          "worker.coalesced": 0,
+          "worker.dropped": 0,
+          "worker.stale": 3,
+          "worker.queue_peak": 1,
+          "worker.transfer_input_units": 224704,
+          "worker.transfer_output_units": 13575,
+          "worker.transfer_input_bytes": 3424000,
+          "canvas.heatmap_draw_calls": 59400
+        }
+      }
+    },
+    {
+      "time": "2026-07-14T05:15:42.651Z",
+      "index": 13,
+      "scenario": "G_PAN_ZOOM",
+      "heapUsedMb": 40.02460765838623,
+      "domNodes": 1876,
+      "heatmapCells": 0,
+      "heatmapFrames": 43,
+      "canvasCount": 2,
+      "workerCount": 1,
+      "websocketCount": 0,
+      "listenerCount": 2,
+      "timerCount": 2,
+      "workerQueue": 0,
+      "cockpit": true,
+      "aifActive": true,
+      "telemetry": {
+        "fps": 52.643865057835804,
+        "averageFrameMs": 18.995565749235475,
+        "p95FrameMs": 48.70000000000073,
+        "p99FrameMs": 83.30000000000109,
+        "longestTaskMs": 63,
+        "publicMessagesPerSecond": 11,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "worker": 1,
+            "observer": 1,
+            "listener": 2,
+            "pixi-text": 34,
+            "worker-queue": 0,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11
+          },
+          "created": {
+            "animation-frame": 170,
+            "timeout": 23,
+            "listener": 4,
+            "interval": 4
+          },
+          "highWater": {
+            "animation-frame": 2,
+            "interval": 2,
+            "listener": 2,
+            "worker": 1,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "pixi-text": 34,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "dom-pro-live-aggregation": 1,
+            "pixi-chart:idzhbv8wp2m:resize": 1,
+            "pixi-chart:idzhbv8wp2m:visibility": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "pixi-chart:idzhbv8wp2m": 60
+          },
+          "totalActive": 67
+        }
+      },
+      "trace": {
+        "startedAt": 1784006130200,
+        "generatedAt": 1784006142648,
+        "spans": {
+          "react.dom_pro_commit": {
+            "calls": 298,
+            "callsPerSecond": 4.966666666666667,
+            "averageMs": 26.94194630880984,
+            "p95Ms": 56,
+            "p99Ms": 88.39999999850988,
+            "maxMs": 98,
+            "averageInputSize": 11,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate": {
+            "calls": 109,
+            "callsPerSecond": 1.8166666666666667,
+            "averageMs": 2.3128440365742104,
+            "p95Ms": 4.100000001490116,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2102.119266055046,
+            "averageOutputSize": 139.36697247706422
+          },
+          "worker.transfer_roundtrip": {
+            "calls": 109,
+            "callsPerSecond": 1.8166666666666667,
+            "averageMs": 9.868807339476882,
+            "p95Ms": 45.5,
+            "p99Ms": 84.09999999403954,
+            "maxMs": 100.50000000745058,
+            "averageInputSize": 32000,
+            "averageOutputSize": 139.36697247706422
+          },
+          "worker.bucket_aggregation": {
+            "calls": 109,
+            "callsPerSecond": 1.8166666666666667,
+            "averageMs": 1.7238532112005653,
+            "p95Ms": 3.399999998509884,
+            "p99Ms": 3.5999999940395355,
+            "maxMs": 3.6999999955296516,
+            "averageInputSize": 2000,
+            "averageOutputSize": 90.96330275229357
+          },
+          "worker.profile_and_delta": {
+            "calls": 109,
+            "callsPerSecond": 1.8166666666666667,
+            "averageMs": 0.07706422030652335,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8999999985098839,
+            "averageInputSize": 90.96330275229357,
+            "averageOutputSize": 181.92660550458714
+          },
+          "worker.wall_calculation": {
+            "calls": 109,
+            "callsPerSecond": 1.8166666666666667,
+            "averageMs": 0.09633027543441965,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.5,
+            "maxMs": 0.8000000044703484,
+            "averageInputSize": 88,
+            "averageOutputSize": 6.009174311926605
+          },
+          "worker.heatmap_shaping": {
+            "calls": 109,
+            "callsPerSecond": 1.8166666666666667,
+            "averageMs": 0.16055045823711867,
+            "p95Ms": 0.4000000059604645,
+            "p99Ms": 0.8000000044703484,
+            "maxMs": 0.8999999985098839,
+            "averageInputSize": 178.96330275229357,
+            "averageOutputSize": 39.71559633027523
+          },
+          "worker.cvd_calculation": {
+            "calls": 109,
+            "callsPerSecond": 1.8166666666666667,
+            "averageMs": 0.03853211005073075,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 102.11926605504587,
+            "averageOutputSize": 2.6788990825688073
+          },
+          "worker.derived_metrics": {
+            "calls": 109,
+            "callsPerSecond": 1.8166666666666667,
+            "averageMs": 0.11834862411295602,
+            "p95Ms": 0.29999999701976776,
+            "p99Ms": 0.30000000447034836,
+            "maxMs": 0.30000000447034836,
+            "averageInputSize": 193.08256880733944,
+            "averageOutputSize": 1
+          },
+          "worker.aggregate_total": {
+            "calls": 109,
+            "callsPerSecond": 1.8166666666666667,
+            "averageMs": 2.300917430960257,
+            "p95Ms": 4.100000001490116,
+            "p99Ms": 4.600000001490116,
+            "maxMs": 4.600000001490116,
+            "averageInputSize": 2102.119266055046,
+            "averageOutputSize": 187.93577981651376
+          },
+          "panel.volume_profile": {
+            "calls": 167,
+            "callsPerSecond": 2.783333333333333,
+            "averageMs": 0.199401197810016,
+            "p95Ms": 0.3999999985098839,
+            "p99Ms": 1,
+            "maxMs": 2.2999999970197678,
+            "averageInputSize": 772.0778443113772,
+            "averageOutputSize": 129
+          },
+          "canvas.master_frame": {
+            "calls": 170,
+            "callsPerSecond": 2.8333333333333335,
+            "averageMs": 3.0235294118523597,
+            "p95Ms": 12.5,
+            "p99Ms": 28.100000001490116,
+            "maxMs": 30.200000002980232,
+            "averageInputSize": 1.0176470588235293,
+            "averageOutputSize": 1.0176470588235293
+          },
+          "panel.snapshot_commit": {
+            "calls": 116,
+            "callsPerSecond": 1.9333333333333333,
+            "averageMs": 1.8758620689783632,
+            "p95Ms": 3.2000000029802322,
+            "p99Ms": 4.299999997019768,
+            "maxMs": 11.5,
+            "averageInputSize": 2.1982758620689653,
+            "averageOutputSize": 2.1982758620689653
+          },
+          "canvas.heatmap_draw": {
+            "calls": 165,
+            "callsPerSecond": 2.75,
+            "averageMs": 3.0800000003793024,
+            "p95Ms": 12.5,
+            "p99Ms": 28.100000001490116,
+            "maxMs": 30.200000002980232,
+            "averageInputSize": 648.0363636363636,
+            "averageOutputSize": 480.0969696969697
+          },
+          "feed.receive_book": {
+            "calls": 122,
+            "callsPerSecond": 2.033333333333333,
+            "averageMs": 0.00245901636901449,
+            "p95Ms": 0,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 2000,
+            "averageOutputSize": 1
+          },
+          "feed.snapshot_publish": {
+            "calls": 132,
+            "callsPerSecond": 2.2,
+            "averageMs": 0.045454545454545456,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 0.9696969696969697,
+            "averageOutputSize": 1
+          },
+          "panel.trade_tape": {
+            "calls": 40,
+            "callsPerSecond": 0.6666666666666666,
+            "averageMs": 0.027500000037252902,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 102.05,
+            "averageOutputSize": 22
+          },
+          "panel.metric_stabilization": {
+            "calls": 19,
+            "callsPerSecond": 0.31666666666666665,
+            "averageMs": 0.06842105208258879,
+            "p95Ms": 0.5,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 1,
+            "averageOutputSize": 1
+          },
+          "panel.cvd_smoothing": {
+            "calls": 31,
+            "callsPerSecond": 0.5166666666666667,
+            "averageMs": 0.041935484015172525,
+            "p95Ms": 0.19999999552965164,
+            "p99Ms": 0.3999999985098839,
+            "maxMs": 0.3999999985098839,
+            "averageInputSize": 2.5806451612903225,
+            "averageOutputSize": 2.2903225806451615
+          },
+          "panel.cvd_candles": {
+            "calls": 31,
+            "callsPerSecond": 0.5166666666666667,
+            "averageMs": 0.11612903182545016,
+            "p95Ms": 0.29999999701976776,
+            "p99Ms": 0.5,
+            "maxMs": 0.5,
+            "averageInputSize": 103.74193548387096,
+            "averageOutputSize": 25.483870967741936
+          },
+          "panel.flow_delta": {
+            "calls": 44,
+            "callsPerSecond": 0.7333333333333333,
+            "averageMs": 0.013636363500898535,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 3.5681818181818183,
+            "averageOutputSize": 3.5681818181818183
+          },
+          "settings.update": {
+            "calls": 10,
+            "callsPerSecond": 0.16666666666666666,
+            "averageMs": 0.020000000298023225,
+            "p95Ms": 0.10000000149011612,
+            "p99Ms": 0.10000000149011612,
+            "maxMs": 0.10000000149011612,
+            "averageInputSize": 8.8,
+            "averageOutputSize": 1
+          },
+          "panel.depth_chart": {
+            "calls": 30,
+            "callsPerSecond": 0.5,
+            "averageMs": 1.7299999999503295,
+            "p95Ms": 2.5,
+            "p99Ms": 2.5,
+            "maxMs": 2.5,
+            "averageInputSize": 1836.0666666666666,
+            "averageOutputSize": 1
+          },
+          "feed.receive_trades": {
+            "calls": 4,
+            "callsPerSecond": 0.06666666666666667,
+            "averageMs": 0.10000000149011612,
+            "p95Ms": 0.20000000298023224,
+            "p99Ms": 0.20000000298023224,
+            "maxMs": 0.20000000298023224,
+            "averageInputSize": 100,
+            "averageOutputSize": 13
+          }
+        },
+        "counters": {
+          "react.dom_pro_renders": 298,
+          "worker.submitted": 118,
+          "worker.processed": 115,
+          "worker.coalesced": 0,
+          "worker.dropped": 0,
+          "worker.stale": 3,
+          "worker.queue_peak": 1,
+          "worker.transfer_input_units": 243631,
+          "worker.transfer_output_units": 15352,
+          "worker.transfer_input_bytes": 3712000,
+          "canvas.heatmap_draw_calls": 79216
+        }
+      }
+    }
+  ]
+}

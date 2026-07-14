@@ -1,0 +1,1221 @@
+{
+  "generatedAt": "2026-07-14T01:45:57.053Z",
+  "mode": "baseline",
+  "requestedDurationMs": 20400,
+  "actualDurationMs": 21204,
+  "sampleCount": 17,
+  "p95FrameMs": 354.1000000000022,
+  "p99FrameMs": 416.59999999999854,
+  "longestTaskMs": 216,
+  "heapGrowthMb": 82.53711891174316,
+  "domGrowth": 4444,
+  "workerQueuePeak": 1,
+  "peakHeatmapDomCells": 4068,
+  "messagesPerSecondPeak": 11,
+  "scenarios": {
+    "B_CHART_DOM": {
+      "samples": 3,
+      "frameP95Ms": 354.1000000000022,
+      "maxLongTaskMs": 216
+    },
+    "D_MACRO_3D": {
+      "samples": 2,
+      "frameP95Ms": 236.10000000000036,
+      "maxLongTaskMs": 216
+    },
+    "E_PRESET_SWITCH": {
+      "samples": 2,
+      "frameP95Ms": 250,
+      "maxLongTaskMs": 216
+    },
+    "F_SETTINGS": {
+      "samples": 2,
+      "frameP95Ms": 256.89999999999964,
+      "maxLongTaskMs": 216
+    },
+    "G_PAN_ZOOM": {
+      "samples": 2,
+      "frameP95Ms": 270.89999999999964,
+      "maxLongTaskMs": 216
+    },
+    "H_MOUNT_UNMOUNT": {
+      "samples": 2,
+      "frameP95Ms": 298.60000000000036,
+      "maxLongTaskMs": 216
+    },
+    "C_AIF_DOM": {
+      "samples": 2,
+      "frameP95Ms": 298.60000000000036,
+      "maxLongTaskMs": 216
+    },
+    "VISIBILITY_RECOVERY": {
+      "samples": 2,
+      "frameP95Ms": 319.60000000000036,
+      "maxLongTaskMs": 216
+    }
+  },
+  "pass": false,
+  "samples": [
+    {
+      "time": "2026-07-14T01:45:37.200Z",
+      "index": 1,
+      "scenario": "B_CHART_DOM",
+      "heapUsedMb": 11.790746688842773,
+      "domNodes": 1719,
+      "heatmapCells": 0,
+      "canvasCount": 1,
+      "workerQueue": 0,
+      "cockpit": true,
+      "telemetry": {
+        "fps": 61.015294500488125,
+        "averageFrameMs": 16.389333333333333,
+        "p95FrameMs": 83.40000000000009,
+        "p99FrameMs": 208.29999999999995,
+        "longestTaskMs": 216,
+        "publicMessagesPerSecond": 1,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "observer": 1,
+            "listener": 2,
+            "worker": 1,
+            "pixi-text": 23,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 0
+          },
+          "created": {
+            "observer": 1,
+            "listener": 2,
+            "interval": 1,
+            "worker": 1
+          },
+          "highWater": {
+            "listener": 2,
+            "interval": 2,
+            "animation-frame": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-text": 23,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "worker": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "pixi-chart:0fxkw78r2tqt:resize": 1,
+            "pixi-chart:0fxkw78r2tqt:visibility": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "dom-pro-live-aggregation": 1,
+            "pixi-chart:0fxkw78r2tqt": 49
+          },
+          "totalActive": 56
+        }
+      },
+      "trace": null
+    },
+    {
+      "time": "2026-07-14T01:45:38.211Z",
+      "index": 2,
+      "scenario": "D_MACRO_3D",
+      "heapUsedMb": 28.915771484375,
+      "domNodes": 1984,
+      "heatmapCells": 32,
+      "canvasCount": 1,
+      "workerQueue": 0,
+      "cockpit": true,
+      "telemetry": {
+        "fps": 36.532007986066866,
+        "averageFrameMs": 27.373255813953488,
+        "p95FrameMs": 125,
+        "p99FrameMs": 263.7999999999997,
+        "longestTaskMs": 216,
+        "publicMessagesPerSecond": 1,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "observer": 1,
+            "listener": 2,
+            "worker": 1,
+            "pixi-text": 32,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 0
+          },
+          "created": {
+            "observer": 1,
+            "listener": 2,
+            "interval": 1,
+            "worker": 1,
+            "timeout": 1
+          },
+          "highWater": {
+            "listener": 2,
+            "interval": 2,
+            "animation-frame": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-text": 32,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "worker": 1,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "pixi-chart:0fxkw78r2tqt:resize": 1,
+            "pixi-chart:0fxkw78r2tqt:visibility": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "dom-pro-live-aggregation": 1,
+            "pixi-chart:0fxkw78r2tqt": 58
+          },
+          "totalActive": 65
+        }
+      },
+      "trace": null
+    },
+    {
+      "time": "2026-07-14T01:45:39.060Z",
+      "index": 3,
+      "scenario": "E_PRESET_SWITCH",
+      "heapUsedMb": 49.13422679901123,
+      "domNodes": 2250,
+      "heatmapCells": 325,
+      "canvasCount": 1,
+      "workerQueue": 0,
+      "cockpit": true,
+      "telemetry": {
+        "fps": 32.17892758148278,
+        "averageFrameMs": 31.076237623762374,
+        "p95FrameMs": 118.09999999999991,
+        "p99FrameMs": 236,
+        "longestTaskMs": 216,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "observer": 1,
+            "listener": 2,
+            "worker": 1,
+            "pixi-text": 32,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 0
+          },
+          "created": {
+            "observer": 1,
+            "listener": 2,
+            "interval": 1,
+            "worker": 1,
+            "timeout": 2
+          },
+          "highWater": {
+            "listener": 2,
+            "interval": 2,
+            "animation-frame": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-text": 32,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "worker": 1,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "pixi-chart:0fxkw78r2tqt:resize": 1,
+            "pixi-chart:0fxkw78r2tqt:visibility": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "dom-pro-live-aggregation": 1,
+            "pixi-chart:0fxkw78r2tqt": 58
+          },
+          "totalActive": 65
+        }
+      },
+      "trace": null
+    },
+    {
+      "time": "2026-07-14T01:45:40.044Z",
+      "index": 4,
+      "scenario": "F_SETTINGS",
+      "heapUsedMb": 41.99280643463135,
+      "domNodes": 2521,
+      "heatmapCells": 595,
+      "canvasCount": 1,
+      "workerQueue": 0,
+      "cockpit": true,
+      "telemetry": {
+        "fps": 27.919278996865206,
+        "averageFrameMs": 35.81754385964912,
+        "p95FrameMs": 118.09999999999991,
+        "p99FrameMs": 236,
+        "longestTaskMs": 216,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "observer": 1,
+            "listener": 2,
+            "worker": 1,
+            "timeout": 1,
+            "pixi-text": 32,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 0
+          },
+          "created": {
+            "observer": 1,
+            "listener": 2,
+            "interval": 1,
+            "worker": 1,
+            "timeout": 11
+          },
+          "highWater": {
+            "listener": 2,
+            "interval": 2,
+            "animation-frame": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-text": 32,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "worker": 1,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "pixi-chart:0fxkw78r2tqt:resize": 1,
+            "pixi-chart:0fxkw78r2tqt:visibility": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "dom-pro-live-aggregation": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:notify": 1,
+            "pixi-chart:0fxkw78r2tqt": 58
+          },
+          "totalActive": 66
+        }
+      },
+      "trace": null
+    },
+    {
+      "time": "2026-07-14T01:45:41.288Z",
+      "index": 5,
+      "scenario": "G_PAN_ZOOM",
+      "heapUsedMb": 31.66775894165039,
+      "domNodes": 2872,
+      "heatmapCells": 955,
+      "canvasCount": 1,
+      "workerQueue": 0,
+      "cockpit": true,
+      "telemetry": {
+        "fps": 23.66163856847087,
+        "averageFrameMs": 42.262499999999996,
+        "p95FrameMs": 125,
+        "p99FrameMs": 236,
+        "longestTaskMs": 216,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "observer": 1,
+            "listener": 2,
+            "worker": 1,
+            "pixi-text": 34,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 0
+          },
+          "created": {
+            "observer": 1,
+            "listener": 2,
+            "interval": 1,
+            "worker": 1,
+            "timeout": 15
+          },
+          "highWater": {
+            "listener": 2,
+            "interval": 2,
+            "animation-frame": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-text": 34,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "worker": 1,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "pixi-chart:0fxkw78r2tqt:resize": 1,
+            "pixi-chart:0fxkw78r2tqt:visibility": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "dom-pro-live-aggregation": 1,
+            "pixi-chart:0fxkw78r2tqt": 60
+          },
+          "totalActive": 67
+        }
+      },
+      "trace": null
+    },
+    {
+      "time": "2026-07-14T01:45:42.464Z",
+      "index": 6,
+      "scenario": "H_MOUNT_UNMOUNT",
+      "heapUsedMb": 44.30063724517822,
+      "domNodes": 3139,
+      "heatmapCells": 1225,
+      "canvasCount": 1,
+      "workerQueue": 0,
+      "cockpit": true,
+      "telemetry": {
+        "fps": 21.874193009372487,
+        "averageFrameMs": 45.71597222222222,
+        "p95FrameMs": 125,
+        "p99FrameMs": 236,
+        "longestTaskMs": 216,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "observer": 1,
+            "listener": 2,
+            "worker": 1,
+            "pixi-text": 32,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 0
+          },
+          "created": {
+            "observer": 1,
+            "listener": 4,
+            "interval": 3,
+            "worker": 1,
+            "timeout": 17
+          },
+          "highWater": {
+            "listener": 2,
+            "interval": 2,
+            "animation-frame": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-text": 34,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "worker": 1,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "pixi-chart:0fxkw78r2tqt:resize": 1,
+            "pixi-chart:0fxkw78r2tqt:visibility": 1,
+            "dom-pro-live-aggregation": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "pixi-chart:0fxkw78r2tqt": 58
+          },
+          "totalActive": 65
+        }
+      },
+      "trace": null
+    },
+    {
+      "time": "2026-07-14T01:45:43.616Z",
+      "index": 7,
+      "scenario": "C_AIF_DOM",
+      "heapUsedMb": 51.992977142333984,
+      "domNodes": 3435,
+      "heatmapCells": 1495,
+      "canvasCount": 1,
+      "workerQueue": 0,
+      "cockpit": true,
+      "telemetry": {
+        "fps": 21.324487619950244,
+        "averageFrameMs": 46.894444444444446,
+        "p95FrameMs": 125,
+        "p99FrameMs": 236,
+        "longestTaskMs": 216,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "observer": 1,
+            "listener": 2,
+            "worker": 1,
+            "pixi-text": 32,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 0
+          },
+          "created": {
+            "observer": 1,
+            "listener": 6,
+            "interval": 5,
+            "worker": 1,
+            "timeout": 23
+          },
+          "highWater": {
+            "listener": 2,
+            "interval": 2,
+            "animation-frame": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-text": 34,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "worker": 1,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "pixi-chart:0fxkw78r2tqt:resize": 1,
+            "pixi-chart:0fxkw78r2tqt:visibility": 1,
+            "dom-pro-live-aggregation": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "pixi-chart:0fxkw78r2tqt": 58
+          },
+          "totalActive": 65
+        }
+      },
+      "trace": null
+    },
+    {
+      "time": "2026-07-14T01:45:44.796Z",
+      "index": 8,
+      "scenario": "VISIBILITY_RECOVERY",
+      "heapUsedMb": 47.89768314361572,
+      "domNodes": 3711,
+      "heatmapCells": 1765,
+      "canvasCount": 1,
+      "workerQueue": 0,
+      "cockpit": true,
+      "telemetry": {
+        "fps": 19.5031239015319,
+        "averageFrameMs": 51.27383720930233,
+        "p95FrameMs": 152.90000000000055,
+        "p99FrameMs": 236.10000000000036,
+        "longestTaskMs": 216,
+        "publicMessagesPerSecond": 9,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "observer": 1,
+            "listener": 2,
+            "worker": 1,
+            "pixi-text": 32,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 0
+          },
+          "created": {
+            "observer": 1,
+            "listener": 6,
+            "interval": 5,
+            "worker": 1,
+            "timeout": 23
+          },
+          "highWater": {
+            "listener": 2,
+            "interval": 2,
+            "animation-frame": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-text": 34,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "worker": 1,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "pixi-chart:0fxkw78r2tqt:resize": 1,
+            "pixi-chart:0fxkw78r2tqt:visibility": 1,
+            "dom-pro-live-aggregation": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "pixi-chart:0fxkw78r2tqt": 58
+          },
+          "totalActive": 65
+        }
+      },
+      "trace": null
+    },
+    {
+      "time": "2026-07-14T01:45:46.285Z",
+      "index": 9,
+      "scenario": "B_CHART_DOM",
+      "heapUsedMb": 73.9437780380249,
+      "domNodes": 4067,
+      "heatmapCells": 2125,
+      "canvasCount": 1,
+      "workerQueue": 0,
+      "cockpit": true,
+      "telemetry": {
+        "fps": 17.29616277826902,
+        "averageFrameMs": 57.816292134831464,
+        "p95FrameMs": 236,
+        "p99FrameMs": 256.89999999999964,
+        "longestTaskMs": 216,
+        "publicMessagesPerSecond": 11,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "observer": 1,
+            "listener": 2,
+            "worker": 1,
+            "pixi-text": 34,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 0
+          },
+          "created": {
+            "observer": 1,
+            "listener": 6,
+            "interval": 5,
+            "worker": 1,
+            "timeout": 28
+          },
+          "highWater": {
+            "listener": 2,
+            "interval": 2,
+            "animation-frame": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-text": 34,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "worker": 1,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "pixi-chart:0fxkw78r2tqt:resize": 1,
+            "pixi-chart:0fxkw78r2tqt:visibility": 1,
+            "dom-pro-live-aggregation": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "pixi-chart:0fxkw78r2tqt": 60
+          },
+          "totalActive": 67
+        }
+      },
+      "trace": null
+    },
+    {
+      "time": "2026-07-14T01:45:47.344Z",
+      "index": 10,
+      "scenario": "D_MACRO_3D",
+      "heapUsedMb": 40.89355182647705,
+      "domNodes": 4239,
+      "heatmapCells": 2215,
+      "canvasCount": 1,
+      "workerQueue": 0,
+      "cockpit": true,
+      "telemetry": {
+        "fps": 16.088966681694824,
+        "averageFrameMs": 62.1543956043956,
+        "p95FrameMs": 236.10000000000036,
+        "p99FrameMs": 263.7999999999997,
+        "longestTaskMs": 216,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "observer": 1,
+            "listener": 2,
+            "worker": 1,
+            "pixi-text": 34,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 0
+          },
+          "created": {
+            "observer": 1,
+            "listener": 6,
+            "interval": 5,
+            "worker": 1,
+            "timeout": 30
+          },
+          "highWater": {
+            "listener": 2,
+            "interval": 2,
+            "animation-frame": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-text": 34,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "worker": 1,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "pixi-chart:0fxkw78r2tqt:resize": 1,
+            "pixi-chart:0fxkw78r2tqt:visibility": 1,
+            "dom-pro-live-aggregation": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "pixi-chart:0fxkw78r2tqt": 60
+          },
+          "totalActive": 67
+        }
+      },
+      "trace": null
+    },
+    {
+      "time": "2026-07-14T01:45:48.212Z",
+      "index": 11,
+      "scenario": "E_PRESET_SWITCH",
+      "heapUsedMb": 42.66279983520508,
+      "domNodes": 4659,
+      "heatmapCells": 2683,
+      "canvasCount": 1,
+      "workerQueue": 0,
+      "cockpit": true,
+      "telemetry": {
+        "fps": 15.293427133019748,
+        "averageFrameMs": 65.38756756756757,
+        "p95FrameMs": 250,
+        "p99FrameMs": 270.7999999999993,
+        "longestTaskMs": 216,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "observer": 1,
+            "listener": 2,
+            "worker": 1,
+            "pixi-text": 34,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 0
+          },
+          "created": {
+            "observer": 1,
+            "listener": 6,
+            "interval": 5,
+            "worker": 1,
+            "timeout": 32
+          },
+          "highWater": {
+            "listener": 2,
+            "interval": 2,
+            "animation-frame": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-text": 34,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "worker": 1,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "pixi-chart:0fxkw78r2tqt:resize": 1,
+            "pixi-chart:0fxkw78r2tqt:visibility": 1,
+            "dom-pro-live-aggregation": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "pixi-chart:0fxkw78r2tqt": 60
+          },
+          "totalActive": 67
+        }
+      },
+      "trace": null
+    },
+    {
+      "time": "2026-07-14T01:45:49.240Z",
+      "index": 12,
+      "scenario": "F_SETTINGS",
+      "heapUsedMb": 73.47678184509277,
+      "domNodes": 4840,
+      "heatmapCells": 2863,
+      "canvasCount": 1,
+      "workerQueue": 0,
+      "cockpit": true,
+      "telemetry": {
+        "fps": 14.160803794196315,
+        "averageFrameMs": 70.61746031746033,
+        "p95FrameMs": 256.89999999999964,
+        "p99FrameMs": 319.5,
+        "longestTaskMs": 216,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "observer": 1,
+            "listener": 2,
+            "worker": 1,
+            "pixi-text": 34,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 0
+          },
+          "created": {
+            "observer": 1,
+            "listener": 6,
+            "interval": 5,
+            "worker": 1,
+            "timeout": 38
+          },
+          "highWater": {
+            "listener": 2,
+            "interval": 2,
+            "animation-frame": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-text": 34,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "worker": 1,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "pixi-chart:0fxkw78r2tqt:resize": 1,
+            "pixi-chart:0fxkw78r2tqt:visibility": 1,
+            "dom-pro-live-aggregation": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "pixi-chart:0fxkw78r2tqt": 60
+          },
+          "totalActive": 67
+        }
+      },
+      "trace": null
+    },
+    {
+      "time": "2026-07-14T01:45:51.093Z",
+      "index": 13,
+      "scenario": "G_PAN_ZOOM",
+      "heapUsedMb": 92.57584285736084,
+      "domNodes": 5288,
+      "heatmapCells": 3313,
+      "canvasCount": 1,
+      "workerQueue": 0,
+      "cockpit": true,
+      "telemetry": {
+        "fps": 12.939803234950809,
+        "averageFrameMs": 77.28092783505154,
+        "p95FrameMs": 270.89999999999964,
+        "p99FrameMs": 333.1999999999989,
+        "longestTaskMs": 216,
+        "publicMessagesPerSecond": 8,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "observer": 1,
+            "listener": 2,
+            "worker": 1,
+            "pixi-text": 34,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 0
+          },
+          "created": {
+            "observer": 1,
+            "listener": 6,
+            "interval": 5,
+            "worker": 1,
+            "timeout": 45
+          },
+          "highWater": {
+            "listener": 2,
+            "interval": 2,
+            "animation-frame": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-text": 34,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "worker": 1,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "pixi-chart:0fxkw78r2tqt:resize": 1,
+            "pixi-chart:0fxkw78r2tqt:visibility": 1,
+            "dom-pro-live-aggregation": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "pixi-chart:0fxkw78r2tqt": 60
+          },
+          "totalActive": 67
+        }
+      },
+      "trace": null
+    },
+    {
+      "time": "2026-07-14T01:45:52.231Z",
+      "index": 14,
+      "scenario": "H_MOUNT_UNMOUNT",
+      "heapUsedMb": 52.911505699157715,
+      "domNodes": 5439,
+      "heatmapCells": 3493,
+      "canvasCount": 1,
+      "workerQueue": 0,
+      "cockpit": true,
+      "telemetry": {
+        "fps": 12.57094493677188,
+        "averageFrameMs": 79.54851485148515,
+        "p95FrameMs": 298.60000000000036,
+        "p99FrameMs": 333.1999999999989,
+        "longestTaskMs": 216,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "observer": 1,
+            "listener": 2,
+            "worker": 1,
+            "pixi-text": 32,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 0
+          },
+          "created": {
+            "observer": 1,
+            "listener": 8,
+            "interval": 7,
+            "worker": 1,
+            "timeout": 49
+          },
+          "highWater": {
+            "listener": 2,
+            "interval": 2,
+            "animation-frame": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-text": 34,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "worker": 1,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "pixi-chart:0fxkw78r2tqt:resize": 1,
+            "pixi-chart:0fxkw78r2tqt:visibility": 1,
+            "dom-pro-live-aggregation": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "pixi-chart:0fxkw78r2tqt": 58
+          },
+          "totalActive": 65
+        }
+      },
+      "trace": null
+    },
+    {
+      "time": "2026-07-14T01:45:53.369Z",
+      "index": 15,
+      "scenario": "C_AIF_DOM",
+      "heapUsedMb": 28.216710090637207,
+      "domNodes": 5526,
+      "heatmapCells": 3583,
+      "canvasCount": 1,
+      "workerQueue": 0,
+      "cockpit": true,
+      "telemetry": {
+        "fps": 12.842065938171288,
+        "averageFrameMs": 77.86909090909091,
+        "p95FrameMs": 298.60000000000036,
+        "p99FrameMs": 340.10000000000036,
+        "longestTaskMs": 216,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 0,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "observer": 1,
+            "listener": 2,
+            "worker": 1,
+            "pixi-text": 32,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 0
+          },
+          "created": {
+            "observer": 1,
+            "listener": 10,
+            "interval": 9,
+            "worker": 1,
+            "timeout": 52
+          },
+          "highWater": {
+            "listener": 2,
+            "interval": 2,
+            "animation-frame": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-text": 34,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "worker": 1,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "pixi-chart:0fxkw78r2tqt:resize": 1,
+            "pixi-chart:0fxkw78r2tqt:visibility": 1,
+            "dom-pro-live-aggregation": 1,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "pixi-chart:0fxkw78r2tqt": 58
+          },
+          "totalActive": 65
+        }
+      },
+      "trace": null
+    },
+    {
+      "time": "2026-07-14T01:45:54.605Z",
+      "index": 16,
+      "scenario": "VISIBILITY_RECOVERY",
+      "heapUsedMb": 48.18351936340332,
+      "domNodes": 5934,
+      "heatmapCells": 3911,
+      "canvasCount": 1,
+      "workerQueue": 1,
+      "cockpit": true,
+      "telemetry": {
+        "fps": 12.022843402464684,
+        "averageFrameMs": 83.175,
+        "p95FrameMs": 319.60000000000036,
+        "p99FrameMs": 361.1000000000022,
+        "longestTaskMs": 216,
+        "publicMessagesPerSecond": 10,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 1,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "observer": 1,
+            "listener": 2,
+            "worker": 1,
+            "timeout": 1,
+            "pixi-text": 32,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 1
+          },
+          "created": {
+            "observer": 1,
+            "listener": 10,
+            "interval": 9,
+            "worker": 1,
+            "timeout": 54
+          },
+          "highWater": {
+            "listener": 2,
+            "interval": 2,
+            "animation-frame": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-text": 34,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "worker": 1,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "pixi-chart:0fxkw78r2tqt:resize": 1,
+            "pixi-chart:0fxkw78r2tqt:visibility": 1,
+            "dom-pro-live-aggregation": 2,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:notify": 1,
+            "pixi-chart:0fxkw78r2tqt": 58
+          },
+          "totalActive": 67
+        }
+      },
+      "trace": null
+    },
+    {
+      "time": "2026-07-14T01:45:57.052Z",
+      "index": 17,
+      "scenario": "B_CHART_DOM",
+      "heapUsedMb": 94.32786560058594,
+      "domNodes": 6163,
+      "heatmapCells": 4068,
+      "canvasCount": 1,
+      "workerQueue": 1,
+      "cockpit": true,
+      "telemetry": {
+        "fps": 10.94560510160377,
+        "averageFrameMs": 91.36086956521739,
+        "p95FrameMs": 354.1000000000022,
+        "p99FrameMs": 416.59999999999854,
+        "longestTaskMs": 216,
+        "publicMessagesPerSecond": 8,
+        "privateMessagesPerSecond": 0,
+        "workerQueueDepth": 1,
+        "resources": {
+          "active": {
+            "animation-frame": 1,
+            "interval": 2,
+            "observer": 1,
+            "listener": 2,
+            "worker": 1,
+            "timeout": 1,
+            "pixi-text": 34,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 1
+          },
+          "created": {
+            "observer": 1,
+            "listener": 10,
+            "interval": 9,
+            "worker": 1,
+            "timeout": 63
+          },
+          "highWater": {
+            "listener": 2,
+            "interval": 2,
+            "animation-frame": 1,
+            "pixi-container": 4,
+            "pixi-graphics": 11,
+            "pixi-text": 34,
+            "observer": 1,
+            "pixi-texture": 0,
+            "pixi-geometry": 11,
+            "worker-queue": 2,
+            "worker": 1,
+            "timeout": 1
+          },
+          "byOwner": {
+            "performance-monitor": 2,
+            "pixi-chart:0fxkw78r2tqt:resize": 1,
+            "pixi-chart:0fxkw78r2tqt:visibility": 1,
+            "dom-pro-live-aggregation": 2,
+            "dom-feed:visibility": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:ticker": 1,
+            "dom-feed:binance:perpetual:BTCUSDT:notify": 1,
+            "pixi-chart:0fxkw78r2tqt": 60
+          },
+          "totalActive": 69
+        }
+      },
+      "trace": null
+    }
+  ],
+  "retainedSampleCount": 17
+}

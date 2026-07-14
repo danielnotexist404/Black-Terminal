@@ -181,4 +181,8 @@ A.I.F. settings use `bt_aif_settings:<workspace>:<venue-symbol-timeframe>`. Boun
 
 Settings schema version 4 persists the automatic calculation horizon, structural-zone controls, and value-area appearance. New workspaces default to 20,000 completed bars; supported presets are 2,000, 5,000, 10,000, 20,000, 50,000 and 100,000 bars plus a bounded custom value. Camera transform state is transient and is never persisted as analytical state.
 
-Chapter I-C adds `bt_aif_zone_memory:<workspace>:<venue-symbol-timeframe>`. Zone memory is capped at 48 records; node/event memory is capped at 120/180 records. Both retry compact snapshots and fail soft when local storage is full, so persistence pressure never disables the indicator. Built-in presets do not modify HDLX; custom A.I.F. preset JSON is stored under `bt_aif_custom_preset`.
+Chapter I-C adds `bt_aif_zone_memory:<workspace>:<venue-symbol-timeframe>`. Zone memory is capped at 48 records; node/event memory is capped at 120/180 records. Both retry compact snapshots and fail soft when local storage is full, so persistence pressure never disables the indicator. Settings are higher priority: on quota pressure, disposable A.I.F. research caches are pruned and the selected mode is retried so it survives reload. Built-in presets do not modify HDLX; custom A.I.F. preset JSON is stored under `bt_aif_custom_preset`.
+
+# DOM Pro Runtime State
+
+DOM settings remain scoped by workspace and market key. Performance mode persists with the existing settings record; adaptive quality and interaction mode are transient. Panel settings writes are debounced and fail soft under storage pressure. Heatmap, worker, tooltip and watchdog diagnostics are bounded runtime state and are not restored as workspace analytics.

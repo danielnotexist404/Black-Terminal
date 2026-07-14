@@ -18,6 +18,8 @@
     "perf:baseline": "node scripts/performance-baseline.js",
     "perf:stress": "node scripts/performance-stress.js",
     "perf:soak": "node scripts/performance-soak.js",
+    "perf:dom-pro-smoke": "node scripts/dom-pro-performance-harness.js --minutes=0.2",
+    "perf:dom-pro-soak": "node scripts/dom-pro-performance-harness.js",
     "test:performance": "node --experimental-strip-types scripts/performance-regression-tests.js",
     "test:dom-pro-panels": "node --experimental-strip-types scripts/dom-pro-panel-tests.ts",
     "test:dom-pro-visual": "node scripts/dom-pro-visual-regression.js",

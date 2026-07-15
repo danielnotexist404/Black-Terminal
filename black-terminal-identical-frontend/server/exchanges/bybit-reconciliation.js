@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import {
   getBybitOpenOrdersSnapshot,
   getBybitStrategies,
@@ -46,6 +47,14 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
   const positions = positionRows.filter((position) => position.quantity > 0 && position.direction !== "flat");
   const balances = walletSnapshot.balances;
   const permissionReport = normalizeBybitPermissionReport(apiKeyInfo);
+  const apiKeyFingerprint = crypto.createHash("sha256").update(String(credentials.apiKey || account.id)).digest("hex").slice(0, 24);
+  const venueAccountId = String(apiKeyInfo?.userID || apiKeyInfo?.userId || apiKeyInfo?.parentUid || apiKeyInfo?.uid || apiKeyFingerprint);
+  const canonicalConnectionId = `bybit:${venueAccountId}`;
+  for (const order of openOrders) {
+    order.connectionId = canonicalConnectionId;
+    order.venueAccountId = venueAccountId;
+    order.canonicalKey = `${order.network || "mainnet"}:${canonicalConnectionId}:bybit:${order.category || "unknown"}:${order.venueOrderId || order.orderId}`;
+  }
   const permissionExecutionState = resolveBybitExecutionPolicy(permissionReport);
   const executionState = {
     ...permissionExecutionState,

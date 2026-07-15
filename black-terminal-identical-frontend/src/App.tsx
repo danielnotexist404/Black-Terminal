@@ -88,7 +88,7 @@ import { getMarketDataEngineAdapter } from "./market-data/engine/marketDataEngin
 import { ExchangeOption, MarketSymbolOption, getExchangeOption, marketCatalog } from "./market-data/marketCatalog";
 import type { ExchangeId, MarketSymbol, Timeframe } from "./market-data/types";
 import { blackCoreConnectionManager } from "./connectivity/connectionManager";
-import { readActiveExecutionVenueId, subscribeActiveExecutionVenue } from "./connectivity/activeExecutionVenue";
+import { readActiveExecutionVenueId, setActiveExecutionVenueId, subscribeActiveExecutionVenue } from "./connectivity/activeExecutionVenue";
 import type { ConnectionDiagnostics } from "./connectivity/types";
 import { getCapabilities, type CapabilityUser, type ProductTier, type TerminalCapability } from "./core/permissions/capabilities";
 import { blackCoreWindowDockManager } from "./core/windows/windowDockManager";
@@ -518,6 +518,13 @@ export default function App() {
       await dbAddAuditLog("LOGOUT", `User ${currentUser.username} logged out.`);
     }
     await clearSupabaseAuthSession();
+    blackCoreConnectionManager.clearSession();
+    blackCoreOrderSyncService.clear();
+    setActiveExecutionVenueId(null);
+    setPortfolioPositions([]);
+    setPortfolioOrders([]);
+    setPortfolioOrderSync({});
+    invalidatePortfolioSnapshot();
     setCurrentUser(null);
     setActiveNav("CHART");
   };
@@ -635,7 +642,7 @@ export default function App() {
     if (force) invalidatePortfolioSnapshot();
     const snapshot = await getPortfolioSnapshot();
     setPortfolioPositions(snapshot.positions);
-    setPortfolioOrders(blackCoreOrderSyncService.replaceAccountSnapshots(snapshot.orders, snapshot.orderSync));
+    setPortfolioOrders(blackCoreOrderSyncService.replaceAccountSnapshots(snapshot.orders, snapshot.orderSync, snapshot.accounts.map((account) => account.id)));
     setPortfolioOrderSync(snapshot.orderSync || {});
     return snapshot;
   }, []);
@@ -646,7 +653,7 @@ export default function App() {
       const snapshot = await getPortfolioSnapshot();
       if (!mounted) return;
       setPortfolioPositions(snapshot.positions);
-      setPortfolioOrders(blackCoreOrderSyncService.replaceAccountSnapshots(snapshot.orders, snapshot.orderSync));
+      setPortfolioOrders(blackCoreOrderSyncService.replaceAccountSnapshots(snapshot.orders, snapshot.orderSync, snapshot.accounts.map((account) => account.id)));
       setPortfolioOrderSync(snapshot.orderSync || {});
     };
     void load();

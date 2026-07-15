@@ -14,5 +14,8 @@ The account-wide `/v5/order/realtime` reader appended every page into an array w
 - Older REST data cannot overwrite a newer private-stream update.
 - Diagnostics expose raw, unique, duplicate, stale-update and repeated-cursor counts.
 
-Verified-empty safety is unchanged: an incomplete category snapshot cannot erase the last verified account state.
+## Connection-lifecycle correction
 
+Production evidence later proved that four local `exchange_accounts` rows could represent one Bybit API identity. The canonical connection is now venue-account based rather than local-row based. Legacy duplicate accounts are collapsed before portfolio totals and synchronizations, while authenticated disconnect removes every row for the same credential identity. See `BYBIT_CONNECTION_LIFECYCLE_HOTFIX.md`.
+
+Verified-empty safety is unchanged: an incomplete category snapshot cannot erase the last verified account state.

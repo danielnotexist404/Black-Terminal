@@ -276,6 +276,13 @@ export class ConnectionManager {
     return this.listConnections().map((connection) => this.toDiagnostics(connection));
   }
 
+  clearSession() {
+    for (const connectionId of this.connections.keys()) this.stopHeartbeat(connectionId);
+    this.connections.clear();
+    this.subscriptions.clear();
+    this.notify();
+  }
+
   subscribe(listener: ConnectionListener) {
     this.listeners.add(listener);
     listener(this.listDiagnostics());

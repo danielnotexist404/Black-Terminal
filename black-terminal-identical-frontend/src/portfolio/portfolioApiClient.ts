@@ -332,6 +332,16 @@ export async function connectExchangeAccountViaApi(draft: ExchangeConnectionDraf
   return mapAccount(data.account);
 }
 
+export async function disconnectExchangeAccountViaApi(accountId: string): Promise<void> {
+  const token = await getPortfolioApiToken();
+  if (!token) return;
+  const response = await fetch(`/api/exchange-accounts/${encodeURIComponent(accountId)}?accountId=${encodeURIComponent(accountId)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) throw new Error(await readApiError(response));
+}
+
 export async function connectHyperliquidRelayViaApi(draft: HyperliquidRelayConnectionDraft): Promise<ConnectionRecord | null> {
   const token = await getPortfolioApiToken();
   if (!token) return null;
@@ -720,7 +730,8 @@ function mapOrder(order: any): OrderUpdate {
     venuePriceString: order.venuePriceString === undefined ? undefined : String(order.venuePriceString),
     venueUpdatedTime: toMillis(order.venueUpdatedTime || order.updated_at || order.updatedTime || createdTime),
     canonicalKey: order.canonicalKey,
-    lastSource: order.lastSource || order.source
+    lastSource: order.lastSource || order.source,
+    venueAccountId: order.venueAccountId
   };
 }
 

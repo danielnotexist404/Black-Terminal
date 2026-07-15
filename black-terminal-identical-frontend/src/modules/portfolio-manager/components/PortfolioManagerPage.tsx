@@ -605,12 +605,17 @@ export function PositionsWorkspace({
     setActiveVenueId(nextVenue.id);
   }
 
-  function handleDisconnectExecutionVenue() {
+  async function handleDisconnectExecutionVenue() {
     if (!activeExecutionVenue) return;
 
     const nextVenue = executionVenues.find((venue) => venue.id !== activeExecutionVenue.id);
-    void blackCoreConnectionManager.disconnect(activeExecutionVenue.id);
-    setActiveVenueId(nextVenue?.id ?? null);
+    try {
+      await blackCoreConnectionManager.disconnect(activeExecutionVenue.id);
+      setActiveVenueId(nextVenue?.id ?? null);
+      await refreshOrders();
+    } catch (error) {
+      setConnectStatus(error instanceof Error ? error.message.toUpperCase() : String(error));
+    }
   }
 
   return (
@@ -698,7 +703,7 @@ export function PositionsWorkspace({
             onVenueChange={setActiveVenueId}
             onAddConnection={() => setShowConnection(true)}
             onSwitchVenue={handleSwitchExecutionVenue}
-            onDisconnectVenue={handleDisconnectExecutionVenue}
+            onDisconnectVenue={() => void handleDisconnectExecutionVenue()}
           />
         ) : (
           <>

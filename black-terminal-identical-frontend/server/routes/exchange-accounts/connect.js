@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import {
   applyCors,
   encryptCredentialPayload,
@@ -51,12 +52,11 @@ export default async function handler(req, res) {
       throw blocked;
     }
     const executionPolicy = resolveBybitExecutionPolicy(bybitDiagnostics?.permissions);
-    const credentialRef = `exchange:${exchange}:${user.id}:${Date.now()}`;
+    const credentialFingerprint = crypto.createHash("sha256").update(rawCredentials.apiKey).digest("hex").slice(0, 32);
+    const credentialRef = `exchange:${exchange}:${user.id}:${credentialFingerprint}`;
     const encryptedPayload = encryptCredentialPayload(rawCredentials);
 
-    const { data: account, error: accountError } = await supabase
-      .from("exchange_accounts")
-      .insert({
+    const accountPayload = {
         user_id: user.id,
         exchange,
         account_name: accountName,
@@ -67,22 +67,34 @@ export default async function handler(req, res) {
         is_read_only: !executionPolicy.tradingEnabled,
         trading_enabled: executionPolicy.tradingEnabled,
         credential_ref: credentialRef
-      })
+      };
+    const { data: existingAccount, error: existingError } = await supabase
+      .from("exchange_accounts")
       .select("*")
-      .single();
+      .eq("user_id", user.id)
+      .eq("exchange", exchange)
+      .eq("credential_ref", credentialRef)
+      .maybeSingle();
+    if (existingError) throw existingError;
+
+    const accountResult = existingAccount
+      ? await supabase.from("exchange_accounts").update(accountPayload).eq("id", existingAccount.id).eq("user_id", user.id).select("*").single()
+      : await supabase.from("exchange_accounts").insert(accountPayload).select("*").single();
+    const { data: account, error: accountError } = accountResult;
+    const createdAccount = !existingAccount;
 
     if (accountError) throw accountError;
 
     const { error: credentialError } = await supabase
       .from("exchange_credentials")
-      .insert({
+      .upsert({
         account_id: account.id,
         encrypted_payload: encryptedPayload,
         key_version: 1
-      });
+      }, { onConflict: "account_id" });
 
     if (credentialError) {
-      await supabase.from("exchange_accounts").delete().eq("id", account.id);
+      if (createdAccount) await supabase.from("exchange_accounts").delete().eq("id", account.id);
       throw credentialError;
     }
 
@@ -96,12 +108,12 @@ export default async function handler(req, res) {
 
     const { data: riskControls, error: riskError } = await supabase
       .from("account_risk_controls")
-      .insert(riskControlInsert)
+      .upsert(riskControlInsert, { onConflict: "account_id" })
       .select("*")
       .single();
 
     if (riskError) {
-      await supabase.from("exchange_accounts").delete().eq("id", account.id);
+      if (createdAccount) await supabase.from("exchange_accounts").delete().eq("id", account.id);
       throw riskError;
     }
 

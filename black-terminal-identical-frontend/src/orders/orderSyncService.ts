@@ -19,9 +19,15 @@ export class OrderSyncService {
     this.emit();
   }
 
-  replaceAccountSnapshots(orders: OrderUpdate[], health: PortfolioSnapshot["orderSync"] = {}) {
+  replaceAccountSnapshots(orders: OrderUpdate[], health: PortfolioSnapshot["orderSync"] = {}, authoritativeAccountIds?: string[]) {
     const incomingByAccount = new Map<string, OrderUpdate[]>();
     const nextDiagnostics = { rawRecords: 0, uniqueOrders: 0, duplicatesSuppressed: 0, staleUpdatesSuppressed: 0 };
+    if (authoritativeAccountIds) {
+      const activeAccounts = new Set(authoritativeAccountIds);
+      for (const [key, order] of this.orders) {
+        if (!activeAccounts.has(order.accountId)) this.orders.delete(key);
+      }
+    }
     for (const order of orders) {
       const accountOrders = incomingByAccount.get(order.accountId) || [];
       accountOrders.push(order);
@@ -71,6 +77,26 @@ export class OrderSyncService {
 
   getDiagnostics() {
     return { ...this.diagnostics, uniqueOrders: this.orders.size };
+  }
+
+  removeAccount(accountId: string) {
+    for (const [key, order] of this.orders) {
+      if (order.accountId === accountId) this.orders.delete(key);
+    }
+    this.emit();
+  }
+
+  removeExchange(exchange: OrderUpdate["exchange"]) {
+    for (const [key, order] of this.orders) {
+      if (order.exchange === exchange) this.orders.delete(key);
+    }
+    this.emit();
+  }
+
+  clear() {
+    this.orders.clear();
+    this.diagnostics = { rawRecords: 0, uniqueOrders: 0, duplicatesSuppressed: 0, staleUpdatesSuppressed: 0 };
+    this.emit();
   }
 
   private emit() {

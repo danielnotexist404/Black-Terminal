@@ -1,5 +1,7 @@
 import type { ExchangeConnectionDraft } from "../../portfolio/types";
-import { connectExchangeAccount } from "../../portfolio/portfolioStore";
+import { connectExchangeAccount, invalidatePortfolioSnapshot } from "../../portfolio/portfolioStore";
+import { disconnectExchangeAccountViaApi } from "../../portfolio/portfolioApiClient";
+import { blackCoreOrderSyncService } from "../../orders/orderSyncService";
 import type { ExchangeId } from "../../market-data/types";
 import type { ConnectionAdapter, ConnectRequest, ConnectionRecord } from "../types";
 import { defaultConnectionHealth, defaultPermissionReport } from "../types";
@@ -70,7 +72,12 @@ export function createCentralizedExchangeConnectionAdapter(exchange: ExchangeId,
       };
     },
 
-    async disconnect() {},
+    async disconnect(connection) {
+      if (!connection.accountId) return;
+      await disconnectExchangeAccountViaApi(connection.accountId);
+      blackCoreOrderSyncService.removeExchange(exchange);
+      invalidatePortfolioSnapshot();
+    },
 
     async heartbeat(connection) {
       return defaultConnectionHealth({

@@ -150,6 +150,7 @@ export type OrderUpdate = {
   venueUpdatedTime?: number;
   canonicalKey?: string;
   lastSource?: string;
+  venueAccountId?: string;
 };
 
 export type ExecutionRequest = {

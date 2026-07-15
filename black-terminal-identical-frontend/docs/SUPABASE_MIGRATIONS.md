@@ -2006,3 +2006,7 @@ No migration required. External venue orders are delivered by the existing authe
 # 2026-07-15 - Bybit Canonical Order Synchronization Hotfix II
 
 No migration required. Canonical identity, pagination guards, version precedence, chart geometry and order-management UI are runtime changes. Existing execution and audit tables continue to own durable local orders and management audit events.
+
+# 2026-07-15 - Bybit Connection Lifecycle Hotfix
+
+No migration required. Existing duplicate account records are collapsed at read time and removed by the authenticated disconnect route. Future connection idempotency uses the existing `credential_ref` and existing account/credential/risk tables.

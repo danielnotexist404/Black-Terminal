@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import {
   applyCors,
   decryptCredentialPayload,
@@ -21,13 +22,14 @@ export default async function handler(req, res) {
 
     const { supabase, user } = await requireUser(req);
 
-    const { data: accounts, error: accountsError } = await supabase
+    const { data: accountRows, error: accountsError } = await supabase
       .from("exchange_accounts")
       .select("*")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
     if (accountsError) throw accountsError;
+    const accounts = await selectCanonicalAccounts(supabase, accountRows || []);
 
     const accountIds = accounts.map((account) => account.id);
 
@@ -126,6 +128,41 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     return sendError(res, error);
+  }
+}
+
+async function selectCanonicalAccounts(supabase, accounts) {
+  const bybitAccountIds = accounts.filter((account) => account.exchange === "bybit").map((account) => account.id);
+  if (bybitAccountIds.length < 2) return accounts;
+  const { data: credentials, error } = await supabase
+    .from("exchange_credentials")
+    .select("account_id, encrypted_payload")
+    .in("account_id", bybitAccountIds);
+  if (error || !credentials) return accounts;
+
+  const fingerprintByAccount = new Map(credentials.map((credential) => [
+    credential.account_id,
+    portfolioCredentialFingerprint(credential.encrypted_payload)
+  ]));
+  const seen = new Set();
+  return accounts.filter((account) => {
+    if (account.exchange !== "bybit") return true;
+    const fingerprint = fingerprintByAccount.get(account.id);
+    if (!fingerprint) return true;
+    const key = `bybit:${fingerprint}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function portfolioCredentialFingerprint(encryptedPayload) {
+  try {
+    const credentials = decryptCredentialPayload(encryptedPayload);
+    const apiKey = String(credentials?.apiKey || "");
+    return apiKey ? crypto.createHash("sha256").update(apiKey).digest("hex") : null;
+  } catch {
+    return null;
   }
 }
 

@@ -49,6 +49,11 @@ export function deduplicateCanonicalOrders(orders: OrderUpdate[]) {
   };
 }
 
+export function retainOrdersForAccounts(orders: OrderUpdate[], accountIds: string[]) {
+  const activeAccounts = new Set(accountIds);
+  return orders.filter((order) => activeAccounts.has(order.accountId));
+}
+
 function lifecycleRank(status: OrderUpdate["status"]) {
   return {
     pending: 0,

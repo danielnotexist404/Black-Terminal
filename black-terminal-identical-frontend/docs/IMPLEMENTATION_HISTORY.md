@@ -1099,3 +1099,11 @@ Remaining:
 - Corrected the chart overlay's 44px host-origin displacement while retaining the authoritative linear/log price transform.
 - Added a shared chart/table management menu with authenticated Modify, Cancel and inspection; existing-order Chase remains capability-gated because Bybit does not attach native Chase to a standard order.
 - Added deterministic identity, stale-update, account-isolation, chart-alignment and menu regression tests. No Supabase migration is required.
+
+# 2026-07-15 - Bybit Duplicate Connection And Disconnect Hotfix
+
+- Identified repeated Supabase account insertion, not page duplication, as the remaining four-row production cause.
+- Canonicalized Bybit connections by venue account identity and collapsed legacy credential-duplicate accounts before synchronization and portfolio totals.
+- Replaced the empty CEX disconnect adapter with authenticated server deletion and immediate Black Core cleanup.
+- Added authoritative account-set pruning and complete sign-out cleanup so disconnected orders cannot remain in Orders or on the chart.
+- Made subsequent connects idempotent through deterministic credential references. No Supabase migration is required.

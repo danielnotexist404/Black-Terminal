@@ -1083,3 +1083,11 @@ Remaining:
 - Rebuilt DOM execution as a container-responsive venue-schema ticket with compact Order Type and TIF selectors, separate leverage, account-backed Equity Allocation, live margin/fee/balance preview and existing OMS/EMS/Risk routing.
 - Corrected the missing stats-grid track that clipped camera controls and moved wall labels inside measured/clipped liquidity strips.
 - Added deterministic layout/presentation tests and expanded browser visual regression states. No Supabase migration is required.
+
+# 2026-07-15 - Bybit External Open-Order Synchronization Hotfix
+
+- Replaced chart-symbol-only open-order reads with paginated account-wide linear/spot snapshots and explicit category health.
+- Added deterministic external-order identities, canonical REST/private-stream normalization and verified-empty safety in Black Core order state.
+- Corrected the private worker so order updates trigger reconciliation.
+- Added account-wide Orders fields, source badges, freshness, manual refresh and current-symbol chart lines.
+- Added deterministic synchronization tests and a read-only live certification harness. Live evidence remains operator-gated.

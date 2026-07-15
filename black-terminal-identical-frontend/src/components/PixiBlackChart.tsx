@@ -30,9 +30,12 @@ import { getMarketDataEngineAdapter } from "../market-data/engine/marketDataEngi
 import { ExchangeId, MarketDataAdapter, MarketDataSubscription, MarketSymbol, OrderBookSnapshot, Timeframe } from "../market-data/types";
 import { UnifiedExecutionTicket, type UnifiedExecutionTicketPreset } from "../execution/components/UnifiedExecutionTicket";
 import type { ExecutionSource, OrderSide, OrderType } from "../execution/types";
+import type { OrderUpdate } from "../execution/types";
 import { blackCorePositionManager } from "../positions/positionManager";
 import type { ManagedPosition, PositionProtectionOrder, PositionProtectionType } from "../positions/types";
 import { AifIndicatorOverlay } from "../modules/aif/components/AifIndicatorOverlay";
+import { cancelVenueOrderViaApi } from "../portfolio/portfolioApiClient";
+import { blackCoreOrderSyncService } from "../orders/orderSyncService";
 
 type PixiBlackChartProps = {
   workspaceId: string;
@@ -68,6 +71,7 @@ type PixiBlackChartProps = {
   onAlertFired?: (symbol: string, message: string) => void;
   priceLineColor?: string;
   priceLineIntensity?: number;
+  activeOrders?: OrderUpdate[];
 };
 
 type IndicatorKey = keyof VisibleIndicators;
@@ -277,7 +281,8 @@ export function PixiBlackChart({
   customPlots,
   onAlertFired,
   priceLineColor,
-  priceLineIntensity
+  priceLineIntensity,
+  activeOrders = []
 }: PixiBlackChartProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<BlackChartEngine | null>(null);
@@ -369,13 +374,26 @@ export function PixiBlackChart({
       .filter((line) => line.y !== null);
   }, [activeChartPosition, positionOverlayTick]);
 
+  const activeChartOrders = useMemo(() => {
+    const chartSymbol = normalizeChartSymbol(displaySymbol || marketSymbol.rawSymbol);
+    return activeOrders
+      .filter((order) => ["pending", "accepted", "working", "partially-filled"].includes(order.status))
+      .filter((order) => normalizeChartSymbol(order.normalizedSymbol || order.symbol) === chartSymbol)
+      .filter((order) => !marketSymbol.exchange || order.exchange === marketSymbol.exchange)
+      .filter((order) => Number.isFinite(order.price) && Number(order.price) > 0);
+  }, [activeOrders, displaySymbol, marketSymbol.exchange, marketSymbol.rawSymbol]);
+
+  const chartOrderLines = useMemo(() => activeChartOrders
+    .map((order) => ({ order, y: engineRef.current?.getScreenYForPrice(Number(order.price)) ?? null }))
+    .filter((line) => line.y !== null), [activeChartOrders, positionOverlayTick]);
+
   useEffect(() => blackCorePositionManager.subscribe(setManagedPositions), []);
 
   useEffect(() => {
-    if (!activeChartPosition) return;
+    if (!activeChartPosition && activeChartOrders.length === 0) return;
     const timer = window.setInterval(() => setPositionOverlayTick((tick) => tick + 1), 250);
     return () => window.clearInterval(timer);
-  }, [activeChartPosition]);
+  }, [activeChartPosition, activeChartOrders.length]);
 
   const emitReplayStatus = (active = replayControlsRef.current.enabled, playing = replayControlsRef.current.playing) => {
     const source = replaySourceRef.current;
@@ -3281,9 +3299,9 @@ export function PixiBlackChart({
         </div>
       )}
 
-      {activeChartPosition && positionLines.length > 0 && (
+      {(positionLines.length > 0 || chartOrderLines.length > 0) && (
         <div className="position-protection-overlay" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
-          {positionLines.map((line) => (
+          {activeChartPosition && positionLines.map((line) => (
             <div
               key={line.id}
               className={`position-line ${line.tone}${line.protection ? " draggable" : ""}`}
@@ -3293,6 +3311,26 @@ export function PixiBlackChart({
             >
               <span>{line.label}</span>
               <b>{formatAlertPrice(line.price)}</b>
+            </div>
+          ))}
+          {chartOrderLines.map(({ order, y }) => (
+            <div
+              key={`${order.accountId}:${order.category || "unknown"}:${order.venueOrderId || order.orderId}`}
+              className={`venue-order-line ${order.side === "sell" ? "sell" : "buy"}`}
+              style={{ top: Number(y) }}
+              title={`${order.exchange.toUpperCase()} ${order.side?.toUpperCase()} ${String(order.type || order.orderType || "ORDER").toUpperCase()} | ${formatAlertPrice(Number(order.price))} | Remaining ${order.remainingQuantity ?? order.quantity ?? 0} | ${order.externallyCreated ? "EXTERNAL" : "BLACK TERMINAL"}`}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (!window.confirm(`Cancel ${order.exchange.toUpperCase()} order ${order.venueOrderId || order.orderId}?`)) return;
+                void cancelVenueOrderViaApi(order)
+                  .then(() => blackCoreOrderSyncService.upsert({ ...order, status: "cancelled", time: Date.now() }))
+                  .catch((error) => window.alert(error instanceof Error ? error.message : String(error)));
+              }}
+            >
+              <span>{order.exchange.toUpperCase()} {order.side?.toUpperCase()} {String(order.type || order.orderType || "ORDER").toUpperCase()}</span>
+              <b>{formatAlertPrice(Number(order.price))}</b>
+              <em>{order.remainingQuantity ?? order.quantity ?? 0} {order.externallyCreated ? "EXTERNAL" : "BLACK TERMINAL"}</em>
             </div>
           ))}
         </div>

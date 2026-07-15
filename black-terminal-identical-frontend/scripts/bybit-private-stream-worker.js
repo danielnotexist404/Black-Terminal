@@ -47,7 +47,7 @@ const seenEventTtlMs = Number(process.env.BYBIT_STREAM_DEDUPE_TTL_MS || 10 * 60_
 client.onMessage((event) => {
   if (isDuplicateEvent(event)) return;
   void auditStreamEvent(event);
-  if (["execution", "position", "wallet"].includes(event.type)) scheduleReconciliation();
+  if (["order", "execution", "position", "wallet"].includes(event.type)) scheduleReconciliation();
 });
 
 client.onError((error) => {

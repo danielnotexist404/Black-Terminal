@@ -105,6 +105,7 @@ export type OrderRequest = {
 export type OrderStatus =
   | "pending"
   | "accepted"
+  | "working"
   | "partially-filled"
   | "filled"
   | "cancelled"
@@ -122,6 +123,29 @@ export type OrderUpdate = {
   averageFillPrice?: number;
   reason?: string;
   time: number;
+  internalId?: string;
+  venueOrderId?: string;
+  connectionId?: string;
+  network?: string;
+  category?: string;
+  normalizedSymbol?: string;
+  side?: OrderSide;
+  type?: string;
+  orderType?: string;
+  price?: number;
+  triggerPrice?: number;
+  quantity?: number;
+  leavesQuantity?: number;
+  remainingQuantity?: number;
+  timeInForce?: string;
+  reduceOnly?: boolean;
+  closeOnTrigger?: boolean;
+  positionIdx?: number;
+  source?: "venue" | "black-terminal";
+  ownership?: "external" | "black-terminal";
+  externallyCreated?: boolean;
+  createdTime?: number;
+  updatedTime?: number;
 };
 
 export type ExecutionRequest = {

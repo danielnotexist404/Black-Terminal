@@ -1,5 +1,5 @@
 import {
-  getBybitOpenOrders,
+  getBybitOpenOrdersSnapshot,
   getBybitStrategies,
   getBybitApiKeyInformation,
   getBybitPositions,
@@ -20,10 +20,14 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
   const startedAt = Date.now();
   const symbol = String(options.symbol || "BTCUSDT").toUpperCase();
   const marketKind = options.marketKind === "spot" ? "spot" : "perpetual";
-  const [walletSnapshot, positionRows, openOrders, strategies, metadata, accountState, riskLimits, priceLimit, apiKeyInfo] = await Promise.all([
+  const [walletSnapshot, positionRows, openOrderSnapshot, strategies, metadata, accountState, riskLimits, priceLimit, apiKeyInfo] = await Promise.all([
     getBybitWalletSnapshot(credentials),
     getBybitPositions(credentials, { symbol, includeEmpty: true }),
-    getBybitOpenOrders(credentials, { category: marketKind === "spot" ? "spot" : "linear", symbol }),
+    getBybitOpenOrdersSnapshot(credentials, {
+      categories: options.orderCategories || ["linear", "spot"],
+      settleCoin: options.settleCoin || "USDT",
+      network: options.network || "mainnet"
+    }),
     getBybitStrategies(credentials, { marketKind, symbol }).catch(() => []),
     getBybitInstrumentMetadata({ category: marketKind === "spot" ? "spot" : "linear", symbol }),
     getBybitAccountInfo(credentials),
@@ -31,10 +35,19 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     getBybitOrderPriceLimit({ category: marketKind === "spot" ? "spot" : "linear", symbol }),
     getBybitApiKeyInformation(credentials)
   ]);
+  const openOrders = openOrderSnapshot.orders.map((order) => ({ ...order, accountId: account.id, connectionId: account.id }));
   const positions = positionRows.filter((position) => position.quantity > 0 && position.direction !== "flat");
   const balances = walletSnapshot.balances;
   const permissionReport = normalizeBybitPermissionReport(apiKeyInfo);
-  const executionState = resolveBybitExecutionPolicy(permissionReport);
+  const permissionExecutionState = resolveBybitExecutionPolicy(permissionReport);
+  const executionState = {
+    ...permissionExecutionState,
+    tradingEnabled: permissionExecutionState.tradingEnabled && openOrderSnapshot.health.verified,
+    readOnly: permissionExecutionState.readOnly || !openOrderSnapshot.health.verified,
+    readinessReason: openOrderSnapshot.health.verified
+      ? permissionExecutionState.readinessReason
+      : `Bybit order synchronization is degraded. Failed categories: ${openOrderSnapshot.health.failedCategories.map((failure) => failure.category).join(", ")}.`
+  };
 
   const [localBalancesResult, localPositionsResult, localOrdersResult] = await Promise.all([
     supabase.from("account_balances").select("*").eq("account_id", account.id),
@@ -85,8 +98,8 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
 
   const externalStateChanged = changes.length > 0;
   const accountPatch = {
-    status: "connected",
-    api_health: "healthy",
+    status: openOrderSnapshot.health.stale ? "degraded" : "connected",
+    api_health: openOrderSnapshot.health.stale ? "warning" : "healthy",
     latency_ms: Date.now() - startedAt,
     is_read_only: executionState.readOnly,
     trading_enabled: executionState.tradingEnabled,
@@ -132,6 +145,7 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
       balances: balances.length,
       positions: positions.length,
       openOrders: openOrders.length,
+      orderSync: openOrderSnapshot.health,
       strategies: strategies.length,
       latencyMs: Date.now() - startedAt
     }
@@ -151,6 +165,7 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     executionState,
     positions,
     openOrders,
+    orderSync: openOrderSnapshot.health,
     strategies,
     externalStateChanged,
     changes,

@@ -1998,3 +1998,7 @@ No Supabase migration is required. The chapter changes browser rendering, worker
 # 2026-07-14 - DOM Pro Resizable Workspace
 
 No migration required. Split ratios, panel collapse state, auto-save preference and custom layout presets are workspace/window presentation preferences stored in bounded browser local storage. No account, execution, market-memory or entitlement schema changed.
+
+# 2026-07-15 - Bybit External Order Synchronization
+
+No migration required. External venue orders are delivered by the existing authenticated account sync response and mirrored in the browser's canonical Black Core order store. Existing execution and audit tables remain unchanged; a failed persistence layer cannot suppress the live venue snapshot.

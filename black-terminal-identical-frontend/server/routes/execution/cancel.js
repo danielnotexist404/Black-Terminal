@@ -17,20 +17,25 @@ export default async function handler(req, res) {
       .eq("user_id", user.id)
       .single();
 
-    if (lookupError || !existingOrder) {
-      const error = new Error("Order not found.");
-      error.statusCode = 404;
-      throw error;
-    }
+    const externalOrder = lookupError || !existingOrder;
+    if (externalOrder) requireFields(req.body, ["accountId", "symbol"]);
 
     let venueCancelResult = null;
-    const exchange = existingOrder.exchange_accounts?.exchange || existingOrder.exchange;
-    if (exchange === "bybit" && existingOrder.exchange_order_id) {
-      const account = await getOwnedAccount(supabase, user.id, existingOrder.account_id);
+    const accountId = existingOrder?.account_id || req.body.accountId;
+    const account = await getOwnedAccount(supabase, user.id, accountId);
+    const exchange = existingOrder?.exchange_accounts?.exchange || existingOrder?.exchange || account.exchange;
+    const venueOrderId = existingOrder?.exchange_order_id || req.body.venueOrderId || req.body.orderId;
+    const symbol = existingOrder?.symbol || String(req.body.symbol).toUpperCase();
+    if (externalOrder && exchange !== "bybit") {
+      const unsupported = new Error(`External ${exchange} order cancellation is not certified by this route.`);
+      unsupported.statusCode = 501;
+      throw unsupported;
+    }
+    if (exchange === "bybit" && venueOrderId) {
       const gate = validateBybitManagementGate({
         account,
         body: req.body,
-        symbol: existingOrder.symbol
+        symbol
       });
       if (!gate.ok) {
         const blocked = new Error(gate.reasons.join(" "));
@@ -40,16 +45,41 @@ export default async function handler(req, res) {
       const { data: credential, error: credentialError } = await supabase
         .from("exchange_credentials")
         .select("encrypted_payload")
-        .eq("account_id", existingOrder.account_id)
+        .eq("account_id", accountId)
         .single();
 
       if (credentialError || !credential) throw credentialError || new Error("Missing encrypted credentials for venue cancel.");
       const credentials = decryptCredentialPayload(credential.encrypted_payload);
       venueCancelResult = await cancelBybitOrder(credentials, {
-        marketKind: existingOrder.market_kind || "perpetual",
-        symbol: existingOrder.symbol,
-        orderId: existingOrder.exchange_order_id,
-        clientOrderId: existingOrder.client_order_id
+        marketKind: existingOrder?.market_kind || req.body.marketKind || (req.body.category === "spot" ? "spot" : "perpetual"),
+        symbol,
+        orderId: venueOrderId,
+        clientOrderId: existingOrder?.client_order_id || req.body.clientOrderId
+      });
+    }
+
+    if (externalOrder) {
+      await supabase.from("execution_audit_logs").insert({
+        user_id: user.id,
+        account_id: accountId,
+        event_type: "external_order_cancelled",
+        severity: "info",
+        message: `External ${exchange} order ${venueOrderId} was cancelled.`,
+        metadata: { venueOrderId, symbol, source: "venue", venueCancelResult }
+      });
+      return res.status(200).json({
+        order: {
+          accountId,
+          exchange,
+          orderId: venueOrderId,
+          venueOrderId,
+          symbol,
+          status: "cancelled",
+          filledQuantity: 0,
+          time: Date.now(),
+          source: "venue",
+          externallyCreated: true
+        }
       });
     }
 

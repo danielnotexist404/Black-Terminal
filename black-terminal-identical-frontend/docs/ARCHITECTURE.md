@@ -338,3 +338,7 @@ Heatmap rendering is one canvas surface registered with the shared dirty visual 
 DOM Pro geometry is owned by a versioned normalized split tree in `domWorkspaceLayout.ts`. The root controls upper/bottom height, while independent nested trees control upper analytics and the bottom Depth/Flow/Execution row. Resize events alter viewport geometry only, are RAF-coalesced, and use the existing interaction coordinator to lower visual detail temporarily. Canvas surfaces redraw from retained data after release; aggregation and camera state are preserved.
 
 The compact execution panel consumes `VenueExecutionSchema`, account sync and venue sizing preview. Equity allocation and leverage remain independent. All orders continue through `submitOrder` and the OMS -> EMS -> Risk -> Broker Router path. See `DOM_PRO_RESIZABLE_WORKSPACE.md` and `DOM_PRO_COMPACT_EXECUTION_PANEL.md`.
+
+## Bybit Canonical Order State
+
+Bybit account synchronization performs a paginated REST open-order snapshot before publishing account order state. The persistent private worker consumes the all-category `order` topic and schedules reconciliation for every order lifecycle change. REST and stream records normalize to `account + network + category + venueOrderId`; externally created orders are retained without a local submission record. Black Core owns the active order set consumed by both the Orders panel and current-symbol chart overlay. See `BYBIT_ORDER_SYNC_ARCHITECTURE.md`.

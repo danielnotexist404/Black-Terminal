@@ -130,28 +130,126 @@ export async function getBybitOrderPriceLimit({ category = "linear", symbol = "B
   };
 }
 
-export async function getBybitOpenOrders(credentials, { category = "linear", symbol } = {}) {
-  const response = await bybitRequest(credentials, "GET", "/v5/order/realtime", {
-    category,
-    symbol,
-    limit: "50",
-    openOnly: "0"
-  });
-  return (response?.list || []).map((order) => ({
-    orderId: order.orderId,
-    clientOrderId: order.orderLinkId,
-    symbol: order.symbol,
-    side: String(order.side || "").toLowerCase() === "sell" ? "sell" : "buy",
-    type: String(order.orderType || "").toLowerCase(),
-    status: normalizeBybitOrderStatus(order.orderStatus),
-    quantity: Number(order.qty || 0),
-    filledQuantity: Number(order.cumExecQty || 0),
-    averageFillPrice: nullableNumber(order.avgPrice),
-    price: nullableNumber(order.price),
-    reduceOnly: Boolean(order.reduceOnly),
-    timeInForce: order.timeInForce,
-    updatedAt: Number(order.updatedTime || Date.now())
+export async function getBybitOpenOrders(credentials, { category = "linear", symbol, settleCoin, baseCoin, maxPages = 20 } = {}) {
+  const orders = [];
+  let cursor;
+  let pages = 0;
+
+  do {
+    const response = await bybitRequest(credentials, "GET", "/v5/order/realtime", {
+      category,
+      symbol,
+      settleCoin,
+      baseCoin,
+      cursor,
+      limit: "50",
+      openOnly: "0"
+    });
+    orders.push(...(response?.list || []).map((order) => normalizeBybitVenueOrder(order, category)));
+    cursor = response?.nextPageCursor || undefined;
+    pages += 1;
+  } while (cursor && pages < maxPages);
+
+  return orders;
+}
+
+export async function getBybitOpenOrdersSnapshot(credentials, options = {}) {
+  const startedAt = Date.now();
+  const network = options.network || "mainnet";
+  const requestedCategories = options.categories || ["linear", "spot"];
+  const categoryResults = await Promise.all(requestedCategories.map(async (category) => {
+    try {
+      const orders = await getBybitOpenOrders(credentials, {
+        category,
+        settleCoin: category === "linear" ? (options.settleCoin || "USDT") : undefined,
+        symbol: options.symbolByCategory?.[category]
+      });
+      return { category, status: "ok", orders };
+    } catch (error) {
+      return {
+        category,
+        status: "failed",
+        orders: [],
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
   }));
+  const successfulCategories = categoryResults.filter((result) => result.status === "ok").map((result) => result.category);
+  const failedCategories = categoryResults.filter((result) => result.status === "failed").map((result) => ({
+    category: result.category,
+    error: result.error
+  }));
+  const orders = categoryResults.flatMap((result) => result.orders).map((order) => ({ ...order, network }));
+  const ordersPerCategory = Object.fromEntries(categoryResults.map((result) => [result.category, result.orders.length]));
+  const syncedAt = Date.now();
+
+  return {
+    orders,
+    health: {
+      network,
+      endpoint: "/v5/order/realtime",
+      requestedCategories,
+      successfulCategories,
+      failedCategories,
+      ordersPerCategory,
+      activeOrderCount: orders.length,
+      verified: failedCategories.length === 0,
+      stale: failedCategories.length > 0,
+      syncedAt,
+      latencyMs: syncedAt - startedAt
+    }
+  };
+}
+
+export function normalizeBybitVenueOrder(order, category = order?.category || "linear") {
+  const quantity = Number(order?.qty || 0);
+  const filledQuantity = Number(order?.cumExecQty || 0);
+  const leavesQuantity = order?.leavesQty === undefined || order?.leavesQty === ""
+    ? Math.max(0, quantity - filledQuantity)
+    : Number(order.leavesQty || 0);
+  const orderId = String(order?.orderId || "");
+  const symbol = String(order?.symbol || "").toUpperCase();
+  const createdTime = Number(order?.createdTime || order?.updatedTime || Date.now());
+  const updatedTime = Number(order?.updatedTime || createdTime);
+
+  return {
+    internalId: `bybit:${category}:${orderId}`,
+    orderId,
+    venueOrderId: orderId,
+    clientOrderId: order?.orderLinkId || undefined,
+    orderLinkId: order?.orderLinkId || undefined,
+    exchange: "bybit",
+    venue: "bybit",
+    network: "mainnet",
+    category,
+    marketKind: category === "spot" ? "spot" : "perpetual",
+    symbol,
+    normalizedSymbol: normalizeBybitSymbol(symbol),
+    side: String(order?.side || "").toLowerCase() === "sell" ? "sell" : "buy",
+    type: String(order?.orderType || "").toLowerCase(),
+    orderType: String(order?.orderType || "").toLowerCase(),
+    status: normalizeBybitOrderStatus(order?.orderStatus),
+    price: nullableNumber(order?.price),
+    triggerPrice: nullableNumber(order?.triggerPrice),
+    quantity,
+    leavesQuantity,
+    remainingQuantity: leavesQuantity,
+    filledQuantity,
+    cumulativeFilledQuantity: filledQuantity,
+    averageFillPrice: nullableNumber(order?.avgPrice),
+    timeInForce: String(order?.timeInForce || "").toLowerCase(),
+    reduceOnly: Boolean(order?.reduceOnly),
+    closeOnTrigger: Boolean(order?.closeOnTrigger),
+    positionIdx: Number(order?.positionIdx || 0),
+    source: "venue",
+    ownership: order?.orderLinkId?.startsWith?.("bt-") ? "black-terminal" : "external",
+    externallyCreated: !order?.orderLinkId?.startsWith?.("bt-"),
+    createdTime,
+    updatedTime,
+    createdAt: createdTime,
+    updatedAt: updatedTime,
+    rawVersion: updatedTime
+  };
 }
 
 export async function getBybitStrategies(credentials, { marketKind = "perpetual", symbol } = {}) {
@@ -211,7 +309,7 @@ export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = 
     runBybitDiagnosticCheck("instrument-metadata", () => getBybitInstrumentMetadata({ category: "linear", symbol }), true),
     runBybitDiagnosticCheck("balances", () => getBybitWalletSnapshot(credentials), true),
     runBybitDiagnosticCheck("positions", () => getBybitPositions(credentials), true),
-    runBybitDiagnosticCheck("open-orders", () => getBybitOpenOrders(credentials, { category: "linear", symbol }), false),
+    runBybitDiagnosticCheck("open-orders", () => getBybitOpenOrdersSnapshot(credentials, { categories: ["linear", "spot"], settleCoin: "USDT" }), true),
     runBybitDiagnosticCheck("api-key-permissions", () => getBybitApiKeyInformation(credentials), false)
   ]);
   const requiredFailures = checks.filter((check) => check.required && check.status === "failed");
@@ -225,7 +323,8 @@ export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = 
   const walletSnapshot = diagnosticData(checks, "balances", { balances: [], accountMetrics: emptyBybitAccountMetrics() });
   const balances = walletSnapshot.balances;
   const positions = diagnosticData(checks, "positions", []);
-  const openOrders = diagnosticData(checks, "open-orders", []);
+  const openOrderSnapshot = diagnosticData(checks, "open-orders", { orders: [], health: { stale: true, verified: false } });
+  const openOrders = openOrderSnapshot.orders;
   const apiKeyInfo = diagnosticData(checks, "api-key-permissions", {
     readOnly: true,
     permissions: {},
@@ -235,12 +334,13 @@ export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = 
   const privateStreamRuntime = getBybitPrivateStreamRuntimeDiagnostics();
   const privateStreamsReady = privateStreamRuntime.status === "connected" && privateStreamRuntime.authenticated === true;
   const mainnetValidationEnabled = process.env.BYBIT_MAINNET_VALIDATION_ENABLED === "true";
-  const accountReadReady = requiredFailures.length === 0;
+  const orderReadReady = openOrderSnapshot.health?.verified === true;
+  const accountReadReady = requiredFailures.length === 0 && orderReadReady;
   const executionReady = Boolean(accountReadReady && mainnetValidationEnabled && permissionReport.trading && privateStreamsReady);
   const readinessReason = executionReady
     ? "Bybit execution readiness checks passed for controlled mainnet validation."
     : [
-        !accountReadReady ? `Bybit account read validation failed: ${requiredFailures.map((check) => check.message).join(" ")}` : "",
+        !accountReadReady ? `Bybit account read validation failed: ${requiredFailures.map((check) => check.message).join(" ")} ${orderReadReady ? "" : "Open-order category verification is incomplete."}`.trim() : "",
         !mainnetValidationEnabled ? "BYBIT_MAINNET_VALIDATION_ENABLED is not true." : "",
         !permissionReport.trading ? "Bybit API key is read-only or lacks order/position trading permission." : "",
         !privateStreamsReady ? "Bybit private stream runtime is not authenticated and connected." : ""
@@ -275,6 +375,7 @@ export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = 
     accountMetrics: walletSnapshot.accountMetrics,
     positions,
     openOrders,
+    orderSync: openOrderSnapshot.health,
     apiKeyInfo,
     privateStreamRuntime,
     endpoints: {

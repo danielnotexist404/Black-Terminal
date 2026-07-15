@@ -27,6 +27,8 @@
     "benchmark:aif": "node --experimental-strip-types scripts/aif-benchmarks.ts",
     "test:aif-visual": "node scripts/aif-visual-regression.js",
     "test:bybit-certification": "node scripts/bybit-certification-tests.js",
+    "test:bybit-external-orders": "node scripts/bybit-external-order-tests.js",
+    "certify:bybit-external-orders": "node scripts/bybit-external-order-certification.js",
     "test:venue-execution": "node --experimental-strip-types scripts/venue-execution-tests.js",
     "certify:bybit-mainnet": "node scripts/bybit-mainnet-certification-runner.js",
     "tauri": "tauri",

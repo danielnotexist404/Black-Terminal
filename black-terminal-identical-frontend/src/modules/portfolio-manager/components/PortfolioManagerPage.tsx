@@ -8,6 +8,7 @@ import {
   KeyRound,
   Layers3,
   Plus,
+  RefreshCw,
   ShieldCheck,
   X
 } from "lucide-react";
@@ -80,6 +81,14 @@ type PositionOrderRow = {
   averageFillPrice?: number;
   reason?: string;
   time?: number;
+  price?: number;
+  quantity?: number;
+  remainingQuantity?: number;
+  timeInForce?: string;
+  reduceOnly?: boolean;
+  externallyCreated?: boolean;
+  category?: string;
+  accountId?: string;
 };
 
 const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -388,10 +397,14 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
 
 export function PositionsWorkspace({
   positions,
-  orders = []
+  orders = [],
+  orderSync = {},
+  onRefreshOrders
 }: {
   positions: PortfolioPosition[];
   orders?: PositionOrderRow[];
+  orderSync?: PortfolioSnapshot["orderSync"];
+  onRefreshOrders?: () => Promise<unknown>;
 }) {
   const [showConnection, setShowConnection] = useState(false);
   const [venueKind, setVenueKind] = useState<VenueKind>("cex");
@@ -409,6 +422,7 @@ export function PositionsWorkspace({
   const [hyperliquidAgentPrivateKey, setHyperliquidAgentPrivateKey] = useState("");
   const [hyperliquidMainnetConfirmed, setHyperliquidMainnetConfirmed] = useState(false);
   const [connectStatus, setConnectStatus] = useState("");
+  const [orderRefreshState, setOrderRefreshState] = useState<"idle" | "refreshing" | "failed">("idle");
   const [connectionDiagnostics, setConnectionDiagnostics] = useState<ConnectionDiagnostics[]>(() => blackCoreConnectionManager.listDiagnostics());
   const [activeVenueId, setActiveVenueId] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
@@ -416,6 +430,19 @@ export function PositionsWorkspace({
   });
 
   useEffect(() => blackCoreConnectionManager.subscribe(setConnectionDiagnostics), []);
+
+  const activeOrderSync = (activeVenueId ? orderSync?.[activeVenueId] : undefined) || Object.values(orderSync || {})[0];
+
+  async function refreshOrders() {
+    if (!onRefreshOrders || orderRefreshState === "refreshing") return;
+    setOrderRefreshState("refreshing");
+    try {
+      await onRefreshOrders();
+      setOrderRefreshState("idle");
+    } catch {
+      setOrderRefreshState("failed");
+    }
+  }
 
   const executionVenues: ExecutionVenue[] = useMemo(() => connectionDiagnostics
     .filter((connection) => !["disconnected", "offline", "unsupported"].includes(connection.status))
@@ -607,15 +634,31 @@ export function PositionsWorkspace({
       <div className="positions-left-stack">
         <PortfolioPositionsPanel positions={positions} />
         <div className="positions-orders-panel">
-          <div className="positions-orders-title">Orders</div>
+          <div className="positions-orders-title">
+            <span>Orders</span>
+            <em className={activeOrderSync?.stale ? "stale" : ""}>
+              {activeOrderSync ? `${activeOrderSync.stale ? "DEGRADED" : "SNAPSHOT OK"} / ${activeOrderSync.activeOrderCount} ACTIVE / ${activeOrderSync.latencyMs}ms` : "NOT SYNCHRONIZED"}
+            </em>
+            <button type="button" onClick={() => void refreshOrders()} disabled={!onRefreshOrders || orderRefreshState === "refreshing"} title="Refresh Orders">
+              <RefreshCw size={11} className={orderRefreshState === "refreshing" ? "spin" : ""} />
+              Refresh Orders
+            </button>
+          </div>
           <div className="positions-orders-head">
             <span>Symbol</span>
             <span>Side</span>
             <span>Type</span>
+            <span>Price</span>
+            <span>Quantity</span>
             <span>Status</span>
             <span>Filled</span>
+            <span>Remaining</span>
+            <span>TIF</span>
+            <span>Reduce</span>
+            <span>Source</span>
             <span>Avg</span>
             <span>Exchange</span>
+            <span>Created</span>
           </div>
           {orders.length > 0 ? (
             orders.map((order) => (
@@ -623,14 +666,23 @@ export function PositionsWorkspace({
                 <b>{order.symbol}</b>
                 <span>{order.side ?? "-"}</span>
                 <span>{order.type ?? "-"}</span>
+                <span>{order.price ? money.format(order.price) : "-"}</span>
+                <span>{order.quantity ?? 0}</span>
                 <span>{order.status}</span>
                 <span>{order.filledQuantity ?? 0}</span>
+                <span>{order.remainingQuantity ?? Math.max(0, Number(order.quantity || 0) - Number(order.filledQuantity || 0))}</span>
+                <span>{order.timeInForce?.toUpperCase() || "-"}</span>
+                <span>{order.reduceOnly ? "YES" : "NO"}</span>
+                <span className={order.externallyCreated ? "order-source external" : "order-source"}>{order.externallyCreated ? "BYBIT EXTERNAL" : "BLACK TERMINAL"}</span>
                 <span>{order.averageFillPrice ? money.format(order.averageFillPrice) : "-"}</span>
                 <span>{order.exchange?.toUpperCase() ?? "-"}</span>
+                <span>{order.time ? new Date(order.time).toLocaleTimeString() : "-"}</span>
               </div>
             ))
           ) : (
-            <div className="positions-orders-empty">NO OPEN ORDERS</div>
+            <div className="positions-orders-empty">
+              {activeOrderSync?.stale ? "ORDER SYNC DEGRADED - RETAINING LAST VERIFIED STATE" : activeOrderSync?.verified ? "VERIFIED EMPTY - NO ACTIVE VENUE ORDERS" : "ORDER STATE NOT YET VERIFIED"}
+            </div>
           )}
         </div>
       </div>

@@ -379,3 +379,7 @@ DOM Pro panel geometry is a versioned, normalized split tree. UI separators upda
 The compact DOM execution panel must consume `VenueExecutionSchema`, account sync and venue sizing preview. Do not duplicate exchange rules in the component and do not bypass `submitOrder`. Equity Allocation sizes from usable margin; leverage remains a separate venue-bounded control.
 
 Release gates: `npm run test:dom-pro-panels`, `npm run test:venue-execution`, `npm run test:performance`, `npm run test:dom-pro-visual`, `npm run perf:dom-pro-smoke`, and `npm run build`.
+
+# Bybit External Order Validation
+
+Run `npm run test:bybit-external-orders` and `npm run build`. For controlled live read evidence, provide protected `BYBIT_API_KEY`, `BYBIT_API_SECRET`, and optionally `BYBIT_EXPECTED_ORDER_ID` to `npm run certify:bybit-external-orders`. The harness reads existing orders only; it does not place an order.

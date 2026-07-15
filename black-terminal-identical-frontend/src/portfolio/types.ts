@@ -53,6 +53,18 @@ export type PortfolioSnapshot = {
   balances: Balance[];
   positions: PortfolioPosition[];
   orders: OrderUpdate[];
+  orderSync?: Record<string, {
+    network: string;
+    requestedCategories: string[];
+    successfulCategories: string[];
+    failedCategories: Array<{ category: string; error: string }>;
+    ordersPerCategory: Record<string, number>;
+    activeOrderCount: number;
+    verified: boolean;
+    stale: boolean;
+    syncedAt: number;
+    latencyMs: number;
+  }>;
   curves: {
     equity: PortfolioCurvePoint[];
     drawdown: PortfolioCurvePoint[];

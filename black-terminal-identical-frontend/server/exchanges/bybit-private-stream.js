@@ -10,6 +10,7 @@ const runtimeState = {
   authenticated: false,
   reconnectCount: 0,
   subscriptionCount: 0,
+  subscriptionAcknowledgedAt: null,
   topics: [],
   lastMessageAt: null,
   lastOrderAt: null,
@@ -227,6 +228,15 @@ export class BybitPrivateStreamClient {
       return;
     }
 
+    if (payload.op === "subscribe") {
+      if (payload.success === true || payload.retCode === 0) {
+        runtimeState.subscriptionAcknowledgedAt = Date.now();
+      } else {
+        this.handleError(new Error(payload.ret_msg || payload.retMsg || "Bybit private stream subscription failed."));
+      }
+      return;
+    }
+
     const events = normalizeBybitPrivateStreamMessage(payload);
     for (const event of events) {
       if (event.type === "order") runtimeState.lastOrderAt = event.time;
@@ -290,23 +300,57 @@ export class BybitPrivateStreamClient {
 
 function normalizeBybitOrderEvent(row, time) {
   const status = normalizeBybitOrderStatus(row.orderStatus);
+  const category = row.category || categoryFromSymbol(row.symbol);
+  const quantity = Number(row.qty || 0);
+  const filledQuantity = Number(row.cumExecQty || 0);
+  const remainingQuantity = row.leavesQty === undefined || row.leavesQty === ""
+    ? Math.max(0, quantity - filledQuantity)
+    : Number(row.leavesQty || 0);
+  const createdTime = Number(row.createdTime || time);
+  const updatedTime = Number(row.updatedTime || time);
   return {
+    internalId: `bybit:${category}:${row.orderId}`,
     exchange: "bybit",
+    venue: "bybit",
+    network: "mainnet",
+    category,
+    marketKind: category === "spot" ? "spot" : "perpetual",
     orderId: row.orderId,
+    venueOrderId: row.orderId,
     exchangeOrderId: row.orderId,
     clientOrderId: row.orderLinkId || undefined,
     symbol: row.symbol,
+    normalizedSymbol: String(row.symbol || "").replace(/[^a-zA-Z0-9]/g, "").toUpperCase(),
     status,
     side: String(row.side || "").toLowerCase() === "sell" ? "sell" : "buy",
     orderType: String(row.orderType || "").toLowerCase(),
-    quantity: Number(row.qty || 0),
-    filledQuantity: Number(row.cumExecQty || 0),
+    quantity,
+    filledQuantity,
+    cumulativeFilledQuantity: filledQuantity,
+    leavesQuantity: remainingQuantity,
+    remainingQuantity,
     averageFillPrice: nullableNumber(row.avgPrice),
     price: nullableNumber(row.price),
+    triggerPrice: nullableNumber(row.triggerPrice),
+    timeInForce: String(row.timeInForce || "").toLowerCase(),
     reduceOnly: Boolean(row.reduceOnly),
+    closeOnTrigger: Boolean(row.closeOnTrigger),
+    positionIdx: Number(row.positionIdx || 0),
+    source: "venue",
+    ownership: row.orderLinkId?.startsWith?.("bt-") ? "black-terminal" : "external",
+    externallyCreated: !row.orderLinkId?.startsWith?.("bt-"),
+    createdTime,
+    updatedTime,
     rejectReason: row.rejectReason || undefined,
     time
   };
+}
+
+function categoryFromSymbol(symbol) {
+  const value = String(symbol || "");
+  if (value.includes("-")) return "option";
+  if (value.endsWith("USDT") || value.endsWith("USDC")) return "linear";
+  return "inverse";
 }
 
 function normalizeBybitExecutionEvent(row, time) {

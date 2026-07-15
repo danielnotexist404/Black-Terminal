@@ -34,6 +34,7 @@ type ApiSnapshot = {
   }>;
   positions: Array<Omit<PortfolioPosition, "openedAt"> & { openedAt?: string | number | null }>;
   orders: any[];
+  orderSync?: PortfolioSnapshot["orderSync"];
 };
 
 export type PortfolioOrderDraft = {
@@ -90,7 +91,8 @@ export type HyperliquidSyncPayload = {
   network: "testnet" | "mainnet";
   balances: unknown[];
   positions: unknown[];
-  openOrders: unknown[];
+  openOrders: OrderUpdate[];
+  orderSync: NonNullable<PortfolioSnapshot["orderSync"]>[string];
   fills: unknown[];
   externalStateChanged: boolean;
   syncedAt: string;
@@ -446,6 +448,29 @@ export async function syncExchangeAccountViaApi(accountId: string, symbol = "BTC
   return data.sync as ExchangeAccountSyncPayload;
 }
 
+export async function cancelVenueOrderViaApi(order: OrderUpdate): Promise<OrderUpdate | null> {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+  const response = await fetch("/api/execution/cancel", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      orderId: order.internalId || order.orderId,
+      venueOrderId: order.venueOrderId || order.orderId,
+      accountId: order.accountId,
+      symbol: order.symbol,
+      category: order.category,
+      marketKind: order.category === "spot" ? "spot" : "perpetual",
+      clientOrderId: order.clientOrderId,
+      mainnetConfirmed: true,
+      liveConfirmation: "LIVE"
+    })
+  });
+  if (!response.ok) throw new Error(await readApiError(response));
+  const data = await response.json();
+  return mapOrder(data.order);
+}
+
 export async function setBybitTradingEnabledViaApi(accountId: string, enabled: boolean, confirmation: string): Promise<{ status: "enabled" | "disabled"; accountId: string } | null> {
   const token = await getPortfolioApiToken();
   if (!token) return null;
@@ -593,6 +618,7 @@ function mapSnapshot(data: ApiSnapshot): PortfolioSnapshot {
       openedAt: toMillis(position.openedAt)
     })),
     orders: data.orders.map(mapOrder),
+    orderSync: data.orderSync,
     curves: buildCurves(data.summary)
   };
 }
@@ -625,20 +651,57 @@ function mapAccount(account: ApiAccount): PortfolioAccount {
 }
 
 function mapOrder(order: any): OrderUpdate {
+  const createdTime = toMillis(order.created_at || order.createdTime || order.time);
+  const filledQuantity = Number(order.filled_quantity ?? order.filledQuantity ?? order.cumulativeFilledQuantity ?? 0);
+  const quantity = Number(order.quantity ?? 0);
+  const remainingQuantity = Number(order.remainingQuantity ?? order.leavesQuantity ?? Math.max(0, quantity - filledQuantity));
   return {
     accountId: order.account_id || order.accountId,
     exchange: order.exchange,
-    orderId: order.id || order.orderId,
+    orderId: order.venueOrderId || order.exchange_order_id || order.orderId || order.id,
+    venueOrderId: order.venueOrderId || order.exchange_order_id || order.orderId,
     clientOrderId: order.client_order_id || order.clientOrderId,
     symbol: order.symbol,
     status: order.status,
-    filledQuantity: Number(order.filled_quantity ?? order.filledQuantity ?? 0),
+    filledQuantity,
     averageFillPrice: order.average_fill_price === null || order.average_fill_price === undefined
       ? undefined
       : Number(order.average_fill_price),
     reason: order.rejection_reason || order.reason,
-    time: toMillis(order.created_at || order.time)
+    time: createdTime,
+    internalId: order.internalId || order.id,
+    connectionId: order.connectionId || order.account_id || order.accountId,
+    network: order.network || "mainnet",
+    category: order.category,
+    normalizedSymbol: order.normalizedSymbol || normalizeOrderSymbol(order.symbol),
+    side: order.side,
+    type: order.type || order.order_type || order.orderType,
+    orderType: order.orderType || order.order_type || order.type,
+    price: nullableOrderNumber(order.price ?? order.limit_price),
+    triggerPrice: nullableOrderNumber(order.triggerPrice ?? order.stop_price),
+    quantity,
+    leavesQuantity: remainingQuantity,
+    remainingQuantity,
+    timeInForce: String(order.timeInForce || order.time_in_force || "").toLowerCase(),
+    reduceOnly: Boolean(order.reduceOnly ?? order.reduce_only),
+    closeOnTrigger: Boolean(order.closeOnTrigger),
+    positionIdx: Number(order.positionIdx || 0),
+    source: order.source === "venue" ? "venue" : "black-terminal",
+    ownership: order.ownership || (order.externallyCreated ? "external" : "black-terminal"),
+    externallyCreated: Boolean(order.externallyCreated),
+    createdTime,
+    updatedTime: toMillis(order.updated_at || order.updatedTime || createdTime)
   };
+}
+
+function normalizeOrderSymbol(symbol: unknown) {
+  return String(symbol || "").replace(/[^a-zA-Z0-9]/g, "").replace(/PERP(ETUAL)?$/i, "").toUpperCase();
+}
+
+function nullableOrderNumber(value: unknown) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function buildCurves(summary: PortfolioSnapshot["summary"]) {

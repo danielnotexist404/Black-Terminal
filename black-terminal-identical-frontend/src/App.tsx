@@ -65,9 +65,10 @@ import { StrategyLabPage } from "./modules/strategy-lab/components/StrategyLabPa
 import PortfolioManagerPage, { PositionsWorkspace } from "./modules/portfolio-manager/components/PortfolioManagerPage";
 import { ProfilePage } from "./modules/profile/components/ProfilePage";
 import { InvestmentGroupsPage } from "./modules/investment-groups/components/InvestmentGroupsPage";
-import { getPortfolioSnapshot } from "./portfolio/portfolioStore";
+import { getPortfolioSnapshot, invalidatePortfolioSnapshot } from "./portfolio/portfolioStore";
 import type { PortfolioPosition } from "./positions/types";
 import type { PortfolioSnapshot } from "./portfolio/types";
+import { blackCoreOrderSyncService } from "./orders/orderSyncService";
 import type { StrategyRuntimeKind } from "./modules/strategy-lab/types/strategy.types";
 import type {
   ChartDisplayType,
@@ -598,11 +599,13 @@ export default function App() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; symbol: string } | null>(null);
   const [portfolioPositions, setPortfolioPositions] = useState<PortfolioPosition[]>([]);
   const [portfolioOrders, setPortfolioOrders] = useState<PortfolioSnapshot["orders"]>([]);
+  const [portfolioOrderSync, setPortfolioOrderSync] = useState<PortfolioSnapshot["orderSync"]>({});
   const [connectionDiagnostics, setConnectionDiagnostics] = useState<ConnectionDiagnostics[]>(() => blackCoreConnectionManager.listDiagnostics());
   const [activeExecutionVenueId, setActiveExecutionVenueIdState] = useState<string | null>(() => readActiveExecutionVenueId());
 
   useEffect(() => blackCoreConnectionManager.subscribe(setConnectionDiagnostics), []);
   useEffect(() => subscribeActiveExecutionVenue(setActiveExecutionVenueIdState), []);
+  useEffect(() => blackCoreOrderSyncService.subscribe(setPortfolioOrders), []);
 
   const activeExecutionConnection = useMemo(() => {
     const activeConnections = connectionDiagnostics.filter((connection) => !["disconnected", "offline", "unsupported"].includes(connection.status));
@@ -628,23 +631,27 @@ export default function App() {
     setOpenMenu((current) => current === "exchange" ? null : current);
   }, [lockedMarketExchange]);
 
+  const refreshPortfolioState = useCallback(async (force = false) => {
+    if (force) invalidatePortfolioSnapshot();
+    const snapshot = await getPortfolioSnapshot();
+    setPortfolioPositions(snapshot.positions);
+    setPortfolioOrders(blackCoreOrderSyncService.replaceAccountSnapshots(snapshot.orders, snapshot.orderSync));
+    setPortfolioOrderSync(snapshot.orderSync || {});
+    return snapshot;
+  }, []);
+
   useEffect(() => {
     let mounted = true;
-
-    const loadPortfolioPositions = async () => {
+    const load = async () => {
       const snapshot = await getPortfolioSnapshot();
-      if (mounted) {
-        setPortfolioPositions(snapshot.positions);
-        setPortfolioOrders(snapshot.orders);
-      }
+      if (!mounted) return;
+      setPortfolioPositions(snapshot.positions);
+      setPortfolioOrders(blackCoreOrderSyncService.replaceAccountSnapshots(snapshot.orders, snapshot.orderSync));
+      setPortfolioOrderSync(snapshot.orderSync || {});
     };
-
-    void loadPortfolioPositions();
-    const timer = window.setInterval(loadPortfolioPositions, 5000);
-    return () => {
-      mounted = false;
-      window.clearInterval(timer);
-    };
+    void load();
+    const timer = window.setInterval(load, 5000);
+    return () => { mounted = false; window.clearInterval(timer); };
   }, []);
 
   // Ping update loop
@@ -1865,6 +1872,7 @@ export default function App() {
             onAlertFired={handleAlertFired}
             priceLineColor={terminalSettings.priceLineColor}
             priceLineIntensity={terminalSettings.priceLineIntensity}
+            activeOrders={portfolioOrders}
           />
           {drawingsEnabled && (
             <div className="drawing-toolbar" aria-label="Drawing tools">
@@ -2002,7 +2010,12 @@ export default function App() {
               onClearEventLogs={handleClearEventLogs}
             />
           ) : activeNav === "POSITIONS" ? (
-            <PositionsWorkspace positions={portfolioPositions} orders={portfolioOrders} />
+            <PositionsWorkspace
+              positions={portfolioPositions}
+              orders={portfolioOrders}
+              orderSync={portfolioOrderSync}
+              onRefreshOrders={() => refreshPortfolioState(true)}
+            />
           ) : (
             <div className="bottom-blank" />
           )}

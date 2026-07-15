@@ -41,7 +41,7 @@ export default async function handler(req, res) {
       });
     }
 
-    await syncLiveAccounts(supabase, user.id, accounts);
+    const liveSyncByAccount = await syncLiveAccounts(supabase, user.id, accounts);
 
     const [riskResult, balancesResult, positionsResult, ordersResult] = await Promise.all([
       supabase.from("account_risk_controls").select("*").in("account_id", accountIds),
@@ -64,7 +64,9 @@ export default async function handler(req, res) {
     const riskByAccount = new Map(riskResult.data.map((row) => [row.account_id, row]));
     const balances = balancesResult.data || [];
     const positions = positionsResult.data || [];
-    const orders = ordersResult.data || [];
+    const persistedOrders = (ordersResult.data || []).filter((order) => ["pending", "accepted", "working", "partially-filled"].includes(order.status));
+    const liveOrders = [...liveSyncByAccount.values()].flatMap((sync) => sync.openOrders || []);
+    const orders = mergeActiveOrders(persistedOrders, liveOrders, liveSyncByAccount);
 
     const totalBalance = balances.reduce((sum, row) => sum + num(row.usd_value), 0);
     const unrealizedPnl = positions.reduce((sum, row) => sum + num(row.unrealized_pnl), 0);
@@ -119,7 +121,8 @@ export default async function handler(req, res) {
         openedAt: row.opened_at,
         updatedAt: row.updated_at
       })),
-      orders
+      orders,
+      orderSync: Object.fromEntries([...liveSyncByAccount.entries()].map(([accountId, sync]) => [accountId, sync.orderSync]))
     });
   } catch (error) {
     return sendError(res, error);
@@ -127,6 +130,7 @@ export default async function handler(req, res) {
 }
 
 async function syncLiveAccounts(supabase, userId, accounts) {
+  const liveSyncByAccount = new Map();
   const bybitAccounts = accounts.filter((account) => account.exchange === "bybit");
 
   for (const account of bybitAccounts) {
@@ -139,9 +143,25 @@ async function syncLiveAccounts(supabase, userId, accounts) {
 
       if (error || !credential) continue;
       const credentials = decryptCredentialPayload(credential.encrypted_payload);
-      await syncBybitSnapshotAndReconcile(supabase, userId, account, credentials, { symbol: "BTCUSDT" });
+      const sync = await syncBybitSnapshotAndReconcile(supabase, userId, account, credentials, { symbol: "BTCUSDT" });
+      liveSyncByAccount.set(account.id, sync);
     } catch (error) {
       console.error(`Bybit sync failed for account ${account.id}`, error);
+      liveSyncByAccount.set(account.id, {
+        openOrders: [],
+        orderSync: {
+          network: "mainnet",
+          requestedCategories: ["linear", "spot"],
+          successfulCategories: [],
+          failedCategories: [{ category: "account", error: error instanceof Error ? error.message : String(error) }],
+          ordersPerCategory: {},
+          activeOrderCount: 0,
+          verified: false,
+          stale: true,
+          syncedAt: Date.now(),
+          latencyMs: 0
+        }
+      });
       await supabase
         .from("exchange_accounts")
         .update({
@@ -178,6 +198,26 @@ async function syncLiveAccounts(supabase, userId, accounts) {
         .eq("user_id", userId);
     }
   }
+  return liveSyncByAccount;
+}
+
+function mergeActiveOrders(persistedOrders, liveOrders, liveSyncByAccount) {
+  const merged = new Map();
+  for (const order of persistedOrders) {
+    if (liveSyncByAccount.get(order.account_id)?.orderSync?.verified) continue;
+    const venueOrderId = order.exchange_order_id || order.id;
+    merged.set(`${order.account_id}:${order.exchange}:unknown:${venueOrderId}`, order);
+  }
+  for (const order of liveOrders) {
+    const key = `${order.accountId}:${order.exchange}:${order.category}:${order.venueOrderId || order.orderId}`;
+    for (const existingKey of merged.keys()) {
+      if (existingKey.startsWith(`${order.accountId}:${order.exchange}:`) && existingKey.endsWith(`:${order.venueOrderId || order.orderId}`)) {
+        merged.delete(existingKey);
+      }
+    }
+    merged.set(key, order);
+  }
+  return [...merged.values()].sort((a, b) => Number(b.updatedTime || b.updated_at || b.createdTime || 0) - Number(a.updatedTime || a.updated_at || a.createdTime || 0));
 }
 
 function emptySummary() {

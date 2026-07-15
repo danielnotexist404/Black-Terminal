@@ -383,3 +383,6 @@ Release gates: `npm run test:dom-pro-panels`, `npm run test:venue-execution`, `n
 # Bybit External Order Validation
 
 Run `npm run test:bybit-external-orders` and `npm run build`. For controlled live read evidence, provide protected `BYBIT_API_KEY`, `BYBIT_API_SECRET`, and optionally `BYBIT_EXPECTED_ORDER_ID` to `npm run certify:bybit-external-orders`. The harness reads existing orders only; it does not place an order.
+# Bybit Order Hotfix Verification
+
+Run `npm run test:bybit-canonical-orders`, `npm run test:bybit-external-orders`, `npm run test:bybit-certification`, then `npm run build`. A production release must also verify one controlled venue order produces one row and one line before recording live certification evidence.

@@ -188,3 +188,6 @@ Chapter I-C adds `bt_aif_zone_memory:<workspace>:<venue-symbol-timeframe>`. Zone
 DOM settings remain scoped by workspace and market key. Performance mode persists with the existing settings record; adaptive quality and interaction mode are transient. Panel settings writes are debounced and fail soft under storage pressure. Heatmap, worker, tooltip and watchdog diagnostics are bounded runtime state and are not restored as workspace analytics.
 
 DOM Pro layout uses normalized split ratios under `bt:dom-pro-layout:v1:<workspace>:<window>`. Auto-save writes only after resize ends. Custom presets use `bt:dom-pro-layout-preset:<workspace>:<name>`. Collapse and split ratios persist; temporary maximize state does not. This is browser workspace preference data and requires no Supabase table.
+# Canonical Order Interaction
+
+Positions Orders and chart overlays derive from the same keyed Black Core order state. Right-click either representation for the shared order-management menu. Chart price lines retain their market price through pan, zoom and linear/log scale changes because screen coordinates are derived from the live chart transform.

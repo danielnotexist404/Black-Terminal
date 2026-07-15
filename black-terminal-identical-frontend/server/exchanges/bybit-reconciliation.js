@@ -35,7 +35,14 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     getBybitOrderPriceLimit({ category: marketKind === "spot" ? "spot" : "linear", symbol }),
     getBybitApiKeyInformation(credentials)
   ]);
-  const openOrders = openOrderSnapshot.orders.map((order) => ({ ...order, accountId: account.id, connectionId: account.id }));
+  const openOrders = openOrderSnapshot.orders.map((order) => ({
+    ...order,
+    accountId: account.id,
+    connectionId: account.id,
+    canonicalKey: `${order.network || "mainnet"}:${account.id}:bybit:${order.category || "unknown"}:${order.venueOrderId || order.orderId}`,
+    venueUpdatedTime: Number(order.updatedTime || order.createdTime || Date.now()),
+    lastSource: "rest-snapshot"
+  }));
   const positions = positionRows.filter((position) => position.quantity > 0 && position.direction !== "flat");
   const balances = walletSnapshot.balances;
   const permissionReport = normalizeBybitPermissionReport(apiKeyInfo);

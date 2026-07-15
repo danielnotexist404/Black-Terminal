@@ -3461,7 +3461,7 @@ body.resizing-layout * {
 
 .position-protection-overlay {
   position: absolute;
-  inset: 0;
+  inset: 44px 0 0;
   z-index: 46;
   pointer-events: none;
 }
@@ -4995,6 +4995,56 @@ body.resizing-layout * {
   inset: 44px 0 0;
   overflow: hidden;
 }
+
+.order-management-menu {
+  position: fixed;
+  z-index: 180;
+  width: 286px;
+  border: 1px solid rgba(255, 34, 34, 0.55);
+  border-radius: 3px;
+  background: #07090b;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.72);
+  color: #d9dde4;
+  font: 10px "IBM Plex Mono", monospace;
+}
+
+.order-management-menu header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.order-management-menu header div { display: grid; gap: 2px; }
+.order-management-menu header span { color: #7f8791; font-size: 8px; }
+.order-management-menu header button { width: 26px; height: 26px; color: #aeb4bd; }
+.order-management-actions { display: grid; padding: 5px; }
+.order-management-actions button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px;
+  color: #d9dde4;
+  text-align: left;
+}
+.order-management-actions button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.055); }
+.order-management-actions button.danger { color: #ff4545; }
+.order-management-actions button:disabled { color: #5c626a; cursor: not-allowed; }
+.order-management-actions em { margin-left: auto; color: #7d838b; font-size: 8px; }
+.order-management-form { display: grid; gap: 8px; padding: 10px; }
+.order-management-form label { display: grid; gap: 4px; color: #868d96; }
+.order-management-form input { height: 30px; padding: 0 7px; border: 1px solid #252a30; background: #030405; color: #fff; }
+.order-management-form > div { display: grid; grid-template-columns: 1fr 1.5fr; gap: 6px; }
+.order-management-form button { height: 30px; border: 1px solid #2b3037; color: #cbd0d7; }
+.order-management-form button.primary { border-color: #8f1010; background: #3b0808; color: #fff; }
+.order-management-details { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 6px; margin: 0; padding: 10px; }
+.order-management-details dt { color: #7d858f; }
+.order-management-details dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: #dce0e6; }
+.order-management-details button { grid-column: 1 / -1; height: 28px; border: 1px solid #292e35; color: #cbd0d7; }
+.order-management-status { padding: 7px 9px; border-top: 1px solid rgba(255, 191, 0, 0.3); color: #ffc400; font-size: 8px; overflow-wrap: anywhere; }
 
 .pixi-chart-host.price-scale-dragging,
 .pixi-chart-host.price-scale-dragging canvas,

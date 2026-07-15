@@ -1873,6 +1873,7 @@ export default function App() {
             priceLineColor={terminalSettings.priceLineColor}
             priceLineIntensity={terminalSettings.priceLineIntensity}
             activeOrders={portfolioOrders}
+            onRefreshOrders={() => refreshPortfolioState(true)}
           />
           {drawingsEnabled && (
             <div className="drawing-toolbar" aria-label="Drawing tools">

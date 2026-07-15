@@ -28,6 +28,9 @@ import type { ExchangeId } from "../../../market-data/types";
 import { blackCorePositionManager } from "../../../positions/positionManager";
 import type { ManagedPosition, PortfolioPosition } from "../../../positions/types";
 import { canCreateInvestmentGroup, listInvestmentGroups } from "../../profile/professionalNetworkStore";
+import type { OrderUpdate } from "../../../execution/types";
+import { deduplicateCanonicalOrders } from "../../../orders/canonicalOrder";
+import { OrderManagementMenu } from "../../../orders/OrderManagementMenu";
 
 type PortfolioManagerTab =
   | "Overview"
@@ -68,27 +71,6 @@ type ExecutionVenue = {
   readiness?: string;
   mainnetValidated?: boolean;
   limitations?: string[];
-};
-
-type PositionOrderRow = {
-  orderId?: string;
-  symbol: string;
-  status: string;
-  side?: string;
-  type?: string;
-  exchange?: string;
-  filledQuantity?: number;
-  averageFillPrice?: number;
-  reason?: string;
-  time?: number;
-  price?: number;
-  quantity?: number;
-  remainingQuantity?: number;
-  timeInForce?: string;
-  reduceOnly?: boolean;
-  externallyCreated?: boolean;
-  category?: string;
-  accountId?: string;
 };
 
 const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -402,7 +384,7 @@ export function PositionsWorkspace({
   onRefreshOrders
 }: {
   positions: PortfolioPosition[];
-  orders?: PositionOrderRow[];
+  orders?: OrderUpdate[];
   orderSync?: PortfolioSnapshot["orderSync"];
   onRefreshOrders?: () => Promise<unknown>;
 }) {
@@ -423,6 +405,7 @@ export function PositionsWorkspace({
   const [hyperliquidMainnetConfirmed, setHyperliquidMainnetConfirmed] = useState(false);
   const [connectStatus, setConnectStatus] = useState("");
   const [orderRefreshState, setOrderRefreshState] = useState<"idle" | "refreshing" | "failed">("idle");
+  const [orderMenu, setOrderMenu] = useState<{ order: OrderUpdate; x: number; y: number } | null>(null);
   const [connectionDiagnostics, setConnectionDiagnostics] = useState<ConnectionDiagnostics[]>(() => blackCoreConnectionManager.listDiagnostics());
   const [activeVenueId, setActiveVenueId] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
@@ -432,6 +415,7 @@ export function PositionsWorkspace({
   useEffect(() => blackCoreConnectionManager.subscribe(setConnectionDiagnostics), []);
 
   const activeOrderSync = (activeVenueId ? orderSync?.[activeVenueId] : undefined) || Object.values(orderSync || {})[0];
+  const canonicalOrders = useMemo(() => deduplicateCanonicalOrders(orders).orders, [orders]);
 
   async function refreshOrders() {
     if (!onRefreshOrders || orderRefreshState === "refreshing") return;
@@ -637,7 +621,7 @@ export function PositionsWorkspace({
           <div className="positions-orders-title">
             <span>Orders</span>
             <em className={activeOrderSync?.stale ? "stale" : ""}>
-              {activeOrderSync ? `${activeOrderSync.stale ? "DEGRADED" : "SNAPSHOT OK"} / ${activeOrderSync.activeOrderCount} ACTIVE / ${activeOrderSync.latencyMs}ms` : "NOT SYNCHRONIZED"}
+              {activeOrderSync ? `${activeOrderSync.stale ? "DEGRADED" : "SNAPSHOT OK"} / ${activeOrderSync.activeOrderCount} ACTIVE / ${activeOrderSync.latencyMs}ms${activeOrderSync.duplicateRecordCount ? ` / ${activeOrderSync.duplicateRecordCount} DEDUPED` : ""}` : "NOT SYNCHRONIZED"}
             </em>
             <button type="button" onClick={() => void refreshOrders()} disabled={!onRefreshOrders || orderRefreshState === "refreshing"} title="Refresh Orders">
               <RefreshCw size={11} className={orderRefreshState === "refreshing" ? "spin" : ""} />
@@ -660,9 +644,17 @@ export function PositionsWorkspace({
             <span>Exchange</span>
             <span>Created</span>
           </div>
-          {orders.length > 0 ? (
-            orders.map((order) => (
-              <div className="positions-orders-row" key={order.orderId ?? `${order.symbol}-${order.time}`}>
+          {canonicalOrders.length > 0 ? (
+            canonicalOrders.map((order) => (
+              <div
+                className="positions-orders-row"
+                key={order.canonicalKey || `${order.network || "mainnet"}:${order.accountId}:${order.exchange}:${order.category || "unknown"}:${order.venueOrderId || order.orderId}`}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setOrderMenu({ order, x: event.clientX, y: event.clientY });
+                }}
+                title="Right-click to manage order"
+              >
                 <b>{order.symbol}</b>
                 <span>{order.side ?? "-"}</span>
                 <span>{order.type ?? "-"}</span>
@@ -686,6 +678,16 @@ export function PositionsWorkspace({
           )}
         </div>
       </div>
+
+      {orderMenu && (
+        <OrderManagementMenu
+          order={orderMenu.order}
+          x={orderMenu.x}
+          y={orderMenu.y}
+          onClose={() => setOrderMenu(null)}
+          onSynchronized={onRefreshOrders}
+        />
+      )}
 
       <aside className={activeExecutionVenue ? "positions-execution-dock" : "positions-connect-dock"}>
         {activeExecutionVenue ? (

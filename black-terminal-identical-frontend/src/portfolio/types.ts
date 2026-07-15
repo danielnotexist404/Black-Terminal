@@ -59,6 +59,15 @@ export type PortfolioSnapshot = {
     successfulCategories: string[];
     failedCategories: Array<{ category: string; error: string }>;
     ordersPerCategory: Record<string, number>;
+    duplicateRecordCount?: number;
+    pagination?: Record<string, {
+      pages: number;
+      rawRecordCount: number;
+      uniqueRecordCount: number;
+      duplicateRecordCount: number;
+      repeatedCursor: boolean;
+      cursorLimitReached: boolean;
+    } | null>;
     activeOrderCount: number;
     verified: boolean;
     stale: boolean;

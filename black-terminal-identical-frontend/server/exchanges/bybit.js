@@ -131,11 +131,21 @@ export async function getBybitOrderPriceLimit({ category = "linear", symbol = "B
 }
 
 export async function getBybitOpenOrders(credentials, { category = "linear", symbol, settleCoin, baseCoin, maxPages = 20 } = {}) {
-  const orders = [];
+  const ordersById = new Map();
+  const processedCursors = new Set();
   let cursor;
   let pages = 0;
+  let rawRecordCount = 0;
+  let duplicateRecordCount = 0;
+  let repeatedCursor = false;
 
   do {
+    const cursorKey = cursor || "__FIRST_PAGE__";
+    if (processedCursors.has(cursorKey)) {
+      repeatedCursor = true;
+      break;
+    }
+    processedCursors.add(cursorKey);
     const response = await bybitRequest(credentials, "GET", "/v5/order/realtime", {
       category,
       symbol,
@@ -145,12 +155,35 @@ export async function getBybitOpenOrders(credentials, { category = "linear", sym
       limit: "50",
       openOnly: "0"
     });
-    orders.push(...(response?.list || []).map((order) => normalizeBybitVenueOrder(order, category)));
-    cursor = response?.nextPageCursor || undefined;
+    for (const rawOrder of response?.list || []) {
+      rawRecordCount += 1;
+      const order = normalizeBybitVenueOrder(rawOrder, category);
+      const key = `${category}:${order.venueOrderId}`;
+      const current = ordersById.get(key);
+      if (current) duplicateRecordCount += 1;
+      if (!current || orderVersion(order) >= orderVersion(current)) ordersById.set(key, order);
+    }
+    const nextCursor = response?.nextPageCursor || undefined;
+    if (nextCursor && processedCursors.has(nextCursor)) {
+      repeatedCursor = true;
+      break;
+    }
+    cursor = nextCursor;
     pages += 1;
   } while (cursor && pages < maxPages);
 
-  return orders;
+  return {
+    orders: Array.from(ordersById.values()),
+    diagnostics: {
+      category,
+      pages,
+      rawRecordCount,
+      uniqueRecordCount: ordersById.size,
+      duplicateRecordCount,
+      repeatedCursor,
+      cursorLimitReached: Boolean(cursor && pages >= maxPages)
+    }
+  };
 }
 
 export async function getBybitOpenOrdersSnapshot(credentials, options = {}) {
@@ -159,12 +192,12 @@ export async function getBybitOpenOrdersSnapshot(credentials, options = {}) {
   const requestedCategories = options.categories || ["linear", "spot"];
   const categoryResults = await Promise.all(requestedCategories.map(async (category) => {
     try {
-      const orders = await getBybitOpenOrders(credentials, {
+      const result = await getBybitOpenOrders(credentials, {
         category,
         settleCoin: category === "linear" ? (options.settleCoin || "USDT") : undefined,
         symbol: options.symbolByCategory?.[category]
       });
-      return { category, status: "ok", orders };
+      return { category, status: "ok", orders: result.orders, diagnostics: result.diagnostics };
     } catch (error) {
       return {
         category,
@@ -179,7 +212,17 @@ export async function getBybitOpenOrdersSnapshot(credentials, options = {}) {
     category: result.category,
     error: result.error
   }));
-  const orders = categoryResults.flatMap((result) => result.orders).map((order) => ({ ...order, network }));
+  const uniqueOrders = new Map();
+  let duplicateRecordCount = 0;
+  for (const order of categoryResults.flatMap((result) => result.orders)) {
+    const key = `${network}:bybit:${order.category}:${order.venueOrderId}`;
+    const current = uniqueOrders.get(key);
+    if (current) duplicateRecordCount += 1;
+    if (!current || orderVersion(order) >= orderVersion(current)) {
+      uniqueOrders.set(key, { ...order, network });
+    }
+  }
+  const orders = Array.from(uniqueOrders.values());
   const ordersPerCategory = Object.fromEntries(categoryResults.map((result) => [result.category, result.orders.length]));
   const syncedAt = Date.now();
 
@@ -192,6 +235,8 @@ export async function getBybitOpenOrdersSnapshot(credentials, options = {}) {
       successfulCategories,
       failedCategories,
       ordersPerCategory,
+      pagination: Object.fromEntries(categoryResults.map((result) => [result.category, result.diagnostics || null])),
+      duplicateRecordCount: duplicateRecordCount + categoryResults.reduce((total, result) => total + Number(result.diagnostics?.duplicateRecordCount || 0), 0),
       activeOrderCount: orders.length,
       verified: failedCategories.length === 0,
       stale: failedCategories.length > 0,
@@ -230,6 +275,7 @@ export function normalizeBybitVenueOrder(order, category = order?.category || "l
     orderType: String(order?.orderType || "").toLowerCase(),
     status: normalizeBybitOrderStatus(order?.orderStatus),
     price: nullableNumber(order?.price),
+    venuePriceString: order?.price === undefined || order?.price === null ? undefined : String(order.price),
     triggerPrice: nullableNumber(order?.triggerPrice),
     quantity,
     leavesQuantity,
@@ -250,6 +296,10 @@ export function normalizeBybitVenueOrder(order, category = order?.category || "l
     updatedAt: updatedTime,
     rawVersion: updatedTime
   };
+}
+
+function orderVersion(order) {
+  return Number(order?.rawVersion || order?.updatedTime || order?.updatedAt || order?.createdTime || 0);
 }
 
 export async function getBybitStrategies(credentials, { marketKind = "perpetual", symbol } = {}) {

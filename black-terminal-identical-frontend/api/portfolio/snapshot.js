@@ -206,16 +206,19 @@ function mergeActiveOrders(persistedOrders, liveOrders, liveSyncByAccount) {
   for (const order of persistedOrders) {
     if (liveSyncByAccount.get(order.account_id)?.orderSync?.verified) continue;
     const venueOrderId = order.exchange_order_id || order.id;
-    merged.set(`${order.account_id}:${order.exchange}:unknown:${venueOrderId}`, order);
+    merged.set(`mainnet:${order.account_id}:${order.exchange}:unknown:${venueOrderId}`, order);
   }
   for (const order of liveOrders) {
-    const key = `${order.accountId}:${order.exchange}:${order.category}:${order.venueOrderId || order.orderId}`;
+    const key = order.canonicalKey || `${order.network || "mainnet"}:${order.connectionId || order.accountId}:${order.exchange}:${order.category || "unknown"}:${order.venueOrderId || order.orderId}`;
     for (const existingKey of merged.keys()) {
-      if (existingKey.startsWith(`${order.accountId}:${order.exchange}:`) && existingKey.endsWith(`:${order.venueOrderId || order.orderId}`)) {
+      if (existingKey.includes(`:${order.accountId}:${order.exchange}:`) && existingKey.endsWith(`:${order.venueOrderId || order.orderId}`)) {
         merged.delete(existingKey);
       }
     }
-    merged.set(key, order);
+    const current = merged.get(key);
+    const incomingVersion = Number(order.venueUpdatedTime || order.updatedTime || order.createdTime || 0);
+    const currentVersion = Number(current?.venueUpdatedTime || current?.updatedTime || current?.updated_at || current?.createdTime || 0);
+    if (!current || incomingVersion >= currentVersion) merged.set(key, { ...order, canonicalKey: key });
   }
   return [...merged.values()].sort((a, b) => Number(b.updatedTime || b.updated_at || b.createdTime || 0) - Number(a.updatedTime || a.updated_at || a.createdTime || 0));
 }

@@ -1091,3 +1091,11 @@ Remaining:
 - Corrected the private worker so order updates trigger reconciliation.
 - Added account-wide Orders fields, source badges, freshness, manual refresh and current-symbol chart lines.
 - Added deterministic synchronization tests and a read-only live certification harness. Live evidence remains operator-gated.
+
+# 2026-07-15 - Bybit Canonical Order Synchronization Hotfix II
+
+- Added one canonical order key across REST reconciliation, portfolio API, Black Core, Orders and chart rendering.
+- Added repeated-cursor protection, page/snapshot deduplication, venue-version precedence and duplicate diagnostics.
+- Corrected the chart overlay's 44px host-origin displacement while retaining the authoritative linear/log price transform.
+- Added a shared chart/table management menu with authenticated Modify, Cancel and inspection; existing-order Chase remains capability-gated because Bybit does not attach native Chase to a standard order.
+- Added deterministic identity, stale-update, account-isolation, chart-alignment and menu regression tests. No Supabase migration is required.

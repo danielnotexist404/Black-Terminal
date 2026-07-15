@@ -1,19 +1,27 @@
 import type { OrderUpdate } from "../execution/types";
 import type { PortfolioSnapshot } from "../portfolio/types";
+import { canonicalOrderKey, deduplicateCanonicalOrders, shouldReplaceCanonicalOrder } from "./canonicalOrder";
 
 export type OrderBucket = "open" | "working" | "filled" | "cancelled" | "rejected" | "partial";
 
 export class OrderSyncService {
   private orders = new Map<string, OrderUpdate>();
   private listeners = new Set<(orders: OrderUpdate[]) => void>();
+  private diagnostics = { rawRecords: 0, uniqueOrders: 0, duplicatesSuppressed: 0, staleUpdatesSuppressed: 0 };
 
   upsert(order: OrderUpdate) {
-    this.orders.set(orderIdentity(order), order);
+    const key = canonicalOrderKey(order);
+    const current = this.orders.get(key);
+    this.diagnostics.rawRecords += 1;
+    if (current) this.diagnostics.duplicatesSuppressed += 1;
+    if (shouldReplaceCanonicalOrder(current, order)) this.orders.set(key, { ...order, canonicalKey: key });
+    else this.diagnostics.staleUpdatesSuppressed += 1;
     this.emit();
   }
 
   replaceAccountSnapshots(orders: OrderUpdate[], health: PortfolioSnapshot["orderSync"] = {}) {
     const incomingByAccount = new Map<string, OrderUpdate[]>();
+    const nextDiagnostics = { rawRecords: 0, uniqueOrders: 0, duplicatesSuppressed: 0, staleUpdatesSuppressed: 0 };
     for (const order of orders) {
       const accountOrders = incomingByAccount.get(order.accountId) || [];
       accountOrders.push(order);
@@ -27,10 +35,17 @@ export class OrderSyncService {
       for (const [key, order] of this.orders) {
         if (order.accountId === accountId) this.orders.delete(key);
       }
-      for (const order of incomingByAccount.get(accountId) || []) {
-        this.orders.set(orderIdentity(order), order);
+      const deduplicated = deduplicateCanonicalOrders(incomingByAccount.get(accountId) || []);
+      nextDiagnostics.rawRecords += deduplicated.diagnostics.rawRecords;
+      nextDiagnostics.uniqueOrders += deduplicated.diagnostics.uniqueOrders;
+      nextDiagnostics.duplicatesSuppressed += deduplicated.diagnostics.duplicatesSuppressed;
+      nextDiagnostics.staleUpdatesSuppressed += deduplicated.diagnostics.staleUpdatesSuppressed;
+      for (const order of deduplicated.orders) {
+        const key = canonicalOrderKey(order);
+        this.orders.set(key, { ...order, canonicalKey: key });
       }
     }
+    this.diagnostics = nextDiagnostics;
     this.emit();
     return this.list("open");
   }
@@ -54,14 +69,14 @@ export class OrderSyncService {
     });
   }
 
+  getDiagnostics() {
+    return { ...this.diagnostics, uniqueOrders: this.orders.size };
+  }
+
   private emit() {
     const active = this.list("open");
     for (const listener of this.listeners) listener(active);
   }
-}
-
-function orderIdentity(order: OrderUpdate) {
-  return `${order.accountId}:${order.network || "mainnet"}:${order.category || "unknown"}:${order.venueOrderId || order.orderId}`;
 }
 
 export const blackCoreOrderSyncService = new OrderSyncService();

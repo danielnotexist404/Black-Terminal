@@ -471,6 +471,32 @@ export async function cancelVenueOrderViaApi(order: OrderUpdate): Promise<OrderU
   return mapOrder(data.order);
 }
 
+export async function modifyVenueOrderViaApi(order: OrderUpdate, changes: { quantity?: number; limitPrice?: number }): Promise<OrderUpdate | null> {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+  const response = await fetch("/api/execution/modify", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      localOrderId: order.externallyCreated ? undefined : order.internalId,
+      orderId: order.venueOrderId || order.orderId,
+      exchangeOrderId: order.venueOrderId || order.orderId,
+      accountId: order.accountId,
+      symbol: order.symbol,
+      category: order.category,
+      marketKind: order.category === "spot" ? "spot" : "perpetual",
+      clientOrderId: order.clientOrderId,
+      quantity: changes.quantity,
+      limitPrice: changes.limitPrice,
+      mainnetConfirmed: true,
+      liveConfirmation: "LIVE"
+    })
+  });
+  if (!response.ok) throw new Error(await readApiError(response));
+  const data = await response.json();
+  return mapOrder(data.report);
+}
+
 export async function setBybitTradingEnabledViaApi(accountId: string, enabled: boolean, confirmation: string): Promise<{ status: "enabled" | "disabled"; accountId: string } | null> {
   const token = await getPortfolioApiToken();
   if (!token) return null;
@@ -690,7 +716,11 @@ function mapOrder(order: any): OrderUpdate {
     ownership: order.ownership || (order.externallyCreated ? "external" : "black-terminal"),
     externallyCreated: Boolean(order.externallyCreated),
     createdTime,
-    updatedTime: toMillis(order.updated_at || order.updatedTime || createdTime)
+    updatedTime: toMillis(order.updated_at || order.updatedTime || createdTime),
+    venuePriceString: order.venuePriceString === undefined ? undefined : String(order.venuePriceString),
+    venueUpdatedTime: toMillis(order.venueUpdatedTime || order.updated_at || order.updatedTime || createdTime),
+    canonicalKey: order.canonicalKey,
+    lastSource: order.lastSource || order.source
   };
 }
 

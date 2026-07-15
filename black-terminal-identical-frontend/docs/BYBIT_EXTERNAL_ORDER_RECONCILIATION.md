@@ -17,3 +17,6 @@ Bybit returned active orders correctly, but synchronization queried only the act
 ## Operational diagnostics
 
 The sync payload exposes requested/successful/failed categories, orders per category, active count, network, latency and timestamp. `AUTHENTICATED` and `ORDER READ VERIFIED` are separate conditions.
+# Hotfix II Addendum
+
+External orders now reconcile by `network:connectionId:venue:category:venueOrderId`. REST pagination tracks processed cursors and deduplicates pages before publication. Venue update time controls precedence, and presentation layers apply a final invariant check. See `BYBIT_ORDER_DEDUPLICATION_HOTFIX.md`.

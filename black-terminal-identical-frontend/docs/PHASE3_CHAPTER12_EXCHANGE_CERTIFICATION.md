@@ -207,3 +207,6 @@ Current status:
 - Bybit remains `PARTIAL / BLOCKED FOR LIVE CERTIFICATION` in this local environment.
 - The code path is ready once Vercel env, Supabase service-role access, a real allowlisted Bybit account, and the supervised private-stream worker are configured.
 - Production certification still requires real runtime evidence, not only a passing build.
+# Canonical Open-Order Addendum (2026-07-15)
+
+Bybit open-order certification now includes repeated-cursor protection, canonical REST/private-stream identity, version precedence, exact chart transform alignment and authenticated chart/table management. Deterministic gates pass; final production certification still requires operator-controlled real-order lifecycle evidence.

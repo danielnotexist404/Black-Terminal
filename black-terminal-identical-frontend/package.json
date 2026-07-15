@@ -28,6 +28,7 @@
     "test:aif-visual": "node scripts/aif-visual-regression.js",
     "test:bybit-certification": "node scripts/bybit-certification-tests.js",
     "test:bybit-external-orders": "node scripts/bybit-external-order-tests.js",
+    "test:bybit-canonical-orders": "node --experimental-strip-types scripts/bybit-canonical-order-tests.ts",
     "certify:bybit-external-orders": "node scripts/bybit-external-order-certification.js",
     "test:venue-execution": "node --experimental-strip-types scripts/venue-execution-tests.js",
     "certify:bybit-mainnet": "node scripts/bybit-mainnet-certification-runner.js",

@@ -2002,3 +2002,7 @@ No migration required. Split ratios, panel collapse state, auto-save preference 
 # 2026-07-15 - Bybit External Order Synchronization
 
 No migration required. External venue orders are delivered by the existing authenticated account sync response and mirrored in the browser's canonical Black Core order store. Existing execution and audit tables remain unchanged; a failed persistence layer cannot suppress the live venue snapshot.
+
+# 2026-07-15 - Bybit Canonical Order Synchronization Hotfix II
+
+No migration required. Canonical identity, pagination guards, version precedence, chart geometry and order-management UI are runtime changes. Existing execution and audit tables continue to own durable local orders and management audit events.

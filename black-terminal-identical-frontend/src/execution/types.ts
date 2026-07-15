@@ -146,6 +146,10 @@ export type OrderUpdate = {
   externallyCreated?: boolean;
   createdTime?: number;
   updatedTime?: number;
+  venuePriceString?: string;
+  venueUpdatedTime?: number;
+  canonicalKey?: string;
+  lastSource?: string;
 };
 
 export type ExecutionRequest = {

@@ -7,7 +7,9 @@ Status: **Implementation verified; live venue evidence pending an existing contr
 - REST and private-stream payloads normalize to the same deterministic identity.
 - Partial-fill remaining quantity is preserved.
 - Filled status closes the active order lifecycle.
-- Cursor pagination, category policy, private worker reconciliation and chart projection are regression tested.
+- Cursor pagination, repeated-cursor protection, canonical source deduplication, version precedence and chart projection are regression tested.
+- Chart overlay origin now matches the Pixi host; the former fixed 44px displacement is removed.
+- Modify/cancel management paths are wired; existing-order Chase conversion remains truthfully capability-gated.
 
 ## Live evidence procedure
 

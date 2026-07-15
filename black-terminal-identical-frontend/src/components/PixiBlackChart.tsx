@@ -34,8 +34,8 @@ import type { OrderUpdate } from "../execution/types";
 import { blackCorePositionManager } from "../positions/positionManager";
 import type { ManagedPosition, PositionProtectionOrder, PositionProtectionType } from "../positions/types";
 import { AifIndicatorOverlay } from "../modules/aif/components/AifIndicatorOverlay";
-import { cancelVenueOrderViaApi } from "../portfolio/portfolioApiClient";
-import { blackCoreOrderSyncService } from "../orders/orderSyncService";
+import { canonicalOrderKey, deduplicateCanonicalOrders } from "../orders/canonicalOrder";
+import { OrderManagementMenu } from "../orders/OrderManagementMenu";
 
 type PixiBlackChartProps = {
   workspaceId: string;
@@ -72,6 +72,7 @@ type PixiBlackChartProps = {
   priceLineColor?: string;
   priceLineIntensity?: number;
   activeOrders?: OrderUpdate[];
+  onRefreshOrders?: () => void | Promise<unknown>;
 };
 
 type IndicatorKey = keyof VisibleIndicators;
@@ -84,6 +85,8 @@ type ChartContextMenuState = {
   y: number;
   point: ChartPoint;
 };
+
+type OrderContextMenuState = { x: number; y: number; order: OrderUpdate };
 
 type AlertToast = {
   id: number;
@@ -282,7 +285,8 @@ export function PixiBlackChart({
   onAlertFired,
   priceLineColor,
   priceLineIntensity,
-  activeOrders = []
+  activeOrders = [],
+  onRefreshOrders
 }: PixiBlackChartProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<BlackChartEngine | null>(null);
@@ -299,6 +303,7 @@ export function PixiBlackChart({
   const [mountedIndicators, setMountedIndicators] = useState<Record<IndicatorKey, boolean>>(() => ({ ...visibleIndicators }));
   const [alertSettings, setAlertSettings] = useState<IndicatorAlertSettings>(defaultIndicatorAlertSettings);
   const [chartContextMenu, setChartContextMenu] = useState<ChartContextMenuState | null>(null);
+  const [orderContextMenu, setOrderContextMenu] = useState<OrderContextMenuState | null>(null);
   const [executionTicketPreset, setExecutionTicketPreset] = useState<UnifiedExecutionTicketPreset | null>(null);
   const [managedPositions, setManagedPositions] = useState<ManagedPosition[]>(() => blackCorePositionManager.listActivePositions());
   const [positionOverlayTick, setPositionOverlayTick] = useState(0);
@@ -376,7 +381,7 @@ export function PixiBlackChart({
 
   const activeChartOrders = useMemo(() => {
     const chartSymbol = normalizeChartSymbol(displaySymbol || marketSymbol.rawSymbol);
-    return activeOrders
+    return deduplicateCanonicalOrders(activeOrders).orders
       .filter((order) => ["pending", "accepted", "working", "partially-filled"].includes(order.status))
       .filter((order) => normalizeChartSymbol(order.normalizedSymbol || order.symbol) === chartSymbol)
       .filter((order) => !marketSymbol.exchange || order.exchange === marketSymbol.exchange)
@@ -3315,17 +3320,15 @@ export function PixiBlackChart({
           ))}
           {chartOrderLines.map(({ order, y }) => (
             <div
-              key={`${order.accountId}:${order.category || "unknown"}:${order.venueOrderId || order.orderId}`}
+              key={canonicalOrderKey(order)}
               className={`venue-order-line ${order.side === "sell" ? "sell" : "buy"}`}
               style={{ top: Number(y) }}
               title={`${order.exchange.toUpperCase()} ${order.side?.toUpperCase()} ${String(order.type || order.orderType || "ORDER").toUpperCase()} | ${formatAlertPrice(Number(order.price))} | Remaining ${order.remainingQuantity ?? order.quantity ?? 0} | ${order.externallyCreated ? "EXTERNAL" : "BLACK TERMINAL"}`}
               onContextMenu={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                if (!window.confirm(`Cancel ${order.exchange.toUpperCase()} order ${order.venueOrderId || order.orderId}?`)) return;
-                void cancelVenueOrderViaApi(order)
-                  .then(() => blackCoreOrderSyncService.upsert({ ...order, status: "cancelled", time: Date.now() }))
-                  .catch((error) => window.alert(error instanceof Error ? error.message : String(error)));
+                setChartContextMenu(null);
+                setOrderContextMenu({ x: event.clientX, y: event.clientY, order });
               }}
             >
               <span>{order.exchange.toUpperCase()} {order.side?.toUpperCase()} {String(order.type || order.orderType || "ORDER").toUpperCase()}</span>
@@ -3334,6 +3337,16 @@ export function PixiBlackChart({
             </div>
           ))}
         </div>
+      )}
+
+      {orderContextMenu && (
+        <OrderManagementMenu
+          order={orderContextMenu.order}
+          x={orderContextMenu.x}
+          y={orderContextMenu.y}
+          onClose={() => setOrderContextMenu(null)}
+          onSynchronized={onRefreshOrders}
+        />
       )}
 
       <button

@@ -9649,6 +9649,28 @@ body.dom-pro-resize-active {
   padding-bottom: 0;
 }
 
+.dom-pro-product-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  padding: 5px 8px 0;
+}
+
+.dom-pro-product-switch button {
+  height: 22px;
+  color: #858b94;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(7, 8, 10, 0.82);
+  font: 900 8px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.dom-pro-product-switch button.active {
+  color: #f3f4f6;
+  border-color: rgba(230, 0, 12, 0.7);
+  background: rgba(125, 0, 8, 0.26);
+}
+
 .dom-pro-submit-row,
 .dom-pro-checks {
   display: grid;
@@ -9685,6 +9707,7 @@ body.dom-pro-resize-active {
 }
 
 .dom-pro-execution-form,
+.dom-pro-strategy-grid,
 .dom-pro-protection-fields {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -9693,6 +9716,7 @@ body.dom-pro-resize-active {
 }
 
 .dom-pro-execution-form label,
+.dom-pro-strategy-grid label,
 .dom-pro-protection-fields label {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -9702,6 +9726,7 @@ body.dom-pro-resize-active {
 }
 
 .dom-pro-execution-form label > span,
+.dom-pro-strategy-grid label > span,
 .dom-pro-protection-fields label > span {
   overflow: hidden;
   font-size: 7px;
@@ -9711,10 +9736,31 @@ body.dom-pro-resize-active {
 
 .dom-pro-execution-form input,
 .dom-pro-execution-form select,
+.dom-pro-strategy-grid input,
+.dom-pro-strategy-grid select,
 .dom-pro-protection-fields input {
   height: 24px;
   padding: 0 6px;
   font-size: 9px;
+}
+
+.dom-pro-strategy-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  padding-top: 5px;
+  border-top: 1px solid rgba(255, 0, 0, 0.12);
+}
+
+.dom-pro-strategy-grid .dom-pro-strategy-check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  color: #b8bdc6;
+  font: 800 8px "IBM Plex Mono", monospace;
+}
+
+.dom-pro-strategy-grid .dom-pro-strategy-check input {
+  width: 12px;
+  height: 12px;
 }
 
 .dom-pro-execution-form .read-only b {
@@ -9810,12 +9856,14 @@ body.dom-pro-resize-active {
 }
 
 @container (max-width: 450px) {
-  .dom-pro-execution-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .dom-pro-execution-form,
+  .dom-pro-strategy-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .dom-pro-execution-preview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @container (max-width: 320px) {
-  .dom-pro-execution-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dom-pro-execution-form,
+  .dom-pro-strategy-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dom-pro-execution-preview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dom-pro-allocation-markers button { font-size: 0; }
   .dom-pro-panel-title-status b { display: none; }

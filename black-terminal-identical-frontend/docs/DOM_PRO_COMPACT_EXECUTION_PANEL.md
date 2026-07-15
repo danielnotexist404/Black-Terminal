@@ -14,7 +14,10 @@ The panel synchronizes the selected Bybit account through the existing account s
 
 ## Controls
 
-- Order Type is a compact selector. Only modes with a complete compact-ticket implementation are exposed.
+- Order Type is a compact selector driven directly by the selected venue/product schema. Bybit exposes Market, Limit, Conditional Market/Limit, Chase Limit, TWAP, Iceberg and POV wherever that mode is certified for the selected product.
+- Spot/Futures is a product selector, not an execution bypass. It rebuilds account sync and venue capabilities for Spot or USDT Perpetual while keeping the selected symbol and canonical execution route.
+- Spot actions are labeled Buy/Sell. Futures actions are labeled Long/Short. Both map to the normalized buy/sell side required by OMS and the venue adapter.
+- Conditional, Chase Limit, TWAP, Iceberg and POV fields use the same parameter contract and validation as Unified Execution Ticket. Product restrictions remain schema-driven; for example, Bybit POV is not exposed for Spot.
 - Limit orders expose venue-supported GTC, IOC and FOK. Market orders display venue-default TIF. Post-Only restricts TIF to GTC.
 - Margin mode and leverage are separate controls. Leverage options are bounded by instrument metadata and the active risk tier.
 - Equity Allocation uses markers at 0, 1, 5, 10, 15, 25, 35, 50, 65, 75 and 100 percent.
@@ -22,6 +25,8 @@ The panel synchronizes the selected Bybit account through the existing account s
 - Post-Only, Reduce-Only and TP/SL retain venue validation.
 
 Equity Allocation sizes from usable account margin after fee and leverage effects. It does not equate total equity with executable notional. Changing leverage updates margin independently and recalculates an active percentage allocation without silently changing account mode.
+
+No new execution state or route is introduced. Strategy orders include normalized `strategyParameters` and continue through `submitOrder`, OMS, EMS, Risk and the Protocol/Broker Router.
 
 ## Responsive Modes
 

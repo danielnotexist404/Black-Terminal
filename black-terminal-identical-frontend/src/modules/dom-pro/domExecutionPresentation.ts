@@ -5,9 +5,7 @@ export const DOM_EQUITY_ALLOCATION_MARKERS = [0, 1, 5, 10, 15, 25, 35, 50, 65, 7
 
 export function availableDomOrderTypes(schema: VenueExecutionSchema | null): OrderType[] {
   if (!schema) return ["limit", "market"];
-  const supported = schema.supportedOrderModes.flatMap((mode) => mode.orderTypes);
-  const implementedInCompactTicket: OrderType[] = ["limit", "market"];
-  return implementedInCompactTicket.filter((type) => supported.includes(type));
+  return [...new Set(schema.supportedOrderModes.flatMap((mode) => mode.orderTypes))];
 }
 
 export function availableDomTimeInForce(schema: VenueExecutionSchema | null, orderType: OrderType, postOnly: boolean): TimeInForce[] {

@@ -2010,3 +2010,7 @@ No migration required. Canonical identity, pagination guards, version precedence
 # 2026-07-15 - Bybit Connection Lifecycle Hotfix
 
 No migration required. Existing duplicate account records are collapsed at read time and removed by the authenticated disconnect route. Future connection idempotency uses the existing `credential_ref` and existing account/credential/risk tables.
+
+# 2026-07-16 - DOM Pro Venue-Native Execution Parity
+
+No migration required. Spot/Futures selection, schema-derived order modes and strategy parameters are execution-ticket presentation and normalized request changes. They reuse the existing connection, OMS/EMS, risk, strategy and audit contracts.

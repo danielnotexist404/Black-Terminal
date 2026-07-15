@@ -37,7 +37,8 @@ import {
   splitSpanRatio,
   writeDomProLayout
 } from "../src/modules/dom-pro/domWorkspaceLayout.ts";
-import { availableDomTimeInForce, DOM_EQUITY_ALLOCATION_MARKERS, domExecutionLayoutMode, nearestLeverageOptions } from "../src/modules/dom-pro/domExecutionPresentation.ts";
+import { availableDomOrderTypes, availableDomTimeInForce, DOM_EQUITY_ALLOCATION_MARKERS, domExecutionLayoutMode, nearestLeverageOptions } from "../src/modules/dom-pro/domExecutionPresentation.ts";
+import type { VenueExecutionSchema } from "../src/execution/venueExecutionSchema.ts";
 import { computeDomWallLabelLayout } from "../src/modules/dom-pro/domWallLabelLayout.ts";
 
 class MemoryStorage {
@@ -67,6 +68,18 @@ assert.ok(applyDomProLayoutPreset(layout, "analysis-focus").rootSplit.ratio > la
 assert.deepEqual(availableDomTimeInForce(null, "limit", false), ["gtc", "ioc", "fok"]);
 assert.deepEqual(availableDomTimeInForce(null, "market", false), [], "market orders use venue-default TIF");
 assert.deepEqual(availableDomTimeInForce(null, "limit", true), ["gtc"], "post-only rejects incompatible TIF modes");
+const executionSchema = {
+  supportedOrderModes: [
+    { orderTypes: ["market"] },
+    { orderTypes: ["limit"] },
+    { orderTypes: ["stop-market", "stop-limit"] },
+    { orderTypes: ["chase-limit"] },
+    { orderTypes: ["twap"] },
+    { orderTypes: ["iceberg"] },
+    { orderTypes: ["pov"] }
+  ]
+} as VenueExecutionSchema;
+assert.deepEqual(availableDomOrderTypes(executionSchema), ["market", "limit", "stop-market", "stop-limit", "chase-limit", "twap", "iceberg", "pov"], "DOM execution exposes every venue-certified order type");
 assert.ok(nearestLeverageOptions(1, 20, 1, 17).includes(17), "current venue leverage remains selectable");
 assert.deepEqual(DOM_EQUITY_ALLOCATION_MARKERS, [0, 1, 5, 10, 15, 25, 35, 50, 65, 75, 100]);
 assert.equal(domExecutionLayoutMode(280), "minimal");

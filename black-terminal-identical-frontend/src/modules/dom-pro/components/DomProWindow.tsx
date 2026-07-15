@@ -9,9 +9,9 @@ import { readActiveExecutionVenueId } from "../../../connectivity/activeExecutio
 import type { ConnectionDiagnostics } from "../../../connectivity/types";
 import type { BlackCoreModuleMode } from "../../../core/modules/moduleRegistry";
 import { submitOrder } from "../../../execution/executionEngine";
-import type { MarginMode, OrderSide, OrderType, TimeInForce } from "../../../execution/types";
+import type { MarginMode, OrderSide, OrderType, TimeInForce, TriggerSource, VenueStrategyParameters } from "../../../execution/types";
 import { blackCoreMarketDataEngine } from "../../../market-data/engine/marketDataEngine";
-import type { MarketSymbol } from "../../../market-data/types";
+import type { MarketKind, MarketSymbol } from "../../../market-data/types";
 import { blackCorePerformanceMonitor } from "../../../performance/performanceMonitor";
 import type { PortfolioAccount } from "../../../portfolio/types";
 import { syncExchangeAccountViaApi, type ExchangeAccountSyncPayload } from "../../../portfolio/portfolioApiClient";
@@ -347,6 +347,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     return activeConnections.find((connection) => connection.id === activeVenueId) ?? activeConnections[0] ?? null;
   }, [activeConnections]);
   const [side, setSide] = useState<OrderSide>("buy");
+  const [executionMarketKind, setExecutionMarketKind] = useState<MarketKind>(() => marketSymbol.marketKind === "spot" ? "spot" : "perpetual");
   const [orderType, setOrderType] = useState<OrderType>("limit");
   const [quantity, setQuantity] = useState("0.001");
   const [price, setPrice] = useState("");
@@ -359,6 +360,22 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const [tpSlEnabled, setTpSlEnabled] = useState(false);
   const [takeProfit, setTakeProfit] = useState("");
   const [stopLoss, setStopLoss] = useState("");
+  const [stopPrice, setStopPrice] = useState("");
+  const [triggerBy, setTriggerBy] = useState<TriggerSource>("last");
+  const [strategyDurationSeconds, setStrategyDurationSeconds] = useState(1800);
+  const [strategyIntervalSeconds, setStrategyIntervalSeconds] = useState(30);
+  const [strategyRandomize, setStrategyRandomize] = useState(false);
+  const [strategyTriggerPrice, setStrategyTriggerPrice] = useState("");
+  const [strategyMaxChasePrice, setStrategyMaxChasePrice] = useState("");
+  const [strategyChaseUnit, setStrategyChaseUnit] = useState<"distance" | "percent">("distance");
+  const [strategyChaseValue, setStrategyChaseValue] = useState("0.5");
+  const [strategySubSize, setStrategySubSize] = useState("");
+  const [strategyOrderCount, setStrategyOrderCount] = useState(10);
+  const [icebergPreference, setIcebergPreference] = useState<"maker" | "taker" | "offset" | "fixed">("maker");
+  const [povMode, setPovMode] = useState<"TradedVolume" | "OppositeSideLiquidity" | "SameSideLiquidity">("TradedVolume");
+  const [povParticipationRate, setPovParticipationRate] = useState(10);
+  const [povReferenceWindow, setPovReferenceWindow] = useState(300);
+  const [povDepthReference, setPovDepthReference] = useState(5);
   const [accountSync, setAccountSync] = useState<ExchangeAccountSyncPayload | null>(null);
   const [accountSyncError, setAccountSyncError] = useState("");
   const [executionStatus, setExecutionStatus] = useState("");
@@ -371,10 +388,14 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const [documentVisible, setDocumentVisible] = useState(() => typeof document === "undefined" || document.visibilityState !== "hidden");
   const effectiveVisualQuality = resolveVisualQuality(settings.performanceMode, visualQuality);
   const venueSchema = useMemo(() => selectedConnection
-    ? buildVenueExecutionSchema({ connection: selectedConnection, product: marketSymbol.marketKind, symbol: marketSymbol.rawSymbol, sync: accountSync })
+    ? buildVenueExecutionSchema({ connection: selectedConnection, product: executionMarketKind, symbol: marketSymbol.rawSymbol, sync: accountSync })
     : null,
-  [accountSync, marketSymbol.marketKind, marketSymbol.rawSymbol, selectedConnection]);
+  [accountSync, executionMarketKind, marketSymbol.rawSymbol, selectedConnection]);
   const venueOrderTypes = useMemo(() => availableDomOrderTypes(venueSchema), [venueSchema]);
+  const selectedOrderMode = useMemo(() => venueSchema?.supportedOrderModes.find((mode) => mode.orderTypes.includes(orderType)) ?? null, [orderType, venueSchema]);
+  const supportsPostOnly = venueSchema?.featureFlags.showPostOnly !== false && selectedOrderMode?.fields.includes("postOnly") === true;
+  const supportsReduceOnly = executionMarketKind !== "spot" && venueSchema?.featureFlags.showReduceOnly !== false && selectedOrderMode?.fields.includes("reduceOnly") === true;
+  const supportsTpSl = venueSchema?.featureFlags.showTpSl !== false && selectedOrderMode?.fields.includes("tpSl") === true;
   const venueTimeInForce = useMemo(() => availableDomTimeInForce(venueSchema, orderType, postOnly), [orderType, postOnly, venueSchema]);
   const leverageOptions = useMemo(() => nearestLeverageOptions(
     venueSchema?.instrumentRules.minLeverage ?? 1,
@@ -384,6 +405,24 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   ), [leverage, venueSchema]);
   const executionPrice = Number(price || snapshot.lastPrice || lastPrice || 0);
   const executionQuantity = Number(quantity || 0);
+  const strategyOrder = ["chase-limit", "twap", "iceberg", "pov"].includes(orderType);
+  const strategyParameters: VenueStrategyParameters | undefined = strategyOrder ? {
+    durationSeconds: ["twap", "pov"].includes(orderType) ? strategyDurationSeconds : undefined,
+    intervalSeconds: ["twap", "pov"].includes(orderType) ? strategyIntervalSeconds : undefined,
+    randomize: orderType === "twap" ? strategyRandomize : undefined,
+    triggerPrice: Number(strategyTriggerPrice || 0) || undefined,
+    maxChasePrice: Number(strategyMaxChasePrice || 0) || undefined,
+    chaseDistance: (orderType === "chase-limit" || orderType === "iceberg" && icebergPreference === "offset") && strategyChaseUnit === "distance" ? Number(strategyChaseValue || 0) : undefined,
+    chasePercent: (orderType === "chase-limit" || orderType === "iceberg" && icebergPreference === "offset") && strategyChaseUnit === "percent" ? Number(strategyChaseValue || 0) : undefined,
+    subSize: orderType === "iceberg" ? Number(strategySubSize || 0) || undefined : undefined,
+    orderCount: orderType === "iceberg" && !Number(strategySubSize || 0) ? strategyOrderCount : undefined,
+    icebergPreference: orderType === "iceberg" ? icebergPreference : undefined,
+    povMode: orderType === "pov" ? povMode : undefined,
+    participationRate: orderType === "pov" ? povParticipationRate : undefined,
+    referenceWindowSeconds: orderType === "pov" && povMode === "TradedVolume" ? povReferenceWindow : undefined,
+    depthReference: orderType === "pov" && povMode !== "TradedVolume" ? povDepthReference : undefined
+  } : undefined;
+  const requiresLimitPrice = ["limit", "stop-limit"].includes(orderType) || orderType === "iceberg" && icebergPreference === "fixed";
   const executionPreview = venueSchema ? calculateVenueOrderPreview({
     schema: venueSchema,
     sizingMethod: "quantity",
@@ -400,11 +439,13 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     sizingMethod: "quantity",
     size: executionQuantity,
     referencePrice: executionPrice,
-    limitPrice: orderType === "limit" ? executionPrice : undefined,
+    limitPrice: requiresLimitPrice ? executionPrice : undefined,
+    triggerPrice: ["stop-market", "stop-limit"].includes(orderType) ? Number(stopPrice || 0) || undefined : undefined,
     leverage,
     side,
     reduceOnly,
-    tpSlEnabled
+    tpSlEnabled,
+    strategyParameters
   }) : { valid: false, reasons: ["Connect a supported execution account."] };
   const upperTracks = useMemo(() => domWorkspaceTracks(layout.upperSplit, layout.panelStates), [layout.panelStates, layout.upperSplit]);
   const bottomTracks = useMemo(() => domWorkspaceTracks(layout.bottomSplit, layout.panelStates), [layout.bottomSplit, layout.panelStates]);
@@ -486,7 +527,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     let active = true;
     const load = async () => {
       try {
-        const next = await syncExchangeAccountViaApi(selectedConnection.accountId!, marketSymbol.rawSymbol, marketSymbol.marketKind);
+        const next = await syncExchangeAccountViaApi(selectedConnection.accountId!, marketSymbol.rawSymbol, executionMarketKind);
         if (active) { setAccountSync(next); setAccountSyncError(""); }
       } catch (error) {
         if (active) setAccountSyncError(error instanceof Error ? error.message : String(error));
@@ -495,17 +536,28 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     void load();
     const timer = window.setInterval(load, 10000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [marketSymbol.marketKind, marketSymbol.rawSymbol, selectedConnection?.accountId, selectedConnection?.provider]);
+  }, [executionMarketKind, marketSymbol.rawSymbol, selectedConnection?.accountId, selectedConnection?.provider]);
 
   useEffect(() => {
     if (!venueSchema) return;
-    setLeverage((current) => current === 1 ? venueSchema.currentLeverage || venueSchema.instrumentRules.minLeverage || 1 : current);
+    setLeverage((current) => {
+      if (venueSchema.product === "spot") return 1;
+      const preferred = current === 1 ? venueSchema.currentLeverage || venueSchema.instrumentRules.minLeverage || 1 : current;
+      return Math.min(venueSchema.instrumentRules.maxLeverage, Math.max(venueSchema.instrumentRules.minLeverage, preferred));
+    });
     setMarginMode(venueSchema.currentMarginMode);
+    if (venueSchema.product === "spot") setReduceOnly(false);
   }, [selectedConnection?.accountId, venueSchema]);
 
   useEffect(() => {
     if (!venueOrderTypes.includes(orderType)) setOrderType(venueOrderTypes[0] ?? "market");
   }, [orderType, venueOrderTypes]);
+
+  useEffect(() => {
+    if (!supportsPostOnly) setPostOnly(false);
+    if (!supportsReduceOnly) setReduceOnly(false);
+    if (!supportsTpSl) setTpSlEnabled(false);
+  }, [supportsPostOnly, supportsReduceOnly, supportsTpSl]);
 
   useEffect(() => {
     if (venueTimeInForce.length > 0 && !venueTimeInForce.includes(timeInForce)) setTimeInForce(venueTimeInForce[0]);
@@ -857,20 +909,23 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             accountId: selectedConnection.accountId,
             exchange: selectedConnection.provider as MarketSymbol["exchange"],
             symbol: marketSymbol.rawSymbol.toUpperCase(),
-            marketKind: marketSymbol.marketKind,
+            marketKind: executionMarketKind,
             side: targetSide,
             type: nextOrderType,
             quantity: parsedQuantity,
             sizingMethod: "quantity",
-            limitPrice: nextOrderType === "limit" || nextOrderType === "iceberg" || nextOrderType === "twap" ? parsedPrice : undefined,
+            limitPrice: ["limit", "stop-limit"].includes(nextOrderType) || nextOrderType === "iceberg" && icebergPreference === "fixed" ? parsedPrice : undefined,
+            stopPrice: ["stop-market", "stop-limit"].includes(nextOrderType) ? Number(stopPrice || 0) || undefined : undefined,
             referencePrice: parsedPrice,
             reduceOnly: nextReduceOnly,
             postOnly: nextPostOnly,
             marginMode,
             timeInForce: venueTimeInForce.length > 0 ? timeInForce : undefined,
+            triggerBy,
             leverage,
             takeProfit: tpSlEnabled ? Number(takeProfit || 0) || undefined : undefined,
             stopLoss: tpSlEnabled ? Number(stopLoss || 0) || undefined : undefined,
+            strategyParameters,
             source: "order-ticket",
             destinations: ["personal-portfolio"]
           }, buildExecutionAccount(selectedConnection, accountSync), parsedPrice || 1);
@@ -878,7 +933,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     } catch (error) {
       setExecutionStatus(error instanceof Error ? error.message.toUpperCase() : String(error));
     }
-  }, [accountSync, lastPrice, leverage, marginMode, marketSymbol.marketKind, marketSymbol.rawSymbol, orderType, postOnly, price, quantity, reduceOnly, selectedConnection, snapshot.lastPrice, stopLoss, takeProfit, timeInForce, tpSlEnabled, venueTimeInForce.length]);
+  }, [accountSync, executionMarketKind, icebergPreference, lastPrice, leverage, marginMode, marketSymbol.rawSymbol, orderType, postOnly, price, quantity, reduceOnly, selectedConnection, snapshot.lastPrice, stopLoss, stopPrice, strategyParameters, takeProfit, timeInForce, tpSlEnabled, triggerBy, venueTimeInForce.length]);
 
   useEffect(() => {
     submitQuickOrderRef.current = submitQuickOrder;
@@ -1864,25 +1919,60 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
           {settings.showExecutionPanel && (
             <section className={panelLayoutClass("execution", "dom-pro-execution")}>
               <PanelTitle title="Execution" status={selectedConnection ? selectedConnection.label.toUpperCase() : "NO ACCOUNT"} {...panelHeaderProps("execution")} />
+              <div className="dom-pro-product-switch" role="tablist" aria-label="Trading product">
+                <button type="button" role="tab" aria-selected={executionMarketKind === "spot"} className={executionMarketKind === "spot" ? "active" : ""} onClick={() => setExecutionMarketKind("spot")}>Spot</button>
+                <button type="button" role="tab" aria-selected={executionMarketKind !== "spot"} className={executionMarketKind !== "spot" ? "active" : ""} onClick={() => setExecutionMarketKind("perpetual")}>Futures</button>
+              </div>
               <div className="dom-pro-execution-form">
                 <label><span>Order Type</span><select value={orderType} onChange={(event) => setOrderType(event.target.value as OrderType)}>{venueOrderTypes.map((type) => <option key={type} value={type}>{formatOrderTypeLabel(type)}</option>)}</select></label>
                 {venueTimeInForce.length > 0 ? (
                   <label><span>TIF</span><select value={timeInForce} onChange={(event) => setTimeInForce(event.target.value as TimeInForce)}>{venueTimeInForce.map((tif) => <option key={tif} value={tif}>{tif.toUpperCase()}</option>)}</select></label>
                 ) : <label className="read-only"><span>TIF</span><b>Venue Default</b></label>}
-                <label><span>Margin</span><select value={marginMode} onChange={(event) => setMarginMode(event.target.value as MarginMode)}>{(venueSchema?.supportedMarginModes.length ? venueSchema.supportedMarginModes : ["cross", "isolated"]).map((mode) => <option key={mode} value={mode}>{titleCase(String(mode))}</option>)}</select></label>
-                <label><span>Leverage</span><select value={leverage} onChange={(event) => setLeverage(Number(event.target.value))}>{leverageOptions.map((value) => <option key={value} value={value}>{value}x</option>)}</select></label>
+                {executionMarketKind !== "spot" && <label><span>Margin</span><select value={marginMode} onChange={(event) => setMarginMode(event.target.value as MarginMode)}>{(venueSchema?.supportedMarginModes.length ? venueSchema.supportedMarginModes : ["cross", "isolated"]).map((mode) => <option key={mode} value={mode}>{titleCase(String(mode))}</option>)}</select></label>}
+                {executionMarketKind !== "spot" && <label><span>Leverage</span><select value={leverage} onChange={(event) => setLeverage(Number(event.target.value))}>{leverageOptions.map((value) => <option key={value} value={value}>{value}x</option>)}</select></label>}
                 <label><span>Qty ({marketSymbol.baseAsset})</span><input value={quantity} onChange={(event) => { setQuantity(event.target.value); setEquityAllocation(0); }} inputMode="decimal" /></label>
-                {orderType !== "market" && <label><span>Price ({marketSymbol.quoteAsset})</span><input value={price} placeholder={formatPrice(executionPrice)} onChange={(event) => setPrice(event.target.value)} inputMode="decimal" /></label>}
+                {requiresLimitPrice && <label><span>Price ({marketSymbol.quoteAsset})</span><input value={price} placeholder={formatPrice(executionPrice)} onChange={(event) => setPrice(event.target.value)} inputMode="decimal" /></label>}
               </div>
+              {["stop-market", "stop-limit"].includes(orderType) && <div className="dom-pro-strategy-grid">
+                <label><span>Trigger Price</span><input value={stopPrice} onChange={(event) => setStopPrice(event.target.value)} inputMode="decimal" /></label>
+                <label><span>Trigger By</span><select value={triggerBy} onChange={(event) => setTriggerBy(event.target.value as TriggerSource)}><option value="last">Last Price</option><option value="mark">Mark Price</option><option value="index">Index Price</option></select></label>
+              </div>}
+              {orderType === "chase-limit" && <div className="dom-pro-strategy-grid">
+                <label><span>Chase Unit</span><select value={strategyChaseUnit} onChange={(event) => setStrategyChaseUnit(event.target.value as "distance" | "percent")}><option value="distance">Price Distance</option><option value="percent">Percentage</option></select></label>
+                <label><span>Chase {strategyChaseUnit === "distance" ? "Distance" : "%"}</span><input value={strategyChaseValue} onChange={(event) => setStrategyChaseValue(event.target.value)} inputMode="decimal" /></label>
+                <label><span>Trigger Price</span><input value={strategyTriggerPrice} onChange={(event) => setStrategyTriggerPrice(event.target.value)} placeholder="Optional" inputMode="decimal" /></label>
+                <label><span>Maximum Chase</span><input value={strategyMaxChasePrice} onChange={(event) => setStrategyMaxChasePrice(event.target.value)} placeholder="Optional" inputMode="decimal" /></label>
+              </div>}
+              {orderType === "twap" && <div className="dom-pro-strategy-grid">
+                <label><span>Running Time</span><select value={strategyDurationSeconds} onChange={(event) => setStrategyDurationSeconds(Number(event.target.value))}><option value={600}>10 minutes</option><option value={1800}>30 minutes</option><option value={3600}>1 hour</option><option value={14400}>4 hours</option><option value={28800}>8 hours</option></select></label>
+                <label><span>Child Interval</span><select value={strategyIntervalSeconds} onChange={(event) => setStrategyIntervalSeconds(Number(event.target.value))}><option value={5}>5 seconds</option><option value={10}>10 seconds</option><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={60}>60 seconds</option><option value={120}>120 seconds</option></select></label>
+                <label><span>Trigger Price</span><input value={strategyTriggerPrice} onChange={(event) => setStrategyTriggerPrice(event.target.value)} placeholder="Optional" inputMode="decimal" /></label>
+                <label><span>Price Protection</span><input value={strategyMaxChasePrice} onChange={(event) => setStrategyMaxChasePrice(event.target.value)} placeholder="Optional" inputMode="decimal" /></label>
+                <label className="dom-pro-strategy-check"><input type="checkbox" checked={strategyRandomize} onChange={(event) => setStrategyRandomize(event.target.checked)} /> Randomize child size</label>
+              </div>}
+              {orderType === "iceberg" && <div className="dom-pro-strategy-grid">
+                <label><span>Order Preference</span><select value={icebergPreference} onChange={(event) => setIcebergPreference(event.target.value as typeof icebergPreference)}><option value="maker">Chase Limit / Maker</option><option value="taker">Chase Limit / Taker</option><option value="offset">Chase Limit / Offset</option><option value="fixed">Fixed Price</option></select></label>
+                <label><span>Visible Child Size</span><input value={strategySubSize} onChange={(event) => setStrategySubSize(event.target.value)} placeholder="Uses count when empty" inputMode="decimal" /></label>
+                <label><span>Order Count</span><input value={strategyOrderCount} min="2" step="1" onChange={(event) => setStrategyOrderCount(Math.max(2, Number(event.target.value || 2)))} inputMode="numeric" /></label>
+                {icebergPreference === "offset" && <label><span>Chase Offset</span><input value={strategyChaseValue} onChange={(event) => setStrategyChaseValue(event.target.value)} inputMode="decimal" /></label>}
+                <label><span>Price Protection</span><input value={strategyMaxChasePrice} onChange={(event) => setStrategyMaxChasePrice(event.target.value)} placeholder="Optional" inputMode="decimal" /></label>
+              </div>}
+              {orderType === "pov" && <div className="dom-pro-strategy-grid">
+                <label><span>Volume Reference</span><select value={povMode} onChange={(event) => setPovMode(event.target.value as typeof povMode)}><option value="TradedVolume">Traded Volume</option><option value="OppositeSideLiquidity">Opposite Liquidity</option><option value="SameSideLiquidity">Same-side Liquidity</option></select></label>
+                <label><span>Participation %</span><input value={povParticipationRate} min="1" max="100" step="0.1" onChange={(event) => setPovParticipationRate(Math.min(100, Math.max(1, Number(event.target.value || 1))))} inputMode="decimal" /></label>
+                <label><span>Sampling Interval</span><input value={strategyIntervalSeconds} min="0" max="3600" step="1" onChange={(event) => setStrategyIntervalSeconds(Number(event.target.value || 0))} inputMode="numeric" /></label>
+                <label><span>Maximum Duration</span><input value={strategyDurationSeconds} min="900" max="86400" step="60" onChange={(event) => setStrategyDurationSeconds(Number(event.target.value || 900))} inputMode="numeric" /></label>
+                {povMode === "TradedVolume" ? <label><span>Reference Window</span><input value={povReferenceWindow} min="60" max="14400" step="60" onChange={(event) => setPovReferenceWindow(Number(event.target.value || 60))} inputMode="numeric" /></label> : <label><span>Book Depth</span><input value={povDepthReference} min="1" max="10" step="1" onChange={(event) => setPovDepthReference(Math.min(10, Math.max(1, Number(event.target.value || 1))))} inputMode="numeric" /></label>}
+              </div>}
               <div className="dom-pro-equity-allocation">
                 <div><span>Equity Allocation</span><b>{equityAllocation}%</b></div>
                 <input aria-label="Equity allocation percentage" type="range" min="0" max="100" step="1" value={equityAllocation} onChange={(event) => applyEquityAllocation(Number(event.target.value))} />
                 <div className="dom-pro-allocation-markers">{DOM_EQUITY_ALLOCATION_MARKERS.map((marker) => <button key={marker} type="button" style={{ left: `${marker}%` }} onClick={() => applyEquityAllocation(marker)}><i />{marker}%</button>)}</div>
               </div>
               <div className="dom-pro-checks">
-                <label><input type="checkbox" checked={postOnly} onChange={(event) => setPostOnly(event.target.checked)} /> Post Only</label>
-                <label><input type="checkbox" checked={reduceOnly} onChange={(event) => setReduceOnly(event.target.checked)} /> Reduce Only</label>
-                <label><input type="checkbox" checked={tpSlEnabled} disabled={reduceOnly} onChange={(event) => setTpSlEnabled(event.target.checked)} /> TP/SL</label>
+                {supportsPostOnly && <label><input type="checkbox" checked={postOnly} onChange={(event) => setPostOnly(event.target.checked)} /> Post Only</label>}
+                {supportsReduceOnly && <label><input type="checkbox" checked={reduceOnly} onChange={(event) => setReduceOnly(event.target.checked)} /> Reduce Only</label>}
+                {supportsTpSl && <label><input type="checkbox" checked={tpSlEnabled} disabled={reduceOnly} onChange={(event) => setTpSlEnabled(event.target.checked)} /> TP/SL</label>}
               </div>
               {tpSlEnabled && <div className="dom-pro-protection-fields"><label><span>TP</span><input value={takeProfit} onChange={(event) => setTakeProfit(event.target.value)} inputMode="decimal" /></label><label><span>SL</span><input value={stopLoss} onChange={(event) => setStopLoss(event.target.value)} inputMode="decimal" /></label></div>}
               <div className="dom-pro-execution-preview">
@@ -1893,8 +1983,8 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                 <span>Balance After <b>{formatUsd(executionPreview?.availableAfter)}</b></span>
               </div>
               <div className="dom-pro-submit-row">
-                <button type="button" disabled={!executionValidation.valid} onClick={() => { setSide("buy"); void submitQuickOrder("buy"); }}>Buy</button>
-                <button type="button" className="sell" disabled={!executionValidation.valid} onClick={() => { setSide("sell"); void submitQuickOrder("sell"); }}>Sell</button>
+                <button type="button" disabled={!executionValidation.valid} onClick={() => { setSide("buy"); void submitQuickOrder("buy"); }}>{executionMarketKind === "spot" ? "Buy" : "Long"}</button>
+                <button type="button" className="sell" disabled={!executionValidation.valid} onClick={() => { setSide("sell"); void submitQuickOrder("sell"); }}>{executionMarketKind === "spot" ? "Sell" : "Short"}</button>
               </div>
               <p>{executionStatus || accountSyncError || executionValidation.reasons[0] || "Orders route through OMS / EMS / Risk."}</p>
             </section>

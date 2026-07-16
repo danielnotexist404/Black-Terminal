@@ -4,7 +4,7 @@ import { domPerformanceTrace } from "../domPerformanceTrace";
 import type { DomVisualQuality } from "../domAdaptiveQuality";
 import { domVisualScheduler } from "../domVisualScheduler";
 import { computeDomWallLabelLayout } from "../domWallLabelLayout";
-import { domPriceBucketAt, domPriceToTopPct, type DomProPriceCamera } from "../domPriceCamera";
+import { domPriceToTopPct, type DomProPriceCamera } from "../domPriceCamera";
 import type { DomHeatmapFrame, MacroLiquidityBand, VolumeProfileNode } from "../types";
 
 type Ribbon = { id: string; price: number; intensity: number; side: "supply" | "demand" | "poc"; kind: VolumeProfileNode["kind"] };
@@ -20,7 +20,7 @@ type Props = {
   currentPrice: number;
   quality: DomVisualQuality;
   interactionActive: boolean;
-  hoveredBucketKey?: string;
+  hoveredPrice?: number;
 };
 
 export function DomHeatmapCanvas(props: Props) {
@@ -38,7 +38,7 @@ export function DomHeatmapCanvas(props: Props) {
 
   useEffect(() => {
     domVisualScheduler.markDirty(idRef.current);
-  }, [props.frames, props.camera, props.macroBands, props.depthPoints, props.ribbons, props.gaps, props.currentPrice, props.quality, props.interactionActive, props.hoveredBucketKey]);
+  }, [props.frames, props.camera, props.macroBands, props.depthPoints, props.ribbons, props.gaps, props.currentPrice, props.quality, props.interactionActive, props.hoveredPrice]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -50,7 +50,7 @@ export function DomHeatmapCanvas(props: Props) {
     return () => { observer.disconnect(); visibility.disconnect(); };
   }, []);
 
-  return <canvas ref={canvasRef} className="dom-pro-heatmap-layer" data-heatmap-frames={props.frames.length} data-camera-version={props.camera.version} data-camera-min={props.camera.visiblePriceMin} data-camera-max={props.camera.visiblePriceMax} data-bucket-size={props.camera.bucketSize} data-current-price-top={domPriceToTopPct(props.camera, props.currentPrice)} aria-label="Incremental liquidity heatmap" />;
+  return <canvas ref={canvasRef} className="dom-pro-heatmap-layer" data-heatmap-frames={props.frames.length} data-camera-version={props.camera.version} data-camera-min={props.camera.visiblePriceMin} data-camera-max={props.camera.visiblePriceMax} data-current-price-top={domPriceToTopPct(props.camera, props.currentPrice)} aria-label="Incremental liquidity heatmap" />;
 }
 
 function drawHeatmap(
@@ -83,7 +83,9 @@ function drawHeatmap(
   const maxColumns = props.interactionActive ? 48 : props.quality === "full" ? 140 : props.quality === "balanced" ? 96 : 60;
   const frameStride = Math.max(1, Math.ceil(props.frames.length / maxColumns));
   const columns = Math.max(1, Math.ceil(props.frames.length / frameStride));
-  const rowCount = props.camera.rowCount;
+  // Camera geometry is shared; IMM keeps its own pixel-resolution data grid.
+  const rowCount = Math.max(64, Math.min(512, Math.floor(plotHeight)));
+  canvas.dataset.resolutionRows = String(rowCount);
   if (bidRef.current.length !== rowCount) bidRef.current = new Float32Array(rowCount);
   if (askRef.current.length !== rowCount) askRef.current = new Float32Array(rowCount);
   const bid = bidRef.current;
@@ -98,22 +100,21 @@ function drawHeatmap(
       const cells = props.frames[frameIndex]?.cells ?? [];
       for (let cellIndex = 0; cellIndex < cells.length; cellIndex += 1) {
         const cell = cells[cellIndex];
-        const bucket = domPriceBucketAt(props.camera, cell.price);
-        if (!bucket) continue;
+        if (cell.price < props.camera.visiblePriceMin || cell.price > props.camera.visiblePriceMax) continue;
+        const row = Math.max(0, Math.min(rowCount - 1, Math.floor(yFor(cell.price) / plotHeight * rowCount)));
         const target = cell.side === "bid" ? bid : ask;
-        if (cell.intensity > target[bucket.index]) target[bucket.index] = cell.intensity;
+        if (cell.intensity > target[row]) target[row] = cell.intensity;
         visibleCells += 1;
       }
     }
     const x = column / columns * plotWidth;
     const columnWidth = Math.max(1, plotWidth / columns + 0.5);
     for (let row = 0; row < rowCount; row += 1) {
-      const bucket = props.camera.buckets[row];
       const intensity = Math.max(bid[row], ask[row]);
       if (intensity < 0.035) continue;
       const isAsk = ask[row] >= bid[row];
       context.fillStyle = isAsk ? `rgba(255,18,24,${Math.min(.92, .08 + intensity * .84)})` : `rgba(238,242,250,${Math.min(.78, .05 + intensity * .7)})`;
-      context.fillRect(x, bucket.topPct / 100 * plotHeight, columnWidth, Math.max(1, bucket.heightPct / 100 * plotHeight + 0.4));
+      context.fillRect(x, row / rowCount * plotHeight, columnWidth, Math.max(1, plotHeight / rowCount + 0.4));
       drawCalls += 1;
     }
   }
@@ -123,10 +124,10 @@ function drawHeatmap(
     context.lineWidth = 1;
     context.beginPath(); context.moveTo(0, currentY); context.lineTo(plotWidth, currentY); context.stroke();
   }
-  const hoveredBucket = props.hoveredBucketKey ? props.camera.buckets.find((bucket) => bucket.key === props.hoveredBucketKey) : null;
-  if (hoveredBucket) {
-    const top = hoveredBucket.topPct / 100 * plotHeight;
-    const rowHeight = Math.max(1, hoveredBucket.heightPct / 100 * plotHeight);
+  if (Number.isFinite(props.hoveredPrice)) {
+    const hoveredRow = Math.max(0, Math.min(rowCount - 1, Math.floor(yFor(Number(props.hoveredPrice)) / plotHeight * rowCount)));
+    const top = hoveredRow / rowCount * plotHeight;
+    const rowHeight = Math.max(1, plotHeight / rowCount);
     context.fillStyle = "rgba(255,255,255,.055)";
     context.fillRect(0, top, plotWidth, rowHeight);
     context.strokeStyle = "rgba(255,255,255,.34)";

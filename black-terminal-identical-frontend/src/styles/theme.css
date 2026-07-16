@@ -8852,7 +8852,7 @@ body.dom-pro-resize-active {
 }
 
 .dom-pro-ladder-row.shared-row.hovered,
-.dom-pro-profile-node.shared-row.hovered {
+.dom-pro-profile-node.native-row.hovered {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.42);
   background-color: rgba(255, 255, 255, 0.045);
   z-index: 5;
@@ -9056,14 +9056,14 @@ body.dom-pro-resize-active {
   font: 800 9px "IBM Plex Mono", monospace;
 }
 
-.dom-pro-profile-node.shared-row {
+.dom-pro-profile-node.native-row {
   transform: none;
   min-height: 1px;
   overflow: hidden;
   border-top: 1px solid rgba(255, 255, 255, 0.018);
 }
 
-.dom-pro-profile-node.shared-row i {
+.dom-pro-profile-node.native-row i {
   height: min(7px, 72%);
 }
 

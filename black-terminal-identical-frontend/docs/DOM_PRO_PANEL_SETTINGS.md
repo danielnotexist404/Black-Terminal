@@ -4,6 +4,8 @@
 
 The top-right DOM Pro settings panel owns global cockpit behavior: visibility, total FPS, macro history, shared camera, diagnostics, and global reset/reload actions.
 
+The shared camera setting synchronizes price geometry only. Ladder, Volume Profile and Liquidity Heatmap retain independent data grids; profile row count never changes IMM or ladder aggregation.
+
 Each panel cog owns only that panel's analytical controls. The registry key is scoped to workspace and symbol:
 
 ```text

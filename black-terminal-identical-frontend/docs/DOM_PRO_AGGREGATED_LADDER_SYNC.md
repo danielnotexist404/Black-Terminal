@@ -10,13 +10,12 @@ The first ladder repair derived a separate near-market range from the current ve
 MarketDataEngine (one order-book owner)
   -> DomFeedStore (one normalized market snapshot)
   -> DomProPriceCamera (one visible price domain)
-  -> exact shared buckets
-       -> Aggregated DOM Ladder: current live bid/ask sums
-       -> Volume Profile: visible historical/profile sums
-       -> Liquidity Heatmap: historical depth intensity
+       -> Aggregated DOM Ladder: own wide live bid/ask buckets
+       -> Volume Profile: own dense traded-volume rows
+       -> Liquidity Heatmap: own native IMM/pixel grid
 ```
 
-The ladder aggregates raw venue levels directly into shared buckets. Bid and ask bars use separate robust 90th-percentile references, preserving relative queue-size structure without letting one outlier flatten the panel. Best bid, best ask, current price and IMM wall confluence remain separate markers.
+The ladder aggregates raw venue levels directly into its own bounded display buckets. Bid and ask bars use separate robust 90th-percentile references, preserving relative queue-size structure without letting one outlier flatten the panel. Best bid, best ask, current price and IMM wall confluence remain separate markers. Only price geometry is shared; ladder buckets are never reused by the profile or heatmap.
 
 ## Subscription Ownership
 
@@ -28,4 +27,3 @@ The ladder model is a pure function. It cannot open a socket or fetch a venue. `
 - Browser camera and rendering contract: `npm run test:dom-pro-visual`
 - Public Bybit raw-book comparison: `npm run certify:dom-pro-camera`
 - Evidence file: `docs/validation/dom-pro-shared-camera-live-certification.json`
-

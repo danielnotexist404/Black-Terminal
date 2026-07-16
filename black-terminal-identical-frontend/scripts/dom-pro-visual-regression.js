@@ -63,9 +63,10 @@ try {
     const ladder=document.querySelector('.dom-pro-ladder-book.shared-camera');
     const profile=document.querySelector('.dom-pro-profile-scale.shared-camera');
     const heatmap=document.querySelector('.dom-pro-heatmap-layer');
-    const pick=(node)=>node ? {version:node.dataset.cameraVersion,min:Number(node.dataset.cameraMin),max:Number(node.dataset.cameraMax),bucket:Number(node.dataset.bucketSize),currentTop:Number(node.dataset.currentPriceTop)} : null;
+    const pick=(node)=>node ? {version:node.dataset.cameraVersion,min:Number(node.dataset.cameraMin),max:Number(node.dataset.cameraMax),bucket:node.dataset.bucketSize ? Number(node.dataset.bucketSize) : null,resolution:Number(node.dataset.resolutionRows||0),currentTop:Number(node.dataset.currentPriceTop)} : null;
     const rows=[...document.querySelectorAll('.dom-pro-ladder-row.shared-row')];
-    return {ladder:pick(ladder),profile:pick(profile),heatmap:pick(heatmap),rows:rows.length,live:rows.filter((row)=>row.dataset.coverage==='live').length,unavailable:rows.filter((row)=>row.dataset.coverage==='unavailable').length,bid:rows.reduce((sum,row)=>sum+Number(row.dataset.bidSize||0),0),ask:rows.reduce((sum,row)=>sum+Number(row.dataset.askSize||0),0)};
+    const profileRows=document.querySelectorAll('.dom-pro-profile-node.native-row').length;
+    return {ladder:pick(ladder),profile:pick(profile),heatmap:pick(heatmap),rows:rows.length,profileRows,live:rows.filter((row)=>row.dataset.coverage==='live').length,unavailable:rows.filter((row)=>row.dataset.coverage==='unavailable').length,bid:rows.reduce((sum,row)=>sum+Number(row.dataset.bidSize||0),0),ask:rows.reduce((sum,row)=>sum+Number(row.dataset.askSize||0),0)};
   })()`;
   const initialSharedCamera = await cdp.evaluate(readSharedCamera);
   assertSharedCamera(initialSharedCamera, "initial");
@@ -198,8 +199,10 @@ function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function assertSharedCamera(contract, label) {
   if (!contract?.ladder || !contract.profile || !contract.heatmap) throw new Error(`${label} camera consumer missing: ${JSON.stringify(contract)}`);
   const values = [contract.ladder, contract.profile, contract.heatmap];
-  if (!values.every((value) => value.version === values[0].version && value.min === values[0].min && value.max === values[0].max && value.bucket === values[0].bucket && Math.abs(value.currentTop - values[0].currentTop) < 0.000001)) {
+  if (!values.every((value) => value.version === values[0].version && value.min === values[0].min && value.max === values[0].max && Math.abs(value.currentTop - values[0].currentTop) < 0.000001)) {
     throw new Error(`${label} camera parity failed: ${JSON.stringify(contract)}`);
   }
   if (contract.rows < 12 || contract.rows > 120) throw new Error(`${label} row virtualization failed: ${JSON.stringify(contract)}`);
+  if (contract.profileRows < 128 || contract.profile.resolution !== contract.profileRows) throw new Error(`${label} profile resolution regressed: ${JSON.stringify(contract)}`);
+  if (contract.heatmap.resolution < 64 || contract.heatmap.resolution <= contract.rows) throw new Error(`${label} heatmap resolution regressed: ${JSON.stringify(contract)}`);
 }

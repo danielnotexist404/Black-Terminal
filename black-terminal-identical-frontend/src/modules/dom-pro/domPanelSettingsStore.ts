@@ -44,7 +44,7 @@ export type DomPanelField = {
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-export const DOM_PANEL_SETTINGS_VERSION = 3;
+export const DOM_PANEL_SETTINGS_VERSION = 4;
 const storagePrefix = "bt_dom_pro_panel_settings";
 
 const qualityFields = {
@@ -56,7 +56,7 @@ const qualityFields = {
 
 const panelDefaults: Record<DomPanelId, { preset: string; settings: DomPanelValues }> = {
   ladder: { preset: "Smoothed", settings: { ...qualityFields, updateIntervalMs: 500, renderFps: 8, levels: 42, minimumSize: 0, smoothing: 4, cameraMode: "shared", coverageMode: "dim", displayUnits: "base", showCumulativeDepth: false, showNetDepth: false, showLiveCoverage: true, showWallConfluence: true, autoCenter: false } },
-  "volume-profile": { preset: "Structural", settings: { ...qualityFields, updateIntervalMs: 2000, renderFps: 4, rowCount: 72, smoothing: 8, valueAreaPct: 70, showPoc: true, showHvnLvn: true, showLabels: true, sharedCameraLock: true } },
+  "volume-profile": { preset: "Structural", settings: { ...qualityFields, updateIntervalMs: 2000, renderFps: 4, rowCount: 128, smoothing: 8, valueAreaPct: 70, showPoc: true, showHvnLvn: true, showLabels: true, sharedCameraLock: true } },
   "liquidity-heatmap": { preset: "Institutional", settings: { ...qualityFields, updateIntervalMs: 1000, renderFps: 8, minimumSize: 0, smoothing: 88, persistenceThreshold: 55, decayPct: 92, majorWallsOnly: false, showBuyWalls: true, showSellWalls: true, showLabels: true } },
   "wall-detection": { preset: "Institutional", settings: { ...qualityFields, freezeOnHover: true, updateIntervalMs: 3000, renderFps: 2, minimumWallSize: 0, relativeThreshold: 2.2, activationScore: 62, deactivationScore: 44, minimumPersistenceMs: 8000, minimumAgeMs: 5000, minimumObservations: 3, maximumCancellationRatio: 0.7, maximumRows: 8, sortMode: "reliability", majorOnly: false, showPulled: true, showAbsorbed: true, showMigrated: true } },
   "trade-tape": { preset: "Aggregated", settings: { ...qualityFields, freezeOnHover: true, updateIntervalMs: 500, renderFps: 6, minimumTradeSize: 0, displayRows: 22, aggregateSamePrice: true, groupingIntervalMs: 1000, highlightLargeTrades: true, autoScroll: true, decimalPrecision: 3 } },
@@ -69,7 +69,7 @@ const panelDefaults: Record<DomPanelId, { preset: string; settings: DomPanelValu
 
 export const domPanelFields: Record<DomPanelId, DomPanelField[]> = {
   ladder: [selectField("cameraMode", "Camera", ["shared", "follow-current", "independent"]), selectField("coverageMode", "Uncovered Prices", ["show", "dim", "hide"]), selectField("displayUnits", "Formatting", ["base", "contracts", "notional"]), numberField("updateIntervalMs", "Update Interval", 100, 5000, 100), numberField("levels", "Shared Visible Rows", 12, 120, 1), numberField("minimumSize", "Minimum Size", 0, 10000, 0.01), numberField("smoothing", "Smoothing", 1, 30, 1), toggleField("showLiveCoverage", "Live Coverage"), toggleField("showNetDepth", "Net Depth"), toggleField("showWallConfluence", "Wall Confluence"), toggleField("showCumulativeDepth", "Cumulative Depth")],
-  "volume-profile": [numberField("updateIntervalMs", "Update Interval", 250, 15000, 250), numberField("rowCount", "Profile Rows", 20, 180, 1), numberField("smoothing", "Smoothing", 1, 30, 1), numberField("valueAreaPct", "Value Area %", 50, 95, 1), toggleField("showPoc", "Show POC"), toggleField("showHvnLvn", "Show HVN/LVN"), toggleField("showLabels", "Show Labels"), toggleField("sharedCameraLock", "Shared Camera Lock")],
+  "volume-profile": [numberField("updateIntervalMs", "Update Interval", 250, 15000, 250), numberField("rowCount", "Profile Rows", 64, 256, 1), numberField("smoothing", "Smoothing", 1, 30, 1), numberField("valueAreaPct", "Value Area %", 50, 95, 1), toggleField("showPoc", "Show POC"), toggleField("showHvnLvn", "Show HVN/LVN"), toggleField("showLabels", "Show Labels"), toggleField("sharedCameraLock", "Shared Camera Lock")],
   "liquidity-heatmap": [numberField("updateIntervalMs", "Refresh Cadence", 100, 10000, 100), numberField("minimumSize", "Minimum Size", 0, 10000, 0.01), numberField("smoothing", "Smoothing", 40, 98, 1), numberField("persistenceThreshold", "Persistence %", 0, 100, 1), numberField("decayPct", "Decay %", 50, 99, 1), toggleField("majorWallsOnly", "Major Walls Only"), toggleField("showBuyWalls", "Show Buy Walls"), toggleField("showSellWalls", "Show Sell Walls"), toggleField("showLabels", "Show Labels")],
   "wall-detection": [numberField("updateIntervalMs", "Refresh Cadence", 250, 15000, 250), numberField("minimumWallSize", "Minimum Wall Size", 0, 10000, 0.01), numberField("relativeThreshold", "Relative Threshold", 1, 8, 0.1), numberField("minimumPersistenceMs", "Minimum Persistence", 0, 120000, 1000), numberField("minimumObservations", "Minimum Observations", 1, 100, 1), numberField("maximumRows", "Maximum Rows", 1, 20, 1), selectField("sortMode", "Sort", ["reliability", "strength", "persistence", "age", "size", "distance"]), toggleField("majorOnly", "Major Only"), toggleField("showPulled", "Show Pulled Walls"), toggleField("freezeOnHover", "Freeze On Hover")],
   "trade-tape": [numberField("updateIntervalMs", "Update Cadence", 100, 5000, 100), numberField("minimumTradeSize", "Minimum Trade Size", 0, 10000, 0.001), numberField("displayRows", "Display Rows", 5, 60, 1), numberField("groupingIntervalMs", "Grouping Interval", 0, 10000, 100), toggleField("aggregateSamePrice", "Aggregate Same Price"), toggleField("highlightLargeTrades", "Highlight Large Trades"), toggleField("freezeOnHover", "Pause On Hover"), toggleField("autoScroll", "Auto Scroll")],
@@ -82,7 +82,7 @@ export const domPanelFields: Record<DomPanelId, DomPanelField[]> = {
 
 export const domPanelPresets: Record<DomPanelId, Record<string, Partial<DomPanelValues>>> = {
   ladder: { Raw: { updateIntervalMs: 100, smoothing: 1 }, Smoothed: { updateIntervalMs: 500, smoothing: 4 }, Structural: { updateIntervalMs: 2000, smoothing: 10 } },
-  "volume-profile": { Visible: { updateIntervalMs: 500, rowCount: 48 }, Structural: { updateIntervalMs: 2000, rowCount: 72, smoothing: 8 }, Macro: { updateIntervalMs: 10000, rowCount: 120, smoothing: 16 } },
+  "volume-profile": { Visible: { updateIntervalMs: 500, rowCount: 128 }, Structural: { updateIntervalMs: 2000, rowCount: 128, smoothing: 8 }, Macro: { updateIntervalMs: 10000, rowCount: 192, smoothing: 16 } },
   "liquidity-heatmap": { Fast: { updateIntervalMs: 250, smoothing: 68 }, Institutional: { updateIntervalMs: 1000, smoothing: 88 }, Macro: { updateIntervalMs: 5000, smoothing: 94, majorWallsOnly: true } },
   "wall-detection": { "All Walls": { updateIntervalMs: 500, minimumPersistenceMs: 0, minimumObservations: 1, majorOnly: false }, Persistent: { updateIntervalMs: 2000, minimumPersistenceMs: 5000, minimumObservations: 2 }, Institutional: { updateIntervalMs: 3000, minimumPersistenceMs: 8000, minimumObservations: 3 }, "Major Only": { updateIntervalMs: 5000, minimumPersistenceMs: 15000, minimumObservations: 5, majorOnly: true } },
   "trade-tape": { Raw: { updateIntervalMs: 100, aggregateSamePrice: false }, Aggregated: { updateIntervalMs: 500, aggregateSamePrice: true, groupingIntervalMs: 1000 }, Structural: { updateIntervalMs: 2000, aggregateSamePrice: true, groupingIntervalMs: 5000 } },
@@ -146,6 +146,7 @@ export function migrateDomPanelRegistry(input: unknown, workspaceId: string, sym
   const fallback = defaultDomPanelRegistry(workspaceId, symbolKey);
   if (!input || typeof input !== "object") return fallback;
   const source = input as Partial<DomPanelSettingsRegistry> & { panels?: Partial<Record<DomPanelId, Partial<DomPanelSettings>>> };
+  const sourceVersion = Number(source.schemaVersion ?? 0);
   for (const panelId of Object.keys(fallback.panels) as DomPanelId[]) {
     const panel = source.panels?.[panelId];
     if (!panel || typeof panel.settings !== "object") continue;
@@ -157,6 +158,11 @@ export function migrateDomPanelRegistry(input: unknown, workspaceId: string, sym
       settings: { ...fallback.panels[panelId].settings, ...panel.settings },
       defaultSettings: { ...fallback.panels[panelId].defaultSettings }
     };
+  }
+  if (sourceVersion < 4) {
+    const profile = fallback.panels["volume-profile"];
+    profile.settings.rowCount = Math.max(128, Number(profile.settings.rowCount) || 0);
+    profile.defaultSettings.rowCount = Math.max(128, Number(profile.defaultSettings.rowCount) || 0);
   }
   fallback.workspacePreset = source.workspacePreset && workspacePresetMap[source.workspacePreset] ? source.workspacePreset : "institutional";
   return fallback;

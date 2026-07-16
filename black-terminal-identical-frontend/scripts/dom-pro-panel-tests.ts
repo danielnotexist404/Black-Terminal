@@ -173,6 +173,11 @@ assert.equal(domWindowSource.match(/useDomFeed\(/g)?.length, 1, "DOM Pro owns ex
 assert.match(domWindowSource, /camera=\{sharedPriceCamera\}/, "heatmap consumes the shared camera object");
 assert.match(domWindowSource, /data-camera-version=\{sharedPriceCamera\.version\}/, "volume profile exposes the shared camera version");
 assert.match(domWindowSource, /ladderCameraMode === "shared"\) return sharedPriceCamera/, "ladder shares the exact camera object in synchronized mode");
+assert.doesNotMatch(domWindowSource, /const bins = camera\.buckets\.map/, "volume profile must not inherit the ladder bucket grid");
+assert.match(domWindowSource, /numberSetting\(profilePanelValues, "rowCount", 128\)/, "volume profile uses its own high-resolution row setting");
+const heatmapCanvasSource = readFileSync(new URL("../src/modules/dom-pro/components/DomHeatmapCanvas.tsx", import.meta.url), "utf8");
+assert.match(heatmapCanvasSource, /Math\.max\(64, Math\.min\(512, Math\.floor\(plotHeight\)\)\)/, "heatmap keeps its native pixel-resolution grid");
+assert.doesNotMatch(heatmapCanvasSource, /rowCount = props\.camera\.rowCount/, "heatmap camera cannot control IMM data resolution");
 const ladderSource = readFileSync(new URL("../src/modules/dom-pro/domLadderModel.ts", import.meta.url), "utf8");
 assert.ok(!/useDomFeed|subscribeOrderBook|MarketDataEngine/.test(ladderSource), "ladder aggregation cannot create a second orderbook subscription");
 
@@ -184,6 +189,7 @@ assert.equal(persisted.panels["depth-chart"].settings.updateIntervalMs, 7123, "p
 const migrated = importDomPanelSettings(JSON.stringify({ schemaVersion: 1, panels: { "trade-tape": { settings: { displayRows: 17 } } } }), "desk", "BTC");
 assert.equal(migrated.schemaVersion, DOM_PANEL_SETTINGS_VERSION);
 assert.equal(migrated.panels["trade-tape"].settings.displayRows, 17);
+assert.ok(Number(migrated.panels["volume-profile"].settings.rowCount) >= 128, "legacy settings migrate to high-resolution profile rows");
 assert.ok(migrated.panels["wall-detection"], "migration fills missing panels");
 
 const savedDefault = { ...custom, panels: { ...custom.panels, "depth-chart": { ...custom.panels["depth-chart"], defaultSettings: { ...custom.panels["depth-chart"].settings } } } };

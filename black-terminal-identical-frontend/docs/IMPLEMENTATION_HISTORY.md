@@ -1124,3 +1124,11 @@ Remaining:
 - Carried venue subscribed-depth, update and sequence metadata through the Bybit adapter without adding a subscription.
 - Added deterministic shared-camera tests, six browser camera regressions, a passing Chapter XIV smoke run and a public Bybit 200-level raw-book certification.
 - No Supabase migration is required.
+
+# 2026-07-16 - DOM Pro Native Resolution Restoration
+
+- Corrected the shared-camera hotfix, which had unintentionally reused the ladder's coarse bucket count for the Volume Profile and IMM Heatmap.
+- Kept synchronized price range, pan, zoom, hover and current-price projection while restoring independent data resolution for every panel.
+- Restored the Heatmap's native 64-512 row canvas grid and the Volume Profile's original dense 128-row traded-volume model, with profile rows independently configurable up to 256.
+- Added migration protection for previously persisted low-resolution profile settings and browser assertions that reject future cross-panel data downsampling.
+- No Supabase migration is required.

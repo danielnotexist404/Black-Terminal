@@ -2014,3 +2014,7 @@ No migration required. Existing duplicate account records are collapsed at read 
 # 2026-07-16 - DOM Pro Venue-Native Execution Parity
 
 No migration required. Spot/Futures selection, schema-derived order modes and strategy parameters are execution-ticket presentation and normalized request changes. They reuse the existing connection, OMS/EMS, risk, strategy and audit contracts.
+
+# 2026-07-16 - Runtime-Scoped Private Portfolio Data
+
+No migration required. The client and portfolio snapshot route now scope private synchronization to account IDs currently connected through Black Core Connection Manager. Existing account, order, position and credential tables are unchanged.

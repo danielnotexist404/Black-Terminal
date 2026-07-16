@@ -22,11 +22,14 @@ export default async function handler(req, res) {
 
     const { supabase, user } = await requireUser(req);
 
-    const { data: accountRows, error: accountsError } = await supabase
+    const requestedAccountIds = parseRequestedAccountIds(req.query?.accountIds);
+    let accountsQuery = supabase
       .from("exchange_accounts")
       .select("*")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
+    if (requestedAccountIds) accountsQuery = accountsQuery.in("id", requestedAccountIds);
+    const { data: accountRows, error: accountsError } = await accountsQuery;
 
     if (accountsError) throw accountsError;
     const accounts = await selectCanonicalAccounts(supabase, accountRows || []);
@@ -129,6 +132,12 @@ export default async function handler(req, res) {
   } catch (error) {
     return sendError(res, error);
   }
+}
+
+function parseRequestedAccountIds(value) {
+  const raw = Array.isArray(value) ? value.join(",") : String(value || "");
+  if (!raw) return null;
+  return [...new Set(raw.split(",").map((item) => item.trim()).filter((item) => /^[a-zA-Z0-9_-]{1,128}$/.test(item)))].slice(0, 20);
 }
 
 async function selectCanonicalAccounts(supabase, accounts) {

@@ -6,6 +6,7 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
+- Current - Enforce runtime-connection scoping for private orders, positions and portfolio API synchronization.
 - Current - Bring DOM Pro execution to venue-native Bybit parity with Spot/Futures and dynamic Conditional, Chase, TWAP, Iceberg and POV controls.
 - Current - Replace Bybit's fixed validation notional with account-margin execution capacity.
 - Current - Correct Bybit equity-allocation sizing and detect safety caps below venue minimums.

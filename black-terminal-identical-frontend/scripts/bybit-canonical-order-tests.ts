@@ -56,6 +56,7 @@ const reconciliationSource = readFileSync(new URL("../server/exchanges/bybit-rec
 const disconnectSource = readFileSync(new URL("../server/routes/exchange-accounts/account.js", import.meta.url), "utf8");
 const snapshotSource = readFileSync(new URL("../api/portfolio/snapshot.js", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+const orderSyncSource = readFileSync(new URL("../src/orders/orderSyncService.ts", import.meta.url), "utf8");
 assert.match(bybitSource, /processedCursors/);
 assert.match(bybitSource, /duplicateRecordCount/);
 assert.match(chartSource, /canonicalOrderKey\(order\)/);
@@ -68,7 +69,11 @@ assert.match(reconciliationSource, /canonicalConnectionId/);
 assert.match(reconciliationSource, /apiKeyFingerprint/);
 assert.match(disconnectSource, /findCredentialDuplicateAccountIds/);
 assert.match(snapshotSource, /selectCanonicalAccounts/);
+assert.match(snapshotSource, /parseRequestedAccountIds/);
 assert.match(appSource, /blackCoreOrderSyncService\.clear\(\)/);
-assert.match(appSource, /snapshot\.accounts\.map\(\(account\) => account\.id\)/);
+assert.match(appSource, /getPortfolioSnapshot\(connectedPortfolioAccountIds\)/);
+assert.match(appSource, /activeOrders=\{visiblePortfolioOrders\}/);
+assert.match(orderSyncSource, /if \(activeAccounts && !activeAccounts\.has\(order\.accountId\)\) continue/);
+assert.match(orderSyncSource, /retainAccounts\(accountIds: string\[\]\)/);
 
 console.log("Bybit canonical-order, price-alignment, and management-menu tests passed.");

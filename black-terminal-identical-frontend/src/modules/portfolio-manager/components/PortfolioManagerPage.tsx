@@ -1299,7 +1299,7 @@ function buildPositionExecutionAccount(position: ManagedPosition): PortfolioAcco
   };
 }
 
-export default function PortfolioManagerPage({ onClose, currentUser }: { onClose: () => void; currentUser?: CapabilityUser | null }) {
+export default function PortfolioManagerPage({ onClose, currentUser, activeAccountIds = [] }: { onClose: () => void; currentUser?: CapabilityUser | null; activeAccountIds?: string[] }) {
   const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
   const [activeTab, setActiveTab] = useState<PortfolioManagerTab>("Overview");
   const capabilities = useMemo(() => getCapabilities(currentUser), [currentUser]);
@@ -1314,11 +1314,14 @@ export default function PortfolioManagerPage({ onClose, currentUser }: { onClose
     return tabs;
   }, [capabilities]);
 
+  const activeAccountScope = activeAccountIds.join(",");
+
   useEffect(() => {
     let alive = true;
+    const scopedAccountIds = activeAccountScope ? activeAccountScope.split(",") : [];
 
     const load = async () => {
-      const next = await getPortfolioSnapshot();
+      const next = await getPortfolioSnapshot(scopedAccountIds);
       if (alive) setSnapshot(next);
     };
 
@@ -1328,7 +1331,7 @@ export default function PortfolioManagerPage({ onClose, currentUser }: { onClose
       alive = false;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [activeAccountScope]);
 
   useEffect(() => {
     if (!portfolioTabs.includes(activeTab)) setActiveTab("Overview");

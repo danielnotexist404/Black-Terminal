@@ -299,11 +299,14 @@ export async function getPortfolioApiToken() {
   return data.session?.access_token ?? null;
 }
 
-export async function fetchPortfolioSnapshotFromApi(): Promise<PortfolioSnapshot | null> {
+export async function fetchPortfolioSnapshotFromApi(activeAccountIds?: string[]): Promise<PortfolioSnapshot | null> {
   const token = await getPortfolioApiToken();
   if (!token) return null;
+  if (activeAccountIds?.length === 0) return null;
 
-  const response = await fetch("/api/portfolio/snapshot", {
+  const query = activeAccountIds ? `?accountIds=${encodeURIComponent([...new Set(activeAccountIds)].join(","))}` : "";
+
+  const response = await fetch(`/api/portfolio/snapshot${query}`, {
     headers: {
       Authorization: `Bearer ${token}`
     }

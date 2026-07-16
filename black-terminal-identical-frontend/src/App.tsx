@@ -65,7 +65,7 @@ import { StrategyLabPage } from "./modules/strategy-lab/components/StrategyLabPa
 import PortfolioManagerPage, { PositionsWorkspace } from "./modules/portfolio-manager/components/PortfolioManagerPage";
 import { ProfilePage } from "./modules/profile/components/ProfilePage";
 import { InvestmentGroupsPage } from "./modules/investment-groups/components/InvestmentGroupsPage";
-import { getPortfolioSnapshot, invalidatePortfolioSnapshot } from "./portfolio/portfolioStore";
+import { emptyPortfolioSnapshot, getPortfolioSnapshot, invalidatePortfolioSnapshot } from "./portfolio/portfolioStore";
 import type { PortfolioPosition } from "./positions/types";
 import type { PortfolioSnapshot } from "./portfolio/types";
 import { blackCoreOrderSyncService } from "./orders/orderSyncService";
@@ -614,10 +614,14 @@ export default function App() {
   useEffect(() => subscribeActiveExecutionVenue(setActiveExecutionVenueIdState), []);
   useEffect(() => blackCoreOrderSyncService.subscribe(setPortfolioOrders), []);
 
-  const activeExecutionConnection = useMemo(() => {
-    const activeConnections = connectionDiagnostics.filter((connection) => !["disconnected", "offline", "unsupported"].includes(connection.status));
-    return activeConnections.find((connection) => connection.id === activeExecutionVenueId) ?? null;
-  }, [activeExecutionVenueId, connectionDiagnostics]);
+  const activeRuntimeConnections = useMemo(() => connectionDiagnostics.filter((connection) => !["disconnected", "offline", "unsupported"].includes(connection.status)), [connectionDiagnostics]);
+  const connectedPortfolioAccountScope = useMemo(() => [...new Set(activeRuntimeConnections.map((connection) => connection.accountId).filter((accountId): accountId is string => Boolean(accountId)))].sort().join(","), [activeRuntimeConnections]);
+  const connectedPortfolioAccountIds = useMemo(() => connectedPortfolioAccountScope ? connectedPortfolioAccountScope.split(",") : [], [connectedPortfolioAccountScope]);
+  const connectedPortfolioAccountSet = useMemo(() => new Set(connectedPortfolioAccountIds), [connectedPortfolioAccountScope]);
+  const visiblePortfolioPositions = useMemo(() => portfolioPositions.filter((position) => connectedPortfolioAccountSet.has(position.accountId)), [connectedPortfolioAccountSet, portfolioPositions]);
+  const visiblePortfolioOrders = useMemo(() => portfolioOrders.filter((order) => connectedPortfolioAccountSet.has(order.accountId)), [connectedPortfolioAccountSet, portfolioOrders]);
+  const visiblePortfolioOrderSync = useMemo(() => Object.fromEntries(Object.entries(portfolioOrderSync || {}).filter(([accountId]) => connectedPortfolioAccountSet.has(accountId))), [connectedPortfolioAccountSet, portfolioOrderSync]);
+  const activeExecutionConnection = useMemo(() => activeRuntimeConnections.find((connection) => connection.id === activeExecutionVenueId) ?? null, [activeExecutionVenueId, activeRuntimeConnections]);
 
   const lockedMarketExchange = useMemo(() => exchangeForConnection(activeExecutionConnection), [activeExecutionConnection]);
   const marketScopeLocked = Boolean(activeExecutionConnection && lockedMarketExchange);
@@ -638,28 +642,39 @@ export default function App() {
     setOpenMenu((current) => current === "exchange" ? null : current);
   }, [lockedMarketExchange]);
 
+  const applyPortfolioSnapshot = useCallback((snapshot: PortfolioSnapshot) => {
+    const positions = snapshot.positions.filter((position) => connectedPortfolioAccountSet.has(position.accountId));
+    const orders = snapshot.orders.filter((order) => connectedPortfolioAccountSet.has(order.accountId));
+    const orderSync = Object.fromEntries(Object.entries(snapshot.orderSync || {}).filter(([accountId]) => connectedPortfolioAccountSet.has(accountId)));
+    setPortfolioPositions(positions);
+    setPortfolioOrders(blackCoreOrderSyncService.replaceAccountSnapshots(orders, orderSync, connectedPortfolioAccountIds));
+    setPortfolioOrderSync(orderSync);
+  }, [connectedPortfolioAccountIds, connectedPortfolioAccountSet]);
+
   const refreshPortfolioState = useCallback(async (force = false) => {
     if (force) invalidatePortfolioSnapshot();
-    const snapshot = await getPortfolioSnapshot();
-    setPortfolioPositions(snapshot.positions);
-    setPortfolioOrders(blackCoreOrderSyncService.replaceAccountSnapshots(snapshot.orders, snapshot.orderSync, snapshot.accounts.map((account) => account.id)));
-    setPortfolioOrderSync(snapshot.orderSync || {});
+    const snapshot = await getPortfolioSnapshot(connectedPortfolioAccountIds);
+    applyPortfolioSnapshot(snapshot);
     return snapshot;
-  }, []);
+  }, [applyPortfolioSnapshot, connectedPortfolioAccountIds]);
 
   useEffect(() => {
+    if (!connectedPortfolioAccountScope) {
+      blackCoreOrderSyncService.clear();
+      applyPortfolioSnapshot(emptyPortfolioSnapshot());
+      invalidatePortfolioSnapshot();
+      return;
+    }
     let mounted = true;
     const load = async () => {
-      const snapshot = await getPortfolioSnapshot();
+      const snapshot = await getPortfolioSnapshot(connectedPortfolioAccountIds);
       if (!mounted) return;
-      setPortfolioPositions(snapshot.positions);
-      setPortfolioOrders(blackCoreOrderSyncService.replaceAccountSnapshots(snapshot.orders, snapshot.orderSync, snapshot.accounts.map((account) => account.id)));
-      setPortfolioOrderSync(snapshot.orderSync || {});
+      applyPortfolioSnapshot(snapshot);
     };
     void load();
     const timer = window.setInterval(load, 5000);
     return () => { mounted = false; window.clearInterval(timer); };
-  }, []);
+  }, [applyPortfolioSnapshot, connectedPortfolioAccountIds, connectedPortfolioAccountScope]);
 
   // Ping update loop
   useEffect(() => {
@@ -1821,7 +1836,7 @@ export default function App() {
         </div>
       ) : activeNav === "PORTFOLIO MANAGER" ? (
         <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
-          <PortfolioManagerPage onClose={() => setActiveNav("CHART")} currentUser={currentUser} />
+          <PortfolioManagerPage onClose={() => setActiveNav("CHART")} currentUser={currentUser} activeAccountIds={connectedPortfolioAccountIds} />
         </div>
       ) : activeNav === "PROFILE" ? (
         <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
@@ -1879,7 +1894,7 @@ export default function App() {
             onAlertFired={handleAlertFired}
             priceLineColor={terminalSettings.priceLineColor}
             priceLineIntensity={terminalSettings.priceLineIntensity}
-            activeOrders={portfolioOrders}
+            activeOrders={visiblePortfolioOrders}
             onRefreshOrders={() => refreshPortfolioState(true)}
           />
           {drawingsEnabled && (
@@ -2019,9 +2034,9 @@ export default function App() {
             />
           ) : activeNav === "POSITIONS" ? (
             <PositionsWorkspace
-              positions={portfolioPositions}
-              orders={portfolioOrders}
-              orderSync={portfolioOrderSync}
+              positions={visiblePortfolioPositions}
+              orders={visiblePortfolioOrders}
+              orderSync={visiblePortfolioOrderSync}
               onRefreshOrders={() => refreshPortfolioState(true)}
             />
           ) : (

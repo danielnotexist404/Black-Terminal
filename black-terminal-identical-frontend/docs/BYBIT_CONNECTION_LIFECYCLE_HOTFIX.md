@@ -16,3 +16,13 @@ Repeated connection attempts had created multiple `exchange_accounts` rows for o
 
 No credential material or fingerprint is returned to the browser.
 
+## Runtime-Scoped Private Data
+
+Persisted Supabase account records are not runtime connections. Portfolio snapshot polling is scoped exclusively to account IDs currently owned by Black Core Connection Manager.
+
+- With zero active runtime account IDs, the client returns an empty portfolio snapshot without calling the private portfolio API.
+- Snapshot requests include only active account IDs; the server filters the authenticated user's account query before any venue synchronization occurs.
+- Canonical order ingestion rejects orders belonging to accounts outside the authoritative runtime set.
+- Chart overlays, Positions and Portfolio Manager apply a final connected-account filter, preventing delayed responses from drawing stale private state after disconnect.
+
+Public Bybit market data remains independent and can continue driving charts and DOM. Private balances, positions and orders exist in the UI only while their broker connection is active.

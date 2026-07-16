@@ -22,13 +22,14 @@ export class OrderSyncService {
   replaceAccountSnapshots(orders: OrderUpdate[], health: PortfolioSnapshot["orderSync"] = {}, authoritativeAccountIds?: string[]) {
     const incomingByAccount = new Map<string, OrderUpdate[]>();
     const nextDiagnostics = { rawRecords: 0, uniqueOrders: 0, duplicatesSuppressed: 0, staleUpdatesSuppressed: 0 };
+    const activeAccounts = authoritativeAccountIds ? new Set(authoritativeAccountIds) : null;
     if (authoritativeAccountIds) {
-      const activeAccounts = new Set(authoritativeAccountIds);
       for (const [key, order] of this.orders) {
-        if (!activeAccounts.has(order.accountId)) this.orders.delete(key);
+        if (!activeAccounts?.has(order.accountId)) this.orders.delete(key);
       }
     }
     for (const order of orders) {
+      if (activeAccounts && !activeAccounts.has(order.accountId)) continue;
       const accountOrders = incomingByAccount.get(order.accountId) || [];
       accountOrders.push(order);
       incomingByAccount.set(order.accountId, accountOrders);
@@ -89,6 +90,14 @@ export class OrderSyncService {
   removeExchange(exchange: OrderUpdate["exchange"]) {
     for (const [key, order] of this.orders) {
       if (order.exchange === exchange) this.orders.delete(key);
+    }
+    this.emit();
+  }
+
+  retainAccounts(accountIds: string[]) {
+    const activeAccounts = new Set(accountIds);
+    for (const [key, order] of this.orders) {
+      if (!activeAccounts.has(order.accountId)) this.orders.delete(key);
     }
     this.emit();
   }

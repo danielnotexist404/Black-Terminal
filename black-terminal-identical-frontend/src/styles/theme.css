@@ -7463,6 +7463,111 @@ body.resizing-layout * {
   resize: vertical;
 }
 
+.group-image-picker {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
+  gap: 7px 10px;
+  min-width: 0;
+}
+
+.group-image-picker > span {
+  grid-column: 1 / -1;
+  color: #7f8793;
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.group-image-picker.banner {
+  grid-template-columns: minmax(160px, 1fr) minmax(150px, 0.45fr);
+}
+
+.group-image-preview {
+  grid-row: 2 / span 2;
+  width: 76px;
+  height: 76px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 0, 0, 0.28);
+  border-radius: 3px;
+  background-color: rgba(255, 255, 255, 0.025);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  color: #5f6670;
+}
+
+.group-image-picker.banner .group-image-preview {
+  width: 100%;
+  height: 92px;
+  aspect-ratio: 4 / 1;
+}
+
+.group-image-actions {
+  display: flex;
+  align-items: center;
+  align-self: end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.network-form-grid .group-image-upload,
+.network-form-grid .group-image-remove {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.025);
+  color: #dce1e8;
+  padding: 6px 9px;
+  font: 800 9px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.network-form-grid .group-image-upload:hover,
+.network-form-grid .group-image-remove:hover {
+  border-color: rgba(255, 0, 0, 0.42);
+  color: #fff;
+}
+
+.group-image-upload input {
+  display: none;
+}
+
+.group-image-remove {
+  color: #c4c8cf;
+}
+
+.group-image-picker small {
+  align-self: start;
+  color: #686f79;
+  font: 700 8px "IBM Plex Mono", monospace;
+  line-height: 1.4;
+}
+
+@media (max-width: 620px) {
+  .group-image-picker,
+  .group-image-picker.banner {
+    grid-template-columns: 68px minmax(0, 1fr);
+  }
+
+  .group-image-picker.banner .group-image-preview {
+    width: 68px;
+    height: 68px;
+    aspect-ratio: auto;
+  }
+
+  .group-image-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .network-primary {
   margin-top: 10px;
   padding: 0 12px;

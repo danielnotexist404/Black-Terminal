@@ -1149,3 +1149,9 @@ Remaining:
 - Added an S/R Zone Intensity control that scales Supply and Demand zone opacity without changing zone detection or profile calculations.
 - Extended Fixed Range Length presets and the underlying chart history, cache and candle buffers to 5,000, 10,000 and 20,000 bars.
 - Restored workspaces now initialize the chart history depth from their saved HDLX fixed range. No Supabase migration is required.
+
+# 2026-07-17 - Investment Group Direct Image Selection
+
+- Replaced group logo and cover-banner URL fields with direct PNG, JPG and WebP file pickers for Enterprise and Admin group creators.
+- Added immediate previews, replace/remove controls, responsive wizard layout, type validation and client-side WebP optimization before persistence.
+- Preserved the existing investment-group capability gate and creation model. No Supabase migration is required.

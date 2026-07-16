@@ -4,11 +4,13 @@ import {
   BarChart3,
   Check,
   DoorOpen,
+  ImagePlus,
   Lock,
   MessageSquare,
   Plus,
   ShieldCheck,
   SlidersHorizontal,
+  Trash2,
   Users,
   X
 } from "lucide-react";
@@ -479,8 +481,8 @@ function WizardStep({ step, draft, onChange }: { step: number; draft: typeof def
     return (
       <div className="network-form-grid">
         <label>Firm Name<input value={draft.firmName} onChange={(event) => onChange({ ...draft, firmName: event.target.value })} /></label>
-        <label>Logo URL<input value={draft.logoUrl} onChange={(event) => onChange({ ...draft, logoUrl: event.target.value })} /></label>
-        <label className="wide">Cover Banner URL<input value={draft.bannerUrl} onChange={(event) => onChange({ ...draft, bannerUrl: event.target.value })} /></label>
+        <GroupImagePicker label="Group Picture" value={draft.logoUrl} kind="logo" onChange={(logoUrl) => onChange({ ...draft, logoUrl })} />
+        <GroupImagePicker label="Cover Banner" value={draft.bannerUrl} kind="banner" wide onChange={(bannerUrl) => onChange({ ...draft, bannerUrl })} />
         <label className="wide">Short Description<input value={draft.description} onChange={(event) => onChange({ ...draft, description: event.target.value })} /></label>
         <label className="wide">Long Bio<textarea value={draft.bio} onChange={(event) => onChange({ ...draft, bio: event.target.value })} /></label>
       </div>
@@ -563,6 +565,122 @@ function WizardStep({ step, draft, onChange }: { step: number; draft: typeof def
       <p>{draft.riskDisclaimer}</p>
     </div>
   );
+}
+
+function GroupImagePicker({
+  label,
+  value,
+  kind,
+  wide = false,
+  onChange
+}: {
+  label: string;
+  value: string;
+  kind: "logo" | "banner";
+  wide?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const [error, setError] = useState("");
+
+  const selectImage = async (file?: File | null) => {
+    if (!file) return;
+    try {
+      setError("");
+      onChange(await readGroupImage(file, kind));
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Unable to read this image.");
+    }
+  };
+
+  return (
+    <div className={`group-image-picker ${kind}${wide ? " wide" : ""}`}>
+      <span>{label}</span>
+      <div
+        className="group-image-preview"
+        style={{ backgroundImage: value ? `url(${value})` : undefined }}
+      >
+        {!value && <ImagePlus size={kind === "logo" ? 22 : 28} />}
+      </div>
+      <div className="group-image-actions">
+        <label className="group-image-upload">
+          <ImagePlus size={13} />
+          <span>{value ? "Replace Image" : "Upload Image"}</span>
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.currentTarget.value = "";
+              void selectImage(file);
+            }}
+          />
+        </label>
+        {value && (
+          <button type="button" className="group-image-remove" onClick={() => { setError(""); onChange(""); }}>
+            <Trash2 size={12} /> Remove
+          </button>
+        )}
+      </div>
+      <small>{error || "PNG, JPG or WebP. Optimized automatically."}</small>
+    </div>
+  );
+}
+
+async function readGroupImage(file: File, kind: "logo" | "banner") {
+  const acceptedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+  if (!acceptedTypes.has(file.type)) {
+    throw new Error("Choose a PNG, JPG or WebP image.");
+  }
+  if (file.size > 8 * 1024 * 1024) {
+    throw new Error("Image must be 8 MB or smaller.");
+  }
+
+  const image = await loadGroupImage(file);
+  const maximumWidth = kind === "logo" ? 512 : 1600;
+  const maximumHeight = kind === "logo" ? 512 : 600;
+  const scale = Math.min(1, maximumWidth / image.naturalWidth, maximumHeight / image.naturalHeight);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Image processing is unavailable in this browser.");
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+  const optimized = await canvasBlob(canvas, "image/webp", 0.86);
+  const bounded = optimized.size <= 900 * 1024 ? optimized : await canvasBlob(canvas, "image/webp", 0.7);
+  if (bounded.size > 1.2 * 1024 * 1024) throw new Error("Image remains too large after optimization.");
+  return blobDataUrl(bounded);
+}
+
+function loadGroupImage(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("The selected image could not be decoded."));
+    };
+    image.src = objectUrl;
+  });
+}
+
+function canvasBlob(canvas: HTMLCanvasElement, type: string, quality: number) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("The selected image could not be optimized.")), type, quality);
+  });
+}
+
+function blobDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("The selected image could not be read."));
+    reader.readAsDataURL(blob);
+  });
 }
 
 async function hashText(value: string) {

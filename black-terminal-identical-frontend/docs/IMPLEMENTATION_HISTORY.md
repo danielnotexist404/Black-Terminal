@@ -1130,5 +1130,6 @@ Remaining:
 - Corrected the shared-camera hotfix, which had unintentionally reused the ladder's coarse bucket count for the Volume Profile and IMM Heatmap.
 - Kept synchronized price range, pan, zoom, hover and current-price projection while restoring independent data resolution for every panel.
 - Restored the Heatmap's native 64-512 row canvas grid and the Volume Profile's original dense 128-row traded-volume model, with profile rows independently configurable up to 256.
+- Moved sparse Volume Profile annotations into an independent overlay so high-resolution sub-pixel bars cannot clip price and POC/HVN text.
 - Added migration protection for previously persisted low-resolution profile settings and browser assertions that reject future cross-panel data downsampling.
 - No Supabase migration is required.

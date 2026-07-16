@@ -1789,13 +1789,19 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                   {profileOutline.area && <polygon points={profileOutline.area} />}
                   {profileOutline.line && <polyline points={profileOutline.line} />}
                 </svg>
-                {institutionalProfile.map((node, index) => (
+                {institutionalProfile.map((node) => (
                   <div className={`dom-pro-profile-node native-row ${node.kind} ${node.volume <= 0 ? "empty" : ""} ${domHover?.price !== undefined && domHover.price >= node.low && domHover.price <= node.high ? "hovered" : ""}`} data-profile-key={node.key} data-price-low={node.low} data-price-high={node.high} key={node.key} style={{ top: `${node.topPct}%`, height: `${node.heightPct}%` }}>
                     <i style={{ width: `${node.volume <= 0 ? 0 : Math.max(3, node.volume / maxProfileVolume * 100)}%` }} />
-                    {(index % profileLabelStride === 0 || node.kind === "poc" || node.kind === "hvn") && <span>{formatPrice(node.price)}</span>}
-                    {(node.kind === "poc" || node.kind === "hvn") && <b>{node.kind.toUpperCase()}</b>}
                   </div>
                 ))}
+                <div className="dom-pro-profile-label-layer" aria-hidden="true">
+                  {institutionalProfile.map((node, index) => node.volume > 0 && (index % profileLabelStride === 0 || node.kind === "poc") ? (
+                    <div className={`dom-pro-profile-label ${node.kind}`} key={`label:${node.key}`} style={{ top: `${node.topPct + node.heightPct / 2}%` }}>
+                      <span>{formatPrice(node.price)}</span>
+                      {(node.kind === "poc" || node.kind === "hvn") && <b>{node.kind.toUpperCase()}</b>}
+                    </div>
+                  ) : null)}
+                </div>
                 <div className="dom-pro-profile-current-line" style={{ top: `${domPriceToTopPct(sharedPriceCamera, snapshot.lastPrice ?? lastPrice)}%` }} aria-hidden="true" />
                 <div className="dom-pro-profile-legend"><span>POC</span><span>VALUE AREA</span><span>HVN</span><span>LVN</span></div>
               </div>

@@ -175,6 +175,7 @@ assert.match(domWindowSource, /data-camera-version=\{sharedPriceCamera\.version\
 assert.match(domWindowSource, /ladderCameraMode === "shared"\) return sharedPriceCamera/, "ladder shares the exact camera object in synchronized mode");
 assert.doesNotMatch(domWindowSource, /const bins = camera\.buckets\.map/, "volume profile must not inherit the ladder bucket grid");
 assert.match(domWindowSource, /numberSetting\(profilePanelValues, "rowCount", 128\)/, "volume profile uses its own high-resolution row setting");
+assert.match(domWindowSource, /dom-pro-profile-label-layer/, "profile labels render outside sub-pixel native data rows");
 const heatmapCanvasSource = readFileSync(new URL("../src/modules/dom-pro/components/DomHeatmapCanvas.tsx", import.meta.url), "utf8");
 assert.match(heatmapCanvasSource, /Math\.max\(64, Math\.min\(512, Math\.floor\(plotHeight\)\)\)/, "heatmap keeps its native pixel-resolution grid");
 assert.doesNotMatch(heatmapCanvasSource, /rowCount = props\.camera\.rowCount/, "heatmap camera cannot control IMM data resolution");

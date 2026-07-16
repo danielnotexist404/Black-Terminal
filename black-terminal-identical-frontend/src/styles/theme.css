@@ -9047,10 +9047,8 @@ body.dom-pro-resize-active {
   left: 8px;
   right: 58px;
   height: 12px;
-  display: grid;
-  grid-template-columns: 1fr 64px 34px;
+  display: block;
   align-items: center;
-  gap: 7px;
   transform: translateY(-50%);
   color: #9da3ac;
   font: 800 9px "IBM Plex Mono", monospace;
@@ -9064,6 +9062,7 @@ body.dom-pro-resize-active {
 }
 
 .dom-pro-profile-node.native-row i {
+  display: block;
   height: min(7px, 72%);
 }
 
@@ -9105,6 +9104,34 @@ body.dom-pro-resize-active {
   color: var(--red-hot);
   font-size: 8px;
   text-align: right;
+}
+
+.dom-pro-profile-label-layer {
+  position: absolute;
+  inset: 0 59px 20px 8px;
+  z-index: 4;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.dom-pro-profile-label {
+  position: absolute;
+  right: 2px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 10px;
+  padding: 0 2px;
+  transform: translateY(-50%);
+  background: rgba(4, 5, 7, 0.78);
+  color: #c5cad2;
+  font: 700 8px/10px "IBM Plex Mono", monospace;
+  white-space: nowrap;
+}
+
+.dom-pro-profile-label b {
+  color: var(--red-hot);
+  font-size: 7px;
 }
 
 .dom-pro-profile-legend {

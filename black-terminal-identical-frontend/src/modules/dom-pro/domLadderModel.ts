@@ -1,154 +1,184 @@
 import type { OrderBookLevel } from "../../market-data/types";
-import type { AggregatedDomSnapshot } from "./types";
+import type { DomProPriceCamera } from "./domPriceCamera";
+import { domPriceBucketAt } from "./domPriceCamera.ts";
+import type { AggregatedDomSnapshot, WallDetection } from "./types";
+
+export type DomLiveCoverageState = "live" | "unavailable" | "stale" | "offline";
+
+export type DomLiveBookCoverage = {
+  min: number | null;
+  max: number | null;
+  bestBid: number | null;
+  bestAsk: number | null;
+  bidLevels: number;
+  askLevels: number;
+  subscribedDepth: number | null;
+  sequence: number | null;
+  snapshotTime: number | null;
+  ageMs: number | null;
+  state: Exclude<DomLiveCoverageState, "unavailable">;
+};
 
 export type DomLadderRow = {
+  key: string;
   price: number;
+  priceLow: number;
+  priceHigh: number;
+  centerPrice: number;
+  topPct: number;
+  heightPct: number;
   bidSize: number;
   askSize: number;
   totalSize: number;
+  netDepth: number;
   bidDepth: number;
   askDepth: number;
+  coverage: DomLiveCoverageState;
   isCurrentPrice: boolean;
   isBestBid: boolean;
   isBestAsk: boolean;
+  wall: WallDetection | null;
 };
 
 export type DomLadderModel = {
+  cameraVersion: string;
   rows: DomLadderRow[];
   priceStep: number;
-  sourceBidLevels: number;
-  sourceAskLevels: number;
+  coverage: DomLiveBookCoverage;
+  visibleRows: number;
 };
 
 type LadderQuantity = { bidSize: number; askSize: number };
 
-export function buildDomLadderModel(snapshot: AggregatedDomSnapshot, desiredRowCount = 40): DomLadderModel {
-  const currentPrice = positive(snapshot.midPrice) ?? positive(snapshot.lastPrice) ?? positive(snapshot.bestBid) ?? positive(snapshot.bestAsk) ?? 1;
-  const sourceBids = normalizeLevels(
-    snapshot.sourceBook?.bids?.length
-      ? snapshot.sourceBook.bids
-      : snapshot.bids.map((bucket) => ({ price: bucket.price, quantity: bucket.bidSize })),
-    "bid",
-    currentPrice
-  );
-  const sourceAsks = normalizeLevels(
-    snapshot.sourceBook?.asks?.length
-      ? snapshot.sourceBook.asks
-      : snapshot.asks.map((bucket) => ({ price: bucket.price, quantity: bucket.askSize })),
-    "ask",
-    currentPrice
-  );
-  const rowsPerSide = Math.max(8, Math.min(36, Math.floor(desiredRowCount / 2)));
-  const priceStep = resolveLadderStep(sourceBids, sourceAsks, currentPrice, rowsPerSide, snapshot.renderStats.bucketSize);
-  const firstAskPrice = roundPrice((Math.floor(currentPrice / priceStep) + 1) * priceStep);
-  const firstBidPrice = roundPrice(Math.floor(currentPrice / priceStep) * priceStep);
-  const quantities = new Map<string, LadderQuantity>();
+type BuildDomLadderInput = {
+  snapshot: AggregatedDomSnapshot;
+  camera: DomProPriceCamera;
+  walls?: WallDetection[];
+  bookStatus?: string;
+  now?: number;
+  staleAfterMs?: number;
+  minimumSize?: number;
+  hideUncovered?: boolean;
+};
 
-  for (const level of sourceBids) {
-    const rowPrice = roundPrice(Math.floor(level.price / priceStep) * priceStep);
-    if (rowPrice > firstBidPrice || rowPrice < firstBidPrice - priceStep * (rowsPerSide - 1)) continue;
-    addQuantity(quantities, rowPrice, "bid", level.quantity);
-  }
-  for (const level of sourceAsks) {
-    const rowPrice = roundPrice(Math.ceil(level.price / priceStep) * priceStep);
-    if (rowPrice < firstAskPrice || rowPrice > firstAskPrice + priceStep * (rowsPerSide - 1)) continue;
-    addQuantity(quantities, rowPrice, "ask", level.quantity);
+export function buildDomLadderModel({
+  snapshot,
+  camera,
+  walls = [],
+  bookStatus = "",
+  now = Date.now(),
+  staleAfterMs = 10_000,
+  minimumSize = 0,
+  hideUncovered = false
+}: BuildDomLadderInput): DomLadderModel {
+  const book = snapshot.sourceBook;
+  const bids = normalizeLevels(book?.bids ?? [], "bid");
+  const asks = normalizeLevels(book?.asks ?? [], "ask");
+  const snapshotTime = book?.time && Number.isFinite(book.time) ? book.time * 1000 : null;
+  const ageMs = snapshotTime === null ? null : Math.max(0, now - snapshotTime);
+  const offline = !book || /AWAITING|UNAVAILABLE|OFFLINE|NO BOOK/i.test(bookStatus);
+  const stale = !offline && (ageMs === null || ageMs > staleAfterMs || /STALE|CACHE/i.test(bookStatus));
+  const coverageState: DomLiveBookCoverage["state"] = offline ? "offline" : stale ? "stale" : "live";
+  const minBid = bids.length ? Math.min(...bids.map((level) => level.price)) : null;
+  const maxAsk = asks.length ? Math.max(...asks.map((level) => level.price)) : null;
+  const coverageMin = minBid ?? (asks[0]?.price ?? null);
+  const coverageMax = maxAsk ?? (bids[0]?.price ?? null);
+  const quantities = new Map<number, LadderQuantity>();
+
+  const add = (level: OrderBookLevel, side: "bid" | "ask") => {
+    if (level.quantity < minimumSize) return;
+    const bucket = domPriceBucketAt(camera, level.price);
+    if (!bucket) return;
+    const aggregate = quantities.get(bucket.index) ?? { bidSize: 0, askSize: 0 };
+    if (side === "bid") aggregate.bidSize += level.quantity;
+    else aggregate.askSize += level.quantity;
+    quantities.set(bucket.index, aggregate);
+  };
+  bids.forEach((level) => add(level, "bid"));
+  asks.forEach((level) => add(level, "ask"));
+
+  const bestBidBucket = snapshot.bestBid === null ? null : domPriceBucketAt(camera, snapshot.bestBid)?.index ?? null;
+  const bestAskBucket = snapshot.bestAsk === null ? null : domPriceBucketAt(camera, snapshot.bestAsk)?.index ?? null;
+  const currentPrice = snapshot.lastPrice ?? snapshot.midPrice;
+  const currentBucket = currentPrice === null ? null : domPriceBucketAt(camera, currentPrice)?.index ?? null;
+  const wallsByBucket = new Map<number, WallDetection>();
+  for (const wall of walls) {
+    const bucket = domPriceBucketAt(camera, wall.price);
+    if (!bucket) continue;
+    const existing = wallsByBucket.get(bucket.index);
+    if (!existing || wall.score > existing.score) wallsByBucket.set(bucket.index, wall);
   }
 
-  const bestBidRow = snapshot.bestBid === null ? null : roundPrice(Math.floor(snapshot.bestBid / priceStep) * priceStep);
-  const bestAskRow = snapshot.bestAsk === null ? null : roundPrice(Math.ceil(snapshot.bestAsk / priceStep) * priceStep);
-  const rows: DomLadderRow[] = [];
-
-  for (let index = rowsPerSide - 1; index >= 0; index -= 1) {
-    rows.push(createRow(firstAskPrice + index * priceStep, quantities, null, bestAskRow));
-  }
-  for (let index = 0; index < rowsPerSide; index += 1) {
-    rows.push(createRow(firstBidPrice - index * priceStep, quantities, bestBidRow, null));
-  }
-
+  const rows = camera.buckets.map((bucket): DomLadderRow => {
+    const quantity = quantities.get(bucket.index) ?? { bidSize: 0, askSize: 0 };
+    const insideCoverage = quantity.bidSize > 0 || quantity.askSize > 0 || coverageMin !== null && coverageMax !== null && bucket.center >= coverageMin && bucket.center <= coverageMax;
+    const coverage: DomLiveCoverageState = coverageState !== "live" ? coverageState : insideCoverage ? "live" : "unavailable";
+    return {
+      key: bucket.key,
+      price: bucket.center,
+      priceLow: bucket.low,
+      priceHigh: bucket.high,
+      centerPrice: bucket.center,
+      topPct: bucket.topPct,
+      heightPct: bucket.heightPct,
+      bidSize: quantity.bidSize,
+      askSize: quantity.askSize,
+      totalSize: quantity.bidSize + quantity.askSize,
+      netDepth: quantity.bidSize - quantity.askSize,
+      bidDepth: 0,
+      askDepth: 0,
+      coverage,
+      isCurrentPrice: currentBucket === bucket.index,
+      isBestBid: bestBidBucket === bucket.index,
+      isBestAsk: bestAskBucket === bucket.index,
+      wall: wallsByBucket.get(bucket.index) ?? null
+    };
+  });
   const bidReference = percentile(rows.map((row) => row.bidSize).filter((size) => size > 0), 0.9);
   const askReference = percentile(rows.map((row) => row.askSize).filter((size) => size > 0), 0.9);
   for (const row of rows) {
     row.bidDepth = depthRatio(row.bidSize, bidReference);
     row.askDepth = depthRatio(row.askSize, askReference);
   }
+  const visibleRows = hideUncovered ? rows.filter((row) => row.coverage !== "unavailable") : rows;
 
   return {
-    rows,
-    priceStep,
-    sourceBidLevels: sourceBids.length,
-    sourceAskLevels: sourceAsks.length
+    cameraVersion: camera.version,
+    rows: visibleRows.slice().sort((left, right) => right.centerPrice - left.centerPrice),
+    priceStep: camera.bucketSize,
+    coverage: {
+      min: coverageMin,
+      max: coverageMax,
+      bestBid: snapshot.bestBid,
+      bestAsk: snapshot.bestAsk,
+      bidLevels: bids.length,
+      askLevels: asks.length,
+      subscribedDepth: book?.subscribedDepth ?? null,
+      sequence: book?.sequence ?? null,
+      snapshotTime,
+      ageMs,
+      state: coverageState
+    },
+    visibleRows: visibleRows.length
   };
 }
 
-function normalizeLevels(levels: OrderBookLevel[], side: "bid" | "ask", currentPrice: number) {
+export type DomLadderDisplayUnit = "base" | "contracts" | "notional";
+
+export function formatDomLadderQuantity(row: DomLadderRow, side: "bid" | "ask", fractionDigits = 3, displayUnit: DomLadderDisplayUnit = "base") {
+  if (row.coverage === "unavailable") return "--";
+  if (row.coverage === "offline") return "OFFLINE";
+  if (row.coverage === "stale") return "STALE";
+  const rawQuantity = side === "bid" ? row.bidSize : row.askSize;
+  const quantity = displayUnit === "notional" ? rawQuantity * row.centerPrice : rawQuantity;
+  return quantity.toLocaleString(undefined, { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits });
+}
+
+function normalizeLevels(levels: OrderBookLevel[], side: "bid" | "ask") {
   return levels
     .filter((level) => Number.isFinite(level.price) && level.price > 0 && Number.isFinite(level.quantity) && level.quantity > 0)
-    .filter((level) => side === "bid" ? level.price <= currentPrice : level.price >= currentPrice)
     .sort((left, right) => side === "bid" ? right.price - left.price : left.price - right.price)
     .slice(0, 1500);
-}
-
-function resolveLadderStep(
-  bids: OrderBookLevel[],
-  asks: OrderBookLevel[],
-  currentPrice: number,
-  rowsPerSide: number,
-  fallbackBucketSize: number
-) {
-  const sampleDepth = rowsPerSide * 8;
-  const deepestBid = bids[Math.min(bids.length, sampleDepth) - 1]?.price;
-  const deepestAsk = asks[Math.min(asks.length, sampleDepth) - 1]?.price;
-  const bidSpan = deepestBid === undefined ? 0 : Math.max(0, currentPrice - deepestBid);
-  const askSpan = deepestAsk === undefined ? 0 : Math.max(0, deepestAsk - currentPrice);
-  const spans = [bidSpan, askSpan].filter((span) => span > 0);
-  const sharedSpan = spans.length === 2 ? Math.min(spans[0], spans[1]) : spans[0] ?? 0;
-  const tickSize = inferTickSize([...bids.slice(0, 80), ...asks.slice(0, 80)]);
-  const rawStep = sharedSpan > 0 ? sharedSpan / rowsPerSide : Math.max(tickSize, fallbackBucketSize / 20);
-  return nicePriceStep(Math.max(tickSize, rawStep));
-}
-
-function inferTickSize(levels: OrderBookLevel[]) {
-  const prices = [...new Set(levels.map((level) => level.price))].sort((left, right) => left - right);
-  let minimum = Number.POSITIVE_INFINITY;
-  for (let index = 1; index < prices.length; index += 1) {
-    const difference = prices[index] - prices[index - 1];
-    if (difference > 0) minimum = Math.min(minimum, difference);
-  }
-  return Number.isFinite(minimum) ? Math.max(0.00000001, roundPrice(minimum)) : 0.01;
-}
-
-function nicePriceStep(value: number) {
-  const raw = Math.max(0.00000001, value);
-  const exponent = Math.floor(Math.log10(raw));
-  const base = 10 ** exponent;
-  const normalized = raw / base;
-  const multiplier = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10;
-  return roundPrice(multiplier * base);
-}
-
-function addQuantity(map: Map<string, LadderQuantity>, price: number, side: "bid" | "ask", quantity: number) {
-  const key = priceKey(price);
-  const current = map.get(key) ?? { bidSize: 0, askSize: 0 };
-  if (side === "bid") current.bidSize += quantity;
-  else current.askSize += quantity;
-  map.set(key, current);
-}
-
-function createRow(priceValue: number, quantities: Map<string, LadderQuantity>, bestBid: number | null, bestAsk: number | null): DomLadderRow {
-  const price = roundPrice(priceValue);
-  const quantity = quantities.get(priceKey(price)) ?? { bidSize: 0, askSize: 0 };
-  return {
-    price,
-    bidSize: quantity.bidSize,
-    askSize: quantity.askSize,
-    totalSize: quantity.bidSize + quantity.askSize,
-    bidDepth: 0,
-    askDepth: 0,
-    isCurrentPrice: false,
-    isBestBid: bestBid === price,
-    isBestAsk: bestAsk === price
-  };
 }
 
 function percentile(values: number[], fraction: number) {
@@ -160,16 +190,4 @@ function percentile(values: number[], fraction: number) {
 function depthRatio(size: number, reference: number) {
   if (size <= 0) return 0;
   return Math.min(1, Math.max(0.04, Math.sqrt(size / Math.max(reference, 0.00000001))));
-}
-
-function positive(value: number | null | undefined) {
-  return value !== null && value !== undefined && Number.isFinite(value) && value > 0 ? value : null;
-}
-
-function roundPrice(value: number) {
-  return Number(value.toFixed(8));
-}
-
-function priceKey(price: number) {
-  return price.toFixed(8);
 }

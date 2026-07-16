@@ -1,5 +1,9 @@
 # DOM Pro Signal Stabilization
 
+## Shared Price-Domain Boundary
+
+Stabilized wall, profile and heatmap signals may share a price bucket with the current venue book, but they do not become live queue size. `DomProPriceCamera` aligns geometry only. The ladder numeric columns remain sourced exclusively from the current normalized `sourceBook`; IMM wall persistence is an optional confluence marker.
+
 ## Principle
 
 Raw venue data continues ingesting at source cadence. Derived institutional interpretation recalculates and renders at panel cadence. Slowing a visualization never discards the shared raw feed.

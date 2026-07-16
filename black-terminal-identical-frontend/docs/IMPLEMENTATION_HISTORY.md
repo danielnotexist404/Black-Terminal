@@ -1115,3 +1115,12 @@ Remaining:
 - Decoupled the Aggregated DOM Ladder from the Heatmap macro camera, which had collapsed the live venue book into one oversized price bucket in Macro and Full Data views.
 - Rebuilt the ladder around actual venue order-book coverage with balanced bid/ask bins, robust queue-size normalization, best-level markers and quantity-backed depth bars.
 - Removed duplicate source/bucket accumulation and replaced unavailable opposite-side quantities with an explicit empty state. No other DOM Pro panel or analytical pipeline changed.
+
+# 2026-07-16 - DOM Pro Shared Camera Ladder Hotfix
+
+- Superseded the independent near-book ladder camera with one authoritative price camera shared by Ladder, Volume Profile and Liquidity Heatmap.
+- Added exact shared bucket geometry, coordinated pan/zoom/hover/current-price alignment and bounded 12-120 row virtualization.
+- Separated live venue coverage from historical IMM structure; uncovered, stale and offline rows no longer present fabricated zero depth.
+- Carried venue subscribed-depth, update and sequence metadata through the Bybit adapter without adding a subscription.
+- Added deterministic shared-camera tests, six browser camera regressions, a passing Chapter XIV smoke run and a public Bybit 200-level raw-book certification.
+- No Supabase migration is required.

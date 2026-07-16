@@ -44,7 +44,7 @@ export type DomPanelField = {
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-export const DOM_PANEL_SETTINGS_VERSION = 2;
+export const DOM_PANEL_SETTINGS_VERSION = 3;
 const storagePrefix = "bt_dom_pro_panel_settings";
 
 const qualityFields = {
@@ -55,7 +55,7 @@ const qualityFields = {
 };
 
 const panelDefaults: Record<DomPanelId, { preset: string; settings: DomPanelValues }> = {
-  ladder: { preset: "Smoothed", settings: { ...qualityFields, updateIntervalMs: 500, renderFps: 8, levels: 42, minimumSize: 0, smoothing: 4, showCumulativeDepth: false, autoCenter: true } },
+  ladder: { preset: "Smoothed", settings: { ...qualityFields, updateIntervalMs: 500, renderFps: 8, levels: 42, minimumSize: 0, smoothing: 4, cameraMode: "shared", coverageMode: "dim", displayUnits: "base", showCumulativeDepth: false, showNetDepth: false, showLiveCoverage: true, showWallConfluence: true, autoCenter: false } },
   "volume-profile": { preset: "Structural", settings: { ...qualityFields, updateIntervalMs: 2000, renderFps: 4, rowCount: 72, smoothing: 8, valueAreaPct: 70, showPoc: true, showHvnLvn: true, showLabels: true, sharedCameraLock: true } },
   "liquidity-heatmap": { preset: "Institutional", settings: { ...qualityFields, updateIntervalMs: 1000, renderFps: 8, minimumSize: 0, smoothing: 88, persistenceThreshold: 55, decayPct: 92, majorWallsOnly: false, showBuyWalls: true, showSellWalls: true, showLabels: true } },
   "wall-detection": { preset: "Institutional", settings: { ...qualityFields, freezeOnHover: true, updateIntervalMs: 3000, renderFps: 2, minimumWallSize: 0, relativeThreshold: 2.2, activationScore: 62, deactivationScore: 44, minimumPersistenceMs: 8000, minimumAgeMs: 5000, minimumObservations: 3, maximumCancellationRatio: 0.7, maximumRows: 8, sortMode: "reliability", majorOnly: false, showPulled: true, showAbsorbed: true, showMigrated: true } },
@@ -68,7 +68,7 @@ const panelDefaults: Record<DomPanelId, { preset: string; settings: DomPanelValu
 };
 
 export const domPanelFields: Record<DomPanelId, DomPanelField[]> = {
-  ladder: [numberField("updateIntervalMs", "Update Interval", 100, 5000, 100), numberField("levels", "Visible Levels", 12, 120, 1), numberField("minimumSize", "Minimum Size", 0, 10000, 0.01), numberField("smoothing", "Smoothing", 1, 30, 1), toggleField("showCumulativeDepth", "Cumulative Depth"), toggleField("autoCenter", "Auto Center")],
+  ladder: [selectField("cameraMode", "Camera", ["shared", "follow-current", "independent"]), selectField("coverageMode", "Uncovered Prices", ["show", "dim", "hide"]), selectField("displayUnits", "Formatting", ["base", "contracts", "notional"]), numberField("updateIntervalMs", "Update Interval", 100, 5000, 100), numberField("levels", "Shared Visible Rows", 12, 120, 1), numberField("minimumSize", "Minimum Size", 0, 10000, 0.01), numberField("smoothing", "Smoothing", 1, 30, 1), toggleField("showLiveCoverage", "Live Coverage"), toggleField("showNetDepth", "Net Depth"), toggleField("showWallConfluence", "Wall Confluence"), toggleField("showCumulativeDepth", "Cumulative Depth")],
   "volume-profile": [numberField("updateIntervalMs", "Update Interval", 250, 15000, 250), numberField("rowCount", "Profile Rows", 20, 180, 1), numberField("smoothing", "Smoothing", 1, 30, 1), numberField("valueAreaPct", "Value Area %", 50, 95, 1), toggleField("showPoc", "Show POC"), toggleField("showHvnLvn", "Show HVN/LVN"), toggleField("showLabels", "Show Labels"), toggleField("sharedCameraLock", "Shared Camera Lock")],
   "liquidity-heatmap": [numberField("updateIntervalMs", "Refresh Cadence", 100, 10000, 100), numberField("minimumSize", "Minimum Size", 0, 10000, 0.01), numberField("smoothing", "Smoothing", 40, 98, 1), numberField("persistenceThreshold", "Persistence %", 0, 100, 1), numberField("decayPct", "Decay %", 50, 99, 1), toggleField("majorWallsOnly", "Major Walls Only"), toggleField("showBuyWalls", "Show Buy Walls"), toggleField("showSellWalls", "Show Sell Walls"), toggleField("showLabels", "Show Labels")],
   "wall-detection": [numberField("updateIntervalMs", "Refresh Cadence", 250, 15000, 250), numberField("minimumWallSize", "Minimum Wall Size", 0, 10000, 0.01), numberField("relativeThreshold", "Relative Threshold", 1, 8, 0.1), numberField("minimumPersistenceMs", "Minimum Persistence", 0, 120000, 1000), numberField("minimumObservations", "Minimum Observations", 1, 100, 1), numberField("maximumRows", "Maximum Rows", 1, 20, 1), selectField("sortMode", "Sort", ["reliability", "strength", "persistence", "age", "size", "distance"]), toggleField("majorOnly", "Major Only"), toggleField("showPulled", "Show Pulled Walls"), toggleField("freezeOnHover", "Freeze On Hover")],

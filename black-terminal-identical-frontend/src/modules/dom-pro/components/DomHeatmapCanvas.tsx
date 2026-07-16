@@ -4,14 +4,15 @@ import { domPerformanceTrace } from "../domPerformanceTrace";
 import type { DomVisualQuality } from "../domAdaptiveQuality";
 import { domVisualScheduler } from "../domVisualScheduler";
 import { computeDomWallLabelLayout } from "../domWallLabelLayout";
-import type { DomHeatmapFrame, MacroLiquidityBand, MacroLiquidityRange, VolumeProfileNode } from "../types";
+import { domPriceBucketAt, domPriceToTopPct, type DomProPriceCamera } from "../domPriceCamera";
+import type { DomHeatmapFrame, MacroLiquidityBand, VolumeProfileNode } from "../types";
 
 type Ribbon = { id: string; price: number; intensity: number; side: "supply" | "demand" | "poc"; kind: VolumeProfileNode["kind"] };
 type Gap = { id: string; low: number; high: number };
 
 type Props = {
   frames: DomHeatmapFrame[];
-  range: MacroLiquidityRange;
+  camera: DomProPriceCamera;
   macroBands: MacroLiquidityBand[];
   depthPoints: DepthHistoryPoint[];
   ribbons: Ribbon[];
@@ -19,6 +20,7 @@ type Props = {
   currentPrice: number;
   quality: DomVisualQuality;
   interactionActive: boolean;
+  hoveredBucketKey?: string;
 };
 
 export function DomHeatmapCanvas(props: Props) {
@@ -36,7 +38,7 @@ export function DomHeatmapCanvas(props: Props) {
 
   useEffect(() => {
     domVisualScheduler.markDirty(idRef.current);
-  }, [props.frames, props.range, props.macroBands, props.depthPoints, props.ribbons, props.gaps, props.currentPrice, props.quality, props.interactionActive]);
+  }, [props.frames, props.camera, props.macroBands, props.depthPoints, props.ribbons, props.gaps, props.currentPrice, props.quality, props.interactionActive, props.hoveredBucketKey]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -48,7 +50,7 @@ export function DomHeatmapCanvas(props: Props) {
     return () => { observer.disconnect(); visibility.disconnect(); };
   }, []);
 
-  return <canvas ref={canvasRef} className="dom-pro-heatmap-layer" data-heatmap-frames={props.frames.length} aria-label="Incremental liquidity heatmap" />;
+  return <canvas ref={canvasRef} className="dom-pro-heatmap-layer" data-heatmap-frames={props.frames.length} data-camera-version={props.camera.version} data-camera-min={props.camera.visiblePriceMin} data-camera-max={props.camera.visiblePriceMax} data-bucket-size={props.camera.bucketSize} data-current-price-top={domPriceToTopPct(props.camera, props.currentPrice)} aria-label="Incremental liquidity heatmap" />;
 }
 
 function drawHeatmap(
@@ -71,8 +73,7 @@ function drawHeatmap(
   context.clearRect(0, 0, rect.width, rect.height);
   const plotWidth = Math.max(1, rect.width - 72);
   const plotHeight = rect.height;
-  const span = Math.max(1e-9, props.range.max - props.range.min);
-  const yFor = (price: number) => (props.range.max - price) / span * plotHeight;
+  const yFor = (price: number) => domPriceToTopPct(props.camera, price) / 100 * plotHeight;
 
   drawGaps(context, props.gaps, yFor, plotWidth, plotHeight);
   drawBands(context, props.macroBands, yFor, plotWidth, props.interactionActive);
@@ -82,7 +83,7 @@ function drawHeatmap(
   const maxColumns = props.interactionActive ? 48 : props.quality === "full" ? 140 : props.quality === "balanced" ? 96 : 60;
   const frameStride = Math.max(1, Math.ceil(props.frames.length / maxColumns));
   const columns = Math.max(1, Math.ceil(props.frames.length / frameStride));
-  const rowCount = Math.max(64, Math.min(512, Math.floor(plotHeight)));
+  const rowCount = props.camera.rowCount;
   if (bidRef.current.length !== rowCount) bidRef.current = new Float32Array(rowCount);
   if (askRef.current.length !== rowCount) askRef.current = new Float32Array(rowCount);
   const bid = bidRef.current;
@@ -97,21 +98,22 @@ function drawHeatmap(
       const cells = props.frames[frameIndex]?.cells ?? [];
       for (let cellIndex = 0; cellIndex < cells.length; cellIndex += 1) {
         const cell = cells[cellIndex];
-        if (cell.price < props.range.min || cell.price > props.range.max) continue;
-        const row = Math.max(0, Math.min(rowCount - 1, Math.floor(yFor(cell.price) / plotHeight * rowCount)));
+        const bucket = domPriceBucketAt(props.camera, cell.price);
+        if (!bucket) continue;
         const target = cell.side === "bid" ? bid : ask;
-        if (cell.intensity > target[row]) target[row] = cell.intensity;
+        if (cell.intensity > target[bucket.index]) target[bucket.index] = cell.intensity;
         visibleCells += 1;
       }
     }
     const x = column / columns * plotWidth;
     const columnWidth = Math.max(1, plotWidth / columns + 0.5);
     for (let row = 0; row < rowCount; row += 1) {
+      const bucket = props.camera.buckets[row];
       const intensity = Math.max(bid[row], ask[row]);
       if (intensity < 0.035) continue;
       const isAsk = ask[row] >= bid[row];
       context.fillStyle = isAsk ? `rgba(255,18,24,${Math.min(.92, .08 + intensity * .84)})` : `rgba(238,242,250,${Math.min(.78, .05 + intensity * .7)})`;
-      context.fillRect(x, row / rowCount * plotHeight, columnWidth, Math.max(1, plotHeight / rowCount + 0.4));
+      context.fillRect(x, bucket.topPct / 100 * plotHeight, columnWidth, Math.max(1, bucket.heightPct / 100 * plotHeight + 0.4));
       drawCalls += 1;
     }
   }
@@ -121,7 +123,17 @@ function drawHeatmap(
     context.lineWidth = 1;
     context.beginPath(); context.moveTo(0, currentY); context.lineTo(plotWidth, currentY); context.stroke();
   }
-  drawScale(context, props.range, plotWidth, plotHeight);
+  const hoveredBucket = props.hoveredBucketKey ? props.camera.buckets.find((bucket) => bucket.key === props.hoveredBucketKey) : null;
+  if (hoveredBucket) {
+    const top = hoveredBucket.topPct / 100 * plotHeight;
+    const rowHeight = Math.max(1, hoveredBucket.heightPct / 100 * plotHeight);
+    context.fillStyle = "rgba(255,255,255,.055)";
+    context.fillRect(0, top, plotWidth, rowHeight);
+    context.strokeStyle = "rgba(255,255,255,.34)";
+    context.lineWidth = 1;
+    context.strokeRect(0, top, plotWidth, rowHeight);
+  }
+  drawScale(context, props.camera, plotWidth, plotHeight);
   domPerformanceTrace.record("canvas.heatmap_draw", performance.now() - startedAt, visibleCells, drawCalls);
   domPerformanceTrace.increment("canvas.heatmap_draw_calls", drawCalls);
 }
@@ -184,11 +196,11 @@ function drawRibbons(context: CanvasRenderingContext2D, ribbons: Ribbon[], yFor:
   }
 }
 
-function drawScale(context: CanvasRenderingContext2D, range: MacroLiquidityRange, left: number, height: number) {
+function drawScale(context: CanvasRenderingContext2D, camera: DomProPriceCamera, left: number, height: number) {
   context.fillStyle = "rgba(180,186,198,.9)"; context.font = "8px IBM Plex Mono, monospace";
   for (let index = 0; index <= 6; index += 1) {
     const y = index / 6 * height;
-    const price = range.max - index / 6 * (range.max - range.min);
+    const price = camera.visiblePriceMax - index / 6 * (camera.visiblePriceMax - camera.visiblePriceMin);
     context.fillText(formatPrice(price), left + 7, Math.max(9, Math.min(height - 3, y + 3)));
   }
 }

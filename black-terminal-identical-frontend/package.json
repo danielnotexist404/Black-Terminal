@@ -23,6 +23,7 @@
     "test:performance": "node --experimental-strip-types scripts/performance-regression-tests.js",
     "test:dom-pro-panels": "node --experimental-strip-types scripts/dom-pro-panel-tests.ts",
     "test:dom-pro-visual": "node scripts/dom-pro-visual-regression.js",
+    "certify:dom-pro-camera": "node --experimental-strip-types scripts/dom-pro-shared-camera-certification.ts",
     "test:aif": "node --experimental-strip-types scripts/aif-tests.ts",
     "benchmark:aif": "node --experimental-strip-types scripts/aif-benchmarks.ts",
     "test:aif-visual": "node scripts/aif-visual-regression.js",

@@ -100,3 +100,9 @@ The critical chart-coordinate and automatic 20,000-bar initialization contract i
 - `DOM_PRO_RESIZABLE_WORKSPACE.md` - split-tree ownership, resize interaction, presets and persistence.
 - `DOM_PRO_COMPACT_EXECUTION_PANEL.md` - venue-driven controls, equity allocation, leverage and execution routing.
 - `DOM_PRO_FINAL_COSMETIC_FIXES.md` - camera controls, in-strip wall labels, responsive proof and limits.
+
+# DOM Pro Shared Ladder Camera
+
+- `DOM_PRO_SHARED_PRICE_CAMERA.md` - authoritative vertical domain and exact cross-panel bucket geometry.
+- `DOM_PRO_AGGREGATED_LADDER_SYNC.md` - live depth aggregation, feed ownership and synchronization evidence.
+- `DOM_PRO_LIVE_DEPTH_COVERAGE.md` - live, unavailable, stale and offline depth semantics.

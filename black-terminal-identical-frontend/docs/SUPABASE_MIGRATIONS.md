@@ -2022,3 +2022,7 @@ No migration required. The client and portfolio snapshot route now scope private
 # 2026-07-16 - DOM Pro Aggregated Ladder Depth Repair
 
 No migration required. Live order-book bucketing and ladder depth-bar normalization are bounded browser presentation calculations and introduce no durable account, execution or market-memory schema.
+
+# 2026-07-16 - DOM Pro Shared Price Camera And Live Coverage
+
+No migration required. Shared price-camera geometry, live-book coverage metadata, ladder display settings and visual-regression evidence are bounded browser/runtime concerns. Existing workspace-local settings migration handles schema version 3; no account, execution, entitlement or market-memory table changed.

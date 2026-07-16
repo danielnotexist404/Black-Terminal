@@ -30,6 +30,8 @@ type BybitBookResult = {
   ts: number;
   b: string[][];
   a: string[][];
+  u?: number;
+  seq?: number;
 };
 
 type BybitTradeResult = {
@@ -150,7 +152,10 @@ function mapBook(symbol: MarketSymbol, result: BybitBookResult): OrderBookSnapsh
     symbol: symbol.rawSymbol,
     time: Math.floor(result.ts / 1000),
     bids: result.b.map(([price, quantity]) => ({ price: parseNumber(price), quantity: parseNumber(quantity) })),
-    asks: result.a.map(([price, quantity]) => ({ price: parseNumber(price), quantity: parseNumber(quantity) }))
+    asks: result.a.map(([price, quantity]) => ({ price: parseNumber(price), quantity: parseNumber(quantity) })),
+    subscribedDepth: Math.max(result.b.length, result.a.length),
+    updateId: result.u,
+    sequence: result.seq
   };
 }
 
@@ -205,6 +210,8 @@ function createBybitOrderBookSubscription(
   const messageHandlers = new Set<(message: OrderBookSnapshot) => void>([onBook]);
   const errorHandlers = new Set<(error: Error) => void>();
   const depth = symbol.marketKind === "spot" || symbol.marketKind === "margin" ? 50 : 200;
+  let updateId: number | undefined;
+  let sequence: number | undefined;
   const ws = new WebSocket(categoryFor(symbol.marketKind) === "spot" ? BYBIT_WS_SPOT : BYBIT_WS_LINEAR);
   const topic = `orderbook.${depth}.${normalizeBybitSymbol(symbol.rawSymbol)}`;
 
@@ -223,7 +230,10 @@ function createBybitOrderBookSubscription(
       symbol: symbol.rawSymbol,
       time: Math.floor(timeMs / 1000),
       bids: sortedLevels(bids, "bid", depth),
-      asks: sortedLevels(asks, "ask", depth)
+      asks: sortedLevels(asks, "ask", depth),
+      subscribedDepth: depth,
+      updateId,
+      sequence
     };
     messageHandlers.forEach((handler) => handler(snapshot));
   };
@@ -252,6 +262,8 @@ function createBybitOrderBookSubscription(
 
       applyLevels(payload.data.b ?? [], bids);
       applyLevels(payload.data.a ?? [], asks);
+      updateId = payload.data.u;
+      sequence = payload.data.seq;
       emit(payload.ts ?? Date.now());
     } catch (err) {
       reportError(err);

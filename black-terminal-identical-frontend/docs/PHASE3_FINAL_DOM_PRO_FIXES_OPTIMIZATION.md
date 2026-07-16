@@ -4,6 +4,8 @@
 
 Implemented and locally validated. This chapter refines the existing DOM Pro cockpit; it does not introduce another market-data or execution path.
 
+The final ladder hotfix uses a single shared price camera for Ladder, Profile and Heatmap. Live venue depth is aggregated into exact shared buckets, unsupported distant prices are explicitly unavailable, and IMM history remains visually distinct. Public Bybit raw-book certification and the deterministic browser camera contract are recorded under `docs/validation/` and `docs/visual-regression/dom-pro-final/`.
+
 ## Delivered
 
 - All ten configurable panels expose a compact settings cog in the panel header.

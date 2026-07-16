@@ -40,7 +40,8 @@ import {
 import { availableDomOrderTypes, availableDomTimeInForce, DOM_EQUITY_ALLOCATION_MARKERS, domExecutionLayoutMode, nearestLeverageOptions } from "../src/modules/dom-pro/domExecutionPresentation.ts";
 import type { VenueExecutionSchema } from "../src/execution/venueExecutionSchema.ts";
 import { computeDomWallLabelLayout } from "../src/modules/dom-pro/domWallLabelLayout.ts";
-import { buildDomLadderModel } from "../src/modules/dom-pro/domLadderModel.ts";
+import { buildDomLadderModel, formatDomLadderQuantity } from "../src/modules/dom-pro/domLadderModel.ts";
+import { createDomProPriceCamera, domPriceBucketAt, sameDomPriceCamera } from "../src/modules/dom-pro/domPriceCamera.ts";
 import type { AggregatedDomSnapshot } from "../src/modules/dom-pro/types.ts";
 
 class MemoryStorage {
@@ -93,9 +94,11 @@ const ladderSnapshot = {
   sourceBook: {
     exchange: "bybit",
     symbol: "BTCUSDT",
-    time: 1,
+    time: 1_000,
     bids: Array.from({ length: 200 }, (_, index) => ({ price: 64_000 - index * 0.5, quantity: 1 + index / 20 })),
-    asks: Array.from({ length: 200 }, (_, index) => ({ price: 64_000.5 + index * 0.5, quantity: 1.5 + index / 18 }))
+    asks: Array.from({ length: 200 }, (_, index) => ({ price: 64_000.5 + index * 0.5, quantity: 1.5 + index / 18 })),
+    subscribedDepth: 200,
+    sequence: 901
   },
   bids: [],
   asks: [],
@@ -105,15 +108,53 @@ const ladderSnapshot = {
   lastPrice: 64_000.25,
   renderStats: { bucketSize: 50 }
 } as unknown as AggregatedDomSnapshot;
-const ladderModel = buildDomLadderModel(ladderSnapshot, 40);
-const ladderAbove = ladderModel.rows.filter((row) => row.price > ladderSnapshot.midPrice!);
-const ladderBelow = ladderModel.rows.filter((row) => row.price <= ladderSnapshot.midPrice!);
-assert.equal(ladderModel.rows.length, 40, "ladder creates a balanced market-centered row set");
-assert.ok(ladderModel.priceStep < 100, "ladder step follows live book coverage rather than the macro heatmap camera");
-assert.ok(ladderAbove.every((row) => row.askSize > 0), "dense live asks populate every visible offer row");
-assert.ok(ladderBelow.every((row) => row.bidSize > 0), "dense live bids populate every visible bid row");
+const wideCamera = createDomProPriceCamera({ min: 51_200, max: 76_800, source: "historical-ohlcv" }, 64_000.25, 40, "explore");
+const ladderModel = buildDomLadderModel({ snapshot: ladderSnapshot, camera: wideCamera, bookStatus: "LIVE BOOK", now: 1_000_500 });
+assert.equal(ladderModel.rows.length, wideCamera.rowCount, "wide ladder virtualizes to the shared visible bucket count");
+assert.equal(ladderModel.cameraVersion, wideCamera.version, "ladder consumes the authoritative camera version");
+assert.equal(ladderModel.priceStep, wideCamera.bucketSize, "ladder bucket size is owned by the shared camera");
+assert.equal(ladderModel.coverage.subscribedDepth, 200, "venue subscribed depth capability remains visible");
+assert.equal(ladderModel.coverage.sequence, 901, "venue update sequence reaches ladder diagnostics");
+assert.ok(ladderModel.rows.some((row) => row.coverage === "unavailable"), "wide historical scope preserves distant rows as unavailable");
+assert.ok(ladderModel.rows.filter((row) => row.coverage === "unavailable").every((row) => formatDomLadderQuantity(row, "bid") === "--"), "uncovered depth never renders a false zero");
+assert.ok(ladderModel.rows.some((row) => row.coverage === "live" && row.totalSize > 0), "current live depth is aggregated inside the wide shared domain");
 assert.ok(ladderModel.rows.every((row) => row.bidDepth >= 0 && row.bidDepth <= 1 && row.askDepth >= 0 && row.askDepth <= 1), "ladder depth bars remain normalized");
 assert.ok(ladderModel.rows.some((row) => row.isBestBid) && ladderModel.rows.some((row) => row.isBestAsk), "best bid and ask remain marked after aggregation");
+const cameraBucket = domPriceBucketAt(wideCamera, 64_000)!;
+const ladderBucket = ladderModel.rows.find((row) => row.key === cameraBucket.key)!;
+assert.equal(ladderBucket.priceLow, cameraBucket.low, "ladder and heatmap bucket lows align exactly");
+assert.equal(ladderBucket.priceHigh, cameraBucket.high, "ladder and profile bucket highs align exactly");
+assert.equal(ladderBucket.centerPrice, cameraBucket.center, "shared row centers are identical");
+assert.notEqual(formatDomLadderQuantity(ladderBucket, "bid", 0, "notional"), formatDomLadderQuantity(ladderBucket, "bid", 0, "base"), "notional formatting applies the shared bucket center price");
+assert.equal(formatDomLadderQuantity({ ...ladderBucket, coverage: "offline" }, "bid"), "OFFLINE", "disconnected depth is explicit");
+const panCamera = createDomProPriceCamera({ min: 50_000, max: 75_600, source: "historical-ohlcv" }, 64_000.25, 40, "manual");
+const zoomCamera = createDomProPriceCamera({ min: 57_600, max: 70_400, source: "historical-ohlcv" }, 64_000.25, 40, "manual");
+assert.notEqual(panCamera.version, wideCamera.version, "pan creates one new shared camera version");
+assert.ok(zoomCamera.bucketSize < wideCamera.bucketSize, "wheel zoom reduces the shared bucket width coherently");
+assert.ok(sameDomPriceCamera(wideCamera, createDomProPriceCamera({ min: 51_200, max: 76_800, source: "historical-ohlcv" }, 64_000.25, 40, "explore")), "all synchronized consumers resolve identical domains and boundaries");
+assert.equal(createDomProPriceCamera({ min: 63_000, max: 65_000, source: "live-depth" }, 64_000, 40, "follow").mode, "follow");
+assert.equal(createDomProPriceCamera({ min: 40_000, max: 90_000, source: "historical-ohlcv" }, 64_000, 40, "fit").mode, "fit");
+
+const narrowCamera = createDomProPriceCamera({ min: 63_900, max: 64_101, source: "live-depth" }, 64_000.25, 40, "follow");
+const zeroBucket = narrowCamera.buckets.find((bucket) => bucket.center > 63_950 && bucket.center < 63_960)!;
+const zeroSnapshot = structuredClone(ladderSnapshot);
+zeroSnapshot.sourceBook!.bids = zeroSnapshot.sourceBook!.bids.filter((level) => level.price < zeroBucket.low || level.price > zeroBucket.high);
+const narrowModel = buildDomLadderModel({ snapshot: zeroSnapshot, camera: narrowCamera, bookStatus: "LIVE BOOK", now: 1_000_500 });
+const emptyLiveRow = narrowModel.rows.find((row) => row.coverage === "live" && row.totalSize === 0);
+assert.ok(emptyLiveRow, "a received but empty in-coverage bucket is represented as verified zero");
+assert.equal(formatDomLadderQuantity(emptyLiveRow!, "bid"), "0.000", "verified zero remains distinct from unavailable");
+const updatedSnapshot = structuredClone(zeroSnapshot);
+updatedSnapshot.sourceBook!.bids[10].quantity += 25;
+const updatedModel = buildDomLadderModel({ snapshot: updatedSnapshot, camera: narrowCamera, bookStatus: "LIVE BOOK", now: 1_000_600 });
+const changedRows = narrowModel.rows.filter((row, index) => row.bidSize !== updatedModel.rows[index].bidSize || row.askSize !== updatedModel.rows[index].askSize);
+assert.equal(changedRows.length, 1, "one depth delta changes only its shared visible bucket");
+const reconnectModel = buildDomLadderModel({ snapshot: updatedSnapshot, camera: wideCamera, bookStatus: "LIVE BOOK", now: 1_000_600 });
+assert.equal(reconnectModel.cameraVersion, ladderModel.cameraVersion, "fresh reconnect rebuild preserves shared camera scope");
+const staleModel = buildDomLadderModel({ snapshot: ladderSnapshot, camera: wideCamera, bookStatus: "LIVE BOOK", now: 1_020_000 });
+assert.ok(staleModel.rows.every((row) => row.coverage === "stale"), "stale orderbook timestamps cannot masquerade as current depth");
+const wall: WallDetection = { id: "buy:64000", side: "buy", price: 64_000, size: 20, score: 88, distancePct: 0, persistenceMs: 12_000, persistencePct: 88, state: "persisting" };
+const wallModel = buildDomLadderModel({ snapshot: ladderSnapshot, camera: wideCamera, walls: [wall], bookStatus: "LIVE BOOK", now: 1_000_500 });
+assert.equal(wallModel.rows.find((row) => row.key === cameraBucket.key)?.wall?.id, wall.id, "IMM wall confirmation maps through the same shared bucket without becoming live depth");
 assert.equal(writeDomProLayout(resized, "primary", storage), true);
 assert.equal(readDomProLayout("desk", "primary", storage).rootSplit.ratio, 0.60, "layout ratios persist and restore");
 assert.equal(saveDomProLayoutPreset(resized, "My Desk", storage), true);
@@ -126,6 +167,14 @@ assert.ok(!/DomAggregationEngine|aggregateDomSnapshot|useDomFeed/.test(layoutSou
 const defaults = defaultDomPanelRegistry("desk", "bybit:perpetual:BTCUSDT");
 assert.equal(Object.keys(defaults.panels).length, 10, "all configurable panels have defaults");
 assert.equal(defaults.schemaVersion, DOM_PANEL_SETTINGS_VERSION);
+assert.equal(defaults.panels.ladder.settings.cameraMode, "shared", "shared ladder camera is the persisted factory default");
+const domWindowSource = readFileSync(new URL("../src/modules/dom-pro/components/DomProWindow.tsx", import.meta.url), "utf8");
+assert.equal(domWindowSource.match(/useDomFeed\(/g)?.length, 1, "DOM Pro owns exactly one shared feed subscription hook");
+assert.match(domWindowSource, /camera=\{sharedPriceCamera\}/, "heatmap consumes the shared camera object");
+assert.match(domWindowSource, /data-camera-version=\{sharedPriceCamera\.version\}/, "volume profile exposes the shared camera version");
+assert.match(domWindowSource, /ladderCameraMode === "shared"\) return sharedPriceCamera/, "ladder shares the exact camera object in synchronized mode");
+const ladderSource = readFileSync(new URL("../src/modules/dom-pro/domLadderModel.ts", import.meta.url), "utf8");
+assert.ok(!/useDomFeed|subscribeOrderBook|MarketDataEngine/.test(ladderSource), "ladder aggregation cannot create a second orderbook subscription");
 
 const custom = patchDomPanel(defaults, "depth-chart", { updateIntervalMs: 7123, mode: "macro" });
 writeDomPanelRegistry(custom, storage);

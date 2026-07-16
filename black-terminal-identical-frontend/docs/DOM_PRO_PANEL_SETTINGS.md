@@ -16,7 +16,7 @@ The registry schema is versioned. Reads merge stored values over current default
 
 | Panel | Main controls |
 |---|---|
-| Ladder | levels, minimum size, smoothing, cumulative depth, auto-center, cadence |
+| Ladder | shared/follow/independent camera, shared rows, live coverage, uncovered-row mode, minimum size, wall confluence, cadence |
 | Volume Profile | rows, value area, POC/HVN/LVN, labels, shared camera, cadence |
 | Heatmap | persistence, minimum size, decay, wall sides, labels, cadence |
 | Wall Detection | thresholds, persistence, observations, sorting, major-only, cadence |
@@ -39,3 +39,5 @@ The registry schema is versioned. Reads merge stored values over current default
 Global workspace presets apply a coordinated set once. Panel settings are ordinary registry values afterward, so user overrides are retained until another global preset is explicitly selected.
 
 No Supabase schema is required for this chapter. A future preference API can persist the registry JSON without changing panel components.
+
+Shared is the ladder factory default. `Dim`, `Show` and `Hide` control presentation of uncovered prices only; they never convert historical IMM observations into live size. Settings schema version 3 merges these controls into existing workspace records without discarding compatible preferences.

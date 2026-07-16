@@ -378,7 +378,7 @@ DOM Pro panel geometry is a versioned, normalized split tree. UI separators upda
 
 The compact DOM execution panel must consume `VenueExecutionSchema`, account sync and venue sizing preview. Do not duplicate exchange rules in the component and do not bypass `submitOrder`. Equity Allocation sizes from usable margin; leverage remains a separate venue-bounded control.
 
-Release gates: `npm run test:dom-pro-panels`, `npm run test:venue-execution`, `npm run test:performance`, `npm run test:dom-pro-visual`, `npm run perf:dom-pro-smoke`, and `npm run build`.
+Release gates: `npm run test:dom-pro-panels`, `npm run test:venue-execution`, `npm run test:performance`, `npm run test:dom-pro-visual`, `npm run certify:dom-pro-camera`, `npm run perf:dom-pro-smoke`, and `npm run build`.
 
 # Bybit External Order Validation
 
@@ -386,3 +386,7 @@ Run `npm run test:bybit-external-orders` and `npm run build`. For controlled liv
 # Bybit Order Hotfix Verification
 
 Run `npm run test:bybit-canonical-orders`, `npm run test:bybit-external-orders`, `npm run test:bybit-certification`, then `npm run build`. A production release must also verify one controlled venue order produces one row and one line before recording live certification evidence.
+
+# DOM Pro Shared Camera Certification
+
+Run `npm run test:dom-pro-panels`, `npm run test:dom-pro-visual`, `npm run certify:dom-pro-camera`, `npm run test:performance`, `npm run perf:dom-pro-smoke`, and `npm run build`. The live certification uses public read-only Bybit depth and places no order. Confirm the evidence reports exact raw/rendered bucket sums, unavailable wide-range rows and camera preservation across the second snapshot.

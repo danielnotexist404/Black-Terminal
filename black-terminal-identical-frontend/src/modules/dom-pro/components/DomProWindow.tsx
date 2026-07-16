@@ -25,7 +25,8 @@ import { domPerformanceTrace } from "../domPerformanceTrace";
 import { domFreezeWatchdog } from "../domFreezeWatchdog";
 import { domVisualScheduler } from "../domVisualScheduler";
 import { blackDepthHistoryStore, type DepthHistoryPoint, type DepthHistoryRead } from "../depthHistoryStore";
-import { buildDomLadderModel } from "../domLadderModel";
+import { buildDomLadderModel, formatDomLadderQuantity, type DomLadderDisplayUnit } from "../domLadderModel";
+import { createDomProPriceCamera, domCameraRange, domPriceBucketAt, domPriceToTopPct, type DomProPriceCamera } from "../domPriceCamera";
 import {
   applyDomPanelPreset,
   applyDomWorkspacePreset,
@@ -152,6 +153,7 @@ type DomHoverInfo = {
   y: number;
   title: string;
   lines: string[];
+  priceBucketKey?: string;
 };
 
 type FlowPoint = {
@@ -177,6 +179,14 @@ type HeatmapStructureRibbon = {
   intensity: number;
   side: "supply" | "demand" | "poc";
   kind: VolumeProfileNode["kind"];
+};
+
+type SharedVolumeProfileNode = VolumeProfileNode & {
+  key: string;
+  low: number;
+  high: number;
+  topPct: number;
+  heightPct: number;
 };
 
 type CoverageGap = {
@@ -934,6 +944,9 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     blackDepthHistoryStore.record(marketSymbol, snapshot.sourceBook, snapshot.lastPrice ?? lastPrice);
   }, [lastPrice, marketSymbol, snapshot.generatedAt, snapshot.lastPrice, snapshot.sourceBook]);
 
+  const ladderPanelValues = panelRegistry.panels.ladder.settings;
+  const ladderDisplayUnits = stringSetting(ladderPanelValues, "displayUnits", "base") as DomLadderDisplayUnit;
+  const ladderShowNetDepth = booleanSetting(ladderPanelValues, "showNetDepth", false);
   const cvdPanelValues = panelRegistry.panels["heuristic-cvd"].settings;
   const depthPanelValues = panelRegistry.panels["depth-chart"].settings;
   const wallPanelValues = panelRegistry.panels["wall-detection"].settings;
@@ -1028,26 +1041,62 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     () => applyHeatmapCamera(macroRange, liquidityDataRange, heatmapViewport, snapshot.lastPrice ?? lastPrice),
     [heatmapViewport, lastPrice, liquidityDataRange, macroRange, snapshot.lastPrice]
   );
+  const sharedPriceCameraMode = settings.followMarket && !settings.freeExplore
+    ? "follow"
+    : heatmapViewport.mode === "fit" || heatmapViewport.mode === "full"
+      ? "fit"
+      : heatmapViewport.mode === "manual"
+        ? "manual"
+        : "explore";
+  const sharedPriceRowCount = numberSetting(ladderPanelValues, "levels", settings.mode === "macro" ? 48 : 42);
+  const sharedPriceCamera = useMemo(
+    () => createDomProPriceCamera(heatmapRange, snapshot.lastPrice ?? lastPrice ?? midpoint(heatmapRange), sharedPriceRowCount, sharedPriceCameraMode),
+    [heatmapRange, lastPrice, sharedPriceCameraMode, sharedPriceRowCount, snapshot.lastPrice]
+  );
+  const sharedPriceRange = useMemo(() => domCameraRange(sharedPriceCamera), [sharedPriceCamera]);
+  const ladderCameraMode = stringSetting(ladderPanelValues, "cameraMode", "shared");
+  const ladderPriceCamera = useMemo(() => {
+    if (ladderCameraMode === "shared") return sharedPriceCamera;
+    const marketPrice = ladderSnapshot.lastPrice ?? ladderSnapshot.midPrice ?? lastPrice ?? sharedPriceCamera.centerPrice;
+    if (ladderCameraMode === "follow-current") {
+      const halfSpan = (sharedPriceCamera.visiblePriceMax - sharedPriceCamera.visiblePriceMin) / 2;
+      return createDomProPriceCamera({ min: Math.max(0.00000001, marketPrice - halfSpan), max: marketPrice + halfSpan, source: sharedPriceCamera.source }, marketPrice, sharedPriceRowCount, "follow");
+    }
+    const bookPrices = [...(ladderSnapshot.sourceBook?.bids ?? []), ...(ladderSnapshot.sourceBook?.asks ?? [])].map((level) => level.price).filter((value) => Number.isFinite(value) && value > 0);
+    const localRange = bookPrices.length
+      ? { min: Math.min(...bookPrices), max: Math.max(...bookPrices), source: "live-depth" as const }
+      : sharedPriceRange;
+    return createDomProPriceCamera(localRange, marketPrice, sharedPriceRowCount, "manual");
+  }, [ladderCameraMode, ladderSnapshot.lastPrice, ladderSnapshot.midPrice, ladderSnapshot.sourceBook, lastPrice, sharedPriceCamera, sharedPriceRange, sharedPriceRowCount]);
+  const ladderCoverageMode = stringSetting(ladderPanelValues, "coverageMode", "dim");
+  const ladderModel = useMemo(() => buildDomLadderModel({
+    snapshot: ladderSnapshot,
+    camera: ladderPriceCamera,
+    walls: stableWalls,
+    bookStatus: feed.bookStatus,
+    minimumSize: numberSetting(ladderPanelValues, "minimumSize", 0),
+    hideUncovered: ladderCoverageMode === "hide"
+  }), [feed.bookStatus, ladderCoverageMode, ladderPanelValues, ladderPriceCamera, ladderSnapshot, stableWalls]);
   const institutionalProfile = useMemo(
-    () => traceCalculation("panel.volume_profile", profileSnapshot.volumeProfile.length + macroCandles.length, () => buildInstitutionalProfile(profileSnapshot.volumeProfile, macroCandles, heatmapRange)),
-    [heatmapRange, macroCandles, profileSnapshot.volumeProfile]
+    () => traceCalculation("panel.volume_profile", profileSnapshot.volumeProfile.length + macroCandles.length, () => buildInstitutionalProfile(profileSnapshot.volumeProfile, macroCandles, sharedPriceCamera)),
+    [macroCandles, profileSnapshot.volumeProfile, sharedPriceCamera]
   );
   const maxProfileVolume = Math.max(...institutionalProfile.map((node) => node.volume), 1);
   const profileOutline = useMemo(
-    () => buildProfileOutline(institutionalProfile, maxProfileVolume, heatmapRange),
-    [heatmapRange, institutionalProfile, maxProfileVolume]
+    () => buildProfileOutline(institutionalProfile, maxProfileVolume, sharedPriceRange),
+    [institutionalProfile, maxProfileVolume, sharedPriceRange]
   );
   const heatmapStructureRibbons = useMemo(
-    () => buildHeatmapStructureRibbons(institutionalProfile, maxProfileVolume, heatmapRange, snapshot.lastPrice ?? lastPrice),
-    [heatmapRange, institutionalProfile, lastPrice, maxProfileVolume, snapshot.lastPrice]
+    () => buildHeatmapStructureRibbons(institutionalProfile, maxProfileVolume, sharedPriceRange, snapshot.lastPrice ?? lastPrice),
+    [institutionalProfile, lastPrice, maxProfileVolume, sharedPriceRange, snapshot.lastPrice]
   );
   const depthHistory = useMemo(
-    () => blackDepthHistoryStore.read(marketSymbol, heatmapRange, settings.heatmapHorizon),
-    [depthHistoryRevision, heatmapRange, marketSymbol, settings.heatmapHorizon]
+    () => blackDepthHistoryStore.read(marketSymbol, sharedPriceRange, settings.heatmapHorizon),
+    [depthHistoryRevision, marketSymbol, settings.heatmapHorizon, sharedPriceRange]
   );
   const depthCoverageGaps = useMemo(
-    () => buildDepthCoverageGaps(heatmapRange, heatmapFrames, macroBands, heatmapStructureRibbons, depthHistory.points, snapshot.lastPrice ?? lastPrice),
-    [depthHistory.points, heatmapFrames, heatmapRange, heatmapStructureRibbons, lastPrice, macroBands, snapshot.lastPrice]
+    () => buildDepthCoverageGaps(sharedPriceRange, heatmapFrames, macroBands, heatmapStructureRibbons, depthHistory.points, snapshot.lastPrice ?? lastPrice),
+    [depthHistory.points, heatmapFrames, heatmapStructureRibbons, lastPrice, macroBands, sharedPriceRange, snapshot.lastPrice]
   );
   const smoothedCvdData = useMemo(() => traceCalculation("panel.cvd_smoothing", cvdData.length, () => buildSmoothedCvd(cvdData, analyticalSettings)), [analyticalSettings, cvdData]);
   const cvdCandles = useMemo(() => traceCalculation("panel.cvd_candles", smoothedCvdData.length + cvdSnapshot.trades.length, () => buildCvdCandles(smoothedCvdData, analyticalSettings, cvdSnapshot.trades)), [analyticalSettings, cvdSnapshot.trades, smoothedCvdData]);
@@ -1068,8 +1117,8 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const stabilizedFlowSeries = useMemo(() => clipAndSmoothSeries(flowSeries, numberSetting(flowPanelValues, "outlierPercentile", 95), numberSetting(flowPanelValues, "smoothingLength", 10)), [flowPanelValues, flowSeries]);
   const flowBars = useMemo(() => traceCalculation("panel.flow_delta", stabilizedFlowSeries.length, () => buildFlowBars(stabilizedFlowSeries, analyticalSettings)), [analyticalSettings, stabilizedFlowSeries]);
   const debugStats = useMemo(
-    () => buildDomDebugStats(snapshot, macroRange, heatmapRange, settings, heatmapFrames, institutionalProfile, depthChart, depthHistory, snapshot.lastPrice ?? lastPrice),
-    [depthChart, depthHistory, heatmapFrames, heatmapRange, institutionalProfile, lastPrice, macroRange, settings, snapshot]
+    () => buildDomDebugStats(snapshot, macroRange, sharedPriceRange, settings, heatmapFrames, institutionalProfile, depthChart, depthHistory, snapshot.lastPrice ?? lastPrice),
+    [depthChart, depthHistory, heatmapFrames, institutionalProfile, lastPrice, macroRange, settings, sharedPriceRange, snapshot]
   );
 
   const centerMarketCamera = useCallback(() => {
@@ -1273,40 +1322,44 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     };
   }, [heatmapViewport, lastPrice, macroRange, settings.followMarket, settings.freeExplore, snapshot.lastPrice]);
 
-  const handleHeatmapMouseMove = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+  const moveSharedPriceCamera = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const activeDrag = heatmapDragRef.current;
-    if (activeDrag) {
-      const delta = (event.clientY - activeDrag.startY) / Math.max(1, rect.height);
-      const nextCenter = activeDrag.startCenterPrice + delta * activeDrag.cameraHeight;
-      pendingHeatmapDragRef.current = {
-        centerPrice: nextCenter,
-        cameraHeight: activeDrag.cameraHeight
-      };
-      domVisualScheduler.scheduleOnce(`dom-heatmap-drag:${symbolKey}`, () => {
-          const pending = pendingHeatmapDragRef.current;
-          pendingHeatmapDragRef.current = null;
-          if (!pending) return;
-          setHeatmapViewport((current) => normalizeCamera({
-            ...current,
-            cameraCenterPrice: pending.centerPrice,
-            cameraHeight: pending.cameraHeight,
-            mode: "manual"
-          }, macroRange));
-      }, 2);
-      setDomHover(null);
-      return;
-    }
+    if (!activeDrag) return false;
+    const delta = (event.clientY - activeDrag.startY) / Math.max(1, rect.height);
+    const nextCenter = activeDrag.startCenterPrice + delta * activeDrag.cameraHeight;
+    pendingHeatmapDragRef.current = {
+      centerPrice: nextCenter,
+      cameraHeight: activeDrag.cameraHeight
+    };
+    domVisualScheduler.scheduleOnce(`dom-shared-price-drag:${symbolKey}`, () => {
+        const pending = pendingHeatmapDragRef.current;
+        pendingHeatmapDragRef.current = null;
+        if (!pending) return;
+        setHeatmapViewport((current) => normalizeCamera({
+          ...current,
+          cameraCenterPrice: pending.centerPrice,
+          cameraHeight: pending.cameraHeight,
+          mode: "manual"
+        }, macroRange));
+    }, 2);
+    setDomHover(null);
+    return true;
+  }, [macroRange, symbolKey]);
+
+  const handleHeatmapMouseMove = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (moveSharedPriceCamera(event)) return;
+    const rect = event.currentTarget.getBoundingClientRect();
     pendingHoverRef.current = { x: event.clientX - rect.left, y: event.clientY - rect.top, rect };
     domVisualScheduler.scheduleOnce(`dom-heatmap-hover:${symbolKey}`, () => {
       const hover = pendingHoverRef.current;
       pendingHoverRef.current = null;
       if (!hover || domInteractionCoordinator.isActive()) return;
       const startedAt = performance.now();
-      setDomHover(buildHeatmapHoverAt(hover.x, hover.y, hover.rect, heatmapRange, heatmapFrames, macroBands, snapshot.walls));
+      setDomHover(buildHeatmapHoverAt(hover.x, hover.y, hover.rect, sharedPriceCamera, heatmapFrames, macroBands, snapshot.walls));
       domPerformanceTrace.record("tooltip.calculation", performance.now() - startedAt, heatmapFrames.length, 1);
     }, 4);
-  }, [heatmapFrames, heatmapRange, macroBands, macroRange, snapshot.walls, symbolKey]);
+  }, [heatmapFrames, macroBands, moveSharedPriceCamera, sharedPriceCamera, snapshot.walls, symbolKey]);
 
   const handleCvdWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
     if (cvdCandles.length <= 2) return;
@@ -1363,9 +1416,36 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   }, []);
 
   const handleProfileMouseMove = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (moveSharedPriceCamera(event)) return;
     const rect = event.currentTarget.getBoundingClientRect();
-    setDomHover(buildProfileHover(event, rect, heatmapRange, institutionalProfile));
-  }, [heatmapRange, institutionalProfile]);
+    setDomHover(buildProfileHover(event, rect, sharedPriceCamera, institutionalProfile));
+  }, [institutionalProfile, moveSharedPriceCamera, sharedPriceCamera]);
+
+  const handleLadderMouseMove = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (ladderCameraMode === "shared" && moveSharedPriceCamera(event)) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const price = ladderPriceCamera.visiblePriceMax - y / Math.max(1, rect.height) * (ladderPriceCamera.visiblePriceMax - ladderPriceCamera.visiblePriceMin);
+    const bucket = domPriceBucketAt(ladderPriceCamera, price);
+    const row = bucket ? ladderModel.rows.find((candidate) => candidate.key === bucket.key) : null;
+    if (!bucket || !row) return setDomHover(null);
+    const coverageLabel = row.coverage === "live" ? "Live venue book" : row.coverage === "unavailable" ? "Outside live book coverage" : row.coverage.toUpperCase();
+    setDomHover({
+      x,
+      y,
+      priceBucketKey: bucket.key,
+      title: "PRICE BUCKET",
+      lines: [
+        `${formatPrice(bucket.low)} - ${formatPrice(bucket.high)}`,
+        `Live bid ${row.coverage === "live" ? formatDomLadderQuantity(row, "bid", ladderDisplayUnits === "notional" ? 0 : 3, ladderDisplayUnits) : "unavailable"} ${ladderUnitLabel(ladderDisplayUnits, marketSymbol)}`,
+        `Live ask ${row.coverage === "live" ? formatDomLadderQuantity(row, "ask", ladderDisplayUnits === "notional" ? 0 : 3, ladderDisplayUnits) : "unavailable"} ${ladderUnitLabel(ladderDisplayUnits, marketSymbol)}`,
+        ...(ladderShowNetDepth ? [`Net depth ${formatLadderNetDepth(row.netDepth, row.centerPrice, ladderDisplayUnits)} ${ladderUnitLabel(ladderDisplayUnits, marketSymbol)}`] : []),
+        row.wall ? `IMM ${row.wall.side} wall / ${row.wall.persistencePct.toFixed(0)}% persistence` : "IMM wall none",
+        coverageLabel
+      ]
+    });
+  }, [ladderCameraMode, ladderDisplayUnits, ladderModel.rows, ladderPriceCamera, ladderShowNetDepth, marketSymbol, moveSharedPriceCamera]);
 
   useEffect(() => {
     const clearDrag = () => {
@@ -1468,12 +1548,6 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     });
   }, [cvdData, exchangeLabel, executionStatus, heatmapRange, lastPrice, macroBands, marketSymbol, settings, snapshot, windowMode]);
 
-  const ladderRowCount = settings.mode === "scalper" ? 36 : settings.mode === "macro" ? 48 : 40;
-  const ladderModel = useMemo(() => buildDomLadderModel(ladderSnapshot, ladderRowCount), [ladderRowCount, ladderSnapshot]);
-  const priceRows = ladderModel.rows;
-  const currentLadderPrice = ladderSnapshot.midPrice ?? ladderSnapshot.lastPrice ?? lastPrice ?? midpoint(heatmapRange);
-  const priceRowsAbove = priceRows.filter((row) => row.price > currentLadderPrice);
-  const priceRowsBelow = priceRows.filter((row) => row.price <= currentLadderPrice);
   const panelHeaderProps = (panelId: DomPanelId) => ({
     panelId,
     panel: panelRegistry.panels[panelId],
@@ -1491,6 +1565,13 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     onCollapse: () => setLayout((current) => patchDomPanelLayout(current, panelId, { collapsed: !current.panelStates[panelId].collapsed })),
     onMaximize: () => setLayout((current) => maximizeDomPanel(current, current.maximizedPanel === panelId ? null : panelId))
   });
+  const ladderLabelStride = ladderModel.rows.length > 72 ? 4 : ladderModel.rows.length > 48 ? 3 : ladderModel.rows.length > 36 ? 2 : 1;
+  const ladderCoverageTop = ladderModel.coverage.max === null ? null : domPriceToTopPct(ladderPriceCamera, ladderModel.coverage.max);
+  const ladderCoverageBottom = ladderModel.coverage.min === null ? null : domPriceToTopPct(ladderPriceCamera, ladderModel.coverage.min);
+  const showLadderCoverage = booleanSetting(ladderPanelValues, "showLiveCoverage", true);
+  const showWallConfluence = booleanSetting(ladderPanelValues, "showWallConfluence", true);
+  const ladderShared = ladderCameraMode === "shared";
+  const ladderUnit = ladderUnitLabel(ladderDisplayUnits, marketSymbol);
 
   if (windowMode === "detached-browser") {
     return (
@@ -1637,61 +1718,76 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             style={{ gridTemplateColumns: upperColumns }}
           >
           <section className={panelLayoutClass("ladder", "dom-pro-ladder")}>
-            <PanelTitle title="Aggregated DOM Ladder" status={ladderSnapshot.statusMessage} {...panelHeaderProps("ladder")} />
-            {ladderSnapshot.status === "awaiting-book" ? <EmptyState text="Awaiting live orderbook stream." /> : (
-              <>
-                <div className="dom-pro-ladder-head"><span>Price ({marketSymbol.quoteAsset})</span><span>Bid Size ({marketSymbol.baseAsset})</span><span>Ask Size ({marketSymbol.baseAsset})</span></div>
-                <div className="dom-pro-ladder-book">
-                <div className="dom-pro-ladder-rows upper">
-                  {priceRowsAbove.map((row) => (
-                    <div className={`dom-pro-ladder-row ${row.isCurrentPrice ? "current" : ""} ${row.isBestBid ? "best-bid" : ""} ${row.isBestAsk ? "best-ask" : ""}`} key={row.price}>
-                      <span>{formatPrice(row.price)}</span>
-                      <span>{row.bidSize > 0 ? formatSize(row.bidSize) : "--"}</span>
-                      <span className="red">{row.askSize > 0 ? formatSize(row.askSize) : "--"}</span>
-                      <i className="bid-depth" style={{ transform: `scaleX(${row.bidDepth})` }} />
-                      <i className="ask-depth" style={{ transform: `scaleX(${row.askDepth})` }} />
-                    </div>
-                  ))}
+            <PanelTitle title="Aggregated DOM Ladder" status={`${ladderShared ? "SHARED" : ladderCameraMode.toUpperCase()} / ${ladderModel.coverage.state.toUpperCase()} ${ladderModel.coverage.subscribedDepth ?? Math.max(ladderModel.coverage.bidLevels, ladderModel.coverage.askLevels)}L`} {...panelHeaderProps("ladder")} />
+            <div className="dom-pro-ladder-head"><span>Price ({marketSymbol.quoteAsset})</span><span>Bid Size ({ladderUnit})</span><span>Ask Size ({ladderUnit})</span></div>
+            <div
+              className={`dom-pro-ladder-book shared-camera ${ladderShared ? "is-shared" : "is-independent"}`}
+              data-camera-version={ladderPriceCamera.version}
+              data-camera-min={ladderPriceCamera.visiblePriceMin}
+              data-camera-max={ladderPriceCamera.visiblePriceMax}
+              data-bucket-size={ladderPriceCamera.bucketSize}
+              data-current-price-top={domPriceToTopPct(ladderPriceCamera, ladderSnapshot.lastPrice ?? ladderPriceCamera.centerPrice)}
+              onWheel={ladderShared ? handleHeatmapWheel : undefined}
+              onMouseDown={ladderShared ? handleHeatmapMouseDown : undefined}
+              onMouseMove={handleLadderMouseMove}
+              onMouseLeave={() => setDomHover(null)}
+              onDoubleClick={ladderShared ? centerMarketCamera : undefined}
+            >
+              {showLadderCoverage && ladderCoverageTop !== null && ladderCoverageBottom !== null && (
+                <div className="dom-pro-ladder-coverage" style={{ top: `${ladderCoverageTop}%`, height: `${Math.max(0.35, ladderCoverageBottom - ladderCoverageTop)}%` }} aria-hidden="true" />
+              )}
+              {ladderModel.rows.map((row, index) => {
+                const showValues = index % ladderLabelStride === 0 || row.totalSize > 0 || row.isCurrentPrice || row.wall !== null;
+                return (
+                  <div
+                    className={`dom-pro-ladder-row shared-row ${row.coverage} ${ladderCoverageMode === "dim" && row.coverage === "unavailable" ? "dimmed" : ""} ${row.isCurrentPrice ? "current" : ""} ${row.isBestBid ? "best-bid" : ""} ${row.isBestAsk ? "best-ask" : ""} ${domHover?.priceBucketKey === row.key ? "hovered" : ""} ${row.wall && showWallConfluence ? `wall-confluence ${row.wall.side}` : ""}`}
+                    key={row.key}
+                    data-bucket-key={row.key}
+                    data-price-low={row.priceLow}
+                    data-price-high={row.priceHigh}
+                    data-coverage={row.coverage}
+                    data-bid-size={row.bidSize}
+                    data-ask-size={row.askSize}
+                    style={{ top: `${row.topPct}%`, height: `${row.heightPct}%` }}
+                  >
+                    <span>{showValues ? formatPrice(row.centerPrice) : ""}</span>
+                    <span>{showValues ? formatDomLadderQuantity(row, "bid", ladderDisplayUnits === "notional" ? 0 : 3, ladderDisplayUnits) : ""}</span>
+                    <span className="red">{showValues ? formatDomLadderQuantity(row, "ask", ladderDisplayUnits === "notional" ? 0 : 3, ladderDisplayUnits) : ""}</span>
+                    <i className="bid-depth" style={{ transform: `scaleX(${row.bidDepth})` }} />
+                    <i className="ask-depth" style={{ transform: `scaleX(${row.askDepth})` }} />
+                    {row.wall && showWallConfluence && <mark title={`${row.wall.side.toUpperCase()} wall / ${row.wall.persistencePct.toFixed(0)}% persistence`}>{row.wall.side === "buy" ? "B" : "S"}</mark>}
+                  </div>
+                );
+              })}
+              {ladderSnapshot.lastPrice !== null && (
+                <div className="dom-pro-ladder-current-line" style={{ top: `${domPriceToTopPct(ladderPriceCamera, ladderSnapshot.lastPrice)}%` }}>
+                  <b>{formatPrice(ladderSnapshot.lastPrice)}</b><span>Spread {formatPrice(ladderSnapshot.spread ?? 0)}</span>
                 </div>
-                <div className="dom-pro-mid">
-                  <b>{formatPrice(ladderSnapshot.lastPrice)}</b>
-                  <span>Spread {formatPrice(ladderSnapshot.spread ?? 0)}</span>
-                  <em>Mid {formatPrice(ladderSnapshot.midPrice)}</em>
-                </div>
-                <div className="dom-pro-ladder-rows lower">
-                  {priceRowsBelow.map((row) => (
-                    <div className={`dom-pro-ladder-row ${row.isCurrentPrice ? "current" : ""} ${row.isBestBid ? "best-bid" : ""} ${row.isBestAsk ? "best-ask" : ""}`} key={row.price}>
-                      <span>{formatPrice(row.price)}</span>
-                      <span>{row.bidSize > 0 ? formatSize(row.bidSize) : "--"}</span>
-                      <span className="red">{row.askSize > 0 ? formatSize(row.askSize) : "--"}</span>
-                      <i className="bid-depth" style={{ transform: `scaleX(${row.bidDepth})` }} />
-                      <i className="ask-depth" style={{ transform: `scaleX(${row.askDepth})` }} />
-                    </div>
-                  ))}
-                </div>
-                </div>
-              </>
-            )}
+              )}
+              {showLadderCoverage && <div className="dom-pro-ladder-coverage-label">LIVE BOOK {formatPrice(ladderModel.coverage.min)} - {formatPrice(ladderModel.coverage.max)} · {ladderModel.coverage.bidLevels}B/{ladderModel.coverage.askLevels}A</div>}
+              {domHover && <HoverTooltip hover={domHover} />}
+            </div>
           </section>
 
           <section className={panelLayoutClass("volume-profile", "dom-pro-profile")}>
             <PanelTitle title="Volume Profile" status="ESTIMATED / VISIBLE RANGE" {...panelHeaderProps("volume-profile")} />
             {!settings.showVolumeProfile ? <EmptyState text="Volume profile hidden in DOM settings." /> : institutionalProfile.length === 0 ? <EmptyState text="Awaiting live orderbook or historical candles." /> : (
-                  <div className="dom-pro-profile-scale" onMouseMove={handleProfileMouseMove} onMouseLeave={() => setDomHover(null)} onDoubleClick={centerMarketCamera}>
+                  <div className="dom-pro-profile-scale shared-camera" data-camera-version={sharedPriceCamera.version} data-camera-min={sharedPriceCamera.visiblePriceMin} data-camera-max={sharedPriceCamera.visiblePriceMax} data-bucket-size={sharedPriceCamera.bucketSize} data-current-price-top={domPriceToTopPct(sharedPriceCamera, snapshot.lastPrice ?? lastPrice)} onWheel={handleHeatmapWheel} onMouseDown={handleHeatmapMouseDown} onMouseMove={handleProfileMouseMove} onMouseLeave={() => setDomHover(null)} onDoubleClick={centerMarketCamera}>
                 <div className="dom-pro-profile-axis">
-                  {buildPriceScale(heatmapRange).map((price) => <span key={price} style={{ top: priceToTop(price, heatmapRange) }}>{formatPrice(price)}</span>)}
+                  {buildPriceScale(sharedPriceRange).map((price) => <span key={price} style={{ top: priceToTop(price, sharedPriceRange) }}>{formatPrice(price)}</span>)}
                 </div>
                 <svg className="dom-pro-profile-outline" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                   {profileOutline.area && <polygon points={profileOutline.area} />}
                   {profileOutline.line && <polyline points={profileOutline.line} />}
                 </svg>
                 {institutionalProfile.map((node) => (
-                  <div className={`dom-pro-profile-node ${node.kind} ${node.volume <= 0 ? "empty" : ""}`} key={`${node.price}-${node.kind}`} style={{ top: priceToTop(node.price, heatmapRange) }}>
+                  <div className={`dom-pro-profile-node shared-row ${node.kind} ${node.volume <= 0 ? "empty" : ""} ${domHover?.priceBucketKey === node.key ? "hovered" : ""}`} data-bucket-key={node.key} data-price-low={node.low} data-price-high={node.high} key={node.key} style={{ top: `${node.topPct}%`, height: `${node.heightPct}%` }}>
                     <i style={{ width: `${node.volume <= 0 ? 0 : Math.max(3, node.volume / maxProfileVolume * 100)}%` }} />
                     <span>{formatPrice(node.price)}</span>
                     <b>{node.kind.toUpperCase()}</b>
                   </div>
                 ))}
+                <div className="dom-pro-profile-current-line" style={{ top: `${domPriceToTopPct(sharedPriceCamera, snapshot.lastPrice ?? lastPrice)}%` }} aria-hidden="true" />
                 <div className="dom-pro-profile-legend"><span>POC</span><span>VALUE AREA</span><span>HVN</span><span>LVN</span></div>
               </div>
             )}
@@ -1723,7 +1819,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
               >
                 <DomHeatmapCanvas
                   frames={heatmapFrames}
-                  range={heatmapRange}
+                  camera={sharedPriceCamera}
                   macroBands={macroBands}
                   depthPoints={depthHistory.points}
                   ribbons={heatmapStructureRibbons}
@@ -1731,9 +1827,10 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                   currentPrice={snapshot.lastPrice ?? lastPrice}
                   quality={effectiveVisualQuality}
                   interactionActive={interactionActive}
+                  hoveredBucketKey={domHover?.priceBucketKey}
                 />
                 {domHover && <HoverTooltip hover={domHover} />}
-                <div className="dom-pro-heatmap-footer"><span>{macroStatus}</span><span>{qualityLabel(effectiveVisualQuality)} / {heatmapRange.source.replace("-", " ").toUpperCase()} / {formatCameraZoom(heatmapViewport, macroRange)} / {formatPrice(heatmapRange.min)}-{formatPrice(heatmapRange.max)}</span></div>
+                <div className="dom-pro-heatmap-footer"><span>{macroStatus}</span><span>{qualityLabel(effectiveVisualQuality)} / {sharedPriceRange.source.replace("-", " ").toUpperCase()} / {formatCameraZoom(heatmapViewport, macroRange)} / {formatPrice(sharedPriceRange.min)}-{formatPrice(sharedPriceRange.max)}</span></div>
               </div>
             )}
           </section>
@@ -2388,27 +2485,27 @@ function rangeFromPricePct(price: number, rangePct: number, source: MacroLiquidi
   };
 }
 
-function buildInstitutionalProfile(liveProfile: VolumeProfileNode[], candles: Candle[], range: MacroLiquidityRange): VolumeProfileNode[] {
+function buildInstitutionalProfile(liveProfile: VolumeProfileNode[], candles: Candle[], camera: DomProPriceCamera): SharedVolumeProfileNode[] {
   const historicalSource = candles.slice(-365);
-  const overlappingSource = historicalSource.filter((candle) => candle.high >= range.min && candle.low <= range.max);
-  const source = overlappingSource.length >= 8 ? overlappingSource : historicalSource.filter((candle) => candle.close >= range.min && candle.close <= range.max);
-  const binCount = 128;
-  const step = Math.max((range.max - range.min) / binCount, 0.0001);
-  const bins = Array.from({ length: binCount + 1 }, (_, index) => ({ price: range.min + index * step, volume: 0 }));
+  const overlappingSource = historicalSource.filter((candle) => candle.high >= camera.visiblePriceMin && candle.low <= camera.visiblePriceMax);
+  const source = overlappingSource.length >= 8 ? overlappingSource : historicalSource.filter((candle) => candle.close >= camera.visiblePriceMin && candle.close <= camera.visiblePriceMax);
+  const bins = camera.buckets.map((bucket) => ({ ...bucket, price: bucket.center, volume: 0 }));
 
   for (const candle of source) {
-    const width = Math.max(candle.high - candle.low, step);
+    const width = Math.max(candle.high - candle.low, camera.bucketSize);
     const volume = Math.max(1, candle.volume || 1);
     for (const bin of bins) {
-      if (bin.price < candle.low || bin.price > candle.high) continue;
-      bin.volume += volume / Math.max(1, width / step);
+      const overlap = Math.max(0, Math.min(bin.high, candle.high) - Math.max(bin.low, candle.low));
+      if (overlap <= 0) continue;
+      bin.volume += volume * Math.min(1, overlap / width);
     }
   }
 
   for (const node of liveProfile) {
-    if (node.price < range.min || node.price > range.max || node.volume <= 0) continue;
-    const index = Math.max(0, Math.min(bins.length - 1, Math.round((node.price - range.min) / step)));
-    bins[index].volume += node.volume * Math.max(8, source.length ? 1 : 18);
+    if (node.volume <= 0) continue;
+    const bucket = domPriceBucketAt(camera, node.price);
+    if (!bucket) continue;
+    bins[bucket.index].volume += node.volume * Math.max(8, source.length ? 1 : 18);
   }
 
   const volumes = bins.map((bin) => bin.volume);
@@ -2417,7 +2514,12 @@ function buildInstitutionalProfile(liveProfile: VolumeProfileNode[], candles: Ca
   const avg = positiveVolumes.reduce((sum, value) => sum + value, 0) / Math.max(1, positiveVolumes.length);
   return bins
     .map((bin) => ({
+      key: bin.key,
       price: bin.price,
+      low: bin.low,
+      high: bin.high,
+      topPct: bin.topPct,
+      heightPct: bin.heightPct,
       volume: bin.volume,
       kind: (bin.volume <= 0 ? "lvn" : bin.volume === max ? "poc" : bin.volume > avg * 1.55 ? "hvn" : bin.volume < avg * 0.42 ? "lvn" : "normal") as VolumeProfileNode["kind"]
     }))
@@ -2769,12 +2871,14 @@ function buildHeatmapHoverAt(
   x: number,
   y: number,
   rect: DOMRect,
-  range: MacroLiquidityRange,
+  camera: DomProPriceCamera,
   frames: AggregatedDomSnapshot["heatmap"],
   bands: MacroLiquidityBand[],
   walls: AggregatedDomSnapshot["walls"]
 ): DomHoverInfo {
+  const range = domCameraRange(camera);
   const price = priceFromY(y, rect, range);
+  const bucket = domPriceBucketAt(camera, price);
   const xPct = Math.max(0, Math.min(1, x / Math.max(1, rect.width)));
   const frame = frames[Math.round(xPct * Math.max(0, frames.length - 1))];
   const priceWindow = Math.max((range.max - range.min) * 0.008, 0.00000001);
@@ -2791,8 +2895,9 @@ function buildHeatmapHoverAt(
   return {
     x,
     y,
+    priceBucketKey: bucket?.key,
     title: nearestBand?.label ?? (nearestWall ? `${nearestWall.side.toUpperCase()} WALL` : "LIQUIDITY POINT"),
-    lines
+    lines: bucket ? [`Bucket ${formatPrice(bucket.low)} - ${formatPrice(bucket.high)}`, ...lines] : lines
   };
 }
 
@@ -2837,19 +2942,21 @@ function resolveVisualQuality(mode: DomPerformanceMode, adaptive: DomVisualQuali
   return adaptive;
 }
 
-function buildProfileHover(event: ReactMouseEvent<HTMLDivElement>, rect: DOMRect, range: MacroLiquidityRange, profile: VolumeProfileNode[]): DomHoverInfo {
+function buildProfileHover(event: ReactMouseEvent<HTMLDivElement>, rect: DOMRect, camera: DomProPriceCamera, profile: SharedVolumeProfileNode[]): DomHoverInfo {
   const x = event.clientX - rect.left;
   const y = event.clientY - rect.top;
-  const price = priceFromY(y, rect, range);
+  const price = priceFromY(y, rect, domCameraRange(camera));
+  const bucket = domPriceBucketAt(camera, price);
   const nearest = profile
     .slice()
     .sort((a, b) => Math.abs(a.price - price) - Math.abs(b.price - price))[0];
   return {
     x,
     y,
+    priceBucketKey: bucket?.key,
     title: nearest ? nearest.kind.toUpperCase() : "PROFILE",
     lines: [
-      `Price ${formatPrice(nearest?.price ?? price)}`,
+      bucket ? `Bucket ${formatPrice(bucket.low)} - ${formatPrice(bucket.high)}` : `Price ${formatPrice(nearest?.price ?? price)}`,
       `Volume ${formatCompact(nearest?.volume ?? 0)}`,
       `Node ${nearest?.kind.toUpperCase() ?? "NONE"}`
     ]
@@ -3596,6 +3703,18 @@ function buildExecutionAccount(connection: ConnectionDiagnostics, sync: Exchange
 function formatPrice(value?: number | null) {
   if (!Number.isFinite(value ?? NaN)) return "--";
   return Number(value).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+function ladderUnitLabel(displayUnit: DomLadderDisplayUnit, symbol: MarketSymbol) {
+  if (displayUnit === "notional") return symbol.quoteAsset;
+  if (displayUnit === "contracts") return "CONTRACTS";
+  return symbol.baseAsset;
+}
+
+function formatLadderNetDepth(netDepth: number, centerPrice: number, displayUnit: DomLadderDisplayUnit) {
+  const value = displayUnit === "notional" ? netDepth * centerPrice : netDepth;
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toLocaleString(undefined, { minimumFractionDigits: displayUnit === "notional" ? 0 : 3, maximumFractionDigits: displayUnit === "notional" ? 0 : 3 })}`;
 }
 
 function formatUsd(value?: number | null) {

@@ -58,6 +58,59 @@ try {
   await waitFor(() => cdp.evaluate(`Boolean(document.querySelector(".app-shell"))`), 45_000);
   await cdp.evaluate(`document.querySelector('button[title="Open DOM Pro+"]')?.click()`);
   await waitFor(() => cdp.evaluate(`Boolean(document.querySelector(".dom-pro-window"))`), 20_000);
+  await waitFor(() => cdp.evaluate(`document.querySelectorAll('.dom-pro-ladder-row.shared-row').length >= 12`), 20_000);
+  const readSharedCamera = `(() => {
+    const ladder=document.querySelector('.dom-pro-ladder-book.shared-camera');
+    const profile=document.querySelector('.dom-pro-profile-scale.shared-camera');
+    const heatmap=document.querySelector('.dom-pro-heatmap-layer');
+    const pick=(node)=>node ? {version:node.dataset.cameraVersion,min:Number(node.dataset.cameraMin),max:Number(node.dataset.cameraMax),bucket:Number(node.dataset.bucketSize),currentTop:Number(node.dataset.currentPriceTop)} : null;
+    const rows=[...document.querySelectorAll('.dom-pro-ladder-row.shared-row')];
+    return {ladder:pick(ladder),profile:pick(profile),heatmap:pick(heatmap),rows:rows.length,live:rows.filter((row)=>row.dataset.coverage==='live').length,unavailable:rows.filter((row)=>row.dataset.coverage==='unavailable').length,bid:rows.reduce((sum,row)=>sum+Number(row.dataset.bidSize||0),0),ask:rows.reduce((sum,row)=>sum+Number(row.dataset.askSize||0),0)};
+  })()`;
+  const initialSharedCamera = await cdp.evaluate(readSharedCamera);
+  assertSharedCamera(initialSharedCamera, "initial");
+  if (initialSharedCamera.bid <= 0 || initialSharedCamera.ask <= 0) throw new Error(`Fixture live depth did not reach shared ladder: ${JSON.stringify(initialSharedCamera)}`);
+  await screenshot("shared-follow-near-market.png");
+
+  await cdp.evaluate(`(() => { const button=[...document.querySelectorAll('.dom-pro-horizon-controls button')].find((node)=>node.textContent?.trim()==='+/-5%'); button?.click(); })()`);
+  await sleep(350);
+  const wideSharedCamera = await cdp.evaluate(readSharedCamera);
+  assertSharedCamera(wideSharedCamera, "wide +/-5%");
+  if (wideSharedCamera.unavailable <= 0) throw new Error(`Wide camera did not expose unavailable live-book rows: ${JSON.stringify(wideSharedCamera)}`);
+  await screenshot("shared-wide-5pct-uncovered.png");
+
+  const prePanVersion = wideSharedCamera.ladder.version;
+  const ladderBounds = await cdp.evaluate(`(() => { const rect=document.querySelector('.dom-pro-ladder-book.shared-camera').getBoundingClientRect(); return {x:rect.left+40,y:rect.top+rect.height*.52,endY:rect.top+rect.height*.67}; })()`);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: ladderBounds.x, y: ladderBounds.y, button: "left", buttons: 1, clickCount: 1 });
+  await sleep(80);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: ladderBounds.x, y: ladderBounds.endY, button: "left", buttons: 1 });
+  await sleep(80);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: ladderBounds.x, y: ladderBounds.endY, button: "left", buttons: 0, clickCount: 1 });
+  await sleep(350);
+  const pannedSharedCamera = await cdp.evaluate(readSharedCamera);
+  assertSharedCamera(pannedSharedCamera, "ladder pan");
+  if (pannedSharedCamera.ladder.version === prePanVersion) throw new Error("Ladder pan did not update the shared camera");
+  await screenshot("shared-simultaneous-pan.png");
+
+  const preZoomBucket = pannedSharedCamera.ladder.bucket;
+  await cdp.evaluate(`(() => { const node=document.querySelector('.dom-pro-ladder-book.shared-camera'); const rect=node.getBoundingClientRect(); node.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-120,clientX:rect.left+40,clientY:rect.top+rect.height*.45})); })()`);
+  await sleep(350);
+  const zoomedSharedCamera = await cdp.evaluate(readSharedCamera);
+  assertSharedCamera(zoomedSharedCamera, "ladder zoom");
+  if (!(zoomedSharedCamera.ladder.bucket < preZoomBucket)) throw new Error(`Ladder wheel did not zoom shared buckets: ${preZoomBucket} -> ${zoomedSharedCamera.ladder.bucket}`);
+  await screenshot("shared-simultaneous-zoom.png");
+
+  await cdp.evaluate(`(() => { const button=[...document.querySelectorAll('.dom-pro-horizon-controls button')].find((node)=>node.textContent?.trim()==='+/-20%'); button?.click(); })()`);
+  await sleep(350);
+  const macroSharedCamera = await cdp.evaluate(readSharedCamera);
+  assertSharedCamera(macroSharedCamera, "wide +/-20%");
+  await screenshot("shared-wide-20pct.png");
+
+  await cdp.evaluate(`(() => { const button=[...document.querySelectorAll('.dom-pro-horizon-controls button')].find((node)=>node.textContent?.trim()==='Fit'); button?.click(); })()`);
+  await sleep(350);
+  const fitSharedCamera = await cdp.evaluate(readSharedCamera);
+  assertSharedCamera(fitSharedCamera, "fit");
+  await screenshot("shared-fit-domain.png");
   await screenshot("panel-headers.png");
   const cockpitContract = await cdp.evaluate(`(() => ({ camera:[...document.querySelectorAll('.dom-pro-camera-switches button')].map((node)=>node.textContent.trim()), handles:document.querySelectorAll('.dom-pro-resize-handle').length, orderType:Boolean(document.querySelector('.dom-pro-execution-form select')), tif:Boolean([...document.querySelectorAll('.dom-pro-execution-form span')].find((node)=>node.textContent==='TIF')), allocation:Boolean([...document.querySelectorAll('.dom-pro-equity-allocation span')].find((node)=>node.textContent==='Equity Allocation')) }))()`);
   if (cockpitContract.camera.join("|") !== "Center|Fit|Follow|Explore") throw new Error(`Camera controls are incomplete: ${JSON.stringify(cockpitContract.camera)}`);
@@ -101,8 +154,8 @@ try {
     await cdp.evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", {key:"Escape", bubbles:true}))`);
   }
 
-  writeFileSync(join(output, "summary.json"), `${JSON.stringify({ capturedAt: new Date().toISOString(), viewport: "1920x1080 + 1280x800", panelCogs: labels.length, cockpitContract, presets: presetNames, popovers: labels }, null, 2)}\n`);
-  console.log(`DOM Pro visual regression captured ${labels.length + presetNames.length + 6} snapshots.`);
+  writeFileSync(join(output, "summary.json"), `${JSON.stringify({ capturedAt: new Date().toISOString(), viewport: "1920x1080 + 1280x800", panelCogs: labels.length, cockpitContract, sharedCamera: { initial: initialSharedCamera, wide: wideSharedCamera, pan: pannedSharedCamera, zoom: zoomedSharedCamera, macro: macroSharedCamera, fit: fitSharedCamera }, presets: presetNames, popovers: labels }, null, 2)}\n`);
+  console.log(`DOM Pro visual regression captured ${labels.length + presetNames.length + 12} snapshots.`);
 } finally {
   cdp?.close();
   browser?.kill();
@@ -141,3 +194,12 @@ async function waitForHttp(url, timeoutMs) {
 
 function safeRemove(path) { try { rmSync(path, { recursive: true, force: true, maxRetries: 3 }); } catch {} }
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+function assertSharedCamera(contract, label) {
+  if (!contract?.ladder || !contract.profile || !contract.heatmap) throw new Error(`${label} camera consumer missing: ${JSON.stringify(contract)}`);
+  const values = [contract.ladder, contract.profile, contract.heatmap];
+  if (!values.every((value) => value.version === values[0].version && value.min === values[0].min && value.max === values[0].max && value.bucket === values[0].bucket && Math.abs(value.currentTop - values[0].currentTop) < 0.000001)) {
+    throw new Error(`${label} camera parity failed: ${JSON.stringify(contract)}`);
+  }
+  if (contract.rows < 12 || contract.rows > 120) throw new Error(`${label} row virtualization failed: ${JSON.stringify(contract)}`);
+}

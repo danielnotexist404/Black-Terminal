@@ -83,6 +83,9 @@ export type OrderBookSnapshot = {
   time: number;
   bids: OrderBookLevel[];
   asks: OrderBookLevel[];
+  subscribedDepth?: number;
+  updateId?: number;
+  sequence?: number;
 };
 
 export type TickerSnapshot = {

@@ -9824,15 +9824,15 @@ body.dom-pro-resize-active {
 }
 
 .dom-pro-cvd-card .cvd-delta-bar.positive {
-  fill: rgba(44, 156, 80, 0.46);
-  stroke: rgba(65, 214, 110, 0.42);
+  fill: rgba(226, 230, 238, 0.38);
+  stroke: rgba(255, 255, 255, 0.64);
   stroke-width: 0.22;
   vector-effect: non-scaling-stroke;
 }
 
 .dom-pro-cvd-card .cvd-delta-bar.negative {
-  fill: rgba(201, 35, 50, 0.48);
-  stroke: rgba(255, 47, 61, 0.5);
+  fill: rgba(138, 0, 16, 0.62);
+  stroke: rgba(220, 0, 28, 0.78);
   stroke-width: 0.22;
   vector-effect: non-scaling-stroke;
 }
@@ -9844,13 +9844,13 @@ body.dom-pro-resize-active {
 }
 
 .dom-pro-cvd-card .cvd-structure-line.buy {
-  stroke: rgba(64, 193, 94, 0.9);
-  filter: drop-shadow(0 0 2px rgba(47, 191, 83, 0.22));
+  stroke: rgba(242, 244, 248, 0.94);
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.18));
 }
 
 .dom-pro-cvd-card .cvd-structure-line.sell {
-  stroke: rgba(255, 48, 61, 0.92);
-  filter: drop-shadow(0 0 2px rgba(255, 0, 22, 0.24));
+  stroke: rgba(205, 0, 24, 0.98);
+  filter: drop-shadow(0 0 2px rgba(185, 0, 22, 0.38));
 }
 
 .dom-pro-cvd-card .cvd-time-label {

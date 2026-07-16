@@ -106,3 +106,4 @@ The critical chart-coordinate and automatic 20,000-bar initialization contract i
 - `DOM_PRO_SHARED_PRICE_CAMERA.md` - authoritative vertical domain and exact cross-panel bucket geometry.
 - `DOM_PRO_AGGREGATED_LADDER_SYNC.md` - live depth aggregation, feed ownership and synchronization evidence.
 - `DOM_PRO_LIVE_DEPTH_COVERAGE.md` - live, unavailable, stale and offline depth semantics.
+- `DOM_PRO_STRUCTURAL_CVD.md` - long-horizon OHLCV pressure model, rolling buy/sell structure, camera stability and source truth.

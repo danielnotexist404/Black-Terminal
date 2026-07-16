@@ -11,7 +11,7 @@ import type { BlackCoreModuleMode } from "../../../core/modules/moduleRegistry";
 import { submitOrder } from "../../../execution/executionEngine";
 import type { MarginMode, OrderSide, OrderType, TimeInForce, TriggerSource, VenueStrategyParameters } from "../../../execution/types";
 import { blackCoreMarketDataEngine } from "../../../market-data/engine/marketDataEngine";
-import type { MarketKind, MarketSymbol } from "../../../market-data/types";
+import type { MarketKind, MarketSymbol, Timeframe } from "../../../market-data/types";
 import { blackCorePerformanceMonitor } from "../../../performance/performanceMonitor";
 import type { PortfolioAccount } from "../../../portfolio/types";
 import { syncExchangeAccountViaApi, type ExchangeAccountSyncPayload } from "../../../portfolio/portfolioApiClient";
@@ -65,8 +65,15 @@ import {
 import { availableDomOrderTypes, availableDomTimeInForce, DOM_EQUITY_ALLOCATION_MARKERS, nearestLeverageOptions } from "../domExecutionPresentation";
 import { placePanelPopover } from "../domPanelPopover";
 import {
+  buildStructuralCvdFromCandles,
+  buildStructuralCvdFromTrades,
+  structuralCvdRange,
+  structuralCvdStats,
+  type StructuralCvdCumulation,
+  type StructuralCvdPoint
+} from "../domStructuralCvd";
+import {
   aggregateTradeTape,
-  bucketAndSmoothCvd,
   clipAndSmoothSeries,
   MetricsStabilizer,
   PersistentDepthProcessor,
@@ -164,14 +171,6 @@ type FlowPoint = {
   bidRemoved: number;
   askRemoved: number;
   net: number;
-};
-
-type CvdCandle = {
-  time: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
 };
 
 type HeatmapStructureRibbon = {
@@ -383,6 +382,8 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const [executionStatus, setExecutionStatus] = useState("");
   const [macroCandles, setMacroCandles] = useState<Candle[]>(() => blackCoreMarketDataEngine.cache.getCandles(marketSymbol, "1d"));
   const [macroStatus, setMacroStatus] = useState("HISTORICAL DEPTH");
+  const [cvdHistoryCandles, setCvdHistoryCandles] = useState<Candle[]>(() => blackCoreMarketDataEngine.cache.getCandles(marketSymbol, "4h"));
+  const [cvdHistoryStatus, setCvdHistoryStatus] = useState("LOADING STRUCTURAL FLOW");
   const [depthHistoryRevision, setDepthHistoryRevision] = useState(0);
   const [immStatus, setImmStatus] = useState<IMMStatusPayload | null>(null);
   const [interactionActive, setInteractionActive] = useState(false);
@@ -968,6 +969,53 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     depthSmoothingLevels: numberSetting(depthPanelValues, "bucketAggregation", settings.depthSmoothingLevels),
     depthCurvePower: numberSetting(depthPanelValues, "curvePower", settings.depthCurvePower)
   }), [cvdPanelValues, depthPanelValues, settings]);
+  const cvdSourceTimeframe = stringSetting(cvdPanelValues, "sourceTimeframe", "4h") as Timeframe;
+  const cvdLookbackBars = numberSetting(cvdPanelValues, "lookbackBars", 240);
+  const cvdCumulationType = stringSetting(cvdPanelValues, "cumulationType", "sum") as StructuralCvdCumulation;
+  const cvdCumulationLength = numberSetting(cvdPanelValues, "cumulationLength", 14);
+  const cvdNormalizeMovingAverages = booleanSetting(cvdPanelValues, "normalizeMovingAverages", true);
+  const cvdScaleFactor = numberSetting(cvdPanelValues, "scaleFactor", 1);
+  const cvdOutlierPercentile = numberSetting(cvdPanelValues, "outlierPercentile", 99);
+
+  useEffect(() => {
+    let cancelled = false;
+    const cached = blackCoreMarketDataEngine.cache.getCandles(marketSymbol, cvdSourceTimeframe).slice(-cvdLookbackBars);
+    if (cached.length) {
+      setCvdHistoryCandles(cached);
+      setCvdHistoryStatus(`ESTIMATED OHLCV / ${cached.length} BARS`);
+    } else {
+      setCvdHistoryCandles([]);
+      setCvdHistoryStatus("LOADING STRUCTURAL FLOW");
+    }
+    const adapter = blackCoreMarketDataEngine.getAdapter(marketSymbol.exchange);
+    const load = async () => {
+      try {
+        const candles = await adapter.getHistoricalCandles({
+          exchange: marketSymbol.exchange,
+          symbol: marketSymbol.rawSymbol,
+          marketKind: marketSymbol.marketKind,
+          timeframe: cvdSourceTimeframe,
+          limit: Math.min(1000, Math.max(48, cvdLookbackBars))
+        });
+        if (cancelled) return;
+        const bounded = candles.slice(-cvdLookbackBars);
+        setCvdHistoryCandles((current) => sameCandleSeries(current, bounded) ? current : bounded);
+        setCvdHistoryStatus(bounded.length ? `ESTIMATED OHLCV / ${bounded.length} BARS` : "CLASSIFIED TAPE FALLBACK");
+      } catch {
+        if (cancelled) return;
+        const fallback = blackCoreMarketDataEngine.cache.getCandles(marketSymbol, cvdSourceTimeframe).slice(-cvdLookbackBars);
+        setCvdHistoryCandles((current) => sameCandleSeries(current, fallback) ? current : fallback);
+        setCvdHistoryStatus(fallback.length ? `CACHED OHLCV / ${fallback.length} BARS` : "CLASSIFIED TAPE FALLBACK");
+      }
+    };
+    void load();
+    const refreshMs = Math.max(60_000, numberSetting(cvdPanelValues, "updateIntervalMs", 5000) * 12);
+    const timer = window.setInterval(load, refreshMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [cvdLookbackBars, cvdPanelValues, cvdSourceTimeframe, marketSymbol]);
 
   useEffect(() => {
     const panelUpdateStartedAt = performance.now();
@@ -1027,7 +1075,6 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const profileSnapshot = panelSnapshots["volume-profile"];
   const heatmapSnapshot = panelSnapshots["liquidity-heatmap"];
   const ladderSnapshot = panelSnapshots.ladder;
-  const cvdData = cvdSnapshot.cvdSeries;
   const macroBands = useMemo(
     () => settings.showMacroRadar ? buildMacroLiquidityBands(macroCandles, snapshot.lastPrice ?? lastPrice, settings) : [],
     [lastPrice, macroCandles, settings.macroBandCount, settings.macroLookbackDays, settings.showMacroRadar, snapshot.lastPrice]
@@ -1107,15 +1154,22 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     () => buildDepthCoverageGaps(sharedPriceRange, heatmapFrames, macroBands, heatmapStructureRibbons, depthHistory.points, snapshot.lastPrice ?? lastPrice),
     [depthHistory.points, heatmapFrames, heatmapStructureRibbons, lastPrice, macroBands, sharedPriceRange, snapshot.lastPrice]
   );
-  const smoothedCvdData = useMemo(() => traceCalculation("panel.cvd_smoothing", cvdData.length, () => buildSmoothedCvd(cvdData, analyticalSettings)), [analyticalSettings, cvdData]);
-  const cvdCandles = useMemo(() => traceCalculation("panel.cvd_candles", smoothedCvdData.length + cvdSnapshot.trades.length, () => buildCvdCandles(smoothedCvdData, analyticalSettings, cvdSnapshot.trades)), [analyticalSettings, cvdSnapshot.trades, smoothedCvdData]);
-  const cvdStatsData = useMemo(
-    () => smoothedCvdData.length >= 2 ? smoothedCvdData : cvdCandles.map((candle) => ({ time: candle.time, value: candle.close })),
-    [cvdCandles, smoothedCvdData]
-  );
-  const cvdStats = useMemo(() => buildCvdStats(cvdSnapshot.trades, cvdStatsData, analyticalSettings), [analyticalSettings, cvdSnapshot.trades, cvdStatsData]);
-  const cvdCamera = useMemo(() => resolveCvdCamera(cvdViewport, cvdCandles.length, analyticalSettings), [analyticalSettings, cvdCandles.length, cvdViewport]);
-  const cvdVisibleCandles = useMemo(() => cvdCandles.slice(cvdCamera.start, cvdCamera.end), [cvdCamera.end, cvdCamera.start, cvdCandles]);
+  const cvdStructure = useMemo(() => traceCalculation("panel.cvd_structure", cvdHistoryCandles.length + cvdSnapshot.trades.length, () => {
+    const options = {
+      cumulationType: cvdCumulationType,
+      cumulationLength: cvdCumulationLength,
+      normalizeMovingAverages: cvdNormalizeMovingAverages,
+      scaleFactor: cvdScaleFactor,
+      outlierPercentile: cvdOutlierPercentile
+    };
+    if (cvdHistoryCandles.length >= Math.min(12, cvdCumulationLength)) return buildStructuralCvdFromCandles(cvdHistoryCandles, options);
+    return buildStructuralCvdFromTrades(cvdSnapshot.trades, timeframeSeconds(cvdSourceTimeframe), options);
+  }), [cvdCumulationLength, cvdCumulationType, cvdHistoryCandles, cvdNormalizeMovingAverages, cvdOutlierPercentile, cvdScaleFactor, cvdSnapshot.trades, cvdSourceTimeframe]);
+  const cvdData = useMemo(() => cvdStructure.map((point) => ({ time: point.time, value: point.cumulativeDelta })), [cvdStructure]);
+  const cvdStats = useMemo(() => structuralCvdStats(cvdStructure, numberSetting(cvdPanelValues, "trendThreshold", 0.08)), [cvdPanelValues, cvdStructure]);
+  const cvdCamera = useMemo(() => resolveCvdCamera(cvdViewport, cvdStructure.length, analyticalSettings), [analyticalSettings, cvdStructure.length, cvdViewport]);
+  const cvdVisibleStructure = useMemo(() => cvdStructure.slice(cvdCamera.start, cvdCamera.end), [cvdCamera.end, cvdCamera.start, cvdStructure]);
+  const cvdValueDomain = useMemo(() => structuralCvdRange(cvdVisibleStructure, cvdOutlierPercentile), [cvdOutlierPercentile, cvdVisibleStructure]);
   const cvdCameraLabel = cvdCamera.total > 0 ? `${cvdCamera.start + 1}-${cvdCamera.end} / ${cvdCamera.total}` : "No tape";
   const depthChartRange = useMemo(() => resolveDepthChartRange(depthSnapshot), [depthSnapshot]);
   const structuralDepth = useMemo(() => ({
@@ -1371,25 +1425,25 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   }, [heatmapFrames, macroBands, moveSharedPriceCamera, sharedPriceCamera, snapshot.walls, symbolKey]);
 
   const handleCvdWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
-    if (cvdCandles.length <= 2) return;
+    if (cvdStructure.length <= 2) return;
     event.preventDefault();
     domInteractionCoordinator.begin();
     domInteractionCoordinator.endAfter();
     const rect = event.currentTarget.getBoundingClientRect();
     const anchor = Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width)));
-    const current = resolveCvdCamera(cvdViewport, cvdCandles.length, settings);
+    const current = resolveCvdCamera(cvdViewport, cvdStructure.length, analyticalSettings);
     const factor = event.deltaY > 0 ? 1.24 : 1 / 1.24;
     const nextVisible = clampCvdVisibleCount(Math.round(current.visibleCount * factor), current.total);
     const anchorIndex = current.start + anchor * current.visibleCount;
     const nextStart = clampCvdStart(Math.round(anchorIndex - anchor * nextVisible), current.total, nextVisible);
     setCvdViewport({ startIndex: nextStart, visibleCount: nextVisible, followLatest: false });
-  }, [cvdCandles.length, cvdViewport, settings]);
+  }, [analyticalSettings, cvdStructure.length, cvdViewport]);
 
   const handleCvdMouseDown = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || cvdCandles.length <= 2) return;
+    if (event.button !== 0 || cvdStructure.length <= 2) return;
     domInteractionCoordinator.begin();
     const rect = event.currentTarget.getBoundingClientRect();
-    const current = resolveCvdCamera(cvdViewport, cvdCandles.length, settings);
+    const current = resolveCvdCamera(cvdViewport, cvdStructure.length, analyticalSettings);
     cvdDragStartRef.current = {
       x: event.clientX,
       startIndex: current.start,
@@ -1397,7 +1451,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
       total: current.total,
       width: Math.max(1, rect.width)
     };
-  }, [cvdCandles.length, cvdViewport, settings]);
+  }, [analyticalSettings, cvdStructure.length, cvdViewport]);
 
   const handleCvdMouseMove = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     const activeDrag = cvdDragStartRef.current;
@@ -1413,14 +1467,6 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   }, []);
 
   const handleCvdDoubleClick = useCallback(() => {
-    setCvdViewport(defaultCvdCamera());
-  }, []);
-
-  const fitCvdCamera = useCallback(() => {
-    setCvdViewport({ startIndex: 0, visibleCount: Math.max(1, cvdCandles.length), followLatest: false });
-  }, [cvdCandles.length]);
-
-  const liveCvdCamera = useCallback(() => {
     setCvdViewport(defaultCvdCamera());
   }, []);
 
@@ -1911,28 +1957,33 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
 
           {settings.showCvd && (
             <section className={panelLayoutClass("heuristic-cvd", "dom-pro-cvd")}>
-              <PanelTitle title="Heuristic CVD" status={`${analyticalSettings.cvdHorizon.toUpperCase()} / ${cvdStats.trend.toUpperCase()}`} {...panelHeaderProps("heuristic-cvd")} />
+              <PanelTitle title="Structural CVD" status={`${cvdSourceTimeframe.toUpperCase()} / ${cvdStats.trend.toUpperCase()}`} {...panelHeaderProps("heuristic-cvd")} />
               <div className="dom-pro-cvd-card">
-                {cvdCandles.length === 0 ? <EmptyState text="Trade stream unavailable for this venue." /> : (
+                {cvdStructure.length === 0 ? <EmptyState text="Historical OHLCV and classified trade flow are unavailable." /> : (
                   <>
                     <div className="dom-pro-cvd-stats">
-                      <span>Current <b>{formatSize(cvdStats.current)}</b></span>
-                      <span>Session <b>{formatSize(cvdStats.sessionDelta)}</b></span>
+                      <span>Delta <b>{formatSignedCompact(cvdStats.current)}</b></span>
+                      <span>Change <b>{formatSignedCompact(cvdStats.windowDelta)}</b></span>
                       <span>Buy <b>{cvdStats.buyPct.toFixed(0)}%</b></span>
                       <span>Sell <b>{cvdStats.sellPct.toFixed(0)}%</b></span>
-                      <span>Divergence <b>WATCH</b></span>
+                      <span>Source <b>{cvdHistoryCandles.length ? "EST OHLCV" : "LIVE TAPE"}</b></span>
                     </div>
                     <div className="dom-pro-cvd-chart" onWheel={handleCvdWheel} onMouseDown={handleCvdMouseDown} onMouseMove={handleCvdMouseMove} onMouseUp={handleCvdMouseUp} onMouseLeave={handleCvdMouseUp} onDoubleClick={handleCvdDoubleClick}>
-                      <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Heuristic cumulative volume delta">
-                        {buildCvdAxis(cvdVisibleCandles).map((level) => (
-                          <g key={level.label}><line className="cvd-grid" x1="0" x2="100" y1={level.y} y2={level.y} /><text x="1.5" y={Math.max(7, level.y - 1.5)}>{level.label}</text></g>
+                      <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Structural cumulative volume delta">
+                        {buildStructuralCvdAxis(cvdValueDomain).map((level) => (
+                          <g key={level.label}><line className={level.value === 0 ? "cvd-zero" : "cvd-grid"} x1="5" x2="98" y1={level.y} y2={level.y} /><text x="97" y={Math.max(6, level.y - 1.4)} textAnchor="end">{level.label}</text></g>
                         ))}
-                        {cvdVisibleCandles.map((candle, index) => {
-                          const geometry = cvdCandleGeometry(candle, index, cvdVisibleCandles);
-                          return <g key={`${candle.time}-${index}`} className={candle.close >= candle.open ? "up" : "down"}><line className="wick" x1={geometry.x} x2={geometry.x} y1={geometry.highY} y2={geometry.lowY} /><rect className="body" x={geometry.bodyX} y={geometry.bodyY} width={geometry.bodyWidth} height={geometry.bodyHeight} /></g>;
+                        {booleanSetting(cvdPanelValues, "showDeltaBars", true) && cvdVisibleStructure.map((point, index) => {
+                          const geometry = structuralCvdBarGeometry(point, index, cvdVisibleStructure, cvdValueDomain);
+                          return <rect key={`${point.time}-${index}`} className={`cvd-delta-bar ${point.cumulativeDelta >= 0 ? "positive" : "negative"}`} x={geometry.x} y={geometry.y} width={geometry.width} height={geometry.height}><title>{formatCvdTimestamp(point.time)} · rolling {formatSignedCompact(point.cumulativeDelta)} · bar {formatSignedCompact(point.delta)}</title></rect>;
                         })}
-                        <polyline className="cvd-close-line" points={buildCvdClosePath(cvdVisibleCandles)} />
+                        {booleanSetting(cvdPanelValues, "showBuySellEnvelope", true) && <>
+                          <path className="cvd-structure-line buy" d={buildStructuralCvdStepPath(cvdVisibleStructure, "cumulativeBuy", cvdValueDomain)} />
+                          <path className="cvd-structure-line sell" d={buildStructuralCvdStepPath(cvdVisibleStructure, "cumulativeSell", cvdValueDomain)} />
+                        </>}
+                        {buildStructuralCvdTimeAxis(cvdVisibleStructure).map((label) => <text className="cvd-time-label" key={`${label.time}-${label.x}`} x={label.x} y="98" textAnchor={label.anchor}>{label.label}</text>)}
                       </svg>
+                      <div className="dom-pro-cvd-source"><span>{cvdHistoryStatus}</span><span>{cvdCameraLabel}</span></div>
                     </div>
                   </>
                 )}
@@ -2711,7 +2762,7 @@ function resolveCvdCamera(camera: CvdViewportState, total: number, settings: Dom
   if (total <= 0) {
     return { start: 0, end: 0, visibleCount: 0, total: 0, followLatest: camera.followLatest };
   }
-  const preferredVisible = camera.visibleCount ?? settings.cvdVisibleCandles ?? cvdTargetCandles(settings);
+  const preferredVisible = camera.visibleCount ?? settings.cvdVisibleCandles ?? 120;
   const visibleCount = clampCvdVisibleCount(preferredVisible, total);
   const maxStart = Math.max(0, total - visibleCount);
   const start = camera.followLatest || camera.startIndex === null
@@ -3015,234 +3066,92 @@ function horizonSeconds(horizon: DomHeatmapHorizon | DomCvdHorizon) {
   }
 }
 
-function buildSmoothedCvd(points: Array<{ time: number; value: number }>, settings: DomSettings) {
-  if (points.length === 0) return [];
-  const now = Math.max(Date.now() / 1000, ...points.map((point) => normalizeEpochSeconds(point.time)));
-  const cutoff = now - horizonSeconds(settings.cvdHorizon);
-  const ordered = points
-    .map((point) => ({ time: normalizeEpochSeconds(point.time), value: point.value }))
-    .filter((point) => point.time >= cutoff)
-    .sort((a, b) => a.time - b.time);
-  const source = ordered.length ? ordered : points.slice(-180).map((point) => ({ time: normalizeEpochSeconds(point.time), value: point.value }));
-  return bucketAndSmoothCvd(source, Math.max(1, settings.cvdSampleIntervalSec), settings.cvdSmoothingLength);
+function buildStructuralCvdAxis(range: { min: number; max: number }) {
+  const half = range.max / 2;
+  return [range.max, half, 0, -half, range.min].map((value) => ({
+    value,
+    y: structuralCvdValueToY(value, range),
+    label: value === 0 ? "0" : formatSignedCompact(value)
+  }));
 }
 
-function buildCvdStats(trades: AggregatedDomSnapshot["trades"], cvdData: Array<{ time?: number; value: number }>, settings: DomSettings) {
-  const now = Math.floor(Date.now() / 1000);
-  const cutoff = now - horizonSeconds(settings.cvdHorizon);
-  const horizonTrades = trades.filter((trade) => normalizeEpochSeconds(trade.time) >= cutoff);
-  const buyVolume = horizonTrades.filter((trade) => trade.side === "buy").reduce((sum, trade) => sum + trade.quantity, 0);
-  const sellVolume = horizonTrades.filter((trade) => trade.side === "sell").reduce((sum, trade) => sum + trade.quantity, 0);
-  const total = Math.max(1, buyVolume + sellVolume);
-  const current = cvdData[cvdData.length - 1]?.value ?? 0;
-  const first = cvdData[0]?.value ?? 0;
-  const sessionDelta = current - first;
-  const lookback = cvdData[Math.max(0, cvdData.length - Math.max(4, Math.floor(cvdData.length * 0.25)))]?.value ?? first;
-  const slope = current - lookback;
-  const noise = Math.max(1, Math.abs(sessionDelta) * 0.08);
+function structuralCvdBarGeometry(point: StructuralCvdPoint, index: number, points: StructuralCvdPoint[], range: { min: number; max: number }) {
+  const spacing = 90 / Math.max(1, points.length);
+  const xCenter = structuralCvdX(index, points.length);
+  const zeroY = structuralCvdValueToY(0, range);
+  const valueY = structuralCvdValueToY(point.cumulativeDelta, range);
   return {
-    current,
-    sessionDelta,
-    buyPct: buyVolume / total * 100,
-    sellPct: sellVolume / total * 100,
-    trend: slope > noise ? "rising" : slope < -noise ? "falling" : "flat"
+    x: xCenter - Math.max(0.18, spacing * 0.38),
+    y: Math.min(zeroY, valueY),
+    width: Math.max(0.36, spacing * 0.76),
+    height: Math.max(0.3, Math.abs(valueY - zeroY))
   };
 }
 
-function buildCvdCandles(points: Array<{ time: number; value: number }>, settings: DomSettings, trades: AggregatedDomSnapshot["trades"]): CvdCandle[] {
-  const targetCandles = cvdTargetCandles(settings);
-  const pointCandles = buildCvdCandlesFromPoints(points, settings, targetCandles);
-  if (pointCandles.length >= Math.min(12, Math.floor(targetCandles * 0.35))) return pointCandles;
-  const tradeCandles = buildCvdCandlesFromTrades(trades, settings, targetCandles);
-  return tradeCandles.length > pointCandles.length ? tradeCandles : pointCandles;
-}
-
-function buildCvdCandlesFromPoints(points: Array<{ time: number; value: number }>, settings: DomSettings, targetCandles: number): CvdCandle[] {
-  if (points.length === 0) return [];
-  const horizon = horizonSeconds(settings.cvdHorizon);
-  const bucketSeconds = Math.max(settings.cvdSampleIntervalSec, settings.cvdCandleSeconds, Math.floor(horizon / targetCandles));
-  const ordered = points
-    .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value))
-    .sort((a, b) => a.time - b.time);
-  const candles: CvdCandle[] = [];
-  let activeBucket = Number.NaN;
-  let active: CvdCandle | null = null;
-  let previousClose = ordered[0]?.value ?? 0;
-
-  for (const point of ordered) {
-    const bucket = Math.floor(point.time / bucketSeconds) * bucketSeconds;
-    if (!active || bucket !== activeBucket) {
-      if (active) candles.push(active);
-      activeBucket = bucket;
-      active = {
-        time: bucket,
-        open: previousClose,
-        high: Math.max(previousClose, point.value),
-        low: Math.min(previousClose, point.value),
-        close: point.value
-      };
-    } else {
-      active.high = Math.max(active.high, point.value);
-      active.low = Math.min(active.low, point.value);
-      active.close = point.value;
-    }
-    previousClose = point.value;
-  }
-  if (active) candles.push(active);
-  return candles.slice(-targetCandles);
-}
-
-function buildCvdCandlesFromTrades(trades: AggregatedDomSnapshot["trades"], settings: DomSettings, targetCandles: number): CvdCandle[] {
-  const tradePoints = trades
-    .map((trade, index) => ({
-      index,
-      time: normalizeEpochSeconds(trade.time),
-      quantity: Number(trade.quantity),
-      side: trade.side === "buy" || trade.side === "sell" ? trade.side : null
-    }))
-    .filter((trade): trade is { index: number; time: number; quantity: number; side: "buy" | "sell" } =>
-      Number.isFinite(trade.time) && Number.isFinite(trade.quantity) && trade.quantity > 0 && trade.side !== null
-    )
-    .sort((a, b) => a.time === b.time ? a.index - b.index : a.time - b.time);
-  if (tradePoints.length === 0) return [];
-  const now = Math.max(Date.now() / 1000, tradePoints[tradePoints.length - 1].time);
-  const cutoff = now - horizonSeconds(settings.cvdHorizon);
-  const horizonTrades = tradePoints.filter((trade) => trade.time >= cutoff);
-  const source = (horizonTrades.length >= 8 ? horizonTrades : tradePoints).slice(-Math.max(120, targetCandles * 10));
-  const firstTime = source[0]?.time ?? now;
-  const lastTime = source[source.length - 1]?.time ?? firstTime;
-  const timeSpan = Math.max(0, lastTime - firstTime);
-  if (timeSpan < Math.max(settings.cvdCandleSeconds * 3, settings.cvdSampleIntervalSec * 6, targetCandles * 0.35)) {
-    return buildIndexedTradeCvdCandles(source, targetCandles);
-  }
-
-  const bucketSeconds = Math.max(settings.cvdSampleIntervalSec, settings.cvdCandleSeconds, Math.ceil(timeSpan / targetCandles));
-  const candles: CvdCandle[] = [];
-  let activeBucket = Number.NaN;
-  let active: CvdCandle | null = null;
-  let cumulative = 0;
-  let previousClose = 0;
-
-  for (const trade of source) {
-    const delta = trade.side === "buy" ? trade.quantity : -trade.quantity;
-    const nextValue = cumulative + delta;
-    const bucket = Math.floor(trade.time / bucketSeconds) * bucketSeconds;
-    if (!active || bucket !== activeBucket) {
-      if (active) candles.push(active);
-      activeBucket = bucket;
-      active = {
-        time: bucket,
-        open: previousClose,
-        high: Math.max(previousClose, nextValue),
-        low: Math.min(previousClose, nextValue),
-        close: nextValue
-      };
-    } else {
-      active.high = Math.max(active.high, nextValue);
-      active.low = Math.min(active.low, nextValue);
-      active.close = nextValue;
-    }
-    cumulative = nextValue;
-    previousClose = nextValue;
-  }
-  if (active) candles.push(active);
-  return candles.slice(-targetCandles);
-}
-
-function buildIndexedTradeCvdCandles(
-  trades: Array<{ time: number; quantity: number; side: "buy" | "sell"; index: number }>,
-  targetCandles: number
-): CvdCandle[] {
-  if (trades.length === 0) return [];
-  const structuralTarget = Math.max(8, Math.min(targetCandles, Math.ceil(trades.length / 4)));
-  const chunkSize = Math.max(1, Math.ceil(trades.length / structuralTarget));
-  const candles: CvdCandle[] = [];
-  let cumulative = 0;
-  for (let cursor = 0; cursor < trades.length; cursor += chunkSize) {
-    const chunk = trades.slice(cursor, cursor + chunkSize);
-    const open = cumulative;
-    let high = open;
-    let low = open;
-    for (const trade of chunk) {
-      cumulative += trade.side === "buy" ? trade.quantity : -trade.quantity;
-      high = Math.max(high, cumulative);
-      low = Math.min(low, cumulative);
-    }
-    candles.push({
-      time: chunk[0]?.time ?? cursor,
-      open,
-      high,
-      low,
-      close: cumulative
-    });
-  }
-  return candles.slice(-targetCandles);
-}
-
-function cvdTargetCandles(settings: DomSettings) {
-  if (Number.isFinite(settings.cvdVisibleCandles)) return Math.max(16, Math.min(140, Math.round(settings.cvdVisibleCandles)));
-  if (settings.cvdHorizon === "15m") return 36;
-  if (settings.cvdHorizon === "1h") return 42;
-  return 56;
-}
-
-function buildCvdAxis(candles: CvdCandle[]) {
-  const range = cvdValueRange(candles);
-  return [
-    { value: range.max, y: cvdValueToY(range.max, range), label: formatSignedCompact(range.max) },
-    { value: 0, y: cvdValueToY(0, range), label: "0" },
-    { value: range.min, y: cvdValueToY(range.min, range), label: formatSignedCompact(range.min) }
-  ].filter((level, index, all) => index === 0 || Math.abs(level.y - all[index - 1].y) > 8);
-}
-
-function buildCvdClosePath(candles: CvdCandle[]) {
-  if (candles.length < 2) return "";
-  const range = cvdValueRange(candles);
-  return candles.map((candle, index) => {
-    const x = cvdCandleX(index, candles.length);
-    const y = cvdValueToY(candle.close, range);
-    return `${x.toFixed(2)},${y.toFixed(2)}`;
+function buildStructuralCvdStepPath(points: StructuralCvdPoint[], key: "cumulativeBuy" | "cumulativeSell", range: { min: number; max: number }) {
+  if (!points.length) return "";
+  return points.map((point, index) => {
+    const x = structuralCvdX(index, points.length);
+    const y = structuralCvdValueToY(point[key], range);
+    if (index === 0) return `M ${x.toFixed(2)} ${y.toFixed(2)}`;
+    const previousX = structuralCvdX(index - 1, points.length);
+    return `H ${((previousX + x) / 2).toFixed(2)} V ${y.toFixed(2)} H ${x.toFixed(2)}`;
   }).join(" ");
 }
 
-function cvdCandleGeometry(candle: CvdCandle, index: number, candles: CvdCandle[]) {
-  const range = cvdValueRange(candles);
-  const x = cvdCandleX(index, candles.length);
-  const spacing = 88 / Math.max(1, candles.length);
-  const bodyWidth = Math.max(0.8, Math.min(3.6, spacing * 0.62));
-  const openY = cvdValueToY(candle.open, range);
-  const closeY = cvdValueToY(candle.close, range);
-  const highY = cvdValueToY(candle.high, range);
-  const lowY = cvdValueToY(candle.low, range);
-  return {
-    x,
-    bodyX: x - bodyWidth / 2,
-    bodyY: Math.min(openY, closeY),
-    bodyWidth,
-    bodyHeight: Math.max(0.8, Math.abs(closeY - openY)),
-    highY,
-    lowY
+function buildStructuralCvdTimeAxis(points: StructuralCvdPoint[]) {
+  if (!points.length) return [];
+  const count = Math.min(5, points.length);
+  return Array.from({ length: count }, (_, index) => {
+    const pointIndex = Math.round(index / Math.max(1, count - 1) * (points.length - 1));
+    const point = points[pointIndex];
+    return {
+      time: point.time,
+      x: structuralCvdX(pointIndex, points.length),
+      label: formatCvdTimestamp(point.time),
+      anchor: index === 0 ? "start" as const : index === count - 1 ? "end" as const : "middle" as const
+    };
+  });
+}
+
+function structuralCvdX(index: number, count: number) {
+  return 5 + index / Math.max(1, count - 1) * 90;
+}
+
+function structuralCvdValueToY(value: number, range: { min: number; max: number }) {
+  return 91 - (value - range.min) / Math.max(1, range.max - range.min) * 82;
+}
+
+function formatCvdTimestamp(time: number) {
+  const date = new Date(time * 1000);
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function timeframeSeconds(timeframe: Timeframe) {
+  const value: Partial<Record<Timeframe, number>> = {
+    "1m": 60,
+    "3m": 180,
+    "5m": 300,
+    "15m": 900,
+    "30m": 1800,
+    "1h": 3600,
+    "2h": 7200,
+    "4h": 14400,
+    "6h": 21600,
+    "8h": 28800,
+    "12h": 43200,
+    "1d": 86400,
+    "1w": 604800
   };
+  return value[timeframe] ?? 14400;
 }
 
-function cvdCandleX(index: number, count: number) {
-  return 8 + (index / Math.max(1, count - 1)) * 88;
-}
-
-function cvdValueRange(candles: CvdCandle[]) {
-  const values = candles.flatMap((candle) => [candle.open, candle.high, candle.low, candle.close, 0]);
-  const minRaw = Math.min(...values);
-  const maxRaw = Math.max(...values);
-  const span = Math.max(1, maxRaw - minRaw);
-  return {
-    min: minRaw - span * 0.12,
-    max: maxRaw + span * 0.12
-  };
-}
-
-function cvdValueToY(value: number, range: { min: number; max: number }) {
-  const span = Math.max(1, range.max - range.min);
-  return 94 - ((value - range.min) / span) * 84;
+function sameCandleSeries(current: Candle[], next: Candle[]) {
+  if (current.length !== next.length) return false;
+  if (!current.length) return true;
+  const before = current.at(-1);
+  const after = next.at(-1);
+  return before?.time === after?.time && before?.open === after?.open && before?.high === after?.high && before?.low === after?.low && before?.close === after?.close && before?.volume === after?.volume;
 }
 
 function resolveDepthChartRange(snapshot: AggregatedDomSnapshot): MacroLiquidityRange {
@@ -3481,10 +3390,6 @@ function percentile(values: number[], pct: number) {
   if (sorted.length === 0) return 0;
   const index = Math.max(0, Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * pct)));
   return sorted[index];
-}
-
-function normalizeEpochSeconds(time: number) {
-  return time > 100000000000 ? Math.floor(time / 1000) : time;
 }
 
 function createPanelSnapshotMap(snapshot: AggregatedDomSnapshot): Record<DomPanelId, AggregatedDomSnapshot> {

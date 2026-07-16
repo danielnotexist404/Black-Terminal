@@ -1135,3 +1135,11 @@ Remaining:
 - Added optional Enhanced Liquidity Graphics and Show Level Details settings, restoring neon macro walls with embedded price, touch-count and strength annotations without changing Heatmap data or calculations.
 - Added migration protection for previously persisted low-resolution profile settings and browser assertions that reject future cross-panel data downsampling.
 - No Supabase migration is required.
+
+# 2026-07-16 - DOM Pro Structural CVD
+
+- Replaced the rapidly reframing short-session CVD candlesticks with a broad zero-centered structural model backed by venue OHLCV history.
+- Adapted the supplied MPL-2.0 SVD+CVD pressure allocation into typed TypeScript with rolling SUM, normalized EMA and normalized SMA modes.
+- Added rolling delta columns, independent buy/sell structural envelopes, stable time labels, bounded historical refresh and an explicit classified-tape fallback.
+- Moved timeframe, history, cumulation, scale, visibility and layer controls into the CVD panel settings; schema version 6 migrates old short-window defaults.
+- Added deterministic pressure conservation, cumulation, symmetric-domain and fallback tests. Build and panel/performance regression suites pass; no Supabase migration is required.

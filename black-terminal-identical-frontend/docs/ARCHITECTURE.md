@@ -348,3 +348,7 @@ For Bybit, canonical connection identity is the venue user ID with a server-only
 ## DOM Pro Shared Price Domain
 
 The Aggregated DOM Ladder, Volume Profile and Liquidity Heatmap consume one `DomProPriceCamera` in Shared mode for visible min/max price, pan, zoom and normalized Y projection. Data resolution is deliberately independent: the ladder owns wide live-book buckets, the profile owns dense traded-volume rows, and the Heatmap owns the native IMM/pixel grid. Current live ladder coverage is explicitly separated from wider IMM history. Uncovered prices render unavailable rather than false zero depth. `DomFeedStore` remains the single feed owner, and the pure ladder model cannot subscribe to a venue. See `DOM_PRO_SHARED_PRICE_CAMERA.md`, `DOM_PRO_AGGREGATED_LADDER_SYNC.md` and `DOM_PRO_LIVE_DEPTH_COVERAGE.md`.
+
+## DOM Pro Structural CVD
+
+Structural CVD consumes bounded historical venue OHLCV from the existing Black Core market-data adapter and projects candle body/wick pressure into rolling buy, sell and delta structure. It does not create another stream or claim historical aggressor classification. If historical candles are unavailable, it uses the existing classified DOM trade snapshot as an explicit fallback rather than blending incompatible sources. The CVD camera owns only its horizontal history window and remains independent from the shared price camera. See `DOM_PRO_STRUCTURAL_CVD.md`.

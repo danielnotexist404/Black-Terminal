@@ -42,6 +42,7 @@ import type { VenueExecutionSchema } from "../src/execution/venueExecutionSchema
 import { computeDomWallLabelLayout } from "../src/modules/dom-pro/domWallLabelLayout.ts";
 import { buildDomLadderModel, formatDomLadderQuantity } from "../src/modules/dom-pro/domLadderModel.ts";
 import { createDomProPriceCamera, domPriceBucketAt, sameDomPriceCamera } from "../src/modules/dom-pro/domPriceCamera.ts";
+import { buildStructuralCvdFromCandles, buildStructuralCvdFromTrades, estimateCandlePressure, structuralCvdRange, structuralCvdStats } from "../src/modules/dom-pro/domStructuralCvd.ts";
 import type { AggregatedDomSnapshot } from "../src/modules/dom-pro/types.ts";
 
 class MemoryStorage {
@@ -169,6 +170,8 @@ assert.equal(Object.keys(defaults.panels).length, 10, "all configurable panels h
 assert.equal(defaults.schemaVersion, DOM_PANEL_SETTINGS_VERSION);
 assert.equal(defaults.panels.ladder.settings.cameraMode, "shared", "shared ladder camera is the persisted factory default");
 assert.equal(defaults.panels["liquidity-heatmap"].settings.enhancedGraphics, true, "institutional heatmap graphics are available through panel settings");
+assert.equal(defaults.panels["heuristic-cvd"].settings.sourceTimeframe, "4h", "structural CVD defaults to a multi-session venue candle source");
+assert.ok(Number(defaults.panels["heuristic-cvd"].settings.visibleCandles) >= 120, "structural CVD opens with a broad market window");
 const domWindowSource = readFileSync(new URL("../src/modules/dom-pro/components/DomProWindow.tsx", import.meta.url), "utf8");
 assert.equal(domWindowSource.match(/useDomFeed\(/g)?.length, 1, "DOM Pro owns exactly one shared feed subscription hook");
 assert.match(domWindowSource, /camera=\{sharedPriceCamera\}/, "heatmap consumes the shared camera object");
@@ -205,7 +208,7 @@ assert.equal(macro.panels["depth-chart"].settings.mode, "macro");
 assert.equal(macro.panels["wall-detection"].preset, "Major Only");
 const override = patchDomPanel(macro, "depth-chart", { updateIntervalMs: 9300 });
 assert.equal(override.panels["depth-chart"].settings.updateIntervalMs, 9300, "user override survives preset application");
-assert.equal(applyDomPanelPreset(defaults, "heuristic-cvd", "Structural").panels["heuristic-cvd"].settings.horizon, "4h");
+assert.equal(applyDomPanelPreset(defaults, "heuristic-cvd", "Structural").panels["heuristic-cvd"].settings.sourceTimeframe, "4h");
 
 const scheduler = new DomPanelUpdateScheduler();
 scheduler.registerPanel("trade-tape", 1000, 500);
@@ -240,6 +243,27 @@ assert.equal((pulled[0] as WallDetection & { lifecycle: string }).lifecycle, "pu
 const cvd = bucketAndSmoothCvd([{ time: 0, value: 0 }, { time: 3, value: 10 }, { time: 11, value: 20 }, { time: 19, value: 30 }], 10, 4, 2);
 assert.equal(cvd.length, 2, "CVD aggregates into stable time buckets");
 assert.ok(cvd[1].value < 30, "CVD smoothing limits raw movement");
+
+const bullishPressure = estimateCandlePressure({ time: 1, open: 100, high: 112, low: 98, close: 110, volume: 140 });
+assert.equal(Math.round(bullishPressure.buyVolume + bullishPressure.sellVolume), 140, "OHLCV pressure allocation conserves reported volume");
+assert.ok(bullishPressure.buyVolume > bullishPressure.sellVolume, "a bullish body allocates dominant pressure to buyers");
+const structuralCvd = buildStructuralCvdFromCandles([
+  { time: 1, open: 100, high: 112, low: 98, close: 110, volume: 140 },
+  { time: 2, open: 110, high: 111, low: 99, close: 101, volume: 120 },
+  { time: 3, open: 101, high: 108, low: 100, close: 107, volume: 180 },
+  { time: 4, open: 107, high: 109, low: 104, close: 105, volume: 90 }
+], { cumulationType: "sum", cumulationLength: 3 });
+assert.equal(structuralCvd.length, 4, "structural CVD keeps one stable point per historical candle");
+assert.ok(structuralCvd.every((point) => point.cumulativeBuy >= 0 && point.cumulativeSell <= 0), "buy and sell structure remain on opposite sides of zero");
+assert.ok(structuralCvdRange(structuralCvd).min < 0 && structuralCvdRange(structuralCvd).max > 0, "structural CVD uses a symmetric zero-centered domain");
+assert.ok(["rising", "falling", "flat"].includes(structuralCvdStats(structuralCvd).trend));
+const classifiedCvd = buildStructuralCvdFromTrades([
+  { time: 1, quantity: 2, side: "buy" },
+  { time: 2, quantity: 1, side: "sell" },
+  { time: 61, quantity: 3, side: "buy" }
+], 60, { cumulationLength: 2 });
+assert.equal(classifiedCvd.length, 2, "classified tape fallback aggregates into structural time buckets");
+assert.equal(classifiedCvd[0].delta, 1, "classified tape fallback preserves signed aggressor delta");
 
 const metricRaw: DomMetrics = { orderBookImbalance: 50, depthImbalance: 40, liquidityScore: 80, largeTradesLastMinute: 4, bidStacked: 100, askStacked: 20, bidPulled: 1, askPulled: 1, updateRate: 30, latencyMs: 20 };
 const metrics = new MetricsStabilizer();

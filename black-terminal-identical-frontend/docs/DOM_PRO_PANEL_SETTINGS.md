@@ -28,7 +28,7 @@ The registry schema is versioned. Reads merge stored values over current default
 | Wall Detection | thresholds, persistence, observations, sorting, major-only, cadence |
 | Trade Tape | size filter, rows, grouping, aggregation, hover freeze, cadence |
 | DOM Metrics | EMA, hysteresis, confirmation delay, raw/smoothed view, cadence |
-| Heuristic CVD | horizon, source bucket, EMA, candle interval, visible candles, cadence |
+| Structural CVD | venue candle timeframe, historical bars, SUM/EMA/SMA cumulation, cumulation length, scale, visible structure bars, delta clipping, layers, cadence |
 | Depth Chart | Raw/Smoothed/Structural/Macro, averaging, persistence, levels, curve, cadence |
 | Flow Delta | horizon, time bucket, smoothing, clipping, display mode, cadence |
 | Execution | order defaults, sizing, TIF, margin, confirmation, privacy, compact mode |
@@ -46,4 +46,4 @@ Global workspace presets apply a coordinated set once. Panel settings are ordina
 
 No Supabase schema is required for this chapter. A future preference API can persist the registry JSON without changing panel components.
 
-Shared is the ladder factory default. `Dim`, `Show` and `Hide` control presentation of uncovered prices only; they never convert historical IMM observations into live size. Settings schema version 3 merges these controls into existing workspace records without discarding compatible preferences.
+Shared is the ladder factory default. `Dim`, `Show` and `Hide` control presentation of uncovered prices only; they never convert historical IMM observations into live size. Settings schema version 6 also migrates the old session-scale Heuristic CVD to a broad Structural CVD using venue OHLCV history. See `DOM_PRO_STRUCTURAL_CVD.md`.

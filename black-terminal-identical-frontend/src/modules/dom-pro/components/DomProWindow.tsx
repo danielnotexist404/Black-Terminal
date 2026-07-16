@@ -949,6 +949,8 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const ladderDisplayUnits = stringSetting(ladderPanelValues, "displayUnits", "base") as DomLadderDisplayUnit;
   const ladderShowNetDepth = booleanSetting(ladderPanelValues, "showNetDepth", false);
   const profilePanelValues = panelRegistry.panels["volume-profile"].settings;
+  const profileShowLabels = booleanSetting(profilePanelValues, "showLabels", true);
+  const heatmapPanelValues = panelRegistry.panels["liquidity-heatmap"].settings;
   const cvdPanelValues = panelRegistry.panels["heuristic-cvd"].settings;
   const depthPanelValues = panelRegistry.panels["depth-chart"].settings;
   const wallPanelValues = panelRegistry.panels["wall-detection"].settings;
@@ -1574,7 +1576,6 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     onMaximize: () => setLayout((current) => maximizeDomPanel(current, current.maximizedPanel === panelId ? null : panelId))
   });
   const ladderLabelStride = ladderModel.rows.length > 72 ? 4 : ladderModel.rows.length > 48 ? 3 : ladderModel.rows.length > 36 ? 2 : 1;
-  const profileLabelStride = institutionalProfile.length > 192 ? 12 : institutionalProfile.length > 144 ? 10 : institutionalProfile.length > 96 ? 7 : institutionalProfile.length > 64 ? 5 : 3;
   const ladderCoverageTop = ladderModel.coverage.max === null ? null : domPriceToTopPct(ladderPriceCamera, ladderModel.coverage.max);
   const ladderCoverageBottom = ladderModel.coverage.min === null ? null : domPriceToTopPct(ladderPriceCamera, ladderModel.coverage.min);
   const showLadderCoverage = booleanSetting(ladderPanelValues, "showLiveCoverage", true);
@@ -1794,14 +1795,14 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                     <i style={{ width: `${node.volume <= 0 ? 0 : Math.max(3, node.volume / maxProfileVolume * 100)}%` }} />
                   </div>
                 ))}
-                <div className="dom-pro-profile-label-layer" aria-hidden="true">
-                  {institutionalProfile.map((node, index) => node.volume > 0 && (index % profileLabelStride === 0 || node.kind === "poc") ? (
+                {profileShowLabels && <div className="dom-pro-profile-label-layer dense" aria-hidden="true">
+                  {institutionalProfile.map((node) => node.volume > 0 ? (
                     <div className={`dom-pro-profile-label ${node.kind}`} key={`label:${node.key}`} style={{ top: `${node.topPct + node.heightPct / 2}%` }}>
                       <span>{formatPrice(node.price)}</span>
-                      {(node.kind === "poc" || node.kind === "hvn") && <b>{node.kind.toUpperCase()}</b>}
+                      <b>{node.kind.toUpperCase()}</b>
                     </div>
                   ) : null)}
-                </div>
+                </div>}
                 <div className="dom-pro-profile-current-line" style={{ top: `${domPriceToTopPct(sharedPriceCamera, snapshot.lastPrice ?? lastPrice)}%` }} aria-hidden="true" />
                 <div className="dom-pro-profile-legend"><span>POC</span><span>VALUE AREA</span><span>HVN</span><span>LVN</span></div>
               </div>
@@ -1843,6 +1844,8 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                   quality={effectiveVisualQuality}
                   interactionActive={interactionActive}
                   hoveredPrice={domHover?.price}
+                  enhancedGraphics={booleanSetting(heatmapPanelValues, "enhancedGraphics", true)}
+                  showLevelDetails={booleanSetting(heatmapPanelValues, "showLabels", true)}
                 />
                 {domHover && <HoverTooltip hover={domHover} />}
                 <div className="dom-pro-heatmap-footer"><span>{macroStatus}</span><span>{qualityLabel(effectiveVisualQuality)} / {sharedPriceRange.source.replace("-", " ").toUpperCase()} / {formatCameraZoom(heatmapViewport, macroRange)} / {formatPrice(sharedPriceRange.min)}-{formatPrice(sharedPriceRange.max)}</span></div>

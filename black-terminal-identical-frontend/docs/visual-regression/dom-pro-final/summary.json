@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-07-16T16:45:25.766Z",
+  "capturedAt": "2026-07-16T17:28:03.535Z",
   "viewport": "1920x1080 + 1280x800",
   "panelCogs": 10,
   "cockpitContract": {
@@ -40,8 +40,10 @@
         "resolution": 486,
         "currentTop": 50
       },
+      "heatmapVisualMode": "enhanced",
       "rows": 42,
       "profileRows": 129,
+      "profileLabels": 129,
       "live": 0,
       "unavailable": 0,
       "bid": 1503.5555555555557,
@@ -49,163 +51,173 @@
     },
     "wide": {
       "ladder": {
-        "version": "60877.465:67827.535:42:explore",
-        "min": 60877.465,
-        "max": 67827.535,
-        "bucket": 165.47785714285732,
+        "version": "60691.3868:67620.2132:42:explore",
+        "min": 60691.3868,
+        "max": 67620.21320000001,
+        "bucket": 164.97205714285744,
         "resolution": 0,
-        "currentTop": 50
+        "currentTop": 50.00000000000006
       },
       "profile": {
-        "version": "60877.465:67827.535:42:explore",
-        "min": 60877.465,
-        "max": 67827.535,
+        "version": "60691.3868:67620.2132:42:explore",
+        "min": 60691.3868,
+        "max": 67620.21320000001,
         "bucket": null,
         "resolution": 129,
-        "currentTop": 50
+        "currentTop": 50.00000000000006
       },
       "heatmap": {
-        "version": "60877.465:67827.535:42:explore",
-        "min": 60877.465,
-        "max": 67827.535,
+        "version": "60691.3868:67620.2132:42:explore",
+        "min": 60691.3868,
+        "max": 67620.21320000001,
         "bucket": null,
         "resolution": 486,
-        "currentTop": 50
+        "currentTop": 50.00000000000006
       },
+      "heatmapVisualMode": "enhanced",
       "rows": 42,
       "profileRows": 129,
+      "profileLabels": 129,
       "live": 2,
       "unavailable": 40,
-      "bid": 515.7009999999992,
-      "ask": 438.03299999999786
+      "bid": 421.5349999999992,
+      "ask": 464.6339999999989
     },
     "pan": {
       "ladder": {
-        "version": "61924.50036605:68874.57036605:42:manual",
-        "min": 61924.50036604988,
-        "max": 68874.57036604988,
-        "bucket": 165.47785714285732,
+        "version": "61735.22179533:68664.04819533:42:manual",
+        "min": 61735.22179533387,
+        "max": 68664.04819533387,
+        "bucket": 164.97205714285727,
         "resolution": 0,
-        "currentTop": 65.06510533059206
+        "currentTop": 65.06510533059205
       },
       "profile": {
-        "version": "61924.50036605:68874.57036605:42:manual",
-        "min": 61924.50036604988,
-        "max": 68874.57036604988,
+        "version": "61735.22179533:68664.04819533:42:manual",
+        "min": 61735.22179533387,
+        "max": 68664.04819533387,
         "bucket": null,
         "resolution": 129,
-        "currentTop": 65.06510533059206
+        "currentTop": 65.06510533059205
       },
       "heatmap": {
-        "version": "61924.50036605:68874.57036605:42:manual",
-        "min": 61924.50036604988,
-        "max": 68874.57036604988,
+        "version": "61735.22179533:68664.04819533:42:manual",
+        "min": 61735.22179533387,
+        "max": 68664.04819533387,
         "bucket": null,
         "resolution": 486,
-        "currentTop": 65.06510533059206
+        "currentTop": 65.06510533059205
       },
+      "heatmapVisualMode": "enhanced",
       "rows": 42,
       "profileRows": 129,
-      "live": 3,
-      "unavailable": 39,
-      "bid": 519.966999999999,
-      "ask": 412.8350000000004
+      "profileLabels": 129,
+      "live": 4,
+      "unavailable": 38,
+      "bid": 511.8689999999991,
+      "ask": 470.5350000000001
     },
     "zoom": {
       "ladder": {
-        "version": "62509.57223277:68399.46206328:42:manual",
-        "min": 62509.57223277473,
-        "max": 68399.46206328321,
-        "bucket": 140.23547215496382,
+        "version": "62318.50533004:68190.3921097:42:manual",
+        "min": 62318.505330040774,
+        "max": 68190.3921097018,
+        "bucket": 139.80682808716733,
         "resolution": 0,
-        "currentTop": 68.7103185244779
+        "currentTop": 68.71202155458998
       },
       "profile": {
-        "version": "62509.57223277:68399.46206328:42:manual",
-        "min": 62509.57223277473,
-        "max": 68399.46206328321,
+        "version": "62318.50533004:68190.3921097:42:manual",
+        "min": 62318.505330040774,
+        "max": 68190.3921097018,
         "bucket": null,
         "resolution": 129,
-        "currentTop": 68.7103185244779
+        "currentTop": 68.71202155458998
       },
       "heatmap": {
-        "version": "62509.57223277:68399.46206328:42:manual",
-        "min": 62509.57223277473,
-        "max": 68399.46206328321,
+        "version": "62318.50533004:68190.3921097:42:manual",
+        "min": 62318.505330040774,
+        "max": 68190.3921097018,
         "bucket": null,
         "resolution": 486,
-        "currentTop": 68.7103185244779
+        "currentTop": 68.71202155458998
       },
+      "heatmapVisualMode": "enhanced",
       "rows": 42,
       "profileRows": 129,
-      "live": 3,
-      "unavailable": 39,
-      "bid": 545.257999999999,
-      "ask": 415.47999999999894
+      "profileLabels": 129,
+      "live": 5,
+      "unavailable": 37,
+      "bid": 496.728,
+      "ask": 439.9609999999994
     },
     "macro": {
       "ladder": {
-        "version": "50452.36:78252.64:42:explore",
-        "min": 50452.36,
-        "max": 78252.64,
-        "bucket": 661.9114285714286,
+        "version": "50298.0688:78013.3312:42:explore",
+        "min": 50298.068799999994,
+        "max": 78013.3312,
+        "bucket": 659.8872000000001,
         "resolution": 0,
         "currentTop": 50
       },
       "profile": {
-        "version": "50452.36:78252.64:42:explore",
-        "min": 50452.36,
-        "max": 78252.64,
+        "version": "50298.0688:78013.3312:42:explore",
+        "min": 50298.068799999994,
+        "max": 78013.3312,
         "bucket": null,
         "resolution": 129,
         "currentTop": 50
       },
       "heatmap": {
-        "version": "50452.36:78252.64:42:explore",
-        "min": 50452.36,
-        "max": 78252.64,
+        "version": "50298.0688:78013.3312:42:explore",
+        "min": 50298.068799999994,
+        "max": 78013.3312,
         "bucket": null,
         "resolution": 486,
         "currentTop": 50
       },
+      "heatmapVisualMode": "enhanced",
       "rows": 42,
       "profileRows": 129,
+      "profileLabels": 94,
       "live": 2,
       "unavailable": 40,
-      "bid": 537.6499999999991,
-      "ask": 506.4269999999984
+      "bid": 499.1929999999988,
+      "ask": 459.24799999999874
     },
     "fit": {
       "ladder": {
-        "version": "45131.61490916:129507.16038251:42:fit",
-        "min": 45131.614909158336,
-        "max": 129507.16038250831,
-        "bucket": 2008.9415588892853,
+        "version": "44960.22572516:129521.10956651:42:fit",
+        "min": 44960.225725158336,
+        "max": 129521.10956650831,
+        "bucket": 2013.3543771749994,
         "resolution": 0,
-        "currentTop": 77.2198390149518
+        "currentTop": 77.29981830505047
       },
       "profile": {
-        "version": "45131.61490916:129507.16038251:42:fit",
-        "min": 45131.614909158336,
-        "max": 129507.16038250831,
+        "version": "44960.22572516:129521.10956651:42:fit",
+        "min": 44960.225725158336,
+        "max": 129521.10956650831,
         "bucket": null,
         "resolution": 129,
-        "currentTop": 77.2198390149518
+        "currentTop": 77.29981830505047
       },
       "heatmap": {
-        "version": "45131.61490916:129507.16038251:42:fit",
-        "min": 45131.614909158336,
-        "max": 129507.16038250831,
+        "version": "44960.22572516:129521.10956651:42:fit",
+        "min": 44960.225725158336,
+        "max": 129521.10956650831,
         "bucket": null,
         "resolution": 486,
-        "currentTop": 77.2198390149518
+        "currentTop": 77.29981830505047
       },
+      "heatmapVisualMode": "enhanced",
       "rows": 42,
       "profileRows": 129,
+      "profileLabels": 103,
       "live": 1,
       "unavailable": 41,
-      "bid": 546.933999999999,
-      "ask": 497.8109999999985
+      "bid": 518.2359999999985,
+      "ask": 461.1019999999987
     }
   },
   "presets": [

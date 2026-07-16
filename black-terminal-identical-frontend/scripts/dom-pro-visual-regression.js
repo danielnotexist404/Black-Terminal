@@ -66,7 +66,7 @@ try {
     const pick=(node)=>node ? {version:node.dataset.cameraVersion,min:Number(node.dataset.cameraMin),max:Number(node.dataset.cameraMax),bucket:node.dataset.bucketSize ? Number(node.dataset.bucketSize) : null,resolution:Number(node.dataset.resolutionRows||0),currentTop:Number(node.dataset.currentPriceTop)} : null;
     const rows=[...document.querySelectorAll('.dom-pro-ladder-row.shared-row')];
     const profileRows=document.querySelectorAll('.dom-pro-profile-node.native-row').length;
-    return {ladder:pick(ladder),profile:pick(profile),heatmap:pick(heatmap),rows:rows.length,profileRows,live:rows.filter((row)=>row.dataset.coverage==='live').length,unavailable:rows.filter((row)=>row.dataset.coverage==='unavailable').length,bid:rows.reduce((sum,row)=>sum+Number(row.dataset.bidSize||0),0),ask:rows.reduce((sum,row)=>sum+Number(row.dataset.askSize||0),0)};
+    return {ladder:pick(ladder),profile:pick(profile),heatmap:pick(heatmap),heatmapVisualMode:heatmap?.dataset.visualMode,rows:rows.length,profileRows,profileLabels:document.querySelectorAll('.dom-pro-profile-label-layer.dense .dom-pro-profile-label').length,live:rows.filter((row)=>row.dataset.coverage==='live').length,unavailable:rows.filter((row)=>row.dataset.coverage==='unavailable').length,bid:rows.reduce((sum,row)=>sum+Number(row.dataset.bidSize||0),0),ask:rows.reduce((sum,row)=>sum+Number(row.dataset.askSize||0),0)};
   })()`;
   const initialSharedCamera = await cdp.evaluate(readSharedCamera);
   assertSharedCamera(initialSharedCamera, "initial");
@@ -204,5 +204,7 @@ function assertSharedCamera(contract, label) {
   }
   if (contract.rows < 12 || contract.rows > 120) throw new Error(`${label} row virtualization failed: ${JSON.stringify(contract)}`);
   if (contract.profileRows < 128 || contract.profile.resolution !== contract.profileRows) throw new Error(`${label} profile resolution regressed: ${JSON.stringify(contract)}`);
+  if (contract.profileLabels < 24) throw new Error(`${label} dense profile annotations regressed: ${JSON.stringify(contract)}`);
   if (contract.heatmap.resolution < 64 || contract.heatmap.resolution <= contract.rows) throw new Error(`${label} heatmap resolution regressed: ${JSON.stringify(contract)}`);
+  if (contract.heatmapVisualMode !== "enhanced") throw new Error(`${label} enhanced heatmap graphics are not active: ${JSON.stringify(contract)}`);
 }

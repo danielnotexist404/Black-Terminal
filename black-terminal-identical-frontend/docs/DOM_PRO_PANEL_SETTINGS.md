@@ -6,6 +6,10 @@ The top-right DOM Pro settings panel owns global cockpit behavior: visibility, t
 
 The shared camera setting synchronizes price geometry only. Ladder, Volume Profile and Liquidity Heatmap retain independent data grids; profile row count never changes IMM or ladder aggregation.
 
+The Liquidity Heatmap panel includes `Enhanced Liquidity Graphics`. It is a rendering-only option that restores high-contrast neon macro walls and embeds price, touch count and strength inside each visible level. `Show Level Details` controls the embedded text independently. Neither option changes IMM history, wall selection, camera geometry or analytics.
+
+Volume Profile annotations use a dedicated dense overlay above the native profile rows. This preserves the complete institutional price/classification columns without clipping or reducing profile resolution.
+
 Each panel cog owns only that panel's analytical controls. The registry key is scoped to workspace and symbol:
 
 ```text

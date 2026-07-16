@@ -21,6 +21,8 @@ type Props = {
   quality: DomVisualQuality;
   interactionActive: boolean;
   hoveredPrice?: number;
+  enhancedGraphics: boolean;
+  showLevelDetails: boolean;
 };
 
 export function DomHeatmapCanvas(props: Props) {
@@ -38,7 +40,7 @@ export function DomHeatmapCanvas(props: Props) {
 
   useEffect(() => {
     domVisualScheduler.markDirty(idRef.current);
-  }, [props.frames, props.camera, props.macroBands, props.depthPoints, props.ribbons, props.gaps, props.currentPrice, props.quality, props.interactionActive, props.hoveredPrice]);
+  }, [props.frames, props.camera, props.macroBands, props.depthPoints, props.ribbons, props.gaps, props.currentPrice, props.quality, props.interactionActive, props.hoveredPrice, props.enhancedGraphics, props.showLevelDetails]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -50,7 +52,7 @@ export function DomHeatmapCanvas(props: Props) {
     return () => { observer.disconnect(); visibility.disconnect(); };
   }, []);
 
-  return <canvas ref={canvasRef} className="dom-pro-heatmap-layer" data-heatmap-frames={props.frames.length} data-camera-version={props.camera.version} data-camera-min={props.camera.visiblePriceMin} data-camera-max={props.camera.visiblePriceMax} data-current-price-top={domPriceToTopPct(props.camera, props.currentPrice)} aria-label="Incremental liquidity heatmap" />;
+  return <canvas ref={canvasRef} className="dom-pro-heatmap-layer" data-heatmap-frames={props.frames.length} data-camera-version={props.camera.version} data-camera-min={props.camera.visiblePriceMin} data-camera-max={props.camera.visiblePriceMax} data-current-price-top={domPriceToTopPct(props.camera, props.currentPrice)} data-visual-mode={props.enhancedGraphics ? "enhanced" : "standard"} aria-label="Incremental liquidity heatmap" />;
 }
 
 function drawHeatmap(
@@ -76,7 +78,7 @@ function drawHeatmap(
   const yFor = (price: number) => domPriceToTopPct(props.camera, price) / 100 * plotHeight;
 
   drawGaps(context, props.gaps, yFor, plotWidth, plotHeight);
-  drawBands(context, props.macroBands, yFor, plotWidth, props.interactionActive);
+  if (!props.enhancedGraphics) drawBands(context, props.macroBands, yFor, plotWidth, props.interactionActive, false, props.showLevelDetails);
   drawDepthMemory(context, props.depthPoints, yFor, plotWidth, props.quality, props.interactionActive);
   drawRibbons(context, props.ribbons, yFor, plotWidth, props.interactionActive);
 
@@ -118,6 +120,7 @@ function drawHeatmap(
       drawCalls += 1;
     }
   }
+  if (props.enhancedGraphics) drawBands(context, props.macroBands, yFor, plotWidth, props.interactionActive, true, props.showLevelDetails);
   const currentY = yFor(props.currentPrice);
   if (currentY >= 0 && currentY <= plotHeight) {
     context.strokeStyle = "rgba(255,255,255,.82)";
@@ -150,7 +153,66 @@ function drawGaps(context: CanvasRenderingContext2D, gaps: Gap[], yFor: (price: 
   context.restore();
 }
 
-function drawBands(context: CanvasRenderingContext2D, bands: MacroLiquidityBand[], yFor: (price: number) => number, width: number, simple: boolean) {
+function drawBands(
+  context: CanvasRenderingContext2D,
+  bands: MacroLiquidityBand[],
+  yFor: (price: number) => number,
+  width: number,
+  simple: boolean,
+  enhanced: boolean,
+  showDetails: boolean
+) {
+  if (!enhanced) {
+    drawBandsStandard(context, bands, yFor, width, simple || !showDetails);
+    return;
+  }
+  for (const band of bands) {
+    const y = yFor(band.price);
+    if (y < -24 || y > context.canvas.height + 24) continue;
+    const isSupply = band.side === "supply";
+    const isPoc = band.side === "poc";
+    const half = Math.max(3.5, Math.min(12, band.strength * 9 + 2.5));
+    const color = isSupply ? "255,0,10" : "238,242,250";
+    const gradient = context.createLinearGradient(0, 0, width, 0);
+    gradient.addColorStop(0, `rgba(${color},.08)`);
+    gradient.addColorStop(.18, `rgba(${color},${Math.max(.32, band.strength * .72)})`);
+    gradient.addColorStop(.58, `rgba(${color},${Math.max(.58, band.strength * .98)})`);
+    gradient.addColorStop(.88, `rgba(${color},${Math.max(.2, band.strength * .5)})`);
+    gradient.addColorStop(1, `rgba(${color},.04)`);
+    const top = y - half;
+    const stripHeight = half * 2;
+    context.save();
+    if (!simple) {
+      context.shadowColor = isSupply ? "rgba(255,0,12,.72)" : "rgba(245,248,255,.54)";
+      context.shadowBlur = isPoc ? 20 : 14;
+    }
+    context.fillStyle = gradient;
+    context.fillRect(0, top, width, stripHeight);
+    context.restore();
+    if (!showDetails || simple) continue;
+
+    const sideLabel = isPoc ? "POC" : isSupply ? "SELL WALL" : "BUY WALL";
+    const fullLabel = `${sideLabel} / ${formatPrice(band.price)}`;
+    context.font = "700 9px IBM Plex Mono, monospace";
+    const layout = computeDomWallLabelLayout({ top, height: stripHeight, width, measuredWidth: context.measureText(fullLabel).width });
+    if (!layout.visible) continue;
+    context.save();
+    context.beginPath();
+    context.rect(layout.clipX, layout.clipY, layout.clipWidth, layout.clipHeight);
+    context.clip();
+    context.textBaseline = "middle";
+    context.fillStyle = isSupply ? "rgba(255,255,255,.97)" : "rgba(10,12,15,.95)";
+    context.fillText(layout.compact ? sideLabel : fullLabel, layout.x, layout.y);
+    if (!layout.compact && width >= 270) {
+      context.textAlign = "right";
+      context.font = "700 8px IBM Plex Mono, monospace";
+      context.fillText(`${band.touches} touches / ${Math.round(band.strength * 100)}%`, width - 10, layout.y);
+    }
+    context.restore();
+  }
+}
+
+function drawBandsStandard(context: CanvasRenderingContext2D, bands: MacroLiquidityBand[], yFor: (price: number) => number, width: number, simple: boolean) {
   for (const band of bands) {
     const y = yFor(band.price);
     if (y < -20 || y > context.canvas.height + 20) continue;

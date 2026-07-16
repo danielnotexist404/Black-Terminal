@@ -168,6 +168,7 @@ const defaults = defaultDomPanelRegistry("desk", "bybit:perpetual:BTCUSDT");
 assert.equal(Object.keys(defaults.panels).length, 10, "all configurable panels have defaults");
 assert.equal(defaults.schemaVersion, DOM_PANEL_SETTINGS_VERSION);
 assert.equal(defaults.panels.ladder.settings.cameraMode, "shared", "shared ladder camera is the persisted factory default");
+assert.equal(defaults.panels["liquidity-heatmap"].settings.enhancedGraphics, true, "institutional heatmap graphics are available through panel settings");
 const domWindowSource = readFileSync(new URL("../src/modules/dom-pro/components/DomProWindow.tsx", import.meta.url), "utf8");
 assert.equal(domWindowSource.match(/useDomFeed\(/g)?.length, 1, "DOM Pro owns exactly one shared feed subscription hook");
 assert.match(domWindowSource, /camera=\{sharedPriceCamera\}/, "heatmap consumes the shared camera object");
@@ -179,6 +180,8 @@ assert.match(domWindowSource, /dom-pro-profile-label-layer/, "profile labels ren
 const heatmapCanvasSource = readFileSync(new URL("../src/modules/dom-pro/components/DomHeatmapCanvas.tsx", import.meta.url), "utf8");
 assert.match(heatmapCanvasSource, /Math\.max\(64, Math\.min\(512, Math\.floor\(plotHeight\)\)\)/, "heatmap keeps its native pixel-resolution grid");
 assert.doesNotMatch(heatmapCanvasSource, /rowCount = props\.camera\.rowCount/, "heatmap camera cannot control IMM data resolution");
+assert.match(heatmapCanvasSource, /data-visual-mode=\{props\.enhancedGraphics \? "enhanced" : "standard"\}/, "heatmap exposes its selected visual mode");
+assert.match(heatmapCanvasSource, /band\.touches.*Math\.round\(band\.strength \* 100\)/, "enhanced walls retain touch and strength explanations");
 const ladderSource = readFileSync(new URL("../src/modules/dom-pro/domLadderModel.ts", import.meta.url), "utf8");
 assert.ok(!/useDomFeed|subscribeOrderBook|MarketDataEngine/.test(ladderSource), "ladder aggregation cannot create a second orderbook subscription");
 

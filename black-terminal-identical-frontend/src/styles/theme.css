@@ -9134,6 +9134,43 @@ body.dom-pro-resize-active {
   font-size: 7px;
 }
 
+.dom-pro-profile-label-layer.dense .dom-pro-profile-label {
+  left: 54%;
+  right: 0;
+  display: grid;
+  grid-template-columns: minmax(42px, 1fr) 28px;
+  gap: 3px;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  color: rgba(218, 223, 231, 0.88);
+  font: 700 5px/5px "IBM Plex Mono", monospace;
+  text-shadow: 0 0 3px rgba(255, 255, 255, 0.2);
+}
+
+.dom-pro-profile-label-layer.dense .dom-pro-profile-label span,
+.dom-pro-profile-label-layer.dense .dom-pro-profile-label b {
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.dom-pro-profile-label-layer.dense .dom-pro-profile-label b {
+  color: rgba(255, 25, 30, 0.92);
+  font-size: 5px;
+  text-align: right;
+}
+
+.dom-pro-profile-label-layer.dense .dom-pro-profile-label.lvn {
+  opacity: 0.48;
+}
+
+.dom-pro-profile-label-layer.dense .dom-pro-profile-label.poc {
+  z-index: 2;
+  color: #fff;
+  font-size: 6px;
+  text-shadow: 0 0 5px rgba(255, 255, 255, 0.42);
+}
+
 .dom-pro-profile-legend {
   position: absolute;
   left: 10px;

@@ -13,6 +13,7 @@ export const defaultVolumeProfileSettings: VolumeProfileSettings = {
   supplyDemandThreshold: 15,
   supplyZoneColor: "#5d0808",
   demandZoneColor: "#2b2d31",
+  supplyDemandIntensity: 60,
   showProfileGaps: true,
   nodeDetectionPercent: 7,
   profileGapColor: "#4c2b00",

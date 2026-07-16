@@ -1,7 +1,7 @@
 import type { Candle } from "../../chart-engine/types";
 import type { FundingRate, MarketSymbol, OpenInterest, OrderBookSnapshot, TickerSnapshot, TradeTick } from "../types";
 
-const maxCandlesPerKey = 5000;
+const maxCandlesPerKey = 20000;
 const maxTradesPerKey = 1000;
 const maxCandleKeys = 24;
 const maxTradeKeys = 16;

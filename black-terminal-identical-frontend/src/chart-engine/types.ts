@@ -170,6 +170,7 @@ export type VolumeProfileSettings = {
   supplyDemandThreshold: number;
   supplyZoneColor: string;
   demandZoneColor: string;
+  supplyDemandIntensity: number;
   showProfileGaps: boolean;
   nodeDetectionPercent: number;
   profileGapColor: string;

@@ -55,7 +55,7 @@ export class VolumeProfileModel {
       : settings.rangeMode === "visible"
         ? Math.max(0, Math.min(candles.length - 1, visibleLastIndex))
         : candles.length - 1;
-    const rangeLength = Math.max(10, Math.min(5000, Math.round(settings.fixedRangeLength)));
+    const rangeLength = Math.max(10, Math.min(20000, Math.round(settings.fixedRangeLength)));
     const startIndex = fixedWindow
       ? Math.max(0, Math.min(fixedWindow.startIndex, endIndex))
       : settings.rangeMode === "visible"

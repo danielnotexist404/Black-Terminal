@@ -2263,7 +2263,7 @@ export class BlackChartEngine {
   private resolveVolumeProfileFixedWindow(data: Candle[], settings: VolumeProfileSettings) {
     if (settings.rangeMode !== "fixed" || data.length === 0) return undefined;
 
-    const rangeLength = Math.max(10, Math.min(5000, Math.round(settings.fixedRangeLength)));
+    const rangeLength = Math.max(10, Math.min(20000, Math.round(settings.fixedRangeLength)));
     const key = `${rangeLength}:${settings.fixedRangeResetToken}`;
     if (!this.fixedVolumeProfileRange || this.fixedVolumeProfileRange.key !== key) {
       const endIndex = data.length - 1;
@@ -2323,6 +2323,10 @@ export class BlackChartEngine {
   }
 
   private drawVolumeProfileZones(g: Graphics, rows: VolumeProfileRow[], leftX: number, rightX: number, plotHeight: number) {
+    const configuredIntensity = Number(this.indicatorAdvancedSettings.volumeProfile.supplyDemandIntensity ?? 60);
+    const intensity = Math.max(0, Math.min(100, Number.isFinite(configuredIntensity) ? configuredIntensity : 60)) / 100;
+    const supplyAlpha = 0.04 + intensity * 0.28;
+    const demandAlpha = 0.035 + intensity * 0.235;
     for (const row of rows) {
       if (!row.supplyDemand) continue;
       const yHigh = Math.max(this.view.topPadding, Math.min(plotHeight, this.yForPrice(row.priceHigh)));
@@ -2332,7 +2336,7 @@ export class BlackChartEngine {
       const color = row.supplyDemand === "supply"
         ? this.hexColor(this.indicatorAdvancedSettings.volumeProfile.supplyZoneColor, theme.redBright)
         : this.hexColor(this.indicatorAdvancedSettings.volumeProfile.demandZoneColor, 0x0094ff);
-      g.rect(leftX, y, Math.max(1, rightX - leftX), height).fill({ color, alpha: row.supplyDemand === "supply" ? 0.035 : 0.028 });
+      g.rect(leftX, y, Math.max(1, rightX - leftX), height).fill({ color, alpha: row.supplyDemand === "supply" ? supplyAlpha : demandAlpha });
     }
   }
 

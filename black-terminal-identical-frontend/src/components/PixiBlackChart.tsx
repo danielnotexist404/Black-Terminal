@@ -76,7 +76,7 @@ type PixiBlackChartProps = {
 };
 
 type IndicatorKey = keyof VisibleIndicators;
-type HistoryDepth = 1000 | 2500 | 5000 | 10000;
+type HistoryDepth = 1000 | 2500 | 5000 | 10000 | 20000;
 type VolumeProfileSettingsTab = "inputs" | "style" | "visibility";
 type AdaptiveSwingSettingsTab = "signals" | "engine" | "optimization" | "alerts";
 type LineAlertIndicatorKey = "vwap" | "ema20" | "ema50" | "ema200";
@@ -118,7 +118,8 @@ const historyDepthOptions: { label: string; value: HistoryDepth }[] = [
   { label: "1K bars", value: 1000 },
   { label: "2.5K bars", value: 2500 },
   { label: "5K bars", value: 5000 },
-  { label: "10K bars", value: 10000 }
+  { label: "10K bars", value: 10000 },
+  { label: "20K bars", value: 20000 }
 ];
 
 const timeframeSeconds: Record<any, number> = {
@@ -298,7 +299,12 @@ export function PixiBlackChart({
   const [activeIndicator, setActiveIndicator] = useState<IndicatorKey | null>(null);
   const [volumeProfileSettingsTab, setVolumeProfileSettingsTab] = useState<VolumeProfileSettingsTab>("inputs");
   const [adaptiveSwingSettingsTab, setAdaptiveSwingSettingsTab] = useState<AdaptiveSwingSettingsTab>("signals");
-  const [historyDepth, setHistoryDepth] = useState<HistoryDepth>(2500);
+  const [historyDepth, setHistoryDepth] = useState<HistoryDepth>(() => {
+    const configuredDepth = Number(indicatorAdvancedSettings.volumeProfile?.fixedRangeLength ?? 5000);
+    if (configuredDepth >= 20000) return 20000;
+    if (configuredDepth >= 10000) return 10000;
+    return 5000;
+  });
   const [indicatorsCollapsed, setIndicatorsCollapsed] = useState(false);
   const [mountedIndicators, setMountedIndicators] = useState<Record<IndicatorKey, boolean>>(() => ({ ...visibleIndicators }));
   const [alertSettings, setAlertSettings] = useState<IndicatorAlertSettings>(defaultIndicatorAlertSettings);
@@ -447,7 +453,7 @@ export function PixiBlackChart({
   };
 
   const setReplaySource = (candles: Candle[]) => {
-    replaySourceRef.current = uniqueSortedCandles(candles).slice(-12000);
+    replaySourceRef.current = uniqueSortedCandles(candles).slice(-20000);
     if (replayActiveRef.current) {
       if (replayControlsRef.current.selecting) {
         engineRef.current?.setCandles(replaySourceRef.current, {
@@ -473,7 +479,7 @@ export function PixiBlackChart({
     replaySourceRef.current =
       last?.time === candle.time
         ? [...source.slice(0, -1), candle]
-        : [...source, candle].slice(-12000);
+        : [...source, candle].slice(-20000);
   };
 
   const ingestTradeIntoReplaySource = (price: number, quantity: number, time: number) => {
@@ -656,7 +662,7 @@ export function PixiBlackChart({
             return;
           }
 
-          replaySourceRef.current = uniqueSortedCandles([...olderCandles, ...replaySourceRef.current]).slice(-12000);
+          replaySourceRef.current = uniqueSortedCandles([...olderCandles, ...replaySourceRef.current]).slice(-20000);
           if (replayActiveRef.current) {
             setDataStatus("REPLAY HISTORY EXTENDED");
             return;
@@ -1814,7 +1820,7 @@ export function PixiBlackChart({
   };
 
   const updateIndicatorPeriod = (key: keyof IndicatorPeriods, value: number) => {
-    const max = key === "volumeProfile" ? 5000 : 500;
+    const max = key === "volumeProfile" ? 20000 : 500;
     const nextValue = Math.max(2, Math.min(max, Number.isFinite(value) ? value : indicatorPeriods[key]));
     onIndicatorPeriodsChange((current) => ({
       ...current,
@@ -2323,6 +2329,19 @@ export function PixiBlackChart({
       </label>
       {renderProfileColorSetting("Supply Zones", "supplyZoneColor")}
       {renderProfileColorSetting("Demand Zones", "demandZoneColor")}
+      <label className="indicator-range-row">
+        S/R Zone Intensity
+        <span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={volumeProfileSettings.supplyDemandIntensity ?? 60}
+            onChange={(event) => updateVolumeProfileSetting("supplyDemandIntensity", Number(event.target.value))}
+          />
+          <b>{volumeProfileSettings.supplyDemandIntensity ?? 60}%</b>
+        </span>
+      </label>
       <label>
         Supply & Demand Threshold %
         <input
@@ -2457,18 +2476,19 @@ export function PixiBlackChart({
       </label>
       <label>
         Fixed Range Length
-        <input
-          type="number"
-          min={10}
-          max={5000}
-          step={10}
+        <select
           value={volumeProfileSettings.fixedRangeLength}
           onChange={(event) => {
-            const value = clampNumber(Number(event.target.value), 10, 5000);
+            const value = Number(event.target.value) as HistoryDepth;
             updateVolumeProfileSetting("fixedRangeLength", value);
             onIndicatorPeriodsChange((current) => ({ ...current, volumeProfile: value }));
+            setHistoryDepth(value);
           }}
-        />
+        >
+          <option value={5000}>5,000 bars</option>
+          <option value={10000}>10,000 bars</option>
+          <option value={20000}>20,000 bars</option>
+        </select>
       </label>
       <label>
         Locked Window

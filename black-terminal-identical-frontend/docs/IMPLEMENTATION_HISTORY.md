@@ -1143,3 +1143,9 @@ Remaining:
 - Added rolling delta columns, independent buy/sell structural envelopes, stable time labels, bounded historical refresh and an explicit classified-tape fallback.
 - Moved timeframe, history, cumulation, scale, visibility and layer controls into the CVD panel settings; schema version 6 migrates old short-window defaults.
 - Added deterministic pressure conservation, cumulation, symmetric-domain and fallback tests. Build and panel/performance regression suites pass; no Supabase migration is required.
+
+# 2026-07-16 - HDLX Profile Zone Visibility And Extended Range
+
+- Added an S/R Zone Intensity control that scales Supply and Demand zone opacity without changing zone detection or profile calculations.
+- Extended Fixed Range Length presets and the underlying chart history, cache and candle buffers to 5,000, 10,000 and 20,000 bars.
+- Restored workspaces now initialize the chart history depth from their saved HDLX fixed range. No Supabase migration is required.

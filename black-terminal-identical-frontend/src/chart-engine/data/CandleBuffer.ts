@@ -11,12 +11,12 @@ export class CandleBuffer {
     return this.data;
   }
 
-  push(candle: Candle, max = 12000) {
+  push(candle: Candle, max = 20000) {
     this.data.push(candle);
     if (this.data.length > max) this.data.splice(0, this.data.length - max);
   }
 
-  prepend(candles: Candle[], max = 12000) {
+  prepend(candles: Candle[], max = 20000) {
     if (candles.length === 0) return 0;
 
     const byTime = new Map<number, Candle>();

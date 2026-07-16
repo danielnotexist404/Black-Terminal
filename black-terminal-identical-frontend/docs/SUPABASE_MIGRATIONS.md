@@ -2018,3 +2018,7 @@ No migration required. Spot/Futures selection, schema-derived order modes and st
 # 2026-07-16 - Runtime-Scoped Private Portfolio Data
 
 No migration required. The client and portfolio snapshot route now scope private synchronization to account IDs currently connected through Black Core Connection Manager. Existing account, order, position and credential tables are unchanged.
+
+# 2026-07-16 - DOM Pro Aggregated Ladder Depth Repair
+
+No migration required. Live order-book bucketing and ladder depth-bar normalization are bounded browser presentation calculations and introduce no durable account, execution or market-memory schema.

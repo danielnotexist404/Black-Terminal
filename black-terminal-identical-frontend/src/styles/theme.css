@@ -8745,19 +8745,28 @@ body.dom-pro-resize-active {
   position: absolute;
   top: 2px;
   bottom: 2px;
-  width: 44%;
-  opacity: 0.38;
+  width: 32%;
+  opacity: 0.58;
   transform-origin: right center;
+  pointer-events: none;
 }
 
 .dom-pro-ladder-row .bid-depth {
-  left: 24%;
-  background: linear-gradient(90deg, rgba(180, 185, 194, 0.06), rgba(205, 209, 216, 0.44));
+  left: 34%;
+  background: linear-gradient(90deg, rgba(180, 185, 194, 0.04), rgba(225, 229, 235, 0.48));
 }
 
 .dom-pro-ladder-row .ask-depth {
   right: 8px;
-  background: linear-gradient(270deg, rgba(255, 0, 0, 0.66), rgba(255, 0, 0, 0.02));
+  background: linear-gradient(270deg, rgba(255, 18, 18, 0.78), rgba(255, 0, 0, 0.04));
+}
+
+.dom-pro-ladder-row.best-bid {
+  box-shadow: inset 0 -1px 0 rgba(229, 233, 240, 0.5);
+}
+
+.dom-pro-ladder-row.best-ask {
+  box-shadow: inset 0 1px 0 rgba(255, 24, 24, 0.72);
 }
 
 .dom-pro-ladder-row.current {

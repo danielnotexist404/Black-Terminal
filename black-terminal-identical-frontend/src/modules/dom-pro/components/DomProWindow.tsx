@@ -25,6 +25,7 @@ import { domPerformanceTrace } from "../domPerformanceTrace";
 import { domFreezeWatchdog } from "../domFreezeWatchdog";
 import { domVisualScheduler } from "../domVisualScheduler";
 import { blackDepthHistoryStore, type DepthHistoryPoint, type DepthHistoryRead } from "../depthHistoryStore";
+import { buildDomLadderModel } from "../domLadderModel";
 import {
   applyDomPanelPreset,
   applyDomWorkspacePreset,
@@ -160,16 +161,6 @@ type FlowPoint = {
   bidRemoved: number;
   askRemoved: number;
   net: number;
-};
-
-type DomLadderRow = {
-  price: number;
-  bidSize: number;
-  askSize: number;
-  totalSize: number;
-  isCurrentPrice: boolean;
-  isBestBid: boolean;
-  isBestAsk: boolean;
 };
 
 type CvdCandle = {
@@ -1477,11 +1468,12 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     });
   }, [cvdData, exchangeLabel, executionStatus, heatmapRange, lastPrice, macroBands, marketSymbol, settings, snapshot, windowMode]);
 
-  const priceRows = useMemo(() => buildLadderRows(ladderSnapshot, heatmapRange, settings), [heatmapRange, ladderSnapshot, settings]);
+  const ladderRowCount = settings.mode === "scalper" ? 36 : settings.mode === "macro" ? 48 : 40;
+  const ladderModel = useMemo(() => buildDomLadderModel(ladderSnapshot, ladderRowCount), [ladderRowCount, ladderSnapshot]);
+  const priceRows = ladderModel.rows;
   const currentLadderPrice = ladderSnapshot.midPrice ?? ladderSnapshot.lastPrice ?? lastPrice ?? midpoint(heatmapRange);
   const priceRowsAbove = priceRows.filter((row) => row.price > currentLadderPrice);
   const priceRowsBelow = priceRows.filter((row) => row.price <= currentLadderPrice);
-  const maxTotal = Math.max(...priceRows.map((row) => row.totalSize), 1);
   const panelHeaderProps = (panelId: DomPanelId) => ({
     panelId,
     panel: panelRegistry.panels[panelId],
@@ -1652,12 +1644,12 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                 <div className="dom-pro-ladder-book">
                 <div className="dom-pro-ladder-rows upper">
                   {priceRowsAbove.map((row) => (
-                    <div className={`dom-pro-ladder-row ${row.isCurrentPrice ? "current" : ""}`} key={row.price}>
+                    <div className={`dom-pro-ladder-row ${row.isCurrentPrice ? "current" : ""} ${row.isBestBid ? "best-bid" : ""} ${row.isBestAsk ? "best-ask" : ""}`} key={row.price}>
                       <span>{formatPrice(row.price)}</span>
-                      <span>{formatSize(row.bidSize)}</span>
-                      <span className="red">{formatSize(row.askSize)}</span>
-                      <i className="bid-depth" style={{ transform: `scaleX(${row.bidSize / maxTotal})` }} />
-                      <i className="ask-depth" style={{ transform: `scaleX(${row.askSize / maxTotal})` }} />
+                      <span>{row.bidSize > 0 ? formatSize(row.bidSize) : "--"}</span>
+                      <span className="red">{row.askSize > 0 ? formatSize(row.askSize) : "--"}</span>
+                      <i className="bid-depth" style={{ transform: `scaleX(${row.bidDepth})` }} />
+                      <i className="ask-depth" style={{ transform: `scaleX(${row.askDepth})` }} />
                     </div>
                   ))}
                 </div>
@@ -1668,12 +1660,12 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                 </div>
                 <div className="dom-pro-ladder-rows lower">
                   {priceRowsBelow.map((row) => (
-                    <div className={`dom-pro-ladder-row ${row.isCurrentPrice ? "current" : ""}`} key={row.price}>
+                    <div className={`dom-pro-ladder-row ${row.isCurrentPrice ? "current" : ""} ${row.isBestBid ? "best-bid" : ""} ${row.isBestAsk ? "best-ask" : ""}`} key={row.price}>
                       <span>{formatPrice(row.price)}</span>
-                      <span>{formatSize(row.bidSize)}</span>
-                      <span className="red">{formatSize(row.askSize)}</span>
-                      <i className="bid-depth" style={{ transform: `scaleX(${row.bidSize / maxTotal})` }} />
-                      <i className="ask-depth" style={{ transform: `scaleX(${row.askSize / maxTotal})` }} />
+                      <span>{row.bidSize > 0 ? formatSize(row.bidSize) : "--"}</span>
+                      <span className="red">{row.askSize > 0 ? formatSize(row.askSize) : "--"}</span>
+                      <i className="bid-depth" style={{ transform: `scaleX(${row.bidDepth})` }} />
+                      <i className="ask-depth" style={{ transform: `scaleX(${row.askDepth})` }} />
                     </div>
                   ))}
                 </div>
@@ -2551,96 +2543,6 @@ function priceToHeight(low: number, high: number, range: MacroLiquidityRange) {
 function buildPriceScale(range: MacroLiquidityRange) {
   const step = (range.max - range.min) / 5;
   return Array.from({ length: 6 }, (_, index) => range.max - step * index);
-}
-
-function buildLadderRows(snapshot: AggregatedDomSnapshot, range: MacroLiquidityRange, settings: DomSettings): DomLadderRow[] {
-  const currentPrice = snapshot.midPrice ?? snapshot.lastPrice ?? midpoint(range);
-  const visibleSpan = Math.max(rangeSpan(range), currentPrice * 0.01);
-  const desiredRows = settings.mode === "scalper" ? 36 : settings.mode === "macro" ? 44 : 40;
-  const rawStep = visibleSpan / desiredRows;
-  const bookStep = inferLadderBookStep(snapshot);
-  const step = nicePriceStep(Math.max(rawStep, bookStep));
-  const min = Math.max(0.00000001, Math.floor(range.min / step) * step);
-  const max = Math.max(min + step, Math.ceil(range.max / step) * step);
-  const rawRows = aggregateBookForLadder(snapshot, step, currentPrice);
-  const rows: DomLadderRow[] = [];
-  for (let price = max; price >= min && rows.length < 92; price = Number((price - step).toFixed(8))) {
-    const aggregate = rawRows.get(ladderPriceKey(price)) ?? { bidSize: 0, askSize: 0 };
-    const low = price - step / 2;
-    const high = price + step / 2;
-    rows.push({
-      price,
-      bidSize: aggregate.bidSize,
-      askSize: aggregate.askSize,
-      totalSize: aggregate.bidSize + aggregate.askSize,
-      isCurrentPrice: currentPrice >= low && currentPrice <= high,
-      isBestBid: snapshot.bestBid !== null && snapshot.bestBid >= low && snapshot.bestBid <= high,
-      isBestAsk: snapshot.bestAsk !== null && snapshot.bestAsk >= low && snapshot.bestAsk <= high
-    });
-  }
-  if (rows.some((row) => row.totalSize > 0)) return rows;
-  return snapshot.buckets.slice(0, 80).map((bucket) => ({
-    price: bucket.price,
-    bidSize: bucket.bidSize,
-    askSize: bucket.askSize,
-    totalSize: bucket.totalSize,
-    isCurrentPrice: bucket.isCurrentPrice,
-    isBestBid: bucket.isBestBid,
-    isBestAsk: bucket.isBestAsk
-  }));
-}
-
-function aggregateBookForLadder(snapshot: AggregatedDomSnapshot, step: number, currentPrice: number) {
-  const map = new Map<string, { bidSize: number; askSize: number }>();
-  const add = (price: number, side: "bid" | "ask", size: number) => {
-    if (!Number.isFinite(price) || !Number.isFinite(size) || size <= 0) return;
-    const rowPrice = roundToLadderPrice(price, step);
-    const key = ladderPriceKey(rowPrice);
-    const row = map.get(key) ?? { bidSize: 0, askSize: 0 };
-    if (side === "bid") row.bidSize += size;
-    else row.askSize += size;
-    map.set(key, row);
-  };
-  const bids = snapshot.sourceBook?.bids?.length ? snapshot.sourceBook.bids : snapshot.bids.map((bucket) => ({ price: bucket.price, quantity: bucket.bidSize }));
-  const asks = snapshot.sourceBook?.asks?.length ? snapshot.sourceBook.asks : snapshot.asks.map((bucket) => ({ price: bucket.price, quantity: bucket.askSize }));
-  for (const level of bids.slice(0, 1500)) add(level.price, "bid", level.quantity);
-  for (const level of asks.slice(0, 1500)) add(level.price, "ask", level.quantity);
-  for (const bucket of snapshot.buckets) {
-    if (Math.abs(bucket.price - currentPrice) / Math.max(1, currentPrice) > 0.12) continue;
-    add(bucket.price, "bid", bucket.bidSize);
-    add(bucket.price, "ask", bucket.askSize);
-  }
-  return map;
-}
-
-function inferLadderBookStep(snapshot: AggregatedDomSnapshot) {
-  const prices = [
-    ...(snapshot.sourceBook?.bids ?? []).slice(0, 80).map((level) => level.price),
-    ...(snapshot.sourceBook?.asks ?? []).slice(0, 80).map((level) => level.price)
-  ].filter((price) => Number.isFinite(price) && price > 0).sort((a, b) => a - b);
-  let minDiff = Number.POSITIVE_INFINITY;
-  for (let index = 1; index < prices.length; index += 1) {
-    const diff = Math.abs(prices[index] - prices[index - 1]);
-    if (diff > 0) minDiff = Math.min(minDiff, diff);
-  }
-  return Number.isFinite(minDiff) ? minDiff : Math.max(0.01, snapshot.renderStats.bucketSize / 20);
-}
-
-function nicePriceStep(value: number) {
-  const raw = Math.max(0.00000001, value);
-  const exponent = Math.floor(Math.log10(raw));
-  const base = Math.pow(10, exponent);
-  const normalized = raw / base;
-  const multiplier = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10;
-  return Number((multiplier * base).toFixed(8));
-}
-
-function roundToLadderPrice(price: number, step: number) {
-  return Number((Math.round(price / step) * step).toFixed(8));
-}
-
-function ladderPriceKey(price: number) {
-  return price.toFixed(8);
 }
 
 function defaultHeatmapCamera(): HeatmapViewportState {

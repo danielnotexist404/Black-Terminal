@@ -40,6 +40,8 @@ import {
 import { availableDomOrderTypes, availableDomTimeInForce, DOM_EQUITY_ALLOCATION_MARKERS, domExecutionLayoutMode, nearestLeverageOptions } from "../src/modules/dom-pro/domExecutionPresentation.ts";
 import type { VenueExecutionSchema } from "../src/execution/venueExecutionSchema.ts";
 import { computeDomWallLabelLayout } from "../src/modules/dom-pro/domWallLabelLayout.ts";
+import { buildDomLadderModel } from "../src/modules/dom-pro/domLadderModel.ts";
+import type { AggregatedDomSnapshot } from "../src/modules/dom-pro/types.ts";
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -87,6 +89,31 @@ assert.equal(domExecutionLayoutMode(760), "wide");
 const wallLabel = computeDomWallLabelLayout({ top: 20, height: 16, width: 300, measuredWidth: 92 });
 assert.equal(wallLabel.y, 28, "wall label is vertically centered inside its strip");
 assert.ok(wallLabel.y >= wallLabel.clipY && wallLabel.y <= wallLabel.clipY + wallLabel.clipHeight, "wall label cannot escape strip bounds");
+const ladderSnapshot = {
+  sourceBook: {
+    exchange: "bybit",
+    symbol: "BTCUSDT",
+    time: 1,
+    bids: Array.from({ length: 200 }, (_, index) => ({ price: 64_000 - index * 0.5, quantity: 1 + index / 20 })),
+    asks: Array.from({ length: 200 }, (_, index) => ({ price: 64_000.5 + index * 0.5, quantity: 1.5 + index / 18 }))
+  },
+  bids: [],
+  asks: [],
+  bestBid: 64_000,
+  bestAsk: 64_000.5,
+  midPrice: 64_000.25,
+  lastPrice: 64_000.25,
+  renderStats: { bucketSize: 50 }
+} as unknown as AggregatedDomSnapshot;
+const ladderModel = buildDomLadderModel(ladderSnapshot, 40);
+const ladderAbove = ladderModel.rows.filter((row) => row.price > ladderSnapshot.midPrice!);
+const ladderBelow = ladderModel.rows.filter((row) => row.price <= ladderSnapshot.midPrice!);
+assert.equal(ladderModel.rows.length, 40, "ladder creates a balanced market-centered row set");
+assert.ok(ladderModel.priceStep < 100, "ladder step follows live book coverage rather than the macro heatmap camera");
+assert.ok(ladderAbove.every((row) => row.askSize > 0), "dense live asks populate every visible offer row");
+assert.ok(ladderBelow.every((row) => row.bidSize > 0), "dense live bids populate every visible bid row");
+assert.ok(ladderModel.rows.every((row) => row.bidDepth >= 0 && row.bidDepth <= 1 && row.askDepth >= 0 && row.askDepth <= 1), "ladder depth bars remain normalized");
+assert.ok(ladderModel.rows.some((row) => row.isBestBid) && ladderModel.rows.some((row) => row.isBestAsk), "best bid and ask remain marked after aggregation");
 assert.equal(writeDomProLayout(resized, "primary", storage), true);
 assert.equal(readDomProLayout("desk", "primary", storage).rootSplit.ratio, 0.60, "layout ratios persist and restore");
 assert.equal(saveDomProLayoutPreset(resized, "My Desk", storage), true);

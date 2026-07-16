@@ -1109,3 +1109,9 @@ Remaining:
 - Replaced the empty CEX disconnect adapter with authenticated server deletion and immediate Black Core cleanup.
 - Added authoritative account-set pruning and complete sign-out cleanup so disconnected orders cannot remain in Orders or on the chart.
 - Made subsequent connects idempotent through deterministic credential references. No Supabase migration is required.
+
+# 2026-07-16 - DOM Pro Aggregated Ladder Depth Repair
+
+- Decoupled the Aggregated DOM Ladder from the Heatmap macro camera, which had collapsed the live venue book into one oversized price bucket in Macro and Full Data views.
+- Rebuilt the ladder around actual venue order-book coverage with balanced bid/ask bins, robust queue-size normalization, best-level markers and quantity-backed depth bars.
+- Removed duplicate source/bucket accumulation and replaced unavailable opposite-side quantities with an explicit empty state. No other DOM Pro panel or analytical pipeline changed.

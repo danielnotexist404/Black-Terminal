@@ -1,11 +1,13 @@
 import joinRequest from "../../../../server/network/routes/investment-group-join-request.js";
 import messages from "../../../../server/network/routes/investment-group-messages.js";
 import reviewRequest from "../../../../server/network/routes/investment-group-review-request.js";
+import moderation from "../../../../server/network/routes/investment-group-moderation.js";
 
 const handlers = {
   "join-request": joinRequest,
   messages,
-  "review-request": reviewRequest
+  "review-request": reviewRequest,
+  moderation
 };
 
 export default async function handler(req, res) {

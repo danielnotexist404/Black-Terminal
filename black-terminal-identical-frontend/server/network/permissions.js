@@ -68,6 +68,32 @@ export async function assertCanManageGroup(supabase, user, groupId) {
   return true;
 }
 
+export async function assertCanModerateGroup(supabase, user, groupId) {
+  const capabilities = getNetworkCapabilities(user);
+  if (capabilities.has("admin.override")) return { role: "platform_admin" };
+
+  const { data: group, error: groupError } = await supabase
+    .from("investment_groups")
+    .select("owner_user_id")
+    .eq("id", groupId)
+    .single();
+  if (groupError || !group) throw groupError || Object.assign(new Error("Investment group not found."), { statusCode: 404 });
+  if (group.owner_user_id === user.id) return { role: "owner" };
+
+  const { data: member, error: memberError } = await supabase
+    .from("investment_group_members")
+    .select("role,status")
+    .eq("group_id", groupId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (memberError) throw memberError;
+  if (member?.status === "active" && member.role === "manager") return { role: "manager" };
+
+  const forbidden = new Error("Investment group moderation permission denied.");
+  forbidden.statusCode = 403;
+  throw forbidden;
+}
+
 export function networkSlug(value) {
   return String(value || "")
     .toLowerCase()

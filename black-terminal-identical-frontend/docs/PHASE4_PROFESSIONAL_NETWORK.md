@@ -12,6 +12,7 @@ Phase IV adds a professional trading network inside Black Terminal. It is not ge
 - Added `INVESTMENT GROUPS` to the main sidebar.
 - Added a Professional Profile module with avatar and banner upload scaffolding, display name, bio, country, trading style tags, Research Feed composer, own posts, followed research feed, follower/following graph, published indicator scaffolding, published strategy scaffolding, opt-in performance disclosure settings, and owned/joined group views.
 - Added an Investment Groups module with discovery, Enterprise/Admin creation gate, six-step group creation wizard, password-hash-only protected group handling, group detail tabs, join requests, owner/admin review, and Trading Room channels.
+- Added owner-controlled public group sections, selected group-admin roles, audited message/member moderation and clickable read-only professional identities.
 - Updated Portfolio Manager Investment Groups tab to show owned/joined/discovery groups and role-based group tool status.
 
 ## Architecture
@@ -59,6 +60,7 @@ The Supabase migration ledger now includes:
 - `investment_group_members`
 - `investment_group_join_requests`
 - `investment_group_messages`
+- `investment_group_moderation_events`
 - `notification_events`
 
 Password-protected groups store only `password_hash`. No plaintext group password is stored.
@@ -70,12 +72,15 @@ Password-protected groups store only `password_hash`. No plaintext group passwor
 - Historical performance language is used.
 - Group creation is restricted to Enterprise/Admin.
 - Group owner cannot access broker credentials through this subsystem.
+- Selected group admins may moderate regular members and room messages, but cannot alter ownership or moderate another manager.
+- Message deletion and member removal require a retained reason.
+- Public group sections fail closed unless explicitly enabled by the owner.
 - Capital control is not implemented here and must continue through allocation and execution architecture later.
 
 ## Next Work
 
 - Wire Profile and Investment Groups pages to Supabase API clients after the migration is applied.
 - Add verified exchange performance feeds.
-- Add admin moderation tools for group suspension and content governance.
+- Wire the typed scaffold store to the production network endpoints for cross-device realtime state; the server moderation contract and schema are now ready.
 - Add notification center UI backed by `notification_events`.
 - Connect Investment Groups to future Allocation Engine rules without bypassing OMS/EMS/Risk.

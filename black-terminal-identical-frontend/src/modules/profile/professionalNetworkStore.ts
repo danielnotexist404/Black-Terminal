@@ -9,6 +9,8 @@ import type {
   InvestmentGroupJoinRequest,
   InvestmentGroupMember,
   InvestmentGroupMessage,
+  InvestmentGroupModerationEvent,
+  InvestmentGroupPublicSection,
   ProfessionalNetworkNotification,
   ProfessionalNetworkNotificationType,
   ProfessionalNetworkState,
@@ -31,6 +33,7 @@ const emptyState: ProfessionalNetworkState = {
   groupMembers: [],
   joinRequests: [],
   messages: [],
+  moderationEvents: [],
   notifications: []
 };
 
@@ -60,10 +63,14 @@ function readState(): ProfessionalNetworkState {
       posts: parsed.posts ?? [],
       indicators: parsed.indicators ?? [],
       strategies: parsed.strategies ?? [],
-      groups: parsed.groups ?? [],
+      groups: (parsed.groups ?? []).map((group) => ({
+        ...group,
+        publicSections: Array.isArray(group.publicSections) ? group.publicSections : []
+      })),
       groupMembers: parsed.groupMembers ?? [],
       joinRequests: parsed.joinRequests ?? [],
       messages: parsed.messages ?? [],
+      moderationEvents: parsed.moderationEvents ?? [],
       notifications: parsed.notifications ?? []
     };
   } catch {
@@ -95,6 +102,28 @@ export function canManageInvestmentGroup(user: CapabilityUser | null | undefined
     capabilities.has("admin.override") ||
     (capabilities.has("can_manage_investment_group") && group ? group.ownerUserId === userIdFromUsername(user.username) : false)
   );
+}
+
+export function canModerateInvestmentGroup(user: CapabilityUser | null | undefined, group?: InvestmentGroup) {
+  if (!user || !group) return false;
+  if (canManageInvestmentGroup(user, group)) return true;
+  const userId = userIdFromUsername(user.username);
+  return readState().groupMembers.some((member) => (
+    member.groupId === group.id &&
+    member.userId === userId &&
+    member.status === "active" &&
+    (member.role === "owner" || member.role === "manager")
+  ));
+}
+
+export function isInvestmentGroupMember(user: CapabilityUser | null | undefined, groupId: string) {
+  if (!user) return false;
+  const userId = userIdFromUsername(user.username);
+  return readState().groupMembers.some((member) => member.groupId === groupId && member.userId === userId && member.status === "active");
+}
+
+export function isInvestmentGroupSectionPublic(group: InvestmentGroup, section: InvestmentGroupPublicSection) {
+  return (group.publicSections ?? []).includes(section);
 }
 
 export function ensureProfessionalProfile(user: CapabilityUser): ProfessionalProfile {
@@ -186,6 +215,23 @@ export function getProfessionalNetworkSnapshot(user: CapabilityUser) {
       .map((member) => state.groups.find((group) => group.id === member.groupId))
       .filter(Boolean) as InvestmentGroup[],
     notifications: state.notifications.filter((item) => item.userId === profile.userId)
+  };
+}
+
+export function getPublicProfessionalProfileSnapshot(username: string) {
+  const state = readState();
+  const userId = userIdFromUsername(username);
+  const profile = state.profiles.find((item) => item.userId === userId);
+  if (!profile) return null;
+
+  return {
+    profile,
+    followerCount: state.follows.filter((item) => item.followedUserId === userId).length,
+    followingCount: state.follows.filter((item) => item.followerUserId === userId).length,
+    posts: state.posts.filter((item) => item.userId === userId && item.visibility === "public").sort((a, b) => b.createdAt - a.createdAt),
+    indicators: state.indicators.filter((item) => item.userId === userId && item.visibility === "public"),
+    strategies: state.strategies.filter((item) => item.userId === userId && item.visibility === "public"),
+    groups: state.groups.filter((item) => item.ownerUserId === userId && item.status === "active" && item.visibility === "public")
   };
 }
 
@@ -395,6 +441,7 @@ export function updateInvestmentGroup(
     | "minimumEquity"
     | "maxFollowers"
     | "approvalRequired"
+    | "publicSections"
     | "riskDisclaimer"
   >>
 ) {
@@ -425,6 +472,127 @@ export function updateInvestmentGroup(
   });
 
   return updated ?? group;
+}
+
+export function deleteGroupMessage(user: CapabilityUser, groupId: string, messageId: string, reason: string) {
+  const normalizedReason = requireModerationReason(reason);
+  const state = readState();
+  const group = state.groups.find((item) => item.id === groupId);
+  if (!group) throw new Error("Investment group not found.");
+  if (!canModerateInvestmentGroup(user, group)) throw new Error("Only the owner or a selected group admin can moderate messages.");
+
+  const message = state.messages.find((item) => item.id === messageId && item.groupId === groupId);
+  if (!message) throw new Error("Trading Room message not found.");
+  const actor = ensureProfessionalProfile(user);
+  const actorMember = state.groupMembers.find((item) => item.groupId === groupId && item.userId === actor.userId && item.status === "active");
+  if (message.role === "owner" && actorMember?.role === "manager" && !canManageInvestmentGroup(user, group)) {
+    throw new Error("A group admin cannot remove the owner's messages.");
+  }
+
+  mutate((draftState) => {
+    draftState.messages = draftState.messages.filter((item) => item.id !== messageId);
+    draftState.moderationEvents.unshift(makeModerationEvent({
+      groupId,
+      action: "message_deleted",
+      actor,
+      targetUserId: message.userId,
+      targetUsername: message.username,
+      messageId,
+      reason: normalizedReason,
+      metadata: { channel: message.channel, bodyExcerpt: message.body.slice(0, 160) }
+    }));
+    if (message.userId !== actor.userId) {
+      draftState.notifications.unshift(makeNotification(
+        message.userId,
+        "group_message_removed",
+        "Trading Room Message Removed",
+        `A message in ${group.firmName} was removed by moderation. Reason: ${normalizedReason}`,
+        { groupId, messageId }
+      ));
+    }
+  });
+}
+
+export function removeInvestmentGroupMember(user: CapabilityUser, groupId: string, memberId: string, reason: string) {
+  const normalizedReason = requireModerationReason(reason);
+  const state = readState();
+  const group = state.groups.find((item) => item.id === groupId);
+  if (!group) throw new Error("Investment group not found.");
+  if (!canModerateInvestmentGroup(user, group)) throw new Error("Only the owner or a selected group admin can remove members.");
+
+  const target = state.groupMembers.find((item) => item.id === memberId && item.groupId === groupId && item.status === "active");
+  if (!target) throw new Error("Active group member not found.");
+  if (target.role === "owner") throw new Error("Group ownership cannot be removed.");
+
+  const actor = ensureProfessionalProfile(user);
+  const actorMember = state.groupMembers.find((item) => item.groupId === groupId && item.userId === actor.userId && item.status === "active");
+  const hasOwnerAuthority = canManageInvestmentGroup(user, group);
+  if (target.role === "manager" && actorMember?.role === "manager" && !hasOwnerAuthority) {
+    throw new Error("A group admin cannot remove another group admin.");
+  }
+
+  mutate((draftState) => {
+    const member = draftState.groupMembers.find((item) => item.id === memberId);
+    if (!member) return;
+    member.status = "removed";
+    const draftGroup = draftState.groups.find((item) => item.id === groupId);
+    if (draftGroup) draftGroup.stats.followerCount = Math.max(0, draftGroup.stats.followerCount - 1);
+    draftState.moderationEvents.unshift(makeModerationEvent({
+      groupId,
+      action: "member_removed",
+      actor,
+      targetUserId: target.userId,
+      targetUsername: target.username,
+      reason: normalizedReason,
+      metadata: { previousRole: target.role }
+    }));
+    draftState.notifications.unshift(makeNotification(
+      target.userId,
+      "group_member_removed",
+      "Investment Group Membership Removed",
+      `Your membership in ${group.firmName} was removed. Reason: ${normalizedReason}`,
+      { groupId }
+    ));
+  });
+}
+
+export function setInvestmentGroupMemberRole(user: CapabilityUser, groupId: string, memberId: string, role: "manager" | "member") {
+  const state = readState();
+  const group = state.groups.find((item) => item.id === groupId);
+  if (!group) throw new Error("Investment group not found.");
+  if (!canManageInvestmentGroup(user, group)) throw new Error("Only the group owner or a platform admin can select group admins.");
+
+  const target = state.groupMembers.find((item) => item.id === memberId && item.groupId === groupId && item.status === "active");
+  if (!target) throw new Error("Active group member not found.");
+  if (target.role === "owner") throw new Error("The owner role cannot be changed.");
+  if (target.role === role) return target;
+
+  const actor = ensureProfessionalProfile(user);
+  let updated = target;
+  mutate((draftState) => {
+    const member = draftState.groupMembers.find((item) => item.id === memberId);
+    if (!member) return;
+    const previousRole = member.role;
+    member.role = role;
+    updated = member;
+    draftState.moderationEvents.unshift(makeModerationEvent({
+      groupId,
+      action: "role_changed",
+      actor,
+      targetUserId: member.userId,
+      targetUsername: member.username,
+      reason: role === "manager" ? "Selected as group admin by owner." : "Group admin access revoked by owner.",
+      metadata: { previousRole, nextRole: role }
+    }));
+    draftState.notifications.unshift(makeNotification(
+      member.userId,
+      "group_role_changed",
+      role === "manager" ? "Group Admin Access Granted" : "Group Admin Access Revoked",
+      `${group.firmName} changed your group role to ${role}.`,
+      { groupId, role }
+    ));
+  });
+  return updated;
 }
 
 export function requestToJoinGroup(user: CapabilityUser, groupId: string, message: string, passwordHash?: string) {
@@ -572,6 +740,37 @@ function makeNotification(
     title,
     body,
     metadata,
+    createdAt: now()
+  };
+}
+
+function requireModerationReason(reason: string) {
+  const normalized = reason.trim();
+  if (normalized.length < 5) throw new Error("A specific moderation reason of at least 5 characters is required.");
+  return normalized.slice(0, 500);
+}
+
+function makeModerationEvent(input: {
+  groupId: string;
+  action: InvestmentGroupModerationEvent["action"];
+  actor: ProfessionalProfile;
+  targetUserId?: string;
+  targetUsername?: string;
+  messageId?: string;
+  reason: string;
+  metadata: Record<string, unknown>;
+}): InvestmentGroupModerationEvent {
+  return {
+    id: makeId("moderation"),
+    groupId: input.groupId,
+    action: input.action,
+    actorUserId: input.actor.userId,
+    actorUsername: input.actor.username,
+    targetUserId: input.targetUserId,
+    targetUsername: input.targetUsername,
+    messageId: input.messageId,
+    reason: input.reason,
+    metadata: input.metadata,
     createdAt: now()
   };
 }

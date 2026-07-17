@@ -42,6 +42,7 @@ export default async function handler(req, res) {
         minimum_equity: req.body.minimumEquity ?? null,
         max_followers: req.body.maxFollowers ?? null,
         approval_required: req.body.approvalRequired !== false,
+        public_sections: Array.isArray(req.body.publicSections) ? req.body.publicSections : [],
         status: "active"
       })
       .select("*")

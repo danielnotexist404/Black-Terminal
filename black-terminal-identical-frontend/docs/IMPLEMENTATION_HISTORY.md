@@ -1162,3 +1162,11 @@ Remaining:
 - Rebuilt the group identity header with structured manager metadata, a full-width readable biography and truthful verification labels.
 - Replaced the Settings scaffold with an owner/admin-authorized editor for identity, group picture, banner, bio, access, membership limits, mandate, venues, wallets and risk disclosure.
 - Added a capability-checked group update operation with password hashing, timestamps and Black Core success notification. No Supabase migration is required.
+
+# 2026-07-17 - Investment Group Governance And Public Disclosure
+
+- Added owner-selected public visibility for Performance, Drawdown, Positions Visibility, Research, Members, Trading Room and Risk; non-public tabs fail closed for unaffiliated visitors while members retain internal access.
+- Promoted the existing manager role into a selected group-admin role. Owners can grant or revoke it without transferring ownership.
+- Added reason-required message deletion and member removal with immutable owner protection, manager hierarchy checks, member notifications and moderation audit events.
+- Made Trading Room and Members identities open a dedicated read-only professional profile page.
+- Added a service-side moderation route and an idempotent Supabase migration for `public_sections`, moderation records and message visibility/deletion policies.

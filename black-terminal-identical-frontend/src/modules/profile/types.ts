@@ -80,6 +80,14 @@ export type UserFollow = {
 export type InvestmentGroupVisibility = "public" | "private" | "invite_only" | "password_protected";
 export type InvestmentGroupAccessMode = "open" | "approval_required" | "invite_only" | "password_protected";
 export type InvestmentGroupStatus = "draft" | "active" | "suspended" | "archived";
+export type InvestmentGroupPublicSection =
+  | "performance"
+  | "drawdown"
+  | "positions"
+  | "research"
+  | "members"
+  | "trading_room"
+  | "risk";
 
 export type InvestmentGroupStats = {
   followerCount: number;
@@ -117,6 +125,7 @@ export type InvestmentGroup = {
   minimumEquity?: number;
   maxFollowers?: number;
   approvalRequired: boolean;
+  publicSections: InvestmentGroupPublicSection[];
   status: InvestmentGroupStatus;
   riskDisclaimer: string;
   managerTermsAccepted: boolean;
@@ -165,6 +174,22 @@ export type InvestmentGroupMessage = {
   createdAt: number;
 };
 
+export type InvestmentGroupModerationAction = "message_deleted" | "member_removed" | "role_changed";
+
+export type InvestmentGroupModerationEvent = {
+  id: string;
+  groupId: string;
+  action: InvestmentGroupModerationAction;
+  actorUserId: string;
+  actorUsername: string;
+  targetUserId?: string;
+  targetUsername?: string;
+  messageId?: string;
+  reason: string;
+  metadata: Record<string, unknown>;
+  createdAt: number;
+};
+
 export type ProfessionalNetworkNotificationType =
   | "new_follower"
   | "follow_request"
@@ -173,6 +198,9 @@ export type ProfessionalNetworkNotificationType =
   | "join_request_declined"
   | "group_announcement"
   | "group_message"
+  | "group_message_removed"
+  | "group_member_removed"
+  | "group_role_changed"
   | "new_research_post"
   | "group_created"
   | "group_suspended_by_admin";
@@ -198,5 +226,6 @@ export type ProfessionalNetworkState = {
   groupMembers: InvestmentGroupMember[];
   joinRequests: InvestmentGroupJoinRequest[];
   messages: InvestmentGroupMessage[];
+  moderationEvents: InvestmentGroupModerationEvent[];
   notifications: ProfessionalNetworkNotification[];
 };

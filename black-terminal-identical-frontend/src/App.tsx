@@ -64,6 +64,7 @@ import type { ScannerResult } from "./modules/scanner/types/scanner.types";
 import { StrategyLabPage } from "./modules/strategy-lab/components/StrategyLabPage";
 import PortfolioManagerPage, { PositionsWorkspace } from "./modules/portfolio-manager/components/PortfolioManagerPage";
 import { ProfilePage } from "./modules/profile/components/ProfilePage";
+import { PublicProfessionalProfilePage } from "./modules/profile/components/PublicProfessionalProfilePage";
 import { InvestmentGroupsPage } from "./modules/investment-groups/components/InvestmentGroupsPage";
 import { emptyPortfolioSnapshot, getPortfolioSnapshot, invalidatePortfolioSnapshot } from "./portfolio/portfolioStore";
 import type { PortfolioPosition } from "./positions/types";
@@ -407,6 +408,7 @@ export default function App() {
     }
   }, [currentUser]);
   const [activeNav, setActiveNav] = useState(() => localStorage.getItem("bt_active_nav") || "CHART");
+  const [selectedProfessionalUsername, setSelectedProfessionalUsername] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showRevokedPopup, setShowRevokedPopup] = useState(false);
 
@@ -1720,7 +1722,10 @@ export default function App() {
             <button
               key={label}
               className={label === activeNav ? "nav active" : "nav"}
-              onClick={() => setActiveNav(label)}
+              onClick={() => {
+                if (label === "PROFILE") setSelectedProfessionalUsername(null);
+                setActiveNav(label);
+              }}
               style={{ position: "relative" }}
             >
               <Icon size={19} />
@@ -1840,15 +1845,26 @@ export default function App() {
         </div>
       ) : activeNav === "PROFILE" ? (
         <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
-          <ProfilePage
-            currentUser={currentUser}
-            onClose={() => setActiveNav("CHART")}
-            onOpenInvestmentGroups={() => setActiveNav("INVESTMENT GROUPS")}
-          />
+          {selectedProfessionalUsername && selectedProfessionalUsername.toLowerCase() !== currentUser.username.toLowerCase() ? (
+            <PublicProfessionalProfilePage username={selectedProfessionalUsername} onClose={() => setActiveNav("INVESTMENT GROUPS")} />
+          ) : (
+            <ProfilePage
+              currentUser={currentUser}
+              onClose={() => setActiveNav("CHART")}
+              onOpenInvestmentGroups={() => setActiveNav("INVESTMENT GROUPS")}
+            />
+          )}
         </div>
       ) : activeNav === "INVESTMENT GROUPS" ? (
         <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
-          <InvestmentGroupsPage currentUser={currentUser} onClose={() => setActiveNav("CHART")} />
+          <InvestmentGroupsPage
+            currentUser={currentUser}
+            onClose={() => setActiveNav("CHART")}
+            onOpenProfile={(username) => {
+              setSelectedProfessionalUsername(username);
+              setActiveNav("PROFILE");
+            }}
+          />
         </div>
       ) : (
         <main className={showCompactDom ? "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>

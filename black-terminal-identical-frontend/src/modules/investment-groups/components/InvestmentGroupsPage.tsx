@@ -11,6 +11,9 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Trash2,
+  UserCog,
+  UserMinus,
+  UserRound,
   Users,
   X
 } from "lucide-react";
@@ -18,19 +21,34 @@ import type { CapabilityUser } from "../../../core/permissions/capabilities";
 import {
   canCreateInvestmentGroup,
   canManageInvestmentGroup,
+  canModerateInvestmentGroup,
   createInvestmentGroup,
+  deleteGroupMessage,
+  isInvestmentGroupMember,
+  isInvestmentGroupSectionPublic,
   listInvestmentGroups,
   postGroupMessage,
+  removeInvestmentGroupMember,
   requestToJoinGroup,
   reviewJoinRequest,
+  setInvestmentGroupMemberRole,
   updateInvestmentGroup,
   userIdFromUsername
 } from "../../profile/professionalNetworkStore";
-import type { InvestmentGroup, InvestmentGroupAccessMode, InvestmentGroupVisibility, TradingRoomChannel } from "../../profile/types";
+import type {
+  InvestmentGroup,
+  InvestmentGroupAccessMode,
+  InvestmentGroupMember,
+  InvestmentGroupMessage,
+  InvestmentGroupPublicSection,
+  InvestmentGroupVisibility,
+  TradingRoomChannel
+} from "../../profile/types";
 
 type InvestmentGroupsPageProps = {
   currentUser: CapabilityUser;
   onClose: () => void;
+  onOpenProfile: (username: string) => void;
 };
 
 type GroupTab =
@@ -58,6 +76,18 @@ const groupTabs: GroupTab[] = [
   "Settings"
 ];
 
+const publicSectionOptions: { section: InvestmentGroupPublicSection; tab: GroupTab; label: string }[] = [
+  { section: "performance", tab: "Performance", label: "Performance" },
+  { section: "drawdown", tab: "Drawdown", label: "Drawdown" },
+  { section: "positions", tab: "Positions Visibility", label: "Positions Visibility" },
+  { section: "research", tab: "Research", label: "Research" },
+  { section: "members", tab: "Members", label: "Members" },
+  { section: "trading_room", tab: "Trading Room", label: "Trading Room" },
+  { section: "risk", tab: "Risk", label: "Risk" }
+];
+
+const publicSectionByTab = new Map<GroupTab, InvestmentGroupPublicSection>(publicSectionOptions.map((item) => [item.tab, item.section]));
+
 const tradingStyles = ["scalping", "swing trading", "macro", "crypto futures", "spot", "DeFi", "orderflow", "volume profile", "quant", "discretionary", "HDLX"];
 
 const defaultDraft = {
@@ -75,11 +105,12 @@ const defaultDraft = {
   acceptedWallets: "MetaMask, Phantom",
   maxFollowers: "",
   approvalRequired: true,
+  publicSections: [] as InvestmentGroupPublicSection[],
   riskDisclaimer: "Historical performance is not a guarantee of future returns. Followers retain explicit control over allocation and execution permissions.",
   managerTermsAccepted: false
 };
 
-export function InvestmentGroupsPage({ currentUser, onClose }: InvestmentGroupsPageProps) {
+export function InvestmentGroupsPage({ currentUser, onClose, onOpenProfile }: InvestmentGroupsPageProps) {
   const [revision, setRevision] = useState(0);
   const data = useMemo(() => listInvestmentGroups(currentUser), [currentUser, revision]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(data.publicGroups[0]?.id ?? data.myGroups[0]?.id ?? null);
@@ -98,6 +129,18 @@ export function InvestmentGroupsPage({ currentUser, onClose }: InvestmentGroupsP
   const [status, setStatus] = useState("");
   const canCreate = canCreateInvestmentGroup(currentUser);
   const currentUserId = userIdFromUsername(currentUser.username);
+  const selectedCanManage = selectedGroup ? canManageInvestmentGroup(currentUser, selectedGroup) : false;
+  const selectedCanModerate = selectedGroup ? canModerateInvestmentGroup(currentUser, selectedGroup) : false;
+  const selectedIsMember = selectedGroup ? isInvestmentGroupMember(currentUser, selectedGroup.id) : false;
+  const visibleTabs = selectedGroup ? groupTabs.filter((tab) => {
+    if (tab === "Settings" || tab === "Requests") return selectedCanManage;
+    const publicSection = publicSectionByTab.get(tab);
+    return !publicSection || selectedIsMember || selectedCanModerate || isInvestmentGroupSectionPublic(selectedGroup, publicSection);
+  }) : ["Overview"] as GroupTab[];
+
+  useEffect(() => {
+    if (!visibleTabs.includes(activeTab)) setActiveTab("Overview");
+  }, [activeTab, visibleTabs]);
 
   const refresh = () => setRevision((value) => value + 1);
 
@@ -121,6 +164,7 @@ export function InvestmentGroupsPage({ currentUser, onClose }: InvestmentGroupsP
         minimumEquity: draft.minimumEquity ? Number(draft.minimumEquity) : undefined,
         maxFollowers: draft.maxFollowers ? Number(draft.maxFollowers) : undefined,
         approvalRequired: draft.approvalRequired,
+        publicSections: draft.publicSections,
         riskDisclaimer: draft.riskDisclaimer,
         managerTermsAccepted: draft.managerTermsAccepted
       });
@@ -208,7 +252,8 @@ export function InvestmentGroupsPage({ currentUser, onClose }: InvestmentGroupsP
             <GroupHeader
               group={selectedGroup}
               currentUserId={currentUserId}
-              canManage={canManageInvestmentGroup(currentUser, selectedGroup)}
+              canManage={selectedCanManage}
+              isMember={selectedIsMember || selectedCanModerate}
               onJoinRequest={submitJoinRequest}
               joinMessage={joinMessage}
               joinPassword={joinPassword}
@@ -216,7 +261,7 @@ export function InvestmentGroupsPage({ currentUser, onClose }: InvestmentGroupsP
               onJoinPasswordChange={setJoinPassword}
             />
             <nav className="network-tabs compact-tabs">
-              {groupTabs.filter((tab) => tab !== "Settings" || canManageInvestmentGroup(currentUser, selectedGroup)).map((tab) => (
+              {visibleTabs.map((tab) => (
                 <button type="button" key={tab} className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>
                   {tab}
                 </button>
@@ -232,6 +277,7 @@ export function InvestmentGroupsPage({ currentUser, onClose }: InvestmentGroupsP
               onChannelChange={setRoomChannel}
               onMessageChange={setRoomMessage}
               onPostMessage={submitRoomMessage}
+              onOpenProfile={onOpenProfile}
               onGroupUpdated={(message) => {
                 setStatus(message);
                 refresh();
@@ -287,6 +333,7 @@ function GroupHeader({
   group,
   currentUserId,
   canManage,
+  isMember,
   onJoinRequest,
   joinMessage,
   joinPassword,
@@ -296,6 +343,7 @@ function GroupHeader({
   group: InvestmentGroup;
   currentUserId: string;
   canManage: boolean;
+  isMember: boolean;
   onJoinRequest: () => void;
   joinMessage: string;
   joinPassword: string;
@@ -323,7 +371,7 @@ function GroupHeader({
           <em>{group.visibility.toUpperCase()}</em>
         </div>
       </div>
-      {!isOwner && !canManage && (
+      {!isOwner && !canManage && !isMember && (
         <div className="investment-join">
           {group.accessMode === "password_protected" && <input type="password" value={joinPassword} onChange={(event) => onJoinPasswordChange(event.target.value)} placeholder="Group password" />}
           <input value={joinMessage} onChange={(event) => onJoinMessageChange(event.target.value)} placeholder="Optional request message" />
@@ -344,6 +392,7 @@ function GroupTabContent({
   onChannelChange,
   onMessageChange,
   onPostMessage,
+  onOpenProfile,
   onGroupUpdated,
   onReview
 }: {
@@ -356,6 +405,7 @@ function GroupTabContent({
   onChannelChange: (channel: TradingRoomChannel) => void;
   onMessageChange: (message: string) => void;
   onPostMessage: () => void;
+  onOpenProfile: (username: string) => void;
   onGroupUpdated: (message: string) => void;
   onReview: (requestId: string, action: "approve" | "decline") => void;
 }) {
@@ -363,6 +413,8 @@ function GroupTabContent({
   const requests = data.joinRequests.filter((request) => request.groupId === group.id && request.status === "pending");
   const messages = data.messages.filter((message) => message.groupId === group.id && message.channel === roomChannel);
   const canManage = canManageInvestmentGroup(currentUser, group);
+  const canModerate = canModerateInvestmentGroup(currentUser, group);
+  const isMember = isInvestmentGroupMember(currentUser, group.id) || canModerate;
 
   if (tab === "Overview") {
     return (
@@ -393,34 +445,20 @@ function GroupTabContent({
 
   if (tab === "Trading Room") {
     return (
-      <section className="network-grid feed">
-        <div className="network-panel">
-          <div className="network-panel-title"><MessageSquare size={14} /> Trading Room</div>
-          <div className="network-inline-form">
-            <select value={roomChannel} onChange={(event) => onChannelChange(event.target.value as TradingRoomChannel)}>
-              <option value="announcements">Announcements</option>
-              <option value="general">General</option>
-              <option value="research">Research</option>
-              <option value="trades">Trades</option>
-            </select>
-            <input value={roomMessage} onChange={(event) => onMessageChange(event.target.value)} placeholder="Professional room message" />
-            <button type="button" onClick={onPostMessage} disabled={roomMessage.trim().length < 2}>Post</button>
-          </div>
-          {messages.length === 0 ? (
-            <div className="network-empty">NO TRADING ROOM MESSAGES IN THIS CHANNEL.</div>
-          ) : (
-            <div className="network-list">
-              {messages.map((message) => (
-                <div className="network-list-row" key={message.id}>
-                  <strong>@{message.username}</strong>
-                  <span>{message.body}</span>
-                  <em>{message.role.toUpperCase()} / {new Date(message.createdAt).toLocaleString()}</em>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
+      <TradingRoomPanel
+        currentUser={currentUser}
+        group={group}
+        messages={messages}
+        roomChannel={roomChannel}
+        roomMessage={roomMessage}
+        canPost={isMember}
+        canModerate={canModerate}
+        onChannelChange={onChannelChange}
+        onMessageChange={onMessageChange}
+        onPostMessage={onPostMessage}
+        onOpenProfile={onOpenProfile}
+        onChanged={onGroupUpdated}
+      />
     );
   }
 
@@ -451,16 +489,15 @@ function GroupTabContent({
 
   if (tab === "Members") {
     return (
-      <section className="network-panel">
-        <div className="network-panel-title"><Users size={14} /> Members</div>
-        {members.map((member) => (
-          <div className="network-list-row" key={member.id}>
-            <strong>@{member.username}</strong>
-            <span>{member.role.toUpperCase()}</span>
-            <em>JOINED {new Date(member.joinedAt).toLocaleDateString()}</em>
-          </div>
-        ))}
-      </section>
+      <MembersPanel
+        currentUser={currentUser}
+        group={group}
+        members={members}
+        canManage={canManage}
+        canModerate={canModerate}
+        onOpenProfile={onOpenProfile}
+        onChanged={onGroupUpdated}
+      />
     );
   }
 
@@ -480,6 +517,223 @@ function GroupTabContent({
   );
 }
 
+function TradingRoomPanel({
+  currentUser,
+  group,
+  messages,
+  roomChannel,
+  roomMessage,
+  canPost,
+  canModerate,
+  onChannelChange,
+  onMessageChange,
+  onPostMessage,
+  onOpenProfile,
+  onChanged
+}: {
+  currentUser: CapabilityUser;
+  group: InvestmentGroup;
+  messages: InvestmentGroupMessage[];
+  roomChannel: TradingRoomChannel;
+  roomMessage: string;
+  canPost: boolean;
+  canModerate: boolean;
+  onChannelChange: (channel: TradingRoomChannel) => void;
+  onMessageChange: (message: string) => void;
+  onPostMessage: () => void;
+  onOpenProfile: (username: string) => void;
+  onChanged: (message: string) => void;
+}) {
+  const [messageToDelete, setMessageToDelete] = useState<InvestmentGroupMessage | null>(null);
+  const [error, setError] = useState("");
+
+  const confirmDelete = (reason: string) => {
+    if (!messageToDelete) return;
+    try {
+      deleteGroupMessage(currentUser, group.id, messageToDelete.id, reason);
+      setMessageToDelete(null);
+      setError("");
+      onChanged("Trading Room message removed and recorded in the moderation audit.");
+    } catch (moderationError) {
+      setError(moderationError instanceof Error ? moderationError.message : String(moderationError));
+    }
+  };
+
+  return (
+    <section className="network-grid feed">
+      <div className="network-panel">
+        <div className="network-panel-title"><MessageSquare size={14} /> Trading Room</div>
+        <div className={canPost ? "network-inline-form" : "network-inline-form room-read-only"}>
+          <select value={roomChannel} onChange={(event) => onChannelChange(event.target.value as TradingRoomChannel)}>
+            <option value="announcements">Announcements</option>
+            <option value="general">General</option>
+            <option value="research">Research</option>
+            <option value="trades">Trades</option>
+          </select>
+          {canPost ? (
+            <>
+              <input value={roomMessage} onChange={(event) => onMessageChange(event.target.value)} placeholder="Professional room message" />
+              <button type="button" onClick={onPostMessage} disabled={roomMessage.trim().length < 2}>Post</button>
+            </>
+          ) : <span>PUBLIC READ-ONLY VIEW</span>}
+        </div>
+        {error && <div className="network-status investment-settings-status">{error}</div>}
+        {messages.length === 0 ? (
+          <div className="network-empty">NO TRADING ROOM MESSAGES IN THIS CHANNEL.</div>
+        ) : (
+          <div className="network-list trading-room-list">
+            {messages.map((message) => (
+              <div className="network-list-row trading-room-message" key={message.id}>
+                <button className="network-profile-link" type="button" onClick={() => onOpenProfile(message.username)} title={`Open ${message.username}'s profile`}>
+                  <UserRound size={13} /> @{message.username}
+                </button>
+                <span>{message.body}</span>
+                <em>{message.role.toUpperCase()} / {new Date(message.createdAt).toLocaleString()}</em>
+                {canModerate && (
+                  <button className="network-icon-danger" type="button" onClick={() => setMessageToDelete(message)} title="Remove abusive message" aria-label={`Delete message from ${message.username}`}>
+                    <Trash2 size={13} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {messageToDelete && (
+        <ModerationDialog
+          title="Remove Trading Room Message"
+          description={`Remove @${messageToDelete.username}'s message from #${messageToDelete.channel}. The reason is retained in the moderation audit.`}
+          confirmLabel="Remove Message"
+          onCancel={() => { setMessageToDelete(null); setError(""); }}
+          onConfirm={confirmDelete}
+        />
+      )}
+    </section>
+  );
+}
+
+function MembersPanel({
+  currentUser,
+  group,
+  members,
+  canManage,
+  canModerate,
+  onOpenProfile,
+  onChanged
+}: {
+  currentUser: CapabilityUser;
+  group: InvestmentGroup;
+  members: InvestmentGroupMember[];
+  canManage: boolean;
+  canModerate: boolean;
+  onOpenProfile: (username: string) => void;
+  onChanged: (message: string) => void;
+}) {
+  const [memberToRemove, setMemberToRemove] = useState<InvestmentGroupMember | null>(null);
+  const [error, setError] = useState("");
+  const currentUserId = userIdFromUsername(currentUser.username);
+
+  const changeRole = (member: InvestmentGroupMember, role: "manager" | "member") => {
+    try {
+      setInvestmentGroupMemberRole(currentUser, group.id, member.id, role);
+      setError("");
+      onChanged(role === "manager" ? `@${member.username} is now a group admin.` : `@${member.username} is now a standard member.`);
+    } catch (roleError) {
+      setError(roleError instanceof Error ? roleError.message : String(roleError));
+    }
+  };
+
+  const confirmRemoval = (reason: string) => {
+    if (!memberToRemove) return;
+    try {
+      removeInvestmentGroupMember(currentUser, group.id, memberToRemove.id, reason);
+      const username = memberToRemove.username;
+      setMemberToRemove(null);
+      setError("");
+      onChanged(`@${username} was removed from the group and the reason was audited.`);
+    } catch (moderationError) {
+      setError(moderationError instanceof Error ? moderationError.message : String(moderationError));
+    }
+  };
+
+  return (
+    <section className="network-panel">
+      <div className="network-panel-title"><Users size={14} /> Members</div>
+      {error && <div className="network-status investment-settings-status">{error}</div>}
+      <div className="network-list member-management-list">
+        {members.map((member) => {
+          const canRemoveMember = canModerate && member.role !== "owner" && member.userId !== currentUserId && (canManage || member.role === "member");
+          return (
+            <div className="network-list-row member-management-row" key={member.id}>
+              <button className="network-profile-link" type="button" onClick={() => onOpenProfile(member.username)} title={`Open ${member.username}'s profile`}>
+                <UserRound size={13} /> @{member.username}
+              </button>
+              <span>{member.role.toUpperCase()}</span>
+              <em>JOINED {new Date(member.joinedAt).toLocaleDateString()}</em>
+              <div className="member-management-actions">
+                {canManage && member.role !== "owner" && (
+                  <button type="button" onClick={() => changeRole(member, member.role === "manager" ? "member" : "manager")} title={member.role === "manager" ? "Revoke group admin" : "Select as group admin"}>
+                    <UserCog size={13} /> {member.role === "manager" ? "Revoke Admin" : "Make Admin"}
+                  </button>
+                )}
+                {canRemoveMember && (
+                  <button className="network-danger" type="button" onClick={() => setMemberToRemove(member)}>
+                    <UserMinus size={13} /> Remove
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {memberToRemove && (
+        <ModerationDialog
+          title="Remove Group Member"
+          description={`Remove @${memberToRemove.username} from ${group.firmName}. A specific reason is mandatory and will be retained in the moderation audit.`}
+          confirmLabel="Remove Member"
+          onCancel={() => { setMemberToRemove(null); setError(""); }}
+          onConfirm={confirmRemoval}
+        />
+      )}
+    </section>
+  );
+}
+
+function ModerationDialog({
+  title,
+  description,
+  confirmLabel,
+  onCancel,
+  onConfirm
+}: {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  onCancel: () => void;
+  onConfirm: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  return (
+    <div className="network-modal-backdrop moderation-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+      <div className="network-modal moderation-dialog" role="dialog" aria-modal="true" aria-labelledby="moderation-dialog-title">
+        <header>
+          <strong id="moderation-dialog-title">{title}</strong>
+          <button type="button" onClick={onCancel} aria-label="Cancel moderation"><X size={14} /></button>
+        </header>
+        <div className="moderation-dialog-body">
+          <p>{description}</p>
+          <label>Moderation Reason<textarea autoFocus value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} placeholder="State the policy or conduct reason..." /></label>
+          <span>{reason.trim().length}/500 · minimum 5 characters</span>
+        </div>
+        <footer>
+          <button type="button" onClick={onCancel}>Cancel</button>
+          <button className="network-danger" type="button" disabled={reason.trim().length < 5} onClick={() => onConfirm(reason)}><Trash2 size={13} /> {confirmLabel}</button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
 type GroupSettingsDraft = {
   firmName: string;
   description: string;
@@ -495,6 +749,7 @@ type GroupSettingsDraft = {
   minimumEquity: string;
   maxFollowers: string;
   approvalRequired: boolean;
+  publicSections: InvestmentGroupPublicSection[];
   riskDisclaimer: string;
 };
 
@@ -514,6 +769,7 @@ function groupSettingsDraft(group: InvestmentGroup): GroupSettingsDraft {
     minimumEquity: group.minimumEquity === undefined ? "" : String(group.minimumEquity),
     maxFollowers: group.maxFollowers === undefined ? "" : String(group.maxFollowers),
     approvalRequired: group.approvalRequired,
+    publicSections: group.publicSections ?? [],
     riskDisclaimer: group.riskDisclaimer
   };
 }
@@ -559,6 +815,7 @@ function GroupSettingsEditor({
         minimumEquity: draft.minimumEquity ? Number(draft.minimumEquity) : undefined,
         maxFollowers: draft.maxFollowers ? Number(draft.maxFollowers) : undefined,
         approvalRequired: draft.approvalRequired,
+        publicSections: draft.publicSections,
         riskDisclaimer: draft.riskDisclaimer.trim()
       });
       setDraft((current) => ({ ...current, password: "" }));
@@ -603,6 +860,27 @@ function GroupSettingsEditor({
             <label className="wide">Accepted Exchanges<input value={draft.acceptedExchanges} onChange={(event) => setDraft((current) => ({ ...current, acceptedExchanges: event.target.value }))} /></label>
             <label className="wide">Accepted Wallets<input value={draft.acceptedWallets} onChange={(event) => setDraft((current) => ({ ...current, acceptedWallets: event.target.value }))} /></label>
             <label className="wide">Risk Disclaimer<textarea value={draft.riskDisclaimer} onChange={(event) => setDraft((current) => ({ ...current, riskDisclaimer: event.target.value }))} /></label>
+          </div>
+        </div>
+        <div className="investment-settings-section">
+          <strong>Public Page Sections</strong>
+          <p className="network-muted">Choose which group areas unaffiliated visitors may inspect. Owners, selected group admins, and active members retain complete internal access.</p>
+          <div className="investment-public-sections">
+            {publicSectionOptions.map(({ section, label }) => (
+              <label className="network-check" key={section}>
+                <input
+                  type="checkbox"
+                  checked={draft.publicSections.includes(section)}
+                  onChange={(event) => setDraft((current) => ({
+                    ...current,
+                    publicSections: event.target.checked
+                      ? [...current.publicSections, section]
+                      : current.publicSections.filter((item) => item !== section)
+                  }))}
+                />
+                <span><b>{label}</b><em>{eventDisclosureDescription(section)}</em></span>
+              </label>
+            ))}
           </div>
         </div>
         <div className="investment-settings-actions">
@@ -832,6 +1110,19 @@ async function hashText(value: string) {
 
 function splitList(value: string) {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function eventDisclosureDescription(section: InvestmentGroupPublicSection) {
+  const descriptions: Record<InvestmentGroupPublicSection, string> = {
+    performance: "Verified return and performance disclosures",
+    drawdown: "Current and historical drawdown disclosures",
+    positions: "Position visibility policy and permitted exposure",
+    research: "Published group research and market notes",
+    members: "Active member and group-admin directory",
+    trading_room: "Read-only public access to Trading Room channels",
+    risk: "Risk mandate, score, and group disclaimer"
+  };
+  return descriptions[section];
 }
 
 function money(value: number) {

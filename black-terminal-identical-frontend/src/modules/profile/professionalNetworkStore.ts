@@ -377,6 +377,56 @@ export function createInvestmentGroup(user: CapabilityUser, draft: Omit<Investme
   return group;
 }
 
+export function updateInvestmentGroup(
+  user: CapabilityUser,
+  groupId: string,
+  patch: Partial<Pick<InvestmentGroup,
+    | "firmName"
+    | "description"
+    | "bio"
+    | "logoUrl"
+    | "bannerUrl"
+    | "visibility"
+    | "accessMode"
+    | "passwordHash"
+    | "tradingStyleTags"
+    | "acceptedExchanges"
+    | "acceptedWallets"
+    | "minimumEquity"
+    | "maxFollowers"
+    | "approvalRequired"
+    | "riskDisclaimer"
+  >>
+) {
+  const state = readState();
+  const group = state.groups.find((item) => item.id === groupId);
+  if (!group) throw new Error("Investment group not found.");
+  if (!canManageInvestmentGroup(user, group)) throw new Error("You do not have permission to edit this investment group.");
+
+  const firmName = patch.firmName?.trim();
+  if (patch.firmName !== undefined && !firmName) throw new Error("Firm name is required.");
+
+  let updated: InvestmentGroup | undefined;
+  mutate((draftState) => {
+    const target = draftState.groups.find((item) => item.id === groupId);
+    if (!target) throw new Error("Investment group not found.");
+    Object.assign(target, {
+      ...patch,
+      ...(firmName ? { firmName, slug: slugify(firmName) } : {}),
+      updatedAt: now()
+    });
+    updated = target;
+  });
+
+  blackCoreNotificationCenter.push({
+    severity: "success",
+    title: "Investment Group Updated",
+    message: `${updated?.firmName ?? group.firmName} settings were saved.`
+  });
+
+  return updated ?? group;
+}
+
 export function requestToJoinGroup(user: CapabilityUser, groupId: string, message: string, passwordHash?: string) {
   const profile = ensureProfessionalProfile(user);
   const state = readState();

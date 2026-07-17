@@ -7235,7 +7235,7 @@ body.resizing-layout * {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 14px;
-  align-items: center;
+  align-items: start;
   padding: 12px 14px;
 }
 
@@ -7262,12 +7262,27 @@ body.resizing-layout * {
   padding: 5px;
 }
 
-.profile-title div,
-.investment-title-row div:nth-child(2) {
+.profile-title div {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.investment-identity-copy {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.investment-heading-line {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 12px;
 }
 
 .profile-title strong,
@@ -7299,11 +7314,14 @@ body.resizing-layout * {
 
 .profile-title p,
 .investment-title-row p {
+  width: 100%;
   max-width: 760px;
-  margin: 6px 0 0;
+  margin: 0;
   color: #c4cad3;
   font-size: 11px;
-  line-height: 1.55;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .profile-counts,
@@ -7384,9 +7402,12 @@ body.resizing-layout * {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.network-grid.feed,
-.investment-layout {
+.network-grid.feed {
   grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.55fr);
+}
+
+.investment-layout {
+  grid-template-columns: minmax(210px, 0.42fr) minmax(0, 1.58fr);
 }
 
 .network-panel,
@@ -7780,7 +7801,55 @@ body.resizing-layout * {
 }
 
 .investment-badges {
-  min-width: 210px;
+  min-width: 170px;
+  align-self: start;
+  padding-top: 3px;
+}
+
+.investment-settings-panel {
+  margin: 10px;
+}
+
+.investment-settings-form {
+  display: grid;
+  gap: 16px;
+}
+
+.investment-settings-section {
+  display: grid;
+  gap: 9px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.investment-settings-section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.investment-settings-section > strong {
+  color: #dce2ea;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.investment-settings-status {
+  margin: 0 0 12px;
+}
+
+.investment-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+.investment-settings-actions button {
+  min-width: 150px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
 }
 
 .compact-tabs {
@@ -7881,8 +7950,7 @@ body.resizing-layout * {
   .network-grid.two,
   .network-grid.feed,
   .investment-layout,
-  .profile-identity,
-  .investment-title-row {
+  .profile-identity {
     grid-template-columns: 1fr;
   }
 
@@ -7895,6 +7963,26 @@ body.resizing-layout * {
   .investment-join,
   .network-inline-form {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .investment-title-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .investment-badges {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+
+  .network-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .network-form-grid .wide,
+  .network-check.wide {
+    grid-column: auto;
   }
 }
 

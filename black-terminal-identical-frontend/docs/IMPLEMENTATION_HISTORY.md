@@ -1155,3 +1155,10 @@ Remaining:
 - Replaced group logo and cover-banner URL fields with direct PNG, JPG and WebP file pickers for Enterprise and Admin group creators.
 - Added immediate previews, replace/remove controls, responsive wizard layout, type validation and client-side WebP optimization before persistence.
 - Preserved the existing investment-group capability gate and creation model. No Supabase migration is required.
+
+# 2026-07-17 - Investment Group Page And Owner Settings
+
+- Corrected the discovery/detail proportions and removed the horizontal-flex rule that compressed group biographies into an unreadable text column.
+- Rebuilt the group identity header with structured manager metadata, a full-width readable biography and truthful verification labels.
+- Replaced the Settings scaffold with an owner/admin-authorized editor for identity, group picture, banner, bio, access, membership limits, mandate, venues, wallets and risk disclosure.
+- Added a capability-checked group update operation with password hashing, timestamps and Black Core success notification. No Supabase migration is required.

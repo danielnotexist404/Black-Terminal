@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   BadgeCheck,
   BarChart3,
@@ -23,6 +23,7 @@ import {
   postGroupMessage,
   requestToJoinGroup,
   reviewJoinRequest,
+  updateInvestmentGroup,
   userIdFromUsername
 } from "../../profile/professionalNetworkStore";
 import type { InvestmentGroup, InvestmentGroupAccessMode, InvestmentGroupVisibility, TradingRoomChannel } from "../../profile/types";
@@ -215,7 +216,7 @@ export function InvestmentGroupsPage({ currentUser, onClose }: InvestmentGroupsP
               onJoinPasswordChange={setJoinPassword}
             />
             <nav className="network-tabs compact-tabs">
-              {groupTabs.map((tab) => (
+              {groupTabs.filter((tab) => tab !== "Settings" || canManageInvestmentGroup(currentUser, selectedGroup)).map((tab) => (
                 <button type="button" key={tab} className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>
                   {tab}
                 </button>
@@ -231,6 +232,10 @@ export function InvestmentGroupsPage({ currentUser, onClose }: InvestmentGroupsP
               onChannelChange={setRoomChannel}
               onMessageChange={setRoomMessage}
               onPostMessage={submitRoomMessage}
+              onGroupUpdated={(message) => {
+                setStatus(message);
+                refresh();
+              }}
               onReview={(requestId, action) => {
                 try {
                   reviewJoinRequest(currentUser, requestId, action);
@@ -305,14 +310,16 @@ function GroupHeader({
         <div className="investment-logo" style={{ backgroundImage: group.logoUrl ? `url(${group.logoUrl})` : undefined }}>
           {!group.logoUrl && group.firmName.slice(0, 2).toUpperCase()}
         </div>
-        <div>
-          <strong>{group.firmName}</strong>
-          <span>Owner @{group.ownerUsername}</span>
+        <div className="investment-identity-copy">
+          <div className="investment-heading-line">
+            <strong>{group.firmName}</strong>
+            <span>Managed by @{group.ownerUsername}</span>
+          </div>
           <p>{group.bio || group.description || "No investment mandate published yet."}</p>
         </div>
         <div className="investment-badges">
-          <em><BadgeCheck size={13} /> Verified Placeholder</em>
-          <em><ShieldCheck size={13} /> Enterprise</em>
+          <em>{group.stats.verified ? <><BadgeCheck size={13} /> Verified Performance</> : "Performance Unverified"}</em>
+          <em><ShieldCheck size={13} /> Managed Group</em>
           <em>{group.visibility.toUpperCase()}</em>
         </div>
       </div>
@@ -337,6 +344,7 @@ function GroupTabContent({
   onChannelChange,
   onMessageChange,
   onPostMessage,
+  onGroupUpdated,
   onReview
 }: {
   tab: GroupTab;
@@ -348,6 +356,7 @@ function GroupTabContent({
   onChannelChange: (channel: TradingRoomChannel) => void;
   onMessageChange: (message: string) => void;
   onPostMessage: () => void;
+  onGroupUpdated: (message: string) => void;
   onReview: (requestId: string, action: "approve" | "decline") => void;
 }) {
   const members = data.groupMembers.filter((member) => member.groupId === group.id && member.status === "active");
@@ -456,14 +465,9 @@ function GroupTabContent({
   }
 
   if (tab === "Settings") {
-    return (
-      <section className="network-panel">
-        <div className="network-panel-title"><SlidersHorizontal size={14} /> Settings</div>
-        <div className="network-empty">
-          GROUP SETTINGS ARE SCAFFOLDED. PRODUCTION EDITS MUST BE SERVER-AUTHORIZED AND AUDITED.
-        </div>
-      </section>
-    );
+    return canManage
+      ? <GroupSettingsEditor currentUser={currentUser} group={group} onSaved={onGroupUpdated} />
+      : <section className="network-panel"><div className="network-empty">GROUP SETTINGS ARE AVAILABLE ONLY TO THE GROUP OWNER OR ADMIN.</div></section>;
   }
 
   return (
@@ -471,6 +475,139 @@ function GroupTabContent({
       <div className="network-panel-title"><BarChart3 size={14} /> {tab}</div>
       <div className="network-empty">
         {tab.toUpperCase()} WILL POPULATE FROM VERIFIED PORTFOLIO, POSITION, RESEARCH, AND RISK FEEDS. NO GUARANTEED RETURN LANGUAGE IS SHOWN.
+      </div>
+    </section>
+  );
+}
+
+type GroupSettingsDraft = {
+  firmName: string;
+  description: string;
+  bio: string;
+  logoUrl: string;
+  bannerUrl: string;
+  visibility: InvestmentGroupVisibility;
+  accessMode: InvestmentGroupAccessMode;
+  password: string;
+  tradingStyleTags: string;
+  acceptedExchanges: string;
+  acceptedWallets: string;
+  minimumEquity: string;
+  maxFollowers: string;
+  approvalRequired: boolean;
+  riskDisclaimer: string;
+};
+
+function groupSettingsDraft(group: InvestmentGroup): GroupSettingsDraft {
+  return {
+    firmName: group.firmName,
+    description: group.description,
+    bio: group.bio,
+    logoUrl: group.logoUrl,
+    bannerUrl: group.bannerUrl,
+    visibility: group.visibility,
+    accessMode: group.accessMode,
+    password: "",
+    tradingStyleTags: group.tradingStyleTags.join(", "),
+    acceptedExchanges: group.acceptedExchanges.join(", "),
+    acceptedWallets: group.acceptedWallets.join(", "),
+    minimumEquity: group.minimumEquity === undefined ? "" : String(group.minimumEquity),
+    maxFollowers: group.maxFollowers === undefined ? "" : String(group.maxFollowers),
+    approvalRequired: group.approvalRequired,
+    riskDisclaimer: group.riskDisclaimer
+  };
+}
+
+function GroupSettingsEditor({
+  currentUser,
+  group,
+  onSaved
+}: {
+  currentUser: CapabilityUser;
+  group: InvestmentGroup;
+  onSaved: (message: string) => void;
+}) {
+  const [draft, setDraft] = useState<GroupSettingsDraft>(() => groupSettingsDraft(group));
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDraft(groupSettingsDraft(group));
+    setError("");
+  }, [group.id, group.updatedAt]);
+
+  const save = async () => {
+    try {
+      setSaving(true);
+      setError("");
+      if (!draft.firmName.trim()) throw new Error("Firm name is required.");
+      if (draft.accessMode === "password_protected" && !group.passwordHash && !draft.password.trim()) {
+        throw new Error("Set a group password before enabling password-protected access.");
+      }
+      updateInvestmentGroup(currentUser, group.id, {
+        firmName: draft.firmName.trim(),
+        description: draft.description.trim(),
+        bio: draft.bio.trim(),
+        logoUrl: draft.logoUrl,
+        bannerUrl: draft.bannerUrl,
+        visibility: draft.visibility,
+        accessMode: draft.accessMode,
+        ...(draft.password.trim() ? { passwordHash: await hashText(draft.password.trim()) } : {}),
+        tradingStyleTags: splitList(draft.tradingStyleTags),
+        acceptedExchanges: splitList(draft.acceptedExchanges),
+        acceptedWallets: splitList(draft.acceptedWallets),
+        minimumEquity: draft.minimumEquity ? Number(draft.minimumEquity) : undefined,
+        maxFollowers: draft.maxFollowers ? Number(draft.maxFollowers) : undefined,
+        approvalRequired: draft.approvalRequired,
+        riskDisclaimer: draft.riskDisclaimer.trim()
+      });
+      setDraft((current) => ({ ...current, password: "" }));
+      onSaved("Investment group settings saved.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="network-panel investment-settings-panel">
+      <div className="network-panel-title"><SlidersHorizontal size={14} /> Group Settings</div>
+      {error && <div className="network-status investment-settings-status">{error}</div>}
+      <div className="investment-settings-form">
+        <div className="investment-settings-section">
+          <strong>Identity</strong>
+          <div className="network-form-grid">
+            <label>Firm Name<input value={draft.firmName} onChange={(event) => setDraft((current) => ({ ...current, firmName: event.target.value }))} /></label>
+            <GroupImagePicker label="Group Picture" value={draft.logoUrl} kind="logo" onChange={(logoUrl) => setDraft((current) => ({ ...current, logoUrl }))} />
+            <GroupImagePicker label="Cover Banner" value={draft.bannerUrl} kind="banner" wide onChange={(bannerUrl) => setDraft((current) => ({ ...current, bannerUrl }))} />
+            <label className="wide">Short Description<input value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} /></label>
+            <label className="wide">Group Bio<textarea value={draft.bio} onChange={(event) => setDraft((current) => ({ ...current, bio: event.target.value }))} /></label>
+          </div>
+        </div>
+        <div className="investment-settings-section">
+          <strong>Access And Membership</strong>
+          <div className="network-form-grid">
+            <label>Visibility<select value={draft.visibility} onChange={(event) => setDraft((current) => ({ ...current, visibility: event.target.value as InvestmentGroupVisibility }))}><option value="public">Public</option><option value="private">Private</option><option value="invite_only">Invite Only</option><option value="password_protected">Password Protected</option></select></label>
+            <label>Access Mode<select value={draft.accessMode} onChange={(event) => setDraft((current) => ({ ...current, accessMode: event.target.value as InvestmentGroupAccessMode }))}><option value="open">Open</option><option value="approval_required">Approval Required</option><option value="invite_only">Invite Only</option><option value="password_protected">Password Protected</option></select></label>
+            {draft.accessMode === "password_protected" && <label className="wide">{group.passwordHash ? "Replace Group Password" : "Group Password"}<input type="password" value={draft.password} onChange={(event) => setDraft((current) => ({ ...current, password: event.target.value }))} /></label>}
+            <label>Minimum Follower Equity<input type="number" min={0} value={draft.minimumEquity} onChange={(event) => setDraft((current) => ({ ...current, minimumEquity: event.target.value }))} /></label>
+            <label>Maximum Followers<input type="number" min={1} value={draft.maxFollowers} onChange={(event) => setDraft((current) => ({ ...current, maxFollowers: event.target.value }))} /></label>
+            <label className="network-check wide"><input type="checkbox" checked={draft.approvalRequired} onChange={(event) => setDraft((current) => ({ ...current, approvalRequired: event.target.checked }))} /> Approval required</label>
+          </div>
+        </div>
+        <div className="investment-settings-section">
+          <strong>Mandate</strong>
+          <div className="network-form-grid">
+            <label className="wide">Trading Styles<input value={draft.tradingStyleTags} onChange={(event) => setDraft((current) => ({ ...current, tradingStyleTags: event.target.value }))} /></label>
+            <label className="wide">Accepted Exchanges<input value={draft.acceptedExchanges} onChange={(event) => setDraft((current) => ({ ...current, acceptedExchanges: event.target.value }))} /></label>
+            <label className="wide">Accepted Wallets<input value={draft.acceptedWallets} onChange={(event) => setDraft((current) => ({ ...current, acceptedWallets: event.target.value }))} /></label>
+            <label className="wide">Risk Disclaimer<textarea value={draft.riskDisclaimer} onChange={(event) => setDraft((current) => ({ ...current, riskDisclaimer: event.target.value }))} /></label>
+          </div>
+        </div>
+        <div className="investment-settings-actions">
+          <button type="button" onClick={save} disabled={saving}><Check size={13} /> {saving ? "Saving" : "Save Changes"}</button>
+        </div>
       </div>
     </section>
   );

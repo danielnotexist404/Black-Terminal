@@ -181,6 +181,7 @@ const HDLX_PROFILE_CAPABILITY: TerminalCapability = "proprietary.hdlxProfile";
 const defaultWorkspaces = ["Quant Desk", "Scalp Layout", "Strategy Lab"] as const;
 const workspaceStorageKey = "bt_workspaces_v1";
 const workspaceNamesStorageKey = "bt_workspace_names_v1";
+const visibleIndicatorsStorageKey = "bt_visible_indicators_v1";
 
 const defaultVisibleIndicators: VisibleIndicators = {
   orderBookHeatmap: false,
@@ -201,6 +202,21 @@ const defaultVisibleIndicators: VisibleIndicators = {
   waveTrendOscillator: false,
   volume: true
 };
+
+function loadStoredVisibleIndicators(): VisibleIndicators {
+  const stored = localStorage.getItem(visibleIndicatorsStorageKey);
+  if (!stored) return defaultVisibleIndicators;
+  try {
+    const parsed = JSON.parse(stored) as Partial<Record<keyof VisibleIndicators, unknown>>;
+    const next = { ...defaultVisibleIndicators };
+    (Object.keys(next) as Array<keyof VisibleIndicators>).forEach((key) => {
+      if (typeof parsed[key] === "boolean") next[key] = parsed[key];
+    });
+    return next;
+  } catch {
+    return defaultVisibleIndicators;
+  }
+}
 
 const defaultIndicatorPeriods: IndicatorPeriods = {
   volatilityHeatmap: 34,
@@ -503,10 +519,6 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem("bt_terminal_settings", JSON.stringify(terminalSettings));
-    setVisibleIndicators(current => ({
-      ...current,
-      orderBookHeatmap: terminalSettings.showOrderBookHeatmap
-    }));
   }, [terminalSettings]);
 
   const visibleNav = useMemo(() => {
@@ -571,7 +583,8 @@ export default function App() {
     localStorage.setItem("bt_last_chart_type", chartType);
   }, [chartType]);
 
-  const [visibleIndicators, setVisibleIndicators] = useState<VisibleIndicators>(defaultVisibleIndicators);
+  const [visibleIndicators, setVisibleIndicators] = useState<VisibleIndicators>(loadStoredVisibleIndicators);
+  const [indicatorPreferencesUser, setIndicatorPreferencesUser] = useState<string | null>(null);
   const [indicatorPeriods, setIndicatorPeriods] = useState<IndicatorPeriods>(defaultIndicatorPeriods);
   const [indicatorVisualSettings, setIndicatorVisualSettings] = useState<IndicatorVisualSettings>(defaultIndicatorVisualSettings);
   const [indicatorAdvancedSettings, setIndicatorAdvancedSettings] = useState<IndicatorAdvancedSettings>(defaultIndicatorAdvancedSettings);
@@ -585,6 +598,24 @@ export default function App() {
   const prevPriceRef = useRef(lastPrice);
   const [recentCandles, setRecentCandles] = useState<Array<{ time: number; open: number; high: number; low: number; close: number; volume: number }>>([]);
   const recentCandlesRef = useRef(recentCandles);
+
+  useEffect(() => {
+    localStorage.setItem(visibleIndicatorsStorageKey, JSON.stringify(visibleIndicators));
+    setTerminalSettings((current: typeof terminalSettings) => (
+      current.showOrderBookHeatmap === visibleIndicators.orderBookHeatmap
+        ? current
+        : { ...current, showOrderBookHeatmap: visibleIndicators.orderBookHeatmap }
+    ));
+  }, [visibleIndicators]);
+
+  const handleTerminalSettingsChange = useCallback((next: typeof terminalSettings) => {
+    setTerminalSettings(next);
+    setVisibleIndicators((current) => (
+      current.orderBookHeatmap === next.showOrderBookHeatmap
+        ? current
+        : { ...current, orderBookHeatmap: next.showOrderBookHeatmap }
+    ));
+  }, []);
 
   // Update browser tab title with price + direction like TradingView
   useEffect(() => {
@@ -854,7 +885,7 @@ export default function App() {
 
   // Real-time active indicators sync
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || indicatorPreferencesUser !== currentUser.username) return;
     const activeList = Object.entries(visibleIndicators)
       .filter(([_, visible]) => visible === true)
       .map(([key]) => key);
@@ -873,16 +904,33 @@ export default function App() {
       }
     };
     syncActive();
-  }, [visibleIndicators, currentUser]);
+  }, [visibleIndicators, currentUser, indicatorPreferencesUser]);
 
   // Load user database configuration on boot/refresh
   useEffect(() => {
     if (!currentUser) return;
+    const username = currentUser.username;
+    let disposed = false;
+    setIndicatorPreferencesUser(null);
     const fetchUserConfig = async () => {
       try {
         const users = await dbGetUsers();
-        const record = users.find((u) => u.username === currentUser.username);
+        if (disposed) return;
+        const record = users.find((u) => u.username === username);
         if (record) {
+          const activeIndicators = new Set(Array.isArray(record.activeIndicators) ? record.activeIndicators : []);
+          const nextVisible = { ...defaultVisibleIndicators };
+          const recordPermissions = new Set(record.permissions || []);
+          const recordCanUseHdlx =
+            record.role === "admin" ||
+            record.allowedIndicators.includes(PROPRIETARY_HDLX_INDICATOR) ||
+            recordPermissions.has(HDLX_PROFILE_CAPABILITY);
+          (Object.keys(nextVisible) as Array<keyof VisibleIndicators>).forEach((key) => {
+            const allowed = key === PROPRIETARY_HDLX_INDICATOR ? recordCanUseHdlx : record.allowedIndicators.includes(key);
+            nextVisible[key] = activeIndicators.has(key) && allowed;
+          });
+          setVisibleIndicators(nextVisible);
+
           if (record.workspaces && record.workspaces.length > 0) {
             setWorkspaces(record.workspaces);
             setWorkspace(record.activeWorkspace || "Quant Desk");
@@ -898,21 +946,6 @@ export default function App() {
               if (nextSymbol) setSymbol(nextSymbol);
               setTimeframe(snapshot.timeframe);
               setChartType(snapshot.chartType);
-              
-              // Sanitize active indicators against allowed list on boot
-              const nextVisible = { ...snapshot.visibleIndicators };
-              const recordPermissions = new Set(record.permissions || []);
-              const recordCanUseHdlx =
-                record.role === "admin" ||
-                record.allowedIndicators.includes(PROPRIETARY_HDLX_INDICATOR) ||
-                recordPermissions.has(HDLX_PROFILE_CAPABILITY);
-              Object.keys(nextVisible).forEach((k) => {
-                const allowed = k === PROPRIETARY_HDLX_INDICATOR ? recordCanUseHdlx : record.allowedIndicators.includes(k);
-                if (nextVisible[k as keyof VisibleIndicators] && !allowed) {
-                  nextVisible[k as keyof VisibleIndicators] = false;
-                }
-              });
-              setVisibleIndicators(nextVisible);
               
               setIndicatorPeriods(snapshot.indicatorPeriods);
               setIndicatorVisualSettings(snapshot.indicatorVisualSettings);
@@ -932,9 +965,14 @@ export default function App() {
         }
       } catch (e) {
         console.error("Failed to load user config from database:", e);
+      } finally {
+        if (!disposed) setIndicatorPreferencesUser(username);
       }
     };
-    fetchUserConfig();
+    void fetchUserConfig();
+    return () => {
+      disposed = true;
+    };
   }, [currentUser?.username]);
 
   // Real-time allowed indicators sync (and automatic turn-off of revoked indicators)
@@ -1857,7 +1895,7 @@ export default function App() {
           <SettingsPanel
             currentUser={currentUser!}
             terminalSettings={terminalSettings}
-            onSettingsChange={setTerminalSettings}
+            onSettingsChange={handleTerminalSettingsChange}
             onClose={() => setActiveNav("CHART")}
           />
         </div>

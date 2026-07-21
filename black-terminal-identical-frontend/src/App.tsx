@@ -446,6 +446,23 @@ export default function App() {
   const [domProMode, setDomProMode] = useState<BlackCoreModuleMode>("expanded");
   const [domProSettingsSignal, setDomProSettingsSignal] = useState(0);
   const showCompactDom = terminalSettings.showDOM && !domProOpen;
+  const bothSidePanelsCollapsed = sidebarCollapsed && !terminalSettings.showDOM;
+
+  const toggleBothSidePanels = useCallback(() => {
+    const shouldExpand = sidebarCollapsed && !terminalSettings.showDOM;
+    setSidebarCollapsed(!shouldExpand);
+    setTerminalSettings((current: typeof terminalSettings) => ({
+      ...current,
+      showDOM: shouldExpand
+    }));
+  }, [sidebarCollapsed, terminalSettings.showDOM]);
+
+  const toggleRightPanel = useCallback(() => {
+    setTerminalSettings((current: typeof terminalSettings) => ({
+      ...current,
+      showDOM: !current.showDOM
+    }));
+  }, []);
 
   useEffect(() => blackCoreWindowDockManager.subscribe((windows) => {
     const domWindow = windows.find((windowState) => windowState.moduleId === "dom-pro" && windowState.isOpen);
@@ -1702,13 +1719,31 @@ export default function App() {
         <button className="icon-btn" onClick={() => setActiveNav("SETTINGS")}>
           <Settings size={17} />
         </button>
-        <button className="icon-btn" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>
+        <button
+          className={sidebarCollapsed ? "icon-btn active" : "icon-btn"}
+          onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+          title={sidebarCollapsed ? "Show left menu" : "Minimize left menu"}
+          aria-label={sidebarCollapsed ? "Show left menu" : "Minimize left menu"}
+          aria-pressed={sidebarCollapsed}
+        >
           <PanelLeft size={17} />
         </button>
-        <button className="icon-btn">
+        <button
+          className={bothSidePanelsCollapsed ? "icon-btn active" : "icon-btn"}
+          onClick={toggleBothSidePanels}
+          title={bothSidePanelsCollapsed ? "Show both side panels" : "Minimize both side panels"}
+          aria-label={bothSidePanelsCollapsed ? "Show both side panels" : "Minimize both side panels"}
+          aria-pressed={bothSidePanelsCollapsed}
+        >
           <Columns3 size={17} />
         </button>
-        <button className="icon-btn">
+        <button
+          className={terminalSettings.showDOM ? "icon-btn" : "icon-btn active"}
+          onClick={toggleRightPanel}
+          title={terminalSettings.showDOM ? "Hide right panel" : "Show right panel"}
+          aria-label={terminalSettings.showDOM ? "Hide right panel" : "Show right panel"}
+          aria-pressed={!terminalSettings.showDOM}
+        >
           <PanelRight size={17} />
         </button>
         <button className="icon-btn">

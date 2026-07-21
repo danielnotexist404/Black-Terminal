@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window-minimal",
+  "description": "Minimum permissions for the Black Terminal main trading window.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

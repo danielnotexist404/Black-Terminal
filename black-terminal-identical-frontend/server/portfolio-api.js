@@ -1,25 +1,9 @@
 import crypto from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
-
-const corsHeaders = {
-  "Access-Control-Allow-Credentials": "true",
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET,OPTIONS,PATCH,DELETE,POST,PUT",
-  "Access-Control-Allow-Headers":
-    "Authorization, X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version"
-};
+import { applyCors as applyHardenedCors } from "./security/http-security.js";
 
 export function applyCors(req, res) {
-  for (const [key, value] of Object.entries(corsHeaders)) {
-    res.setHeader(key, value);
-  }
-
-  if (req.method === "OPTIONS") {
-    res.status(200).end();
-    return true;
-  }
-
-  return false;
+  return applyHardenedCors(req, res);
 }
 
 export function getSupabaseAdmin() {

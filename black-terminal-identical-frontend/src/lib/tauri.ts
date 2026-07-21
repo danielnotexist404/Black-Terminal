@@ -17,14 +17,9 @@ export async function sendWebhook(payload: Record<string, unknown>, explicitUrl?
 }
 
 export async function sendSshAlert(payload: Record<string, unknown>, target?: string) {
-  try {
-    const sshTarget = target?.trim() || localStorage.getItem("bt_alert_ssh_target") || "";
-    if (!sshTarget) return { skipped: true, reason: "No SSH target configured" };
-    return await invoke("send_ssh_alert", { target: sshTarget, payload });
-  } catch (err) {
-    console.error("SSH alert failed", err);
-    return { error: String(err) };
-  }
+  void payload;
+  void target;
+  return { skipped: true, reason: "SSH alert IPC is disabled by the Security Fortress policy." };
 }
 
 export async function sendIndicatorAlert(

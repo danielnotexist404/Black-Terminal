@@ -293,10 +293,55 @@ export type BybitRuntimeStatusPayload = {
   };
 };
 
+export type BlackCloudStatusPayload = {
+  connections: Array<{
+    id: string; account_id: string | null; provider: string; label: string; account_reference: string | null;
+    connection_mode: string; execution_capability: string; health_status: string;
+    lifecycle_status: string; control_state: "ACTIVE" | "PAUSED" | "EMERGENCY_STOP";
+    last_private_event_at: string | null; last_reconciled_at: string | null;
+    last_error_code: string | null; paused_at: string | null; emergency_stopped_at: string | null;
+  }>;
+  mandates: Array<{ id: string; group_id: string; broker_connection_id: string; status: string; allocation_method: string; allocation_value: number; max_leverage: number }>;
+  recentPlans: Array<{ id: string; broker_connection_id: string; execution_status: string; risk_result: string; rejection_reason: string | null; updated_at: string }>;
+  openIncidents: Array<{ id: string; connection_id: string; severity: string; incident_type: string; status: string; title: string; created_at: string }>;
+};
+
 export async function getPortfolioApiToken() {
   if (!supabase) return null;
   const { data } = await supabase.auth.getSession();
   return data.session?.access_token ?? null;
+}
+
+export async function fetchBlackCloudStatusViaApi(): Promise<BlackCloudStatusPayload | null> {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+  const response = await fetch("/api/cloud-execution/status", { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) throw new Error(await readApiError(response));
+  return response.json();
+}
+
+export async function controlBlackCloudConnectionViaApi(connectionId: string, action: "pause" | "resume" | "emergency-stop", reason?: string) {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+  const response = await fetch("/api/cloud-execution/control", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ connectionId, action, reason })
+  });
+  if (!response.ok) throw new Error(await readApiError(response));
+  return response.json() as Promise<{ connection: BlackCloudStatusPayload["connections"][number]; monitoring: string; reconciliation: string; newOrders: string }>;
+}
+
+export async function activateBlackCloudConnectionViaApi(accountId: string, confirmation: "ENABLE OFFLINE CLOUD EXECUTION") {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+  const response = await fetch("/api/cloud-execution/connection", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ accountId, confirmation })
+  });
+  if (!response.ok) throw new Error(await readApiError(response));
+  return response.json() as Promise<{ connection: { id: string; provider: string; healthStatus: string }; offlineExecution: string; readinessReason: string }>;
 }
 
 export async function fetchPortfolioSnapshotFromApi(activeAccountIds?: string[]): Promise<PortfolioSnapshot | null> {

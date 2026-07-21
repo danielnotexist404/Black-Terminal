@@ -19,7 +19,7 @@ import type { ConnectionCapability, ConnectionDiagnostics } from "../../../conne
 import { formatExecutionMode, getVenueCertification, type VenueCertificationRecord } from "../../../connectivity/venueRegistry";
 import { submitOrder } from "../../../execution/executionEngine";
 import { MAINNET_ORDER_CONFIRMATION, disableMainnetValidationMode, promptEnableMainnetValidationMode, readMainnetValidationMode, validateMainnetOrderReadiness } from "../../../execution/mainnetValidationMode";
-import { getBybitRuntimeStatusViaApi, runExchangeAccountDiagnosticsViaApi, type BybitRuntimeStatusPayload, type PortfolioOrderDraft } from "../../../portfolio/portfolioApiClient";
+import { activateBlackCloudConnectionViaApi, controlBlackCloudConnectionViaApi, fetchBlackCloudStatusViaApi, getBybitRuntimeStatusViaApi, runExchangeAccountDiagnosticsViaApi, type BlackCloudStatusPayload, type BybitRuntimeStatusPayload, type PortfolioOrderDraft } from "../../../portfolio/portfolioApiClient";
 import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } from "../../../portfolio/types";
 import { getPortfolioSnapshot } from "../../../portfolio/portfolioStore";
 import { defaultRiskControls } from "../../../risk/types";
@@ -398,7 +398,8 @@ export function PositionsWorkspace({
     accountName: "",
     apiKey: "",
     apiSecret: "",
-    passphrase: ""
+    passphrase: "",
+    network: "mainnet"
   });
   const [hyperliquidNetwork, setHyperliquidNetwork] = useState<"testnet" | "mainnet">("testnet");
   const [hyperliquidAgentPrivateKey, setHyperliquidAgentPrivateKey] = useState("");
@@ -411,8 +412,27 @@ export function PositionsWorkspace({
     if (typeof window === "undefined") return null;
     return readActiveExecutionVenueId();
   });
+  const [cloudStatus, setCloudStatus] = useState<BlackCloudStatusPayload | null>(null);
+  const [cloudStatusMessage, setCloudStatusMessage] = useState("");
 
   useEffect(() => blackCoreConnectionManager.subscribe(setConnectionDiagnostics), []);
+
+  useEffect(() => {
+    let active = true;
+    let timer = 0;
+    const refresh = async () => {
+      try {
+        const next = await fetchBlackCloudStatusViaApi();
+        if (active && next) { setCloudStatus(next); setCloudStatusMessage(""); }
+      } catch (error) {
+        if (active) setCloudStatusMessage(error instanceof Error ? error.message : String(error));
+      } finally {
+        if (active) timer = window.setTimeout(refresh, document.hidden ? 60_000 : 15_000);
+      }
+    };
+    void refresh();
+    return () => { active = false; window.clearTimeout(timer); };
+  }, []);
 
   const activeOrderSync = (activeVenueId ? orderSync?.[activeVenueId] : undefined) || Object.values(orderSync || {})[0];
   const canonicalOrders = useMemo(() => deduplicateCanonicalOrders(orders).orders, [orders]);
@@ -465,6 +485,35 @@ export function PositionsWorkspace({
       };
     }), [connectionDiagnostics]);
   const activeExecutionVenue = executionVenues.find((venue) => venue.id === activeVenueId) ?? executionVenues[0] ?? null;
+  const activeCloudConnection = cloudStatus?.connections.find((item) => item.id === activeExecutionVenue?.id || item.account_id === activeExecutionVenue?.accountId) ?? null;
+
+  async function controlCloudConnection(action: "pause" | "resume" | "emergency-stop") {
+    if (!activeCloudConnection) return;
+    if (action === "emergency-stop" && !window.confirm("Emergency stop blocks all new Black Cloud orders while monitoring and reconciliation continue. Activate it?")) return;
+    try {
+      await controlBlackCloudConnectionViaApi(activeCloudConnection.id, action, action === "emergency-stop" ? "portfolio_manager_operator" : undefined);
+      const next = await fetchBlackCloudStatusViaApi();
+      if (next) setCloudStatus(next);
+      setCloudStatusMessage(action === "resume" ? "BLACK CLOUD EXECUTION RESUMED" : action === "pause" ? "NEW CLOUD ORDERS PAUSED" : "EMERGENCY STOP ACTIVE");
+    } catch (error) {
+      setCloudStatusMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function activateCloudConnection() {
+    const accountId = activeExecutionVenue?.accountId;
+    if (!accountId) return;
+    const confirmation = window.prompt("Black Cloud may execute authorized Investment Group orders while this browser and device are offline. Type: ENABLE OFFLINE CLOUD EXECUTION");
+    if (confirmation !== "ENABLE OFFLINE CLOUD EXECUTION") { setCloudStatusMessage("OFFLINE EXECUTION CONSENT NOT PROVIDED"); return; }
+    try {
+      const result = await activateBlackCloudConnectionViaApi(accountId, confirmation);
+      const next = await fetchBlackCloudStatusViaApi();
+      if (next) setCloudStatus(next);
+      setCloudStatusMessage(result?.readinessReason || "BLACK CLOUD CONNECTION VALIDATING");
+    } catch (error) {
+      setCloudStatusMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   useEffect(() => {
     setActiveExecutionVenueId(activeVenueId);
@@ -534,11 +583,12 @@ export function PositionsWorkspace({
           accountName
         },
         metadata: {
-          accountName
+          accountName,
+          network: connection.network || "mainnet"
         }
       });
       setActiveVenueId(nextConnection.id);
-      setConnection({ exchange: selectedCex, accountName: "", apiKey: "", apiSecret: "", passphrase: "" });
+      setConnection({ exchange: selectedCex, accountName: "", apiKey: "", apiSecret: "", passphrase: "", network: "mainnet" });
       setConnectStatus("BROKER LINK STORED");
       setShowConnection(false);
     } catch (error) {
@@ -695,7 +745,7 @@ export function PositionsWorkspace({
       )}
 
       <aside className={activeExecutionVenue ? "positions-execution-dock" : "positions-connect-dock"}>
-        {activeExecutionVenue ? (
+        {activeExecutionVenue ? (<>
           <ExecutionDock
             venue={activeExecutionVenue}
             venues={executionVenues}
@@ -705,6 +755,8 @@ export function PositionsWorkspace({
             onSwitchVenue={handleSwitchExecutionVenue}
             onDisconnectVenue={() => void handleDisconnectExecutionVenue()}
           />
+          <BlackCloudConnectionPanel connection={activeCloudConnection} accountId={activeExecutionVenue.accountId} status={cloudStatus} message={cloudStatusMessage} onActivate={activateCloudConnection} onControl={controlCloudConnection} />
+          </>
         ) : (
           <>
             <button className="positions-connect-button" onClick={() => setShowConnection(true)}>
@@ -772,6 +824,7 @@ export function PositionsWorkspace({
             {venueKind === "cex" ? (
               <>
                 <ConnectionSupportCard certification={selectedCexCertification} />
+                {selectedCex === "bybit" && <select value={connection.network || "mainnet"} onChange={(event) => setConnection((current) => ({ ...current, network: event.target.value as "mainnet" | "testnet" }))}><option value="mainnet">Bybit Mainnet</option><option value="testnet">Bybit Testnet</option></select>}
                 <input placeholder="Account name" value={connection.accountName} onChange={(event) => setConnection((current) => ({ ...current, accountName: event.target.value }))} />
                 <input placeholder="API key" value={connection.apiKey} onChange={(event) => setConnection((current) => ({ ...current, apiKey: event.target.value }))} />
                 <input placeholder="API secret" type="password" value={connection.apiSecret} onChange={(event) => setConnection((current) => ({ ...current, apiSecret: event.target.value }))} />
@@ -825,6 +878,45 @@ export function PositionsWorkspace({
       )}
     </div>
   );
+}
+
+function BlackCloudConnectionPanel({ connection, accountId, status, message, onActivate, onControl }: {
+  connection: BlackCloudStatusPayload["connections"][number] | null;
+  accountId?: string;
+  status: BlackCloudStatusPayload | null;
+  message: string;
+  onActivate: () => Promise<void>;
+  onControl: (action: "pause" | "resume" | "emergency-stop") => Promise<void>;
+}) {
+  if (!connection) return <div className="black-cloud-panel unavailable"><b>BLACK CLOUD</b><span>NO CLOUD-DELEGATED CONNECTION</span>{accountId && <button onClick={() => void onActivate()}>Enable Offline Cloud</button>}{message && <em>{message}</em>}</div>;
+  const mandates = status?.mandates.filter((item) => item.broker_connection_id === connection.id) ?? [];
+  const incidents = status?.openIncidents.filter((item) => item.connection_id === connection.id) ?? [];
+  const stopped = connection.control_state !== "ACTIVE";
+  return <div className={`black-cloud-panel ${stopped ? "stopped" : "ready"}`}>
+    <div className="black-cloud-title"><b>BLACK CLOUD</b><span>{connection.lifecycle_status}</span></div>
+    <div className="black-cloud-grid">
+      <span>Provider <b>{connection.provider.toUpperCase()}</b></span>
+      <span>Health <b>{connection.health_status}</b></span>
+      <span>Control <b>{connection.control_state}</b></span>
+      <span>Private Stream <b>{connection.last_private_event_at ? "ACTIVE" : "WAITING"}</b></span>
+      <span>Last Sync <b>{formatCloudAge(connection.last_reconciled_at)}</b></span>
+      <span>Mandates <b>{mandates.filter((item) => item.status === "ACTIVE").length} ACTIVE</b></span>
+      <span>Incidents <b>{incidents.length}</b></span>
+      <span>Cloud Execution <b>{connection.execution_capability}</b></span>
+    </div>
+    <div className="black-cloud-actions">
+      <button onClick={() => void onControl(stopped ? "resume" : "pause")}>{stopped ? "Resume" : "Pause"}</button>
+      <button className="danger" disabled={connection.control_state === "EMERGENCY_STOP"} onClick={() => void onControl("emergency-stop")}>Emergency Stop</button>
+    </div>
+    {message && <em>{message}</em>}
+    {connection.last_error_code && <em>{connection.last_error_code}</em>}
+  </div>;
+}
+
+function formatCloudAge(value: string | null) {
+  if (!value) return "NEVER";
+  const seconds = Math.max(0, Math.round((Date.now() - Date.parse(value)) / 1000));
+  return seconds < 60 ? `${seconds}s AGO` : `${Math.floor(seconds / 60)}m AGO`;
 }
 
 function ConnectionSupportCard({ certification }: { certification?: VenueCertificationRecord }) {
@@ -1326,7 +1418,7 @@ export default function PortfolioManagerPage({ onClose, currentUser, activeAccou
     };
 
     void load();
-    const timer = window.setInterval(load, 5000);
+    const timer = window.setInterval(load, document.hidden ? 60_000 : 15_000);
     return () => {
       alive = false;
       window.clearInterval(timer);

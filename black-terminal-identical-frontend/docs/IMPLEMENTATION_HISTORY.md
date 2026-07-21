@@ -6,6 +6,7 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
+- Current - Implement Phase V Chapter I Security Fortress and production migration baseline.
 - Current - Enforce runtime-connection scoping for private orders, positions and portfolio API synchronization.
 - Current - Bring DOM Pro execution to venue-native Bybit parity with Spot/Futures and dynamic Conditional, Chase, TWAP, Iceberg and POV controls.
 - Current - Replace Bybit's fixed validation notional with account-margin execution capacity.
@@ -48,6 +49,20 @@ Recent pushed commits:
 - `e327cf0` - Optimize topbar and sidebar layout for MacBook 13-inch and mobile viewports.
 - `fe1777a` - Integrate Portfolio Manager, Copy Trading, Risk Engine, and Wallet connection modules.
 - `c7d928e` - Give BlackGPT real-time OHLCV chart access with live candle buffer and precise price context.
+
+## 2026-07-20 - Phase V Chapter I Security Fortress
+
+Status: Implemented and deployed; Resend provider-key revocation remains an account-owner operation.
+
+- Removed provider secrets, arbitrary email HTML/recipient control and the AI system prompt from the browser bundle.
+- Added authenticated email, AI, admin and audit gateways plus centralized JWT, CORS, schema, payload and persistent rate policies across all APIs.
+- Replaced local/plaintext profile passwords with Supabase Auth, linked all existing profiles, removed `bt_users.password`, and installed strict RLS/column privileges.
+- Exported and registered the live Supabase baseline, then applied the missing IMM, Black Cloud, security-fortress and verification migrations.
+- Added the AES-256-GCM ciphertext vault, database-enforced audit redaction and compressed 90-day hot/one-year archive retention.
+- Added strict trading-command contracts and Vercel/Tauri CSP, capability, SSRF and IPC hardening; pinned Node 22, upgraded the Vite build chain and reached zero npm vulnerabilities.
+- Reduced Supabase polling through Realtime-first authorization/admin updates and visibility-aware portfolio repair intervals.
+- Deployed and black-box validated production at `dpl_9GCZhTrzk41EZ3rdE4MB7gmwHwYf`.
+- Full certification and the remaining provider rotation procedure are recorded in `PHASE5_CHAPTER1_SECURITY_FORTRESS.md`.
 
 ## Vercel API Route Consolidation
 
@@ -1170,3 +1185,20 @@ Remaining:
 - Added reason-required message deletion and member removal with immutable owner protection, manager hierarchy checks, member notifications and moderation audit events.
 - Made Trading Room and Members identities open a dedicated read-only professional profile page.
 - Added a service-side moderation route and an idempotent Supabase migration for `public_sections`, moderation records and message visibility/deletion policies.
+
+# 2026-07-17 - Professional Center, Research Feed And Messaging
+
+- Rebuilt Professional Center around an institutional profile header, route-backed tabs, curated overview, structured feed, research/trade-idea composer, public publication cards and privacy-aware discovery.
+- Added server-enforced reactions, two-level comments, revision history, repost/quote distribution, private saved collections, follows/requests, mute/block/report and notification preferences.
+- Added atomic one-to-one conversations, message requests, idempotent delivery, read state, scoped realtime, private image attachments and mobile conversation navigation.
+- Added administrator moderation review, private signed media, file-signature validation, canonical attachment validation and an atomic server rate limiter.
+- Added the Chapter II Supabase migration, deterministic contract suite and the Professional Network documentation set. Hosted RLS and production certification remain gated on applying the migration and executing the documented staging matrix.
+
+# 2026-07-20 - Phase V Chapter II Black Cloud Connectivity
+
+- Added the server ExchangeAdapter standard and initial Bybit cloud adapter.
+- Added explicit broker lifecycle, pause/resume and emergency-stop state with monitoring-preserving semantics.
+- Added the authenticated server-backed Black Cloud Portfolio Manager panel.
+- Added Node 22 worker container packaging and health probes.
+- Applied Supabase migrations `202607200003` through `202607200006`; current production control plane and typed-consent activation UI deployment is `dpl_Hh9aSdgTBvT7KCLLGFgxy3pqT8iA`.
+- Added dedicated broker, investor, mandate and reconciliation suites. Persistent provider deployment and offline execution certification remain open; execution flags stay disabled until then.

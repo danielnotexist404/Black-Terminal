@@ -84,7 +84,7 @@ import type {
   VisibleIndicators
 } from "./chart-engine/types";
 import { defaultIndicatorAdvancedSettings } from "./chart-engine/profile/volumeProfileDefaults";
-import { clearSupabaseAuthSession, dbGetUsers, dbUpdateUser, dbAddAuditLog } from "./lib/supabase";
+import { clearSupabaseAuthSession, dbGetUsers, dbUpdateUser, dbAddAuditLog, supabase } from "./lib/supabase";
 import { getMarketDataEngineAdapter } from "./market-data/engine/marketDataEngine";
 import { ExchangeOption, MarketSymbolOption, getExchangeOption, marketCatalog } from "./market-data/marketCatalog";
 import type { ExchangeId, MarketSymbol, Timeframe } from "./market-data/types";
@@ -691,7 +691,7 @@ export default function App() {
       applyPortfolioSnapshot(snapshot);
     };
     void load();
-    const timer = window.setInterval(load, 5000);
+    const timer = window.setInterval(load, document.hidden ? 60_000 : 15_000);
     return () => { mounted = false; window.clearInterval(timer); };
   }, [applyPortfolioSnapshot, connectedPortfolioAccountIds, connectedPortfolioAccountScope]);
 
@@ -940,9 +940,12 @@ export default function App() {
   // Real-time allowed indicators sync (and automatic turn-off of revoked indicators)
   useEffect(() => {
     if (!currentUser) return;
-    const interval = setInterval(async () => {
+    let disposed = false;
+    let channel: ReturnType<NonNullable<typeof supabase>["channel"]> | null = null;
+    const syncAccess = async () => {
       try {
         const users = await dbGetUsers();
+        if (disposed) return;
         const record = users.find((u) => u.username === currentUser.username);
         if (record) {
           const nextProductTier = record.productTier || (record.role === "admin" ? "admin" : "retail");
@@ -994,12 +997,24 @@ export default function App() {
           }
         }
       } catch (e) {
-        console.error("App.tsx allowed indicators poll failed:", e);
+        console.error("App.tsx access sync failed:", e);
       }
-    }, 1500);
+    };
+    void syncAccess();
+    const interval = setInterval(syncAccess, 300_000);
+    void supabase?.auth.getUser().then(({ data }) => {
+      if (disposed || !data.user || !supabase) return;
+      channel = supabase.channel(`bt-user-access-${data.user.id}`)
+        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "bt_users", filter: `auth_user_id=eq.${data.user.id}` }, () => { void syncAccess(); })
+        .subscribe();
+    });
 
-    return () => clearInterval(interval);
-  }, [currentUser]);
+    return () => {
+      disposed = true;
+      clearInterval(interval);
+      if (channel && supabase) void supabase.removeChannel(channel);
+    };
+  }, [currentUser?.username]);
 
   useEffect(() => {
     let disposed = false;
@@ -1881,7 +1896,12 @@ export default function App() {
       ) : activeNav === "PROFILE" ? (
         <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
           {selectedProfessionalUsername && selectedProfessionalUsername.toLowerCase() !== currentUser.username.toLowerCase() ? (
-            <PublicProfessionalProfilePage username={selectedProfessionalUsername} onClose={() => setActiveNav("INVESTMENT GROUPS")} />
+            <PublicProfessionalProfilePage
+              username={selectedProfessionalUsername}
+              currentUser={currentUser}
+              onClose={() => setActiveNav("INVESTMENT GROUPS")}
+              onOpenInvestmentGroups={() => setActiveNav("INVESTMENT GROUPS")}
+            />
           ) : (
             <ProfilePage
               currentUser={currentUser}

@@ -1,3 +1,6 @@
+// Pixi names this entrypoint after the feature it replaces. It installs static
+// renderer/UBO/uniform implementations so the chart works with CSP unsafe-eval disabled.
+import "pixi.js/unsafe-eval";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";

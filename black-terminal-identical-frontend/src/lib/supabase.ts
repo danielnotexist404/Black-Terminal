@@ -22,7 +22,6 @@ export interface DBUser {
   activeIndicators: string[];
   productTier?: ProductTier;
   permissions?: TerminalCapability[];
-  password?: string;
 
   // Configuration persistence fields
   workspaces?: string[];
@@ -55,7 +54,6 @@ export interface DBAuditLog {
 
 // Local mock keys
 const USERS_DB_KEY = "bt_users_db";
-const CREDS_DB_KEY = "bt_users_creds";
 const AUDIT_LOGS_KEY = "bt_audit_logs";
 
 function normalizeProductTier(value: unknown, role?: "admin" | "user"): ProductTier {
@@ -160,38 +158,47 @@ export async function getGeoIPInfo(): Promise<{ ip: string; countryCode: string;
 
 // Helper: Verify credentials and return user role
 export async function dbVerifyUser(username: string, accessCode: string): Promise<{ success: boolean; role?: "admin" | "user"; error?: string }> {
-  const cleanUser = username.trim();
-  const cleanPass = accessCode.trim();
+  const email = username.trim().toLowerCase();
+  const password = accessCode.trim();
+  if (!isSupabaseConfigured || !supabase) return { success: false, error: "Secure authentication is unavailable." };
+  if (!email.includes("@")) return { success: false, error: "Enter your verified email address, not a legacy username." };
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error || !data.session) return { success: false, error: "Access denied: Invalid credentials or unverified email." };
+  const role = data.user.app_metadata?.role === "admin" ? "admin" : "user";
+  return { success: true, role };
+}
 
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { data, error } = await supabase
-        .from("bt_users")
-        .select("password, role")
-        .eq("username", cleanUser)
-        .single();
-      if (error) {
-        return { success: false, error: "Access denied: Invalid credentials" };
-      }
-      if (data && data.password === cleanPass) {
-        return { success: true, role: data.role };
-      } else {
-        return { success: false, error: "Access denied: Invalid credentials" };
-      }
-    } catch (e) {
-      console.error("Supabase verify failed, falling back:", e);
-    }
-  }
+export async function dbAdminGetUsers(): Promise<DBUser[]> {
+  const payload = await authenticatedApiRequest<{ users: DBUser[] }>("/api/security/admin-users", { method: "GET" });
+  return payload.users || [];
+}
 
-  // Local fallback
-  const storedCreds = localStorage.getItem(CREDS_DB_KEY);
-  const creds = storedCreds ? JSON.parse(storedCreds) : {};
-  if (creds[cleanUser] && creds[cleanUser] === cleanPass) {
-    const users = await dbGetUsers();
-    const userObj = users.find(u => u.username === cleanUser);
-    return { success: true, role: userObj?.role || "user" };
-  }
-  return { success: false, error: "Access denied: Invalid credentials" };
+export async function dbAdminCreateUser(username: string, email: string, password: string): Promise<void> {
+  await authenticatedApiRequest("/api/security/admin-users", {
+    method: "POST",
+    body: JSON.stringify({ action: "create", username, email, password })
+  });
+}
+
+export async function dbAdminUpdateUser(username: string, patch: Partial<DBUser>): Promise<void> {
+  const allowed = {
+    ...(patch.status !== undefined ? { status: patch.status } : {}),
+    ...(patch.allowedIndicators !== undefined ? { allowedIndicators: patch.allowedIndicators } : {}),
+    ...(patch.productTier !== undefined ? { productTier: patch.productTier } : {}),
+    ...(patch.permissions !== undefined ? { permissions: patch.permissions } : {}),
+    ...(patch.aiMessagesCount !== undefined ? { aiMessagesCount: patch.aiMessagesCount } : {})
+  };
+  await authenticatedApiRequest("/api/security/admin-users", {
+    method: "POST",
+    body: JSON.stringify({ action: "update", username, patch: allowed })
+  });
+}
+
+export async function dbAdminDeleteUser(username: string): Promise<void> {
+  await authenticatedApiRequest("/api/security/admin-users", {
+    method: "POST",
+    body: JSON.stringify({ action: "delete", username })
+  });
 }
 
 export async function establishSupabaseAuthSession(
@@ -239,41 +246,16 @@ export async function establishSupabaseAuthSession(
     };
   }
 
-  const ensured = await fetch("/api/auth/ensure-user", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email,
-      password,
-      username: user.username,
-      displayName: user.displayName || user.username
-    })
+  const signup = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { username: user.username, display_name: user.displayName || user.username } }
   });
-
-  if (!ensured.ok) {
-    let errorMessage = "Server-side Supabase Auth user creation failed.";
-    try {
-      const errorPayload = await ensured.json();
-      errorMessage = errorPayload.error || errorMessage;
-    } catch {
-      // Keep generic error.
-    }
-
-    return {
-      success: false,
-      error: `${errorMessage} ${signInMessage}`
-    };
+  if (signup.error) return { success: false, error: signup.error.message };
+  if (!signup.data.session) {
+    return { success: false, needsEmailConfirmation: true, error: "Check your email and confirm the Supabase Auth registration, then sign in." };
   }
-
-  const retrySignIn = await supabase.auth.signInWithPassword({ email, password });
-  if (!retrySignIn.error && retrySignIn.data.session) {
-    return { success: true };
-  }
-
-  return {
-    success: false,
-    error: `Supabase Auth user for ${email} was confirmed server-side, but sign-in still failed. ${retrySignIn.error?.message || signInMessage}`
-  };
+  return { success: true };
 }
 
 export async function clearSupabaseAuthSession(): Promise<void> {
@@ -282,51 +264,19 @@ export async function clearSupabaseAuthSession(): Promise<void> {
 }
 
 // Helper: Register user
-export async function dbRegisterUser(user: DBUser, accessCode: string): Promise<{ success: boolean; error?: string }> {
-  let ip = user.ip;
-  let countryCode = user.countryCode;
-  let countryName = user.countryName;
-  if (!ip || !countryCode) {
-    const geo = await getGeoIPInfo();
-    ip = ip || geo.ip;
-    countryCode = countryCode || geo.countryCode;
-    countryName = countryName || geo.countryName;
-  }
-
+export async function dbRegisterUser(user: DBUser, _accessCode: string): Promise<{ success: boolean; error?: string }> {
   if (isSupabaseConfigured && supabase) {
     try {
-      // Check if user already exists
-      const { data: existing } = await supabase
-        .from("bt_users")
-        .select("username")
-        .eq("username", user.username)
-        .maybeSingle();
-      if (existing) {
-        return { success: false, error: "Username already exists" };
-      }
-
       const payload = {
-        username: user.username,
         display_name: user.displayName || user.username,
-        email: user.email,
-        password: accessCode.trim(),
-        role: user.role,
-        status: user.status,
-        created_at: user.createdAt,
         last_login: user.lastLogin,
-        allowed_indicators: user.allowedIndicators,
         active_indicators: user.activeIndicators,
-        product_tier: user.productTier || (user.role === "admin" ? "admin" : "retail"),
-        permissions: user.permissions || [],
         workspaces: user.workspaces || ["Quant Desk", "Scalp Layout", "Strategy Lab"],
         workspace_snapshots: user.workspaceSnapshots || {},
         active_workspace: user.activeWorkspace || "Quant Desk",
         alerts: user.alerts || [],
         scripts: user.scripts || [],
         alert_event_logs: user.alertEventLogs || [],
-        ip: ip,
-        country_code: countryCode,
-        country_name: countryName,
         first_name: user.firstName || "",
         last_name: user.lastName || "",
         organization: user.organization || "",
@@ -334,24 +284,13 @@ export async function dbRegisterUser(user: DBUser, accessCode: string): Promise<
         purpose_of_use: user.purposeOfUse || "personal",
         phone: user.phone || "",
         newsletter_opt_in: user.newsletterOptIn || false,
-        referred_by: user.referredBy || "",
-        email_verified: user.emailVerified || false
+        referred_by: user.referredBy || ""
       };
-
-      const { error } = await supabase.from("bt_users").insert(payload);
-      if (error) {
-        const message = error.message || "";
-        if (message.includes("display_name") || message.includes("product_tier") || message.includes("permissions") || error.code === "PGRST204") {
-          const compatiblePayload: any = { ...payload };
-          delete compatiblePayload.display_name;
-          delete compatiblePayload.product_tier;
-          delete compatiblePayload.permissions;
-          const retry = await supabase.from("bt_users").insert(compatiblePayload);
-          if (retry.error) throw retry.error;
-        } else {
-          throw error;
-        }
-      }
+      const authUserId = (await supabase.auth.getUser()).data.user?.id;
+      if (!authUserId) throw new Error("Secure registration session is unavailable.");
+      const { data: updated, error } = await supabase.from("bt_users").update(payload).eq("auth_user_id", authUserId).select("username").maybeSingle();
+      if (error) throw error;
+      if (!updated) throw new Error("Secure user profile was not created.");
       return { success: true };
     } catch (e: any) {
       console.error("Supabase register error:", e);
@@ -359,26 +298,7 @@ export async function dbRegisterUser(user: DBUser, accessCode: string): Promise<
     }
   }
 
-  // Local fallback
-  const storedCreds = localStorage.getItem(CREDS_DB_KEY);
-  const creds = storedCreds ? JSON.parse(storedCreds) : {};
-  if (creds[user.username]) {
-    return { success: false, error: "Username already exists" };
-  }
-
-  const users = await dbGetUsers();
-  users.push({
-    ...user,
-    ip,
-    countryCode,
-    countryName
-  });
-  localStorage.setItem(USERS_DB_KEY, JSON.stringify(users));
-
-  creds[user.username] = accessCode.trim();
-  localStorage.setItem(CREDS_DB_KEY, JSON.stringify(creds));
-
-  return { success: true };
+  return { success: false, error: "Secure registration requires Supabase Auth." };
 }
 
 // Helper: Update user fields
@@ -395,7 +315,10 @@ export async function dbUpdateUser(username: string, patch: Partial<DBUser> & { 
       if (patch.activeIndicators !== undefined) dbPatch.active_indicators = patch.activeIndicators;
       if (patch.productTier !== undefined) dbPatch.product_tier = patch.productTier;
       if (patch.permissions !== undefined) dbPatch.permissions = patch.permissions;
-      if (patch.password !== undefined) dbPatch.password = patch.password;
+      if (patch.password !== undefined) {
+        const passwordResult = await supabase.auth.updateUser({ password: patch.password });
+        if (passwordResult.error) throw passwordResult.error;
+      }
       if (patch.workspaces !== undefined) dbPatch.workspaces = patch.workspaces;
       if (patch.workspaceSnapshots !== undefined) dbPatch.workspace_snapshots = patch.workspaceSnapshots;
       if (patch.activeWorkspace !== undefined) dbPatch.active_workspace = patch.activeWorkspace;
@@ -435,12 +358,6 @@ export async function dbUpdateUser(username: string, patch: Partial<DBUser> & { 
     users[index] = { ...users[index], ...patch };
     localStorage.setItem(USERS_DB_KEY, JSON.stringify(users));
   }
-  if (patch.password !== undefined) {
-    const storedCreds = localStorage.getItem(CREDS_DB_KEY);
-    const creds = storedCreds ? JSON.parse(storedCreds) : {};
-    creds[username] = patch.password.trim();
-    localStorage.setItem(CREDS_DB_KEY, JSON.stringify(creds));
-  }
 }
 
 // Helper: Delete user
@@ -463,23 +380,15 @@ export async function dbDeleteUser(username: string): Promise<void> {
   const updated = users.filter(u => u.username !== username);
   localStorage.setItem(USERS_DB_KEY, JSON.stringify(updated));
 
-  const storedCreds = localStorage.getItem(CREDS_DB_KEY);
-  const creds = storedCreds ? JSON.parse(storedCreds) : {};
-  delete creds[username];
-  localStorage.setItem(CREDS_DB_KEY, JSON.stringify(creds));
 }
 
 // Helper: Get audit logs
 export async function dbGetAuditLogs(): Promise<DBAuditLog[]> {
   if (isSupabaseConfigured && supabase) {
     try {
-      const { data, error } = await supabase
-        .from("bt_audit_logs")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      if (data) {
-        return data.map((l: any) => ({
+      const result = await authenticatedApiRequest<{ logs: any[] }>("/api/security/audit", { method: "GET" });
+      if (result.logs) {
+        return result.logs.map((l: any) => ({
           timestamp: l.timestamp,
           tag: l.tag,
           message: l.message
@@ -497,17 +406,10 @@ export async function dbGetAuditLogs(): Promise<DBAuditLog[]> {
 // Helper: Add audit log
 export async function dbAddAuditLog(tag: DBAuditLog["tag"], message: string): Promise<void> {
   const timestamp = new Date().toLocaleTimeString();
+  const safeMessage = `${tag} event recorded by Black Terminal.`;
   if (isSupabaseConfigured && supabase) {
     try {
-      const { error } = await supabase
-        .from("bt_audit_logs")
-        .insert({
-          timestamp,
-          tag,
-          message,
-          created_at: new Date().toISOString()
-        });
-      if (error) throw error;
+      await authenticatedApiRequest("/api/security/audit", { method: "POST", body: JSON.stringify({ tag }) });
       return;
     } catch (e) {
       console.error("Supabase add log failed, falling back:", e);
@@ -516,6 +418,25 @@ export async function dbAddAuditLog(tag: DBAuditLog["tag"], message: string): Pr
 
   const stored = localStorage.getItem(AUDIT_LOGS_KEY);
   const logs = stored ? JSON.parse(stored) : [];
-  const logMsg = { timestamp, tag, message };
+  void message;
+  const logMsg = { timestamp, tag, message: safeMessage };
   localStorage.setItem(AUDIT_LOGS_KEY, JSON.stringify([logMsg, ...logs]));
+}
+
+async function authenticatedApiRequest<T = { success: boolean }>(url: string, init: RequestInit): Promise<T> {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Sign in again to continue.");
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(init.headers || {})
+    }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Secure API request failed.");
+  return payload as T;
 }

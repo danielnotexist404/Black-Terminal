@@ -4,6 +4,22 @@ This file records database migrations required by Black Terminal.
 
 Rule: every new table, column, policy, trigger, function, or index must be added here before it is applied in Supabase.
 
+## 2026-07-20 - Phase V Chapter I Security Fortress
+
+Status: Applied and verified on linked project `jdwlspxzoudgzxcghbjo`.
+
+Canonical migration sources, in applied order:
+
+- `supabase/migrations/000000_baseline.sql` — PostgreSQL 17 export of the pre-Phase-V live public schema; registered as applied, never replayed.
+- `supabase/migrations/202607190001_phase5_security_imm_foundation.sql` — missing IMM persistence schema.
+- `supabase/migrations/202607190002_phase5_black_cloud_execution_foundation.sql` — Black Cloud execution and safe secret-reference schema.
+- `supabase/migrations/202607190003_phase5_security_fortress.sql` — Supabase Auth linkage, password-column removal, RLS and column grants, API/AI rate counters, security audit, ciphertext vault and retention.
+- `supabase/migrations/202607190004_phase5_security_verification.sql` — live invariant assertions and retention sweep.
+- `supabase/migrations/202607200001_phase5_compressed_audit_archive.sql` — compressed, server-only audit archive storage and access assertions.
+- `supabase/migrations/202607200002_phase5_audit_redaction_guard.sql` — database-enforced redaction of sensitive audit text and metadata.
+
+`npm run security:verify-migrations` must report 24/24 tables before this chapter is considered database-complete. Future schema work must add a new timestamped migration; never edit or replay `000000_baseline.sql` against the linked production database.
+
 ## 2026-07-13 - Chapter XIII readiness and native strategy hotfix
 
 No migration is required. The synchronization repair, native Bybit strategy routing and strategy snapshots use the existing account, order, validation and audit schema.
@@ -2116,3 +2132,15 @@ create policy "investment_group_messages_select_members"
 ```
 
 The API performs authoritative owner/manager checks before using the service-role client. No client may write moderation audit rows directly.
+
+# 2026-07-17 - Phase IV Professional Network Chapter II
+
+Migration required. Apply after the Professional Network foundation and the Investment Group public-sections/moderation migration.
+
+Canonical paste-ready source:
+
+`docs/migrations/20260717_phase4_professional_network_chapter2.sql`
+
+This migration extends `profiles_extended`, `profile_posts`, and `notification_events`; adds privacy, engagement, saved collections, direct messaging, reports, moderation, observability and atomic rate limiting; creates the private `professional-media` bucket; and installs strict RLS and scoped realtime publication entries. It deliberately does not create duplicate profile, post, follow, notification, indicator, strategy or Investment Group concepts.
+
+Expected successful result: `Success. No rows returned.` Do not expose or paste `SUPABASE_SERVICE_ROLE_KEY` into this SQL or any browser setting.

@@ -193,3 +193,13 @@ DOM Pro panel settings schema v3 stores Ladder camera and live-coverage presenta
 # Canonical Order Interaction
 
 Positions Orders and chart overlays derive from the same keyed Black Core order state. Right-click either representation for the shared order-management menu. Chart price lines retain their market price through pan, zoom and linear/log scale changes because screen coordinates are derived from the live chart transform.
+
+# Professional Center Workspace State
+
+Professional Center routes are stored in the URL hash rather than browser-local duplicate profile state. Shareable routes preserve feed, profile handle/tab, individual post and conversation context. Canonical profile, feed and message data remains in Supabase; only transient composer fields, optimistic state and current in-memory entities live in the browser.
+
+Realtime subscriptions are limited to the active conversation and authenticated notification stream and are disposed on navigation. Professional media object URLs used during local preview must be revoked by their owning editor component; persisted media is always represented by an expiring signed URL.
+
+# Black Cloud Workspace State
+
+Black Cloud connection health, lifecycle, control state, mandates, follower plans and incidents are server state. Portfolio Manager refreshes the authenticated status endpoint every 15 seconds while visible and every 60 seconds while hidden. It must not persist or infer execution authority locally. Pause, resume and emergency-stop always call the control plane. Browser disconnect, tab closure and desktop shutdown do not stop a provisioned cloud worker.

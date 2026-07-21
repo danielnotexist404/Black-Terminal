@@ -5,6 +5,8 @@ import mainnetValidation from "../../server/routes/exchange-accounts/mainnet-val
 import bybitRuntimeStatus from "../../server/routes/exchange-accounts/bybit-runtime-status.js";
 import account from "../../server/routes/exchange-accounts/account.js";
 import { applyCors, sendError } from "../../server/portfolio-api.js";
+import { requireApiSecurity } from "../../server/security/securityMiddleware.js";
+import { validateTradingRequest } from "../../server/security/trading-schemas.js";
 
 const routes = new Map([
   ["connect", connect],
@@ -18,6 +20,13 @@ export default async function handler(req, res) {
   try {
     const path = normalizePath(req.query.path, req, "exchange-accounts");
     const route = routes.get(path[0]);
+
+    if (route || (path.length === 1 && path[0])) {
+      const permission = path[0] === "connect" ? "execution.connectBroker" : "execution.managePositions";
+      const security = await requireApiSecurity(req, res, { endpoint: `exchange-accounts.${path[0]}`, permission, maxBytes: 128 * 1024, rateLimit: { perMinute: 30, perDay: 5000 } });
+      if (security.handled) return;
+      validateTradingRequest(req, "exchange", path[0]);
+    }
 
     if (route) return route(req, res);
     if (path.length === 1 && path[0]) return account(req, res);

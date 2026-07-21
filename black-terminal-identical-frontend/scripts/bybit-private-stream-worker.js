@@ -1,6 +1,7 @@
 import { decryptCredentialPayload, getSupabaseAdmin } from "../server/portfolio-api.js";
 import { BybitPrivateStreamClient } from "../server/exchanges/bybit-private-stream.js";
 import { syncBybitSnapshotAndReconcile } from "../server/exchanges/bybit-reconciliation.js";
+import { sanitizeAuditMetadata, sanitizeAuditText } from "../server/security/audit-safety.js";
 
 const accountId = process.env.BYBIT_STREAM_ACCOUNT_ID;
 const symbol = process.env.BYBIT_STREAM_SYMBOL || "BTCUSDT";
@@ -51,14 +52,14 @@ client.onMessage((event) => {
 });
 
 client.onError((error) => {
-  console.error("Bybit private stream error:", error.message);
+  console.error("Bybit private stream error:", sanitizeAuditText(error.message));
   void supabase.from("execution_audit_logs").insert({
     user_id: account.user_id,
     account_id: account.id,
     event_type: "private_stream_error",
     severity: "error",
-    message: error.message,
-    metadata: { venueId: "bybit", diagnostics: client.diagnostics() }
+    message: sanitizeAuditText(error.message),
+    metadata: sanitizeAuditMetadata({ venueId: "bybit", diagnostics: client.diagnostics() })
   }).catch(() => null);
 });
 
@@ -108,7 +109,16 @@ async function auditStreamEvent(event) {
     event_type: eventType,
     severity: "info",
     message: `Bybit private stream ${event.type} event received.`,
-    metadata: { venueId: "bybit", event }
+    metadata: sanitizeAuditMetadata({
+      venueId: "bybit",
+      eventType,
+      topic: event.topic,
+      eventTime: event.time,
+      orderId: event.report?.orderId,
+      fillId: event.fill?.fillId,
+      symbol: event.report?.symbol || event.fill?.symbol || event.position?.symbol,
+      status: event.report?.status
+    })
   }).catch(() => null);
 }
 

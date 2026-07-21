@@ -352,3 +352,13 @@ The Aggregated DOM Ladder, Volume Profile and Liquidity Heatmap consume one `Dom
 ## DOM Pro Structural CVD
 
 Structural CVD consumes bounded historical venue OHLCV from the existing Black Core market-data adapter and projects candle body/wick pressure into rolling buy, sell and delta structure. It does not create another stream or claim historical aggressor classification. If historical candles are unavailable, it uses the existing classified DOM trade snapshot as an explicit fallback rather than blending incompatible sources. The CVD camera owns only its horizontal history window and remains independent from the shared price camera. See `DOM_PRO_STRUCTURAL_CVD.md`.
+
+## Phase IV Professional Network Chapter II
+
+Professional Center is now a modular authenticated subsystem under `src/modules/professional-network`. It reuses canonical profile, post, follow, notification, publication and Investment Group tables while adding privacy, engagement, messaging, secure media, moderation and rate-limit entities through `20260717_phase4_professional_network_chapter2.sql`.
+
+All privileged operations flow through `/api/network/[resource]`. Server routes perform authorization even though their Supabase service client bypasses RLS. Private media uses signed uploads, signature validation and expiring reads. Direct messages use an atomic canonical participant RPC and scoped realtime channels. See `PROFESSIONAL_NETWORK_ARCHITECTURE.md` and `SOCIAL_RLS_POLICIES.md`.
+
+## Phase V Black Cloud Connectivity
+
+The browser and Tauri app are authenticated control clients. Vercel hosts the stateless control plane; an independently hosted Node 22 worker owns cloud-delegated broker streams, commands, risk gates and reconciliation. Supabase stores signed intents, mandates, leases/fencing tokens, execution plans, health, incidents and redacted audit evidence. Exchange credentials cross only the service-role vault boundary. See `BROKER_CONNECTION_ARCHITECTURE.md` and `PHASE5_CHAPTER2_BLACK_CLOUD_CONNECTIVITY.md`.

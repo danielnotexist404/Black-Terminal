@@ -1,6 +1,7 @@
 export type ProductTier = "retail" | "professional" | "enterprise" | "admin";
 
 export type TerminalCapability =
+  | "ai.blackGpt"
   | "execution.connectBroker"
   | "execution.connectWallet"
   | "execution.managePositions"
@@ -38,6 +39,7 @@ export type CapabilityUser = {
 
 const tierCapabilities: Record<ProductTier, TerminalCapability[]> = {
   retail: [
+    "ai.blackGpt",
     "execution.connectBroker",
     "execution.connectWallet",
     "execution.managePositions",
@@ -47,6 +49,7 @@ const tierCapabilities: Record<ProductTier, TerminalCapability[]> = {
     "can_follow_users"
   ],
   professional: [
+    "ai.blackGpt",
     "execution.connectBroker",
     "execution.connectWallet",
     "execution.managePositions",
@@ -58,6 +61,7 @@ const tierCapabilities: Record<ProductTier, TerminalCapability[]> = {
     "can_follow_users"
   ],
   enterprise: [
+    "ai.blackGpt",
     "execution.connectBroker",
     "execution.connectWallet",
     "execution.managePositions",
@@ -80,6 +84,7 @@ const tierCapabilities: Record<ProductTier, TerminalCapability[]> = {
     "proprietary.domPro"
   ],
   admin: [
+    "ai.blackGpt",
     "execution.connectBroker",
     "execution.connectWallet",
     "execution.managePositions",

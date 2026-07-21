@@ -13,6 +13,7 @@ This version removes TradingView Lightweight Charts and uses a custom GPU-render
 - `docs/WORKSPACE.md` - local setup, commands, and directory guide
 - `docs/PYTHON_INDICATORS.md` - draft Python indicator contract
 - `docs/SUPABASE_MIGRATIONS.md` - Supabase schema migration ledger
+- `docs/PHASE5_CHAPTER1_SECURITY_FORTRESS.md` - deployed security architecture and certification record
 - `docs/ROADMAP.md` - suggested milestone sequence
 
 ## Why this version

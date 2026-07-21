@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { X } from "lucide-react";
 import "../styles/admin.css";
-import { dbGetUsers, dbRegisterUser, dbUpdateUser, dbDeleteUser, dbGetAuditLogs, dbAddAuditLog } from "../lib/supabase";
+import { dbAdminCreateUser, dbAdminDeleteUser, dbAdminGetUsers, dbAdminUpdateUser, dbGetAuditLogs, dbAddAuditLog, supabase } from "../lib/supabase";
 import type { ProductTier } from "../core/permissions/capabilities";
 
 interface User {
@@ -86,11 +86,11 @@ export default function AdminPanel() {
   const [newPassword, setNewPassword] = useState("");
   const [formError, setFormError] = useState("");
 
-  // Poll database to get real-time active indicators and state changes
+  // Supabase Realtime is primary; a slow poll repairs missed events without creating database churn.
   useEffect(() => {
     const fetchDB = async () => {
       try {
-        const parsed = await dbGetUsers();
+        const parsed = await dbAdminGetUsers();
         // Normalize fields in case older records exist
         const normalized = parsed.map((u: any) => ({
           ...u,
@@ -113,8 +113,14 @@ export default function AdminPanel() {
     };
 
     fetchDB();
-    const interval = setInterval(fetchDB, 1500); // Poll every 1.5s for real-time tracking
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchDB, 60_000);
+    const channel = supabase?.channel("admin-bt-users-security")
+      .on("postgres_changes", { event: "*", schema: "public", table: "bt_users" }, () => { void fetchDB(); })
+      .subscribe();
+    return () => {
+      clearInterval(interval);
+      if (channel && supabase) void supabase.removeChannel(channel);
+    };
   }, []);
 
   // Load logs
@@ -155,16 +161,17 @@ export default function AdminPanel() {
       permissions: []
     };
 
-    const regResult = await dbRegisterUser(newUser, cleanPass);
-    if (!regResult.success) {
-      setFormError(regResult.error || "User already exists");
+    try {
+      await dbAdminCreateUser(newUser.username, newUser.email, cleanPass);
+    } catch (error: any) {
+      setFormError(error?.message || "User already exists");
       return;
     }
 
     await dbAddAuditLog("CREATE", `New user ${cleanUser} created by Admin.`);
     
     // Refresh lists manually
-    const updatedUsers = await dbGetUsers();
+    const updatedUsers = await dbAdminGetUsers();
     setUsers(updatedUsers);
 
     setNewUsername("");
@@ -176,20 +183,20 @@ export default function AdminPanel() {
     if (!matchedUser) return;
 
     const nextStatus = matchedUser.status === "suspended" ? "offline" : "suspended";
-    await dbUpdateUser(username, { status: nextStatus as any });
+    await dbAdminUpdateUser(username, { status: nextStatus as any });
 
     const tag = nextStatus === "suspended" ? "SUSPEND" : "REACTIVATE";
     await dbAddAuditLog(tag as any, `User ${username} status changed to ${nextStatus}.`);
 
-    const updatedUsers = await dbGetUsers();
+    const updatedUsers = await dbAdminGetUsers();
     setUsers(updatedUsers);
   };
 
   const handleDeleteUser = async (username: string) => {
-    await dbDeleteUser(username);
+    await dbAdminDeleteUser(username);
     await dbAddAuditLog("DELETE", `User ${username} deleted from database.`);
 
-    const updatedUsers = await dbGetUsers();
+    const updatedUsers = await dbAdminGetUsers();
     setUsers(updatedUsers);
 
     if (selectedUser?.username === username) {
@@ -213,10 +220,10 @@ export default function AdminPanel() {
       nextAllowed = [...selectedUser.allowedIndicators, indicatorKey];
     }
 
-    await dbUpdateUser(selectedUser.username, { allowedIndicators: nextAllowed });
+    await dbAdminUpdateUser(selectedUser.username, { allowedIndicators: nextAllowed });
     await dbAddAuditLog(tag as any, msg);
 
-    const updatedUsers = await dbGetUsers();
+    const updatedUsers = await dbAdminGetUsers();
     setUsers(updatedUsers);
 
     const updatedSelected = updatedUsers.find(u => u.username === selectedUser.username);
@@ -228,10 +235,10 @@ export default function AdminPanel() {
   const handleProductTierChange = async (tier: (typeof ASSIGNABLE_PRODUCT_TIERS)[number]) => {
     if (!selectedUser || selectedUser.role === "admin") return;
 
-    await dbUpdateUser(selectedUser.username, { productTier: tier });
+    await dbAdminUpdateUser(selectedUser.username, { productTier: tier });
     await dbAddAuditLog("SYSTEM", `User ${selectedUser.username} product tier changed to ${tier.toUpperCase()}.`);
 
-    const updatedUsers = await dbGetUsers();
+    const updatedUsers = await dbAdminGetUsers();
     setUsers(updatedUsers);
 
     const updatedSelected = updatedUsers.find(u => u.username === selectedUser.username);
@@ -540,7 +547,7 @@ export default function AdminPanel() {
                     </div>
                     <button
                       onClick={async () => {
-                        await dbUpdateUser(selectedUser.username, { aiMessagesCount: 0 });
+                        await dbAdminUpdateUser(selectedUser.username, { aiMessagesCount: 0 });
                         await dbAddAuditLog("SYSTEM", `Admin manually reset BlackGPT daily query usage for user ${selectedUser.username}`);
                       }}
                       style={{

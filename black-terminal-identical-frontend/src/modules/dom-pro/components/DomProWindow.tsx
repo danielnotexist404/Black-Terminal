@@ -14,7 +14,7 @@ import { blackCoreMarketDataEngine } from "../../../market-data/engine/marketDat
 import type { MarketKind, MarketSymbol, Timeframe } from "../../../market-data/types";
 import { blackCorePerformanceMonitor } from "../../../performance/performanceMonitor";
 import type { PortfolioAccount } from "../../../portfolio/types";
-import { syncExchangeAccountViaApi, type ExchangeAccountSyncPayload } from "../../../portfolio/portfolioApiClient";
+import { getPortfolioApiToken, syncExchangeAccountViaApi, type ExchangeAccountSyncPayload } from "../../../portfolio/portfolioApiClient";
 import { defaultRiskControls } from "../../../risk/types";
 import { buildVenueExecutionSchema, calculateVenueOrderPreview, sizeFromEquityPercent, validateVenueOrderDraft } from "../../../execution/venueExecutionSchema";
 import { DomAggregationEngine } from "../domAggregationEngine";
@@ -611,7 +611,9 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     let cancelled = false;
     const loadStatus = async () => {
       try {
-        const response = await fetch("/api/imm/status", { headers: { accept: "application/json" } });
+        const token = await getPortfolioApiToken();
+        if (!token) throw new Error("Authenticated IMM status requires a current session.");
+        const response = await fetch("/api/imm/status", { headers: { accept: "application/json", Authorization: `Bearer ${token}` } });
         if (!response.ok) throw new Error(`IMM status ${response.status}`);
         const payload = await response.json() as IMMStatusPayload;
         if (!cancelled) setImmStatus(payload);

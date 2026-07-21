@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Send, Bot, RefreshCw, AlertTriangle, ShieldAlert, Sparkles } from "lucide-react";
-import { dbUpdateUser, dbAddAuditLog, dbGetUsers } from "../lib/supabase";
+import { dbUpdateUser, dbAddAuditLog, dbGetUsers, supabase } from "../lib/supabase";
 import { sendSecurityAlertEmail } from "../lib/resend";
 
 interface Message {
@@ -163,11 +163,11 @@ export default function BlackGPT({
         ]);
 
         // Audit Log
-        await dbAddAuditLog("ERROR", `User ${currentUser.username} query blocked by AI security shield: "${query}"`);
+        await dbAddAuditLog("ERROR", `AI security shield blocked a prohibited request for user ${currentUser.username}.`);
 
         // Send Email notification via Resend
         try {
-          await sendSecurityAlertEmail("blacktrianglecorp@gmail.com", currentUser.username, query);
+          await sendSecurityAlertEmail(currentUser.username);
         } catch (e) {
           console.error("Failed to send security alert email:", e);
         }
@@ -211,40 +211,6 @@ export default function BlackGPT({
         ? `\nLIVE CHART OHLCV DATA (last ${recentCandles.slice(-10).length} candles, timeframe ${timeframe}):\n${candleRows}\n`
         : `\nNote: Chart data is still loading (no candles received yet). Use real-world knowledge for the asset the user is asking about.\n`;
 
-      const systemInstruction = `
-You are BlackGPT, a premium AI cryptocurrency trading assistant integrated directly into Black Terminal, a professional trading platform built by Black Triangle Group. You have real-time access to the user's chart and can see live price action.
-
-LANGUAGE & LENGTH RULES:
-- You MUST detect the language used by the user in their prompt and reply strictly in that same language.
-- If the user writes in Hebrew, reply in Hebrew. If the user writes in English, reply in English.
-- Keep your responses balanced: professional, complete, and concise — not too short, not too long.
-
-YOUR REAL-TIME CHART ACCESS:
-- Active Workspace: ${workspace}
-- Chart Asset (currently displayed on the chart): ${symbol}
-- Live Current Price of ${symbol}: $${price.toLocaleString(undefined, { maximumFractionDigits: 4 })} USDT
-- Timeframe: ${timeframe}
-- Exchange: ${exchange}
-- Active Chart Overlays/Indicators: ${formattedIndicators}
-- User Membership Tier: ${isPremium ? "PREMIUM MEMBER" : "FREE TRIAL"}
-${chartDataBlock}
-IMPORTANT — ASSET CONTEXT:
-- The price "$${price.toLocaleString(undefined, { maximumFractionDigits: 4 })} USDT" above is the LIVE price of ${symbol} from the chart, NOT any other asset.
-- If the user asks about a DIFFERENT asset (e.g., asks about ETH when the chart shows BTC), use your real-world knowledge for that other asset's price, and clearly state you are doing so.
-- Do NOT confuse the chart asset's price with a different asset.
-
-SECURITY CONSTRAINTS:
-- NEVER output indicator code, scripts, or private repository files.
-
-TRADING SIGNAL TEMPLATE (use when asked to analyze/recommend trades):
-- Action: LONG / SHORT / HOLD
-- Entry: [price range]
-- Take Profit (TP): [levels]
-- Stop Loss (SL): [level]
-- Risk/Reward: [ratio]
-- Rationale: [1-2 sentences based on visible indicators and OHLC data above]
-`;
-
       const msgRoleMap = { model: "assistant" } as const;
       // Map chat history (excluding system logs) to Anthropic Messages schema
       const history = messages
@@ -260,15 +226,26 @@ TRADING SIGNAL TEMPLATE (use when asked to analyze/recommend trades):
         content: query
       });
 
+      const { data: authData } = await supabase!.auth.getSession();
+      const authToken = authData.session?.access_token;
+      if (!authToken) throw new Error("Sign in again before using BlackGPT.");
       const response = await fetch("/api/claude", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`
         },
         body: JSON.stringify({
-          system: systemInstruction,
           messages: history,
-          model: "claude-haiku-4-5"
+          context: {
+            workspace,
+            symbol,
+            price,
+            timeframe,
+            exchange,
+            indicators: formattedIndicators,
+            chartSummary: chartDataBlock.slice(0, 12000)
+          }
         })
       });
 

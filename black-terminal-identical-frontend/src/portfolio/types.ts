@@ -88,4 +88,5 @@ export type ExchangeConnectionDraft = {
   apiKey: string;
   apiSecret: string;
   passphrase?: string;
+  network?: "mainnet" | "testnet";
 };

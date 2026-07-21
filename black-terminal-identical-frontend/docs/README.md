@@ -39,6 +39,28 @@ Every meaningful platform change must update documentation in the same work cycl
 - `REACT_RENDER_AUDIT.md` - high-frequency React ownership and render-path findings.
 - `MEMORY_LEAK_AUDIT.md` - resource lifecycle, retention rules, fixes, and repeatable leak procedure.
 - `PHASE4_PROFESSIONAL_NETWORK.md` - Professional Profile, Research Feed, follow graph, Investment Groups, join requests, and Trading Room foundation.
+- `PHASE5_CHAPTER1_SECURITY_FORTRESS.md` - secret isolation, authenticated API fortress, Auth/RLS migration, encrypted broker vault, retention and production certification.
+- `PHASE5_CHAPTER3_OBSIDIAN_PROTOCOL_INTRODUCTION.md` - conceptual introduction to the proposed Obsidian trust and settlement layer; not an implementation record.
+
+## Project Obsidian — Architecture Only
+
+Project Obsidian is currently a research and protocol-formalization workstream. No Obsidian contracts, production vaults, migrations, wallet custody, application integration, testnet deployment, or mainnet deployment are represented as implemented.
+
+- `obsidian/PROJECT_OBSIDIAN_OVERVIEW.md` - product hierarchy, protocol concept, architectural hypothesis, and proof boundary.
+- `obsidian/OBSIDIAN_PROTOCOL_CONSTITUTION.md` - permanent and forbidden powers, authority hierarchy, consent, emergency doctrine, and amendment rules.
+- `obsidian/OBSIDIAN_VAULT_ARCHITECTURE.md` - pooled, individual and hybrid model comparison plus vault and tranche state machines.
+- `obsidian/OBSIDIAN_ACCOUNTING_AND_FEES.md` - NAV/share equations, per-tranche high-water marks, invariants, edge cases, and numerical examples.
+- `obsidian/OBSIDIAN_EPOCH_AND_REDEMPTION_MODEL.md` - subscription, lock, maturity, settlement, queue, redemption, and rollover model.
+- `obsidian/OBSIDIAN_OPERATOR_MANDATES.md` - mandate and trade-intent lifecycles, typed actions, risk checks, signatures, nonces, and reconciliation.
+- `obsidian/OBSIDIAN_ADAPTER_STANDARD.md` - conceptual venue-adapter registry and asset-extraction prevention standard.
+- `obsidian/OBSIDIAN_WALLET_INTEGRATION.md` - existing-wallet-first integration and future Obsidian Account/Wallet boundaries.
+- `obsidian/OBSIDIAN_THREAT_MODEL.md` - comprehensive pre-implementation attack register, controls, recovery, and residual risks.
+- `obsidian/OBSIDIAN_PROTOCOL_INVARIANTS.md` - constitutional properties for later property-based and formal testing.
+- `obsidian/OBSIDIAN_GOVERNANCE_AND_UPGRADES.md` - multisignature, timelock, version, migration, registry, and incident requirements.
+- `obsidian/OBSIDIAN_REGULATORY_QUESTIONS.md` - legal issue checklist requiring qualified counsel; it contains no legal conclusions.
+- `obsidian/OBSIDIAN_SECURITY_AND_AUDIT_PLAN.md` - staged assurance and production release gates.
+- `obsidian/OBSIDIAN_ROADMAP.md` - research, reference-model, no-value testnet, audit, pilot, and expansion sequence.
+- `obsidian/OPEN_QUESTIONS_AND_DECISIONS.md` - confirmed principles, preferences, unresolved decisions, contradictions, assumptions, blockers, and prerequisites.
 
 ## Specialist Docs
 
@@ -107,3 +129,15 @@ The critical chart-coordinate and automatic 20,000-bar initialization contract i
 - `DOM_PRO_AGGREGATED_LADDER_SYNC.md` - live depth aggregation, feed ownership and synchronization evidence.
 - `DOM_PRO_LIVE_DEPTH_COVERAGE.md` - live, unavailable, stale and offline depth semantics.
 - `DOM_PRO_STRUCTURAL_CVD.md` - long-horizon OHLCV pressure model, rolling buy/sell structure, camera stability and source truth.
+
+# Professional Network Chapter II
+
+- `PROFESSIONAL_NETWORK_ARCHITECTURE.md` - module, API, state and deployment ownership.
+- `PROFESSIONAL_PROFILE_UX.md` - identity hierarchy, actions, editor and responsive behavior.
+- `SOCIAL_FEED_ARCHITECTURE.md` - feeds, engagement, pagination and optimistic state.
+- `RESEARCH_POSTS_AND_TRADE_IDEAS.md` - structured research, lifecycle and publication attachments.
+- `PROFESSIONAL_MESSAGING.md` - atomic conversations, requests, delivery and privacy.
+- `SOCIAL_MEDIA_STORAGE_AND_SECURITY.md` - private object paths, signed URLs and validation.
+- `SOCIAL_RLS_POLICIES.md` - table and storage authorization contracts.
+- `SOCIAL_MODERATION.md` - reporting, administrative review and rate limits.
+- `PROFESSIONAL_NETWORK_TEST_REPORT.md` - deterministic evidence and hosted certification matrix.

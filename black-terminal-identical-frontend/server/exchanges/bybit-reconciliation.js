@@ -30,10 +30,10 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
       network: options.network || "mainnet"
     }),
     getBybitStrategies(credentials, { marketKind, symbol }).catch(() => []),
-    getBybitInstrumentMetadata({ category: marketKind === "spot" ? "spot" : "linear", symbol }),
+    getBybitInstrumentMetadata({ category: marketKind === "spot" ? "spot" : "linear", symbol, network: options.network || credentials.network }),
     getBybitAccountInfo(credentials),
-    marketKind === "spot" ? Promise.resolve([]) : getBybitRiskLimits({ category: "linear", symbol }),
-    getBybitOrderPriceLimit({ category: marketKind === "spot" ? "spot" : "linear", symbol }),
+    marketKind === "spot" ? Promise.resolve([]) : getBybitRiskLimits({ category: "linear", symbol, network: options.network || credentials.network }),
+    getBybitOrderPriceLimit({ category: marketKind === "spot" ? "spot" : "linear", symbol, network: options.network || credentials.network }),
     getBybitApiKeyInformation(credentials)
   ]);
   const openOrders = openOrderSnapshot.orders.map((order) => ({
@@ -170,7 +170,7 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
   return {
     accountId: account.id,
     exchange: "bybit",
-    network: "mainnet",
+    network: options.network || credentials.network || "mainnet",
     balances,
     accountMetrics: walletSnapshot.accountMetrics,
     instrumentRules: metadata[0] || null,
@@ -214,7 +214,7 @@ async function updateKnownOrders(supabase, userId, accountId, openOrders) {
   ));
 }
 
-function diffBalances(localRows, venueRows) {
+export function diffBalances(localRows, venueRows) {
   const localByAsset = new Map(localRows.map((row) => [String(row.asset).toUpperCase(), Number(row.total || 0)]));
   return venueRows.flatMap((row) => {
     const local = localByAsset.get(String(row.asset).toUpperCase()) ?? 0;
@@ -224,7 +224,7 @@ function diffBalances(localRows, venueRows) {
   });
 }
 
-function diffPositions(localRows, venueRows) {
+export function diffPositions(localRows, venueRows) {
   const localByKey = new Map(localRows.map((row) => [positionKey(row), Number(row.quantity || 0)]));
   return venueRows.flatMap((row) => {
     const local = localByKey.get(positionKey(row)) ?? 0;
@@ -234,7 +234,7 @@ function diffPositions(localRows, venueRows) {
   });
 }
 
-function diffOrders(localRows, venueRows) {
+export function diffOrders(localRows, venueRows) {
   const venueOrderIds = new Set(venueRows.map((row) => row.orderId).filter(Boolean));
   return localRows.flatMap((row) => {
     if (!row.exchange_order_id) return [];
@@ -244,7 +244,7 @@ function diffOrders(localRows, venueRows) {
   });
 }
 
-function findStalePositions(localRows, venueRows) {
+export function findStalePositions(localRows, venueRows) {
   const venueKeys = new Set(venueRows.map(positionKey));
   return localRows.filter((row) => Number(row.quantity || 0) > 0 && !venueKeys.has(positionKey(row)));
 }

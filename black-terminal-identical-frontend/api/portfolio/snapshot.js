@@ -1,26 +1,24 @@
 import crypto from "node:crypto";
 import {
-  applyCors,
   decryptCredentialPayload,
   requireMethod,
-  requireUser,
   sendError,
   toCamelAccount
 } from "../../server/portfolio-api.js";
 import { syncBybitSnapshotAndReconcile } from "../../server/exchanges/bybit-reconciliation.js";
 import { loadHyperliquidCredential, syncHyperliquidAccount } from "../../server/protocols/hyperliquid.js";
+import { requireApiSecurity } from "../../server/security/securityMiddleware.js";
 
 function num(value) {
   return Number(value || 0);
 }
 
 export default async function handler(req, res) {
-  if (applyCors(req, res)) return;
-
   try {
+    const security = await requireApiSecurity(req, res, { endpoint: "portfolio.snapshot", permission: "portfolio.retailAnalytics", maxBytes: 32768, rateLimit: { perMinute: 20, perDay: 5000 } });
+    if (security.handled) return;
     requireMethod(req, "GET");
-
-    const { supabase, user } = await requireUser(req);
+    const { supabase, user } = security;
 
     const requestedAccountIds = parseRequestedAccountIds(req.query?.accountIds);
     let accountsQuery = supabase

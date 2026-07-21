@@ -7,6 +7,8 @@ import protection from "../../server/routes/execution/protection.js";
 import accountMode from "../../server/routes/execution/account-mode.js";
 import strategy from "../../server/routes/execution/strategy.js";
 import { applyCors, sendError } from "../../server/portfolio-api.js";
+import { requireApiSecurity } from "../../server/security/securityMiddleware.js";
+import { validateTradingRequest } from "../../server/security/trading-schemas.js";
 
 const routes = new Map([
   ["order", order],
@@ -23,7 +25,12 @@ export default async function handler(req, res) {
   try {
     const path = normalizePath(req.query.path, req, "execution");
     const route = routes.get(path[0]);
-    if (route) return route(req, res);
+    if (route) {
+      const security = await requireApiSecurity(req, res, { endpoint: `execution.${path[0]}`, permission: "execution.managePositions", maxBytes: 128 * 1024, rateLimit: { perMinute: 60, perDay: 10000 } });
+      if (security.handled) return;
+      validateTradingRequest(req, "execution", path[0]);
+      return route(req, res);
+    }
 
     if (applyCors(req, res)) return;
     return res.status(404).json({ error: "Execution route not found." });

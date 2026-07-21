@@ -1,5 +1,13 @@
 import type { MarketSymbol } from "../../market-data/types";
+import { supabase } from "../../lib/supabase";
 import type { DomHeatmapHorizon, MacroLiquidityRange } from "./types";
+
+async function authenticatedHeaders() {
+  const session = supabase ? await supabase.auth.getSession() : null;
+  const token = session?.data.session?.access_token;
+  if (!token) throw new Error("Sign in again to access Institutional Market Memory.");
+  return { Accept: "application/json", Authorization: `Bearer ${token}` };
+}
 
 export type BlackCoreDepthReplayPoint = {
   id: string;
@@ -91,7 +99,7 @@ export async function fetchBlackCoreDepthReplay(
   if (Number.isFinite(range.max) && range.max > 0) params.set("maxPrice", String(range.max));
 
   const response = await fetch(`/api/market-depth/replay?${params.toString()}`, {
-    headers: { Accept: "application/json" }
+    headers: await authenticatedHeaders()
   });
   if (!response.ok) return null;
   const data = await response.json() as BlackCoreDepthReplay;
@@ -116,7 +124,7 @@ export async function fetchBlackCoreDepthTiles(
   if (Number.isFinite(range.max) && range.max > 0) params.set("maxPrice", String(range.max));
 
   const response = await fetch(`/api/market-depth/tiles?${params.toString()}`, {
-    headers: { Accept: "application/json" }
+    headers: await authenticatedHeaders()
   });
   if (!response.ok) return null;
   const data = await response.json() as BlackCoreDepthTiles;

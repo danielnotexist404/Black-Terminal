@@ -372,6 +372,12 @@ Chapter I-C adds structural-zone assertions to `npm run test:aif`: contiguous me
 # DOM Pro Performance Validation
 
 Use `perf:dom-pro-smoke` for the deterministic scenario matrix. Release evidence requires both the 30-minute and one-hour `perf:dom-pro-soak` runs. The harness activates DOM Pro and A.I.F., changes presets, opens settings, pans/zooms, mounts/unmounts and exercises visibility recovery without placing orders. `?domPerfTrace=1` enables bounded span and watchdog diagnostics.
+
+# Professional Network Chapter II Build Note (2026-07-17)
+
+Apply `docs/migrations/20260717_phase4_professional_network_chapter2.sql` after the Professional Network foundation and Investment Group governance migrations. Keep `professional-media` private. Vercel requires the existing Supabase public configuration plus a server-only `SUPABASE_SERVICE_ROLE_KEY`.
+
+Run `npm run test:professional-network`, `npm run typecheck`, and `npm run build`. Then execute the hosted two-user/one-admin certification in `PROFESSIONAL_NETWORK_TEST_REPORT.md`. A green bundle does not certify hosted RLS, signed-media expiry or realtime membership isolation.
 # DOM Pro Resizable Workspace Build Note (2026-07-14)
 
 DOM Pro panel geometry is a versioned, normalized split tree. UI separators update ratios through one RAF-coalesced interaction path and must never restart feeds, workers or analytics. Workspace layouts and custom presets are browser-local and keyed by workspace/window.
@@ -383,6 +389,10 @@ Release gates: `npm run test:dom-pro-panels`, `npm run test:venue-execution`, `n
 # Bybit External Order Validation
 
 Run `npm run test:bybit-external-orders` and `npm run build`. For controlled live read evidence, provide protected `BYBIT_API_KEY`, `BYBIT_API_SECRET`, and optionally `BYBIT_EXPECTED_ORDER_ID` to `npm run certify:bybit-external-orders`. The harness reads existing orders only; it does not place an order.
+
+# Black Cloud Worker Build and Rollout
+
+Run `npm run test:phase5-chapter2`, `npm run security:contracts` and `npm run build`. Build the persistent runtime with `docker build -f Dockerfile.black-cloud -t black-terminal-cloud-worker .`. Deploy it to an always-on container provider with the server-only variables listed in `OFFLINE_EXECUTION_CERTIFICATION.md`; verify `/live` and `/ready` before enabling the Vercel control-plane flag. Start on Bybit testnet. Never enable mainnet or claim offline certification until the full shutdown/reconnect/emergency matrix has persisted evidence.
 # Bybit Order Hotfix Verification
 
 Run `npm run test:bybit-canonical-orders`, `npm run test:bybit-external-orders`, `npm run test:bybit-certification`, then `npm run build`. A production release must also verify one controlled venue order produces one row and one line before recording live certification evidence.

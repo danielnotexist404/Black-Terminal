@@ -21,6 +21,10 @@ pnpm-debug.log*
 .env.*
 !.env.example
 !.env.bybit-mainnet.example
+!.env.black-cloud.example
+
+# Supabase CLI local linkage/cache
+supabase/.temp/
 
 # OS and editor noise
 .DS_Store

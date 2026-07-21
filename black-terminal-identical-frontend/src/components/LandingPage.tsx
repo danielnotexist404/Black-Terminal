@@ -12,7 +12,6 @@ import {
   establishSupabaseAuthSession,
   getGeoIPInfo
 } from "../lib/supabase";
-import { sendVerificationEmail } from "../lib/resend";
 
 // Import generated images
 import terminalMockup from "../assets/terminal_mockup.jpg";
@@ -111,8 +110,6 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
   // Captcha & Code verification states
   const [mathCaptcha, setMathCaptcha] = useState({ num1: 0, num2: 0, result: 0 });
   const [captchaAnswer, setCaptchaAnswer] = useState("");
-  const [generatedVerificationCode, setGeneratedVerificationCode] = useState("");
-  const [verificationInput, setVerificationInput] = useState("");
 
   const generateCaptcha = () => {
     const num1 = Math.floor(Math.random() * 9) + 2;
@@ -144,7 +141,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
 
       // Fetch user details to verify suspension and update status/lastLogin
       const users = await dbGetUsers();
-      const userObj = users.find((u) => u.username === cleanUser);
+      const userObj = users.find((u) => u.email.toLowerCase() === cleanUser.toLowerCase());
       if (userObj) {
         if (userObj.status === "suspended") {
           setErrorMsg("Access suspended by Administrator");
@@ -161,12 +158,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
           countryName: geo.countryName
         });
 
-        const secureSession = await establishSupabaseAuthSession(userObj, cleanPass);
-        if (!secureSession.success) {
-          await dbUpdateUser(cleanUser, { emailVerified: false });
-        } else if (!userObj.emailVerified) {
-          await dbUpdateUser(cleanUser, { emailVerified: true });
-        }
+        if (!userObj.emailVerified) await dbUpdateUser(userObj.username, { emailVerified: true });
 
         await dbAddAuditLog("LOGIN", `User ${cleanUser} logged in from landing page.`);
         onLoginSuccess(cleanUser, userObj.role);
@@ -272,20 +264,20 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
         return;
       }
 
-      // Send Verification Email
+      // Supabase Auth owns verification email generation and code/link validation.
       setLoading(true);
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      setGeneratedVerificationCode(code);
-
       try {
-        const mailRes = await sendVerificationEmail(cleanEmail, cleanUser, code);
+        const authResult = await establishSupabaseAuthSession({
+          username: cleanUser,
+          displayName: cleanDisplayName,
+          email: cleanEmail,
+          role: "user"
+        }, cleanPass, { allowCreate: true });
         setLoading(false);
-        if (mailRes.success) {
-          setSignUpStep(3);
-          setSuccessMsg(`Verification code sent to ${cleanEmail}`);
-        } else {
-          setErrorMsg(mailRes.error || "Failed to send verification email. Verify your address or Resend setup.");
-        }
+        setSignUpStep(3);
+        setSuccessMsg(authResult.success
+          ? "Secure Supabase Auth session established. Complete profile setup."
+          : authResult.error || `Verification link sent to ${cleanEmail}. Confirm it, then continue.`);
       } catch (err: any) {
         setLoading(false);
         setErrorMsg(err.message || "Email dispatch failed");
@@ -294,11 +286,6 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
     }
 
     if (signUpStep === 3) {
-      if (verificationInput.trim() !== generatedVerificationCode) {
-        setErrorMsg("Invalid verification code. Please check your email.");
-        return;
-      }
-
       setLoading(true);
       try {
         const defaultAllowed = [
@@ -339,6 +326,12 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
           emailVerified: false
         };
 
+        const secureSession = await establishSupabaseAuthSession(newUser, cleanPass);
+        if (!secureSession.success) {
+          setErrorMsg(secureSession.error || "Confirm your email, then continue registration.");
+          setLoading(false);
+          return;
+        }
         const regResult = await dbRegisterUser(newUser, cleanPass);
         if (!regResult.success) {
           setErrorMsg(regResult.error || "Registration failed. Try again.");
@@ -348,12 +341,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
 
         await dbAddAuditLog("CREATE", `New secure account registered: ${cleanUser} (${cleanEmail})`);
         await dbAddAuditLog("LOGIN", `User ${cleanUser} logged in automatically.`);
-        const secureSession = await establishSupabaseAuthSession(newUser, cleanPass, { allowCreate: true });
-        if (!secureSession.success) {
-          await dbAddAuditLog("ERROR", `Supabase Auth session pending for ${cleanUser}: ${secureSession.error || "Unknown auth bridge error"}`);
-        } else {
-          await dbUpdateUser(cleanUser, { emailVerified: true });
-        }
+        await dbUpdateUser(cleanUser, { emailVerified: true });
 
         setSuccessMsg("Handshake successful! Terminal ready...");
         setTimeout(() => {
@@ -521,15 +509,15 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                      </span>
                    </div>
                    <div className="login-field">
-                     <label className="login-label">Identity (Username)</label>
+                     <label className="login-label">Verified Email</label>
                      <input
                        className="login-input"
                        type="text"
                        value={username}
-                       placeholder="USERNAME"
+                       placeholder="EMAIL ADDRESS"
                        onChange={(e) => setUsername(e.target.value)}
                        disabled={loading}
-                       autoComplete="off"
+                       autoComplete="email"
                      />
                    </div>
                    <div className="login-field">
@@ -758,23 +746,8 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                {!isSignIn && signUpStep === 3 && (
                  <>
                    <div className="signup-verification-text">
-                     Security protocol initiated. Enter the 6-digit cryptographic verification code sent to your secure email to authorize registration.
+                     Confirm the Supabase Auth verification email, then continue. Black Terminal never generates verification codes in browser JavaScript.
                    </div>
-                   <div className="login-field">
-                     <label className="login-label">Verification Code</label>
-                     <input
-                       className="login-input"
-                       style={{ letterSpacing: '6px', textAlign: 'center', fontSize: '18px', fontWeight: 'bold' }}
-                       type="text"
-                       maxLength={6}
-                       value={verificationInput}
-                       placeholder="XXXXXX"
-                       onChange={(e) => setVerificationInput(e.target.value.replace(/\D/g, ''))}
-                       disabled={loading}
-                       autoComplete="off"
-                     />
-                   </div>
-
                    <div className="signup-wizard-nav">
                      <button
                        className="signup-back-btn"
@@ -785,7 +758,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                        Back
                      </button>
                      <button className="login-submit-btn" type="submit" disabled={loading}>
-                       {loading ? "Completing handshake..." : "Verify & Complete Signup"}
+                       {loading ? "Completing handshake..." : "I Confirmed Email — Complete Signup"}
                      </button>
                    </div>
                  </>

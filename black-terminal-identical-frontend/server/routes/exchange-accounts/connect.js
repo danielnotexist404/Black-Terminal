@@ -35,12 +35,14 @@ export default async function handler(req, res) {
       throw unsupported;
     }
     const accountName = String(req.body.accountName).trim();
+    const network = req.body.network === "testnet" ? "testnet" : "mainnet";
     const rawCredentials = {
       exchange,
       apiKey: String(req.body.apiKey),
       apiSecret: String(req.body.apiSecret),
       passphrase: req.body.passphrase ? String(req.body.passphrase) : undefined,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      network
     };
     const validation = exchange === "bybit"
       ? await validateBybitCredentials(rawCredentials)
@@ -53,7 +55,7 @@ export default async function handler(req, res) {
     }
     const executionPolicy = resolveBybitExecutionPolicy(bybitDiagnostics?.permissions);
     const credentialFingerprint = crypto.createHash("sha256").update(rawCredentials.apiKey).digest("hex").slice(0, 32);
-    const credentialRef = `exchange:${exchange}:${user.id}:${credentialFingerprint}`;
+    const credentialRef = `exchange:${exchange}:${network}:${user.id}:${credentialFingerprint}`;
     const encryptedPayload = encryptCredentialPayload(rawCredentials);
 
     const accountPayload = {
@@ -66,13 +68,15 @@ export default async function handler(req, res) {
         permissions: executionPolicy.permissions,
         is_read_only: !executionPolicy.tradingEnabled,
         trading_enabled: executionPolicy.tradingEnabled,
-        credential_ref: credentialRef
+        credential_ref: credentialRef,
+        network
       };
     const { data: existingAccount, error: existingError } = await supabase
       .from("exchange_accounts")
       .select("*")
       .eq("user_id", user.id)
       .eq("exchange", exchange)
+      .eq("network", network)
       .eq("credential_ref", credentialRef)
       .maybeSingle();
     if (existingError) throw existingError;

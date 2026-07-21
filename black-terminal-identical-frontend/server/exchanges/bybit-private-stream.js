@@ -4,9 +4,12 @@ const BYBIT_PRIVATE_TOPICS = ["order", "execution", "position", "wallet", "strat
 const DEFAULT_STALE_AFTER_MS = 45_000;
 const DEFAULT_PING_MS = 20_000;
 
-const runtimeState = {
-  enabled: process.env.BYBIT_PRIVATE_STREAM_RUNTIME_ENABLED === "true",
-  status: process.env.BYBIT_PRIVATE_STREAM_RUNTIME_ENABLED === "true" ? "disconnected" : "not-supported",
+const runtimeStates = new Map();
+
+function createRuntimeState(enabled = process.env.BYBIT_PRIVATE_STREAM_RUNTIME_ENABLED === "true") {
+  return {
+  enabled,
+  status: enabled ? "disconnected" : "not-supported",
   authenticated: false,
   reconnectCount: 0,
   subscriptionCount: 0,
@@ -18,10 +21,13 @@ const runtimeState = {
   lastPositionAt: null,
   lastWalletAt: null,
   lastStrategyAt: null,
-  lastError: process.env.BYBIT_PRIVATE_STREAM_RUNTIME_ENABLED === "true"
+  lastError: enabled
     ? null
     : "BYBIT_PRIVATE_STREAM_RUNTIME_ENABLED is not true. Persistent private streams require a long-running worker runtime."
-};
+  };
+}
+
+const fallbackRuntimeState = createRuntimeState();
 
 export function getBybitPrivateWsUrl({ network = "mainnet" } = {}) {
   if (process.env.BYBIT_PRIVATE_WS_URL) return process.env.BYBIT_PRIVATE_WS_URL;
@@ -42,7 +48,26 @@ export function createBybitWsAuthPayload(credentials, { expires = Date.now() + 1
   };
 }
 
-export function getBybitPrivateStreamRuntimeDiagnostics() {
+export function getBybitPrivateStreamRuntimeDiagnostics(connectionId = null) {
+  if (connectionId && runtimeStates.has(connectionId)) return runtimeDiagnostics(runtimeStates.get(connectionId));
+  const states = [...runtimeStates.values()];
+  if (!states.length) return runtimeDiagnostics(fallbackRuntimeState);
+  const diagnostics = states.map(runtimeDiagnostics);
+  const connected = diagnostics.filter((state) => state.status === "connected");
+  return {
+    enabled: true,
+    status: connected.length === diagnostics.length ? "connected" : connected.length ? "degraded" : diagnostics[0].status,
+    authenticated: connected.length === diagnostics.length,
+    connectionCount: diagnostics.length,
+    connectedCount: connected.length,
+    reconnectCount: diagnostics.reduce((sum, state) => sum + state.reconnectCount, 0),
+    stale: diagnostics.some((state) => state.stale),
+    lastMessageAt: Math.max(...diagnostics.map((state) => Number(state.lastMessageAt || 0))) || null,
+    connections: diagnostics
+  };
+}
+
+function runtimeDiagnostics(runtimeState) {
   const now = Date.now();
   const lastMessageAt = runtimeState.lastMessageAt ? Number(runtimeState.lastMessageAt) : null;
   const stale = lastMessageAt ? now - lastMessageAt > DEFAULT_STALE_AFTER_MS : runtimeState.status === "connected";
@@ -131,6 +156,10 @@ export class BybitPrivateStreamClient {
     this.pingIntervalMs = options.pingIntervalMs || DEFAULT_PING_MS;
     this.staleAfterMs = options.staleAfterMs || DEFAULT_STALE_AFTER_MS;
     this.WebSocketCtor = options.WebSocketCtor;
+    this.connectionId = options.connectionId || `anonymous:${Math.random().toString(36).slice(2)}`;
+    this.state = createRuntimeState(true);
+    this.state.connectionId = this.connectionId;
+    runtimeStates.set(this.connectionId, this.state);
     this.ws = null;
     this.reconnectTimer = null;
     this.pingTimer = null;
@@ -149,9 +178,9 @@ export class BybitPrivateStreamClient {
   }
 
   async connect() {
-    runtimeState.enabled = true;
-    runtimeState.status = "connecting";
-    runtimeState.lastError = null;
+    this.state.enabled = true;
+    this.state.status = "connecting";
+    this.state.lastError = null;
     this.closedByUser = false;
     const WebSocketCtor = await this.resolveWebSocketCtor();
     this.ws = new WebSocketCtor(this.url);
@@ -162,13 +191,13 @@ export class BybitPrivateStreamClient {
   disconnect() {
     this.closedByUser = true;
     this.clearTimers();
-    runtimeState.status = "disconnected";
-    runtimeState.authenticated = false;
+    this.state.status = "disconnected";
+    this.state.authenticated = false;
     if (this.ws) this.ws.close?.();
   }
 
   diagnostics() {
-    return getBybitPrivateStreamRuntimeDiagnostics();
+    return runtimeDiagnostics(this.state);
   }
 
   async resolveWebSocketCtor() {
@@ -180,15 +209,15 @@ export class BybitPrivateStreamClient {
 
   bindSocket(ws) {
     const handleOpen = () => {
-      runtimeState.status = "authenticating";
+      this.state.status = "authenticating";
       this.send(createBybitWsAuthPayload(this.credentials));
       this.startTimers();
     };
     const handleMessage = (data) => this.handleRawMessage(typeof data === "string" ? data : data?.toString?.() ?? String(data));
     const handleError = (error) => this.handleError(error);
     const handleClose = () => {
-      runtimeState.authenticated = false;
-      runtimeState.status = this.closedByUser ? "disconnected" : "reconnecting";
+      this.state.authenticated = false;
+      this.state.status = this.closedByUser ? "disconnected" : "reconnecting";
       this.clearTimers();
       if (!this.closedByUser) this.scheduleReconnect();
     };
@@ -208,7 +237,7 @@ export class BybitPrivateStreamClient {
   }
 
   handleRawMessage(raw) {
-    runtimeState.lastMessageAt = Date.now();
+    this.state.lastMessageAt = Date.now();
     let payload;
     try {
       payload = JSON.parse(raw);
@@ -219,8 +248,8 @@ export class BybitPrivateStreamClient {
 
     if (payload.op === "auth") {
       if (payload.success === true || payload.retCode === 0) {
-        runtimeState.authenticated = true;
-        runtimeState.status = "connected";
+        this.state.authenticated = true;
+        this.state.status = "connected";
         this.subscribe(this.topics);
       } else {
         this.handleError(new Error(payload.ret_msg || payload.retMsg || "Bybit private stream authentication failed."));
@@ -230,7 +259,7 @@ export class BybitPrivateStreamClient {
 
     if (payload.op === "subscribe") {
       if (payload.success === true || payload.retCode === 0) {
-        runtimeState.subscriptionAcknowledgedAt = Date.now();
+        this.state.subscriptionAcknowledgedAt = Date.now();
       } else {
         this.handleError(new Error(payload.ret_msg || payload.retMsg || "Bybit private stream subscription failed."));
       }
@@ -239,19 +268,19 @@ export class BybitPrivateStreamClient {
 
     const events = normalizeBybitPrivateStreamMessage(payload);
     for (const event of events) {
-      if (event.type === "order") runtimeState.lastOrderAt = event.time;
-      if (event.type === "execution") runtimeState.lastExecutionAt = event.time;
-      if (event.type === "position") runtimeState.lastPositionAt = event.time;
-      if (event.type === "wallet") runtimeState.lastWalletAt = event.time;
-      if (event.type === "strategy") runtimeState.lastStrategyAt = event.time;
+      if (event.type === "order") this.state.lastOrderAt = event.time;
+      if (event.type === "execution") this.state.lastExecutionAt = event.time;
+      if (event.type === "position") this.state.lastPositionAt = event.time;
+      if (event.type === "wallet") this.state.lastWalletAt = event.time;
+      if (event.type === "strategy") this.state.lastStrategyAt = event.time;
       for (const handler of this.handlers) handler(event);
     }
   }
 
   subscribe(topics) {
     const uniqueTopics = [...new Set(topics)];
-    runtimeState.topics = uniqueTopics;
-    runtimeState.subscriptionCount = uniqueTopics.length;
+    this.state.topics = uniqueTopics;
+    this.state.subscriptionCount = uniqueTopics.length;
     this.send({ op: "subscribe", args: uniqueTopics });
   }
 
@@ -267,8 +296,8 @@ export class BybitPrivateStreamClient {
     this.clearTimers();
     this.pingTimer = setInterval(() => this.send({ op: "ping" }), this.pingIntervalMs);
     this.staleTimer = setInterval(() => {
-      const lastMessageAt = runtimeState.lastMessageAt ? Number(runtimeState.lastMessageAt) : 0;
-      if (runtimeState.status === "connected" && lastMessageAt && Date.now() - lastMessageAt > this.staleAfterMs) {
+      const lastMessageAt = this.state.lastMessageAt ? Number(this.state.lastMessageAt) : 0;
+      if (this.state.status === "connected" && lastMessageAt && Date.now() - lastMessageAt > this.staleAfterMs) {
         this.handleError(new Error("Bybit private stream stale threshold exceeded."));
         this.ws?.close?.();
       }
@@ -285,15 +314,15 @@ export class BybitPrivateStreamClient {
   }
 
   scheduleReconnect() {
-    runtimeState.reconnectCount += 1;
-    const delay = Math.min(this.maxReconnectDelayMs, this.reconnectDelayMs * 2 ** Math.max(0, runtimeState.reconnectCount - 1));
+    this.state.reconnectCount += 1;
+    const delay = Math.min(this.maxReconnectDelayMs, this.reconnectDelayMs * 2 ** Math.max(0, this.state.reconnectCount - 1));
     this.reconnectTimer = setTimeout(() => void this.connect(), delay);
   }
 
   handleError(error) {
     const nextError = error instanceof Error ? error : new Error(String(error));
-    runtimeState.lastError = nextError.message;
-    runtimeState.status = runtimeState.status === "connected" ? "degraded" : runtimeState.status;
+    this.state.lastError = nextError.message;
+    this.state.status = this.state.status === "connected" ? "degraded" : this.state.status;
     for (const handler of this.errorHandlers) handler(nextError);
   }
 }

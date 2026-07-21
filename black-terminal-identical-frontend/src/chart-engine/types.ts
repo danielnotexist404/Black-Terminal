@@ -95,6 +95,7 @@ export type ChartEngineOptions = {
   host: HTMLDivElement;
   candles: Candle[];
   chartType?: ChartDisplayType;
+  snapToLatest?: boolean;
   visibleIndicators?: VisibleIndicators;
   indicatorPeriods?: IndicatorPeriods;
   indicatorVisualSettings?: IndicatorVisualSettings;

@@ -45,6 +45,7 @@ type PixiBlackChartProps = {
   timeframe: Timeframe;
   timeframeLabel: string;
   chartType: ChartDisplayType;
+  snapToLatest: boolean;
   activeDrawingTool: DrawingToolId;
   drawingsVisible: boolean;
   drawingsLocked: boolean;
@@ -260,6 +261,7 @@ export function PixiBlackChart({
   timeframe,
   timeframeLabel,
   chartType,
+  snapToLatest,
   activeDrawingTool,
   drawingsVisible,
   drawingsLocked,
@@ -838,6 +840,7 @@ export function PixiBlackChart({
         ? createMockCandles(historyDepth, timeframeSeconds[timeframe], lastPrice)
         : [],
       chartType,
+      snapToLatest,
       visibleIndicators,
       indicatorPeriods,
       indicatorVisualSettings,
@@ -1110,6 +1113,10 @@ export function PixiBlackChart({
   useEffect(() => {
     engineRef.current?.setChartType(chartType);
   }, [chartType]);
+
+  useEffect(() => {
+    engineRef.current?.setSnapToLatest(snapToLatest);
+  }, [snapToLatest]);
 
   useEffect(() => {
     engineRef.current?.setDrawingTool(activeDrawingTool);

@@ -146,6 +146,7 @@ export class BlackChartEngine {
   };
   private heatmapVisibleUntilIndex?: number;
   private chartType: ChartDisplayType = "candlesticks";
+  private snapToLatest = true;
   private onPriceChange?: (price: number) => void;
   private onCandleChange?: (candle: Candle) => void;
   private onPriceTransformChange?: (transform: ChartPriceTransformSnapshot) => void;
@@ -292,6 +293,7 @@ export class BlackChartEngine {
     this.host = options.host;
     this.candles = new CandleBuffer(options.candles);
     if (options.chartType) this.chartType = options.chartType;
+    if (options.snapToLatest !== undefined) this.snapToLatest = options.snapToLatest;
     if (options.visibleIndicators) this.visibleIndicators = options.visibleIndicators;
     if (options.indicatorPeriods) this.indicatorPeriods = options.indicatorPeriods;
     if (options.indicatorVisualSettings) this.indicatorVisualSettings = options.indicatorVisualSettings;
@@ -371,8 +373,7 @@ export class BlackChartEngine {
       } else if (this.dragging) {
         const dx = e.global.x - this.dragStartX;
         const dy = e.global.y - this.dragStartY;
-        const maxScroll = Math.max(0, (this.getDisplayCandles().length - 1) * this.timeStep());
-        this.view.scrollX = Math.max(0, Math.min(maxScroll, this.dragStartScroll + dx));
+        this.view.scrollX = this.clampHorizontalScroll(this.dragStartScroll + dx);
         this.panPriceAxis(dy);
         this.queueDraw();
       } else {
@@ -722,6 +723,14 @@ export class BlackChartEngine {
     this.draw();
   }
 
+  setSnapToLatest(enabled: boolean) {
+    if (this.snapToLatest === enabled) return;
+    this.snapToLatest = enabled;
+    if (enabled) this.view.scrollX = 0;
+    else this.view.scrollX = this.clampHorizontalScroll(this.view.scrollX);
+    this.queueDraw();
+  }
+
   setDrawingTool(tool: DrawingToolId) {
     this.activeDrawingTool = tool;
     this.host.classList.toggle("drawing-eraser", tool === "eraser");
@@ -950,8 +959,7 @@ export class BlackChartEngine {
   };
 
   private panTimeAxis(delta: number) {
-    const maxScroll = Math.max(0, (this.getDisplayCandles().length - 1) * this.timeStep());
-    this.view.scrollX = Math.max(0, Math.min(maxScroll, this.view.scrollX + delta * 0.9));
+    this.view.scrollX = this.clampHorizontalScroll(this.view.scrollX + delta * 0.9);
   }
 
   private zoomTimeAxis(factor: number, anchorX: number) {
@@ -961,8 +969,8 @@ export class BlackChartEngine {
     const oldStep = this.timeStep();
     const plotWidth = this.view.width - this.view.rightAxisWidth;
     const clampedX = Math.max(0, Math.min(plotWidth, anchorX));
-    const barsFromRight = (plotWidth - this.view.candleWidth / 2 - 12 - clampedX) / oldStep;
-    const anchorIndex = this.view.lastIndex - barsFromRight;
+    const oldRightAnchor = plotWidth - this.view.candleWidth / 2 - 12;
+    const anchorIndex = data.length - 1 - (oldRightAnchor + this.view.scrollX - clampedX) / oldStep;
 
     this.view.candleWidth = Math.max(MIN_CANDLE_WIDTH, Math.min(MAX_CANDLE_WIDTH, this.view.candleWidth * factor));
     this.view.gap = Math.max(
@@ -971,10 +979,17 @@ export class BlackChartEngine {
     );
 
     const newStep = this.timeStep();
-    const nextBarsFromRight = (plotWidth - this.view.candleWidth / 2 - 12 - clampedX) / newStep;
-    const desiredLastIndex = anchorIndex + nextBarsFromRight;
-    const maxScroll = Math.max(0, (data.length - 1) * newStep);
-    this.view.scrollX = Math.max(0, Math.min(maxScroll, (data.length - 1 - desiredLastIndex) * newStep));
+    const newRightAnchor = plotWidth - this.view.candleWidth / 2 - 12;
+    const nextScroll = clampedX - newRightAnchor + (data.length - 1 - anchorIndex) * newStep;
+    this.view.scrollX = this.clampHorizontalScroll(nextScroll);
+  }
+
+  private clampHorizontalScroll(scrollX: number) {
+    const data = this.getDisplayCandles();
+    const maxScroll = Math.max(0, (data.length - 1) * this.timeStep());
+    const plotWidth = Math.max(0, this.view.width - this.view.rightAxisWidth);
+    const minScroll = this.snapToLatest ? 0 : -plotWidth * 0.72;
+    return Math.max(minScroll, Math.min(maxScroll, scrollX));
   }
 
   private queueResize = () => {
@@ -1135,7 +1150,8 @@ export class BlackChartEngine {
     const plotWidth = this.view.width - this.view.rightAxisWidth;
     const step = this.timeStep();
     const visibleCount = Math.ceil(plotWidth / step) + 80;
-    const lastIndex = Math.max(0, data.length - 1 - Math.floor(this.view.scrollX / step));
+    this.view.scrollX = this.clampHorizontalScroll(this.view.scrollX);
+    const lastIndex = Math.max(0, Math.min(data.length - 1, data.length - 1 - Math.floor(this.view.scrollX / step)));
     const firstIndex = Math.max(0, lastIndex - visibleCount);
 
     const visible = data.slice(firstIndex, lastIndex + 1);
@@ -1172,8 +1188,8 @@ export class BlackChartEngine {
   private xForIndex(index: number) {
     const plotWidth = this.view.width - this.view.rightAxisWidth;
     const step = this.timeStep();
-    const barsFromRight = this.view.lastIndex - index;
-    return plotWidth - barsFromRight * step - this.view.candleWidth / 2 - 12;
+    const barsFromLatest = this.getDisplayCandles().length - 1 - index;
+    return plotWidth - barsFromLatest * step - this.view.candleWidth / 2 - 12 + this.view.scrollX;
   }
 
   private getOscillatorPaneHeight() {
@@ -1202,8 +1218,9 @@ export class BlackChartEngine {
 
   private indexForX(x: number) {
     const plotWidth = this.view.width - this.view.rightAxisWidth;
-    const barsFromRight = (plotWidth - this.view.candleWidth / 2 - 12 - x) / this.timeStep();
-    return Math.max(0, Math.min(this.getDisplayCandles().length - 1, Math.round(this.view.lastIndex - barsFromRight)));
+    const dataLength = this.getDisplayCandles().length;
+    const barsFromLatest = (plotWidth - this.view.candleWidth / 2 - 12 + this.view.scrollX - x) / this.timeStep();
+    return Math.max(0, Math.min(dataLength - 1, Math.round(dataLength - 1 - barsFromLatest)));
   }
 
   private drawingPointFromPointer(x: number, y: number): DrawingPoint {

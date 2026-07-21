@@ -19,6 +19,7 @@ import {
   LayoutDashboard,
   LineChart,
   Lock,
+  Magnet,
   Maximize2,
   Minus,
   MousePointer2,
@@ -633,6 +634,7 @@ export default function App() {
   const [drawingsLocked, setDrawingsLocked] = useState(false);
   const [drawingClearSignal, setDrawingClearSignal] = useState(0);
   const [crosshairEnabled, setCrosshairEnabled] = useState(true);
+  const [snapToLatest, setSnapToLatest] = useState(() => localStorage.getItem("bt_chart_snap_to_latest") !== "false");
   const [replayControls, setReplayControls] = useState<ReplayControls>(defaultReplayControls);
   const [replayStatus, setReplayStatus] = useState<ReplayStatus>(defaultReplayStatus);
   const [layout, setLayout] = useState({
@@ -641,6 +643,10 @@ export default function App() {
     rightTopHeight: 430,
     rightStatsWidth: 80
   });
+
+  useEffect(() => {
+    localStorage.setItem("bt_chart_snap_to_latest", String(snapToLatest));
+  }, [snapToLatest]);
 
   // Advanced configurations states
   const [ping, setPing] = useState(23);
@@ -1568,12 +1574,14 @@ export default function App() {
           </button>
           <button
             className={drawingsEnabled ? "icon-btn active" : "icon-btn"}
+            aria-label="Drawing tools"
+            title="Drawing tools"
             onClick={() => {
               setDrawingsEnabled((value) => !value);
               setOpenMenu(null);
             }}
           >
-            <LineChart size={17} />
+            <Pencil size={17} />
           </button>
           <div className="menu-wrap chart-type-wrap">
             <button
@@ -1602,6 +1610,15 @@ export default function App() {
               </div>
             )}
           </div>
+          <button
+            className={snapToLatest ? "icon-btn active" : "icon-btn"}
+            aria-pressed={snapToLatest}
+            aria-label={snapToLatest ? "Disable chart snapping" : "Snap chart to latest candle"}
+            title={snapToLatest ? "Latest candle snapped to right edge" : "Free chart positioning"}
+            onClick={() => setSnapToLatest((value) => !value)}
+          >
+            <Magnet size={17} />
+          </button>
         </div>
 
         <div className="menu-wrap">
@@ -1970,6 +1987,7 @@ export default function App() {
             timeframe={timeframe}
             timeframeLabel={selectedTimeframe.label}
             chartType={chartType}
+            snapToLatest={snapToLatest}
             activeDrawingTool={drawingsEnabled && !drawingsLocked ? activeDrawingTool : "cursor"}
             drawingsVisible={drawingsVisible}
             drawingsLocked={drawingsLocked}

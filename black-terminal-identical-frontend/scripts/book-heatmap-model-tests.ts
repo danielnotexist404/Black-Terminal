@@ -111,6 +111,7 @@ assert.ok(liveCells.length >= 2, "valid live L2 bid/ask buckets should render");
 assert.ok(liveCells.some((cell) => cell.side === "bid"));
 assert.ok(liveCells.some((cell) => cell.side === "ask"));
 assert.ok(liveCells.every((cell) => cell.classification === "LIVE L2"));
+assert.ok(liveCells.every((cell) => cell.active), "the newest full-book observation must be marked as the current live profile");
 assert.ok(liveCells.every((cell) => cell.xStartIndex >= 118), "live data must not be projected backward");
 assert.ok(liveCells.every((cell) => cell.notional > 0 && cell.strength > 0 && cell.strength <= 1));
 
@@ -137,6 +138,8 @@ assert.ok(analyticCells.some((cell) => cell.side === "bid" && cell.correlatedTra
 assert.ok(analyticCells.some((cell) => cell.estimatedConsumedNotional > 0));
 assert.ok(analyticCells.some((cell) => cell.estimatedCancelledNotional > 0));
 assert.ok(analyticCells.every((cell) => cell.confidence >= 0 && cell.confidence <= 1));
+assert.ok(analyticCells.some((cell) => !cell.active), "superseded observations must remain truthful historical columns");
+assert.ok(analyticCells.some((cell) => cell.active), "only the latest observation remains the current profile");
 
 model.replaceHistoricalCells([
   {

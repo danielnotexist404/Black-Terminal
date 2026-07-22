@@ -86,10 +86,11 @@ History requests are source-checked, abortable and throttled by venue/symbol/hor
 - Live frames default to a 1,200-frame hard bound and are configurable only inside a 60–7,200 range. Correlated trades are capped at 5,000.
 - LOD limits observation columns for wide views while retaining the original time positions; skipped columns are not stretched.
 - Historical cells are rendered from their real start/end buckets. Live cells begin only at their observation time.
+- The newest full-book observation from each fresh venue is also rendered as a right-edge current-depth profile. This prevents a few minutes of live collection from disappearing into a sub-pixel column on higher timeframes, while the time-price matrix remains strictly limited to observed history.
 - Robust percentile, adaptive, logarithmic and linear intensity modes prevent one outlier from flattening the entire display.
 - The blood-red palette progresses from deep red through crimson/orange to silver-white. Glow is reserved for exceptional concentrations.
 
-The main overlay and fullscreen workspace are rendered by Pixi rather than per-cell React elements. Opacity, visual smoothing, visibility threshold, palette, history horizon, visible price range, source mode and venue selection are user-controlled.
+The main overlay and fullscreen workspace are rendered by Pixi rather than per-cell React elements. Opacity, visual smoothing, visibility threshold, palette, history horizon, visible price range, source mode and venue selection are user-controlled. Current-profile bands are derived only from the active authentic L2 frame and are not copied backward across the chart.
 
 ## Camera and indicator coexistence
 

@@ -130,6 +130,12 @@ try {
   await sleep(300);
   await shot("11-zoomed-out-alignment.png");
 
+  await installCandles(3600);
+  await cdp.eval(`window.__BLACK_TERMINAL_BOOK_HEATMAP_VISUAL__.setHistory([])`);
+  await injectBook("wall", 300, "bybit");
+  await sleep(450);
+  await shot("12-current-live-profile-1h-no-history.png");
+
   const errors = await cdp.eval(`performance.getEntriesByType("resource").filter((entry)=>entry.name.includes("perpdexwars")).length`);
   if (errors !== 0) throw new Error("Forbidden perpdexwars dependency was requested.");
   const contract = await cdp.eval(`({workspace:Boolean(document.querySelector(".book-heatmap-workspace")),mode:document.querySelector(".book-heatmap-workspace-mode")?.value,diagnostics:document.querySelector(".book-heatmap-diagnostics")?.textContent||"",canvas:Boolean(document.querySelector(".pixi-chart-host canvas")),volumeVisible:Boolean([...document.querySelectorAll(".indicator-row")].find((node)=>node.textContent?.includes("Volume")&&node.classList.contains("active")))})`);
@@ -152,8 +158,8 @@ try {
   remove(profile);
 }
 
-async function installCandles() {
-  await cdp.eval(`(() => { const now=Math.floor(Date.now()/1000); const candles=Array.from({length:240},(_,index)=>{const center=103000+Math.sin(index/13)*1200+index*4;return {time:now-(239-index)*60,open:center-90,high:center+220,low:center-240,close:center+70,volume:120+(index%19)*22};}); window.__BLACK_TERMINAL_BOOK_HEATMAP_VISUAL__.setCandles(candles); })()`);
+async function installCandles(intervalSeconds = 60) {
+  await cdp.eval(`(() => { const now=Math.floor(Date.now()/1000); const interval=${Number(intervalSeconds)}; const candles=Array.from({length:240},(_,index)=>{const center=103000+Math.sin(index/13)*1200+index*4;return {time:now-(239-index)*interval,open:center-90,high:center+220,low:center-240,close:center+70,volume:120+(index%19)*22};}); window.__BLACK_TERMINAL_BOOK_HEATMAP_VISUAL__.setCandles(candles); })()`);
 }
 
 async function installHistory(kind) {

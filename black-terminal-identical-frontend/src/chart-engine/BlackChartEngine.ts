@@ -1918,6 +1918,47 @@ export class BlackChartEngine {
       }
     }
 
+    // A newly opened 1H/4H chart can compress several minutes of authentic L2
+    // observations into less than one screen pixel. Keep the historical cells on
+    // their truthful time axis, and separately render only each venue's newest
+    // full-book observation as a right-edge depth profile. This makes live depth
+    // immediately readable without projecting it backward into unobserved time.
+    const currentProfileCells = cells
+      .filter((cell) => cell.active && cell.strength >= Math.max(0.08, threshold))
+      .sort((a, b) => a.strength - b.strength)
+      .slice(-180);
+    for (const cell of currentProfileCells) {
+      const yTop = this.yForPrice(cell.priceHigh);
+      const yBottom = this.yForPrice(cell.priceLow);
+      const y = Math.min(yTop, yBottom);
+      const h = Math.max(1.15, Math.min(7.5, Math.abs(yBottom - yTop)));
+      if (y + h < this.view.topPadding || y > plotHeight) continue;
+
+      const width = plotWidth * (0.045 + cell.strength * 0.245);
+      const x = Math.max(0, plotWidth - width);
+      const color = this.orderBookHeatmapColor(cell.strength, cell.side, settings.palette);
+      const alpha = (0.05 + cell.strength * 0.4) * Math.max(0.35, visual.alpha) * opacity;
+      if (smoothing > 0 && cell.strength > 0.25) {
+        const pad = 0.5 + smoothing * 1.25;
+        g.rect(x - pad, y - pad, width + pad, h + pad * 2)
+          .fill({ color, alpha: Math.min(0.12, alpha * smoothing * 0.24) });
+      }
+      g.rect(x, y, width, h).fill({ color, alpha: Math.min(0.68, alpha) });
+      if (cell.strength > 0.72) {
+        g.rect(x, y + h * 0.35, width, Math.max(0.7, h * 0.3))
+          .fill({ color: cell.strength >= 0.94 ? 0xf4f5f7 : theme.orangeBright, alpha: Math.min(0.56, alpha * 0.82) });
+      }
+
+      if (
+        this.pointer.active &&
+        this.pointer.x >= x && this.pointer.x <= plotWidth &&
+        this.pointer.y >= y - 3 && this.pointer.y <= y + h + 3 &&
+        (!hovered || cell.strength > hovered.cell.strength)
+      ) {
+        hovered = { cell, x, y };
+      }
+    }
+
     if (hovered) {
       const { cell } = hovered;
       const venues = Object.keys(cell.venues).map((venue) => venue.toUpperCase()).join("+") || "VENUE";
@@ -1925,7 +1966,7 @@ export class BlackChartEngine {
         ? `${(cell.persistenceMs / 60_000).toFixed(1)}m`
         : `${Math.max(0, cell.persistenceMs / 1000).toFixed(1)}s`;
       const lines = [
-        `${cell.classification} · ${venues}`,
+        `${cell.classification} · ${venues}${cell.active ? " · CURRENT PROFILE" : ""}`,
         `${cell.side.toUpperCase()} ${cell.price.toLocaleString(undefined, { maximumFractionDigits: 4 })}`,
         `${this.compactVolume(cell.notional)} NOTIONAL · ${persistence} · ${cell.observations} OBS`,
         `STACK +${this.compactVolume(cell.stackingNotional)} · PULL -${this.compactVolume(cell.pullingNotional)} · IMB ${(cell.imbalance * 100).toFixed(0)}%${cell.spoofRisk > 0 ? ` · SPOOF? ${(cell.spoofRisk * 100).toFixed(0)}%` : ""}`,

@@ -60,6 +60,8 @@ export type OrderBookHeatmapCell = {
   absorptionScore: number;
   icebergProbability: number;
   confidence: number;
+  /** True only for the newest still-live full-book observation from its venue. */
+  active: boolean;
   analyticsBasis: "OBSERVED BOOK DELTAS" | "HISTORICAL DEPTH TILES";
   classification: BookHeatmapClassification;
   venues: Record<string, BookHeatmapVenueContribution>;
@@ -516,6 +518,7 @@ export class OrderBookHeatmapModel {
       current.spoofRisk = Math.max(current.spoofRisk, cell.spoofRisk);
       current.absorptionScore = Math.max(current.absorptionScore, cell.absorptionScore);
       current.icebergProbability = Math.max(current.icebergProbability, cell.icebergProbability);
+      current.active = current.active || cell.active;
       current.confidence = Math.min(1, Math.max(current.confidence, cell.confidence) + Math.min(0.18, Object.keys(cell.venues).length * 0.06));
       current.score += cell.score;
       for (const [venue, contribution] of Object.entries(cell.venues)) {
@@ -611,7 +614,7 @@ export class OrderBookHeatmapModel {
             venues: { [frame.venue]: { bidNotional: side === "bid" ? notional : 0, askNotional: side === "ask" ? notional : 0 } },
             stackingNotional, pullingNotional, imbalance, replenishmentScore, spoofRisk,
             correlatedTradeNotional, estimatedConsumedNotional, estimatedCancelledNotional,
-            absorptionScore, icebergProbability
+            absorptionScore, icebergProbability, active: !next
           }));
         };
         addSide("bid", bidNotional);
@@ -642,7 +645,8 @@ export class OrderBookHeatmapModel {
         stackingNotional: 0, pullingNotional: 0,
         imbalance: (cell.bidSize - cell.askSize) / Math.max(1, cell.bidSize + cell.askSize),
         replenishmentScore: 0, spoofRisk: 0, correlatedTradeNotional: 0,
-        estimatedConsumedNotional: 0, estimatedCancelledNotional: 0, absorptionScore: 0, icebergProbability: 0
+        estimatedConsumedNotional: 0, estimatedCancelledNotional: 0, absorptionScore: 0, icebergProbability: 0,
+        active: false
       }));
       if (cell.askSize > 0) result.push(this.makeRawCell({
         xStartIndex, xEndIndex, price: cell.price, bucketSize: cell.bucketSize, side: "ask",
@@ -652,7 +656,8 @@ export class OrderBookHeatmapModel {
         stackingNotional: 0, pullingNotional: 0,
         imbalance: (cell.bidSize - cell.askSize) / Math.max(1, cell.bidSize + cell.askSize),
         replenishmentScore: 0, spoofRisk: 0, correlatedTradeNotional: 0,
-        estimatedConsumedNotional: 0, estimatedCancelledNotional: 0, absorptionScore: 0, icebergProbability: 0
+        estimatedConsumedNotional: 0, estimatedCancelledNotional: 0, absorptionScore: 0, icebergProbability: 0,
+        active: false
       }));
     }
     return result;
@@ -665,6 +670,7 @@ export class OrderBookHeatmapModel {
     stackingNotional: number; pullingNotional: number; imbalance: number; replenishmentScore: number; spoofRisk: number;
     correlatedTradeNotional: number; estimatedConsumedNotional: number; estimatedCancelledNotional: number;
     absorptionScore: number; icebergProbability: number;
+    active: boolean;
   }): RawCell {
     const persistenceMs = Math.max(0, input.lastSeenAt - input.firstSeenAt);
     const persistenceWeight = 1 + Math.min(0.35, Math.log1p(input.observations) * 0.06 + Math.log1p(persistenceMs / 1000) * 0.025);
@@ -692,6 +698,7 @@ export class OrderBookHeatmapModel {
       absorptionScore: input.absorptionScore,
       icebergProbability: input.icebergProbability,
       confidence: Math.min(1, 0.42 + Math.log1p(input.observations) * 0.12 + Math.log1p(persistenceMs / 1000) * 0.035),
+      active: input.active,
       analyticsBasis: input.classification === "LIVE L2" ? "OBSERVED BOOK DELTAS" : "HISTORICAL DEPTH TILES",
       classification: input.classification,
       venues: input.venues,

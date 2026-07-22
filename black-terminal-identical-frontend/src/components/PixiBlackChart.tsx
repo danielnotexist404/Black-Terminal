@@ -1201,7 +1201,7 @@ export function PixiBlackChart({
       const resolutions = [...new Set(loaded.map((result) => result.resolution))].join("+");
       setBookHeatmapHistoryStatus(cells.length > 0
         ? `${cells.length.toLocaleString()} authentic ${resolutions} cells · ${loaded.map((result) => result.venue.toUpperCase()).join("+")}`
-        : "No historical coverage — collecting live depth");
+        : "No historical coverage · current L2 profile shown at right · collecting depth");
     });
     return () => controller.abort();
   }, [

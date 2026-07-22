@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-07-22T01:58:06.057Z",
+  "capturedAt": "2026-07-22T09:09:15.083Z",
   "captures": [
     "01-main-normal-market.png",
     "02-thin-book.png",
@@ -11,13 +11,14 @@
     "08-multi-venue-disagreement.png",
     "09-disconnected-resynchronizing-venue.png",
     "10-zoomed-in-alignment.png",
-    "11-zoomed-out-alignment.png"
+    "11-zoomed-out-alignment.png",
+    "12-current-live-profile-1h-no-history.png"
   ],
   "viewport": "1920x1080",
   "contract": {
     "workspace": true,
     "mode": "live-book",
-    "diagnostics": "BOOK · AUTHENTIC L2 ONLY1 authentic L2 venue livePartial history fixture — unavailable periods remain emptyBYBIT+BINANCE · live 5 · history 480 · 979msBYBIT live 630ms · BINANCE resynchronizing 979msaccepted 5 · rejected 1 · stale 0 · backpressure 0",
+    "diagnostics": "BOOK · AUTHENTIC L2 ONLY1 authentic L2 venue livePartial history fixture — unavailable periods remain emptyBYBIT+BINANCE · live 6 · history 0 · 632msBYBIT live 632ms · BINANCE resynchronizing 984msaccepted 6 · rejected 1 · stale 0 · backpressure 0",
     "canvas": true,
     "volumeVisible": false
   },

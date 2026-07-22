@@ -1,4 +1,4 @@
-import type { AdaptiveSwingStrategySettings, IndicatorAdvancedSettings, VolumeProfileSettings } from "../types";
+import type { AdaptiveSwingStrategySettings, BookHeatmapSettings, IndicatorAdvancedSettings, VolumeProfileSettings } from "../types";
 
 export const defaultVolumeProfileSettings: VolumeProfileSettings = {
   showVolumeProfile: true,
@@ -124,5 +124,23 @@ export const defaultAdaptiveSwingStrategySettings: AdaptiveSwingStrategySettings
 
 export const defaultIndicatorAdvancedSettings: IndicatorAdvancedSettings = {
   volumeProfile: defaultVolumeProfileSettings,
-  adaptiveSwingStrategy: defaultAdaptiveSwingStrategySettings
+  adaptiveSwingStrategy: defaultAdaptiveSwingStrategySettings,
+  bookHeatmap: {
+    dataMode: "live-book",
+    workspaceMode: "live-book",
+    selectedVenues: ["bybit", "binance"],
+    historyHorizon: "24h",
+    visibleRangePercent: 8,
+    scaleMode: "adaptive",
+    percentile: 98.5,
+    minimumNotional: 0,
+    opacity: 82,
+    smoothing: 18,
+    thresholdPercent: 2,
+    palette: "blood-silver",
+    showDiagnostics: true,
+    showHistoricalDepth: true
+  }
 };
+
+export const defaultBookHeatmapSettings: BookHeatmapSettings = defaultIndicatorAdvancedSettings.bookHeatmap;

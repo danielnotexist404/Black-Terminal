@@ -1,0 +1,18 @@
+{
+  "provenance": {
+    "venue": "okx",
+    "channel": "books:BTC-USDT-SWAP",
+    "classification": "recorded-public-l2-normalized-contract-quantity",
+    "capturedAt": "2025-05-18T14:20:31.318Z",
+    "limitation": "Contract value was not present in the normalized snapshot. Production heatmap must reject it."
+  },
+  "snapshot": {
+    "exchange": "okx",
+    "symbol": "BTC-USDT-SWAP",
+    "time": 1747578031,
+    "sequence": 21472893381,
+    "subscribedDepth": 400,
+    "bids": [[103241.4, 482], [103241.3, 107]],
+    "asks": [[103241.5, 392], [103241.6, 216]]
+  }
+}

@@ -8,6 +8,10 @@ import {
 import { CandleBuffer } from "./data/CandleBuffer";
 import { LiquidationHeatmapModel } from "./heatmap/LiquidationHeatmapModel";
 import { OrderBookHeatmapModel } from "./heatmap/OrderBookHeatmapModel";
+import type { BookHeatmapDiagnostics, HistoricalBookHeatmapCell } from "./heatmap/OrderBookHeatmapModel";
+import { BookHeatmapWorkerClient } from "./heatmap/bookHeatmapWorkerClient";
+import { ConfirmedLiquidationModel } from "./heatmap/ConfirmedLiquidationModel";
+import type { ConfirmedLiquidationDiagnostics, ConfirmedLiquidationEvent } from "./heatmap/ConfirmedLiquidationModel";
 import { VolatilityHeatmapModel } from "./heatmap/VolatilityHeatmapModel";
 import { VolumeProfileModel, VolumeProfileResult, VolumeProfileRow } from "./profile/VolumeProfileModel";
 import { defaultIndicatorAdvancedSettings } from "./profile/volumeProfileDefaults";
@@ -132,6 +136,15 @@ export class BlackChartEngine {
   private displayedCandles: Candle[] = [];
   private heatmapModel = new LiquidationHeatmapModel();
   private orderBookHeatmapModel = new OrderBookHeatmapModel();
+  private orderBookHeatmapWorker = new BookHeatmapWorkerClient(
+    (snapshot) => {
+      const result = this.orderBookHeatmapModel.ingestCompacted(snapshot);
+      if (result.accepted) this.scheduleOrderBookHeatmapDraw();
+    },
+    (count) => this.orderBookHeatmapModel.recordBackpressureDrop(count)
+  );
+  private confirmedLiquidationModel = new ConfirmedLiquidationModel();
+  private bookHeatmapWorkspaceMode: "live-book" | "estimated-liquidations" | "confirmed-liquidations" | null = null;
   private volatilityHeatmapModel = new VolatilityHeatmapModel();
   private volumeProfileModel = new VolumeProfileModel();
   private lastVolumeProfileResult?: VolumeProfileResult;
@@ -175,7 +188,7 @@ export class BlackChartEngine {
     openInterestOscillator: false,
     zScoreOscillator: false,
     waveTrendOscillator: false,
-    volume: true
+    volume: false
   };
   private indicatorPeriods: IndicatorPeriods = {
     volatilityHeatmap: 34,
@@ -548,6 +561,11 @@ export class BlackChartEngine {
     this.onPriceChange?.(price);
   }
 
+  ingestBookHeatmapTrade(price: number, quantity: number, time: number, side: "buy" | "sell" | "unknown" = "unknown") {
+    if (!this.visibleIndicators.orderBookHeatmap) return;
+    this.orderBookHeatmapModel.ingestTrade(price, quantity, time, side);
+  }
+
   getChartPointFromClient(clientX: number, clientY: number): ChartPoint | null {
     const bounds = this.host.getBoundingClientRect();
     const localX = clientX - bounds.left;
@@ -667,7 +685,10 @@ export class BlackChartEngine {
   }
 
   ingestOrderBookSnapshot(snapshot: OrderBookSnapshot) {
-    this.orderBookHeatmapModel.ingest(snapshot);
+    this.orderBookHeatmapWorker.submit(snapshot);
+  }
+
+  private scheduleOrderBookHeatmapDraw() {
     if (!this.visibleIndicators.orderBookHeatmap) return;
 
     const now = performance.now();
@@ -696,6 +717,15 @@ export class BlackChartEngine {
     this.indicatorPeriods = indicatorPeriods;
     this.indicatorVisualSettings = indicatorVisualSettings;
     this.indicatorAdvancedSettings = indicatorAdvancedSettings;
+    const bookSettings = indicatorAdvancedSettings.bookHeatmap;
+    if (bookSettings) {
+      this.orderBookHeatmapModel.setSettings({
+        scaleMode: bookSettings.scaleMode,
+        percentile: bookSettings.percentile / 100,
+        minimumNotional: bookSettings.minimumNotional,
+        consolidated: bookSettings.dataMode === "consolidated-book"
+      });
+    }
     if (!this.visibleIndicators.orderBookHeatmap && this.orderBookDrawTimer) {
       window.clearTimeout(this.orderBookDrawTimer);
       this.orderBookDrawTimer = undefined;
@@ -708,6 +738,35 @@ export class BlackChartEngine {
     this.priceLineColor = color;
     this.priceLineIntensity = intensity;
     this.draw();
+  }
+
+  setOrderBookHeatmapHistory(cells: HistoricalBookHeatmapCell[]) {
+    this.orderBookHeatmapModel.replaceHistoricalCells(cells);
+    this.queueDraw();
+  }
+
+  clearOrderBookHeatmapHistory() {
+    this.orderBookHeatmapModel.clearHistoricalCells();
+    this.queueDraw();
+  }
+
+  getOrderBookHeatmapDiagnostics(): BookHeatmapDiagnostics {
+    return this.orderBookHeatmapModel.diagnostics();
+  }
+
+  setBookHeatmapWorkspaceMode(mode: "live-book" | "estimated-liquidations" | "confirmed-liquidations" | null) {
+    this.bookHeatmapWorkspaceMode = mode;
+    this.setHeatmapSource(this.candles.all(), this.heatmapVisibleUntilIndex);
+    this.queueDraw();
+  }
+
+  ingestConfirmedLiquidation(event: ConfirmedLiquidationEvent) {
+    if (!this.confirmedLiquidationModel.ingest(event)) return;
+    if (this.bookHeatmapWorkspaceMode === "confirmed-liquidations") this.queueDraw();
+  }
+
+  getConfirmedLiquidationDiagnostics(): ConfirmedLiquidationDiagnostics {
+    return this.confirmedLiquidationModel.diagnostics();
   }
 
   setAlertDefinitions(alertDefinitions: IndicatorAlertDefinition[]) {
@@ -728,6 +787,12 @@ export class BlackChartEngine {
     this.snapToLatest = enabled;
     if (enabled) this.view.scrollX = 0;
     else this.view.scrollX = this.clampHorizontalScroll(this.view.scrollX);
+    this.queueDraw();
+  }
+
+  resetViewport() {
+    this.view.scrollX = 0;
+    this.manualPriceRange = undefined;
     this.queueDraw();
   }
 
@@ -808,11 +873,12 @@ export class BlackChartEngine {
 
   private setHeatmapSource(candles: Candle[], visibleUntilIndex = candles.length - 1) {
     this.heatmapVisibleUntilIndex = Math.max(0, Math.min(Math.max(0, candles.length - 1), visibleUntilIndex));
-    if (this.visibleIndicators.liquidationHeatmap) {
+    if (this.visibleIndicators.liquidationHeatmap || this.bookHeatmapWorkspaceMode === "estimated-liquidations") {
       this.heatmapModel.setSource(candles);
     }
     if (this.visibleIndicators.orderBookHeatmap) {
       this.orderBookHeatmapModel.setCandles(candles);
+      this.confirmedLiquidationModel.setCandles(candles);
     }
     if (this.visibleIndicators.volatilityHeatmap) {
       this.volatilityHeatmapModel.setSource(candles, this.indicatorPeriods.volatilityHeatmap);
@@ -829,6 +895,7 @@ export class BlackChartEngine {
     if (this.resizeRaf) window.cancelAnimationFrame(this.resizeRaf);
     if (this.drawRaf) window.cancelAnimationFrame(this.drawRaf);
     if (this.orderBookDrawTimer) window.clearTimeout(this.orderBookDrawTimer);
+    this.orderBookHeatmapWorker.dispose();
     this.host.classList.remove("price-scale-dragging", "price-scale-hover", "drawing-eraser");
     this.setReplaySelectionMode(false);
     this.resizeObserver?.disconnect();
@@ -1163,6 +1230,17 @@ export class BlackChartEngine {
     }
 
     const last = data[data.length - 1];
+    const bookRangePercent = this.indicatorAdvancedSettings.bookHeatmap?.visibleRangePercent;
+    if (
+      this.visibleIndicators.orderBookHeatmap &&
+      last &&
+      Number.isFinite(bookRangePercent) &&
+      Number(bookRangePercent) > 0
+    ) {
+      const bookRange = last.close * Math.max(0.005, Math.min(0.4, Number(bookRangePercent) / 100));
+      min = Math.min(min, last.close - bookRange);
+      max = Math.max(max, last.close + bookRange);
+    }
     if (data.length <= 300 && last && last.close > 60000 && last.close < 75000) {
       min = Math.min(min, 64600);
       max = Math.max(max, 67400);
@@ -1479,7 +1557,8 @@ export class BlackChartEngine {
     if (
       !this.visibleIndicators.orderBookHeatmap &&
       !this.visibleIndicators.liquidationHeatmap &&
-      !this.visibleIndicators.volatilityHeatmap
+      !this.visibleIndicators.volatilityHeatmap &&
+      !this.bookHeatmapWorkspaceMode
     ) {
       return;
     }
@@ -1487,9 +1566,14 @@ export class BlackChartEngine {
     const plotWidth = this.view.width - this.view.rightAxisWidth;
     const plotHeight = this.view.height - this.view.bottomAxisHeight;
     this.drawVolatilityHeatmap(g, plotWidth, plotHeight);
-    this.drawOrderBookHeatmap(g, plotWidth, plotHeight);
+    if (!this.bookHeatmapWorkspaceMode || this.bookHeatmapWorkspaceMode === "live-book") {
+      this.drawOrderBookHeatmap(g, plotWidth, plotHeight);
+    }
+    if (this.bookHeatmapWorkspaceMode === "confirmed-liquidations") {
+      this.drawConfirmedLiquidations(g, plotWidth, plotHeight);
+    }
 
-    if (!this.visibleIndicators.liquidationHeatmap) return;
+    if (!this.visibleIndicators.liquidationHeatmap && this.bookHeatmapWorkspaceMode !== "estimated-liquidations") return;
 
     const visual = this.visualFor("liquidationHeatmap", "red");
     const untilIndex = this.heatmapVisibleUntilIndex ?? this.candles.all().length - 1;
@@ -1502,6 +1586,7 @@ export class BlackChartEngine {
     );
     const step = this.timeStep();
     const profile = new Map<string, { price: number; strength: number }>();
+    let hoveredEstimated: (typeof cells)[number] | undefined;
 
     for (const cell of cells) {
       const startIndex = Math.max(this.view.firstIndex, cell.startIndex);
@@ -1520,8 +1605,15 @@ export class BlackChartEngine {
 
       const color = this.liquidationColor(cell.strength);
       const alpha = (0.032 + cell.strength * 0.22) * Math.max(0.35, visual.alpha);
-      g.rect(Math.max(0, x1), y, Math.min(plotWidth, x2) - Math.max(0, x1), h)
+      const clippedX = Math.max(0, x1);
+      const clippedWidth = Math.min(plotWidth, x2) - clippedX;
+      g.rect(clippedX, y, clippedWidth, h)
         .fill({ color, alpha });
+      if (
+        this.pointer.active && this.pointer.x >= clippedX && this.pointer.x <= clippedX + clippedWidth &&
+        this.pointer.y >= y - 3 && this.pointer.y <= y + h + 3 &&
+        (!hoveredEstimated || cell.strength > hoveredEstimated.strength)
+      ) hoveredEstimated = cell;
 
       if (cell.strength >= 0.55) {
         const coreHeight = Math.max(1, h * 0.42);
@@ -1563,6 +1655,18 @@ export class BlackChartEngine {
         g.rect(plotWidth - bw - 18, y - h / 2 + k * 2.2, bw, 1.05)
           .fill({ color: lvl.color, alpha: (lvl.color === theme.orangeBright ? 0.24 : 0.15) * Math.max(0.35, visual.alpha) });
       }
+    }
+    if (hoveredEstimated) {
+      const tooltipX = Math.max(8, Math.min(plotWidth - 286, this.pointer.x + 14));
+      const tooltipY = Math.max(this.view.topPadding + 8, Math.min(plotHeight - 82, this.pointer.y - 26));
+      g.roundRect(tooltipX, tooltipY, 278, 76, 3)
+        .fill({ color: 0x030405, alpha: 0.95 })
+        .stroke({ width: 1, color: this.liquidationColor(hoveredEstimated.strength), alpha: 0.75 });
+      this.addHeatmapText("ESTIMATED LIQUIDATION · MODEL-DERIVED", tooltipX + 8, tooltipY + 6, 0xff6a00, 8);
+      this.addHeatmapText(`${hoveredEstimated.side.toUpperCase()} · ${hoveredEstimated.price.toLocaleString(undefined, { maximumFractionDigits: 4 })}`, tooltipX + 8, tooltipY + 20, 0xf1f2f4, 9);
+      this.addHeatmapText(`CONF ${(hoveredEstimated.confidence * 100).toFixed(0)}% · NOT EXCHANGE-REPORTED`, tooltipX + 8, tooltipY + 35, 0xa7abb2, 8);
+      this.addHeatmapText(hoveredEstimated.modelInputs.join(" + "), tooltipX + 8, tooltipY + 50, 0x858a93, 7);
+      this.addHeatmapText("LEVERAGE TIERS: 5x / 10x / 25x / 50x / 100x", tooltipX + 8, tooltipY + 63, 0x6f747c, 7);
     }
   }
 
@@ -1715,10 +1819,52 @@ export class BlackChartEngine {
     }
   }
 
+  private drawConfirmedLiquidations(g: Graphics, plotWidth: number, plotHeight: number) {
+    const cells = this.confirmedLiquidationModel.cells(
+      this.view.firstIndex,
+      this.view.lastIndex,
+      this.view.priceMin,
+      this.view.priceMax
+    );
+    let hovered: (typeof cells)[number] | undefined;
+    for (const cell of cells) {
+      const x = this.xForIndex(cell.xIndex);
+      const y = this.yForPrice(cell.price);
+      if (x < 0 || x > plotWidth || y < this.view.topPadding || y > plotHeight) continue;
+      const radius = 2.5 + cell.strength * 7.5;
+      const color = cell.liquidatedSide === "long" ? 0xff303d : cell.liquidatedSide === "short" ? 0xff8a00 : 0xcdd1d6;
+      g.circle(x, y, radius + 3).fill({ color, alpha: 0.08 + cell.strength * 0.12 });
+      g.circle(x, y, radius).fill({ color, alpha: 0.22 + cell.strength * 0.54 });
+      g.moveTo(x - radius * 0.7, y).lineTo(x + radius * 0.7, y)
+        .stroke({ width: 1, color: cell.strength > 0.9 ? 0xffffff : color, alpha: 0.86 });
+      if (this.pointer.active && Math.hypot(this.pointer.x - x, this.pointer.y - y) <= radius + 5) {
+        if (!hovered || cell.notional > hovered.notional) hovered = cell;
+      }
+    }
+    if (!hovered) return;
+    const tooltipX = Math.max(8, Math.min(plotWidth - 252, this.pointer.x + 14));
+    const tooltipY = Math.max(this.view.topPadding + 8, Math.min(plotHeight - 68, this.pointer.y - 24));
+    const color = hovered.liquidatedSide === "long" ? 0xff303d : hovered.liquidatedSide === "short" ? 0xff8a00 : 0xcdd1d6;
+    g.roundRect(tooltipX, tooltipY, 244, 62, 3)
+      .fill({ color: 0x030405, alpha: 0.95 })
+      .stroke({ width: 1, color, alpha: 0.75 });
+    this.addHeatmapText(`CONFIRMED · ${hovered.venue.toUpperCase()}`, tooltipX + 8, tooltipY + 6, color, 8);
+    this.addHeatmapText(`${hovered.liquidatedSide.toUpperCase()} LIQ · ${hovered.priceKind.toUpperCase()} ${hovered.price.toLocaleString(undefined, { maximumFractionDigits: 4 })}`, tooltipX + 8, tooltipY + 20, 0xf1f2f4, 9);
+    this.addHeatmapText(`${this.compactVolume(hovered.notional)} NOTIONAL · EXCHANGE EVENT`, tooltipX + 8, tooltipY + 35, 0xa7abb2, 8);
+    this.addHeatmapText(new Date(hovered.time).toISOString(), tooltipX + 8, tooltipY + 49, 0x6f747c, 7);
+  }
+
   private drawOrderBookHeatmap(g: Graphics, plotWidth: number, plotHeight: number) {
     if (!this.visibleIndicators.orderBookHeatmap) return;
 
     const visual = this.visualFor("orderBookHeatmap", "orange");
+    const settings = {
+      ...defaultIndicatorAdvancedSettings.bookHeatmap,
+      ...this.indicatorAdvancedSettings.bookHeatmap
+    };
+    const threshold = Math.max(0, Math.min(0.95, settings.thresholdPercent / 100));
+    const opacity = Math.max(0.1, Math.min(1, settings.opacity / 100));
+    const smoothing = Math.max(0, Math.min(1, settings.smoothing / 100));
     const cells = this.orderBookHeatmapModel.cells(
       this.view.firstIndex,
       this.view.lastIndex,
@@ -1727,38 +1873,98 @@ export class BlackChartEngine {
     );
     if (cells.length === 0) return;
 
+    let hovered: { cell: (typeof cells)[number]; x: number; y: number } | undefined;
+
     for (const cell of cells) {
-      if (cell.strength < 0.018) continue;
+      if (cell.strength < Math.max(0.018, threshold)) continue;
 
       const x1 = this.xForIndex(cell.xStartIndex);
       const x2 = this.xForIndex(cell.xEndIndex);
-      const x = Math.max(0, Math.min(x1, x2));
-      const w = Math.min(plotWidth, Math.max(x1, x2)) - x;
-      if (w <= 0.4 || x > plotWidth) continue;
+      const rawLeft = Math.min(x1, x2);
+      const rawRight = Math.max(x1, x2);
+      const columnWidth = Math.max(1.15, rawRight - rawLeft);
+      const centerX = (rawLeft + rawRight) * 0.5;
+      const x = Math.max(0, centerX - columnWidth * 0.5);
+      const w = Math.min(plotWidth, centerX + columnWidth * 0.5) - x;
+      if (w <= 0 || x > plotWidth) continue;
 
       const yTop = this.yForPrice(cell.priceHigh);
       const yBottom = this.yForPrice(cell.priceLow);
       const y = Math.min(yTop, yBottom);
-      const h = Math.max(1, Math.min(4.5, Math.abs(yBottom - yTop)));
+      const h = Math.max(1.15, Math.min(7.5, Math.abs(yBottom - yTop)));
       if (y + h < this.view.topPadding || y > plotHeight) continue;
 
-      const color = this.orderBookHeatmapColor(cell.strength, cell.side);
-      const alpha = (0.028 + cell.strength * 0.34) * Math.max(0.35, visual.alpha);
+      const color = this.orderBookHeatmapColor(cell.strength, cell.side, settings.palette);
+      const alpha = (0.035 + cell.strength * 0.52) * Math.max(0.35, visual.alpha) * opacity;
 
-      g.rect(x, y, w, h).fill({ color, alpha: Math.min(0.72, alpha) });
+      if (smoothing > 0 && cell.strength > 0.25) {
+        const pad = 0.5 + smoothing * 1.5;
+        g.rect(x - pad, y - pad, w + pad * 2, h + pad * 2)
+          .fill({ color, alpha: Math.min(0.14, alpha * smoothing * 0.28) });
+      }
+      g.rect(x, y, w, h).fill({ color, alpha: Math.min(0.82, alpha) });
       if (cell.strength > 0.72) {
         g.rect(x, y + h * 0.35, w, Math.max(0.7, h * 0.3))
-          .fill({ color: theme.orangeBright, alpha: Math.min(0.48, alpha * 0.8) });
+          .fill({ color: cell.strength >= 0.94 ? 0xf4f5f7 : theme.orangeBright, alpha: Math.min(0.66, alpha * 0.88) });
       }
+
+      if (
+        this.pointer.active &&
+        this.pointer.x >= x && this.pointer.x <= x + w &&
+        this.pointer.y >= y - 3 && this.pointer.y <= y + h + 3 &&
+        (!hovered || cell.strength > hovered.cell.strength)
+      ) {
+        hovered = { cell, x, y };
+      }
+    }
+
+    if (hovered) {
+      const { cell } = hovered;
+      const venues = Object.keys(cell.venues).map((venue) => venue.toUpperCase()).join("+") || "VENUE";
+      const persistence = cell.persistenceMs >= 60_000
+        ? `${(cell.persistenceMs / 60_000).toFixed(1)}m`
+        : `${Math.max(0, cell.persistenceMs / 1000).toFixed(1)}s`;
+      const lines = [
+        `${cell.classification} · ${venues}`,
+        `${cell.side.toUpperCase()} ${cell.price.toLocaleString(undefined, { maximumFractionDigits: 4 })}`,
+        `${this.compactVolume(cell.notional)} NOTIONAL · ${persistence} · ${cell.observations} OBS`,
+        `STACK +${this.compactVolume(cell.stackingNotional)} · PULL -${this.compactVolume(cell.pullingNotional)} · IMB ${(cell.imbalance * 100).toFixed(0)}%${cell.spoofRisk > 0 ? ` · SPOOF? ${(cell.spoofRisk * 100).toFixed(0)}%` : ""}`,
+        `TRADE ${this.compactVolume(cell.correlatedTradeNotional)} · CONSUMED~ ${this.compactVolume(cell.estimatedConsumedNotional)} · CANCELLED~ ${this.compactVolume(cell.estimatedCancelledNotional)}`,
+        `ABS ${(cell.absorptionScore * 100).toFixed(0)}% · ICEBERG? ${(cell.icebergProbability * 100).toFixed(0)}% · CONF ${(cell.confidence * 100).toFixed(0)}%`,
+        cell.analyticsBasis
+      ];
+      const tooltipX = Math.max(8, Math.min(plotWidth - 298, this.pointer.x + 14));
+      const tooltipY = Math.max(this.view.topPadding + 8, Math.min(plotHeight - 110, this.pointer.y - 26));
+      g.roundRect(tooltipX, tooltipY, 290, 104, 3)
+        .fill({ color: 0x030405, alpha: 0.94 })
+        .stroke({ width: 1, color: this.orderBookHeatmapColor(cell.strength, cell.side, settings.palette), alpha: 0.7 });
+      this.addHeatmapText(lines[0], tooltipX + 8, tooltipY + 6, 0xff6a00, 8);
+      this.addHeatmapText(lines[1], tooltipX + 8, tooltipY + 19, 0xf1f2f4, 9);
+      this.addHeatmapText(lines[2], tooltipX + 8, tooltipY + 33, 0xa7abb2, 8);
+      this.addHeatmapText(lines[3], tooltipX + 8, tooltipY + 47, cell.spoofRisk > 0 ? 0xff303d : 0x858a93, 7);
+      this.addHeatmapText(lines[4], tooltipX + 8, tooltipY + 61, 0x858a93, 7);
+      this.addHeatmapText(lines[5], tooltipX + 8, tooltipY + 75, cell.icebergProbability > 0.5 ? 0xff8a00 : 0x858a93, 7);
+      this.addHeatmapText(lines[6], tooltipX + 8, tooltipY + 89, 0x6f747c, 7);
     }
   }
 
-  private orderBookHeatmapColor(strength: number, side: "bid" | "ask") {
-    if (strength >= 0.88) return 0xfff05a;
-    if (strength >= 0.70) return theme.orangeBright;
-    if (strength >= 0.48) return side === "bid" ? 0xd1a315 : theme.redBright;
-    if (strength >= 0.22) return side === "bid" ? theme.orange : theme.red;
-    return side === "bid" ? 0x6f3a22 : 0x651927;
+  private orderBookHeatmapColor(
+    strength: number,
+    side: "bid" | "ask",
+    palette: "blood-silver" | "monochrome-red" = "blood-silver"
+  ) {
+    if (palette === "monochrome-red") {
+      if (strength >= 0.9) return 0xff6069;
+      if (strength >= 0.7) return 0xf02030;
+      if (strength >= 0.45) return 0xb30b18;
+      return side === "bid" ? 0x42030a : 0x65050f;
+    }
+    if (strength >= 0.97) return 0xf7f7f8;
+    if (strength >= 0.90) return 0xcdd1d6;
+    if (strength >= 0.74) return 0xff8a00;
+    if (strength >= 0.52) return 0xff3a18;
+    if (strength >= 0.28) return side === "bid" ? 0xb30b18 : 0xd31322;
+    return side === "bid" ? 0x42030a : 0x65050f;
   }
 
   private liquidationColor(strength: number) {

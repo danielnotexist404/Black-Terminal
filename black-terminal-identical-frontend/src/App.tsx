@@ -201,7 +201,7 @@ const defaultVisibleIndicators: VisibleIndicators = {
   openInterestOscillator: false,
   zScoreOscillator: false,
   waveTrendOscillator: false,
-  volume: true
+  volume: false
 };
 
 function loadStoredVisibleIndicators(): VisibleIndicators {
@@ -307,6 +307,7 @@ type LayoutVars = CSSProperties & {
 };
 
 type WorkspaceSnapshot = {
+  schemaVersion?: 2;
   selectedExchangeId: string;
   symbolRaw: string;
   timeframe: Timeframe;
@@ -389,10 +390,48 @@ function loadWorkspaceSnapshots(): Record<string, WorkspaceSnapshot> {
   try {
     const stored = localStorage.getItem(workspaceStorageKey);
     const parsed = stored ? JSON.parse(stored) : {};
-    return parsed && typeof parsed === "object" ? parsed : {};
+    if (!parsed || typeof parsed !== "object") return {};
+    return Object.fromEntries(Object.entries(parsed).flatMap(([name, value]) => {
+      if (!value || typeof value !== "object") return [];
+      return [[name, migrateWorkspaceSnapshot(value as WorkspaceSnapshot)]];
+    }));
   } catch {
     return {};
   }
+}
+
+function migrateIndicatorAdvancedSettings(value: Partial<IndicatorAdvancedSettings> | null | undefined): IndicatorAdvancedSettings {
+  return {
+    volumeProfile: {
+      ...defaultIndicatorAdvancedSettings.volumeProfile,
+      ...(value?.volumeProfile ?? {})
+    },
+    adaptiveSwingStrategy: {
+      ...defaultIndicatorAdvancedSettings.adaptiveSwingStrategy,
+      ...(value?.adaptiveSwingStrategy ?? {})
+    },
+    bookHeatmap: {
+      ...defaultIndicatorAdvancedSettings.bookHeatmap,
+      ...(value?.bookHeatmap ?? {})
+    }
+  };
+}
+
+function migrateVisibleIndicators(value: Partial<VisibleIndicators> | null | undefined): VisibleIndicators {
+  const migrated = { ...defaultVisibleIndicators };
+  for (const key of Object.keys(migrated) as Array<keyof VisibleIndicators>) {
+    if (typeof value?.[key] === "boolean") migrated[key] = value[key];
+  }
+  return migrated;
+}
+
+function migrateWorkspaceSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+  return {
+    ...snapshot,
+    schemaVersion: 2,
+    visibleIndicators: migrateVisibleIndicators(snapshot.visibleIndicators),
+    indicatorAdvancedSettings: migrateIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings)
+  };
 }
 
 type AppUser = CapabilityUser & {
@@ -439,7 +478,7 @@ export default function App() {
     }
     return {
       showDOM: true,
-      showOrderBookHeatmap: true,
+      showOrderBookHeatmap: false,
       enabledTimeframes: ["1m", "5m", "15m", "1h", "4h", "1d"]
     };
   });
@@ -944,8 +983,9 @@ export default function App() {
             localStorage.setItem(workspaceStorageKey, JSON.stringify(record.workspaceSnapshots || {}));
             
             const activeName = record.activeWorkspace || "Quant Desk";
-            const snapshot = (record.workspaceSnapshots || {})[activeName];
-            if (snapshot) {
+            const rawSnapshot = (record.workspaceSnapshots || {})[activeName];
+            if (rawSnapshot) {
+              const snapshot = migrateWorkspaceSnapshot(rawSnapshot);
               const exchange = marketCatalog.find((item) => item.id === snapshot.selectedExchangeId);
               const nextSymbol = exchange?.symbols.find((item) => item.rawSymbol === snapshot.symbolRaw);
               if (exchange) setSelectedExchange(exchange);
@@ -955,7 +995,7 @@ export default function App() {
               
               setIndicatorPeriods(snapshot.indicatorPeriods);
               setIndicatorVisualSettings(snapshot.indicatorVisualSettings);
-              setIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings);
+              setIndicatorAdvancedSettings(migrateIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings));
               setLayout(snapshot.layout);
               setActiveStrategyKind(snapshot.activeStrategyKind);
             }
@@ -1169,6 +1209,7 @@ export default function App() {
   };
 
   const captureWorkspaceSnapshot = (): WorkspaceSnapshot => ({
+    schemaVersion: 2,
     selectedExchangeId: selectedExchange.id,
     symbolRaw: symbol.rawSymbol,
     timeframe,
@@ -1262,7 +1303,7 @@ export default function App() {
       setVisibleIndicators(snapshot.visibleIndicators);
       setIndicatorPeriods(snapshot.indicatorPeriods);
       setIndicatorVisualSettings(snapshot.indicatorVisualSettings);
-      setIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings);
+      setIndicatorAdvancedSettings(migrateIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings));
       setLayout(snapshot.layout);
       setActiveStrategyKind(snapshot.activeStrategyKind);
       setReplayControls(defaultReplayControls);
@@ -1988,6 +2029,7 @@ export default function App() {
             timeframeLabel={selectedTimeframe.label}
             chartType={chartType}
             snapToLatest={snapToLatest}
+            onSnapToLatestChange={setSnapToLatest}
             activeDrawingTool={drawingsEnabled && !drawingsLocked ? activeDrawingTool : "cursor"}
             drawingsVisible={drawingsVisible}
             drawingsLocked={drawingsLocked}

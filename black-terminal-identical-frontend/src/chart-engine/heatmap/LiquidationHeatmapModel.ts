@@ -1,4 +1,4 @@
-import { Candle } from "../types";
+import type { Candle } from "../types.ts";
 
 export type LiquidationSide = "long" | "short";
 
@@ -10,6 +10,9 @@ export type LiquidationHeatmapCell = {
   priceHigh: number;
   strength: number;
   side: LiquidationSide;
+  classification: "ESTIMATED LIQUIDATION";
+  confidence: number;
+  modelInputs: readonly ["PRICE", "TRADED VOLUME", "VOLATILITY", "LEVERAGE ASSUMPTIONS"];
 };
 
 export type LiquidationHeatmapLevel = {
@@ -241,7 +244,10 @@ export class LiquidationHeatmapModel {
           priceLow: level.price - this.bucketSize * 0.5,
           priceHigh: level.price + this.bucketSize * 0.5,
           strength,
-          side
+          side,
+          classification: "ESTIMATED LIQUIDATION",
+          confidence: Math.min(0.68, 0.28 + strength * 0.34),
+          modelInputs: ["PRICE", "TRADED VOLUME", "VOLATILITY", "LEVERAGE ASSUMPTIONS"]
         };
         openCells.set(cellKey, next);
         cells.push(next);

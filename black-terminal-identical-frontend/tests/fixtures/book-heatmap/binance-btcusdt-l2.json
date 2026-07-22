@@ -1,0 +1,18 @@
+{
+  "provenance": {
+    "venue": "binance",
+    "channel": "btcusdt@depth@100ms",
+    "classification": "recorded-public-l2-normalized",
+    "capturedAt": "2025-05-18T14:20:31.300Z"
+  },
+  "snapshot": {
+    "exchange": "binance",
+    "symbol": "BTCUSDT",
+    "time": 1747578031,
+    "sequence": 5917428753112,
+    "updateId": 5917428753112,
+    "subscribedDepth": 1000,
+    "bids": [[103241.4, 0.815], [103241.3, 1.219], [103241.2, 0.337]],
+    "asks": [[103241.5, 0.628], [103241.6, 1.704], [103241.7, 0.291]]
+  }
+}

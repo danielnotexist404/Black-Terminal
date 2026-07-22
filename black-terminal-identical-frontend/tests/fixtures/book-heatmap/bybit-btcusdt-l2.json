@@ -1,0 +1,18 @@
+{
+  "provenance": {
+    "venue": "bybit",
+    "channel": "orderbook.200.BTCUSDT",
+    "classification": "recorded-public-l2-normalized",
+    "capturedAt": "2025-05-18T14:20:31.246Z"
+  },
+  "snapshot": {
+    "exchange": "bybit",
+    "symbol": "BTCUSDT",
+    "time": 1747578031,
+    "sequence": 182774552611,
+    "updateId": 89217341,
+    "subscribedDepth": 200,
+    "bids": [[103241.5, 1.821], [103241, 0.443], [103240.5, 2.107]],
+    "asks": [[103242, 1.397], [103242.5, 0.521], [103243, 3.004]]
+  }
+}

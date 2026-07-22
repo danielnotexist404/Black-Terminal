@@ -282,9 +282,27 @@ export type AdaptiveSwingStrategySettings = {
   robustnessMode: "Balanced" | "Profit First" | "Drawdown First";
 };
 
+export type BookHeatmapSettings = {
+  dataMode: "live-book" | "consolidated-book";
+  workspaceMode: "live-book" | "estimated-liquidations" | "confirmed-liquidations";
+  selectedVenues: Array<"bybit" | "binance">;
+  historyHorizon: "15m" | "1h" | "6h" | "24h" | "3d" | "1w";
+  visibleRangePercent: number;
+  scaleMode: "adaptive" | "percentile" | "logarithmic" | "linear";
+  percentile: number;
+  minimumNotional: number;
+  opacity: number;
+  smoothing: number;
+  thresholdPercent: number;
+  palette: "blood-silver" | "monochrome-red";
+  showDiagnostics: boolean;
+  showHistoricalDepth: boolean;
+};
+
 export type IndicatorAdvancedSettings = {
   volumeProfile: VolumeProfileSettings;
   adaptiveSwingStrategy: AdaptiveSwingStrategySettings;
+  bookHeatmap: BookHeatmapSettings;
 };
 
 export type FeedEvent = {

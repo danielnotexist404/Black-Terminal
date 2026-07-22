@@ -60,7 +60,7 @@ size - Max daily loss - Max exposure - Allowed symbols - Emergency
 stop - Read-only mode
 
 Rendering roadmap: - Typed-array buffers - Geometry batching - Millions
-of candles - Order-book heatmap - Footprints - Volume profile - Replay -
+of candles - Footprints - Volume profile - Replay -
 GPU optimized layers
 
 Long-term objective: Black Terminal should evolve into an institutional grade desktop trading

@@ -32,7 +32,6 @@ Unified Ticket
 - Pixi wheel/pan rAF coalescing, hidden-tab ticker suspension and deterministic observer/listener/GPU cleanup.
 - Central account snapshot request deduplication and short-lived cache.
 - Bounded market, DOM history, OMS order and execution-report collections.
-- Main-chart orderbook heatmap retention capped at 360 snapshots and 240 levels per side; long-range depth remains in IMM.
 - WebSocket intentional-close semantics, heartbeat/stale state and exponential jittered reconnect.
 - Server route stage timing and parallel independent account reads without weakening fail-closed checks.
 - Explicit simulation isolation: production no longer silently substitutes fake chart candles.

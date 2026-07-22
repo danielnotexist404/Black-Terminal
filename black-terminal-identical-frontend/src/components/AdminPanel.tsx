@@ -40,7 +40,6 @@ interface AuditLog {
 const ALL_INDICATORS_METADATA = [
   { key: "aif", name: "A.I.F. Auction Intelligence", desc: "Native proprietary long-horizon auction framework" },
   { key: "volumeProfile", name: "HDLX Profile (hdlx)", desc: "Fixed locked/visible volume profile" },
-  { key: "orderBookHeatmap", name: "Order Book Heatmap", desc: "Live L2 depth blocks" },
   { key: "liquidationHeatmap", name: "Liquidation Heatmap", desc: "Modeled leverage clusters" },
   { key: "volatilityHeatmap", name: "Volatility Heatmap", desc: "Pine projection buy/sell zones" },
   { key: "adaptiveSwingStrategy", name: "Adaptive Swing Reversal", desc: "Native strategy overlay" },
@@ -58,7 +57,6 @@ const ALL_INDICATORS_METADATA = [
 ];
 
 const DEFAULT_ALLOWED = [
-  "orderBookHeatmap",
   "liquidationHeatmap",
   "volatilityHeatmap",
   "adaptiveSwingStrategy",

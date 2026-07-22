@@ -80,7 +80,7 @@ The mock feed randomly triggers alert events and sends them through the Tauri Ru
 2. Add worker/Rust-side candle aggregation.
 3. Add typed-array buffers for millions of points.
 4. Add WebGL geometry batching for candles.
-5. Add orderbook heatmap and replay.
+5. Extend replay and native liquidation analytics.
 6. Add footprint / volume delta layer.
 7. Add indicator plugin loader.
 8. Add alert condition builder.

@@ -6,7 +6,6 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
-- Current - Rebuild the main-chart Book Heatmap with authentic L2 provenance, explicit estimated/confirmed liquidation modes, bounded worker ingestion, historical tiles, shared-camera rendering and deterministic evidence. See `BOOK_HEATMAP_ARCHITECTURE.md` and `BOOK_HEATMAP_IMPLEMENTATION_HISTORY.md`.
 - Current - Implement Phase V Chapter I Security Fortress and production migration baseline.
 - Current - Enforce runtime-connection scoping for private orders, positions and portfolio API synchronization.
 - Current - Bring DOM Pro execution to venue-native Bybit parity with Spot/Futures and dynamic Conditional, Chase, TWAP, Iceberg and POV controls.

@@ -158,7 +158,6 @@ const timeframes: { label: string; value: Timeframe }[] = [
 ];
 
 const DEFAULT_ALLOWED = [
-  "orderBookHeatmap",
   "liquidationHeatmap",
   "volatilityHeatmap",
   "adaptiveSwingStrategy",
@@ -185,7 +184,6 @@ const workspaceNamesStorageKey = "bt_workspace_names_v1";
 const visibleIndicatorsStorageKey = "bt_visible_indicators_v1";
 
 const defaultVisibleIndicators: VisibleIndicators = {
-  orderBookHeatmap: false,
   liquidationHeatmap: false,
   volatilityHeatmap: false,
   volumeProfile: false,
@@ -234,7 +232,6 @@ const defaultIndicatorPeriods: IndicatorPeriods = {
 };
 
 const defaultIndicatorVisualSettings: IndicatorVisualSettings = {
-  orderBookHeatmap: { color: "orange", intensity: 72 },
   liquidationHeatmap: { color: "red", intensity: 78 },
   volatilityHeatmap: { color: "green", intensity: 86 },
   volumeProfile: { color: "red", intensity: 72 },
@@ -307,7 +304,7 @@ type LayoutVars = CSSProperties & {
 };
 
 type WorkspaceSnapshot = {
-  schemaVersion?: 2;
+  schemaVersion?: 3;
   selectedExchangeId: string;
   symbolRaw: string;
   timeframe: Timeframe;
@@ -401,7 +398,6 @@ function loadWorkspaceSnapshots(): Record<string, WorkspaceSnapshot> {
 }
 
 function migrateIndicatorAdvancedSettings(value: Partial<IndicatorAdvancedSettings> | null | undefined): IndicatorAdvancedSettings {
-  const legacyBookHeatmap = value?.bookHeatmap as (Omit<Partial<IndicatorAdvancedSettings["bookHeatmap"]>, "palette"> & { palette?: string }) | undefined;
   return {
     volumeProfile: {
       ...defaultIndicatorAdvancedSettings.volumeProfile,
@@ -410,15 +406,6 @@ function migrateIndicatorAdvancedSettings(value: Partial<IndicatorAdvancedSettin
     adaptiveSwingStrategy: {
       ...defaultIndicatorAdvancedSettings.adaptiveSwingStrategy,
       ...(value?.adaptiveSwingStrategy ?? {})
-    },
-    bookHeatmap: {
-      ...defaultIndicatorAdvancedSettings.bookHeatmap,
-      ...(legacyBookHeatmap ?? {}),
-      palette: legacyBookHeatmap?.palette === "monochrome-red"
-        ? "blood-silver"
-        : (["institutional", "thermal", "blood-silver"].includes(legacyBookHeatmap?.palette ?? "")
-          ? legacyBookHeatmap?.palette as IndicatorAdvancedSettings["bookHeatmap"]["palette"]
-          : defaultIndicatorAdvancedSettings.bookHeatmap.palette)
     }
   };
 }
@@ -434,7 +421,7 @@ function migrateVisibleIndicators(value: Partial<VisibleIndicators> | null | und
 function migrateWorkspaceSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
   return {
     ...snapshot,
-    schemaVersion: 2,
+    schemaVersion: 3,
     visibleIndicators: migrateVisibleIndicators(snapshot.visibleIndicators),
     indicatorAdvancedSettings: migrateIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings)
   };
@@ -484,7 +471,6 @@ export default function App() {
     }
     return {
       showDOM: true,
-      showOrderBookHeatmap: false,
       enabledTimeframes: ["1m", "5m", "15m", "1h", "4h", "1d"]
     };
   });
@@ -647,20 +633,10 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem(visibleIndicatorsStorageKey, JSON.stringify(visibleIndicators));
-    setTerminalSettings((current: typeof terminalSettings) => (
-      current.showOrderBookHeatmap === visibleIndicators.orderBookHeatmap
-        ? current
-        : { ...current, showOrderBookHeatmap: visibleIndicators.orderBookHeatmap }
-    ));
   }, [visibleIndicators]);
 
   const handleTerminalSettingsChange = useCallback((next: typeof terminalSettings) => {
     setTerminalSettings(next);
-    setVisibleIndicators((current) => (
-      current.orderBookHeatmap === next.showOrderBookHeatmap
-        ? current
-        : { ...current, orderBookHeatmap: next.showOrderBookHeatmap }
-    ));
   }, []);
 
   // Update browser tab title with price + direction like TradingView
@@ -1215,7 +1191,7 @@ export default function App() {
   };
 
   const captureWorkspaceSnapshot = (): WorkspaceSnapshot => ({
-    schemaVersion: 2,
+    schemaVersion: 3,
     selectedExchangeId: selectedExchange.id,
     symbolRaw: symbol.rawSymbol,
     timeframe,
@@ -2035,7 +2011,6 @@ export default function App() {
             timeframeLabel={selectedTimeframe.label}
             chartType={chartType}
             snapToLatest={snapToLatest}
-            onSnapToLatestChange={setSnapToLatest}
             activeDrawingTool={drawingsEnabled && !drawingsLocked ? activeDrawingTool : "cursor"}
             drawingsVisible={drawingsVisible}
             drawingsLocked={drawingsLocked}

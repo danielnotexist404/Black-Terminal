@@ -40,6 +40,9 @@ const leverageTiers = [
   { leverage: 50, weight: 1.18 },
   { leverage: 100, weight: 0.82 }
 ];
+const MAX_SOURCE_CANDLES = 3_000;
+const MAX_ACTIVE_LEVELS = 192;
+const MAX_RETAINED_CELLS = 16_000;
 
 function median(values: number[]) {
   if (values.length === 0) return 0;
@@ -60,13 +63,16 @@ function niceBucketSize(value: number) {
 function signatureFor(candles: Candle[]) {
   const first = candles[0];
   const last = candles[candles.length - 1];
-  return `${candles.length}:${first?.time ?? 0}:${last?.time ?? 0}:${last?.close ?? 0}:${last?.volume ?? 0}`;
+  // Rebuild for a new/history-window candle, not every trade update to the
+  // active candle. The old per-tick full-history rebuild froze the chart.
+  return `${candles.length}:${first?.time ?? 0}:${last?.time ?? 0}`;
 }
 
 export class LiquidationHeatmapModel {
   private signature = "";
   private cells: LiquidationHeatmapCell[] = [];
   private bucketSize = 1;
+  private rebuilds = 0;
 
   setSource(candles: Candle[]) {
     const signature = signatureFor(candles);
@@ -74,6 +80,11 @@ export class LiquidationHeatmapModel {
 
     this.signature = signature;
     this.cells = this.buildCells(candles);
+    this.rebuilds += 1;
+  }
+
+  diagnostics() {
+    return { retainedCells: this.cells.length, bucketSize: this.bucketSize, rebuilds: this.rebuilds };
   }
 
   visibleCells(firstIndex: number, lastIndex: number, untilIndex: number, priceMin: number, priceMax: number) {
@@ -125,7 +136,8 @@ export class LiquidationHeatmapModel {
   private buildCells(candles: Candle[]) {
     if (candles.length < 24) return [];
 
-    const source = candles.slice(-12000);
+    const sourceOffset = Math.max(0, candles.length - MAX_SOURCE_CANDLES);
+    const source = candles.slice(sourceOffset);
     const ranges = source
       .slice(Math.max(0, source.length - 420))
       .map((candle) => Math.max(0, candle.high - candle.low))
@@ -213,6 +225,21 @@ export class LiquidationHeatmapModel {
         addLevel(candle.low * 0.971, swingWeight * 0.72, "long");
       }
 
+      if (activeLevels.size > MAX_ACTIVE_LEVELS * 2) {
+        const retained = new Set(
+          [...activeLevels.values()]
+            .sort((a, b) => b.score - a.score)
+            .slice(0, MAX_ACTIVE_LEVELS)
+            .map((level) => level.key)
+        );
+        for (const key of activeLevels.keys()) {
+          if (retained.has(key)) continue;
+          activeLevels.delete(key);
+          openCells.delete(`${key}:long`);
+          openCells.delete(`${key}:short`);
+        }
+      }
+
       const ranked = [...activeLevels.values()].sort((a, b) => b.score - a.score).slice(0, 44);
       runningMax = Math.max(runningMax * 0.998, ranked[0]?.score ?? 1);
       const touched = new Set<string>();
@@ -226,8 +253,9 @@ export class LiquidationHeatmapModel {
         touched.add(cellKey);
 
         const existing = openCells.get(cellKey);
-        if (existing && existing.endIndex >= index - 1) {
-          existing.endIndex = index;
+        const globalIndex = sourceOffset + index;
+        if (existing && existing.endIndex >= globalIndex - 1) {
+          existing.endIndex = globalIndex;
           existing.lastTouched = index;
           existing.price = existing.price * 0.96 + level.price * 0.04;
           existing.priceLow = existing.price - this.bucketSize * 0.5;
@@ -237,8 +265,8 @@ export class LiquidationHeatmapModel {
         }
 
         const next: OpenCell = {
-          startIndex: index,
-          endIndex: index,
+          startIndex: globalIndex,
+          endIndex: globalIndex,
           lastTouched: index,
           price: level.price,
           priceLow: level.price - this.bucketSize * 0.5,
@@ -260,6 +288,8 @@ export class LiquidationHeatmapModel {
       }
     }
 
-    return cells.filter((cell) => cell.endIndex - cell.startIndex >= 1 || cell.strength >= 0.42);
+    return cells
+      .filter((cell) => cell.endIndex - cell.startIndex >= 1 || cell.strength >= 0.42)
+      .slice(-MAX_RETAINED_CELLS);
   }
 }

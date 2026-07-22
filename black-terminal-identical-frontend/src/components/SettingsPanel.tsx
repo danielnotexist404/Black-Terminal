@@ -5,7 +5,6 @@ import "../styles/settings.css";
 
 interface TerminalSettings {
   showDOM: boolean;
-  showOrderBookHeatmap: boolean;
   enabledTimeframes: string[];
   theme?: string;
   priceLineColor?: string;
@@ -218,19 +217,6 @@ export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange,
                 type="checkbox"
                 checked={terminalSettings.showDOM}
                 onChange={(e) => onSettingsChange({ ...terminalSettings, showDOM: e.target.checked })}
-                style={{ width: "20px", height: "20px", cursor: "pointer", accentColor: "var(--red-hot)" }}
-              />
-            </div>
-
-            <div className="settings-field" style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: "20px" }}>
-              <div>
-                <label className="settings-label" style={{ fontSize: "11px", display: "block" }}>Order Book Heatmap</label>
-                <span className="settings-hint">Plot exchange order book liquidity depth maps directly on chart canvas</span>
-              </div>
-              <input
-                type="checkbox"
-                checked={terminalSettings.showOrderBookHeatmap}
-                onChange={(e) => onSettingsChange({ ...terminalSettings, showOrderBookHeatmap: e.target.checked })}
                 style={{ width: "20px", height: "20px", cursor: "pointer", accentColor: "var(--red-hot)" }}
               />
             </div>

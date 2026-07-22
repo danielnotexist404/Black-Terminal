@@ -114,7 +114,6 @@ export type ChartEngineOptions = {
 };
 
 export type VisibleIndicators = {
-  orderBookHeatmap: boolean;
   liquidationHeatmap: boolean;
   volatilityHeatmap: boolean;
   volumeProfile: boolean;
@@ -282,30 +281,9 @@ export type AdaptiveSwingStrategySettings = {
   robustnessMode: "Balanced" | "Profit First" | "Drawdown First";
 };
 
-export type BookHeatmapSettings = {
-  dataMode: "live-book" | "consolidated-book";
-  displayMode: "historical-liquidity" | "current-book-profile" | "combined";
-  workspaceMode: "live-book" | "estimated-liquidations" | "confirmed-liquidations";
-  selectedVenues: Array<"bybit" | "binance">;
-  historyHorizon: "15m" | "1h" | "6h" | "24h" | "3d" | "1w";
-  timeResolution: "adaptive" | "1s" | "5s" | "15s" | "1m";
-  priceResolution: "adaptive" | "tick" | "basis-points" | "fixed" | "atr-relative" | "visible-range";
-  visibleRangePercent: number;
-  scaleMode: "adaptive" | "percentile" | "logarithmic" | "linear";
-  percentile: number;
-  minimumNotional: number;
-  opacity: number;
-  smoothing: number;
-  thresholdPercent: number;
-  palette: "institutional" | "thermal" | "blood-silver";
-  showDiagnostics: boolean;
-  showHistoricalDepth: boolean;
-};
-
 export type IndicatorAdvancedSettings = {
   volumeProfile: VolumeProfileSettings;
   adaptiveSwingStrategy: AdaptiveSwingStrategySettings;
-  bookHeatmap: BookHeatmapSettings;
 };
 
 export type FeedEvent = {

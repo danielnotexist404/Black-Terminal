@@ -1,6 +1,5 @@
 import alerts from "../../server/market-depth/routes/alerts.js";
 import ingest from "../../server/market-depth/routes/ingest.js";
-import historicalTiles from "../../server/market-depth/routes/historical-tiles.js";
 import prune from "../../server/market-depth/routes/prune.js";
 import replay from "../../server/market-depth/routes/replay.js";
 import status from "../../server/market-depth/routes/status.js";
@@ -11,7 +10,6 @@ import { sendError } from "../../server/portfolio-api.js";
 
 const handlers = {
   alerts,
-  "historical-tiles": historicalTiles,
   ingest,
   prune,
   replay,

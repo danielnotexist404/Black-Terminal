@@ -27,7 +27,6 @@ const PLANS: Plan[] = [
     price: 99.00,
     desc: "Unlocks the full Black Terminal algorithmic toolkit for professional retail traders.",
     indicators: [
-      "Orderbook Heatmap (Depth Feeds)",
       "Liquidation Heatmap (Liquidity Gaps)",
       "Volatility Heatmap",
       "Adaptive Swing Strategy",
@@ -108,7 +107,6 @@ export default function UpgradePanel({ onClose, currentUser, onUpgradeSuccess }:
       try {
         // Upgrade account in database
         const fullPremiumIndicators = [
-          "orderBookHeatmap",
           "liquidationHeatmap",
           "volatilityHeatmap",
           "adaptiveSwingStrategy",

@@ -55,13 +55,6 @@ const builtInIndicators: BuiltInIndicator[] = [
     runtime: "Native"
   },
   {
-    key: "orderBookHeatmap",
-    title: "Order Book Heatmap",
-    group: "Orderflow",
-    type: "Overlay",
-    signal: "Live L2 depth blocks"
-  },
-  {
     key: "liquidationHeatmap",
     title: "Liquidation Heatmap",
     group: "Liquidity",

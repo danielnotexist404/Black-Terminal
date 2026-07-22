@@ -289,7 +289,6 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
       setLoading(true);
       try {
         const defaultAllowed = [
-          "orderBookHeatmap",
           "liquidationHeatmap",
           "volatilityHeatmap",
           "adaptiveSwingStrategy",
@@ -991,7 +990,6 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
               <li><Check size={16} /> Standard Charting Environment</li>
               <li><Check size={16} /> Real-Time Exchange Data Stream</li>
               <li><Check size={16} /> 2 Active Sandbox Strategy Slots</li>
-              <li style={{ color: "var(--dim)" }}><X size={16} style={{ color: "var(--red)" }} /> Restricted Order-Book Heatmaps</li>
             </ul>
             <button className="btn-plan" onClick={handleOpenSignUp}>Register Free</button>
           </div>

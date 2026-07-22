@@ -4,14 +4,8 @@ import { Bell, Brush, Columns3, Copy, Eye, EyeOff, Minus, Play, Plus, SlidersHor
 import { BlackChartEngine } from "../chart-engine/BlackChartEngine";
 import type { ChartPoint, IndicatorAlertLevel, IndicatorAlertLine } from "../chart-engine/BlackChartEngine";
 import type { ChartPriceTransformSnapshot } from "../chart-engine/priceTransform";
-import type { BookHeatmapDiagnostics, HistoricalBookHeatmapCell } from "../chart-engine/heatmap/OrderBookHeatmapModel";
-import { loadBookHeatmapHistory } from "../chart-engine/heatmap/bookHeatmapHistoryClient";
-import type { ConfirmedLiquidationDiagnostics } from "../chart-engine/heatmap/ConfirmedLiquidationModel";
-import { subscribeConfirmedLiquidations } from "../chart-engine/heatmap/confirmedLiquidationFeed";
-import { bookHeatmapOrderBookSource } from "../chart-engine/heatmap/bookHeatmapLiveFeed";
 import {
   AdaptiveSwingStrategySettings,
-  BookHeatmapSettings,
   Candle,
   ChartDisplayType,
   DrawingToolId,
@@ -26,14 +20,14 @@ import {
   VisibleIndicators,
   VolumeProfileSettings
 } from "../chart-engine/types";
-import { defaultAdaptiveSwingStrategySettings, defaultBookHeatmapSettings, defaultVolumeProfileSettings } from "../chart-engine/profile/volumeProfileDefaults";
+import { defaultAdaptiveSwingStrategySettings, defaultVolumeProfileSettings } from "../chart-engine/profile/volumeProfileDefaults";
 import { createMockCandles } from "../data/mockMarket";
 import type { AlertCondition, AlertIndicatorTarget, IndicatorAlertDefinition } from "../automation/alerts";
 import { canUseIndicator } from "../features/premium";
 import { sendIndicatorAlert, sendWebhook } from "../lib/tauri";
 import type { CompiledPlot } from "./ScriptCompiler";
 import { getMarketDataEngineAdapter } from "../market-data/engine/marketDataEngine";
-import { ExchangeId, MarketDataAdapter, MarketDataSubscription, MarketSymbol, OrderBookSnapshot, Timeframe } from "../market-data/types";
+import { ExchangeId, MarketDataAdapter, MarketDataSubscription, MarketSymbol, Timeframe } from "../market-data/types";
 import { UnifiedExecutionTicket, type UnifiedExecutionTicketPreset } from "../execution/components/UnifiedExecutionTicket";
 import type { ExecutionSource, OrderSide, OrderType } from "../execution/types";
 import type { OrderUpdate } from "../execution/types";
@@ -52,7 +46,6 @@ type PixiBlackChartProps = {
   timeframeLabel: string;
   chartType: ChartDisplayType;
   snapToLatest: boolean;
-  onSnapToLatestChange?: (enabled: boolean) => void;
   activeDrawingTool: DrawingToolId;
   drawingsVisible: boolean;
   drawingsLocked: boolean;
@@ -129,17 +122,6 @@ const historyDepthOptions: { label: string; value: HistoryDepth }[] = [
   { label: "10K bars", value: 10000 },
   { label: "20K bars", value: 20000 }
 ];
-
-function formatHeatmapDuration(milliseconds: number) {
-  if (!(milliseconds > 0)) return "0m";
-  const minutes = Math.floor(milliseconds / 60_000);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  if (hours < 24) return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ${hours % 24}h`;
-}
 
 const timeframeSeconds: Record<any, number> = {
   "1s": 1,
@@ -280,7 +262,6 @@ export function PixiBlackChart({
   timeframeLabel,
   chartType,
   snapToLatest,
-  onSnapToLatestChange,
   activeDrawingTool,
   drawingsVisible,
   drawingsLocked,
@@ -310,9 +291,6 @@ export function PixiBlackChart({
   activeOrders = [],
   onRefreshOrders
 }: PixiBlackChartProps) {
-  const localVisualHarness = typeof window !== "undefined" &&
-    window.location.hostname === "127.0.0.1" &&
-    new URLSearchParams(window.location.search).get("perfHarness") === "1";
   const hostRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<BlackChartEngine | null>(null);
   const aifActiveRef = useRef(visibleIndicators.aif);
@@ -339,12 +317,6 @@ export function PixiBlackChart({
   const [positionOverlayTick, setPositionOverlayTick] = useState(0);
   const [alertToast, setAlertToast] = useState<AlertToast | null>(null);
   const [editingChartAlertId, setEditingChartAlertId] = useState<string | null>(null);
-  const [bookHeatmapDiagnostics, setBookHeatmapDiagnostics] = useState<BookHeatmapDiagnostics | null>(null);
-  const [confirmedLiquidationDiagnostics, setConfirmedLiquidationDiagnostics] = useState<ConfirmedLiquidationDiagnostics | null>(null);
-  const [confirmedLiquidationFeedStatus, setConfirmedLiquidationFeedStatus] = useState("Confirmed feed not requested");
-  const [bookHeatmapHistoryStatus, setBookHeatmapHistoryStatus] = useState("Historical depth not requested");
-  const [bookHeatmapWorkspaceOpen, setBookHeatmapWorkspaceOpen] = useState(false);
-  const bookHeatmapHistoryRequestRef = useRef<{ key: string; requestedAt: number } | null>(null);
   const replaySourceRef = useRef<Candle[]>([]);
   const replayControlsRef = useRef(replayControls);
   const replayStatusCallbackRef = useRef(onReplayStatusChange);
@@ -360,14 +332,6 @@ export function PixiBlackChart({
   const configuredAlertRuntimeRef = useRef(new Map<string, { lastFiredAt: number; fired: boolean }>());
   const alertToastTimerRef = useRef<number | undefined>(undefined);
   aifActiveRef.current = visibleIndicators.aif;
-  const bookHeatmapSettings = {
-    ...defaultBookHeatmapSettings,
-    ...indicatorAdvancedSettings.bookHeatmap
-  };
-  const bookHeatmapHistoryBand = Math.round(
-    Math.log(Math.max(0.00000001, lastPrice)) /
-    Math.log(1 + Math.max(0.5, Math.min(40, bookHeatmapSettings.visibleRangePercent)) / 400)
-  );
 
   const scopedChartAlerts = useMemo(() => {
     return alertDefinitions.filter((definition) =>
@@ -721,7 +685,7 @@ export function PixiBlackChart({
 
     const candleStreamIsStale = () => !lastLiveCandleAt || Date.now() - lastLiveCandleAt > liveCandleStaleMs;
 
-    const ingestTrades = (trades: { tradeId: string; price: number; quantity: number; time: number; side?: "buy" | "sell" | "unknown" }[]) => {
+    const ingestTrades = (trades: { tradeId: string; price: number; quantity: number; time: number }[]) => {
       for (const trade of trades) {
         if (seenTrades.has(trade.tradeId)) continue;
         seenTrades.add(trade.tradeId);
@@ -732,7 +696,6 @@ export function PixiBlackChart({
         }
 
         lastTradeAt = Date.now();
-        engineRef.current?.ingestBookHeatmapTrade(trade.price, trade.quantity, trade.time, trade.side ?? "unknown");
         if (synthesizeCandlesFromTrades || candleStreamIsStale()) {
           ingestTradeIntoReplaySource(trade.price, trade.quantity, trade.time);
           if (replayActiveRef.current) continue;
@@ -920,22 +883,6 @@ export function PixiBlackChart({
           return;
         }
 
-        if (localVisualHarness) {
-          (window as Window & { __BLACK_TERMINAL_BOOK_HEATMAP_VISUAL__?: {
-            setCandles: (candles: Candle[]) => void;
-            ingest: (snapshot: OrderBookSnapshot) => void;
-            ingestConfirmed: (event: Parameters<BlackChartEngine["ingestConfirmedLiquidation"]>[0]) => void;
-            setHistory: (cells: HistoricalBookHeatmapCell[]) => void;
-          } }).__BLACK_TERMINAL_BOOK_HEATMAP_VISUAL__ = {
-            setCandles: (candles) => engine.setCandles(candles),
-            ingest: (snapshot) => engine.ingestOrderBookSnapshot(snapshot),
-            ingestConfirmed: (event) => engine.ingestConfirmedLiquidation(event),
-            setHistory: (cells) => engine.setOrderBookHeatmapHistory(cells)
-          };
-          setDataStatus("LOCAL VISUAL FIXTURE HARNESS");
-          return;
-        }
-
         if (!adapter) {
           if (allowSimulatedFallback) startMockFallback();
           else setDataStatus("MARKET DATA UNAVAILABLE - NO ADAPTER");
@@ -1011,8 +958,6 @@ export function PixiBlackChart({
       if (initialized) {
         engine.destroy();
       }
-      const visualWindow = window as Window & { __BLACK_TERMINAL_BOOK_HEATMAP_VISUAL__?: unknown };
-      delete visualWindow.__BLACK_TERMINAL_BOOK_HEATMAP_VISUAL__;
       engineRef.current = null;
       setAifPriceTransform(null);
     };
@@ -1026,215 +971,6 @@ export function PixiBlackChart({
     timeframe,
     historyDepth,
     onPriceChange
-  ]);
-
-  useEffect(() => {
-    if (!visibleIndicators.orderBookHeatmap || localVisualHarness) return;
-
-    let disposed = false;
-    const subscriptions: Array<MarketDataSubscription<OrderBookSnapshot>> = [];
-    const pollTimers: number[] = [];
-    const venueIds = bookHeatmapSettings.dataMode === "consolidated-book"
-      ? bookHeatmapSettings.selectedVenues
-      : [marketSymbol.exchange];
-
-    const ingestOrderBook = (book: OrderBookSnapshot) => {
-      if (disposed || replayActiveRef.current) return;
-      engineRef.current?.ingestOrderBookSnapshot(book);
-    };
-
-    for (const venueId of venueIds) {
-      const adapter = getMarketDataEngineAdapter(venueId);
-      if (!adapter) continue;
-      const bookSource = bookHeatmapOrderBookSource(adapter);
-      const venueSymbol = venueId === marketSymbol.exchange
-        ? marketSymbol
-        : {
-            ...marketSymbol,
-            exchange: venueId,
-            rawSymbol: adapter.normalizeSymbol(`${marketSymbol.baseAsset}${marketSymbol.quoteAsset}`, marketSymbol.marketKind)
-          };
-      let polling = false;
-      const pollOrderBook = () => {
-        if (!bookSource.getOrderBookSnapshot || disposed) return;
-        bookSource.getOrderBookSnapshot(venueSymbol, 1000)
-          .then((book) => { if (!disposed) ingestOrderBook(book); })
-          .catch((err: unknown) => console.error(`${adapter.label} order book REST heartbeat failed`, err));
-      };
-      const startOrderBookPolling = () => {
-        if (!bookSource.getOrderBookSnapshot || polling || disposed) return;
-        polling = true;
-        pollOrderBook();
-        pollTimers.push(window.setInterval(pollOrderBook, 1000));
-      };
-      if (bookSource.subscribeOrderBook) {
-        const subscription = bookSource.subscribeOrderBook(venueSymbol, ingestOrderBook);
-        subscriptions.push(subscription);
-        subscription.onError((err) => {
-          console.error(`${adapter.label} order book stream failed`, err);
-          subscription.unsubscribe();
-          startOrderBookPolling();
-        });
-      } else startOrderBookPolling();
-    }
-
-    return () => {
-      disposed = true;
-      subscriptions.forEach((subscription) => subscription.unsubscribe());
-      pollTimers.forEach((timer) => window.clearInterval(timer));
-    };
-  }, [
-    visibleIndicators.orderBookHeatmap,
-    marketSymbol.exchange,
-    marketSymbol.rawSymbol,
-    marketSymbol.marketKind,
-    marketSymbol.baseAsset,
-    marketSymbol.quoteAsset,
-    bookHeatmapSettings.dataMode,
-    bookHeatmapSettings.selectedVenues.join(",")
-  ]);
-
-  useEffect(() => {
-    if (!visibleIndicators.orderBookHeatmap) {
-      setBookHeatmapDiagnostics(null);
-      setConfirmedLiquidationDiagnostics(null);
-      return;
-    }
-    const refreshDiagnostics = () => {
-      const diagnostics = engineRef.current?.getOrderBookHeatmapDiagnostics() ?? null;
-      setBookHeatmapDiagnostics(diagnostics);
-      setConfirmedLiquidationDiagnostics(engineRef.current?.getConfirmedLiquidationDiagnostics() ?? null);
-    };
-    refreshDiagnostics();
-    const timer = window.setInterval(refreshDiagnostics, 1_000);
-    return () => window.clearInterval(timer);
-  }, [visibleIndicators.orderBookHeatmap, marketSymbol.exchange, marketSymbol.rawSymbol, bookHeatmapSettings.workspaceMode]);
-
-  useEffect(() => {
-    window.dispatchEvent(new Event("black-terminal-layout-resize"));
-  }, [bookHeatmapWorkspaceOpen]);
-
-  useEffect(() => {
-    const engine = engineRef.current;
-    if (!engine) return;
-    engine.setBookHeatmapWorkspaceMode(bookHeatmapWorkspaceOpen ? bookHeatmapSettings.workspaceMode : null);
-    return () => engine.setBookHeatmapWorkspaceMode(null);
-  }, [bookHeatmapWorkspaceOpen, bookHeatmapSettings.workspaceMode]);
-
-  useEffect(() => {
-    if (!bookHeatmapWorkspaceOpen || bookHeatmapSettings.workspaceMode !== "confirmed-liquidations") {
-      setConfirmedLiquidationFeedStatus("Confirmed feed not requested");
-      return;
-    }
-    if (localVisualHarness) {
-      setConfirmedLiquidationFeedStatus("Local recorded liquidation fixtures");
-      return;
-    }
-    const venues = (bookHeatmapSettings.dataMode === "consolidated-book"
-      ? bookHeatmapSettings.selectedVenues
-      : [marketSymbol.exchange])
-      .filter((venue): venue is "bybit" | "binance" => venue === "bybit" || venue === "binance");
-    const subscriptions = venues.map((venue) => subscribeConfirmedLiquidations({
-      venue,
-      symbol: `${marketSymbol.baseAsset}${marketSymbol.quoteAsset}`,
-      onEvent: (event) => {
-        setConfirmedLiquidationFeedStatus(`${event.venue.toUpperCase()} confirmed events live`);
-        engineRef.current?.ingestConfirmedLiquidation(event);
-      },
-      onError: (error) => setConfirmedLiquidationFeedStatus(error.message)
-    }));
-    return () => subscriptions.forEach((subscription) => subscription.unsubscribe());
-  }, [
-    bookHeatmapWorkspaceOpen,
-    bookHeatmapSettings.workspaceMode,
-    bookHeatmapSettings.dataMode,
-    bookHeatmapSettings.selectedVenues.join(","),
-    marketSymbol.exchange,
-    marketSymbol.baseAsset,
-    marketSymbol.quoteAsset
-  ]);
-
-  useEffect(() => {
-    const engine = engineRef.current;
-    if (!visibleIndicators.orderBookHeatmap || !engine) return;
-    if (localVisualHarness) {
-      engine.clearOrderBookHeatmapHistory();
-      setBookHeatmapHistoryStatus("Partial history fixture — unavailable periods remain empty");
-      return;
-    }
-    if (!bookHeatmapSettings.showHistoricalDepth) {
-      engine.clearOrderBookHeatmapHistory();
-      setBookHeatmapHistoryStatus("Historical depth disabled");
-      return;
-    }
-
-    const controller = new AbortController();
-    const rangePercent = Math.max(0.5, Math.min(40, bookHeatmapSettings.visibleRangePercent));
-    const referencePrice = Math.max(0.00000001, lastPrice);
-    const range = referencePrice * rangePercent / 100;
-    const historyVenues = bookHeatmapSettings.dataMode === "consolidated-book"
-      ? bookHeatmapSettings.selectedVenues
-      : [marketSymbol.exchange];
-    const requestKey = [
-      historyVenues.join(","),
-      marketSymbol.marketKind,
-      marketSymbol.baseAsset,
-      marketSymbol.quoteAsset,
-      bookHeatmapSettings.historyHorizon,
-      bookHeatmapSettings.timeResolution,
-      rangePercent,
-      bookHeatmapHistoryBand
-    ].join(":");
-    const previousRequest = bookHeatmapHistoryRequestRef.current;
-    if (previousRequest?.key === requestKey && Date.now() - previousRequest.requestedAt < 60_000) return;
-    bookHeatmapHistoryRequestRef.current = { key: requestKey, requestedAt: Date.now() };
-    setBookHeatmapHistoryStatus("Loading authenticated depth history");
-    Promise.allSettled(historyVenues.map((venue) => loadBookHeatmapHistory({
-      venue,
-      marketKind: marketSymbol.marketKind,
-      symbol: `${marketSymbol.baseAsset}${marketSymbol.quoteAsset}`,
-      horizon: bookHeatmapSettings.historyHorizon,
-      resolution: bookHeatmapSettings.timeResolution,
-      minPrice: Math.max(0.00000001, referencePrice - range),
-      maxPrice: referencePrice + range,
-      signal: controller.signal
-    }))).then((results) => {
-      if (controller.signal.aborted) return;
-      const loaded = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
-      const cells = loaded.flatMap((result) => result.cells);
-      if (loaded.length === 0) {
-        engine.clearOrderBookHeatmapHistory();
-        const firstFailure = results.find((result) => result.status === "rejected");
-        setBookHeatmapHistoryStatus(firstFailure?.status === "rejected" && firstFailure.reason instanceof Error
-          ? firstFailure.reason.message
-          : "Historical depth unavailable");
-        return;
-      }
-      engine.setOrderBookHeatmapHistory(cells);
-      const resolutions = [...new Set(loaded.map((result) => result.resolution))].join("+");
-      const coverageSummary = loaded.map((result) => {
-        const coverage = result.coverage;
-        if (!coverage) return `${result.venue.toUpperCase()} coverage unavailable`;
-        return `${result.venue.toUpperCase()} ${coverage.collectorStatus} · ${formatHeatmapDuration(coverage.availableHorizonMs)} of ${formatHeatmapDuration(coverage.requestedHorizonMs)} · ${coverage.continuityPercent.toFixed(1)}% continuous`;
-      }).join(" · ");
-      setBookHeatmapHistoryStatus(cells.length > 0
-        ? `${coverageSummary} · ${cells.length.toLocaleString()} ${resolutions} cells`
-        : `${coverageSummary} · no historical frames`);
-    });
-    return () => controller.abort();
-  }, [
-    visibleIndicators.orderBookHeatmap,
-    marketSymbol.exchange,
-    marketSymbol.marketKind,
-    marketSymbol.baseAsset,
-    marketSymbol.quoteAsset,
-    bookHeatmapSettings.showHistoricalDepth,
-    bookHeatmapSettings.dataMode,
-    bookHeatmapSettings.selectedVenues.join(","),
-    bookHeatmapSettings.historyHorizon,
-    bookHeatmapSettings.timeResolution,
-    bookHeatmapSettings.visibleRangePercent,
-    bookHeatmapHistoryBand
   ]);
 
   useEffect(() => {
@@ -1994,13 +1730,6 @@ export function PixiBlackChart({
   const changePercent = displayCandle.open ? (change / displayCandle.open) * 100 : 0;
   const indicatorRows: { key: IndicatorKey; label: string; value: string }[] = [
     { key: "aif", label: "A.I.F.", value: "auction intelligence" },
-    {
-      key: "orderBookHeatmap",
-      label: "Book Heatmap",
-      value: bookHeatmapDiagnostics?.state === "live"
-        ? `${bookHeatmapDiagnostics.venue?.toUpperCase() ?? "L2"} authentic`
-        : bookHeatmapDiagnostics?.message ?? "authentic L2"
-    },
     { key: "liquidationHeatmap", label: "Liq Heatmap", value: "model" },
     { key: "volatilityHeatmap", label: "VAE Clusters", value: "top zones" },
     { key: "volumeProfile", label: "HDLX Profile", value: indicatorAdvancedSettings.volumeProfile.rangeMode === "visible" ? "visible" : `lock ${indicatorAdvancedSettings.volumeProfile.fixedRangeLength}` },
@@ -2056,20 +1785,6 @@ export function PixiBlackChart({
       [key]: {
         ...current[key],
         ...patch
-      }
-    }));
-  };
-
-  const updateBookHeatmapSetting = <Key extends keyof BookHeatmapSettings>(
-    key: Key,
-    value: BookHeatmapSettings[Key]
-  ) => {
-    onIndicatorAdvancedSettingsChange((current) => ({
-      ...current,
-      bookHeatmap: {
-        ...defaultBookHeatmapSettings,
-        ...current.bookHeatmap,
-        [key]: value
       }
     }));
   };
@@ -3172,46 +2887,7 @@ export function PixiBlackChart({
   );
 
   return (
-    <div className={bookHeatmapWorkspaceOpen ? "chart-wrap book-heatmap-workspace" : "chart-wrap"}>
-      {bookHeatmapWorkspaceOpen && (
-        <div className="book-heatmap-workspace-bar">
-          <div>
-            <strong>BLACK TERMINAL · BOOK HEATMAP</strong>
-            <span>
-              {bookHeatmapSettings.workspaceMode === "live-book" ? "AUTHENTIC L2" : bookHeatmapSettings.workspaceMode === "estimated-liquidations" ? "ESTIMATED · MODEL-DERIVED" : "CONFIRMED EXCHANGE EVENTS"} · {bookHeatmapSettings.dataMode === "consolidated-book"
-                ? bookHeatmapSettings.selectedVenues.map((venue) => venue.toUpperCase()).join("+")
-                : marketSymbol.exchange.toUpperCase()} · {displaySymbol}
-            </span>
-          </div>
-          <div>
-            <select
-              className="book-heatmap-workspace-mode"
-              value={bookHeatmapSettings.workspaceMode}
-              onChange={(event) => updateBookHeatmapSetting("workspaceMode", event.target.value as BookHeatmapSettings["workspaceMode"])}
-            >
-              <option value="live-book">LIVE BOOK LIQUIDITY</option>
-              <option value="estimated-liquidations">ESTIMATED LIQUIDATIONS · MODEL</option>
-              <option value="confirmed-liquidations">CONFIRMED LIQUIDATIONS</option>
-            </select>
-            <span>{bookHeatmapSettings.workspaceMode === "live-book"
-              ? bookHeatmapDiagnostics?.message ?? "Collecting live depth"
-              : bookHeatmapSettings.workspaceMode === "estimated-liquidations"
-                ? "MODEL-DERIVED · PRICE + VOLUME + LEVERAGE ASSUMPTIONS"
-                : confirmedLiquidationDiagnostics?.state === "live" ? confirmedLiquidationDiagnostics.message : confirmedLiquidationFeedStatus}</span>
-            <span>{bookHeatmapSettings.workspaceMode === "live-book"
-              ? bookHeatmapHistoryStatus
-              : bookHeatmapSettings.workspaceMode === "estimated-liquidations"
-                ? "Estimated concentrations are not exchange-reported"
-                : `${confirmedLiquidationDiagnostics?.events ?? 0} confirmed exchange events retained`}</span>
-            <button type="button" onClick={() => onSnapToLatestChange?.(!snapToLatest)}>
-              {snapToLatest ? "LIVE FOLLOW" : "FREE EXPLORE"}
-            </button>
-            <button type="button" onClick={() => engineRef.current?.resetViewport()}>RESET CAMERA</button>
-            <button type="button" onClick={() => setActiveIndicator("orderBookHeatmap")}>SETTINGS</button>
-            <button type="button" onClick={() => setBookHeatmapWorkspaceOpen(false)}>EXIT WORKSPACE</button>
-          </div>
-        </div>
-      )}
+    <div className="chart-wrap">
       <div className="chart-header">
         <div>
           <span className="pair">{displaySymbol} PERP - {timeframeLabel} - {exchangeLabel.toUpperCase()}</span>
@@ -3261,7 +2937,7 @@ export function PixiBlackChart({
               }}
             >
               <span>{indicator.label}</span>
-              <b className={indicator.key === "aif" || indicator.key === "ema200" || indicator.key === "volume" || indicator.key === "liquidationHeatmap" || indicator.key === "orderBookHeatmap" || indicator.key === "volatilityHeatmap" || indicator.key === "volumeProfile" || indicator.key === "adaptiveSwingStrategy" ? "red" : ""}>{indicator.value}</b>
+              <b className={indicator.key === "aif" || indicator.key === "ema200" || indicator.key === "volume" || indicator.key === "liquidationHeatmap" || indicator.key === "volatilityHeatmap" || indicator.key === "volumeProfile" || indicator.key === "adaptiveSwingStrategy" ? "red" : ""}>{indicator.value}</b>
               <button
                 type="button"
                 className="indicator-action"
@@ -3356,225 +3032,7 @@ export function PixiBlackChart({
               <b>{indicatorVisualSettings[activeIndicator].intensity}</b>
             </span>
           </label>
-          {activeIndicator === "orderBookHeatmap" ? (
-            <>
-              <div className="book-heatmap-truth-panel">
-                <strong>BOOK HEATMAP · AUTHENTIC L2</strong>
-                <span>Live source · {bookHeatmapDiagnostics?.message ?? "Waiting for live depth"}</span>
-                <span>Collector / available history · {bookHeatmapHistoryStatus}</span>
-                <small>Modeled liquidation exposure is intentionally separate from Book Heatmap.</small>
-              </div>
-              <label>
-                Source Mode
-                <select
-                  value={bookHeatmapSettings.dataMode}
-                  onChange={(event) => updateBookHeatmapSetting("dataMode", event.target.value as BookHeatmapSettings["dataMode"])}
-                >
-                  <option value="live-book">Selected venue L2</option>
-                  <option value="consolidated-book">Consolidated certified L2</option>
-                </select>
-              </label>
-              <label>
-                Heatmap Mode
-                <select
-                  value={bookHeatmapSettings.displayMode}
-                  onChange={(event) => updateBookHeatmapSetting("displayMode", event.target.value as BookHeatmapSettings["displayMode"])}
-                >
-                  <option value="historical-liquidity">Historical Liquidity</option>
-                  <option value="current-book-profile">Current Book Profile</option>
-                  <option value="combined">Combined</option>
-                </select>
-              </label>
-              <label>
-                Workspace Data
-                <select
-                  value={bookHeatmapSettings.workspaceMode}
-                  onChange={(event) => updateBookHeatmapSetting("workspaceMode", event.target.value as BookHeatmapSettings["workspaceMode"])}
-                >
-                  <option value="live-book">Live Book Liquidity</option>
-                  <option value="estimated-liquidations">Estimated Liquidations · Model</option>
-                  <option value="confirmed-liquidations">Confirmed Liquidation Events</option>
-                </select>
-              </label>
-              {bookHeatmapSettings.dataMode === "consolidated-book" && (
-                <div className="book-heatmap-venue-filter">
-                  <span>Certified Venues</span>
-                  {(["bybit", "binance"] as const).map((venue) => (
-                    <label key={venue}>
-                      <input
-                        type="checkbox"
-                        checked={bookHeatmapSettings.selectedVenues.includes(venue)}
-                        onChange={(event) => {
-                          const selected = new Set(bookHeatmapSettings.selectedVenues);
-                          if (event.target.checked) selected.add(venue);
-                          else if (selected.size > 1) selected.delete(venue);
-                          updateBookHeatmapSetting("selectedVenues", [...selected] as BookHeatmapSettings["selectedVenues"]);
-                        }}
-                      />
-                      {venue.toUpperCase()}
-                    </label>
-                  ))}
-                  <small>Only venues with certified base-quantity normalization are eligible.</small>
-                </div>
-              )}
-              <label>
-                Historical Depth
-                <input
-                  type="checkbox"
-                  checked={bookHeatmapSettings.showHistoricalDepth}
-                  onChange={(event) => updateBookHeatmapSetting("showHistoricalDepth", event.target.checked)}
-                />
-              </label>
-              <label>
-                History Horizon
-                <select
-                  value={bookHeatmapSettings.historyHorizon}
-                  onChange={(event) => updateBookHeatmapSetting("historyHorizon", event.target.value as BookHeatmapSettings["historyHorizon"])}
-                >
-                  {(["15m", "1h", "6h", "24h", "3d", "1w"] as const).map((horizon) => (
-                    <option key={horizon} value={horizon}>{horizon}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Time Resolution
-                <select
-                  value={bookHeatmapSettings.timeResolution}
-                  onChange={(event) => updateBookHeatmapSetting("timeResolution", event.target.value as BookHeatmapSettings["timeResolution"])}
-                >
-                  <option value="adaptive">Adaptive</option>
-                  <option value="1s">1 second</option>
-                  <option value="5s">5 seconds</option>
-                  <option value="15s">15 seconds</option>
-                  <option value="1m">1 minute</option>
-                </select>
-              </label>
-              <label>
-                Price Resolution
-                <select
-                  value={bookHeatmapSettings.priceResolution}
-                  onChange={(event) => updateBookHeatmapSetting("priceResolution", event.target.value as BookHeatmapSettings["priceResolution"])}
-                >
-                  <option value="adaptive">Adaptive</option>
-                  <option value="tick">Tick</option>
-                  <option value="basis-points">Basis points</option>
-                  <option value="fixed">Fixed absolute</option>
-                  <option value="atr-relative">ATR-relative</option>
-                  <option value="visible-range">Visible range</option>
-                </select>
-              </label>
-              <label>
-                Price Coverage ±%
-                <input
-                  type="number"
-                  min={0.5}
-                  max={40}
-                  step={0.5}
-                  value={bookHeatmapSettings.visibleRangePercent}
-                  onChange={(event) => updateBookHeatmapSetting("visibleRangePercent", clampNumber(Number(event.target.value), 0.5, 40))}
-                />
-              </label>
-              <label>
-                Intensity Scale
-                <select
-                  value={bookHeatmapSettings.scaleMode}
-                  onChange={(event) => updateBookHeatmapSetting("scaleMode", event.target.value as BookHeatmapSettings["scaleMode"])}
-                >
-                  <option value="adaptive">Adaptive</option>
-                  <option value="percentile">Percentile</option>
-                  <option value="logarithmic">Logarithmic</option>
-                  <option value="linear">Linear</option>
-                </select>
-              </label>
-              <label>
-                Normalization Percentile
-                <input
-                  type="number"
-                  min={50}
-                  max={99.9}
-                  step={0.1}
-                  value={bookHeatmapSettings.percentile}
-                  onChange={(event) => updateBookHeatmapSetting("percentile", clampNumber(Number(event.target.value), 50, 99.9))}
-                />
-              </label>
-              <label>
-                Minimum Notional
-                <input
-                  type="number"
-                  min={0}
-                  step={1000}
-                  value={bookHeatmapSettings.minimumNotional}
-                  onChange={(event) => updateBookHeatmapSetting("minimumNotional", Math.max(0, Number(event.target.value) || 0))}
-                />
-              </label>
-              <label className="indicator-range-row">
-                Opacity
-                <span>
-                  <input
-                    type="range"
-                    min={10}
-                    max={100}
-                    value={bookHeatmapSettings.opacity}
-                    onChange={(event) => updateBookHeatmapSetting("opacity", Number(event.target.value))}
-                  />
-                  <b>{bookHeatmapSettings.opacity}%</b>
-                </span>
-              </label>
-              <label className="indicator-range-row">
-                Visual Smoothing
-                <span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={bookHeatmapSettings.smoothing}
-                    onChange={(event) => updateBookHeatmapSetting("smoothing", Number(event.target.value))}
-                  />
-                  <b>{bookHeatmapSettings.smoothing}%</b>
-                </span>
-              </label>
-              <label>
-                Visibility Threshold %
-                <input
-                  type="number"
-                  min={0}
-                  max={95}
-                  step={1}
-                  value={bookHeatmapSettings.thresholdPercent}
-                  onChange={(event) => updateBookHeatmapSetting("thresholdPercent", clampNumber(Number(event.target.value), 0, 95))}
-                />
-              </label>
-              <label>
-                Palette
-                <select
-                  value={bookHeatmapSettings.palette}
-                  onChange={(event) => updateBookHeatmapSetting("palette", event.target.value as BookHeatmapSettings["palette"])}
-                >
-                  <option value="thermal">Thermal · Purple / Cyan / Yellow</option>
-                  <option value="institutional">Institutional · Black / Gray / White / Red</option>
-                  <option value="blood-silver">Blood Red · Red / White</option>
-                </select>
-              </label>
-              <label>
-                Feed Diagnostics
-                <input
-                  type="checkbox"
-                  checked={bookHeatmapSettings.showDiagnostics}
-                  onChange={(event) => updateBookHeatmapSetting("showDiagnostics", event.target.checked)}
-                />
-              </label>
-              <button
-                type="button"
-                className="profile-inline-button"
-                onClick={() => {
-                  setBookHeatmapWorkspaceOpen(true);
-                  setActiveIndicator(null);
-                }}
-              >
-                Open Full Book Heatmap Workspace
-              </button>
-            </>
-          ) : activeIndicator === "liquidationHeatmap" ? (
+          {activeIndicator === "liquidationHeatmap" ? (
             <label>
               Model
               <select value="leverage-volume" onChange={() => undefined}>
@@ -3864,41 +3322,6 @@ export function PixiBlackChart({
         {indicatorsCollapsed ? "v" : "^"}
       </button>
       <div ref={hostRef} className="pixi-chart-host" onContextMenu={handleChartContextMenu} onClick={() => setChartContextMenu(null)} />
-      {visibleIndicators.orderBookHeatmap && bookHeatmapSettings.showDiagnostics && bookHeatmapDiagnostics && (
-        <div className={`book-heatmap-diagnostics state-${bookHeatmapDiagnostics.state}`}>
-          {bookHeatmapWorkspaceOpen && bookHeatmapSettings.workspaceMode === "estimated-liquidations" ? (
-            <>
-              <strong>ESTIMATED LIQUIDATIONS · MODEL-DERIVED</strong>
-              <span>Inputs: exchange candles, traded volume, volatility and explicit leverage-tier assumptions</span>
-              <span>These concentrations are estimates, not exchange-reported liquidation levels.</span>
-              <small>Confidence is limited while open interest and funding history are unavailable.</small>
-            </>
-          ) : bookHeatmapWorkspaceOpen && bookHeatmapSettings.workspaceMode === "confirmed-liquidations" ? (
-            <>
-              <strong>CONFIRMED LIQUIDATIONS · EXCHANGE EVENTS</strong>
-              <span>{confirmedLiquidationDiagnostics?.state === "live" ? confirmedLiquidationDiagnostics.message : confirmedLiquidationFeedStatus}</span>
-              <span>{confirmedLiquidationDiagnostics?.venues.map((venue) => venue.toUpperCase()).join("+") || "BYBIT/BINANCE PUBLIC FEEDS"}</span>
-              <small>{confirmedLiquidationDiagnostics?.events ?? 0} bounded events retained · confidence 100% event provenance</small>
-            </>
-          ) : (
-            <>
-              <strong>BOOK · {bookHeatmapDiagnostics.classification}</strong>
-              <span>{bookHeatmapDiagnostics.message}</span>
-              <span>{bookHeatmapHistoryStatus}</span>
-              <small>
-                {bookHeatmapDiagnostics.venue?.toUpperCase() ?? "NO VENUE"} · live {bookHeatmapDiagnostics.liveFrames} · history {bookHeatmapDiagnostics.historicalCells}
-                {bookHeatmapDiagnostics.latencyMs !== null ? ` · ${bookHeatmapDiagnostics.latencyMs}ms` : ""}
-              </small>
-              <small>
-                {Object.entries(bookHeatmapDiagnostics.venues).map(([venue, status]) => `${venue.toUpperCase()} ${status.state}${status.latencyMs !== null ? ` ${status.latencyMs}ms` : ""}`).join(" · ") || "NO CERTIFIED LIVE VENUE"}
-              </small>
-              <small>
-                accepted {bookHeatmapDiagnostics.acceptedSnapshots} · rejected {bookHeatmapDiagnostics.rejectedSnapshots} · stale {bookHeatmapDiagnostics.staleSnapshots} · backpressure {bookHeatmapDiagnostics.backpressureDrops}
-              </small>
-            </>
-          )}
-        </div>
-      )}
       <AifIndicatorOverlay
         active={visibleIndicators.aif}
         settingsOpen={activeIndicator === "aif"}

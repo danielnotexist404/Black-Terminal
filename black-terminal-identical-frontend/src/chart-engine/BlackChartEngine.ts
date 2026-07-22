@@ -3,24 +3,15 @@ import {
   Container,
   FederatedPointerEvent,
   Graphics,
-  Sprite,
-  Texture,
   Text
 } from "pixi.js";
 import { CandleBuffer } from "./data/CandleBuffer";
 import { LiquidationHeatmapModel } from "./heatmap/LiquidationHeatmapModel";
-import { OrderBookHeatmapModel } from "./heatmap/OrderBookHeatmapModel";
-import type { BookHeatmapDiagnostics, HistoricalBookHeatmapCell } from "./heatmap/OrderBookHeatmapModel";
-import { BookHeatmapWorkerClient } from "./heatmap/bookHeatmapWorkerClient";
-import { buildHistoricalLiquidityMatrix, matrixQuantileReference } from "./heatmap/HistoricalLiquidityMatrix";
-import { ConfirmedLiquidationModel } from "./heatmap/ConfirmedLiquidationModel";
-import type { ConfirmedLiquidationDiagnostics, ConfirmedLiquidationEvent } from "./heatmap/ConfirmedLiquidationModel";
 import { VolatilityHeatmapModel } from "./heatmap/VolatilityHeatmapModel";
 import { VolumeProfileModel, VolumeProfileResult, VolumeProfileRow } from "./profile/VolumeProfileModel";
 import { defaultIndicatorAdvancedSettings } from "./profile/volumeProfileDefaults";
 import type { IndicatorAlertDefinition } from "../automation/alerts";
 import type { CompiledPlot } from "../components/ScriptCompiler";
-import { OrderBookSnapshot } from "../market-data/types";
 import { createAdaptiveSwingSignals } from "../modules/strategy-lab/adapters/signalAdapter";
 import type { StrategySettings, StrategySignal } from "../modules/strategy-lab/types/strategy.types";
 import { blackCorePerformanceMonitor } from "../performance/performanceMonitor";
@@ -138,16 +129,6 @@ export class BlackChartEngine {
   private candles: CandleBuffer;
   private displayedCandles: Candle[] = [];
   private heatmapModel = new LiquidationHeatmapModel();
-  private orderBookHeatmapModel = new OrderBookHeatmapModel();
-  private orderBookHeatmapWorker = new BookHeatmapWorkerClient(
-    (snapshot) => {
-      const result = this.orderBookHeatmapModel.ingestCompacted(snapshot);
-      if (result.accepted) this.scheduleOrderBookHeatmapDraw();
-    },
-    (count) => this.orderBookHeatmapModel.recordBackpressureDrop(count)
-  );
-  private confirmedLiquidationModel = new ConfirmedLiquidationModel();
-  private bookHeatmapWorkspaceMode: "live-book" | "estimated-liquidations" | "confirmed-liquidations" | null = null;
   private volatilityHeatmapModel = new VolatilityHeatmapModel();
   private volumeProfileModel = new VolumeProfileModel();
   private lastVolumeProfileResult?: VolumeProfileResult;
@@ -175,7 +156,6 @@ export class BlackChartEngine {
   private customPlots: CompiledPlot[] = [];
   private alertDefinitions: IndicatorAlertDefinition[] = [];
   private visibleIndicators: VisibleIndicators = {
-    orderBookHeatmap: false,
     liquidationHeatmap: false,
     volatilityHeatmap: false,
       volumeProfile: false,
@@ -191,7 +171,7 @@ export class BlackChartEngine {
     openInterestOscillator: false,
     zScoreOscillator: false,
     waveTrendOscillator: false,
-    volume: false
+    volume: true
   };
   private indicatorPeriods: IndicatorPeriods = {
     volatilityHeatmap: 34,
@@ -207,7 +187,6 @@ export class BlackChartEngine {
     waveTrendOscillator: 10
   };
   private indicatorVisualSettings: IndicatorVisualSettings = {
-    orderBookHeatmap: { color: "orange", intensity: 72 },
     liquidationHeatmap: { color: "red", intensity: 78 },
     volatilityHeatmap: { color: "green", intensity: 86 },
       volumeProfile: { color: "red", intensity: 72 },
@@ -230,7 +209,6 @@ export class BlackChartEngine {
   private rootLayer = new Container();
   private gridLayer = new Graphics();
   private watermarkLayer = new Graphics();
-  private historicalHeatmapLayer = new Container();
   private heatmapLayer = new Graphics();
   private candleLayer = new Graphics();
   private volumeLayer = new Graphics();
@@ -252,9 +230,6 @@ export class BlackChartEngine {
   private alertTexts: Text[] = [];
   private priceLineColor = "";
   private priceLineIntensity = 75;
-  private historicalHeatmapCanvas?: HTMLCanvasElement;
-  private historicalHeatmapTexture?: Texture;
-  private historicalHeatmapSprite?: Sprite;
 
   private view: ViewState = {
     width: 800,
@@ -300,8 +275,6 @@ export class BlackChartEngine {
   private resizeRaf?: number;
   private drawRaf?: number;
   private mockTimer?: number;
-  private orderBookDrawTimer?: number;
-  private lastOrderBookDrawAt = 0;
   private frameCount = 0;
   private lastFpsTime = performance.now();
   private lastTickerFrameAt = performance.now();
@@ -347,7 +320,6 @@ export class BlackChartEngine {
     this.rootLayer.addChild(
       this.gridLayer,
       this.watermarkLayer,
-      this.historicalHeatmapLayer,
       this.heatmapLayer,
       this.volumeLayer,
       this.candleLayer,
@@ -359,12 +331,7 @@ export class BlackChartEngine {
       this.crosshairLayer
     );
     this.drawingLayer.addChild(this.drawingGraphics);
-    this.historicalHeatmapCanvas = document.createElement("canvas");
-    this.historicalHeatmapTexture = Texture.from(this.historicalHeatmapCanvas);
-    this.historicalHeatmapSprite = new Sprite(this.historicalHeatmapTexture);
-    this.historicalHeatmapSprite.visible = false;
-    this.historicalHeatmapLayer.addChild(this.historicalHeatmapSprite);
-    blackCoreResourceTracker.setGauge("pixi-container", this.resourceOwner, 5);
+    blackCoreResourceTracker.setGauge("pixi-container", this.resourceOwner, 4);
     blackCoreResourceTracker.setGauge("pixi-graphics", this.resourceOwner, 11);
     blackCoreResourceTracker.setGauge("pixi-text", this.resourceOwner, 0);
 
@@ -574,11 +541,6 @@ export class BlackChartEngine {
     this.onPriceChange?.(price);
   }
 
-  ingestBookHeatmapTrade(price: number, quantity: number, time: number, side: "buy" | "sell" | "unknown" = "unknown") {
-    if (!this.visibleIndicators.orderBookHeatmap) return;
-    this.orderBookHeatmapModel.ingestTrade(price, quantity, time, side);
-  }
-
   getChartPointFromClient(clientX: number, clientY: number): ChartPoint | null {
     const bounds = this.host.getBoundingClientRect();
     const localX = clientX - bounds.left;
@@ -697,29 +659,6 @@ export class BlackChartEngine {
     return snapshot;
   }
 
-  ingestOrderBookSnapshot(snapshot: OrderBookSnapshot) {
-    this.orderBookHeatmapWorker.submit(snapshot);
-  }
-
-  private scheduleOrderBookHeatmapDraw() {
-    if (!this.visibleIndicators.orderBookHeatmap) return;
-
-    const now = performance.now();
-    const waitMs = 260 - (now - this.lastOrderBookDrawAt);
-    if (waitMs <= 0) {
-      this.lastOrderBookDrawAt = now;
-      this.draw();
-      return;
-    }
-
-    if (this.orderBookDrawTimer) return;
-    this.orderBookDrawTimer = window.setTimeout(() => {
-      this.orderBookDrawTimer = undefined;
-      this.lastOrderBookDrawAt = performance.now();
-      this.draw();
-    }, waitMs);
-  }
-
   setIndicatorState(
     visibleIndicators: VisibleIndicators,
     indicatorPeriods: IndicatorPeriods,
@@ -730,19 +669,6 @@ export class BlackChartEngine {
     this.indicatorPeriods = indicatorPeriods;
     this.indicatorVisualSettings = indicatorVisualSettings;
     this.indicatorAdvancedSettings = indicatorAdvancedSettings;
-    const bookSettings = indicatorAdvancedSettings.bookHeatmap;
-    if (bookSettings) {
-      this.orderBookHeatmapModel.setSettings({
-        scaleMode: bookSettings.scaleMode,
-        percentile: bookSettings.percentile / 100,
-        minimumNotional: bookSettings.minimumNotional,
-        consolidated: bookSettings.dataMode === "consolidated-book"
-      });
-    }
-    if (!this.visibleIndicators.orderBookHeatmap && this.orderBookDrawTimer) {
-      window.clearTimeout(this.orderBookDrawTimer);
-      this.orderBookDrawTimer = undefined;
-    }
     this.setHeatmapSource(this.candles.all(), this.heatmapVisibleUntilIndex);
     this.draw();
   }
@@ -751,35 +677,6 @@ export class BlackChartEngine {
     this.priceLineColor = color;
     this.priceLineIntensity = intensity;
     this.draw();
-  }
-
-  setOrderBookHeatmapHistory(cells: HistoricalBookHeatmapCell[]) {
-    this.orderBookHeatmapModel.replaceHistoricalCells(cells);
-    this.queueDraw();
-  }
-
-  clearOrderBookHeatmapHistory() {
-    this.orderBookHeatmapModel.clearHistoricalCells();
-    this.queueDraw();
-  }
-
-  getOrderBookHeatmapDiagnostics(): BookHeatmapDiagnostics {
-    return this.orderBookHeatmapModel.diagnostics();
-  }
-
-  setBookHeatmapWorkspaceMode(mode: "live-book" | "estimated-liquidations" | "confirmed-liquidations" | null) {
-    this.bookHeatmapWorkspaceMode = mode;
-    this.setHeatmapSource(this.candles.all(), this.heatmapVisibleUntilIndex);
-    this.queueDraw();
-  }
-
-  ingestConfirmedLiquidation(event: ConfirmedLiquidationEvent) {
-    if (!this.confirmedLiquidationModel.ingest(event)) return;
-    if (this.bookHeatmapWorkspaceMode === "confirmed-liquidations") this.queueDraw();
-  }
-
-  getConfirmedLiquidationDiagnostics(): ConfirmedLiquidationDiagnostics {
-    return this.confirmedLiquidationModel.diagnostics();
   }
 
   setAlertDefinitions(alertDefinitions: IndicatorAlertDefinition[]) {
@@ -800,12 +697,6 @@ export class BlackChartEngine {
     this.snapToLatest = enabled;
     if (enabled) this.view.scrollX = 0;
     else this.view.scrollX = this.clampHorizontalScroll(this.view.scrollX);
-    this.queueDraw();
-  }
-
-  resetViewport() {
-    this.view.scrollX = 0;
-    this.manualPriceRange = undefined;
     this.queueDraw();
   }
 
@@ -886,12 +777,8 @@ export class BlackChartEngine {
 
   private setHeatmapSource(candles: Candle[], visibleUntilIndex = candles.length - 1) {
     this.heatmapVisibleUntilIndex = Math.max(0, Math.min(Math.max(0, candles.length - 1), visibleUntilIndex));
-    if (this.visibleIndicators.liquidationHeatmap || this.bookHeatmapWorkspaceMode === "estimated-liquidations") {
+    if (this.visibleIndicators.liquidationHeatmap) {
       this.heatmapModel.setSource(candles);
-    }
-    if (this.visibleIndicators.orderBookHeatmap) {
-      this.orderBookHeatmapModel.setCandles(candles);
-      this.confirmedLiquidationModel.setCandles(candles);
     }
     if (this.visibleIndicators.volatilityHeatmap) {
       this.volatilityHeatmapModel.setSource(candles, this.indicatorPeriods.volatilityHeatmap);
@@ -907,8 +794,6 @@ export class BlackChartEngine {
     window.removeEventListener("visibilitychange", this.handleVisibilityChange);
     if (this.resizeRaf) window.cancelAnimationFrame(this.resizeRaf);
     if (this.drawRaf) window.cancelAnimationFrame(this.drawRaf);
-    if (this.orderBookDrawTimer) window.clearTimeout(this.orderBookDrawTimer);
-    this.orderBookHeatmapWorker.dispose();
     this.host.classList.remove("price-scale-dragging", "price-scale-hover", "drawing-eraser");
     this.setReplaySelectionMode(false);
     this.resizeObserver?.disconnect();
@@ -918,10 +803,6 @@ export class BlackChartEngine {
     this.clearAlertTexts();
     this.clearProfileTexts();
     this.clearHeatmapTexts();
-    this.historicalHeatmapTexture?.destroy(true);
-    this.historicalHeatmapTexture = undefined;
-    this.historicalHeatmapSprite = undefined;
-    this.historicalHeatmapCanvas = undefined;
     this.app.destroy(true, { children: true, texture: true });
     blackCoreResourceTracker.clearGauge("pixi-container", this.resourceOwner);
     blackCoreResourceTracker.clearGauge("pixi-graphics", this.resourceOwner);
@@ -1247,17 +1128,6 @@ export class BlackChartEngine {
     }
 
     const last = data[data.length - 1];
-    const bookRangePercent = this.indicatorAdvancedSettings.bookHeatmap?.visibleRangePercent;
-    if (
-      this.visibleIndicators.orderBookHeatmap &&
-      last &&
-      Number.isFinite(bookRangePercent) &&
-      Number(bookRangePercent) > 0
-    ) {
-      const bookRange = last.close * Math.max(0.005, Math.min(0.4, Number(bookRangePercent) / 100));
-      min = Math.min(min, last.close - bookRange);
-      max = Math.max(max, last.close + bookRange);
-    }
     if (data.length <= 300 && last && last.close > 60000 && last.close < 75000) {
       min = Math.min(min, 64600);
       max = Math.max(max, 67400);
@@ -1572,10 +1442,8 @@ export class BlackChartEngine {
     g.clear();
     this.clearHeatmapTexts();
     if (
-      !this.visibleIndicators.orderBookHeatmap &&
       !this.visibleIndicators.liquidationHeatmap &&
-      !this.visibleIndicators.volatilityHeatmap &&
-      !this.bookHeatmapWorkspaceMode
+      !this.visibleIndicators.volatilityHeatmap
     ) {
       return;
     }
@@ -1583,14 +1451,8 @@ export class BlackChartEngine {
     const plotWidth = this.view.width - this.view.rightAxisWidth;
     const plotHeight = this.view.height - this.view.bottomAxisHeight;
     this.drawVolatilityHeatmap(g, plotWidth, plotHeight);
-    if (!this.bookHeatmapWorkspaceMode || this.bookHeatmapWorkspaceMode === "live-book") {
-      this.drawOrderBookHeatmap(g, plotWidth, plotHeight);
-    }
-    if (this.bookHeatmapWorkspaceMode === "confirmed-liquidations") {
-      this.drawConfirmedLiquidations(g, plotWidth, plotHeight);
-    }
 
-    if (!this.visibleIndicators.liquidationHeatmap && this.bookHeatmapWorkspaceMode !== "estimated-liquidations") return;
+    if (!this.visibleIndicators.liquidationHeatmap) return;
 
     const visual = this.visualFor("liquidationHeatmap", "red");
     const untilIndex = this.heatmapVisibleUntilIndex ?? this.candles.all().length - 1;
@@ -1603,7 +1465,6 @@ export class BlackChartEngine {
     );
     const step = this.timeStep();
     const profile = new Map<string, { price: number; strength: number }>();
-    let hoveredEstimated: (typeof cells)[number] | undefined;
 
     for (const cell of cells) {
       const startIndex = Math.max(this.view.firstIndex, cell.startIndex);
@@ -1622,15 +1483,8 @@ export class BlackChartEngine {
 
       const color = this.liquidationColor(cell.strength);
       const alpha = (0.032 + cell.strength * 0.22) * Math.max(0.35, visual.alpha);
-      const clippedX = Math.max(0, x1);
-      const clippedWidth = Math.min(plotWidth, x2) - clippedX;
-      g.rect(clippedX, y, clippedWidth, h)
+      g.rect(Math.max(0, x1), y, Math.min(plotWidth, x2) - Math.max(0, x1), h)
         .fill({ color, alpha });
-      if (
-        this.pointer.active && this.pointer.x >= clippedX && this.pointer.x <= clippedX + clippedWidth &&
-        this.pointer.y >= y - 3 && this.pointer.y <= y + h + 3 &&
-        (!hoveredEstimated || cell.strength > hoveredEstimated.strength)
-      ) hoveredEstimated = cell;
 
       if (cell.strength >= 0.55) {
         const coreHeight = Math.max(1, h * 0.42);
@@ -1672,18 +1526,6 @@ export class BlackChartEngine {
         g.rect(plotWidth - bw - 18, y - h / 2 + k * 2.2, bw, 1.05)
           .fill({ color: lvl.color, alpha: (lvl.color === theme.orangeBright ? 0.24 : 0.15) * Math.max(0.35, visual.alpha) });
       }
-    }
-    if (hoveredEstimated) {
-      const tooltipX = Math.max(8, Math.min(plotWidth - 286, this.pointer.x + 14));
-      const tooltipY = Math.max(this.view.topPadding + 8, Math.min(plotHeight - 82, this.pointer.y - 26));
-      g.roundRect(tooltipX, tooltipY, 278, 76, 3)
-        .fill({ color: 0x030405, alpha: 0.95 })
-        .stroke({ width: 1, color: this.liquidationColor(hoveredEstimated.strength), alpha: 0.75 });
-      this.addHeatmapText("ESTIMATED LIQUIDATION · MODEL-DERIVED", tooltipX + 8, tooltipY + 6, 0xff6a00, 8);
-      this.addHeatmapText(`${hoveredEstimated.side.toUpperCase()} · ${hoveredEstimated.price.toLocaleString(undefined, { maximumFractionDigits: 4 })}`, tooltipX + 8, tooltipY + 20, 0xf1f2f4, 9);
-      this.addHeatmapText(`CONF ${(hoveredEstimated.confidence * 100).toFixed(0)}% · NOT EXCHANGE-REPORTED`, tooltipX + 8, tooltipY + 35, 0xa7abb2, 8);
-      this.addHeatmapText(hoveredEstimated.modelInputs.join(" + "), tooltipX + 8, tooltipY + 50, 0x858a93, 7);
-      this.addHeatmapText("LEVERAGE TIERS: 5x / 10x / 25x / 50x / 100x", tooltipX + 8, tooltipY + 63, 0x6f747c, 7);
     }
   }
 
@@ -1834,269 +1676,6 @@ export class BlackChartEngine {
       g.moveTo(x, boundedY + boundedH * 0.18).lineTo(x + w, boundedY + boundedH * 0.18)
         .stroke({ width: 0.85, color: theme.green, alpha: Math.min(0.28, 0.08 + strength * 0.14) * alphaScale });
     }
-  }
-
-  private drawConfirmedLiquidations(g: Graphics, plotWidth: number, plotHeight: number) {
-    const cells = this.confirmedLiquidationModel.cells(
-      this.view.firstIndex,
-      this.view.lastIndex,
-      this.view.priceMin,
-      this.view.priceMax
-    );
-    let hovered: (typeof cells)[number] | undefined;
-    for (const cell of cells) {
-      const x = this.xForIndex(cell.xIndex);
-      const y = this.yForPrice(cell.price);
-      if (x < 0 || x > plotWidth || y < this.view.topPadding || y > plotHeight) continue;
-      const radius = 2.5 + cell.strength * 7.5;
-      const color = cell.liquidatedSide === "long" ? 0xff303d : cell.liquidatedSide === "short" ? 0xff8a00 : 0xcdd1d6;
-      g.circle(x, y, radius + 3).fill({ color, alpha: 0.08 + cell.strength * 0.12 });
-      g.circle(x, y, radius).fill({ color, alpha: 0.22 + cell.strength * 0.54 });
-      g.moveTo(x - radius * 0.7, y).lineTo(x + radius * 0.7, y)
-        .stroke({ width: 1, color: cell.strength > 0.9 ? 0xffffff : color, alpha: 0.86 });
-      if (this.pointer.active && Math.hypot(this.pointer.x - x, this.pointer.y - y) <= radius + 5) {
-        if (!hovered || cell.notional > hovered.notional) hovered = cell;
-      }
-    }
-    if (!hovered) return;
-    const tooltipX = Math.max(8, Math.min(plotWidth - 252, this.pointer.x + 14));
-    const tooltipY = Math.max(this.view.topPadding + 8, Math.min(plotHeight - 68, this.pointer.y - 24));
-    const color = hovered.liquidatedSide === "long" ? 0xff303d : hovered.liquidatedSide === "short" ? 0xff8a00 : 0xcdd1d6;
-    g.roundRect(tooltipX, tooltipY, 244, 62, 3)
-      .fill({ color: 0x030405, alpha: 0.95 })
-      .stroke({ width: 1, color, alpha: 0.75 });
-    this.addHeatmapText(`CONFIRMED · ${hovered.venue.toUpperCase()}`, tooltipX + 8, tooltipY + 6, color, 8);
-    this.addHeatmapText(`${hovered.liquidatedSide.toUpperCase()} LIQ · ${hovered.priceKind.toUpperCase()} ${hovered.price.toLocaleString(undefined, { maximumFractionDigits: 4 })}`, tooltipX + 8, tooltipY + 20, 0xf1f2f4, 9);
-    this.addHeatmapText(`${this.compactVolume(hovered.notional)} NOTIONAL · EXCHANGE EVENT`, tooltipX + 8, tooltipY + 35, 0xa7abb2, 8);
-    this.addHeatmapText(new Date(hovered.time).toISOString(), tooltipX + 8, tooltipY + 49, 0x6f747c, 7);
-  }
-
-  private drawOrderBookHeatmap(g: Graphics, plotWidth: number, plotHeight: number) {
-    if (!this.visibleIndicators.orderBookHeatmap) return;
-
-    const visual = this.visualFor("orderBookHeatmap", "orange");
-    const settings = {
-      ...defaultIndicatorAdvancedSettings.bookHeatmap,
-      ...this.indicatorAdvancedSettings.bookHeatmap
-    };
-    const threshold = Math.max(0, Math.min(0.95, settings.thresholdPercent / 100));
-    const opacity = Math.max(0.1, Math.min(1, settings.opacity / 100));
-    const smoothing = Math.max(0, Math.min(1, settings.smoothing / 100));
-    const cells = this.orderBookHeatmapModel.cells(
-      this.view.firstIndex,
-      this.view.lastIndex,
-      this.view.priceMin,
-      this.view.priceMax
-    );
-    if (cells.length === 0) {
-      if (this.historicalHeatmapSprite) this.historicalHeatmapSprite.visible = false;
-      return;
-    }
-
-    let hovered: { cell: (typeof cells)[number]; x: number; y: number } | undefined;
-    const historicalCells = settings.displayMode === "combined"
-      ? cells
-      : cells.filter((cell) => cell.classification === "HISTORICAL L2");
-    if (settings.displayMode !== "current-book-profile") {
-      this.renderHistoricalLiquidityRaster(historicalCells, g, plotWidth, settings, visual.alpha, opacity);
-    } else if (this.historicalHeatmapSprite) this.historicalHeatmapSprite.visible = false;
-
-    const currentProfileCells = settings.displayMode === "historical-liquidity"
-      ? []
-      : cells
-      .filter((cell) => cell.active && cell.strength >= Math.max(0.08, threshold))
-      .sort((a, b) => a.strength - b.strength)
-      .slice(-180);
-    for (const cell of currentProfileCells) {
-      const yTop = this.yForPrice(cell.priceHigh);
-      const yBottom = this.yForPrice(cell.priceLow);
-      const y = Math.min(yTop, yBottom);
-      const h = Math.max(1.15, Math.min(7.5, Math.abs(yBottom - yTop)));
-      if (y + h < this.view.topPadding || y > plotHeight) continue;
-
-      const width = plotWidth * (0.045 + cell.strength * 0.245);
-      const x = Math.max(0, plotWidth - width);
-      const color = this.orderBookHeatmapColor(cell.strength, cell.side, settings.palette);
-      const alpha = (0.05 + cell.strength * 0.4) * Math.max(0.35, visual.alpha) * opacity;
-      if (smoothing > 0 && cell.strength > 0.25) {
-        const pad = 0.5 + smoothing * 1.25;
-        g.rect(x - pad, y - pad, width + pad, h + pad * 2)
-          .fill({ color, alpha: Math.min(0.12, alpha * smoothing * 0.24) });
-      }
-      g.rect(x, y, width, h).fill({ color, alpha: Math.min(0.68, alpha) });
-      if (cell.strength > 0.72) {
-        g.rect(x, y + h * 0.35, width, Math.max(0.7, h * 0.3))
-          .fill({ color: cell.strength >= 0.94 ? 0xf4f5f7 : theme.orangeBright, alpha: Math.min(0.56, alpha * 0.82) });
-      }
-
-      if (
-        this.pointer.active &&
-        this.pointer.x >= x && this.pointer.x <= plotWidth &&
-        this.pointer.y >= y - 3 && this.pointer.y <= y + h + 3 &&
-        (!hovered || cell.strength > hovered.cell.strength)
-      ) {
-        hovered = { cell, x, y };
-      }
-    }
-
-    if (hovered) {
-      const { cell } = hovered;
-      const venues = Object.keys(cell.venues).map((venue) => venue.toUpperCase()).join("+") || "VENUE";
-      const persistence = cell.persistenceMs >= 60_000
-        ? `${(cell.persistenceMs / 60_000).toFixed(1)}m`
-        : `${Math.max(0, cell.persistenceMs / 1000).toFixed(1)}s`;
-      const lines = [
-        `${cell.classification} · ${venues}${cell.active ? " · CURRENT PROFILE" : ""}`,
-        `${cell.side.toUpperCase()} ${cell.price.toLocaleString(undefined, { maximumFractionDigits: 4 })}`,
-        `${this.compactVolume(cell.notional)} NOTIONAL · ${persistence} · ${cell.observations} OBS`,
-        `STACK +${this.compactVolume(cell.stackingNotional)} · PULL -${this.compactVolume(cell.pullingNotional)} · IMB ${(cell.imbalance * 100).toFixed(0)}%${cell.spoofRisk > 0 ? ` · SPOOF? ${(cell.spoofRisk * 100).toFixed(0)}%` : ""}`,
-        `TRADE ${this.compactVolume(cell.correlatedTradeNotional)} · CONSUMED~ ${this.compactVolume(cell.estimatedConsumedNotional)} · CANCELLED~ ${this.compactVolume(cell.estimatedCancelledNotional)}`,
-        `ABS ${(cell.absorptionScore * 100).toFixed(0)}% · ICEBERG? ${(cell.icebergProbability * 100).toFixed(0)}% · CONF ${(cell.confidence * 100).toFixed(0)}%`,
-        cell.analyticsBasis
-      ];
-      const tooltipX = Math.max(8, Math.min(plotWidth - 298, this.pointer.x + 14));
-      const tooltipY = Math.max(this.view.topPadding + 8, Math.min(plotHeight - 110, this.pointer.y - 26));
-      g.roundRect(tooltipX, tooltipY, 290, 104, 3)
-        .fill({ color: 0x030405, alpha: 0.94 })
-        .stroke({ width: 1, color: this.orderBookHeatmapColor(cell.strength, cell.side, settings.palette), alpha: 0.7 });
-      this.addHeatmapText(lines[0], tooltipX + 8, tooltipY + 6, 0xff6a00, 8);
-      this.addHeatmapText(lines[1], tooltipX + 8, tooltipY + 19, 0xf1f2f4, 9);
-      this.addHeatmapText(lines[2], tooltipX + 8, tooltipY + 33, 0xa7abb2, 8);
-      this.addHeatmapText(lines[3], tooltipX + 8, tooltipY + 47, cell.spoofRisk > 0 ? 0xff303d : 0x858a93, 7);
-      this.addHeatmapText(lines[4], tooltipX + 8, tooltipY + 61, 0x858a93, 7);
-      this.addHeatmapText(lines[5], tooltipX + 8, tooltipY + 75, cell.icebergProbability > 0.5 ? 0xff8a00 : 0x858a93, 7);
-      this.addHeatmapText(lines[6], tooltipX + 8, tooltipY + 89, 0x6f747c, 7);
-    }
-  }
-
-  private renderHistoricalLiquidityRaster(
-    cells: ReturnType<OrderBookHeatmapModel["cells"]>,
-    g: Graphics,
-    plotWidth: number,
-    settings: typeof defaultIndicatorAdvancedSettings.bookHeatmap,
-    visualAlpha: number,
-    opacity: number
-  ) {
-    const canvas = this.historicalHeatmapCanvas;
-    const sprite = this.historicalHeatmapSprite;
-    if (!canvas || !sprite || cells.length === 0) {
-      if (sprite) sprite.visible = false;
-      return;
-    }
-    const pricePlotHeight = this.getPricePlotHeight();
-    const matrix = buildHistoricalLiquidityMatrix(
-      cells,
-      this.view.firstIndex,
-      this.view.lastIndex,
-      this.view.priceMin,
-      this.view.priceMax,
-      {
-        maxColumns: Math.max(128, Math.min(1024, Math.round(plotWidth / 1.5))),
-        maxRows: Math.max(96, Math.min(512, Math.round(pricePlotHeight / 1.35))),
-        minimumNotional: settings.minimumNotional
-      }
-    );
-    if (matrix.sourceCells === 0) {
-      sprite.visible = false;
-      return;
-    }
-    if (canvas.width !== matrix.columns || canvas.height !== matrix.rows) {
-      canvas.width = matrix.columns;
-      canvas.height = matrix.rows;
-    }
-    const context = canvas.getContext("2d", { alpha: true });
-    if (!context) {
-      sprite.visible = false;
-      return;
-    }
-    const image = context.createImageData(matrix.columns, matrix.rows);
-    const reference = matrixQuantileReference(matrix, Math.max(0.5, Math.min(0.999, settings.percentile / 100)));
-    for (let row = 0; row < matrix.rows; row += 1) {
-      const targetRow = matrix.rows - 1 - row;
-      for (let column = 0; column < matrix.columns; column += 1) {
-        const sourceOffset = row * matrix.columns + column;
-        const targetOffset = (targetRow * matrix.columns + column) * 4;
-        if (!matrix.observedColumns[column]) continue;
-        const bid = matrix.bidIntensity[sourceOffset] ?? 0;
-        const ask = matrix.askIntensity[sourceOffset] ?? 0;
-        const notional = Math.max(bid, ask);
-        const strength = this.normalizedRasterStrength(notional, reference, settings.scaleMode);
-        const [red, green, blue, alpha] = this.historicalRasterColor(strength, bid >= ask ? "bid" : "ask", settings.palette);
-        image.data[targetOffset] = red;
-        image.data[targetOffset + 1] = green;
-        image.data[targetOffset + 2] = blue;
-        image.data[targetOffset + 3] = alpha;
-      }
-    }
-    context.putImageData(image, 0, 0);
-    this.historicalHeatmapTexture?.source.update();
-    sprite.visible = true;
-    sprite.x = 0;
-    sprite.y = this.view.topPadding;
-    sprite.width = plotWidth;
-    sprite.height = pricePlotHeight;
-    sprite.alpha = Math.max(0.1, Math.min(1, opacity * Math.max(0.35, visualAlpha)));
-    const legendX = 8;
-    const legendY = this.view.topPadding + 22;
-    for (let index = 0; index < 12; index += 1) {
-      const strength = index / 11;
-      const [red, green, blue] = this.historicalRasterColor(strength, "bid", settings.palette);
-      g.rect(legendX, legendY + (11 - index) * 5, 7, 5.5).fill({ color: (red << 16) | (green << 8) | blue, alpha: 0.92 });
-    }
-    this.addHeatmapText(this.compactVolume(reference), legendX + 11, legendY - 2, 0xcdd1d6, 7);
-    this.addHeatmapText("0", legendX + 11, legendY + 53, 0x6f747c, 7);
-  }
-
-  private normalizedRasterStrength(value: number, reference: number, mode: "adaptive" | "percentile" | "logarithmic" | "linear") {
-    if (!(value > 0)) return 0;
-    const ratio = value / Math.max(1, reference);
-    if (mode === "linear") return Math.min(1, ratio);
-    if (mode === "logarithmic") return Math.min(1, Math.log1p(value) / Math.max(1, Math.log1p(reference)));
-    if (mode === "percentile") return Math.min(1, Math.sqrt(ratio));
-    return Math.min(1, Math.pow(ratio, 0.46));
-  }
-
-  private historicalRasterColor(
-    strength: number,
-    side: "bid" | "ask",
-    palette: "institutional" | "thermal" | "blood-silver"
-  ): [number, number, number, number] {
-    const clamped = Math.max(0, Math.min(1, strength));
-    if (clamped <= 0) {
-      if (palette === "thermal") return [38, 0, 58, 92];
-      return [3, 4, 5, 76];
-    }
-    const stops = palette === "thermal"
-      ? [[54, 0, 88], [35, 67, 150], [0, 182, 192], [85, 214, 98], [249, 238, 38]]
-      : palette === "institutional"
-        ? [[8, 9, 11], [48, 52, 58], [126, 132, 142], side === "ask" ? [205, 30, 47] : [215, 219, 225], [255, 255, 255]]
-        : [[8, 2, 4], [66, 3, 12], [178, 10, 26], [255, 70, 38], [248, 249, 250]];
-    const scaled = clamped * (stops.length - 1);
-    const left = Math.min(stops.length - 2, Math.floor(scaled));
-    const amount = scaled - left;
-    const from = stops[left];
-    const to = stops[left + 1];
-    return [
-      Math.round(from[0] + (to[0] - from[0]) * amount),
-      Math.round(from[1] + (to[1] - from[1]) * amount),
-      Math.round(from[2] + (to[2] - from[2]) * amount),
-      Math.round(68 + clamped * 187)
-    ];
-  }
-
-  private orderBookHeatmapColor(
-    strength: number,
-    side: "bid" | "ask",
-    palette: "institutional" | "thermal" | "blood-silver" = "blood-silver"
-  ) {
-    if (palette === "thermal") return strength >= 0.82 ? 0xf9ee26 : strength >= 0.56 ? 0x00b6c0 : strength >= 0.28 ? 0x234396 : 0x360058;
-    if (palette === "institutional") return strength >= 0.9 ? 0xffffff : strength >= 0.58 ? side === "ask" ? 0xcd1e2f : 0xd7dbe1 : 0x30343a;
-    if (strength >= 0.97) return 0xf7f7f8;
-    if (strength >= 0.90) return 0xcdd1d6;
-    if (strength >= 0.74) return 0xff8a00;
-    if (strength >= 0.52) return 0xff3a18;
-    if (strength >= 0.28) return side === "bid" ? 0xb30b18 : 0xd31322;
-    return side === "bid" ? 0x42030a : 0x65050f;
   }
 
   private liquidationColor(strength: number) {

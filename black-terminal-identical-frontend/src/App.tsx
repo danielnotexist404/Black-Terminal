@@ -401,6 +401,7 @@ function loadWorkspaceSnapshots(): Record<string, WorkspaceSnapshot> {
 }
 
 function migrateIndicatorAdvancedSettings(value: Partial<IndicatorAdvancedSettings> | null | undefined): IndicatorAdvancedSettings {
+  const legacyBookHeatmap = value?.bookHeatmap as (Omit<Partial<IndicatorAdvancedSettings["bookHeatmap"]>, "palette"> & { palette?: string }) | undefined;
   return {
     volumeProfile: {
       ...defaultIndicatorAdvancedSettings.volumeProfile,
@@ -412,7 +413,12 @@ function migrateIndicatorAdvancedSettings(value: Partial<IndicatorAdvancedSettin
     },
     bookHeatmap: {
       ...defaultIndicatorAdvancedSettings.bookHeatmap,
-      ...(value?.bookHeatmap ?? {})
+      ...(legacyBookHeatmap ?? {}),
+      palette: legacyBookHeatmap?.palette === "monochrome-red"
+        ? "blood-silver"
+        : (["institutional", "thermal", "blood-silver"].includes(legacyBookHeatmap?.palette ?? "")
+          ? legacyBookHeatmap?.palette as IndicatorAdvancedSettings["bookHeatmap"]["palette"]
+          : defaultIndicatorAdvancedSettings.bookHeatmap.palette)
     }
   };
 }

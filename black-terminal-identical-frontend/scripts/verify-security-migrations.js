@@ -8,7 +8,7 @@ const requiredTables = [
   "broker_connection_health", "broker_secret_references", "broker_secret_vault", "execution_audit_events", "execution_commands",
   "execution_command_attempts", "execution_incidents", "follower_execution_plans", "group_execution_mandates",
   "group_trade_intents", "reconciliation_runs", "api_rate_limit_counters", "ai_daily_usage", "security_audit_events",
-  "execution_audit_archive"
+  "execution_audit_archive", "book_heatmap_depth_chunks", "book_heatmap_collector_coverage"
 ];
 
 const allowMissing = process.argv.includes("--allow-missing");

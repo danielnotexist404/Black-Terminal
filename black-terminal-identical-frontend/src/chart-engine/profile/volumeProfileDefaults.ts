@@ -127,9 +127,12 @@ export const defaultIndicatorAdvancedSettings: IndicatorAdvancedSettings = {
   adaptiveSwingStrategy: defaultAdaptiveSwingStrategySettings,
   bookHeatmap: {
     dataMode: "live-book",
+    displayMode: "historical-liquidity",
     workspaceMode: "live-book",
     selectedVenues: ["bybit", "binance"],
     historyHorizon: "24h",
+    timeResolution: "adaptive",
+    priceResolution: "adaptive",
     visibleRangePercent: 8,
     scaleMode: "adaptive",
     percentile: 98.5,
@@ -137,7 +140,7 @@ export const defaultIndicatorAdvancedSettings: IndicatorAdvancedSettings = {
     opacity: 82,
     smoothing: 18,
     thresholdPercent: 2,
-    palette: "blood-silver",
+    palette: "thermal",
     showDiagnostics: true,
     showHistoricalDepth: true
   }

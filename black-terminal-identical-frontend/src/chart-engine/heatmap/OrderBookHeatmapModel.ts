@@ -350,7 +350,7 @@ export class OrderBookHeatmapModel {
           && (finitePositive(cell.bidSize) || finitePositive(cell.askSize));
       })
       .sort((a, b) => toEpochMs(a.time) - toEpochMs(b.time) || a.price - b.price)
-      .slice(-20_000);
+      .slice(-40_000);
     this.historicalCells = accepted.map((cell) => this.indexHistoricalCell(cell));
     const times = this.historicalCells.flatMap((cell) => [toEpochMs(cell.time), toEpochMs(cell.bucketEnd ?? cell.time)]);
     this.historicalFrom = times.length ? Math.min(...times) : null;

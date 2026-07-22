@@ -131,6 +131,10 @@ try {
   await shot("11-zoomed-out-alignment.png");
 
   await installCandles(3600);
+  await cdp.eval(`([...document.querySelectorAll(".indicator-row")].find((node)=>node.textContent?.includes("Book Heatmap")))?.click()`);
+  await waitFor(() => cdp.eval(`Boolean(document.querySelector(".indicator-settings"))`), 10_000);
+  await setHeatmapMode("current-book-profile");
+  await cdp.eval(`document.querySelector(".tv-ok")?.click()`);
   await cdp.eval(`window.__BLACK_TERMINAL_BOOK_HEATMAP_VISUAL__.setHistory([])`);
   await injectBook("wall", 300, "bybit");
   await sleep(450);
@@ -169,17 +173,22 @@ async function installHistory(kind) {
     const start = now - 239 * 60;
     const fixtureKind = ${JSON.stringify(kind)};
     const cells = [];
-    const priceCount = fixtureKind === "thin" ? 4 : 12;
-    for (let column = 0; column < 40; column += 1) {
-      const time = (start + column * 6 * 60) * 1000;
+    const priceCount = fixtureKind === "thin" ? 6 : 28;
+    const columnCount = fixtureKind === "thin" ? 70 : 180;
+    for (let column = 0; column < columnCount; column += 1) {
+      const time = (start + column * 80) * 1000;
       for (let level = 0; level < priceCount; level += 1) {
         const price = fixtureKind === "thin"
-          ? 101700 + level * 900
-          : 98200 + level * 900 + Math.sin(column / 5 + level) * 90;
+          ? 100200 + level * 1150
+          : 96000 + level * 540 + Math.sin(column / 11 + level) * 34;
         const isBid = price < 103250;
-        let notional = (fixtureKind === "thin" ? 90000 : 480000) + (column % 9) * 65000 + (level % 5) * 120000;
-        if (fixtureKind === "wall" && (level === 3 || level === 8)) notional *= 14;
-        if (fixtureKind === "wall" && column === 26 && level === 8) notional *= 20;
+        let notional = (fixtureKind === "thin" ? 90000 : 180000) + (column % 11) * 22000 + (level % 7) * 52000;
+        const longWall = (level === 5 && column >= 8 && column <= 168) || (level === 19 && column >= 24 && column <= 142);
+        const shortWall = level === 11 && column >= 52 && column <= 83;
+        const movedWall = (level === 15 && column >= 76 && column < 116) || (level === 16 && column >= 116 && column <= 164);
+        const absorbedWall = level === 23 && column >= 18 && column <= 104;
+        if (fixtureKind === "wall" && (longWall || shortWall || movedWall || absorbedWall)) notional *= longWall ? 16 : movedWall ? 12 : 9;
+        if (fixtureKind === "wall" && absorbedWall && column > 92) notional *= Math.max(.08, (105-column)/13);
         if (fixtureKind === "disagreement" && (level === 4 || level === 7)) notional *= 9;
         const venues = fixtureKind === "disagreement"
           ? {
@@ -189,7 +198,7 @@ async function installHistory(kind) {
           : { bybit: { bidSize: isBid ? notional : 0, askSize: isBid ? 0 : notional } };
         cells.push({
           time,
-          bucketEnd: time + 6 * 60 * 1000,
+          bucketEnd: time + 82 * 1000,
           price,
           bucketSize: 220,
           bidSize: isBid ? notional : 0,
@@ -224,6 +233,11 @@ async function injectStaleBook(venue, sequence) {
 async function setWorkspaceMode(value) {
   await cdp.eval(`(() => { const select=document.querySelector(".book-heatmap-workspace-mode"); if(!select) throw new Error("Workspace mode control missing"); select.value=${JSON.stringify(value)}; select.dispatchEvent(new Event("change",{bubbles:true})); })()`);
   await waitFor(() => cdp.eval(`document.querySelector(".book-heatmap-workspace-mode")?.value===${JSON.stringify(value)}`), 5_000);
+  await sleep(220);
+}
+
+async function setHeatmapMode(value) {
+  await cdp.eval(`(() => { const label=[...document.querySelectorAll(".indicator-settings label")].find((node)=>node.firstChild?.textContent?.trim()==="Heatmap Mode"); const select=label?.querySelector("select"); if(!select) throw new Error("Heatmap Mode missing"); select.value=${JSON.stringify(value)}; select.dispatchEvent(new Event("change",{bubbles:true})); })()`);
   await sleep(220);
 }
 

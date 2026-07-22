@@ -1,36 +1,36 @@
 {
-  "certifiedAt": "2026-07-16T15:02:34.788Z",
+  "certifiedAt": "2026-07-22T10:04:50.484Z",
   "venue": "BYBIT",
   "symbol": "BTCUSDT",
   "endpoint": "https://api.bybit.com/v5/market/orderbook?category=linear&symbol=BTCUSDT&limit=200",
   "camera": {
-    "version": "61265.4525:67714.4475:60:explore",
-    "min": 61265.45249999999,
-    "max": 67714.4475,
-    "bucketSize": 107.48325000000004,
+    "version": "62605.1425:69195.1575:60:explore",
+    "min": 62605.142499999994,
+    "max": 69195.1575,
+    "bucketSize": 109.83358333333345,
     "rows": 60
   },
   "liveCoverage": {
-    "min": 64461.8,
-    "max": 64518.3,
+    "min": 65873.6,
+    "max": 65929.2,
     "bidLevels": 200,
     "askLevels": 200,
     "subscribedDepth": 200,
-    "sequence": 690767299172,
+    "sequence": 706941799307,
     "unavailableRows": 58
   },
   "independentlyVerifiedBucket": {
-    "key": "61265.4525:67714.4475:60:explore:30",
-    "low": 64489.95,
-    "high": 64597.433249999995,
+    "key": "62605.1425:69195.1575:60:explore:30",
+    "low": 65900.15,
+    "high": 66009.98358333333,
     "renderedBid": 0,
     "rawBid": 0,
-    "renderedAsk": 52.733999999999995,
-    "rawAsk": 52.733999999999995
+    "renderedAsk": 49.210999999999984,
+    "rawAsk": 49.210999999999984
   },
   "reconnect": {
-    "firstSequence": 690767299172,
-    "secondSequence": 690767315857,
+    "firstSequence": 706941799307,
+    "secondSequence": 706941819521,
     "cameraPreserved": true
   },
   "passed": true

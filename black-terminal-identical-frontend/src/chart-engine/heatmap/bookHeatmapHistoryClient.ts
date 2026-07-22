@@ -10,17 +10,32 @@ type TilePayload = {
   from: string;
   to: string;
   cells: RawBookHeatmapHistoryCell[];
+  coverage?: BookHeatmapCoverage;
+};
+
+export type BookHeatmapCoverage = {
+  symbol: string;
+  venue: string;
+  earliestTimestamp: number | null;
+  latestTimestamp: number | null;
+  requestedHorizonMs: number;
+  availableHorizonMs: number;
+  frameCount: number;
+  continuityPercent: number;
+  gaps: Array<{ from: number; to: number }>;
+  collectorStatus: "LIVE" | "DEGRADED" | "OFFLINE" | string;
 };
 
 const BASE_QUANTITY_VENUES = new Set<ExchangeId>(["binance", "binance-us", "bybit", "hyperliquid"]);
 
 export type BookHeatmapHistoryResult = {
   cells: HistoricalBookHeatmapCell[];
-  source: "black-core-market-depth-memory";
+  source: "black-core-book-heatmap-history";
   resolution: string;
   from: number;
   to: number;
   venue: ExchangeId;
+  coverage?: BookHeatmapCoverage;
 };
 
 export async function loadBookHeatmapHistory(input: {
@@ -28,6 +43,7 @@ export async function loadBookHeatmapHistory(input: {
   marketKind: MarketKind;
   symbol: string;
   horizon: string;
+  resolution?: "adaptive" | "1s" | "5s" | "15s" | "1m";
   minPrice: number;
   maxPrice: number;
   signal?: AbortSignal;
@@ -45,17 +61,18 @@ export async function loadBookHeatmapHistory(input: {
     marketKind: input.marketKind,
     symbol: input.symbol.toUpperCase().replace(/[^A-Z0-9]/g, ""),
     horizon: input.horizon,
+    resolution: input.resolution ?? "adaptive",
     minPrice: String(input.minPrice),
     maxPrice: String(input.maxPrice),
-    maxCells: "5000"
+    maxCells: "40000"
   });
-  const response = await fetch(`/api/market-depth/tiles?${params.toString()}`, {
+  const response = await fetch(`/api/market-depth/historical-tiles?${params.toString()}`, {
     headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
     signal: input.signal
   });
   if (!response.ok) throw new Error(`Historical depth request failed (${response.status}).`);
   const payload = await response.json() as TilePayload;
-  if (payload.status !== "ok" || payload.source !== "black-core-market-depth-memory") {
+  if (payload.status !== "ok" || payload.source !== "black-core-book-heatmap-history") {
     throw new Error("Historical depth returned an untrusted source classification.");
   }
 
@@ -63,10 +80,11 @@ export async function loadBookHeatmapHistory(input: {
 
   return {
     cells,
-    source: "black-core-market-depth-memory",
+    source: "black-core-book-heatmap-history",
     resolution: payload.resolution,
     from: Date.parse(payload.from),
     to: Date.parse(payload.to),
-    venue: input.venue
+    venue: input.venue,
+    coverage: payload.coverage
   };
 }

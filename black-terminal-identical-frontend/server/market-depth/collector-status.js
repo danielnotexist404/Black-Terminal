@@ -110,6 +110,7 @@ async function upsertIMMWorkerHeartbeats(supabase, collectorId, diagnostics, hea
       lastSnapshotAt: item.lastSnapshotAt || null,
       lastIntegrityFailureAt: item.lastIntegrityFailureAt || null,
       lastSequence: item.lastSequence ?? null,
+      reconstructionState: item.reconstructionState || null,
       lastError: item.lastError || null
     }
   }));

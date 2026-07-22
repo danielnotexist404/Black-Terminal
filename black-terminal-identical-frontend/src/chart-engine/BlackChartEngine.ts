@@ -3,6 +3,8 @@ import {
   Container,
   FederatedPointerEvent,
   Graphics,
+  Sprite,
+  Texture,
   Text
 } from "pixi.js";
 import { CandleBuffer } from "./data/CandleBuffer";
@@ -10,6 +12,7 @@ import { LiquidationHeatmapModel } from "./heatmap/LiquidationHeatmapModel";
 import { OrderBookHeatmapModel } from "./heatmap/OrderBookHeatmapModel";
 import type { BookHeatmapDiagnostics, HistoricalBookHeatmapCell } from "./heatmap/OrderBookHeatmapModel";
 import { BookHeatmapWorkerClient } from "./heatmap/bookHeatmapWorkerClient";
+import { buildHistoricalLiquidityMatrix, matrixQuantileReference } from "./heatmap/HistoricalLiquidityMatrix";
 import { ConfirmedLiquidationModel } from "./heatmap/ConfirmedLiquidationModel";
 import type { ConfirmedLiquidationDiagnostics, ConfirmedLiquidationEvent } from "./heatmap/ConfirmedLiquidationModel";
 import { VolatilityHeatmapModel } from "./heatmap/VolatilityHeatmapModel";
@@ -227,6 +230,7 @@ export class BlackChartEngine {
   private rootLayer = new Container();
   private gridLayer = new Graphics();
   private watermarkLayer = new Graphics();
+  private historicalHeatmapLayer = new Container();
   private heatmapLayer = new Graphics();
   private candleLayer = new Graphics();
   private volumeLayer = new Graphics();
@@ -248,6 +252,9 @@ export class BlackChartEngine {
   private alertTexts: Text[] = [];
   private priceLineColor = "";
   private priceLineIntensity = 75;
+  private historicalHeatmapCanvas?: HTMLCanvasElement;
+  private historicalHeatmapTexture?: Texture;
+  private historicalHeatmapSprite?: Sprite;
 
   private view: ViewState = {
     width: 800,
@@ -340,6 +347,7 @@ export class BlackChartEngine {
     this.rootLayer.addChild(
       this.gridLayer,
       this.watermarkLayer,
+      this.historicalHeatmapLayer,
       this.heatmapLayer,
       this.volumeLayer,
       this.candleLayer,
@@ -351,7 +359,12 @@ export class BlackChartEngine {
       this.crosshairLayer
     );
     this.drawingLayer.addChild(this.drawingGraphics);
-    blackCoreResourceTracker.setGauge("pixi-container", this.resourceOwner, 4);
+    this.historicalHeatmapCanvas = document.createElement("canvas");
+    this.historicalHeatmapTexture = Texture.from(this.historicalHeatmapCanvas);
+    this.historicalHeatmapSprite = new Sprite(this.historicalHeatmapTexture);
+    this.historicalHeatmapSprite.visible = false;
+    this.historicalHeatmapLayer.addChild(this.historicalHeatmapSprite);
+    blackCoreResourceTracker.setGauge("pixi-container", this.resourceOwner, 5);
     blackCoreResourceTracker.setGauge("pixi-graphics", this.resourceOwner, 11);
     blackCoreResourceTracker.setGauge("pixi-text", this.resourceOwner, 0);
 
@@ -905,6 +918,10 @@ export class BlackChartEngine {
     this.clearAlertTexts();
     this.clearProfileTexts();
     this.clearHeatmapTexts();
+    this.historicalHeatmapTexture?.destroy(true);
+    this.historicalHeatmapTexture = undefined;
+    this.historicalHeatmapSprite = undefined;
+    this.historicalHeatmapCanvas = undefined;
     this.app.destroy(true, { children: true, texture: true });
     blackCoreResourceTracker.clearGauge("pixi-container", this.resourceOwner);
     blackCoreResourceTracker.clearGauge("pixi-graphics", this.resourceOwner);
@@ -1871,59 +1888,22 @@ export class BlackChartEngine {
       this.view.priceMin,
       this.view.priceMax
     );
-    if (cells.length === 0) return;
-
-    let hovered: { cell: (typeof cells)[number]; x: number; y: number } | undefined;
-
-    for (const cell of cells) {
-      if (cell.strength < Math.max(0.018, threshold)) continue;
-
-      const x1 = this.xForIndex(cell.xStartIndex);
-      const x2 = this.xForIndex(cell.xEndIndex);
-      const rawLeft = Math.min(x1, x2);
-      const rawRight = Math.max(x1, x2);
-      const columnWidth = Math.max(1.15, rawRight - rawLeft);
-      const centerX = (rawLeft + rawRight) * 0.5;
-      const x = Math.max(0, centerX - columnWidth * 0.5);
-      const w = Math.min(plotWidth, centerX + columnWidth * 0.5) - x;
-      if (w <= 0 || x > plotWidth) continue;
-
-      const yTop = this.yForPrice(cell.priceHigh);
-      const yBottom = this.yForPrice(cell.priceLow);
-      const y = Math.min(yTop, yBottom);
-      const h = Math.max(1.15, Math.min(7.5, Math.abs(yBottom - yTop)));
-      if (y + h < this.view.topPadding || y > plotHeight) continue;
-
-      const color = this.orderBookHeatmapColor(cell.strength, cell.side, settings.palette);
-      const alpha = (0.035 + cell.strength * 0.52) * Math.max(0.35, visual.alpha) * opacity;
-
-      if (smoothing > 0 && cell.strength > 0.25) {
-        const pad = 0.5 + smoothing * 1.5;
-        g.rect(x - pad, y - pad, w + pad * 2, h + pad * 2)
-          .fill({ color, alpha: Math.min(0.14, alpha * smoothing * 0.28) });
-      }
-      g.rect(x, y, w, h).fill({ color, alpha: Math.min(0.82, alpha) });
-      if (cell.strength > 0.72) {
-        g.rect(x, y + h * 0.35, w, Math.max(0.7, h * 0.3))
-          .fill({ color: cell.strength >= 0.94 ? 0xf4f5f7 : theme.orangeBright, alpha: Math.min(0.66, alpha * 0.88) });
-      }
-
-      if (
-        this.pointer.active &&
-        this.pointer.x >= x && this.pointer.x <= x + w &&
-        this.pointer.y >= y - 3 && this.pointer.y <= y + h + 3 &&
-        (!hovered || cell.strength > hovered.cell.strength)
-      ) {
-        hovered = { cell, x, y };
-      }
+    if (cells.length === 0) {
+      if (this.historicalHeatmapSprite) this.historicalHeatmapSprite.visible = false;
+      return;
     }
 
-    // A newly opened 1H/4H chart can compress several minutes of authentic L2
-    // observations into less than one screen pixel. Keep the historical cells on
-    // their truthful time axis, and separately render only each venue's newest
-    // full-book observation as a right-edge depth profile. This makes live depth
-    // immediately readable without projecting it backward into unobserved time.
-    const currentProfileCells = cells
+    let hovered: { cell: (typeof cells)[number]; x: number; y: number } | undefined;
+    const historicalCells = settings.displayMode === "combined"
+      ? cells
+      : cells.filter((cell) => cell.classification === "HISTORICAL L2");
+    if (settings.displayMode !== "current-book-profile") {
+      this.renderHistoricalLiquidityRaster(historicalCells, g, plotWidth, settings, visual.alpha, opacity);
+    } else if (this.historicalHeatmapSprite) this.historicalHeatmapSprite.visible = false;
+
+    const currentProfileCells = settings.displayMode === "historical-liquidity"
+      ? []
+      : cells
       .filter((cell) => cell.active && cell.strength >= Math.max(0.08, threshold))
       .sort((a, b) => a.strength - b.strength)
       .slice(-180);
@@ -1989,17 +1969,128 @@ export class BlackChartEngine {
     }
   }
 
+  private renderHistoricalLiquidityRaster(
+    cells: ReturnType<OrderBookHeatmapModel["cells"]>,
+    g: Graphics,
+    plotWidth: number,
+    settings: typeof defaultIndicatorAdvancedSettings.bookHeatmap,
+    visualAlpha: number,
+    opacity: number
+  ) {
+    const canvas = this.historicalHeatmapCanvas;
+    const sprite = this.historicalHeatmapSprite;
+    if (!canvas || !sprite || cells.length === 0) {
+      if (sprite) sprite.visible = false;
+      return;
+    }
+    const pricePlotHeight = this.getPricePlotHeight();
+    const matrix = buildHistoricalLiquidityMatrix(
+      cells,
+      this.view.firstIndex,
+      this.view.lastIndex,
+      this.view.priceMin,
+      this.view.priceMax,
+      {
+        maxColumns: Math.max(128, Math.min(1024, Math.round(plotWidth / 1.5))),
+        maxRows: Math.max(96, Math.min(512, Math.round(pricePlotHeight / 1.35))),
+        minimumNotional: settings.minimumNotional
+      }
+    );
+    if (matrix.sourceCells === 0) {
+      sprite.visible = false;
+      return;
+    }
+    if (canvas.width !== matrix.columns || canvas.height !== matrix.rows) {
+      canvas.width = matrix.columns;
+      canvas.height = matrix.rows;
+    }
+    const context = canvas.getContext("2d", { alpha: true });
+    if (!context) {
+      sprite.visible = false;
+      return;
+    }
+    const image = context.createImageData(matrix.columns, matrix.rows);
+    const reference = matrixQuantileReference(matrix, Math.max(0.5, Math.min(0.999, settings.percentile / 100)));
+    for (let row = 0; row < matrix.rows; row += 1) {
+      const targetRow = matrix.rows - 1 - row;
+      for (let column = 0; column < matrix.columns; column += 1) {
+        const sourceOffset = row * matrix.columns + column;
+        const targetOffset = (targetRow * matrix.columns + column) * 4;
+        if (!matrix.observedColumns[column]) continue;
+        const bid = matrix.bidIntensity[sourceOffset] ?? 0;
+        const ask = matrix.askIntensity[sourceOffset] ?? 0;
+        const notional = Math.max(bid, ask);
+        const strength = this.normalizedRasterStrength(notional, reference, settings.scaleMode);
+        const [red, green, blue, alpha] = this.historicalRasterColor(strength, bid >= ask ? "bid" : "ask", settings.palette);
+        image.data[targetOffset] = red;
+        image.data[targetOffset + 1] = green;
+        image.data[targetOffset + 2] = blue;
+        image.data[targetOffset + 3] = alpha;
+      }
+    }
+    context.putImageData(image, 0, 0);
+    this.historicalHeatmapTexture?.source.update();
+    sprite.visible = true;
+    sprite.x = 0;
+    sprite.y = this.view.topPadding;
+    sprite.width = plotWidth;
+    sprite.height = pricePlotHeight;
+    sprite.alpha = Math.max(0.1, Math.min(1, opacity * Math.max(0.35, visualAlpha)));
+    const legendX = 8;
+    const legendY = this.view.topPadding + 22;
+    for (let index = 0; index < 12; index += 1) {
+      const strength = index / 11;
+      const [red, green, blue] = this.historicalRasterColor(strength, "bid", settings.palette);
+      g.rect(legendX, legendY + (11 - index) * 5, 7, 5.5).fill({ color: (red << 16) | (green << 8) | blue, alpha: 0.92 });
+    }
+    this.addHeatmapText(this.compactVolume(reference), legendX + 11, legendY - 2, 0xcdd1d6, 7);
+    this.addHeatmapText("0", legendX + 11, legendY + 53, 0x6f747c, 7);
+  }
+
+  private normalizedRasterStrength(value: number, reference: number, mode: "adaptive" | "percentile" | "logarithmic" | "linear") {
+    if (!(value > 0)) return 0;
+    const ratio = value / Math.max(1, reference);
+    if (mode === "linear") return Math.min(1, ratio);
+    if (mode === "logarithmic") return Math.min(1, Math.log1p(value) / Math.max(1, Math.log1p(reference)));
+    if (mode === "percentile") return Math.min(1, Math.sqrt(ratio));
+    return Math.min(1, Math.pow(ratio, 0.46));
+  }
+
+  private historicalRasterColor(
+    strength: number,
+    side: "bid" | "ask",
+    palette: "institutional" | "thermal" | "blood-silver"
+  ): [number, number, number, number] {
+    const clamped = Math.max(0, Math.min(1, strength));
+    if (clamped <= 0) {
+      if (palette === "thermal") return [38, 0, 58, 92];
+      return [3, 4, 5, 76];
+    }
+    const stops = palette === "thermal"
+      ? [[54, 0, 88], [35, 67, 150], [0, 182, 192], [85, 214, 98], [249, 238, 38]]
+      : palette === "institutional"
+        ? [[8, 9, 11], [48, 52, 58], [126, 132, 142], side === "ask" ? [205, 30, 47] : [215, 219, 225], [255, 255, 255]]
+        : [[8, 2, 4], [66, 3, 12], [178, 10, 26], [255, 70, 38], [248, 249, 250]];
+    const scaled = clamped * (stops.length - 1);
+    const left = Math.min(stops.length - 2, Math.floor(scaled));
+    const amount = scaled - left;
+    const from = stops[left];
+    const to = stops[left + 1];
+    return [
+      Math.round(from[0] + (to[0] - from[0]) * amount),
+      Math.round(from[1] + (to[1] - from[1]) * amount),
+      Math.round(from[2] + (to[2] - from[2]) * amount),
+      Math.round(68 + clamped * 187)
+    ];
+  }
+
   private orderBookHeatmapColor(
     strength: number,
     side: "bid" | "ask",
-    palette: "blood-silver" | "monochrome-red" = "blood-silver"
+    palette: "institutional" | "thermal" | "blood-silver" = "blood-silver"
   ) {
-    if (palette === "monochrome-red") {
-      if (strength >= 0.9) return 0xff6069;
-      if (strength >= 0.7) return 0xf02030;
-      if (strength >= 0.45) return 0xb30b18;
-      return side === "bid" ? 0x42030a : 0x65050f;
-    }
+    if (palette === "thermal") return strength >= 0.82 ? 0xf9ee26 : strength >= 0.56 ? 0x00b6c0 : strength >= 0.28 ? 0x234396 : 0x360058;
+    if (palette === "institutional") return strength >= 0.9 ? 0xffffff : strength >= 0.58 ? side === "ask" ? 0xcd1e2f : 0xd7dbe1 : 0x30343a;
     if (strength >= 0.97) return 0xf7f7f8;
     if (strength >= 0.90) return 0xcdd1d6;
     if (strength >= 0.74) return 0xff8a00;

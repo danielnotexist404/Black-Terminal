@@ -130,6 +130,17 @@ const historyDepthOptions: { label: string; value: HistoryDepth }[] = [
   { label: "20K bars", value: 20000 }
 ];
 
+function formatHeatmapDuration(milliseconds: number) {
+  if (!(milliseconds > 0)) return "0m";
+  const minutes = Math.floor(milliseconds / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  if (hours < 24) return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
+}
+
 const timeframeSeconds: Record<any, number> = {
   "1s": 1,
   "10s": 10,
@@ -1170,6 +1181,7 @@ export function PixiBlackChart({
       marketSymbol.baseAsset,
       marketSymbol.quoteAsset,
       bookHeatmapSettings.historyHorizon,
+      bookHeatmapSettings.timeResolution,
       rangePercent,
       bookHeatmapHistoryBand
     ].join(":");
@@ -1182,6 +1194,7 @@ export function PixiBlackChart({
       marketKind: marketSymbol.marketKind,
       symbol: `${marketSymbol.baseAsset}${marketSymbol.quoteAsset}`,
       horizon: bookHeatmapSettings.historyHorizon,
+      resolution: bookHeatmapSettings.timeResolution,
       minPrice: Math.max(0.00000001, referencePrice - range),
       maxPrice: referencePrice + range,
       signal: controller.signal
@@ -1199,9 +1212,14 @@ export function PixiBlackChart({
       }
       engine.setOrderBookHeatmapHistory(cells);
       const resolutions = [...new Set(loaded.map((result) => result.resolution))].join("+");
+      const coverageSummary = loaded.map((result) => {
+        const coverage = result.coverage;
+        if (!coverage) return `${result.venue.toUpperCase()} coverage unavailable`;
+        return `${result.venue.toUpperCase()} ${coverage.collectorStatus} · ${formatHeatmapDuration(coverage.availableHorizonMs)} of ${formatHeatmapDuration(coverage.requestedHorizonMs)} · ${coverage.continuityPercent.toFixed(1)}% continuous`;
+      }).join(" · ");
       setBookHeatmapHistoryStatus(cells.length > 0
-        ? `${cells.length.toLocaleString()} authentic ${resolutions} cells · ${loaded.map((result) => result.venue.toUpperCase()).join("+")}`
-        : "No historical coverage · current L2 profile shown at right · collecting depth");
+        ? `${coverageSummary} · ${cells.length.toLocaleString()} ${resolutions} cells`
+        : `${coverageSummary} · no historical frames`);
     });
     return () => controller.abort();
   }, [
@@ -1214,6 +1232,7 @@ export function PixiBlackChart({
     bookHeatmapSettings.dataMode,
     bookHeatmapSettings.selectedVenues.join(","),
     bookHeatmapSettings.historyHorizon,
+    bookHeatmapSettings.timeResolution,
     bookHeatmapSettings.visibleRangePercent,
     bookHeatmapHistoryBand
   ]);
@@ -3340,9 +3359,9 @@ export function PixiBlackChart({
           {activeIndicator === "orderBookHeatmap" ? (
             <>
               <div className="book-heatmap-truth-panel">
-                <strong>AUTHENTIC L2 ONLY</strong>
-                <span>{bookHeatmapDiagnostics?.message ?? "Waiting for live depth"}</span>
-                <span>{bookHeatmapHistoryStatus}</span>
+                <strong>BOOK HEATMAP · AUTHENTIC L2</strong>
+                <span>Live source · {bookHeatmapDiagnostics?.message ?? "Waiting for live depth"}</span>
+                <span>Collector / available history · {bookHeatmapHistoryStatus}</span>
                 <small>Modeled liquidation exposure is intentionally separate from Book Heatmap.</small>
               </div>
               <label>
@@ -3353,6 +3372,17 @@ export function PixiBlackChart({
                 >
                   <option value="live-book">Selected venue L2</option>
                   <option value="consolidated-book">Consolidated certified L2</option>
+                </select>
+              </label>
+              <label>
+                Heatmap Mode
+                <select
+                  value={bookHeatmapSettings.displayMode}
+                  onChange={(event) => updateBookHeatmapSetting("displayMode", event.target.value as BookHeatmapSettings["displayMode"])}
+                >
+                  <option value="historical-liquidity">Historical Liquidity</option>
+                  <option value="current-book-profile">Current Book Profile</option>
+                  <option value="combined">Combined</option>
                 </select>
               </label>
               <label>
@@ -3404,6 +3434,33 @@ export function PixiBlackChart({
                   {(["15m", "1h", "6h", "24h", "3d", "1w"] as const).map((horizon) => (
                     <option key={horizon} value={horizon}>{horizon}</option>
                   ))}
+                </select>
+              </label>
+              <label>
+                Time Resolution
+                <select
+                  value={bookHeatmapSettings.timeResolution}
+                  onChange={(event) => updateBookHeatmapSetting("timeResolution", event.target.value as BookHeatmapSettings["timeResolution"])}
+                >
+                  <option value="adaptive">Adaptive</option>
+                  <option value="1s">1 second</option>
+                  <option value="5s">5 seconds</option>
+                  <option value="15s">15 seconds</option>
+                  <option value="1m">1 minute</option>
+                </select>
+              </label>
+              <label>
+                Price Resolution
+                <select
+                  value={bookHeatmapSettings.priceResolution}
+                  onChange={(event) => updateBookHeatmapSetting("priceResolution", event.target.value as BookHeatmapSettings["priceResolution"])}
+                >
+                  <option value="adaptive">Adaptive</option>
+                  <option value="tick">Tick</option>
+                  <option value="basis-points">Basis points</option>
+                  <option value="fixed">Fixed absolute</option>
+                  <option value="atr-relative">ATR-relative</option>
+                  <option value="visible-range">Visible range</option>
                 </select>
               </label>
               <label>
@@ -3493,8 +3550,9 @@ export function PixiBlackChart({
                   value={bookHeatmapSettings.palette}
                   onChange={(event) => updateBookHeatmapSetting("palette", event.target.value as BookHeatmapSettings["palette"])}
                 >
-                  <option value="blood-silver">Blood Red · Orange · Silver</option>
-                  <option value="monochrome-red">Blood Red Monochrome</option>
+                  <option value="thermal">Thermal · Purple / Cyan / Yellow</option>
+                  <option value="institutional">Institutional · Black / Gray / White / Red</option>
+                  <option value="blood-silver">Blood Red · Red / White</option>
                 </select>
               </label>
               <label>

@@ -31,6 +31,7 @@ export type KioseffHistoryRequest = {
 };
 
 const KIOSEFF_HISTORY_PAGE_TIMEOUT_MS = 20_000;
+const KIOSEFF_HISTORY_CONCURRENCY = 6;
 
 export function shouldRefreshKioseffHistory(
   previousChartBarTime: number | undefined,
@@ -200,31 +201,52 @@ export class KioseffHistoryCoordinator {
     intervalSeconds: number
   ) {
     const byTime = new Map<number, Candle>();
-    let cursor = to;
     const expected = Math.max(1, Math.ceil((to - from) / intervalSeconds));
     const pageLimit = adapter.id === "okx" ? 300 : 1000;
-    const maxPages = Math.ceil(expected / pageLimit) + 3;
-    for (let page = 0; page < maxPages && cursor > from; page += 1) {
-      const candles = await withHistoryPageTimeout(
-        adapter.getHistoricalCandles({
-          exchange: symbol.exchange,
-          symbol: symbol.rawSymbol,
-          marketKind: symbol.marketKind,
-          timeframe,
-          from,
-          to: cursor - 1,
-          limit: pageLimit
-        })
-      );
-      this.assertCurrent(generation);
-      const eligible = candles.filter((candle) => candle.time >= from && candle.time < cursor);
-      for (const candle of eligible) byTime.set(candle.time, candle);
-      const oldest = eligible.reduce(
-        (minimum, candle) => Math.min(minimum, candle.time),
-        Number.POSITIVE_INFINITY
-      );
-      if (!Number.isFinite(oldest) || oldest <= from || eligible.length < pageLimit) break;
-      cursor = oldest;
+    const pageSpan = pageLimit * intervalSeconds;
+    const ranges: Array<{ from: number; to: number }> = [];
+    for (let rangeFrom = from; rangeFrom < to; rangeFrom += pageSpan) {
+      ranges.push({ from: rangeFrom, to: Math.min(to, rangeFrom + pageSpan) });
+    }
+    let nextRange = 0;
+    const fetchWorker = async () => {
+      while (nextRange < ranges.length) {
+        const range = ranges[nextRange++];
+        if (!range) return;
+        const candles = await withHistoryPageTimeout(
+          adapter.getHistoricalCandles({
+            exchange: symbol.exchange,
+            symbol: symbol.rawSymbol,
+            marketKind: symbol.marketKind,
+            timeframe,
+            from: range.from,
+            to: range.to - 1,
+            limit: pageLimit
+          })
+        );
+        this.assertCurrent(generation);
+        for (const candle of candles) {
+          if (candle.time >= range.from && candle.time < range.to) {
+            byTime.set(candle.time, candle);
+          }
+        }
+      }
+    };
+    await Promise.all(
+      Array.from(
+        { length: Math.min(KIOSEFF_HISTORY_CONCURRENCY, Math.max(1, ranges.length)) },
+        () => fetchWorker()
+      )
+    );
+    this.assertCurrent(generation);
+    if (byTime.size > expected) {
+      throw new KioseffDataUnavailableError("invalid-time-bucketing", {
+        expected,
+        actual: byTime.size,
+        from,
+        to,
+        intervalSeconds
+      });
     }
     return [...byTime.values()].sort((left, right) => left.time - right.time);
   }

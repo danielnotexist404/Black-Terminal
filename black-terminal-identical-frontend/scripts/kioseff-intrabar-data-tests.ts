@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import type { Candle } from "../src/chart-engine/types.ts";
+import type { MarketDataAdapter, MarketSymbol } from "../src/market-data/types.ts";
 import { KioseffHistoryCache } from "../src/modules/kioseff-stop-loss-clustering/data/cache.ts";
 import {
   aggregateKioseffQuality,
@@ -10,6 +11,7 @@ import {
   stableSourceVersion
 } from "../src/modules/kioseff-stop-loss-clustering/data/normalization.ts";
 import {
+  KioseffHistoryCoordinator,
   KioseffRealtimeIntrabarReconciler,
   shouldRefreshKioseffHistory
 } from "../src/modules/kioseff-stop-loss-clustering/data/historyCoordinator.ts";
@@ -137,6 +139,71 @@ assert.equal(
 
 const aggregate = aggregateKioseffQuality([...partial, ...mismatch]);
 assert.equal(aggregate.sourceMismatch, true);
+
+let activeHistoryRequests = 0;
+let maximumActiveHistoryRequests = 0;
+const historyAdapter = {
+  id: "bybit",
+  label: "Bybit fixture",
+  normalizeSymbol: (symbol: string) => symbol,
+  getHistoricalCandles: async (query) => {
+    activeHistoryRequests += 1;
+    maximumActiveHistoryRequests = Math.max(maximumActiveHistoryRequests, activeHistoryRequests);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const result: Candle[] = [];
+    for (let time = query.from ?? base; time <= (query.to ?? base); time += minute) {
+      result.push({
+        time,
+        open: 100,
+        high: 101,
+        low: 99,
+        close: 100,
+        volume: 1
+      });
+    }
+    activeHistoryRequests -= 1;
+    return result;
+  }
+} as MarketDataAdapter;
+const concurrentChart = Array.from({ length: 30 }, (_, index) => ({
+  time: base + index * 3600,
+  open: 100,
+  high: 101,
+  low: 99,
+  close: 100,
+  volume: 60
+}));
+const concurrentSymbol = {
+  exchange: "bybit",
+  rawSymbol: "BTCUSDT",
+  baseAsset: "BTC",
+  quoteAsset: "USDT",
+  marketKind: "perpetual",
+  metadata: {
+    exchange: "bybit",
+    rawSymbol: "BTCUSDT",
+    normalizedSymbol: "BTCUSDT",
+    assetClass: "crypto",
+    marketKind: "perpetual",
+    tickSize: "0.1",
+    timezone: "UTC",
+    sessionPolicy: "24x7",
+    source: "fixture"
+  }
+} satisfies MarketSymbol;
+const concurrentHistory = await new KioseffHistoryCoordinator().load({
+  adapter: historyAdapter,
+  symbol: concurrentSymbol,
+  chartCandles: concurrentChart,
+  chartTimeframe: "1h",
+  lowerTimeframe: "1m",
+  transport: "fixture",
+  now: base + 30 * 3600
+});
+assert.equal(concurrentHistory.quality.complete, true);
+assert.equal(concurrentHistory.quality.actualCount, 1800);
+assert.ok(maximumActiveHistoryRequests > 1, "intrabar pages load concurrently");
+assert.ok(maximumActiveHistoryRequests <= 6, "intrabar concurrency remains bounded");
 
 const cache = new KioseffHistoryCache(2);
 const result = (sourceVersion: string) => ({

@@ -38,7 +38,10 @@ import { canonicalOrderKey, deduplicateCanonicalOrders } from "../orders/canonic
 import { OrderManagementMenu } from "../orders/OrderManagementMenu";
 import type { KioseffSnapshot } from "../modules/kioseff-stop-loss-clustering/core/canonical";
 import type { KioseffSettingsV1 } from "../modules/kioseff-stop-loss-clustering/core/settings";
-import { KioseffHistoryCoordinator } from "../modules/kioseff-stop-loss-clustering/data/historyCoordinator";
+import {
+  KioseffHistoryCoordinator,
+  shouldRefreshKioseffHistory
+} from "../modules/kioseff-stop-loss-clustering/data/historyCoordinator";
 import { KioseffDataUnavailableError } from "../modules/kioseff-stop-loss-clustering/data/types";
 import {
   kioseffUnavailableDiagnostic,
@@ -498,12 +501,17 @@ export function PixiBlackChart({
     const source = replaySourceRef.current;
     const last = source[source.length - 1];
     if (last && candle.time < last.time) return;
+    const historyAdvanced = shouldRefreshKioseffHistory(last?.time, candle.time);
 
     replaySourceRef.current =
       last?.time === candle.time
         ? [...source.slice(0, -1), candle]
         : [...source, candle].slice(-20000);
-    if (visibleIndicators.volatilityHeatmap && !kioseffRefreshTimerRef.current) {
+    if (
+      historyAdvanced &&
+      visibleIndicators.volatilityHeatmap &&
+      !kioseffRefreshTimerRef.current
+    ) {
       kioseffRefreshTimerRef.current = window.setTimeout(() => {
         kioseffRefreshTimerRef.current = undefined;
         setKioseffSourceRevision((revision) => revision + 1);

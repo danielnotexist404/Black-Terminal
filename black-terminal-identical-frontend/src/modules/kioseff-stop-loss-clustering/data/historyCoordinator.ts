@@ -30,6 +30,34 @@ export type KioseffHistoryRequest = {
   now?: number;
 };
 
+const KIOSEFF_HISTORY_PAGE_TIMEOUT_MS = 20_000;
+
+export function shouldRefreshKioseffHistory(
+  previousChartBarTime: number | undefined,
+  nextChartBarTime: number
+) {
+  return previousChartBarTime === undefined || nextChartBarTime > previousChartBarTime;
+}
+
+async function withHistoryPageTimeout<T>(request: Promise<T>, timeoutMs = KIOSEFF_HISTORY_PAGE_TIMEOUT_MS) {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(
+        new KioseffDataUnavailableError("missing-intrabar-history", {
+          cause: "history-page-timeout",
+          timeoutMs
+        })
+      );
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([request, timeout]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
 export class KioseffHistoryCoordinator {
   private generation = 0;
   private cache = new KioseffHistoryCache(4);
@@ -177,15 +205,17 @@ export class KioseffHistoryCoordinator {
     const pageLimit = adapter.id === "okx" ? 300 : 1000;
     const maxPages = Math.ceil(expected / pageLimit) + 3;
     for (let page = 0; page < maxPages && cursor > from; page += 1) {
-      const candles = await adapter.getHistoricalCandles({
-        exchange: symbol.exchange,
-        symbol: symbol.rawSymbol,
-        marketKind: symbol.marketKind,
-        timeframe,
-        from,
-        to: cursor - 1,
-        limit: pageLimit
-      });
+      const candles = await withHistoryPageTimeout(
+        adapter.getHistoricalCandles({
+          exchange: symbol.exchange,
+          symbol: symbol.rawSymbol,
+          marketKind: symbol.marketKind,
+          timeframe,
+          from,
+          to: cursor - 1,
+          limit: pageLimit
+        })
+      );
       this.assertCurrent(generation);
       const eligible = candles.filter((candle) => candle.time >= from && candle.time < cursor);
       for (const candle of eligible) byTime.set(candle.time, candle);

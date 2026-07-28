@@ -10,13 +10,25 @@ import {
   stableSourceVersion
 } from "../src/modules/kioseff-stop-loss-clustering/data/normalization.ts";
 import {
-  KioseffRealtimeIntrabarReconciler
+  KioseffRealtimeIntrabarReconciler,
+  shouldRefreshKioseffHistory
 } from "../src/modules/kioseff-stop-loss-clustering/data/historyCoordinator.ts";
 import { utcBucketStart } from "../src/modules/kioseff-stop-loss-clustering/data/timeframes.ts";
 import type { KioseffHistoryResult } from "../src/modules/kioseff-stop-loss-clustering/data/types.ts";
 
 const minute = 60;
 const base = 1_704_067_200; // 2024-01-01 00:00:00 UTC
+
+assert.equal(
+  shouldRefreshKioseffHistory(base, base),
+  false,
+  "an update to the open chart candle must not restart full intrabar history"
+);
+assert.equal(
+  shouldRefreshKioseffHistory(base, base + minute),
+  true,
+  "a newly opened chart candle refreshes intrabar history"
+);
 
 function candles(count: number, start = base): Candle[] {
   return Array.from({ length: count }, (_, index) => {
@@ -143,4 +155,3 @@ cache.invalidateSource("two");
 assert.equal(cache.get("b"), undefined, "source invalidation removes matching revision");
 
 console.log("Kioseff deterministic intrabar data tests passed.");
-

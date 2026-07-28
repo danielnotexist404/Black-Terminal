@@ -27,7 +27,7 @@ type BuiltInIndicator = {
   group: string;
   type: string;
   signal: string;
-  runtime?: "Native" | "Python";
+  runtime?: "Native" | "Python" | "Worker";
   periodKey?: IndicatorPeriodKey;
   min?: number;
   max?: number;
@@ -63,14 +63,11 @@ const builtInIndicators: BuiltInIndicator[] = [
   },
   {
     key: "volatilityHeatmap",
-    title: "Volatility-At-Entry Clusters",
+    title: "Stop Loss Clustering (Kioseff)",
     group: "Liquidity",
     type: "Overlay",
-    signal: "Pine-compatible stop-cluster projection with strong active buy/sell zones",
-    runtime: "Python",
-    periodKey: "volatilityHeatmap",
-    min: 5,
-    max: 300,
+    signal: "Absorbtion Extremes and Volatility-At-Entry stop clusters",
+    runtime: "Worker",
     premium: true
   },
   {

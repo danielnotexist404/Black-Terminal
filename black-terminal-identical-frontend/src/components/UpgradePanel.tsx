@@ -28,7 +28,7 @@ const PLANS: Plan[] = [
     desc: "Unlocks the full Black Terminal algorithmic toolkit for professional retail traders.",
     indicators: [
       "Liquidation Heatmap (Liquidity Gaps)",
-      "Volatility Heatmap",
+      "Stop Loss Clustering (Kioseff)",
       "Adaptive Swing Strategy",
       "VWAP & EMA Arrays (20, 50, 200)",
       "Open Interest & Z-Score Oscillators"

@@ -72,6 +72,11 @@ import type { PortfolioPosition } from "./positions/types";
 import type { PortfolioSnapshot } from "./portfolio/types";
 import { blackCoreOrderSyncService } from "./orders/orderSyncService";
 import type { StrategyRuntimeKind } from "./modules/strategy-lab/types/strategy.types";
+import {
+  KIOSEFF_DEFAULT_SETTINGS,
+  migrateKioseffSettings,
+  type KioseffSettingsV1
+} from "./modules/kioseff-stop-loss-clustering/core/settings";
 import type {
   ChartDisplayType,
   DrawingToolId,
@@ -313,6 +318,7 @@ type WorkspaceSnapshot = {
   indicatorPeriods: IndicatorPeriods;
   indicatorVisualSettings: IndicatorVisualSettings;
   indicatorAdvancedSettings: IndicatorAdvancedSettings;
+  kioseffSettings?: KioseffSettingsV1;
   layout: {
     rightPanelWidth: number;
     bottomPanelHeight: number;
@@ -423,7 +429,8 @@ function migrateWorkspaceSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapsho
     ...snapshot,
     schemaVersion: 3,
     visibleIndicators: migrateVisibleIndicators(snapshot.visibleIndicators),
-    indicatorAdvancedSettings: migrateIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings)
+    indicatorAdvancedSettings: migrateIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings),
+    kioseffSettings: migrateKioseffSettings(snapshot.kioseffSettings)
   };
 }
 
@@ -620,6 +627,9 @@ export default function App() {
   const [indicatorPeriods, setIndicatorPeriods] = useState<IndicatorPeriods>(defaultIndicatorPeriods);
   const [indicatorVisualSettings, setIndicatorVisualSettings] = useState<IndicatorVisualSettings>(defaultIndicatorVisualSettings);
   const [indicatorAdvancedSettings, setIndicatorAdvancedSettings] = useState<IndicatorAdvancedSettings>(defaultIndicatorAdvancedSettings);
+  const [kioseffSettings, setKioseffSettings] = useState<KioseffSettingsV1>(() =>
+    structuredClone(KIOSEFF_DEFAULT_SETTINGS)
+  );
   const [indicatorAlerts, setIndicatorAlerts] = useState<IndicatorAlertDefinition[]>(loadStoredAlerts);
   const [activeStrategyKind, setActiveStrategyKind] = useState<StrategyRuntimeKind | undefined>();
   const [strategySelectionRevision, setStrategySelectionRevision] = useState(0);
@@ -978,6 +988,7 @@ export default function App() {
               setIndicatorPeriods(snapshot.indicatorPeriods);
               setIndicatorVisualSettings(snapshot.indicatorVisualSettings);
               setIndicatorAdvancedSettings(migrateIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings));
+              setKioseffSettings(migrateKioseffSettings(snapshot.kioseffSettings));
               setLayout(snapshot.layout);
               setActiveStrategyKind(snapshot.activeStrategyKind);
             }
@@ -1200,6 +1211,7 @@ export default function App() {
     indicatorPeriods,
     indicatorVisualSettings,
     indicatorAdvancedSettings,
+    kioseffSettings,
     layout,
     activeStrategyKind,
     updatedAt: Date.now()
@@ -1286,6 +1298,7 @@ export default function App() {
       setIndicatorPeriods(snapshot.indicatorPeriods);
       setIndicatorVisualSettings(snapshot.indicatorVisualSettings);
       setIndicatorAdvancedSettings(migrateIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings));
+      setKioseffSettings(migrateKioseffSettings(snapshot.kioseffSettings));
       setLayout(snapshot.layout);
       setActiveStrategyKind(snapshot.activeStrategyKind);
       setReplayControls(defaultReplayControls);
@@ -2020,11 +2033,13 @@ export default function App() {
             indicatorPeriods={indicatorPeriods}
             indicatorVisualSettings={indicatorVisualSettings}
             indicatorAdvancedSettings={indicatorAdvancedSettings}
+            kioseffSettings={kioseffSettings}
             alertDefinitions={indicatorAlerts}
             onVisibleIndicatorsChange={setVisibleIndicators}
             onIndicatorPeriodsChange={setIndicatorPeriods}
             onIndicatorVisualSettingsChange={setIndicatorVisualSettings}
             onIndicatorAdvancedSettingsChange={setIndicatorAdvancedSettings}
+            onKioseffSettingsChange={setKioseffSettings}
             onAlertDefinitionsChange={setIndicatorAlerts}
             onDrawingToolRequest={(tool) => {
               setDrawingsEnabled(true);

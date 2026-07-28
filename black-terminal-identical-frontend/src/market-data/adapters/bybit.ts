@@ -11,6 +11,7 @@ import {
   TradeTick
 } from "../types";
 import { marketDataFetchJson } from "../transport";
+import { createSymbolMetadata } from "../symbolMetadata";
 
 type BybitResponse<T> = {
   retCode: number;
@@ -54,11 +55,49 @@ type BybitInstrumentResult = {
     baseCoin: string;
     quoteCoin: string;
     priceScale?: string;
+    priceFilter?: {
+      tickSize?: string;
+    };
     lotSizeFilter?: {
       qtyStep?: string;
     };
   }[];
 };
+
+async function getBybitSymbols(marketKind: MarketKind) {
+  const params = new URLSearchParams({
+    category: categoryFor(marketKind),
+    limit: "1000"
+  });
+  const result = await bybitGet<BybitInstrumentResult>("/v5/market/instruments-info", params);
+  return result.list
+    .filter((item) => item.status === "Trading" && item.quoteCoin === "USDT")
+    .map((item) => {
+      const tickSize = item.priceFilter?.tickSize;
+      const metadata = tickSize
+        ? createSymbolMetadata({
+            exchange: "bybit",
+            rawSymbol: item.symbol,
+            normalizedSymbol: normalizeBybitSymbol(item.symbol),
+            marketKind,
+            tickSize,
+            quantityStep: item.lotSizeFilter?.qtyStep,
+            pricePrecision: item.priceScale ? Number(item.priceScale) : undefined,
+            source: "bybit-v5-instruments-info"
+          })
+        : undefined;
+      return {
+        exchange: "bybit" as const,
+        rawSymbol: item.symbol,
+        baseAsset: item.baseCoin,
+        quoteAsset: item.quoteCoin,
+        marketKind,
+        pricePrecision: item.priceScale ? Number(item.priceScale) : undefined,
+        quantityPrecision: metadata?.quantityPrecision,
+        metadata
+      };
+    });
+}
 
 type BybitTickerResult = {
   category: string;
@@ -300,22 +339,14 @@ export const bybitMarketDataAdapter: MarketDataAdapter = {
     liquidations: true
   },
   normalizeSymbol: (symbol) => normalizeBybitSymbol(symbol),
-  getSymbols: async (marketKind = "perpetual") => {
-    const params = new URLSearchParams({
-      category: categoryFor(marketKind),
-      limit: "1000"
-    });
-    const result = await bybitGet<BybitInstrumentResult>("/v5/market/instruments-info", params);
-    return result.list
-      .filter((item) => item.status === "Trading" && item.quoteCoin === "USDT")
-      .map((item) => ({
-        exchange: "bybit",
-        rawSymbol: item.symbol,
-        baseAsset: item.baseCoin,
-        quoteAsset: item.quoteCoin,
-        marketKind,
-        pricePrecision: item.priceScale ? Number(item.priceScale) : undefined
-      }));
+  getSymbols: (marketKind = "perpetual") => getBybitSymbols(marketKind),
+  getSymbolMetadata: async (symbol) => {
+    const symbols = await getBybitSymbols(symbol.marketKind);
+    const match = symbols.find(
+      (item) => normalizeBybitSymbol(item.rawSymbol) === normalizeBybitSymbol(symbol.rawSymbol)
+    );
+    if (!match?.metadata) throw new Error(`missing-authoritative-tick-size:bybit:${symbol.rawSymbol}`);
+    return match.metadata;
   },
   getHistoricalCandles: async (query: CandleQuery) => {
     const interval = timeframeMap[query.timeframe];

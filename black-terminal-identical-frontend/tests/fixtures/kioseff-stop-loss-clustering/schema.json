@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "black-terminal://kioseff-stop-loss-clustering/fixture-v1",
+  "title": "Kioseff Stop Loss Clustering parity fixture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "certification",
+    "venue",
+    "rawSymbol",
+    "normalizedSymbol",
+    "assetClass",
+    "marketKind",
+    "tickSize",
+    "chartTimeframe",
+    "lowerTimeframe",
+    "timezone",
+    "sessionPolicy",
+    "source",
+    "sourceRevision",
+    "provenance",
+    "warmup",
+    "inputs",
+    "qualityFlags",
+    "bars",
+    "tradingViewReference"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "certification": {
+      "enum": ["structural", "provisional", "tradingview-certified"]
+    },
+    "venue": { "type": "string", "minLength": 1 },
+    "rawSymbol": { "type": "string", "minLength": 1 },
+    "normalizedSymbol": { "type": "string", "minLength": 1 },
+    "assetClass": {
+      "enum": ["crypto", "forex", "equity", "futures", "other"]
+    },
+    "marketKind": { "type": "string", "minLength": 1 },
+    "tickSize": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$"
+    },
+    "chartTimeframe": { "type": "string", "minLength": 1 },
+    "lowerTimeframe": { "type": "string", "minLength": 1 },
+    "timezone": { "type": "string", "minLength": 1 },
+    "sessionPolicy": { "type": "string", "minLength": 1 },
+    "source": { "type": "string", "minLength": 1 },
+    "sourceRevision": { "type": "string", "minLength": 1 },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["historicalVenue", "realtimeVenue", "transport", "normalizedBy"],
+      "properties": {
+        "historicalVenue": { "type": "string", "minLength": 1 },
+        "realtimeVenue": { "type": "string", "minLength": 1 },
+        "transport": { "enum": ["fixture", "browser", "tauri"] },
+        "normalizedBy": { "type": "string", "minLength": 1 }
+      }
+    },
+    "warmup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end", "requestedChartBars", "loadedChartBars"],
+      "properties": {
+        "start": { "type": "integer" },
+        "end": { "type": "integer" },
+        "requestedChartBars": { "type": "integer", "minimum": 0 },
+        "loadedChartBars": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "granularity", "values"],
+      "properties": {
+        "model": { "enum": ["Absorbtion Extremes", "Volatility-At-Entry"] },
+        "granularity": { "enum": ["Lower", "Higher (Heavy)"] },
+        "values": { "type": "object" }
+      }
+    },
+    "qualityFlags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "bars": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/chartBar" }
+    },
+    "tradingViewReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "provider", "exportedAt", "snapshots", "currentBarRevisions", "notes"],
+      "properties": {
+        "status": { "enum": ["available", "unavailable"] },
+        "provider": { "enum": ["TradingView", null] },
+        "exportedAt": { "type": ["string", "null"] },
+        "snapshots": { "type": "array" },
+        "currentBarRevisions": { "type": "array" },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "$defs": {
+    "candle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["originalTime", "time", "open", "high", "low", "close", "volume"],
+      "properties": {
+        "originalTime": { "type": ["string", "number"] },
+        "time": { "type": "integer" },
+        "open": { "type": "number" },
+        "high": { "type": "number" },
+        "low": { "type": "number" },
+        "close": { "type": "number" },
+        "volume": { "type": "number" }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "complete",
+        "expectedIntervalSeconds",
+        "missingTimes",
+        "duplicateTimes",
+        "outOfOrderTimes",
+        "sourceMismatch",
+        "notes"
+      ],
+      "properties": {
+        "complete": { "type": "boolean" },
+        "expectedIntervalSeconds": { "type": "integer", "minimum": 1 },
+        "missingTimes": { "type": "array", "items": { "type": "integer" } },
+        "duplicateTimes": { "type": "array", "items": { "type": "integer" } },
+        "outOfOrderTimes": { "type": "array", "items": { "type": "integer" } },
+        "sourceMismatch": { "type": "boolean" },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "chartBar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chartBar", "intrabars", "chartBarClosed", "sourceVersion", "quality"],
+      "properties": {
+        "chartBar": { "$ref": "#/$defs/candle" },
+        "intrabars": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/candle" }
+        },
+        "chartBarClosed": { "type": "boolean" },
+        "sourceVersion": { "type": "string", "minLength": 1 },
+        "quality": { "$ref": "#/$defs/quality" }
+      }
+    }
+  }
+}
+

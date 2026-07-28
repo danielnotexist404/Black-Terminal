@@ -11,6 +11,7 @@ import {
   TradeTick
 } from "../types";
 import { marketDataFetchJson } from "../transport";
+import { createSymbolMetadata } from "../symbolMetadata";
 
 type BinanceKline = [
   number,
@@ -87,6 +88,7 @@ type BinanceRecentTradeRest = {
 };
 
 type BinanceExchangeInfo = {
+  serverTime?: number;
   symbols: {
     symbol: string;
     status: string;
@@ -95,6 +97,11 @@ type BinanceExchangeInfo = {
     contractType?: string;
     pricePrecision?: number;
     quantityPrecision?: number;
+    filters?: {
+      filterType: string;
+      tickSize?: string;
+      stepSize?: string;
+    }[];
   }[];
 };
 
@@ -164,6 +171,54 @@ function tickerPathFor(marketKind: MarketKind) {
 
 function normalizeBinanceSymbol(symbol: string) {
   return symbol.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+}
+
+function binanceFilter(
+  item: BinanceExchangeInfo["symbols"][number],
+  filterType: "PRICE_FILTER" | "LOT_SIZE"
+) {
+  return item.filters?.find((filter) => filter.filterType === filterType);
+}
+
+async function getBinanceSymbols(marketKind: MarketKind) {
+  const payload = await marketDataFetchJson<BinanceExchangeInfo>(
+    `${restBaseFor(marketKind)}${marketKind === "spot" || marketKind === "margin" ? "/api/v3/exchangeInfo" : "/fapi/v1/exchangeInfo"}`
+  );
+  return payload.symbols
+    .filter((item) => {
+      const isTrading = item.status === "TRADING";
+      const isUsdt = item.quoteAsset === "USDT";
+      const isPerpetual = marketKind === "spot" || marketKind === "margin" || item.contractType === "PERPETUAL";
+      return isTrading && isUsdt && isPerpetual;
+    })
+    .map((item) => {
+      const tickSize = binanceFilter(item, "PRICE_FILTER")?.tickSize;
+      const quantityStep = binanceFilter(item, "LOT_SIZE")?.stepSize;
+      const metadata = tickSize
+        ? createSymbolMetadata({
+            exchange: "binance",
+            rawSymbol: item.symbol,
+            normalizedSymbol: normalizeBinanceSymbol(item.symbol),
+            marketKind,
+            tickSize,
+            quantityStep,
+            pricePrecision: item.pricePrecision,
+            quantityPrecision: item.quantityPrecision,
+            source: "binance-exchangeInfo",
+            sourceRevision: payload.serverTime ? String(payload.serverTime) : undefined
+          })
+        : undefined;
+      return {
+        exchange: "binance" as const,
+        rawSymbol: item.symbol,
+        baseAsset: item.baseAsset,
+        quoteAsset: item.quoteAsset,
+        marketKind,
+        pricePrecision: item.pricePrecision,
+        quantityPrecision: item.quantityPrecision,
+        metadata
+      };
+    });
 }
 
 function parseNumber(value: string | number) {
@@ -445,26 +500,14 @@ export const binanceMarketDataAdapter: MarketDataAdapter = {
     liquidations: true
   },
   normalizeSymbol: (symbol) => normalizeBinanceSymbol(symbol),
-  getSymbols: async (marketKind = "perpetual") => {
-    const payload = await marketDataFetchJson<BinanceExchangeInfo>(
-      `${restBaseFor(marketKind)}${marketKind === "spot" || marketKind === "margin" ? "/api/v3/exchangeInfo" : "/fapi/v1/exchangeInfo"}`
+  getSymbols: (marketKind = "perpetual") => getBinanceSymbols(marketKind),
+  getSymbolMetadata: async (symbol) => {
+    const symbols = await getBinanceSymbols(symbol.marketKind);
+    const match = symbols.find(
+      (item) => normalizeBinanceSymbol(item.rawSymbol) === normalizeBinanceSymbol(symbol.rawSymbol)
     );
-    return payload.symbols
-      .filter((item) => {
-        const isTrading = item.status === "TRADING";
-        const isUsdt = item.quoteAsset === "USDT";
-        const isPerpetual = marketKind === "spot" || marketKind === "margin" || item.contractType === "PERPETUAL";
-        return isTrading && isUsdt && isPerpetual;
-      })
-      .map((item) => ({
-        exchange: "binance",
-        rawSymbol: item.symbol,
-        baseAsset: item.baseAsset,
-        quoteAsset: item.quoteAsset,
-        marketKind,
-        pricePrecision: item.pricePrecision,
-        quantityPrecision: item.quantityPrecision
-      }));
+    if (!match?.metadata) throw new Error(`missing-authoritative-tick-size:binance:${symbol.rawSymbol}`);
+    return match.metadata;
   },
   getHistoricalCandles: async (query: CandleQuery) => {
     if (!supportedTimeframes.includes(query.timeframe)) {

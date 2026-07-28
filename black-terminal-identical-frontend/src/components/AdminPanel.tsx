@@ -41,7 +41,7 @@ const ALL_INDICATORS_METADATA = [
   { key: "aif", name: "A.I.F. Auction Intelligence", desc: "Native proprietary long-horizon auction framework" },
   { key: "volumeProfile", name: "HDLX Profile (hdlx)", desc: "Fixed locked/visible volume profile" },
   { key: "liquidationHeatmap", name: "Liquidation Heatmap", desc: "Modeled leverage clusters" },
-  { key: "volatilityHeatmap", name: "Volatility Heatmap", desc: "Pine projection buy/sell zones" },
+  { key: "volatilityHeatmap", name: "Stop Loss Clustering (Kioseff)", desc: "Certified intrabar Absorbtion and VAE cluster models" },
   { key: "adaptiveSwingStrategy", name: "Adaptive Swing Reversal", desc: "Native strategy overlay" },
   { key: "vwap", name: "VWAP", desc: "Volume weighted average price" },
   { key: "ema20", name: "EMA 20", desc: "Fast exponential moving average" },

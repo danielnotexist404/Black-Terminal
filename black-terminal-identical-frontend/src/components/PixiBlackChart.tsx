@@ -36,6 +36,17 @@ import type { ManagedPosition, PositionProtectionOrder, PositionProtectionType }
 import { AifIndicatorOverlay } from "../modules/aif/components/AifIndicatorOverlay";
 import { canonicalOrderKey, deduplicateCanonicalOrders } from "../orders/canonicalOrder";
 import { OrderManagementMenu } from "../orders/OrderManagementMenu";
+import type { KioseffSnapshot } from "../modules/kioseff-stop-loss-clustering/core/canonical";
+import type { KioseffSettingsV1 } from "../modules/kioseff-stop-loss-clustering/core/settings";
+import { KioseffHistoryCoordinator } from "../modules/kioseff-stop-loss-clustering/data/historyCoordinator";
+import { KioseffDataUnavailableError } from "../modules/kioseff-stop-loss-clustering/data/types";
+import {
+  kioseffUnavailableDiagnostic,
+  type KioseffUnavailableDiagnostic
+} from "../modules/kioseff-stop-loss-clustering/data/unavailability";
+import { KioseffWorkerClient } from "../modules/kioseff-stop-loss-clustering/workers/KioseffWorkerClient";
+import { KioseffSettingsPanel } from "../modules/kioseff-stop-loss-clustering/components/KioseffSettingsPanel";
+import { KioseffOverlays } from "../modules/kioseff-stop-loss-clustering/components/KioseffOverlays";
 
 type PixiBlackChartProps = {
   workspaceId: string;
@@ -55,11 +66,13 @@ type PixiBlackChartProps = {
   indicatorPeriods: IndicatorPeriods;
   indicatorVisualSettings: IndicatorVisualSettings;
   indicatorAdvancedSettings: IndicatorAdvancedSettings;
+  kioseffSettings: KioseffSettingsV1;
   alertDefinitions: IndicatorAlertDefinition[];
   onVisibleIndicatorsChange: Dispatch<SetStateAction<VisibleIndicators>>;
   onIndicatorPeriodsChange: Dispatch<SetStateAction<IndicatorPeriods>>;
   onIndicatorVisualSettingsChange: Dispatch<SetStateAction<IndicatorVisualSettings>>;
   onIndicatorAdvancedSettingsChange: Dispatch<SetStateAction<IndicatorAdvancedSettings>>;
+  onKioseffSettingsChange: Dispatch<SetStateAction<KioseffSettingsV1>>;
   onAlertDefinitionsChange?: Dispatch<SetStateAction<IndicatorAlertDefinition[]>>;
   onDrawingToolRequest?: (tool: DrawingToolId) => void;
   onOpenAlerts?: () => void;
@@ -271,11 +284,13 @@ export function PixiBlackChart({
   indicatorPeriods,
   indicatorVisualSettings,
   indicatorAdvancedSettings,
+  kioseffSettings,
   alertDefinitions,
   onVisibleIndicatorsChange,
   onIndicatorPeriodsChange,
   onIndicatorVisualSettingsChange,
   onIndicatorAdvancedSettingsChange,
+  onKioseffSettingsChange,
   onAlertDefinitionsChange,
   onDrawingToolRequest,
   onOpenAlerts,
@@ -297,6 +312,9 @@ export function PixiBlackChart({
   const [lastPrice, setLastPrice] = useState(66678.1);
   const [lastCandle, setLastCandle] = useState<Candle | null>(null);
   const [aifPriceTransform, setAifPriceTransform] = useState<ChartPriceTransformSnapshot | null>(null);
+  const [kioseffSnapshot, setKioseffSnapshot] = useState<KioseffSnapshot | null>(null);
+  const [kioseffUnavailable, setKioseffUnavailable] = useState<KioseffUnavailableDiagnostic | null>(null);
+  const [kioseffSourceRevision, setKioseffSourceRevision] = useState(0);
   const [dataStatus, setDataStatus] = useState("CONNECTING");
   const [activeIndicator, setActiveIndicator] = useState<IndicatorKey | null>(null);
   const [volumeProfileSettingsTab, setVolumeProfileSettingsTab] = useState<VolumeProfileSettingsTab>("inputs");
@@ -326,6 +344,8 @@ export function PixiBlackChart({
   const replayCursorRef = useRef(0);
   const replayStartIndexRef = useRef(0);
   const replayCommandIdRef = useRef(-1);
+  const kioseffRefreshTimerRef = useRef<number | undefined>(undefined);
+  const chartSourceVenueRef = useRef<ExchangeId | null>(null);
   const replayAppliedRef = useRef(false);
   const alertSettingsRef = useRef(alertSettings);
   const lastAlertSentAtRef = useRef(new Map<string, number>());
@@ -456,6 +476,7 @@ export function PixiBlackChart({
 
   const setReplaySource = (candles: Candle[]) => {
     replaySourceRef.current = uniqueSortedCandles(candles).slice(-20000);
+    setKioseffSourceRevision((revision) => revision + 1);
     if (replayActiveRef.current) {
       if (replayControlsRef.current.selecting) {
         engineRef.current?.setCandles(replaySourceRef.current, {
@@ -482,6 +503,12 @@ export function PixiBlackChart({
       last?.time === candle.time
         ? [...source.slice(0, -1), candle]
         : [...source, candle].slice(-20000);
+    if (visibleIndicators.volatilityHeatmap && !kioseffRefreshTimerRef.current) {
+      kioseffRefreshTimerRef.current = window.setTimeout(() => {
+        kioseffRefreshTimerRef.current = undefined;
+        setKioseffSourceRevision((revision) => revision + 1);
+      }, 1000);
+    }
   };
 
   const ingestTradeIntoReplaySource = (price: number, quantity: number, time: number) => {
@@ -767,6 +794,7 @@ export function PixiBlackChart({
       mockSeedPrice = safeAnchorPrice(anchorPrice);
       setDataStatus("MOCK FALLBACK");
       const mockCandles = createMockCandles(historyDepth, timeframeSeconds[timeframe], mockSeedPrice);
+      chartSourceVenueRef.current = "mock";
       setReplaySource(mockCandles);
       if (!replayActiveRef.current) {
         engine.setCandles(mockCandles);
@@ -845,6 +873,7 @@ export function PixiBlackChart({
       indicatorPeriods,
       indicatorVisualSettings,
       indicatorAdvancedSettings,
+      kioseffSettings,
       alertDefinitions: scopedChartAlerts,
       customPlots: customPlots || [],
       onAlertFired: (alertId, price) => onAlertFired?.(alertId, price),
@@ -893,6 +922,7 @@ export function PixiBlackChart({
         return fetchHistoryWindow(historyDepth)
           .then((candles) => {
             if (disposed) return;
+            chartSourceVenueRef.current = marketSymbol.exchange;
             setReplaySource(candles);
             if (!replayActiveRef.current) {
               engine.setCandles(candles);
@@ -914,6 +944,7 @@ export function PixiBlackChart({
                 historyLabel = `${adapter.label} VIA ${sourceAdapter.label}`;
                 historyExhausted = false;
                 lastHistoryCursor = undefined;
+                chartSourceVenueRef.current = sourceAdapter.id;
                 setReplaySource(candles);
                 if (!replayActiveRef.current) {
                   engine.setCandles(candles);
@@ -955,6 +986,11 @@ export function PixiBlackChart({
       liveTrades?.unsubscribe();
       if (tradePollTimer) window.clearInterval(tradePollTimer);
       if (tickerHeartbeatTimer) window.clearInterval(tickerHeartbeatTimer);
+      if (kioseffRefreshTimerRef.current) {
+        window.clearTimeout(kioseffRefreshTimerRef.current);
+        kioseffRefreshTimerRef.current = undefined;
+      }
+      chartSourceVenueRef.current = null;
       if (initialized) {
         engine.destroy();
       }
@@ -971,6 +1007,135 @@ export function PixiBlackChart({
     timeframe,
     historyDepth,
     onPriceChange
+  ]);
+
+  useEffect(() => {
+    let disposed = false;
+    const coordinator = new KioseffHistoryCoordinator();
+    let client: KioseffWorkerClient | null = null;
+    const lowerTimeframe = (
+      kioseffSettings.model === "volatility-at-entry"
+        ? "1m"
+        : kioseffSettings.absorbtion.lowerTimeframe
+    ) as Timeframe;
+    const unavailable = (
+      reason: KioseffUnavailableDiagnostic["reason"],
+      message: string,
+      expected = 0,
+      actual = 0,
+      start: number | null = null,
+      end: number | null = null
+    ) => {
+      if (disposed) return;
+      const diagnostic = kioseffUnavailableDiagnostic({
+        reason,
+        venue: marketSymbol.exchange,
+        symbol: marketSymbol.rawSymbol,
+        chartTimeframe: timeframe,
+        requestedLowerTimeframe: lowerTimeframe,
+        expected,
+        actual,
+        start,
+        end,
+        realtimeSource: marketSymbol.exchange,
+        message
+      });
+      setKioseffSnapshot(null);
+      setKioseffUnavailable(diagnostic);
+      engineRef.current?.setKioseffState(null, kioseffSettings);
+    };
+    if (!visibleIndicators.volatilityHeatmap) {
+      setKioseffSnapshot(null);
+      setKioseffUnavailable(null);
+      engineRef.current?.setKioseffState(null, kioseffSettings);
+      return () => coordinator.reset();
+    }
+    const adapter = getMarketDataEngineAdapter(marketSymbol.exchange);
+    const chartCandles = replaySourceRef.current;
+    if (!adapter) {
+      unavailable("unsupported-symbol-metadata", "The selected venue has no certified market-data adapter.");
+      return () => coordinator.reset();
+    }
+    if (!chartCandles.length) {
+      unavailable("missing-intrabar-history", "Chart history has not loaded yet.");
+      return () => coordinator.reset();
+    }
+    if (chartSourceVenueRef.current !== marketSymbol.exchange) {
+      unavailable(
+        "source-history-live-mismatch",
+        `Chart history is from ${chartSourceVenueRef.current ?? "an unknown venue"}, not ${marketSymbol.exchange}.`
+      );
+      return () => coordinator.reset();
+    }
+    setKioseffUnavailable(null);
+    coordinator
+      .load({
+        adapter,
+        symbol: marketSymbol,
+        chartCandles,
+        chartTimeframe: timeframe,
+        lowerTimeframe,
+        transport: typeof window !== "undefined" && "__TAURI_INTERNALS__" in window ? "tauri" : "browser"
+      })
+      .then(async (history) => {
+        if (disposed) return;
+        const rejected = history.chartBars.find(
+          (bar) =>
+            !bar.quality.complete ||
+            bar.quality.sourceMismatch ||
+            bar.quality.duplicateTimes.length > 0 ||
+            bar.quality.outOfOrderTimes.length > 0 ||
+            bar.quality.conflictingTimes.length > 0
+        );
+        if (rejected) {
+          unavailable(
+            rejected.quality.sourceMismatch
+              ? "source-history-live-mismatch"
+              : "incomplete-intrabar-coverage",
+            "Certified lower-timeframe coverage is incomplete or ambiguous.",
+            rejected.quality.expectedCount,
+            rejected.quality.actualCount,
+            rejected.quality.coverageStart,
+            rejected.quality.coverageEnd
+          );
+          return;
+        }
+        client = new KioseffWorkerClient({
+          metadata: history.provenance.metadata,
+          timeframe,
+          sourceVersion: history.sourceVersion,
+          settings: kioseffSettings,
+          diagnostics: import.meta.env.DEV
+        });
+        await client.reset();
+        const snapshot = await client.calculateBatch(history.chartBars).promise;
+        if (disposed) return;
+        setKioseffSnapshot(snapshot);
+        setKioseffUnavailable(null);
+        engineRef.current?.setKioseffState(snapshot, kioseffSettings);
+      })
+      .catch((error: unknown) => {
+        if (disposed) return;
+        if (error instanceof KioseffDataUnavailableError) {
+          unavailable(error.reason, error.message);
+          return;
+        }
+        unavailable(
+          "worker-failure",
+          error instanceof Error ? error.message : String(error)
+        );
+      });
+    return () => {
+      disposed = true;
+      coordinator.reset();
+      client?.dispose();
+    };
+  }, [
+    visibleIndicators.volatilityHeatmap,
+    marketSymbol,
+    timeframe,
+    kioseffSettings,
+    kioseffSourceRevision
   ]);
 
   useEffect(() => {
@@ -1731,7 +1896,11 @@ export function PixiBlackChart({
   const indicatorRows: { key: IndicatorKey; label: string; value: string }[] = [
     { key: "aif", label: "A.I.F.", value: "auction intelligence" },
     { key: "liquidationHeatmap", label: "Liq Heatmap", value: "model" },
-    { key: "volatilityHeatmap", label: "VAE Clusters", value: "top zones" },
+    {
+      key: "volatilityHeatmap",
+      label: "Stop Loss Clustering",
+      value: kioseffSettings.model === "absorbtion-extremes" ? "Absorbtion Extremes" : `VAE ${kioseffSettings.volatilityAtEntry.granularity}`
+    },
     { key: "volumeProfile", label: "HDLX Profile", value: indicatorAdvancedSettings.volumeProfile.rangeMode === "visible" ? "visible" : `lock ${indicatorAdvancedSettings.volumeProfile.fixedRangeLength}` },
     {
       key: "adaptiveSwingStrategy",
@@ -2981,8 +3150,15 @@ export function PixiBlackChart({
 
       {activeIndicator === "volumeProfile" && renderVolumeProfileSettings()}
       {activeIndicator === "adaptiveSwingStrategy" && renderAdaptiveSwingSettings()}
+      {activeIndicator === "volatilityHeatmap" && (
+        <KioseffSettingsPanel
+          settings={kioseffSettings}
+          onChange={onKioseffSettingsChange}
+          onClose={() => setActiveIndicator(null)}
+        />
+      )}
 
-      {activeIndicator && activeIndicator !== "aif" && activeIndicator !== "volumeProfile" && activeIndicator !== "adaptiveSwingStrategy" && (
+      {activeIndicator && activeIndicator !== "aif" && activeIndicator !== "volumeProfile" && activeIndicator !== "adaptiveSwingStrategy" && activeIndicator !== "volatilityHeatmap" && (
         <div className="indicator-settings">
           <div className="indicator-settings-title">
             <span>{indicatorRows.find((indicator) => indicator.key === activeIndicator)?.label}</span>
@@ -3037,13 +3213,6 @@ export function PixiBlackChart({
               Model
               <select value="leverage-volume" onChange={() => undefined}>
                 <option value="leverage-volume">Leverage + volume zones</option>
-              </select>
-            </label>
-          ) : activeIndicator === "volatilityHeatmap" ? (
-            <label>
-              Model
-              <select value="volatility-entry" onChange={() => undefined}>
-                <option value="volatility-entry">Volatility-At-Entry stop clusters</option>
               </select>
             </label>
           ) : (
@@ -3322,6 +3491,12 @@ export function PixiBlackChart({
         {indicatorsCollapsed ? "v" : "^"}
       </button>
       <div ref={hostRef} className="pixi-chart-host" onContextMenu={handleChartContextMenu} onClick={() => setChartContextMenu(null)} />
+      <KioseffOverlays
+        visible={visibleIndicators.volatilityHeatmap}
+        snapshot={kioseffSnapshot}
+        unavailable={kioseffUnavailable}
+        settings={kioseffSettings}
+      />
       <AifIndicatorOverlay
         active={visibleIndicators.aif}
         settingsOpen={activeIndicator === "aif"}

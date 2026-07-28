@@ -7,7 +7,6 @@ import {
 } from "pixi.js";
 import { CandleBuffer } from "./data/CandleBuffer";
 import { LiquidationHeatmapModel } from "./heatmap/LiquidationHeatmapModel";
-import { VolatilityHeatmapModel } from "./heatmap/VolatilityHeatmapModel";
 import { VolumeProfileModel, VolumeProfileResult, VolumeProfileRow } from "./profile/VolumeProfileModel";
 import { defaultIndicatorAdvancedSettings } from "./profile/volumeProfileDefaults";
 import type { IndicatorAlertDefinition } from "../automation/alerts";
@@ -16,6 +15,12 @@ import { createAdaptiveSwingSignals } from "../modules/strategy-lab/adapters/sig
 import type { StrategySettings, StrategySignal } from "../modules/strategy-lab/types/strategy.types";
 import { blackCorePerformanceMonitor } from "../performance/performanceMonitor";
 import { blackCoreResourceTracker } from "../performance/resourceTracker";
+import type { KioseffSnapshot } from "../modules/kioseff-stop-loss-clustering/core/canonical";
+import {
+  KIOSEFF_DEFAULT_SETTINGS,
+  type KioseffSettingsV1
+} from "../modules/kioseff-stop-loss-clustering/core/settings";
+import { KioseffPixiRenderer } from "../modules/kioseff-stop-loss-clustering/rendering/KioseffPixiRenderer";
 import {
   fromAxisValue,
   priceToScreenY as mapPriceToScreenY,
@@ -129,7 +134,9 @@ export class BlackChartEngine {
   private candles: CandleBuffer;
   private displayedCandles: Candle[] = [];
   private heatmapModel = new LiquidationHeatmapModel();
-  private volatilityHeatmapModel = new VolatilityHeatmapModel();
+  private kioseffRenderer = new KioseffPixiRenderer();
+  private kioseffSnapshot: KioseffSnapshot | null = null;
+  private kioseffSettings: KioseffSettingsV1 = structuredClone(KIOSEFF_DEFAULT_SETTINGS);
   private volumeProfileModel = new VolumeProfileModel();
   private lastVolumeProfileResult?: VolumeProfileResult;
   private lastVolumeProfileHdlxByIndex = new Map<number, number>();
@@ -291,6 +298,8 @@ export class BlackChartEngine {
     if (options.indicatorPeriods) this.indicatorPeriods = options.indicatorPeriods;
     if (options.indicatorVisualSettings) this.indicatorVisualSettings = options.indicatorVisualSettings;
     if (options.indicatorAdvancedSettings) this.indicatorAdvancedSettings = options.indicatorAdvancedSettings;
+    if (options.kioseffSnapshot !== undefined) this.kioseffSnapshot = options.kioseffSnapshot;
+    if (options.kioseffSettings) this.kioseffSettings = structuredClone(options.kioseffSettings);
     this.setHeatmapSource(options.candles);
     this.onPriceChange = options.onPriceChange;
     this.onCandleChange = options.onCandleChange;
@@ -321,6 +330,7 @@ export class BlackChartEngine {
       this.gridLayer,
       this.watermarkLayer,
       this.heatmapLayer,
+      this.kioseffRenderer.container,
       this.volumeLayer,
       this.candleLayer,
       this.indicatorLayer,
@@ -331,8 +341,8 @@ export class BlackChartEngine {
       this.crosshairLayer
     );
     this.drawingLayer.addChild(this.drawingGraphics);
-    blackCoreResourceTracker.setGauge("pixi-container", this.resourceOwner, 4);
-    blackCoreResourceTracker.setGauge("pixi-graphics", this.resourceOwner, 11);
+    blackCoreResourceTracker.setGauge("pixi-container", this.resourceOwner, 6);
+    blackCoreResourceTracker.setGauge("pixi-graphics", this.resourceOwner, 17);
     blackCoreResourceTracker.setGauge("pixi-text", this.resourceOwner, 0);
 
     this.app.stage.eventMode = "static";
@@ -673,6 +683,12 @@ export class BlackChartEngine {
     this.draw();
   }
 
+  setKioseffState(snapshot: KioseffSnapshot | null, settings = this.kioseffSettings) {
+    this.kioseffSnapshot = snapshot;
+    this.kioseffSettings = structuredClone(settings);
+    this.draw();
+  }
+
   setPriceLineSettings(color: string, intensity: number) {
     this.priceLineColor = color;
     this.priceLineIntensity = intensity;
@@ -780,9 +796,6 @@ export class BlackChartEngine {
     if (this.visibleIndicators.liquidationHeatmap) {
       this.heatmapModel.setSource(candles);
     }
-    if (this.visibleIndicators.volatilityHeatmap) {
-      this.volatilityHeatmapModel.setSource(candles, this.indicatorPeriods.volatilityHeatmap);
-    }
   }
 
   destroy() {
@@ -803,6 +816,7 @@ export class BlackChartEngine {
     this.clearAlertTexts();
     this.clearProfileTexts();
     this.clearHeatmapTexts();
+    this.kioseffRenderer.dispose();
     this.app.destroy(true, { children: true, texture: true });
     blackCoreResourceTracker.clearGauge("pixi-container", this.resourceOwner);
     blackCoreResourceTracker.clearGauge("pixi-graphics", this.resourceOwner);
@@ -1157,6 +1171,24 @@ export class BlackChartEngine {
     return plotWidth - barsFromLatest * step - this.view.candleWidth / 2 - 12 + this.view.scrollX;
   }
 
+  private xForTimestamp(time: number) {
+    const candles = this.getDisplayCandles();
+    if (!candles.length) return 0;
+    let low = 0;
+    let high = candles.length;
+    while (low < high) {
+      const middle = low + Math.floor((high - low) / 2);
+      if (candles[middle]!.time <= time) low = middle + 1;
+      else high = middle;
+    }
+    const leftIndex = Math.max(0, low - 1);
+    const left = candles[leftIndex]!;
+    const right = candles[Math.min(candles.length - 1, leftIndex + 1)]!;
+    if (left.time === right.time) return this.xForIndex(leftIndex);
+    const fraction = (time - left.time) / (right.time - left.time);
+    return this.xForIndex(leftIndex + fraction);
+  }
+
   private getOscillatorPaneHeight() {
     const hasOscillator =
       this.visibleIndicators.openInterestOscillator ||
@@ -1441,16 +1473,31 @@ export class BlackChartEngine {
     const g = this.heatmapLayer;
     g.clear();
     this.clearHeatmapTexts();
-    if (
-      !this.visibleIndicators.liquidationHeatmap &&
-      !this.visibleIndicators.volatilityHeatmap
-    ) {
-      return;
-    }
-
     const plotWidth = this.view.width - this.view.rightAxisWidth;
     const plotHeight = this.view.height - this.view.bottomAxisHeight;
-    this.drawVolatilityHeatmap(g, plotWidth, plotHeight);
+    this.kioseffRenderer.draw(
+      this.visibleIndicators.volatilityHeatmap ? this.kioseffSnapshot : null,
+      this.kioseffSettings,
+      {
+        width: plotWidth,
+        height: plotHeight,
+        top: this.view.topPadding,
+        xForTime: (time) => this.xForTimestamp(time),
+        yForPrice: (price) => this.yForPrice(price)
+      }
+    );
+    const kioseffMetrics = this.kioseffRenderer.metrics();
+    blackCoreResourceTracker.setGauge(
+      "pixi-text",
+      this.resourceOwner,
+      this.priceTexts.length +
+        this.timeTexts.length +
+        this.labelTexts.length +
+        this.hudTexts.length +
+        this.profileTexts.length +
+        this.heatmapTexts.length +
+        kioseffMetrics.textObjects
+    );
 
     if (!this.visibleIndicators.liquidationHeatmap) return;
 
@@ -1526,80 +1573,6 @@ export class BlackChartEngine {
         g.rect(plotWidth - bw - 18, y - h / 2 + k * 2.2, bw, 1.05)
           .fill({ color: lvl.color, alpha: (lvl.color === theme.orangeBright ? 0.24 : 0.15) * Math.max(0.35, visual.alpha) });
       }
-    }
-  }
-
-  private drawVolatilityHeatmap(g: Graphics, plotWidth: number, plotHeight: number) {
-    if (!this.visibleIndicators.volatilityHeatmap) return;
-
-    const visual = this.visualFor("volatilityHeatmap", "red");
-    const untilIndex = this.heatmapVisibleUntilIndex ?? this.candles.all().length - 1;
-    const cells = this.volatilityHeatmapModel.visibleCells(
-      this.view.firstIndex,
-      this.view.lastIndex,
-      untilIndex,
-      this.view.priceMin,
-      this.view.priceMax
-    );
-    if (cells.length === 0) return;
-
-    const step = this.timeStep();
-    const xClamp = (value: number) => Math.max(0, Math.min(plotWidth, value));
-    const drawableCells = [...cells]
-      .filter((cell) => cell.strength >= 0.08)
-      .sort((a, b) => a.strength - b.strength);
-    const labelCells = [...cells]
-      .filter((cell) => cell.hot)
-      .sort((a, b) => Math.abs(b.volume) - Math.abs(a.volume))
-      .slice(0, 60);
-
-    for (const cell of drawableCells) {
-      const startIndex = Math.max(0, cell.startIndex);
-      const endIndex = Math.min(untilIndex, cell.endIndex);
-      if (endIndex < startIndex) continue;
-
-      const x1 = xClamp(this.xForIndex(startIndex) - step * 0.5);
-      const x2 = plotWidth;
-      const w = x2 - x1;
-      if (w <= 0.7) continue;
-
-      const yMid = this.yForPrice(cell.price);
-      const yTop = this.yForPrice(cell.priceHigh);
-      const yBottom = this.yForPrice(cell.priceLow);
-      const rawHeight = Math.max(1, Math.abs(yBottom - yTop));
-      const h = Math.max(1.2, Math.min(6.5, rawHeight));
-      const y = yMid - h / 2;
-      if (y + h < this.view.topPadding || y > plotHeight) continue;
-
-      const alphaScale = Math.max(0.35, visual.alpha);
-      const color = cell.hot ? theme.redBright : 0x8b9097;
-      const fillColor = cell.hot ? 0x2a0308 : 0x111417;
-      const lineAlpha = cell.hot
-        ? Math.min(0.86, (0.42 + cell.strength * 0.32) * alphaScale)
-        : Math.min(0.36, (0.09 + cell.strength * 0.18) * alphaScale);
-
-      g.rect(x1, y, w, h)
-        .fill({ color: fillColor, alpha: cell.hot ? 0.12 * alphaScale : 0.035 * alphaScale });
-
-      const coreY = Math.max(this.view.topPadding, Math.min(plotHeight, yMid));
-      g.moveTo(x1, coreY).lineTo(x2, coreY)
-        .stroke({ width: cell.hot ? 1.25 + cell.strength * 1.15 : 0.55, color, alpha: lineAlpha });
-
-      if (cell.hot) {
-        g.moveTo(x1, coreY - 2.8).lineTo(x2, coreY - 2.8)
-          .stroke({ width: 0.75, color: theme.redBright, alpha: Math.min(0.36, lineAlpha * 0.55) });
-        g.moveTo(x1, coreY + 2.8).lineTo(x2, coreY + 2.8)
-          .stroke({ width: 0.75, color: theme.redBright, alpha: Math.min(0.36, lineAlpha * 0.55) });
-      }
-    }
-
-    const placedY: number[] = [];
-    for (const cell of labelCells) {
-      const y = this.yForPrice(cell.price);
-      if (y < this.view.topPadding || y > plotHeight) continue;
-      if (placedY.some((item) => Math.abs(item - y) < 8)) continue;
-      placedY.push(y);
-      this.addHeatmapText(this.compactVolume(Math.abs(cell.volume)), plotWidth - 58, y - 5, 0xffffff, 8);
     }
   }
 

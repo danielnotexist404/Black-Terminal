@@ -71,6 +71,9 @@ export class MarketDataEngine {
       capabilities: source.capabilities,
       normalizeSymbol: (symbol: string, marketKind: MarketKind) => source.normalizeSymbol(symbol, marketKind),
       getSymbols: source.getSymbols ? (marketKind?: MarketKind) => source.getSymbols?.(marketKind) ?? Promise.resolve([]) : undefined,
+      getSymbolMetadata: source.getSymbolMetadata
+        ? (symbol: MarketSymbol) => source.getSymbolMetadata!(symbol)
+        : undefined,
       getHistoricalCandles: async (query: CandleQuery) => {
         const candles = await source.getHistoricalCandles(query);
         const symbol = symbolFromQuery(query);

@@ -10,6 +10,7 @@ import {
   TradeTick
 } from "../types";
 import { marketDataFetchJson } from "../transport";
+import { createSymbolMetadata } from "../symbolMetadata";
 
 type OkxResponse<T> = {
   code: string;
@@ -39,6 +40,8 @@ type OkxInstrument = {
   quoteCcy: string;
   instType: string;
   settleCcy?: string;
+  tickSz?: string;
+  lotSz?: string;
 };
 
 type OkxTicker = {
@@ -109,6 +112,40 @@ async function okxGet<T>(path: string, params: URLSearchParams) {
     throw new Error(`OKX request failed: ${payload.msg}`);
   }
   return payload.data;
+}
+
+async function getOkxSymbols(marketKind: MarketSymbol["marketKind"]) {
+  const params = new URLSearchParams({
+    instType: marketKind === "spot" ? "SPOT" : "SWAP"
+  });
+  const data = await okxGet<OkxInstrument[]>("/api/v5/public/instruments", params);
+  return data
+    .filter((item) => item.state === "live" && (marketKind === "spot" || item.instId.endsWith("-USDT-SWAP")))
+    .map((item) => {
+      const [baseAsset, quoteAsset] = item.instId.split("-");
+      const resolvedMarketKind = marketKind === "spot" ? "spot" as const : "perpetual" as const;
+      const metadata = item.tickSz
+        ? createSymbolMetadata({
+            exchange: "okx",
+            rawSymbol: item.instId,
+            normalizedSymbol: normalizeOkxSymbol(item.instId),
+            marketKind: resolvedMarketKind,
+            tickSize: item.tickSz,
+            quantityStep: item.lotSz,
+            source: "okx-v5-public-instruments"
+          })
+        : undefined;
+      return {
+        exchange: "okx" as const,
+        rawSymbol: item.instId,
+        baseAsset: item.baseCcy || baseAsset,
+        quoteAsset: item.quoteCcy || quoteAsset,
+        marketKind: resolvedMarketKind,
+        pricePrecision: metadata?.pricePrecision,
+        quantityPrecision: metadata?.quantityPrecision,
+        metadata
+      };
+    });
 }
 
 function mapKline(row: string[]): Candle {
@@ -332,23 +369,14 @@ export const okxMarketDataAdapter: MarketDataAdapter = {
     liquidations: true
   },
   normalizeSymbol: (symbol) => normalizeOkxSymbol(symbol),
-  getSymbols: async (marketKind = "perpetual") => {
-    const params = new URLSearchParams({
-      instType: marketKind === "spot" ? "SPOT" : "SWAP"
-    });
-    const data = await okxGet<OkxInstrument[]>("/api/v5/public/instruments", params);
-    return data
-      .filter((item) => item.state === "live" && item.instId.endsWith("-USDT-SWAP"))
-      .map((item) => {
-        const [baseAsset, quoteAsset] = item.instId.split("-");
-        return {
-          exchange: "okx",
-          rawSymbol: item.instId,
-          baseAsset: item.baseCcy || baseAsset,
-          quoteAsset: item.quoteCcy || quoteAsset,
-          marketKind: "perpetual"
-        };
-      });
+  getSymbols: (marketKind = "perpetual") => getOkxSymbols(marketKind),
+  getSymbolMetadata: async (symbol) => {
+    const symbols = await getOkxSymbols(symbol.marketKind);
+    const match = symbols.find(
+      (item) => normalizeOkxSymbol(item.rawSymbol) === normalizeOkxSymbol(symbol.rawSymbol)
+    );
+    if (!match?.metadata) throw new Error(`missing-authoritative-tick-size:okx:${symbol.rawSymbol}`);
+    return match.metadata;
   },
   getHistoricalCandles: async (query: CandleQuery) => {
     const bar = timeframeMap[query.timeframe];

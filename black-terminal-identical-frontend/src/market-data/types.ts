@@ -20,6 +20,24 @@ export type ExchangeId =
 
 export type MarketKind = "spot" | "margin" | "perpetual" | "futures" | "options" | "swap";
 
+export type SymbolAssetClass = "crypto" | "forex" | "equity" | "futures" | "other";
+
+export type SymbolMetadata = {
+  exchange: ExchangeId;
+  rawSymbol: string;
+  normalizedSymbol: string;
+  assetClass: SymbolAssetClass;
+  marketKind?: MarketKind;
+  tickSize: string;
+  quantityStep?: string;
+  pricePrecision?: number;
+  quantityPrecision?: number;
+  timezone: string;
+  sessionPolicy: string;
+  source: string;
+  sourceRevision?: string;
+};
+
 export type Timeframe =
   | "1s"
   | "10s"
@@ -50,6 +68,7 @@ export type MarketSymbol = {
   pricePrecision?: number;
   quantityPrecision?: number;
   minNotional?: number;
+  metadata?: SymbolMetadata;
 };
 
 export type MarketDataCapabilities = {
@@ -144,6 +163,7 @@ export type MarketDataAdapter = {
   capabilities: MarketDataCapabilities;
   normalizeSymbol: (symbol: string, marketKind: MarketKind) => string;
   getSymbols?: (marketKind?: MarketKind) => Promise<MarketSymbol[]>;
+  getSymbolMetadata?: (symbol: MarketSymbol) => Promise<SymbolMetadata>;
   getHistoricalCandles: (query: CandleQuery) => Promise<Candle[]>;
   getOrderBookSnapshot?: (symbol: MarketSymbol, limit?: number) => Promise<OrderBookSnapshot>;
   getRecentTrades?: (symbol: MarketSymbol, limit?: number) => Promise<TradeTick[]>;

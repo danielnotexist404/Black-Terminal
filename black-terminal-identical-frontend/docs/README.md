@@ -66,6 +66,12 @@ Project Obsidian is currently a research and protocol-formalization workstream. 
 
 - `EXCHANGE_AUTOMATION.md` - exchange data, trading, and webhook strategy.
 - `PYTHON_INDICATORS.md` - Python indicator runtime contract.
+- `indicators/KIOSEFF_STOP_LOSS_CLUSTER_PARITY_AUDIT.md` - pre-implementation Kioseff data,
+  semantic, lifecycle, rendering, and licensing audit.
+- `indicators/KIOSEFF_STOP_LOSS_CLUSTER_IMPLEMENTATION.md` - phased Kioseff implementation,
+  test, performance, migration, and certification record.
+- `indicators/KIOSEFF_STOP_LOSS_CLUSTER_COMPLETION_REPORT.md` - required final architecture,
+  coverage, validation, blocker, and verification handoff.
 - `scanner.md` - scanner module notes.
 
 ## Documentation Rules

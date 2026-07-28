@@ -1,5 +1,10 @@
 # Python Indicators
 
+> The durable `volatilityHeatmap` feature is no longer a Python-runtime indicator. It now hosts the
+> worker-based Kioseff Stop Loss Clustering implementation. The legacy Python VAE source remains
+> unreferenced only until TradingView golden certification authorizes retirement; it is not a
+> fallback. See `indicators/KIOSEFF_STOP_LOSS_CLUSTER_IMPLEMENTATION.md`.
+
 Python indicators are a first-class product goal. The core rule: scripts should be powerful for
 analysis but limited in what they can touch.
 

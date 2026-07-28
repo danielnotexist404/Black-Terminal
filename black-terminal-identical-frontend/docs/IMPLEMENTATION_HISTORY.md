@@ -1202,3 +1202,19 @@ Remaining:
 - Added Node 22 worker container packaging and health probes.
 - Applied Supabase migrations `202607200003` through `202607200006`; current production control plane and typed-consent activation UI deployment is `dpl_Hh9aSdgTBvT7KCLLGFgxy3pqT8iA`.
 - Added dedicated broker, investor, mandate and reconciliation suites. Persistent provider deployment and offline execution certification remain open; execution flags stay disabled until then.
+# 2026-07-28 - Kioseff Stop Loss Clustering Worker Implementation
+
+- Replaced the chart calculation behind durable key `volatilityHeatmap` with a dedicated,
+  transactional worker implementation of both Kioseff models and both VAE granularities.
+- Added authoritative Binance/Bybit/OKX decimal tick metadata and deterministic same-venue
+  lower-timeframe history, grouping, reconciliation, quality gates, and provenance.
+- Added Pine semantic utilities, canonical snapshot hashing, committed/provisional rollback,
+  first-divergence diagnostics, PixiJS batching, React settings/summary/ratio/unavailability
+  overlays, workspace migration, alerts, and pane output.
+- Preserved the supplied Pine v6 source, MPL-2.0 notices, original authorship, and source
+  availability plan.
+- Added ten focused Kioseff suites plus 1,000–20,000-bar benchmarks. The full suite, production
+  build, security contracts, security audit, and browser/Tauri normalized hash pass.
+- Status is implementation complete, parity pending reference certification. Approved TradingView
+  snapshots are absent, so no fully-identical claim is made and the unreferenced legacy approximation
+  files are not yet deleted.

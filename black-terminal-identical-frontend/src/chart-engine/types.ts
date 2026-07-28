@@ -1,5 +1,7 @@
 import type { IndicatorAlertDefinition } from "../automation/alerts";
 import type { ChartPriceTransformSnapshot } from "./priceTransform";
+import type { KioseffSnapshot } from "../modules/kioseff-stop-loss-clustering/core/canonical";
+import type { KioseffSettingsV1 } from "../modules/kioseff-stop-loss-clustering/core/settings";
 
 export type Candle = {
   time: number;
@@ -100,6 +102,8 @@ export type ChartEngineOptions = {
   indicatorPeriods?: IndicatorPeriods;
   indicatorVisualSettings?: IndicatorVisualSettings;
   indicatorAdvancedSettings?: IndicatorAdvancedSettings;
+  kioseffSnapshot?: KioseffSnapshot | null;
+  kioseffSettings?: KioseffSettingsV1;
   alertDefinitions?: IndicatorAlertDefinition[];
   customPlots?: any[];
   onAlertFired?: (symbol: string, message: string) => void;

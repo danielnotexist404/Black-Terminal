@@ -40,6 +40,19 @@ The buy/sell oscillator output remains present in the canonical worker snapshot 
 default at render time. It can be enabled from the Style tab, where its buy and sell colors are also
 configurable. These controls change presentation only; they do not change clustering calculations.
 
+## Calculation lookback and loading telemetry
+
+The indicator owns a persisted calculation lookback independent of the ordinary chart-history
+selector: 5,000, 11,000 (default), or 22,000 chart bars. The retained chart source is sized for the
+maximum selection and the history coordinator reports the selected target truthfully when the venue
+cannot supply the full window. On a complete 1H/1m configuration, 22,000 chart bars require
+1,320,000 ordered intrabars.
+
+The loading overlay maps real chart-history pages, intrabar pages, grouping, validation, worker
+calculation, and render stages into a continuous energy-bar progress display. Progress does not use
+an artificial timer. Large-history warmup materializes sorted intrabar collections only at actual
+warmup milestones instead of copying the growing collection after every page batch.
+
 ## Price-domain policies
 
 - `Candles Only`

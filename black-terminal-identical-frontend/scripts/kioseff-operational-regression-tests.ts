@@ -17,6 +17,7 @@ import {
 } from "../src/modules/kioseff-stop-loss-clustering/core/canonical.ts";
 import {
   KIOSEFF_DEFAULT_SETTINGS,
+  KIOSEFF_HISTORY_LOOKBACK_OPTIONS,
   KIOSEFF_TIMEFRAME_INPUTS,
   kioseffSettingsVersion,
   migrateKioseffSettings
@@ -39,6 +40,7 @@ import {
   type NormalizedCandle
 } from "../src/modules/kioseff-stop-loss-clustering/data/types.ts";
 import { buildKioseffRenderModel } from "../src/modules/kioseff-stop-loss-clustering/rendering/renderModel.ts";
+import { kioseffLoadProgress } from "../src/modules/kioseff-stop-loss-clustering/data/loadProgress.ts";
 import { KioseffWorkerRuntime } from "../src/modules/kioseff-stop-loss-clustering/workers/KioseffWorker.ts";
 
 const fixturePath = fileURLToPath(
@@ -106,6 +108,24 @@ assert.equal(noRangeDiagnostic.historyCoverage.actual, 0);
 assert.equal(noRangeDiagnostic.reason, "missing-request-range");
 
 const base = 1_704_067_200;
+const maximumLookbackChart = Array.from({ length: 22_000 }, (_, index) => ({
+  time: base + index * 3600,
+  open: 100,
+  high: 101,
+  low: 99,
+  close: 100,
+  volume: 60
+}));
+assert.equal(
+  constructKioseffRequestRange(
+    maximumLookbackChart,
+    "1h",
+    "1m",
+    base + 22_000 * 3600
+  ).expectedIntrabars,
+  1_320_000,
+  "22,000 one-hour bars request 1.32 million ordered one-minute intrabars"
+);
 const normalizedBoundary = normalizeKioseffCandles(
   [
     { time: base + 3540, open: 1, high: 2, low: 1, close: 2, volume: 1 },
@@ -442,6 +462,7 @@ const settingsPanelPath = fileURLToPath(
 const settingsPanelSource = readFileSync(settingsPanelPath, "utf8");
 for (const field of [
   "model",
+  "historyLookbackBars",
   "absorbtion.showXRay",
   "absorbtion.intensityBySize",
   "absorbtion.stopClusterBuys",
@@ -476,7 +497,42 @@ const overlaysSource = readFileSync(overlaysPath, "utf8");
 assert.match(overlaysSource, /<summary>Parity Diagnostics<\/summary>/);
 assert.match(overlaysSource, /settings\.style\.showSummaryTable/);
 assert.match(overlaysSource, /settings\.showClusterRatioMeter/);
+assert.match(overlaysSource, /kioseff-energy-loader/);
+const chartSource = readFileSync(
+  fileURLToPath(new URL("../src/components/PixiBlackChart.tsx", import.meta.url)),
+  "utf8"
+);
+assert.match(chartSource, /MAX_RETAINED_CHART_BARS = 22_000/);
+assert.match(chartSource, /targetChartBars: kioseffSettings\.historyLookbackBars/);
+const themeSource = readFileSync(
+  fileURLToPath(new URL("../src/styles/theme.css", import.meta.url)),
+  "utf8"
+);
+assert.match(themeSource, /@keyframes kioseff-energy-sweep/);
 assert.match(settingsPanelSource, /settings\.model === "absorbtion-extremes"/);
+assert.equal(KIOSEFF_DEFAULT_SETTINGS.historyLookbackBars, 11000);
+assert.deepEqual(
+  KIOSEFF_HISTORY_LOOKBACK_OPTIONS.map((option) => option.value),
+  [5000, 11000, 22000]
+);
+assert.equal(kioseffLoadProgress({ stage: "fetching-chart-history", loaded: 5500, target: 11000 }), 10);
+assert.equal(kioseffLoadProgress({ stage: "fetching-intrabar-history", loaded: 660000, target: 1320000 }), 46);
+assert.equal(kioseffLoadProgress({ stage: "ready" }), 100);
+const progressiveWarmup = [
+  kioseffLoadProgress({ stage: "fetching-intrabar-history", loaded: 6000, target: 1_320_000 }),
+  kioseffLoadProgress({ stage: "grouping-intrabars", bars: 100, intrabars: 6000, targetBars: 22_000 }),
+  kioseffLoadProgress({ stage: "validating", bars: 100, intrabars: 6000, targetBars: 22_000 }),
+  kioseffLoadProgress({ stage: "starting-worker", bars: 100, targetBars: 22_000 }),
+  kioseffLoadProgress({ stage: "calculating", bars: 100, intrabars: 6000, targetBars: 22_000 }),
+  kioseffLoadProgress({ stage: "rendering", clusters: 1, completedBars: 100, targetBars: 22_000 }),
+  kioseffLoadProgress({ stage: "warming", completedBars: 100, targetBars: 22_000 }),
+  kioseffLoadProgress({ stage: "fetching-intrabar-history", loaded: 12000, target: 1_320_000 })
+];
+assert.deepEqual(
+  progressiveWarmup,
+  [...progressiveWarmup].sort((left, right) => left - right),
+  "progressive warmup energy remains monotonic across worker previews"
+);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.absorbtion.showXRay, true);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.absorbtion.intensityBySize, false);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.absorbtion.stopClusterBuys, 2);

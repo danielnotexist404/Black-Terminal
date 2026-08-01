@@ -195,6 +195,7 @@ const concurrentHistory = await new KioseffHistoryCoordinator().load({
   adapter: historyAdapter,
   symbol: concurrentSymbol,
   chartCandles: concurrentChart,
+  targetChartBars: 60,
   chartTimeframe: "1h",
   lowerTimeframe: "1m",
   transport: "fixture",
@@ -202,6 +203,9 @@ const concurrentHistory = await new KioseffHistoryCoordinator().load({
 });
 assert.equal(concurrentHistory.quality.complete, true);
 assert.equal(concurrentHistory.quality.actualCount, 1800);
+assert.equal(concurrentHistory.warmup.completedChartBars, 30);
+assert.equal(concurrentHistory.warmup.targetChartBars, 60);
+assert.equal(concurrentHistory.warmup.full, false, "requested lookback remains truthful when chart history is shorter");
 assert.ok(maximumActiveHistoryRequests > 1, "intrabar pages load concurrently");
 assert.ok(maximumActiveHistoryRequests <= 6, "intrabar concurrency remains bounded");
 

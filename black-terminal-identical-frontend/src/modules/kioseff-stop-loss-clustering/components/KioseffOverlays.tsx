@@ -5,6 +5,7 @@ import type {
   KioseffLoadState,
   KioseffRuntimeDiagnostics
 } from "../data/loadState";
+import { kioseffLoadProgress } from "../data/loadProgress";
 
 type Props = {
   visible: boolean;
@@ -56,6 +57,31 @@ function loadLabel(state: KioseffLoadState) {
     case "error":
       return `Error — ${state.message}`;
   }
+}
+
+function KioseffEnergyLoader({ state }: { state: KioseffLoadState }) {
+  const progress = kioseffLoadProgress(state);
+  return (
+    <aside className="kioseff-energy-loader" data-testid="kioseff-load-state" role="status" aria-live="polite">
+      <div className="kioseff-energy-heading">
+        <b>Stop Loss Clustering</b>
+        <strong>{Math.round(progress)}%</strong>
+      </div>
+      <div
+        className="kioseff-energy-track"
+        role="progressbar"
+        aria-label="Stop Loss Clustering loading progress"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(progress)}
+      >
+        <span className="kioseff-energy-fill" style={{ width: `${progress}%` }} />
+        <i className="kioseff-energy-grid" />
+      </div>
+      <span>{loadLabel(state)}</span>
+      <small>HIGH-RESOLUTION ORDERED INTRABAR RECONSTRUCTION</small>
+    </aside>
+  );
 }
 
 export function KioseffOverlays({
@@ -126,7 +152,7 @@ export function KioseffOverlays({
   if (!snapshot) {
     return (
       <>
-        <aside className="kioseff-unavailable" data-testid="kioseff-load-state"><b>Stop Loss Clustering</b><span>{loadLabel(loadState)}</span></aside>
+        <KioseffEnergyLoader state={loadState} />
         {parityPanel}
         {inspector}
       </>
@@ -136,14 +162,7 @@ export function KioseffOverlays({
   const sell = snapshot.summary.nearestSell;
   return (
     <>
-      {loadState.stage !== "ready" && (
-        <aside className="kioseff-warming" role="status">
-          <b>PARITY STATE NOT FINAL · PREVIEW ONLY</b>
-          {loadState.stage === "warming"
-            ? loadLabel(loadState)
-            : `Warming up — calculated from ${diagnostics.groupedChartBarCount.toLocaleString()} of ${diagnostics.chartHistoryCount.toLocaleString()} chart bars · ${loadLabel(loadState)}`}
-        </aside>
-      )}
+      {loadState.stage !== "ready" && <KioseffEnergyLoader state={loadState} />}
       {loadState.stage === "ready" &&
         snapshot.activeClusters.length + snapshot.violatedClusters.length === 0 && (
           <aside className="kioseff-warming" role="status">

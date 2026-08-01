@@ -1258,3 +1258,9 @@ Remaining:
 - Simplified the parity diagnostics title, made both indicator tables independently optional, hid the
   oscillator by default, and added separate oscillator buy/sell color controls without changing the
   canonical cluster calculation or pane output.
+- Added an indicator-owned 5,000 / 11,000 / 22,000 calculation lookback with an 11,000-bar default,
+  raised retained chart history to the 22,000-bar maximum, and preserved truthful partial warmup when
+  a venue returns fewer bars than requested.
+- Added a live stage-weighted energy progress bar for chart history, ordered intrabars, grouping,
+  validation, worker calculation, and rendering. Removed per-page full-history materialization so
+  million-intrabar warmups sort only at meaningful milestones.

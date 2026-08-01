@@ -30,6 +30,7 @@ export type KioseffHistoryRequest = {
   adapter: MarketDataAdapter;
   symbol: MarketSymbol;
   chartCandles: Candle[];
+  targetChartBars?: number;
   chartTimeframe: Timeframe;
   lowerTimeframe: Timeframe;
   transport: KioseffSourceProvenance["transport"];
@@ -188,6 +189,10 @@ export class KioseffHistoryCoordinator {
       const sortedChart = [...request.chartCandles].sort(
         (left, right) => left.time - right.time
       );
+      const targetChartBars = Math.max(
+        sortedChart.length,
+        Math.floor(request.targetChartBars ?? sortedChart.length)
+      );
       const range = constructKioseffRequestRange(
         sortedChart,
         request.chartTimeframe,
@@ -233,7 +238,8 @@ export class KioseffHistoryCoordinator {
         metadata.tickSize,
         range.start,
         range.end,
-        sortedChart.length
+        sortedChart.length,
+        targetChartBars
       ]);
       const cached = this.cache.get(cacheKey);
       if (cached) {
@@ -267,7 +273,7 @@ export class KioseffHistoryCoordinator {
         range,
         abort.signal,
         request.onProgress,
-        async (raw, continuousStart) => {
+        async (materialize, continuousStart) => {
           const firstFullChartTime =
             Math.ceil(continuousStart / chartSeconds) * chartSeconds;
           const warmChart = sortedChart.filter(
@@ -275,7 +281,9 @@ export class KioseffHistoryCoordinator {
           );
           const crossedMilestone =
             warmChart.length >= (milestones[nextMilestone] ?? sortedChart.length);
-          const full = continuousStart <= range.start;
+          const full =
+            continuousStart <= range.start &&
+            sortedChart.length >= targetChartBars;
           if (!crossedMilestone && !full) return;
           while (
             nextMilestone < milestones.length &&
@@ -290,9 +298,9 @@ export class KioseffHistoryCoordinator {
             normalizedSymbol,
             cacheKey,
             range,
-            raw,
+            raw: materialize(),
             chartCandles: full ? sortedChart : warmChart,
-            targetChartBars: sortedChart.length,
+            targetChartBars,
             full
           });
           await request.onWarmup?.(warmResult);
@@ -308,8 +316,8 @@ export class KioseffHistoryCoordinator {
         range,
         raw: rawIntrabars,
         chartCandles: sortedChart,
-        targetChartBars: sortedChart.length,
-        full: true
+        targetChartBars,
+        full: sortedChart.length >= targetChartBars
       });
       this.cache.set(cacheKey, result);
       return result;
@@ -453,7 +461,7 @@ export class KioseffHistoryCoordinator {
     signal: AbortSignal,
     onProgress?: (progress: KioseffHistoryProgress) => void,
     onBatch?: (
-      collection: RawHistoryCollection,
+      materialize: () => RawHistoryCollection,
       continuousStart: number
     ) => void | Promise<void>
   ): Promise<RawHistoryCollection> {
@@ -578,7 +586,7 @@ export class KioseffHistoryCoordinator {
         conflictingTimes: uniqueTimes(conflictingTimes)
       });
       const oldestBatchRange = batch.at(-1);
-      if (oldestBatchRange) await onBatch?.(collection(), oldestBatchRange.from);
+      if (oldestBatchRange) await onBatch?.(collection, oldestBatchRange.from);
     }
     this.assertCurrent(generation);
     if (byTime.size > expected) {

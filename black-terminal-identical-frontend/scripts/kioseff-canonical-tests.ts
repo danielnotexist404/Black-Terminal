@@ -95,6 +95,7 @@ assert.throws(() => canonicalSnapshotHash({ ...base, outputs: { ...base.outputs,
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.absorbtion.stopClusterBuys, 2);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.volatilityAtEntry.granularity, "lower");
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.engineMode, "pine-compatibility");
+assert.equal(KIOSEFF_DEFAULT_SETTINGS.historyLookbackBars, 11000);
 assert.equal(kioseffSettingsHash(KIOSEFF_DEFAULT_SETTINGS).length, 16);
 const hiddenMonths = structuredClone(KIOSEFF_DEFAULT_SETTINGS);
 hiddenMonths.visibility.months = false;
@@ -111,6 +112,14 @@ assert.equal(
     volatilityAtEntry: {}
   }).absorbtion.stopClusterBuys,
   7
+);
+assert.equal(
+  migrateKioseffSettings({ version: 1, historyLookbackBars: 22000 }).historyLookbackBars,
+  22000
+);
+assert.equal(
+  migrateKioseffSettings({ version: 1, historyLookbackBars: 12000 }).historyLookbackBars,
+  11000
 );
 
 console.log("Kioseff canonical output tests passed.");

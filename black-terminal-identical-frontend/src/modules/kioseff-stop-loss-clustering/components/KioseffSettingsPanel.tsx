@@ -1,6 +1,7 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 import {
   KIOSEFF_DEFAULT_SETTINGS,
+  KIOSEFF_HISTORY_LOOKBACK_OPTIONS,
   KIOSEFF_TIMEFRAME_INPUTS,
   isKioseffLowerTimeframeSupported,
   type KioseffSettingsV1
@@ -72,6 +73,21 @@ export function KioseffSettingsPanel({
         ))}
       </div>
       {tab === "inputs" && <>
+      <label>
+        Default Bar Lookback Calculation
+        <select
+          data-kioseff-field="historyLookbackBars"
+          value={settings.historyLookbackBars}
+          onChange={(event) => patch({
+            historyLookbackBars: Number(event.target.value) as KioseffSettingsV1["historyLookbackBars"]
+          })}
+        >
+          {KIOSEFF_HISTORY_LOOKBACK_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+        <small>Controls the real chart-bar warmup and ordered intrabar request. Larger windows take longer and use more memory.</small>
+      </label>
       <label>
         Model
         <select

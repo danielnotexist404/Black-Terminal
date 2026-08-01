@@ -151,6 +151,7 @@ const historyDepthOptions: { label: string; value: HistoryDepth }[] = [
   { label: "10K bars", value: 10000 },
   { label: "20K bars", value: 20000 }
 ];
+const MAX_RETAINED_CHART_BARS = 22_000;
 
 const timeframeSeconds: Record<any, number> = {
   "1s": 1,
@@ -348,6 +349,9 @@ export function PixiBlackChart({
     if (configuredDepth >= 10000) return 10000;
     return 5000;
   });
+  const marketHistoryTarget = visibleIndicators.volatilityHeatmap
+    ? Math.max(historyDepth, kioseffSettings.historyLookbackBars)
+    : historyDepth;
   const [indicatorsCollapsed, setIndicatorsCollapsed] = useState(false);
   const [mountedIndicators, setMountedIndicators] = useState<Record<IndicatorKey, boolean>>(() => ({ ...visibleIndicators }));
   const [alertSettings, setAlertSettings] = useState<IndicatorAlertSettings>(defaultIndicatorAlertSettings);
@@ -498,7 +502,7 @@ export function PixiBlackChart({
   };
 
   const setReplaySource = (candles: Candle[]) => {
-    replaySourceRef.current = uniqueSortedCandles(candles).slice(-20000);
+    replaySourceRef.current = uniqueSortedCandles(candles).slice(-MAX_RETAINED_CHART_BARS);
     setKioseffSourceRevision((revision) => revision + 1);
     if (replayActiveRef.current) {
       if (replayControlsRef.current.selecting) {
@@ -526,7 +530,7 @@ export function PixiBlackChart({
     replaySourceRef.current =
       last?.time === candle.time
         ? [...source.slice(0, -1), candle]
-        : [...source, candle].slice(-20000);
+        : [...source, candle].slice(-MAX_RETAINED_CHART_BARS);
     if (
       historyAdvanced &&
       visibleIndicators.volatilityHeatmap &&
@@ -631,7 +635,8 @@ export function PixiBlackChart({
       sourceAdapter: MarketDataAdapter,
       sourceExchange: ExchangeId,
       sourceSymbol: string,
-      targetBars: number
+      targetBars: number,
+      onProgress?: (loaded: number, target: number) => void
     ) => {
       const sourcePageLimit = pageLimitFor(sourceExchange);
 
@@ -661,6 +666,7 @@ export function PixiBlackChart({
 
         if (newCandles.length === 0) break;
         collected.push(...newCandles);
+        onProgress?.(Math.min(seenTimes.size, targetBars), targetBars);
         beforeTime = Math.min(...newCandles.map((candle) => candle.time));
         if (eligibleCandles.length < Math.min(sourcePageLimit, remaining)) break;
       }
@@ -672,12 +678,24 @@ export function PixiBlackChart({
       return history;
     };
 
-    const fetchHistoryWindow = async (targetBars: number) => {
+    const fetchHistoryWindow = async (
+      targetBars: number,
+      onProgress?: (loaded: number, target: number) => void
+    ) => {
       if (!adapter) return [];
-      return fetchHistoryWindowFrom(adapter, marketSymbol.exchange, marketSymbol.rawSymbol, targetBars);
+      return fetchHistoryWindowFrom(
+        adapter,
+        marketSymbol.exchange,
+        marketSymbol.rawSymbol,
+        targetBars,
+        onProgress
+      );
     };
 
-    const fetchFallbackHistoryWindow = async (targetBars: number) => {
+    const fetchFallbackHistoryWindow = async (
+      targetBars: number,
+      onProgress?: (loaded: number, target: number) => void
+    ) => {
       const failures: string[] = [];
 
       for (const exchange of historyFallbackOrder(marketSymbol.exchange)) {
@@ -686,7 +704,13 @@ export function PixiBlackChart({
 
         try {
           const sourceSymbol = sourceAdapter.normalizeSymbol(`${marketSymbol.baseAsset}${marketSymbol.quoteAsset}`, marketSymbol.marketKind);
-          const candles = await fetchHistoryWindowFrom(sourceAdapter, exchange, sourceSymbol, targetBars);
+          const candles = await fetchHistoryWindowFrom(
+            sourceAdapter,
+            exchange,
+            sourceSymbol,
+            targetBars,
+            onProgress
+          );
           return { candles, adapter: sourceAdapter };
         } catch (err) {
           failures.push(`${sourceAdapter.label}: ${err instanceof Error ? err.message : String(err)}`);
@@ -720,7 +744,10 @@ export function PixiBlackChart({
             return;
           }
 
-          replaySourceRef.current = uniqueSortedCandles([...olderCandles, ...replaySourceRef.current]).slice(-20000);
+          replaySourceRef.current = uniqueSortedCandles([
+            ...olderCandles,
+            ...replaySourceRef.current
+          ]).slice(-MAX_RETAINED_CHART_BARS);
           if (replayActiveRef.current) {
             setDataStatus("REPLAY HISTORY EXTENDED");
             return;
@@ -950,8 +977,12 @@ export function PixiBlackChart({
           return;
         }
 
-        setDataStatus(`${adapter.label.toUpperCase()} HISTORY ${historyDepth.toLocaleString()} BARS`);
-        return fetchHistoryWindow(historyDepth)
+        const reportChartHistoryProgress = (loaded: number, target: number) => {
+          if (disposed || !visibleIndicators.volatilityHeatmap) return;
+          setKioseffLoadState({ stage: "fetching-chart-history", loaded, target });
+        };
+        setDataStatus(`${adapter.label.toUpperCase()} HISTORY ${marketHistoryTarget.toLocaleString()} BARS`);
+        return fetchHistoryWindow(marketHistoryTarget, reportChartHistoryProgress)
           .then((candles) => {
             if (disposed) return;
             chartSourceVenueRef.current = marketSymbol.exchange;
@@ -967,7 +998,10 @@ export function PixiBlackChart({
             console.error(`${adapter.label} market data failed; trying cross-exchange history`, err);
             setDataStatus(`${adapter.label.toUpperCase()} HISTORY FALLBACK`);
 
-            return fetchFallbackHistoryWindow(historyDepth)
+            return fetchFallbackHistoryWindow(
+              marketHistoryTarget,
+              reportChartHistoryProgress
+            )
               .then(({ candles, adapter: sourceAdapter }) => {
                 if (disposed) return;
                 synthesizeCandlesFromTrades = !adapter.subscribeCandles;
@@ -1042,6 +1076,8 @@ export function PixiBlackChart({
     displaySymbol,
     timeframe,
     historyDepth,
+    marketHistoryTarget,
+    visibleIndicators.volatilityHeatmap,
     onPriceChange
   ]);
 
@@ -1176,7 +1212,7 @@ export function PixiBlackChart({
       marketCategory: marketSymbol.marketKind,
       chartTimeframe: timeframe,
       requestedLowerTimeframe: lowerTimeframe,
-      chartHistoryCount: replaySourceRef.current.length,
+      chartHistoryCount: kioseffSettings.historyLookbackBars,
       loadStage: "fetching-chart-history",
       settingsHash: kioseffSettingsHash(kioseffSettings),
       percentileMode:
@@ -1185,7 +1221,9 @@ export function PixiBlackChart({
           : "ABSOLUTE BIN / PINE HIGHER"
     });
     const adapter = selectedAdapter;
-    const chartCandles = replaySourceRef.current;
+    const chartCandles = replaySourceRef.current.slice(
+      -kioseffSettings.historyLookbackBars
+    );
     if (!adapter) {
       unavailable("unsupported-symbol-metadata", "The selected venue has no certified market-data adapter.");
       return () => coordinator.reset();
@@ -1201,12 +1239,12 @@ export function PixiBlackChart({
       setLoadStage({
         stage: "fetching-chart-history",
         loaded: 0,
-        target: historyDepth
+        target: kioseffSettings.historyLookbackBars
       });
       trace("fetching-chart-history", {
         inputCount: 0,
         outputCount: 0,
-        target: historyDepth,
+        target: kioseffSettings.historyLookbackBars,
         rejectionReason: null
       });
       return () => coordinator.reset();
@@ -1228,7 +1266,8 @@ export function PixiBlackChart({
       setLoadStage({
         stage: "validating",
         bars: history.chartBars.length,
-        intrabars: intrabarCount
+        intrabars: intrabarCount,
+        targetBars: history.warmup.targetChartBars
       });
       setKioseffDiagnostics((current) => ({
         ...current,
@@ -1283,7 +1322,11 @@ export function PixiBlackChart({
           }
         );
       }
-      setLoadStage({ stage: "starting-worker" });
+      setLoadStage({
+        stage: "starting-worker",
+        bars: history.warmup.completedChartBars,
+        targetBars: history.warmup.targetChartBars
+      });
       const context = {
         metadata: history.provenance.metadata,
         timeframe,
@@ -1308,12 +1351,14 @@ export function PixiBlackChart({
       setLoadStage({
         stage: "rebuilding",
         bars: chartBarsSent,
-        intrabars: intrabarsSent
+        intrabars: intrabarsSent,
+        targetBars: history.warmup.targetChartBars
       });
       setLoadStage({
         stage: "calculating",
         bars: chartBarsSent,
-        intrabars: intrabarsSent
+        intrabars: intrabarsSent,
+        targetBars: history.warmup.targetChartBars
       });
       setKioseffDiagnostics((current) => ({
         ...current,
@@ -1339,7 +1384,12 @@ export function PixiBlackChart({
       const renderModel = buildKioseffRenderModel(snapshot, kioseffSettings);
       const clusterCount =
         renderModel.activeZones.length + renderModel.violatedZones.length;
-      setLoadStage({ stage: "rendering", clusters: clusterCount });
+      setLoadStage({
+        stage: "rendering",
+        clusters: clusterCount,
+        completedBars: history.warmup.completedChartBars,
+        targetBars: history.warmup.targetChartBars
+      });
       setKioseffSnapshot(snapshot);
       setKioseffUnavailable(null);
       const chartEngine = engineRef.current;
@@ -1406,6 +1456,7 @@ export function PixiBlackChart({
         adapter,
         symbol: marketSymbol,
         chartCandles,
+        targetChartBars: kioseffSettings.historyLookbackBars,
         chartTimeframe: timeframe,
         lowerTimeframe,
         transport:
@@ -1448,7 +1499,8 @@ export function PixiBlackChart({
             setLoadStage({
               stage: "grouping-intrabars",
               bars: progress.bars,
-              intrabars: progress.intrabars
+              intrabars: progress.intrabars,
+              targetBars: kioseffSettings.historyLookbackBars
             });
           }
         },
@@ -1458,8 +1510,14 @@ export function PixiBlackChart({
         if (disposed) return;
         if (processedSourceVersion !== history.sourceVersion) {
           await calculateHistory(history);
-        } else {
+        } else if (history.warmup.full) {
           setLoadStage({ stage: "ready" });
+        } else {
+          setLoadStage({
+            stage: "warming",
+            completedBars: history.warmup.completedChartBars,
+            targetBars: history.warmup.targetChartBars
+          });
         }
       })
       .catch((error: unknown) => {

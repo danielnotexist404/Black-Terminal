@@ -7,10 +7,13 @@ import {
 import type { Timeframe } from "../../../market-data/types.ts";
 import { kioseffTimeframeSeconds } from "../data/timeframes.ts";
 
+export type KioseffHistoryLookbackBars = 5000 | 11000 | 22000;
+
 export type KioseffSettingsV1 = {
   version: 1;
   engineMode: KioseffEngineMode;
   model: KioseffModel;
+  historyLookbackBars: KioseffHistoryLookbackBars;
   absorbtion: {
     showXRay: boolean;
     intensityBySize: boolean;
@@ -62,6 +65,7 @@ export const KIOSEFF_DEFAULT_SETTINGS: KioseffSettingsV1 = {
   version: 1,
   engineMode: "pine-compatibility",
   model: "absorbtion-extremes",
+  historyLookbackBars: 11000,
   absorbtion: {
     showXRay: true,
     intensityBySize: false,
@@ -117,6 +121,15 @@ export const KIOSEFF_TIMEFRAME_INPUTS = [
   value: string;
   label: string;
   timeframe: Timeframe;
+}[];
+
+export const KIOSEFF_HISTORY_LOOKBACK_OPTIONS = [
+  { value: 5000, label: "5,000 bars" },
+  { value: 11000, label: "11,000 bars · Default" },
+  { value: 22000, label: "22,000 bars · Maximum" }
+] as const satisfies readonly {
+  value: KioseffHistoryLookbackBars;
+  label: string;
 }[];
 
 export function normalizeKioseffTimeframeInput(value: string): Timeframe {
@@ -194,6 +207,12 @@ export function migrateKioseffSettings(
       source.model === "volatility-at-entry" || source.model === "absorbtion-extremes"
         ? source.model
         : defaults.model,
+    historyLookbackBars:
+      source.historyLookbackBars === 5000 ||
+      source.historyLookbackBars === 11000 ||
+      source.historyLookbackBars === 22000
+        ? source.historyLookbackBars
+        : defaults.historyLookbackBars,
     absorbtion: {
       showXRay: typeof absorbtion.showXRay === "boolean" ? absorbtion.showXRay : defaults.absorbtion.showXRay,
       intensityBySize:

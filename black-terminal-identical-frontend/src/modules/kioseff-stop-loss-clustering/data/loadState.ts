@@ -6,12 +6,12 @@ export type KioseffLoadState =
   | { stage: "requesting-symbol-metadata" }
   | { stage: "fetching-chart-history"; loaded: number; target: number }
   | { stage: "fetching-intrabar-history"; loaded: number; target?: number }
-  | { stage: "grouping-intrabars"; bars: number; intrabars: number }
-  | { stage: "validating"; bars: number; intrabars: number }
-  | { stage: "starting-worker" }
-  | { stage: "rebuilding"; bars: number; intrabars: number }
-  | { stage: "calculating"; bars: number; intrabars: number }
-  | { stage: "rendering"; clusters: number }
+  | { stage: "grouping-intrabars"; bars: number; intrabars: number; targetBars?: number }
+  | { stage: "validating"; bars: number; intrabars: number; targetBars?: number }
+  | { stage: "starting-worker"; bars?: number; targetBars?: number }
+  | { stage: "rebuilding"; bars: number; intrabars: number; targetBars?: number }
+  | { stage: "calculating"; bars: number; intrabars: number; targetBars?: number }
+  | { stage: "rendering"; clusters: number; completedBars?: number; targetBars?: number }
   | { stage: "warming"; completedBars: number; targetBars: number }
   | { stage: "ready" }
   | { stage: "degraded"; message: string }

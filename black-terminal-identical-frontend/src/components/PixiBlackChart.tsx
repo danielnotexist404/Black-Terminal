@@ -103,6 +103,7 @@ type PixiBlackChartProps = {
   priceLineIntensity?: number;
   activeOrders?: OrderUpdate[];
   onRefreshOrders?: () => void | Promise<unknown>;
+  allowedIndicators: readonly string[];
 };
 
 type IndicatorKey = keyof VisibleIndicators;
@@ -321,7 +322,8 @@ export function PixiBlackChart({
   priceLineColor,
   priceLineIntensity,
   activeOrders = [],
-  onRefreshOrders
+  onRefreshOrders,
+  allowedIndicators
 }: PixiBlackChartProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<BlackChartEngine | null>(null);
@@ -2335,7 +2337,7 @@ export function PixiBlackChart({
   const mountedIndicatorRows = indicatorRows.filter((indicator) => mountedIndicators[indicator.key]);
 
   const toggleIndicator = (key: IndicatorKey) => {
-    if (!canUseIndicator(key)) return;
+    if (!canUseIndicator(key, { allowedIndicators })) return;
     onVisibleIndicatorsChange((current) => ({ ...current, [key]: !current[key] }));
   };
 

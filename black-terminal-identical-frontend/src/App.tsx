@@ -102,6 +102,13 @@ import { getCapabilities, type CapabilityUser, type ProductTier, type TerminalCa
 import { blackCoreWindowDockManager } from "./core/windows/windowDockManager";
 import type { BlackCoreModuleMode } from "./core/modules/moduleRegistry";
 import { PerformanceHud } from "./performance/PerformanceHud";
+import {
+  ADMIN_ALLOWED_INDICATORS,
+  canUseIndicator,
+  DEFAULT_ALLOWED_INDICATORS,
+  MARKET_MAKER_HEATMAP_KEY,
+  restrictVisibleIndicators
+} from "./features/premium";
 
 const DomProWindow = lazy(() =>
   import("./modules/dom-pro/components/DomProWindow").then((module) => ({ default: module.DomProWindow }))
@@ -163,23 +170,6 @@ const timeframes: { label: string; value: Timeframe }[] = [
   { label: "100t", value: "100t" }
 ];
 
-const DEFAULT_ALLOWED = [
-  "liquidationHeatmap",
-  "volatilityHeatmap",
-  "adaptiveSwingStrategy",
-  "vwap",
-  "ema20",
-  "ema50",
-  "ema200",
-  "sma20",
-  "sma50",
-  "bollinger",
-  "openInterestOscillator",
-  "zScoreOscillator",
-  "waveTrendOscillator",
-  "volume"
-];
-const ADMIN_ALLOWED = [...DEFAULT_ALLOWED, "volumeProfile", "aif"];
 const PROPRIETARY_HDLX_INDICATOR = "volumeProfile";
 const DOM_PRO_CAPABILITY: TerminalCapability = "proprietary.domPro";
 const HDLX_PROFILE_CAPABILITY: TerminalCapability = "proprietary.hdlxProfile";
@@ -504,6 +494,7 @@ export default function App() {
       allowed.delete(PROPRIETARY_HDLX_INDICATOR);
     }
     if (currentUser?.role === "admin") allowed.add("aif");
+    if (currentUser?.role === "admin") allowed.add(MARKET_MAKER_HEATMAP_KEY);
     return Array.from(allowed);
   }, [canUseHdlxProfile, currentUser?.allowedIndicators, currentUser?.role]);
   const [domProOpen, setDomProOpen] = useState(false);
@@ -559,6 +550,14 @@ export default function App() {
       return { ...current, volumeProfile: false };
     });
   }, [canUseHdlxProfile]);
+
+  useEffect(() => {
+    if (canUseIndicator(MARKET_MAKER_HEATMAP_KEY, currentUser)) return;
+    setVisibleIndicators((current) => {
+      if (!current.volatilityHeatmap) return current;
+      return { ...current, volatilityHeatmap: false };
+    });
+  }, [currentUser?.allowedIndicators, currentUser?.role]);
 
   // Bootstrap Database
   useEffect(() => {
@@ -972,7 +971,9 @@ export default function App() {
             record.allowedIndicators.includes(PROPRIETARY_HDLX_INDICATOR) ||
             recordPermissions.has(HDLX_PROFILE_CAPABILITY);
           (Object.keys(nextVisible) as Array<keyof VisibleIndicators>).forEach((key) => {
-            const allowed = key === PROPRIETARY_HDLX_INDICATOR ? recordCanUseHdlx : record.allowedIndicators.includes(key);
+            const allowed = key === PROPRIETARY_HDLX_INDICATOR
+              ? recordCanUseHdlx
+              : canUseIndicator(key, record);
             nextVisible[key] = activeIndicators.has(key) && allowed;
           });
           setVisibleIndicators(nextVisible);
@@ -1061,7 +1062,9 @@ export default function App() {
               const next = { ...current };
               let changed = false;
               Object.keys(next).forEach((key) => {
-                const allowed = key === PROPRIETARY_HDLX_INDICATOR ? recordCanUseHdlx : record.allowedIndicators.includes(key);
+                const allowed = key === PROPRIETARY_HDLX_INDICATOR
+                  ? recordCanUseHdlx
+                  : canUseIndicator(key as keyof VisibleIndicators, record);
                 if (next[key as keyof VisibleIndicators] && !allowed) {
                   next[key as keyof VisibleIndicators] = false;
                   changed = true;
@@ -1303,7 +1306,7 @@ export default function App() {
       if (nextSymbol) setSymbol(nextSymbol);
       setTimeframe(snapshot.timeframe);
       setChartType(snapshot.chartType);
-      setVisibleIndicators(snapshot.visibleIndicators);
+      setVisibleIndicators(restrictVisibleIndicators(snapshot.visibleIndicators, currentUser));
       setIndicatorPeriods(snapshot.indicatorPeriods);
       setIndicatorVisualSettings(snapshot.indicatorVisualSettings);
       setIndicatorAdvancedSettings(migrateIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings));
@@ -1424,7 +1427,9 @@ export default function App() {
           const resolvedRole = role;
           const users = await dbGetUsers();
           const matched = users.find((u: any) => u.username === username);
-          const allowed = matched?.allowedIndicators || (resolvedRole === "admin" ? ADMIN_ALLOWED : DEFAULT_ALLOWED);
+          const allowed = matched?.allowedIndicators || (resolvedRole === "admin"
+            ? [...ADMIN_ALLOWED_INDICATORS]
+            : [...DEFAULT_ALLOWED_INDICATORS]);
           
           if (matched) {
             if (matched.workspaces && matched.workspaces.length > 0) {
@@ -2070,6 +2075,7 @@ export default function App() {
             priceLineIntensity={terminalSettings.priceLineIntensity}
             activeOrders={visiblePortfolioOrders}
             onRefreshOrders={() => refreshPortfolioState(true)}
+            allowedIndicators={effectiveAllowedIndicators}
           />
           {drawingsEnabled && (
             <div className="drawing-toolbar" aria-label="Drawing tools">

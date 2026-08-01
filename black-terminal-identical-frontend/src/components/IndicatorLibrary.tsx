@@ -2,7 +2,7 @@ import { Activity, Check, Code2, Download, Eye, EyeOff, Globe2, Lock, Plus, Sear
 import { useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { IndicatorPeriods, VisibleIndicators } from "../chart-engine/types";
-import { canUseIndicator, isPremiumIndicator } from "../features/premium";
+import { canUseIndicator } from "../features/premium";
 import type { StrategyRuntimeKind } from "../modules/strategy-lab/types/strategy.types";
 
 type IndicatorKey = keyof VisibleIndicators;
@@ -31,7 +31,7 @@ type BuiltInIndicator = {
   periodKey?: IndicatorPeriodKey;
   min?: number;
   max?: number;
-  premium?: boolean;
+  adminControlled?: boolean;
 };
 
 type CommunityScript = {
@@ -68,7 +68,7 @@ const builtInIndicators: BuiltInIndicator[] = [
     type: "Overlay",
     signal: "Modeled maker walls, wall violations, and liquidation pressure",
     runtime: "Worker",
-    premium: true
+    adminControlled: true
   },
   {
     key: "volumeProfile",
@@ -229,12 +229,15 @@ export function IndicatorLibrary({
 
   const filteredIndicators = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return builtInIndicators;
+    const accessibleIndicators = builtInIndicators.filter(
+      (indicator) => !indicator.adminControlled || canUseIndicator(indicator.key, { allowedIndicators })
+    );
+    if (!needle) return accessibleIndicators;
 
-    return builtInIndicators.filter((indicator) =>
+    return accessibleIndicators.filter((indicator) =>
       [indicator.title, indicator.group, indicator.type, indicator.signal, indicator.runtime ?? ""].some((value) => value.toLowerCase().includes(needle))
     );
-  }, [query]);
+  }, [allowedIndicators, query]);
 
   const filteredCommunityIndicators = useMemo(
     () => filterCommunityScripts(communityIndicators, query),
@@ -248,7 +251,7 @@ export function IndicatorLibrary({
   const adaptiveSwingInstalled = activeStrategyKind === "builtin-adaptive-swing";
 
   const toggleIndicator = (key: IndicatorKey) => {
-    if (!allowedIndicators.includes(key)) return;
+    if (!canUseIndicator(key, { allowedIndicators })) return;
     onVisibleIndicatorsChange((current) => ({ ...current, [key]: !current[key] }));
   };
 
@@ -349,7 +352,7 @@ export function IndicatorLibrary({
         <div className="library-list">
           {filteredIndicators.map((indicator) => {
             const active = visibleIndicators[indicator.key];
-            const locked = !allowedIndicators.includes(indicator.key);
+            const locked = !canUseIndicator(indicator.key, { allowedIndicators });
 
             return indicator.key === "volumeProfile" ? (
               <div className={`${active ? "library-row active" : "library-row"}${locked ? " premium-locked" : ""}`} key={indicator.key}>
@@ -406,7 +409,7 @@ export function IndicatorLibrary({
                       <strong>{indicator.title}</strong>
                       <em>
                         {indicator.group} / {indicator.type}{indicator.runtime ? ` / ${indicator.runtime}` : ""}
-                        {indicator.premium ? <b className="premium-badge">PREMIUM</b> : null}
+                        {indicator.adminControlled ? <b className="premium-badge">ADMIN GRANT</b> : null}
                       </em>
                     </span>
                 </button>
@@ -458,7 +461,7 @@ export function IndicatorLibrary({
         adaptiveSwingInstalled ? (
           <div className="library-list">
             {(() => {
-              const locked = !allowedIndicators.includes("adaptiveSwingStrategy");
+              const locked = !canUseIndicator("adaptiveSwingStrategy", { allowedIndicators });
               return (
                 <div className={`${visibleIndicators.adaptiveSwingStrategy ? "library-row active" : "library-row"}${locked ? " premium-locked" : ""}`}>
                   <button

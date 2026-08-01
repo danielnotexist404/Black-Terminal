@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Check, X, Shield, RefreshCw, Cpu, Award, Zap, AlertTriangle } from "lucide-react";
 import { dbUpdateUser, dbAddAuditLog } from "../lib/supabase";
+import { DEFAULT_ALLOWED_INDICATORS } from "../features/premium";
 
 interface UpgradePanelProps {
   onClose: () => void;
@@ -107,20 +108,7 @@ export default function UpgradePanel({ onClose, currentUser, onUpgradeSuccess }:
       try {
         // Upgrade account in database
         const fullPremiumIndicators = [
-          "liquidationHeatmap",
-          "volatilityHeatmap",
-          "adaptiveSwingStrategy",
-          "vwap",
-          "ema20",
-          "ema50",
-          "ema200",
-          "sma20",
-          "sma50",
-          "bollinger",
-          "openInterestOscillator",
-          "zScoreOscillator",
-          "waveTrendOscillator",
-          "volume"
+          ...new Set([...DEFAULT_ALLOWED_INDICATORS, ...currentUser.allowedIndicators])
         ];
 
         await dbUpdateUser(currentUser.username, {

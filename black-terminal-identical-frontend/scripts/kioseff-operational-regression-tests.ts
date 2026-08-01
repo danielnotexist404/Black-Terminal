@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { Candle } from "../src/chart-engine/types.ts";
+import type { Candle, VisibleIndicators } from "../src/chart-engine/types.ts";
+import {
+  ADMIN_ALLOWED_INDICATORS,
+  canUseIndicator,
+  DEFAULT_ALLOWED_INDICATORS,
+  MARKET_MAKER_HEATMAP_KEY,
+  restrictVisibleIndicators
+} from "../src/features/premium.ts";
 import {
   assertBybitCandleQuery,
   parseBybitKlineRows
@@ -505,12 +512,58 @@ assert.match(overlaysSource, /Nearest Sell Wall/);
 assert.match(overlaysSource, /const parityPanel = import\.meta\.env\.DEV/);
 assert.doesNotMatch(overlaysSource, /Stop[- ]Loss Clustering/i);
 assert.doesNotMatch(settingsPanelSource, /Stop[- ]Loss Clustering/i);
+assert.equal(Array.from<string>(DEFAULT_ALLOWED_INDICATORS).includes(MARKET_MAKER_HEATMAP_KEY), false);
+assert.equal(ADMIN_ALLOWED_INDICATORS.includes(MARKET_MAKER_HEATMAP_KEY), true);
+assert.equal(canUseIndicator(MARKET_MAKER_HEATMAP_KEY, { role: "user", allowedIndicators: [] }), false);
+assert.equal(canUseIndicator(MARKET_MAKER_HEATMAP_KEY, { role: "admin", allowedIndicators: [] }), true);
+assert.equal(
+  canUseIndicator(MARKET_MAKER_HEATMAP_KEY, { role: "user", allowedIndicators: [MARKET_MAKER_HEATMAP_KEY] }),
+  true
+);
+assert.equal(
+  restrictVisibleIndicators(
+    { volatilityHeatmap: true } as VisibleIndicators,
+    { role: "user", allowedIndicators: [] }
+  ).volatilityHeatmap,
+  false,
+  "revoked workspace state cannot reactivate Market Maker Heatmap"
+);
 const chartSource = readFileSync(
   fileURLToPath(new URL("../src/components/PixiBlackChart.tsx", import.meta.url)),
   "utf8"
 );
 assert.match(chartSource, /MAX_RETAINED_CHART_BARS = 22_000/);
 assert.match(chartSource, /targetChartBars: kioseffSettings\.historyLookbackBars/);
+assert.match(chartSource, /canUseIndicator\(key, \{ allowedIndicators \}\)/);
+const appSource = readFileSync(
+  fileURLToPath(new URL("../src/App.tsx", import.meta.url)),
+  "utf8"
+);
+assert.match(appSource, /restrictVisibleIndicators\(snapshot\.visibleIndicators, currentUser\)/);
+assert.match(appSource, /allowedIndicators=\{effectiveAllowedIndicators\}/);
+const adminSource = readFileSync(
+  fileURLToPath(new URL("../src/components/AdminPanel.tsx", import.meta.url)),
+  "utf8"
+);
+assert.match(adminSource, /ADMIN CONTROLLED/);
+const indicatorLibrarySource = readFileSync(
+  fileURLToPath(new URL("../src/components/IndicatorLibrary.tsx", import.meta.url)),
+  "utf8"
+);
+assert.match(indicatorLibrarySource, /ADMIN GRANT/);
+assert.match(indicatorLibrarySource, /!indicator\.adminControlled \|\| canUseIndicator/);
+const upgradeSource = readFileSync(
+  fileURLToPath(new URL("../src/components/UpgradePanel.tsx", import.meta.url)),
+  "utf8"
+);
+assert.doesNotMatch(upgradeSource, /"volatilityHeatmap"/);
+const accessMigrationSource = readFileSync(
+  fileURLToPath(new URL("../supabase/migrations/202608010001_market_maker_heatmap_admin_gate.sql", import.meta.url)),
+  "utf8"
+);
+assert.match(accessMigrationSource, /where role <> 'admin'/);
+assert.match(accessMigrationSource, /array_remove\(active_indicators, 'volatilityHeatmap'\)/);
+assert.match(accessMigrationSource, /where role = 'admin'/);
 const themeSource = readFileSync(
   fileURLToPath(new URL("../src/styles/theme.css", import.meta.url)),
   "utf8"

@@ -3,6 +3,11 @@ import { X } from "lucide-react";
 import "../styles/admin.css";
 import { dbAdminCreateUser, dbAdminDeleteUser, dbAdminGetUsers, dbAdminUpdateUser, dbGetAuditLogs, dbAddAuditLog, supabase } from "../lib/supabase";
 import type { ProductTier } from "../core/permissions/capabilities";
+import {
+  ADMIN_ALLOWED_INDICATORS,
+  DEFAULT_ALLOWED_INDICATORS,
+  MARKET_MAKER_HEATMAP_KEY
+} from "../features/premium";
 
 interface User {
   username: string;
@@ -41,7 +46,7 @@ const ALL_INDICATORS_METADATA = [
   { key: "aif", name: "A.I.F. Auction Intelligence", desc: "Native proprietary long-horizon auction framework" },
   { key: "volumeProfile", name: "HDLX Profile (hdlx)", desc: "Fixed locked/visible volume profile" },
   { key: "liquidationHeatmap", name: "Liquidation Heatmap", desc: "Modeled leverage clusters" },
-  { key: "volatilityHeatmap", name: "Market Maker Heatmap", desc: "Intrabar maker-wall activity and modeled liquidation pressure" },
+  { key: MARKET_MAKER_HEATMAP_KEY, name: "Market Maker Heatmap", desc: "Admin-controlled intrabar maker-wall activity and modeled liquidation pressure", adminControlled: true },
   { key: "adaptiveSwingStrategy", name: "Adaptive Swing Reversal", desc: "Native strategy overlay" },
   { key: "vwap", name: "VWAP", desc: "Volume weighted average price" },
   { key: "ema20", name: "EMA 20", desc: "Fast exponential moving average" },
@@ -56,24 +61,6 @@ const ALL_INDICATORS_METADATA = [
   { key: "volume", name: "Volume Panel", desc: "Exchange traded volume bar charts" }
 ];
 
-const DEFAULT_ALLOWED = [
-  "liquidationHeatmap",
-  "volatilityHeatmap",
-  "adaptiveSwingStrategy",
-  "vwap",
-  "ema20",
-  "ema50",
-  "ema200",
-  "sma20",
-  "sma50",
-  "bollinger",
-  "openInterestOscillator",
-  "zScoreOscillator",
-  "waveTrendOscillator",
-  "volume"
-];
-
-const ADMIN_ALLOWED = [...DEFAULT_ALLOWED, "volumeProfile", "aif"];
 const ASSIGNABLE_PRODUCT_TIERS = ["retail", "professional", "enterprise"] as const;
 
 export default function AdminPanel() {
@@ -92,7 +79,9 @@ export default function AdminPanel() {
         // Normalize fields in case older records exist
         const normalized = parsed.map((u: any) => ({
           ...u,
-          allowedIndicators: u.allowedIndicators || (u.role === "admin" ? ADMIN_ALLOWED : DEFAULT_ALLOWED),
+          allowedIndicators: u.role === "admin"
+            ? [...new Set([...(u.allowedIndicators ?? ADMIN_ALLOWED_INDICATORS), MARKET_MAKER_HEATMAP_KEY])]
+            : (u.allowedIndicators ?? [...DEFAULT_ALLOWED_INDICATORS]),
           activeIndicators: u.activeIndicators || [],
           productTier: u.productTier || (u.role === "admin" ? "admin" : "retail"),
           permissions: u.permissions || []
@@ -153,7 +142,7 @@ export default function AdminPanel() {
       status: "offline" as const,
       createdAt: new Date().toISOString(),
       lastLogin: "Never",
-      allowedIndicators: [...DEFAULT_ALLOWED],
+      allowedIndicators: [...DEFAULT_ALLOWED_INDICATORS],
       activeIndicators: [],
       productTier: "retail" as const,
       permissions: []
@@ -204,6 +193,7 @@ export default function AdminPanel() {
 
   const handleToggleIndicatorPermission = async (indicatorKey: string) => {
     if (!selectedUser) return;
+    if (selectedUser.role === "admin" && indicatorKey === MARKET_MAKER_HEATMAP_KEY) return;
     const isAllowed = selectedUser.allowedIndicators.includes(indicatorKey);
     let nextAllowed = [];
 
@@ -572,17 +562,19 @@ export default function AdminPanel() {
                   <span className="details-subtitle">Toggle Permissions Configuration</span>
                   <div className="permissions-grid">
                     {ALL_INDICATORS_METADATA.map((ind) => {
-                      const isAllowed = selectedUser.allowedIndicators.includes(ind.key);
+                      const isAdminDefault = selectedUser.role === "admin" && ind.key === MARKET_MAKER_HEATMAP_KEY;
+                      const isAllowed = isAdminDefault || selectedUser.allowedIndicators.includes(ind.key);
                       return (
                         <div
                           key={ind.key}
-                          className={`permission-toggle-card ${isAllowed ? "allowed" : "blocked"}`}
-                          onClick={() => handleToggleIndicatorPermission(ind.key)}
+                          className={`permission-toggle-card ${isAllowed ? "allowed" : "blocked"}${isAdminDefault ? " fixed" : ""}`}
+                          onClick={() => { if (!isAdminDefault) void handleToggleIndicatorPermission(ind.key); }}
                           title={ind.desc}
                         >
                           <div className="permission-name-group">
                             <span className="permission-name">{ind.name}</span>
                             <span className="permission-key">{ind.key}</span>
+                            {ind.adminControlled && <span className="permission-control-label">ADMIN CONTROLLED</span>}
                           </div>
                           <span
                             className={`permission-status-dot ${

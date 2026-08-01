@@ -1,5 +1,12 @@
 # Implementation History
 
+## 2026-08-01 — Market Maker Heatmap access control
+
+- Made Market Maker Heatmap administrator-only by default and removed it from registration and paid-plan default grants.
+- Retained explicit per-user grants through the existing Admin Panel indicator permissions.
+- Added chart, workspace, and real-time revocation guards so an unauthorized saved state cannot start the indicator.
+- Added a Supabase migration that removes legacy non-admin grants/active state, preserves admin access, and changes the database default.
+
 This file records what has been built so far and what must be recorded going forward.
 
 ## Current Git Milestones

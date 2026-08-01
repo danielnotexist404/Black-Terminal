@@ -12,6 +12,7 @@ import {
   establishSupabaseAuthSession,
   getGeoIPInfo
 } from "../lib/supabase";
+import { DEFAULT_ALLOWED_INDICATORS } from "../features/premium";
 
 // Import generated images
 import terminalMockup from "../assets/terminal_mockup.jpg";
@@ -288,22 +289,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
     if (signUpStep === 3) {
       setLoading(true);
       try {
-        const defaultAllowed = [
-          "liquidationHeatmap",
-          "volatilityHeatmap",
-          "adaptiveSwingStrategy",
-          "vwap",
-          "ema20",
-          "ema50",
-          "ema200",
-          "sma20",
-          "sma50",
-          "bollinger",
-          "openInterestOscillator",
-          "zScoreOscillator",
-          "waveTrendOscillator",
-          "volume"
-        ];
+        const defaultAllowed = [...DEFAULT_ALLOWED_INDICATORS];
         const newUser = {
           username: cleanUser,
           displayName: cleanDisplayName,

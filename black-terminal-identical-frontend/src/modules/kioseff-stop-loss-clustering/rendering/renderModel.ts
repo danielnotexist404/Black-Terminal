@@ -74,65 +74,24 @@ export function formatPineVolume(value: number) {
 }
 
 /**
- * Keeps labels on their exact price Y while suppressing rows that cannot fit
- * without collision. Selection is global across the visible price range, so a
- * large ascending grid cannot consume the pool only at its lowest levels.
+ * Keeps every visible label attached to its canonical wall and exact price.
+ * Labels may overlap at extreme zoom levels; suppressing collision winners by
+ * screen row made the displayed wall/value association change during panning.
  */
 export function layoutKioseffLabels(
   zones: readonly KioseffRenderZone[],
   yForPrice: (price: number) => number,
   top: number,
   bottom: number,
-  fontSize: number,
+  _fontSize: number,
   maximum = KIOSEFF_PINE_ACTIVE_OBJECT_CAP
 ): KioseffLabelLayout[] {
-  const minimumGap = Math.max(8, fontSize);
-  const rowHeight = minimumGap + 1;
-  const span = Math.max(1, bottom - top);
-  const rowCount = Math.max(
-    1,
-    Math.min(maximum, Math.floor(span / rowHeight))
-  );
-  const candidates = zones
+  return zones
     .filter((zone) => zone.showLabel && zone.labelText !== null)
     .map((zone) => ({ zone, y: yForPrice(zone.price) }))
-    .filter(({ y }) => Number.isFinite(y) && y >= top && y <= bottom);
-  type BucketedLabel = KioseffLabelLayout & {
-    targetY: number;
-    targetDistance: number;
-  };
-  const rows: Array<BucketedLabel | undefined> = Array.from({ length: rowCount });
-  for (const candidate of candidates) {
-    const normalized = Math.max(0, Math.min(1, (candidate.y - top) / span));
-    const row = Math.min(rowCount - 1, Math.floor(normalized * rowCount));
-    const targetY = top + ((row + 0.5) / rowCount) * span;
-    const targetDistance = Math.abs(candidate.y - targetY);
-    const current = rows[row];
-    if (
-      !current ||
-      targetDistance < current.targetDistance ||
-      (targetDistance === current.targetDistance &&
-        (Number(candidate.zone.hot) > Number(current.zone.hot) ||
-          (candidate.zone.hot === current.zone.hot &&
-            (candidate.zone.absoluteVolume > current.zone.absoluteVolume ||
-              (candidate.zone.absoluteVolume === current.zone.absoluteVolume &&
-                candidate.zone.id.localeCompare(current.zone.id) < 0)))))
-    ) {
-      rows[row] = { ...candidate, targetY, targetDistance };
-    }
-  }
-  const selected: BucketedLabel[] = [];
-  for (const candidate of rows.filter((value): value is BucketedLabel => Boolean(value))) {
-    const previous = selected.at(-1);
-    if (!previous || candidate.y - previous.y >= minimumGap) {
-      selected.push(candidate);
-      continue;
-    }
-    if (candidate.targetDistance < previous.targetDistance) {
-      selected[selected.length - 1] = candidate;
-    }
-  }
-  return selected.map(({ zone, y }) => ({ zone, y }));
+    .filter(({ y }) => Number.isFinite(y) && y >= top && y <= bottom)
+    .sort((left, right) => left.y - right.y || left.zone.id.localeCompare(right.zone.id))
+    .slice(0, maximum);
 }
 
 function newestBySide(
@@ -191,28 +150,50 @@ export function buildKioseffRenderModel(
         )
       )
     : 1;
-  const opacityFor = (cluster: CanonicalCluster) =>
-    absorbtion && settings.absorbtion.intensityBySize
+  const opacityFor = (cluster: CanonicalCluster) => {
+    const opacity = absorbtion && settings.absorbtion.intensityBySize
       ? 0.07 +
         0.25 *
           Math.min(1, Math.abs(cluster.signedVolume) / absorbtionMaximumVolume)
       : cluster.opacity;
+    if (!absorbtion && cluster.side === "buy-stop") {
+      return Math.max(
+        opacity ?? (cluster.strength === "strong" ? 0.2 : 0.09),
+        cluster.strength === "strong" ? 0.24 : 0.14
+      );
+    }
+    return opacity;
+  };
+  const vaeActiveColor = (cluster: CanonicalCluster) => {
+    if (cluster.side === "buy-stop") {
+      return cluster.strength === "strong"
+        ? settings.style.buyWallColor
+        : interpolateHexColor(
+            settings.style.chartBackgroundColor,
+            settings.style.buyWallColor,
+            Math.max(0.35, cluster.strengthNormalized ?? 0)
+          );
+    }
+    return cluster.strength === "strong"
+      ? settings.volatilityAtEntry.strongClusterColor
+      : interpolateHexColor(
+          settings.style.chartBackgroundColor,
+          settings.volatilityAtEntry.weakClusterColor,
+          cluster.strengthNormalized ?? 0
+        );
+  };
   const activeZones = active.map((cluster) => ({
     ...cluster,
     color: absorbtion
       ? settings.absorbtion.clusterColor
-      : cluster.strength === "strong"
-        ? settings.volatilityAtEntry.strongClusterColor
-        : interpolateHexColor(
-            settings.style.chartBackgroundColor,
-            settings.volatilityAtEntry.weakClusterColor,
-            cluster.strengthNormalized ?? 0
-          ),
+      : vaeActiveColor(cluster),
     labelColor: absorbtion
       ? settings.absorbtion.clusterColor
-      : cluster.strength === "strong"
-        ? settings.volatilityAtEntry.strongClusterColor
-        : settings.volatilityAtEntry.weakClusterColor,
+      : cluster.side === "buy-stop"
+        ? settings.style.buyWallColor
+        : cluster.strength === "strong"
+          ? settings.volatilityAtEntry.strongClusterColor
+          : settings.volatilityAtEntry.weakClusterColor,
     showLabel:
       absorbtion || settings.volatilityAtEntry.showActiveClusterSize,
     labelText: formatPineVolume(cluster.signedVolume),

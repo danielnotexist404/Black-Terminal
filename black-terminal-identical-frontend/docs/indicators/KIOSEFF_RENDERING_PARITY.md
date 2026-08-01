@@ -69,6 +69,12 @@ provides confirmed tick/liquidation events. Dashboard width is persisted and adj
 
 Parity/data hashes and runtime diagnostics are developer-only and are absent from production UI.
 
+Active wall-size labels are keyed by canonical wall ID and remain attached to the wall's exact price
+through vertical pan and scale changes. The renderer does not choose viewport-dependent collision
+winners; dense levels may overlap rather than display another wall's size. VAE buy walls use a
+dedicated configurable cyan color, a minimum opacity floor, and a center spine so weak buy-side
+activity remains visible without changing canonical calculations.
+
 ## Price-domain policies
 
 - `Candles Only`

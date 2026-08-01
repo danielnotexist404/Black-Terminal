@@ -488,6 +488,7 @@ for (const field of [
   "forceTypicalMove",
   "showClusterRatioMeter",
   "style.showSummaryTable",
+  "style.buyWallColor",
   "style.showOscillator",
   "style.oscillatorBuyColor",
   "style.oscillatorSellColor",
@@ -639,6 +640,7 @@ assert.equal(
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.forceTypicalMove, false);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.showClusterRatioMeter, true);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.showSummaryTable, true);
+assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.buyWallColor, "#55ffda");
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.showOscillator, false);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.oscillatorBuyColor, "#55ffda");
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.oscillatorSellColor, "#ff65fb");

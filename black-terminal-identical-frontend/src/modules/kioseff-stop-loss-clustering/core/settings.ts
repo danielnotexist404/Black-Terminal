@@ -42,6 +42,7 @@ export type KioseffSettingsV1 = {
     labelFontSize: number;
     showSummaryTable: boolean;
     showOscillator: boolean;
+    buyWallColor: string;
     oscillatorBuyColor: string;
     oscillatorSellColor: string;
     activityDashboardWidth: number;
@@ -95,6 +96,7 @@ export const KIOSEFF_DEFAULT_SETTINGS: KioseffSettingsV1 = {
     labelFontSize: 9,
     showSummaryTable: true,
     showOscillator: false,
+    buyWallColor: "#55ffda",
     oscillatorBuyColor: "#55ffda",
     oscillatorSellColor: "#ff65fb",
     activityDashboardWidth: 560
@@ -305,6 +307,10 @@ export function migrateKioseffSettings(
         typeof style.showOscillator === "boolean"
           ? style.showOscillator
           : defaults.style.showOscillator,
+      buyWallColor:
+        typeof style.buyWallColor === "string"
+          ? style.buyWallColor
+          : defaults.style.buyWallColor,
       oscillatorBuyColor:
         typeof style.oscillatorBuyColor === "string"
           ? style.oscillatorBuyColor

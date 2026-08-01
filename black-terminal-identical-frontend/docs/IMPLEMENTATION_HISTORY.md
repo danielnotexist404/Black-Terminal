@@ -1,5 +1,11 @@
 # Implementation History
 
+## 2026-08-02 — Stable active wall labels and buy-wall visibility
+
+- Bound active wall-size text objects to canonical wall IDs and exact price coordinates.
+- Removed viewport-dependent collision winners that changed the apparent value association during vertical panning.
+- Added a configurable buy-wall color, minimum buy-wall opacity, and visible center spine without modifying wall calculations.
+
 ## 2026-08-01 — Market Maker Heatmap access control
 
 - Made Market Maker Heatmap administrator-only by default and removed it from registration and paid-plan default grants.

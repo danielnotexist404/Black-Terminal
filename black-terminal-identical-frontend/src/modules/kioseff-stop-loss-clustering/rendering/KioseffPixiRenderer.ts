@@ -30,8 +30,8 @@ export class KioseffPixiRenderer {
   private lineGeometry = new Graphics();
   private paneGeometry = new Graphics();
   private textLayer = new Container();
-  private textPool: Text[] = [];
-  private usedTexts = 0;
+  private textByWallId = new Map<string, Text>();
+  private usedTextIds = new Set<string>();
   private lastRenderMetrics = {
     activeZones: 0,
     violatedZones: 0,
@@ -52,8 +52,8 @@ export class KioseffPixiRenderer {
     this.container.mask = this.clip;
   }
 
-  private acquireText() {
-    let text = this.textPool[this.usedTexts];
+  private acquireText(wallId: string) {
+    let text = this.textByWallId.get(wallId);
     if (!text) {
       text = new Text({
         text: "",
@@ -64,12 +64,21 @@ export class KioseffPixiRenderer {
           fontWeight: "700"
         }
       });
-      this.textPool.push(text);
+      this.textByWallId.set(wallId, text);
       this.textLayer.addChild(text);
     }
     text.visible = true;
-    this.usedTexts += 1;
+    this.usedTextIds.add(wallId);
     return text;
+  }
+
+  private releaseUnusedTexts() {
+    for (const [wallId, text] of this.textByWallId) {
+      if (this.usedTextIds.has(wallId)) continue;
+      this.textLayer.removeChild(text);
+      text.destroy();
+      this.textByWallId.delete(wallId);
+    }
   }
 
   private drawZone(
@@ -105,14 +114,14 @@ export class KioseffPixiRenderer {
         });
     }
     const middle = transform.yForPrice(zone.price);
-    if (zone.drawAsLine || zone.hot) {
+    if (zone.drawAsLine || zone.hot || (!violated && zone.side === "buy-stop")) {
       this.lineGeometry
         .moveTo(left, middle)
         .lineTo(right, middle)
         .stroke({
           color,
           width: Math.max(0.5, settings.style.activeLineWidth),
-          alpha: zone.hot ? 1 : alpha
+          alpha: zone.hot ? 1 : zone.side === "buy-stop" ? Math.max(0.62, alpha) : alpha
         });
     }
     if (zone.hot) {
@@ -136,7 +145,7 @@ export class KioseffPixiRenderer {
       settings.style.labelFontSize
     );
     for (const { zone, y } of labels) {
-      const text = this.acquireText();
+      const text = this.acquireText(`${zone.state}:${zone.id}`);
       text.text = zone.labelText!;
       text.style.fill = colorNumber(zone.labelColor);
       text.style.fontSize = settings.style.labelFontSize;
@@ -247,7 +256,7 @@ export class KioseffPixiRenderer {
     this.curveGeometry.clear();
     this.lineGeometry.clear();
     this.paneGeometry.clear();
-    this.usedTexts = 0;
+    this.usedTextIds.clear();
     if (!snapshot) {
       this.lastRenderMetrics = {
         activeZones: 0,
@@ -255,7 +264,7 @@ export class KioseffPixiRenderer {
         panePoints: 0,
         geometryCommandCount: 0
       };
-      for (const text of this.textPool) text.visible = false;
+      this.releaseUnusedTexts();
       return;
     }
     const model = buildKioseffRenderModel(snapshot, settings);
@@ -285,23 +294,22 @@ export class KioseffPixiRenderer {
     this.drawLabels([...model.activeZones, ...model.violatedZones], transform, settings);
     this.drawCurves(model.curves, transform);
     this.drawPane(model.pane, transform, settings);
-    for (let index = this.usedTexts; index < this.textPool.length; index += 1) {
-      this.textPool[index]!.visible = false;
-    }
+    this.releaseUnusedTexts();
   }
 
   dispose() {
     this.container.mask = null;
     this.container.destroy({ children: true });
-    this.textPool = [];
+    this.textByWallId.clear();
+    this.usedTextIds.clear();
   }
 
   metrics() {
     return {
       graphics: 6,
       containers: 2,
-      textObjects: this.textPool.length,
-      visibleTextObjects: this.usedTexts,
+      textObjects: this.textByWallId.size,
+      visibleTextObjects: this.usedTextIds.size,
       containerVisible: this.container.visible,
       ...this.lastRenderMetrics
     };

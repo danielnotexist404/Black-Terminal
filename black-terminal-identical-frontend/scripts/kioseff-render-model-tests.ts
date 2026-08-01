@@ -171,6 +171,28 @@ assert.equal(
 );
 assert.equal(continuous.violatedZones[0]!.drawAsLine, true);
 assert.equal(continuous.violatedZones[0]!.opacity, 0.5);
+const visibleBuy = {
+  ...weak,
+  id: "visible-buy-wall",
+  side: "buy-stop" as const,
+  signedVolume: 4240,
+  absoluteVolume: 4240
+};
+const buyVisibilityRender = buildKioseffRenderModel(
+  { ...denseVae, activeClusters: [visibleBuy], violatedClusters: [] },
+  settings
+);
+assert.equal(buyVisibilityRender.activeZones[0]!.labelText, "4.24K");
+assert.equal(buyVisibilityRender.activeZones[0]!.labelColor, settings.style.buyWallColor);
+assert.ok(
+  (buyVisibilityRender.activeZones[0]!.opacity ?? 0) >= 0.14,
+  "weak buy walls retain a readable minimum opacity"
+);
+assert.notEqual(
+  buyVisibilityRender.activeZones[0]!.color,
+  settings.style.chartBackgroundColor,
+  "buy wall fill cannot disappear into the chart background"
+);
 assert.equal(interpolateHexColor("#000000", "#ffffff", 0.5), "#808080");
 assert.equal(formatPineVolume(4240), "4.24K");
 assert.equal(formatPineVolume(-12_070), "-12.07K");
@@ -201,8 +223,8 @@ const collisionZones = [
 const labelLayout = layoutKioseffLabels(collisionZones, (price) => price, 0, 100, 9);
 assert.deepEqual(
   labelLayout.map(({ zone }) => zone.id),
-  ["strong-collision", "separate"],
-  "dense labels keep the strongest exact-price row instead of collapsing into a vertical column"
+  ["weak-collision", "strong-collision", "separate"],
+  "every visible active wall retains its own exact label instead of competing for a screen row"
 );
 assert.ok(
   labelLayout.every(({ zone, y }) => y === zone.price),
@@ -223,12 +245,23 @@ const fullScaleLayout = layoutKioseffLabels(
 assert.ok(fullScaleLayout.length >= 8, "dense labels occupy multiple readable screen rows");
 assert.ok(fullScaleLayout[0]!.y <= 6, "label distribution reaches the top of the visible scale");
 assert.ok(fullScaleLayout.at(-1)!.y >= 94, "label distribution reaches the bottom of the visible scale");
-assert.ok(
-  fullScaleLayout.every(
-    (label, index) =>
-      index === 0 || label.y - fullScaleLayout[index - 1]!.y >= 9
-  ),
-  "full-scale label rows remain non-overlapping"
+assert.equal(
+  fullScaleLayout.length,
+  KIOSEFF_PINE_ACTIVE_OBJECT_CAP,
+  "dense exact-price labels are never replaced by viewport-dependent collision winners"
+);
+const verticallyPannedLayout = layoutKioseffLabels(
+  capacityRender.activeZones,
+  (price) => price + 40,
+  139,
+  146,
+  9
+);
+assert.deepEqual(
+  verticallyPannedLayout.map(({ zone }) => [zone.id, zone.labelText]),
+  layoutKioseffLabels(capacityRender.activeZones, (price) => price, 99, 106, 9)
+    .map(({ zone }) => [zone.id, zone.labelText]),
+  "vertical panning preserves the permanent wall-ID to active-size association"
 );
 
 const domain = kioseffPriceDomain(denseVae, settings, 99, 101, 0, 100);

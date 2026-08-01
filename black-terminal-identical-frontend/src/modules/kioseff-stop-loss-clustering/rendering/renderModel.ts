@@ -86,27 +86,53 @@ export function layoutKioseffLabels(
   fontSize: number,
   maximum = KIOSEFF_PINE_ACTIVE_OBJECT_CAP
 ): KioseffLabelLayout[] {
-  const minimumGap = Math.max(8, fontSize + 1);
+  const minimumGap = Math.max(8, fontSize);
+  const rowHeight = minimumGap + 1;
+  const span = Math.max(1, bottom - top);
+  const rowCount = Math.max(
+    1,
+    Math.min(maximum, Math.floor(span / rowHeight))
+  );
   const candidates = zones
     .filter((zone) => zone.showLabel && zone.labelText !== null)
     .map((zone) => ({ zone, y: yForPrice(zone.price) }))
-    .filter(({ y }) => Number.isFinite(y) && y >= top && y <= bottom)
-    .sort(
-      (left, right) =>
-        Number(right.zone.hot) - Number(left.zone.hot) ||
-        right.zone.absoluteVolume - left.zone.absoluteVolume ||
-        left.y - right.y ||
-        left.zone.id.localeCompare(right.zone.id)
-    );
-  const selected: KioseffLabelLayout[] = [];
+    .filter(({ y }) => Number.isFinite(y) && y >= top && y <= bottom);
+  type BucketedLabel = KioseffLabelLayout & {
+    targetY: number;
+    targetDistance: number;
+  };
+  const rows: Array<BucketedLabel | undefined> = Array.from({ length: rowCount });
   for (const candidate of candidates) {
-    if (selected.length >= maximum) break;
-    if (selected.some((current) => Math.abs(current.y - candidate.y) < minimumGap)) {
+    const normalized = Math.max(0, Math.min(1, (candidate.y - top) / span));
+    const row = Math.min(rowCount - 1, Math.floor(normalized * rowCount));
+    const targetY = top + ((row + 0.5) / rowCount) * span;
+    const targetDistance = Math.abs(candidate.y - targetY);
+    const current = rows[row];
+    if (
+      !current ||
+      targetDistance < current.targetDistance ||
+      (targetDistance === current.targetDistance &&
+        (Number(candidate.zone.hot) > Number(current.zone.hot) ||
+          (candidate.zone.hot === current.zone.hot &&
+            (candidate.zone.absoluteVolume > current.zone.absoluteVolume ||
+              (candidate.zone.absoluteVolume === current.zone.absoluteVolume &&
+                candidate.zone.id.localeCompare(current.zone.id) < 0)))))
+    ) {
+      rows[row] = { ...candidate, targetY, targetDistance };
+    }
+  }
+  const selected: BucketedLabel[] = [];
+  for (const candidate of rows.filter((value): value is BucketedLabel => Boolean(value))) {
+    const previous = selected.at(-1);
+    if (!previous || candidate.y - previous.y >= minimumGap) {
+      selected.push(candidate);
       continue;
     }
-    selected.push(candidate);
+    if (candidate.targetDistance < previous.targetDistance) {
+      selected[selected.length - 1] = candidate;
+    }
   }
-  return selected.sort((left, right) => left.y - right.y);
+  return selected.map(({ zone, y }) => ({ zone, y }));
 }
 
 function newestBySide(

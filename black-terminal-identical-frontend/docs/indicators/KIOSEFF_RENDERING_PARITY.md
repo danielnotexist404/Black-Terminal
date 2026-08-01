@@ -20,10 +20,12 @@ cell can acquire a pooled text object up to the Pine capacity of 496. Labels pre
 compact K/M/B/T formatting and align at the right plot edge. Historical VAE labels remain disabled,
 matching Pine.
 
-When more visible price rows exist than the screen can physically fit, label projection evaluates
-the full visible grid, retains hot/stronger rows first, and suppresses collisions without changing a
-selected label's exact price Y. It does not consume the pool from the lowest grid index or shift text
-downward. Weak label text uses Pine's static weak color rather than the darker fill interpolation.
+When more visible price rows exist than the screen can physically fit, label projection divides the
+complete visible scale into readable screen rows and chooses the cluster nearest each row center.
+Hot/volume strength is only a deterministic tie-breaker inside the same row, so a dense lower-price
+concentration cannot consume the label display. Collisions are suppressed without changing a
+selected label's exact price Y. Weak label text uses Pine's static weak color rather than the darker
+fill interpolation.
 
 ## Calculation/display separation
 

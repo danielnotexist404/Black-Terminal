@@ -194,6 +194,28 @@ assert.ok(
   labelLayout.every(({ zone, y }) => y === zone.price),
   "collision handling never shifts a label away from its cluster price"
 );
+const fullScaleLayout = layoutKioseffLabels(
+  capacityRender.activeZones.map((zone, index, zones) => ({
+    ...zone,
+    price: (index / (zones.length - 1)) * 100,
+    absoluteVolume: zones.length - index,
+    hot: index < 20
+  })),
+  (price) => price,
+  0,
+  100,
+  9
+);
+assert.ok(fullScaleLayout.length >= 8, "dense labels occupy multiple readable screen rows");
+assert.ok(fullScaleLayout[0]!.y <= 6, "label distribution reaches the top of the visible scale");
+assert.ok(fullScaleLayout.at(-1)!.y >= 94, "label distribution reaches the bottom of the visible scale");
+assert.ok(
+  fullScaleLayout.every(
+    (label, index) =>
+      index === 0 || label.y - fullScaleLayout[index - 1]!.y >= 9
+  ),
+  "full-scale label rows remain non-overlapping"
+);
 
 const domain = kioseffPriceDomain(denseVae, settings, 99, 101, 0, 100);
 assert.ok(domain.maximum >= strong.priceHigh, "visible cluster geometry participates in price domain");

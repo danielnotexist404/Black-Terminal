@@ -37,12 +37,20 @@ import { AifIndicatorOverlay } from "../modules/aif/components/AifIndicatorOverl
 import { canonicalOrderKey, deduplicateCanonicalOrders } from "../orders/canonicalOrder";
 import { OrderManagementMenu } from "../orders/OrderManagementMenu";
 import type { KioseffSnapshot } from "../modules/kioseff-stop-loss-clustering/core/canonical";
-import type { KioseffSettingsV1 } from "../modules/kioseff-stop-loss-clustering/core/settings";
+import {
+  normalizeKioseffTimeframeInput,
+  type KioseffSettingsV1
+} from "../modules/kioseff-stop-loss-clustering/core/settings";
 import {
   KioseffHistoryCoordinator,
   shouldRefreshKioseffHistory
 } from "../modules/kioseff-stop-loss-clustering/data/historyCoordinator";
 import { KioseffDataUnavailableError } from "../modules/kioseff-stop-loss-clustering/data/types";
+import {
+  emptyKioseffRuntimeDiagnostics,
+  type KioseffLoadState,
+  type KioseffRuntimeDiagnostics
+} from "../modules/kioseff-stop-loss-clustering/data/loadState";
 import {
   kioseffUnavailableDiagnostic,
   type KioseffUnavailableDiagnostic
@@ -50,6 +58,7 @@ import {
 import { KioseffWorkerClient } from "../modules/kioseff-stop-loss-clustering/workers/KioseffWorkerClient";
 import { KioseffSettingsPanel } from "../modules/kioseff-stop-loss-clustering/components/KioseffSettingsPanel";
 import { KioseffOverlays } from "../modules/kioseff-stop-loss-clustering/components/KioseffOverlays";
+import { buildKioseffRenderModel } from "../modules/kioseff-stop-loss-clustering/rendering/renderModel";
 
 type PixiBlackChartProps = {
   workspaceId: string;
@@ -317,8 +326,15 @@ export function PixiBlackChart({
   const [aifPriceTransform, setAifPriceTransform] = useState<ChartPriceTransformSnapshot | null>(null);
   const [kioseffSnapshot, setKioseffSnapshot] = useState<KioseffSnapshot | null>(null);
   const [kioseffUnavailable, setKioseffUnavailable] = useState<KioseffUnavailableDiagnostic | null>(null);
+  const [kioseffLoadState, setKioseffLoadState] = useState<KioseffLoadState>({ stage: "idle" });
+  const [kioseffDiagnostics, setKioseffDiagnostics] = useState<KioseffRuntimeDiagnostics>(
+    emptyKioseffRuntimeDiagnostics
+  );
   const [kioseffSourceRevision, setKioseffSourceRevision] = useState(0);
   const [dataStatus, setDataStatus] = useState("CONNECTING");
+  const [chartHistoryState, setChartHistoryState] = useState<
+    "loading" | "ready" | "unavailable"
+  >("loading");
   const [activeIndicator, setActiveIndicator] = useState<IndicatorKey | null>(null);
   const [volumeProfileSettingsTab, setVolumeProfileSettingsTab] = useState<VolumeProfileSettingsTab>("inputs");
   const [adaptiveSwingSettingsTab, setAdaptiveSwingSettingsTab] = useState<AdaptiveSwingSettingsTab>("signals");
@@ -595,6 +611,7 @@ export function PixiBlackChart({
     let historySymbol = marketSymbol.rawSymbol;
     let historyLabel = adapter?.label ?? "Mock";
     setLastCandle(null);
+    setChartHistoryState("loading");
     setDataStatus(adapter ? `${adapter.label.toUpperCase()} CONNECTING` : allowSimulatedFallback ? "SIMULATION" : "MARKET DATA UNAVAILABLE");
     synthesizeCandlesFromTrades = !adapter?.subscribeCandles;
 
@@ -922,7 +939,10 @@ export function PixiBlackChart({
 
         if (!adapter) {
           if (allowSimulatedFallback) startMockFallback();
-          else setDataStatus("MARKET DATA UNAVAILABLE - NO ADAPTER");
+          else {
+            setDataStatus("MARKET DATA UNAVAILABLE - NO ADAPTER");
+            setChartHistoryState("unavailable");
+          }
           return;
         }
 
@@ -932,6 +952,7 @@ export function PixiBlackChart({
             if (disposed) return;
             chartSourceVenueRef.current = marketSymbol.exchange;
             setReplaySource(candles);
+            setChartHistoryState("ready");
             if (!replayActiveRef.current) {
               engine.setCandles(candles);
               setDataStatus(`${adapter.label.toUpperCase()} LIVE - ${candles.length.toLocaleString()} BARS`);
@@ -954,6 +975,7 @@ export function PixiBlackChart({
                 lastHistoryCursor = undefined;
                 chartSourceVenueRef.current = sourceAdapter.id;
                 setReplaySource(candles);
+                setChartHistoryState("ready");
                 if (!replayActiveRef.current) {
                   engine.setCandles(candles);
                   setDataStatus(`${adapter.label.toUpperCase()} VIA ${sourceAdapter.label.toUpperCase()} - ${candles.length.toLocaleString()} BARS`);
@@ -979,6 +1001,7 @@ export function PixiBlackChart({
                   return;
                 }
                 setDataStatus(`${adapter.label.toUpperCase()} LIVE - HISTORY UNAVAILABLE`);
+                setChartHistoryState("unavailable");
                 startPrimaryLiveFeeds();
               });
           });
@@ -986,6 +1009,7 @@ export function PixiBlackChart({
       .catch((err: unknown) => {
         console.error("Chart engine failed to initialize", err);
         setDataStatus("ENGINE ERROR");
+        setChartHistoryState("unavailable");
       });
 
     return () => {
@@ -1021,11 +1045,34 @@ export function PixiBlackChart({
     let disposed = false;
     const coordinator = new KioseffHistoryCoordinator();
     let client: KioseffWorkerClient | null = null;
-    const lowerTimeframe = (
+    const abort = new AbortController();
+    let processedSourceVersion: string | null = null;
+    let lastCoverage: import("../modules/kioseff-stop-loss-clustering/data/types").IntrabarCoverage | undefined;
+    const lowerTimeframe = normalizeKioseffTimeframeInput(
       kioseffSettings.model === "volatility-at-entry"
-        ? "1m"
+        ? "1"
         : kioseffSettings.absorbtion.lowerTimeframe
-    ) as Timeframe;
+    );
+    const trace = (stage: string, data: Record<string, unknown>) => {
+      if (import.meta.env.DEV) {
+        console.debug("[Kioseff pipeline]", {
+          stage,
+          exchange: marketSymbol.exchange,
+          symbol: marketSymbol.rawSymbol,
+          chartTimeframe: timeframe,
+          lowerTimeframe,
+          ...data
+        });
+      }
+    };
+    const setLoadStage = (state: KioseffLoadState) => {
+      if (disposed) return;
+      setKioseffLoadState(state);
+      setKioseffDiagnostics((current) => ({
+        ...current,
+        loadStage: state.stage
+      }));
+    };
     const unavailable = (
       reason: KioseffUnavailableDiagnostic["reason"],
       message: string,
@@ -1046,26 +1093,89 @@ export function PixiBlackChart({
         start,
         end,
         realtimeSource: marketSymbol.exchange,
-        message
+        message,
+        coverage: lastCoverage
       });
       setKioseffSnapshot(null);
       setKioseffUnavailable(diagnostic);
+      setLoadStage({ stage: "unavailable", reason });
+      setKioseffDiagnostics((current) => ({
+        ...current,
+        workerStatus: "unavailable",
+        lastDiagnostic: `${reason}: ${message}`
+      }));
       engineRef.current?.setKioseffState(null, kioseffSettings);
+      trace("unavailable", {
+        rejectionReason: reason,
+        message,
+        expected,
+        actual,
+        start,
+        end
+      });
     };
     if (!visibleIndicators.volatilityHeatmap) {
       setKioseffSnapshot(null);
       setKioseffUnavailable(null);
+      setLoadStage({ stage: "idle" });
       engineRef.current?.setKioseffState(null, kioseffSettings);
       return () => coordinator.reset();
     }
-    const adapter = getMarketDataEngineAdapter(marketSymbol.exchange);
+    setKioseffSnapshot(null);
+    setKioseffUnavailable(null);
+    engineRef.current?.setKioseffState(null, kioseffSettings);
+    const selectedAdapter = getMarketDataEngineAdapter(marketSymbol.exchange);
+    trace("selected-symbol", {
+      entered: true,
+      inputCount: 1,
+      outputCount: selectedAdapter ? 1 : 0,
+      normalizedSymbol:
+        selectedAdapter?.normalizeSymbol(
+          marketSymbol.rawSymbol,
+          marketSymbol.marketKind
+        ) ?? null,
+      marketCategory: marketSymbol.marketKind,
+      source: marketSymbol.exchange,
+      generation: null,
+      sourceVersion: null,
+      rejectionReason: selectedAdapter ? null : "adapter-symbol-category-mismatch"
+    });
+    setKioseffDiagnostics({
+      ...emptyKioseffRuntimeDiagnostics(),
+      exchange: marketSymbol.exchange,
+      rawSymbol: marketSymbol.rawSymbol,
+      normalizedSymbol: "",
+      marketCategory: marketSymbol.marketKind,
+      chartTimeframe: timeframe,
+      requestedLowerTimeframe: lowerTimeframe,
+      chartHistoryCount: replaySourceRef.current.length,
+      loadStage: "fetching-chart-history"
+    });
+    const adapter = selectedAdapter;
     const chartCandles = replaySourceRef.current;
     if (!adapter) {
       unavailable("unsupported-symbol-metadata", "The selected venue has no certified market-data adapter.");
       return () => coordinator.reset();
     }
     if (!chartCandles.length) {
-      unavailable("missing-intrabar-history", "Chart history has not loaded yet.");
+      if (chartHistoryState === "unavailable") {
+        unavailable(
+          "missing-request-range",
+          "No retained chart history was available to construct the one-minute request range."
+        );
+        return () => coordinator.reset();
+      }
+      setLoadStage({
+        stage: "fetching-chart-history",
+        loaded: 0,
+        target: historyDepth
+      });
+      trace("fetching-chart-history", {
+        inputCount: 0,
+        outputCount: 0,
+        target: historyDepth,
+        rejectionReason: null
+      });
       return () => coordinator.reset();
     }
     if (chartSourceVenueRef.current !== marketSymbol.exchange) {
@@ -1075,52 +1185,218 @@ export function PixiBlackChart({
       );
       return () => coordinator.reset();
     }
-    setKioseffUnavailable(null);
-    coordinator
+    const calculateHistory = async (
+      history: import("../modules/kioseff-stop-loss-clustering/data/types").KioseffHistoryResult
+    ) => {
+      if (disposed) return;
+      lastCoverage = history.coverage;
+      const intrabarCount = history.coverage.receivedIntrabars;
+      const provisional = history.chartBars.at(-1);
+      setKioseffDiagnostics((current) => ({
+        ...current,
+        normalizedSymbol: history.provenance.normalizedSymbol,
+        tickSize: history.provenance.metadata.tickSize,
+        chartHistoryCount: history.warmup.targetChartBars,
+        minuteHistoryCount: intrabarCount,
+        requestStart: history.requestRange.start,
+        requestEnd: history.requestRange.end,
+        firstMinute: history.coverage.firstReceivedTime,
+        lastMinute: history.coverage.lastReceivedTime,
+        groupedChartBarCount: history.chartBars.length,
+        completeCoverage: history.coverage.chartBarsWithCompleteIntrabars,
+        partialCoverage: history.coverage.chartBarsWithPartialIntrabars,
+        missingCoverage: history.coverage.chartBarsWithNoIntrabars,
+        currentProvisionalIntrabars:
+          provisional && !provisional.chartBarClosed
+            ? provisional.intrabars.length
+            : 0,
+        sourceVersion: history.sourceVersion,
+        generation: history.generation
+      }));
+      const rejected = history.chartBars.find(
+        (bar) =>
+          !bar.quality.complete ||
+          bar.quality.sourceMismatch ||
+          bar.quality.duplicateTimes.length > 0 ||
+          bar.quality.outOfOrderTimes.length > 0 ||
+          bar.quality.conflictingTimes.length > 0
+      );
+      if (rejected) {
+        throw new KioseffDataUnavailableError(
+          rejected.quality.sourceMismatch
+            ? "source-history-live-mismatch"
+            : "incomplete-intrabar-coverage",
+          {
+            chartBarTime: rejected.chartBar.time,
+            expected: rejected.quality.expectedCount,
+            actual: rejected.quality.actualCount
+          }
+        );
+      }
+      setLoadStage({ stage: "starting-worker" });
+      const context = {
+        metadata: history.provenance.metadata,
+        timeframe,
+        sourceVersion: history.sourceVersion,
+        settings: kioseffSettings,
+        diagnostics: import.meta.env.DEV
+      };
+      if (!client) {
+        client = new KioseffWorkerClient(context);
+      }
+      setKioseffDiagnostics((current) => ({
+        ...current,
+        workerStatus: "resetting"
+      }));
+      await client.reset(context);
+      if (disposed) return;
+      const chartBarsSent = history.chartBars.length;
+      const intrabarsSent = history.chartBars.reduce(
+        (sum, bar) => sum + bar.intrabars.length,
+        0
+      );
+      setLoadStage({
+        stage: "calculating",
+        bars: chartBarsSent,
+        intrabars: intrabarsSent
+      });
+      setKioseffDiagnostics((current) => ({
+        ...current,
+        workerStatus: "calculating",
+        chartBarsSent,
+        intrabarsSent,
+        groupOffsetsSent: 0
+      }));
+      trace("worker-request", {
+        chartBarsSent,
+        intrabarsSent,
+        groupOffsetsSent: 0,
+        generation: client.activeGeneration,
+        sourceVersion: history.sourceVersion,
+        provisionalBarTime:
+          provisional && !provisional.chartBarClosed
+            ? provisional.chartBar.time
+            : null,
+        rejectionReason: null
+      });
+      const snapshot = await client.calculateBatch(history.chartBars).promise;
+      if (disposed) return;
+      const renderModel = buildKioseffRenderModel(snapshot, kioseffSettings);
+      const clusterCount =
+        renderModel.activeZones.length + renderModel.violatedZones.length;
+      setLoadStage({ stage: "rendering", clusters: clusterCount });
+      setKioseffSnapshot(snapshot);
+      setKioseffUnavailable(null);
+      const chartEngine = engineRef.current;
+      chartEngine?.setKioseffState(snapshot, kioseffSettings);
+      const renderMetrics = chartEngine?.getKioseffRenderMetrics();
+      const telemetry = client.lastTelemetry;
+      setKioseffDiagnostics((current) => ({
+        ...current,
+        generation: client?.activeGeneration ?? history.generation,
+        workerStatus: "complete",
+        workerChartBarsReceived: telemetry.workerChartBarsReceived,
+        workerIntrabarsReceived: telemetry.workerIntrabarsReceived,
+        activeClusterCount: snapshot.activeClusters.length,
+        violatedClusterCount: snapshot.violatedClusters.length,
+        panePointCount: snapshot.pane.length,
+        renderActiveZones:
+          renderMetrics?.activeZones ?? renderModel.activeZones.length,
+        renderViolatedZones:
+          renderMetrics?.violatedZones ?? renderModel.violatedZones.length,
+        renderPanePoints: renderMetrics?.panePoints ?? renderModel.pane.length,
+        renderGeometryCommands:
+          renderMetrics?.geometryCommandCount ??
+          renderModel.geometryCommandCount,
+        renderContainerVisible: renderMetrics?.containerVisible ?? false,
+        outputDiagnostics: telemetry.outputDiagnostics,
+        lastDiagnostic: snapshot.diagnostics.at(-1)?.message ?? null,
+        calculationMilliseconds: client?.lastCalculationMs ?? null
+      }));
+      processedSourceVersion = history.sourceVersion;
+      if (history.warmup.full) {
+        setLoadStage({ stage: "ready" });
+      } else {
+        setLoadStage({
+          stage: "warming",
+          completedBars: history.warmup.completedChartBars,
+          targetBars: history.warmup.targetChartBars
+        });
+      }
+      trace("render-model", {
+        activeClusters: snapshot.activeClusters.length,
+        violatedClusters: snapshot.violatedClusters.length,
+        panePoints: snapshot.pane.length,
+        activeZones: renderModel.activeZones.length,
+        violatedZones: renderModel.violatedZones.length,
+        geometryCommands: renderModel.geometryCommandCount,
+        pixiContainerVisible: renderMetrics?.containerVisible ?? false,
+        generation: client.activeGeneration,
+        sourceVersion: history.sourceVersion,
+        calculationMs: client.lastCalculationMs,
+        rejectionReason: null
+      });
+    };
+    void coordinator
       .load({
         adapter,
         symbol: marketSymbol,
         chartCandles,
         chartTimeframe: timeframe,
         lowerTimeframe,
-        transport: typeof window !== "undefined" && "__TAURI_INTERNALS__" in window ? "tauri" : "browser"
+        transport:
+          typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+            ? "tauri"
+            : "browser",
+        signal: abort.signal,
+        onProgress: (progress) => {
+          if (disposed) return;
+          if (progress.stage === "requesting-symbol-metadata") {
+            setLoadStage({ stage: "requesting-symbol-metadata" });
+            trace(progress.stage, {
+              inputCount: chartCandles.length,
+              outputCount: 0,
+              generation: null,
+              sourceVersion: null,
+              rejectionReason: null
+            });
+          } else if (progress.stage === "fetching-intrabar-history") {
+            setLoadStage({
+              stage: "fetching-intrabar-history",
+              loaded: progress.loaded,
+              target: progress.target
+            });
+            setKioseffDiagnostics((current) => ({
+              ...current,
+              minuteHistoryCount: progress.loaded,
+              requestStart: progress.requestRange.start,
+              requestEnd: progress.requestRange.end
+            }));
+            trace(progress.stage, {
+              inputCount: progress.loaded,
+              outputCount: progress.loaded,
+              target: progress.target,
+              completedPages: progress.completedPages,
+              targetPages: progress.targetPages,
+              rejectionReason: null
+            });
+          } else {
+            setLoadStage({
+              stage: "grouping-intrabars",
+              bars: progress.bars,
+              intrabars: progress.intrabars
+            });
+          }
+        },
+        onWarmup: calculateHistory
       })
       .then(async (history) => {
         if (disposed) return;
-        const rejected = history.chartBars.find(
-          (bar) =>
-            !bar.quality.complete ||
-            bar.quality.sourceMismatch ||
-            bar.quality.duplicateTimes.length > 0 ||
-            bar.quality.outOfOrderTimes.length > 0 ||
-            bar.quality.conflictingTimes.length > 0
-        );
-        if (rejected) {
-          unavailable(
-            rejected.quality.sourceMismatch
-              ? "source-history-live-mismatch"
-              : "incomplete-intrabar-coverage",
-            "Certified lower-timeframe coverage is incomplete or ambiguous.",
-            rejected.quality.expectedCount,
-            rejected.quality.actualCount,
-            rejected.quality.coverageStart,
-            rejected.quality.coverageEnd
-          );
-          return;
+        if (processedSourceVersion !== history.sourceVersion) {
+          await calculateHistory(history);
+        } else {
+          setLoadStage({ stage: "ready" });
         }
-        client = new KioseffWorkerClient({
-          metadata: history.provenance.metadata,
-          timeframe,
-          sourceVersion: history.sourceVersion,
-          settings: kioseffSettings,
-          diagnostics: import.meta.env.DEV
-        });
-        await client.reset();
-        const snapshot = await client.calculateBatch(history.chartBars).promise;
-        if (disposed) return;
-        setKioseffSnapshot(snapshot);
-        setKioseffUnavailable(null);
-        engineRef.current?.setKioseffState(snapshot, kioseffSettings);
       })
       .catch((error: unknown) => {
         if (disposed) return;
@@ -1135,6 +1411,7 @@ export function PixiBlackChart({
       });
     return () => {
       disposed = true;
+      abort.abort("effect-cleanup");
       coordinator.reset();
       client?.dispose();
     };
@@ -1143,7 +1420,9 @@ export function PixiBlackChart({
     marketSymbol,
     timeframe,
     kioseffSettings,
-    kioseffSourceRevision
+    kioseffSourceRevision,
+    historyDepth,
+    chartHistoryState
   ]);
 
   useEffect(() => {
@@ -3161,6 +3440,7 @@ export function PixiBlackChart({
       {activeIndicator === "volatilityHeatmap" && (
         <KioseffSettingsPanel
           settings={kioseffSettings}
+          chartTimeframe={timeframe}
           onChange={onKioseffSettingsChange}
           onClose={() => setActiveIndicator(null)}
         />
@@ -3504,6 +3784,8 @@ export function PixiBlackChart({
         snapshot={kioseffSnapshot}
         unavailable={kioseffUnavailable}
         settings={kioseffSettings}
+        loadState={kioseffLoadState}
+        diagnostics={kioseffDiagnostics}
       />
       <AifIndicatorOverlay
         active={visibleIndicators.aif}

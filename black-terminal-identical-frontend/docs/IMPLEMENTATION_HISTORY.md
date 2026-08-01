@@ -6,6 +6,8 @@ This file records what has been built so far and what must be recorded going for
 
 Recent pushed commits:
 
+- Current - Repair the Kioseff Bybit 5K intrabar pipeline, progressive warmup, diagnostics, and
+  complete original settings surface.
 - Current - Implement Phase V Chapter I Security Fortress and production migration baseline.
 - Current - Enforce runtime-connection scoping for private orders, positions and portfolio API synchronization.
 - Current - Bring DOM Pro execution to venue-native Bybit parity with Spot/Futures and dynamic Conditional, Chase, TWAP, Iceberg and POV controls.
@@ -1218,3 +1220,19 @@ Remaining:
 - Status is implementation complete, parity pending reference certification. Approved TradingView
   snapshots are absent, so no fully-identical claim is made and the unreferenced legacy approximation
   files are not yet deleted.
+
+# 2026-08-01 - Kioseff 5K Operational Remediation
+
+- Reproduced the exact Bybit BTCUSDT linear perpetual, 1H, 5K, VAE Lower, 1m path against the public
+  API and located the first failure in coverage aggregation before worker delivery.
+- Replaced the 300,000-element timestamp spread that raised `Maximum call stack size exceeded` with
+  bounded aggregation and streaming source hashing.
+- Added explicit request-range/coverage contracts, bounded recent-first pagination, retry/abort
+  policy, progressive immutable warmups, real load states, worker/render telemetry, and the
+  development data inspector.
+- Completed the original Pine settings surface and schema-4 legacy workspace migration.
+- Added captured Bybit and legacy-workspace fixtures plus the operational regression suite.
+- Verified 5,000 chart bars and 299,991 live one-minute candles through grouping, the worker,
+  398 active clusters, 5,000 pane points, and 19,504 render commands. The full Kioseff suite,
+  production build, security checks, liquidation heatmap regression, and A.I.F. suite pass.
+- Authenticated browser visual acceptance remains operator-gated and is not claimed.

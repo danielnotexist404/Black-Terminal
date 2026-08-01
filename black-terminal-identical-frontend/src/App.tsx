@@ -77,6 +77,7 @@ import {
   migrateKioseffSettings,
   type KioseffSettingsV1
 } from "./modules/kioseff-stop-loss-clustering/core/settings";
+import { migrateKioseffWorkspaceFields } from "./modules/kioseff-stop-loss-clustering/core/workspaceMigration";
 import type {
   ChartDisplayType,
   DrawingToolId,
@@ -309,7 +310,7 @@ type LayoutVars = CSSProperties & {
 };
 
 type WorkspaceSnapshot = {
-  schemaVersion?: 3;
+  schemaVersion?: 4;
   selectedExchangeId: string;
   symbolRaw: string;
   timeframe: Timeframe;
@@ -425,12 +426,20 @@ function migrateVisibleIndicators(value: Partial<VisibleIndicators> | null | und
 }
 
 function migrateWorkspaceSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+  const kioseff = migrateKioseffWorkspaceFields({
+    visibility: snapshot.visibleIndicators?.volatilityHeatmap,
+    period: snapshot.indicatorPeriods?.volatilityHeatmap,
+    visual: snapshot.indicatorVisualSettings?.volatilityHeatmap,
+    settings: snapshot.kioseffSettings
+  });
+  const visibleIndicators = migrateVisibleIndicators(snapshot.visibleIndicators);
+  visibleIndicators.volatilityHeatmap = kioseff.visibility;
   return {
     ...snapshot,
-    schemaVersion: 3,
-    visibleIndicators: migrateVisibleIndicators(snapshot.visibleIndicators),
+    schemaVersion: 4,
+    visibleIndicators,
     indicatorAdvancedSettings: migrateIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings),
-    kioseffSettings: migrateKioseffSettings(snapshot.kioseffSettings)
+    kioseffSettings: kioseff.settings
   };
 }
 
@@ -1202,7 +1211,7 @@ export default function App() {
   };
 
   const captureWorkspaceSnapshot = (): WorkspaceSnapshot => ({
-    schemaVersion: 3,
+    schemaVersion: 4,
     selectedExchangeId: selectedExchange.id,
     symbolRaw: symbol.rawSymbol,
     timeframe,

@@ -1,4 +1,3 @@
-import { Candle } from "../../chart-engine/types";
 import {
   CandleQuery,
   MarketDataAdapter,
@@ -12,6 +11,10 @@ import {
 } from "../types";
 import { marketDataFetchJson } from "../transport";
 import { createSymbolMetadata } from "../symbolMetadata";
+import {
+  assertBybitCandleQuery,
+  parseBybitKlineRows
+} from "./bybitKline.ts";
 
 type BybitResponse<T> = {
   retCode: number;
@@ -166,23 +169,15 @@ function parseNumber(value: string | number) {
   return parsed;
 }
 
-async function bybitGet<T>(path: string, params: URLSearchParams) {
-  const payload = await marketDataFetchJson<BybitResponse<T>>(`${BYBIT_REST}${path}?${params}`);
+async function bybitGet<T>(path: string, params: URLSearchParams, signal?: AbortSignal) {
+  const payload = await marketDataFetchJson<BybitResponse<T>>(
+    `${BYBIT_REST}${path}?${params}`,
+    { signal }
+  );
   if (payload.retCode !== 0) {
     throw new Error(`Bybit request failed: ${payload.retMsg}`);
   }
   return payload.result;
-}
-
-function mapKline(row: string[]): Candle {
-  return {
-    time: Math.floor(parseNumber(row[0]) / 1000),
-    open: parseNumber(row[1]),
-    high: parseNumber(row[2]),
-    low: parseNumber(row[3]),
-    close: parseNumber(row[4]),
-    volume: parseNumber(row[5])
-  };
 }
 
 function mapBook(symbol: MarketSymbol, result: BybitBookResult): OrderBookSnapshot {
@@ -349,6 +344,7 @@ export const bybitMarketDataAdapter: MarketDataAdapter = {
     return match.metadata;
   },
   getHistoricalCandles: async (query: CandleQuery) => {
+    assertBybitCandleQuery(query);
     const interval = timeframeMap[query.timeframe];
     if (!interval) {
       throw new Error(`Unsupported Bybit timeframe: ${query.timeframe}`);
@@ -364,8 +360,8 @@ export const bybitMarketDataAdapter: MarketDataAdapter = {
     if (query.from) params.set("start", String(query.from * 1000));
     if (query.to) params.set("end", String(query.to * 1000));
 
-    const result = await bybitGet<BybitKlineResult>("/v5/market/kline", params);
-    return result.list.map(mapKline).sort((a, b) => a.time - b.time);
+    const result = await bybitGet<BybitKlineResult>("/v5/market/kline", params, query.signal);
+    return parseBybitKlineRows(result.list);
   },
   getOrderBookSnapshot: async (symbol, limit = 25) => {
     const params = new URLSearchParams({

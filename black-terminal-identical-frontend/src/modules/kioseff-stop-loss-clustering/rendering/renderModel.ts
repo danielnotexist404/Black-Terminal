@@ -18,6 +18,7 @@ export type KioseffRenderModel = {
   curves: CanonicalCurve[];
   pane: CanonicalPanePoint[];
   xRay: { enabled: boolean; priceLow: number; priceHigh: number } | null;
+  geometryCommandCount: number;
 };
 
 function newestBySide(
@@ -57,6 +58,20 @@ export function buildKioseffRenderModel(
     : settings.volatilityAtEntry.showHistoricalTriggers
       ? snapshot.violatedClusters
       : [];
+  const absorbtionMaximumVolume = absorbtion
+    ? Math.max(
+        1,
+        ...[...active, ...violated].map((cluster) =>
+          Math.abs(cluster.signedVolume)
+        )
+      )
+    : 1;
+  const opacityFor = (cluster: CanonicalCluster) =>
+    absorbtion && settings.absorbtion.intensityBySize
+      ? 0.07 +
+        0.25 *
+          Math.min(1, Math.abs(cluster.signedVolume) / absorbtionMaximumVolume)
+      : cluster.opacity;
   const activeZones = active.map((cluster) => ({
     ...cluster,
     color: absorbtion
@@ -65,7 +80,8 @@ export function buildKioseffRenderModel(
         ? settings.volatilityAtEntry.strongClusterColor
         : settings.volatilityAtEntry.weakClusterColor,
     showLabel:
-      absorbtion || settings.volatilityAtEntry.showActiveClusterSize
+      absorbtion || settings.volatilityAtEntry.showActiveClusterSize,
+    opacity: opacityFor(cluster)
   }));
   const violatedZones = violated.map((cluster) => ({
     ...cluster,
@@ -74,7 +90,8 @@ export function buildKioseffRenderModel(
       : cluster.strength === "strong"
         ? settings.volatilityAtEntry.strongClusterColor
         : settings.volatilityAtEntry.weakClusterColor,
-    showLabel: absorbtion
+    showLabel: absorbtion,
+    opacity: opacityFor(cluster)
   }));
   const all = [...activeZones, ...violatedZones];
   const xRay =
@@ -91,6 +108,23 @@ export function buildKioseffRenderModel(
     violatedZones,
     curves: absorbtion ? snapshot.qCurves.slice(-50) : [],
     pane: snapshot.pane,
-    xRay
+    xRay,
+    geometryCommandCount:
+      activeZones.length * 2 +
+      violatedZones.length * 2 +
+      snapshot.qCurves.reduce(
+        (sum, curve) => sum + Math.max(0, curve.points.length - 1),
+        0
+      ) +
+      snapshot.pane.reduce(
+        (sum, point) =>
+          sum +
+          Number(point.buyStopsHit !== null) +
+          Number(point.sellStopsHit !== null) +
+          Number(point.buyAverage !== null) +
+          Number(point.sellAverage !== null),
+        0
+      ) +
+      Number(Boolean(xRay))
   };
 }

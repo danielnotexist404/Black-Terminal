@@ -7,6 +7,23 @@ import { workerFailure } from "./protocol.ts";
 import { assertKioseffInputQuality } from "../data/qualityGate.ts";
 import { KioseffDataUnavailableError } from "../data/types.ts";
 
+function workerTelemetry(
+  inputs: readonly import("../data/types.ts").KioseffChartBarInput[],
+  snapshot: import("../core/canonical.ts").KioseffSnapshot
+) {
+  return {
+    workerChartBarsReceived: inputs.length,
+    workerIntrabarsReceived: inputs.reduce(
+      (sum, input) => sum + input.intrabars.length,
+      0
+    ),
+    outputClusters:
+      snapshot.activeClusters.length + snapshot.violatedClusters.length,
+    outputPanePoints: snapshot.pane.length,
+    outputDiagnostics: snapshot.diagnostics.length
+  };
+}
+
 export class KioseffWorkerRuntime {
   private engine: KioseffParityEngine | null = null;
   private generation = -1;
@@ -36,6 +53,7 @@ export class KioseffWorkerRuntime {
       this.engineVersion = request.engineVersion;
       this.settingsVersion = request.settingsVersion;
       this.cancelled.clear();
+      const snapshot = this.engine.snapshot();
       return {
         type: "result",
         requestId: request.requestId,
@@ -43,8 +61,9 @@ export class KioseffWorkerRuntime {
         sourceVersion: request.sourceVersion,
         engineVersion: request.engineVersion,
         settingsVersion: request.settingsVersion,
-        snapshot: this.engine.snapshot(),
-        calculationMs: performance.now() - started
+        snapshot,
+        calculationMs: performance.now() - started,
+        telemetry: workerTelemetry([], snapshot)
       };
     }
     if (!this.engine) {
@@ -59,7 +78,11 @@ export class KioseffWorkerRuntime {
       return workerFailure(
         request,
         "stale-source-generation",
-        "Request envelope does not match the active worker generation.",
+        [
+          "Request envelope does not match the active worker generation.",
+          `expected generation=${this.generation} sourceVersion=${this.sourceVersion}`,
+          `received generation=${request.generation} sourceVersion=${request.sourceVersion}`
+        ].join(" "),
         performance.now() - started
       );
     }
@@ -86,7 +109,8 @@ export class KioseffWorkerRuntime {
         engineVersion: request.engineVersion,
         settingsVersion: request.settingsVersion,
         snapshot,
-        calculationMs: performance.now() - started
+        calculationMs: performance.now() - started,
+        telemetry: workerTelemetry(inputs, snapshot)
       };
     } catch (error) {
       if (error instanceof KioseffDataUnavailableError) {

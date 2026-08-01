@@ -155,6 +155,7 @@ export type CandleQuery = {
   limit?: number;
   from?: number;
   to?: number;
+  signal?: AbortSignal;
 };
 
 export type MarketDataAdapter = {

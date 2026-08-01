@@ -36,6 +36,12 @@ export class KioseffPixiRenderer {
   private textLayer = new Container();
   private textPool: Text[] = [];
   private usedTexts = 0;
+  private lastRenderMetrics = {
+    activeZones: 0,
+    violatedZones: 0,
+    panePoints: 0,
+    geometryCommandCount: 0
+  };
 
   constructor() {
     this.container.addChild(
@@ -215,10 +221,22 @@ export class KioseffPixiRenderer {
     this.paneGeometry.clear();
     this.usedTexts = 0;
     if (!snapshot) {
+      this.lastRenderMetrics = {
+        activeZones: 0,
+        violatedZones: 0,
+        panePoints: 0,
+        geometryCommandCount: 0
+      };
       for (const text of this.textPool) text.visible = false;
       return;
     }
     const model = buildKioseffRenderModel(snapshot, settings);
+    this.lastRenderMetrics = {
+      activeZones: model.activeZones.length,
+      violatedZones: model.violatedZones.length,
+      panePoints: model.pane.length,
+      geometryCommandCount: model.geometryCommandCount
+    };
     if (model.xRay) {
       const top = transform.yForPrice(model.xRay.priceHigh);
       const bottom = transform.yForPrice(model.xRay.priceLow);
@@ -254,7 +272,9 @@ export class KioseffPixiRenderer {
       graphics: 6,
       containers: 2,
       textObjects: this.textPool.length,
-      visibleTextObjects: this.usedTexts
+      visibleTextObjects: this.usedTexts,
+      containerVisible: this.container.visible,
+      ...this.lastRenderMetrics
     };
   }
 }

@@ -72,6 +72,8 @@ Project Obsidian is currently a research and protocol-formalization workstream. 
   test, performance, migration, and certification record.
 - `indicators/KIOSEFF_STOP_LOSS_CLUSTER_COMPLETION_REPORT.md` - required final architecture,
   coverage, validation, blocker, and verification handoff.
+- `indicators/KIOSEFF_STOP_LOSS_CLUSTER_OPERATIONAL_REMEDIATION.md` - deployed 5K Bybit failure
+  root cause, live pipeline evidence, progressive loading, settings, validation, and release status.
 - `scanner.md` - scanner module notes.
 
 ## Documentation Rules

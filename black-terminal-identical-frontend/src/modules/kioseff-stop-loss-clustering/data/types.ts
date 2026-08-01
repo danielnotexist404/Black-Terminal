@@ -8,15 +8,69 @@ import type {
 } from "../../../market-data/types";
 
 export type KioseffUnavailableReason =
+  | "missing-request-range"
   | "missing-authoritative-tick-size"
   | "missing-intrabar-history"
   | "incomplete-intrabar-coverage"
   | "source-history-live-mismatch"
+  | "adapter-symbol-category-mismatch"
+  | "invalid-timestamp-units"
+  | "rate-limited"
   | "unsupported-lower-timeframe"
   | "stale-source-generation"
   | "invalid-time-bucketing"
   | "unsupported-symbol-metadata"
   | "worker-failure";
+
+export type IntrabarCoverage = {
+  requestedChartBars: number;
+  chartBarsWithCompleteIntrabars: number;
+  chartBarsWithPartialIntrabars: number;
+  chartBarsWithNoIntrabars: number;
+  expectedIntrabars: number;
+  receivedIntrabars: number;
+  firstRequiredTime: number | null;
+  lastRequiredTime: number | null;
+  firstReceivedTime: number | null;
+  lastReceivedTime: number | null;
+  missingIntervals: number;
+  duplicateIntervals: number;
+  outOfOrderIntervals: number;
+};
+
+export type KioseffRequestRange = {
+  start: number;
+  end: number;
+  intervalSeconds: number;
+  expectedIntrabars: number;
+};
+
+export type KioseffWarmup = {
+  completedChartBars: number;
+  targetChartBars: number;
+  full: boolean;
+};
+
+export type KioseffHistoryProgress =
+  | {
+      stage: "requesting-symbol-metadata";
+      loaded: 0;
+      target: 0;
+    }
+  | {
+      stage: "fetching-intrabar-history";
+      loaded: number;
+      target: number;
+      completedPages: number;
+      targetPages: number;
+      requestRange: KioseffRequestRange;
+    }
+  | {
+      stage: "grouping-intrabars";
+      bars: number;
+      intrabars: number;
+      requestRange: KioseffRequestRange;
+    };
 
 export type NormalizedCandle = Candle & {
   originalTime: string | number;
@@ -69,6 +123,9 @@ export type KioseffHistoryResult = {
   chartBars: KioseffChartBarInput[];
   provenance: KioseffSourceProvenance;
   quality: IntrabarQualityReport;
+  coverage: IntrabarCoverage;
+  requestRange: KioseffRequestRange;
+  warmup: KioseffWarmup;
 };
 
 export class KioseffDataUnavailableError extends Error {

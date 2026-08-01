@@ -9,6 +9,7 @@
 import type { Timeframe } from "../../../market-data/types";
 import type { KioseffChartBarInput, NormalizedCandle } from "../data/types.ts";
 import { kioseffTimeframeSeconds } from "../data/timeframes.ts";
+import { normalizeKioseffTimeframeInput } from "./settings.ts";
 import {
   KIOSEFF_ENGINE_VERSION,
   KIOSEFF_SCHEMA_VERSION,
@@ -140,7 +141,9 @@ export class VolatilityAtEntryEngine
     this.context = context;
     this.tick = parseDecimalStep(context.metadata.tickSize);
     const scalingSeconds = kioseffTimeframeSeconds(
-      context.settings.volatilityAtEntry.timeScaledVolatilityTimeframe as Timeframe
+      normalizeKioseffTimeframeInput(
+        context.settings.volatilityAtEntry.timeScaledVolatilityTimeframe
+      )
     );
     const t0 = scalingSeconds / 60;
     this.factors = [1, 5, 15, 30, 60, 240].flatMap((minutes) =>

@@ -106,8 +106,11 @@ function parseNumber(value: string | number) {
   return parsed;
 }
 
-async function okxGet<T>(path: string, params: URLSearchParams) {
-  const payload = await marketDataFetchJson<OkxResponse<T>>(`${OKX_REST}${path}?${params}`);
+async function okxGet<T>(path: string, params: URLSearchParams, signal?: AbortSignal) {
+  const payload = await marketDataFetchJson<OkxResponse<T>>(
+    `${OKX_REST}${path}?${params}`,
+    { signal }
+  );
   if (payload.code !== "0") {
     throw new Error(`OKX request failed: ${payload.msg}`);
   }
@@ -392,7 +395,7 @@ export const okxMarketDataAdapter: MarketDataAdapter = {
     if (query.to) params.set("after", String(query.to * 1000));
     if (query.from) params.set("before", String(query.from * 1000));
 
-    const data = await okxGet<string[][]>("/api/v5/market/candles", params);
+    const data = await okxGet<string[][]>("/api/v5/market/candles", params, query.signal);
     return data.map(mapKline).sort((a, b) => a.time - b.time);
   },
   getOrderBookSnapshot: async (symbol, limit = 20) => {

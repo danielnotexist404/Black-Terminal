@@ -1,4 +1,6 @@
 import type { KioseffGranularity, KioseffModel } from "./canonical.ts";
+import type { Timeframe } from "../../../market-data/types.ts";
+import { kioseffTimeframeSeconds } from "../data/timeframes.ts";
 
 export type KioseffSettingsV1 = {
   version: 1;
@@ -36,13 +38,13 @@ export const KIOSEFF_DEFAULT_SETTINGS: KioseffSettingsV1 = {
     stopClusterSells: 2,
     oldStopClusterSells: 2,
     oldStopClusterBuys: 2,
-    lowerTimeframe: "1m",
+    lowerTimeframe: "1",
     clusterColor: "#55ffda",
     oldClusterColor: "#ff65fb"
   },
   volatilityAtEntry: {
     granularity: "lower",
-    timeScaledVolatilityTimeframe: "1m",
+    timeScaledVolatilityTimeframe: "1",
     strongClusterColor: "#ff65fb",
     weakClusterColor: "#6929F2",
     showHistoricalTriggers: false,
@@ -52,13 +54,69 @@ export const KIOSEFF_DEFAULT_SETTINGS: KioseffSettingsV1 = {
   showClusterRatioMeter: true
 };
 
+export const KIOSEFF_TIMEFRAME_INPUTS = [
+  { value: "1", label: "1 minute", timeframe: "1m" },
+  { value: "3", label: "3 minutes", timeframe: "3m" },
+  { value: "5", label: "5 minutes", timeframe: "5m" },
+  { value: "15", label: "15 minutes", timeframe: "15m" },
+  { value: "30", label: "30 minutes", timeframe: "30m" },
+  { value: "60", label: "1 hour", timeframe: "1h" },
+  { value: "240", label: "4 hours", timeframe: "4h" }
+] as const satisfies readonly {
+  value: string;
+  label: string;
+  timeframe: Timeframe;
+}[];
+
+export function normalizeKioseffTimeframeInput(value: string): Timeframe {
+  const normalized = KIOSEFF_TIMEFRAME_INPUTS.find(
+    (option) => option.value === value || option.timeframe === value
+  )?.timeframe;
+  return normalized ?? "1m";
+}
+
+function migrateTimeframeInput(value: unknown, fallback: string) {
+  if (typeof value !== "string") return fallback;
+  const match = KIOSEFF_TIMEFRAME_INPUTS.find(
+    (option) => option.value === value || option.timeframe === value
+  );
+  return match?.value ?? fallback;
+}
+
+export function isKioseffLowerTimeframeSupported(
+  value: string,
+  chartTimeframe: Timeframe
+) {
+  return (
+    kioseffTimeframeSeconds(normalizeKioseffTimeframeInput(value)) <
+    kioseffTimeframeSeconds(chartTimeframe)
+  );
+}
+
 function integerAtLeast(value: unknown, minimum: number, fallback: number) {
   return Number.isInteger(value) && Number(value) >= minimum ? Number(value) : fallback;
 }
 
-export function migrateKioseffSettings(value: unknown): KioseffSettingsV1 {
+export function migrateKioseffSettings(
+  value: unknown,
+  legacyVisual?: { color?: string; intensity?: number }
+): KioseffSettingsV1 {
   const source = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-  if (source.version !== 1) return structuredClone(KIOSEFF_DEFAULT_SETTINGS);
+  if (source.version !== 1) {
+    const migrated = structuredClone(KIOSEFF_DEFAULT_SETTINGS);
+    const legacyColor = {
+      red: "#ff334f",
+      green: "#55ffda",
+      white: "#ffffff",
+      silver: "#b8bec9",
+      gray: "#7d8491"
+    }[legacyVisual?.color ?? ""];
+    if (legacyColor) {
+      migrated.absorbtion.clusterColor = legacyColor;
+      migrated.volatilityAtEntry.strongClusterColor = legacyColor;
+    }
+    return migrated;
+  }
   const absorbtion =
     source.absorbtion && typeof source.absorbtion === "object"
       ? (source.absorbtion as Record<string, unknown>)
@@ -92,10 +150,10 @@ export function migrateKioseffSettings(value: unknown): KioseffSettingsV1 {
         0,
         defaults.absorbtion.oldStopClusterBuys
       ),
-      lowerTimeframe:
-        typeof absorbtion.lowerTimeframe === "string"
-          ? absorbtion.lowerTimeframe
-          : defaults.absorbtion.lowerTimeframe,
+      lowerTimeframe: migrateTimeframeInput(
+        absorbtion.lowerTimeframe,
+        defaults.absorbtion.lowerTimeframe
+      ),
       clusterColor:
         typeof absorbtion.clusterColor === "string"
           ? absorbtion.clusterColor
@@ -110,10 +168,10 @@ export function migrateKioseffSettings(value: unknown): KioseffSettingsV1 {
         vae.granularity === "higher" || vae.granularity === "lower"
           ? vae.granularity
           : defaults.volatilityAtEntry.granularity,
-      timeScaledVolatilityTimeframe:
-        typeof vae.timeScaledVolatilityTimeframe === "string"
-          ? vae.timeScaledVolatilityTimeframe
-          : defaults.volatilityAtEntry.timeScaledVolatilityTimeframe,
+      timeScaledVolatilityTimeframe: migrateTimeframeInput(
+        vae.timeScaledVolatilityTimeframe,
+        defaults.volatilityAtEntry.timeScaledVolatilityTimeframe
+      ),
       strongClusterColor:
         typeof vae.strongClusterColor === "string"
           ? vae.strongClusterColor

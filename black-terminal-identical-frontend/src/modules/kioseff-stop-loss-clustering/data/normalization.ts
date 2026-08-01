@@ -1,5 +1,8 @@
 import type { Candle } from "../../../chart-engine/types";
-import type { NormalizedCandle } from "./types";
+import {
+  KioseffDataUnavailableError,
+  type NormalizedCandle
+} from "./types.ts";
 
 export type NormalizeCandleOptions = {
   source: string;
@@ -35,6 +38,12 @@ export function normalizeKioseffCandles(
 
   for (const candle of candles) {
     if (!Number.isInteger(candle.time)) throw new Error(`Candle time must be integer seconds: ${candle.time}`);
+    if (candle.time > 10_000_000_000) {
+      throw new KioseffDataUnavailableError("invalid-timestamp-units", {
+        time: candle.time,
+        expected: "integer-seconds"
+      });
+    }
     if (
       ![candle.open, candle.high, candle.low, candle.close, candle.volume].every(Number.isFinite) ||
       candle.high < candle.low
@@ -78,28 +87,46 @@ function uniqueSorted(values: number[]) {
 
 export function stableSourceVersion(parts: readonly (string | number | boolean | null | undefined)[]) {
   let hash = 0x811c9dc5;
-  const text = parts.map((part) => String(part ?? "")).join("|");
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
+  for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
+    if (partIndex > 0) {
+      hash ^= 124;
+      hash = Math.imul(hash, 0x01000193);
+    }
+    const text = String(parts[partIndex] ?? "");
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193);
+    }
   }
   return `kioseff-fnv1a-${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 export function candleSourceVersion(candles: readonly NormalizedCandle[], prefix: string) {
-  return stableSourceVersion([
-    prefix,
-    candles.length,
-    ...candles.flatMap((candle) => [
-      candle.time,
-      candle.open,
-      candle.high,
-      candle.low,
-      candle.close,
-      candle.volume,
-      candle.source,
-      candle.sourceRevision
-    ])
-  ]);
+  let hash = 0x811c9dc5;
+  let partIndex = 0;
+  const update = (value: string | number) => {
+    if (partIndex > 0) {
+      hash ^= 124;
+      hash = Math.imul(hash, 0x01000193);
+    }
+    const text = String(value);
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    partIndex += 1;
+  };
+  update(prefix);
+  update(candles.length);
+  for (const candle of candles) {
+    update(candle.time);
+    update(candle.open);
+    update(candle.high);
+    update(candle.low);
+    update(candle.close);
+    update(candle.volume);
+    update(candle.source);
+    update(candle.sourceRevision);
+  }
+  return `kioseff-fnv1a-${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
-

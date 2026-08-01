@@ -689,6 +689,10 @@ export class BlackChartEngine {
     this.draw();
   }
 
+  getKioseffRenderMetrics() {
+    return this.kioseffRenderer.metrics();
+  }
+
   setPriceLineSettings(color: string, intensity: number) {
     this.priceLineColor = color;
     this.priceLineIntensity = intensity;

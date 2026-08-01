@@ -32,10 +32,19 @@ export type KioseffWorkerRequest =
       type: "dispose";
     });
 
+export type KioseffWorkerTelemetry = {
+  workerChartBarsReceived: number;
+  workerIntrabarsReceived: number;
+  outputClusters: number;
+  outputPanePoints: number;
+  outputDiagnostics: number;
+};
+
 export type KioseffWorkerSuccess = KioseffWorkerEnvelope & {
   type: "result";
   snapshot: KioseffSnapshot;
   calculationMs: number;
+  telemetry: KioseffWorkerTelemetry;
 };
 
 export type KioseffWorkerFailure = KioseffWorkerEnvelope & {

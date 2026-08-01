@@ -524,7 +524,8 @@ export const binanceMarketDataAdapter: MarketDataAdapter = {
     if (query.to) params.set("endTime", String(query.to * 1000));
 
     const payload = await marketDataFetchJson<BinanceKline[]>(
-      `${restBaseFor(query.marketKind)}${klinePathFor(query.marketKind)}?${params}`
+      `${restBaseFor(query.marketKind)}${klinePathFor(query.marketKind)}?${params}`,
+      { signal: query.signal }
     );
     return payload.map(mapKline);
   },

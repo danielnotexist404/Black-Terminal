@@ -4,7 +4,8 @@ import { kioseffSettingsVersion } from "../core/settings.ts";
 import type { KioseffChartBarInput } from "../data/types.ts";
 import type {
   KioseffWorkerRequest,
-  KioseffWorkerResponse
+  KioseffWorkerResponse,
+  KioseffWorkerTelemetry
 } from "./protocol.ts";
 
 export type KioseffWorkerLike = {
@@ -27,6 +28,14 @@ export class KioseffWorkerClient {
   private sequence = 0;
   private pending = new Map<string, Pending>();
   private disposed = false;
+  private telemetry: KioseffWorkerTelemetry = {
+    workerChartBarsReceived: 0,
+    workerIntrabarsReceived: 0,
+    outputClusters: 0,
+    outputPanePoints: 0,
+    outputDiagnostics: 0
+  };
+  private calculationMs = 0;
 
   constructor(
     context: KioseffEngineContext,
@@ -68,6 +77,8 @@ export class KioseffWorkerClient {
       pending.reject(new Error(`${response.code}: ${response.message}`));
       return;
     }
+    this.telemetry = response.telemetry;
+    this.calculationMs = response.calculationMs;
     pending.resolve(response.snapshot);
   }
 
@@ -143,5 +154,13 @@ export class KioseffWorkerClient {
 
   get activeGeneration() {
     return this.generation;
+  }
+
+  get lastTelemetry() {
+    return { ...this.telemetry };
+  }
+
+  get lastCalculationMs() {
+    return this.calculationMs;
   }
 }

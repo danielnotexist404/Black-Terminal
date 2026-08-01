@@ -65,7 +65,15 @@ const snapshot: KioseffSnapshot = {
     radiateBuy: false,
     radiateSell: false
   },
-  pane: [],
+  pane: [{
+    time: 10,
+    buyStopsHit: 2,
+    sellStopsHit: -3,
+    buyAverage: 1,
+    sellAverage: -1,
+    radiateBuy: true,
+    radiateSell: false
+  }],
   alerts: [],
   summary: { nearestBuy: null, nearestSell: null },
   ratioMeter: emptyRatioModel(),
@@ -83,6 +91,11 @@ assert.equal(renderModel.activeZones.filter((zone) => zone.side === "sell-stop")
 assert.equal(renderModel.violatedZones.filter((zone) => zone.side === "buy-stop").length, 1);
 assert.equal(renderModel.violatedZones.filter((zone) => zone.side === "sell-stop").length, 2);
 assert.ok(renderModel.xRay);
+assert.ok(renderModel.activeZones.length > 0);
+assert.ok(renderModel.violatedZones.length > 0);
+assert.ok(renderModel.pane.length > 0);
+assert.ok(renderModel.geometryCommandCount > 0, "render smoke emits visible geometry commands");
+assert.ok(snapshot.summary, "render smoke retains a summary model");
 assert.equal(canonicalSnapshotHash(snapshot), before, "render selection cannot mutate canonical state");
 
 const vae = { ...snapshot, model: "volatility-at-entry" as const, granularity: "higher" as const };

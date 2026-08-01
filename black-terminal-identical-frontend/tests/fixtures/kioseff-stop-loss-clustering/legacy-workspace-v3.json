@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 3,
+  "visibleIndicators": {
+    "volatilityHeatmap": true
+  },
+  "indicatorPeriods": {
+    "volatilityHeatmap": 34
+  },
+  "indicatorVisualSettings": {
+    "volatilityHeatmap": {
+      "color": "red",
+      "intensity": 86
+    }
+  },
+  "kioseffSettings": null
+}

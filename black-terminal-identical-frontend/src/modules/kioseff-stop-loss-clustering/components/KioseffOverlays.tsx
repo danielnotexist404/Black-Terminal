@@ -1,12 +1,18 @@
 import type { KioseffSnapshot } from "../core/canonical";
 import type { KioseffSettingsV1 } from "../core/settings";
 import type { KioseffUnavailableDiagnostic } from "../data/unavailability";
+import type {
+  KioseffLoadState,
+  KioseffRuntimeDiagnostics
+} from "../data/loadState";
 
 type Props = {
   visible: boolean;
   snapshot: KioseffSnapshot | null;
   unavailable: KioseffUnavailableDiagnostic | null;
   settings: KioseffSettingsV1;
+  loadState: KioseffLoadState;
+  diagnostics: KioseffRuntimeDiagnostics;
 };
 
 function formatPrice(value: number | null | undefined) {
@@ -17,28 +23,96 @@ function formatVolume(value: number | null | undefined) {
   return value === null || value === undefined ? "—" : Math.abs(value).toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
-export function KioseffOverlays({ visible, snapshot, unavailable, settings }: Props) {
+function loadLabel(state: KioseffLoadState) {
+  switch (state.stage) {
+    case "idle":
+      return "Waiting to start…";
+    case "requesting-symbol-metadata":
+      return "Requesting authoritative symbol metadata…";
+    case "fetching-chart-history":
+      return `Fetching chart history — ${state.loaded.toLocaleString()} of ${state.target.toLocaleString()} bars`;
+    case "fetching-intrabar-history":
+      return `Fetching ordered intrabars — ${state.loaded.toLocaleString()}${state.target === undefined ? "" : ` of ${state.target.toLocaleString()}`}`;
+    case "grouping-intrabars":
+      return `Grouping ${state.intrabars.toLocaleString()} intrabars into ${state.bars.toLocaleString()} chart bars…`;
+    case "starting-worker":
+      return "Starting versioned calculation worker…";
+    case "calculating":
+      return `Calculating ${state.bars.toLocaleString()} bars from ${state.intrabars.toLocaleString()} intrabars…`;
+    case "rendering":
+      return `Building visible render geometry for ${state.clusters.toLocaleString()} clusters…`;
+    case "warming":
+      return `Warming up — calculated from ${state.completedBars.toLocaleString()} of ${state.targetBars.toLocaleString()} chart bars`;
+    case "ready":
+      return "Ready";
+    case "unavailable":
+      return `Unavailable — ${state.reason}`;
+    case "error":
+      return `Error — ${state.message}`;
+  }
+}
+
+export function KioseffOverlays({
+  visible,
+  snapshot,
+  unavailable,
+  settings,
+  loadState,
+  diagnostics
+}: Props) {
   if (!visible) return null;
+  const inspector = import.meta.env.DEV ? (
+    <details className="kioseff-data-inspector" data-testid="kioseff-data-inspector">
+      <summary>Kioseff data inspector</summary>
+      {Object.entries(diagnostics).map(([key, value]) => (
+        <small key={key}><span>{key}</span><b>{value === null ? "—" : String(value)}</b></small>
+      ))}
+    </details>
+  ) : null;
   if (unavailable) {
     return (
-      <aside className="kioseff-unavailable" role="status">
-        <b>Stop Loss Clustering unavailable</b>
-        <span>{unavailable.capability}</span>
-        <small>{unavailable.venue} · {unavailable.symbol} · {unavailable.chartTimeframe}</small>
-        <small>Requested LTF: {unavailable.requestedLowerTimeframe}</small>
-        <small>Coverage: {unavailable.historyCoverage.actual}/{unavailable.historyCoverage.expected}</small>
-        <small>Realtime source: {unavailable.realtimeSource}</small>
-        <em>{unavailable.retryable ? "Retry is possible." : "This market configuration is unsupported."}</em>
-      </aside>
+      <>
+        <aside className="kioseff-unavailable" role="status">
+          <b>Stop Loss Clustering unavailable</b>
+          <span>{unavailable.capability}</span>
+          <small>{unavailable.venue} · {unavailable.symbol} · {unavailable.chartTimeframe}</small>
+          <small>Requested LTF: {unavailable.requestedLowerTimeframe}</small>
+          <small>Coverage: {unavailable.historyCoverage.actual}/{unavailable.historyCoverage.expected}</small>
+          <small>Chart bars: {unavailable.historyCoverage.completeChartBars} complete · {unavailable.historyCoverage.partialChartBars} provisional · {unavailable.historyCoverage.missingChartBars} empty</small>
+          <small>Missing intervals: {unavailable.historyCoverage.missingIntervals}</small>
+          <small>Realtime source: {unavailable.realtimeSource}</small>
+          <small>{unavailable.message}</small>
+          <em>{unavailable.retryable ? "Retry is possible." : "This market configuration is unsupported."}</em>
+        </aside>
+        {inspector}
+      </>
     );
   }
   if (!snapshot) {
-    return <aside className="kioseff-unavailable"><b>Stop Loss Clustering</b><span>Loading certified intrabars…</span></aside>;
+    return (
+      <>
+        <aside className="kioseff-unavailable" data-testid="kioseff-load-state"><b>Stop Loss Clustering</b><span>{loadLabel(loadState)}</span></aside>
+        {inspector}
+      </>
+    );
   }
   const buy = snapshot.summary.nearestBuy;
   const sell = snapshot.summary.nearestSell;
   return (
     <>
+      {loadState.stage !== "ready" && (
+        <aside className="kioseff-warming" role="status">
+          {loadState.stage === "warming"
+            ? loadLabel(loadState)
+            : `Warming up — calculated from ${diagnostics.groupedChartBarCount.toLocaleString()} of ${diagnostics.chartHistoryCount.toLocaleString()} chart bars · ${loadLabel(loadState)}`}
+        </aside>
+      )}
+      {loadState.stage === "ready" &&
+        snapshot.activeClusters.length + snapshot.violatedClusters.length === 0 && (
+          <aside className="kioseff-warming" role="status">
+            Ready — this canonical market window produced no clusters.
+          </aside>
+        )}
       <aside className="kioseff-summary">
         <b>Stop-Loss Clustering</b>
         <div><span>Nearest Buy-Stop Cluster</span><strong>{formatPrice(buy?.price)}</strong><small>{formatVolume(buy?.signedVolume)}</small><em>{snapshot.model === "absorbtion-extremes" ? buy?.typicalMove === null || buy?.typicalMove === undefined ? "None Similar" : `${(buy.typicalMove * 100).toFixed(2)}%` : buy?.activeSidePercent === null || buy?.activeSidePercent === undefined ? "—" : `${buy.activeSidePercent.toFixed(2)}%`}</em></div>
@@ -58,6 +132,7 @@ export function KioseffOverlays({ visible, snapshot, unavailable, settings }: Pr
           {snapshot.diagnostics.map((diagnostic, index) => <small key={`${diagnostic.code}:${index}`}>{diagnostic.code}: {diagnostic.message}</small>)}
         </aside>
       )}
+      {inspector}
     </>
   );
 }

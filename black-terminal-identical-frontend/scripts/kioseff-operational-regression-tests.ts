@@ -350,7 +350,11 @@ if (response.type === "result") {
   assert.ok(response.snapshot.pane.length > 0);
   assert.equal(response.snapshot.schemaVersion, KIOSEFF_SCHEMA_VERSION);
   const render = buildKioseffRenderModel(response.snapshot, settings);
-  assert.ok(render.pane.length > 0, "canonical worker output reaches the render model");
+  assert.equal(render.pane.length, 0, "oscillator output is hidden by default");
+  const oscillatorSettings = structuredClone(settings);
+  oscillatorSettings.style.showOscillator = true;
+  const oscillatorRender = buildKioseffRenderModel(response.snapshot, oscillatorSettings);
+  assert.ok(oscillatorRender.pane.length > 0, "canonical worker output reaches the render model when enabled");
 }
 
 const legacyWorkspacePath = fileURLToPath(
@@ -454,10 +458,24 @@ for (const field of [
   "volatilityAtEntry.showHistoricalTriggers",
   "volatilityAtEntry.showActiveClusterSize",
   "forceTypicalMove",
-  "showClusterRatioMeter"
+  "showClusterRatioMeter",
+  "style.showSummaryTable",
+  "style.showOscillator",
+  "style.oscillatorBuyColor",
+  "style.oscillatorSellColor"
 ]) {
   assert.match(settingsPanelSource, new RegExp(`data-kioseff-field="${field.replaceAll(".", "\\.")}"`));
 }
+const overlaysPath = fileURLToPath(
+  new URL(
+    "../src/modules/kioseff-stop-loss-clustering/components/KioseffOverlays.tsx",
+    import.meta.url
+  )
+);
+const overlaysSource = readFileSync(overlaysPath, "utf8");
+assert.match(overlaysSource, /<summary>Parity Diagnostics<\/summary>/);
+assert.match(overlaysSource, /settings\.style\.showSummaryTable/);
+assert.match(overlaysSource, /settings\.showClusterRatioMeter/);
 assert.match(settingsPanelSource, /settings\.model === "absorbtion-extremes"/);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.absorbtion.showXRay, true);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.absorbtion.intensityBySize, false);
@@ -491,6 +509,10 @@ assert.equal(
 );
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.forceTypicalMove, false);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.showClusterRatioMeter, true);
+assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.showSummaryTable, true);
+assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.showOscillator, false);
+assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.oscillatorBuyColor, "#55ffda");
+assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.oscillatorSellColor, "#ff65fb");
 assert.deepEqual(
   KIOSEFF_TIMEFRAME_INPUTS.map((option) => option.value),
   ["1", "3", "5", "15", "30", "60", "240"]

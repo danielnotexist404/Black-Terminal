@@ -166,9 +166,12 @@ export class KioseffPixiRenderer {
 
   private drawPane(
     pane: ReturnType<typeof buildKioseffRenderModel>["pane"],
-    transform: KioseffRenderTransform
+    transform: KioseffRenderTransform,
+    settings: KioseffSettingsV1
   ) {
     if (!pane.length) return;
+    const buyColor = colorNumber(settings.style.oscillatorBuyColor);
+    const sellColor = colorNumber(settings.style.oscillatorSellColor);
     const visible = pane.filter((point) => {
       const x = transform.xForTime(point.time);
       return x >= -4 && x <= transform.width + 4;
@@ -197,21 +200,21 @@ export class KioseffPixiRenderer {
       if (point.buyStopsHit !== null) {
         const y = yForValue(point.buyStopsHit);
         this.paneGeometry.circle(x, y, point.radiateBuy ? 4 : 2).fill({
-          color: 0x55ffda,
+          color: buyColor,
           alpha: point.radiateBuy ? 0.95 : 0.5
         });
         if (point.radiateBuy) {
-          this.paneGeometry.circle(x, y, 8).stroke({ color: 0x55ffda, width: 2, alpha: 0.18 });
+          this.paneGeometry.circle(x, y, 8).stroke({ color: buyColor, width: 2, alpha: 0.18 });
         }
       }
       if (point.sellStopsHit !== null) {
         const y = yForValue(point.sellStopsHit);
         this.paneGeometry.circle(x, y, point.radiateSell ? 4 : 2).fill({
-          color: 0xff65fb,
+          color: sellColor,
           alpha: point.radiateSell ? 0.95 : 0.5
         });
         if (point.radiateSell) {
-          this.paneGeometry.circle(x, y, 8).stroke({ color: 0xff65fb, width: 2, alpha: 0.18 });
+          this.paneGeometry.circle(x, y, 8).stroke({ color: sellColor, width: 2, alpha: 0.18 });
         }
       }
     }
@@ -222,13 +225,13 @@ export class KioseffPixiRenderer {
         this.paneGeometry
           .moveTo(transform.xForTime(previous.time), yForValue(previous.buyAverage))
           .lineTo(transform.xForTime(current.time), yForValue(current.buyAverage))
-          .stroke({ color: 0x55ffda, width: 1, alpha: 0.76 });
+          .stroke({ color: buyColor, width: 1, alpha: 0.76 });
       }
       if (previous.sellAverage !== null && current.sellAverage !== null) {
         this.paneGeometry
           .moveTo(transform.xForTime(previous.time), yForValue(previous.sellAverage))
           .lineTo(transform.xForTime(current.time), yForValue(current.sellAverage))
-          .stroke({ color: 0xff65fb, width: 1, alpha: 0.76 });
+          .stroke({ color: sellColor, width: 1, alpha: 0.76 });
       }
     }
   }
@@ -281,7 +284,7 @@ export class KioseffPixiRenderer {
     for (const zone of model.violatedZones) this.drawZone(zone, transform, true, settings);
     this.drawLabels([...model.activeZones, ...model.violatedZones], transform, settings);
     this.drawCurves(model.curves, transform);
-    this.drawPane(model.pane, transform);
+    this.drawPane(model.pane, transform, settings);
     for (let index = this.usedTexts; index < this.textPool.length; index += 1) {
       this.textPool[index]!.visible = false;
     }

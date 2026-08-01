@@ -109,10 +109,14 @@ assert.equal(renderModel.violatedZones.filter((zone) => zone.side === "sell-stop
 assert.ok(renderModel.xRay);
 assert.ok(renderModel.activeZones.length > 0);
 assert.ok(renderModel.violatedZones.length > 0);
-assert.ok(renderModel.pane.length > 0);
+assert.equal(renderModel.pane.length, 0, "oscillator is hidden by default");
 assert.ok(renderModel.geometryCommandCount > 0, "render smoke emits visible geometry commands");
 assert.ok(snapshot.summary, "render smoke retains a summary model");
 assert.equal(canonicalSnapshotHash(snapshot), before, "render selection cannot mutate canonical state");
+
+settings.style.showOscillator = true;
+const oscillatorRenderModel = buildKioseffRenderModel(snapshot, settings);
+assert.ok(oscillatorRenderModel.pane.length > 0, "oscillator can be enabled from Style settings");
 
 const vae = { ...snapshot, model: "volatility-at-entry" as const, granularity: "higher" as const };
 settings.volatilityAtEntry.showHistoricalTriggers = false;

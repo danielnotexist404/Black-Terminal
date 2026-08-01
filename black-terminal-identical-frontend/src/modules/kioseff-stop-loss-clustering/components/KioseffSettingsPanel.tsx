@@ -136,6 +136,7 @@ export function KioseffSettingsPanel({
       <div className="indicator-settings-section">
         <b>Optionals</b>
         <label>Force Find Typical Move (Less Similar)<input data-kioseff-field="forceTypicalMove" type="checkbox" checked={settings.forceTypicalMove} onChange={(event) => patch({ forceTypicalMove: event.target.checked })} /></label>
+        <label>Show Nearest Cluster Table<input data-kioseff-field="style.showSummaryTable" type="checkbox" checked={settings.style.showSummaryTable} onChange={(event) => patchStyle({ showSummaryTable: event.target.checked })} /></label>
         <label>Show Cluster Ratio Meter<input data-kioseff-field="showClusterRatioMeter" type="checkbox" checked={settings.showClusterRatioMeter} onChange={(event) => patch({ showClusterRatioMeter: event.target.checked })} /></label>
       </div>
       </>}
@@ -146,6 +147,9 @@ export function KioseffSettingsPanel({
           <label>Active Line Width<input data-kioseff-field="style.activeLineWidth" type="number" min={0.5} max={4} step={0.5} value={settings.style.activeLineWidth} onChange={(event) => patchStyle({ activeLineWidth: Number(event.target.value) })} /></label>
           <label>Hot Line Width<input data-kioseff-field="style.hotLineWidth" type="number" min={1} max={10} step={1} value={settings.style.hotLineWidth} onChange={(event) => patchStyle({ hotLineWidth: Number(event.target.value) })} /></label>
           <label>Label Font Size<input data-kioseff-field="style.labelFontSize" type="number" min={7} max={14} step={1} value={settings.style.labelFontSize} onChange={(event) => patchStyle({ labelFontSize: Number(event.target.value) })} /></label>
+          <label>Show Oscillator<input data-kioseff-field="style.showOscillator" type="checkbox" checked={settings.style.showOscillator} onChange={(event) => patchStyle({ showOscillator: event.target.checked })} /></label>
+          <label>Oscillator Buy Color<input data-kioseff-field="style.oscillatorBuyColor" type="color" value={settings.style.oscillatorBuyColor} onChange={(event) => patchStyle({ oscillatorBuyColor: event.target.value })} /></label>
+          <label>Oscillator Sell Color<input data-kioseff-field="style.oscillatorSellColor" type="color" value={settings.style.oscillatorSellColor} onChange={(event) => patchStyle({ oscillatorSellColor: event.target.value })} /></label>
           <small>Pine inputs remain authoritative; these controls reproduce TradingView's separate Style surface.</small>
         </div>
       )}

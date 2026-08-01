@@ -1255,3 +1255,6 @@ Remaining:
 - Corrected active-size projection so a grid larger than 496 cannot allocate labels only to its
   lowest prices. Visible labels now retain exact price alignment and use deterministic collision
   selection rather than producing an unreadable vertical text column.
+- Simplified the parity diagnostics title, made both indicator tables independently optional, hid the
+  oscillator by default, and added separate oscillator buy/sell color controls without changing the
+  canonical cluster calculation or pane output.

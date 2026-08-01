@@ -37,6 +37,10 @@ export type KioseffSettingsV1 = {
     activeLineWidth: number;
     hotLineWidth: number;
     labelFontSize: number;
+    showSummaryTable: boolean;
+    showOscillator: boolean;
+    oscillatorBuyColor: string;
+    oscillatorSellColor: string;
   };
   visibility: {
     ticks: boolean;
@@ -83,7 +87,11 @@ export const KIOSEFF_DEFAULT_SETTINGS: KioseffSettingsV1 = {
     chartBackgroundColor: "#05070b",
     activeLineWidth: 1,
     hotLineWidth: 5,
-    labelFontSize: 9
+    labelFontSize: 9,
+    showSummaryTable: true,
+    showOscillator: false,
+    oscillatorBuyColor: "#55ffda",
+    oscillatorSellColor: "#ff65fb"
   },
   visibility: {
     ticks: true,
@@ -267,7 +275,23 @@ export function migrateKioseffSettings(
       labelFontSize:
         typeof style.labelFontSize === "number"
           ? Math.max(7, Math.min(14, Math.round(style.labelFontSize)))
-          : defaults.style.labelFontSize
+          : defaults.style.labelFontSize,
+      showSummaryTable:
+        typeof style.showSummaryTable === "boolean"
+          ? style.showSummaryTable
+          : defaults.style.showSummaryTable,
+      showOscillator:
+        typeof style.showOscillator === "boolean"
+          ? style.showOscillator
+          : defaults.style.showOscillator,
+      oscillatorBuyColor:
+        typeof style.oscillatorBuyColor === "string"
+          ? style.oscillatorBuyColor
+          : defaults.style.oscillatorBuyColor,
+      oscillatorSellColor:
+        typeof style.oscillatorSellColor === "string"
+          ? style.oscillatorSellColor
+          : defaults.style.oscillatorSellColor
     },
     visibility: {
       ticks:

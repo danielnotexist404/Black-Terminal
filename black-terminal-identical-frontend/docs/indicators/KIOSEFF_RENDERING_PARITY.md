@@ -33,6 +33,13 @@ The worker snapshot contains no screen or viewport fields. `canonicalClusterHash
 active/violated calculation output. Camera changes rebuild projection only. Pure price-domain tests
 exercise five time windows while asserting an identical cluster hash.
 
+## Optional display surfaces
+
+The nearest-cluster summary table and cluster-ratio table each have an independent settings toggle.
+The buy/sell oscillator output remains present in the canonical worker snapshot but is hidden by
+default at render time. It can be enabled from the Style tab, where its buy and sell colors are also
+configurable. These controls change presentation only; they do not change clustering calculations.
+
 ## Price-domain policies
 
 - `Candles Only`

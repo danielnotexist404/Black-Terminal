@@ -77,7 +77,7 @@ export function KioseffOverlays({
   ) : null;
   const parityPanel = (
     <details className="kioseff-parity-diagnostics" data-testid="kioseff-parity-diagnostics">
-      <summary>KIOSEFF PARITY DIAGNOSTICS · {diagnostics.parityState}</summary>
+      <summary>Parity Diagnostics</summary>
       <div><span>Engine Mode</span><b>{diagnostics.engineMode}</b></div>
       <div><span>Engine Version</span><b>{diagnostics.engineVersion}</b></div>
       <div><span>Data State</span><b>{diagnostics.parityState}</b></div>
@@ -150,11 +150,13 @@ export function KioseffOverlays({
             Ready — this canonical market window produced no clusters.
           </aside>
         )}
-      <aside className="kioseff-summary">
-        <b>Stop-Loss Clustering</b>
-        <div><span>Nearest Buy-Stop Cluster</span><strong>{formatPrice(buy?.price)}</strong><small>{formatVolume(buy?.signedVolume)}</small><em>{snapshot.model === "absorbtion-extremes" ? buy?.typicalMove === null || buy?.typicalMove === undefined ? "None Similar" : `${(buy.typicalMove * 100).toFixed(2)}%` : buy?.activeSidePercent === null || buy?.activeSidePercent === undefined ? "—" : `${buy.activeSidePercent.toFixed(2)}%`}</em></div>
-        <div><span>Nearest Sell-Stop Cluster</span><strong>{formatPrice(sell?.price)}</strong><small>{formatVolume(sell?.signedVolume)}</small><em>{snapshot.model === "absorbtion-extremes" ? sell?.typicalMove === null || sell?.typicalMove === undefined ? "None Similar" : `${(sell.typicalMove * 100).toFixed(2)}%` : sell?.activeSidePercent === null || sell?.activeSidePercent === undefined ? "—" : `${sell.activeSidePercent.toFixed(2)}%`}</em></div>
-      </aside>
+      {settings.style.showSummaryTable && (
+        <aside className="kioseff-summary">
+          <b>Stop-Loss Clustering</b>
+          <div><span>Nearest Buy-Stop Cluster</span><strong>{formatPrice(buy?.price)}</strong><small>{formatVolume(buy?.signedVolume)}</small><em>{snapshot.model === "absorbtion-extremes" ? buy?.typicalMove === null || buy?.typicalMove === undefined ? "None Similar" : `${(buy.typicalMove * 100).toFixed(2)}%` : buy?.activeSidePercent === null || buy?.activeSidePercent === undefined ? "—" : `${buy.activeSidePercent.toFixed(2)}%`}</em></div>
+          <div><span>Nearest Sell-Stop Cluster</span><strong>{formatPrice(sell?.price)}</strong><small>{formatVolume(sell?.signedVolume)}</small><em>{snapshot.model === "absorbtion-extremes" ? sell?.typicalMove === null || sell?.typicalMove === undefined ? "None Similar" : `${(sell.typicalMove * 100).toFixed(2)}%` : sell?.activeSidePercent === null || sell?.activeSidePercent === undefined ? "—" : `${sell.activeSidePercent.toFixed(2)}%`}</em></div>
+        </aside>
+      )}
       {settings.showClusterRatioMeter && (
         <aside className="kioseff-ratio">
           <div><span>Active Buy-Stop Clusters</span><b>{formatVolume(snapshot.ratioMeter.activeBuyStops)}</b><span>Active Sell-Stop Clusters</span><b>{formatVolume(snapshot.ratioMeter.activeSellStops)}</b></div>

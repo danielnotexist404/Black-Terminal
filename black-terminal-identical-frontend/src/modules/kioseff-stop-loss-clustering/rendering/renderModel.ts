@@ -256,12 +256,13 @@ export function buildKioseffRenderModel(
           priceHigh: Math.max(...all.map((cluster) => cluster.priceHigh))
         }
       : null;
+  const pane = settings.style.showOscillator ? snapshot.pane : [];
   return {
     model: snapshot.model,
     activeZones,
     violatedZones,
     curves: absorbtion ? snapshot.qCurves.slice(-50) : [],
-    pane: snapshot.pane,
+    pane,
     xRay,
     geometryCommandCount:
       activeZones.length * 2 +
@@ -270,7 +271,7 @@ export function buildKioseffRenderModel(
         (sum, curve) => sum + Math.max(0, curve.points.length - 1),
         0
       ) +
-      snapshot.pane.reduce(
+      pane.reduce(
         (sum, point) =>
           sum +
           Number(point.buyStopsHit !== null) +

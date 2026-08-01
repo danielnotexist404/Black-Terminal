@@ -17,6 +17,7 @@ import {
   kioseffPriceDomain,
   layoutKioseffLabels
 } from "../src/modules/kioseff-stop-loss-clustering/rendering/renderModel.ts";
+import { buildMarketMakerActivityDashboard } from "../src/modules/kioseff-stop-loss-clustering/components/marketMakerDashboardModel.ts";
 
 function cluster(index: number, side: "buy-stop" | "sell-stop", state: "active" | "violated"): CanonicalCluster {
   return {
@@ -113,6 +114,15 @@ assert.equal(renderModel.pane.length, 0, "oscillator is hidden by default");
 assert.ok(renderModel.geometryCommandCount > 0, "render smoke emits visible geometry commands");
 assert.ok(snapshot.summary, "render smoke retains a summary model");
 assert.equal(canonicalSnapshotHash(snapshot), before, "render selection cannot mutate canonical state");
+const activityDashboard = buildMarketMakerActivityDashboard(snapshot, 102);
+assert.equal(activityDashboard.nearestBuyWall?.price, 104);
+assert.equal(activityDashboard.nearestSellWall?.price, 100);
+assert.equal(activityDashboard.violatedEventCount, 10);
+assert.equal(activityDashboard.totalLiquidationPressure, 30);
+assert.ok(
+  activityDashboard.nearestSellWall,
+  "dashboard finds the nearest active sell wall even when the parity hot summary is empty"
+);
 
 settings.style.showOscillator = true;
 const oscillatorRenderModel = buildKioseffRenderModel(snapshot, settings);

@@ -6,6 +6,7 @@ import type {
   KioseffRuntimeDiagnostics
 } from "../data/loadState";
 import { kioseffLoadProgress } from "../data/loadProgress";
+import { buildMarketMakerActivityDashboard } from "./marketMakerDashboardModel";
 
 type Props = {
   visible: boolean;
@@ -14,6 +15,7 @@ type Props = {
   settings: KioseffSettingsV1;
   loadState: KioseffLoadState;
   diagnostics: KioseffRuntimeDiagnostics;
+  currentPrice: number;
 };
 
 function formatPrice(value: number | null | undefined) {
@@ -22,6 +24,21 @@ function formatPrice(value: number | null | undefined) {
 
 function formatVolume(value: number | null | undefined) {
   return value === null || value === undefined ? "—" : Math.abs(value).toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function formatDistance(value: number | null | undefined) {
+  if (value === null || value === undefined) return "—";
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function formatEventTime(value: number | null | undefined) {
+  if (value === null || value === undefined) return "—";
+  return new Date(value * 1000).toLocaleString(undefined, {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
 function loadLabel(state: KioseffLoadState) {
@@ -45,7 +62,7 @@ function loadLabel(state: KioseffLoadState) {
     case "calculating":
       return `Calculating ${state.bars.toLocaleString()} bars from ${state.intrabars.toLocaleString()} intrabars…`;
     case "rendering":
-      return `Building visible render geometry for ${state.clusters.toLocaleString()} clusters…`;
+      return `Building visible market-maker geometry for ${state.clusters.toLocaleString()} zones…`;
     case "warming":
       return `Warming up — calculated from ${state.completedBars.toLocaleString()} of ${state.targetBars.toLocaleString()} chart bars`;
     case "ready":
@@ -64,13 +81,13 @@ function KioseffEnergyLoader({ state }: { state: KioseffLoadState }) {
   return (
     <aside className="kioseff-energy-loader" data-testid="kioseff-load-state" role="status" aria-live="polite">
       <div className="kioseff-energy-heading">
-        <b>Stop Loss Clustering</b>
+        <b>Market Maker Heatmap</b>
         <strong>{Math.round(progress)}%</strong>
       </div>
       <div
         className="kioseff-energy-track"
         role="progressbar"
-        aria-label="Stop Loss Clustering loading progress"
+        aria-label="Market Maker Heatmap loading progress"
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(progress)}
@@ -90,7 +107,8 @@ export function KioseffOverlays({
   unavailable,
   settings,
   loadState,
-  diagnostics
+  diagnostics,
+  currentPrice
 }: Props) {
   if (!visible) return null;
   const inspector = import.meta.env.DEV ? (
@@ -101,7 +119,7 @@ export function KioseffOverlays({
       ))}
     </details>
   ) : null;
-  const parityPanel = (
+  const parityPanel = import.meta.env.DEV ? (
     <details className="kioseff-parity-diagnostics" data-testid="kioseff-parity-diagnostics">
       <summary>Parity Diagnostics</summary>
       <div><span>Engine Mode</span><b>{diagnostics.engineMode}</b></div>
@@ -128,12 +146,12 @@ export function KioseffOverlays({
       <div><span>Last Rebuild</span><b>{diagnostics.lastRebuild === null ? "—" : new Date(diagnostics.lastRebuild * 1000).toISOString()}</b></div>
       <div><span>Viewport Affects Calculation</span><b>{diagnostics.viewportAffectsCalculation ? "YES" : "NO"}</b></div>
     </details>
-  );
+  ) : null;
   if (unavailable) {
     return (
       <>
         <aside className="kioseff-unavailable" role="status">
-          <b>Stop Loss Clustering unavailable</b>
+          <b>Market Maker Heatmap unavailable</b>
           <span>{unavailable.capability}</span>
           <small>{unavailable.venue} · {unavailable.symbol} · {unavailable.chartTimeframe}</small>
           <small>Requested LTF: {unavailable.requestedLowerTimeframe}</small>
@@ -158,29 +176,65 @@ export function KioseffOverlays({
       </>
     );
   }
-  const buy = snapshot.summary.nearestBuy;
-  const sell = snapshot.summary.nearestSell;
+  const dashboard = buildMarketMakerActivityDashboard(snapshot, currentPrice);
+  const buy = dashboard.nearestBuyWall;
+  const sell = dashboard.nearestSellWall;
+  const latestLiquidation = dashboard.latestLiquidationEvent;
+  const pressureBias =
+    dashboard.dominantPressure === "none"
+      ? "No events"
+      : dashboard.dominantPressure === "balanced"
+        ? "Balanced"
+        : `${dashboard.dominantPressure === "buy-wall" ? "Buy wall" : "Sell wall"} ${dashboard.dominantPressurePercent?.toFixed(0) ?? "—"}%`;
   return (
     <>
       {loadState.stage !== "ready" && <KioseffEnergyLoader state={loadState} />}
       {loadState.stage === "ready" &&
         snapshot.activeClusters.length + snapshot.violatedClusters.length === 0 && (
           <aside className="kioseff-warming" role="status">
-            Ready — this canonical market window produced no clusters.
+            Ready — this market window produced no active maker zones.
           </aside>
         )}
       {settings.style.showSummaryTable && (
-        <aside className="kioseff-summary">
-          <b>Stop-Loss Clustering</b>
-          <div><span>Nearest Buy-Stop Cluster</span><strong>{formatPrice(buy?.price)}</strong><small>{formatVolume(buy?.signedVolume)}</small><em>{snapshot.model === "absorbtion-extremes" ? buy?.typicalMove === null || buy?.typicalMove === undefined ? "None Similar" : `${(buy.typicalMove * 100).toFixed(2)}%` : buy?.activeSidePercent === null || buy?.activeSidePercent === undefined ? "—" : `${buy.activeSidePercent.toFixed(2)}%`}</em></div>
-          <div><span>Nearest Sell-Stop Cluster</span><strong>{formatPrice(sell?.price)}</strong><small>{formatVolume(sell?.signedVolume)}</small><em>{snapshot.model === "absorbtion-extremes" ? sell?.typicalMove === null || sell?.typicalMove === undefined ? "None Similar" : `${(sell.typicalMove * 100).toFixed(2)}%` : sell?.activeSidePercent === null || sell?.activeSidePercent === undefined ? "—" : `${sell.activeSidePercent.toFixed(2)}%`}</em></div>
+        <aside
+          className="kioseff-summary kioseff-activity-dashboard"
+          style={{ width: `min(${settings.style.activityDashboardWidth}px, calc(100% - 140px))` }}
+        >
+          <header>
+            <b>Market Maker Activity Dashboard</b>
+            <small>LIVE MODEL</small>
+          </header>
+          <div className="kioseff-wall-row buy-wall">
+            <span>Nearest Buy Wall</span>
+            <strong>{formatPrice(buy?.price)}</strong>
+            <small>{formatVolume(buy?.signedVolume)} vol</small>
+            <em>{formatDistance(buy?.distancePercent)}</em>
+          </div>
+          <div className="kioseff-wall-row sell-wall">
+            <span>Nearest Sell Wall</span>
+            <strong>{formatPrice(sell?.price)}</strong>
+            <small>{formatVolume(sell?.signedVolume)} vol</small>
+            <em>{formatDistance(sell?.distancePercent)}</em>
+          </div>
+          <section className="kioseff-activity-stats">
+            <div><span>Active Walls</span><b>{dashboard.activeBuyWallCount} buy · {dashboard.activeSellWallCount} sell</b></div>
+            <div><span>Wall Liquidity</span><b>{formatVolume(dashboard.activeBuyLiquidity)} / {formatVolume(dashboard.activeSellLiquidity)}</b></div>
+            <div><span>Liquidation Pressure</span><b>{formatVolume(dashboard.totalLiquidationPressure)}</b></div>
+            <div><span>Pressure Bias</span><b>{pressureBias}</b></div>
+          </section>
+          <footer>
+            <span>Liquidation Events</span>
+            <b>{dashboard.violatedEventCount.toLocaleString()}</b>
+            <small>{latestLiquidation ? `${latestLiquidation.side === "buy-stop" ? "Buy wall cleared" : "Sell wall cleared"} · ${formatPrice(latestLiquidation.price)} · ${formatVolume(latestLiquidation.volume)} · ${formatEventTime(latestLiquidation.time)}` : "No violated-wall events in this window"}</small>
+            <em>Estimated from violated walls · Black Core tick confirmation pending</em>
+          </footer>
         </aside>
       )}
       {settings.showClusterRatioMeter && (
         <aside className="kioseff-ratio">
-          <div><span>Active Buy-Stop Clusters</span><b>{formatVolume(snapshot.ratioMeter.activeBuyStops)}</b><span>Active Sell-Stop Clusters</span><b>{formatVolume(snapshot.ratioMeter.activeSellStops)}</b></div>
+          <div><span>Active Buy Walls</span><b>{formatVolume(snapshot.ratioMeter.activeBuyStops)}</b><span>Active Sell Walls</span><b>{formatVolume(snapshot.ratioMeter.activeSellStops)}</b></div>
           <meter min={0} max={20} value={snapshot.ratioMeter.activeBuyBlocks ?? 10} />
-          <div><span>Violated Buy-Stop Clusters</span><b>{formatVolume(snapshot.ratioMeter.violatedBuyStops)}</b><span>Violated Sell-Stop Clusters</span><b>{formatVolume(snapshot.ratioMeter.violatedSellStops)}</b></div>
+          <div><span>Violated Buy Walls</span><b>{formatVolume(snapshot.ratioMeter.violatedBuyStops)}</b><span>Violated Sell Walls</span><b>{formatVolume(snapshot.ratioMeter.violatedSellStops)}</b></div>
           <meter min={0} max={20} value={snapshot.ratioMeter.violatedBuyBlocks ?? 10} />
         </aside>
       )}

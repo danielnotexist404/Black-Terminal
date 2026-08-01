@@ -2307,7 +2307,7 @@ export function PixiBlackChart({
     { key: "liquidationHeatmap", label: "Liq Heatmap", value: "model" },
     {
       key: "volatilityHeatmap",
-      label: "Stop Loss Clustering",
+      label: "Market Maker Heatmap",
       value: kioseffSettings.model === "absorbtion-extremes" ? "Absorbtion Extremes" : `VAE ${kioseffSettings.volatilityAtEntry.granularity}`
     },
     { key: "volumeProfile", label: "HDLX Profile", value: indicatorAdvancedSettings.volumeProfile.rangeMode === "visible" ? "visible" : `lock ${indicatorAdvancedSettings.volumeProfile.fixedRangeLength}` },
@@ -3908,6 +3908,7 @@ export function PixiBlackChart({
         settings={kioseffSettings}
         loadState={kioseffLoadState}
         diagnostics={kioseffDiagnostics}
+        currentPrice={lastPrice}
       />
       <AifIndicatorOverlay
         active={visibleIndicators.aif}

@@ -53,6 +53,22 @@ calculation, and render stages into a continuous energy-bar progress display. Pr
 an artificial timer. Large-history warmup materializes sorted intrabar collections only at actual
 warmup milestones instead of copying the growing collection after every page batch.
 
+## Product surface: Market Maker Heatmap
+
+The production indicator is presented as **Market Maker Heatmap**. The durable
+`volatilityHeatmap` workspace key and internal Kioseff source attribution remain unchanged for
+backward compatibility and provenance. Production labels use maker-wall terminology; internal
+calculation types retain their original names until a future versioned schema migration.
+
+The **Market Maker Activity Dashboard** selects the actual nearest active buy and sell wall, even
+when the compatibility engine's hot-only summary has no sell-side selection. It adds active-wall
+counts, modeled liquidity, violated-wall event count, liquidation-pressure bias and the latest
+violated-wall event. Liquidation pressure is explicitly labeled as model-estimated until Black Core
+provides confirmed tick/liquidation events. Dashboard width is persisted and adjustable from 440 to
+760 pixels in Style settings.
+
+Parity/data hashes and runtime diagnostics are developer-only and are absent from production UI.
+
 ## Price-domain policies
 
 - `Candles Only`

@@ -63,10 +63,10 @@ const builtInIndicators: BuiltInIndicator[] = [
   },
   {
     key: "volatilityHeatmap",
-    title: "Stop Loss Clustering (Kioseff)",
+    title: "Market Maker Heatmap",
     group: "Liquidity",
     type: "Overlay",
-    signal: "Absorbtion Extremes and Volatility-At-Entry stop clusters",
+    signal: "Modeled maker walls, wall violations, and liquidation pressure",
     runtime: "Worker",
     premium: true
   },

@@ -44,6 +44,7 @@ export type KioseffSettingsV1 = {
     showOscillator: boolean;
     oscillatorBuyColor: string;
     oscillatorSellColor: string;
+    activityDashboardWidth: number;
   };
   visibility: {
     ticks: boolean;
@@ -95,7 +96,8 @@ export const KIOSEFF_DEFAULT_SETTINGS: KioseffSettingsV1 = {
     showSummaryTable: true,
     showOscillator: false,
     oscillatorBuyColor: "#55ffda",
-    oscillatorSellColor: "#ff65fb"
+    oscillatorSellColor: "#ff65fb",
+    activityDashboardWidth: 560
   },
   visibility: {
     ticks: true,
@@ -310,7 +312,11 @@ export function migrateKioseffSettings(
       oscillatorSellColor:
         typeof style.oscillatorSellColor === "string"
           ? style.oscillatorSellColor
-          : defaults.style.oscillatorSellColor
+          : defaults.style.oscillatorSellColor,
+      activityDashboardWidth:
+        typeof style.activityDashboardWidth === "number"
+          ? Math.max(440, Math.min(760, Math.round(style.activityDashboardWidth)))
+          : defaults.style.activityDashboardWidth
     },
     visibility: {
       ticks:

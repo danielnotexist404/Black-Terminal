@@ -483,7 +483,8 @@ for (const field of [
   "style.showSummaryTable",
   "style.showOscillator",
   "style.oscillatorBuyColor",
-  "style.oscillatorSellColor"
+  "style.oscillatorSellColor",
+  "style.activityDashboardWidth"
 ]) {
   assert.match(settingsPanelSource, new RegExp(`data-kioseff-field="${field.replaceAll(".", "\\.")}"`));
 }
@@ -498,6 +499,12 @@ assert.match(overlaysSource, /<summary>Parity Diagnostics<\/summary>/);
 assert.match(overlaysSource, /settings\.style\.showSummaryTable/);
 assert.match(overlaysSource, /settings\.showClusterRatioMeter/);
 assert.match(overlaysSource, /kioseff-energy-loader/);
+assert.match(overlaysSource, /Market Maker Activity Dashboard/);
+assert.match(overlaysSource, /Nearest Buy Wall/);
+assert.match(overlaysSource, /Nearest Sell Wall/);
+assert.match(overlaysSource, /const parityPanel = import\.meta\.env\.DEV/);
+assert.doesNotMatch(overlaysSource, /Stop[- ]Loss Clustering/i);
+assert.doesNotMatch(settingsPanelSource, /Stop[- ]Loss Clustering/i);
 const chartSource = readFileSync(
   fileURLToPath(new URL("../src/components/PixiBlackChart.tsx", import.meta.url)),
   "utf8"
@@ -509,6 +516,19 @@ const themeSource = readFileSync(
   "utf8"
 );
 assert.match(themeSource, /@keyframes kioseff-energy-sweep/);
+for (const relativePath of [
+  "../src/features/premium.ts",
+  "../src/components/IndicatorLibrary.tsx",
+  "../src/components/UpgradePanel.tsx",
+  "../src/components/AdminPanel.tsx"
+]) {
+  const productSurfaceSource = readFileSync(
+    fileURLToPath(new URL(relativePath, import.meta.url)),
+    "utf8"
+  );
+  assert.match(productSurfaceSource, /Market Maker Heatmap/);
+  assert.doesNotMatch(productSurfaceSource, /Stop[- ]Loss Clustering/i);
+}
 assert.match(settingsPanelSource, /settings\.model === "absorbtion-extremes"/);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.historyLookbackBars, 11000);
 assert.deepEqual(
@@ -569,6 +589,7 @@ assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.showSummaryTable, true);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.showOscillator, false);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.oscillatorBuyColor, "#55ffda");
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.oscillatorSellColor, "#ff65fb");
+assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.activityDashboardWidth, 560);
 assert.deepEqual(
   KIOSEFF_TIMEFRAME_INPUTS.map((option) => option.value),
   ["1", "3", "5", "15", "30", "60", "240"]

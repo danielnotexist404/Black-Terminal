@@ -3,7 +3,7 @@ import type { VisibleIndicators } from "../chart-engine/types";
 export type PremiumFeatureKey = "volatilityHeatmap";
 
 const premiumFeatureLabels: Record<PremiumFeatureKey, string> = {
-  volatilityHeatmap: "Stop Loss Clustering (Kioseff)"
+  volatilityHeatmap: "Market Maker Heatmap"
 };
 
 export function hasPremiumAccess() {

@@ -1264,3 +1264,9 @@ Remaining:
 - Added a live stage-weighted energy progress bar for chart history, ordered intrabars, grouping,
   validation, worker calculation, and rendering. Removed per-page full-history materialization so
   million-intrabar warmups sort only at meaningful milestones.
+- Rebranded the production indicator surface as Market Maker Heatmap while preserving the durable
+  workspace key, internal calculation schema, and original source attribution.
+- Rebuilt the summary as the adjustable Market Maker Activity Dashboard with guaranteed nearest-wall
+  fallback selection, active-wall liquidity, violated-wall event totals, modeled liquidation
+  pressure/bias and latest-event context. Production parity/data-hash diagnostics are now hidden;
+  confirmed liquidation labeling remains reserved for future Black Core tick data.

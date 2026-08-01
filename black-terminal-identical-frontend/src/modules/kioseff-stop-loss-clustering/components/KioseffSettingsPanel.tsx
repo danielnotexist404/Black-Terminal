@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import {
   KIOSEFF_DEFAULT_SETTINGS,
   KIOSEFF_TIMEFRAME_INPUTS,
@@ -20,6 +20,7 @@ export function KioseffSettingsPanel({
   onChange,
   onClose
 }: Props) {
+  const [tab, setTab] = useState<"inputs" | "style" | "visibility">("inputs");
   const patch = (value: Partial<KioseffSettingsV1>) =>
     onChange((current) => ({ ...current, ...value }));
   const patchAbsorbtion = (value: Partial<KioseffSettingsV1["absorbtion"]>) =>
@@ -32,12 +33,45 @@ export function KioseffSettingsPanel({
       ...current,
       volatilityAtEntry: { ...current.volatilityAtEntry, ...value }
     }));
+  const patchStyle = (value: Partial<KioseffSettingsV1["style"]>) =>
+    onChange((current) => ({
+      ...current,
+      style: { ...current.style, ...value }
+    }));
+  const patchVisibility = (value: Partial<KioseffSettingsV1["visibility"]>) =>
+    onChange((current) => ({
+      ...current,
+      visibility: { ...current.visibility, ...value }
+    }));
   return (
     <div className="indicator-settings kioseff-settings" role="dialog" aria-label="Stop Loss Clustering settings" data-testid="kioseff-settings-panel">
       <div className="indicator-settings-title">
         <span>Stop Loss Clustering</span>
         <button type="button" onClick={onClose}>DONE</button>
       </div>
+      <label>
+        Engine Mode
+        <select data-kioseff-field="engineMode" value={settings.engineMode} disabled>
+          <option value="pine-compatibility">Kioseff Parity Mode</option>
+          <option value="black-core-enhanced" disabled>Black Core Enhanced — certification required</option>
+        </select>
+        <small>Enhanced mode remains disabled until TradingView golden-master parity passes.</small>
+      </label>
+      <div className="indicator-settings-tabs" role="tablist" aria-label="Kioseff settings groups">
+        {(["inputs", "style", "visibility"] as const).map((item) => (
+          <button
+            key={item}
+            type="button"
+            role="tab"
+            aria-selected={tab === item}
+            className={tab === item ? "active" : ""}
+            onClick={() => setTab(item)}
+          >
+            {item[0]!.toUpperCase() + item.slice(1)}
+          </button>
+        ))}
+      </div>
+      {tab === "inputs" && <>
       <label>
         Model
         <select
@@ -88,11 +122,10 @@ export function KioseffSettingsPanel({
             Time-Scaled Volatility TF
             <select data-kioseff-field="volatilityAtEntry.timeScaledVolatilityTimeframe" value={settings.volatilityAtEntry.timeScaledVolatilityTimeframe} onChange={(event) => patchVae({ timeScaledVolatilityTimeframe: event.target.value })}>
               {KIOSEFF_TIMEFRAME_INPUTS.map((option) => {
-                const supported = isKioseffLowerTimeframeSupported(option.value, chartTimeframe);
-                return <option key={option.value} value={option.value} disabled={!supported} title={supported ? option.label : `Must be lower than ${chartTimeframe}`}>{option.value} · {option.label}{supported ? "" : " (unsupported)"}</option>;
+                return <option key={option.value} value={option.value}>{option.value} · {option.label}</option>;
               })}
             </select>
-            <small>Lower-timeframe history cost increases with the selected chart depth.</small>
+            <small>Pine always consumes ordered 1m data here; this input changes the volatility scaling baseline only.</small>
           </label>
           <label>Strong Cluster Color<input data-kioseff-field="volatilityAtEntry.strongClusterColor" type="color" value={settings.volatilityAtEntry.strongClusterColor} onChange={(event) => patchVae({ strongClusterColor: event.target.value })} /></label>
           <label>Weak Cluster Color<input data-kioseff-field="volatilityAtEntry.weakClusterColor" type="color" value={settings.volatilityAtEntry.weakClusterColor} onChange={(event) => patchVae({ weakClusterColor: event.target.value })} /></label>
@@ -105,6 +138,38 @@ export function KioseffSettingsPanel({
         <label>Force Find Typical Move (Less Similar)<input data-kioseff-field="forceTypicalMove" type="checkbox" checked={settings.forceTypicalMove} onChange={(event) => patch({ forceTypicalMove: event.target.checked })} /></label>
         <label>Show Cluster Ratio Meter<input data-kioseff-field="showClusterRatioMeter" type="checkbox" checked={settings.showClusterRatioMeter} onChange={(event) => patch({ showClusterRatioMeter: event.target.checked })} /></label>
       </div>
+      </>}
+      {tab === "style" && (
+        <div className="indicator-settings-section">
+          <b>Style</b>
+          <label>Chart Background Reference<input data-kioseff-field="style.chartBackgroundColor" type="color" value={settings.style.chartBackgroundColor} onChange={(event) => patchStyle({ chartBackgroundColor: event.target.value })} /></label>
+          <label>Active Line Width<input data-kioseff-field="style.activeLineWidth" type="number" min={0.5} max={4} step={0.5} value={settings.style.activeLineWidth} onChange={(event) => patchStyle({ activeLineWidth: Number(event.target.value) })} /></label>
+          <label>Hot Line Width<input data-kioseff-field="style.hotLineWidth" type="number" min={1} max={10} step={1} value={settings.style.hotLineWidth} onChange={(event) => patchStyle({ hotLineWidth: Number(event.target.value) })} /></label>
+          <label>Label Font Size<input data-kioseff-field="style.labelFontSize" type="number" min={7} max={14} step={1} value={settings.style.labelFontSize} onChange={(event) => patchStyle({ labelFontSize: Number(event.target.value) })} /></label>
+          <small>Pine inputs remain authoritative; these controls reproduce TradingView's separate Style surface.</small>
+        </div>
+      )}
+      {tab === "visibility" && (
+        <div className="indicator-settings-section">
+          <b>Visibility</b>
+          <label>Ticks<input data-kioseff-field="visibility.ticks" type="checkbox" checked={settings.visibility.ticks} onChange={(event) => patchVisibility({ ticks: event.target.checked })} /></label>
+          <label>Seconds<input data-kioseff-field="visibility.seconds" type="checkbox" checked={settings.visibility.seconds} onChange={(event) => patchVisibility({ seconds: event.target.checked })} /></label>
+          <label>Minutes<input data-kioseff-field="visibility.minutes" type="checkbox" checked={settings.visibility.minutes} onChange={(event) => patchVisibility({ minutes: event.target.checked })} /></label>
+          <label>Hours<input data-kioseff-field="visibility.hours" type="checkbox" checked={settings.visibility.hours} onChange={(event) => patchVisibility({ hours: event.target.checked })} /></label>
+          <label>Days<input data-kioseff-field="visibility.days" type="checkbox" checked={settings.visibility.days} onChange={(event) => patchVisibility({ days: event.target.checked })} /></label>
+          <label>Weeks<input data-kioseff-field="visibility.weeks" type="checkbox" checked={settings.visibility.weeks} onChange={(event) => patchVisibility({ weeks: event.target.checked })} /></label>
+          <label>Months<input data-kioseff-field="visibility.months" type="checkbox" checked={settings.visibility.months} onChange={(event) => patchVisibility({ months: event.target.checked })} /></label>
+          <label>
+            Price Scale
+            <select data-kioseff-field="visibility.priceScalePolicy" value={settings.visibility.priceScalePolicy} onChange={(event) => patchVisibility({ priceScalePolicy: event.target.value as KioseffSettingsV1["visibility"]["priceScalePolicy"] })}>
+              <option value="candles-only">Candles Only</option>
+              <option value="candles-active-clusters">Candles + Active Clusters</option>
+              <option value="candles-visible-geometry">Candles + Visible Cluster Geometry</option>
+              <option value="fixed-manual">Fixed Manual Scale</option>
+            </select>
+          </label>
+        </div>
+      )}
       <button type="button" className="tv-defaults" onClick={() => onChange(structuredClone(KIOSEFF_DEFAULT_SETTINGS))}>Defaults</button>
     </div>
   );

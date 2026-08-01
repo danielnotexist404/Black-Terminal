@@ -394,11 +394,23 @@ export class AbsorbtionExtremesEngine
   private canonicalRecord(record: SwingRecord, state: "active" | "violated"): CanonicalCluster {
     const priceLow = Math.min(record.p, record.p2);
     const priceHigh = Math.max(record.p, record.p2);
+    const createdAtBarIndex = Math.max(
+      0,
+      this.state.bars.findIndex((bar) => bar.time === record.time)
+    );
+    const violatedAtBarIndex =
+      record.violationTime === null
+        ? null
+        : Math.max(
+            0,
+            this.state.bars.findIndex((bar) => bar.time === record.violationTime)
+          );
     return {
       id: record.id,
       side: record.side,
       state,
       signedVolume: record.volume,
+      absoluteVolume: Math.abs(record.volume),
       price: (record.p + record.p2) / 2,
       priceLow,
       priceHigh,
@@ -408,9 +420,16 @@ export class AbsorbtionExtremesEngine
       violationTime: record.violationTime,
       endTime: state === "violated" ? record.violationTime : null,
       strength: null,
+      percentileValue: null,
+      strengthNormalized: null,
       hot: false,
       sourceCount: record.sourceCount,
-      opacity: null
+      opacity: null,
+      granularity: null,
+      historicalTrigger: state === "violated",
+      createdAtBarIndex,
+      violatedAtBarIndex,
+      sourceEngineVersion: KIOSEFF_ENGINE_VERSION
     };
   }
 

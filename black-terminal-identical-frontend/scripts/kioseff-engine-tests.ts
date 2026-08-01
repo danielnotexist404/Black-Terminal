@@ -3,7 +3,11 @@ import type { SymbolMetadata } from "../src/market-data/types.ts";
 import { AbsorbtionExtremesEngine } from "../src/modules/kioseff-stop-loss-clustering/core/absorbtionEngine.ts";
 import { canonicalSnapshotHash } from "../src/modules/kioseff-stop-loss-clustering/core/canonical.ts";
 import { KIOSEFF_DEFAULT_SETTINGS } from "../src/modules/kioseff-stop-loss-clustering/core/settings.ts";
-import { VolatilityAtEntryEngine } from "../src/modules/kioseff-stop-loss-clustering/core/volatilityAtEntryEngine.ts";
+import { KioseffParityEngine } from "../src/modules/kioseff-stop-loss-clustering/core/parityEngine.ts";
+import {
+  VolatilityAtEntryEngine,
+  pineVaeDisplayStatistics
+} from "../src/modules/kioseff-stop-loss-clustering/core/volatilityAtEntryEngine.ts";
 import type {
   IntrabarQualityReport,
   KioseffChartBarInput,
@@ -103,6 +107,14 @@ const baseContext = {
   diagnostics: true
 };
 
+const enhancedSettings = structuredClone(KIOSEFF_DEFAULT_SETTINGS);
+enhancedSettings.engineMode = "black-core-enhanced";
+assert.throws(
+  () => new KioseffParityEngine({ ...baseContext, settings: enhancedSettings }),
+  /disabled until TradingView golden-master certification passes/u,
+  "enhanced mode stays fail-closed before golden-master approval"
+);
+
 const absorbtion = new AbsorbtionExtremesEngine(baseContext);
 for (let index = 0; index < 90; index += 1) {
   const rising = index % 8 < 4;
@@ -160,7 +172,7 @@ for (let index = 0; index < 80; index += 1) {
 const frozen = lower.exportState().lower.frozenWidth;
 assert.ok(frozen !== null && frozen > 0, "lower width freezes after chart ATR/SMA warm-up");
 const volatile = candle(80 * 300, 100, 140, 60, 120, 10_000);
-lower.processBar(input(volatile, intrabarsFor(volatile)));
+const historicalSnapshot = lower.processBar(input(volatile, intrabarsFor(volatile)));
 assert.equal(lower.exportState().lower.frozenWidth, frozen, "lower width never recalculates");
 assert.equal(
   lower.exportState().lower.levels.length,
@@ -171,6 +183,55 @@ assert.equal(
   lower.exportState().lower.levels.length,
   lower.exportState().lower.removed.length,
   "lower removed cells remain in lockstep"
+);
+assert.ok(historicalSnapshot.violatedClusters.length > 0, "violent wick creates retained lower historical triggers");
+assert.ok(
+  historicalSnapshot.violatedClusters.every(
+    (cluster) =>
+      cluster.startTime !== null &&
+      cluster.endTime !== null &&
+      cluster.startTime <= cluster.endTime
+  ),
+  "lower historical geometry preserves a valid Pine-derived temporal span"
+);
+assert.ok(
+  historicalSnapshot.violatedClusters.some(
+    (cluster) => cluster.startTime !== cluster.endTime
+  ),
+  "historical triggers are not emitted as universally zero-width geometry"
+);
+
+const signedStatistics = pineVaeDisplayStatistics([-100, -50, 1, 2, 3, 4, 5], "lower");
+const magnitudeStatistics = pineVaeDisplayStatistics([-100, -50, 1, 2, 3, 4, 5], "higher");
+assert.equal(signedStatistics.percentileValue, 5);
+assert.equal(magnitudeStatistics.percentileValue, 100);
+assert.notEqual(
+  signedStatistics.percentileValue,
+  magnitudeStatistics.percentileValue,
+  "compatibility mode proves signed and magnitude percentiles diverge"
+);
+assert.equal(signedStatistics.hotThreshold, 1, "lower Pine top-five state ignores negative magnitudes");
+
+const deterministicInputs = Array.from({ length: 40 }, (_, index) => {
+  const open = 100 + Math.sin(index / 4) * 0.8;
+  const bar = candle(
+    index * 300,
+    open,
+    open + 0.7,
+    open - 0.7,
+    open + Math.cos(index / 3) * 0.15
+  );
+  return input(bar, intrabarsFor(bar));
+});
+const rebuilt = new KioseffParityEngine({ ...baseContext, settings: higherSettings });
+const streamed = new KioseffParityEngine({ ...baseContext, settings: higherSettings });
+const rebuiltSnapshot = rebuilt.processBatch(deterministicInputs);
+let streamedSnapshot = streamed.snapshot();
+for (const item of deterministicInputs) streamedSnapshot = streamed.processBar(item);
+assert.equal(
+  canonicalSnapshotHash(rebuiltSnapshot),
+  canonicalSnapshotHash(streamedSnapshot),
+  "clean full rebuild and chronological streamed replay produce identical hashes"
 );
 
 const incomplete = new VolatilityAtEntryEngine({ ...baseContext, settings: higherSettings });

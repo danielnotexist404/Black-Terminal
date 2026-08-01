@@ -83,6 +83,7 @@ type DisplayCell = {
   violationTime: number | null;
   sourceCount: number;
   sequence: number;
+  creationTime: number;
   priceKey: string | number;
 };
 
@@ -117,6 +118,28 @@ function topFiveThreshold(values: readonly number[]) {
     }
   }
   return top[0]!;
+}
+
+function normalized(value: number, minimum: number, maximum: number) {
+  if (maximum === minimum) return value >= maximum ? 1 : 0;
+  return Math.max(0, Math.min(1, (value - minimum) / (maximum - minimum)));
+}
+
+export function pineVaeDisplayStatistics(
+  volumes: readonly number[],
+  granularity: "higher" | "lower"
+) {
+  const ranked = granularity === "higher" ? volumes.map(Math.abs) : [...volumes];
+  const percentileValue = pinePercentileNearestRank(ranked, 95) ?? 0;
+  return {
+    minimum: ranked.length ? Math.min(...ranked) : 0,
+    maximum: ranked.length ? Math.max(...ranked) : 0,
+    percentileValue,
+    // Pine's lower-granularity top-cluster array starts with five zeroes and
+    // only admits signed values greater than its minimum. Negative values are
+    // therefore intentionally not ranked by magnitude at this stage.
+    hotThreshold: topFiveThreshold(ranked)
+  };
 }
 
 function copyVolTime(value: VolTime): VolTime {
@@ -542,22 +565,36 @@ export class VolatilityAtEntryEngine
       const priceHigh = bottom + distance * (index + 1);
       const lowKey = pineTickIndex(priceLow, this.tick);
       const highKey = pineTickIndex(priceHigh, this.tick);
+      const sliceStart = Math.max(0, pineBinarySearchLeftmost(keys, lowKey));
+      const sliceEnd = Math.max(
+        sliceStart,
+        Math.min(keys.length, pineBinarySearchRightmost(keys, highKey))
+      );
       const records = keys
-        .filter((key) => key >= lowKey && key <= highKey)
+        .slice(sliceStart, sliceEnd)
         .map((key) => map.get(key)!)
         .filter(Boolean);
-      if (!records.length) continue;
+      const endTime = removed && records.length
+        ? Math.max(...records.map((record) => record.time))
+        : null;
       cells.push({
         priceLow,
         priceHigh,
         volume: sum(records.map((record) => Math.abs(record.volume))),
-        startTime: Math.min(...records.map((record) => record.time)),
-        endTime: removed ? Math.max(...records.map((record) => record.time)) : null,
-        violationTime: removed
+        startTime: records.length
+          ? removed
+            ? this.findHistoricalStart(endTime!, priceLow, priceHigh, "higher")
+            : Math.min(...records.map((record) => record.time))
+          : 0,
+        endTime,
+        violationTime: removed && records.length
           ? Math.max(...records.map((record) => record.violationTime ?? record.time))
           : null,
         sourceCount: sum(records.map((record) => record.sourceCount)),
-        sequence: Math.min(...records.map((record) => record.sequence)),
+        sequence: records.length ? Math.min(...records.map((record) => record.sequence)) : 0,
+        creationTime: records.length
+          ? Math.min(...records.map((record) => record.creationTime))
+          : 0,
         priceKey: `${lowKey}-${highKey}`
       });
     }
@@ -591,17 +628,44 @@ export class VolatilityAtEntryEngine
     const record = (removed ? lower.removed : lower.active)[index];
     const priceLow = lower.levels[index];
     if (!record || priceLow === undefined) return null;
+    const endTime = removed ? record.time : null;
+    const startTime = removed
+      ? this.findHistoricalStart(record.time, priceLow, priceLow + lower.frozenWidth, "lower")
+      : record.time;
     return {
       priceLow,
       priceHigh: priceLow + lower.frozenWidth,
       volume: record.volume,
-      startTime: record.time,
-      endTime: removed ? record.time : null,
+      startTime,
+      endTime,
       violationTime: removed ? record.violationTime : null,
       sourceCount: record.sourceCount,
       sequence: record.sequence,
+      creationTime: record.creationTime,
       priceKey: priceLow.toString()
     };
+  }
+
+  private findHistoricalStart(
+    endTime: number,
+    priceLow: number,
+    priceHigh: number,
+    mode: "higher" | "lower"
+  ) {
+    if (!this.state.barStats.length || endTime <= 0) return endTime;
+    const times = this.state.barStats.map((bar) => bar.time);
+    const index =
+      mode === "higher"
+        ? pineBinarySearchRightmost(times, endTime)
+        : pineBinarySearchLeftmost(times, endTime);
+    const first = Math.max(0, index - 1);
+    const last = mode === "higher" ? 0 : Math.max(0, index - 1000);
+    for (let cursor = first; cursor >= last; cursor -= 1) {
+      const bar = this.state.barStats[cursor]!;
+      const overlaps = Math.max(bar.low, priceLow) <= Math.min(bar.high, priceHigh);
+      if (overlaps || (mode === "lower" && cursor === last)) return bar.time;
+    }
+    return endTime;
   }
 
   private lowerRemovedCells() {
@@ -616,45 +680,79 @@ export class VolatilityAtEntryEngine
   }
 
   private canonicalCells(cells: DisplayCell[], state: "active" | "violated", close: number) {
-    const p95 = pinePercentileNearestRank(cells.map((cell) => Math.abs(cell.volume)), 95) ?? 0;
-    const hotThreshold = topFiveThreshold(cells.map((cell) => Math.abs(cell.volume)));
+    const granularity = this.context.settings.volatilityAtEntry.granularity;
+    const statistics = pineVaeDisplayStatistics(
+      cells.map((cell) => cell.volume),
+      granularity
+    );
+    let hotCount = 0;
     return cells
       .filter((cell) => cell.volume !== 0)
       .map((cell): CanonicalCluster => {
         const price = (cell.priceLow + cell.priceHigh) / 2;
         const side = price < close ? "buy-stop" : "sell-stop";
-        const signedVolume =
-          this.context.settings.volatilityAtEntry.granularity === "higher"
-            ? side === "buy-stop"
-              ? -Math.abs(cell.volume)
-              : Math.abs(cell.volume)
-            : cell.volume;
+        // Higher-granularity Pine display bins sum absolute tick-map volume;
+        // lower-granularity cells retain their signed source value.
+        const signedVolume = cell.volume;
+        const strong = cell.volume >= statistics.percentileValue;
+        const strengthNormalized = strong
+          ? normalized(
+              cell.volume,
+              statistics.percentileValue,
+              statistics.maximum
+            )
+          : normalized(cell.volume, statistics.minimum, statistics.maximum);
+        const opacity = strong
+          ? 0.05 + strengthNormalized * 0.05
+          : 0.02 + strengthNormalized * 0.08;
+        const createdAtBarIndex = Math.max(
+          0,
+          this.state.bars.findIndex((bar) => bar.time >= cell.creationTime)
+        );
+        const violatedAtBarIndex =
+          cell.violationTime === null
+            ? null
+            : Math.max(
+                0,
+                this.state.bars.findIndex((bar) => bar.time >= cell.violationTime!)
+              );
+        const hotCandidate = Math.abs(cell.volume) >= statistics.hotThreshold;
+        const hot = hotCandidate && hotCount < 5;
+        if (hot) hotCount += 1;
         return {
           id: canonicalClusterId({
             model: "volatility-at-entry",
             side,
             priceKey: cell.priceKey,
-            creationTime: cell.startTime,
+            creationTime: cell.creationTime,
             creationSequence: cell.sequence
           }),
           side,
           state,
           signedVolume,
+          absoluteVolume: Math.abs(signedVolume),
           price,
           priceLow: cell.priceLow,
           priceHigh: cell.priceHigh,
           tickIndex:
-            this.context.settings.volatilityAtEntry.granularity === "higher"
+            granularity === "higher"
               ? pineTickIndex(price, this.tick)
               : null,
-          creationTime: cell.startTime,
-          startTime: cell.startTime || null,
+          creationTime: cell.creationTime,
+          startTime: cell.startTime,
           violationTime: cell.violationTime,
           endTime: cell.endTime,
-          strength: Math.abs(cell.volume) >= p95 ? "strong" : "weak",
-          hot: Math.abs(cell.volume) >= hotThreshold,
+          strength: strong ? "strong" : "weak",
+          percentileValue: statistics.percentileValue,
+          strengthNormalized,
+          hot,
           sourceCount: cell.sourceCount,
-          opacity: null
+          opacity,
+          granularity,
+          historicalTrigger: state === "violated",
+          createdAtBarIndex,
+          violatedAtBarIndex,
+          sourceEngineVersion: KIOSEFF_ENGINE_VERSION
         };
       });
   }

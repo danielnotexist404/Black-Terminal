@@ -74,6 +74,14 @@ Project Obsidian is currently a research and protocol-formalization workstream. 
   coverage, validation, blocker, and verification handoff.
 - `indicators/KIOSEFF_STOP_LOSS_CLUSTER_OPERATIONAL_REMEDIATION.md` - deployed 5K Bybit failure
   root cause, live pipeline evidence, progressive loading, settings, validation, and release status.
+- `indicators/KIOSEFF_STOP_LOSS_CLUSTERING_PARITY_RESTORATION.md` - active Pine Compatibility
+  correction scope, restored contracts, reported 4H case, validation, and approval boundary.
+- `indicators/KIOSEFF_PARITY_AUDIT.md` - line-ranged Pine state/function map and correction ledger.
+- `indicators/KIOSEFF_PINE_STATE_MODEL.md` - committed/provisional and model lifecycle semantics.
+- `indicators/KIOSEFF_LTF_DATA_CONTRACT.md` - immutable same-venue lower-timeframe input contract.
+- `indicators/KIOSEFF_RENDERING_PARITY.md` - geometry, gradient, labels, visibility, and price domain.
+- `indicators/KIOSEFF_GOLDEN_MASTER_PROTOCOL.md` - approved TradingView fixture and screenshot gate.
+- `indicators/KIOSEFF_KNOWN_DIVERGENCES.md` - open certification blockers and allowed claim language.
 - `scanner.md` - scanner module notes.
 
 ## Documentation Rules

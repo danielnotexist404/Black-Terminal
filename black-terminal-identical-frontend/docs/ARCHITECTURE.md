@@ -362,3 +362,18 @@ All privileged operations flow through `/api/network/[resource]`. Server routes 
 ## Phase V Black Cloud Connectivity
 
 The browser and Tauri app are authenticated control clients. Vercel hosts the stateless control plane; an independently hosted Node 22 worker owns cloud-delegated broker streams, commands, risk gates and reconciliation. Supabase stores signed intents, mandates, leases/fencing tokens, execution plans, health, incidents and redacted audit evidence. Exchange credentials cross only the service-role vault boundary. See `BROKER_CONNECTION_ARCHITECTURE.md` and `PHASE5_CHAPTER2_BLACK_CLOUD_CONNECTIVITY.md`.
+
+## Kioseff Pine Compatibility Architecture
+
+Kioseff Stop Loss Clustering is a chart-native TypeScript worker subsystem under
+`src/modules/kioseff-stop-loss-clustering`. Same-venue chart and ordered lower-timeframe candles pass
+through provenance and coverage gates before the transactional engine. Closed bars commit state;
+the current bar is rebuilt from the last commit for every revision. The worker publishes immutable
+canonical clusters, pane series, hashes, and readiness diagnostics. Pixi and React are projections
+only and cannot feed camera state back into calculation.
+
+Two engine modes are named but not interchangeable. `pine-compatibility` is the permanent reference
+baseline; `black-core-enhanced` throws at construction until TradingView golden-master approval.
+Display scaling may include visible cluster geometry, but it cannot mutate analytical state or its
+cluster hash. Python is limited to offline validation. See the Kioseff parity, state, data, rendering,
+golden-master, and known-divergence documents under `docs/indicators/`.

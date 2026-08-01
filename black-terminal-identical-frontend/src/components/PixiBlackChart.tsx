@@ -36,8 +36,12 @@ import type { ManagedPosition, PositionProtectionOrder, PositionProtectionType }
 import { AifIndicatorOverlay } from "../modules/aif/components/AifIndicatorOverlay";
 import { canonicalOrderKey, deduplicateCanonicalOrders } from "../orders/canonicalOrder";
 import { OrderManagementMenu } from "../orders/OrderManagementMenu";
-import type { KioseffSnapshot } from "../modules/kioseff-stop-loss-clustering/core/canonical";
 import {
+  canonicalClusterHash,
+  type KioseffSnapshot
+} from "../modules/kioseff-stop-loss-clustering/core/canonical";
+import {
+  kioseffSettingsHash,
   normalizeKioseffTimeframeInput,
   type KioseffSettingsV1
 } from "../modules/kioseff-stop-loss-clustering/core/settings";
@@ -1068,9 +1072,32 @@ export function PixiBlackChart({
     const setLoadStage = (state: KioseffLoadState) => {
       if (disposed) return;
       setKioseffLoadState(state);
+      const parityState: KioseffRuntimeDiagnostics["parityState"] =
+        state.stage === "idle"
+          ? "NO_DATA"
+          : state.stage === "requesting-symbol-metadata" ||
+              state.stage === "fetching-chart-history" ||
+              state.stage === "fetching-intrabar-history" ||
+              state.stage === "grouping-intrabars"
+            ? "FETCHING"
+            : state.stage === "validating"
+              ? "VALIDATING"
+              : state.stage === "starting-worker" ||
+                  state.stage === "rebuilding" ||
+                  state.stage === "calculating" ||
+                  state.stage === "rendering"
+                ? "REBUILDING"
+                : state.stage === "warming"
+                  ? "WARMING"
+                  : state.stage === "ready"
+                    ? "READY"
+                    : state.stage === "error"
+                      ? "ERROR"
+                      : "DEGRADED";
       setKioseffDiagnostics((current) => ({
         ...current,
-        loadStage: state.stage
+        loadStage: state.stage,
+        parityState
       }));
     };
     const unavailable = (
@@ -1142,6 +1169,7 @@ export function PixiBlackChart({
     });
     setKioseffDiagnostics({
       ...emptyKioseffRuntimeDiagnostics(),
+      engineMode: "Pine Compatibility",
       exchange: marketSymbol.exchange,
       rawSymbol: marketSymbol.rawSymbol,
       normalizedSymbol: "",
@@ -1149,7 +1177,12 @@ export function PixiBlackChart({
       chartTimeframe: timeframe,
       requestedLowerTimeframe: lowerTimeframe,
       chartHistoryCount: replaySourceRef.current.length,
-      loadStage: "fetching-chart-history"
+      loadStage: "fetching-chart-history",
+      settingsHash: kioseffSettingsHash(kioseffSettings),
+      percentileMode:
+        kioseffSettings.volatilityAtEntry.granularity === "lower"
+          ? "SIGNED / PINE LOWER"
+          : "ABSOLUTE BIN / PINE HIGHER"
     });
     const adapter = selectedAdapter;
     const chartCandles = replaySourceRef.current;
@@ -1192,12 +1225,27 @@ export function PixiBlackChart({
       lastCoverage = history.coverage;
       const intrabarCount = history.coverage.receivedIntrabars;
       const provisional = history.chartBars.at(-1);
+      setLoadStage({
+        stage: "validating",
+        bars: history.chartBars.length,
+        intrabars: intrabarCount
+      });
       setKioseffDiagnostics((current) => ({
         ...current,
         normalizedSymbol: history.provenance.normalizedSymbol,
         tickSize: history.provenance.metadata.tickSize,
         chartHistoryCount: history.warmup.targetChartBars,
         minuteHistoryCount: intrabarCount,
+        expectedIntrabars: history.coverage.expectedIntrabars,
+        coveragePercent:
+          history.coverage.expectedIntrabars > 0
+            ? (history.coverage.receivedIntrabars /
+                history.coverage.expectedIntrabars) *
+              100
+            : 0,
+        missingIntervals: history.coverage.missingIntervals,
+        duplicateIntervals: history.coverage.duplicateIntervals,
+        outOfOrderIntervals: history.coverage.outOfOrderIntervals,
         requestStart: history.requestRange.start,
         requestEnd: history.requestRange.end,
         firstMinute: history.coverage.firstReceivedTime,
@@ -1211,6 +1259,8 @@ export function PixiBlackChart({
             ? provisional.intrabars.length
             : 0,
         sourceVersion: history.sourceVersion,
+        dataHash: history.sourceVersion,
+        settingsHash: kioseffSettingsHash(kioseffSettings),
         generation: history.generation
       }));
       const rejected = history.chartBars.find(
@@ -1256,6 +1306,11 @@ export function PixiBlackChart({
         0
       );
       setLoadStage({
+        stage: "rebuilding",
+        bars: chartBarsSent,
+        intrabars: intrabarsSent
+      });
+      setLoadStage({
         stage: "calculating",
         bars: chartBarsSent,
         intrabars: intrabarsSent
@@ -1298,6 +1353,12 @@ export function PixiBlackChart({
         workerChartBarsReceived: telemetry.workerChartBarsReceived,
         workerIntrabarsReceived: telemetry.workerIntrabarsReceived,
         activeClusterCount: snapshot.activeClusters.length,
+        activeBuyClusterCount: snapshot.activeClusters.filter(
+          (cluster) => cluster.side === "buy-stop"
+        ).length,
+        activeSellClusterCount: snapshot.activeClusters.filter(
+          (cluster) => cluster.side === "sell-stop"
+        ).length,
         violatedClusterCount: snapshot.violatedClusters.length,
         panePointCount: snapshot.pane.length,
         renderActiveZones:
@@ -1311,7 +1372,10 @@ export function PixiBlackChart({
         renderContainerVisible: renderMetrics?.containerVisible ?? false,
         outputDiagnostics: telemetry.outputDiagnostics,
         lastDiagnostic: snapshot.diagnostics.at(-1)?.message ?? null,
-        calculationMilliseconds: client?.lastCalculationMs ?? null
+        calculationMilliseconds: client?.lastCalculationMs ?? null,
+        clusterHash: canonicalClusterHash(snapshot),
+        lastClosedCandle: snapshot.committedThrough,
+        lastRebuild: Math.floor(Date.now() / 1000)
       }));
       processedSourceVersion = history.sourceVersion;
       if (history.warmup.full) {

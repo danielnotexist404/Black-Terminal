@@ -234,7 +234,9 @@ function barInput(
   };
 }
 
-function fixtureSettings(fixture: KioseffParityFixture): KioseffSettingsV1 {
+export function settingsFromKioseffFixture(
+  fixture: KioseffParityFixture
+): KioseffSettingsV1 {
   const settings = structuredClone(KIOSEFF_DEFAULT_SETTINGS);
   settings.model =
     fixture.inputs.model === "Absorbtion Extremes"
@@ -244,11 +246,61 @@ function fixtureSettings(fixture: KioseffParityFixture): KioseffSettingsV1 {
     fixture.inputs.granularity === "Higher (Heavy)" ? "higher" : "lower";
   settings.absorbtion.lowerTimeframe = fixture.lowerTimeframe;
   for (const [key, value] of Object.entries(fixture.inputs.values)) {
-    if (key === "Force Find Typical Move (Less Similar)" && typeof value === "boolean") {
-      settings.forceTypicalMove = value;
-    }
-    if (key === "Show Cluster Ratio Meter" && typeof value === "boolean") {
-      settings.showClusterRatioMeter = value;
+    switch (key) {
+      case "X-ray":
+        if (typeof value === "boolean") settings.absorbtion.showXRay = value;
+        break;
+      case "Set Color Intensity by Stop Cluster Size":
+        if (typeof value === "boolean") settings.absorbtion.intensityBySize = value;
+        break;
+      case "Stop Cluster Buys":
+        if (typeof value === "number") settings.absorbtion.stopClusterBuys = value;
+        break;
+      case "Stop Cluster Sells":
+        if (typeof value === "number") settings.absorbtion.stopClusterSells = value;
+        break;
+      case "Old Stop Cluster Sells":
+        if (typeof value === "number") settings.absorbtion.oldStopClusterSells = value;
+        break;
+      case "Old Stop Clusters Buys":
+        if (typeof value === "number") settings.absorbtion.oldStopClusterBuys = value;
+        break;
+      case "Lower Timeframe Vol. Data":
+        if (typeof value === "string") settings.absorbtion.lowerTimeframe = value;
+        break;
+      case "Cluster Color":
+        if (typeof value === "string") settings.absorbtion.clusterColor = value;
+        break;
+      case "Old Cluster Color":
+        if (typeof value === "string") settings.absorbtion.oldClusterColor = value;
+        break;
+      case "Time-Scaled Volatility TF":
+        if (typeof value === "string") {
+          settings.volatilityAtEntry.timeScaledVolatilityTimeframe = value;
+        }
+        break;
+      case "Strong Cluster Color":
+        if (typeof value === "string") settings.volatilityAtEntry.strongClusterColor = value;
+        break;
+      case "Weak Cluster Color":
+        if (typeof value === "string") settings.volatilityAtEntry.weakClusterColor = value;
+        break;
+      case "Show Historical Triggers":
+        if (typeof value === "boolean") {
+          settings.volatilityAtEntry.showHistoricalTriggers = value;
+        }
+        break;
+      case "Show Active Cluster Size":
+        if (typeof value === "boolean") {
+          settings.volatilityAtEntry.showActiveClusterSize = value;
+        }
+        break;
+      case "Force Find Typical Move (Less Similar)":
+        if (typeof value === "boolean") settings.forceTypicalMove = value;
+        break;
+      case "Show Cluster Ratio Meter":
+        if (typeof value === "boolean") settings.showClusterRatioMeter = value;
+        break;
     }
   }
   return settings;
@@ -347,7 +399,7 @@ export function runKioseffParityFixture(value: unknown): KioseffParityReport {
     metadata: metadata(fixture),
     timeframe: fixture.chartTimeframe as Timeframe,
     sourceVersion: fixture.sourceRevision,
-    settings: fixtureSettings(fixture),
+    settings: settingsFromKioseffFixture(fixture),
     diagnostics: true
   });
   const actual: KioseffSnapshot[] = [];

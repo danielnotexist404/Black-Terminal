@@ -21,6 +21,7 @@ import {
   type KioseffSettingsV1
 } from "../modules/kioseff-stop-loss-clustering/core/settings";
 import { KioseffPixiRenderer } from "../modules/kioseff-stop-loss-clustering/rendering/KioseffPixiRenderer";
+import { kioseffPriceDomain } from "../modules/kioseff-stop-loss-clustering/rendering/renderModel";
 import {
   fromAxisValue,
   priceToScreenY as mapPriceToScreenY,
@@ -1149,6 +1150,19 @@ export class BlackChartEngine {
     if (data.length <= 300 && last && last.close > 60000 && last.close < 75000) {
       min = Math.min(min, 64600);
       max = Math.max(max, 67400);
+    }
+
+    if (this.visibleIndicators.volatilityHeatmap) {
+      const indicatorDomain = kioseffPriceDomain(
+        this.kioseffSnapshot,
+        this.kioseffSettings,
+        min,
+        max,
+        visible[0]?.time ?? null,
+        visible.at(-1)?.time ?? null
+      );
+      min = indicatorDomain.minimum;
+      max = indicatorDomain.maximum;
     }
 
     const pad = (max - min) * 0.035 || 100;

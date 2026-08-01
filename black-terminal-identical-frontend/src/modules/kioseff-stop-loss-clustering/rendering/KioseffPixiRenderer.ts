@@ -1,7 +1,11 @@
 import { Container, Graphics, Text } from "pixi.js";
 import type { KioseffSnapshot } from "../core/canonical.ts";
 import type { KioseffSettingsV1 } from "../core/settings.ts";
-import { buildKioseffRenderModel, type KioseffRenderZone } from "./renderModel.ts";
+import {
+  buildKioseffRenderModel,
+  layoutKioseffLabels,
+  type KioseffRenderZone
+} from "./renderModel.ts";
 
 export type KioseffRenderTransform = {
   width: number;
@@ -15,14 +19,6 @@ function colorNumber(color: string) {
   const normalized = color.trim().replace(/^#/, "");
   const parsed = Number.parseInt(normalized, 16);
   return Number.isFinite(parsed) ? parsed : 0xffffff;
-}
-
-function compactVolume(value: number) {
-  const absolute = Math.abs(value);
-  if (absolute >= 1e9) return `${(value / 1e9).toFixed(1)}B`;
-  if (absolute >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
-  if (absolute >= 1e3) return `${(value / 1e3).toFixed(1)}K`;
-  return value.toFixed(0);
 }
 
 export class KioseffPixiRenderer {
@@ -79,7 +75,8 @@ export class KioseffPixiRenderer {
   private drawZone(
     zone: KioseffRenderZone,
     transform: KioseffRenderTransform,
-    violated: boolean
+    violated: boolean,
+    settings: KioseffSettingsV1
   ) {
     const start = transform.xForTime(zone.startTime ?? zone.creationTime);
     const end =
@@ -97,31 +94,55 @@ export class KioseffPixiRenderer {
     const color = colorNumber(zone.color);
     const strengthAlpha = zone.strength === "strong" ? 0.2 : 0.09;
     const alpha = zone.opacity ?? strengthAlpha;
-    this.zoneGeometry.rect(left, y, right - left, height).fill({
-      color,
-      alpha: violated ? alpha * 0.62 : alpha
-    });
+    if (!zone.drawAsLine) {
+      this.zoneGeometry
+        .rect(left, y, right - left, height)
+        .fill({ color, alpha })
+        .stroke({
+          color,
+          width: Math.max(0.5, settings.style.activeLineWidth),
+          alpha
+        });
+    }
     const middle = transform.yForPrice(zone.price);
-    this.lineGeometry
-      .moveTo(left, middle)
-      .lineTo(right, middle)
-      .stroke({ color, width: zone.hot ? 1.5 : 0.75, alpha: zone.hot ? 0.92 : 0.55 });
+    if (zone.drawAsLine || zone.hot) {
+      this.lineGeometry
+        .moveTo(left, middle)
+        .lineTo(right, middle)
+        .stroke({
+          color,
+          width: Math.max(0.5, settings.style.activeLineWidth),
+          alpha: zone.hot ? 1 : alpha
+        });
+    }
     if (zone.hot) {
       this.lineGeometry
         .moveTo(left, middle)
         .lineTo(right, middle)
-        .stroke({ color, width: 5, alpha: 0.13 });
-      this.lineGeometry
-        .moveTo(left, middle)
-        .lineTo(right, middle)
-        .stroke({ color, width: 10, alpha: 0.06 });
+        .stroke({ color, width: settings.style.hotLineWidth, alpha: 0.1 });
     }
-    if (zone.showLabel && this.usedTexts < 120) {
+  }
+
+  private drawLabels(
+    zones: readonly KioseffRenderZone[],
+    transform: KioseffRenderTransform,
+    settings: KioseffSettingsV1
+  ) {
+    const labels = layoutKioseffLabels(
+      zones,
+      transform.yForPrice,
+      transform.top + settings.style.labelFontSize / 2,
+      transform.height - settings.style.labelFontSize / 2,
+      settings.style.labelFontSize
+    );
+    for (const { zone, y } of labels) {
       const text = this.acquireText();
-      text.text = compactVolume(zone.signedVolume);
-      text.style.fill = color;
-      text.x = Math.max(2, Math.min(transform.width - text.width - 4, violated ? left : right - 58));
-      text.y = middle - 6;
+      text.text = zone.labelText!;
+      text.style.fill = colorNumber(zone.labelColor);
+      text.style.fontSize = settings.style.labelFontSize;
+      text.anchor.set(1, 0.5);
+      text.x = Math.max(2, transform.width - 6);
+      text.y = Math.round(y * 2) / 2;
     }
   }
 
@@ -148,7 +169,11 @@ export class KioseffPixiRenderer {
     transform: KioseffRenderTransform
   ) {
     if (!pane.length) return;
-    const visible = pane.slice(-300);
+    const visible = pane.filter((point) => {
+      const x = transform.xForTime(point.time);
+      return x >= -4 && x <= transform.width + 4;
+    });
+    if (!visible.length) return;
     const paneTop = transform.height * 0.82;
     const paneBottom = transform.height - 4;
     const zero = (paneTop + paneBottom) / 2;
@@ -252,8 +277,9 @@ export class KioseffPixiRenderer {
           });
       }
     }
-    for (const zone of model.activeZones) this.drawZone(zone, transform, false);
-    for (const zone of model.violatedZones) this.drawZone(zone, transform, true);
+    for (const zone of model.activeZones) this.drawZone(zone, transform, false, settings);
+    for (const zone of model.violatedZones) this.drawZone(zone, transform, true, settings);
+    this.drawLabels([...model.activeZones, ...model.violatedZones], transform, settings);
     this.drawCurves(model.curves, transform);
     this.drawPane(model.pane, transform);
     for (let index = this.usedTexts; index < this.textPool.length; index += 1) {

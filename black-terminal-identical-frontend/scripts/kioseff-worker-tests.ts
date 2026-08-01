@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import type { SymbolMetadata } from "../src/market-data/types.ts";
-import { canonicalSnapshotHash } from "../src/modules/kioseff-stop-loss-clustering/core/canonical.ts";
+import {
+  KIOSEFF_ENGINE_VERSION,
+  canonicalSnapshotHash
+} from "../src/modules/kioseff-stop-loss-clustering/core/canonical.ts";
 import { KioseffParityEngine } from "../src/modules/kioseff-stop-loss-clustering/core/parityEngine.ts";
-import { KIOSEFF_DEFAULT_SETTINGS } from "../src/modules/kioseff-stop-loss-clustering/core/settings.ts";
+import {
+  KIOSEFF_DEFAULT_SETTINGS,
+  kioseffSettingsVersion
+} from "../src/modules/kioseff-stop-loss-clustering/core/settings.ts";
 import type {
   IntrabarQualityReport,
   KioseffChartBarInput,
@@ -108,8 +114,8 @@ const runtime = new KioseffWorkerRuntime();
 const envelope = {
   generation: 1,
   sourceVersion: "rollback-v1",
-  engineVersion: "1.0.0-parity-pending",
-  settingsVersion: JSON.stringify(settings)
+  engineVersion: KIOSEFF_ENGINE_VERSION,
+  settingsVersion: kioseffSettingsVersion(settings)
 };
 const resetResponse = runtime.handle({
   type: "reset",

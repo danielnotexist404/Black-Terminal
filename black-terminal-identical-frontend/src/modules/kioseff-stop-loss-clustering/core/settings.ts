@@ -1,9 +1,15 @@
-import type { KioseffGranularity, KioseffModel } from "./canonical.ts";
+import {
+  stableValueHash,
+  type KioseffEngineMode,
+  type KioseffGranularity,
+  type KioseffModel
+} from "./canonical.ts";
 import type { Timeframe } from "../../../market-data/types.ts";
 import { kioseffTimeframeSeconds } from "../data/timeframes.ts";
 
 export type KioseffSettingsV1 = {
   version: 1;
+  engineMode: KioseffEngineMode;
   model: KioseffModel;
   absorbtion: {
     showXRay: boolean;
@@ -26,10 +32,31 @@ export type KioseffSettingsV1 = {
   };
   forceTypicalMove: boolean;
   showClusterRatioMeter: boolean;
+  style: {
+    chartBackgroundColor: string;
+    activeLineWidth: number;
+    hotLineWidth: number;
+    labelFontSize: number;
+  };
+  visibility: {
+    ticks: boolean;
+    seconds: boolean;
+    minutes: boolean;
+    hours: boolean;
+    days: boolean;
+    weeks: boolean;
+    months: boolean;
+    priceScalePolicy:
+      | "candles-only"
+      | "candles-active-clusters"
+      | "candles-visible-geometry"
+      | "fixed-manual";
+  };
 };
 
 export const KIOSEFF_DEFAULT_SETTINGS: KioseffSettingsV1 = {
   version: 1,
+  engineMode: "pine-compatibility",
   model: "absorbtion-extremes",
   absorbtion: {
     showXRay: true,
@@ -51,7 +78,23 @@ export const KIOSEFF_DEFAULT_SETTINGS: KioseffSettingsV1 = {
     showActiveClusterSize: false
   },
   forceTypicalMove: false,
-  showClusterRatioMeter: true
+  showClusterRatioMeter: true,
+  style: {
+    chartBackgroundColor: "#05070b",
+    activeLineWidth: 1,
+    hotLineWidth: 5,
+    labelFontSize: 9
+  },
+  visibility: {
+    ticks: true,
+    seconds: true,
+    minutes: true,
+    hours: true,
+    days: true,
+    weeks: true,
+    months: true,
+    priceScalePolicy: "candles-visible-geometry"
+  }
 };
 
 export const KIOSEFF_TIMEFRAME_INPUTS = [
@@ -125,9 +168,20 @@ export function migrateKioseffSettings(
     source.volatilityAtEntry && typeof source.volatilityAtEntry === "object"
       ? (source.volatilityAtEntry as Record<string, unknown>)
       : {};
+  const style =
+    source.style && typeof source.style === "object"
+      ? (source.style as Record<string, unknown>)
+      : {};
+  const visibility =
+    source.visibility && typeof source.visibility === "object"
+      ? (source.visibility as Record<string, unknown>)
+      : {};
   const defaults = KIOSEFF_DEFAULT_SETTINGS;
   return {
     version: 1,
+    // Enhanced mode remains a separately named but certification-gated path.
+    // Persisted attempts to enable it cannot silently bypass the parity gate.
+    engineMode: "pine-compatibility",
     model:
       source.model === "volatility-at-entry" || source.model === "absorbtion-extremes"
         ? source.model
@@ -196,10 +250,82 @@ export function migrateKioseffSettings(
     showClusterRatioMeter:
       typeof source.showClusterRatioMeter === "boolean"
         ? source.showClusterRatioMeter
-        : defaults.showClusterRatioMeter
+        : defaults.showClusterRatioMeter,
+    style: {
+      chartBackgroundColor:
+        typeof style.chartBackgroundColor === "string"
+          ? style.chartBackgroundColor
+          : defaults.style.chartBackgroundColor,
+      activeLineWidth:
+        typeof style.activeLineWidth === "number"
+          ? Math.max(0.5, Math.min(4, style.activeLineWidth))
+          : defaults.style.activeLineWidth,
+      hotLineWidth:
+        typeof style.hotLineWidth === "number"
+          ? Math.max(1, Math.min(10, style.hotLineWidth))
+          : defaults.style.hotLineWidth,
+      labelFontSize:
+        typeof style.labelFontSize === "number"
+          ? Math.max(7, Math.min(14, Math.round(style.labelFontSize)))
+          : defaults.style.labelFontSize
+    },
+    visibility: {
+      ticks:
+        typeof visibility.ticks === "boolean"
+          ? visibility.ticks
+          : defaults.visibility.ticks,
+      seconds:
+        typeof visibility.seconds === "boolean"
+          ? visibility.seconds
+          : defaults.visibility.seconds,
+      minutes:
+        typeof visibility.minutes === "boolean"
+          ? visibility.minutes
+          : defaults.visibility.minutes,
+      hours:
+        typeof visibility.hours === "boolean"
+          ? visibility.hours
+          : defaults.visibility.hours,
+      days:
+        typeof visibility.days === "boolean"
+          ? visibility.days
+          : defaults.visibility.days,
+      weeks:
+        typeof visibility.weeks === "boolean"
+          ? visibility.weeks
+          : defaults.visibility.weeks,
+      months:
+        typeof visibility.months === "boolean"
+          ? visibility.months
+          : defaults.visibility.months,
+      priceScalePolicy:
+        visibility.priceScalePolicy === "candles-only" ||
+        visibility.priceScalePolicy === "candles-active-clusters" ||
+        visibility.priceScalePolicy === "candles-visible-geometry" ||
+        visibility.priceScalePolicy === "fixed-manual"
+          ? visibility.priceScalePolicy
+          : defaults.visibility.priceScalePolicy
+    }
   };
 }
 
 export function kioseffSettingsVersion(settings: KioseffSettingsV1) {
-  return JSON.stringify(settings);
+  return kioseffSettingsHash(settings);
+}
+
+export function kioseffSettingsHash(settings: KioseffSettingsV1) {
+  return stableValueHash(settings);
+}
+
+export function isKioseffVisibleOnTimeframe(
+  settings: KioseffSettingsV1,
+  timeframe: Timeframe | string
+) {
+  if (timeframe.endsWith("t")) return settings.visibility.ticks;
+  if (timeframe.endsWith("s")) return settings.visibility.seconds;
+  if (timeframe.endsWith("m")) return settings.visibility.minutes;
+  if (timeframe.endsWith("h")) return settings.visibility.hours;
+  if (timeframe.endsWith("d")) return settings.visibility.days;
+  if (timeframe.endsWith("w")) return settings.visibility.weeks;
+  return settings.visibility.months;
 }

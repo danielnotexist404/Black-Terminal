@@ -1236,3 +1236,22 @@ Remaining:
   398 active clusters, 5,000 pane points, and 19,504 render commands. The full Kioseff suite,
   production build, security checks, liquidation heatmap regression, and A.I.F. suite pass.
 - Authenticated browser visual acceptance remains operator-gated and is not claimed.
+
+# 2026-08-01 - Kioseff Pine Compatibility Parity Restoration
+
+- Completed a line-ranged Pine-to-TypeScript state map and preserved the source identity at SHA-256
+  `ee848e8e1de892c088648980a0d8e422d93800d131d235ff2dc3b79d4c7ebf11`.
+- Corrected VAE lower signed percentile/top-five behavior, higher end-exclusive bin slicing, empty-bin
+  statistics, historical start searches, hot-line budgeting, active/historical geometry, continuous
+  gradients, signed labels, and Pine's 496-object display capacity.
+- Added a canonical cluster contract, settings/data/cluster hashes, explicit parity readiness states,
+  complete diagnostics, viewport-independent calculation proof, cluster-aware display scaling, and
+  Inputs/Style/Visibility settings groups.
+- Added the fail-closed `pine-compatibility`/`black-core-enhanced` mode boundary. Enhanced Mode remains
+  disabled and the engine version remains `parity-pending`.
+- Added the five-row machine-readable golden matrix under `tests/golden/kioseff/`; all rows are honestly
+  `pending-reference` because approved TradingView snapshots and synchronized screenshots have not
+  been supplied. Structural and deterministic tests do not constitute TradingView parity approval.
+- Corrected active-size projection so a grid larger than 496 cannot allocate labels only to its
+  lowest prices. Visible labels now retain exact price alignment and use deterministic collision
+  selection rather than producing an unreadable vertical text column.

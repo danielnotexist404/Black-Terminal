@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import {
   firstCanonicalDifference,
-  runKioseffParityFixture
+  runKioseffParityFixture,
+  settingsFromKioseffFixture
 } from "../src/modules/kioseff-stop-loss-clustering/testing/parityHarness.ts";
 import type { KioseffParityFixture } from "../src/modules/kioseff-stop-loss-clustering/testing/fixtureTypes.ts";
 
@@ -97,6 +98,43 @@ const pending = runKioseffParityFixture(base);
 assert.equal(pending.status, "pending-reference");
 assert.equal(pending.divergence?.kind, "fixture-incompleteness");
 assert.equal(pending.actualHashes.length, 1);
+
+const allInputs = structuredClone(base);
+allInputs.inputs.values = {
+  "X-ray": false,
+  "Set Color Intensity by Stop Cluster Size": true,
+  "Stop Cluster Buys": 7,
+  "Stop Cluster Sells": 8,
+  "Old Stop Cluster Sells": 9,
+  "Old Stop Clusters Buys": 10,
+  "Lower Timeframe Vol. Data": "3",
+  "Cluster Color": "#010203",
+  "Old Cluster Color": "#040506",
+  "Time-Scaled Volatility TF": "15",
+  "Strong Cluster Color": "#070809",
+  "Weak Cluster Color": "#0a0b0c",
+  "Show Historical Triggers": true,
+  "Show Active Cluster Size": true,
+  "Force Find Typical Move (Less Similar)": true,
+  "Show Cluster Ratio Meter": false
+};
+const mapped = settingsFromKioseffFixture(allInputs);
+assert.equal(mapped.absorbtion.showXRay, false);
+assert.equal(mapped.absorbtion.intensityBySize, true);
+assert.equal(mapped.absorbtion.stopClusterBuys, 7);
+assert.equal(mapped.absorbtion.stopClusterSells, 8);
+assert.equal(mapped.absorbtion.oldStopClusterSells, 9);
+assert.equal(mapped.absorbtion.oldStopClusterBuys, 10);
+assert.equal(mapped.absorbtion.lowerTimeframe, "3");
+assert.equal(mapped.absorbtion.clusterColor, "#010203");
+assert.equal(mapped.absorbtion.oldClusterColor, "#040506");
+assert.equal(mapped.volatilityAtEntry.timeScaledVolatilityTimeframe, "15");
+assert.equal(mapped.volatilityAtEntry.strongClusterColor, "#070809");
+assert.equal(mapped.volatilityAtEntry.weakClusterColor, "#0a0b0c");
+assert.equal(mapped.volatilityAtEntry.showHistoricalTriggers, true);
+assert.equal(mapped.volatilityAtEntry.showActiveClusterSize, true);
+assert.equal(mapped.forceTypicalMove, true);
+assert.equal(mapped.showClusterRatioMeter, false);
 
 const rejected = structuredClone(base);
 rejected.id = "quality-rejected";

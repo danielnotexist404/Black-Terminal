@@ -35,8 +35,12 @@ function loadLabel(state: KioseffLoadState) {
       return `Fetching ordered intrabars — ${state.loaded.toLocaleString()}${state.target === undefined ? "" : ` of ${state.target.toLocaleString()}`}`;
     case "grouping-intrabars":
       return `Grouping ${state.intrabars.toLocaleString()} intrabars into ${state.bars.toLocaleString()} chart bars…`;
+    case "validating":
+      return `Validating ${state.intrabars.toLocaleString()} ordered intrabars across ${state.bars.toLocaleString()} chart bars…`;
     case "starting-worker":
       return "Starting versioned calculation worker…";
+    case "rebuilding":
+      return `Rebuilding clean Pine state from ${state.bars.toLocaleString()} chronological bars and ${state.intrabars.toLocaleString()} intrabars…`;
     case "calculating":
       return `Calculating ${state.bars.toLocaleString()} bars from ${state.intrabars.toLocaleString()} intrabars…`;
     case "rendering":
@@ -45,6 +49,8 @@ function loadLabel(state: KioseffLoadState) {
       return `Warming up — calculated from ${state.completedBars.toLocaleString()} of ${state.targetBars.toLocaleString()} chart bars`;
     case "ready":
       return "Ready";
+    case "degraded":
+      return `Degraded — ${state.message}`;
     case "unavailable":
       return `Unavailable — ${state.reason}`;
     case "error":
@@ -69,6 +75,34 @@ export function KioseffOverlays({
       ))}
     </details>
   ) : null;
+  const parityPanel = (
+    <details className="kioseff-parity-diagnostics" data-testid="kioseff-parity-diagnostics">
+      <summary>KIOSEFF PARITY DIAGNOSTICS · {diagnostics.parityState}</summary>
+      <div><span>Engine Mode</span><b>{diagnostics.engineMode}</b></div>
+      <div><span>Engine Version</span><b>{diagnostics.engineVersion}</b></div>
+      <div><span>Data State</span><b>{diagnostics.parityState}</b></div>
+      <div><span>Venue</span><b>{diagnostics.exchange || "—"}</b></div>
+      <div><span>Symbol</span><b>{diagnostics.rawSymbol || "—"} · {diagnostics.marketCategory || "—"}</b></div>
+      <div><span>Chart TF / LTF</span><b>{diagnostics.chartTimeframe || "—"} / {diagnostics.requestedLowerTimeframe || "—"}</b></div>
+      <div><span>Chart Bars</span><b>{diagnostics.groupedChartBarCount.toLocaleString()} / {diagnostics.chartHistoryCount.toLocaleString()}</b></div>
+      <div><span>LTF Coverage</span><b>{diagnostics.coveragePercent.toFixed(2)}%</b></div>
+      <div><span>LTF Missing</span><b>{diagnostics.missingIntervals.toLocaleString()}</b></div>
+      <div><span>LTF Duplicates</span><b>{diagnostics.duplicateIntervals.toLocaleString()}</b></div>
+      <div><span>LTF Out Of Order</span><b>{diagnostics.outOfOrderIntervals.toLocaleString()}</b></div>
+      <div><span>Active Buy Clusters</span><b>{diagnostics.activeBuyClusterCount.toLocaleString()}</b></div>
+      <div><span>Active Sell Clusters</span><b>{diagnostics.activeSellClusterCount.toLocaleString()}</b></div>
+      <div><span>Historical Clusters</span><b>{diagnostics.violatedClusterCount.toLocaleString()}</b></div>
+      <div><span>Cluster Cap</span><b>{diagnostics.clusterCap}</b></div>
+      <div><span>Percentile Mode</span><b>{diagnostics.percentileMode}</b></div>
+      <div><span>Gradient Mode</span><b>{diagnostics.gradientMode}</b></div>
+      <div><span>Settings Hash</span><b>{diagnostics.settingsHash ?? "—"}</b></div>
+      <div><span>Data Hash</span><b>{diagnostics.dataHash ?? "—"}</b></div>
+      <div><span>Cluster Hash</span><b>{diagnostics.clusterHash ?? "—"}</b></div>
+      <div><span>Last Closed Candle</span><b>{diagnostics.lastClosedCandle === null ? "—" : new Date(diagnostics.lastClosedCandle * 1000).toISOString()}</b></div>
+      <div><span>Last Rebuild</span><b>{diagnostics.lastRebuild === null ? "—" : new Date(diagnostics.lastRebuild * 1000).toISOString()}</b></div>
+      <div><span>Viewport Affects Calculation</span><b>{diagnostics.viewportAffectsCalculation ? "YES" : "NO"}</b></div>
+    </details>
+  );
   if (unavailable) {
     return (
       <>
@@ -84,6 +118,7 @@ export function KioseffOverlays({
           <small>{unavailable.message}</small>
           <em>{unavailable.retryable ? "Retry is possible." : "This market configuration is unsupported."}</em>
         </aside>
+        {parityPanel}
         {inspector}
       </>
     );
@@ -92,6 +127,7 @@ export function KioseffOverlays({
     return (
       <>
         <aside className="kioseff-unavailable" data-testid="kioseff-load-state"><b>Stop Loss Clustering</b><span>{loadLabel(loadState)}</span></aside>
+        {parityPanel}
         {inspector}
       </>
     );
@@ -102,6 +138,7 @@ export function KioseffOverlays({
     <>
       {loadState.stage !== "ready" && (
         <aside className="kioseff-warming" role="status">
+          <b>PARITY STATE NOT FINAL · PREVIEW ONLY</b>
           {loadState.stage === "warming"
             ? loadLabel(loadState)
             : `Warming up — calculated from ${diagnostics.groupedChartBarCount.toLocaleString()} of ${diagnostics.chartHistoryCount.toLocaleString()} chart bars · ${loadLabel(loadState)}`}
@@ -132,6 +169,7 @@ export function KioseffOverlays({
           {snapshot.diagnostics.map((diagnostic, index) => <small key={`${diagnostic.code}:${index}`}>{diagnostic.code}: {diagnostic.message}</small>)}
         </aside>
       )}
+      {parityPanel}
       {inspector}
     </>
   );

@@ -366,7 +366,8 @@ non-integer calculation values.
 - Added `scripts/kioseff-render-model-tests.ts`.
 
 The renderer owns a clipped, deterministic set of six batched Graphics objects, two Containers, and
-a bounded pool of at most 120 visible Text labels. It renders active/violated zones, intensity and
+a bounded pool of at most 496 visible Text labels (raised from the original implementation's 120 in
+the 2026-08-01 parity restoration). It renders active/violated zones, intensity and
 strength metadata, hot glow lines, X-ray bands, dashed qCurves, the stop-hit pane, radiating markers,
 and VAE averages using timestamp/price transforms. Pan, zoom, and resize do not mutate the canonical
 snapshot.

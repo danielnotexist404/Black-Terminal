@@ -42,6 +42,8 @@ npm run test:performance
 npm run perf:soak -- --hours=1
 npm run test:bybit-certification
 npm run certify:bybit-mainnet
+npm run test:kioseff
+npm run benchmark:kioseff
 ```
 
 `npm run check` runs TypeScript and Rust checks. Use it before packaging or larger refactors.
@@ -51,6 +53,20 @@ npm run certify:bybit-mainnet
 `npm run perf:stress` requires `PERF_STRESS_URL` and writes a long-session JSONL log under `docs/performance/`.
 `npm run test:performance` verifies registration, cleanup, coalescing and retention invariants.
 `npm run perf:soak -- --hours=1` launches a local production preview, exercises safe cockpit interactions, and writes a JSONL report without submitting orders.
+`npm run test:kioseff` runs data, Pine-kernel, canonical-state, engine, worker, parity-harness,
+rendering, platform, and operational regression contracts. It proves deterministic internal behavior;
+it does not approve TradingView parity. `npm run benchmark:kioseff` exercises the bounded worker path.
+
+## Kioseff Parity Workspace State
+
+- Production calculation: dedicated TypeScript Web Worker; Python is offline validation-only.
+- Active mode: `pine-compatibility`; `black-core-enhanced` is present but fail-closed.
+- Fixture source contract: `tests/fixtures/kioseff-stop-loss-clustering/`.
+- TradingView approval boundary: `tests/golden/kioseff/manifest.json`.
+- Current certification: `pending-reference`; no approved TradingView golden snapshots exist.
+- Camera pan/zoom affects projection and optional display-domain selection only, never worker input.
+- Use the collapsed Kioseff parity diagnostics panel to record venue, symbol, timeframes, coverage,
+  engine/source versions, settings/data/cluster hashes, rebuild time, and readiness state.
 
 Bybit diagnostics and controlled live validation use:
 

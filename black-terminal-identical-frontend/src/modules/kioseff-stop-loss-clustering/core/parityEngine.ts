@@ -33,6 +33,11 @@ export class KioseffParityEngine {
   private lastSnapshot: KioseffSnapshot;
 
   constructor(context: KioseffEngineContext) {
+    if (context.settings.engineMode !== "pine-compatibility") {
+      throw new Error(
+        "Black Core Enhanced Mode is disabled until TradingView golden-master certification passes."
+      );
+    }
     this.context = structuredClone(context);
     this.engine = this.createEngine();
     this.committedState = this.exportModelState();
@@ -143,6 +148,11 @@ export class KioseffParityEngine {
   }
 
   reset(context = this.context) {
+    if (context.settings.engineMode !== "pine-compatibility") {
+      throw new Error(
+        "Black Core Enhanced Mode is disabled until TradingView golden-master certification passes."
+      );
+    }
     this.context = structuredClone(context);
     this.engine = this.createEngine();
     this.committedState = this.exportModelState();

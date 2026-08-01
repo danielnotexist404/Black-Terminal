@@ -195,8 +195,9 @@ tolerance is absolute `1e-9` plus relative `1e-9`.
 ## 22. Memory/resource results
 
 The higher 20,000-bar observed heap delta was 22,876,656 bytes. Its full snapshot payload was
-6,239,719 bytes. Renderer ownership is fixed at six Graphics/two Containers; visible Kioseff Text is
-bounded to 120 and reused. Client disposal clears messages/listeners and terminates the worker.
+6,239,719 bytes. Renderer ownership is fixed at six Graphics/two Containers. The original 120-text
+limit recorded here was raised to Pine's 496-label capacity by the 2026-08-01 parity restoration;
+texts remain pooled and reused. Client disposal clears messages/listeners and terminates the worker.
 
 ## 23. Browser/Tauri results
 

@@ -5,6 +5,15 @@
 > unreferenced only until TradingView golden certification authorizes retirement; it is not a
 > fallback. See `indicators/KIOSEFF_STOP_LOSS_CLUSTER_IMPLEMENTATION.md`.
 
+## Kioseff Production Boundary (2026-08-01)
+
+Kioseff Stop Loss Clustering executes in a dedicated TypeScript Web Worker. The production data path
+is authoritative venue history/realtime data -> ordered lower-timeframe reconstruction -> TypeScript
+compatibility engine -> immutable canonical snapshot -> Pixi/React projection. Python may be used
+offline for independent fixture inspection or validation only; it is neither the production engine
+nor a runtime fallback. Pine Compatibility remains `parity-pending`, and Black Core Enhanced Mode is
+disabled until approved TradingView golden fixtures pass.
+
 Python indicators are a first-class product goal. The core rule: scripts should be powerful for
 analysis but limited in what they can touch.
 

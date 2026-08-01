@@ -1,8 +1,9 @@
 export const KIOSEFF_SCHEMA_VERSION = 1;
-export const KIOSEFF_ENGINE_VERSION = "1.0.0-parity-pending";
+export const KIOSEFF_ENGINE_VERSION = "1.1.0-pine-compatibility-parity-pending";
 
 export type KioseffModel = "absorbtion-extremes" | "volatility-at-entry";
 export type KioseffGranularity = "higher" | "lower";
+export type KioseffEngineMode = "pine-compatibility" | "black-core-enhanced";
 export type ClusterSide = "buy-stop" | "sell-stop";
 export type ClusterState = "active" | "violated";
 
@@ -11,6 +12,7 @@ export type CanonicalCluster = {
   side: ClusterSide;
   state: ClusterState;
   signedVolume: number;
+  absoluteVolume: number;
   price: number;
   priceLow: number;
   priceHigh: number;
@@ -20,9 +22,16 @@ export type CanonicalCluster = {
   violationTime: number | null;
   endTime: number | null;
   strength: "strong" | "weak" | null;
+  percentileValue: number | null;
+  strengthNormalized: number | null;
   hot: boolean;
   sourceCount: number;
   opacity: number | null;
+  granularity: KioseffGranularity | null;
+  historicalTrigger: boolean;
+  createdAtBarIndex: number;
+  violatedAtBarIndex: number | null;
+  sourceEngineVersion: string;
 };
 
 export type CanonicalCurve = {
@@ -205,6 +214,30 @@ export function canonicalSnapshotHash(snapshot: KioseffSnapshot) {
     hash = BigInt.asUintN(64, hash * 0x100000001b3n);
   }
   return hash.toString(16).padStart(16, "0");
+}
+
+function fnv1a64(source: string) {
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of new TextEncoder().encode(source)) {
+    hash ^= BigInt(byte);
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
+/**
+ * Hashes calculation output only. Camera, viewport, pane sizing and draw order
+ * are intentionally excluded so zoom/pan can never alter this diagnostic.
+ */
+export function canonicalClusterHash(snapshot: KioseffSnapshot) {
+  const clusters = [...snapshot.activeClusters, ...snapshot.violatedClusters]
+    .sort(compareCanonicalClusters)
+    .map((cluster) => stableJsonValue(cluster));
+  return fnv1a64(JSON.stringify(clusters));
+}
+
+export function stableValueHash(value: unknown) {
+  return fnv1a64(JSON.stringify(stableJsonValue(value)));
 }
 
 export function emptyRatioModel(): CanonicalRatioModel {

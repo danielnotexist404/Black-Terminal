@@ -294,6 +294,16 @@ export type BybitRuntimeStatusPayload = {
 };
 
 export type BlackCloudStatusPayload = {
+  nodes: Array<{
+    node_id: string; deployment_commit: string; software_version: string; node_version: string;
+    worker_instance_id: string; execution_environment: "DEMO" | "MAINNET_LIVE";
+    status: "STARTING" | "READY" | "DEGRADED" | "DRAINING" | "OFFLINE";
+    reportedStatus: string; startup_phase: string; started_at: string; last_heartbeat_at: string;
+    heartbeatAgeMs: number | null; stale: boolean; clockStatus: "HEALTHY" | "WARNING" | "UNSAFE";
+    active_connection_count: number; ready_connection_count: number; degraded_connection_count: number;
+    active_strategy_count: number; queue_depth: number; oldest_queue_age_ms: number;
+    endpointProfile: string | null; strategyRuntimeEnabled: boolean;
+  }>;
   connections: Array<{
     id: string; account_id: string | null; provider: string; label: string; account_reference: string | null;
     connection_mode: string; execution_capability: string; health_status: string;

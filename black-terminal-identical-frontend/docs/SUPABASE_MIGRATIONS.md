@@ -2161,3 +2161,11 @@ Canonical paste-ready source:
 This migration extends `profiles_extended`, `profile_posts`, and `notification_events`; adds privacy, engagement, saved collections, direct messaging, reports, moderation, observability and atomic rate limiting; creates the private `professional-media` bucket; and installs strict RLS and scoped realtime publication entries. It deliberately does not create duplicate profile, post, follow, notification, indicator, strategy or Investment Group concepts.
 
 Expected successful result: `Success. No rows returned.` Do not expose or paste `SUPABASE_SERVICE_ROLE_KEY` into this SQL or any browser setting.
+
+# 2026-08-02 - Phase V Chapter II-D Black Cloud Node 01
+
+Migration: `supabase/migrations/202608020003_phase5_chapter2d_black_cloud_node01.sql`.
+
+This additive migration creates the service-role-only `black_cloud_nodes` registry and immutable `black_cloud_certification_records`. Both tables enable RLS and revoke direct `anon`/`authenticated` access. The status API reads only safe node fields through the server service identity and applies a 45-second stale threshold.
+
+The linked production ledger for `jdwlspxzoudgzxcghbjo` records II-B `202608020001`, II-C `202608020002`, and II-D `202608020003`. Do not reapply them manually or destructively roll them back. The Chapter II-D source file is the exact deployable SQL artifact to retain for review.

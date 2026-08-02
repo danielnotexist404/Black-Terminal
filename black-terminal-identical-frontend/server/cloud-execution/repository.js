@@ -123,11 +123,59 @@ export class BlackCloudRepository {
       head(this.supabase.from("execution_commands").select("id", { head: true, count: "exact" })),
       head(this.supabase.from("broker_secret_vault").select("id", { head: true, count: "exact" })),
       head(this.supabase.from("worker_leases").select("lease_key", { head: true, count: "exact" })),
-      head(this.supabase.from("execution_inbox").select("id", { head: true, count: "exact" }))
+      head(this.supabase.from("execution_inbox").select("id", { head: true, count: "exact" })),
+      head(this.supabase.from("black_cloud_nodes").select("node_id", { head: true, count: "exact" })),
+      head(this.supabase.from("strategy_deployments").select("id", { head: true, count: "exact" }))
     ]);
-    const names = ["queue", "credentialVault", "leaseSubsystem", "eventInbox"];
+    const names = ["queue", "credentialVault", "leaseSubsystem", "eventInbox", "nodeRegistry", "strategyRuntime"];
     const dependencies = Object.fromEntries(checks.map((result, index) => [names[index], result.status === "fulfilled"]));
-    return { ready: Object.values(dependencies).every(Boolean) && Boolean(this.workerId), workerIdentity: Boolean(this.workerId), dependencies };
+    const telemetry = await this.getNodeTelemetry().catch(() => ({ queueDepth: null, oldestQueueAgeMs: null, activeStrategyCount: null }));
+    return { ready: Object.values(dependencies).every(Boolean) && Boolean(this.workerId), workerIdentity: Boolean(this.workerId), dependencies, ...telemetry };
+  }
+
+  async getNodeTelemetry() {
+    const [queue, oldest, strategies] = await Promise.all([
+      this.supabase.from("execution_commands").select("id", { head: true, count: "exact" }).in("status", ["QUEUED", "RETRY", "SUBMISSION_UNKNOWN", "RECONCILING"]),
+      this.supabase.from("execution_commands").select("created_at").in("status", ["QUEUED", "RETRY", "SUBMISSION_UNKNOWN", "RECONCILING"]).order("created_at", { ascending: true }).limit(1).maybeSingle(),
+      this.supabase.from("strategy_deployments").select("id", { head: true, count: "exact" }).in("status", ["DEPLOYED", "RUNNING", "PAUSED"])
+    ]);
+    for (const result of [queue, oldest, strategies]) if (result.error) throw result.error;
+    return {
+      queueDepth: Number(queue.count || 0),
+      oldestQueueAgeMs: oldest.data?.created_at ? Math.max(0, Date.now() - Date.parse(oldest.data.created_at)) : 0,
+      activeStrategyCount: Number(strategies.count || 0)
+    };
+  }
+
+  async writeNodeHeartbeat(node) {
+    const payload = {
+      node_id: node.nodeId,
+      deployment_environment: node.deploymentEnvironment,
+      region: node.region,
+      hostname: node.hostname,
+      deployment_commit: node.deploymentCommit,
+      image_digest: node.imageDigest,
+      software_version: node.softwareVersion,
+      node_version: node.nodeVersion,
+      worker_instance_id: node.workerInstanceId,
+      execution_environment: node.executionEnvironment,
+      status: node.status,
+      startup_phase: node.startupPhase,
+      started_at: node.startedAt,
+      last_heartbeat_at: new Date().toISOString(),
+      clock_health: redactObject(node.clockHealth || {}),
+      crypto_self_test: redactObject(node.cryptoSelfTest || {}),
+      active_connection_count: Number(node.activeConnectionCount || 0),
+      ready_connection_count: Number(node.readyConnectionCount || 0),
+      degraded_connection_count: Number(node.degradedConnectionCount || 0),
+      active_strategy_count: Number(node.activeStrategyCount || 0),
+      queue_depth: Number(node.queueDepth || 0),
+      oldest_queue_age_ms: Number(node.oldestQueueAgeMs || 0),
+      safe_metadata: redactObject(node.safeMetadata || {})
+    };
+    const { error } = await this.supabase.from("black_cloud_nodes").upsert(payload, { onConflict: "node_id" });
+    if (error) throw error;
+    return payload;
   }
 
   async audit(event) {

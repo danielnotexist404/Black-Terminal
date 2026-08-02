@@ -1,13 +1,13 @@
 services:
   black-cloud-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.black-cloud
-    image: black-terminal/black-cloud-worker:chapter-2c
+    image: ${BLACK_CLOUD_IMAGE_REFERENCE:?Use the immutable commit tag, for example black-terminal-black-cloud:7a75e7c}
+    pull_policy: never
+    container_name: black-cloud-node-01
+    hostname: black-cloud-node-01
     restart: always
     init: true
     env_file:
-      - .env.black-cloud
+      - ${BLACK_CLOUD_ENV_FILE:-/etc/black-terminal/black-cloud-node01.env}
     ports:
       - "127.0.0.1:8080:8080"
     read_only: true
@@ -19,7 +19,14 @@ services:
       - no-new-privileges:true
     mem_limit: 768m
     cpus: 1.0
+    pids_limit: 256
     stop_grace_period: 45s
+    stop_signal: SIGTERM
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 30s

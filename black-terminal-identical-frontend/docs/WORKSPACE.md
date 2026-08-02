@@ -229,3 +229,5 @@ Realtime subscriptions are limited to the active conversation and authenticated 
 # Black Cloud Workspace State
 
 Black Cloud connection health, lifecycle, control state, mandates, follower plans and incidents are server state. Portfolio Manager refreshes the authenticated status endpoint every 15 seconds while visible and every 60 seconds while hidden. It must not persist or infer execution authority locally. Pause, resume and emergency-stop always call the control plane. Browser disconnect, tab closure and desktop shutdown do not stop a provisioned cloud worker.
+
+Chapter II-D adds safe node health to the same authenticated payload: stable node ID, stale-aware status, heartbeat age, deployment commit, connection/strategy counts, queue depth and clock state. Hostname/IP, image internals, keys and raw cryptographic state remain server-only. The UI reports `OFFLINE` after 45 seconds without heartbeat even if the last database status was `READY`.

@@ -191,7 +191,7 @@ test("mainnet validation gate fails closed without execution mode and symbol all
   restoreEnv(previous);
 });
 
-test("execution policy follows Bybit permissions and server limits", () => {
+test("execution policy follows Bybit permissions without a global financial ceiling", () => {
   const previous = {
     enabled: process.env.BYBIT_MAINNET_VALIDATION_ENABLED,
     allowedConnections: process.env.BYBIT_MAINNET_ALLOWED_CONNECTIONS,
@@ -204,7 +204,8 @@ test("execution policy follows Bybit permissions and server limits", () => {
 
   const enabled = resolveBybitExecutionPolicy({ trading: true, withdrawal: false });
   assert.equal(enabled.tradingEnabled, true);
-  assert.equal(enabled.maxNotionalUsd, 5);
+  assert.equal(enabled.maxNotionalUsd, 0);
+  assert.equal(enabled.capacityMode, "broker-metadata-account-margin-and-user-policy");
   assert.deepEqual(enabled.allowedSymbols, ["BTCUSDT", "SOLUSDT"]);
 
   const blocked = resolveBybitExecutionPolicy({ trading: true, withdrawal: true });
@@ -226,7 +227,7 @@ test("account-margin capacity is ready without a fixed operator notional cap", (
   const policy = resolveBybitExecutionPolicy({ trading: true, withdrawal: false });
   assert.equal(policy.tradingEnabled, true);
   assert.equal(policy.maxNotionalUsd, 0);
-  assert.equal(policy.capacityMode, "account-margin");
+  assert.equal(policy.capacityMode, "broker-metadata-account-margin-and-user-policy");
 
   const gate = validateBybitMainnetValidationRequest({
     account: { id: "acct-1" },

@@ -3,7 +3,7 @@
 This matrix describes repository capability, not what a provider API could support in theory. `No`
 under certification means no recorded Chapter II-B external test evidence exists.
 
-| Provider | Interactive | Persistent | Market data | Account data | Manual trading | Automated trading | Browser-independent | Testnet certified | Mainnet certified | Current state / limitation |
+| Provider | Interactive | Persistent | Market data | Account data | Manual trading | Automated trading | Browser-independent | Demo/sandbox certified | Mainnet certified | Current state / limitation |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
 | Bybit | Yes | Code present | Yes | Yes | Gated | Gated | Worker design: yes | No | No | PERSISTENT CAPABLE — NOT CERTIFIED; only registered persistent adapter |
 | Hyperliquid | MetaMask | No | Yes | Relay snapshot | Gated relay | No persistent runtime | Requests only | No | No | REQUEST RELAY — NOT PERSISTENT; agent onboarding is not common mandate/worker lifecycle |
@@ -51,6 +51,10 @@ under certification means no recorded Chapter II-B external test evidence exists
 ## Promotion rule
 
 A provider may move to `FULLY PERSISTENT` only after a normalized adapter exists, no-withdrawal
-permission validation is implemented, the v2 vault and mandate are used, private streams and full
+permission validation is implemented, the current environment-bound v3 vault and signed mandate are used, private streams and full
 reconciliation run in the worker, and the browser-independent test matrix is recorded. Public API
 documentation or an interactive connection is not certification.
+
+## Chapter II-D node status
+
+`BLACK_CLOUD_NODE_01` has a production deployment package and schema but is not remotely deployed or externally certified because no VPS SSH destination/identity was available. Bybit Demo and Mainnet Live remain `PERSISTENT CAPABLE — NOT CERTIFIED`. Hyperliquid, MetaMask and Phantom persistent execution remain unsupported. A stale node heartbeat is shown as offline; no provider is promoted from an old database row.

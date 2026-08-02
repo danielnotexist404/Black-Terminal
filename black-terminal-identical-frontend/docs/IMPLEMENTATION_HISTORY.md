@@ -1313,3 +1313,13 @@ Remaining:
   fallback selection, active-wall liquidity, violated-wall event totals, modeled liquidation
   pressure/bias and latest-event context. Production parity/data-hash diagnostics are now hidden;
   confirmed liquidation labeling remains reserved for future Black Core tick data.
+
+# 2026-08-02 - Phase V Chapter II-D Black Cloud Node 01 Production Package
+
+- Added the additive `black_cloud_nodes` registry and immutable redacted certification-evidence table with service-role-only access and RLS enabled.
+- Added stable `BLACK_CLOUD_NODE_01` identity, per-start worker instances, explicit startup phases, persistent heartbeat telemetry and stale-node UI semantics.
+- Added synthetic AES-256-GCM envelope tests for decrypt, AAD, tamper, tenant, provider and environment binding plus signed-mandate/revocation tests. No real credential is used or persisted.
+- Added Bybit public-time clock health; unsafe drift blocks new durable queue claims and external order submission while reconciliation remains available.
+- Hardened the immutable Compose runtime with non-root/read-only execution, dropped capabilities, loopback-only health, bounded resources/PIDs/logs and no Docker socket.
+- Added exact single-VPS preflight/build/deploy/rollback scripts and the operations/certification runbooks.
+- Did not claim external completion: no VPS destination or SSH identity was available, no container was built on the actual host, and no broker order or browser-offline/reboot scenario was executed.

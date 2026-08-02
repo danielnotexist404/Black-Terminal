@@ -22,6 +22,28 @@ export function verifyCanonicalSignature(payload, signature, signingKey = proces
   return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
 }
 
+export function runMandateSignatureSelfTest(signingKey = process.env.BLACK_CLOUD_INTENT_SIGNING_KEY) {
+  const activeMandate = {
+    scope: "black-cloud-startup-self-test",
+    mandateId: "synthetic-never-persisted",
+    status: "ACTIVE",
+    executionEnvironment: "DEMO",
+    mandateVersion: 1
+  };
+  const signature = signCanonicalPayload(activeMandate, signingKey);
+  const checks = {
+    signatureAccepted: verifyCanonicalSignature(activeMandate, signature, signingKey),
+    modifiedPayloadRejected: !verifyCanonicalSignature({ ...activeMandate, mandateVersion: 2 }, signature, signingKey),
+    revokedMandateRejected: !isActiveSignedMandate({ ...activeMandate, status: "REVOKED" }, signature, signingKey)
+  };
+  if (!Object.values(checks).every(Boolean)) throw new Error("Automation mandate cryptographic self-test failed.");
+  return { status: "PASS", algorithm: "HMAC-SHA256", checks };
+}
+
+function isActiveSignedMandate(mandate, signature, signingKey) {
+  return mandate?.status === "ACTIVE" && verifyCanonicalSignature(mandate, signature, signingKey);
+}
+
 export function createExecutionIdempotencyKey({ groupIntentId, mandateId, connectionId, intentVersion, executionLeg }) {
   return hashCanonicalPayload({
     groupIntentId: String(groupIntentId),

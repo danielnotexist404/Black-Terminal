@@ -104,6 +104,10 @@ src/automation/types.ts
 These files define the boundaries before implementation of live WebSocket, REST, API-key, and
 strategy-runner code begins.
 
+## Black Cloud production boundary
+
+Bybit Demo and Mainnet Live are the only active Black Cloud execution environments; Testnet is not used. Browser automation delegates signed, versioned intents to Supabase. `BLACK_CLOUD_NODE_01` consumes them only after config, vault/mandate self-test, schema, lease, queue, reconciliation and clock gates pass. The worker instance is ephemeral while the node identity is stable. New submissions stop on unsafe clock or lost fencing. Strategy runtime remains disabled until an actual browser-offline strategy lifecycle is externally certified; no UI or Investment Group module may call the adapter directly.
+
 ## Implementation Status
 
 - Binance public historical candles are implemented through the normalized market-data adapter.

@@ -17,13 +17,13 @@ This document explains how Black Terminal is built today and how its major syste
 The persistent execution service is a separate Node 22 container. `Dockerfile.black-cloud` and
 `docker-compose.black-cloud.yml` package the worker with restart, readiness, resource, filesystem, and
 graceful-shutdown controls. The worker requires Supabase service identity, versioned vault keys,
-intent signing, testnet/mainnet gates, and explicit provider endpoints from
+intent signing, Bybit Demo/Mainnet Live gates, and an approved endpoint profile from
 `.env.black-cloud.example`.
 
 The control plane may run on Vercel because its requests are short lived. Private broker WebSockets,
 strategy runtime, reconciliation, and protection may not. Use `/health/live`, `/health/ready`, and
 `/metrics` on the always-on host. Deployment is incomplete until the image digest, applied migration,
-host, alert routes, rollback target, and testnet certification evidence are recorded.
+host, alert routes, rollback target, and selected Demo or Mainnet Live certification evidence are recorded.
 
 ## Boot Flow
 
@@ -405,7 +405,7 @@ Run `npm run test:bybit-external-orders` and `npm run build`. For controlled liv
 
 # Black Cloud Worker Build and Rollout
 
-Run `npm run test:phase5-chapter2`, `npm run security:contracts` and `npm run build`. Build the persistent runtime with `docker build -f Dockerfile.black-cloud -t black-terminal-cloud-worker .`. Deploy it to an always-on container provider with the server-only variables listed in `OFFLINE_EXECUTION_CERTIFICATION.md`; verify `/live` and `/ready` before enabling the Vercel control-plane flag. Start on Bybit testnet. Never enable mainnet or claim offline certification until the full shutdown/reconnect/emergency matrix has persisted evidence.
+Run `npm run test:phase5-chapter2`, `npm run security:contracts`, `npm run security:verify-migration-source` and `npm run build`. The only authorized persistent host for Chapter II-D is the user's existing VPS, registered as `BLACK_CLOUD_NODE_01`; do not provision another execution VPS and do not use Vercel for the worker. Use `scripts/black-cloud-node-preflight.sh` and the two-stage `scripts/deploy-black-cloud-node01.sh build|deploy <COMMIT>` flow. Retain the commit tag and exact `sha256:` image ID. Bybit environments are Demo or Mainnet Live only—never Testnet. Verify liveness, fail-closed readiness, metrics, heartbeat freshness, leases, private authentication/subscriptions and reconciliation before any separate user-authorized order certification.
 # Bybit Order Hotfix Verification
 
 Run `npm run test:bybit-canonical-orders`, `npm run test:bybit-external-orders`, `npm run test:bybit-certification`, then `npm run build`. A production release must also verify one controlled venue order produces one row and one line before recording live certification evidence.

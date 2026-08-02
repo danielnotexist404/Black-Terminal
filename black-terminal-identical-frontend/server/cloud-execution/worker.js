@@ -12,6 +12,7 @@ import {
   createExecutionIdempotencyKey,
   hashCanonicalPayload,
   intentSigningPayload,
+  runMandateSignatureSelfTest,
   verifyCanonicalSignature
 } from "./canonical.js";
 import { BlackCloudRepository, sanitizeError } from "./repository.js";
@@ -19,11 +20,36 @@ import { BrokerConnectionManager } from "./connection-supervisor.js";
 import { validateBlackCloudRuntime } from "./runtime-config.js";
 import { createCloudExchangeAdapter } from "./adapters/registry.js";
 import { normalizeBybitExecutionEnvironment } from "../exchanges/bybit-endpoints.js";
+import { runBrokerCredentialCryptoSelfTest } from "./secret-vault.js";
+import { measureBybitClockHealth, WORKER_CLOCK_STATUSES } from "./clock-health.js";
+import fs from "node:fs";
+
+const BLACK_CLOUD_SOFTWARE_VERSION = readPackageVersion();
+
+export const WORKER_STARTUP_PHASES = Object.freeze({
+  PROCESS_STARTING: "PROCESS_STARTING",
+  CONFIG_VALIDATING: "CONFIG_VALIDATING",
+  CRYPTO_SELF_TEST: "CRYPTO_SELF_TEST",
+  DATABASE_CONNECTING: "DATABASE_CONNECTING",
+  SCHEMA_VALIDATING: "SCHEMA_VALIDATING",
+  LEASE_SUBSYSTEM_READY: "LEASE_SUBSYSTEM_READY",
+  QUEUE_READY: "QUEUE_READY",
+  WORKER_READY: "WORKER_READY",
+  CONFIGURATION_ERROR: "CONFIGURATION_ERROR",
+  CRYPTOGRAPHIC_ERROR: "CRYPTOGRAPHIC_ERROR",
+  DATABASE_UNAVAILABLE: "DATABASE_UNAVAILABLE",
+  SCHEMA_MISMATCH: "SCHEMA_MISMATCH",
+  LEASE_UNAVAILABLE: "LEASE_UNAVAILABLE",
+  QUEUE_UNAVAILABLE: "QUEUE_UNAVAILABLE",
+  CLOCK_UNSAFE: "CLOCK_UNSAFE",
+  FATAL: "FATAL"
+});
 
 export class BlackCloudExecutionWorker {
   constructor(supabase, options = {}) {
     this.supabase = supabase;
     this.workerId = options.workerId || buildWorkerId();
+    this.nodeId = options.nodeId || process.env.BLACK_CLOUD_NODE_ID || null;
     this.pollIntervalMs = options.pollIntervalMs || 1_000;
     this.claimLimit = options.claimLimit || 10;
     this.leaseTtlSeconds = options.leaseTtlSeconds || 30;
@@ -39,12 +65,22 @@ export class BlackCloudExecutionWorker {
     this.inFlight = new Set();
     this.lastReadiness = { ready: false, workerIdentity: Boolean(this.workerId), dependencies: {} };
     this.lastReadinessAt = null;
+    this.runtime = null;
+    this.startupPhase = WORKER_STARTUP_PHASES.PROCESS_STARTING;
+    this.cryptoSelfTest = null;
+    this.clockHealth = null;
+    this.lastClockCheckAt = null;
+    this.lastNodeHeartbeatAt = null;
     this.metricsCounters = {
       commandsClaimed: 0,
       commandsSucceeded: 0,
       commandsFailed: 0,
       leaseContention: 0,
-      unknownSubmissionOutcomes: 0
+      unknownSubmissionOutcomes: 0,
+      fencingRejections: 0,
+      ordersSubmitted: 0,
+      ordersConfirmed: 0,
+      ordersRejected: 0
     };
   }
 
@@ -53,26 +89,63 @@ export class BlackCloudExecutionWorker {
   }
 
   async start() {
-    const runtime = this.assertRuntime();
-    this.lastReadiness = await this.repository.probeReadiness();
-    this.lastReadinessAt = new Date().toISOString();
-    if (!this.lastReadiness.ready) throw terminalError("WORKER_DEPENDENCIES_UNAVAILABLE", "Black Cloud database, vault, lease, or queue readiness failed.");
-    this.running = true;
     this.startedAt = new Date().toISOString();
-    await this.repository.audit({
-      eventType: "WORKER_STARTED",
-      severity: "INFO",
-      purpose: "worker_lifecycle",
-      userVisible: false,
-      message: "Black Cloud execution worker started.",
-      metadata: { workerId: this.workerId, executionEnvironment: runtime.executionEnvironment, endpointProfile: runtime.endpointProfile }
-    });
-    await this.connectionSupervisor.start();
-    await this.tick();
+    try {
+      this.setStartupPhase(WORKER_STARTUP_PHASES.CONFIG_VALIDATING);
+      this.runtime = this.assertRuntime();
+      this.nodeId = this.runtime.nodeId;
+      this.setStartupPhase(WORKER_STARTUP_PHASES.CRYPTO_SELF_TEST);
+      this.cryptoSelfTest = {
+        status: "PASS",
+        vaultEnvelope: runBrokerCredentialCryptoSelfTest(this.runtime),
+        automationMandate: runMandateSignatureSelfTest()
+      };
+      this.setStartupPhase(WORKER_STARTUP_PHASES.DATABASE_CONNECTING);
+      this.lastReadiness = await this.repository.probeReadiness();
+      this.lastReadinessAt = new Date().toISOString();
+      const dependencies = this.lastReadiness.dependencies || {};
+      if (!Object.values(dependencies).some(Boolean)) throw terminalError("DATABASE_UNAVAILABLE", "Black Cloud database is unavailable.");
+      if (["credentialVault", "eventInbox", "nodeRegistry", "strategyRuntime"].some((name) => !dependencies[name])) throw terminalError("SCHEMA_MISMATCH", "Black Cloud required schema is unavailable; verify the Phase V Chapter II migrations.");
+      this.setStartupPhase(WORKER_STARTUP_PHASES.SCHEMA_VALIDATING);
+      if (!this.lastReadiness.dependencies?.leaseSubsystem) throw terminalError("LEASE_UNAVAILABLE", "Black Cloud lease subsystem is unavailable.");
+      this.setStartupPhase(WORKER_STARTUP_PHASES.LEASE_SUBSYSTEM_READY);
+      if (!this.lastReadiness.dependencies?.queue) throw terminalError("QUEUE_UNAVAILABLE", "Black Cloud durable execution queue is unavailable.");
+      this.setStartupPhase(WORKER_STARTUP_PHASES.QUEUE_READY);
+      if (!this.lastReadiness.ready) throw terminalError("WORKER_DEPENDENCIES_UNAVAILABLE", "Black Cloud database, vault, schema, lease, or queue readiness failed.");
+      this.clockHealth = await measureBybitClockHealth(this.runtime);
+      this.lastClockCheckAt = new Date().toISOString();
+      this.running = true;
+      await this.writeNodeState("STARTING");
+      await this.connectionSupervisor.start();
+      if (this.clockHealth.status === WORKER_CLOCK_STATUSES.UNSAFE) {
+        this.setStartupPhase(WORKER_STARTUP_PHASES.CLOCK_UNSAFE);
+        await this.writeNodeState("DEGRADED");
+        await this.emitClockUnsafeAudit();
+      } else {
+        this.setStartupPhase(WORKER_STARTUP_PHASES.WORKER_READY);
+        await this.writeNodeState("READY");
+      }
+      await this.repository.audit({
+        eventType: "WORKER_STARTED",
+        severity: "INFO",
+        purpose: "worker_lifecycle",
+        userVisible: false,
+        message: "Black Cloud execution worker started.",
+        metadata: { nodeId: this.nodeId, workerId: this.workerId, deploymentCommit: this.runtime.deploymentCommit, executionEnvironment: this.runtime.executionEnvironment, endpointProfile: this.runtime.endpointProfile }
+      });
+      await this.tick();
+    } catch (error) {
+      this.lastLoopError = sanitizeError(error?.message || error);
+      this.setStartupPhase(classifyStartupFailure(error, this.startupPhase));
+      await this.writeNodeState("DEGRADED").catch(() => null);
+      throw error;
+    }
   }
 
   async stop() {
     this.running = false;
+    this.setStartupPhase("DRAINING");
+    await this.writeNodeState("DRAINING").catch(() => null);
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     await Promise.allSettled([...this.inFlight]);
@@ -83,8 +156,9 @@ export class BlackCloudExecutionWorker {
       purpose: "worker_lifecycle",
       userVisible: false,
       message: "Black Cloud execution worker drained and stopped.",
-      metadata: { workerId: this.workerId }
+      metadata: { nodeId: this.nodeId, workerId: this.workerId }
     });
+    await this.writeNodeState("OFFLINE").catch(() => null);
   }
 
   async tick() {
@@ -92,7 +166,8 @@ export class BlackCloudExecutionWorker {
     try {
       this.lastTickAt = new Date().toISOString();
       this.lastLoopError = null;
-      const commands = await this.repository.claimCommands(this.claimLimit);
+      if (!this.lastClockCheckAt || Date.now() - Date.parse(this.lastClockCheckAt) > 30_000) await this.refreshClockHealth();
+      const commands = this.isClockSafe() ? await this.repository.claimCommands(this.claimLimit) : [];
       this.metricsCounters.commandsClaimed += (commands || []).length;
       for (const command of commands || []) {
         const task = this.processCommand(command).finally(() => this.inFlight.delete(task));
@@ -103,16 +178,21 @@ export class BlackCloudExecutionWorker {
         this.lastReadiness = await this.repository.probeReadiness();
         this.lastReadinessAt = new Date().toISOString();
       }
+      if (!this.lastNodeHeartbeatAt || Date.now() - Date.parse(this.lastNodeHeartbeatAt) >= this.runtime.nodeHeartbeatIntervalMs) {
+        await this.writeNodeState(this.isClockSafe() ? "READY" : "DEGRADED");
+      }
     } catch (error) {
       this.lastLoopError = sanitizeError(error?.message || error);
-      console.error("[black-cloud-worker-loop]", sanitizeError(error?.message || error));
+      console.error(JSON.stringify({ timestamp: new Date().toISOString(), level: "ERROR", event: "worker_loop_failed", nodeId: this.nodeId, workerInstanceId: this.workerId, error: sanitizeError(error?.message || error) }));
     } finally {
       if (this.running) this.timer = setTimeout(() => void this.tick(), this.pollIntervalMs);
     }
   }
 
   diagnostics() {
+    const operationalReady = this.running && this.lastReadiness?.ready === true && this.cryptoSelfTest?.status === "PASS" && this.isClockSafe() && this.startupPhase === WORKER_STARTUP_PHASES.WORKER_READY && !this.lastLoopError;
     return {
+      nodeId: this.nodeId,
       workerId: this.workerId,
       running: this.running,
       startedAt: this.startedAt,
@@ -122,6 +202,13 @@ export class BlackCloudExecutionWorker {
       supervisedConnections: this.connectionSupervisor.connections.size,
       executionEnvironment: process.env.BLACK_CLOUD_EXECUTION_ENVIRONMENT || process.env.BYBIT_EXECUTION_ENVIRONMENT || null,
       endpointProfile: process.env.BYBIT_ENDPOINT_PROFILE || "GLOBAL",
+      deploymentCommit: this.runtime?.deploymentCommit || process.env.BLACK_CLOUD_DEPLOYMENT_COMMIT || null,
+      imageDigest: this.runtime?.imageDigest || process.env.BLACK_CLOUD_IMAGE_DIGEST || null,
+      startupPhase: this.startupPhase,
+      clockHealth: this.clockHealth,
+      cryptoSelfTest: this.cryptoSelfTest,
+      lastNodeHeartbeatAt: this.lastNodeHeartbeatAt,
+      operationalReady,
       readiness: this.lastReadiness,
       lastReadinessAt: this.lastReadinessAt,
       connectionMetrics: this.connectionSupervisor.diagnostics(),
@@ -133,10 +220,14 @@ export class BlackCloudExecutionWorker {
     this.lastReadiness = await this.repository.probeReadiness();
     this.lastReadinessAt = new Date().toISOString();
     const tickFresh = this.lastTickAt && Date.now() - Date.parse(this.lastTickAt) <= Math.max(15_000, this.pollIntervalMs * 5);
-    return { ...this.lastReadiness, ready: this.running && tickFresh && !this.lastLoopError && this.lastReadiness.ready, tickFresh };
+    const cryptoReady = this.cryptoSelfTest?.status === "PASS";
+    const clockSafe = this.isClockSafe();
+    const draining = this.startupPhase === "DRAINING";
+    return { ...this.lastReadiness, ready: this.running && tickFresh && !this.lastLoopError && this.lastReadiness.ready && cryptoReady && clockSafe && !draining, tickFresh, cryptoReady, clockSafe, startupPhase: this.startupPhase };
   }
 
   async processCommand(command) {
+    if (command.command_type === "PLACE_ORDER") this.assertSubmissionClockSafe();
     const lease = await this.repository.acquireLease(command.connection_id, this.leaseTtlSeconds);
     if (!lease) {
       this.metricsCounters.leaseContention += 1;
@@ -165,6 +256,8 @@ export class BlackCloudExecutionWorker {
     } catch (error) {
       const classification = classifyExecutionError(error, command);
       this.metricsCounters.commandsFailed += 1;
+      if (/fencing|stale worker/i.test(String(error?.message || error))) this.metricsCounters.fencingRejections += 1;
+      if (command.command_type === "PLACE_ORDER" && !classification.ambiguous) this.metricsCounters.ordersRejected += 1;
       if (classification.ambiguous) this.metricsCounters.unknownSubmissionOutcomes += 1;
       await this.repository.finishAttempt(attemptId, classification.attemptOutcome, {
         errorCode: classification.code,
@@ -255,6 +348,7 @@ export class BlackCloudExecutionWorker {
   }
 
   async placeFollowerOrder(command, fencingToken) {
+    this.assertSubmissionClockSafe();
     if (process.env.BYBIT_CLOUD_EXECUTION_ENABLED !== "true") throw terminalError("BYBIT_CLOUD_DISABLED", "Bybit Cloud execution is disabled.");
     const [plan, intent, mandate, connection, capabilities] = await Promise.all([
       single(this.supabase.from("follower_execution_plans").select("*").eq("id", command.follower_plan_id)),
@@ -373,6 +467,7 @@ export class BlackCloudExecutionWorker {
         throw terminalError("AUTOMATION_MANDATE_RISK_REJECTED", "Order notional exceeds the broker automation mandate.");
       }
       await this.repository.assertFencingToken(connection.id, fencingToken);
+      this.assertSubmissionClockSafe();
       const adapter = createCloudExchangeAdapter(connection.provider, {
         credentials,
         executionEnvironment: credentialEnvironment,
@@ -380,6 +475,7 @@ export class BlackCloudExecutionWorker {
         connectionId: connection.id
       });
       venueReport = await adapter.placeOrder(orderDraft, venueValidation);
+      this.metricsCounters.ordersSubmitted += 1;
     } catch (error) {
       if (!isAmbiguousTransportError(error)) throw error;
       const recovered = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol: intent.symbol, clientOrderId }).catch(() => null);
@@ -460,6 +556,7 @@ export class BlackCloudExecutionWorker {
       message: "Investment Group order was acknowledged by Bybit while under Black Cloud control.",
       metadata: { venueOrderId: venueReport.exchangeOrderId, orderId }
     });
+    this.metricsCounters.ordersConfirmed += 1;
     return { venueOrderId: venueReport.exchangeOrderId, orderId, recovered: Boolean(venueReport.recoveredByReconciliation) };
   }
 
@@ -524,6 +621,75 @@ export class BlackCloudExecutionWorker {
       last_error_code: code,
       last_error_message: message
     }).eq("id", command.id).eq("locked_by", this.workerId));
+  }
+
+  setStartupPhase(phase) {
+    this.startupPhase = phase;
+  }
+
+  isClockSafe() {
+    return Boolean(this.clockHealth) && this.clockHealth.status !== WORKER_CLOCK_STATUSES.UNSAFE;
+  }
+
+  assertSubmissionClockSafe() {
+    if (!this.isClockSafe()) throw terminalError("CLOCK_UNSAFE", "New broker submissions are blocked because worker clock health is unsafe.");
+  }
+
+  async refreshClockHealth() {
+    const previous = this.clockHealth?.status;
+    this.clockHealth = await measureBybitClockHealth(this.runtime);
+    this.lastClockCheckAt = new Date().toISOString();
+    if (this.clockHealth.status === WORKER_CLOCK_STATUSES.UNSAFE) {
+      this.setStartupPhase(WORKER_STARTUP_PHASES.CLOCK_UNSAFE);
+      if (previous !== WORKER_CLOCK_STATUSES.UNSAFE) await this.emitClockUnsafeAudit();
+    } else if (this.startupPhase === WORKER_STARTUP_PHASES.CLOCK_UNSAFE) {
+      this.setStartupPhase(WORKER_STARTUP_PHASES.WORKER_READY);
+    }
+    return this.clockHealth;
+  }
+
+  async emitClockUnsafeAudit() {
+    await this.repository.audit({
+      eventType: "WORKER_CLOCK_UNSAFE",
+      severity: "CRITICAL",
+      purpose: "clock_health",
+      userVisible: false,
+      message: "New broker submissions were blocked because the worker clock reference is unavailable or outside the configured drift boundary.",
+      metadata: { nodeId: this.nodeId, workerId: this.workerId, clockHealth: this.clockHealth }
+    }).catch(() => null);
+  }
+
+  async writeNodeState(status) {
+    if (!this.runtime || !this.nodeId) return;
+    const connections = this.connectionSupervisor.diagnostics();
+    const telemetry = await this.repository.getNodeTelemetry().catch(() => ({
+      queueDepth: this.lastReadiness?.queueDepth || 0,
+      oldestQueueAgeMs: this.lastReadiness?.oldestQueueAgeMs || 0,
+      activeStrategyCount: this.lastReadiness?.activeStrategyCount || 0
+    }));
+    await this.repository.writeNodeHeartbeat({
+      nodeId: this.nodeId,
+      deploymentEnvironment: this.runtime.deploymentEnvironment,
+      region: this.runtime.region,
+      hostname: process.env.BLACK_CLOUD_HOSTNAME || "redacted-existing-vps",
+      deploymentCommit: this.runtime.deploymentCommit,
+      imageDigest: this.runtime.imageDigest,
+      softwareVersion: BLACK_CLOUD_SOFTWARE_VERSION,
+      nodeVersion: process.version,
+      workerInstanceId: this.workerId,
+      executionEnvironment: this.runtime.executionEnvironment,
+      status,
+      startupPhase: this.startupPhase,
+      startedAt: this.startedAt,
+      clockHealth: this.clockHealth,
+      cryptoSelfTest: this.cryptoSelfTest,
+      activeConnectionCount: connections.activeConnections,
+      readyConnectionCount: connections.readyConnections,
+      degradedConnectionCount: connections.degradedConnections,
+      ...telemetry,
+      safeMetadata: { endpointProfile: this.runtime.endpointProfile, strategyRuntimeEnabled: process.env.BLACK_CLOUD_STRATEGY_RUNTIME_ENABLED === "true" }
+    });
+    this.lastNodeHeartbeatAt = new Date().toISOString();
   }
 }
 
@@ -607,7 +773,22 @@ function ambiguousError(message) {
 }
 
 function buildWorkerId() {
-  return `${process.env.BLACK_CLOUD_WORKER_REGION || "local"}:${process.pid}:${Math.random().toString(36).slice(2, 10)}`;
+  return `${process.env.BLACK_CLOUD_NODE_ID || "unregistered-node"}:${Date.now().toString(36)}:${process.pid}:${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function classifyStartupFailure(error, currentPhase) {
+  if (error?.code === "BLACK_CLOUD_RUNTIME_INVALID" || currentPhase === WORKER_STARTUP_PHASES.CONFIG_VALIDATING) return WORKER_STARTUP_PHASES.CONFIGURATION_ERROR;
+  if (currentPhase === WORKER_STARTUP_PHASES.CRYPTO_SELF_TEST) return WORKER_STARTUP_PHASES.CRYPTOGRAPHIC_ERROR;
+  if (error?.code === "SCHEMA_MISMATCH") return WORKER_STARTUP_PHASES.SCHEMA_MISMATCH;
+  if (error?.code === "LEASE_UNAVAILABLE") return WORKER_STARTUP_PHASES.LEASE_UNAVAILABLE;
+  if (error?.code === "QUEUE_UNAVAILABLE") return WORKER_STARTUP_PHASES.QUEUE_UNAVAILABLE;
+  if ([WORKER_STARTUP_PHASES.DATABASE_CONNECTING, WORKER_STARTUP_PHASES.SCHEMA_VALIDATING].includes(currentPhase)) return WORKER_STARTUP_PHASES.DATABASE_UNAVAILABLE;
+  return WORKER_STARTUP_PHASES.FATAL;
+}
+
+function readPackageVersion() {
+  try { return JSON.parse(fs.readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version || "unknown"; }
+  catch { return "unknown"; }
 }
 
 async function rows(query) {

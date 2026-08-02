@@ -15,6 +15,15 @@ export class BrokerConnectionManager {
     this.reconciliationWorker = new ReconciliationWorker(supabase, this.workerId);
     this.running = false;
     this.refreshTimer = null;
+    this.metrics = {
+      leaseRenewals: 0,
+      leaseFailures: 0,
+      reconciliationRuns: 0,
+      reconciliationDurationMs: 0,
+      privateEvents: 0,
+      orderEvents: 0,
+      executionEvents: 0
+    };
   }
 
   async start() {
@@ -38,7 +47,8 @@ export class BrokerConnectionManager {
       reconnectCount: health.reduce((sum, row) => sum + Number(row.reconnectAttempts || 0), 0),
       oldestAccountStreamAgeMs: health.reduce((oldest, row) => row.lastAccountEventAt
         ? Math.max(oldest, Date.now() - Number(row.lastAccountEventAt))
-        : oldest, 0)
+        : oldest, 0),
+      ...this.metrics
     };
   }
 
@@ -167,14 +177,19 @@ export class BrokerConnectionManager {
     if (runtime.stopped) return;
     const lease = await this.repository.acquireLease(runtime.connection.id, this.leaseTtlSeconds).catch(() => null);
     if (!lease || Number(lease.fencing_token) !== runtime.fencingToken) {
+      this.metrics.leaseFailures += 1;
       await this.stopConnection(runtime.connection.id, "lease_lost");
       return;
     }
+    this.metrics.leaseRenewals += 1;
     await this.writeHealth(runtime);
   }
 
   async handleEvent(runtime, event) {
     if (runtime.stopped || this.isDuplicate(runtime, event)) return;
+    this.metrics.privateEvents += 1;
+    if (event.type === "order") this.metrics.orderEvents += 1;
+    if (event.type === "execution") this.metrics.executionEvents += 1;
     const inbox = await this.repository.recordInboxEvent(runtime.connection, event);
     if (!inbox.inserted) return;
     const eventAt = new Date(Number(event.time || Date.now())).toISOString();
@@ -253,6 +268,7 @@ export class BrokerConnectionManager {
   async reconcile(runtime, triggerType) {
     if (runtime.stopped || runtime.reconciling) return;
     runtime.reconciling = true;
+    const startedAt = Date.now();
     try {
       const result = await this.reconciliationWorker.run({ adapter: runtime.adapter, connection: runtime.connection, account: runtime.account, triggerType });
       if (!result.executionState?.tradingEnabled) {
@@ -287,6 +303,8 @@ export class BrokerConnectionManager {
     } catch (error) {
       await this.handleError(runtime, error);
     } finally {
+      this.metrics.reconciliationRuns += 1;
+      this.metrics.reconciliationDurationMs = Date.now() - startedAt;
       runtime.reconciling = false;
     }
   }

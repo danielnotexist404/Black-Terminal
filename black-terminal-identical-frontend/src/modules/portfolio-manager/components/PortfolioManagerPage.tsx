@@ -1004,9 +1004,20 @@ function BlackCloudConnectionPanel({ connection, accountId, status, message, onA
   const automation = status?.automationMandates?.find((item) => item.connection_id === connection.id && item.status === "ACTIVE") ?? null;
   const strategies = status?.strategyDeployments?.filter((item) => item.connection_id === connection.id && !["STOPPED", "FAILED"].includes(item.status)) ?? [];
   const incidents = status?.openIncidents.filter((item) => item.connection_id === connection.id) ?? [];
+  const node = status?.nodes?.find((item) => item.execution_environment === connection.execution_environment) || status?.nodes?.[0] || null;
   const stopped = connection.control_state !== "ACTIVE";
   return <div className={`black-cloud-panel ${stopped ? "stopped" : "ready"}`}>
     <div className="black-cloud-title"><b>BLACK CLOUD</b><span>{connection.execution_readiness}</span></div>
+    <div className="black-cloud-grid">
+      <span>Node <b>{node?.node_id || "BLACK_CLOUD_NODE_01"}</b></span>
+      <span>Node Status <b>{node?.status || "OFFLINE"}</b></span>
+      <span>Node Heartbeat <b>{node ? formatCloudAge(node.last_heartbeat_at) : "NEVER"}</b></span>
+      <span>Deployment <b>{node?.deployment_commit?.slice(0, 7) || "NOT DEPLOYED"}</b></span>
+      <span>Node Connections <b>{node ? `${node.ready_connection_count} READY / ${node.active_connection_count} ACTIVE` : "0 READY"}</b></span>
+      <span>Active Strategies <b>{node?.active_strategy_count || 0}</b></span>
+      <span>Queue <b>{node ? `${node.queue_depth} PENDING` : "UNAVAILABLE"}</b></span>
+      <span>Clock <b>{node?.clockStatus || "UNSAFE"}</b></span>
+    </div>
     <div className="black-cloud-grid">
       <span>Provider <b>{connection.provider.toUpperCase()}</b></span>
       <span>Environment <b>{connection.execution_environment === "DEMO" ? "BYBIT DEMO" : "BYBIT MAINNET LIVE"}</b></span>

@@ -9,6 +9,7 @@ import { BybitPrivateStreamClient } from "../server/exchanges/bybit-private-stre
 
 assert.equal(resolveApprovedProviderEndpoint("bybit", "demo", "https"), "https://api-demo.bybit.com");
 assert.equal(isProviderEndpointApproved({ provider: "bybit", environment: "demo", endpoint: "wss://stream-demo.bybit.com/v5/private", protocol: "wss" }), true);
+assert.equal(isProviderEndpointApproved({ provider: "bybit", environment: "testnet", endpoint: "https://api-testnet.bybit.com", protocol: "https" }), false);
 assert.equal(isProviderEndpointApproved({ provider: "bybit", environment: "demo", endpoint: "https://127.0.0.1/steal" }), false);
 assert.throws(() => assertProviderEndpoint({ provider: "bybit", environment: "mainnet_live", endpoint: "http://api.bybit.com" }), /HTTPS and WSS/);
 assert.throws(() => assertProviderEndpoint({ provider: "bybit", environment: "mainnet_live", endpoint: "https://evil.example" }), /not approved/);

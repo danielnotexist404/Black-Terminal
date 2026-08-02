@@ -10,8 +10,7 @@ const PROVIDER_ENDPOINTS = Object.freeze({
       "https://api.bybit.id", "wss://stream.bybit.id",
       "https://api.manepa.jp", "wss://stream.manepa.jp"
     ],
-    demo: ["https://api-demo.bybit.com", "https://api.bybit.com", "wss://stream-demo.bybit.com", "wss://stream.bybit.com"],
-    testnet: ["https://api-testnet.bybit.com", "wss://stream-testnet.bybit.com"]
+    demo: ["https://api-demo.bybit.com", "https://api.bybit.com", "wss://stream-demo.bybit.com", "wss://stream.bybit.com"]
   },
   hyperliquid: {
     mainnet: ["https://api.hyperliquid.xyz", "wss://api.hyperliquid.xyz"],

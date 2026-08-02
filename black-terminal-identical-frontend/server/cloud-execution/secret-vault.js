@@ -109,6 +109,56 @@ export function toSafeSecretReference(row) {
   };
 }
 
+export function runBrokerCredentialCryptoSelfTest({
+  executionEnvironment = "DEMO",
+  masterKeyVersion = Number(process.env.BLACK_CLOUD_MASTER_KEY_VERSION || 1)
+} = {}) {
+  const identity = {
+    userId: "00000000-0000-4000-8000-000000000001",
+    connectionId: "00000000-0000-4000-8000-000000000002",
+    provider: "bybit",
+    executionEnvironment: normalizeBybitExecutionEnvironment(executionEnvironment),
+    credentialVersion: 1
+  };
+  const masterKey = credentialMasterKey(masterKeyVersion);
+  const dataKey = crypto.randomBytes(32);
+  const plaintext = Buffer.from(JSON.stringify({ apiKey: "synthetic", apiSecret: "never-persisted" }), "utf8");
+  const aad = associatedData(identity);
+  const wrapAad = wrappingAssociatedData(aad, masterKeyVersion);
+  let decryptedKey;
+  let decrypted;
+  try {
+    const secretEnvelope = encryptAesGcm(plaintext, dataKey, aad);
+    const keyEnvelope = encryptAesGcm(dataKey, masterKey, wrapAad);
+    decryptedKey = decryptAesGcm(keyEnvelope, masterKey, wrapAad);
+    decrypted = decryptAesGcm(secretEnvelope, decryptedKey, aad);
+    const checks = {
+      encryptDecrypt: decrypted.equals(plaintext),
+      associatedDataBinding: rejection(() => decryptAesGcm(secretEnvelope, decryptedKey, associatedData({ ...identity, credentialVersion: 2 }))),
+      tamperRejected: rejection(() => decryptAesGcm({ ...secretEnvelope, ciphertext: tampered(secretEnvelope.ciphertext) }, decryptedKey, aad)),
+      wrongTenantRejected: rejection(() => decryptAesGcm(secretEnvelope, decryptedKey, associatedData({ ...identity, userId: "00000000-0000-4000-8000-000000000099" }))),
+      wrongProviderRejected: rejection(() => decryptAesGcm(secretEnvelope, decryptedKey, associatedData({ ...identity, provider: "other" }))),
+      wrongEnvironmentRejected: rejection(() => decryptAesGcm(secretEnvelope, decryptedKey, associatedData({ ...identity, executionEnvironment: identity.executionEnvironment === "DEMO" ? "MAINNET_LIVE" : "DEMO" })))
+    };
+    if (!Object.values(checks).every(Boolean)) throw new Error("Broker credential cryptographic self-test failed.");
+    return {
+      status: "PASS",
+      envelopeVersion: ENVELOPE_VERSION,
+      masterKeyVersion,
+      masterKeyFingerprint: crypto.createHash("sha256").update(masterKey).digest("hex").slice(0, 16),
+      checks
+    };
+  } finally {
+    masterKey.fill(0);
+    dataKey.fill(0);
+    plaintext.fill(0);
+    aad.fill(0);
+    wrapAad.fill(0);
+    decryptedKey?.fill(0);
+    decrypted?.fill(0);
+  }
+}
+
 function decryptV3(row, reference) {
   const identity = {
     userId: reference.user_id,
@@ -192,6 +242,17 @@ function decryptAesGcm(envelope, key, aad) {
   return Buffer.concat([decipher.update(envelope.ciphertext), decipher.final()]);
 }
 
+function rejection(run) {
+  try { run(); return false; }
+  catch { return true; }
+}
+
+function tampered(value) {
+  const output = Buffer.from(value);
+  output[0] ^= 1;
+  return output;
+}
+
 function associatedData(input, envelopeVersion = ENVELOPE_VERSION) {
   const payload = {
     scope: "black-cloud-broker-credential",
@@ -247,6 +308,7 @@ function credentialMasterKey(version) {
   const encoded = process.env[`BLACK_CLOUD_SECRET_MASTER_KEY_V${version}`]
     || (version === 1 ? process.env.BLACK_CLOUD_SECRET_MASTER_KEY || process.env.EXCHANGE_CREDENTIAL_MASTER_KEY : null);
   if (!encoded) throw Object.assign(new Error(`Black Cloud credential wrapping key v${version} is unavailable.`), { statusCode: 503 });
+  if (!/^[A-Za-z0-9+/]{43}=$/.test(encoded)) throw Object.assign(new Error(`Black Cloud credential wrapping key v${version} is not canonical base64.`), { statusCode: 503 });
   const key = Buffer.from(encoded, "base64");
   if (key.length !== 32) {
     key.fill(0);

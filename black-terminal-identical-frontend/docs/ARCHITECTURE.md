@@ -376,6 +376,8 @@ All privileged operations flow through `/api/network/[resource]`. Server routes 
 
 The browser and Tauri app are authenticated control clients. Vercel hosts the stateless control plane; an independently hosted Node 22 worker owns cloud-delegated broker streams, commands, risk gates and reconciliation. Supabase stores signed intents, mandates, leases/fencing tokens, execution plans, health, incidents and redacted audit evidence. Exchange credentials cross only the service-role vault boundary. See `BROKER_CONNECTION_ARCHITECTURE.md` and `PHASE5_CHAPTER2_BLACK_CLOUD_CONNECTIVITY.md`.
 
+Chapter II-D binds the first production data-plane identity to the user's existing single VPS as `BLACK_CLOUD_NODE_01`. A stable node ID is distinct from the generated per-process worker instance. The additive node registry stores commit/digest, startup phase, safe clock/crypto results, heartbeat and bounded telemetry. A 45-second stale threshold prevents the control plane from treating an old `READY` row as live. The immutable, non-root Compose service publishes health/metrics on host loopback only and uses bounded logs. The repository package is complete, but the external VPS remains undeployed until SSH access is supplied; the architecture is not high availability.
+
 ## Kioseff Pine Compatibility Architecture
 
 Kioseff Stop Loss Clustering is a chart-native TypeScript worker subsystem under

@@ -17,6 +17,7 @@ export type VenueCertificationRecord = {
   defaultNetwork: ConnectionNetwork;
   readiness: ConnectionReadiness;
   status: VenueImplementationStatus;
+  supportState: "FULLY PERSISTENT" | "FULLY FUNCTIONAL — INTERACTIVE ONLY" | "READ ONLY" | "TESTNET ONLY" | "IMPLEMENTED BUT DISABLED" | "PERSISTENT CAPABLE — NOT CERTIFIED" | "REQUEST RELAY — NOT PERSISTENT" | "UNSUPPORTED";
   connectorVisible: boolean;
   authReady: boolean;
   accountReadReady: boolean;
@@ -63,6 +64,7 @@ function cexMarketDataOnly(id: ExchangeId, label: string, products: MarketKind[]
     defaultNetwork: "mainnet",
     readiness: "execution-blocked",
     status: "market-data-only",
+    supportState: "READ ONLY",
     connectorVisible: true,
     authReady: false,
     accountReadReady: false,
@@ -86,6 +88,7 @@ export const venueCertificationRegistry: VenueCertificationRecord[] = [
     defaultNetwork: "mainnet",
     readiness: "execution-blocked",
     status: "partial",
+    supportState: "PERSISTENT CAPABLE — NOT CERTIFIED",
     connectorVisible: true,
     authReady: true,
     accountReadReady: true,
@@ -122,6 +125,7 @@ export const venueCertificationRegistry: VenueCertificationRecord[] = [
     defaultNetwork: "mainnet",
     readiness: "execution-blocked",
     status: "partial",
+    supportState: "REQUEST RELAY — NOT PERSISTENT",
     connectorVisible: true,
     authReady: true,
     accountReadReady: true,
@@ -146,6 +150,7 @@ export const venueCertificationRegistry: VenueCertificationRecord[] = [
     defaultNetwork: "mainnet",
     readiness: "execution-blocked",
     status: "signer-only",
+    supportState: "FULLY FUNCTIONAL — INTERACTIVE ONLY",
     connectorVisible: true,
     authReady: true,
     accountReadReady: false,
@@ -166,6 +171,7 @@ export const venueCertificationRegistry: VenueCertificationRecord[] = [
     defaultNetwork: "mainnet",
     readiness: "execution-blocked",
     status: "signer-only",
+    supportState: "FULLY FUNCTIONAL — INTERACTIVE ONLY",
     connectorVisible: true,
     authReady: true,
     accountReadReady: false,
@@ -216,6 +222,7 @@ function signerProtocol(id: string, label: string, reason: string): VenueCertifi
     defaultNetwork: "mainnet",
     readiness: "execution-blocked",
     status: "signer-only",
+    supportState: "FULLY FUNCTIONAL — INTERACTIVE ONLY",
     connectorVisible: true,
     authReady: true,
     accountReadReady: false,
@@ -239,6 +246,7 @@ function deferredProtocol(id: string, label: string, reason: string): VenueCerti
     defaultNetwork: "unsupported",
     readiness: "disconnected",
     status: "deferred",
+    supportState: "UNSUPPORTED",
     connectorVisible: false,
     authReady: false,
     accountReadReady: false,
@@ -262,6 +270,7 @@ function deferredInstitutional(id: string, label: string): VenueCertificationRec
     defaultNetwork: "unsupported",
     readiness: "disconnected",
     status: "deferred",
+    supportState: "UNSUPPORTED",
     connectorVisible: false,
     authReady: false,
     accountReadReady: false,

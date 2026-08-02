@@ -165,6 +165,7 @@ export class BybitPrivateStreamClient {
     this.pingTimer = null;
     this.staleTimer = null;
     this.closedByUser = false;
+    this.readyWaiter = null;
   }
 
   onMessage(handler) {
@@ -183,8 +184,10 @@ export class BybitPrivateStreamClient {
     this.state.lastError = null;
     this.closedByUser = false;
     const WebSocketCtor = await this.resolveWebSocketCtor();
+    const ready = this.createReadyWaiter();
     this.ws = new WebSocketCtor(this.url);
     this.bindSocket(this.ws);
+    await ready;
     return this;
   }
 
@@ -193,7 +196,9 @@ export class BybitPrivateStreamClient {
     this.clearTimers();
     this.state.status = "disconnected";
     this.state.authenticated = false;
+    this.rejectReadyWaiter(new Error("Bybit private stream disconnected before it became ready."));
     if (this.ws) this.ws.close?.();
+    runtimeStates.delete(this.connectionId);
   }
 
   diagnostics() {
@@ -218,6 +223,7 @@ export class BybitPrivateStreamClient {
     const handleClose = () => {
       this.state.authenticated = false;
       this.state.status = this.closedByUser ? "disconnected" : "reconnecting";
+      this.rejectReadyWaiter(new Error("Bybit private stream closed before authentication and subscription completed."));
       this.clearTimers();
       if (!this.closedByUser) this.scheduleReconnect();
     };
@@ -260,6 +266,7 @@ export class BybitPrivateStreamClient {
     if (payload.op === "subscribe") {
       if (payload.success === true || payload.retCode === 0) {
         this.state.subscriptionAcknowledgedAt = Date.now();
+        this.resolveReadyWaiter();
       } else {
         this.handleError(new Error(payload.ret_msg || payload.retMsg || "Bybit private stream subscription failed."));
       }
@@ -316,14 +323,50 @@ export class BybitPrivateStreamClient {
   scheduleReconnect() {
     this.state.reconnectCount += 1;
     const delay = Math.min(this.maxReconnectDelayMs, this.reconnectDelayMs * 2 ** Math.max(0, this.state.reconnectCount - 1));
-    this.reconnectTimer = setTimeout(() => void this.connect(), delay);
+    this.reconnectTimer = setTimeout(() => void this.connect().catch((error) => this.handleError(error)), delay);
   }
 
   handleError(error) {
     const nextError = error instanceof Error ? error : new Error(String(error));
     this.state.lastError = nextError.message;
     this.state.status = this.state.status === "connected" ? "degraded" : this.state.status;
+    this.rejectReadyWaiter(nextError);
     for (const handler of this.errorHandlers) handler(nextError);
+  }
+
+  createReadyWaiter(timeoutMs = Number(process.env.BYBIT_PRIVATE_STREAM_CONNECT_TIMEOUT_MS || 12_000)) {
+    this.rejectReadyWaiter(new Error("A newer Bybit private stream connection attempt replaced the previous attempt."));
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (!this.readyWaiter) return;
+        const error = new Error("Bybit private stream authentication or subscription acknowledgement timed out.");
+        error.code = "BYBIT_PRIVATE_STREAM_READY_TIMEOUT";
+        this.readyWaiter = null;
+        this.state.status = "degraded";
+        reject(error);
+        this.ws?.close?.();
+      }, Math.max(1_000, timeoutMs));
+      this.readyWaiter = {
+        resolve: () => {
+          clearTimeout(timeout);
+          this.readyWaiter = null;
+          resolve();
+        },
+        reject: (error) => {
+          clearTimeout(timeout);
+          this.readyWaiter = null;
+          reject(error);
+        }
+      };
+    });
+  }
+
+  resolveReadyWaiter() {
+    this.readyWaiter?.resolve();
+  }
+
+  rejectReadyWaiter(error) {
+    this.readyWaiter?.reject(error);
   }
 }
 

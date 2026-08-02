@@ -58,7 +58,7 @@ import AdminPanel from "./components/AdminPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import UpgradePanel from "./components/UpgradePanel";
 import BlackGPT from "./components/BlackGPT";
-import { LogOut, Shield } from "lucide-react";
+import { LogOut, Shield, ShieldCheck } from "lucide-react";
 import type { IndicatorAlertDefinition } from "./automation/alerts";
 import { ScannerPage } from "./modules/scanner/components/ScannerPage";
 import type { ScannerResult } from "./modules/scanner/types/scanner.types";
@@ -92,6 +92,7 @@ import type {
 } from "./chart-engine/types";
 import { defaultIndicatorAdvancedSettings } from "./chart-engine/profile/volumeProfileDefaults";
 import { clearSupabaseAuthSession, dbGetUsers, dbUpdateUser, dbAddAuditLog, supabase } from "./lib/supabase";
+import { controlBlackCloudConnectionViaApi, fetchBlackCloudStatusViaApi } from "./portfolio/portfolioApiClient";
 import { getMarketDataEngineAdapter } from "./market-data/engine/marketDataEngine";
 import { ExchangeOption, MarketSymbolOption, getExchangeOption, marketCatalog } from "./market-data/marketCatalog";
 import type { ExchangeId, MarketSymbol, Timeframe } from "./market-data/types";
@@ -590,7 +591,8 @@ export default function App() {
     return base;
   }, [currentUser]);
 
-  const handleSignOut = async () => {
+  const handleSignOut = async (skipWarning = false) => {
+    if (!skipWarning && !window.confirm("Log out of Black Terminal? Your explicitly authorized broker connections, deployed automations, and position protection will continue running in Black Cloud. Use Stop Automations & Log Out if you want to pause new automated execution first.")) return;
     if (currentUser) {
       await dbUpdateUser(currentUser.username, { status: "offline" });
       await dbAddAuditLog("LOGOUT", `User ${currentUser.username} logged out.`);
@@ -605,6 +607,19 @@ export default function App() {
     invalidatePortfolioSnapshot();
     setCurrentUser(null);
     setActiveNav("CHART");
+  };
+
+  const handleStopAndSignOut = async () => {
+    if (!window.confirm("Pause new automated entries on every Black Cloud connection, preserve broker-native protective orders, and then log out?")) return;
+    try {
+      const status = await fetchBlackCloudStatusViaApi();
+      for (const connection of status?.connections || []) {
+        if (connection.control_state === "ACTIVE") await controlBlackCloudConnectionViaApi(connection.id, "pause-new-entries", { reason: "stop_and_logout" });
+      }
+      await handleSignOut(true);
+    } catch (error) {
+      window.alert(`Stop-and-logout was not completed. You remain signed in. ${error instanceof Error ? error.message : String(error)}`);
+    }
   };
   const [selectedExchange, setSelectedExchange] = useState<ExchangeOption>(marketCatalog[0]);
   const [symbol, setSymbol] = useState<MarketSymbolOption>(() => {
@@ -1910,10 +1925,18 @@ export default function App() {
           <button
             className="nav"
             style={{ marginTop: "auto", borderTop: "1px solid var(--line-soft)", paddingTop: "12px", paddingBottom: "12px" }}
-            onClick={handleSignOut}
+            onClick={() => void handleSignOut(false)}
           >
             <LogOut size={19} />
             <span>SIGN OUT</span>
+          </button>
+          <button
+            className="nav danger"
+            title="Pause new cloud entries, preserve protective orders, then sign out"
+            onClick={() => void handleStopAndSignOut()}
+          >
+            <ShieldCheck size={19} />
+            <span>STOP &amp; SIGN OUT</span>
           </button>
         </div>
         <div className="side-watermark" aria-hidden>

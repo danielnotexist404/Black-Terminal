@@ -28,6 +28,19 @@ export class BrokerConnectionManager {
     await Promise.allSettled([...this.connections.keys()].map((id) => this.stopConnection(id, "worker_shutdown")));
   }
 
+  diagnostics() {
+    const health = [...this.connections.values()].map((runtime) => runtime.adapter?.getHealth?.() || {});
+    return {
+      activeConnections: this.connections.size,
+      readyConnections: health.filter((row) => row.connected === true && row.state === "READY").length,
+      degradedConnections: health.filter((row) => row.state === "DEGRADED").length,
+      reconnectCount: health.reduce((sum, row) => sum + Number(row.reconnectAttempts || 0), 0),
+      oldestAccountStreamAgeMs: health.reduce((oldest, row) => row.lastAccountEventAt
+        ? Math.max(oldest, Date.now() - Number(row.lastAccountEventAt))
+        : oldest, 0)
+    };
+  }
+
   async refresh() {
     if (!this.running) return;
     try {
@@ -40,7 +53,12 @@ export class BrokerConnectionManager {
       if (error) throw error;
       const desired = new Set((data || []).map((row) => row.id));
       for (const row of data || []) {
-        if (!this.connections.has(row.id)) await this.startConnection(row).catch((error) => this.recordStartFailure(row, error));
+        const runtime = this.connections.get(row.id);
+        if (!runtime) await this.startConnection(row).catch((error) => this.recordStartFailure(row, error));
+        else {
+          runtime.connection = row;
+          await this.repository.requireAutomationMandate(row.id, "read").catch(async () => this.stopConnection(row.id, "mandate_inactive"));
+        }
       }
       for (const id of this.connections.keys()) {
         if (!desired.has(id)) await this.stopConnection(id, "connection_disabled");
@@ -51,15 +69,17 @@ export class BrokerConnectionManager {
   }
 
   async startConnection(connection) {
-    if (connection.provider !== "bybit" || process.env.BYBIT_CLOUD_EXECUTION_ENABLED !== "true") return;
+    if (connection.provider !== "bybit") throw typedError("PROVIDER_UNSUPPORTED", `${connection.provider} has no registered persistent Black Cloud adapter.`);
+    if (process.env.BYBIT_CLOUD_EXECUTION_ENABLED !== "true") throw typedError("PROVIDER_DISABLED", "The Bybit Black Cloud adapter is disabled by rollout policy.");
     const connectionNetwork = connection.metadata?.network || "mainnet";
     const workerNetwork = process.env.BLACK_CLOUD_NETWORK || "testnet";
     if (connectionNetwork !== workerNetwork) throw Object.assign(new Error(`Connection network ${connectionNetwork} cannot run on ${workerNetwork} worker.`), { code: "WORKER_NETWORK_MISMATCH" });
     const lease = await this.repository.acquireLease(connection.id, this.leaseTtlSeconds);
     if (!lease) return;
-    const [account, secretReference] = await Promise.all([
+    const [account, secretReference, mandate] = await Promise.all([
       single(this.supabase.from("exchange_accounts").select("*").eq("id", connection.account_id)),
-      single(this.supabase.from("broker_secret_references").select("id").eq("connection_id", connection.id).eq("status", "ACTIVE"))
+      single(this.supabase.from("broker_secret_references").select("id").eq("connection_id", connection.id).eq("status", "ACTIVE")),
+      this.repository.requireAutomationMandate(connection.id, "trade")
     ]);
     const credentials = await this.repository.readBrokerSecret(secretReference.id, "private_stream_authentication");
     const adapter = createCloudExchangeAdapter(connection.provider, {
@@ -72,6 +92,7 @@ export class BrokerConnectionManager {
       account,
       credentials,
       adapter,
+      mandate,
       client: null,
       fencingToken: Number(lease.fencing_token),
       stopped: false,
@@ -79,21 +100,37 @@ export class BrokerConnectionManager {
       reconcileTimer: null,
       heartbeatTimer: null,
       periodicTimer: null,
+      lastPrivateStreamStatus: "disconnected",
+      lastReconnectCount: 0,
       seenEvents: new Map()
     };
     this.connections.set(connection.id, runtime);
     await updateOrThrow(this.supabase.from("connectivity_connections").update({
+      status: "degraded",
       health_status: "RECONCILING",
       lifecycle_status: "VALIDATING",
+      credential_state: "VERIFYING",
+      worker_state: "STARTING",
+      synchronization_state: "NOT_SYNCHRONIZED",
+      execution_readiness: "BLOCKED",
+      current_lease_generation: Number(lease.fencing_token),
+      degradation_reasons: [],
       last_error_code: null,
       last_error_at: null
     }).eq("id", connection.id));
-    runtime.client = await adapter.subscribePrivateEvents({
-      onMessage: (event) => void this.handleEvent(runtime, event),
-      onError: (error) => void this.handleError(runtime, error)
-    });
+    const verification = await adapter.verifyCredentials();
+    if (verification?.diagnostics?.permissions?.withdrawal) throw typedError("WITHDRAWAL_PERMISSION_DETECTED", "Withdrawal-enabled credentials are forbidden.");
+    if (!verification?.diagnostics?.permissions?.trading) throw typedError("PERMISSION_REJECTED", "The broker credential does not permit trading.");
+    runtime.client = await adapter.subscribeAccountEvents(
+      (event) => void this.handleEvent(runtime, event).catch((error) => this.handleError(runtime, error)),
+      { onError: (error) => void this.handleError(runtime, error) }
+    );
+    runtime.lastPrivateStreamStatus = runtime.client.diagnostics().status;
+    runtime.lastReconnectCount = Number(runtime.client.diagnostics().reconnectCount || 0);
     await updateOrThrow(this.supabase.from("connectivity_connections").update({
       lifecycle_status: "CONNECTED",
+      credential_state: "AUTHENTICATED",
+      worker_state: "LIVE",
       last_authenticated_at: new Date().toISOString()
     }).eq("id", connection.id));
     await this.reconcile(runtime, "STARTUP");
@@ -110,7 +147,10 @@ export class BrokerConnectionManager {
   }
 
   startTimers(runtime) {
-    runtime.heartbeatTimer = setInterval(() => void this.heartbeat(runtime), Math.max(5_000, this.leaseTtlSeconds * 400));
+    runtime.heartbeatTimer = setInterval(
+      () => void this.heartbeat(runtime).catch((error) => this.handleError(runtime, error).catch(() => null)),
+      Math.max(5_000, this.leaseTtlSeconds * 400)
+    );
     runtime.periodicTimer = setInterval(() => void this.reconcile(runtime, "SCHEDULED"), this.reconcileIntervalMs);
   }
 
@@ -126,26 +166,38 @@ export class BrokerConnectionManager {
 
   async handleEvent(runtime, event) {
     if (runtime.stopped || this.isDuplicate(runtime, event)) return;
+    const inbox = await this.repository.recordInboxEvent(runtime.connection, event);
+    if (!inbox.inserted) return;
     const eventAt = new Date(Number(event.time || Date.now())).toISOString();
-    await updateOrThrow(this.supabase.from("connectivity_connections").update({
-      health_status: "CONNECTED_CLOUD",
-      lifecycle_status: "HEALTHY",
-      last_private_event_at: eventAt,
-      last_heartbeat_at: new Date().toISOString(),
-      last_error_code: null
-    }).eq("id", runtime.connection.id));
-    if (event.type === "order") await this.applyOrderEvent(runtime, event.report);
-    if (event.type === "execution") await this.applyFillEvent(runtime, event.fill);
-    await this.repository.audit({
-      userId: runtime.connection.user_id,
-      connectionId: runtime.connection.id,
-      eventType: `PRIVATE_${String(event.type).toUpperCase()}_EVENT`,
-      userVisible: ["order", "execution", "position"].includes(event.type),
-      purpose: "private_stream_event",
-      message: `Bybit private ${event.type} event received by Black Cloud.`,
-      metadata: safeEventMetadata(event)
-    });
-    this.scheduleReconciliation(runtime, "PRIVATE_EVENT");
+    try {
+      await updateOrThrow(this.supabase.from("connectivity_connections").update({
+        health_status: "CONNECTED_CLOUD",
+        lifecycle_status: "HEALTHY",
+        worker_state: "LIVE",
+        last_private_event_at: eventAt,
+        last_account_event_at: eventAt,
+        last_order_event_at: ["order", "execution"].includes(event.type) ? eventAt : runtime.connection.last_order_event_at,
+        last_heartbeat_at: new Date().toISOString(),
+        degradation_reasons: [],
+        last_error_code: null
+      }).eq("id", runtime.connection.id));
+      if (event.type === "order") await this.applyOrderEvent(runtime, event.report);
+      if (event.type === "execution") await this.applyFillEvent(runtime, event.fill);
+      await this.repository.audit({
+        userId: runtime.connection.user_id,
+        connectionId: runtime.connection.id,
+        eventType: `PRIVATE_${String(event.type).toUpperCase()}_EVENT`,
+        userVisible: ["order", "execution", "position"].includes(event.type),
+        purpose: "private_stream_event",
+        message: `Bybit private ${event.type} event received by Black Cloud.`,
+        metadata: { ...safeEventMetadata(event), eventIdentity: inbox.eventIdentity }
+      });
+      await this.repository.markInboxEvent(inbox.id, "APPLIED");
+      this.scheduleReconciliation(runtime, "PRIVATE_EVENT");
+    } catch (error) {
+      await this.repository.markInboxEvent(inbox.id, "FAILED", error?.code || "EVENT_APPLY_FAILED").catch(() => null);
+      throw error;
+    }
   }
 
   async applyOrderEvent(runtime, report) {
@@ -195,11 +247,26 @@ export class BrokerConnectionManager {
     try {
       const result = await this.reconciliationWorker.run({ adapter: runtime.adapter, connection: runtime.connection, account: runtime.account, triggerType });
       await updateOrThrow(this.supabase.from("connectivity_connections").update({
+        status: "connected",
         health_status: "CONNECTED_CLOUD",
         lifecycle_status: "HEALTHY",
+        worker_state: "LIVE",
+        synchronization_state: "SYNCHRONIZED",
+        execution_readiness: runtime.connection.control_state === "ACTIVE" ? "READY" : "PAUSED",
         last_reconciled_at: result.syncedAt,
+        last_position_sync_at: result.syncedAt,
+        degradation_reasons: [],
         last_error_code: null
       }).eq("id", runtime.connection.id));
+      const diagnostics = runtime.client?.diagnostics?.();
+      runtime.connection.status = "connected";
+      runtime.connection.health_status = "CONNECTED_CLOUD";
+      runtime.connection.lifecycle_status = "HEALTHY";
+      runtime.connection.synchronization_state = "SYNCHRONIZED";
+      runtime.connection.execution_readiness = runtime.connection.control_state === "ACTIVE" ? "READY" : "PAUSED";
+      runtime.connection.last_reconciled_at = result.syncedAt;
+      runtime.lastPrivateStreamStatus = diagnostics?.status || runtime.lastPrivateStreamStatus;
+      runtime.lastReconnectCount = Number(diagnostics?.reconnectCount || runtime.lastReconnectCount || 0);
     } catch (error) {
       await this.handleError(runtime, error);
     } finally {
@@ -209,19 +276,41 @@ export class BrokerConnectionManager {
 
   async writeHealth(runtime) {
     const diagnostics = runtime.client.diagnostics();
+    const reconnected = diagnostics.status === "connected"
+      && (runtime.lastPrivateStreamStatus !== "connected"
+        || Number(diagnostics.reconnectCount || 0) > runtime.lastReconnectCount);
+    const synchronizationState = diagnostics.status !== "connected"
+      ? "STALE"
+      : reconnected
+        ? "SYNCHRONIZING"
+        : runtime.connection.synchronization_state || "NOT_SYNCHRONIZED";
+    const executionReady = diagnostics.status === "connected"
+      && synchronizationState === "SYNCHRONIZED"
+      && runtime.connection.control_state === "ACTIVE";
     const healthStatus = diagnostics.status === "connected" ? "CONNECTED_CLOUD" : diagnostics.status === "stale" ? "DEGRADED" : "RECONCILING";
     const lifecycleStatus = diagnostics.status === "connected" ? "HEALTHY" : diagnostics.status === "reconnecting" || diagnostics.status === "connecting" || diagnostics.status === "authenticating" ? "RECONNECTING" : "DEGRADED";
     await updateOrThrow(this.supabase.from("connectivity_connections").update({
+      status: diagnostics.status === "connected" ? "connected" : "degraded",
       health_status: healthStatus,
       lifecycle_status: lifecycleStatus,
+      worker_state: diagnostics.status === "connected" ? "LIVE" : diagnostics.status === "reconnecting" ? "RECONNECTING" : "DEGRADED",
+      synchronization_state: synchronizationState,
+      execution_readiness: executionReady ? "READY" : "BLOCKED",
       last_heartbeat_at: new Date().toISOString(),
       last_private_event_at: diagnostics.lastMessageAt ? new Date(Number(diagnostics.lastMessageAt)).toISOString() : runtime.connection.last_private_event_at,
       last_error_code: diagnostics.lastError ? "PRIVATE_STREAM_ERROR" : null,
-      last_error_at: diagnostics.lastError ? new Date().toISOString() : null
+      last_error_at: diagnostics.lastError ? new Date().toISOString() : null,
+      reconnect_attempts: Number(diagnostics.reconnectCount || 0),
+      current_lease_generation: runtime.fencingToken,
+      degradation_reasons: diagnostics.lastError ? ["PRIVATE_STREAM_ERROR"] : []
     }).eq("id", runtime.connection.id));
     runtime.connection.health_status = healthStatus;
     runtime.connection.lifecycle_status = lifecycleStatus;
-    await this.supabase.from("broker_connection_health").insert({
+    runtime.connection.synchronization_state = synchronizationState;
+    runtime.connection.execution_readiness = executionReady ? "READY" : "BLOCKED";
+    runtime.lastPrivateStreamStatus = diagnostics.status;
+    runtime.lastReconnectCount = Number(diagnostics.reconnectCount || 0);
+    await updateOrThrow(this.supabase.from("broker_connection_health").insert({
       connection_id: runtime.connection.id,
       user_id: runtime.connection.user_id,
       health_status: healthStatus,
@@ -234,17 +323,25 @@ export class BrokerConnectionManager {
       stale_after: diagnostics.lastMessageAt ? new Date(Number(diagnostics.lastMessageAt) + diagnostics.staleAfterMs).toISOString() : null,
       error_code: diagnostics.lastError ? "PRIVATE_STREAM_ERROR" : null,
       safe_details: { authenticated: diagnostics.authenticated, topics: diagnostics.topics, subscriptionCount: diagnostics.subscriptionCount }
-    });
+    }));
+    if (reconnected) this.scheduleReconciliation(runtime, "PRIVATE_STREAM_RECONNECTED");
   }
 
   async handleError(runtime, error) {
     const message = sanitizeError(error?.message || error);
     await updateOrThrow(this.supabase.from("connectivity_connections").update({
+      status: "degraded",
       health_status: "DEGRADED",
       lifecycle_status: "DEGRADED",
+      worker_state: "DEGRADED",
+      synchronization_state: "STALE",
+      execution_readiness: "BLOCKED",
+      degradation_reasons: [error?.code || "PRIVATE_STREAM_ERROR"],
       last_error_code: error?.code || "PRIVATE_STREAM_ERROR",
       last_error_at: new Date().toISOString()
     }).eq("id", runtime.connection.id));
+    runtime.connection.synchronization_state = "STALE";
+    runtime.connection.execution_readiness = "BLOCKED";
     await this.repository.audit({
       userId: runtime.connection.user_id,
       connectionId: runtime.connection.id,
@@ -257,24 +354,55 @@ export class BrokerConnectionManager {
   }
 
   async recordStartFailure(connection, error) {
+    const runtime = this.connections.get(connection.id);
+    if (runtime) {
+      runtime.stopped = true;
+      if (runtime.reconcileTimer) clearTimeout(runtime.reconcileTimer);
+      if (runtime.heartbeatTimer) clearInterval(runtime.heartbeatTimer);
+      if (runtime.periodicTimer) clearInterval(runtime.periodicTimer);
+      await runtime.adapter?.disconnect?.("start_failed").catch(() => null);
+      runtime.credentials = null;
+      this.connections.delete(connection.id);
+    }
     await updateOrThrow(this.supabase.from("connectivity_connections").update({
+      status: "degraded",
       health_status: "ERROR",
       lifecycle_status: "FAILED",
+      worker_state: "FAILED",
+      synchronization_state: "FAILED",
+      execution_readiness: "FAILED",
+      degradation_reasons: [error?.code || "WORKER_START_FAILED"],
       last_error_code: error?.code || "WORKER_START_FAILED",
       last_error_at: new Date().toISOString()
     }).eq("id", connection.id)).catch(() => null);
+    await this.repository.audit({
+      userId: connection.user_id,
+      connectionId: connection.id,
+      eventType: "PERSISTENT_CONNECTION_START_FAILED",
+      severity: "ERROR",
+      purpose: "worker_lifecycle",
+      userVisible: true,
+      message: sanitizeError(error?.message || error),
+      metadata: { provider: connection.provider, code: error?.code || "WORKER_START_FAILED" }
+    }).catch(() => null);
   }
 
   async stopConnection(connectionId, reason) {
     const runtime = this.connections.get(connectionId);
     if (!runtime) return;
     runtime.stopped = true;
-    runtime.client.disconnect();
+    await runtime.adapter.disconnect(reason).catch(() => null);
     if (runtime.reconcileTimer) clearTimeout(runtime.reconcileTimer);
     if (runtime.heartbeatTimer) clearInterval(runtime.heartbeatTimer);
     if (runtime.periodicTimer) clearInterval(runtime.periodicTimer);
     runtime.credentials = null;
     this.connections.delete(connectionId);
+    await updateOrThrow(this.supabase.from("connectivity_connections").update({
+      status: "disconnected",
+      worker_state: reason === "lease_lost" ? "SUSPENDED" : "OFFLINE",
+      execution_readiness: "BLOCKED",
+      degradation_reasons: [reason]
+    }).eq("id", connectionId)).catch(() => null);
     await this.repository.audit({
       userId: runtime.connection.user_id,
       connectionId,
@@ -333,3 +461,5 @@ async function updateOrThrow(query) {
   const { error } = await query;
   if (error) throw error;
 }
+
+function typedError(code, message) { return Object.assign(new Error(message), { code }); }

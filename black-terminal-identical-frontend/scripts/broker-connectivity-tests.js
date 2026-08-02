@@ -19,6 +19,8 @@ assert.equal(typeof adapter.subscribePrivateEvents, "function");
 assert.equal(typeof adapter.reconcile, "function");
 
 const previousMasterKey = process.env.BLACK_CLOUD_SECRET_MASTER_KEY;
+const previousMasterKeyV2 = process.env.BLACK_CLOUD_SECRET_MASTER_KEY_V2;
+const previousMasterKeyVersion = process.env.BLACK_CLOUD_MASTER_KEY_VERSION;
 process.env.BLACK_CLOUD_SECRET_MASTER_KEY = Buffer.alloc(32, 9).toString("base64");
 try {
   const vaultDb = createVaultDatabase();
@@ -26,9 +28,17 @@ try {
   assert.equal(stored.withdrawalEnabled, false);
   assert.equal(JSON.stringify(vaultDb.tables.broker_secret_vault).includes("server-only"), false);
   assert.deepEqual(await decryptBrokerCredential(vaultDb, stored.id), { apiKey:"server-only", apiSecret:"never-client" });
+  await assert.rejects(() => decryptBrokerCredential(vaultDb, stored.id, { userId: "other-user" }), /user binding mismatch/);
+  const storedVaultRow = vaultDb.tables.broker_secret_vault.find((row) => row.id === vaultDb.tables.broker_secret_references[0].vault_secret_id);
+  const originalAadHash = storedVaultRow.associated_data_hash;
+  storedVaultRow.associated_data_hash = "0".repeat(64);
+  await assert.rejects(() => decryptBrokerCredential(vaultDb, stored.id), /associated-data verification failed/);
+  storedVaultRow.associated_data_hash = originalAadHash;
   const repository = new BlackCloudRepository(vaultDb, "worker-test");
   assert.deepEqual(await repository.readBrokerSecret(stored.id, "reconciliation"), { apiKey:"server-only", apiSecret:"never-client" });
   assert.equal(vaultDb.tables.execution_audit_events.at(-1).event_type, "CREDENTIAL_USED");
+  process.env.BLACK_CLOUD_SECRET_MASTER_KEY_V2 = Buffer.alloc(32, 11).toString("base64");
+  process.env.BLACK_CLOUD_MASTER_KEY_VERSION = "2";
   const rotated = await storeBrokerCredential(vaultDb, { userId:"user-1",connectionId:"connection-1",provider:"bybit",secret:{apiKey:"rotated",apiSecret:"rotated-secret"},publicIdentifier:"rotated",authorizationType:"trade_only_api_credential",permissionScope:{trading:true},withdrawalEnabled:false });
   assert.equal(rotated.credentialVersion, 2);
   assert.equal(vaultDb.tables.broker_secret_references.filter((row) => row.status === "ACTIVE").length, 1);
@@ -37,6 +47,10 @@ try {
 } finally {
   if (previousMasterKey === undefined) delete process.env.BLACK_CLOUD_SECRET_MASTER_KEY;
   else process.env.BLACK_CLOUD_SECRET_MASTER_KEY = previousMasterKey;
+  if (previousMasterKeyV2 === undefined) delete process.env.BLACK_CLOUD_SECRET_MASTER_KEY_V2;
+  else process.env.BLACK_CLOUD_SECRET_MASTER_KEY_V2 = previousMasterKeyV2;
+  if (previousMasterKeyVersion === undefined) delete process.env.BLACK_CLOUD_MASTER_KEY_VERSION;
+  else process.env.BLACK_CLOUD_MASTER_KEY_VERSION = previousMasterKeyVersion;
 }
 const validRuntime = { SUPABASE_URL:"https://example.supabase.co",SUPABASE_SERVICE_ROLE_KEY:"service",EXCHANGE_CREDENTIAL_MASTER_KEY:Buffer.alloc(32, 7).toString("base64"),BLACK_CLOUD_INTENT_SIGNING_KEY:"x".repeat(32),BLACK_CLOUD_EXECUTION_ENABLED:"true",INVESTMENT_GROUP_EXECUTION_ENABLED:"true",BYBIT_CLOUD_EXECUTION_ENABLED:"true",BLACK_CLOUD_NETWORK:"testnet" };
 assert.equal(validateBlackCloudRuntime(validRuntime).network, "testnet");
@@ -59,13 +73,13 @@ function createVaultDatabase() {
   const tables = { broker_secret_vault: [], broker_secret_references: [], execution_audit_events: [] };
   let sequence = 0;
   return { tables, from(name) { return builder(name); }, async rpc(name, payload) {
-    assert.equal(name, "black_cloud_store_encrypted_broker_secret");
+    assert.equal(name, "black_cloud_store_encrypted_broker_secret_v2");
     const oldReferences = tables.broker_secret_references.filter((row) => row.connection_id === payload.p_connection_id && row.status === "ACTIVE");
     for (const row of oldReferences) row.status = "ROTATED";
     for (const row of tables.broker_secret_vault.filter((item) => item.connection_id === payload.p_connection_id && item.rotation_status === "ACTIVE")) row.rotation_status = "ROTATED";
     const version = Math.max(0, ...tables.broker_secret_references.filter((row) => row.connection_id === payload.p_connection_id).map((row) => row.credential_version)) + 1;
     const vaultId=`id-${++sequence}`, referenceId=`id-${++sequence}`;
-    tables.broker_secret_vault.push({id:vaultId,user_id:payload.p_user_id,connection_id:payload.p_connection_id,provider:payload.p_provider,encrypted_secret:payload.p_encrypted_secret,encryption_iv:payload.p_encryption_iv,authentication_tag:payload.p_authentication_tag,encryption_version:1,rotation_status:"ACTIVE"});
+    tables.broker_secret_vault.push({id:vaultId,user_id:payload.p_user_id,connection_id:payload.p_connection_id,provider:payload.p_provider,encrypted_secret:payload.p_encrypted_secret,encryption_iv:payload.p_encryption_iv,authentication_tag:payload.p_authentication_tag,encryption_version:2,rotation_status:"ACTIVE",wrapped_data_key:payload.p_wrapped_data_key,wrapping_iv:payload.p_wrapping_iv,wrapping_authentication_tag:payload.p_wrapping_authentication_tag,associated_data_hash:payload.p_associated_data_hash,master_key_version:payload.p_master_key_version});
     const reference={id:referenceId,user_id:payload.p_user_id,connection_id:payload.p_connection_id,provider:payload.p_provider,vault_secret_id:vaultId,credential_version:version,credential_fingerprint:payload.p_credential_fingerprint,authorization_type:payload.p_authorization_type,permission_scope:payload.p_permission_scope,withdrawal_enabled:false,status:"ACTIVE",activated_at:new Date().toISOString()};
     tables.broker_secret_references.push(reference);
     return {data:reference,error:null};

@@ -132,8 +132,30 @@ const hyperliquidSchemas = {
 };
 
 const cloudSchemas = {
-  connection: z.object({ accountId: id, confirmation: z.literal("ENABLE OFFLINE CLOUD EXECUTION") }).strict(),
-  control: z.object({ connectionId: id, action: z.enum(["pause", "resume", "emergency-stop"]), reason: shortText.optional() }).strict(),
+  connection: z.object({
+    accountId: id,
+    confirmation: z.literal("ENABLE OFFLINE CLOUD EXECUTION"),
+    automation: z.object({
+      allowStrategyExecution: boolean.optional(),
+      allowCopyTrading: boolean.optional(),
+      allowInvestmentGroupExecution: boolean.optional(),
+      maxOrderNotional: positive.optional(),
+      maxPositionNotional: positive.optional(),
+      maxLeverage: positive.max(1000).optional(),
+      maxDailyLoss: positive.optional(),
+      allowedStrategies: z.array(id).max(500).optional(),
+      allowedSymbols: z.array(symbol).max(500).optional(),
+      expiresAt: z.string().datetime({ offset: true }).optional(),
+      preserveProtectiveOrders: boolean.optional()
+    }).strict().optional()
+  }).strict(),
+  control: z.object({
+    connectionId: id,
+    action: z.enum(["pause", "pause-new-entries", "resume", "stop-strategy", "cancel-entry-orders", "cancel-all", "close-strategy-positions", "revoke-mandate", "disconnect-broker", "emergency-stop", "emergency-account-lock"]),
+    reason: shortText.optional(),
+    strategyDeploymentId: id.optional(),
+    cancelProtectiveOrders: boolean.optional()
+  }).strict(),
   intent: z.object({
     groupId: id, strategyId: id.optional(), clientIntentId: id, symbol, marketType: shortText.min(1), side, orderType: shortText.min(1),
     limitPrice: positive.optional(), stopPrice: positive.optional(), quantityModel: shortText.min(1), quantityValue: positive,

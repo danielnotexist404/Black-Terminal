@@ -3,7 +3,6 @@ import {
   getBybitInstrumentMetadata,
   getBybitTicker,
   getBybitWalletSnapshot,
-  placeBybitOrder,
   validateBybitOrderDraft
 } from "../exchanges/bybit.js";
 import { syncBybitSnapshotAndReconcile } from "../exchanges/bybit-reconciliation.js";
@@ -18,6 +17,7 @@ import {
 import { BlackCloudRepository, sanitizeError } from "./repository.js";
 import { BrokerConnectionManager } from "./connection-supervisor.js";
 import { validateBlackCloudRuntime } from "./runtime-config.js";
+import { createCloudExchangeAdapter } from "./adapters/registry.js";
 
 export class BlackCloudExecutionWorker {
   constructor(supabase, options = {}) {
@@ -36,6 +36,15 @@ export class BlackCloudExecutionWorker {
     this.lastLoopError = null;
     this.timer = null;
     this.inFlight = new Set();
+    this.lastReadiness = { ready: false, workerIdentity: Boolean(this.workerId), dependencies: {} };
+    this.lastReadinessAt = null;
+    this.metricsCounters = {
+      commandsClaimed: 0,
+      commandsSucceeded: 0,
+      commandsFailed: 0,
+      leaseContention: 0,
+      unknownSubmissionOutcomes: 0
+    };
   }
 
   assertRuntime() {
@@ -44,6 +53,9 @@ export class BlackCloudExecutionWorker {
 
   async start() {
     const network = this.assertRuntime();
+    this.lastReadiness = await this.repository.probeReadiness();
+    this.lastReadinessAt = new Date().toISOString();
+    if (!this.lastReadiness.ready) throw terminalError("WORKER_DEPENDENCIES_UNAVAILABLE", "Black Cloud database, vault, lease, or queue readiness failed.");
     this.running = true;
     this.startedAt = new Date().toISOString();
     await this.repository.audit({
@@ -80,11 +92,16 @@ export class BlackCloudExecutionWorker {
       this.lastTickAt = new Date().toISOString();
       this.lastLoopError = null;
       const commands = await this.repository.claimCommands(this.claimLimit);
+      this.metricsCounters.commandsClaimed += (commands || []).length;
       for (const command of commands || []) {
         const task = this.processCommand(command).finally(() => this.inFlight.delete(task));
         this.inFlight.add(task);
       }
       await Promise.allSettled([...this.inFlight]);
+      if (!this.lastReadinessAt || Date.now() - Date.parse(this.lastReadinessAt) > 10_000) {
+        this.lastReadiness = await this.repository.probeReadiness();
+        this.lastReadinessAt = new Date().toISOString();
+      }
     } catch (error) {
       this.lastLoopError = sanitizeError(error?.message || error);
       console.error("[black-cloud-worker-loop]", sanitizeError(error?.message || error));
@@ -102,13 +119,25 @@ export class BlackCloudExecutionWorker {
       lastLoopError: this.lastLoopError,
       inFlightCommands: this.inFlight.size,
       supervisedConnections: this.connectionSupervisor.connections.size,
-      network: process.env.BLACK_CLOUD_NETWORK || "testnet"
+      network: process.env.BLACK_CLOUD_NETWORK || "testnet",
+      readiness: this.lastReadiness,
+      lastReadinessAt: this.lastReadinessAt,
+      connectionMetrics: this.connectionSupervisor.diagnostics(),
+      counters: { ...this.metricsCounters }
     };
+  }
+
+  async readiness() {
+    this.lastReadiness = await this.repository.probeReadiness();
+    this.lastReadinessAt = new Date().toISOString();
+    const tickFresh = this.lastTickAt && Date.now() - Date.parse(this.lastTickAt) <= Math.max(15_000, this.pollIntervalMs * 5);
+    return { ...this.lastReadiness, ready: this.running && tickFresh && !this.lastLoopError && this.lastReadiness.ready, tickFresh };
   }
 
   async processCommand(command) {
     const lease = await this.repository.acquireLease(command.connection_id, this.leaseTtlSeconds);
     if (!lease) {
+      this.metricsCounters.leaseContention += 1;
       await this.releaseForRetry(command, 2, "LEASE_BUSY", "Another worker owns this execution boundary.");
       return;
     }
@@ -118,7 +147,10 @@ export class BlackCloudExecutionWorker {
     try {
       let result;
       if (command.command_type === "EXPAND_GROUP_INTENT") result = await this.expandGroupIntent(command);
-      else if (command.command_type === "PLACE_ORDER") result = await this.placeFollowerOrder(command);
+      else if (command.command_type === "PLACE_ORDER") result = await this.placeFollowerOrder(command, fencingToken);
+      else if (command.command_type === "MODIFY_ORDER") result = await this.executeBrokerMutation(command, fencingToken, "modify");
+      else if (command.command_type === "CANCEL_ORDER") result = await this.executeBrokerMutation(command, fencingToken, "cancel");
+      else if (command.command_type === "CANCEL_ALL") result = await this.executeBrokerMutation(command, fencingToken, "cancel-all");
       else if (command.command_type === "SYNC_ACCOUNT") result = await this.syncAccount(command);
       else throw terminalError("UNSUPPORTED_COMMAND", `Unsupported Black Cloud command: ${command.command_type}`);
 
@@ -127,8 +159,11 @@ export class BlackCloudExecutionWorker {
         safeDetails: result || {}
       });
       await this.repository.finishCommand(command.id, fencingToken, "SUCCEEDED");
+      this.metricsCounters.commandsSucceeded += 1;
     } catch (error) {
       const classification = classifyExecutionError(error, command);
+      this.metricsCounters.commandsFailed += 1;
+      if (classification.ambiguous) this.metricsCounters.unknownSubmissionOutcomes += 1;
       await this.repository.finishAttempt(attemptId, classification.attemptOutcome, {
         errorCode: classification.code,
         errorMessage: error?.message,
@@ -217,7 +252,7 @@ export class BlackCloudExecutionWorker {
     return { queuedPlans: queued };
   }
 
-  async placeFollowerOrder(command) {
+  async placeFollowerOrder(command, fencingToken) {
     if (process.env.BYBIT_CLOUD_EXECUTION_ENABLED !== "true") throw terminalError("BYBIT_CLOUD_DISABLED", "Bybit Cloud execution is disabled.");
     const [plan, intent, mandate, connection, capabilities] = await Promise.all([
       single(this.supabase.from("follower_execution_plans").select("*").eq("id", command.follower_plan_id)),
@@ -229,6 +264,7 @@ export class BlackCloudExecutionWorker {
     assertIntentIntegrity(intent);
     if (connection.provider !== "bybit") throw terminalError("PROVIDER_UNSUPPORTED", `${connection.provider} has no certified Black Cloud worker adapter.`);
     if (!connection.account_id) throw terminalError("ACCOUNT_REFERENCE_MISSING", "Cloud connection is not linked to an exchange account.");
+    const automationMandate = await this.repository.requireAutomationMandate(connection.id, "group");
 
     const [account, secretReference, positions] = await Promise.all([
       single(this.supabase.from("exchange_accounts").select("*").eq("id", connection.account_id)),
@@ -328,7 +364,12 @@ export class BlackCloudExecutionWorker {
 
     let venueReport;
     try {
-      venueReport = await placeBybitOrder(credentials, orderDraft, venueValidation);
+      if (automationMandate.max_order_notional && allocation.targetNotional > Number(automationMandate.max_order_notional)) {
+        throw terminalError("AUTOMATION_MANDATE_RISK_REJECTED", "Order notional exceeds the broker automation mandate.");
+      }
+      await this.repository.assertFencingToken(connection.id, fencingToken);
+      const adapter = createCloudExchangeAdapter(connection.provider, { credentials, network: workerNetwork, connectionId: connection.id });
+      venueReport = await adapter.placeOrder(orderDraft, venueValidation);
     } catch (error) {
       if (!isAmbiguousTransportError(error)) throw error;
       const recovered = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol: intent.symbol, clientOrderId }).catch(() => null);
@@ -415,6 +456,7 @@ export class BlackCloudExecutionWorker {
   async syncAccount(command) {
     const connection = await single(this.supabase.from("connectivity_connections").select("*").eq("id", command.connection_id));
     if (connection.provider !== "bybit" || !connection.account_id) throw terminalError("SYNC_UNSUPPORTED", "Only linked Bybit cloud connections are currently supported.");
+    await this.repository.requireAutomationMandate(connection.id, "read");
     const [account, secretReference] = await Promise.all([
       single(this.supabase.from("exchange_accounts").select("*").eq("id", connection.account_id)),
       single(this.supabase.from("broker_secret_references").select("id").eq("connection_id", connection.id).eq("status", "ACTIVE"))
@@ -428,21 +470,41 @@ export class BlackCloudExecutionWorker {
     await updateOrThrow(this.supabase.from("connectivity_connections").update({
       health_status: "CONNECTED_CLOUD",
       lifecycle_status: "HEALTHY",
+      worker_state: "LIVE",
+      synchronization_state: "SYNCHRONIZED",
+      execution_readiness: connection.control_state === "ACTIVE" ? "READY" : "PAUSED",
       last_reconciled_at: result.syncedAt,
+      last_position_sync_at: result.syncedAt,
+      degradation_reasons: [],
       last_error_code: null
     }).eq("id", connection.id));
     return { reconciled: true, externalStateChanged: result.externalStateChanged, latencyMs: result.latencyMs };
   }
 
+  async executeBrokerMutation(command, fencingToken, operation) {
+    const connection = await single(this.supabase.from("connectivity_connections").select("*").eq("id", command.connection_id));
+    if (connection.control_state !== "ACTIVE" && operation === "modify") throw terminalError("CONNECTION_NOT_ACTIVE", "Order modification is blocked while execution is paused.");
+    const scope = operation === "modify" ? "modify" : "cancel";
+    await this.repository.requireAutomationMandate(connection.id, scope);
+    const secretReference = await single(this.supabase.from("broker_secret_references").select("id").eq("connection_id", connection.id).eq("status", "ACTIVE"));
+    const credentials = await this.repository.readBrokerSecret(secretReference.id, `broker_${operation}`);
+    const network = credentials.network || connection.metadata?.network || "mainnet";
+    const adapter = createCloudExchangeAdapter(connection.provider, { credentials, network, connectionId: connection.id });
+    await this.repository.assertFencingToken(connection.id, fencingToken);
+    if (operation === "modify") return adapter.modifyOrder(command.payload.request || command.payload);
+    if (operation === "cancel") return adapter.cancelOrder(command.payload.request || command.payload);
+    return adapter.cancelAll(command.payload.request || command.payload);
+  }
+
   async releaseForRetry(command, delay, code, message) {
-    await this.supabase.from("execution_commands").update({
+    await updateOrThrow(this.supabase.from("execution_commands").update({
       status: "RETRY",
       available_at: new Date(Date.now() + delay * 1_000).toISOString(),
       locked_by: null,
       locked_until: null,
       last_error_code: code,
       last_error_message: message
-    }).eq("id", command.id).eq("locked_by", this.workerId);
+    }).eq("id", command.id).eq("locked_by", this.workerId));
   }
 }
 

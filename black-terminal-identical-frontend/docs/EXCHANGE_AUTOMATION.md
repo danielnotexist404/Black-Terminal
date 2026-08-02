@@ -1,5 +1,18 @@
 # Exchange Data, Trading, and Automation
 
+## Persistent execution rule
+
+The browser may create authenticated intents and controls but cannot own automation. Persistent
+execution requires an active signed broker automation mandate, an encrypted server credential, a
+healthy synchronized Black Cloud worker connection, OMS/EMS approval, and the provider's normalized
+adapter. Ordinary UI logout does not revoke that explicit authority. Withdrawal-enabled credentials
+are rejected.
+
+Current certification is intentionally narrow: Bybit has the only registered persistent adapter and
+still requires external testnet certification; Hyperliquid has a non-persistent request relay;
+MetaMask and Phantom are interactive signers; all remaining listed CEX adapters are public market
+data only. See `docs/connectivity/BROKER_CERTIFICATION_MATRIX.md`.
+
 Black-Terminal should treat market data, account trading, Python indicators, and automated strategy
 execution as separate systems that communicate through typed contracts.
 

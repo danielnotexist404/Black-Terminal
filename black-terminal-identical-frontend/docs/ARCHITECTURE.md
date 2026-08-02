@@ -1,5 +1,18 @@
 # Architecture
 
+## Phase V Chapter II-B control/data-plane separation
+
+Persistent trading is not part of the React runtime. The authenticated UI authorizes a versioned
+broker automation mandate; the mandate permits the Node 22 Black Cloud worker; the worker alone owns
+private broker streams, reconciliation, durable execution commands, and broker mutations. Credentials
+are v2 envelope-encrypted server-side, and leases plus fencing prevent split-brain ownership.
+
+The authoritative implementation and current provider truth are in
+`docs/connectivity/BLACK_CLOUD_PERSISTENT_CONNECTIVITY.md` and
+`docs/connectivity/BROKER_CERTIFICATION_MATRIX.md`. Bybit is persistent-capable but not externally
+certified in this repository. Hyperliquid is a request relay, wallets are interactive, and other CEX
+providers are market-data-only until normalized private adapters are implemented.
+
 ## Current Shape
 
 ```text

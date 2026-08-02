@@ -42,11 +42,21 @@ npm run test:performance
 npm run perf:soak -- --hours=1
 npm run test:bybit-certification
 npm run certify:bybit-mainnet
+npm run test:phase5-chapter2
+npm run test:persistent-connectivity
+npm run security:verify-migrations
 npm run test:kioseff
 npm run benchmark:kioseff
 ```
 
 `npm run check` runs TypeScript and Rust checks. Use it before packaging or larger refactors.
+`npm run test:phase5-chapter2` runs the Black Cloud, broker, follower, mandate, reconciliation, and
+persistent-connectivity contract suites. These are local contracts, not live broker certification.
+
+For a testnet worker, provision `.env.black-cloud` from `.env.black-cloud.example` through the host's
+secret manager, then build `Dockerfile.black-cloud` or use `docker-compose.black-cloud.yml`. Readiness
+is `GET /health/ready`; Prometheus metrics are `GET /metrics`. Never expose the health port publicly
+without TLS, authentication, and network controls.
 `npm run depth:worker:supervise` is the recommended local/persistent command for the Black Core Market Depth Memory collector because it restarts the worker after stale-feed exits or process failures.
 `npm run depth:verify` checks persisted IMM data quality and returns a non-zero exit code on serious operational failures.
 `npm run perf:baseline` writes the current Chapter XIV performance footprint to `docs/performance/latest-baseline.md` and `.json`.

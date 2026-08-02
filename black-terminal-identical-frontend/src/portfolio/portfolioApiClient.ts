@@ -300,8 +300,19 @@ export type BlackCloudStatusPayload = {
     lifecycle_status: string; control_state: "ACTIVE" | "PAUSED" | "EMERGENCY_STOP";
     last_private_event_at: string | null; last_reconciled_at: string | null;
     last_error_code: string | null; paused_at: string | null; emergency_stopped_at: string | null;
+    credential_state: string; worker_state: string; synchronization_state: string; execution_readiness: string;
+    last_heartbeat_at: string | null; last_account_event_at: string | null; last_order_event_at: string | null;
+    last_position_sync_at: string | null; reconnect_attempts: number; current_lease_generation: number | null; degradation_reasons: string[];
   }>;
   mandates: Array<{ id: string; group_id: string; broker_connection_id: string; status: string; allocation_method: string; allocation_value: number; max_leverage: number }>;
+  automationMandates: Array<{
+    id: string; connection_id: string; broker: string; account_reference: string; status: string;
+    allow_read: boolean; allow_trade: boolean; allow_cancel: boolean; allow_modify: boolean;
+    allow_strategy_execution: boolean; allow_copy_trading: boolean; allow_investment_group_execution: boolean;
+    max_order_notional: number; max_position_notional: number; max_leverage: number; max_daily_loss: number;
+    mandate_version: number; accepted_at: string | null; expires_at: string | null; revoked_at: string | null;
+  }>;
+  strategyDeployments: Array<{ id: string; connection_id: string; strategy_id: string | null; strategy_version: string; symbol: string; timeframe: string; status: string; deployed_at: string | null; last_heartbeat_at: string | null }>;
   recentPlans: Array<{ id: string; broker_connection_id: string; execution_status: string; risk_result: string; rejection_reason: string | null; updated_at: string }>;
   openIncidents: Array<{ id: string; connection_id: string; severity: string; incident_type: string; status: string; title: string; created_at: string }>;
 };
@@ -320,25 +331,31 @@ export async function fetchBlackCloudStatusViaApi(): Promise<BlackCloudStatusPay
   return response.json();
 }
 
-export async function controlBlackCloudConnectionViaApi(connectionId: string, action: "pause" | "resume" | "emergency-stop", reason?: string) {
+export type BlackCloudControlAction = "pause" | "pause-new-entries" | "resume" | "stop-strategy" | "cancel-entry-orders" | "cancel-all" | "close-strategy-positions" | "revoke-mandate" | "disconnect-broker" | "emergency-stop" | "emergency-account-lock";
+
+export async function controlBlackCloudConnectionViaApi(connectionId: string, action: BlackCloudControlAction, options: { reason?: string; strategyDeploymentId?: string; cancelProtectiveOrders?: boolean } = {}) {
   const token = await getPortfolioApiToken();
   if (!token) return null;
   const response = await fetch("/api/cloud-execution/control", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ connectionId, action, reason })
+    body: JSON.stringify({ connectionId, action, ...options })
   });
   if (!response.ok) throw new Error(await readApiError(response));
   return response.json() as Promise<{ connection: BlackCloudStatusPayload["connections"][number]; monitoring: string; reconciliation: string; newOrders: string }>;
 }
 
-export async function activateBlackCloudConnectionViaApi(accountId: string, confirmation: "ENABLE OFFLINE CLOUD EXECUTION") {
+export async function activateBlackCloudConnectionViaApi(accountId: string, confirmation: "ENABLE OFFLINE CLOUD EXECUTION", automation: {
+  allowStrategyExecution?: boolean; allowCopyTrading?: boolean; allowInvestmentGroupExecution?: boolean;
+  maxOrderNotional?: number; maxPositionNotional?: number; maxLeverage?: number; maxDailyLoss?: number;
+  allowedStrategies?: string[]; allowedSymbols?: string[]; expiresAt?: string; preserveProtectiveOrders?: boolean;
+} = {}) {
   const token = await getPortfolioApiToken();
   if (!token) return null;
   const response = await fetch("/api/cloud-execution/connection", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ accountId, confirmation })
+    body: JSON.stringify({ accountId, confirmation, automation })
   });
   if (!response.ok) throw new Error(await readApiError(response));
   return response.json() as Promise<{ connection: { id: string; provider: string; healthStatus: string }; offlineExecution: string; readinessReason: string }>;

@@ -1,5 +1,20 @@
 # Implementation History
 
+## 2026-08-02 — Phase V Chapter II-B persistent connectivity restoration
+
+- Completed the security regression map and made provider states explicit instead of treating a UI
+  connection card as adapter certification.
+- Added v2 envelope encryption with per-record DEKs, associated-data tenant binding, master-key
+  versioning, atomic credential rotation, and operation-scoped decryption.
+- Added signed/versioned broker automation mandates, durable strategy/intent/outbox/inbox records,
+  immutable connection audit, and follower connection assignments.
+- Normalized the persistent adapter lifecycle; registered Bybit only; added persistent private-event
+  supervision, durable dedupe, reconciliation readiness, startup recovery, leases, and mutation-time fencing.
+- Added separate logout/stop-and-logout semantics, explicit consent, canonical connection health,
+  emergency controls, truthful provider labels, Node 22 container health/metrics, and deployment template.
+- Added connectivity/security contract coverage and the complete `docs/connectivity/` runbook set.
+- External worker deployment and live Bybit testnet/mainnet certification are not claimed by this entry.
+
 ## 2026-08-02 — 4H / 22,000-bar heatmap reliability
 
 - Preserved Bybit response codes so 10006 / Too many visits is correctly recognized as throttling rather than an unknown fatal error.

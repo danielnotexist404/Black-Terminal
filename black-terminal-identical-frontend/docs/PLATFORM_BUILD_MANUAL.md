@@ -10,7 +10,20 @@ This document explains how Black Terminal is built today and how its major syste
 - Backend runtime: Vercel API routes under `api/`.
 - Database and auth: Supabase.
 - Icons and UI primitives: lucide-react plus project CSS in `src/styles/`.
-- Package baseline: Node 20+, npm 10+.
+- Package baseline: Node 22, npm 10+.
+
+## Black Cloud data plane
+
+The persistent execution service is a separate Node 22 container. `Dockerfile.black-cloud` and
+`docker-compose.black-cloud.yml` package the worker with restart, readiness, resource, filesystem, and
+graceful-shutdown controls. The worker requires Supabase service identity, versioned vault keys,
+intent signing, testnet/mainnet gates, and explicit provider endpoints from
+`.env.black-cloud.example`.
+
+The control plane may run on Vercel because its requests are short lived. Private broker WebSockets,
+strategy runtime, reconciliation, and protection may not. Use `/health/live`, `/health/ready`, and
+`/metrics` on the always-on host. Deployment is incomplete until the image digest, applied migration,
+host, alert routes, rollback target, and testnet certification evidence are recorded.
 
 ## Boot Flow
 

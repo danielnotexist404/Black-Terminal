@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { assertProviderEndpoint } from "../cloud-execution/provider-allowlist.js";
 import { getBybitPrivateStreamRuntimeDiagnostics } from "./bybit-private-stream.js";
 import { replaceBybitBalances, replaceBybitPositions } from "./bybit-snapshot-store.js";
 
@@ -200,6 +201,39 @@ export async function getBybitOpenOrders(credentials, { category = "linear", sym
       cursorLimitReached: Boolean(cursor && pages >= maxPages)
     }
   };
+}
+
+export async function getBybitExecutions(credentials, { category = "linear", symbol, startTime, endTime, maxPages = 20 } = {}) {
+  const executions = [];
+  const seen = new Set();
+  let cursor;
+  let pages = 0;
+  do {
+    const response = await bybitRequest(credentials, "GET", "/v5/execution/list", {
+      category, symbol, startTime, endTime, cursor, limit: "100"
+    });
+    for (const row of response?.list || []) {
+      const identity = String(row.execId || `${row.orderId}:${row.execTime}:${row.execQty}`);
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      executions.push({
+        executionId: identity,
+        orderId: row.orderId || null,
+        clientOrderId: row.orderLinkId || null,
+        symbol: row.symbol,
+        side: String(row.side || "").toLowerCase(),
+        quantity: Number(row.execQty || 0),
+        price: Number(row.execPrice || 0),
+        fee: Number(row.execFee || 0),
+        feeAsset: row.feeCurrency || null,
+        isMaker: Boolean(row.isMaker),
+        timestamp: Number(row.execTime || 0)
+      });
+    }
+    cursor = response?.nextPageCursor || undefined;
+    pages += 1;
+  } while (cursor && pages < maxPages);
+  return executions;
 }
 
 export async function findBybitOrderByClientOrderId(credentials, { marketKind = "perpetual", symbol, clientOrderId }) {
@@ -1298,12 +1332,18 @@ function getBybitBaseUrls(routing = {}) {
     if (configured && !/^https:\/\/api-testnet\.bybit\.com$/i.test(configured)) {
       throw new Error("Bybit testnet execution requires BYBIT_BASE_URL=https://api-testnet.bybit.com.");
     }
-    return [configured || BYBIT_TESTNET_BASE_URL];
+    return [configured || BYBIT_TESTNET_BASE_URL].map((endpoint) => approvedBybitEndpoint(endpoint, "testnet"));
   }
-  return [...new Set([configured, ...BYBIT_DEFAULT_BASE_URLS].filter(Boolean))];
+  return [...new Set([configured, ...BYBIT_DEFAULT_BASE_URLS].filter(Boolean))]
+    .map((endpoint) => approvedBybitEndpoint(endpoint, "mainnet"));
 }
 
 export function resolveBybitBaseUrlsForTests(routing = {}) { return getBybitBaseUrls(routing); }
+
+function approvedBybitEndpoint(endpoint, network) {
+  assertProviderEndpoint({ provider: "bybit", environment: network, endpoint, protocol: "https" });
+  return String(endpoint).replace(/\/$/, "");
+}
 
 function createBybitRequestId() {
   return `bt-${Date.now()}-${crypto.randomBytes(6).toString("hex")}`;

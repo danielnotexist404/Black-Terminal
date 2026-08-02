@@ -1,6 +1,8 @@
 # Phase V Chapter II — Black Cloud Connectivity
 
-Status: implementation and production control-plane migration deployed; persistent worker provisioning and offline execution certification remain open.
+Status: superseded for current readiness by Phase V Chapter II-B documentation. Historical control-
+plane deployment details below do not prove that the current persistent worker is hosted, that the
+Chapter II-B migration is applied, or that offline broker execution is certified.
 
 Production web deployment: `dpl_Hh9aSdgTBvT7KCLLGFgxy3pqT8iA`. Supabase Chapter II migrations `202607200003` through `202607200006` are applied; all eleven local/remote migrations match.
 
@@ -25,7 +27,15 @@ Production web deployment: `dpl_Hh9aSdgTBvT7KCLLGFgxy3pqT8iA`. Supabase Chapter 
 
 The production control plane intentionally remains disabled for activation until an always-on container provider is provisioned. No claim is made that broker connections currently survive device shutdown. Enablement order is: deploy worker with testnet flags, verify `/ready`, enable the Vercel control plane, activate a test connection, complete the offline certification, then consider mainnet.
 
-## Verification
+## Chapter II-B truth boundary
+
+The current code adds v2 envelope encryption, atomic signed mandates, durable private-event inbox,
+canonical multi-axis health, mutation-time fencing, provider allowlisting, distinct emergency/logout
+controls, worker readiness/metrics, and truthful capability labels. Bybit remains `PERSISTENT CAPABLE
+— NOT CERTIFIED`; Hyperliquid remains `REQUEST RELAY — NOT PERSISTENT`. See
+`docs/connectivity/BROKER_CERTIFICATION_MATRIX.md`.
+
+## Historical Verification
 
 - `npm run test:phase5-chapter2` passes all five suites.
 - `npm run security:contracts` passes 27 strict mutating-route contracts.

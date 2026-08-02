@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { decryptBrokerCredential } from "./secret-vault.js";
 
 export class BlackCloudRepository {
@@ -43,7 +44,11 @@ export class BlackCloudRepository {
       .select("user_id,connection_id,provider,credential_version,status")
       .eq("id", secretReferenceId).single();
     if (error || reference?.status !== "ACTIVE") throw error || new Error("Active broker credential reference was not found.");
-    const secret = await decryptBrokerCredential(this.supabase, secretReferenceId);
+    const secret = await decryptBrokerCredential(this.supabase, secretReferenceId, {
+      userId: reference.user_id,
+      connectionId: reference.connection_id,
+      provider: reference.provider
+    });
     const { error: usedError } = await this.supabase.from("broker_secret_references")
       .update({ last_used_at: new Date().toISOString() }).eq("id", secretReferenceId);
     if (usedError) throw usedError;
@@ -57,6 +62,70 @@ export class BlackCloudRepository {
       metadata: { provider: reference.provider, credentialVersion: reference.credential_version }
     });
     return secret;
+  }
+
+  async assertFencingToken(connectionId, fencingToken) {
+    return this.rpc("black_cloud_assert_current_fencing_token", {
+      p_connection_id: connectionId,
+      p_worker_id: this.workerId,
+      p_fencing_token: fencingToken
+    });
+  }
+
+  async requireAutomationMandate(connectionId, operation) {
+    const { data, error } = await this.supabase.from("broker_automation_mandates")
+      .select("*")
+      .eq("connection_id", connectionId)
+      .eq("status", "ACTIVE")
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) throw mandateError("AUTOMATION_MANDATE_REQUIRED", "An active broker automation mandate is required.");
+    if (data.expires_at && Date.parse(data.expires_at) <= Date.now()) throw mandateError("AUTOMATION_MANDATE_EXPIRED", "The broker automation mandate has expired.");
+    const field = {
+      read: "allow_read", trade: "allow_trade", cancel: "allow_cancel", modify: "allow_modify",
+      strategy: "allow_strategy_execution", copy: "allow_copy_trading", group: "allow_investment_group_execution"
+    }[operation];
+    if (!field || data[field] !== true) throw mandateError("AUTOMATION_MANDATE_SCOPE_REJECTED", `The automation mandate does not permit ${operation}.`);
+    if (data.allow_withdrawals) throw mandateError("WITHDRAWAL_PERMISSION_DETECTED", "Withdrawal authority is forbidden.");
+    return data;
+  }
+
+  async recordInboxEvent(connection, event) {
+    const eventIdentity = providerEventIdentity(connection.provider, event);
+    const payloadHash = hashCanonical(event);
+    const { data, error } = await this.supabase.from("execution_inbox").upsert({
+      connection_id: connection.id,
+      provider: String(connection.provider).toLowerCase(),
+      event_identity: eventIdentity,
+      event_type: String(event.type || "unknown").toUpperCase(),
+      event_at: new Date(Number(event.time || Date.now())).toISOString(),
+      payload_hash: payloadHash,
+      status: "RECEIVED"
+    }, { onConflict: "connection_id,event_identity", ignoreDuplicates: true }).select("id,status").maybeSingle();
+    if (error) throw error;
+    return { inserted: Boolean(data), id: data?.id || null, eventIdentity };
+  }
+
+  async markInboxEvent(id, status = "APPLIED", errorCode = null) {
+    if (!id) return;
+    const { error } = await this.supabase.from("execution_inbox").update({
+      status,
+      error_code: errorCode,
+      applied_at: status === "APPLIED" || status === "IGNORED" ? new Date().toISOString() : null
+    }).eq("id", id);
+    if (error) throw error;
+  }
+
+  async probeReadiness() {
+    const checks = await Promise.allSettled([
+      head(this.supabase.from("execution_commands").select("id", { head: true, count: "exact" })),
+      head(this.supabase.from("broker_secret_vault").select("id", { head: true, count: "exact" })),
+      head(this.supabase.from("worker_leases").select("lease_key", { head: true, count: "exact" })),
+      head(this.supabase.from("execution_inbox").select("id", { head: true, count: "exact" }))
+    ]);
+    const names = ["queue", "credentialVault", "leaseSubsystem", "eventInbox"];
+    const dependencies = Object.fromEntries(checks.map((result, index) => [names[index], result.status === "fulfilled"]));
+    return { ready: Object.values(dependencies).every(Boolean) && Boolean(this.workerId), workerIdentity: Boolean(this.workerId), dependencies };
   }
 
   async audit(event) {
@@ -128,3 +197,29 @@ export function sanitizeError(value) {
     .replace(/(api[-_ ]?key|secret|token|signature|authorization|password)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]")
     .slice(0, 1000);
 }
+
+export function providerEventIdentity(provider, event) {
+  const body = event.report || event.fill || event.position || event.wallet || event.strategy || event.raw || event;
+  const nativeId = body?.executionId || body?.fillId || body?.eventId || body?.orderId || body?.exchangeOrderId;
+  const version = body?.updatedTime || body?.updateTime || body?.timestamp || event.time || "0";
+  if (nativeId) return `${String(provider).toLowerCase()}:${String(event.type || "event").toLowerCase()}:${nativeId}:${version}`;
+  return `${String(provider).toLowerCase()}:${String(event.type || "event").toLowerCase()}:${hashCanonical(event)}`;
+}
+
+function hashCanonical(value) {
+  return crypto.createHash("sha256").update(stableJson(value)).digest("hex");
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (!value || typeof value !== "object") return JSON.stringify(value);
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+}
+
+async function head(builder) {
+  const { error } = await builder;
+  if (error) throw error;
+  return true;
+}
+
+function mandateError(code, message) { return Object.assign(new Error(message), { code, statusCode: 403 }); }

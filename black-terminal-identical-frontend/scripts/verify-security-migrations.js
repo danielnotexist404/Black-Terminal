@@ -8,11 +8,26 @@ const requiredTables = [
   "broker_connection_health", "broker_secret_references", "broker_secret_vault", "execution_audit_events", "execution_commands",
   "execution_command_attempts", "execution_incidents", "follower_execution_plans", "group_execution_mandates",
   "group_trade_intents", "reconciliation_runs", "api_rate_limit_counters", "ai_daily_usage", "security_audit_events",
-  "execution_audit_archive"
+  "execution_audit_archive", "broker_automation_mandates", "broker_automation_mandate_versions",
+  "strategy_deployments", "strategy_runtime_state", "durable_execution_intents", "execution_outbox",
+  "execution_inbox", "connection_audit_events", "investment_group_connection_assignments"
 ];
 
 const allowMissing = process.argv.includes("--allow-missing");
+const sourceOnly = process.argv.includes("--source-only");
 const supabase = process.env.SUPABASE_BIN || "supabase";
+const migrationDirectory = path.join(process.cwd(), "supabase", "migrations");
+const migrationSql = fs.readdirSync(migrationDirectory).filter((name) => name.endsWith(".sql"))
+  .map((name) => fs.readFileSync(path.join(migrationDirectory, name), "utf8")).join("\n");
+if (sourceOnly) {
+  const undefinedTables = requiredTables.filter((table) => !new RegExp(`create\\s+table\\s+if\\s+not\\s+exists\\s+(?:"?public"?\\.)?"?${table}"?\\b`, "i").test(migrationSql));
+  if (undefinedTables.length) {
+    console.error(`Migration source verification failed: ${undefinedTables.join(", ")}`);
+    process.exit(1);
+  }
+  console.log(`Migration source verification passed: ${requiredTables.length}/${requiredTables.length} required tables are defined.`);
+  process.exit(0);
+}
 let output;
 try {
   output = execFileSync(supabase, ["inspect", "db", "table-stats", "--linked"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -29,10 +44,6 @@ try {
 }
 const liveTables = new Set((inspection.rows || []).map((row) => String(row.name || "").replace(/^public\./, "")).filter(Boolean));
 const missing = requiredTables.filter((table) => !liveTables.has(table));
-
-const migrationDirectory = path.join(process.cwd(), "supabase", "migrations");
-const migrationSql = fs.readdirSync(migrationDirectory).filter((name) => name.endsWith(".sql"))
-  .map((name) => fs.readFileSync(path.join(migrationDirectory, name), "utf8")).join("\n");
 const undefinedInMigrations = missing.filter((table) => !new RegExp(`create\\s+table\\s+if\\s+not\\s+exists\\s+public\\.${table}\\b`, "i").test(migrationSql));
 if (undefinedInMigrations.length) {
   console.error(`Migration verification failed: no idempotent CREATE TABLE for ${undefinedInMigrations.join(", ")}`);

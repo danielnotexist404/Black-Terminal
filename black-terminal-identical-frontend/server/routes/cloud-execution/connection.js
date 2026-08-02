@@ -10,6 +10,7 @@ import {
 } from "../../portfolio-api.js";
 import { normalizeBybitPermissionReport, validateBybitCredentials } from "../../exchanges/bybit.js";
 import { storeBrokerCredential } from "../../cloud-execution/secret-vault.js";
+import { hashCanonicalPayload, signCanonicalPayload } from "../../cloud-execution/canonical.js";
 
 const CONFIRMATION = "ENABLE OFFLINE CLOUD EXECUTION";
 
@@ -64,7 +65,9 @@ export default async function handler(req, res) {
       category: "centralized-exchange",
       provider: "bybit",
       label: account.account_name || "Bybit Cloud",
-      status: "connected",
+      // REST credential verification is not persistent-stream readiness. The
+      // supervisor promotes the connection only after authentication and sync.
+      status: "degraded",
       account_id: account.id,
       account_reference: maskAccountReference(account.account_name),
       account_type: "unified",
@@ -74,6 +77,10 @@ export default async function handler(req, res) {
       authorization_type: "trade_only_api_credential",
       health_status: "RECONCILING",
       lifecycle_status: "VALIDATING",
+      credential_state: "VERIFYING",
+      worker_state: "OFFLINE",
+      synchronization_state: "NOT_SYNCHRONIZED",
+      execution_readiness: "BLOCKED",
       control_state: "ACTIVE",
       last_authenticated_at: new Date().toISOString(),
       capabilities: ["read-balances", "read-positions", "read-orders", "market-orders", "limit-orders", "offline-execution", "group-orders"],
@@ -121,6 +128,7 @@ export default async function handler(req, res) {
       permissionScope: { trading: true, withdrawal: false, products: ["spot", "perpetual"], network: credentials.network },
       withdrawalEnabled: false
     });
+    const automationMandate = await createAutomationMandate(supabase, user.id, account, connection, req.body.automation || {});
 
     const { error: auditError } = await supabase.from("execution_audit_events").insert({
       user_id: user.id, connection_id: connection.id, event_type: "CONNECTION_CREATED", severity: "INFO",
@@ -129,7 +137,7 @@ export default async function handler(req, res) {
     });
     if (auditError) throw auditError;
 
-    await supabase.from("execution_commands").upsert({
+    const { error: syncQueueError } = await supabase.from("execution_commands").upsert({
       command_type: "SYNC_ACCOUNT",
       user_id: user.id,
       connection_id: connection.id,
@@ -138,13 +146,15 @@ export default async function handler(req, res) {
       status: "QUEUED",
       priority: 10
     }, { onConflict: "idempotency_key", ignoreDuplicates: true });
+    if (syncQueueError) throw syncQueueError;
 
     return res.status(200).json({
       connection: safeConnection(connection),
       secretReference,
+      automationMandate: safeAutomationMandate(automationMandate),
       offlineExecution: "PENDING_RECONCILIATION",
       withdrawalPermission: "NONE",
-      readinessReason: "Black Cloud must complete the first account reconciliation before mandates can activate."
+      readinessReason: "Automation is authorized; Black Cloud must complete its first account reconciliation before execution becomes ready."
     });
   } catch (error) {
     return sendError(res, error);
@@ -159,9 +169,93 @@ function safeConnection(row) {
     connectionMode: row.connection_mode,
     executionCapability: row.execution_capability,
     healthStatus: row.health_status,
+    credentialState: row.credential_state || "VERIFYING",
+    workerState: row.worker_state || "OFFLINE",
+    synchronizationState: row.synchronization_state || "NOT_SYNCHRONIZED",
+    executionReadiness: row.execution_readiness || "BLOCKED",
     accountReference: row.account_reference,
     lastAuthenticatedAt: row.last_authenticated_at
   };
+}
+
+async function createAutomationMandate(supabase, userId, account, connection, requested) {
+  const { data: risk, error: riskError } = await supabase.from("account_risk_controls").select("*").eq("account_id", account.id).maybeSingle();
+  if (riskError) throw riskError;
+  const { data: latest, error: latestError } = await supabase.from("broker_automation_mandates")
+    .select("mandate_version")
+    .eq("connection_id", connection.id)
+    .order("mandate_version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (latestError) throw latestError;
+  const version = Number(latest?.mandate_version || 0) + 1;
+  const acceptedAt = new Date().toISOString();
+  const expiresAt = requested.expiresAt || null;
+  if (expiresAt && Date.parse(expiresAt) <= Date.now()) throw Object.assign(new Error("Automation mandate expiry must be in the future."), { statusCode: 400 });
+  const policy = {
+    userId,
+    connectionId: connection.id,
+    broker: connection.provider,
+    accountReference: connection.account_reference || maskAccountReference(account.account_name),
+    subaccountReference: null,
+    allowRead: true,
+    allowTrade: true,
+    allowCancel: true,
+    allowModify: true,
+    allowStrategyExecution: requested.allowStrategyExecution !== false,
+    allowCopyTrading: requested.allowCopyTrading === true,
+    allowInvestmentGroupExecution: requested.allowInvestmentGroupExecution === true,
+    allowWithdrawals: false,
+    maxOrderNotional: positiveOr(requested.maxOrderNotional, Math.min(Number(risk?.max_position_usd || 1_000), 1_000)),
+    maxPositionNotional: positiveOr(requested.maxPositionNotional, Number(risk?.max_position_usd || 5_000)),
+    maxLeverage: positiveOr(requested.maxLeverage, Number(risk?.max_leverage || 3)),
+    maxDailyLoss: positiveOr(requested.maxDailyLoss, Number(risk?.max_daily_loss_usd || 500)),
+    allowedStrategies: requested.allowedStrategies || [],
+    allowedSymbols: requested.allowedSymbols || risk?.allowed_symbols || [],
+    emergencyPolicy: { preserveProtectiveOrders: requested.preserveProtectiveOrders !== false },
+    status: "ACTIVE",
+    mandateVersion: version,
+    policyVersion: "black-cloud-mandate-v1",
+    securityVersion: "security-fortress-v1",
+    acceptedAt,
+    expiresAt
+  };
+  const canonicalHash = hashCanonicalPayload(policy);
+  const serviceSignature = signCanonicalPayload(policy);
+  const consentEvidence = { confirmation: CONFIRMATION, acceptedAt, persistentAfterLogout: true };
+  const { data, error } = await supabase.rpc("black_cloud_activate_automation_mandate", {
+    p_user_id: userId,
+    p_connection_id: connection.id,
+    p_policy: policy,
+    p_canonical_hash: canonicalHash,
+    p_service_signature: serviceSignature,
+    p_consent_evidence: consentEvidence
+  });
+  if (error) throw error;
+  return Array.isArray(data) ? data[0] : data;
+}
+
+function safeAutomationMandate(row) {
+  return {
+    id: row.id,
+    connectionId: row.connection_id,
+    status: row.status,
+    version: row.mandate_version,
+    allowStrategyExecution: row.allow_strategy_execution,
+    allowCopyTrading: row.allow_copy_trading,
+    allowInvestmentGroupExecution: row.allow_investment_group_execution,
+    withdrawalPermission: "NONE",
+    maxOrderNotional: Number(row.max_order_notional),
+    maxPositionNotional: Number(row.max_position_notional),
+    maxLeverage: Number(row.max_leverage),
+    maxDailyLoss: Number(row.max_daily_loss),
+    expiresAt: row.expires_at
+  };
+}
+
+function positiveOr(value, fallback) {
+  const candidate = Number(value ?? fallback);
+  return Number.isFinite(candidate) && candidate > 0 ? candidate : fallback;
 }
 
 function maskAccountReference(value) {

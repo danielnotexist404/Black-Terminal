@@ -4,6 +4,23 @@ This file records database migrations required by Black Terminal.
 
 Rule: every new table, column, policy, trigger, function, or index must be added here before it is applied in Supabase.
 
+## 2026-08-02 - Phase V Chapter II-B persistent connectivity
+
+Status: migration authored and locally verified; application to a linked remote project is not recorded
+in this repository.
+
+- `supabase/migrations/202608020001_phase5_chapter2b_persistent_connectivity.sql`
+- Adds canonical credential/worker/synchronization/readiness fields to connections.
+- Upgrades the credential vault for per-record DEKs and versioned master-key wrapping.
+- Adds broker automation mandates and immutable versions, strategy deployments/runtime state, durable
+  intents/outbox/inbox, immutable connection audits, and Investment Group connection assignments.
+- Adds atomic v2 vault storage, atomic mandate activation, and current-fencing-token RPCs restricted
+  to the service role.
+- Enables tenant RLS/select policies while revoking client access to execution queue/inbox data.
+
+Run `npm run security:verify-migrations` before deployment and record the remote migration version only
+after the database reports it applied.
+
 ## 2026-07-20 - Phase V Chapter I Security Fortress
 
 Status: Applied and verified on linked project `jdwlspxzoudgzxcghbjo`.

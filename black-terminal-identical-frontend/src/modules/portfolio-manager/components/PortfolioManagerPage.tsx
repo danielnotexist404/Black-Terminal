@@ -16,10 +16,10 @@ import { getCapabilities, resolveProductTier, type CapabilityUser } from "../../
 import { blackCoreConnectionManager } from "../../../connectivity/connectionManager";
 import { readActiveExecutionVenueId, setActiveExecutionVenueId } from "../../../connectivity/activeExecutionVenue";
 import type { ConnectionCapability, ConnectionDiagnostics } from "../../../connectivity/types";
-import { formatExecutionMode, getVenueCertification, type VenueCertificationRecord } from "../../../connectivity/venueRegistry";
+import { getVenueCertification, type VenueCertificationRecord } from "../../../connectivity/venueRegistry";
 import { submitOrder } from "../../../execution/executionEngine";
 import { MAINNET_ORDER_CONFIRMATION, disableMainnetValidationMode, promptEnableMainnetValidationMode, readMainnetValidationMode, validateMainnetOrderReadiness } from "../../../execution/mainnetValidationMode";
-import { activateBlackCloudConnectionViaApi, controlBlackCloudConnectionViaApi, fetchBlackCloudStatusViaApi, getBybitRuntimeStatusViaApi, runExchangeAccountDiagnosticsViaApi, type BlackCloudStatusPayload, type BybitRuntimeStatusPayload, type PortfolioOrderDraft } from "../../../portfolio/portfolioApiClient";
+import { activateBlackCloudConnectionViaApi, controlBlackCloudConnectionViaApi, fetchBlackCloudStatusViaApi, getBybitRuntimeStatusViaApi, runExchangeAccountDiagnosticsViaApi, type BlackCloudControlAction, type BlackCloudStatusPayload, type BybitRuntimeStatusPayload, type PortfolioOrderDraft } from "../../../portfolio/portfolioApiClient";
 import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } from "../../../portfolio/types";
 import { getPortfolioSnapshot } from "../../../portfolio/portfolioStore";
 import { defaultRiskControls } from "../../../risk/types";
@@ -487,14 +487,23 @@ export function PositionsWorkspace({
   const activeExecutionVenue = executionVenues.find((venue) => venue.id === activeVenueId) ?? executionVenues[0] ?? null;
   const activeCloudConnection = cloudStatus?.connections.find((item) => item.id === activeExecutionVenue?.id || item.account_id === activeExecutionVenue?.accountId) ?? null;
 
-  async function controlCloudConnection(action: "pause" | "resume" | "emergency-stop") {
+  async function controlCloudConnection(action: BlackCloudControlAction, options: { cancelProtectiveOrders?: boolean } = {}) {
     if (!activeCloudConnection) return;
-    if (action === "emergency-stop" && !window.confirm("Emergency stop blocks all new Black Cloud orders while monitoring and reconciliation continue. Activate it?")) return;
+    const warning = action === "emergency-account-lock" || action === "emergency-stop"
+      ? "Emergency Account Lock blocks new execution, pauses strategies and mandates, and preserves broker-native protective orders. Continue?"
+      : action === "revoke-mandate" ? "Revoke browser-independent automation authority for this broker? Existing broker-native protection is preserved."
+        : action === "disconnect-broker" ? "Disconnect this Black Cloud broker session? Existing broker-native orders are not cancelled."
+          : action === "cancel-all" ? "Cancel every working order, including broker-native protective orders? This is intentionally destructive."
+            : "";
+    if (warning && !window.confirm(warning)) return;
     try {
-      await controlBlackCloudConnectionViaApi(activeCloudConnection.id, action, action === "emergency-stop" ? "portfolio_manager_operator" : undefined);
+      await controlBlackCloudConnectionViaApi(activeCloudConnection.id, action, {
+        reason: action.includes("emergency") ? "positions_cockpit_operator" : undefined,
+        cancelProtectiveOrders: action === "cancel-all" ? true : options.cancelProtectiveOrders
+      });
       const next = await fetchBlackCloudStatusViaApi();
       if (next) setCloudStatus(next);
-      setCloudStatusMessage(action === "resume" ? "BLACK CLOUD EXECUTION RESUMED" : action === "pause" ? "NEW CLOUD ORDERS PAUSED" : "EMERGENCY STOP ACTIVE");
+      setCloudStatusMessage(action === "resume" ? "RESUME REQUESTED — RECONCILIATION REQUIRED" : `${action.replaceAll("-", " ").toUpperCase()} RECORDED`);
     } catch (error) {
       setCloudStatusMessage(error instanceof Error ? error.message : String(error));
     }
@@ -503,10 +512,29 @@ export function PositionsWorkspace({
   async function activateCloudConnection() {
     const accountId = activeExecutionVenue?.accountId;
     if (!accountId) return;
-    const confirmation = window.prompt("Black Cloud may execute authorized Investment Group orders while this browser and device are offline. Type: ENABLE OFFLINE CLOUD EXECUTION");
+    const confirmation = window.prompt([
+      "PERSISTENT BLACK CLOUD AUTHORIZATION",
+      "Broker: BYBIT / selected account",
+      "Scope: read, trade, cancel, modify, automated strategies, copy trading and Investment Groups",
+      "Default limits: 1,000 USDT/order · 5,000 USDT position · 3x leverage · 500 USDT daily loss",
+      "Withdrawals: FORBIDDEN",
+      "Duration: until revoked",
+      "Emergency default: preserve broker-native protective orders",
+      "This authorization continues after browser closure, logout, or device shutdown when an always-on Black Cloud worker is deployed.",
+      "Type: ENABLE OFFLINE CLOUD EXECUTION"
+    ].join("\n\n"));
     if (confirmation !== "ENABLE OFFLINE CLOUD EXECUTION") { setCloudStatusMessage("OFFLINE EXECUTION CONSENT NOT PROVIDED"); return; }
     try {
-      const result = await activateBlackCloudConnectionViaApi(accountId, confirmation);
+      const result = await activateBlackCloudConnectionViaApi(accountId, confirmation, {
+        allowStrategyExecution: true,
+        allowCopyTrading: true,
+        allowInvestmentGroupExecution: true,
+        maxOrderNotional: 1_000,
+        maxPositionNotional: 5_000,
+        maxLeverage: 3,
+        maxDailyLoss: 500,
+        preserveProtectiveOrders: true
+      });
       const next = await fetchBlackCloudStatusViaApi();
       if (next) setCloudStatus(next);
       setCloudStatusMessage(result?.readinessReason || "BLACK CLOUD CONNECTION VALIDATING");
@@ -807,7 +835,7 @@ export function PositionsWorkspace({
                   const certification = getVenueCertification(venue.id);
                   return (
                     <option key={venue.id} value={`dex:${venue.id}`} disabled={certification?.connectorVisible === false}>
-                      {venue.label} / {venue.defaultProvider === "metamask" ? "MetaMask" : "Phantom"} - {certification ? formatExecutionMode(certification.executionMode) : "UNAVAILABLE"}
+                      {venue.label} / {venue.defaultProvider === "metamask" ? "MetaMask" : "Phantom"} - {certification?.supportState || "UNSUPPORTED"}
                     </option>
                   );
                 })}
@@ -886,28 +914,42 @@ function BlackCloudConnectionPanel({ connection, accountId, status, message, onA
   status: BlackCloudStatusPayload | null;
   message: string;
   onActivate: () => Promise<void>;
-  onControl: (action: "pause" | "resume" | "emergency-stop") => Promise<void>;
+  onControl: (action: BlackCloudControlAction, options?: { cancelProtectiveOrders?: boolean }) => Promise<void>;
 }) {
   if (!connection) return <div className="black-cloud-panel unavailable"><b>BLACK CLOUD</b><span>NO CLOUD-DELEGATED CONNECTION</span>{accountId && <button onClick={() => void onActivate()}>Enable Offline Cloud</button>}{message && <em>{message}</em>}</div>;
   const mandates = status?.mandates.filter((item) => item.broker_connection_id === connection.id) ?? [];
+  const automation = status?.automationMandates?.find((item) => item.connection_id === connection.id && item.status === "ACTIVE") ?? null;
+  const strategies = status?.strategyDeployments?.filter((item) => item.connection_id === connection.id && !["STOPPED", "FAILED"].includes(item.status)) ?? [];
   const incidents = status?.openIncidents.filter((item) => item.connection_id === connection.id) ?? [];
   const stopped = connection.control_state !== "ACTIVE";
   return <div className={`black-cloud-panel ${stopped ? "stopped" : "ready"}`}>
-    <div className="black-cloud-title"><b>BLACK CLOUD</b><span>{connection.lifecycle_status}</span></div>
+    <div className="black-cloud-title"><b>BLACK CLOUD</b><span>{connection.execution_readiness}</span></div>
     <div className="black-cloud-grid">
       <span>Provider <b>{connection.provider.toUpperCase()}</b></span>
-      <span>Health <b>{connection.health_status}</b></span>
-      <span>Control <b>{connection.control_state}</b></span>
-      <span>Private Stream <b>{connection.last_private_event_at ? "ACTIVE" : "WAITING"}</b></span>
-      <span>Last Sync <b>{formatCloudAge(connection.last_reconciled_at)}</b></span>
-      <span>Mandates <b>{mandates.filter((item) => item.status === "ACTIVE").length} ACTIVE</b></span>
+      <span>UI Session <b>AUTHENTICATED</b></span>
+      <span>Broker Auth <b>{connection.credential_state}</b></span>
+      <span>Black Cloud <b>{connection.worker_state}</b></span>
+      <span>Account Sync <b>{connection.synchronization_state}</b></span>
+      <span>Automation <b>{automation?.status || "NOT AUTHORIZED"}</b></span>
+      <span>Execution <b>{connection.execution_readiness}</b></span>
+      <span>Heartbeat <b>{formatCloudAge(connection.last_heartbeat_at)}</b></span>
+      <span>Account Event <b>{formatCloudAge(connection.last_account_event_at)}</b></span>
+      <span>Order Event <b>{formatCloudAge(connection.last_order_event_at)}</b></span>
+      <span>Position Sync <b>{formatCloudAge(connection.last_position_sync_at || connection.last_reconciled_at)}</b></span>
+      <span>Strategies <b>{strategies.length}</b></span>
+      <span>Group Mandates <b>{mandates.filter((item) => item.status === "ACTIVE").length}</b></span>
       <span>Incidents <b>{incidents.length}</b></span>
-      <span>Cloud Execution <b>{connection.execution_capability}</b></span>
+      <span>Reconnects <b>{connection.reconnect_attempts || 0}</b></span>
     </div>
     <div className="black-cloud-actions">
-      <button onClick={() => void onControl(stopped ? "resume" : "pause")}>{stopped ? "Resume" : "Pause"}</button>
-      <button className="danger" disabled={connection.control_state === "EMERGENCY_STOP"} onClick={() => void onControl("emergency-stop")}>Emergency Stop</button>
+      <button onClick={() => void onControl(stopped ? "resume" : "pause-new-entries")}>{stopped ? "Resume" : "Pause Entries"}</button>
+      <button onClick={() => void onControl("cancel-entry-orders")}>Cancel Entries</button>
+      <button onClick={() => void onControl("revoke-mandate")}>Revoke Mandate</button>
+      <button onClick={() => void onControl("disconnect-broker")}>Disconnect Broker</button>
+      <button className="danger" onClick={() => void onControl("cancel-all")}>Cancel All</button>
+      <button className="danger" disabled={connection.control_state === "EMERGENCY_STOP"} onClick={() => void onControl("emergency-account-lock")}>Account Lock</button>
     </div>
+    {automation && <em>Limits {Number(automation.max_order_notional).toLocaleString()} / order · {automation.max_leverage}x · withdrawals disabled</em>}
     {message && <em>{message}</em>}
     {connection.last_error_code && <em>{connection.last_error_code}</em>}
   </div>;
@@ -933,7 +975,7 @@ function ConnectionSupportCard({ certification }: { certification?: VenueCertifi
     <div className={`connection-support-card ${certification.executionMode}`}>
       <div>
         <span>{certification.label}</span>
-        <b>{formatExecutionMode(certification.executionMode)}</b>
+        <b>{certification.supportState}</b>
       </div>
       <div>
         <span>Readiness</span>

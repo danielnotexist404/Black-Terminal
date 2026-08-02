@@ -570,6 +570,17 @@ const themeSource = readFileSync(
   "utf8"
 );
 assert.match(themeSource, /@keyframes kioseff-energy-sweep/);
+assert.match(themeSource, /linear-gradient\(90deg, #4b000a 0%, #850012 32%, #b00018 64%, #ff1d1d 86%, #cfd3da 96%, #fff 100%\)/);
+assert.match(themeSource, /\.kioseff-summary > \.buy-wall strong \{ color: #fff; \}/);
+assert.match(themeSource, /\.kioseff-summary > \.sell-wall strong \{ color: #d0001f; \}/);
+assert.doesNotMatch(themeSource, /#(?:55ffda|ff65fb|72ffe2|65ffe0|96ffe8|ffa5fc|c69cff|2ef0ce|6effe2|e46cff)/i);
+const pixiRendererSource = readFileSync(
+  fileURLToPath(new URL("../src/modules/kioseff-stop-loss-clustering/rendering/KioseffPixiRenderer.ts", import.meta.url)),
+  "utf8"
+);
+assert.match(pixiRendererSource, /settings\.style\.buyWallColor/);
+assert.match(pixiRendererSource, /settings\.volatilityAtEntry\.strongClusterColor/);
+assert.doesNotMatch(pixiRendererSource, /0x(?:55ffda|ff65fb|ff22cc|6929f2)/i);
 for (const relativePath of [
   "../src/features/premium.ts",
   "../src/components/IndicatorLibrary.tsx",
@@ -614,8 +625,8 @@ assert.equal(KIOSEFF_DEFAULT_SETTINGS.absorbtion.stopClusterSells, 2);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.absorbtion.oldStopClusterSells, 2);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.absorbtion.oldStopClusterBuys, 2);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.absorbtion.lowerTimeframe, "1");
-assert.equal(KIOSEFF_DEFAULT_SETTINGS.absorbtion.clusterColor, "#55ffda");
-assert.equal(KIOSEFF_DEFAULT_SETTINGS.absorbtion.oldClusterColor, "#ff65fb");
+assert.equal(KIOSEFF_DEFAULT_SETTINGS.absorbtion.clusterColor, "#f4f6f7");
+assert.equal(KIOSEFF_DEFAULT_SETTINGS.absorbtion.oldClusterColor, "#b00018");
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.volatilityAtEntry.granularity, "lower");
 assert.equal(
   KIOSEFF_DEFAULT_SETTINGS.volatilityAtEntry.timeScaledVolatilityTimeframe,
@@ -623,11 +634,11 @@ assert.equal(
 );
 assert.equal(
   KIOSEFF_DEFAULT_SETTINGS.volatilityAtEntry.strongClusterColor,
-  "#ff65fb"
+  "#b00018"
 );
 assert.equal(
   KIOSEFF_DEFAULT_SETTINGS.volatilityAtEntry.weakClusterColor,
-  "#6929F2"
+  "#7d838a"
 );
 assert.equal(
   KIOSEFF_DEFAULT_SETTINGS.volatilityAtEntry.showHistoricalTriggers,
@@ -640,11 +651,28 @@ assert.equal(
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.forceTypicalMove, false);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.showClusterRatioMeter, true);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.showSummaryTable, true);
-assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.buyWallColor, "#55ffda");
+assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.buyWallColor, "#f4f6f7");
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.showOscillator, false);
-assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.oscillatorBuyColor, "#55ffda");
-assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.oscillatorSellColor, "#ff65fb");
+assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.oscillatorBuyColor, "#cfd3da");
+assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.oscillatorSellColor, "#b00018");
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.activityDashboardWidth, 560);
+const migratedLegacyPalette = migrateKioseffSettings({
+  version: 1,
+  absorbtion: { clusterColor: "#55ffda", oldClusterColor: "#ff65fb" },
+  volatilityAtEntry: { strongClusterColor: "#ff65fb", weakClusterColor: "#6929F2" },
+  style: {
+    buyWallColor: "#55ffda",
+    oscillatorBuyColor: "#55ffda",
+    oscillatorSellColor: "#ff65fb"
+  }
+});
+assert.equal(migratedLegacyPalette.absorbtion.clusterColor, "#f4f6f7");
+assert.equal(migratedLegacyPalette.absorbtion.oldClusterColor, "#b00018");
+assert.equal(migratedLegacyPalette.volatilityAtEntry.strongClusterColor, "#b00018");
+assert.equal(migratedLegacyPalette.volatilityAtEntry.weakClusterColor, "#7d838a");
+assert.equal(migratedLegacyPalette.style.buyWallColor, "#f4f6f7");
+assert.equal(migratedLegacyPalette.style.oscillatorBuyColor, "#cfd3da");
+assert.equal(migratedLegacyPalette.style.oscillatorSellColor, "#b00018");
 assert.deepEqual(
   KIOSEFF_TIMEFRAME_INPUTS.map((option) => option.value),
   ["1", "3", "5", "15", "30", "60", "240"]

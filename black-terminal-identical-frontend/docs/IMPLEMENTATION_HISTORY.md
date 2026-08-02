@@ -1,5 +1,12 @@
 # Implementation History
 
+## 2026-08-02 — Market Maker Heatmap Black Terminal palette
+
+- Replaced the cyan/pink indicator defaults with white powerful buy walls, blood-red sell walls, and silver weak-wall/oscillator tones.
+- Restyled the energy loader as a predominantly blood-red charge bar with a narrow silver/bright-white leading edge.
+- Matched the Market Maker Activity Dashboard to DOM Pro's black/charcoal panels and grey borders; nearest buy-wall data is white and nearest sell-wall data is blood red.
+- Added exact legacy-default color migration so saved workspaces using the former cyan/pink defaults adopt the new palette without overriding unrelated custom colors.
+
 ## 2026-08-02 — Stable active wall labels and buy-wall visibility
 
 - Bound active wall-size text objects to canonical wall IDs and exact price coordinates.

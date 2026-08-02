@@ -9,6 +9,13 @@ import { kioseffTimeframeSeconds } from "../data/timeframes.ts";
 
 export type KioseffHistoryLookbackBars = 5000 | 11000 | 22000;
 
+export const KIOSEFF_BLACK_TERMINAL_PALETTE = {
+  buyWall: "#f4f6f7",
+  sellWall: "#b00018",
+  weakWall: "#7d838a",
+  oscillatorBuy: "#cfd3da"
+} as const;
+
 export type KioseffSettingsV1 = {
   version: 1;
   engineMode: KioseffEngineMode;
@@ -76,14 +83,14 @@ export const KIOSEFF_DEFAULT_SETTINGS: KioseffSettingsV1 = {
     oldStopClusterSells: 2,
     oldStopClusterBuys: 2,
     lowerTimeframe: "1",
-    clusterColor: "#55ffda",
-    oldClusterColor: "#ff65fb"
+    clusterColor: KIOSEFF_BLACK_TERMINAL_PALETTE.buyWall,
+    oldClusterColor: KIOSEFF_BLACK_TERMINAL_PALETTE.sellWall
   },
   volatilityAtEntry: {
     granularity: "lower",
     timeScaledVolatilityTimeframe: "1",
-    strongClusterColor: "#ff65fb",
-    weakClusterColor: "#6929F2",
+    strongClusterColor: KIOSEFF_BLACK_TERMINAL_PALETTE.sellWall,
+    weakClusterColor: KIOSEFF_BLACK_TERMINAL_PALETTE.weakWall,
     showHistoricalTriggers: false,
     showActiveClusterSize: false
   },
@@ -96,9 +103,9 @@ export const KIOSEFF_DEFAULT_SETTINGS: KioseffSettingsV1 = {
     labelFontSize: 9,
     showSummaryTable: true,
     showOscillator: false,
-    buyWallColor: "#55ffda",
-    oscillatorBuyColor: "#55ffda",
-    oscillatorSellColor: "#ff65fb",
+    buyWallColor: KIOSEFF_BLACK_TERMINAL_PALETTE.buyWall,
+    oscillatorBuyColor: KIOSEFF_BLACK_TERMINAL_PALETTE.oscillatorBuy,
+    oscillatorSellColor: KIOSEFF_BLACK_TERMINAL_PALETTE.sellWall,
     activityDashboardWidth: 560
   },
   visibility: {
@@ -165,6 +172,15 @@ function integerAtLeast(value: unknown, minimum: number, fallback: number) {
   return Number.isInteger(value) && Number(value) >= minimum ? Number(value) : fallback;
 }
 
+function migrateLegacyPaletteColor(
+  value: unknown,
+  fallback: string,
+  replacements: Readonly<Record<string, string>>
+) {
+  if (typeof value !== "string") return fallback;
+  return replacements[value.trim().toLowerCase()] ?? value;
+}
+
 export function migrateKioseffSettings(
   value: unknown,
   legacyVisual?: { color?: string; intensity?: number }
@@ -174,7 +190,7 @@ export function migrateKioseffSettings(
     const migrated = structuredClone(KIOSEFF_DEFAULT_SETTINGS);
     const legacyColor = {
       red: "#ff334f",
-      green: "#55ffda",
+      green: KIOSEFF_BLACK_TERMINAL_PALETTE.buyWall,
       white: "#ffffff",
       silver: "#b8bec9",
       gray: "#7d8491"
@@ -239,14 +255,16 @@ export function migrateKioseffSettings(
         absorbtion.lowerTimeframe,
         defaults.absorbtion.lowerTimeframe
       ),
-      clusterColor:
-        typeof absorbtion.clusterColor === "string"
-          ? absorbtion.clusterColor
-          : defaults.absorbtion.clusterColor,
-      oldClusterColor:
-        typeof absorbtion.oldClusterColor === "string"
-          ? absorbtion.oldClusterColor
-          : defaults.absorbtion.oldClusterColor
+      clusterColor: migrateLegacyPaletteColor(
+        absorbtion.clusterColor,
+        defaults.absorbtion.clusterColor,
+        { "#55ffda": defaults.absorbtion.clusterColor }
+      ),
+      oldClusterColor: migrateLegacyPaletteColor(
+        absorbtion.oldClusterColor,
+        defaults.absorbtion.oldClusterColor,
+        { "#ff65fb": defaults.absorbtion.oldClusterColor }
+      )
     },
     volatilityAtEntry: {
       granularity:
@@ -257,14 +275,16 @@ export function migrateKioseffSettings(
         vae.timeScaledVolatilityTimeframe,
         defaults.volatilityAtEntry.timeScaledVolatilityTimeframe
       ),
-      strongClusterColor:
-        typeof vae.strongClusterColor === "string"
-          ? vae.strongClusterColor
-          : defaults.volatilityAtEntry.strongClusterColor,
-      weakClusterColor:
-        typeof vae.weakClusterColor === "string"
-          ? vae.weakClusterColor
-          : defaults.volatilityAtEntry.weakClusterColor,
+      strongClusterColor: migrateLegacyPaletteColor(
+        vae.strongClusterColor,
+        defaults.volatilityAtEntry.strongClusterColor,
+        { "#ff65fb": defaults.volatilityAtEntry.strongClusterColor }
+      ),
+      weakClusterColor: migrateLegacyPaletteColor(
+        vae.weakClusterColor,
+        defaults.volatilityAtEntry.weakClusterColor,
+        { "#6929f2": defaults.volatilityAtEntry.weakClusterColor }
+      ),
       showHistoricalTriggers:
         typeof vae.showHistoricalTriggers === "boolean"
           ? vae.showHistoricalTriggers
@@ -307,18 +327,21 @@ export function migrateKioseffSettings(
         typeof style.showOscillator === "boolean"
           ? style.showOscillator
           : defaults.style.showOscillator,
-      buyWallColor:
-        typeof style.buyWallColor === "string"
-          ? style.buyWallColor
-          : defaults.style.buyWallColor,
-      oscillatorBuyColor:
-        typeof style.oscillatorBuyColor === "string"
-          ? style.oscillatorBuyColor
-          : defaults.style.oscillatorBuyColor,
-      oscillatorSellColor:
-        typeof style.oscillatorSellColor === "string"
-          ? style.oscillatorSellColor
-          : defaults.style.oscillatorSellColor,
+      buyWallColor: migrateLegacyPaletteColor(
+        style.buyWallColor,
+        defaults.style.buyWallColor,
+        { "#55ffda": defaults.style.buyWallColor }
+      ),
+      oscillatorBuyColor: migrateLegacyPaletteColor(
+        style.oscillatorBuyColor,
+        defaults.style.oscillatorBuyColor,
+        { "#55ffda": defaults.style.oscillatorBuyColor }
+      ),
+      oscillatorSellColor: migrateLegacyPaletteColor(
+        style.oscillatorSellColor,
+        defaults.style.oscillatorSellColor,
+        { "#ff65fb": defaults.style.oscillatorSellColor }
+      ),
       activityDashboardWidth:
         typeof style.activityDashboardWidth === "number"
           ? Math.max(440, Math.min(760, Math.round(style.activityDashboardWidth)))

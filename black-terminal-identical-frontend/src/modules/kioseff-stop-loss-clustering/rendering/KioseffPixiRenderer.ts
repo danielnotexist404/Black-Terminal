@@ -159,10 +159,13 @@ export class KioseffPixiRenderer {
 
   private drawCurves(
     curves: ReturnType<typeof buildKioseffRenderModel>["curves"],
-    transform: KioseffRenderTransform
+    transform: KioseffRenderTransform,
+    settings: KioseffSettingsV1
   ) {
+    const buyColor = colorNumber(settings.style.buyWallColor);
+    const sellColor = colorNumber(settings.volatilityAtEntry.strongClusterColor);
     for (const curve of curves) {
-      const color = curve.side === "buy-stop" ? 0x55ffda : 0xff65fb;
+      const color = curve.side === "buy-stop" ? buyColor : sellColor;
       for (let index = 1; index < curve.points.length; index += 1) {
         if (index % 2 === 0) continue;
         const previous = curve.points[index - 1]!;
@@ -286,7 +289,7 @@ export class KioseffPixiRenderer {
         this.xRay
           .rect(0, y + (height * index) / 50, transform.width, height / 50 + 0.5)
           .fill({
-            color: index < 25 ? 0xff22cc : 0x6929f2,
+            color: index < 25 ? 0xcfd3da : 0x5d6268,
             alpha: 0.07 + (1 - midpointDistance) * 0.05
           });
       }
@@ -294,7 +297,7 @@ export class KioseffPixiRenderer {
     for (const zone of model.activeZones) this.drawZone(zone, transform, false, settings);
     for (const zone of model.violatedZones) this.drawZone(zone, transform, true, settings);
     this.drawLabels([...model.activeZones, ...model.violatedZones], transform, settings);
-    this.drawCurves(model.curves, transform);
+    this.drawCurves(model.curves, transform, settings);
     this.drawPane(model.pane, transform, settings);
     this.releaseUnusedTexts();
   }

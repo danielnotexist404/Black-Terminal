@@ -209,6 +209,30 @@ assert.equal(concurrentHistory.warmup.full, false, "requested lookback remains t
 assert.ok(maximumActiveHistoryRequests > 1, "intrabar pages load concurrently");
 assert.ok(maximumActiveHistoryRequests <= 6, "intrabar concurrency remains bounded");
 
+let throttledAttempts = 0;
+const throttledAdapter = {
+  ...historyAdapter,
+  getHistoricalCandles: async (query) => {
+    throttledAttempts += 1;
+    if (throttledAttempts === 1) {
+      throw new Error("Bybit request failed (10006): Too many visits!");
+    }
+    return historyAdapter.getHistoricalCandles(query);
+  }
+} as MarketDataAdapter;
+const recoveredHistory = await new KioseffHistoryCoordinator().load({
+  adapter: throttledAdapter,
+  symbol: concurrentSymbol,
+  chartCandles: concurrentChart.slice(0, 1),
+  targetChartBars: 1,
+  chartTimeframe: "1h",
+  lowerTimeframe: "1m",
+  transport: "fixture",
+  now: base + 3600
+});
+assert.equal(throttledAttempts, 2, "Bybit 10006 throttling is retried instead of becoming unavailable");
+assert.equal(recoveredHistory.quality.complete, true);
+
 const cache = new KioseffHistoryCache(2);
 const result = (sourceVersion: string) => ({
   generation: 1,

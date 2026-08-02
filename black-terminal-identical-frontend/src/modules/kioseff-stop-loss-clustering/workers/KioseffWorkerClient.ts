@@ -8,6 +8,13 @@ import type {
   KioseffWorkerTelemetry
 } from "./protocol.ts";
 
+export type KioseffWorkerChunkProgress = {
+  completedBars: number;
+  totalBars: number;
+  completedIntrabars: number;
+  totalIntrabars: number;
+};
+
 export type KioseffWorkerLike = {
   onmessage: ((event: MessageEvent<KioseffWorkerResponse>) => void) | null;
   onerror: ((event: ErrorEvent) => void) | null;
@@ -116,6 +123,52 @@ export class KioseffWorkerClient {
         inputs
       })
     };
+  }
+
+  async calculateBatchChunked(
+    inputs: KioseffChartBarInput[],
+    chunkSize = 250,
+    onProgress?: (progress: KioseffWorkerChunkProgress) => void
+  ) {
+    const boundedChunkSize = Math.max(1, Math.floor(chunkSize));
+    const totalIntrabars = inputs.reduce(
+      (sum, input) => sum + input.intrabars.length,
+      0
+    );
+    let completedBars = 0;
+    let completedIntrabars = 0;
+    let totalCalculationMs = 0;
+    let snapshot: KioseffSnapshot | null = null;
+    let finalTelemetry = { ...this.telemetry };
+
+    for (let offset = 0; offset < inputs.length; offset += boundedChunkSize) {
+      const chunk = inputs.slice(offset, offset + boundedChunkSize);
+      snapshot = await this.calculateBatch(chunk).promise;
+      completedBars += chunk.length;
+      completedIntrabars += chunk.reduce(
+        (sum, input) => sum + input.intrabars.length,
+        0
+      );
+      totalCalculationMs += this.calculationMs;
+      finalTelemetry = {
+        ...this.telemetry,
+        workerChartBarsReceived: completedBars,
+        workerIntrabarsReceived: completedIntrabars
+      };
+      onProgress?.({
+        completedBars,
+        totalBars: inputs.length,
+        completedIntrabars,
+        totalIntrabars
+      });
+    }
+
+    if (!snapshot) {
+      return this.calculateBatch(inputs).promise;
+    }
+    this.telemetry = finalTelemetry;
+    this.calculationMs = totalCalculationMs;
+    return snapshot;
   }
 
   cancel(requestId: string) {

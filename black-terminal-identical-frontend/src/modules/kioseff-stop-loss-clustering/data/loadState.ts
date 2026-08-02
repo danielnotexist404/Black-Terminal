@@ -10,7 +10,14 @@ export type KioseffLoadState =
   | { stage: "validating"; bars: number; intrabars: number; targetBars?: number }
   | { stage: "starting-worker"; bars?: number; targetBars?: number }
   | { stage: "rebuilding"; bars: number; intrabars: number; targetBars?: number }
-  | { stage: "calculating"; bars: number; intrabars: number; targetBars?: number }
+  | {
+      stage: "calculating";
+      bars: number;
+      intrabars: number;
+      targetBars?: number;
+      processedBars?: number;
+      processedIntrabars?: number;
+    }
   | { stage: "rendering"; clusters: number; completedBars?: number; targetBars?: number }
   | { stage: "warming"; completedBars: number; targetBars: number }
   | { stage: "ready" }

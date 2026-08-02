@@ -1,5 +1,13 @@
 # Implementation History
 
+## 2026-08-02 — 4H / 22,000-bar heatmap reliability
+
+- Preserved Bybit response codes so 10006 / Too many visits is correctly recognized as throttling rather than an unknown fatal error.
+- Added paced pagination plus bounded exponential retry for rate-limited, timed-out, and transient history pages.
+- Split multi-million-intrabar worker calculation into 250-chart-bar messages while preserving one chronological engine state and exact ordered one-minute inputs.
+- Calculate only the newest contiguous certified history when the venue has no one-minute coverage for an older prefix.
+- Keep the last certified progressive warmup visible in degraded mode if a later page cannot finish, instead of clearing the heatmap and showing a false all-or-nothing unavailable state.
+
 ## 2026-08-02 — Market Maker Heatmap Black Terminal palette
 
 - Replaced the cyan/pink indicator defaults with white powerful buy walls, blood-red sell walls, and silver weak-wall/oscillator tones.

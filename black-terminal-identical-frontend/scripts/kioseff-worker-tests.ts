@@ -9,6 +9,7 @@ import {
   KIOSEFF_DEFAULT_SETTINGS,
   kioseffSettingsVersion
 } from "../src/modules/kioseff-stop-loss-clustering/core/settings.ts";
+import { certifiedKioseffInputTail } from "../src/modules/kioseff-stop-loss-clustering/data/qualityGate.ts";
 import type {
   IntrabarQualityReport,
   KioseffChartBarInput,
@@ -142,12 +143,16 @@ assert.equal(stale.type, "error");
 if (stale.type === "error") assert.equal(stale.code, "stale-source-generation");
 
 class LoopbackWorker implements KioseffWorkerLike {
+  maxBatchSize = 0;
   onmessage: ((event: MessageEvent<KioseffWorkerResponse>) => void) | null = null;
   onerror: ((event: ErrorEvent) => void) | null = null;
   private runtime = new KioseffWorkerRuntime();
   private terminated = false;
 
   postMessage(message: KioseffWorkerRequest) {
+    if (message.type === "calculate-batch") {
+      this.maxBatchSize = Math.max(this.maxBatchSize, message.inputs.length);
+    }
     const delay = message.type === "calculate" ? 5 : 0;
     setTimeout(() => {
       if (this.terminated) return;
@@ -175,5 +180,44 @@ await supersededRejection;
 assert.equal(client.pendingCount, 0);
 client.dispose();
 assert.equal(client.pendingCount, 0);
+
+const incomplete = barInput(4);
+incomplete.quality = {
+  ...incomplete.quality,
+  complete: false,
+  missingTimes: [incomplete.chartBar.time]
+};
+const certifiedTail = certifiedKioseffInputTail([
+  barInput(0),
+  incomplete,
+  barInput(5),
+  barInput(6)
+]);
+assert.deepEqual(
+  certifiedTail.map((input) => input.chartBar.time),
+  [barInput(5).chartBar.time, barInput(6).chartBar.time],
+  "only the newest contiguous certified history is calculated"
+);
+
+const chunkInputs = Array.from({ length: 11 }, (_, index) => barInput(index));
+const chunkExpected = new KioseffParityEngine(context).processBatch(chunkInputs);
+const chunkWorker = new LoopbackWorker();
+const chunkClient = new KioseffWorkerClient(context, () => chunkWorker);
+await chunkClient.reset();
+const chunkProgress: number[] = [];
+const chunkSnapshot = await chunkClient.calculateBatchChunked(
+  chunkInputs,
+  4,
+  (progress) => chunkProgress.push(progress.completedBars)
+);
+assert.equal(canonicalSnapshotHash(chunkSnapshot), canonicalSnapshotHash(chunkExpected));
+assert.equal(chunkWorker.maxBatchSize, 4, "large histories are never cloned to the worker as one payload");
+assert.deepEqual(chunkProgress, [4, 8, 11]);
+assert.equal(chunkClient.lastTelemetry.workerChartBarsReceived, 11);
+assert.equal(
+  chunkClient.lastTelemetry.workerIntrabarsReceived,
+  chunkInputs.reduce((sum, input) => sum + input.intrabars.length, 0)
+);
+chunkClient.dispose();
 
 console.log("Kioseff transactional worker tests passed.");

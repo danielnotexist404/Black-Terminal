@@ -42,6 +42,10 @@ export type KioseffHistoryRequest = {
 
 const KIOSEFF_HISTORY_PAGE_TIMEOUT_MS = 20_000;
 const KIOSEFF_HISTORY_CONCURRENCY = 6;
+const KIOSEFF_HISTORY_RATE_LIMIT_ATTEMPTS = 7;
+const KIOSEFF_HISTORY_TRANSIENT_ATTEMPTS = 4;
+const KIOSEFF_HISTORY_BATCH_PACE_MS = 125;
+const KIOSEFF_HISTORY_MAX_RETRY_DELAY_MS = 12_000;
 
 export function shouldRefreshKioseffHistory(
   previousChartBarTime: number | undefined,
@@ -166,6 +170,55 @@ function sameCandle(left: Candle, right: Candle) {
   );
 }
 
+export function isKioseffHistoryRateLimitError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b(?:403|429|10006)\b|rate.?limit|too many (?:requests|visits)|access too frequent/i.test(
+    message
+  );
+}
+
+function isKioseffTransientHistoryError(error: unknown) {
+  if (error instanceof KioseffDataUnavailableError) {
+    if (error.reason === "stale-source-generation") return false;
+    if (
+      error.reason === "missing-intrabar-history" &&
+      error.details.cause === "history-page-timeout"
+    ) {
+      return true;
+    }
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b(?:408|425|429|5\d\d)\b|network|fetch failed|timeout|temporarily unavailable/i.test(
+    message
+  );
+}
+
+async function waitForKioseffHistoryRetry(signal: AbortSignal, delayMs: number) {
+  if (signal.aborted) {
+    throw new KioseffDataUnavailableError("stale-source-generation", {
+      cause: "history-retry-aborted"
+    });
+  }
+  await new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    };
+    const timeout = setTimeout(finish, delayMs);
+    const abort = () => {
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", abort);
+      reject(
+        new KioseffDataUnavailableError("stale-source-generation", {
+          cause: "history-retry-aborted"
+        })
+      );
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+  });
+}
+
 export class KioseffHistoryCoordinator {
   private generation = 0;
   private cache = new KioseffHistoryCache(4);
@@ -281,10 +334,13 @@ export class KioseffHistoryCoordinator {
           );
           const crossedMilestone =
             warmChart.length >= (milestones[nextMilestone] ?? sortedChart.length);
+          const reachedRequestStart = continuousStart <= range.start;
           const full =
-            continuousStart <= range.start &&
-            sortedChart.length >= targetChartBars;
-          if (!crossedMilestone && !full) return;
+            reachedRequestStart && sortedChart.length >= targetChartBars;
+          // The terminal result is built after fetchRange returns, when the
+          // multi-million-entry paging map is no longer live. Earlier
+          // milestones still render progressively.
+          if (reachedRequestStart || (!crossedMilestone && !full)) return;
           while (
             nextMilestone < milestones.length &&
             warmChart.length >= milestones[nextMilestone]!
@@ -320,6 +376,9 @@ export class KioseffHistoryCoordinator {
         full: sortedChart.length >= targetChartBars
       });
       this.cache.set(cacheKey, result);
+      // Final calculation begins only after fetchRange has released its paging
+      // map, avoiding a second live copy of a multi-million-intrabar window.
+      await request.onWarmup?.(result);
       return result;
     } finally {
       request.signal?.removeEventListener("abort", forwardAbort);
@@ -483,7 +542,7 @@ export class KioseffHistoryCoordinator {
       const pages = await Promise.all(
         batch.map(async (pageRange) => {
           let lastError: unknown;
-          for (let attempt = 0; attempt < 3; attempt += 1) {
+          for (let attempt = 0; attempt < KIOSEFF_HISTORY_RATE_LIMIT_ATTEMPTS; attempt += 1) {
             try {
               return await withHistoryPageTimeout(
                 (pageSignal) =>
@@ -501,36 +560,34 @@ export class KioseffHistoryCoordinator {
               );
             } catch (error) {
               lastError = error;
-              const message = error instanceof Error ? error.message : String(error);
-              const rateLimited = /\b429\b|rate.?limit|too many requests|10006/i.test(message);
-              if (!rateLimited) throw error;
-              if (attempt === 2) {
-                throw new KioseffDataUnavailableError("rate-limited", {
-                  adapter: adapter.id,
-                  pageFrom: pageRange.from,
-                  pageTo: pageRange.to,
-                  attempts: attempt + 1,
-                  cause: message
-                });
+              const rateLimited = isKioseffHistoryRateLimitError(error);
+              const transient = rateLimited || isKioseffTransientHistoryError(error);
+              const maximumAttempts = rateLimited
+                ? KIOSEFF_HISTORY_RATE_LIMIT_ATTEMPTS
+                : transient
+                  ? KIOSEFF_HISTORY_TRANSIENT_ATTEMPTS
+                  : 1;
+              if (attempt + 1 >= maximumAttempts) {
+                if (rateLimited) {
+                  throw new KioseffDataUnavailableError("rate-limited", {
+                    adapter: adapter.id,
+                    pageFrom: pageRange.from,
+                    pageTo: pageRange.to,
+                    attempts: attempt + 1,
+                    cause: error instanceof Error ? error.message : String(error)
+                  });
+                }
+                throw error;
               }
-              await new Promise<void>((resolve, reject) => {
-                const finishRetry = () => {
-                  signal.removeEventListener("abort", abortRetry);
-                  resolve();
-                };
-                const timeout = setTimeout(finishRetry, 250 * 2 ** attempt);
-                const abortRetry = () => {
-                  clearTimeout(timeout);
-                  signal.removeEventListener("abort", abortRetry);
-                  reject(
-                    new KioseffDataUnavailableError("stale-source-generation", {
-                      cause: "rate-limit-retry-aborted"
-                    })
-                  );
-                };
-                signal.addEventListener("abort", abortRetry, { once: true });
-                if (signal.aborted) abortRetry();
-              });
+              const baseDelay = rateLimited ? 750 : 350;
+              const pageJitter =
+                Math.abs(Math.floor(pageRange.from / intervalSeconds)) % 173;
+              const retryDelay =
+                Math.min(
+                  KIOSEFF_HISTORY_MAX_RETRY_DELAY_MS,
+                  baseDelay * 2 ** attempt
+                ) + pageJitter;
+              await waitForKioseffHistoryRetry(signal, retryDelay);
             }
           }
           throw lastError;
@@ -587,6 +644,9 @@ export class KioseffHistoryCoordinator {
       });
       const oldestBatchRange = batch.at(-1);
       if (oldestBatchRange) await onBatch?.(collection, oldestBatchRange.from);
+      if (offset + batch.length < ranges.length) {
+        await waitForKioseffHistoryRetry(signal, KIOSEFF_HISTORY_BATCH_PACE_MS);
+      }
     }
     this.assertCurrent(generation);
     if (byTime.size > expected) {

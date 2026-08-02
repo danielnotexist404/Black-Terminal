@@ -36,6 +36,7 @@ import {
 } from "../src/modules/kioseff-stop-loss-clustering/data/grouping.ts";
 import {
   constructKioseffRequestRange,
+  isKioseffHistoryRateLimitError,
   KioseffHistoryCoordinator
 } from "../src/modules/kioseff-stop-loss-clustering/data/historyCoordinator.ts";
 import { normalizeKioseffCandles } from "../src/modules/kioseff-stop-loss-clustering/data/normalization.ts";
@@ -113,6 +114,18 @@ const noRangeDiagnostic = kioseffUnavailableDiagnostic({
 assert.equal(noRangeDiagnostic.historyCoverage.expected, 0);
 assert.equal(noRangeDiagnostic.historyCoverage.actual, 0);
 assert.equal(noRangeDiagnostic.reason, "missing-request-range");
+assert.equal(
+  isKioseffHistoryRateLimitError(
+    new Error("Bybit request failed (10006): Too many visits!")
+  ),
+  true
+);
+assert.equal(
+  isKioseffHistoryRateLimitError(
+    new Error("Market data request failed with 403: access too frequent")
+  ),
+  true
+);
 
 const base = 1_704_067_200;
 const maximumLookbackChart = Array.from({ length: 22_000 }, (_, index) => ({
@@ -132,6 +145,20 @@ assert.equal(
   ).expectedIntrabars,
   1_320_000,
   "22,000 one-hour bars request 1.32 million ordered one-minute intrabars"
+);
+const maximumFourHourLookbackChart = maximumLookbackChart.map((bar, index) => ({
+  ...bar,
+  time: base + index * 14_400
+}));
+assert.equal(
+  constructKioseffRequestRange(
+    maximumFourHourLookbackChart,
+    "4h",
+    "1m",
+    base + 22_000 * 14_400
+  ).expectedIntrabars,
+  5_280_000,
+  "22,000 four-hour bars retain the exact 5.28-million one-minute input target"
 );
 const normalizedBoundary = normalizeKioseffCandles(
   [
@@ -507,6 +534,7 @@ assert.match(overlaysSource, /<summary>Parity Diagnostics<\/summary>/);
 assert.match(overlaysSource, /settings\.style\.showSummaryTable/);
 assert.match(overlaysSource, /settings\.showClusterRatioMeter/);
 assert.match(overlaysSource, /kioseff-energy-loader/);
+assert.match(overlaysSource, /loadState\.stage !== "degraded"/);
 assert.match(overlaysSource, /Market Maker Activity Dashboard/);
 assert.match(overlaysSource, /Nearest Buy Wall/);
 assert.match(overlaysSource, /Nearest Sell Wall/);
@@ -535,6 +563,9 @@ const chartSource = readFileSync(
 );
 assert.match(chartSource, /MAX_RETAINED_CHART_BARS = 22_000/);
 assert.match(chartSource, /targetChartBars: kioseffSettings\.historyLookbackBars/);
+assert.match(chartSource, /calculateBatchChunked/);
+assert.match(chartSource, /certifiedKioseffInputTail/);
+assert.match(chartSource, /Certified partial warmup retained/);
 assert.match(chartSource, /canUseIndicator\(key, \{ allowedIndicators \}\)/);
 const appSource = readFileSync(
   fileURLToPath(new URL("../src/App.tsx", import.meta.url)),

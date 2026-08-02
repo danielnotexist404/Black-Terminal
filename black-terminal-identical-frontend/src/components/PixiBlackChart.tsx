@@ -49,6 +49,7 @@ import {
   KioseffHistoryCoordinator,
   shouldRefreshKioseffHistory
 } from "../modules/kioseff-stop-loss-clustering/data/historyCoordinator";
+import { certifiedKioseffInputTail } from "../modules/kioseff-stop-loss-clustering/data/qualityGate";
 import { KioseffDataUnavailableError } from "../modules/kioseff-stop-loss-clustering/data/types";
 import {
   emptyKioseffRuntimeDiagnostics,
@@ -1089,6 +1090,8 @@ export function PixiBlackChart({
     let client: KioseffWorkerClient | null = null;
     const abort = new AbortController();
     let processedSourceVersion: string | null = null;
+    let processedChartBarCount = 0;
+    let processedFullyCertified = false;
     let lastCoverage: import("../modules/kioseff-stop-loss-clustering/data/types").IntrabarCoverage | undefined;
     const lowerTimeframe = normalizeKioseffTimeframeInput(
       kioseffSettings.model === "volatility-at-entry"
@@ -1137,6 +1140,22 @@ export function PixiBlackChart({
         loadStage: state.stage,
         parityState
       }));
+    };
+    const degraded = (message: string) => {
+      if (disposed || !processedSourceVersion || processedChartBarCount === 0) return false;
+      setKioseffUnavailable(null);
+      setLoadStage({ stage: "degraded", message });
+      setKioseffDiagnostics((current) => ({
+        ...current,
+        workerStatus: "degraded",
+        lastDiagnostic: message
+      }));
+      trace("degraded", {
+        completedChartBars: processedChartBarCount,
+        targetChartBars: kioseffSettings.historyLookbackBars,
+        message
+      });
+      return true;
     };
     const unavailable = (
       reason: KioseffUnavailableDiagnostic["reason"],
@@ -1264,7 +1283,8 @@ export function PixiBlackChart({
       if (disposed) return;
       lastCoverage = history.coverage;
       const intrabarCount = history.coverage.receivedIntrabars;
-      const provisional = history.chartBars.at(-1);
+      const certifiedChartBars = certifiedKioseffInputTail(history.chartBars);
+      const provisional = certifiedChartBars.at(-1);
       setLoadStage({
         stage: "validating",
         bars: history.chartBars.length,
@@ -1304,25 +1324,18 @@ export function PixiBlackChart({
         settingsHash: kioseffSettingsHash(kioseffSettings),
         generation: history.generation
       }));
-      const rejected = history.chartBars.find(
-        (bar) =>
-          !bar.quality.complete ||
-          bar.quality.sourceMismatch ||
-          bar.quality.duplicateTimes.length > 0 ||
-          bar.quality.outOfOrderTimes.length > 0 ||
-          bar.quality.conflictingTimes.length > 0
-      );
-      if (rejected) {
-        throw new KioseffDataUnavailableError(
-          rejected.quality.sourceMismatch
-            ? "source-history-live-mismatch"
-            : "incomplete-intrabar-coverage",
-          {
-            chartBarTime: rejected.chartBar.time,
-            expected: rejected.quality.expectedCount,
-            actual: rejected.quality.actualCount
-          }
-        );
+      if (!certifiedChartBars.length) {
+        throw new KioseffDataUnavailableError("missing-intrabar-history", {
+          chartBars: history.chartBars.length,
+          cause: "no-contiguous-certified-tail"
+        });
+      }
+      const trimmedChartBars = history.chartBars.length - certifiedChartBars.length;
+      if (trimmedChartBars > 0) {
+        setKioseffDiagnostics((current) => ({
+          ...current,
+          lastDiagnostic: `Retained ${certifiedChartBars.length.toLocaleString()} contiguous certified bars; omitted ${trimmedChartBars.toLocaleString()} older bars with unavailable one-minute coverage.`
+        }));
       }
       setLoadStage({
         stage: "starting-worker",
@@ -1345,8 +1358,8 @@ export function PixiBlackChart({
       }));
       await client.reset(context);
       if (disposed) return;
-      const chartBarsSent = history.chartBars.length;
-      const intrabarsSent = history.chartBars.reduce(
+      const chartBarsSent = certifiedChartBars.length;
+      const intrabarsSent = certifiedChartBars.reduce(
         (sum, bar) => sum + bar.intrabars.length,
         0
       );
@@ -1381,7 +1394,27 @@ export function PixiBlackChart({
             : null,
         rejectionReason: null
       });
-      const snapshot = await client.calculateBatch(history.chartBars).promise;
+      const snapshot = await client.calculateBatchChunked(
+        certifiedChartBars,
+        250,
+        (progress) => {
+          if (disposed) return;
+          setLoadStage({
+            stage: "calculating",
+            bars: progress.totalBars,
+            intrabars: progress.totalIntrabars,
+            processedBars: progress.completedBars,
+            processedIntrabars: progress.completedIntrabars,
+            targetBars: history.warmup.targetChartBars
+          });
+          setKioseffDiagnostics((current) => ({
+            ...current,
+            workerStatus: "calculating",
+            workerChartBarsReceived: progress.completedBars,
+            workerIntrabarsReceived: progress.completedIntrabars
+          }));
+        }
+      );
       if (disposed) return;
       const renderModel = buildKioseffRenderModel(snapshot, kioseffSettings);
       const clusterCount =
@@ -1430,12 +1463,15 @@ export function PixiBlackChart({
         lastRebuild: Math.floor(Date.now() / 1000)
       }));
       processedSourceVersion = history.sourceVersion;
-      if (history.warmup.full) {
+      processedChartBarCount = certifiedChartBars.length;
+      processedFullyCertified =
+        history.warmup.full && certifiedChartBars.length === history.chartBars.length;
+      if (processedFullyCertified) {
         setLoadStage({ stage: "ready" });
       } else {
         setLoadStage({
           stage: "warming",
-          completedBars: history.warmup.completedChartBars,
+          completedBars: certifiedChartBars.length,
           targetBars: history.warmup.targetChartBars
         });
       }
@@ -1512,26 +1548,38 @@ export function PixiBlackChart({
         if (disposed) return;
         if (processedSourceVersion !== history.sourceVersion) {
           await calculateHistory(history);
-        } else if (history.warmup.full) {
+        } else if (history.warmup.full && processedFullyCertified) {
           setLoadStage({ stage: "ready" });
         } else {
-          setLoadStage({
-            stage: "warming",
-            completedBars: history.warmup.completedChartBars,
-            targetBars: history.warmup.targetChartBars
-          });
+          const retained = degraded(
+            `Using ${processedChartBarCount.toLocaleString()} certified bars. ${adapter.label} history ended before the ${history.warmup.targetChartBars.toLocaleString()}-bar target; the calculated heatmap remains active.`
+          );
+          if (!retained) {
+            setLoadStage({
+              stage: "warming",
+              completedBars: history.warmup.completedChartBars,
+              targetBars: history.warmup.targetChartBars
+            });
+          }
         }
       })
       .catch((error: unknown) => {
         if (disposed) return;
         if (error instanceof KioseffDataUnavailableError) {
-          unavailable(error.reason, error.message);
+          const retained = degraded(
+            `Certified partial warmup retained (${processedChartBarCount.toLocaleString()} of ${kioseffSettings.historyLookbackBars.toLocaleString()} bars). Full history paused: ${error.reason}.`
+          );
+          if (!retained) unavailable(error.reason, error.message);
           return;
         }
-        unavailable(
-          "worker-failure",
-          error instanceof Error ? error.message : String(error)
-        );
+        const message = error instanceof Error ? error.message : String(error);
+        if (
+          !degraded(
+            `Certified partial warmup retained (${processedChartBarCount.toLocaleString()} of ${kioseffSettings.historyLookbackBars.toLocaleString()} bars). Worker continuation paused: ${message}.`
+          )
+        ) {
+          unavailable("worker-failure", message);
+        }
       });
     return () => {
       disposed = true;

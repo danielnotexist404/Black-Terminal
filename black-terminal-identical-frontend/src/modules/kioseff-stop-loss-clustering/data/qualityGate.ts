@@ -1,6 +1,27 @@
 import type { KioseffChartBarInput } from "./types.ts";
 import { KioseffDataUnavailableError } from "./types.ts";
 
+export function isKioseffInputQualityCertified(input: KioseffChartBarInput) {
+  return (
+    input.quality.complete &&
+    !input.quality.sourceMismatch &&
+    input.quality.missingTimes.length === 0 &&
+    input.quality.conflictingTimes.length === 0 &&
+    input.quality.duplicateTimes.length === 0 &&
+    input.quality.outOfOrderTimes.length === 0
+  );
+}
+
+export function certifiedKioseffInputTail(
+  inputs: readonly KioseffChartBarInput[]
+) {
+  let start = 0;
+  for (let index = 0; index < inputs.length; index += 1) {
+    if (!isKioseffInputQualityCertified(inputs[index]!)) start = index + 1;
+  }
+  return inputs.slice(start);
+}
+
 export function assertKioseffInputQuality(inputs: readonly KioseffChartBarInput[]) {
   if (!inputs.length) {
     throw new KioseffDataUnavailableError("missing-intrabar-history", { chartBars: 0 });
@@ -11,13 +32,7 @@ export function assertKioseffInputQuality(inputs: readonly KioseffChartBarInput[
         chartBarTime: input.chartBar.time
       });
     }
-    if (
-      !input.quality.complete ||
-      input.quality.missingTimes.length ||
-      input.quality.conflictingTimes.length ||
-      input.quality.duplicateTimes.length ||
-      input.quality.outOfOrderTimes.length
-    ) {
+    if (!isKioseffInputQualityCertified(input)) {
       throw new KioseffDataUnavailableError("incomplete-intrabar-coverage", {
         chartBarTime: input.chartBar.time,
         expected: input.quality.expectedCount,

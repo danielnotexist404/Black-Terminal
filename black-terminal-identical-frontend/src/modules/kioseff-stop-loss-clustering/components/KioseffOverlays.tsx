@@ -60,7 +60,7 @@ function loadLabel(state: KioseffLoadState) {
     case "rebuilding":
       return `Rebuilding clean Pine state from ${state.bars.toLocaleString()} chronological bars and ${state.intrabars.toLocaleString()} intrabars…`;
     case "calculating":
-      return `Calculating ${state.bars.toLocaleString()} bars from ${state.intrabars.toLocaleString()} intrabars…`;
+      return `Calculating ${(state.processedBars ?? state.bars).toLocaleString()} of ${state.bars.toLocaleString()} bars from ${(state.processedIntrabars ?? state.intrabars).toLocaleString()} of ${state.intrabars.toLocaleString()} intrabars…`;
     case "rendering":
       return `Building visible market-maker geometry for ${state.clusters.toLocaleString()} zones…`;
     case "warming":
@@ -188,7 +188,14 @@ export function KioseffOverlays({
         : `${dashboard.dominantPressure === "buy-wall" ? "Buy wall" : "Sell wall"} ${dashboard.dominantPressurePercent?.toFixed(0) ?? "—"}%`;
   return (
     <>
-      {loadState.stage !== "ready" && <KioseffEnergyLoader state={loadState} />}
+      {loadState.stage !== "ready" &&
+        loadState.stage !== "degraded" &&
+        <KioseffEnergyLoader state={loadState} />}
+      {loadState.stage === "degraded" && (
+        <aside className="kioseff-warming" role="status">
+          {loadState.message}
+        </aside>
+      )}
       {loadState.stage === "ready" &&
         snapshot.activeClusters.length + snapshot.violatedClusters.length === 0 && (
           <aside className="kioseff-warming" role="status">

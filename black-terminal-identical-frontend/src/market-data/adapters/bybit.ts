@@ -175,7 +175,7 @@ async function bybitGet<T>(path: string, params: URLSearchParams, signal?: Abort
     { signal }
   );
   if (payload.retCode !== 0) {
-    throw new Error(`Bybit request failed: ${payload.retMsg}`);
+    throw new Error(`Bybit request failed (${payload.retCode}): ${payload.retMsg}`);
   }
   return payload.result;
 }

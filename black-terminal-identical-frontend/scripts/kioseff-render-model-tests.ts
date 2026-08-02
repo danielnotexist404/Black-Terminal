@@ -171,27 +171,41 @@ assert.equal(
 );
 assert.equal(continuous.violatedZones[0]!.drawAsLine, true);
 assert.equal(continuous.violatedZones[0]!.opacity, 0.5);
-const visibleBuy = {
+const weakBuy = {
   ...weak,
-  id: "visible-buy-wall",
+  id: "weak-buy-wall",
   side: "buy-stop" as const,
   signedVolume: 4240,
   absoluteVolume: 4240
 };
-const buyVisibilityRender = buildKioseffRenderModel(
-  { ...denseVae, activeClusters: [visibleBuy], violatedClusters: [] },
+const weakBuyRender = buildKioseffRenderModel(
+  { ...denseVae, activeClusters: [weakBuy], violatedClusters: [] },
   settings
 );
-assert.equal(buyVisibilityRender.activeZones[0]!.labelText, "4.24K");
-assert.equal(buyVisibilityRender.activeZones[0]!.labelColor, settings.style.buyWallColor);
-assert.ok(
-  (buyVisibilityRender.activeZones[0]!.opacity ?? 0) >= 0.14,
-  "weak buy walls retain a readable minimum opacity"
+assert.equal(weakBuyRender.activeZones[0]!.labelText, "4.24K");
+assert.equal(
+  weakBuyRender.activeZones[0]!.color,
+  continuous.activeZones[0]!.color,
+  "ordinary buy walls keep the same weak heatmap treatment as ordinary sell walls"
 );
-assert.notEqual(
-  buyVisibilityRender.activeZones[0]!.color,
-  settings.style.chartBackgroundColor,
-  "buy wall fill cannot disappear into the chart background"
+assert.equal(weakBuyRender.activeZones[0]!.opacity, weak.opacity);
+assert.equal(weakBuyRender.activeZones[0]!.labelColor, settings.volatilityAtEntry.weakClusterColor);
+const powerfulBuy = {
+  ...strong,
+  id: "powerful-buy-wall",
+  side: "buy-stop" as const,
+  signedVolume: 24_200,
+  absoluteVolume: 24_200
+};
+const powerfulBuyRender = buildKioseffRenderModel(
+  { ...denseVae, activeClusters: [powerfulBuy], violatedClusters: [] },
+  settings
+);
+assert.equal(powerfulBuyRender.activeZones[0]!.color, settings.style.buyWallColor);
+assert.equal(powerfulBuyRender.activeZones[0]!.labelColor, settings.style.buyWallColor);
+assert.ok(
+  (powerfulBuyRender.activeZones[0]!.opacity ?? 0) >= 0.24,
+  "only powerful buy walls receive the high-contrast visibility floor"
 );
 assert.equal(interpolateHexColor("#000000", "#ffffff", 0.5), "#808080");
 assert.equal(formatPineVolume(4240), "4.24K");

@@ -71,9 +71,10 @@ Parity/data hashes and runtime diagnostics are developer-only and are absent fro
 
 Active wall-size labels are keyed by canonical wall ID and remain attached to the wall's exact price
 through vertical pan and scale changes. The renderer does not choose viewport-dependent collision
-winners; dense levels may overlap rather than display another wall's size. VAE buy walls use a
-dedicated configurable cyan color, a minimum opacity floor, and a center spine so weak buy-side
-activity remains visible without changing canonical calculations.
+winners; dense levels may overlap rather than display another wall's size. Only VAE buy walls that
+qualify as strong use the dedicated configurable cyan color, minimum opacity floor, and center
+spine. Ordinary buy levels retain the same weak heatmap treatment as ordinary sell levels, without
+changing canonical calculations.
 
 ## Price-domain policies
 

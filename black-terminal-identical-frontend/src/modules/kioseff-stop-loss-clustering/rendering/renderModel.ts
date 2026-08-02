@@ -156,23 +156,21 @@ export function buildKioseffRenderModel(
         0.25 *
           Math.min(1, Math.abs(cluster.signedVolume) / absorbtionMaximumVolume)
       : cluster.opacity;
-    if (!absorbtion && cluster.side === "buy-stop") {
+    if (
+      !absorbtion &&
+      cluster.side === "buy-stop" &&
+      cluster.strength === "strong"
+    ) {
       return Math.max(
-        opacity ?? (cluster.strength === "strong" ? 0.2 : 0.09),
-        cluster.strength === "strong" ? 0.24 : 0.14
+        opacity ?? 0.2,
+        0.24
       );
     }
     return opacity;
   };
   const vaeActiveColor = (cluster: CanonicalCluster) => {
-    if (cluster.side === "buy-stop") {
-      return cluster.strength === "strong"
-        ? settings.style.buyWallColor
-        : interpolateHexColor(
-            settings.style.chartBackgroundColor,
-            settings.style.buyWallColor,
-            Math.max(0.35, cluster.strengthNormalized ?? 0)
-          );
+    if (cluster.side === "buy-stop" && cluster.strength === "strong") {
+      return settings.style.buyWallColor;
     }
     return cluster.strength === "strong"
       ? settings.volatilityAtEntry.strongClusterColor
@@ -189,7 +187,7 @@ export function buildKioseffRenderModel(
       : vaeActiveColor(cluster),
     labelColor: absorbtion
       ? settings.absorbtion.clusterColor
-      : cluster.side === "buy-stop"
+      : cluster.side === "buy-stop" && cluster.strength === "strong"
         ? settings.style.buyWallColor
         : cluster.strength === "strong"
           ? settings.volatilityAtEntry.strongClusterColor

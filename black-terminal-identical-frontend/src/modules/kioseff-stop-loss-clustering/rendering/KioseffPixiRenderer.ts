@@ -114,14 +114,16 @@ export class KioseffPixiRenderer {
         });
     }
     const middle = transform.yForPrice(zone.price);
-    if (zone.drawAsLine || zone.hot || (!violated && zone.side === "buy-stop")) {
+    const powerfulBuyWall =
+      !violated && zone.side === "buy-stop" && zone.strength === "strong";
+    if (zone.drawAsLine || zone.hot || powerfulBuyWall) {
       this.lineGeometry
         .moveTo(left, middle)
         .lineTo(right, middle)
         .stroke({
           color,
           width: Math.max(0.5, settings.style.activeLineWidth),
-          alpha: zone.hot ? 1 : zone.side === "buy-stop" ? Math.max(0.62, alpha) : alpha
+          alpha: zone.hot ? 1 : powerfulBuyWall ? Math.max(0.62, alpha) : alpha
         });
     }
     if (zone.hot) {

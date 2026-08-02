@@ -21,7 +21,7 @@ test("canonical serialization is key-order independent", () => {
 });
 
 test("server exchange adapter registry exposes the complete Bybit contract", () => {
-  const adapter = createCloudExchangeAdapter("bybit", { credentials: { apiKey: "test", apiSecret: "test" }, network: "testnet" });
+  const adapter = createCloudExchangeAdapter("bybit", { credentials: { apiKey: "test", apiSecret: "test", executionEnvironment: "DEMO" }, executionEnvironment: "DEMO" });
   assert.deepEqual(listCloudExchangeAdapters(), ["bybit"]);
   for (const operation of ["connect", "authenticate", "getAccount", "getPositions", "getOrders", "placeOrder", "cancelOrder", "modifyOrder", "subscribeMarketData", "subscribePrivateEvents", "reconcile"]) {
     assert.equal(typeof adapter[operation], "function");

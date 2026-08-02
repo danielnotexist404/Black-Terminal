@@ -18,6 +18,7 @@ import { BlackCloudRepository, sanitizeError } from "./repository.js";
 import { BrokerConnectionManager } from "./connection-supervisor.js";
 import { validateBlackCloudRuntime } from "./runtime-config.js";
 import { createCloudExchangeAdapter } from "./adapters/registry.js";
+import { normalizeBybitExecutionEnvironment } from "../exchanges/bybit-endpoints.js";
 
 export class BlackCloudExecutionWorker {
   constructor(supabase, options = {}) {
@@ -48,11 +49,11 @@ export class BlackCloudExecutionWorker {
   }
 
   assertRuntime() {
-    return validateBlackCloudRuntime().network;
+    return validateBlackCloudRuntime();
   }
 
   async start() {
-    const network = this.assertRuntime();
+    const runtime = this.assertRuntime();
     this.lastReadiness = await this.repository.probeReadiness();
     this.lastReadinessAt = new Date().toISOString();
     if (!this.lastReadiness.ready) throw terminalError("WORKER_DEPENDENCIES_UNAVAILABLE", "Black Cloud database, vault, lease, or queue readiness failed.");
@@ -64,7 +65,7 @@ export class BlackCloudExecutionWorker {
       purpose: "worker_lifecycle",
       userVisible: false,
       message: "Black Cloud execution worker started.",
-      metadata: { workerId: this.workerId, network }
+      metadata: { workerId: this.workerId, executionEnvironment: runtime.executionEnvironment, endpointProfile: runtime.endpointProfile }
     });
     await this.connectionSupervisor.start();
     await this.tick();
@@ -119,7 +120,8 @@ export class BlackCloudExecutionWorker {
       lastLoopError: this.lastLoopError,
       inFlightCommands: this.inFlight.size,
       supervisedConnections: this.connectionSupervisor.connections.size,
-      network: process.env.BLACK_CLOUD_NETWORK || "testnet",
+      executionEnvironment: process.env.BLACK_CLOUD_EXECUTION_ENVIRONMENT || process.env.BYBIT_EXECUTION_ENVIRONMENT || null,
+      endpointProfile: process.env.BYBIT_ENDPOINT_PROFILE || "GLOBAL",
       readiness: this.lastReadiness,
       lastReadinessAt: this.lastReadinessAt,
       connectionMetrics: this.connectionSupervisor.diagnostics(),
@@ -274,14 +276,17 @@ export class BlackCloudExecutionWorker {
     if (!account.trading_enabled || account.is_read_only) throw terminalError("ACCOUNT_READ_ONLY", "The venue account is not approved for trading.");
 
     const credentials = await this.repository.readBrokerSecret(secretReference.id, "group_order_execution");
-    const workerNetwork = process.env.BLACK_CLOUD_NETWORK || "testnet";
-    if ((credentials.network || "mainnet") !== workerNetwork) throw terminalError("WORKER_NETWORK_MISMATCH", "Credential network does not match this worker's isolated venue network.");
+    const credentialEnvironment = normalizeBybitExecutionEnvironment(credentials.executionEnvironment || credentials.network);
+    const workerEnvironment = normalizeBybitExecutionEnvironment(process.env.BLACK_CLOUD_EXECUTION_ENVIRONMENT || process.env.BYBIT_EXECUTION_ENVIRONMENT || process.env.BLACK_CLOUD_NETWORK);
+    if (credentialEnvironment !== workerEnvironment) throw terminalError("WORKER_ENVIRONMENT_MISMATCH", "Credential environment does not match this worker's isolated venue environment.");
+    if (normalizeBybitExecutionEnvironment(connection.execution_environment) !== credentialEnvironment) throw terminalError("CONNECTION_ENVIRONMENT_MISMATCH", "Connection and credential execution environments differ.");
+    if (normalizeBybitExecutionEnvironment(automationMandate.execution_environment) !== credentialEnvironment) throw terminalError("MANDATE_ENVIRONMENT_MISMATCH", "Automation mandate cannot execute in a different broker environment.");
     const marketKind = intent.market_type === "SPOT" ? "spot" : "perpetual";
     const category = marketKind === "spot" ? "spot" : "linear";
     const [wallet, metadataRows, ticker] = await Promise.all([
       getBybitWalletSnapshot(credentials),
-      getBybitInstrumentMetadata({ category, symbol: intent.symbol, network: credentials.network }),
-      getBybitTicker({ category, symbol: intent.symbol, network: credentials.network })
+      getBybitInstrumentMetadata({ category, symbol: intent.symbol, executionEnvironment: credentialEnvironment, endpointProfile: credentials.endpointProfile }),
+      getBybitTicker({ category, symbol: intent.symbol, executionEnvironment: credentialEnvironment, endpointProfile: credentials.endpointProfile })
     ]);
     const instrument = metadataRows[0];
     if (!instrument || String(instrument.tradingStatus).toLowerCase() !== "trading") {
@@ -368,7 +373,12 @@ export class BlackCloudExecutionWorker {
         throw terminalError("AUTOMATION_MANDATE_RISK_REJECTED", "Order notional exceeds the broker automation mandate.");
       }
       await this.repository.assertFencingToken(connection.id, fencingToken);
-      const adapter = createCloudExchangeAdapter(connection.provider, { credentials, network: workerNetwork, connectionId: connection.id });
+      const adapter = createCloudExchangeAdapter(connection.provider, {
+        credentials,
+        executionEnvironment: credentialEnvironment,
+        endpointProfile: credentials.endpointProfile || connection.endpoint_profile || "GLOBAL",
+        connectionId: connection.id
+      });
       venueReport = await adapter.placeOrder(orderDraft, venueValidation);
     } catch (error) {
       if (!isAmbiguousTransportError(error)) throw error;
@@ -462,10 +472,13 @@ export class BlackCloudExecutionWorker {
       single(this.supabase.from("broker_secret_references").select("id").eq("connection_id", connection.id).eq("status", "ACTIVE"))
     ]);
     const credentials = await this.repository.readBrokerSecret(secretReference.id, "account_reconciliation");
+    assertWorkerEnvironment(connection, credentials);
     const result = await syncBybitSnapshotAndReconcile(this.supabase, account.user_id, account, credentials, {
       symbol: command.payload.symbol || "BTCUSDT",
       marketKind: command.payload.marketKind || "perpetual",
-      network: credentials.network || connection.metadata?.network || "mainnet"
+      network: credentials.network,
+      executionEnvironment: credentials.executionEnvironment || connection.execution_environment,
+      endpointProfile: credentials.endpointProfile || connection.endpoint_profile
     });
     await updateOrThrow(this.supabase.from("connectivity_connections").update({
       health_status: "CONNECTED_CLOUD",
@@ -488,8 +501,14 @@ export class BlackCloudExecutionWorker {
     await this.repository.requireAutomationMandate(connection.id, scope);
     const secretReference = await single(this.supabase.from("broker_secret_references").select("id").eq("connection_id", connection.id).eq("status", "ACTIVE"));
     const credentials = await this.repository.readBrokerSecret(secretReference.id, `broker_${operation}`);
-    const network = credentials.network || connection.metadata?.network || "mainnet";
-    const adapter = createCloudExchangeAdapter(connection.provider, { credentials, network, connectionId: connection.id });
+    assertWorkerEnvironment(connection, credentials);
+    const executionEnvironment = credentials.executionEnvironment || connection.execution_environment || connection.metadata?.executionEnvironment;
+    const adapter = createCloudExchangeAdapter(connection.provider, {
+      credentials,
+      executionEnvironment,
+      endpointProfile: credentials.endpointProfile || connection.endpoint_profile || "GLOBAL",
+      connectionId: connection.id
+    });
     await this.repository.assertFencingToken(connection.id, fencingToken);
     if (operation === "modify") return adapter.modifyOrder(command.payload.request || command.payload);
     if (operation === "cancel") return adapter.cancelOrder(command.payload.request || command.payload);
@@ -506,6 +525,15 @@ export class BlackCloudExecutionWorker {
       last_error_message: message
     }).eq("id", command.id).eq("locked_by", this.workerId));
   }
+}
+
+function assertWorkerEnvironment(connection, credentials) {
+  const credentialEnvironment = normalizeBybitExecutionEnvironment(credentials.executionEnvironment || credentials.network);
+  const connectionEnvironment = normalizeBybitExecutionEnvironment(connection.execution_environment || connection.metadata?.executionEnvironment);
+  const workerEnvironment = normalizeBybitExecutionEnvironment(process.env.BLACK_CLOUD_EXECUTION_ENVIRONMENT || process.env.BYBIT_EXECUTION_ENVIRONMENT || process.env.BLACK_CLOUD_NETWORK);
+  if (credentialEnvironment !== connectionEnvironment) throw terminalError("CONNECTION_ENVIRONMENT_MISMATCH", "Connection and credential execution environments differ.");
+  if (credentialEnvironment !== workerEnvironment) throw terminalError("WORKER_ENVIRONMENT_MISMATCH", "Credential environment does not match this worker's isolated venue environment.");
+  return credentialEnvironment;
 }
 
 function assertIntentIntegrity(intent) {

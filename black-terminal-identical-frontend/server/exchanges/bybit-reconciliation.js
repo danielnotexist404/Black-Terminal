@@ -21,6 +21,8 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
   const startedAt = Date.now();
   const symbol = String(options.symbol || "BTCUSDT").toUpperCase();
   const marketKind = options.marketKind === "spot" ? "spot" : "perpetual";
+  const executionEnvironment = options.executionEnvironment || credentials.executionEnvironment || account.execution_environment || credentials.network;
+  const endpointProfile = options.endpointProfile || credentials.endpointProfile || account.endpoint_profile || "GLOBAL";
   const [walletSnapshot, positionRows, openOrderSnapshot, strategies, metadata, accountState, riskLimits, priceLimit, apiKeyInfo] = await Promise.all([
     getBybitWalletSnapshot(credentials),
     getBybitPositions(credentials, { symbol, includeEmpty: true }),
@@ -30,10 +32,10 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
       network: options.network || "mainnet"
     }),
     getBybitStrategies(credentials, { marketKind, symbol }).catch(() => []),
-    getBybitInstrumentMetadata({ category: marketKind === "spot" ? "spot" : "linear", symbol, network: options.network || credentials.network }),
+    getBybitInstrumentMetadata({ category: marketKind === "spot" ? "spot" : "linear", symbol, executionEnvironment, endpointProfile }),
     getBybitAccountInfo(credentials),
-    marketKind === "spot" ? Promise.resolve([]) : getBybitRiskLimits({ category: "linear", symbol, network: options.network || credentials.network }),
-    getBybitOrderPriceLimit({ category: marketKind === "spot" ? "spot" : "linear", symbol, network: options.network || credentials.network }),
+    marketKind === "spot" ? Promise.resolve([]) : getBybitRiskLimits({ category: "linear", symbol, executionEnvironment, endpointProfile }),
+    getBybitOrderPriceLimit({ category: marketKind === "spot" ? "spot" : "linear", symbol, executionEnvironment, endpointProfile }),
     getBybitApiKeyInformation(credentials)
   ]);
   const openOrders = openOrderSnapshot.orders.map((order) => ({
@@ -48,14 +50,17 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
   const balances = walletSnapshot.balances;
   const permissionReport = normalizeBybitPermissionReport(apiKeyInfo);
   const apiKeyFingerprint = crypto.createHash("sha256").update(String(credentials.apiKey || account.id)).digest("hex").slice(0, 24);
-  const venueAccountId = String(apiKeyInfo?.userID || apiKeyInfo?.userId || apiKeyInfo?.parentUid || apiKeyInfo?.uid || apiKeyFingerprint);
+  const venueAccountId = String(apiKeyInfo?.userID || apiKeyInfo?.userId || apiKeyInfo?.parentUid || apiKeyInfo?.uid || "");
+  if (!venueAccountId) {
+    throw Object.assign(new Error(`Bybit account UID verification failed for credential ${apiKeyFingerprint}.`), { code: "BROKER_ACCOUNT_UID_UNVERIFIED", statusCode: 403 });
+  }
   const canonicalConnectionId = `bybit:${venueAccountId}`;
   for (const order of openOrders) {
     order.connectionId = canonicalConnectionId;
     order.venueAccountId = venueAccountId;
     order.canonicalKey = `${order.network || "mainnet"}:${canonicalConnectionId}:bybit:${order.category || "unknown"}:${order.venueOrderId || order.orderId}`;
   }
-  const permissionExecutionState = resolveBybitExecutionPolicy(permissionReport);
+  const permissionExecutionState = resolveBybitExecutionPolicy(permissionReport, { executionEnvironment });
   const executionState = {
     ...permissionExecutionState,
     tradingEnabled: permissionExecutionState.tradingEnabled && openOrderSnapshot.health.verified,
@@ -119,7 +124,10 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     latency_ms: Date.now() - startedAt,
     is_read_only: executionState.readOnly,
     trading_enabled: executionState.tradingEnabled,
-    permissions: executionState.permissions
+    permissions: executionState.permissions,
+    broker_account_uid: venueAccountId,
+    permission_snapshot: permissionReport.snapshot,
+    permission_verified_at: new Date(permissionReport.snapshot.verifiedAt).toISOString()
   };
   const riskPatch = {
     read_only_mode: executionState.readOnly,
@@ -141,6 +149,7 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
       readinessReason: executionState.readinessReason,
       venueTradingPermission: permissionReport.trading,
       withdrawalPermission: permissionReport.withdrawal,
+      transferPermission: permissionReport.transfer,
       allowedSymbols: executionState.allowedSymbols,
       maxNotionalUsd: executionState.maxNotionalUsd
     });
@@ -171,6 +180,8 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     accountId: account.id,
     exchange: "bybit",
     network: options.network || credentials.network || "mainnet",
+    executionEnvironment,
+    endpointProfile,
     balances,
     accountMetrics: walletSnapshot.accountMetrics,
     instrumentRules: metadata[0] || null,
@@ -179,6 +190,8 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     riskLimits,
     priceLimit,
     executionState,
+    brokerAccountUid: venueAccountId,
+    permissionSnapshot: permissionReport.snapshot,
     positions,
     openOrders,
     orderSync: openOrderSnapshot.health,

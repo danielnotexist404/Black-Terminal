@@ -1,10 +1,12 @@
 import crypto from "node:crypto";
-import { assertProviderEndpoint } from "../cloud-execution/provider-allowlist.js";
 import { getBybitPrivateStreamRuntimeDiagnostics } from "./bybit-private-stream.js";
 import { replaceBybitBalances, replaceBybitPositions } from "./bybit-snapshot-store.js";
+import {
+  BYBIT_EXECUTION_ENVIRONMENTS,
+  normalizeBybitExecutionEnvironment,
+  resolveBybitEndpointSet
+} from "./bybit-endpoints.js";
 
-const BYBIT_DEFAULT_BASE_URLS = ["https://api.bybit.com", "https://api.bytick.com"];
-const BYBIT_TESTNET_BASE_URL = "https://api-testnet.bybit.com";
 const RECV_WINDOW = "5000";
 const BYBIT_REQUEST_TIMEOUT_MS = Math.max(1500, Math.min(8000, Number(process.env.BYBIT_REQUEST_TIMEOUT_MS || 4500)));
 const BYBIT_RUNTIME_REGION = process.env.VERCEL_REGION || process.env.AWS_REGION || "local";
@@ -66,8 +68,8 @@ export async function getBybitServerTime(routing = {}) {
   };
 }
 
-export async function getBybitTicker({ category = "linear", symbol = "BTCUSDT", network, baseUrl } = {}) {
-  const response = await bybitPublicRequest("/v5/market/tickers", { category, symbol }, { network, baseUrl });
+export async function getBybitTicker({ category = "linear", symbol = "BTCUSDT", network, executionEnvironment, endpointProfile } = {}) {
+  const response = await bybitPublicRequest("/v5/market/tickers", { category, symbol }, { network, executionEnvironment, endpointProfile });
   const ticker = response?.list?.[0];
   if (!ticker) throw new Error(`Bybit ticker is unavailable for ${symbol}.`);
   return {
@@ -81,11 +83,11 @@ export async function getBybitTicker({ category = "linear", symbol = "BTCUSDT", 
   };
 }
 
-export async function getBybitInstrumentMetadata({ category = "linear", symbol = "BTCUSDT", network, baseUrl } = {}) {
-  const cacheKey = `instrument:${network || "default"}:${category}:${symbol}`;
+export async function getBybitInstrumentMetadata({ category = "linear", symbol = "BTCUSDT", network, executionEnvironment, endpointProfile } = {}) {
+  const cacheKey = `instrument:${executionEnvironment || network || "default"}:${endpointProfile || "GLOBAL"}:${category}:${symbol}`;
   const cached = readBybitPublicCache(cacheKey);
   if (cached) return cached;
-  const response = await bybitPublicRequest("/v5/market/instruments-info", { category, symbol }, { network, baseUrl });
+  const response = await bybitPublicRequest("/v5/market/instruments-info", { category, symbol }, { network, executionEnvironment, endpointProfile });
   const list = response?.list || [];
   const metadata = list.map((instrument) => ({
     venueId: "bybit",
@@ -102,6 +104,7 @@ export async function getBybitInstrumentMetadata({ category = "linear", symbol =
     minQuantity: nullableNumber(instrument.lotSizeFilter?.minOrderQty),
     minNotional: nullableNumber(instrument.lotSizeFilter?.minNotionalValue || instrument.lotSizeFilter?.minOrderAmt),
     maxQuantity: nullableNumber(instrument.lotSizeFilter?.maxOrderQty || instrument.lotSizeFilter?.maxLimitOrderQty),
+    maxMarketQuantity: nullableNumber(instrument.lotSizeFilter?.maxMktOrderQty || instrument.lotSizeFilter?.maxMarketOrderQty),
     pricePrecision: precisionFromStep(instrument.priceFilter?.tickSize),
     quantityPrecision: precisionFromStep(instrument.lotSizeFilter?.qtyStep || instrument.lotSizeFilter?.basePrecision),
     leverageLimits: {
@@ -119,11 +122,11 @@ export async function getBybitInstrumentMetadata({ category = "linear", symbol =
   return metadata;
 }
 
-export async function getBybitRiskLimits({ category = "linear", symbol = "BTCUSDT", network, baseUrl } = {}) {
+export async function getBybitRiskLimits({ category = "linear", symbol = "BTCUSDT", network, executionEnvironment, endpointProfile } = {}) {
   const cacheKey = `risk:${network || "default"}:${category}:${symbol}`;
   const cached = readBybitPublicCache(cacheKey);
   if (cached) return cached;
-  const response = await bybitPublicRequest("/v5/market/risk-limit", { category, symbol }, { network, baseUrl });
+  const response = await bybitPublicRequest("/v5/market/risk-limit", { category, symbol }, { network, executionEnvironment, endpointProfile });
   const riskLimits = (response?.list || []).map((tier) => ({
     id: Number(tier.id || 0),
     symbol: tier.symbol,
@@ -137,8 +140,8 @@ export async function getBybitRiskLimits({ category = "linear", symbol = "BTCUSD
   return riskLimits;
 }
 
-export async function getBybitOrderPriceLimit({ category = "linear", symbol = "BTCUSDT", network, baseUrl } = {}) {
-  const response = await bybitPublicRequest("/v5/market/price-limit", { category, symbol }, { network, baseUrl });
+export async function getBybitOrderPriceLimit({ category = "linear", symbol = "BTCUSDT", network, executionEnvironment, endpointProfile } = {}) {
+  const response = await bybitPublicRequest("/v5/market/price-limit", { category, symbol }, { network, executionEnvironment, endpointProfile });
   return {
     symbol: response?.symbol || symbol,
     maximumBuyPrice: Number(response?.buyLmt || 0),
@@ -417,12 +420,13 @@ export async function getBybitAccountInfo(credentials) {
 
 export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = {}) {
   const startedAt = Date.now();
+  const endpointSet = resolveBybitEndpointSet(credentials);
   const checks = await Promise.all([
     runBybitDiagnosticCheck("server-time", () => getBybitServerTime(credentials), true),
-    runBybitDiagnosticCheck("instrument-metadata", () => getBybitInstrumentMetadata({ category: "linear", symbol, network: credentials.network, baseUrl: credentials.baseUrl }), true),
+    runBybitDiagnosticCheck("instrument-metadata", () => getBybitInstrumentMetadata({ category: "linear", symbol, executionEnvironment: endpointSet.environment, endpointProfile: endpointSet.region }), true),
     runBybitDiagnosticCheck("balances", () => getBybitWalletSnapshot(credentials), true),
     runBybitDiagnosticCheck("positions", () => getBybitPositions(credentials), true),
-    runBybitDiagnosticCheck("open-orders", () => getBybitOpenOrdersSnapshot(credentials, { categories: ["linear", "spot"], settleCoin: "USDT", network: credentials.network || "mainnet" }), true),
+    runBybitDiagnosticCheck("open-orders", () => getBybitOpenOrdersSnapshot(credentials, { categories: ["linear", "spot"], settleCoin: "USDT", network: endpointSet.environment }), true),
     runBybitDiagnosticCheck("api-key-permissions", () => getBybitApiKeyInformation(credentials), false)
   ]);
   const requiredFailures = checks.filter((check) => check.required && check.status === "failed");
@@ -446,24 +450,29 @@ export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = 
   const permissionReport = normalizeBybitPermissionReport(apiKeyInfo);
   const privateStreamRuntime = getBybitPrivateStreamRuntimeDiagnostics();
   const privateStreamsReady = privateStreamRuntime.status === "connected" && privateStreamRuntime.authenticated === true;
-  const isMainnet = (credentials.network || "mainnet") === "mainnet";
+  const isMainnet = endpointSet.environment === BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE;
   const mainnetValidationEnabled = !isMainnet || process.env.BYBIT_MAINNET_VALIDATION_ENABLED === "true";
   const orderReadReady = openOrderSnapshot.health?.verified === true;
   const accountReadReady = requiredFailures.length === 0 && orderReadReady;
-  const executionReady = Boolean(accountReadReady && mainnetValidationEnabled && permissionReport.trading && privateStreamsReady);
+  const executionReady = Boolean(accountReadReady && mainnetValidationEnabled && permissionReport.trading && !permissionReport.transfer && !permissionReport.withdrawal && privateStreamsReady);
   const readinessReason = executionReady
     ? "Bybit execution readiness checks passed for controlled mainnet validation."
     : [
         !accountReadReady ? `Bybit account read validation failed: ${requiredFailures.map((check) => check.message).join(" ")} ${orderReadReady ? "" : "Open-order category verification is incomplete."}`.trim() : "",
         !mainnetValidationEnabled ? "BYBIT_MAINNET_VALIDATION_ENABLED is not true for this mainnet account." : "",
-        !permissionReport.trading ? "Bybit API key is read-only or lacks order/position trading permission." : "",
+        !permissionReport.trading ? "Bybit API key is read-only or lacks both contract Order and Position permissions." : "",
+        permissionReport.transfer ? "Bybit API key has wallet transfer permission, which is not required for execution." : "",
+        permissionReport.withdrawal ? "Bybit API key has forbidden withdrawal permission." : "",
         !privateStreamsReady ? "Bybit private stream runtime is not authenticated and connected." : ""
       ].filter(Boolean).join(" ");
 
   return {
     venueId: "bybit",
     provider: "bybit",
-    network: credentials.network || "mainnet",
+    network: endpointSet.environment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO ? "demo" : "mainnet",
+    executionEnvironment: endpointSet.environment,
+    endpointProfile: endpointSet.region,
+    accountUid: String(apiKeyInfo.userID ?? apiKeyInfo.userId ?? ""),
     executionMode: executionReady ? "full-live" : "read-only",
     readiness: executionReady ? "execution-ready" : "execution-blocked",
     latencyMs: Date.now() - startedAt,
@@ -476,6 +485,7 @@ export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = 
       read: accountReadReady,
       trading: permissionReport.trading,
       withdrawal: permissionReport.withdrawal,
+      transfer: permissionReport.transfer,
       warnings: [
         ...permissionReport.warnings,
         executionReady ? "" : readinessReason,
@@ -491,6 +501,15 @@ export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = 
     openOrders,
     orderSync: openOrderSnapshot.health,
     apiKeyInfo,
+    permissionSnapshot: permissionReport.snapshot,
+    environmentTruth: endpointSet.environment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO
+      ? { badge: "BYBIT DEMO", funds: "SIMULATED FUNDS", marketData: "MAINNET PUBLIC MARKET DATA", execution: "SIMULATED EXECUTION" }
+      : { badge: "BYBIT MAINNET LIVE", funds: "REAL FUNDS", marketData: "MAINNET PUBLIC MARKET DATA", execution: "REAL EXECUTION" },
+    endpointCapabilities: {
+      region: endpointSet.region,
+      websocketOrderEntrySupported: endpointSet.websocketOrderEntrySupported,
+      orderTransport: endpointSet.websocketOrderEntrySupported ? "REST_OR_WEBSOCKET" : "REST_ONLY"
+    },
     privateStreamRuntime,
     endpoints: {
       order: permissionReport.trading ? "available-gated" : "blocked-permission",
@@ -552,6 +571,7 @@ export async function placeBybitOrder(credentials, order, prevalidated = null) {
   if (!validation.ok) {
     const error = new Error(validation.reasons.join(" "));
     error.statusCode = 400;
+    error.code = validation.codes?.[0] || "BYBIT_ORDER_VALIDATION_FAILED";
     error.validation = validation;
     throw error;
   }
@@ -932,10 +952,12 @@ export async function switchBybitPositionMode(credentials, { category = "linear"
 export async function validateBybitOrderDraft(credentials, order) {
   const category = order.marketKind === "spot" ? "spot" : "linear";
   const symbol = normalizeBybitSymbol(order.symbol);
+  const endpointSet = resolveBybitEndpointSet(credentials);
+  const routing = { executionEnvironment: endpointSet.environment, endpointProfile: endpointSet.region };
   const [metadataRows, priceLimit, riskLimits, positionRows] = await Promise.all([
-    getBybitInstrumentMetadata({ category, symbol }),
-    getBybitOrderPriceLimit({ category, symbol }),
-    category === "spot" ? Promise.resolve([]) : getBybitRiskLimits({ category, symbol }),
+    getBybitInstrumentMetadata({ category, symbol, ...routing }),
+    getBybitOrderPriceLimit({ category, symbol, ...routing }),
+    category === "spot" ? Promise.resolve([]) : getBybitRiskLimits({ category, symbol, ...routing }),
     category === "spot" ? Promise.resolve([]) : getBybitPositions(credentials, { symbol, includeEmpty: true })
   ]);
   const metadata = metadataRows[0];
@@ -966,6 +988,7 @@ export function evaluateBybitOrderDraftAgainstMetadata(metadata, order, context 
   const category = context.category || (order.marketKind === "spot" ? "spot" : "linear");
   const symbol = context.symbol || normalizeBybitSymbol(order.symbol);
   const reasons = [];
+  const codes = [];
   const quantity = Number(order.quantity || 0);
   const referencePrice = Number(order.referencePrice || order.limitPrice || order.stopPrice || 0);
   const notional = Math.abs(quantity * referencePrice);
@@ -981,6 +1004,11 @@ export function evaluateBybitOrderDraftAgainstMetadata(metadata, order, context 
   }
   if (metadata?.maxQuantity && quantity > metadata.maxQuantity) {
     reasons.push(`Quantity exceeds Bybit maximum ${metadata.maxQuantity}.`);
+    codes.push("ORDER_ABOVE_EXCHANGE_MAXIMUM");
+  }
+  if (orderType === "Market" && metadata?.maxMarketQuantity && quantity > metadata.maxMarketQuantity) {
+    reasons.push(`Market quantity exceeds Bybit current maximum ${metadata.maxMarketQuantity}. Source: Bybit instrument metadata.`);
+    codes.push("ORDER_ABOVE_EXCHANGE_MARKET_MAXIMUM");
   }
   if (metadata?.quantityStep && !isStepAligned(quantity, metadata.quantityStep)) {
     reasons.push(`Quantity must align to Bybit quantity step ${metadata.quantityStep}.`);
@@ -995,7 +1023,8 @@ export function evaluateBybitOrderDraftAgainstMetadata(metadata, order, context 
     reasons.push(`Stop price must align to Bybit tick size ${metadata.tickSize}.`);
   }
   if (metadata?.minNotional && referencePrice > 0 && notional < metadata.minNotional) {
-    reasons.push(`Order notional ${notional.toFixed(4)} is below Bybit minimum notional ${metadata.minNotional}.`);
+    reasons.push(`ORDER_BELOW_EXCHANGE_MINIMUM — Requested notional: $${notional.toFixed(2)}. Current minimum: $${Number(metadata.minNotional).toFixed(2)}. Source: Bybit instrument metadata.`);
+    codes.push("ORDER_BELOW_EXCHANGE_MINIMUM");
   }
   if (category !== "spot" && order.leverage && metadata?.leverageLimits?.max && Number(order.leverage) > metadata.leverageLimits.max) {
     reasons.push(`Leverage exceeds Bybit maximum ${metadata.leverageLimits.max}x.`);
@@ -1016,6 +1045,7 @@ export function evaluateBybitOrderDraftAgainstMetadata(metadata, order, context 
   return {
     ok: reasons.length === 0,
     reasons,
+    codes,
     category,
     symbol,
     metadata,
@@ -1032,8 +1062,12 @@ export function evaluateBybitOrderDraftAgainstMetadata(metadata, order, context 
 export function validateBybitMainnetValidationRequest({ account, order, risk, validation }) {
   const reasons = [];
   const allowedConnections = splitCsv(process.env.BYBIT_MAINNET_ALLOWED_CONNECTIONS);
-  const allowedSymbols = splitCsv(process.env.BYBIT_MAINNET_ALLOWED_SYMBOLS).map((item) => item.toUpperCase());
-  const maxNotional = Number(process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD || 0);
+  const environment = normalizeBybitExecutionEnvironment(account?.execution_environment || account?.network);
+
+  if (environment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO) {
+    if (!validation?.ok) reasons.push(...(validation?.reasons || ["Bybit venue validation failed."]));
+    return { ok: reasons.length === 0, reasons, maxNotionalUsd: 0, environment };
+  }
 
   if (process.env.BYBIT_MAINNET_VALIDATION_ENABLED !== "true") {
     reasons.push("BYBIT_MAINNET_VALIDATION_ENABLED must be true.");
@@ -1044,12 +1078,6 @@ export function validateBybitMainnetValidationRequest({ account, order, risk, va
   if (allowedConnections.length > 0 && !allowedConnections.includes("*") && !allowedConnections.includes(account.id)) {
     reasons.push("Bybit account is not in BYBIT_MAINNET_ALLOWED_CONNECTIONS.");
   }
-  if (!allowedSymbols.length || !allowedSymbols.includes("*") && !allowedSymbols.includes(String(order.symbol || "").toUpperCase())) {
-    reasons.push("Bybit symbol is not in BYBIT_MAINNET_ALLOWED_SYMBOLS.");
-  }
-  if (Number.isFinite(maxNotional) && maxNotional > 0 && risk.notional > maxNotional) {
-    reasons.push(`Order notional exceeds BYBIT_MAINNET_MAX_NOTIONAL_USD (${maxNotional}).`);
-  }
   if (!validation?.ok) {
     reasons.push(...(validation?.reasons || ["Bybit venue validation failed."]));
   }
@@ -1057,26 +1085,29 @@ export function validateBybitMainnetValidationRequest({ account, order, risk, va
   return {
     ok: reasons.length === 0,
     reasons,
-    maxNotionalUsd: Number.isFinite(maxNotional) && maxNotional > 0 ? maxNotional : 0
+    maxNotionalUsd: 0,
+    environment
   };
 }
 
-export function resolveBybitExecutionPolicy(permissionReport = {}) {
+export function resolveBybitExecutionPolicy(permissionReport = {}, options = {}) {
+  const environment = normalizeBybitExecutionEnvironment(options.executionEnvironment || options.network);
   const allowedSymbols = splitCsv(process.env.BYBIT_MAINNET_ALLOWED_SYMBOLS).map((item) => item.toUpperCase());
-  const maxNotionalUsd = Number(process.env.BYBIT_MAINNET_MAX_NOTIONAL_USD || 0);
   const reasons = [];
 
-  if (process.env.BYBIT_MAINNET_VALIDATION_ENABLED !== "true") reasons.push("Server-side Bybit trading is disabled.");
+  if (environment === BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE && process.env.BYBIT_MAINNET_VALIDATION_ENABLED !== "true") reasons.push("Server-side Bybit Mainnet Live trading is disabled.");
+  if (environment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO && process.env.BYBIT_DEMO_ENABLED !== "true") reasons.push("Server-side Bybit Demo trading is disabled.");
   if (permissionReport.trading !== true) reasons.push("The Bybit API key does not have trading permission.");
   if (permissionReport.withdrawal === true) reasons.push("Withdrawal-enabled API keys cannot trade through Black Terminal.");
-  if (allowedSymbols.length === 0) reasons.push("No Bybit symbols are enabled by server policy.");
+  if (permissionReport.transfer === true) reasons.push("Wallet-transfer-enabled API keys cannot trade through Black Terminal.");
   const tradingEnabled = reasons.length === 0;
   return {
     tradingEnabled,
     readOnly: !tradingEnabled,
-    allowedSymbols,
-    maxNotionalUsd: Number.isFinite(maxNotionalUsd) && maxNotionalUsd > 0 ? maxNotionalUsd : 0,
-    capacityMode: Number.isFinite(maxNotionalUsd) && maxNotionalUsd > 0 ? "operator-cap" : "account-margin",
+    allowedSymbols: allowedSymbols.length ? allowedSymbols : ["*"],
+    maxNotionalUsd: 0,
+    capacityMode: "broker-metadata-account-margin-and-user-policy",
+    executionEnvironment: environment,
     readinessReason: reasons.join(" "),
     permissions: tradingEnabled
       ? ["read-account", "read-orders", "read-positions", "place-orders", "cancel-orders", "modify-orders", "withdraw-disabled"]
@@ -1251,7 +1282,7 @@ async function bybitPublicRequest(path, query = {}, routing = {}) {
     headers: {
       "cdn-request-id": createBybitRequestId()
     }
-  }, routing);
+  }, { ...routing, publicData: true });
   const data = await readBybitResponse(response);
 
   if (!response.ok || data?.retCode !== 0) {
@@ -1323,27 +1354,17 @@ async function fetchBybitWithFallback(path, queryString, options, routing = {}) 
 }
 
 function getBybitBaseUrls(routing = {}) {
-  // A connection's explicit network is authoritative. Do not inherit a
-  // process-wide mainnet URL when routing a testnet account (or vice versa).
-  const inheritedBaseUrl = routing.network ? "" : process.env.BYBIT_BASE_URL;
-  const configured = String(routing.baseUrl || inheritedBaseUrl || "").trim().replace(/\/$/, "");
-  const network = String(routing.network || process.env.BYBIT_NETWORK || "mainnet").toLowerCase();
-  if (["testnet", "sandbox"].includes(network)) {
-    if (configured && !/^https:\/\/api-testnet\.bybit\.com$/i.test(configured)) {
-      throw new Error("Bybit testnet execution requires BYBIT_BASE_URL=https://api-testnet.bybit.com.");
-    }
-    return [configured || BYBIT_TESTNET_BASE_URL].map((endpoint) => approvedBybitEndpoint(endpoint, "testnet"));
+  if (routing.baseUrl) {
+    throw Object.assign(new Error("Per-request Bybit baseUrl overrides are forbidden. Select a certified execution environment and endpoint profile."), { code: "BYBIT_ENDPOINT_OVERRIDE_REJECTED", statusCode: 400 });
   }
-  return [...new Set([configured, ...BYBIT_DEFAULT_BASE_URLS].filter(Boolean))]
-    .map((endpoint) => approvedBybitEndpoint(endpoint, "mainnet"));
+  const endpointSet = resolveBybitEndpointSet({
+    executionEnvironment: routing.executionEnvironment ?? routing.environment ?? routing.network ?? process.env.BYBIT_EXECUTION_ENVIRONMENT ?? process.env.BLACK_CLOUD_EXECUTION_ENVIRONMENT,
+    endpointProfile: routing.endpointProfile ?? routing.region ?? process.env.BYBIT_ENDPOINT_PROFILE ?? "GLOBAL"
+  });
+  return [routing.publicData ? endpointSet.publicRest : endpointSet.rest];
 }
 
 export function resolveBybitBaseUrlsForTests(routing = {}) { return getBybitBaseUrls(routing); }
-
-function approvedBybitEndpoint(endpoint, network) {
-  assertProviderEndpoint({ provider: "bybit", environment: network, endpoint, protocol: "https" });
-  return String(endpoint).replace(/\/$/, "");
-}
 
 function createBybitRequestId() {
   return `bt-${Date.now()}-${crypto.randomBytes(6).toString("hex")}`;
@@ -1576,23 +1597,42 @@ export function normalizeBybitPermissionReport(apiKeyInfo = {}) {
   const readOnly = apiKeyInfo.readOnly === 1 || apiKeyInfo.readOnly === "1" || apiKeyInfo.readOnly === true;
   const contract = normalizePermissionList(permissions.ContractTrade || permissions.contractTrade || permissions.Derivatives || []);
   const spot = normalizePermissionList(permissions.Spot || permissions.spot || []);
+  const options = normalizePermissionList(permissions.Options || permissions.options || []);
   const wallet = normalizePermissionList(permissions.Wallet || permissions.wallet || []);
-  const trading = !readOnly && (
-    contract.some((item) => ["order", "position", "trade"].includes(item)) ||
-    spot.some((item) => ["spottrade", "trade"].includes(item))
-  );
+  const contractOrder = contract.includes("order") || contract.includes("derivativestrade");
+  const contractPosition = contract.includes("position") || contract.includes("derivativestrade");
+  const spotTrade = spot.includes("spottrade") || spot.includes("trade");
+  const optionsTrade = options.includes("optionstrade") || options.includes("trade");
+  const trading = !readOnly && contractOrder && contractPosition;
   const withdrawal = wallet.some((item) => ["withdraw", "withdrawal"].includes(item));
+  const transfer = wallet.some((item) => ["accounttransfer", "submembertransfer", "submembertransferlist", "transfer"].includes(item));
   const warnings = [];
 
   if (readOnly) warnings.push("Bybit API key is read-only.");
-  if (!trading) warnings.push("Bybit API key does not advertise trading permission.");
+  if (!contractOrder) warnings.push("Bybit API key lacks ContractTrade.Order permission.");
+  if (!contractPosition) warnings.push("Bybit API key lacks ContractTrade.Position permission.");
+  if (transfer) warnings.push("Wallet transfer permission detected. Create a trading-only key without AccountTransfer or SubMemberTransfer.");
   if (withdrawal) warnings.push("Withdrawal permission detected. Use trading-only API keys.");
   if (apiKeyInfo.error) warnings.push(`Bybit API-key permission probe failed: ${apiKeyInfo.error}`);
+
+  const snapshot = Object.freeze({
+    readOnly,
+    contractOrder,
+    contractPosition,
+    spotTrade,
+    optionsTrade,
+    walletTransfer: transfer,
+    withdrawal,
+    verifiedAt: Date.now()
+  });
 
   return {
     read: true,
     trading,
     withdrawal,
+    transfer,
+    accountUid: String(apiKeyInfo.userID ?? apiKeyInfo.userId ?? ""),
+    snapshot,
     warnings,
     raw: apiKeyInfo
   };

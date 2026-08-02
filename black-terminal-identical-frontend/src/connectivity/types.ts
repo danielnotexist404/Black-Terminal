@@ -7,7 +7,7 @@ export type ConnectionCategory = "centralized-exchange" | "wallet" | "protocol" 
 
 export type ExecutionMode = "full-live" | "read-only" | "market-data-only" | "signer-only" | "unavailable";
 
-export type ConnectionNetwork = "mainnet" | "sandbox" | "testnet" | "unsupported";
+export type ConnectionNetwork = "mainnet" | "demo" | "sandbox" | "testnet" | "unsupported";
 
 export type ConnectionReadiness =
   | "disconnected"

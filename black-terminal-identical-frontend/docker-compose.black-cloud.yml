@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.black-cloud
-    image: black-terminal/black-cloud-worker:chapter-2b
+    image: black-terminal/black-cloud-worker:chapter-2c
     restart: always
     init: true
     env_file:

@@ -7,13 +7,13 @@ import { providerEventIdentity, redactObject } from "../server/cloud-execution/r
 import { tradingSchemasForTests } from "../server/security/trading-schemas.js";
 import { BybitPrivateStreamClient } from "../server/exchanges/bybit-private-stream.js";
 
-assert.equal(resolveApprovedProviderEndpoint("bybit", "testnet", "https"), "https://api-testnet.bybit.com");
-assert.equal(isProviderEndpointApproved({ provider: "bybit", environment: "testnet", endpoint: "wss://stream-testnet.bybit.com/v5/private", protocol: "wss" }), true);
-assert.equal(isProviderEndpointApproved({ provider: "bybit", environment: "testnet", endpoint: "https://127.0.0.1/steal" }), false);
-assert.throws(() => assertProviderEndpoint({ provider: "bybit", environment: "mainnet", endpoint: "http://api.bybit.com" }), /HTTPS and WSS/);
-assert.throws(() => assertProviderEndpoint({ provider: "bybit", environment: "mainnet", endpoint: "https://evil.example" }), /not approved/);
+assert.equal(resolveApprovedProviderEndpoint("bybit", "demo", "https"), "https://api-demo.bybit.com");
+assert.equal(isProviderEndpointApproved({ provider: "bybit", environment: "demo", endpoint: "wss://stream-demo.bybit.com/v5/private", protocol: "wss" }), true);
+assert.equal(isProviderEndpointApproved({ provider: "bybit", environment: "demo", endpoint: "https://127.0.0.1/steal" }), false);
+assert.throws(() => assertProviderEndpoint({ provider: "bybit", environment: "mainnet_live", endpoint: "http://api.bybit.com" }), /HTTPS and WSS/);
+assert.throws(() => assertProviderEndpoint({ provider: "bybit", environment: "mainnet_live", endpoint: "https://evil.example" }), /not approved/);
 
-const adapter = createCloudExchangeAdapter("bybit", { credentials: {}, network: "testnet", connectionId: "connection-1" });
+const adapter = createCloudExchangeAdapter("bybit", { credentials: { executionEnvironment: "DEMO" }, executionEnvironment: "DEMO", connectionId: "connection-1" });
 for (const operation of PERSISTENT_ADAPTER_OPERATIONS) assert.equal(typeof adapter[operation], "function", `${operation} must exist`);
 assert.throws(() => createCloudExchangeAdapter("binance", {}), /No Black Cloud adapter/);
 
@@ -38,8 +38,8 @@ class AuthenticatedPrivateSocket {
 }
 
 const stream = new BybitPrivateStreamClient(
-  { apiKey: "public-test-key", apiSecret: "private-test-secret" },
-  { network: "testnet", connectionId: "readiness-test", WebSocketCtor: AuthenticatedPrivateSocket }
+  { apiKey: "public-test-key", apiSecret: "private-test-secret", executionEnvironment: "DEMO" },
+  { executionEnvironment: "DEMO", connectionId: "readiness-test", WebSocketCtor: AuthenticatedPrivateSocket }
 );
 await stream.connect();
 assert.equal(stream.diagnostics().authenticated, true);
@@ -69,6 +69,10 @@ for (const table of ["broker_automation_mandates", "strategy_deployments", "stra
 assert.match(migration, /black_cloud_assert_current_fencing_token/);
 assert.match(migration, /black_cloud_store_encrypted_broker_secret_v2/);
 assert.match(migration, /black_cloud_activate_automation_mandate/);
+const productionMigration = fs.readFileSync(new URL("../supabase/migrations/202608020002_phase5_chapter2c_bybit_production_activation.sql", import.meta.url), "utf8");
+assert.match(productionMigration, /create table if not exists public\.broker_risk_policy_versions/i);
+assert.match(productionMigration, /black_cloud_store_encrypted_broker_secret_v3/i);
+assert.match(productionMigration, /execution_environment in \('DEMO','MAINNET_LIVE'\)/i);
 assert.equal(redactObject({ agentPrivateKey: "never", safe: "yes" }).agentPrivateKey, "[REDACTED]");
 
 console.log("Persistent connectivity tests passed: allowlist, adapter contract, durable identity, emergency schema, fencing order, migration and redaction.");

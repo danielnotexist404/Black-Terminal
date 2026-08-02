@@ -11,8 +11,10 @@ import {
 import { normalizeBybitPermissionReport, validateBybitCredentials } from "../../exchanges/bybit.js";
 import { storeBrokerCredential } from "../../cloud-execution/secret-vault.js";
 import { hashCanonicalPayload, signCanonicalPayload } from "../../cloud-execution/canonical.js";
+import { BYBIT_EXECUTION_ENVIRONMENTS, normalizeBybitExecutionEnvironment, resolveBybitEndpointSet } from "../../exchanges/bybit-endpoints.js";
 
 const CONFIRMATION = "ENABLE OFFLINE CLOUD EXECUTION";
+const LIVE_CONFIRMATION = "ENABLE LIVE BYBIT EXECUTION";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -37,6 +39,11 @@ export default async function handler(req, res) {
       error.statusCode = 501;
       throw error;
     }
+    const executionEnvironment = normalizeBybitExecutionEnvironment(account.execution_environment || account.network);
+    const endpointSet = resolveBybitEndpointSet({ executionEnvironment, endpointProfile: account.endpoint_profile || "GLOBAL" });
+    if (executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE && req.body.liveConfirmation !== LIVE_CONFIRMATION) {
+      throw Object.assign(new Error(`Mainnet Live activation requires explicit confirmation: ${LIVE_CONFIRMATION}`), { statusCode: 400 });
+    }
     const { data: legacyCredential, error: credentialError } = await supabase
       .from("exchange_credentials")
       .select("encrypted_payload")
@@ -44,11 +51,18 @@ export default async function handler(req, res) {
       .single();
     if (credentialError || !legacyCredential) throw credentialError || new Error("The existing broker credential could not be migrated.");
     const credentials = decryptCredentialPayload(legacyCredential.encrypted_payload);
-    credentials.network = account.network || credentials.network || "mainnet";
+    credentials.network = executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO ? "demo" : "mainnet";
+    credentials.executionEnvironment = executionEnvironment;
+    credentials.endpointProfile = endpointSet.region;
     const validation = await validateBybitCredentials(credentials);
     const permissionReport = normalizeBybitPermissionReport(validation.diagnostics?.apiKeyInfo || {});
     if (permissionReport.withdrawal) {
       const error = new Error("Withdrawal-enabled Bybit credentials cannot be activated for Black Cloud execution.");
+      error.statusCode = 403;
+      throw error;
+    }
+    if (permissionReport.transfer) {
+      const error = new Error("Wallet-transfer-enabled Bybit credentials cannot be activated for Black Cloud execution.");
       error.statusCode = 403;
       throw error;
     }
@@ -58,7 +72,13 @@ export default async function handler(req, res) {
       throw error;
     }
 
-    const connectionKey = `cloud:bybit:${account.id}`;
+    if (!permissionReport.accountUid || String(account.broker_account_uid || permissionReport.accountUid) !== permissionReport.accountUid) {
+      const error = new Error("Bybit account UID verification failed or changed since the account was connected.");
+      error.statusCode = 403;
+      throw error;
+    }
+
+    const connectionKey = `cloud:bybit:${executionEnvironment}:${account.id}`;
     const connectionPayload = {
       user_id: user.id,
       connection_key: connectionKey,
@@ -85,7 +105,18 @@ export default async function handler(req, res) {
       last_authenticated_at: new Date().toISOString(),
       capabilities: ["read-balances", "read-positions", "read-orders", "market-orders", "limit-orders", "offline-execution", "group-orders"],
       permissions: { trading: true, withdrawal: false },
-      metadata: { network: account.network || "mainnet", activation: "explicit-user-consent" }
+      execution_environment: executionEnvironment,
+      endpoint_profile: endpointSet.region,
+      broker_account_uid: permissionReport.accountUid,
+      permission_snapshot: permissionReport.snapshot,
+      certification_state: "PERMISSIONS_VERIFIED",
+      metadata: {
+        network: account.network,
+        executionEnvironment,
+        endpointProfile: endpointSet.region,
+        websocketOrderEntrySupported: endpointSet.websocketOrderEntrySupported,
+        activation: "explicit-user-consent"
+      }
     };
     const { data: connection, error: connectionError } = await supabase
       .from("connectivity_connections")
@@ -122,18 +153,25 @@ export default async function handler(req, res) {
       userId: user.id,
       connectionId: connection.id,
       provider: "bybit",
+      executionEnvironment,
       secret: credentials,
       publicIdentifier: credentials.apiKey,
       authorizationType: "trade_only_api_credential",
-      permissionScope: { trading: true, withdrawal: false, products: ["spot", "perpetual"], network: credentials.network },
+      permissionScope: { ...permissionReport.snapshot, trading: true, withdrawal: false, walletTransfer: false, products: ["spot", "perpetual"] },
+      permissionSnapshot: permissionReport.snapshot,
+      transferEnabled: false,
       withdrawalEnabled: false
     });
-    const automationMandate = await createAutomationMandate(supabase, user.id, account, connection, req.body.automation || {});
+    const automationMandate = await createAutomationMandate(supabase, user.id, account, connection, {
+      ...(req.body.automation || {}),
+      executionEnvironment,
+      liveConfirmation: req.body.liveConfirmation
+    });
 
     const { error: auditError } = await supabase.from("execution_audit_events").insert({
       user_id: user.id, connection_id: connection.id, event_type: "CONNECTION_CREATED", severity: "INFO",
       operation_purpose: "broker_connection_activation", message: "A trade-only broker connection was delegated to Black Cloud.",
-      safe_metadata: { provider: "bybit", withdrawalPermission: false, connectionMode: connection.connection_mode }
+      safe_metadata: { provider: "bybit", executionEnvironment, endpointProfile: endpointSet.region, withdrawalPermission: false, transferPermission: false, connectionMode: connection.connection_mode }
     });
     if (auditError) throw auditError;
 
@@ -142,7 +180,7 @@ export default async function handler(req, res) {
       user_id: user.id,
       connection_id: connection.id,
       idempotency_key: crypto.createHash("sha256").update(`activate:${connection.id}:${secretReference.credentialVersion}`).digest("hex"),
-      payload: { symbol: "BTCUSDT", marketKind: "perpetual", reason: "cloud-activation" },
+      payload: { symbol: "BTCUSDT", marketKind: "perpetual", executionEnvironment, reason: "cloud-activation" },
       status: "QUEUED",
       priority: 10
     }, { onConflict: "idempotency_key", ignoreDuplicates: true });
@@ -154,6 +192,11 @@ export default async function handler(req, res) {
       automationMandate: safeAutomationMandate(automationMandate),
       offlineExecution: "PENDING_RECONCILIATION",
       withdrawalPermission: "NONE",
+      transferPermission: "NONE",
+      executionEnvironment,
+      environmentTruth: executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO
+        ? ["BYBIT DEMO", "SIMULATED FUNDS", "MAINNET PUBLIC MARKET DATA", "SIMULATED EXECUTION"]
+        : ["BYBIT MAINNET LIVE", "REAL FUNDS", "REAL EXECUTION"],
       readinessReason: "Automation is authorized; Black Cloud must complete its first account reconciliation before execution becomes ready."
     });
   } catch (error) {
@@ -173,6 +216,10 @@ function safeConnection(row) {
     workerState: row.worker_state || "OFFLINE",
     synchronizationState: row.synchronization_state || "NOT_SYNCHRONIZED",
     executionReadiness: row.execution_readiness || "BLOCKED",
+    executionEnvironment: row.execution_environment,
+    endpointProfile: row.endpoint_profile,
+    certificationState: row.certification_state,
+    accountUidVerified: Boolean(row.broker_account_uid),
     accountReference: row.account_reference,
     lastAuthenticatedAt: row.last_authenticated_at
   };
@@ -188,7 +235,15 @@ async function createAutomationMandate(supabase, userId, account, connection, re
     .limit(1)
     .maybeSingle();
   if (latestError) throw latestError;
+  const { data: latestRiskPolicy, error: latestRiskPolicyError } = await supabase.from("broker_risk_policy_versions")
+    .select("policy_version")
+    .eq("connection_id", connection.id)
+    .order("policy_version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (latestRiskPolicyError) throw latestRiskPolicyError;
   const version = Number(latest?.mandate_version || 0) + 1;
+  const riskPolicyVersion = Number(latestRiskPolicy?.policy_version || 0) + 1;
   const acceptedAt = new Date().toISOString();
   const expiresAt = requested.expiresAt || null;
   if (expiresAt && Date.parse(expiresAt) <= Date.now()) throw Object.assign(new Error("Automation mandate expiry must be in the future."), { statusCode: 400 });
@@ -206,15 +261,17 @@ async function createAutomationMandate(supabase, userId, account, connection, re
     allowCopyTrading: requested.allowCopyTrading === true,
     allowInvestmentGroupExecution: requested.allowInvestmentGroupExecution === true,
     allowWithdrawals: false,
-    maxOrderNotional: positiveOr(requested.maxOrderNotional, Math.min(Number(risk?.max_position_usd || 1_000), 1_000)),
-    maxPositionNotional: positiveOr(requested.maxPositionNotional, Number(risk?.max_position_usd || 5_000)),
-    maxLeverage: positiveOr(requested.maxLeverage, Number(risk?.max_leverage || 3)),
-    maxDailyLoss: positiveOr(requested.maxDailyLoss, Number(risk?.max_daily_loss_usd || 500)),
+    executionEnvironment: requested.executionEnvironment,
+    maxOrderNotional: nullablePositive(requested.maxOrderNotional),
+    maxPositionNotional: nullablePositive(requested.maxPositionNotional),
+    maxLeverage: nullablePositive(requested.maxLeverage),
+    maxDailyLoss: nullablePositive(requested.maxDailyLoss),
     allowedStrategies: requested.allowedStrategies || [],
     allowedSymbols: requested.allowedSymbols || risk?.allowed_symbols || [],
     emergencyPolicy: { preserveProtectiveOrders: requested.preserveProtectiveOrders !== false },
     status: "ACTIVE",
     mandateVersion: version,
+    riskPolicyVersion,
     policyVersion: "black-cloud-mandate-v1",
     securityVersion: "security-fortress-v1",
     acceptedAt,
@@ -222,14 +279,32 @@ async function createAutomationMandate(supabase, userId, account, connection, re
   };
   const canonicalHash = hashCanonicalPayload(policy);
   const serviceSignature = signCanonicalPayload(policy);
-  const consentEvidence = { confirmation: CONFIRMATION, acceptedAt, persistentAfterLogout: true };
-  const { data, error } = await supabase.rpc("black_cloud_activate_automation_mandate", {
+  const consentEvidence = {
+    confirmation: CONFIRMATION,
+    liveConfirmation: requested.executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE ? requested.liveConfirmation : null,
+    executionEnvironment: requested.executionEnvironment,
+    acceptedAt,
+    persistentAfterLogout: true
+  };
+  const riskPolicy = {
+    maxOrderNotional: policy.maxOrderNotional,
+    maxPositionNotional: policy.maxPositionNotional,
+    maxLeverage: policy.maxLeverage,
+    maxDailyLoss: policy.maxDailyLoss,
+    allowedSymbols: policy.allowedSymbols,
+    optionalCapsDisabled: ["maxOrderNotional", "maxPositionNotional", "maxLeverage", "maxDailyLoss"].filter((key) => policy[key] === null),
+    mandatoryControls: ["NO_WITHDRAWALS", "NO_TRANSFERS", "OMS_EMS", "BROKER_METADATA", "OWNERSHIP", "MANDATE", "FENCING", "IDEMPOTENCY", "RECONCILIATION"]
+  };
+  const { data, error } = await supabase.rpc("black_cloud_activate_automation_mandate_v2", {
     p_user_id: userId,
     p_connection_id: connection.id,
     p_policy: policy,
     p_canonical_hash: canonicalHash,
     p_service_signature: serviceSignature,
-    p_consent_evidence: consentEvidence
+    p_consent_evidence: consentEvidence,
+    p_risk_policy: riskPolicy,
+    p_risk_canonical_hash: hashCanonicalPayload(riskPolicy),
+    p_risk_service_signature: signCanonicalPayload(riskPolicy)
   });
   if (error) throw error;
   return Array.isArray(data) ? data[0] : data;
@@ -245,18 +320,21 @@ function safeAutomationMandate(row) {
     allowCopyTrading: row.allow_copy_trading,
     allowInvestmentGroupExecution: row.allow_investment_group_execution,
     withdrawalPermission: "NONE",
-    maxOrderNotional: Number(row.max_order_notional),
-    maxPositionNotional: Number(row.max_position_notional),
-    maxLeverage: Number(row.max_leverage),
-    maxDailyLoss: Number(row.max_daily_loss),
+    executionEnvironment: row.execution_environment,
+    maxOrderNotional: nullableNumber(row.max_order_notional),
+    maxPositionNotional: nullableNumber(row.max_position_notional),
+    maxLeverage: nullableNumber(row.max_leverage),
+    maxDailyLoss: nullableNumber(row.max_daily_loss),
     expiresAt: row.expires_at
   };
 }
 
-function positiveOr(value, fallback) {
-  const candidate = Number(value ?? fallback);
-  return Number.isFinite(candidate) && candidate > 0 ? candidate : fallback;
+function nullablePositive(value) {
+  const candidate = Number(value);
+  return Number.isFinite(candidate) && candidate > 0 ? candidate : null;
 }
+
+function nullableNumber(value) { return value === null || value === undefined ? null : Number(value); }
 
 function maskAccountReference(value) {
   const text = String(value || "Bybit account");

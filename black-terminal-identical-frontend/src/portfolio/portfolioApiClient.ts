@@ -143,7 +143,7 @@ export type BybitAccountMetrics = {
 export type ExchangeAccountSyncPayload = {
   accountId: string;
   exchange: "bybit";
-  network: "mainnet";
+  network: "mainnet" | "demo";
   balances: Array<{ asset: string; free: number; locked: number; total: number; usdValue: number }>;
   positions: Array<{
     symbol: string;
@@ -297,6 +297,8 @@ export type BlackCloudStatusPayload = {
   connections: Array<{
     id: string; account_id: string | null; provider: string; label: string; account_reference: string | null;
     connection_mode: string; execution_capability: string; health_status: string;
+    execution_environment: "DEMO" | "MAINNET_LIVE" | null; endpoint_profile: string | null;
+    broker_account_uid: string | null; permission_snapshot: Record<string, unknown>; certification_state: string;
     lifecycle_status: string; control_state: "ACTIVE" | "PAUSED" | "EMERGENCY_STOP";
     last_private_event_at: string | null; last_reconciled_at: string | null;
     last_error_code: string | null; paused_at: string | null; emergency_stopped_at: string | null;
@@ -309,7 +311,8 @@ export type BlackCloudStatusPayload = {
     id: string; connection_id: string; broker: string; account_reference: string; status: string;
     allow_read: boolean; allow_trade: boolean; allow_cancel: boolean; allow_modify: boolean;
     allow_strategy_execution: boolean; allow_copy_trading: boolean; allow_investment_group_execution: boolean;
-    max_order_notional: number; max_position_notional: number; max_leverage: number; max_daily_loss: number;
+    max_order_notional: number | null; max_position_notional: number | null; max_leverage: number | null; max_daily_loss: number | null;
+    execution_environment: "DEMO" | "MAINNET_LIVE" | null; risk_policy_version: number;
     mandate_version: number; accepted_at: string | null; expires_at: string | null; revoked_at: string | null;
   }>;
   strategyDeployments: Array<{ id: string; connection_id: string; strategy_id: string | null; strategy_version: string; symbol: string; timeframe: string; status: string; deployed_at: string | null; last_heartbeat_at: string | null }>;
@@ -349,13 +352,13 @@ export async function activateBlackCloudConnectionViaApi(accountId: string, conf
   allowStrategyExecution?: boolean; allowCopyTrading?: boolean; allowInvestmentGroupExecution?: boolean;
   maxOrderNotional?: number; maxPositionNotional?: number; maxLeverage?: number; maxDailyLoss?: number;
   allowedStrategies?: string[]; allowedSymbols?: string[]; expiresAt?: string; preserveProtectiveOrders?: boolean;
-} = {}) {
+} = {}, liveConfirmation?: string) {
   const token = await getPortfolioApiToken();
   if (!token) return null;
   const response = await fetch("/api/cloud-execution/connection", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ accountId, confirmation, automation })
+    body: JSON.stringify({ accountId, confirmation, automation, liveConfirmation })
   });
   if (!response.ok) throw new Error(await readApiError(response));
   return response.json() as Promise<{ connection: { id: string; provider: string; healthStatus: string }; offlineExecution: string; readinessReason: string }>;

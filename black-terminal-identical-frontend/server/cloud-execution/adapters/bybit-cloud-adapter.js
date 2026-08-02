@@ -17,7 +17,14 @@ import { ExchangeAdapter } from "./exchange-adapter.js";
 
 export class BybitCloudAdapter extends ExchangeAdapter {
   constructor(options = {}) {
-    super({ ...options, credentials: { ...options.credentials, network: options.network } });
+    const executionEnvironment = options.executionEnvironment || options.network || options.credentials?.executionEnvironment || options.credentials?.network;
+    const endpointProfile = options.endpointProfile || options.credentials?.endpointProfile || "GLOBAL";
+    super({
+      ...options,
+      executionEnvironment,
+      endpointProfile,
+      credentials: { ...options.credentials, executionEnvironment, endpointProfile }
+    });
     this.provider = "bybit";
     this.client = null;
     this.health = { provider: "bybit", state: "DISCONNECTED", connected: false, reconnectAttempts: 0, degradationReasons: [] };
@@ -72,14 +79,18 @@ export class BybitCloudAdapter extends ExchangeAdapter {
   async fetchExecutions(since) { return getBybitExecutions(this.credentials, { startTime: since }); }
 
   async subscribeMarketData({ symbol = "BTCUSDT", category = "linear", onSnapshot } = {}) {
-    const snapshot = await getBybitTicker({ symbol, category, network: this.network });
+    const snapshot = await getBybitTicker({ symbol, category, executionEnvironment: this.executionEnvironment, endpointProfile: this.endpointProfile });
     onSnapshot?.(snapshot);
     return { mode: "REST_SNAPSHOT", snapshot };
   }
 
   async subscribeAccountEvents(handler, { onError } = {}) {
     if (this.client) return subscription(this.client);
-    const client = new BybitPrivateStreamClient(this.credentials, { network: this.network, connectionId: this.connectionId });
+    const client = new BybitPrivateStreamClient(this.credentials, {
+      executionEnvironment: this.executionEnvironment,
+      endpointProfile: this.endpointProfile,
+      connectionId: this.connectionId
+    });
     this.client = client;
     client.onMessage((event) => {
       this.health = { ...this.health, state: "READY", connected: true, lastAccountEventAt: Number(event.time || Date.now()), degradationReasons: [] };

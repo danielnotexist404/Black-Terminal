@@ -1,4 +1,5 @@
-import { assertProviderEndpoint, resolveApprovedProviderEndpoint } from "./provider-allowlist.js";
+import { assertProviderEndpoint } from "./provider-allowlist.js";
+import { BYBIT_EXECUTION_ENVIRONMENTS, normalizeBybitExecutionEnvironment, resolveBybitEndpointSet } from "../exchanges/bybit-endpoints.js";
 
 export function validateBlackCloudRuntime(env = process.env) {
   const errors = [];
@@ -15,20 +16,32 @@ export function validateBlackCloudRuntime(env = process.env) {
   for (const flag of ["BLACK_CLOUD_EXECUTION_ENABLED", "INVESTMENT_GROUP_EXECUTION_ENABLED", "BYBIT_CLOUD_EXECUTION_ENABLED"]) {
     if (env[flag] !== "true") errors.push(`${flag} must be true.`);
   }
-  const network = env.BLACK_CLOUD_NETWORK || "testnet";
-  if (!new Set(["testnet", "mainnet"]).has(network)) errors.push("BLACK_CLOUD_NETWORK must be testnet or mainnet.");
-  if (network === "mainnet" && env.BLACK_CLOUD_MAINNET_ENABLED !== "true") errors.push("BLACK_CLOUD_MAINNET_ENABLED must be true for mainnet.");
-  if (network === "testnet" && env.BYBIT_BASE_URL && env.BYBIT_BASE_URL !== "https://api-testnet.bybit.com") errors.push("BYBIT_BASE_URL must use api-testnet.bybit.com for testnet.");
-  if (network === "testnet" && env.BYBIT_PRIVATE_WS_URL && env.BYBIT_PRIVATE_WS_URL !== "wss://stream-testnet.bybit.com/v5/private") errors.push("BYBIT_PRIVATE_WS_URL must use stream-testnet.bybit.com for testnet.");
-  for (const [endpoint, protocol] of [
-    [env.BYBIT_BASE_URL || resolveApprovedProviderEndpoint("bybit", network, "https"), "https"],
-    [env.BYBIT_PRIVATE_WS_URL || `${resolveApprovedProviderEndpoint("bybit", network, "wss")}/v5/private`, "wss"]
-  ]) {
-    try { assertProviderEndpoint({ provider: "bybit", environment: network, endpoint, protocol }); }
-    catch (error) { errors.push(error.message); }
+  let executionEnvironment;
+  let endpointSet;
+  try {
+    executionEnvironment = normalizeBybitExecutionEnvironment(env.BLACK_CLOUD_EXECUTION_ENVIRONMENT || env.BYBIT_EXECUTION_ENVIRONMENT || env.BLACK_CLOUD_NETWORK);
+    endpointSet = resolveBybitEndpointSet({ executionEnvironment, endpointProfile: env.BYBIT_ENDPOINT_PROFILE || "GLOBAL" });
+  } catch (error) {
+    errors.push(error.message);
+  }
+  if (executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE && env.BLACK_CLOUD_MAINNET_ENABLED !== "true") errors.push("BLACK_CLOUD_MAINNET_ENABLED must be true for MAINNET_LIVE.");
+  if (executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO && env.BYBIT_DEMO_ENABLED !== "true") errors.push("BYBIT_DEMO_ENABLED must be true for DEMO.");
+  if (env.BYBIT_BASE_URL || env.BYBIT_PRIVATE_WS_URL) errors.push("Legacy Bybit endpoint overrides are forbidden. Use BLACK_CLOUD_EXECUTION_ENVIRONMENT and BYBIT_ENDPOINT_PROFILE.");
+  if (endpointSet) {
+    for (const [endpoint, protocol] of [[endpointSet.rest, "https"], [endpointSet.privateWebSocket, "wss"]]) {
+      try { assertProviderEndpoint({ provider: "bybit", environment: executionEnvironment, endpoint, protocol }); }
+      catch (error) { errors.push(error.message); }
+    }
   }
   if (errors.length) throw Object.assign(new Error(`Black Cloud runtime is not ready: ${errors.join(" ")}`), { code: "BLACK_CLOUD_RUNTIME_INVALID", reasons: errors });
-  return { network, mainnet: network === "mainnet", masterKeyVersion };
+  return {
+    executionEnvironment,
+    network: executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO ? "demo" : "mainnet",
+    mainnet: executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE,
+    endpointProfile: endpointSet.region,
+    websocketOrderEntrySupported: endpointSet.websocketOrderEntrySupported,
+    masterKeyVersion
+  };
 }
 
 function required(value, label, errors) {

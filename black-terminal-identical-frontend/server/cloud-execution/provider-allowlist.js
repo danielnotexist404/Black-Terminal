@@ -1,6 +1,16 @@
 const PROVIDER_ENDPOINTS = Object.freeze({
   bybit: {
     mainnet: ["https://api.bybit.com", "https://api.bytick.com", "wss://stream.bybit.com"],
+    mainnet_live: [
+      "https://api.bybit.com", "https://api.bytick.com", "wss://stream.bybit.com",
+      "https://api.bybit.nl", "https://api.bybit.tr", "wss://stream.bybit.tr",
+      "https://api.bybit.kz", "wss://stream.bybit.kz",
+      "https://api.bybitgeorgia.ge", "wss://stream.bybitgeorgia.ge",
+      "https://api.bybit.ae", "https://api.bybit.eu",
+      "https://api.bybit.id", "wss://stream.bybit.id",
+      "https://api.manepa.jp", "wss://stream.manepa.jp"
+    ],
+    demo: ["https://api-demo.bybit.com", "https://api.bybit.com", "wss://stream-demo.bybit.com", "wss://stream.bybit.com"],
     testnet: ["https://api-testnet.bybit.com", "wss://stream-testnet.bybit.com"]
   },
   hyperliquid: {
@@ -55,5 +65,10 @@ export function isProviderEndpointApproved(input) {
 }
 
 function normalize(value) { return String(value || "").trim().toLowerCase(); }
-function normalizeEnvironment(value) { return value === "sandbox" ? "testnet" : normalize(value || "mainnet"); }
+function normalizeEnvironment(value) {
+  const normalized = normalize(value || "mainnet").replaceAll("-", "_");
+  if (normalized === "sandbox") return "testnet";
+  if (normalized === "live") return "mainnet_live";
+  return normalized;
+}
 function endpointError(code, message) { return Object.assign(new Error(message), { code, statusCode: 400 }); }

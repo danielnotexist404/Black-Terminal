@@ -41,13 +41,15 @@ export class BlackCloudRepository {
 
   async readBrokerSecret(secretReferenceId, purpose) {
     const { data: reference, error } = await this.supabase.from("broker_secret_references")
-      .select("user_id,connection_id,provider,credential_version,status")
+      .select("user_id,connection_id,provider,execution_environment,credential_version,status")
       .eq("id", secretReferenceId).single();
     if (error || reference?.status !== "ACTIVE") throw error || new Error("Active broker credential reference was not found.");
     const secret = await decryptBrokerCredential(this.supabase, secretReferenceId, {
       userId: reference.user_id,
       connectionId: reference.connection_id,
-      provider: reference.provider
+      provider: reference.provider,
+      executionEnvironment: reference.execution_environment,
+      credentialVersion: reference.credential_version
     });
     const { error: usedError } = await this.supabase.from("broker_secret_references")
       .update({ last_used_at: new Date().toISOString() }).eq("id", secretReferenceId);
@@ -59,7 +61,7 @@ export class BlackCloudRepository {
       purpose,
       userVisible: false,
       message: "The execution worker accessed a broker credential for an authorized operation.",
-      metadata: { provider: reference.provider, credentialVersion: reference.credential_version }
+      metadata: { provider: reference.provider, executionEnvironment: reference.execution_environment, credentialVersion: reference.credential_version }
     });
     return secret;
   }

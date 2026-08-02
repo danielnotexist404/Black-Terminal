@@ -11,6 +11,8 @@ const workerUrl = required("BLACK_CLOUD_WORKER_URL").replace(/\/$/, "");
 const connectionId = required("BLACK_CLOUD_CERT_CONNECTION_ID");
 const intentId = required("BLACK_CLOUD_CERT_INTENT_ID");
 const startedAt = required("BLACK_CLOUD_CERT_STARTED_AT");
+const certificationEnvironment = required("BLACK_CLOUD_CERT_ENVIRONMENT");
+assert.ok(["DEMO", "MAINNET_LIVE"].includes(certificationEnvironment), "Certification environment must be DEMO or MAINNET_LIVE.");
 assert.equal(required("BLACK_CLOUD_OFFLINE_OPERATOR_CONFIRMATION"), "BROWSER CLOSED AND DEVICE OFFLINE", "Offline operator confirmation is invalid.");
 const supabase = createClient(required("SUPABASE_URL"), required("SUPABASE_SERVICE_ROLE_KEY"), { auth: { persistSession: false, autoRefreshToken: false } });
 
@@ -19,7 +21,7 @@ assert.equal(healthResponse.ok, true, `Worker readiness returned ${healthRespons
 const health = await healthResponse.json();
 assert.equal(health.status, "ready");
 assert.equal(health.running, true);
-assert.equal(health.network, "testnet", "Offline certification must begin on testnet.");
+assert.equal(health.executionEnvironment, certificationEnvironment, "Worker and certification environments differ.");
 assert.ok(Date.now() - Date.parse(health.lastTickAt) < 15_000, "Worker tick is stale.");
 
 const [connection, snapshots, reconciliations, plans, audits, lease] = await Promise.all([

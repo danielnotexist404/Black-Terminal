@@ -65,7 +65,9 @@ type ExecutionVenue = {
   unsupportedReason?: string;
   executionReady?: boolean;
   readinessReason?: string;
-  network?: "testnet" | "mainnet";
+  network?: "demo" | "testnet" | "mainnet";
+  executionEnvironment?: "DEMO" | "MAINNET_LIVE";
+  endpointProfile?: string;
   mainnetConfirmed?: boolean;
   executionMode?: string;
   readiness?: string;
@@ -399,7 +401,9 @@ export function PositionsWorkspace({
     apiKey: "",
     apiSecret: "",
     passphrase: "",
-    network: "mainnet"
+    network: "mainnet",
+    executionEnvironment: "MAINNET_LIVE",
+    endpointProfile: "GLOBAL"
   });
   const [hyperliquidNetwork, setHyperliquidNetwork] = useState<"testnet" | "mainnet">("testnet");
   const [hyperliquidAgentPrivateKey, setHyperliquidAgentPrivateKey] = useState("");
@@ -476,7 +480,9 @@ export function PositionsWorkspace({
             : undefined,
         executionReady: connection.metadata.executionReady === true,
         readinessReason: typeof connection.metadata.readinessReason === "string" ? connection.metadata.readinessReason : undefined,
-        network: connection.metadata.network === "mainnet" ? "mainnet" : connection.metadata.network === "testnet" ? "testnet" : undefined,
+        network: connection.metadata.network === "mainnet" ? "mainnet" : connection.metadata.network === "demo" ? "demo" : connection.metadata.network === "testnet" ? "testnet" : undefined,
+        executionEnvironment: connection.metadata.executionEnvironment === "DEMO" ? "DEMO" : connection.metadata.executionEnvironment === "MAINNET_LIVE" ? "MAINNET_LIVE" : undefined,
+        endpointProfile: typeof connection.metadata.endpointProfile === "string" ? connection.metadata.endpointProfile : undefined,
         mainnetConfirmed: connection.metadata.mainnetConfirmed === true,
         executionMode: typeof connection.metadata.executionMode === "string" ? connection.metadata.executionMode : undefined,
         readiness: typeof connection.metadata.readiness === "string" ? connection.metadata.readiness : undefined,
@@ -512,11 +518,12 @@ export function PositionsWorkspace({
   async function activateCloudConnection() {
     const accountId = activeExecutionVenue?.accountId;
     if (!accountId) return;
+    const executionEnvironment = activeCloudConnection?.execution_environment || activeExecutionVenue?.executionEnvironment;
     const confirmation = window.prompt([
       "PERSISTENT BLACK CLOUD AUTHORIZATION",
       "Broker: BYBIT / selected account",
       "Scope: read, trade, cancel, modify, automated strategies, copy trading and Investment Groups",
-      "Default limits: 1,000 USDT/order · 5,000 USDT position · 3x leverage · 500 USDT daily loss",
+      "Risk controls: optional, owner-configurable and auditable",
       "Withdrawals: FORBIDDEN",
       "Duration: until revoked",
       "Emergency default: preserve broker-native protective orders",
@@ -524,17 +531,26 @@ export function PositionsWorkspace({
       "Type: ENABLE OFFLINE CLOUD EXECUTION"
     ].join("\n\n"));
     if (confirmation !== "ENABLE OFFLINE CLOUD EXECUTION") { setCloudStatusMessage("OFFLINE EXECUTION CONSENT NOT PROVIDED"); return; }
+    let liveConfirmation: string | undefined;
+    if (executionEnvironment === "MAINNET_LIVE") {
+      liveConfirmation = window.prompt([
+        "LIVE BYBIT EXECUTION",
+        "This connection controls a real-money Bybit account.",
+        "Orders may be submitted while the browser is closed or you are logged out.",
+        "Environment: MAINNET LIVE",
+        "Funds: REAL",
+        "Withdrawal authority: PROHIBITED",
+        "Type: ENABLE LIVE BYBIT EXECUTION"
+      ].join("\n\n")) || undefined;
+      if (liveConfirmation !== "ENABLE LIVE BYBIT EXECUTION") { setCloudStatusMessage("MAINNET LIVE CONSENT NOT PROVIDED"); return; }
+    }
     try {
       const result = await activateBlackCloudConnectionViaApi(accountId, confirmation, {
         allowStrategyExecution: true,
         allowCopyTrading: true,
         allowInvestmentGroupExecution: true,
-        maxOrderNotional: 1_000,
-        maxPositionNotional: 5_000,
-        maxLeverage: 3,
-        maxDailyLoss: 500,
         preserveProtectiveOrders: true
-      });
+      }, liveConfirmation);
       const next = await fetchBlackCloudStatusViaApi();
       if (next) setCloudStatus(next);
       setCloudStatusMessage(result?.readinessReason || "BLACK CLOUD CONNECTION VALIDATING");
@@ -598,6 +614,24 @@ export function PositionsWorkspace({
       setConnectStatus("API KEY AND SECRET REQUIRED");
       return;
     }
+    const executionEnvironment = connection.executionEnvironment || "MAINNET_LIVE";
+    let liveConfirmation: string | undefined;
+    if (selectedCex === "bybit" && executionEnvironment === "MAINNET_LIVE") {
+      liveConfirmation = window.prompt([
+        "LIVE BYBIT EXECUTION",
+        "This connection controls a real-money Bybit account.",
+        "Environment: MAINNET LIVE",
+        "Funds: REAL",
+        "Execution: REAL",
+        "Withdrawal authority: PROHIBITED",
+        "Persistent automation remains disabled until separately authorized.",
+        "Type: ENABLE LIVE BYBIT EXECUTION"
+      ].join("\n\n")) || undefined;
+      if (liveConfirmation !== "ENABLE LIVE BYBIT EXECUTION") {
+        setConnectStatus("MAINNET LIVE CONSENT NOT PROVIDED");
+        return;
+      }
+    }
 
     try {
       const nextConnection = await blackCoreConnectionManager.connect({
@@ -608,15 +642,21 @@ export function PositionsWorkspace({
         credentials: {
           ...connection,
           exchange: selectedCex,
-          accountName
+          accountName,
+          network: executionEnvironment === "DEMO" ? "demo" : "mainnet",
+          executionEnvironment,
+          endpointProfile: executionEnvironment === "DEMO" ? "GLOBAL" : connection.endpointProfile || "GLOBAL",
+          liveConfirmation
         },
         metadata: {
           accountName,
-          network: connection.network || "mainnet"
+          network: executionEnvironment === "DEMO" ? "demo" : "mainnet",
+          executionEnvironment,
+          endpointProfile: executionEnvironment === "DEMO" ? "GLOBAL" : connection.endpointProfile || "GLOBAL"
         }
       });
       setActiveVenueId(nextConnection.id);
-      setConnection({ exchange: selectedCex, accountName: "", apiKey: "", apiSecret: "", passphrase: "", network: "mainnet" });
+      setConnection({ exchange: selectedCex, accountName: "", apiKey: "", apiSecret: "", passphrase: "", network: "mainnet", executionEnvironment: "MAINNET_LIVE", endpointProfile: "GLOBAL" });
       setConnectStatus("BROKER LINK STORED");
       setShowConnection(false);
     } catch (error) {
@@ -852,7 +892,50 @@ export function PositionsWorkspace({
             {venueKind === "cex" ? (
               <>
                 <ConnectionSupportCard certification={selectedCexCertification} />
-                {selectedCex === "bybit" && <select value={connection.network || "mainnet"} onChange={(event) => setConnection((current) => ({ ...current, network: event.target.value as "mainnet" | "testnet" }))}><option value="mainnet">Bybit Mainnet</option><option value="testnet">Bybit Testnet</option></select>}
+                {selectedCex === "bybit" && (
+                  <>
+                    <select
+                      aria-label="Bybit certification environment"
+                      value={connection.executionEnvironment || "MAINNET_LIVE"}
+                      onChange={(event) => {
+                        const executionEnvironment = event.target.value as "DEMO" | "MAINNET_LIVE";
+                        setConnection((current) => ({
+                          ...current,
+                          executionEnvironment,
+                          network: executionEnvironment === "DEMO" ? "demo" : "mainnet",
+                          endpointProfile: executionEnvironment === "DEMO" ? "GLOBAL" : current.endpointProfile || "GLOBAL"
+                        }));
+                      }}
+                    >
+                      <option value="DEMO">Bybit Demo — simulated funds</option>
+                      <option value="MAINNET_LIVE">Bybit Mainnet Live — real funds</option>
+                    </select>
+                    {connection.executionEnvironment === "MAINNET_LIVE" && (
+                      <select
+                        aria-label="Bybit endpoint profile"
+                        value={connection.endpointProfile || "GLOBAL"}
+                        onChange={(event) => setConnection((current) => ({ ...current, endpointProfile: event.target.value as ExchangeConnectionDraft["endpointProfile"] }))}
+                      >
+                        <option value="GLOBAL">Global account</option>
+                        <option value="NETHERLANDS">Netherlands</option>
+                        <option value="TURKEY">Turkey</option>
+                        <option value="KAZAKHSTAN">Kazakhstan</option>
+                        <option value="GEORGIA">Georgia</option>
+                        <option value="UAE">UAE</option>
+                        <option value="EEA">EEA</option>
+                        <option value="INDONESIA">Indonesia</option>
+                        <option value="JAPAN">Japan</option>
+                      </select>
+                    )}
+                    <div className="connection-support-card">
+                      {connection.executionEnvironment === "DEMO" ? (
+                        <><div><span>Environment</span><b>BYBIT DEMO</b></div><p>SIMULATED FUNDS · MAINNET PUBLIC MARKET DATA · SIMULATED EXECUTION</p></>
+                      ) : (
+                        <><div><span>Environment</span><b>BYBIT MAINNET LIVE</b></div><p>REAL FUNDS · REAL EXECUTION · explicit live confirmation required</p></>
+                      )}
+                    </div>
+                  </>
+                )}
                 <input placeholder="Account name" value={connection.accountName} onChange={(event) => setConnection((current) => ({ ...current, accountName: event.target.value }))} />
                 <input placeholder="API key" value={connection.apiKey} onChange={(event) => setConnection((current) => ({ ...current, apiKey: event.target.value }))} />
                 <input placeholder="API secret" type="password" value={connection.apiSecret} onChange={(event) => setConnection((current) => ({ ...current, apiSecret: event.target.value }))} />
@@ -926,6 +1009,9 @@ function BlackCloudConnectionPanel({ connection, accountId, status, message, onA
     <div className="black-cloud-title"><b>BLACK CLOUD</b><span>{connection.execution_readiness}</span></div>
     <div className="black-cloud-grid">
       <span>Provider <b>{connection.provider.toUpperCase()}</b></span>
+      <span>Environment <b>{connection.execution_environment === "DEMO" ? "BYBIT DEMO" : "BYBIT MAINNET LIVE"}</b></span>
+      <span>Funds <b>{connection.execution_environment === "DEMO" ? "SIMULATED" : "REAL"}</b></span>
+      <span>Endpoint <b>{connection.endpoint_profile || "GLOBAL"}</b></span>
       <span>UI Session <b>AUTHENTICATED</b></span>
       <span>Broker Auth <b>{connection.credential_state}</b></span>
       <span>Black Cloud <b>{connection.worker_state}</b></span>
@@ -949,7 +1035,7 @@ function BlackCloudConnectionPanel({ connection, accountId, status, message, onA
       <button className="danger" onClick={() => void onControl("cancel-all")}>Cancel All</button>
       <button className="danger" disabled={connection.control_state === "EMERGENCY_STOP"} onClick={() => void onControl("emergency-account-lock")}>Account Lock</button>
     </div>
-    {automation && <em>Limits {Number(automation.max_order_notional).toLocaleString()} / order · {automation.max_leverage}x · withdrawals disabled</em>}
+    {automation && <em>Risk policy v{automation.risk_policy_version} · order cap {automation.max_order_notional == null ? "DISABLED" : Number(automation.max_order_notional).toLocaleString()} · leverage cap {automation.max_leverage == null ? "DISABLED" : `${automation.max_leverage}x`} · withdrawals prohibited</em>}
     {message && <em>{message}</em>}
     {connection.last_error_code && <em>{connection.last_error_code}</em>}
   </div>;

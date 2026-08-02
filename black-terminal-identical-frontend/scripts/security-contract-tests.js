@@ -30,7 +30,7 @@ const validCases = [
   ["execution", "protection", { accountId, symbol: "BTCUSDT", stopLoss: 60000 }],
   ["execution", "account-mode", { accountId, action: "set-leverage", symbol: "BTCUSDT", leverage: 2 }],
   ["execution", "strategy", { accountId, strategyId: "strategy-123", symbol: "BTCUSDT" }],
-  ["exchange", "connect", { exchange: "bybit", accountName: "Main", apiKey: "key-12345", apiSecret: "secret-12345" }],
+  ["exchange", "connect", { exchange: "bybit", accountName: "Demo", apiKey: "key-12345", apiSecret: "secret-12345", network: "demo", executionEnvironment: "DEMO", endpointProfile: "GLOBAL" }],
   ["exchange", "diagnostics", { accountId, symbol: "BTCUSDT" }],
   ["exchange", "sync", { accountId, symbol: "BTCUSDT", marketKind: "perpetual" }],
   ["exchange", "mainnet-validation", { accountId, action: "enable", confirmation: "ENABLE BYBIT MAINNET" }],

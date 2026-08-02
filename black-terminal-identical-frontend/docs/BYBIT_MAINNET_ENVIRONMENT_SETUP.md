@@ -1,128 +1,98 @@
-# Bybit Mainnet Environment Setup
+# Bybit Demo and Mainnet Live Environment Setup
 
-Status: Chapter XII-C operational activation guide.
+Status: Phase V Chapter II-C production activation guide.
 
-Bybit remains fail-closed until the runtime configuration, Supabase prerequisites, private-stream worker, and operator certification evidence are present.
+Bybit remains fail-closed until runtime configuration, Supabase migrations,
+credential permissions, UID verification, private-stream readiness and account
+reconciliation are all valid.
 
-## Vercel Environment
+## Vercel control plane
 
-Bybit rejects API requests originating from US IP addresses. Black Terminal therefore pins Vercel Functions to the Frankfurt region (`fra1`) in `vercel.json`. Do not move exchange-account or execution functions back to a restricted region such as the default Washington, D.C. region (`iad1`). After deployment, verify the function build region in `vercel inspect` before testing credentials.
-
-The Bybit transport uses the two official global mainnet hosts, `api.bybit.com` and `api.bytick.com`, with automatic failover for network errors, HTTP 403, and upstream HTTP 5xx responses. A non-empty `BYBIT_BASE_URL` is attempted first for regional Bybit domains.
-
-Set these in Vercel for API routes:
+Vercel hosts authenticated UI/control routes only. It must not host the persistent
+private WebSocket or execution worker. Configure:
 
 ```bash
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 EXCHANGE_CREDENTIAL_MASTER_KEY=
-BYBIT_BASE_URL=https://api.bybit.com
-BYBIT_PRIVATE_WS_URL=wss://stream.bybit.com/v5/private
-BYBIT_NETWORK=mainnet
+BLACK_CLOUD_INTENT_SIGNING_KEY=
+BYBIT_DEMO_ENABLED=true
 BYBIT_MAINNET_VALIDATION_ENABLED=false
 BYBIT_MAINNET_ALLOWED_CONNECTIONS=
 BYBIT_MAINNET_ALLOWED_SYMBOLS=*
-# Optional absolute operator ceiling. Leave unset for live account-margin capacity.
-BYBIT_MAINNET_MAX_NOTIONAL_USD=
 BYBIT_MAINNET_VALIDATION_ADMIN_EMAILS=
+CLOUD_EXECUTION_CONTROL_PLANE_ENABLED=false
 ```
 
-Leave `BYBIT_MAINNET_ALLOWED_CONNECTIONS` empty to permit authenticated owners to activate only their own trade-authorized accounts, or populate it with comma-separated account ids for an operator-managed allowlist. `*` explicitly allows every owned account while the remaining confirmation, permission, risk, symbol, and notional gates still apply.
+Keep the control-plane flag false until an always-on worker reports healthy and
+ready. Do not set `BYBIT_BASE_URL`, `BYBIT_PRIVATE_WS_URL`,
+`BYBIT_NETWORK` or `BLACK_CLOUD_NETWORK`. Bybit endpoint selection is
+centralized and audited from `DEMO`/`MAINNET_LIVE` plus the regional profile.
 
-Set `BYBIT_MAINNET_ALLOWED_SYMBOLS=*` to permit every symbol that passes live Bybit metadata, product, quantity, price, balance and risk validation. Use a comma-separated symbol list when an operator wants a narrower production universe.
+There is no mandatory Black Terminal dollar ceiling. Empty allowlists permit the
+authenticated owner’s connection; `*` permits every symbol that passes current
+Bybit metadata, collateral, account, OMS/EMS and optional user-policy checks.
 
-`BYBIT_MAINNET_MAX_NOTIONAL_USD` is optional. A positive value is an absolute operator ceiling. When it is unset or zero, Black Terminal derives order capacity from Bybit Unified Account `totalAvailableBalance`, selected leverage, estimated fees, venue quantity/notional rules, risk tier and any positive per-account risk limits. Zero risk ceilings mean venue/account capacity; they do not disable authentication, venue validation, collateral checks, confirmations, emergency stops or withdrawal-permission blocking.
+Server-only secrets must never use a `VITE_` prefix.
 
-Secrets:
+## Persistent worker
 
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `EXCHANGE_CREDENTIAL_MASTER_KEY`
-
-Do not expose secrets with a `VITE_` prefix. The Supabase URL is not secret, but server routes should still prefer `SUPABASE_URL`.
-
-## Private-Stream Worker Environment
-
-Run this outside Vercel as a persistent supervised process:
+Run `Dockerfile.black-cloud` on an always-on Linux host, outside Vercel. Deploy
+one isolated worker per environment:
 
 ```bash
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 EXCHANGE_CREDENTIAL_MASTER_KEY=
-BYBIT_PRIVATE_STREAM_RUNTIME_ENABLED=true
-BYBIT_STREAM_ACCOUNT_ID=
-BYBIT_STREAM_SYMBOL=BTCUSDT
-BYBIT_NETWORK=mainnet
-npm run bybit:private-stream:supervise
+BLACK_CLOUD_INTENT_SIGNING_KEY=
+BLACK_CLOUD_EXECUTION_ENVIRONMENT=DEMO
+BYBIT_ENDPOINT_PROFILE=GLOBAL
+BYBIT_DEMO_ENABLED=true
+BLACK_CLOUD_MAINNET_ENABLED=false
+BLACK_CLOUD_EXECUTION_ENABLED=true
+INVESTMENT_GROUP_EXECUTION_ENABLED=true
+BYBIT_CLOUD_EXECUTION_ENABLED=true
+BLACK_CLOUD_WORKER_ID=
+BLACK_CLOUD_WORKER_REGION=
+docker compose -f docker-compose.black-cloud.yml up -d
 ```
 
-Status check:
+For a live worker, set `BLACK_CLOUD_EXECUTION_ENVIRONMENT=MAINNET_LIVE`, select
+the validated account jurisdiction in `BYBIT_ENDPOINT_PROFILE`, set
+`BLACK_CLOUD_MAINNET_ENABLED=true`, and do not enable the Demo toggle.
 
-```bash
-npm run bybit:private-stream:status
-```
+Verify `/health/live`, `/health/ready` and `/metrics` before enabling the
+Vercel control plane.
 
-## Local Operator Environment
+## Explicit confirmations
 
-Use this only from the operator machine that will run certification:
-
-```bash
-BYBIT_CERTIFY_ACCOUNT_ID=
-BYBIT_CERTIFY_SYMBOL=BTCUSDT
-BYBIT_CERTIFY_API_BASE_URL=https://<vercel-deployment>
-BYBIT_CERTIFY_USER_TOKEN=<short-lived-supabase-user-jwt>
-BYBIT_CERTIFY_CONFIRMATION=
-BYBIT_CERTIFY_OPERATOR_PAUSE=true
-BYBIT_CERTIFY_INCLUDE_REVERSE=false
-npm run certify:bybit-mainnet -- --interactive
-```
-
-Initial activation requires:
+Initial Mainnet connection and Black Cloud activation require:
 
 ```text
-LIVE BYBIT MAINNET
+ENABLE LIVE BYBIT EXECUTION
 ```
 
-Exposure-changing stages require:
+Each live order continues to require the existing per-order confirmation:
 
 ```text
 LIVE
 ```
 
-Abort any stage with:
+Demo does not require a real-money confirmation, but its UI must state simulated
+funds and simulated execution.
 
-```text
-ABORT
-```
+## Rotation and emergency disable
 
-## Infrastructure Verification
+Credential rotation creates a new environment-bound v3 envelope and credential
+version; older active envelopes are rotated atomically. Keep all referenced
+wrapping-key versions available until their envelopes are retired.
 
-Before live validation:
-
-```bash
-npm run verify:bybit-infrastructure
-```
-
-This checks Chapter XI operational tables, portfolio/execution baseline tables, and optional relay RPC prerequisites without printing secrets.
-
-## Rotation
-
-To rotate Bybit API keys:
-
-1. Disable live validation by setting `BYBIT_MAINNET_VALIDATION_ENABLED=false`.
-2. Disconnect or delete the affected exchange account.
-3. Create a Bybit API key without withdrawal permissions.
-4. Reconnect through Positions.
-5. Restart the private-stream worker with the new `BYBIT_STREAM_ACCOUNT_ID`.
-6. Run diagnostics and certification again.
-
-To rotate `EXCHANGE_CREDENTIAL_MASTER_KEY`, decrypt/re-encrypt existing credential records in a controlled maintenance window. Old encrypted payloads cannot be read after the key changes.
-
-## Emergency Disable
-
-Immediate kill switch:
+Emergency control:
 
 ```bash
 BYBIT_MAINNET_VALIDATION_ENABLED=false
+CLOUD_EXECUTION_CONTROL_PLANE_ENABLED=false
 ```
 
-Then redeploy Vercel and stop the private-stream worker. Existing account records remain stored, but order routes fail closed.
+Pause new entries or invoke Account Lock in Black Terminal, preserve
+broker-native protection, reconcile account state, then stop the relevant worker.

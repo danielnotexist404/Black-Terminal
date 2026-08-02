@@ -1,6 +1,7 @@
 import { sanitizeError } from "./repository.js";
 import { createCloudExchangeAdapter } from "./adapters/registry.js";
 import { ReconciliationWorker } from "./reconciliation-worker.js";
+import { normalizeBybitExecutionEnvironment } from "../exchanges/bybit-endpoints.js";
 
 export class BrokerConnectionManager {
   constructor(supabase, repository, options = {}) {
@@ -71,9 +72,9 @@ export class BrokerConnectionManager {
   async startConnection(connection) {
     if (connection.provider !== "bybit") throw typedError("PROVIDER_UNSUPPORTED", `${connection.provider} has no registered persistent Black Cloud adapter.`);
     if (process.env.BYBIT_CLOUD_EXECUTION_ENABLED !== "true") throw typedError("PROVIDER_DISABLED", "The Bybit Black Cloud adapter is disabled by rollout policy.");
-    const connectionNetwork = connection.metadata?.network || "mainnet";
-    const workerNetwork = process.env.BLACK_CLOUD_NETWORK || "testnet";
-    if (connectionNetwork !== workerNetwork) throw Object.assign(new Error(`Connection network ${connectionNetwork} cannot run on ${workerNetwork} worker.`), { code: "WORKER_NETWORK_MISMATCH" });
+    const connectionEnvironment = normalizeBybitExecutionEnvironment(connection.execution_environment || connection.metadata?.executionEnvironment || connection.metadata?.network);
+    const workerEnvironment = normalizeBybitExecutionEnvironment(process.env.BLACK_CLOUD_EXECUTION_ENVIRONMENT || process.env.BYBIT_EXECUTION_ENVIRONMENT || process.env.BLACK_CLOUD_NETWORK);
+    if (connectionEnvironment !== workerEnvironment) throw Object.assign(new Error(`Connection environment ${connectionEnvironment} cannot run on ${workerEnvironment} worker.`), { code: "WORKER_ENVIRONMENT_MISMATCH" });
     const lease = await this.repository.acquireLease(connection.id, this.leaseTtlSeconds);
     if (!lease) return;
     const [account, secretReference, mandate] = await Promise.all([
@@ -82,9 +83,13 @@ export class BrokerConnectionManager {
       this.repository.requireAutomationMandate(connection.id, "trade")
     ]);
     const credentials = await this.repository.readBrokerSecret(secretReference.id, "private_stream_authentication");
+    const credentialEnvironment = normalizeBybitExecutionEnvironment(credentials.executionEnvironment || credentials.network);
+    if (credentialEnvironment !== connectionEnvironment) throw typedError("CREDENTIAL_ENVIRONMENT_MISMATCH", "The broker credential is bound to a different execution environment.");
+    if (normalizeBybitExecutionEnvironment(mandate.execution_environment) !== connectionEnvironment) throw typedError("MANDATE_ENVIRONMENT_MISMATCH", "The active automation mandate is bound to a different execution environment.");
     const adapter = createCloudExchangeAdapter(connection.provider, {
       credentials,
-      network: connectionNetwork,
+      executionEnvironment: connectionEnvironment,
+      endpointProfile: connection.endpoint_profile || connection.metadata?.endpointProfile || "GLOBAL",
       connectionId: connection.id
     });
     const runtime = {
@@ -120,7 +125,9 @@ export class BrokerConnectionManager {
     }).eq("id", connection.id));
     const verification = await adapter.verifyCredentials();
     if (verification?.diagnostics?.permissions?.withdrawal) throw typedError("WITHDRAWAL_PERMISSION_DETECTED", "Withdrawal-enabled credentials are forbidden.");
+    if (verification?.diagnostics?.permissions?.transfer) throw typedError("TRANSFER_PERMISSION_DETECTED", "Wallet-transfer-enabled credentials are forbidden.");
     if (!verification?.diagnostics?.permissions?.trading) throw typedError("PERMISSION_REJECTED", "The broker credential does not permit trading.");
+    if (String(verification?.diagnostics?.accountUid || "") !== String(connection.broker_account_uid || "")) throw typedError("BROKER_ACCOUNT_UID_MISMATCH", "The authenticated Bybit UID no longer matches this connection.");
     runtime.client = await adapter.subscribeAccountEvents(
       (event) => void this.handleEvent(runtime, event).catch((error) => this.handleError(runtime, error)),
       { onError: (error) => void this.handleError(runtime, error) }
@@ -131,6 +138,8 @@ export class BrokerConnectionManager {
       lifecycle_status: "CONNECTED",
       credential_state: "AUTHENTICATED",
       worker_state: "LIVE",
+      permission_snapshot: verification.diagnostics.permissionSnapshot || {},
+      certification_state: "SYNCHRONIZING",
       last_authenticated_at: new Date().toISOString()
     }).eq("id", connection.id));
     await this.reconcile(runtime, "STARTUP");
@@ -142,7 +151,7 @@ export class BrokerConnectionManager {
       userVisible: true,
       purpose: "private_stream_authentication",
       message: "Black Cloud started the persistent Bybit private stream.",
-      metadata: { provider: "bybit", network: connection.metadata?.network || account.network || "mainnet" }
+      metadata: { provider: "bybit", executionEnvironment: connectionEnvironment, endpointProfile: connection.endpoint_profile || "GLOBAL" }
     });
   }
 
@@ -246,6 +255,12 @@ export class BrokerConnectionManager {
     runtime.reconciling = true;
     try {
       const result = await this.reconciliationWorker.run({ adapter: runtime.adapter, connection: runtime.connection, account: runtime.account, triggerType });
+      if (!result.executionState?.tradingEnabled) {
+        throw typedError("CREDENTIAL_PERMISSION_CHANGED", result.executionState?.readinessReason || "Bybit credential permissions no longer satisfy the trade-only execution contract.");
+      }
+      if (String(result.brokerAccountUid || "") !== String(runtime.connection.broker_account_uid || "")) {
+        throw typedError("BROKER_ACCOUNT_UID_MISMATCH", "The reconciled Bybit UID no longer matches this connection.");
+      }
       await updateOrThrow(this.supabase.from("connectivity_connections").update({
         status: "connected",
         health_status: "CONNECTED_CLOUD",
@@ -253,6 +268,8 @@ export class BrokerConnectionManager {
         worker_state: "LIVE",
         synchronization_state: "SYNCHRONIZED",
         execution_readiness: runtime.connection.control_state === "ACTIVE" ? "READY" : "PAUSED",
+        certification_state: runtime.connection.control_state === "ACTIVE" ? "READY" : "SYNCHRONIZING",
+        permission_snapshot: result.permissionSnapshot || {},
         last_reconciled_at: result.syncedAt,
         last_position_sync_at: result.syncedAt,
         degradation_reasons: [],
@@ -296,6 +313,7 @@ export class BrokerConnectionManager {
       worker_state: diagnostics.status === "connected" ? "LIVE" : diagnostics.status === "reconnecting" ? "RECONNECTING" : "DEGRADED",
       synchronization_state: synchronizationState,
       execution_readiness: executionReady ? "READY" : "BLOCKED",
+      certification_state: executionReady ? "READY" : "DEGRADED",
       last_heartbeat_at: new Date().toISOString(),
       last_private_event_at: diagnostics.lastMessageAt ? new Date(Number(diagnostics.lastMessageAt)).toISOString() : runtime.connection.last_private_event_at,
       last_error_code: diagnostics.lastError ? "PRIVATE_STREAM_ERROR" : null,

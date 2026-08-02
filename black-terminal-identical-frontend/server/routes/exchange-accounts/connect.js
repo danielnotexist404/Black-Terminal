@@ -10,6 +10,9 @@ import {
 } from "../../portfolio-api.js";
 import { resolveBybitExecutionPolicy, syncBybitAccountToSupabase, validateBybitCredentials } from "../../exchanges/bybit.js";
 import { describeSupabaseError } from "../../exchanges/bybit-snapshot-store.js";
+import { BYBIT_EXECUTION_ENVIRONMENTS, resolveBybitEndpointSet } from "../../exchanges/bybit-endpoints.js";
+
+const LIVE_CONFIRMATION = "ENABLE LIVE BYBIT EXECUTION";
 
 const certifiedCredentialAdapters = {
   bybit: {
@@ -35,14 +38,27 @@ export default async function handler(req, res) {
       throw unsupported;
     }
     const accountName = String(req.body.accountName).trim();
-    const network = req.body.network === "testnet" ? "testnet" : "mainnet";
+    const endpointSet = resolveBybitEndpointSet({
+      executionEnvironment: req.body.executionEnvironment || req.body.network,
+      endpointProfile: req.body.endpointProfile || "GLOBAL"
+    });
+    const executionEnvironment = endpointSet.environment;
+    const endpointProfile = endpointSet.region;
+    const network = executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO ? "demo" : "mainnet";
+    if (executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE && req.body.liveConfirmation !== LIVE_CONFIRMATION) {
+      const blocked = new Error(`Mainnet Live connection requires the exact confirmation: ${LIVE_CONFIRMATION}`);
+      blocked.statusCode = 403;
+      throw blocked;
+    }
     const rawCredentials = {
       exchange,
       apiKey: String(req.body.apiKey),
       apiSecret: String(req.body.apiSecret),
       passphrase: req.body.passphrase ? String(req.body.passphrase) : undefined,
       createdAt: new Date().toISOString(),
-      network
+      network,
+      executionEnvironment,
+      endpointProfile
     };
     const validation = exchange === "bybit"
       ? await validateBybitCredentials(rawCredentials)
@@ -53,9 +69,19 @@ export default async function handler(req, res) {
       blocked.statusCode = 403;
       throw blocked;
     }
-    const executionPolicy = resolveBybitExecutionPolicy(bybitDiagnostics?.permissions);
+    if (bybitDiagnostics?.permissions?.transfer) {
+      const blocked = new Error("Bybit API key has wallet transfer permission. Create a trading-only key without AccountTransfer or SubMemberTransfer before connecting.");
+      blocked.statusCode = 403;
+      throw blocked;
+    }
+    if (!bybitDiagnostics?.accountUid) {
+      const blocked = new Error("Bybit account UID verification did not complete.");
+      blocked.statusCode = 403;
+      throw blocked;
+    }
+    const executionPolicy = resolveBybitExecutionPolicy(bybitDiagnostics?.permissions, { executionEnvironment });
     const credentialFingerprint = crypto.createHash("sha256").update(rawCredentials.apiKey).digest("hex").slice(0, 32);
-    const credentialRef = `exchange:${exchange}:${network}:${user.id}:${credentialFingerprint}`;
+    const credentialRef = `exchange:${exchange}:${executionEnvironment}:${endpointProfile}:${user.id}:${credentialFingerprint}`;
     const encryptedPayload = encryptCredentialPayload(rawCredentials);
 
     const accountPayload = {
@@ -69,14 +95,20 @@ export default async function handler(req, res) {
         is_read_only: !executionPolicy.tradingEnabled,
         trading_enabled: executionPolicy.tradingEnabled,
         credential_ref: credentialRef,
-        network
+        network,
+        execution_environment: executionEnvironment,
+        endpoint_profile: endpointProfile,
+        broker_account_uid: bybitDiagnostics?.accountUid || null,
+        permission_snapshot: bybitDiagnostics?.permissionSnapshot || {},
+        permission_verified_at: new Date().toISOString()
       };
     const { data: existingAccount, error: existingError } = await supabase
       .from("exchange_accounts")
       .select("*")
       .eq("user_id", user.id)
       .eq("exchange", exchange)
-      .eq("network", network)
+      .eq("execution_environment", executionEnvironment)
+      .eq("endpoint_profile", endpointProfile)
       .eq("credential_ref", credentialRef)
       .maybeSingle();
     if (existingError) throw existingError;
@@ -107,7 +139,9 @@ export default async function handler(req, res) {
       read_only_mode: !executionPolicy.tradingEnabled,
       trading_enabled: executionPolicy.tradingEnabled,
       allowed_symbols: executionPolicy.allowedSymbols,
-      max_position_usd: executionPolicy.maxNotionalUsd
+      max_position_usd: optionalPositiveOrZero(req.body.riskPolicy?.maxPositionNotional),
+      max_leverage: optionalPositiveOrZero(req.body.riskPolicy?.maxLeverage),
+      max_daily_loss_usd: optionalPositiveOrZero(req.body.riskPolicy?.maxDailyLoss)
     };
 
     const { data: riskControls, error: riskError } = await supabase
@@ -171,14 +205,25 @@ function buildConnectionResult(exchange, diagnostics, snapshotWarning = null, ex
   if (exchange !== "bybit" || !diagnostics) return null;
   const executionReady = executionPolicy?.tradingEnabled === true;
   return {
-    headline: "BYBIT MAINNET ACCOUNT CONNECTED",
+    headline: diagnostics.executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO ? "BYBIT DEMO VERIFIED" : "BYBIT MAINNET LIVE VERIFIED",
+    executionEnvironment: diagnostics.executionEnvironment,
+    endpointProfile: diagnostics.endpointProfile,
+    accountUid: diagnostics.accountUid,
+    permissionSnapshot: diagnostics.permissionSnapshot,
+    environmentTruth: diagnostics.environmentTruth,
     readAccess: diagnostics.permissions?.read === true,
     tradingAccess: diagnostics.permissions?.trading === true,
     withdrawalAccess: diagnostics.permissions?.withdrawal === true,
+    transferAccess: diagnostics.permissions?.transfer === true,
     derivativesAccess: diagnostics.metadata?.some((item) => item.marketType === "perpetual") === true,
     snapshotSynced: !snapshotWarning,
     snapshotWarning,
     executionReady,
     blocker: executionReady ? null : executionPolicy?.readinessReason || diagnostics.permissions?.warnings?.[0] || "Bybit trading permission is unavailable."
   };
+}
+
+function optionalPositiveOrZero(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }

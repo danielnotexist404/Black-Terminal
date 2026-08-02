@@ -6,9 +6,11 @@ export const PERSISTENT_ADAPTER_OPERATIONS = Object.freeze([
 ]);
 
 export class ExchangeAdapter {
-  constructor({ credentials, network, connectionId } = {}) {
+  constructor({ credentials, network, executionEnvironment, endpointProfile, connectionId } = {}) {
     this.credentials = credentials;
     this.network = network;
+    this.executionEnvironment = executionEnvironment || network;
+    this.endpointProfile = endpointProfile || "GLOBAL";
     this.connectionId = connectionId;
   }
 

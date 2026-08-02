@@ -170,6 +170,7 @@ export function checkOrderRisk({ account, riskControls, order, accountExposureUs
   const requiredMargin = order.marketKind === "spot" ? notional : notional / leverage;
   const maxPositionUsd = Number(riskControls?.max_position_usd || 0);
   const maxPortfolioExposureUsd = Number(riskControls?.max_portfolio_exposure_usd || 0);
+  const maxDailyLossUsd = Number(riskControls?.max_daily_loss_usd || 0);
 
   if (!account) reasons.push("Account not found.");
   if (account?.is_read_only) reasons.push("Account is read-only.");
@@ -186,7 +187,7 @@ export function checkOrderRisk({ account, riskControls, order, accountExposureUs
   if (maxPortfolioExposureUsd > 0 && accountExposureUsd + requiredMargin > maxPortfolioExposureUsd) {
     reasons.push("Order would exceed maximum portfolio exposure.");
   }
-  if (riskControls && dailyPnl <= -Math.abs(Number(riskControls.max_daily_loss_usd))) {
+  if (maxDailyLossUsd > 0 && dailyPnl <= -Math.abs(maxDailyLossUsd)) {
     reasons.push("Maximum daily loss has been reached.");
   }
 

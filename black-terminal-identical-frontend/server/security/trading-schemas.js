@@ -116,7 +116,12 @@ const executionSchemas = {
 };
 
 const exchangeSchemas = {
-  connect: z.object({ exchange: z.literal("bybit"), accountName: shortText.min(1), apiKey: secret, apiSecret: secret, passphrase: secret.optional(), network: z.enum(["mainnet", "testnet"]).optional() }).strict(),
+  connect: z.object({
+    exchange: z.literal("bybit"), accountName: shortText.min(1), apiKey: secret, apiSecret: secret, passphrase: secret.optional(),
+    network: z.enum(["mainnet", "demo"]).optional(), executionEnvironment: z.enum(["DEMO", "MAINNET_LIVE"]),
+    endpointProfile: z.enum(["GLOBAL", "NETHERLANDS", "TURKEY", "KAZAKHSTAN", "GEORGIA", "UAE", "EEA", "INDONESIA", "JAPAN"]).optional(),
+    liveConfirmation: shortText.optional()
+  }).strict(),
   diagnostics: z.object({ accountId: id, symbol: symbol.optional() }).strict(),
   sync: z.object({ accountId: id, symbol: symbol.optional(), marketKind: marketKind.optional() }).strict(),
   "mainnet-validation": z.object({ accountId: id, action: z.enum(["enable", "disable"]), confirmation: shortText }).strict()
@@ -135,6 +140,7 @@ const cloudSchemas = {
   connection: z.object({
     accountId: id,
     confirmation: z.literal("ENABLE OFFLINE CLOUD EXECUTION"),
+    liveConfirmation: shortText.optional(),
     automation: z.object({
       allowStrategyExecution: boolean.optional(),
       allowCopyTrading: boolean.optional(),

@@ -1,46 +1,63 @@
 import crypto from "node:crypto";
+import { normalizeBybitExecutionEnvironment } from "../exchanges/bybit-endpoints.js";
 
-const ENVELOPE_VERSION = 2;
+const ENVELOPE_VERSION = 3;
 
 export async function storeBrokerCredential(supabase, input) {
   if (input.withdrawalEnabled || input.permissionScope?.withdrawal) {
     throw forbidden("Withdrawal-enabled credentials cannot be stored for Black Cloud execution.");
   }
+  if (input.transferEnabled || input.permissionScope?.walletTransfer || input.permissionScope?.transfer) {
+    throw forbidden("Wallet-transfer-enabled credentials cannot be stored for Black Cloud execution.");
+  }
   assertIdentity(input);
   const masterKeyVersion = positiveInteger(input.masterKeyVersion || process.env.BLACK_CLOUD_MASTER_KEY_VERSION || 1, "master key version");
-  const masterKey = credentialMasterKey(masterKeyVersion);
-  const dataKey = crypto.randomBytes(32);
-  const secretBytes = Buffer.from(JSON.stringify(input.secret), "utf8");
-  const aad = associatedData(input);
-  const wrapAad = wrappingAssociatedData(aad, masterKeyVersion);
-  try {
-    const secretEnvelope = encryptAesGcm(secretBytes, dataKey, aad);
-    const keyEnvelope = encryptAesGcm(dataKey, masterKey, wrapAad);
-    const fingerprint = crypto.createHash("sha256").update(String(input.publicIdentifier || "")).digest("hex").slice(0, 32);
-    const { data: reference, error } = await supabase.rpc("black_cloud_store_encrypted_broker_secret_v2", {
-      p_user_id: input.userId,
-      p_connection_id: input.connectionId,
-      p_provider: normalizedProvider(input.provider),
-      p_encrypted_secret: toBytea(secretEnvelope.ciphertext),
-      p_encryption_iv: toBytea(secretEnvelope.iv),
-      p_authentication_tag: toBytea(secretEnvelope.tag),
-      p_wrapped_data_key: toBytea(keyEnvelope.ciphertext),
-      p_wrapping_iv: toBytea(keyEnvelope.iv),
-      p_wrapping_authentication_tag: toBytea(keyEnvelope.tag),
-      p_associated_data_hash: hash(aad),
-      p_master_key_version: masterKeyVersion,
-      p_credential_fingerprint: fingerprint,
-      p_authorization_type: input.authorizationType,
-      p_permission_scope: { ...(input.permissionScope || {}), withdrawal: false },
-      p_withdrawal_enabled: false
-    });
-    if (error) throw error;
-    return toSafeSecretReference(reference);
-  } finally {
-    masterKey.fill(0);
-    dataKey.fill(0);
-    secretBytes.fill(0);
+  const executionEnvironment = normalizeBybitExecutionEnvironment(input.executionEnvironment || input.secret?.executionEnvironment || input.secret?.network);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const credentialVersion = await nextCredentialVersion(supabase, input.connectionId);
+    const binding = { ...input, executionEnvironment, credentialVersion };
+    const masterKey = credentialMasterKey(masterKeyVersion);
+    const dataKey = crypto.randomBytes(32);
+    const secretBytes = Buffer.from(JSON.stringify({ ...input.secret, executionEnvironment }), "utf8");
+    const aad = associatedData(binding);
+    const wrapAad = wrappingAssociatedData(aad, masterKeyVersion);
+    try {
+      const secretEnvelope = encryptAesGcm(secretBytes, dataKey, aad);
+      const keyEnvelope = encryptAesGcm(dataKey, masterKey, wrapAad);
+      const fingerprint = crypto.createHash("sha256").update(String(input.publicIdentifier || "")).digest("hex").slice(0, 32);
+      const permissionSnapshot = { ...(input.permissionSnapshot || input.permissionScope || {}), withdrawal: false, walletTransfer: false };
+      const { data: reference, error } = await supabase.rpc("black_cloud_store_encrypted_broker_secret_v3", {
+        p_user_id: input.userId,
+        p_connection_id: input.connectionId,
+        p_provider: normalizedProvider(input.provider),
+        p_execution_environment: executionEnvironment,
+        p_expected_credential_version: credentialVersion,
+        p_encrypted_secret: toBytea(secretEnvelope.ciphertext),
+        p_encryption_iv: toBytea(secretEnvelope.iv),
+        p_authentication_tag: toBytea(secretEnvelope.tag),
+        p_wrapped_data_key: toBytea(keyEnvelope.ciphertext),
+        p_wrapping_iv: toBytea(keyEnvelope.iv),
+        p_wrapping_authentication_tag: toBytea(keyEnvelope.tag),
+        p_associated_data_hash: hash(aad),
+        p_master_key_version: masterKeyVersion,
+        p_credential_fingerprint: fingerprint,
+        p_authorization_type: input.authorizationType,
+        p_permission_scope: permissionSnapshot,
+        p_permission_snapshot: permissionSnapshot,
+        p_withdrawal_enabled: false
+      });
+      if (error) {
+        if (String(error.code) === "40001" && attempt < 2) continue;
+        throw error;
+      }
+      return toSafeSecretReference(reference);
+    } finally {
+      masterKey.fill(0);
+      dataKey.fill(0);
+      secretBytes.fill(0);
+    }
   }
+  throw forbidden("Broker credential version could not be reserved safely.");
 }
 
 export async function revokeBrokerCredential(supabase, input) {
@@ -58,20 +75,20 @@ export async function revokeBrokerCredential(supabase, input) {
 
 export async function decryptBrokerCredential(supabase, secretReferenceId, expected = {}) {
   const { data: reference, error: referenceError } = await supabase.from("broker_secret_references")
-    .select("vault_secret_id,user_id,connection_id,provider,credential_version,status")
+    .select("vault_secret_id,user_id,connection_id,provider,execution_environment,credential_version,status")
     .eq("id", secretReferenceId)
     .single();
   if (referenceError || reference?.status !== "ACTIVE") throw forbidden("Broker credential is not active.");
   assertExpectedIdentity(reference, expected);
   const { data: row, error } = await supabase.from("broker_secret_vault")
-    .select("user_id,connection_id,provider,encrypted_secret,encryption_iv,authentication_tag,encryption_version,rotation_status,wrapped_data_key,wrapping_iv,wrapping_authentication_tag,associated_data_hash,master_key_version")
+    .select("user_id,connection_id,provider,execution_environment,credential_version,encrypted_secret,encryption_iv,authentication_tag,encryption_version,rotation_status,wrapped_data_key,wrapping_iv,wrapping_authentication_tag,associated_data_hash,master_key_version")
     .eq("id", reference.vault_secret_id)
     .single();
   if (error || row?.rotation_status !== "ACTIVE") throw forbidden("Broker credential vault entry is unavailable.");
   assertRowIdentity(row, reference);
-  return Number(row.encryption_version) === ENVELOPE_VERSION
-    ? decryptV2(row, reference)
-    : decryptLegacyV1(row);
+  if (Number(row.encryption_version) === 3) return decryptV3(row, reference);
+  if (Number(row.encryption_version) === 2) return decryptV2(row, reference);
+  return decryptLegacyV1(row);
 }
 
 export function toSafeSecretReference(row) {
@@ -80,14 +97,27 @@ export function toSafeSecretReference(row) {
     id: row.id,
     connectionId: row.connection_id,
     provider: row.provider,
+    executionEnvironment: row.execution_environment,
     credentialVersion: row.credential_version,
     credentialFingerprint: row.credential_fingerprint,
     authorizationType: row.authorization_type,
     permissionScope: row.permission_scope,
+    permissionSnapshot: row.permission_snapshot || row.permission_scope,
     withdrawalEnabled: false,
     status: row.status,
     activatedAt: row.activated_at
   };
+}
+
+function decryptV3(row, reference) {
+  const identity = {
+    userId: reference.user_id,
+    connectionId: reference.connection_id,
+    provider: reference.provider,
+    executionEnvironment: reference.execution_environment,
+    credentialVersion: reference.credential_version
+  };
+  return decryptWrappedEnvelope(row, associatedData(identity));
 }
 
 function decryptV2(row, reference) {
@@ -96,7 +126,11 @@ function decryptV2(row, reference) {
     connectionId: reference.connection_id,
     provider: reference.provider
   };
-  const aad = associatedData(identity);
+  const aad = associatedData(identity, 2);
+  return decryptWrappedEnvelope(row, aad);
+}
+
+function decryptWrappedEnvelope(row, aad) {
   if (!safeEqualHex(hash(aad), row.associated_data_hash)) throw forbidden("Broker credential associated-data verification failed.");
   const masterKeyVersion = positiveInteger(row.master_key_version, "master key version");
   const masterKey = credentialMasterKey(masterKeyVersion);
@@ -136,7 +170,7 @@ function decryptLegacyV1(row) {
     }, masterKey);
     return JSON.parse(plaintext.toString("utf8"));
   } catch {
-    throw forbidden("Legacy broker credential authentication failed; rotate this credential into a v2 envelope.");
+    throw forbidden("Legacy broker credential authentication failed; rotate this credential into the current v3 environment-bound envelope.");
   } finally {
     masterKey.fill(0);
     plaintext?.fill(0);
@@ -158,14 +192,19 @@ function decryptAesGcm(envelope, key, aad) {
   return Buffer.concat([decipher.update(envelope.ciphertext), decipher.final()]);
 }
 
-function associatedData(input) {
-  return Buffer.from(JSON.stringify({
+function associatedData(input, envelopeVersion = ENVELOPE_VERSION) {
+  const payload = {
     scope: "black-cloud-broker-credential",
     userId: String(input.userId),
     connectionId: String(input.connectionId),
     provider: normalizedProvider(input.provider),
-    envelopeVersion: ENVELOPE_VERSION
-  }), "utf8");
+    envelopeVersion
+  };
+  if (envelopeVersion >= 3) {
+    payload.executionEnvironment = normalizeBybitExecutionEnvironment(input.executionEnvironment);
+    payload.credentialVersion = positiveInteger(input.credentialVersion, "credential version");
+  }
+  return Buffer.from(JSON.stringify(payload), "utf8");
 }
 
 function wrappingAssociatedData(aad, keyVersion) {
@@ -180,12 +219,28 @@ function assertExpectedIdentity(reference, expected) {
   if (expected.userId && String(expected.userId) !== String(reference.user_id)) throw forbidden("Broker credential user binding mismatch.");
   if (expected.connectionId && String(expected.connectionId) !== String(reference.connection_id)) throw forbidden("Broker credential connection binding mismatch.");
   if (expected.provider && normalizedProvider(expected.provider) !== normalizedProvider(reference.provider)) throw forbidden("Broker credential provider binding mismatch.");
+  if (expected.executionEnvironment && normalizeBybitExecutionEnvironment(expected.executionEnvironment) !== normalizeBybitExecutionEnvironment(reference.execution_environment)) throw forbidden("Broker credential execution-environment binding mismatch.");
+  if (expected.credentialVersion && Number(expected.credentialVersion) !== Number(reference.credential_version)) throw forbidden("Broker credential version binding mismatch.");
 }
 
 function assertRowIdentity(row, reference) {
   if (String(row.user_id) !== String(reference.user_id) || String(row.connection_id) !== String(reference.connection_id) || normalizedProvider(row.provider) !== normalizedProvider(reference.provider)) {
     throw forbidden("Broker credential vault ownership mismatch.");
   }
+  if (Number(row.encryption_version) >= 3 && (normalizeBybitExecutionEnvironment(row.execution_environment) !== normalizeBybitExecutionEnvironment(reference.execution_environment) || Number(row.credential_version) !== Number(reference.credential_version))) {
+    throw forbidden("Broker credential vault environment or version binding mismatch.");
+  }
+}
+
+async function nextCredentialVersion(supabase, connectionId) {
+  const { data, error } = await supabase.from("broker_secret_references")
+    .select("credential_version")
+    .eq("connection_id", connectionId)
+    .order("credential_version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return positiveInteger(Number(data?.credential_version || 0) + 1, "credential version");
 }
 
 function credentialMasterKey(version) {

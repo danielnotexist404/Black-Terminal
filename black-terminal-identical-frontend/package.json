@@ -11,6 +11,7 @@
     "security:contracts": "node scripts/security-contract-tests.js",
     "security:verify-migrations": "node scripts/verify-security-migrations.js",
     "security:verify-migration-source": "node scripts/verify-security-migrations.js --source-only",
+    "security:verify-phase5-anon": "node scripts/verify-phase5-anon-boundary.js",
     "preview": "vite preview --host 127.0.0.1",
     "depth:worker": "node scripts/market-depth-worker.js",
     "depth:worker:supervise": "node scripts/market-depth-supervisor.js",

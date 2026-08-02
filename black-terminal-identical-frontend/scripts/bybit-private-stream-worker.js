@@ -35,8 +35,11 @@ if (credentialError || !credential) {
 }
 
 const credentials = decryptCredentialPayload(credential.encrypted_payload);
+const executionEnvironment = account.execution_environment || credentials.executionEnvironment;
+const endpointProfile = account.endpoint_profile || credentials.endpointProfile || "GLOBAL";
 const client = new BybitPrivateStreamClient(credentials, {
-  network: process.env.BYBIT_NETWORK || "mainnet"
+  executionEnvironment,
+  endpointProfile
 });
 
 let syncTimer = null;
@@ -136,7 +139,7 @@ async function writeHealthSnapshot() {
       venue_id: "bybit",
       provider: "bybit",
       category: "centralized-exchange",
-      network: process.env.BYBIT_NETWORK || "mainnet",
+      network: executionEnvironment === "DEMO" ? "demo" : "mainnet",
       readiness: diagnostics.status === "connected" ? "synchronizing" : diagnostics.status === "stale" ? "degraded" : "reconnecting",
       execution_mode: "read-only",
       public_stream: "connected",
@@ -154,7 +157,7 @@ async function writeHealthSnapshot() {
       provider: "bybit",
       category: "centralized-exchange",
       execution_mode: "read-only",
-      network: process.env.BYBIT_NETWORK || "mainnet",
+      network: executionEnvironment === "DEMO" ? "demo" : "mainnet",
       readiness: diagnostics.status === "connected" ? "connected-read-only" : "degraded",
       implementation_status: "partial",
       market_data_ready: true,

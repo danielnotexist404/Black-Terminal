@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { resolveBybitEndpointSet } from "./bybit-endpoints.js";
 
 const BYBIT_PRIVATE_TOPICS = ["order", "execution", "position", "wallet", "strategy"];
 const DEFAULT_STALE_AFTER_MS = 45_000;
@@ -29,11 +30,14 @@ function createRuntimeState(enabled = process.env.BYBIT_PRIVATE_STREAM_RUNTIME_E
 
 const fallbackRuntimeState = createRuntimeState();
 
-export function getBybitPrivateWsUrl({ network = "mainnet" } = {}) {
-  if (process.env.BYBIT_PRIVATE_WS_URL) return process.env.BYBIT_PRIVATE_WS_URL;
-  return network === "testnet" || network === "sandbox"
-    ? "wss://stream-testnet.bybit.com/v5/private"
-    : "wss://stream.bybit.com/v5/private";
+export function getBybitPrivateWsUrl(options = {}) {
+  if (options.url || process.env.BYBIT_PRIVATE_WS_URL) {
+    throw Object.assign(new Error("Private-stream URL overrides are forbidden; select a certified Bybit environment and endpoint profile."), { code: "BYBIT_ENDPOINT_OVERRIDE_REJECTED" });
+  }
+  return resolveBybitEndpointSet({
+    executionEnvironment: options.executionEnvironment ?? options.environment ?? options.network ?? process.env.BYBIT_EXECUTION_ENVIRONMENT ?? process.env.BLACK_CLOUD_EXECUTION_ENVIRONMENT,
+    endpointProfile: options.endpointProfile ?? options.region ?? process.env.BYBIT_ENDPOINT_PROFILE ?? "GLOBAL"
+  }).privateWebSocket;
 }
 
 export function createBybitWsAuthPayload(credentials, { expires = Date.now() + 10_000 } = {}) {
@@ -146,8 +150,10 @@ export function normalizeBybitPrivateStreamMessage(input) {
 export class BybitPrivateStreamClient {
   constructor(credentials, options = {}) {
     this.credentials = credentials;
-    this.network = options.network || "mainnet";
-    this.url = options.url || getBybitPrivateWsUrl({ network: this.network });
+    this.executionEnvironment = options.executionEnvironment || credentials.executionEnvironment || credentials.network || "MAINNET_LIVE";
+    this.endpointProfile = options.endpointProfile || credentials.endpointProfile || "GLOBAL";
+    this.network = this.executionEnvironment;
+    this.url = getBybitPrivateWsUrl({ executionEnvironment: this.executionEnvironment, endpointProfile: this.endpointProfile });
     this.topics = options.topics || BYBIT_PRIVATE_TOPICS;
     this.handlers = new Set();
     this.errorHandlers = new Set();

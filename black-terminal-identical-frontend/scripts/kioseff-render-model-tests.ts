@@ -165,11 +165,18 @@ assert.notEqual(
 );
 assert.equal(continuous.activeZones[0]!.opacity, 0.04);
 assert.equal(
+  continuous.activeZones[0]!.fillZone,
+  false,
+  "weak VAE walls render as exact-price lines rather than compounding rectangles"
+);
+assert.equal(continuous.activeZones[1]!.fillZone, true);
+assert.equal(
   continuous.activeZones[0]!.labelColor,
   settings.volatilityAtEntry.weakClusterColor,
   "weak label text uses Pine's static weak color rather than the dark fill gradient"
 );
 assert.equal(continuous.violatedZones[0]!.drawAsLine, true);
+assert.equal(continuous.violatedZones[0]!.fillZone, false);
 assert.equal(continuous.violatedZones[0]!.opacity, 0.5);
 const weakBuy = {
   ...weak,

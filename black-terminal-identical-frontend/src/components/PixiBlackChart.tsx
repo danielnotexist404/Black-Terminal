@@ -1245,6 +1245,12 @@ export function PixiBlackChart({
     const chartCandles = replaySourceRef.current.slice(
       -kioseffSettings.historyLookbackBars
     );
+    // The setting is a maximum ceiling. On large chart timeframes the venue's
+    // entire market history can contain fewer bars (11,000 daily bars would be
+    // roughly 30 years). Once chart history is loaded, certify every available
+    // bar instead of misreporting a mathematically impossible target as a
+    // degraded heatmap.
+    const availableChartBarTarget = chartCandles.length;
     if (!adapter) {
       unavailable("unsupported-symbol-metadata", "The selected venue has no certified market-data adapter.");
       return () => coordinator.reset();
@@ -1494,7 +1500,7 @@ export function PixiBlackChart({
         adapter,
         symbol: marketSymbol,
         chartCandles,
-        targetChartBars: kioseffSettings.historyLookbackBars,
+        targetChartBars: availableChartBarTarget,
         chartTimeframe: timeframe,
         lowerTimeframe,
         transport:
@@ -1538,7 +1544,7 @@ export function PixiBlackChart({
               stage: "grouping-intrabars",
               bars: progress.bars,
               intrabars: progress.intrabars,
-              targetBars: kioseffSettings.historyLookbackBars
+              targetBars: availableChartBarTarget
             });
           }
         },
@@ -1552,7 +1558,7 @@ export function PixiBlackChart({
           setLoadStage({ stage: "ready" });
         } else {
           const retained = degraded(
-            `Using ${processedChartBarCount.toLocaleString()} certified bars. ${adapter.label} history ended before the ${history.warmup.targetChartBars.toLocaleString()}-bar target; the calculated heatmap remains active.`
+            `Using ${processedChartBarCount.toLocaleString()} contiguous certified bars from ${availableChartBarTarget.toLocaleString()} available ${timeframe} bars. Older one-minute coverage is unavailable; the calculated heatmap remains active.`
           );
           if (!retained) {
             setLoadStage({

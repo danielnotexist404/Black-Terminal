@@ -103,7 +103,7 @@ export class KioseffPixiRenderer {
     const color = colorNumber(zone.color);
     const strengthAlpha = zone.strength === "strong" ? 0.2 : 0.09;
     const alpha = zone.opacity ?? strengthAlpha;
-    if (!zone.drawAsLine) {
+    if (zone.fillZone && !zone.drawAsLine) {
       this.zoneGeometry
         .rect(left, y, right - left, height)
         .fill({ color, alpha })
@@ -116,14 +116,21 @@ export class KioseffPixiRenderer {
     const middle = transform.yForPrice(zone.price);
     const powerfulBuyWall =
       !violated && zone.side === "buy-stop" && zone.strength === "strong";
-    if (zone.drawAsLine || zone.hot || powerfulBuyWall) {
+    const weakActiveWall = !violated && !zone.fillZone;
+    if (zone.drawAsLine || zone.hot || powerfulBuyWall || weakActiveWall) {
       this.lineGeometry
         .moveTo(left, middle)
         .lineTo(right, middle)
         .stroke({
           color,
           width: Math.max(0.5, settings.style.activeLineWidth),
-          alpha: zone.hot ? 1 : powerfulBuyWall ? Math.max(0.62, alpha) : alpha
+          alpha: zone.hot
+            ? 1
+            : powerfulBuyWall
+              ? Math.max(0.62, alpha)
+              : weakActiveWall
+                ? Math.min(0.16, alpha)
+                : alpha
         });
     }
     if (zone.hot) {

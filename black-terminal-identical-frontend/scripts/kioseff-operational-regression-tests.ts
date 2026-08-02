@@ -562,7 +562,8 @@ const chartSource = readFileSync(
   "utf8"
 );
 assert.match(chartSource, /MAX_RETAINED_CHART_BARS = 22_000/);
-assert.match(chartSource, /targetChartBars: kioseffSettings\.historyLookbackBars/);
+assert.match(chartSource, /targetChartBars: availableChartBarTarget/);
+assert.match(chartSource, /The setting is a maximum ceiling/);
 assert.match(chartSource, /calculateBatchChunked/);
 assert.match(chartSource, /certifiedKioseffInputTail/);
 assert.match(chartSource, /Certified partial warmup retained/);
@@ -612,6 +613,13 @@ const pixiRendererSource = readFileSync(
 assert.match(pixiRendererSource, /settings\.style\.buyWallColor/);
 assert.match(pixiRendererSource, /settings\.volatilityAtEntry\.strongClusterColor/);
 assert.doesNotMatch(pixiRendererSource, /0x(?:55ffda|ff65fb|ff22cc|6929f2)/i);
+assert.match(pixiRendererSource, /const weakActiveWall = !violated && !zone\.fillZone/);
+const chartEngineSource = readFileSync(
+  fileURLToPath(new URL("../src/chart-engine/BlackChartEngine.ts", import.meta.url)),
+  "utf8"
+);
+assert.match(chartEngineSource, /this\.kioseffSettings = migrateKioseffSettings\(settings\)/);
+
 for (const relativePath of [
   "../src/features/premium.ts",
   "../src/components/IndicatorLibrary.tsx",

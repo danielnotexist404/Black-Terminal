@@ -18,6 +18,7 @@ import { blackCoreResourceTracker } from "../performance/resourceTracker";
 import type { KioseffSnapshot } from "../modules/kioseff-stop-loss-clustering/core/canonical";
 import {
   KIOSEFF_DEFAULT_SETTINGS,
+  migrateKioseffSettings,
   type KioseffSettingsV1
 } from "../modules/kioseff-stop-loss-clustering/core/settings";
 import { KioseffPixiRenderer } from "../modules/kioseff-stop-loss-clustering/rendering/KioseffPixiRenderer";
@@ -300,7 +301,9 @@ export class BlackChartEngine {
     if (options.indicatorVisualSettings) this.indicatorVisualSettings = options.indicatorVisualSettings;
     if (options.indicatorAdvancedSettings) this.indicatorAdvancedSettings = options.indicatorAdvancedSettings;
     if (options.kioseffSnapshot !== undefined) this.kioseffSnapshot = options.kioseffSnapshot;
-    if (options.kioseffSettings) this.kioseffSettings = structuredClone(options.kioseffSettings);
+    if (options.kioseffSettings) {
+      this.kioseffSettings = migrateKioseffSettings(options.kioseffSettings);
+    }
     this.setHeatmapSource(options.candles);
     this.onPriceChange = options.onPriceChange;
     this.onCandleChange = options.onCandleChange;
@@ -686,7 +689,10 @@ export class BlackChartEngine {
 
   setKioseffState(snapshot: KioseffSnapshot | null, settings = this.kioseffSettings) {
     this.kioseffSnapshot = snapshot;
-    this.kioseffSettings = structuredClone(settings);
+    // Normalize legacy palette values at the renderer boundary as well as when
+    // a workspace is reopened. A deployed SPA can otherwise keep an older
+    // cyan/pink/purple settings object alive until the next hard reload.
+    this.kioseffSettings = migrateKioseffSettings(settings);
     this.draw();
   }
 

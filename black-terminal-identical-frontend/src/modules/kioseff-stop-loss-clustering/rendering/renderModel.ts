@@ -15,6 +15,7 @@ export type KioseffRenderZone = CanonicalCluster & {
   showLabel: boolean;
   labelText: string | null;
   drawAsLine: boolean;
+  fillZone: boolean;
 };
 
 export type KioseffLabelLayout = {
@@ -196,6 +197,10 @@ export function buildKioseffRenderModel(
       absorbtion || settings.volatilityAtEntry.showActiveClusterSize,
     labelText: formatPineVolume(cluster.signedVolume),
     drawAsLine: false,
+    // Hundreds of overlapping weak VAE rectangles compound their alpha into
+    // one opaque block on high timeframes. Keep only strong walls filled;
+    // weak walls retain their exact price as low-alpha heatmap lines.
+    fillZone: absorbtion || cluster.strength === "strong",
     opacity: opacityFor(cluster)
   }));
   const violatedZones = violated.map((cluster) => ({
@@ -221,6 +226,7 @@ export function buildKioseffRenderModel(
     showLabel: absorbtion,
     labelText: absorbtion ? formatPineVolume(cluster.signedVolume) : null,
     drawAsLine: !absorbtion,
+    fillZone: absorbtion,
     opacity:
       !absorbtion && snapshot.granularity === "lower"
         ? 0.5

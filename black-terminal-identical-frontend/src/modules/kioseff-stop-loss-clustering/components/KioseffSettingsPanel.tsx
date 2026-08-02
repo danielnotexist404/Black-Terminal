@@ -86,7 +86,7 @@ export function KioseffSettingsPanel({
             <option key={option.value} value={option.value}>{option.label}</option>
           ))}
         </select>
-        <small>Controls the real chart-bar warmup and ordered intrabar request. Larger windows take longer and use more memory.</small>
+        <small>Sets the maximum chart-bar warmup and ordered intrabar request. If the venue has fewer bars on a large timeframe, all available bars are used. Larger windows take longer and use more memory.</small>
       </label>
       <label>
         Model

@@ -18,6 +18,10 @@ import { PINE_CVD_PROFILE_KNOWN_ANOMALIES } from "../src/modules/auction-profile
 import { appendTradesToAuctionProfile, calculateAuctionProfile, calculateAuctionProfiles } from "../src/modules/auction-profile/engines/nativeEngine.ts";
 import { InMemoryCanonicalCvdService } from "../src/modules/auction-profile/data/tradeSource.ts";
 import { AuctionProfileWorkerRuntime } from "../src/modules/auction-profile/worker/auctionProfileWorker.ts";
+import { AuctionProfileWorkerClient } from "../src/modules/auction-profile/worker/AuctionProfileWorkerClient.ts";
+import { auctionProfileSettingsForDevice, RADAP_TABLET_RENDER_BUDGET } from "../src/modules/auction-profile/rendering/deviceBudget.ts";
+import { isIpadClassDevice, resolveChartDeviceCapabilities } from "../src/chart-engine/deviceCapabilities.ts";
+import { canUseIndicator } from "../src/features/premium.ts";
 import type { Candle } from "../src/chart-engine/types.ts";
 import type { CanonicalTrade } from "../src/modules/auction-profile/core/types.ts";
 import type { AuctionProfileWorkerResponse } from "../src/modules/auction-profile/worker/protocol.ts";
@@ -95,6 +99,18 @@ assert.ok(snapshot, "native profile must be produced");
 assert.equal(RADAP_SHORT_NAME, "RADAP");
 assert.equal(RADAP_FULL_NAME, "Range Anchored Directional Auction Profile");
 assert.equal(RADAP_DISPLAY_NAME, "RADAP · Range Anchored Directional Auction Profile");
+assert.equal(canUseIndicator("auctionProfile", { role: "user", allowedIndicators: [] }), true, "RADAP must remain available on a fresh signed-in device");
+assert.equal(canUseIndicator("volatilityHeatmap", { role: "user", allowedIndicators: [] }), false, "admin-controlled indicators must remain restricted");
+assert.equal(isIpadClassDevice({ userAgent: "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X)", platform: "iPad", maxTouchPoints: 5 }), true);
+assert.equal(isIpadClassDevice({ userAgent: "Mozilla/5.0 (Macintosh)", platform: "MacIntel", maxTouchPoints: 5 }), true, "desktop-class iPad user agents must be detected");
+assert.equal(resolveChartDeviceCapabilities({ userAgent: "iPad", platform: "iPad", maxTouchPoints: 5, devicePixelRatio: 2 }).rendererResolution, 1.5);
+assert.equal(resolveChartDeviceCapabilities({ userAgent: "Desktop", platform: "Linux x86_64", maxTouchPoints: 0, devicePixelRatio: 2 }).rendererResolution, 2);
+const tabletSettings = auctionProfileSettingsForDevice(settings, true);
+assert.equal(tabletSettings.rendering.maximumVisibleColumns, RADAP_TABLET_RENDER_BUDGET.maximumVisibleColumns);
+assert.equal(tabletSettings.rendering.maximumVisibleRows, RADAP_TABLET_RENDER_BUDGET.maximumVisibleRows);
+assert.equal(tabletSettings.rendering.maximumVisibleLabels, RADAP_TABLET_RENDER_BUDGET.maximumVisibleLabels);
+assert.equal(tabletSettings.rendering.cellTextMode, "AUTO");
+assert.equal(auctionProfileSettingsForDevice(settings, false), settings, "desktop RADAP rendering must remain unchanged");
 assert.deepEqual(retainCertifiedRadapSnapshots([snapshot], []), [snapshot], "an empty rebuild must retain the last certified RADAP snapshot");
 assert.deepEqual(retainCertifiedRadapSnapshots([], [snapshot]), [snapshot], "a certified rebuild must replace an empty display");
 assert.equal(snapshot.quality.quality, "EXACT");
@@ -547,6 +563,28 @@ lockedRuntime.handle({ type: "APPEND_TRADES", protocolVersion: 1, requestId: "lo
 const lockedAppend = lockedResponses.find(response => response.type === "RESULT" && response.requestId === "locked-append");
 assert.ok(lockedAppend && lockedAppend.type === "RESULT");
 assert.equal(lockedAppend.snapshots[0]?.profileVersion, lockedInitial.snapshots[0]?.profileVersion, "locked composites must not repaint");
+
+const inlineFallbackClient = new AuctionProfileWorkerClient(() => {
+  throw new Error("module workers unavailable");
+});
+assert.equal(inlineFallbackClient.executionMode, "INLINE");
+const inlineSnapshots = await inlineFallbackClient.initialize(input);
+assert.equal(inlineSnapshots.length, 1, "RADAP must calculate through the inline fallback when iPad WebKit rejects its module worker");
+inlineFallbackClient.dispose();
+
+const failingWorker = {
+  onmessage: null,
+  onerror: null,
+  postMessage() {
+    this.onerror?.({ message: "worker script blocked" } as ErrorEvent);
+  },
+  terminate() {}
+} satisfies import("../src/modules/auction-profile/worker/AuctionProfileWorkerClient.ts").AuctionProfileWorkerLike;
+const asynchronousFallbackClient = new AuctionProfileWorkerClient(() => failingWorker);
+const asynchronousFallbackSnapshots = await asynchronousFallbackClient.initialize(input);
+assert.equal(asynchronousFallbackClient.executionMode, "INLINE");
+assert.equal(asynchronousFallbackSnapshots.length, 1, "a browser worker load error must replay the pending RADAP calculation inline");
+asynchronousFallbackClient.dispose();
 
 console.log("RADAP certification passed", {
   profileVersion: snapshot.profileVersion,

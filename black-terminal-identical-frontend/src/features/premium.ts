@@ -42,7 +42,9 @@ export function isPremiumIndicator(key: keyof VisibleIndicators): key is Premium
 }
 
 export function canUseIndicator(key: keyof VisibleIndicators, subject: IndicatorAccessSubject) {
-  return subject?.role === "admin" || Boolean(subject?.allowedIndicators?.includes(key));
+  return subject?.role === "admin" ||
+    DEFAULT_ALLOWED_INDICATORS.includes(key as (typeof DEFAULT_ALLOWED_INDICATORS)[number]) ||
+    Boolean(subject?.allowedIndicators?.includes(key));
 }
 
 export function restrictVisibleIndicators(

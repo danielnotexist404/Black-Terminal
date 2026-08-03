@@ -1,11 +1,41 @@
 import type { AuctionProfileCalculationInput, AuctionProfileSettings, AuctionProfileSnapshot, CanonicalTrade } from "../core/types.ts";
 import type { AuctionProfileWorkerRequest, AuctionProfileWorkerResponse } from "./protocol.ts";
+import { AuctionProfileWorkerRuntime } from "./auctionProfileWorker.ts";
 
 type Pending = {
   resolve: (snapshots: AuctionProfileSnapshot[]) => void;
   reject: (error: Error) => void;
   generation: number;
+  request: AuctionProfileWorkerRequest;
 };
+
+export class InlineAuctionProfileWorker implements AuctionProfileWorkerLike {
+  onmessage: AuctionProfileWorkerLike["onmessage"] = null;
+  onerror: AuctionProfileWorkerLike["onerror"] = null;
+  private terminated = false;
+  private runtime = new AuctionProfileWorkerRuntime({
+    postMessage: message => {
+      queueMicrotask(() => {
+        if (!this.terminated) this.onmessage?.({ data: message } as MessageEvent<AuctionProfileWorkerResponse>);
+      });
+    }
+  });
+
+  postMessage(message: AuctionProfileWorkerRequest) {
+    globalThis.setTimeout(() => {
+      if (this.terminated) return;
+      try {
+        this.runtime.handle(message);
+      } catch (error) {
+        this.onerror?.({ message: error instanceof Error ? error.message : String(error) } as ErrorEvent);
+      }
+    }, 0);
+  }
+
+  terminate() {
+    this.terminated = true;
+  }
+}
 
 export type AuctionProfileWorkerLike = {
   onmessage: ((event: MessageEvent<AuctionProfileWorkerResponse>) => void) | null;
@@ -22,11 +52,34 @@ export class AuctionProfileWorkerClient {
   private disposed = false;
   private progress = 0;
   private lastCalculationMs = 0;
+  private executionModeValue: "WORKER" | "INLINE" = "WORKER";
 
   constructor(workerFactory: () => AuctionProfileWorkerLike = () => new Worker(new URL("./auction-profile.worker.ts", import.meta.url), { type: "module", name: "black-core-auction-profile" })) {
-    this.worker = workerFactory();
+    try {
+      this.worker = workerFactory();
+    } catch {
+      this.worker = new InlineAuctionProfileWorker();
+      this.executionModeValue = "INLINE";
+    }
+    this.attachWorker();
+  }
+
+  private attachWorker() {
     this.worker.onmessage = event => this.receive(event.data);
-    this.worker.onerror = event => this.rejectAll(new Error(event.message || "RADAP worker failed."));
+    this.worker.onerror = event => this.activateInlineFallback(new Error(event.message || "RADAP worker failed."));
+  }
+
+  private activateInlineFallback(error: Error) {
+    if (this.disposed) return;
+    if (this.executionModeValue === "INLINE") {
+      this.rejectAll(error);
+      return;
+    }
+    this.worker.terminate();
+    this.worker = new InlineAuctionProfileWorker();
+    this.executionModeValue = "INLINE";
+    this.attachWorker();
+    for (const pending of this.pending.values()) this.worker.postMessage(pending.request);
   }
 
   private nextId(prefix: string) {
@@ -61,8 +114,12 @@ export class AuctionProfileWorkerClient {
   private send(request: AuctionProfileWorkerRequest) {
     if (this.disposed) return Promise.reject(new Error("RADAP worker client is disposed."));
     return new Promise<AuctionProfileSnapshot[]>((resolve, reject) => {
-      this.pending.set(request.requestId, { resolve, reject, generation: this.generation });
-      this.worker.postMessage(request);
+      this.pending.set(request.requestId, { resolve, reject, generation: this.generation, request });
+      try {
+        this.worker.postMessage(request);
+      } catch (error) {
+        this.activateInlineFallback(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 
@@ -93,7 +150,11 @@ export class AuctionProfileWorkerClient {
     if (this.pending.size) {
       const cancelGeneration = this.generation;
       const requestId = this.nextId("cancel");
-      this.worker.postMessage({ type: "CANCEL", ...this.envelope(requestId), cancelGeneration });
+      try {
+        this.worker.postMessage({ type: "CANCEL", ...this.envelope(requestId), cancelGeneration });
+      } catch {
+        // A failed primary worker is replaced when the next calculation is sent.
+      }
       this.rejectAll(new Error("CANCELLED"));
     }
     this.generation += 1;
@@ -108,7 +169,11 @@ export class AuctionProfileWorkerClient {
   dispose() {
     if (this.disposed) return;
     const requestId = this.nextId("dispose");
-    this.worker.postMessage({ type: "DISPOSE", ...this.envelope(requestId) });
+    try {
+      this.worker.postMessage({ type: "DISPOSE", ...this.envelope(requestId) });
+    } catch {
+      // Disposal must remain idempotent even after a browser worker failure.
+    }
     this.disposed = true;
     this.rejectAll(new Error("DISPOSED"));
     this.worker.terminate();
@@ -117,4 +182,5 @@ export class AuctionProfileWorkerClient {
   get activeGeneration() { return this.generation; }
   get buildProgress() { return this.progress; }
   get calculationMs() { return this.lastCalculationMs; }
+  get executionMode() { return this.executionModeValue; }
 }

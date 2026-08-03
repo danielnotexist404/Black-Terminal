@@ -28,6 +28,7 @@ import { CvdFootprintRenderer } from "../modules/auction-profile/rendering/footp
 import { resolveAuctionVisualizationLayers } from "../modules/auction-profile/rendering/visualization";
 import { AUCTION_PROFILE_DEFAULT_SETTINGS, migrateAuctionProfileSettings } from "../modules/auction-profile/core/settings";
 import type { AuctionProfileSettings, AuctionProfileSnapshot } from "../modules/auction-profile/core/types";
+import { resolveChartDeviceCapabilities } from "./deviceCapabilities";
 
 import {
   fromAxisValue,
@@ -149,6 +150,7 @@ export class BlackChartEngine {
   private cvdFootprintRenderer = new CvdFootprintRenderer();
   private auctionProfileSnapshots: AuctionProfileSnapshot[] = [];
   private auctionProfileSettings: AuctionProfileSettings = structuredClone(AUCTION_PROFILE_DEFAULT_SETTINGS);
+  private constrainedTouchRenderer = false;
   private volumeProfileModel = new VolumeProfileModel();
   private lastVolumeProfileResult?: VolumeProfileResult;
   private lastVolumeProfileHdlxByIndex = new Map<number, number>();
@@ -334,11 +336,18 @@ export class BlackChartEngine {
   }
 
   async init() {
+    const device = resolveChartDeviceCapabilities({
+      devicePixelRatio: window.devicePixelRatio || 1,
+      maxTouchPoints: navigator.maxTouchPoints || 0,
+      platform: navigator.platform || "",
+      userAgent: navigator.userAgent || ""
+    });
+    this.constrainedTouchRenderer = device.constrainedTouchRenderer;
     await this.app.init({
       background: theme.background,
       antialias: true,
       autoDensity: true,
-      resolution: window.devicePixelRatio || 1,
+      resolution: device.rendererResolution,
       resizeTo: this.host,
       preference: "webgl",
       powerPreference: "high-performance"
@@ -1560,6 +1569,7 @@ export class BlackChartEngine {
       height: plotHeight,
       top: this.view.topPadding,
       bottom: plotHeight,
+      constrainedTouchRenderer: this.constrainedTouchRenderer,
       xForTime: (time: number) => this.xForTimestamp(time),
       xForLookbackBars: (bars: number) => this.xForIndex(Math.max(0, this.getDisplayCandles().length - Math.max(1, Math.round(bars)))),
       yForPrice: (price: number) => this.yForPrice(price)

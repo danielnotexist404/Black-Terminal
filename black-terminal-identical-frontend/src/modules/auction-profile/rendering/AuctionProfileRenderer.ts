@@ -15,6 +15,7 @@ import type { AuctionProfileSettings, AuctionProfileSnapshot } from "../core/typ
 import { auctionBrightnessAlpha } from "./heatmap.ts";
 import { auctionColorNumber, auctionDirectionalColor } from "./colors.ts";
 import { auctionCellTextVisible, formatAuctionCellMetric, formatAuctionMetric, formatAuctionProfileRowMetric } from "./labels.ts";
+import { auctionProfileSettingsForDevice } from "./deviceBudget.ts";
 
 export { AUCTION_PROFILE_RENDERER_KIND };
 
@@ -23,6 +24,7 @@ export type AuctionProfileRenderTransform = {
   height: number;
   top: number;
   bottom: number;
+  constrainedTouchRenderer?: boolean;
   xForTime(time: number): number;
   xForLookbackBars(bars: number): number;
   yForPrice(price: number): number;
@@ -320,14 +322,15 @@ export class AuctionProfileRenderer {
   }
 
   draw(snapshots: AuctionProfileSnapshot | readonly AuctionProfileSnapshot[] | null, settings: AuctionProfileSettings, transform: AuctionProfileRenderTransform) {
+    const effectiveSettings = auctionProfileSettingsForDevice(settings, transform.constrainedTouchRenderer);
     const items = snapshots ? (Array.isArray(snapshots) ? snapshots : [snapshots as AuctionProfileSnapshot]) : [];
-    if (this.lastRenderingSettings !== settings.rendering) {
-      this.lastRenderingSettings = settings.rendering;
-      this.renderingSettingsSignature = JSON.stringify(settings.rendering);
+    if (this.lastRenderingSettings !== effectiveSettings.rendering) {
+      this.lastRenderingSettings = effectiveSettings.rendering;
+      this.renderingSettingsSignature = JSON.stringify(effectiveSettings.rendering);
     }
-    const signature = auctionProfileDrawSignature(items, settings, transform, this.renderingSettingsSignature);
+    const signature = auctionProfileDrawSignature(items, effectiveSettings, transform, this.renderingSettingsSignature);
     if (signature === this.lastDrawSignature) return;
-    this.settings = settings;
+    this.settings = effectiveSettings;
     this.activeTextKeys.clear();
     this.background.clear();
     this.profiles.clear();
@@ -340,7 +343,7 @@ export class AuctionProfileRenderer {
     this.viewport = { width: transform.width, top: transform.top, bottom: transform.bottom };
     this.clip.clear().rect(0, transform.top, transform.width, Math.max(1, transform.bottom - transform.top)).fill(0xffffff);
     this.clearHover();
-    items.forEach((snapshot, index) => this.drawSnapshot(snapshot, settings, transform, index, items.length));
+    items.forEach((snapshot, index) => this.drawSnapshot(snapshot, effectiveSettings, transform, index, items.length));
     this.finishTextFrame();
     this.lastDrawSignature = signature;
   }

@@ -18,6 +18,11 @@ export class AuctionProfileWorkerRuntime {
   private disposed = false;
   private readonly port: AuctionProfileWorkerPort;
 
+  private clone<T>(value: T): T {
+    if (typeof globalThis.structuredClone === "function") return globalThis.structuredClone(value);
+    return JSON.parse(JSON.stringify(value)) as T;
+  }
+
   constructor(port: AuctionProfileWorkerPort) {
     this.port = port;
   }
@@ -61,7 +66,7 @@ export class AuctionProfileWorkerRuntime {
         return;
       }
       if (request.type === "INITIALIZE") {
-        this.input = structuredClone(request.input);
+        this.input = this.clone(request.input);
         this.rebuild(request);
         return;
       }
@@ -70,12 +75,12 @@ export class AuctionProfileWorkerRuntime {
         return;
       }
       if (request.type === "SETTINGS_UPDATE") {
-        this.input.settings = structuredClone(request.settings);
+        this.input.settings = this.clone(request.settings);
         this.rebuild(request);
         return;
       }
       if (request.type === "REBUILD") {
-        if (request.input) this.input = structuredClone(request.input);
+        if (request.input) this.input = this.clone(request.input);
         this.rebuild(request);
         return;
       }

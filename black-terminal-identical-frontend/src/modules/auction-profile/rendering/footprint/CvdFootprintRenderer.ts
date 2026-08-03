@@ -5,6 +5,7 @@ import { auctionCellRenderStrides, downsampleAuctionCells } from "../cells.ts";
 import { auctionDirectionalColor } from "../colors.ts";
 import { auctionCellTextVisible, formatAuctionCellMetric, formatAuctionMetric } from "../labels.ts";
 import type { AuctionProfileRenderTransform } from "../AuctionProfileRenderer.ts";
+import { auctionProfileSettingsForDevice } from "../deviceBudget.ts";
 
 export const CVD_FOOTPRINT_RENDERER_KIND = "TIME_PRICE_FOOTPRINT" as const;
 export const auctionCellColor = auctionDirectionalColor;
@@ -64,7 +65,8 @@ export class CvdFootprintRenderer {
   }
 
   draw(snapshots: readonly AuctionProfileSnapshot[] | AuctionProfileSnapshot | null, settings: AuctionProfileSettings, transform: AuctionProfileRenderTransform) {
-    this.cvdMetric = settings.cvdMetric;
+    const effectiveSettings = auctionProfileSettingsForDevice(settings, transform.constrainedTouchRenderer);
+    this.cvdMetric = effectiveSettings.cvdMetric;
     this.activeTextKeys.clear();
     this.cells.clear();
     this.clip.clear().rect(0, transform.top, transform.width, Math.max(1, transform.bottom - transform.top)).fill(0xffffff);
@@ -86,7 +88,7 @@ export class CvdFootprintRenderer {
         const bottom = transform.yForPrice(row.low);
         return Math.max(top, bottom) >= transform.top && Math.min(top, bottom) <= transform.bottom;
       }).length;
-      const strides = auctionCellRenderStrides(visibleBlocks, visibleRows, settings.rendering.maximumVisibleColumns, settings.rendering.maximumVisibleRows);
+      const strides = auctionCellRenderStrides(visibleBlocks, visibleRows, effectiveSettings.rendering.maximumVisibleColumns, effectiveSettings.rendering.maximumVisibleRows);
       for (const cell of downsampleAuctionCells(snapshot.matrix.cells, strides.columnStride, strides.rowStride)) {
         const rawLeft = transform.xForTime(cell.startTime);
         const rawRight = transform.xForTime(cell.endTime + 1);
@@ -98,15 +100,15 @@ export class CvdFootprintRenderer {
         const height = Math.max(1, Math.abs(bottom - top) - 0.35);
         if (x + width < 0 || x > transform.width || y + height < transform.top || y > transform.bottom) continue;
         const strength = Math.abs(cell.normalizedValue);
-        const color = auctionDirectionalColor(cell.rawValue, strength, settings.rendering);
-        const alpha = auctionBrightnessAlpha((0.3 + strength * 0.66) * settings.rendering.opacity, settings.rendering.brightness);
+        const color = auctionDirectionalColor(cell.rawValue, strength, effectiveSettings.rendering);
+        const alpha = auctionBrightnessAlpha((0.3 + strength * 0.66) * effectiveSettings.rendering.opacity, effectiveSettings.rendering.brightness);
         this.cells.rect(x, y, width, height).fill({ color, alpha });
-        if (settings.rendering.cellBorder !== "NONE") {
-          this.cells.rect(x, y, width, height).stroke({ color: 0x090909, width: settings.rendering.cellBorder === "HIGH_CONTRAST" ? 1.2 : 0.65, alpha: settings.rendering.cellBorder === "SUBTLE" ? 0.64 : 0.9 });
+        if (effectiveSettings.rendering.cellBorder !== "NONE") {
+          this.cells.rect(x, y, width, height).stroke({ color: 0x090909, width: effectiveSettings.rendering.cellBorder === "HIGH_CONTRAST" ? 1.2 : 0.65, alpha: effectiveSettings.rendering.cellBorder === "SUBTLE" ? 0.64 : 0.9 });
         }
         if (cell.isDeveloping) this.cells.rect(x, y, width, height).stroke({ color: 0xffffff, width: 0.8, alpha: 0.4 });
-        if (settings.rendering.showText && this.activeTextKeys.size < settings.rendering.maximumVisibleLabels && auctionCellTextVisible(settings.rendering.cellTextMode, width, height, strength)) {
-          this.text(`footprint:${snapshot.profileId}:${cell.id}`, formatAuctionCellMetric(cell.rawValue, snapshot.engine, settings.cvdMetric), x + width / 2, y + height / 2, cellFontSize(settings.rendering.cellTextSize, width, height));
+        if (effectiveSettings.rendering.showText && this.activeTextKeys.size < effectiveSettings.rendering.maximumVisibleLabels && auctionCellTextVisible(effectiveSettings.rendering.cellTextMode, width, height, strength)) {
+          this.text(`footprint:${snapshot.profileId}:${cell.id}`, formatAuctionCellMetric(cell.rawValue, snapshot.engine, effectiveSettings.cvdMetric), x + width / 2, y + height / 2, cellFontSize(effectiveSettings.rendering.cellTextSize, width, height));
         }
         this.hitCells.push({ x, y, width, height, cell, snapshot });
         this.metricsState.cells += 1;

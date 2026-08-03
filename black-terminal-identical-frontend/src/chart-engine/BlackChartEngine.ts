@@ -1545,6 +1545,7 @@ export class BlackChartEngine {
         height: plotHeight,
         top: this.view.topPadding,
         bottom: plotHeight,
+        xForTime: (time) => this.xForTimestamp(time),
         yForPrice: (price) => this.yForPrice(price)
       }
     );

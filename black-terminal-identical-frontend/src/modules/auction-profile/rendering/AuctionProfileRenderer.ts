@@ -1,7 +1,7 @@
 import { Container, Graphics, Text } from "pixi.js";
 import type { AuctionProfileSettings, AuctionProfileSnapshot } from "../core/types.ts";
 import { auctionBrightnessAlpha, normalizedAuctionRowStrength } from "./heatmap.ts";
-import { auctionHistogramWidth } from "./histogram.ts";
+import { auctionHistogramWidth, auctionProfileHorizontalBounds } from "./histogram.ts";
 import { formatAuctionMetric } from "./labels.ts";
 import { auctionNodeAlpha } from "./nodes.ts";
 
@@ -10,6 +10,7 @@ export type AuctionProfileRenderTransform = {
   height: number;
   top: number;
   bottom: number;
+  xForTime(time: number): number;
   yForPrice(price: number): number;
 };
 
@@ -69,8 +70,13 @@ export class AuctionProfileRenderer {
     }
     const rendering = settings.rendering;
     const maximum = Math.max(...snapshot.rows.map(row => Math.abs(row.value)), Number.EPSILON);
-    const profileWidth = transform.width * rendering.widthPercent / 100;
-    const baseX = transform.width - 4;
+    const bounds = auctionProfileHorizontalBounds(snapshot.range, transform.width, transform.xForTime);
+    if (!bounds.visible || bounds.width < 1) {
+      this.metricsState = { rows: snapshot.rows.length, nodes: snapshot.nodes.length, labels: 0, commands: 0 };
+      return;
+    }
+    const profileWidth = bounds.width;
+    const baseX = bounds.right;
     const histogramEnabled = ["HORIZONTAL_HISTOGRAM", "PROFILE_COLUMNS", "COMBINED"].includes(rendering.displayStyle);
     const heatmapEnabled = ["HEATMAP_BLOCKS", "CONTOUR", "COMBINED"].includes(rendering.displayStyle);
     const nodesEnabled = ["NODES_ONLY", "STRUCTURAL_ZONES", "COMBINED"].includes(rendering.displayStyle) || rendering.showNodeLabels;
@@ -85,15 +91,14 @@ export class AuctionProfileRenderer {
       const color = colorNumber(positive ? rendering.positiveColor : rendering.negativeColor);
       const strength = normalizedAuctionRowStrength(row, maximum);
       if (heatmapEnabled) {
-        const x = Math.max(0, transform.width - profileWidth);
-        this.heatmap.rect(x, y, profileWidth, height).fill({
+        this.heatmap.rect(bounds.left, y, profileWidth, height).fill({
           color,
           alpha: auctionBrightnessAlpha((0.018 + strength * 0.16) * rendering.opacity, rendering.brightness)
         });
         commands += 1;
       }
       if (histogramEnabled) {
-        const width = auctionHistogramWidth(row, maximum, profileWidth);
+        const width = auctionHistogramWidth(row, maximum, profileWidth, rendering.widthPercent);
         this.histogram.rect(baseX - width, y, width, height).fill({
           color,
           alpha: auctionBrightnessAlpha((0.16 + strength * 0.62) * rendering.opacity, rendering.brightness)
@@ -112,17 +117,17 @@ export class AuctionProfileRenderer {
         const height = Math.max(2, Math.abs(bottom - top));
         if (y + height < transform.top || y > transform.bottom) continue;
         const color = colorNumber(node.type === "LVN" ? rendering.lvnColor : rendering.hvnColor);
-        this.zones.rect(Math.max(0, transform.width - profileWidth), y, profileWidth, height)
+        this.zones.rect(bounds.left, y, profileWidth, height)
           .fill({ color, alpha: auctionBrightnessAlpha(auctionNodeAlpha(node) * rendering.opacity, rendering.brightness) })
           .stroke({ color, width: 1, alpha: 0.72 });
         commands += 2;
-        if (rendering.showNodeLabels && height >= 6) this.text(node.classification.replaceAll("_", " "), Math.max(4, transform.width - profileWidth + 4), y + height / 2, color);
+        if (rendering.showNodeLabels && height >= 6) this.text(node.classification.replaceAll("_", " "), Math.max(4, bounds.left + 4), y + height / 2, color);
       }
     }
     if (rendering.showValueArea && snapshot.keyLevels.vah !== null && snapshot.keyLevels.val !== null) {
       const top = transform.yForPrice(snapshot.keyLevels.vah);
       const bottom = transform.yForPrice(snapshot.keyLevels.val);
-      this.levels.rect(Math.max(0, transform.width - profileWidth), Math.min(top, bottom), profileWidth, Math.abs(bottom - top))
+      this.levels.rect(bounds.left, Math.min(top, bottom), profileWidth, Math.abs(bottom - top))
         .stroke({ color: colorNumber(rendering.valueAreaColor), width: 1, alpha: 0.3 });
       commands += 1;
     }
@@ -139,8 +144,8 @@ export class AuctionProfileRenderer {
         const y = transform.yForPrice(price);
         if (y < transform.top || y > transform.bottom) return;
         const number = colorNumber(color);
-        this.levels.moveTo(Math.max(0, transform.width - profileWidth), y).lineTo(transform.width, y).stroke({ color: number, width: name === "POC" ? 2 : 1, alpha: name === "POC" ? 0.9 : 0.48 });
-        this.text(name, Math.max(4, transform.width - profileWidth + 3), y - 6, number);
+        this.levels.moveTo(bounds.left, y).lineTo(bounds.right, y).stroke({ color: number, width: name === "POC" ? 2 : 1, alpha: name === "POC" ? 0.9 : 0.48 });
+        this.text(name, Math.max(4, bounds.left + 3), y - 6, number);
         commands += 1;
       });
     }

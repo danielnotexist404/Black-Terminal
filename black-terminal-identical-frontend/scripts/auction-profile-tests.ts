@@ -3,6 +3,7 @@ import { migrateAuctionProfileSettings } from "../src/modules/auction-profile/co
 import { stableHash } from "../src/modules/auction-profile/core/canonical.ts";
 import { createAuctionProfileGrid } from "../src/modules/auction-profile/core/profileGrid.ts";
 import { resolveAuctionScopeWindows } from "../src/modules/auction-profile/core/scope.ts";
+import { auctionHistogramWidth, auctionProfileHorizontalBounds } from "../src/modules/auction-profile/rendering/histogram.ts";
 import { PINE_CVD_PROFILE_KNOWN_ANOMALIES } from "../src/modules/auction-profile/engines/pineCompatibility.ts";
 import { appendTradesToAuctionProfile, calculateAuctionProfile } from "../src/modules/auction-profile/engines/nativeEngine.ts";
 import { InMemoryCanonicalCvdService } from "../src/modules/auction-profile/data/tradeSource.ts";
@@ -85,6 +86,33 @@ assert.ok(snapshot.keyLevels.poc !== null);
 assert.ok(snapshot.keyLevels.vah !== null);
 assert.ok(snapshot.keyLevels.val !== null);
 assert.ok(snapshot.profileVersion.startsWith("auction-"));
+
+const fullyVisibleProfile = auctionProfileHorizontalBounds(
+  { start: 100, end: 500 },
+  1000,
+  time => time * 2
+);
+assert.deepEqual(fullyVisibleProfile, { left: 200, right: 1000, width: 800, visible: true });
+const clippedLookbackProfile = auctionProfileHorizontalBounds(
+  { start: 100, end: 500 },
+  600,
+  time => time * 2 - 500
+);
+assert.deepEqual(clippedLookbackProfile, { left: 0, right: 500, width: 500, visible: true });
+const offscreenProfile = auctionProfileHorizontalBounds(
+  { start: 100, end: 500 },
+  600,
+  time => time * 2 + 700
+);
+assert.equal(offscreenProfile.visible, false);
+const strongestRow = { value: 100 } as Parameters<typeof auctionHistogramWidth>[0];
+const weakerRow = { value: 25 } as Parameters<typeof auctionHistogramWidth>[0];
+assert.equal(auctionHistogramWidth(strongestRow, 100, fullyVisibleProfile.width, 5), fullyVisibleProfile.width);
+assert.ok(
+  auctionHistogramWidth(weakerRow, 100, fullyVisibleProfile.width, 25)
+    < auctionHistogramWidth(weakerRow, 100, fullyVisibleProfile.width, 100),
+  "width control must taper weaker rows without moving the calculation anchor"
+);
 
 const gridA = createAuctionProfileGrid(bars, settings, input.metadata);
 const gridB = createAuctionProfileGrid(bars, settings, input.metadata);

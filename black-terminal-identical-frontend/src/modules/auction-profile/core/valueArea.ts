@@ -3,6 +3,8 @@ import type { AuctionProfileKeyLevels, AuctionProfileRow, AuctionProfileSettings
 function basis(row: AuctionProfileRow, settings: AuctionProfileSettings) {
   switch (settings.valueAreaBasis) {
     case "TOTAL_VOLUME": return row.totalQuantity;
+    case "BUY_VOLUME": return row.buyQuantity;
+    case "SELL_VOLUME": return row.sellQuantity;
     case "POSITIVE_SIDE": return Math.max(0, row.value);
     case "NEGATIVE_SIDE": return Math.abs(Math.min(0, row.value));
     case "TPO": return row.tpoCount;

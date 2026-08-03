@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { AUCTION_PROFILE_DEFAULT_SETTINGS, migrateAuctionProfileSettings } from "../src/modules/auction-profile/core/settings.ts";
 import { stableHash } from "../src/modules/auction-profile/core/canonical.ts";
 import { createAuctionProfileGrid } from "../src/modules/auction-profile/core/profileGrid.ts";
@@ -6,7 +7,9 @@ import { resolveAuctionScopeWindows } from "../src/modules/auction-profile/core/
 import { auctionHistogramWidth, auctionProfileHorizontalBounds, auctionProfileStartX } from "../src/modules/auction-profile/rendering/histogram.ts";
 import { auctionCellRenderStrides, downsampleAuctionCells } from "../src/modules/auction-profile/rendering/cells.ts";
 import { auctionCellTextVisible, formatAuctionCellMetric } from "../src/modules/auction-profile/rendering/labels.ts";
-import { auctionCellColor } from "../src/modules/auction-profile/rendering/AuctionProfileRenderer.ts";
+import { CVD_FOOTPRINT_RENDERER_KIND, auctionCellColor } from "../src/modules/auction-profile/rendering/footprint/CvdFootprintRenderer.ts";
+import { AUCTION_PROFILE_RENDERER_KIND, auctionProfileBarSpans, buildAuctionProfileRows, resolveAuctionProfilePlacement } from "../src/modules/auction-profile/core/profileGeometry.ts";
+import { resolveAuctionVisualizationLayers } from "../src/modules/auction-profile/rendering/visualization.ts";
 import { validateAuctionProfileInvariants } from "../src/modules/auction-profile/testing/nativeValidation.ts";
 import { PINE_CVD_PROFILE_KNOWN_ANOMALIES } from "../src/modules/auction-profile/engines/pineCompatibility.ts";
 import { appendTradesToAuctionProfile, calculateAuctionProfile, calculateAuctionProfiles } from "../src/modules/auction-profile/engines/nativeEngine.ts";
@@ -71,6 +74,19 @@ const input = {
   now: 1_720_100_000_000
 };
 
+const visualManifest = JSON.parse(readFileSync(new URL("../tests/golden/auction-profile/manifest.json", import.meta.url), "utf8")) as {
+  captureStatus: string;
+  fixtures: Array<{ id: string; visualizationType: string; expected: string[] }>;
+};
+assert.equal(visualManifest.captureStatus, "pending-browser-runtime");
+assert.deepEqual(visualManifest.fixtures.map(fixture => fixture.id), ["session-cvd-profile", "macro-cvd-composite", "pine-segmented-profile", "cvd-footprint"]);
+assert.ok(visualManifest.fixtures.every(fixture => fixture.expected.length >= 5));
+assert.equal(visualManifest.fixtures.filter(fixture => fixture.visualizationType === "CVD_FOOTPRINT").length, 1);
+assert.deepEqual(resolveAuctionVisualizationLayers(true, false, "AUCTION_PROFILE"), { dataRequired: true, profile: true, footprint: false });
+assert.deepEqual(resolveAuctionVisualizationLayers(false, true, "AUCTION_PROFILE"), { dataRequired: true, profile: false, footprint: true });
+assert.deepEqual(resolveAuctionVisualizationLayers(true, false, "CVD_FOOTPRINT"), { dataRequired: true, profile: false, footprint: true });
+assert.deepEqual(resolveAuctionVisualizationLayers(true, false, "COMBINED"), { dataRequired: true, profile: true, footprint: true });
+
 const snapshot = calculateAuctionProfile(input);
 assert.ok(snapshot, "native profile must be produced");
 assert.equal(snapshot.quality.quality, "EXACT");
@@ -90,9 +106,15 @@ assert.ok(snapshot.keyLevels.poc !== null);
 assert.ok(snapshot.keyLevels.vah !== null);
 assert.ok(snapshot.keyLevels.val !== null);
 assert.ok(snapshot.profileVersion.startsWith("auction-"));
-assert.equal(settings.rendering.presentationMode, "DYNAMIC_KEY_LEVELS", "dynamic blocks plus restrained key levels must be the default presentation");
-assert.equal(settings.nodeDetection.showLvns, false, "dense node overlays must remain opt-in");
-assert.equal(settings.nodeDetection.showHvns, false, "dense node overlays must remain opt-in");
+assert.equal(settings.rendering.visualizationType, "AUCTION_PROFILE", "range × price Auction Profile must be the default visualization");
+assert.equal(settings.rendering.profileGeometry, "BIDIRECTIONAL_DELTA");
+assert.equal(settings.rendering.profilePlacement, "RIGHT");
+assert.equal(settings.rendering.profileWidthMetric, "NET_CVD");
+assert.equal(settings.rendering.timeSegmentsMode, "OFF", "macro profiles must begin as one unified profile");
+assert.equal(settings.nodeDetection.showLvns, true, "restrained LVN context is enabled by default");
+assert.equal(settings.nodeDetection.showHvns, true, "restrained HVN context is enabled by default");
+assert.equal(settings.rendering.maximumVisibleLvns, 3);
+assert.equal(settings.rendering.maximumVisibleHvns, 3);
 assert.equal(settings.rendering.showNodeLabels, false);
 assert.equal(settings.rendering.showMidpoint, false);
 assert.equal(settings.rendering.showStructuralSr, false);
@@ -229,6 +251,34 @@ assert.equal(exactCell(0, 63000)?.rawValue, frozenValue, "incremental updates mu
 assert.equal(exactCell(1, 63100)?.rawValue, developingBefore - 2, "incremental trades must update only their active cell");
 assert.deepEqual(validateAuctionProfileInvariants(exactSnapshot), []);
 
+assert.equal(AUCTION_PROFILE_RENDERER_KIND, "RANGE_PRICE_PROFILE");
+assert.equal(CVD_FOOTPRINT_RENDERER_KIND, "TIME_PRICE_FOOTPRINT");
+assert.notEqual(AUCTION_PROFILE_RENDERER_KIND, CVD_FOOTPRINT_RENDERER_KIND, "profile and footprint must remain separate renderer contracts");
+const profileRows = buildAuctionProfileRows(exactSnapshot, exactSettings);
+assert.equal(profileRows.length, exactSnapshot.rows.length, "profile renderer projects exactly one aggregate bar per price row");
+const aggregate63000 = profileRows.find(row => row.priceLow <= 63000 && row.priceHigh > 63000);
+const aggregate63050 = profileRows.find(row => row.priceLow <= 63050 && row.priceHigh > 63050);
+const aggregate63100 = profileRows.find(row => row.priceLow <= 63100 && row.priceHigh > 63100);
+assert.equal(aggregate63000?.netCvd, 3);
+assert.equal(aggregate63050?.netCvd, -4);
+assert.equal(aggregate63100?.netCvd, 4, "profile row must dynamically include the developing-cell update");
+assert.ok(profileRows.every(row => row.timeSegments.length === 0), "unified Auction Profile must not leak footprint cells into its shape");
+const segmentedRows = buildAuctionProfileRows(exactSnapshot, migrateAuctionProfileSettings({
+  ...exactSettings,
+  rendering: { ...exactSettings.rendering, timeSegmentsMode: "STACKED" }
+}));
+assert.ok(segmentedRows.some(row => row.timeSegments.length > 0), "optional segmented profile mode must retain time contribution detail inside price rows");
+const rightBounds = resolveAuctionProfilePlacement("RIGHT", 1000, 100, 900, 32);
+assert.deepEqual(rightBounds, { left: 680, right: 1000, center: 840, width: 320 });
+const negativeSpan = auctionProfileBarSpans(aggregate63050!, "BIDIRECTIONAL_DELTA", rightBounds)[0]!;
+const positiveSpan = auctionProfileBarSpans(aggregate63000!, "BIDIRECTIONAL_DELTA", rightBounds)[0]!;
+assert.equal(negativeSpan.right, rightBounds.center, "negative delta must grow left from the profile centerline");
+assert.ok(negativeSpan.left < rightBounds.center);
+assert.equal(positiveSpan.left, rightBounds.center, "positive delta must grow right from the profile centerline");
+assert.ok(positiveSpan.right > rightBounds.center);
+const splitSpans = auctionProfileBarSpans(aggregate63100!, "POSITIVE_NEGATIVE_SPLIT", rightBounds);
+assert.equal(splitSpans.length, 2, "split geometry must expose sell and buy sides independently");
+
 const projected = downsampleAuctionCells(exactSnapshot.matrix.cells, 2, 2);
 assert.equal(
   projected.reduce((sum, cell) => sum + cell.rawValue, 0),
@@ -346,6 +396,44 @@ const sixHourPeriodic = resolveAuctionScopeWindows(scopeBars, migrateAuctionProf
   lookbackBars: 48
 }));
 assert.equal(sixHourPeriodic.length, 8);
+
+const fixedSettings = migrateAuctionProfileSettings({
+  ...settings,
+  scopeMode: "FIXED_START",
+  fixedStartTime: scopeBars[12]!.time,
+  lookbackBars: 48,
+  dataSource: "CHART_BARS"
+});
+const fixedWindow = resolveAuctionScopeWindows(scopeBars, fixedSettings);
+assert.equal(fixedWindow.length, 1);
+assert.equal(fixedWindow[0]!.startBarIndex, 12);
+assert.equal(fixedWindow[0]!.endBarIndex, 47, "Fixed Start must remain anchored and develop through the latest bar");
+const fixedSnapshot = calculateAuctionProfile({ ...input, bars: scopeBars, trades: [], settings: fixedSettings, visibleRange: { start: scopeBars[30]!.time, end: scopeBars[35]!.time } });
+assert.ok(fixedSnapshot);
+assert.equal(fixedSnapshot.range.loadedBars, 36);
+assert.equal(fixedSnapshot.diagnostics.viewportAffectsCalculation, false);
+
+const rollingSettings = migrateAuctionProfileSettings({ ...settings, scopeMode: "ROLLING", lookbackBars: 24, dataSource: "CHART_BARS" });
+const rollingWindow = resolveAuctionScopeWindows(scopeBars, rollingSettings);
+assert.equal(rollingWindow[0]!.startBarIndex, 24);
+assert.equal(rollingWindow[0]!.endBarIndex, 47);
+
+const macroSettings = migrateAuctionProfileSettings({ ...settings, scopeMode: "MACRO_COMPOSITE", lookbackBars: 48, dataSource: "CHART_BARS" });
+const macroA = calculateAuctionProfile({ ...input, bars: scopeBars, trades: [], settings: macroSettings, visibleRange: { start: scopeBars[0]!.time, end: scopeBars[10]!.time } });
+const macroB = calculateAuctionProfile({ ...input, bars: scopeBars, trades: [], settings: macroSettings, visibleRange: { start: scopeBars[30]!.time, end: scopeBars[47]!.time } });
+assert.ok(macroA && macroB);
+assert.equal(macroA.profileVersion, macroB.profileVersion, "Macro profile hash must be camera-independent");
+assert.deepEqual(macroA.rows, macroB.rows, "zoom and pan ranges must not alter Macro aggregate rows");
+assert.equal(macroA.diagnostics.viewportAffectsCalculation, false);
+
+const composite = calculateAuctionProfiles({
+  ...input,
+  bars: scopeBars,
+  trades: [],
+  settings: migrateAuctionProfileSettings({ ...settings, scopeMode: "COMPOSITE", lookbackBars: 48, dataSource: "CHART_BARS" })
+});
+assert.equal(composite.length, 1, "Composite mode must emit one combined range profile");
+assert.equal(composite[0]!.range.loadedBars, 48);
 
 const independentModes = [
   ["MACRO_COMPOSITE", "DYNAMIC_BLOCKS"],

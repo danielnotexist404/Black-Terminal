@@ -1348,3 +1348,12 @@ Remaining:
 - Retained completed session matrices, finalized their cells, and used the same renderer for Session, Composite, and Macro scopes.
 - Added deterministic block cadence, render budgets, semantic signed downsampling, node/detail budgets, extension choices, and five presets.
 - Added native `+3 / -4 / +6` certification, matrix conservation/lifecycle checks, palette/text tests, and capacity benchmarks.
+
+## 2026-08-03 — Auction Profile Shape Restoration
+
+- Correctly reclassified the deployed time × price matrix as CVD Footprint and preserved it behind a dedicated renderer.
+- Removed the synthetic sinusoidal Volume Footprint candle painter; the candle-type toggle now loads canonical Auction worker data and renders the professional CVD footprint with subdued OHLC reference candles.
+- Restored Auction Profile as the default range × price distribution with one horizontal aggregate per price row.
+- Added seven profile geometries, five placements, eight width metrics, unified/segmented time modes, row-label policies, square-root scaling, and Profile/Footprint/Combined selection.
+- Added CVD Session, CVD Macro, CVD Deep Macro, Original Pine Profile, and CVD Footprint presets.
+- Added renderer-separation, aggregate-shape, signed-direction, segmentation, live-update, and 20,000-bar performance certification plus the corrective documentation set.

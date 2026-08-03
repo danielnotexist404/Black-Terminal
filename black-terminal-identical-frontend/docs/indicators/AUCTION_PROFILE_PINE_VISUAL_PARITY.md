@@ -1,5 +1,7 @@
 # Auction Profile Pine Visual Parity
 
+> **Shape correction:** the chart-wide grid described in the historical section below is now classified and preserved as CVD Footprint. Original Pine Profile compatibility uses horizontally stacked contributions *inside aggregate price rows*; see `PINE_SEGMENTED_PROFILE_RENDERER.md`.
+
 ## Restored visual semantics
 
 The compatibility target is the supplied grid-like screenshot: discrete columns through time, price-row rectangles, per-cell numbers, red negative cells, gray/white positive cells, a developing final column, and restrained POC/VA/IB lines.

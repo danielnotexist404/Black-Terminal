@@ -243,11 +243,13 @@ function percentile(sorted: readonly number[], percentileValue: number) {
   return sorted[lower]! * (1 - fraction) + sorted[upper]! * fraction;
 }
 
-function normalizeValue(value: number, lower: number, upper: number, logarithmic = false) {
+function normalizeValue(value: number, lower: number, upper: number, mode: "LINEAR" | "LOGARITHMIC" | "SQUARE_ROOT" = "LINEAR") {
   const absolute = Math.abs(value);
-  const scaled = logarithmic
+  const scaled = mode === "LOGARITHMIC"
     ? Math.log1p(absolute) / Math.max(Math.log1p(upper), Number.EPSILON)
-    : (absolute - lower) / Math.max(upper - lower, Number.EPSILON);
+    : mode === "SQUARE_ROOT"
+      ? Math.sqrt(absolute) / Math.max(Math.sqrt(upper), Number.EPSILON)
+      : (absolute - lower) / Math.max(upper - lower, Number.EPSILON);
   return Math.sign(value) * Math.max(0, Math.min(1, scaled));
 }
 
@@ -271,7 +273,7 @@ export function normalizeAuctionMatrixCells(cells: AuctionBlockCell[], settings:
       cell.normalizedValue = normalizeValue(cell.rawValue, 0, Math.max(...nearby, Number.EPSILON));
     });
   } else {
-    cells.forEach(cell => { cell.normalizedValue = normalizeValue(cell.rawValue, globalLower, globalUpper, mode === "LOGARITHMIC"); });
+    cells.forEach(cell => { cell.normalizedValue = normalizeValue(cell.rawValue, globalLower, globalUpper, mode === "LOGARITHMIC" ? "LOGARITHMIC" : mode === "SQUARE_ROOT" ? "SQUARE_ROOT" : "LINEAR"); });
   }
   cells.forEach(cell => { cell.sign = Math.sign(cell.rawValue) as -1 | 0 | 1; });
   return { lower: globalLower, upper: Math.max(globalUpper, Number.EPSILON) };
@@ -421,7 +423,7 @@ export function appendTradesToAuctionMatrix(
       cell.rawValue = cell.buyValue - cell.sellValue - (previous ? previous.buyValue - previous.sellValue : 0);
     }
     cell.sign = Math.sign(cell.rawValue) as -1 | 0 | 1;
-    cell.normalizedValue = normalizeValue(cell.rawValue, matrix.normalizationLower, matrix.normalizationUpper, matrix.normalizationMode === "LOGARITHMIC");
+    cell.normalizedValue = normalizeValue(cell.rawValue, matrix.normalizationLower, matrix.normalizationUpper, matrix.normalizationMode === "LOGARITHMIC" ? "LOGARITHMIC" : matrix.normalizationMode === "SQUARE_ROOT" ? "SQUARE_ROOT" : "LINEAR");
     cell.dataQuality = "EXACT_TRADES";
     updates += 1;
   }

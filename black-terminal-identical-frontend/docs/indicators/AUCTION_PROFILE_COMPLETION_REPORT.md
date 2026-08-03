@@ -109,3 +109,24 @@ The supplied Pine and Black Terminal images remain the comparison evidence. Auto
 - touch/mitigation/invalidation extension modes currently extend right; event-terminated zone state is future work;
 - TPO display downsampling sums finalized bracket counts because bracket identities are not serialized;
 - color freeze is guaranteed for incremental updates; a deliberate full source rebuild may recompute robust profile bounds.
+
+## BC-MEAP 2.1 shape restoration addendum
+
+This section supersedes the 2.0 addendum's classification of the dynamic matrix as the default Auction Profile.
+
+### Corrected architecture
+
+- Auction Profile is now the default **range × price** renderer and consumes aggregate price rows.
+- The professional **time × price** matrix is preserved as `CvdFootprintRenderer` and replaces the old synthetic Volume Footprint candle mode.
+- Auction Profile, CVD Footprint, and Combined are explicit visualization choices.
+- Bidirectional Delta is the default geometry; six additional profile geometries, five placements, eight width metrics, row-label policies, and optional internal time segmentation are available.
+- Session, Fixed Start, Rolling, Visible, Composite, Periodic, Macro, and Manual scopes retain their calculation semantics.
+- POC/VA/IB and restrained LVN/HVN context are bounded to each profile instead of extending chart-wide.
+
+### Certification result
+
+The exact `+3 / -4 / +6` matrix fixture remains certified. After a `-2` developing update, the aggregate profile certifies `+3 / -4 / +4` at the corresponding price rows. Tests prove one aggregate bar per row, negative-left/positive-right geometry, split geometry, opt-in internal segmentation, separate renderer contracts, conservation, finalized-history stability, worker incrementality, and data-quality honesty.
+
+The latest local benchmark covers 100–20,000 bars. The 20,000-bar/2,029-row case completed a cold worker build in 2,212.89 ms, a warm build in 2,274.58 ms, and the restored profile projection in 2.63 ms. These remain machine-local preparation timings, not a browser FPS claim.
+
+No database schema, broker execution, OMS/EMS, Black Cloud deployment, HDLX, Market Maker Heatmap, AIF, DOM Pro, or IMM calculation was changed by this corrective chapter. No Supabase migration is required.

@@ -4,6 +4,7 @@ import { migrateAuctionProfileSettings } from "../src/modules/auction-profile/co
 import { appendTradesToAuctionProfile, calculateAuctionProfile } from "../src/modules/auction-profile/engines/nativeEngine.ts";
 import { auctionCellRenderStrides, downsampleAuctionCells } from "../src/modules/auction-profile/rendering/cells.ts";
 import { auctionCellTextVisible, formatAuctionCellMetric } from "../src/modules/auction-profile/rendering/labels.ts";
+import { buildAuctionProfileRows } from "../src/modules/auction-profile/core/profileGeometry.ts";
 import { auctionFixture } from "../src/modules/auction-profile/testing/fixtures.ts";
 import { validateAuctionProfileInvariants } from "../src/modules/auction-profile/testing/nativeValidation.ts";
 
@@ -59,6 +60,10 @@ for (const [barCount, targetRows] of cases) {
   const strides = auctionCellRenderStrides(first.matrix.blocks.length, first.matrix.rows.length, 500, 300);
   const projectedCells = downsampleAuctionCells(first.matrix.cells, strides.columnStride, strides.rowStride);
   const renderProjectionMs = performance.now() - projectionStart;
+  const profileProjectionStart = performance.now();
+  const projectedProfileRows = buildAuctionProfileRows(first, settings);
+  const profileProjectionMs = performance.now() - profileProjectionStart;
+  assert.equal(projectedProfileRows.length, first.rows.length);
   const textStart = performance.now();
   let visibleLabels = 0;
   for (const cell of projectedCells) {
@@ -92,6 +97,7 @@ for (const [barCount, targetRows] of cases) {
     incrementalMs: Number(incrementalMs.toFixed(2)),
     serializationMs: Number(serializationMs.toFixed(2)),
     renderProjectionMs: Number(renderProjectionMs.toFixed(2)),
+    profileProjectionMs: Number(profileProjectionMs.toFixed(2)),
     textLayoutMs: Number(textLayoutMs.toFixed(2)),
     visibleLabels,
     estimatedBytes: first.diagnostics.memoryEstimateBytes,

@@ -24,6 +24,8 @@ import {
 import { KioseffPixiRenderer } from "../modules/kioseff-stop-loss-clustering/rendering/KioseffPixiRenderer";
 import { kioseffPriceDomain } from "../modules/kioseff-stop-loss-clustering/rendering/renderModel";
 import { AuctionProfileRenderer } from "../modules/auction-profile/rendering/AuctionProfileRenderer";
+import { CvdFootprintRenderer } from "../modules/auction-profile/rendering/footprint/CvdFootprintRenderer";
+import { resolveAuctionVisualizationLayers } from "../modules/auction-profile/rendering/visualization";
 import { AUCTION_PROFILE_DEFAULT_SETTINGS, migrateAuctionProfileSettings } from "../modules/auction-profile/core/settings";
 import type { AuctionProfileSettings, AuctionProfileSnapshot } from "../modules/auction-profile/core/types";
 
@@ -144,6 +146,7 @@ export class BlackChartEngine {
   private kioseffSnapshot: KioseffSnapshot | null = null;
   private kioseffSettings: KioseffSettingsV1 = structuredClone(KIOSEFF_DEFAULT_SETTINGS);
   private auctionProfileRenderer = new AuctionProfileRenderer();
+  private cvdFootprintRenderer = new CvdFootprintRenderer();
   private auctionProfileSnapshots: AuctionProfileSnapshot[] = [];
   private auctionProfileSettings: AuctionProfileSettings = structuredClone(AUCTION_PROFILE_DEFAULT_SETTINGS);
   private volumeProfileModel = new VolumeProfileModel();
@@ -351,6 +354,7 @@ export class BlackChartEngine {
       this.kioseffRenderer.container,
       this.volumeLayer,
       this.candleLayer,
+      this.cvdFootprintRenderer.container,
       this.auctionProfileRenderer.container,
       this.indicatorLayer,
       this.drawingLayer,
@@ -400,7 +404,9 @@ export class BlackChartEngine {
         this.queueDraw();
       } else {
         this.drawCrosshair();
-        if (this.visibleIndicators.auctionProfile) this.auctionProfileRenderer.drawHover(e.global.x, e.global.y);
+        const visualization = this.auctionProfileSettings.rendering.visualizationType;
+        if (this.visibleIndicators.auctionProfile && visualization !== "CVD_FOOTPRINT") this.auctionProfileRenderer.drawHover(e.global.x, e.global.y);
+        if (this.chartType === "volumeFootprint" || (this.visibleIndicators.auctionProfile && visualization !== "AUCTION_PROFILE")) this.cvdFootprintRenderer.drawHover(e.global.x, e.global.y);
       }
     });
 
@@ -453,6 +459,7 @@ export class BlackChartEngine {
     this.app.stage.on("pointerleave", () => {
       this.pointer.active = false;
       this.auctionProfileRenderer.clearHover();
+      this.cvdFootprintRenderer.clearHover();
       this.setPriceScaleHover(false);
       this.finishBrushDrawing();
       this.stopDragging();
@@ -857,6 +864,7 @@ export class BlackChartEngine {
     this.clearHeatmapTexts();
     this.kioseffRenderer.dispose();
     this.auctionProfileRenderer.dispose();
+    this.cvdFootprintRenderer.dispose();
     this.app.destroy(true, { children: true, texture: true });
     blackCoreResourceTracker.clearGauge("pixi-container", this.resourceOwner);
     blackCoreResourceTracker.clearGauge("pixi-graphics", this.resourceOwner);
@@ -1542,20 +1550,32 @@ export class BlackChartEngine {
       }
     );
     const kioseffMetrics = this.kioseffRenderer.metrics();
-    this.auctionProfileRenderer.draw(
-      this.visibleIndicators.auctionProfile ? this.auctionProfileSnapshots : null,
+    const layers = resolveAuctionVisualizationLayers(
+      this.visibleIndicators.auctionProfile,
+      this.chartType === "volumeFootprint",
+      this.auctionProfileSettings.rendering.visualizationType
+    );
+    const auctionTransform = {
+      width: plotWidth,
+      height: plotHeight,
+      top: this.view.topPadding,
+      bottom: plotHeight,
+      xForTime: (time: number) => this.xForTimestamp(time),
+      xForLookbackBars: (bars: number) => this.xForIndex(Math.max(0, this.getDisplayCandles().length - Math.max(1, Math.round(bars)))),
+      yForPrice: (price: number) => this.yForPrice(price)
+    };
+    this.cvdFootprintRenderer.draw(
+      layers.footprint ? this.auctionProfileSnapshots : null,
       this.auctionProfileSettings,
-      {
-        width: plotWidth,
-        height: plotHeight,
-        top: this.view.topPadding,
-        bottom: plotHeight,
-        xForTime: (time) => this.xForTimestamp(time),
-        xForLookbackBars: (bars) => this.xForIndex(Math.max(0, this.getDisplayCandles().length - Math.max(1, Math.round(bars)))),
-        yForPrice: (price) => this.yForPrice(price)
-      }
+      auctionTransform
+    );
+    this.auctionProfileRenderer.draw(
+      layers.profile ? this.auctionProfileSnapshots : null,
+      this.auctionProfileSettings,
+      auctionTransform
     );
     const auctionProfileMetrics = this.auctionProfileRenderer.metrics();
+    const footprintMetrics = this.cvdFootprintRenderer.metrics();
 
     blackCoreResourceTracker.setGauge(
       "pixi-text",
@@ -1566,7 +1586,7 @@ export class BlackChartEngine {
         this.hudTexts.length +
         this.profileTexts.length +
         this.heatmapTexts.length +
-        kioseffMetrics.textObjects + auctionProfileMetrics.labels
+        kioseffMetrics.textObjects + auctionProfileMetrics.labels + footprintMetrics.labels
     );
 
     if (!this.visibleIndicators.liquidationHeatmap) return;
@@ -3211,9 +3231,6 @@ export class BlackChartEngine {
     g.clear();
     const data = this.getDisplayCandles();
     if (data.length === 0) return;
-    const visible = data.slice(this.view.firstIndex, this.view.lastIndex + 1);
-    const maxVol = Math.max(...visible.map(c => c.volume), 1);
-
     if (this.chartType === "line") {
       this.drawLineSeries(g, data);
       return;
@@ -3228,7 +3245,7 @@ export class BlackChartEngine {
       } else if (this.chartType === "hollow") {
         this.drawHollowCandle(g, c, data[i - 1], x);
       } else if (this.chartType === "volumeFootprint") {
-        this.drawFootprintCandle(g, c, x, maxVol);
+        this.drawClassicCandle(g, c, x, { color: c.close >= c.open ? theme.silver : theme.red, alpha: 0.28 });
       } else {
         this.drawClassicCandle(g, c, x, this.volumeProfileCandleOverride(c, i, data));
       }
@@ -3304,44 +3321,6 @@ export class BlackChartEngine {
     g.rect(x - bodyWidth / 2, bodyTop, bodyWidth, bodyHeight)
       .fill({ color, alpha: bullish ? 0.78 : 0.92 })
       .stroke({ width: 0.8, color: bullish ? theme.text : theme.redBright, alpha: 0.42 });
-  }
-
-  private drawFootprintCandle(g: Graphics, c: Candle, x: number, maxVol: number) {
-    if (this.view.candleWidth < 3.2) {
-      this.drawClassicCandle(g, c, x);
-      return;
-    }
-
-    const openY = this.yForPrice(c.open);
-    const closeY = this.yForPrice(c.close);
-    const highY = this.yForPrice(c.high);
-    const lowY = this.yForPrice(c.low);
-    const bullish = c.close >= c.open;
-    const bodyTop = Math.min(openY, closeY);
-    const bodyHeight = Math.max(2, Math.abs(openY - closeY));
-    const bodyWidth = Math.max(7, Math.min(16, this.view.candleWidth * 2.2));
-    const span = Math.max(8, Math.abs(lowY - highY));
-    const rowCount = Math.max(3, Math.min(8, Math.floor(span / 8)));
-    const rowHeight = span / rowCount;
-    const volumeAlpha = Math.max(0.22, Math.min(0.92, Math.sqrt(c.volume / Math.max(1, maxVol))));
-
-    g.moveTo(x, highY).lineTo(x, lowY).stroke({ width: 1, color: bullish ? theme.silverBright : theme.redBright, alpha: 0.78 });
-    g.rect(x - bodyWidth / 2, bodyTop, bodyWidth, bodyHeight)
-      .fill({ color: bullish ? 0x111417 : 0x19080b, alpha: 0.34 })
-      .stroke({ width: 0.8, color: bullish ? theme.silver : theme.red, alpha: 0.62 });
-
-    for (let row = 0; row < rowCount; row++) {
-      const y = highY + row * rowHeight + rowHeight * 0.2;
-      const position = rowCount <= 1 ? 0.5 : row / (rowCount - 1);
-      const wave = 0.58 + Math.abs(Math.sin(c.time * 0.00019 + row * 1.53)) * 0.42;
-      const buyBias = bullish ? 0.55 + (1 - position) * 0.18 : 0.33 + (1 - position) * 0.14;
-      const sellWidth = bodyWidth * (1 - buyBias) * wave;
-      const buyWidth = bodyWidth * buyBias * wave;
-      const h = Math.max(1, rowHeight * 0.48);
-
-      g.rect(x - sellWidth, y, sellWidth, h).fill({ color: theme.redBright, alpha: 0.18 + volumeAlpha * 0.36 });
-      g.rect(x, y, buyWidth, h).fill({ color: theme.green, alpha: 0.14 + volumeAlpha * 0.32 });
-    }
   }
 
   private drawLineSeries(g: Graphics, data: Candle[]) {

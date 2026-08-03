@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "captureStatus": "pending-browser-runtime",
+  "truthBoundary": "Structural render contracts are certified; raster screenshots require the in-app browser runtime and are not fabricated.",
+  "fixtures": [
+    {
+      "id": "session-cvd-profile",
+      "visualizationType": "AUCTION_PROFILE",
+      "scope": "SESSION",
+      "geometry": "BIDIRECTIONAL_DELTA",
+      "expected": ["one-profile-per-session", "horizontal-price-rows", "signed-centerline", "row-labels", "poc-vah-val", "maximum-three-lvn-hvn"]
+    },
+    {
+      "id": "macro-cvd-composite",
+      "visualizationType": "AUCTION_PROFILE",
+      "scope": "MACRO_COMPOSITE",
+      "lookbackBars": 5000,
+      "geometry": "BIDIRECTIONAL_DELTA",
+      "expected": ["one-unified-profile", "right-placement", "thirty-percent-width", "viewport-independent", "minimal-nodes"]
+    },
+    {
+      "id": "pine-segmented-profile",
+      "visualizationType": "AUCTION_PROFILE",
+      "scope": "SESSION",
+      "geometry": "BIDIRECTIONAL_DELTA",
+      "timeSegmentsMode": "STACKED",
+      "expected": ["horizontal-segments-inside-rows", "numeric-segments", "red-gray-white", "profile-boundary", "poc-vah-val-ib"]
+    },
+    {
+      "id": "cvd-footprint",
+      "visualizationType": "CVD_FOOTPRINT",
+      "scope": "ROLLING",
+      "expected": ["time-price-cell-matrix", "candle-aligned-columns", "per-cell-labels", "subdued-ohlc-reference", "no-aggregate-profile-bars"]
+    }
+  ]
+}

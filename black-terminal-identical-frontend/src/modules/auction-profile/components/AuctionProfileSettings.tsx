@@ -39,42 +39,62 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
     ...current,
     offChartMetrics: checked ? [...new Set([...current.offChartMetrics, metric])] : current.offChartMetrics.filter(item => item !== metric)
   }));
-  const applyPreset = (preset: "PINE" | "SESSION" | "MACRO" | "STRUCTURE" | "TPO") => onChange(current => {
+  const applyPreset = (preset: "PINE" | "SESSION" | "MACRO" | "DEEP_MACRO" | "FOOTPRINT") => onChange(current => {
     const next = structuredClone(current);
+    next.rendering.profileWidthAuto = false;
     if (preset === "PINE") {
       next.implementationMode = "PINE_COMPATIBILITY";
       next.scopeMode = "SESSION";
       next.calculationEngine = "CVD_PINE_COMPATIBLE";
       next.blockResolution = "CHART_TIMEFRAME";
-      next.rendering.presentationMode = "DYNAMIC_BLOCKS";
-      next.rendering.cellTextMode = "ALWAYS";
+      next.rendering.visualizationType = "AUCTION_PROFILE";
+      next.rendering.profileGeometry = "BIDIRECTIONAL_DELTA";
+      next.rendering.profilePlacement = "RIGHT";
+      next.rendering.profileWidthMetric = "NET_CVD";
+      next.rendering.timeSegmentsMode = "STACKED";
+      next.rendering.rowLabelMode = "ALWAYS";
     } else if (preset === "SESSION") {
       next.implementationMode = "BLACK_CORE_NATIVE";
       next.scopeMode = "SESSION";
       next.calculationEngine = "CVD_REAL_TRADES";
       next.cvdMetric = "NET_CVD";
-      next.rendering.presentationMode = "DYNAMIC_KEY_LEVELS";
+      next.rendering.visualizationType = "AUCTION_PROFILE";
+      next.rendering.profileGeometry = "BIDIRECTIONAL_DELTA";
+      next.rendering.profilePlacement = "RIGHT";
+      next.rendering.timeSegmentsMode = "OFF";
     } else if (preset === "MACRO") {
       next.implementationMode = "BLACK_CORE_NATIVE";
       next.scopeMode = "MACRO_COMPOSITE";
       next.lookbackBars = 5000;
       next.blockResolution = "ADAPTIVE";
-      next.rendering.presentationMode = "DYNAMIC_KEY_LEVELS";
+      next.rendering.visualizationType = "AUCTION_PROFILE";
+      next.rendering.profileGeometry = "BIDIRECTIONAL_DELTA";
+      next.rendering.profilePlacement = "RIGHT";
+      next.rendering.widthPercent = 30;
+      next.rendering.timeSegmentsMode = "OFF";
       next.nodeDetection.showLvns = true;
       next.nodeDetection.showHvns = true;
       next.rendering.structuralDetail = "MINIMAL";
-    } else if (preset === "STRUCTURE") {
+    } else if (preset === "DEEP_MACRO") {
       next.implementationMode = "BLACK_CORE_NATIVE";
       next.scopeMode = "MACRO_COMPOSITE";
       next.lookbackBars = 20000;
-      next.rendering.presentationMode = "MACRO_STRUCTURE";
+      next.rendering.visualizationType = "AUCTION_PROFILE";
+      next.rendering.profileGeometry = "BIDIRECTIONAL_DELTA";
+      next.rendering.profilePlacement = "RIGHT";
+      next.rendering.widthPercent = 36;
+      next.rendering.timeSegmentsMode = "OFF";
       next.nodeDetection.showLvns = true;
       next.nodeDetection.showHvns = true;
       next.rendering.structuralDetail = "STANDARD";
     } else {
-      next.scopeMode = "SESSION";
-      next.calculationEngine = "TPO";
-      next.rendering.presentationMode = "DYNAMIC_KEY_LEVELS";
+      next.implementationMode = "BLACK_CORE_NATIVE";
+      next.scopeMode = "ROLLING";
+      next.calculationEngine = "CVD_REAL_TRADES";
+      next.cvdMetric = "NET_CVD";
+      next.rendering.visualizationType = "CVD_FOOTPRINT";
+      next.rendering.cellTextMode = "AUTO";
+      next.rendering.cellBorder = "SUBTLE";
     }
     return next;
   });
@@ -87,11 +107,14 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
       </div>
 
       {tab === "engine" && <div className="indicator-settings-section">
+        <b>Visualization</b>
+        <label>Renderer<select value={settings.rendering.visualizationType} onChange={event => patchRendering({ visualizationType: event.target.value as AuctionProfileSettings["rendering"]["visualizationType"] })}><option value="AUCTION_PROFILE">Auction Profile</option><option value="CVD_FOOTPRINT">CVD Footprint</option><option value="COMBINED">Combined</option></select></label>
+        <small>Profile aggregates the selected range by price. Footprint preserves the time × price cell matrix.</small>
         <b>Presets</b>
         <div className="auction-profile-presets">
           <button type="button" onClick={() => applyPreset("PINE")}>Original Pine</button><button type="button" onClick={() => applyPreset("SESSION")}>CVD Session</button>
-          <button type="button" onClick={() => applyPreset("MACRO")}>CVD Macro Matrix</button><button type="button" onClick={() => applyPreset("STRUCTURE")}>Macro Structure</button>
-          <button type="button" onClick={() => applyPreset("TPO")}>TPO Session</button>
+          <button type="button" onClick={() => applyPreset("MACRO")}>CVD Macro</button><button type="button" onClick={() => applyPreset("DEEP_MACRO")}>CVD Deep Macro</button>
+          <button type="button" onClick={() => applyPreset("FOOTPRINT")}>CVD Footprint</button>
         </div>
         <b>Calculation Engine</b>
         <label>Implementation<select value={settings.implementationMode} onChange={event => patch({ implementationMode: event.target.value as AuctionProfileSettings["implementationMode"] })}><option value="BLACK_CORE_NATIVE">Black Core Native</option><option value="PINE_COMPATIBILITY">Pine Compatibility</option></select></label>
@@ -142,8 +165,8 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
         <label>Grid Anchor<select value={settings.gridAnchor} onChange={event => patch({ gridAnchor: event.target.value as AuctionProfileSettings["gridAnchor"] })}><option value="INSTRUMENT_TICK_ORIGIN">Instrument Tick Origin</option><option value="PROFILE_OPEN">Profile Open</option><option value="ROUND_NUMBER">Round Number</option><option value="FIXED_ORIGIN">Fixed Origin</option><option value="MANUAL_ORIGIN">Manual Origin</option></select></label>
         {settings.gridAnchor === "MANUAL_ORIGIN" && <label>Manual Grid Origin<input type="number" step="any" value={settings.manualGridOrigin ?? ""} onChange={event => patch({ manualGridOrigin: event.target.value === "" ? undefined : Number(event.target.value) })} /></label>}
         <label>Value Area ({Math.round(settings.valueAreaFraction * 100)}%)<input type="range" min={50} max={95} value={settings.valueAreaFraction * 100} onChange={event => patch({ valueAreaFraction: Number(event.target.value) / 100 })} /></label>
-        <label>Value Area Basis<select value={settings.valueAreaBasis} onChange={event => patch({ valueAreaBasis: event.target.value as AuctionProfileSettings["valueAreaBasis"] })}><option value="SELECTED_ENGINE">Selected Engine</option><option value="TOTAL_VOLUME">Total Volume</option><option value="ABSOLUTE_VALUE">Absolute Value</option><option value="POSITIVE_SIDE">Positive Side</option><option value="NEGATIVE_SIDE">Negative Side</option><option value="TPO">TPO</option><option value="HYBRID">Hybrid</option></select></label>
-        <label>POC Basis<select value={settings.pocBasis} onChange={event => patch({ pocBasis: event.target.value as AuctionProfileSettings["pocBasis"] })}><option value="MAXIMUM_SELECTED_METRIC">Maximum Selected Metric</option><option value="MAXIMUM_ABSOLUTE_METRIC">Maximum Absolute Metric</option><option value="MAXIMUM_POSITIVE_METRIC">Maximum Positive Metric</option><option value="MINIMUM_NEGATIVE_METRIC">Minimum Negative Metric</option><option value="MAXIMUM_TOTAL_VOLUME">Maximum Total Volume</option><option value="MAXIMUM_TPO">Maximum TPO</option><option value="HYBRID">Hybrid</option></select></label>
+        <label>Value Area Basis<select value={settings.valueAreaBasis} onChange={event => patch({ valueAreaBasis: event.target.value as AuctionProfileSettings["valueAreaBasis"] })}><option value="ABSOLUTE_VALUE">Absolute CVD / Value</option><option value="TOTAL_VOLUME">Total Volume</option><option value="BUY_VOLUME">Buy Volume</option><option value="SELL_VOLUME">Sell Volume</option><option value="SELECTED_ENGINE">Selected Metric</option><option value="POSITIVE_SIDE">Positive Side</option><option value="NEGATIVE_SIDE">Negative Side</option><option value="TPO">TPO</option><option value="HYBRID">Hybrid</option></select></label>
+        <label>POC Basis<select value={settings.pocBasis} onChange={event => patch({ pocBasis: event.target.value as AuctionProfileSettings["pocBasis"] })}><option value="MAXIMUM_ABSOLUTE_METRIC">Maximum Absolute CVD / Value</option><option value="MAXIMUM_POSITIVE_METRIC">Maximum Positive CVD / Value</option><option value="MINIMUM_NEGATIVE_METRIC">Maximum Negative Magnitude</option><option value="MAXIMUM_TOTAL_VOLUME">Maximum Total Volume</option><option value="MAXIMUM_SELECTED_METRIC">Maximum Selected Metric</option><option value="MAXIMUM_TPO">Maximum TPO</option><option value="HYBRID">Maximum Hybrid Score</option></select></label>
       </div>}
 
       {tab === "nodes" && <div className="indicator-settings-section">
@@ -168,16 +191,25 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
 
       {tab === "style" && <div className="indicator-settings-section">
         <b>Black Terminal Rendering</b>
-        <label>Display Mode<select value={settings.rendering.presentationMode} onChange={event => patchRendering({ presentationMode: event.target.value as AuctionProfileSettings["rendering"]["presentationMode"] })}><option value="DYNAMIC_BLOCKS">Dynamic Blocks</option><option value="AGGREGATE_HISTOGRAM">Aggregate Histogram</option><option value="STRUCTURAL_NODES">Structural Nodes</option><option value="DYNAMIC_KEY_LEVELS">Dynamic Blocks + Key Levels</option><option value="DYNAMIC_AGGREGATE">Dynamic Blocks + Aggregate</option><option value="MACRO_STRUCTURE">Macro Structure</option></select></label>
-        {["AGGREGATE_HISTOGRAM", "DYNAMIC_AGGREGATE", "MACRO_STRUCTURE"].includes(settings.rendering.presentationMode) && <label>Aggregate Style<select value={settings.rendering.displayStyle} onChange={event => patchRendering({ displayStyle: event.target.value as AuctionProfileSettings["rendering"]["displayStyle"] })}><option value="HORIZONTAL_HISTOGRAM">Horizontal Histogram</option><option value="PROFILE_COLUMNS">Profile Columns</option><option value="COMBINED">Combined</option></select></label>}
-        <label>Cell Text<select value={settings.rendering.cellTextMode} onChange={event => patchRendering({ cellTextMode: event.target.value as AuctionProfileSettings["rendering"]["cellTextMode"] })}><option value="AUTO">Auto</option><option value="ALWAYS">Always</option><option value="HOVER_ONLY">Hover Only</option><option value="STRONG_ONLY">Strong Cells Only</option><option value="OFF">Off</option></select></label>
-        <label>Text Size<select value={settings.rendering.cellTextSize} onChange={event => patchRendering({ cellTextSize: event.target.value as AuctionProfileSettings["rendering"]["cellTextSize"] })}><option value="AUTO">Adaptive GPU Text</option><option value="TINY">Tiny</option><option value="SMALL">Small</option><option value="NORMAL">Normal</option><option value="LARGE">Large</option><option value="HUGE">Huge</option></select></label>
-        <label>Cell Border<select value={settings.rendering.cellBorder} onChange={event => patchRendering({ cellBorder: event.target.value as AuctionProfileSettings["rendering"]["cellBorder"] })}><option value="NONE">None</option><option value="SUBTLE">Subtle</option><option value="STANDARD">Standard</option><option value="HIGH_CONTRAST">High Contrast</option></select></label>
+        {settings.rendering.visualizationType !== "CVD_FOOTPRINT" && <>
+          <label>Profile Geometry<select value={settings.rendering.profileGeometry} onChange={event => patchRendering({ profileGeometry: event.target.value as AuctionProfileSettings["rendering"]["profileGeometry"] })}><option value="BIDIRECTIONAL_DELTA">Bidirectional Delta</option><option value="ABSOLUTE_DIRECTIONAL">Absolute Width + Directional Color</option><option value="POSITIVE_NEGATIVE_SPLIT">Positive / Negative Split</option><option value="MIRRORED">Mirrored</option><option value="SINGLE_SIDED_RIGHT">Single-Sided Right</option><option value="SINGLE_SIDED_LEFT">Single-Sided Left</option><option value="CENTERED">Centered</option></select></label>
+          <label>Profile Placement<select value={settings.rendering.profilePlacement} onChange={event => patchRendering({ profilePlacement: event.target.value as AuctionProfileSettings["rendering"]["profilePlacement"] })}><option value="RIGHT">Right</option><option value="LEFT">Left</option><option value="OVERLAY">Overlay</option><option value="INSIDE_RANGE">Inside Range</option><option value="DETACHED_PANEL">Detached Profile Rail</option></select></label>
+          <label>Width Metric<select value={settings.rendering.profileWidthMetric} onChange={event => patchRendering({ profileWidthMetric: event.target.value as AuctionProfileSettings["rendering"]["profileWidthMetric"] })}><option value="NET_CVD">Net CVD</option><option value="ABSOLUTE_CVD">Absolute CVD</option><option value="BUY_VOLUME">Buy Volume</option><option value="SELL_VOLUME">Sell Volume</option><option value="TOTAL_VOLUME">Total Volume</option><option value="CVD_EFFICIENCY">CVD Efficiency</option><option value="IMBALANCE_RATIO">Imbalance Ratio</option><option value="SELECTED_ENGINE">Selected Engine</option></select></label>
+          <label>Row Labels<select value={settings.rendering.rowLabelMode} onChange={event => patchRendering({ rowLabelMode: event.target.value as AuctionProfileSettings["rendering"]["rowLabelMode"] })}><option value="ALWAYS">Always</option><option value="AUTO">Auto</option><option value="STRONG_ONLY">Strong Rows Only</option><option value="HOVER">Hover</option><option value="OFF">Off</option></select></label>
+          <label>Time Segments<select value={settings.rendering.timeSegmentsMode} onChange={event => patchRendering({ timeSegmentsMode: event.target.value as AuctionProfileSettings["rendering"]["timeSegmentsMode"] })}><option value="OFF">Off · Unified Profile</option><option value="STACKED">Stacked</option><option value="LATEST_N">Latest N</option><option value="SESSION_BLOCKS">Session Blocks</option><option value="CUSTOM">Custom</option></select></label>
+          {["LATEST_N", "CUSTOM"].includes(settings.rendering.timeSegmentsMode) && <label>Segment Count<input type="number" min={1} max={5000} value={settings.rendering.latestSegmentCount} onChange={event => patchRendering({ latestSegmentCount: Number(event.target.value) })} /></label>}
+        </>}
+        {settings.rendering.visualizationType !== "AUCTION_PROFILE" && <>
+          <label>Footprint Cell Text<select value={settings.rendering.cellTextMode} onChange={event => patchRendering({ cellTextMode: event.target.value as AuctionProfileSettings["rendering"]["cellTextMode"] })}><option value="AUTO">Auto</option><option value="ALWAYS">Always</option><option value="HOVER_ONLY">Hover Only</option><option value="STRONG_ONLY">Strong Cells Only</option><option value="OFF">Off</option></select></label>
+          <label>Footprint Text Size<select value={settings.rendering.cellTextSize} onChange={event => patchRendering({ cellTextSize: event.target.value as AuctionProfileSettings["rendering"]["cellTextSize"] })}><option value="AUTO">Adaptive GPU Text</option><option value="TINY">Tiny</option><option value="SMALL">Small</option><option value="NORMAL">Normal</option><option value="LARGE">Large</option><option value="HUGE">Huge</option></select></label>
+        </>}
+        <label>Row / Cell Border<select value={settings.rendering.cellBorder} onChange={event => patchRendering({ cellBorder: event.target.value as AuctionProfileSettings["rendering"]["cellBorder"] })}><option value="NONE">None</option><option value="SUBTLE">Subtle</option><option value="STANDARD">Standard</option><option value="HIGH_CONTRAST">High Contrast</option></select></label>
         <label>Palette<select value={settings.rendering.palette} onChange={event => patchRendering({ palette: event.target.value as AuctionProfileSettings["rendering"]["palette"] })}><option value="BLACK_TERMINAL_INSTITUTIONAL">Black Terminal Institutional</option><option value="ORIGINAL">Original</option><option value="THERMAL">Thermal</option><option value="BLOOD_RED">Blood Red</option><option value="CVD_DIRECTIONAL">CVD Directional</option><option value="MONOCHROME">Monochrome</option><option value="CUSTOM">Custom</option></select></label>
         <label>Width ({settings.rendering.widthPercent}%)<input type="range" min={5} max={100} value={settings.rendering.widthPercent} onChange={event => patchRendering({ widthPercent: Number(event.target.value) })} /></label>
+        <label>Automatic Profile Width<input type="checkbox" checked={settings.rendering.profileWidthAuto} onChange={event => patchRendering({ profileWidthAuto: event.target.checked })} /></label>
         <label>Opacity ({Math.round(settings.rendering.opacity * 100)}%)<input type="range" min={2} max={100} value={settings.rendering.opacity * 100} onChange={event => patchRendering({ opacity: Number(event.target.value) / 100 })} /></label>
         <label>Brightness ({settings.rendering.brightness}%)<input type="range" min={10} max={300} step={5} value={settings.rendering.brightness} onChange={event => patchRendering({ brightness: Number(event.target.value) })} /></label>
-        <label>Normalization<select value={settings.rendering.normalizationMode} onChange={event => patchRendering({ normalizationMode: event.target.value as AuctionProfileSettings["rendering"]["normalizationMode"] })}><option value="ROBUST_PERCENTILE">Robust Percentile</option><option value="PER_PROFILE">Per Profile</option><option value="PER_TIME_BLOCK">Per Time Block</option><option value="ROLLING">Rolling</option><option value="ABSOLUTE_FIXED">Absolute Fixed</option><option value="PERCENTILE">Percentile</option><option value="LOGARITHMIC">Logarithmic</option></select></label>
+        <label>Normalization<select value={settings.rendering.normalizationMode} onChange={event => patchRendering({ normalizationMode: event.target.value as AuctionProfileSettings["rendering"]["normalizationMode"] })}><option value="ROBUST_PERCENTILE">Robust Percentile</option><option value="PER_PROFILE">Per Profile</option><option value="PER_TIME_BLOCK">Per Time Block</option><option value="ROLLING">Rolling</option><option value="ABSOLUTE_FIXED">Absolute Fixed</option><option value="PERCENTILE">Percentile</option><option value="LOGARITHMIC">Logarithmic</option><option value="SQUARE_ROOT">Square Root</option></select></label>
         <label>Color Lifecycle<select value={settings.rendering.colorScalingLifecycle} onChange={event => patchRendering({ colorScalingLifecycle: event.target.value as AuctionProfileSettings["rendering"]["colorScalingLifecycle"] })}><option value="FROZEN_ON_BLOCK_CLOSE">Frozen On Block Close</option><option value="FROZEN_PER_BLOCK">Frozen Per Block</option><option value="DEVELOPING_GLOBAL">Developing Global</option><option value="FROZEN_ON_PROFILE_LOCK">Frozen On Profile Lock</option><option value="ROLLING">Rolling</option></select></label>
         <label>Visible Column Budget<input type="number" min={25} max={2000} value={settings.rendering.maximumVisibleColumns} onChange={event => patchRendering({ maximumVisibleColumns: Number(event.target.value) })} /></label>
         <label>Visible Row Budget<input type="number" min={25} max={1000} value={settings.rendering.maximumVisibleRows} onChange={event => patchRendering({ maximumVisibleRows: Number(event.target.value) })} /></label>

@@ -254,7 +254,7 @@ const defaultIndicatorVisualSettings: IndicatorVisualSettings = {
 const chartTypes: { label: string; value: ChartDisplayType; description: string }[] = [
   { label: "Candlesticks", value: "candlesticks", description: "OHLC candles" },
   { label: "Heikin Ashi", value: "heikinAshi", description: "Smoothed OHLC transform" },
-  { label: "Volume Footprint", value: "volumeFootprint", description: "Bid/ask volume profile candles" },
+  { label: "CVD Footprint", value: "volumeFootprint", description: "Time × price CVD cells from canonical trade flow" },
   { label: "Renko", value: "renko", description: "ATR-sized price bricks" },
   { label: "Hollow Candles", value: "hollow", description: "Hollow up, filled down" },
   { label: "Line", value: "line", description: "Close-price line" }

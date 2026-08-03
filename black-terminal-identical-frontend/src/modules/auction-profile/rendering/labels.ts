@@ -1,4 +1,4 @@
-import type { AuctionCalculationEngine, AuctionCvdMetric } from "../core/types.ts";
+import type { AuctionCalculationEngine, AuctionCvdMetric, AuctionProfileWidthMetric } from "../core/types.ts";
 
 export function formatAuctionMetric(value: number) {
   const absolute = Math.abs(value);
@@ -20,6 +20,12 @@ export function formatAuctionCellMetric(value: number, engine: AuctionCalculatio
   if (engine === "TPO" || engine === "TRADE_COUNT") return Math.round(value).toLocaleString("en-US");
   const text = formatAuctionMetric(value);
   return value > 0 && ["CVD_REAL_TRADES", "CVD_PINE_COMPATIBLE", "DELTA_VOLUME"].includes(engine) ? "+" + text : text;
+}
+
+export function formatAuctionProfileRowMetric(value: number, metric: AuctionProfileWidthMetric) {
+  if (metric === "CVD_EFFICIENCY" || metric === "IMBALANCE_RATIO") return (value >= 0 ? "+" : "") + Math.round(value * 100) + "%";
+  const text = formatAuctionMetric(value);
+  return value > 0 && metric === "NET_CVD" ? "+" + text : text;
 }
 
 export function auctionCellTextVisible(mode: "ALWAYS" | "AUTO" | "HOVER_ONLY" | "STRONG_ONLY" | "OFF", width: number, height: number, strength: number) {

@@ -82,6 +82,8 @@ export type AuctionGridAnchor =
 export type AuctionValueAreaBasis =
   | "SELECTED_ENGINE"
   | "TOTAL_VOLUME"
+  | "BUY_VOLUME"
+  | "SELL_VOLUME"
   | "ABSOLUTE_VALUE"
   | "POSITIVE_SIDE"
   | "NEGATIVE_SIDE"
@@ -137,6 +139,20 @@ export type AuctionPresentationMode =
   | "DYNAMIC_AGGREGATE"
   | "MACRO_STRUCTURE";
 
+export type AuctionVisualizationType = "AUCTION_PROFILE" | "CVD_FOOTPRINT" | "COMBINED";
+export type AuctionProfileGeometry =
+  | "BIDIRECTIONAL_DELTA"
+  | "ABSOLUTE_DIRECTIONAL"
+  | "POSITIVE_NEGATIVE_SPLIT"
+  | "MIRRORED"
+  | "SINGLE_SIDED_RIGHT"
+  | "SINGLE_SIDED_LEFT"
+  | "CENTERED";
+export type AuctionProfilePlacement = "RIGHT" | "LEFT" | "OVERLAY" | "INSIDE_RANGE" | "DETACHED_PANEL";
+export type AuctionProfileWidthMetric = "NET_CVD" | "ABSOLUTE_CVD" | "BUY_VOLUME" | "SELL_VOLUME" | "TOTAL_VOLUME" | "CVD_EFFICIENCY" | "IMBALANCE_RATIO" | "SELECTED_ENGINE";
+export type AuctionProfileTimeSegments = "OFF" | "STACKED" | "LATEST_N" | "SESSION_BLOCKS" | "CUSTOM";
+export type AuctionRowLabelMode = "ALWAYS" | "AUTO" | "STRONG_ONLY" | "HOVER" | "OFF";
+
 export type AuctionBlockResolution =
   | "CHART_TIMEFRAME"
   | "1m"
@@ -151,7 +167,7 @@ export type AuctionBlockResolution =
 
 export type AuctionCellTextMode = "ALWAYS" | "AUTO" | "HOVER_ONLY" | "STRONG_ONLY" | "OFF";
 export type AuctionCellTextSize = "AUTO" | "TINY" | "SMALL" | "NORMAL" | "LARGE" | "HUGE";
-export type AuctionNormalizationMode = "PER_PROFILE" | "PER_TIME_BLOCK" | "ROLLING" | "ABSOLUTE_FIXED" | "PERCENTILE" | "LOGARITHMIC" | "ROBUST_PERCENTILE";
+export type AuctionNormalizationMode = "PER_PROFILE" | "PER_TIME_BLOCK" | "ROLLING" | "ABSOLUTE_FIXED" | "PERCENTILE" | "LOGARITHMIC" | "SQUARE_ROOT" | "ROBUST_PERCENTILE";
 export type AuctionColorScalingLifecycle = "DEVELOPING_GLOBAL" | "FROZEN_PER_BLOCK" | "FROZEN_ON_BLOCK_CLOSE" | "FROZEN_ON_PROFILE_LOCK" | "ROLLING";
 export type AuctionCellBorder = "NONE" | "SUBTLE" | "STANDARD" | "HIGH_CONTRAST";
 export type AuctionStructuralDetail = "MINIMAL" | "STANDARD" | "DETAILED" | "RESEARCH";
@@ -225,8 +241,16 @@ export interface NodeDetectionSettings {
 export interface AuctionProfileRenderingSettings {
   displayStyle: AuctionDisplayStyle;
   presentationMode: AuctionPresentationMode;
+  visualizationType: AuctionVisualizationType;
+  profileGeometry: AuctionProfileGeometry;
+  profilePlacement: AuctionProfilePlacement;
+  profileWidthMetric: AuctionProfileWidthMetric;
+  rowLabelMode: AuctionRowLabelMode;
+  timeSegmentsMode: AuctionProfileTimeSegments;
+  latestSegmentCount: number;
   palette: AuctionPalette;
   widthPercent: number;
+  profileWidthAuto: boolean;
   opacity: number;
   brightness: number;
   showText: boolean;
@@ -583,4 +607,3 @@ export function canonicalTradeFromTick(
     source
   };
 }
-

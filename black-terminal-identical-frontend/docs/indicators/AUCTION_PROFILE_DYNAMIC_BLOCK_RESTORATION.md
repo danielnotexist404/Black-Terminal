@@ -1,4 +1,6 @@
-# Auction Profile Dynamic Block Restoration
+# CVD Footprint Dynamic Block Restoration
+
+> **2026-08-03 correction:** this chapter restored a professional time × price footprint, not an Auction Profile. The implementation is preserved as the CVD Footprint renderer and chart type. `AUCTION_PROFILE_SHAPE_RESTORATION.md` defines the corrected range × price profile architecture and supersedes every statement below that called the matrix the default Auction Profile.
 
 ## Diagnosis
 
@@ -20,7 +22,7 @@ BC-MEAP 2.0 adds a sparse `AuctionBlockMatrix` to every snapshot. Its primary pr
 time blocks × price rows × selected engine value
 ```
 
-The default is **Dynamic Blocks + Key Levels**. Aggregate Histogram and Macro Structure remain explicit optional presentations.
+The matrix is available through **CVD Footprint** and optional Combined presentation. Auction Profile is the default indicator presentation.
 
 Each visible non-empty cell:
 

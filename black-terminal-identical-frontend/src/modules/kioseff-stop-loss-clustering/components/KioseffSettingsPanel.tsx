@@ -160,6 +160,20 @@ export function KioseffSettingsPanel({
         <div className="indicator-settings-section">
           <b>Style</b>
           <label>Chart Background Reference<input data-kioseff-field="style.chartBackgroundColor" type="color" value={settings.style.chartBackgroundColor} onChange={(event) => patchStyle({ chartBackgroundColor: event.target.value })} /></label>
+          <label className="indicator-range-row">
+            Heatmap Brightness ({settings.style.heatmapBrightness}%)
+            <input
+              data-kioseff-field="style.heatmapBrightness"
+              type="range"
+              min={25}
+              max={300}
+              step={5}
+              value={settings.style.heatmapBrightness}
+              aria-label="Heatmap brightness"
+              onChange={(event) => patchStyle({ heatmapBrightness: Number(event.target.value) })}
+            />
+            <small>Changes wall intensity only. Cluster calculations and relative strength remain unchanged.</small>
+          </label>
           <label>Active Line Width<input data-kioseff-field="style.activeLineWidth" type="number" min={0.5} max={4} step={0.5} value={settings.style.activeLineWidth} onChange={(event) => patchStyle({ activeLineWidth: Number(event.target.value) })} /></label>
           <label>Hot Line Width<input data-kioseff-field="style.hotLineWidth" type="number" min={1} max={10} step={1} value={settings.style.hotLineWidth} onChange={(event) => patchStyle({ hotLineWidth: Number(event.target.value) })} /></label>
           <label>Label Font Size<input data-kioseff-field="style.labelFontSize" type="number" min={7} max={14} step={1} value={settings.style.labelFontSize} onChange={(event) => patchStyle({ labelFontSize: Number(event.target.value) })} /></label>

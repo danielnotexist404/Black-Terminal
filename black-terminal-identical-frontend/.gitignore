@@ -33,3 +33,7 @@ desktop.ini
 .idea/
 .vscode/*.log
 .vercel
+
+# Python analysis artifacts
+__pycache__/
+*.py[cod]

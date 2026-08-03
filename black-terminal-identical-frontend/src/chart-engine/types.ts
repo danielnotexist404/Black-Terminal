@@ -2,6 +2,8 @@ import type { IndicatorAlertDefinition } from "../automation/alerts";
 import type { ChartPriceTransformSnapshot } from "./priceTransform";
 import type { KioseffSnapshot } from "../modules/kioseff-stop-loss-clustering/core/canonical";
 import type { KioseffSettingsV1 } from "../modules/kioseff-stop-loss-clustering/core/settings";
+import type { AuctionProfileSettings, AuctionProfileSnapshot } from "../modules/auction-profile/core/types";
+
 
 export type Candle = {
   time: number;
@@ -104,6 +106,8 @@ export type ChartEngineOptions = {
   indicatorAdvancedSettings?: IndicatorAdvancedSettings;
   kioseffSnapshot?: KioseffSnapshot | null;
   kioseffSettings?: KioseffSettingsV1;
+  auctionProfileSnapshot?: AuctionProfileSnapshot | null;
+  auctionProfileSettings?: AuctionProfileSettings;
   alertDefinitions?: IndicatorAlertDefinition[];
   customPlots?: any[];
   onAlertFired?: (symbol: string, message: string) => void;
@@ -119,6 +123,7 @@ export type ChartEngineOptions = {
 
 export type VisibleIndicators = {
   liquidationHeatmap: boolean;
+  auctionProfile: boolean;
   volatilityHeatmap: boolean;
   volumeProfile: boolean;
   aif: boolean;

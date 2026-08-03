@@ -11,6 +11,7 @@ export const MARKET_MAKER_HEATMAP_KEY: PremiumFeatureKey = "volatilityHeatmap";
 
 export const DEFAULT_ALLOWED_INDICATORS = [
   "liquidationHeatmap",
+  "auctionProfile",
   "adaptiveSwingStrategy",
   "vwap",
   "ema20",

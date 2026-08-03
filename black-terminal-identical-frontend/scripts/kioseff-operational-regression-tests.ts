@@ -26,6 +26,8 @@ import {
   KIOSEFF_DEFAULT_SETTINGS,
   KIOSEFF_HISTORY_LOOKBACK_OPTIONS,
   KIOSEFF_TIMEFRAME_INPUTS,
+  kioseffCalculationSettingsHash,
+  kioseffSettingsHash,
   kioseffSettingsVersion,
   migrateKioseffSettings
 } from "../src/modules/kioseff-stop-loss-clustering/core/settings.ts";
@@ -515,6 +517,7 @@ for (const field of [
   "forceTypicalMove",
   "showClusterRatioMeter",
   "style.showSummaryTable",
+  "style.heatmapBrightness",
   "style.buyWallColor",
   "style.showOscillator",
   "style.oscillatorBuyColor",
@@ -690,11 +693,20 @@ assert.equal(
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.forceTypicalMove, false);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.showClusterRatioMeter, true);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.showSummaryTable, true);
+assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.heatmapBrightness, 100);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.buyWallColor, "#f4f6f7");
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.showOscillator, false);
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.oscillatorBuyColor, "#cfd3da");
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.oscillatorSellColor, "#b00018");
 assert.equal(KIOSEFF_DEFAULT_SETTINGS.style.activityDashboardWidth, 560);
+const brighterPresentation = structuredClone(KIOSEFF_DEFAULT_SETTINGS);
+brighterPresentation.style.heatmapBrightness = 225;
+assert.notEqual(kioseffSettingsHash(brighterPresentation), kioseffSettingsHash(KIOSEFF_DEFAULT_SETTINGS));
+assert.equal(
+  kioseffCalculationSettingsHash(brighterPresentation),
+  kioseffCalculationSettingsHash(KIOSEFF_DEFAULT_SETTINGS),
+  "brightness remains presentation-only and cannot restart intrabar calculation"
+);
 const migratedLegacyPalette = migrateKioseffSettings({
   version: 1,
   absorbtion: { clusterColor: "#55ffda", oldClusterColor: "#ff65fb" },

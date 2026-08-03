@@ -41,6 +41,7 @@ import {
   type KioseffSnapshot
 } from "../modules/kioseff-stop-loss-clustering/core/canonical";
 import {
+  kioseffCalculationSettingsHash,
   kioseffSettingsHash,
   normalizeKioseffTimeframeInput,
   type KioseffSettingsV1
@@ -64,6 +65,16 @@ import { KioseffWorkerClient } from "../modules/kioseff-stop-loss-clustering/wor
 import { KioseffSettingsPanel } from "../modules/kioseff-stop-loss-clustering/components/KioseffSettingsPanel";
 import { KioseffOverlays } from "../modules/kioseff-stop-loss-clustering/components/KioseffOverlays";
 import { buildKioseffRenderModel } from "../modules/kioseff-stop-loss-clustering/rendering/renderModel";
+import { AuctionProfileSettingsPanel } from "../modules/auction-profile/components/AuctionProfileSettings";
+import { AuctionProfileDiagnostics } from "../modules/auction-profile/components/AuctionProfileDiagnostics";
+import { AuctionProfileLegend } from "../modules/auction-profile/components/AuctionProfileLegend";
+import { auctionProfileCalculationSettingsHash, migrateAuctionProfileSettings } from "../modules/auction-profile/core/settings";
+import type { AuctionProfileSettings, AuctionProfileSnapshot, CanonicalTrade } from "../modules/auction-profile/core/types";
+import { canonicalCvdService, normalizeCanonicalTrade } from "../modules/auction-profile/data/tradeSource";
+import { AuctionProfileWorkerClient } from "../modules/auction-profile/worker/AuctionProfileWorkerClient";
+import type { TradeTick } from "../market-data/types";
+
+
 
 type PixiBlackChartProps = {
   workspaceId: string;
@@ -84,12 +95,14 @@ type PixiBlackChartProps = {
   indicatorVisualSettings: IndicatorVisualSettings;
   indicatorAdvancedSettings: IndicatorAdvancedSettings;
   kioseffSettings: KioseffSettingsV1;
+  auctionProfileSettings: AuctionProfileSettings;
   alertDefinitions: IndicatorAlertDefinition[];
   onVisibleIndicatorsChange: Dispatch<SetStateAction<VisibleIndicators>>;
   onIndicatorPeriodsChange: Dispatch<SetStateAction<IndicatorPeriods>>;
   onIndicatorVisualSettingsChange: Dispatch<SetStateAction<IndicatorVisualSettings>>;
   onIndicatorAdvancedSettingsChange: Dispatch<SetStateAction<IndicatorAdvancedSettings>>;
   onKioseffSettingsChange: Dispatch<SetStateAction<KioseffSettingsV1>>;
+  onAuctionProfileSettingsChange: Dispatch<SetStateAction<AuctionProfileSettings>>;
   onAlertDefinitionsChange?: Dispatch<SetStateAction<IndicatorAlertDefinition[]>>;
   onDrawingToolRequest?: (tool: DrawingToolId) => void;
   onOpenAlerts?: () => void;
@@ -304,12 +317,14 @@ export function PixiBlackChart({
   indicatorVisualSettings,
   indicatorAdvancedSettings,
   kioseffSettings,
+  auctionProfileSettings,
   alertDefinitions,
   onVisibleIndicatorsChange,
   onIndicatorPeriodsChange,
   onIndicatorVisualSettingsChange,
   onIndicatorAdvancedSettingsChange,
   onKioseffSettingsChange,
+  onAuctionProfileSettingsChange,
   onAlertDefinitionsChange,
   onDrawingToolRequest,
   onOpenAlerts,
@@ -333,12 +348,22 @@ export function PixiBlackChart({
   const [lastCandle, setLastCandle] = useState<Candle | null>(null);
   const [aifPriceTransform, setAifPriceTransform] = useState<ChartPriceTransformSnapshot | null>(null);
   const [kioseffSnapshot, setKioseffSnapshot] = useState<KioseffSnapshot | null>(null);
+  const [auctionProfileSnapshot, setAuctionProfileSnapshot] = useState<AuctionProfileSnapshot | null>(null);
+  const [auctionProfileLoading, setAuctionProfileLoading] = useState(false);
+  const [auctionProfileError, setAuctionProfileError] = useState<string | null>(null);
+  const [auctionProfileSourceRevision, setAuctionProfileSourceRevision] = useState(0);
   const [kioseffUnavailable, setKioseffUnavailable] = useState<KioseffUnavailableDiagnostic | null>(null);
   const [kioseffLoadState, setKioseffLoadState] = useState<KioseffLoadState>({ stage: "idle" });
   const [kioseffDiagnostics, setKioseffDiagnostics] = useState<KioseffRuntimeDiagnostics>(
     emptyKioseffRuntimeDiagnostics
   );
   const [kioseffSourceRevision, setKioseffSourceRevision] = useState(0);
+  const kioseffCalculationVersion = kioseffCalculationSettingsHash(kioseffSettings);
+  const normalizedAuctionProfileSettings = useMemo(() => migrateAuctionProfileSettings(auctionProfileSettings), [auctionProfileSettings]);
+  const auctionProfileCalculationVersion = auctionProfileCalculationSettingsHash(normalizedAuctionProfileSettings);
+  const auctionProfileDataRevision = normalizedAuctionProfileSettings.compositeLocked
+    ? "locked:" + auctionProfileCalculationVersion
+    : "chart:" + auctionProfileSourceRevision;
   const [dataStatus, setDataStatus] = useState("CONNECTING");
   const [chartHistoryState, setChartHistoryState] = useState<
     "loading" | "ready" | "unavailable"
@@ -352,9 +377,11 @@ export function PixiBlackChart({
     if (configuredDepth >= 10000) return 10000;
     return 5000;
   });
-  const marketHistoryTarget = visibleIndicators.volatilityHeatmap
-    ? Math.max(historyDepth, kioseffSettings.historyLookbackBars)
-    : historyDepth;
+  const marketHistoryTarget = Math.min(20000, Math.max(
+    historyDepth,
+    visibleIndicators.volatilityHeatmap ? kioseffSettings.historyLookbackBars : 0,
+    visibleIndicators.auctionProfile ? normalizedAuctionProfileSettings.lookbackBars : 0
+  ));
   const [indicatorsCollapsed, setIndicatorsCollapsed] = useState(false);
   const [mountedIndicators, setMountedIndicators] = useState<Record<IndicatorKey, boolean>>(() => ({ ...visibleIndicators }));
   const [alertSettings, setAlertSettings] = useState<IndicatorAlertSettings>(defaultIndicatorAlertSettings);
@@ -376,6 +403,11 @@ export function PixiBlackChart({
   const replayCommandIdRef = useRef(-1);
   const kioseffRefreshTimerRef = useRef<number | undefined>(undefined);
   const chartSourceVenueRef = useRef<ExchangeId | null>(null);
+  const auctionRefreshTimerRef = useRef<number | undefined>(undefined);
+  const auctionWorkerRef = useRef<AuctionProfileWorkerClient | null>(null);
+  const auctionTradeHistoryRef = useRef<CanonicalTrade[]>([]);
+  const auctionTradeBufferRef = useRef<CanonicalTrade[]>([]);
+  const auctionTradeFlushTimerRef = useRef<number | undefined>(undefined);
   const replayAppliedRef = useRef(false);
   const alertSettingsRef = useRef(alertSettings);
   const lastAlertSentAtRef = useRef(new Map<string, number>());
@@ -507,6 +539,7 @@ export function PixiBlackChart({
   const setReplaySource = (candles: Candle[]) => {
     replaySourceRef.current = uniqueSortedCandles(candles).slice(-MAX_RETAINED_CHART_BARS);
     setKioseffSourceRevision((revision) => revision + 1);
+    setAuctionProfileSourceRevision((revision) => revision + 1);
     if (replayActiveRef.current) {
       if (replayControlsRef.current.selecting) {
         engineRef.current?.setCandles(replaySourceRef.current, {
@@ -544,6 +577,14 @@ export function PixiBlackChart({
         setKioseffSourceRevision((revision) => revision + 1);
       }, 1000);
     }
+    if (historyAdvanced && visibleIndicators.auctionProfile && !auctionRefreshTimerRef.current) {
+      auctionRefreshTimerRef.current = window.setTimeout(() => {
+        auctionRefreshTimerRef.current = undefined;
+        setAuctionProfileSourceRevision((revision) => revision + 1);
+      }, 1000);
+    }
+
+
   };
 
   const ingestTradeIntoReplaySource = (price: number, quantity: number, time: number) => {
@@ -771,8 +812,28 @@ export function PixiBlackChart({
 
     const candleStreamIsStale = () => !lastLiveCandleAt || Date.now() - lastLiveCandleAt > liveCandleStaleMs;
 
-    const ingestTrades = (trades: { tradeId: string; price: number; quantity: number; time: number }[]) => {
-      for (const trade of trades) {
+    const ingestTrades = (trades: TradeTick[]) => {
+      const newTrades = trades.filter((trade) => !seenTrades.has(trade.tradeId));
+      const canonicalTrades = newTrades.map(normalizeCanonicalTrade);
+      canonicalCvdService.ingest(canonicalTrades);
+      auctionTradeHistoryRef.current = [...auctionTradeHistoryRef.current, ...canonicalTrades].slice(-250_000);
+      if (visibleIndicators.auctionProfile && !normalizedAuctionProfileSettings.compositeLocked && auctionWorkerRef.current && canonicalTrades.length) {
+        auctionTradeBufferRef.current.push(...canonicalTrades);
+        if (!auctionTradeFlushTimerRef.current) {
+          auctionTradeFlushTimerRef.current = window.setTimeout(() => {
+            auctionTradeFlushTimerRef.current = undefined;
+            const buffered = auctionTradeBufferRef.current.splice(0);
+            const client = auctionWorkerRef.current;
+            if (!client || !buffered.length) return;
+            void client.appendTrades(buffered, "live:" + Date.now()).then((snapshots) => {
+              const snapshot = snapshots.at(-1) ?? null;
+              setAuctionProfileSnapshot(snapshot);
+              engineRef.current?.setAuctionProfileState(snapshot, normalizedAuctionProfileSettings);
+            }).catch(() => undefined);
+          }, 180);
+        }
+      }
+      for (const trade of newTrades) {
         if (seenTrades.has(trade.tradeId)) continue;
         seenTrades.add(trade.tradeId);
         seenTradeOrder.push(trade.tradeId);
@@ -936,6 +997,8 @@ export function PixiBlackChart({
       alertDefinitions: scopedChartAlerts,
       customPlots: customPlots || [],
       onAlertFired: (alertId, price) => onAlertFired?.(alertId, price),
+      auctionProfileSettings: normalizedAuctionProfileSettings,
+      auctionProfileSnapshot,
       onAlertEditRequest: (alertId) => {
         setEditingChartAlertId(alertId);
         setChartContextMenu(null);
@@ -1067,6 +1130,14 @@ export function PixiBlackChart({
       if (initialized) {
         engine.destroy();
       }
+      if (auctionRefreshTimerRef.current) {
+        window.clearTimeout(auctionRefreshTimerRef.current);
+        auctionRefreshTimerRef.current = undefined;
+      }
+      if (auctionTradeFlushTimerRef.current) {
+        window.clearTimeout(auctionTradeFlushTimerRef.current);
+        auctionTradeFlushTimerRef.current = undefined;
+      }
       engineRef.current = null;
       setAifPriceTransform(null);
     };
@@ -1081,6 +1152,7 @@ export function PixiBlackChart({
     historyDepth,
     marketHistoryTarget,
     visibleIndicators.volatilityHeatmap,
+    visibleIndicators.auctionProfile,
     onPriceChange
   ]);
 
@@ -1597,10 +1669,92 @@ export function PixiBlackChart({
     visibleIndicators.volatilityHeatmap,
     marketSymbol,
     timeframe,
-    kioseffSettings,
+    kioseffCalculationVersion,
     kioseffSourceRevision,
     historyDepth,
     chartHistoryState
+  ]);
+
+  useEffect(() => {
+    engineRef.current?.setKioseffState(kioseffSnapshot, kioseffSettings);
+  }, [kioseffSnapshot, kioseffSettings.style.heatmapBrightness]);
+
+  useEffect(() => {
+    if (!visibleIndicators.auctionProfile) {
+      auctionWorkerRef.current?.dispose();
+      auctionWorkerRef.current = null;
+      setAuctionProfileSnapshot(null);
+      setAuctionProfileLoading(false);
+      setAuctionProfileError(null);
+      engineRef.current?.setAuctionProfileState(null, normalizedAuctionProfileSettings);
+      return;
+    }
+    if (chartHistoryState !== "ready" || replaySourceRef.current.length === 0) return;
+
+    let disposed = false;
+    const client = new AuctionProfileWorkerClient();
+    auctionWorkerRef.current?.dispose();
+    auctionWorkerRef.current = client;
+    setAuctionProfileLoading(true);
+    setAuctionProfileError(null);
+    const bars = replaySourceRef.current.slice(-normalizedAuctionProfileSettings.lookbackBars);
+    const start = bars[0]?.time ?? 0;
+    const interval = bars.length > 1 ? Math.max(1, bars[bars.length - 1]!.time - bars[bars.length - 2]!.time) : timeframeSeconds[timeframe];
+    const end = (bars[bars.length - 1]?.time ?? 0) + interval;
+    const trades = auctionTradeHistoryRef.current.filter(trade =>
+      trade.venue === marketSymbol.exchange &&
+      trade.symbol === marketSymbol.rawSymbol &&
+      trade.timestamp >= start &&
+      trade.timestamp <= end
+    );
+
+    void client.initialize({
+      venue: marketSymbol.exchange,
+      symbol: marketSymbol.rawSymbol,
+      timeframe,
+      metadata: marketSymbol.metadata,
+      bars,
+      trades,
+      settings: normalizedAuctionProfileSettings,
+      sourceRevision: auctionProfileDataRevision
+    }).then(snapshots => {
+      if (disposed) return;
+      const snapshot = snapshots.at(-1) ?? null;
+      setAuctionProfileSnapshot(snapshot);
+      setAuctionProfileLoading(false);
+      engineRef.current?.setAuctionProfileState(snapshot, normalizedAuctionProfileSettings);
+    }).catch(error => {
+      if (disposed || String(error).includes("CANCELLED")) return;
+      setAuctionProfileLoading(false);
+      setAuctionProfileError(error instanceof Error ? error.message : String(error));
+      engineRef.current?.setAuctionProfileState(null, normalizedAuctionProfileSettings);
+    });
+
+    return () => {
+      disposed = true;
+      if (auctionWorkerRef.current === client) auctionWorkerRef.current = null;
+      client.dispose();
+    };
+  }, [
+    visibleIndicators.auctionProfile,
+    marketSymbol.exchange,
+    marketSymbol.rawSymbol,
+    timeframe,
+    chartHistoryState,
+    auctionProfileCalculationVersion,
+    auctionProfileDataRevision
+  ]);
+
+  useEffect(() => {
+    engineRef.current?.setAuctionProfileState(
+      visibleIndicators.auctionProfile ? auctionProfileSnapshot : null,
+      normalizedAuctionProfileSettings
+    );
+  }, [
+    auctionProfileSnapshot,
+    normalizedAuctionProfileSettings.rendering,
+    normalizedAuctionProfileSettings.diagnosticsVisible,
+    visibleIndicators.auctionProfile
   ]);
 
   useEffect(() => {
@@ -2360,6 +2514,11 @@ export function PixiBlackChart({
   const changePercent = displayCandle.open ? (change / displayCandle.open) * 100 : 0;
   const indicatorRows: { key: IndicatorKey; label: string; value: string }[] = [
     { key: "aif", label: "A.I.F.", value: "auction intelligence" },
+    {
+      key: "auctionProfile",
+      label: "Auction Profile",
+      value: auctionProfileLoading ? "building…" : auctionProfileError ? "unavailable" : normalizedAuctionProfileSettings.calculationEngine.replaceAll("_", " ")
+    },
     { key: "liquidationHeatmap", label: "Liq Heatmap", value: "model" },
     {
       key: "volatilityHeatmap",
@@ -3571,7 +3730,7 @@ export function PixiBlackChart({
               }}
             >
               <span>{indicator.label}</span>
-              <b className={indicator.key === "aif" || indicator.key === "ema200" || indicator.key === "volume" || indicator.key === "liquidationHeatmap" || indicator.key === "volatilityHeatmap" || indicator.key === "volumeProfile" || indicator.key === "adaptiveSwingStrategy" ? "red" : ""}>{indicator.value}</b>
+              <b className={indicator.key === "aif" || indicator.key === "auctionProfile" || indicator.key === "ema200" || indicator.key === "volume" || indicator.key === "liquidationHeatmap" || indicator.key === "volatilityHeatmap" || indicator.key === "volumeProfile" || indicator.key === "adaptiveSwingStrategy" ? "red" : ""}>{indicator.value}</b>
               <button
                 type="button"
                 className="indicator-action"
@@ -3623,8 +3782,16 @@ export function PixiBlackChart({
           onClose={() => setActiveIndicator(null)}
         />
       )}
+      {activeIndicator === "auctionProfile" && (
+        <AuctionProfileSettingsPanel
+          settings={normalizedAuctionProfileSettings}
+          onChange={onAuctionProfileSettingsChange}
+          onClose={() => setActiveIndicator(null)}
+        />
+      )}
 
-      {activeIndicator && activeIndicator !== "aif" && activeIndicator !== "volumeProfile" && activeIndicator !== "adaptiveSwingStrategy" && activeIndicator !== "volatilityHeatmap" && (
+
+      {activeIndicator && activeIndicator !== "aif" && activeIndicator !== "auctionProfile" && activeIndicator !== "volumeProfile" && activeIndicator !== "adaptiveSwingStrategy" && activeIndicator !== "volatilityHeatmap" && (
         <div className="indicator-settings">
           <div className="indicator-settings-title">
             <span>{indicatorRows.find((indicator) => indicator.key === activeIndicator)?.label}</span>
@@ -3957,6 +4124,15 @@ export function PixiBlackChart({
         {indicatorsCollapsed ? "v" : "^"}
       </button>
       <div ref={hostRef} className="pixi-chart-host" onContextMenu={handleChartContextMenu} onClick={() => setChartContextMenu(null)} />
+      {visibleIndicators.auctionProfile && <>
+        <AuctionProfileLegend snapshot={auctionProfileSnapshot} />
+        {normalizedAuctionProfileSettings.diagnosticsVisible && <AuctionProfileDiagnostics snapshot={auctionProfileSnapshot} />}
+        {auctionProfileLoading && <div className="auction-profile-loading"><b>BLACK CORE AUCTION PROFILE</b><span>Rebuilding deterministic price grid…</span><i /></div>}
+        {auctionProfileError && <div className="auction-profile-error"><b>AUCTION PROFILE UNAVAILABLE</b><span>{auctionProfileError}</span></div>}
+      </>}
+
+
+
       <KioseffOverlays
         visible={visibleIndicators.volatilityHeatmap}
         snapshot={kioseffSnapshot}

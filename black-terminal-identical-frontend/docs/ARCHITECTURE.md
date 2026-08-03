@@ -392,3 +392,9 @@ baseline; `black-core-enhanced` throws at construction until TradingView golden-
 Display scaling may include visible cluster geometry, but it cannot mutate analytical state or its
 cluster hash. Python is limited to offline validation. See the Kioseff parity, state, data, rendering,
 golden-master, and known-divergence documents under `docs/indicators/`.
+
+## Black Core Multi-Engine Auction Profile
+
+The chart owns one canonical CVD ingestion service and one versioned Auction Profile worker per active chart. Venue adapters preserve aggressor provenance before the chart consumes trades. Worker snapshots are immutable calculation products; Pixi receives only a snapshot plus presentation settings. This keeps OMS/EMS, Black Cloud, DOM Pro, Kioseff, HDLX, AIF, and IMM outside the profile calculation boundary.
+
+The browser path is incremental for live trades. Python is an optional offline/server rebuild and validation layer. See `docs/indicators/BLACK_CORE_MULTI_ENGINE_AUCTION_PROFILE.md`.

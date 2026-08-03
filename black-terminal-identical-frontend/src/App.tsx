@@ -78,6 +78,8 @@ import {
   type KioseffSettingsV1
 } from "./modules/kioseff-stop-loss-clustering/core/settings";
 import { migrateKioseffWorkspaceFields } from "./modules/kioseff-stop-loss-clustering/core/workspaceMigration";
+import { AUCTION_PROFILE_DEFAULT_SETTINGS, migrateAuctionProfileSettings } from "./modules/auction-profile/core/settings";
+import type { AuctionProfileSettings } from "./modules/auction-profile/core/types";
 import type {
   ChartDisplayType,
   DrawingToolId,
@@ -182,6 +184,7 @@ const visibleIndicatorsStorageKey = "bt_visible_indicators_v1";
 
 const defaultVisibleIndicators: VisibleIndicators = {
   liquidationHeatmap: false,
+  auctionProfile: false,
   volatilityHeatmap: false,
   volumeProfile: false,
   aif: false,
@@ -230,6 +233,7 @@ const defaultIndicatorPeriods: IndicatorPeriods = {
 
 const defaultIndicatorVisualSettings: IndicatorVisualSettings = {
   liquidationHeatmap: { color: "red", intensity: 78 },
+  auctionProfile: { color: "red", intensity: 82 },
   volatilityHeatmap: { color: "green", intensity: 86 },
   volumeProfile: { color: "red", intensity: 72 },
   aif: { color: "red", intensity: 78 },
@@ -311,6 +315,7 @@ type WorkspaceSnapshot = {
   indicatorVisualSettings: IndicatorVisualSettings;
   indicatorAdvancedSettings: IndicatorAdvancedSettings;
   kioseffSettings?: KioseffSettingsV1;
+  auctionProfileSettings?: AuctionProfileSettings;
   layout: {
     rightPanelWidth: number;
     bottomPanelHeight: number;
@@ -430,7 +435,8 @@ function migrateWorkspaceSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapsho
     schemaVersion: 4,
     visibleIndicators,
     indicatorAdvancedSettings: migrateIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings),
-    kioseffSettings: kioseff.settings
+    kioseffSettings: kioseff.settings,
+    auctionProfileSettings: migrateAuctionProfileSettings(snapshot.auctionProfileSettings)
   };
 }
 
@@ -489,6 +495,7 @@ export default function App() {
     Boolean(currentUser?.allowedIndicators.includes(PROPRIETARY_HDLX_INDICATOR));
   const effectiveAllowedIndicators = useMemo(() => {
     const allowed = new Set(currentUser?.allowedIndicators || []);
+    allowed.add("auctionProfile");
     if (canUseHdlxProfile) {
       allowed.add(PROPRIETARY_HDLX_INDICATOR);
     } else {
@@ -654,6 +661,9 @@ export default function App() {
     structuredClone(KIOSEFF_DEFAULT_SETTINGS)
   );
   const [indicatorAlerts, setIndicatorAlerts] = useState<IndicatorAlertDefinition[]>(loadStoredAlerts);
+  const [auctionProfileSettings, setAuctionProfileSettings] = useState<AuctionProfileSettings>(() =>
+    migrateAuctionProfileSettings(structuredClone(AUCTION_PROFILE_DEFAULT_SETTINGS))
+  );
   const [activeStrategyKind, setActiveStrategyKind] = useState<StrategyRuntimeKind | undefined>();
   const [strategySelectionRevision, setStrategySelectionRevision] = useState(0);
   const [workspaces, setWorkspaces] = useState<string[]>(loadWorkspaceNames);
@@ -1015,6 +1025,7 @@ export default function App() {
               setIndicatorAdvancedSettings(migrateIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings));
               setKioseffSettings(migrateKioseffSettings(snapshot.kioseffSettings));
               setLayout(snapshot.layout);
+              setAuctionProfileSettings(migrateAuctionProfileSettings(snapshot.auctionProfileSettings));
               setActiveStrategyKind(snapshot.activeStrategyKind);
             }
           }
@@ -1240,6 +1251,7 @@ export default function App() {
     indicatorAdvancedSettings,
     kioseffSettings,
     layout,
+    auctionProfileSettings,
     activeStrategyKind,
     updatedAt: Date.now()
   });
@@ -1327,6 +1339,7 @@ export default function App() {
       setIndicatorAdvancedSettings(migrateIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings));
       setKioseffSettings(migrateKioseffSettings(snapshot.kioseffSettings));
       setLayout(snapshot.layout);
+      setAuctionProfileSettings(migrateAuctionProfileSettings(snapshot.auctionProfileSettings));
       setActiveStrategyKind(snapshot.activeStrategyKind);
       setReplayControls(defaultReplayControls);
       setReplayStatus(defaultReplayStatus);
@@ -2072,12 +2085,14 @@ export default function App() {
             indicatorAdvancedSettings={indicatorAdvancedSettings}
             kioseffSettings={kioseffSettings}
             alertDefinitions={indicatorAlerts}
+            auctionProfileSettings={auctionProfileSettings}
             onVisibleIndicatorsChange={setVisibleIndicators}
             onIndicatorPeriodsChange={setIndicatorPeriods}
             onIndicatorVisualSettingsChange={setIndicatorVisualSettings}
             onIndicatorAdvancedSettingsChange={setIndicatorAdvancedSettings}
             onKioseffSettingsChange={setKioseffSettings}
             onAlertDefinitionsChange={setIndicatorAlerts}
+            onAuctionProfileSettingsChange={setAuctionProfileSettings}
             onDrawingToolRequest={(tool) => {
               setDrawingsEnabled(true);
               setActiveDrawingTool(tool);

@@ -1,5 +1,11 @@
 # Implementation History
 
+## 2026-08-03 — Market Maker Heatmap brightness control
+
+- Added a persisted 25–300% heatmap brightness slider to Style settings.
+- Applied perceptual alpha scaling to wall zones, lines, curves and X-ray detail while preserving cluster calculations and relative wall strength.
+- Kept brightness on the immediate render path so dragging the control does not restart ordered-intrabar calculation.
+
 ## 2026-08-02 — Phase V Chapter II-B persistent connectivity restoration
 
 - Completed the security regression map and made provider states explicit instead of treating a UI
@@ -1323,3 +1329,12 @@ Remaining:
 - Hardened the immutable Compose runtime with non-root/read-only execution, dropped capabilities, loopback-only health, bounded resources/PIDs/logs and no Docker socket.
 - Added exact single-VPS preflight/build/deploy/rollback scripts and the operations/certification runbooks.
 - Did not claim external completion: no VPS destination or SSH identity was available, no container was built on the actual host, and no broker order or browser-offline/reboot scenario was executed.
+
+## 2026-08-03 — Black Core Multi-Engine Auction Profile
+
+- Retained the supplied Pine v6 CVD Profile source unchanged.
+- Added separate Pine Compatibility and Black Core Native calculation modes.
+- Added canonical aggressor-side CVD provenance, mixed-data coverage, deterministic scopes/grid, value area, POC/IB, LVN/HVN detection, 18 selectable engines, worker cancellation and incremental trades.
+- Added Pixi GPU rendering, full settings/diagnostics/workspace integration, 20,000-bar history selection, and a Black Terminal red/silver/white visual system.
+- Added the `black_core_profiles` Python package, deterministic TypeScript/Python fixtures, methodology docs, limitations, audit, and completion report.
+- Preserved the prior Market Maker Heatmap brightness work and did not alter OMS/EMS, Black Cloud, DOM Pro, HDLX, AIF, Kioseff calculations, or IMM.

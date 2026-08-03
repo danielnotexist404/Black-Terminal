@@ -11921,3 +11921,123 @@ body.dom-pro-resize-active {
 
   .dom-pro-camera-switches { min-width: 210px; }
 }
+
+.auction-profile-settings {
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 92px));
+  overflow: auto;
+}
+.auction-profile-settings .indicator-settings-tabs {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 2px;
+}
+.auction-profile-settings .indicator-settings-tabs button {
+  min-width: 0;
+  padding: 6px 3px;
+  border: 1px solid #252932;
+  background: #080a0e;
+  color: #777e88;
+  font: 700 8px/1 "IBM Plex Mono", monospace;
+}
+.auction-profile-settings .indicator-settings-tabs button.active {
+  border-color: #700010;
+  color: #f4f6f7;
+  background: #160207;
+}
+.auction-profile-settings .indicator-settings-section > small {
+  display: block;
+  color: #8a9098;
+  line-height: 1.45;
+  padding: 6px 0;
+}
+.auction-profile-settings input[type="datetime-local"],
+.auction-profile-settings input[type="text"] {
+  width: 176px;
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #07090b;
+  color: var(--text);
+  font: 10px "IBM Plex Mono", monospace;
+}
+.auction-profile-legend,
+.auction-profile-diagnostics,
+.auction-profile-loading,
+.auction-profile-error {
+  position: absolute;
+  z-index: 14;
+  right: 100px;
+  pointer-events: none;
+  border: 1px solid #2a2e35;
+  background: rgba(5, 7, 10, 0.93);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.42);
+  font-family: "IBM Plex Mono", monospace;
+}
+.auction-profile-legend {
+  top: 48px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 8px;
+  font-size: 8px;
+}
+.auction-profile-legend b { color: #d0001f; }
+.auction-profile-legend span { color: #f4f6f7; }
+.auction-profile-legend em { color: #7f858e; font-style: normal; }
+.auction-profile-diagnostics {
+  top: 78px;
+  width: 310px;
+  padding: 6px 8px;
+  font-size: 8px;
+}
+.auction-profile-diagnostics > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+}
+.auction-profile-diagnostics > div:first-child { color: #d0001f; }
+.auction-profile-diagnostics span { color: #8b9199; }
+.auction-profile-diagnostics strong { color: #f4f6f7; font-weight: 600; }
+.auction-profile-diagnostics small {
+  display: block;
+  padding-top: 5px;
+  color: #666c74;
+  overflow-wrap: anywhere;
+}
+.auction-profile-loading,
+.auction-profile-error {
+  top: 78px;
+  width: 310px;
+  padding: 9px;
+  display: grid;
+  gap: 6px;
+  font-size: 9px;
+}
+.auction-profile-loading b,
+.auction-profile-error b { color: #d0001f; }
+.auction-profile-loading span,
+.auction-profile-error span { color: #aeb4bc; }
+.auction-profile-loading i {
+  display: block;
+  height: 3px;
+  overflow: hidden;
+  background: #15181e;
+}
+.auction-profile-loading i::after {
+  content: "";
+  display: block;
+  width: 42%;
+  height: 100%;
+  background: linear-gradient(90deg, #360008, #d0001f 65%, #f4f6f7);
+  animation: auction-profile-energy 1.2s ease-in-out infinite alternate;
+}
+@keyframes auction-profile-energy {
+  from { transform: translateX(-12%); }
+  to { transform: translateX(150%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .auction-profile-loading i::after { animation: none; width: 100%; }
+}

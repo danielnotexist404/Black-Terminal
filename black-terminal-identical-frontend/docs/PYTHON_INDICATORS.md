@@ -88,3 +88,9 @@ Community indicators should run with:
 4. Render returned plots through the chart engine.
 5. Add signed indicator packages and metadata.
 6. Validate the iPad/iPhone packaging strategy before expanding library support.
+
+## Black Core Auction Profiles
+
+The optional `python/black_core_profiles` package covers historical composite rebuilds, exact trade aggregation, price-grid research, TPO, realized/Parkinson volatility, value area, CVD LVN/HVN experiments, compact float64 serialization, and golden fixture validation. It is deliberately not required by the live chart.
+
+Validation: `python3 scripts/auction-profile-python-tests.py`.

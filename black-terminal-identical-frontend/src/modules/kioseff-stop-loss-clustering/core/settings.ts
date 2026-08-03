@@ -44,6 +44,7 @@ export type KioseffSettingsV1 = {
   showClusterRatioMeter: boolean;
   style: {
     chartBackgroundColor: string;
+    heatmapBrightness: number;
     activeLineWidth: number;
     hotLineWidth: number;
     labelFontSize: number;
@@ -98,6 +99,7 @@ export const KIOSEFF_DEFAULT_SETTINGS: KioseffSettingsV1 = {
   showClusterRatioMeter: true,
   style: {
     chartBackgroundColor: "#05070b",
+    heatmapBrightness: 100,
     activeLineWidth: 1,
     hotLineWidth: 5,
     labelFontSize: 9,
@@ -307,6 +309,10 @@ export function migrateKioseffSettings(
         typeof style.chartBackgroundColor === "string"
           ? style.chartBackgroundColor
           : defaults.style.chartBackgroundColor,
+      heatmapBrightness:
+        typeof style.heatmapBrightness === "number"
+          ? Math.max(25, Math.min(300, Math.round(style.heatmapBrightness)))
+          : defaults.style.heatmapBrightness,
       activeLineWidth:
         typeof style.activeLineWidth === "number"
           ? Math.max(0.5, Math.min(4, style.activeLineWidth))
@@ -393,6 +399,20 @@ export function kioseffSettingsVersion(settings: KioseffSettingsV1) {
 
 export function kioseffSettingsHash(settings: KioseffSettingsV1) {
   return stableValueHash(settings);
+}
+
+/**
+ * Presentation-only brightness must never restart the expensive intrabar
+ * calculation pipeline while the operator is dragging its slider.
+ */
+export function kioseffCalculationSettingsHash(settings: KioseffSettingsV1) {
+  return stableValueHash({
+    ...settings,
+    style: {
+      ...settings.style,
+      heatmapBrightness: KIOSEFF_DEFAULT_SETTINGS.style.heatmapBrightness
+    }
+  });
 }
 
 export function isKioseffVisibleOnTimeframe(

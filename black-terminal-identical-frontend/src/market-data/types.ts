@@ -89,6 +89,12 @@ export type TradeTick = {
   price: number;
   quantity: number;
   side: "buy" | "sell" | "unknown";
+  aggressorSource?:
+    | "EXCHANGE_AGGRESSOR_FLAG"
+    | "MAKER_SIDE_INVERSION"
+    | "QUOTE_RULE"
+    | "TICK_RULE"
+    | "INFERRED";
 };
 
 export type OrderBookLevel = {

@@ -3,6 +3,7 @@ import type { KioseffSnapshot } from "../core/canonical.ts";
 import type { KioseffSettingsV1 } from "../core/settings.ts";
 import {
   buildKioseffRenderModel,
+  kioseffBrightnessAlpha,
   layoutKioseffLabels,
   type KioseffRenderZone
 } from "./renderModel.ts";
@@ -103,14 +104,16 @@ export class KioseffPixiRenderer {
     const color = colorNumber(zone.color);
     const strengthAlpha = zone.strength === "strong" ? 0.2 : 0.09;
     const alpha = zone.opacity ?? strengthAlpha;
+    const brighten = (value: number) =>
+      kioseffBrightnessAlpha(value, settings.style.heatmapBrightness);
     if (zone.fillZone && !zone.drawAsLine) {
       this.zoneGeometry
         .rect(left, y, right - left, height)
-        .fill({ color, alpha })
+        .fill({ color, alpha: brighten(alpha) })
         .stroke({
           color,
           width: Math.max(0.5, settings.style.activeLineWidth),
-          alpha
+          alpha: brighten(alpha)
         });
     }
     const middle = transform.yForPrice(zone.price);
@@ -124,20 +127,22 @@ export class KioseffPixiRenderer {
         .stroke({
           color,
           width: Math.max(0.5, settings.style.activeLineWidth),
-          alpha: zone.hot
-            ? 1
-            : powerfulBuyWall
-              ? Math.max(0.62, alpha)
-              : weakActiveWall
-                ? Math.min(0.16, alpha)
-                : alpha
+          alpha: brighten(
+            zone.hot
+              ? 1
+              : powerfulBuyWall
+                ? Math.max(0.62, alpha)
+                : weakActiveWall
+                  ? Math.min(0.16, alpha)
+                  : alpha
+          )
         });
     }
     if (zone.hot) {
       this.lineGeometry
         .moveTo(left, middle)
         .lineTo(right, middle)
-        .stroke({ color, width: settings.style.hotLineWidth, alpha: 0.1 });
+        .stroke({ color, width: settings.style.hotLineWidth, alpha: brighten(0.1) });
     }
   }
 
@@ -171,6 +176,7 @@ export class KioseffPixiRenderer {
   ) {
     const buyColor = colorNumber(settings.style.buyWallColor);
     const sellColor = colorNumber(settings.volatilityAtEntry.strongClusterColor);
+    const curveAlpha = kioseffBrightnessAlpha(0.72, settings.style.heatmapBrightness);
     for (const curve of curves) {
       const color = curve.side === "buy-stop" ? buyColor : sellColor;
       for (let index = 1; index < curve.points.length; index += 1) {
@@ -180,7 +186,7 @@ export class KioseffPixiRenderer {
         this.curveGeometry
           .moveTo(transform.xForTime(previous.time), transform.yForPrice(previous.price))
           .lineTo(transform.xForTime(current.time), transform.yForPrice(current.price))
-          .stroke({ color, width: 1, alpha: 0.72 });
+          .stroke({ color, width: 1, alpha: curveAlpha });
       }
     }
   }
@@ -297,7 +303,10 @@ export class KioseffPixiRenderer {
           .rect(0, y + (height * index) / 50, transform.width, height / 50 + 0.5)
           .fill({
             color: index < 25 ? 0xcfd3da : 0x5d6268,
-            alpha: 0.07 + (1 - midpointDistance) * 0.05
+            alpha: kioseffBrightnessAlpha(
+              0.07 + (1 - midpointDistance) * 0.05,
+              settings.style.heatmapBrightness
+            )
           });
       }
     }

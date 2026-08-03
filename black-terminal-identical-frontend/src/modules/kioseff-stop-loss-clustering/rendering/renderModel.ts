@@ -59,6 +59,13 @@ export function interpolateHexColor(from: string, to: string, position: number) 
   )}${channelHex(start.blue + (end.blue - start.blue) * amount)}`;
 }
 
+export function kioseffBrightnessAlpha(alpha: number, brightnessPercent: number) {
+  const normalizedAlpha = Math.max(0, Math.min(1, alpha));
+  const exposure = Math.max(0.25, Math.min(3, brightnessPercent / 100));
+  if (exposure === 1) return normalizedAlpha;
+  return 1 - Math.pow(1 - normalizedAlpha, exposure);
+}
+
 export function formatPineVolume(value: number) {
   const absolute = Math.abs(value);
   const sign = value < 0 ? "-" : "";

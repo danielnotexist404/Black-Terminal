@@ -55,6 +55,15 @@ const builtInIndicators: BuiltInIndicator[] = [
     runtime: "Native"
   },
   {
+    key: "auctionProfile",
+    title: "Auction Profile · BC-MEAP",
+    group: "Black Core / Auction Intelligence",
+    type: "Overlay + Optional Pane",
+    signal: "Real CVD, TPO, volume, volatility, composite structure, LVNs and HVNs",
+    runtime: "Worker"
+  },
+
+  {
     key: "liquidationHeatmap",
     title: "Liquidation Heatmap",
     group: "Liquidity",

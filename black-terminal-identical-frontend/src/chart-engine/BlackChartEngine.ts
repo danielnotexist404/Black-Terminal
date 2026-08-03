@@ -23,6 +23,10 @@ import {
 } from "../modules/kioseff-stop-loss-clustering/core/settings";
 import { KioseffPixiRenderer } from "../modules/kioseff-stop-loss-clustering/rendering/KioseffPixiRenderer";
 import { kioseffPriceDomain } from "../modules/kioseff-stop-loss-clustering/rendering/renderModel";
+import { AuctionProfileRenderer } from "../modules/auction-profile/rendering/AuctionProfileRenderer";
+import { AUCTION_PROFILE_DEFAULT_SETTINGS, migrateAuctionProfileSettings } from "../modules/auction-profile/core/settings";
+import type { AuctionProfileSettings, AuctionProfileSnapshot } from "../modules/auction-profile/core/types";
+
 import {
   fromAxisValue,
   priceToScreenY as mapPriceToScreenY,
@@ -139,6 +143,9 @@ export class BlackChartEngine {
   private kioseffRenderer = new KioseffPixiRenderer();
   private kioseffSnapshot: KioseffSnapshot | null = null;
   private kioseffSettings: KioseffSettingsV1 = structuredClone(KIOSEFF_DEFAULT_SETTINGS);
+  private auctionProfileRenderer = new AuctionProfileRenderer();
+  private auctionProfileSnapshot: AuctionProfileSnapshot | null = null;
+  private auctionProfileSettings: AuctionProfileSettings = structuredClone(AUCTION_PROFILE_DEFAULT_SETTINGS);
   private volumeProfileModel = new VolumeProfileModel();
   private lastVolumeProfileResult?: VolumeProfileResult;
   private lastVolumeProfileHdlxByIndex = new Map<number, number>();
@@ -166,6 +173,7 @@ export class BlackChartEngine {
   private alertDefinitions: IndicatorAlertDefinition[] = [];
   private visibleIndicators: VisibleIndicators = {
     liquidationHeatmap: false,
+    auctionProfile: false,
     volatilityHeatmap: false,
       volumeProfile: false,
       aif: false,
@@ -197,6 +205,7 @@ export class BlackChartEngine {
   };
   private indicatorVisualSettings: IndicatorVisualSettings = {
     liquidationHeatmap: { color: "red", intensity: 78 },
+    auctionProfile: { color: "red", intensity: 82 },
     volatilityHeatmap: { color: "green", intensity: 86 },
       volumeProfile: { color: "red", intensity: 72 },
       aif: { color: "red", intensity: 78 },
@@ -305,6 +314,10 @@ export class BlackChartEngine {
       this.kioseffSettings = migrateKioseffSettings(options.kioseffSettings);
     }
     this.setHeatmapSource(options.candles);
+    if (options.auctionProfileSnapshot !== undefined) this.auctionProfileSnapshot = options.auctionProfileSnapshot;
+    if (options.auctionProfileSettings) {
+      this.auctionProfileSettings = migrateAuctionProfileSettings(options.auctionProfileSettings);
+    }
     this.onPriceChange = options.onPriceChange;
     this.onCandleChange = options.onCandleChange;
     this.onPriceTransformChange = options.onPriceTransformChange;
@@ -337,6 +350,7 @@ export class BlackChartEngine {
       this.kioseffRenderer.container,
       this.volumeLayer,
       this.candleLayer,
+      this.auctionProfileRenderer.container,
       this.indicatorLayer,
       this.drawingLayer,
       this.alertLayer,
@@ -701,9 +715,20 @@ export class BlackChartEngine {
   }
 
   setPriceLineSettings(color: string, intensity: number) {
+
     this.priceLineColor = color;
     this.priceLineIntensity = intensity;
     this.draw();
+  }
+
+  setAuctionProfileState(snapshot: AuctionProfileSnapshot | null, settings = this.auctionProfileSettings) {
+    this.auctionProfileSnapshot = snapshot;
+    this.auctionProfileSettings = migrateAuctionProfileSettings(settings);
+    this.draw();
+  }
+
+  getAuctionProfileRenderMetrics() {
+    return this.auctionProfileRenderer.metrics();
   }
 
   setAlertDefinitions(alertDefinitions: IndicatorAlertDefinition[]) {
@@ -828,6 +853,7 @@ export class BlackChartEngine {
     this.clearProfileTexts();
     this.clearHeatmapTexts();
     this.kioseffRenderer.dispose();
+    this.auctionProfileRenderer.dispose();
     this.app.destroy(true, { children: true, texture: true });
     blackCoreResourceTracker.clearGauge("pixi-container", this.resourceOwner);
     blackCoreResourceTracker.clearGauge("pixi-graphics", this.resourceOwner);
@@ -1511,6 +1537,19 @@ export class BlackChartEngine {
       }
     );
     const kioseffMetrics = this.kioseffRenderer.metrics();
+    this.auctionProfileRenderer.draw(
+      this.visibleIndicators.auctionProfile ? this.auctionProfileSnapshot : null,
+      this.auctionProfileSettings,
+      {
+        width: plotWidth,
+        height: plotHeight,
+        top: this.view.topPadding,
+        bottom: plotHeight,
+        yForPrice: (price) => this.yForPrice(price)
+      }
+    );
+    const auctionProfileMetrics = this.auctionProfileRenderer.metrics();
+
     blackCoreResourceTracker.setGauge(
       "pixi-text",
       this.resourceOwner,
@@ -1520,7 +1559,7 @@ export class BlackChartEngine {
         this.hudTexts.length +
         this.profileTexts.length +
         this.heatmapTexts.length +
-        kioseffMetrics.textObjects
+        kioseffMetrics.textObjects + auctionProfileMetrics.labels
     );
 
     if (!this.visibleIndicators.liquidationHeatmap) return;

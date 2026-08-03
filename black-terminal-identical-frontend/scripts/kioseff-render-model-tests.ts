@@ -14,6 +14,7 @@ import {
   buildKioseffRenderModel,
   formatPineVolume,
   interpolateHexColor,
+  kioseffBrightnessAlpha,
   kioseffPriceDomain,
   layoutKioseffLabels
 } from "../src/modules/kioseff-stop-loss-clustering/rendering/renderModel.ts";
@@ -215,6 +216,13 @@ assert.ok(
   "only powerful buy walls receive the high-contrast visibility floor"
 );
 assert.equal(interpolateHexColor("#000000", "#ffffff", 0.5), "#808080");
+assert.equal(kioseffBrightnessAlpha(0.2, 100), 0.2);
+assert.ok(kioseffBrightnessAlpha(0.2, 250) > 0.2);
+assert.ok(kioseffBrightnessAlpha(0.2, 25) < 0.2);
+assert.ok(
+  kioseffBrightnessAlpha(0.09, 300) < kioseffBrightnessAlpha(0.2, 300),
+  "brightness preserves weak-versus-strong heatmap separation"
+);
 assert.equal(formatPineVolume(4240), "4.24K");
 assert.equal(formatPineVolume(-12_070), "-12.07K");
 assert.equal(KIOSEFF_PINE_ACTIVE_OBJECT_CAP, 496);

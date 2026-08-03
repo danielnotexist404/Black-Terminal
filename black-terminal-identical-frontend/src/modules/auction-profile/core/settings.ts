@@ -54,9 +54,9 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
   nodeDetection: {
     source: "ABSOLUTE_CVD",
     method: "HYBRID",
-    sensitivityPercentile: 20,
-    neighborhood: 3,
-    prominence: 0.16,
+    sensitivityPercentile: 10,
+    neighborhood: 5,
+    prominence: 0.42,
     minimumWidthRows: 1,
     maximumGapRows: 1,
     mergeContiguousRows: true,
@@ -77,6 +77,7 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
     displayStyle: "COMBINED",
     presentationMode: "AGGREGATE_HISTOGRAM",
     visualizationType: "AUCTION_PROFILE",
+    profileLayoutRevision: 2,
     profileBodyStyle: "HDLX_CVD_BLOCKS",
     profileBlockValueMode: "CUMULATIVE_CVD",
     profileBlockPixelWidth: 24,
@@ -87,7 +88,7 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
     timeSegmentsMode: "STACKED",
     latestSegmentCount: 24,
     palette: "BLACK_TERMINAL_INSTITUTIONAL",
-    widthPercent: 48,
+    widthPercent: 30,
     profileWidthAuto: false,
     opacity: 0.82,
     brightness: 100,
@@ -112,9 +113,9 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
     maximumVisibleRows: 300,
     maximumVisibleLabels: 3000,
     structuralDetail: "MINIMAL",
-    maximumVisibleLvns: 3,
-    maximumVisibleHvns: 3,
-    maximumVisibleStructuralZones: 4,
+    maximumVisibleLvns: 2,
+    maximumVisibleHvns: 1,
+    maximumVisibleStructuralZones: 2,
     zoneExtensionMode: "PROFILE_ONLY",
     fixedExtensionBars: 100,
     positiveColor: "#e2e3e5",
@@ -240,6 +241,7 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
       displayStyle: choice(r.displayStyle, DISPLAY_STYLES, d.rendering.displayStyle),
       presentationMode: choice(r.presentationMode, ["DYNAMIC_BLOCKS", "AGGREGATE_HISTOGRAM", "STRUCTURAL_NODES", "DYNAMIC_KEY_LEVELS", "DYNAMIC_AGGREGATE", "MACRO_STRUCTURE"], d.rendering.presentationMode),
       visualizationType: choice(r.visualizationType, ["AUCTION_PROFILE", "CVD_FOOTPRINT", "COMBINED"], d.rendering.visualizationType),
+      profileLayoutRevision: integer(r.profileLayoutRevision, d.rendering.profileLayoutRevision, 1, 1000),
       profileBodyStyle: choice(r.profileBodyStyle, ["HDLX_CVD_BLOCKS", "SOLID_HISTOGRAM"], d.rendering.profileBodyStyle),
       profileBlockValueMode: choice(r.profileBlockValueMode, ["CUMULATIVE_CVD", "BLOCK_DELTA"], d.rendering.profileBlockValueMode),
       profileBlockPixelWidth: finite(r.profileBlockPixelWidth, d.rendering.profileBlockPixelWidth, 14, 80),
@@ -298,7 +300,8 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
   }
   // Existing workspaces predate the reference-faithful matrix profile. Promote
   // them once so a saved solid histogram cannot mask the corrected default.
-  if (typeof r.profileBodyStyle !== "string") {
+  const legacyBlockProfile = typeof r.profileBodyStyle !== "string";
+  if (legacyBlockProfile) {
     result.targetRows = Math.min(result.targetRows, 72);
     result.rendering.profileBodyStyle = "HDLX_CVD_BLOCKS";
     result.rendering.profileBlockValueMode = "CUMULATIVE_CVD";
@@ -308,9 +311,24 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
     result.rendering.profileWidthMetric = "CVD_ACTIVITY";
     result.rendering.rowLabelMode = "OFF";
     result.rendering.timeSegmentsMode = "STACKED";
-    result.rendering.widthPercent = 48;
+    result.rendering.widthPercent = 30;
     result.rendering.cellTextMode = "ALWAYS";
     result.rendering.maximumVisibleLabels = Math.max(result.rendering.maximumVisibleLabels, 3000);
+  }
+  // Revision 2 corrects the first block-profile release, which covered too much
+  // of the chart and emitted low-prominence structure. This migration runs once;
+  // later user-selected widths remain untouched.
+  if (r.profileLayoutRevision !== 2) {
+    result.rendering.profileLayoutRevision = 2;
+    if (result.rendering.profileBodyStyle === "HDLX_CVD_BLOCKS") {
+      result.rendering.widthPercent = 30;
+      result.nodeDetection.sensitivityPercentile = 10;
+      result.nodeDetection.neighborhood = Math.max(5, result.nodeDetection.neighborhood);
+      result.nodeDetection.prominence = Math.max(0.42, result.nodeDetection.prominence);
+      result.rendering.maximumVisibleLvns = Math.min(2, result.rendering.maximumVisibleLvns);
+      result.rendering.maximumVisibleHvns = Math.min(1, result.rendering.maximumVisibleHvns);
+      result.rendering.maximumVisibleStructuralZones = Math.min(2, result.rendering.maximumVisibleStructuralZones);
+    }
   }
   if (result.implementationMode === "PINE_COMPATIBILITY") {
     if (result.calculationEngine === "CVD_REAL_TRADES") result.calculationEngine = "CVD_PINE_COMPATIBLE";

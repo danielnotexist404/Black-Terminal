@@ -244,6 +244,7 @@ export interface AuctionProfileRenderingSettings {
   displayStyle: AuctionDisplayStyle;
   presentationMode: AuctionPresentationMode;
   visualizationType: AuctionVisualizationType;
+  profileLayoutRevision: number;
   profileBodyStyle: AuctionProfileBodyStyle;
   profileBlockValueMode: AuctionProfileBlockValueMode;
   profileBlockPixelWidth: number;

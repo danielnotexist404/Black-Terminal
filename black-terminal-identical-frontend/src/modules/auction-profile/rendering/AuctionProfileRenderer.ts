@@ -33,6 +33,34 @@ function labelVisible(mode: AuctionProfileSettings["rendering"]["rowLabelMode"],
   return width >= 28 && height >= 9;
 }
 
+export function auctionProfileDrawSignature(
+  snapshots: readonly AuctionProfileSnapshot[],
+  settings: AuctionProfileSettings,
+  transform: AuctionProfileRenderTransform,
+  renderingSignature = JSON.stringify(settings.rendering)
+) {
+  const projectionSignature = snapshots.map(snapshot => [
+    snapshot.profileId,
+    snapshot.profileVersion,
+    transform.xForTime(snapshot.range.start).toFixed(2),
+    transform.xForTime(snapshot.range.end + 1).toFixed(2),
+    transform.yForPrice(snapshot.grid.priceLow).toFixed(2),
+    transform.yForPrice(snapshot.grid.priceHigh).toFixed(2)
+  ].join(":"));
+  return [
+    snapshots.length,
+    projectionSignature.join("|"),
+    renderingSignature,
+    settings.nodeDetection.prominence,
+    settings.nodeDetection.showLvns,
+    settings.nodeDetection.showHvns,
+    transform.width,
+    transform.height,
+    transform.top,
+    transform.bottom
+  ].join(";");
+}
+
 export class AuctionProfileRenderer {
   readonly container = new Container();
   private clip = new Graphics();
@@ -51,6 +79,9 @@ export class AuctionProfileRenderer {
   private hitBlocks: Array<{ left: number; right: number; top: number; bottom: number; row: AuctionProfileRowProjection; block: AuctionProfileDisplayBlock; snapshot: AuctionProfileSnapshot }> = [];
   private viewport = { width: 0, top: 0, bottom: 0 };
   private settings: AuctionProfileSettings | null = null;
+  private lastDrawSignature = "";
+  private lastRenderingSettings: AuctionProfileSettings["rendering"] | null = null;
+  private renderingSettingsSignature = "";
   private metricsState = { rows: 0, nodes: 0, labels: 0, commands: 0, footprintCells: 0, profileBlocks: 0 };
 
   constructor() {
@@ -168,7 +199,13 @@ export class AuctionProfileRenderer {
       this.background.moveTo(bounds.center, profileTop).lineTo(bounds.center, profileBottom).stroke({ color: 0xb9bec5, width: 0.7, alpha: 0.36 });
     }
 
-    const ranked = [...snapshot.nodes].sort((left, right) => (right.prominence + right.normalizedScore) - (left.prominence + left.normalizedScore));
+    const structureVisible = snapshotIndex === snapshotCount - 1 || settings.rendering.showHistoricalExtensions;
+    const minimumProminence = Math.max(settings.nodeDetection.prominence, settings.rendering.structuralDetail === "MINIMAL" ? 0.42 : 0.3);
+    const ranked = structureVisible
+      ? [...snapshot.nodes]
+        .filter(node => node.prominence >= minimumProminence && (node.type === "LVN" || node.normalizedScore >= 0.55))
+        .sort((left, right) => (right.prominence + right.normalizedScore) - (left.prominence + left.normalizedScore))
+      : [];
     const detailCap = settings.rendering.structuralDetail === "MINIMAL" ? 3 : settings.rendering.structuralDetail === "STANDARD" ? 6 : settings.rendering.structuralDetail === "DETAILED" ? 12 : Number.POSITIVE_INFINITY;
     const lvn = settings.nodeDetection.showLvns ? ranked.filter(node => node.type === "LVN").slice(0, Math.min(detailCap, settings.rendering.maximumVisibleLvns)) : [];
     const hvn = settings.nodeDetection.showHvns ? ranked.filter(node => node.type === "HVN").slice(0, Math.min(detailCap, settings.rendering.maximumVisibleHvns)) : [];
@@ -216,13 +253,13 @@ export class AuctionProfileRenderer {
       this.metricsState.rows += 1;
     }
 
-    const keyLevels: Array<[string, number | null, string, boolean, boolean]> = [
+    const keyLevels: Array<[string, number | null, string, boolean, boolean]> = structureVisible ? [
       ["POC", snapshot.keyLevels.poc, settings.rendering.pocColor, settings.rendering.showKeyLevels, false],
       ["VAH", snapshot.keyLevels.vah, settings.rendering.valueAreaColor, settings.rendering.showValueArea, true],
       ["VAL", snapshot.keyLevels.val, settings.rendering.valueAreaColor, settings.rendering.showValueArea, true],
       ["IBH", snapshot.keyLevels.ibHigh, settings.rendering.negativeColor, settings.rendering.showInitialBalance, true],
       ["IBL", snapshot.keyLevels.ibLow, settings.rendering.negativeColor, settings.rendering.showInitialBalance, true]
-    ];
+    ] : [];
     for (const [name, price, colorValue, visible, dashed] of keyLevels) {
       if (!visible || price === null) continue;
       const y = transform.yForPrice(price);
@@ -238,6 +275,13 @@ export class AuctionProfileRenderer {
   }
 
   draw(snapshots: AuctionProfileSnapshot | readonly AuctionProfileSnapshot[] | null, settings: AuctionProfileSettings, transform: AuctionProfileRenderTransform) {
+    const items = snapshots ? (Array.isArray(snapshots) ? snapshots : [snapshots as AuctionProfileSnapshot]) : [];
+    if (this.lastRenderingSettings !== settings.rendering) {
+      this.lastRenderingSettings = settings.rendering;
+      this.renderingSettingsSignature = JSON.stringify(settings.rendering);
+    }
+    const signature = auctionProfileDrawSignature(items, settings, transform, this.renderingSettingsSignature);
+    if (signature === this.lastDrawSignature) return;
     this.settings = settings;
     this.activeTextKeys.clear();
     this.background.clear();
@@ -251,9 +295,9 @@ export class AuctionProfileRenderer {
     this.viewport = { width: transform.width, top: transform.top, bottom: transform.bottom };
     this.clip.clear().rect(0, transform.top, transform.width, Math.max(1, transform.bottom - transform.top)).fill(0xffffff);
     this.clearHover();
-    const items = snapshots ? (Array.isArray(snapshots) ? snapshots : [snapshots as AuctionProfileSnapshot]) : [];
     items.forEach((snapshot, index) => this.drawSnapshot(snapshot, settings, transform, index, items.length));
     this.finishTextFrame();
+    this.lastDrawSignature = signature;
   }
 
   clearHover() {
@@ -310,6 +354,8 @@ export class AuctionProfileRenderer {
   }
 
   dispose() {
+    this.lastDrawSignature = "";
+    this.lastRenderingSettings = null;
     this.container.mask = null;
     this.container.destroy({ children: true });
     this.textPool.forEach(text => text.destroy());

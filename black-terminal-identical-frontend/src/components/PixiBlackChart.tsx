@@ -350,6 +350,7 @@ export function PixiBlackChart({
   const [aifPriceTransform, setAifPriceTransform] = useState<ChartPriceTransformSnapshot | null>(null);
   const [kioseffSnapshot, setKioseffSnapshot] = useState<KioseffSnapshot | null>(null);
   const [auctionProfileSnapshots, setAuctionProfileSnapshots] = useState<AuctionProfileSnapshot[]>([]);
+  const auctionProfileSnapshotsRef = useRef<AuctionProfileSnapshot[]>([]);
   const auctionProfileSnapshot = auctionProfileSnapshots.at(-1) ?? null;
   const [auctionProfileLoading, setAuctionProfileLoading] = useState(false);
   const [auctionProfileError, setAuctionProfileError] = useState<string | null>(null);
@@ -833,10 +834,14 @@ export function PixiBlackChart({
             const client = auctionWorkerRef.current;
             if (!client || !buffered.length) return;
             void client.appendTrades(buffered, "live:" + Date.now()).then((snapshots) => {
+              const previousFingerprint = auctionProfileSnapshotsRef.current.map(snapshot => snapshot.profileVersion).join("|");
+              const nextFingerprint = snapshots.map(snapshot => snapshot.profileVersion).join("|");
+              if (previousFingerprint === nextFingerprint) return;
+              auctionProfileSnapshotsRef.current = snapshots;
               setAuctionProfileSnapshots(snapshots);
               engineRef.current?.setAuctionProfileState(snapshots, normalizedAuctionProfileSettings);
             }).catch(() => undefined);
-          }, 180);
+          }, 600);
         }
       }
       for (const trade of newTrades) {
@@ -1689,6 +1694,7 @@ export function PixiBlackChart({
     if (!auctionDataRequired) {
       auctionWorkerRef.current?.dispose();
       auctionWorkerRef.current = null;
+      auctionProfileSnapshotsRef.current = [];
       setAuctionProfileSnapshots([]);
       setAuctionProfileLoading(false);
       setAuctionProfileError(null);
@@ -1701,7 +1707,7 @@ export function PixiBlackChart({
     const client = new AuctionProfileWorkerClient();
     auctionWorkerRef.current?.dispose();
     auctionWorkerRef.current = client;
-    setAuctionProfileLoading(true);
+    setAuctionProfileLoading(auctionProfileSnapshotsRef.current.length === 0);
     setAuctionProfileError(null);
     const bars = replaySourceRef.current.slice(-normalizedAuctionProfileSettings.lookbackBars);
     const start = bars[0]?.time ?? 0;
@@ -1725,6 +1731,7 @@ export function PixiBlackChart({
       sourceRevision: auctionProfileDataRevision
     }).then(snapshots => {
       if (disposed) return;
+      auctionProfileSnapshotsRef.current = snapshots;
       setAuctionProfileSnapshots(snapshots);
       setAuctionProfileLoading(false);
       engineRef.current?.setAuctionProfileState(snapshots, normalizedAuctionProfileSettings);
@@ -1732,7 +1739,9 @@ export function PixiBlackChart({
       if (disposed || String(error).includes("CANCELLED")) return;
       setAuctionProfileLoading(false);
       setAuctionProfileError(error instanceof Error ? error.message : String(error));
-      engineRef.current?.setAuctionProfileState(null, normalizedAuctionProfileSettings);
+      if (auctionProfileSnapshotsRef.current.length === 0) {
+        engineRef.current?.setAuctionProfileState(null, normalizedAuctionProfileSettings);
+      }
     });
 
     return () => {

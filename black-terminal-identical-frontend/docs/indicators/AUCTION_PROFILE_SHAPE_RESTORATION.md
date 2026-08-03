@@ -17,7 +17,7 @@ This remains different from the separate **CVD Footprint** chart type. Profile b
 
 The default is Auction Profile → HDLX CVD Matrix Blocks → Single-Sided Right → Range Start → CVD Activity. Selling pressure is independently graded from dark red to blood red. Buying pressure is independently graded from dark graphite through silver to white. Every block receives its own color from its own signed CVD value.
 
-The default 48% width, 24-pixel cells, and 72-row grid keep the full 5,000-bar profile legible with values inside the cells. The same renderer supports 10,000 and 20,000 bars without changing the calculation when the camera moves. Solid Histogram remains an explicit optional construction, not the default.
+The corrected default 30% width, 24-pixel cells, and 72-row grid keep the full 5,000-bar profile legible without covering the market structure. Macro and Deep Macro presets use 32% and 36%. The same renderer supports 10,000 and 20,000 bars without changing the calculation when the camera moves. Solid Histogram remains an explicit optional construction, not the default.
 
 ## Scope semantics
 
@@ -32,6 +32,10 @@ Camera movement does not alter calculation data except when Visible Range or Vis
 
 POC, VAH, VAL, IB, LVN, and HVN remain constrained to the profile boundary. Classified live trades update only their active price/time cell; the block's delta and developing row CVD update together while finalized history remains frozen.
 
+VAH, VAL, and structural nodes are emitted only for the active profile unless Historical Extensions is explicitly enabled. Minimal structure requires at least 42% local prominence, excludes incomplete edge neighborhoods, and caps the visible context at two LVNs, one HVN, and two total zones. This prevents routine local minima from filling the chart.
+
+The renderer fingerprints its snapshot, settings, and camera projection. Ordinary price ticks reuse the existing Pixi geometry instead of clearing and rebuilding thousands of matrix labels. Background recalculation preserves the last certified snapshot until its replacement is ready, so loading and transient worker states cannot flash the profile off the chart.
+
 ## Certification
 
-`npm run test:auction-profile` certifies signed matrix conservation, cumulative row CVD, deterministic chronological compression, source-cell disclosure, stable placement, live updates, renderer separation, and exact/mixed provenance. `npm run benchmark:auction-profile` covers 100 through 20,000 bars.
+`npm run test:auction-profile` certifies signed matrix conservation, cumulative row CVD, deterministic chronological compression, source-cell disclosure, stable placement, render-cache invalidation, significant-node defaults, live updates, renderer separation, and exact/mixed provenance. `npm run benchmark:auction-profile` covers 100 through 20,000 bars.

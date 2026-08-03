@@ -51,12 +51,14 @@ export function detectAuctionNodes(
     const peers = values.slice(from, to + 1);
     return type === "LVN" ? values[index]! <= Math.min(...peers) : values[index]! >= Math.max(...peers);
   };
+  const hasCompleteNeighborhood = (index: number) => rows.length <= neighborhood * 2 + 1
+    || (index >= neighborhood && index <= rows.length - neighborhood - 1);
   const nodes: AuctionNodeZone[] = [];
   for (const type of ["LVN", "HVN"] as const) {
     if ((type === "LVN" && !settings.nodeDetection.showLvns) || (type === "HVN" && !settings.nodeDetection.showHvns)) continue;
     const candidates = values
       .map((value, index) => ({ value, index }))
-      .filter(({ value, index }) => (type === "LVN" ? value <= lowThreshold : value >= highThreshold) && local(index, type))
+      .filter(({ value, index }) => hasCompleteNeighborhood(index) && (type === "LVN" ? value <= lowThreshold : value >= highThreshold) && local(index, type))
       .map(({ index }) => index);
     const groups = settings.nodeDetection.mergeContiguousRows ? mergeCandidates(candidates, settings.nodeDetection.maximumGapRows) : candidates.map(index => [index]);
     for (const group of groups.filter(item => item.length >= settings.nodeDetection.minimumWidthRows)) {

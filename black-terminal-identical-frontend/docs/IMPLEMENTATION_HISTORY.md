@@ -1358,3 +1358,4 @@ Remaining:
 - Retained Solid Histogram as an optional construction plus seven geometries, six placements, row-label policies, square-root scaling, and Profile/Footprint/Combined selection.
 - Added CVD Session, CVD Macro, CVD Deep Macro, Original Pine Profile, and CVD Footprint presets.
 - Added renderer-separation, block-chain, signed-direction, cumulative-CVD, compression, live-update, and 20,000-bar performance certification plus the corrective documentation set.
+- Corrected the first block-profile polish: reduced the default footprint to 30%, cached unchanged GPU frames to eliminate tick-driven flashing, retained the last certified snapshot through background refreshes, and restricted VAH/VAL/LVN/HVN structure to the active profile with high-prominence node filtering.

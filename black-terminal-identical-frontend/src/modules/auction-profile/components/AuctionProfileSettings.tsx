@@ -56,7 +56,7 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
       next.rendering.timeSegmentsMode = "STACKED";
       next.rendering.rowLabelMode = "OFF";
       next.rendering.cellTextMode = "ALWAYS";
-      next.rendering.widthPercent = 44;
+      next.rendering.widthPercent = 30;
     } else if (preset === "SESSION") {
       next.implementationMode = "BLACK_CORE_NATIVE";
       next.scopeMode = "SESSION";
@@ -71,7 +71,7 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
       next.rendering.timeSegmentsMode = "STACKED";
       next.rendering.rowLabelMode = "OFF";
       next.rendering.cellTextMode = "ALWAYS";
-      next.rendering.widthPercent = 44;
+      next.rendering.widthPercent = 30;
     } else if (preset === "MACRO") {
       next.implementationMode = "BLACK_CORE_NATIVE";
       next.scopeMode = "MACRO_COMPOSITE";
@@ -83,7 +83,7 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
       next.rendering.profileGeometry = "SINGLE_SIDED_RIGHT";
       next.rendering.profilePlacement = "RANGE_START";
       next.rendering.profileWidthMetric = "CVD_ACTIVITY";
-      next.rendering.widthPercent = 48;
+      next.rendering.widthPercent = 32;
       next.rendering.timeSegmentsMode = "STACKED";
       next.rendering.rowLabelMode = "OFF";
       next.rendering.cellTextMode = "ALWAYS";
@@ -100,7 +100,7 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
       next.rendering.profileGeometry = "SINGLE_SIDED_RIGHT";
       next.rendering.profilePlacement = "RANGE_START";
       next.rendering.profileWidthMetric = "CVD_ACTIVITY";
-      next.rendering.widthPercent = 55;
+      next.rendering.widthPercent = 36;
       next.rendering.timeSegmentsMode = "STACKED";
       next.rendering.rowLabelMode = "OFF";
       next.rendering.cellTextMode = "ALWAYS";

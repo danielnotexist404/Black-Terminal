@@ -8,6 +8,7 @@ import { auctionHistogramWidth, auctionProfileHorizontalBounds, auctionProfileSt
 import { auctionCellRenderStrides, downsampleAuctionCells } from "../src/modules/auction-profile/rendering/cells.ts";
 import { auctionCellTextVisible, formatAuctionCellMetric } from "../src/modules/auction-profile/rendering/labels.ts";
 import { CVD_FOOTPRINT_RENDERER_KIND, auctionCellColor } from "../src/modules/auction-profile/rendering/footprint/CvdFootprintRenderer.ts";
+import { auctionProfileDrawSignature } from "../src/modules/auction-profile/rendering/AuctionProfileRenderer.ts";
 import { AUCTION_PROFILE_RENDERER_KIND, auctionProfileBarSpans, buildAuctionProfileRows, compressAuctionProfileSegments, resolveAuctionProfilePlacement } from "../src/modules/auction-profile/core/profileGeometry.ts";
 import { resolveAuctionVisualizationLayers } from "../src/modules/auction-profile/rendering/visualization.ts";
 import { validateAuctionProfileInvariants } from "../src/modules/auction-profile/testing/nativeValidation.ts";
@@ -112,11 +113,15 @@ assert.equal(settings.rendering.profileBlockValueMode, "CUMULATIVE_CVD");
 assert.equal(settings.rendering.profileGeometry, "SINGLE_SIDED_RIGHT");
 assert.equal(settings.rendering.profilePlacement, "RANGE_START");
 assert.equal(settings.rendering.profileWidthMetric, "CVD_ACTIVITY");
+assert.equal(settings.rendering.profileLayoutRevision, 2);
+assert.equal(settings.rendering.widthPercent, 30);
 assert.equal(settings.rendering.timeSegmentsMode, "STACKED", "the profile silhouette must be built from chronological CVD cells");
 assert.equal(settings.nodeDetection.showLvns, true, "restrained LVN context is enabled by default");
 assert.equal(settings.nodeDetection.showHvns, true, "restrained HVN context is enabled by default");
-assert.equal(settings.rendering.maximumVisibleLvns, 3);
-assert.equal(settings.rendering.maximumVisibleHvns, 3);
+assert.equal(settings.rendering.maximumVisibleLvns, 2);
+assert.equal(settings.rendering.maximumVisibleHvns, 1);
+assert.ok(settings.nodeDetection.prominence >= 0.42);
+assert.equal(settings.nodeDetection.sensitivityPercentile, 10);
 assert.equal(settings.rendering.showNodeLabels, false);
 assert.equal(settings.rendering.showMidpoint, false);
 assert.equal(settings.rendering.showStructuralSr, false);
@@ -131,6 +136,31 @@ assert.equal(
   snapshot.matrix.cells.reduce((sum, cell) => sum + cell.totalValue, 0),
   trades.reduce((sum, trade) => sum + trade.quantity, 0),
   "the sparse matrix must conserve exact trade quantity"
+);
+const stableTransform = {
+  width: 1000,
+  height: 700,
+  top: 40,
+  bottom: 650,
+  xForTime: (time: number) => time / 1000,
+  xForLookbackBars: (count: number) => 1000 - count,
+  yForPrice: (price: number) => 650 - price
+};
+const stableDrawSignature = auctionProfileDrawSignature([snapshot], settings, stableTransform);
+assert.equal(
+  auctionProfileDrawSignature([snapshot], settings, stableTransform),
+  stableDrawSignature,
+  "ordinary market redraws must reuse the existing GPU profile"
+);
+assert.notEqual(
+  auctionProfileDrawSignature([{ ...snapshot, profileVersion: snapshot.profileVersion + ":live" }], settings, stableTransform),
+  stableDrawSignature,
+  "a genuine CVD snapshot revision must invalidate the profile cache"
+);
+assert.notEqual(
+  auctionProfileDrawSignature([snapshot], settings, { ...stableTransform, yForPrice: (price: number) => 640 - price }),
+  stableDrawSignature,
+  "a price-camera change must invalidate the profile cache"
 );
 
 const fullyVisibleProfile = auctionProfileHorizontalBounds(

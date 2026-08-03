@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
-import { migrateAuctionProfileSettings } from "../src/modules/auction-profile/core/settings.ts";
+import { AUCTION_PROFILE_DEFAULT_SETTINGS, migrateAuctionProfileSettings } from "../src/modules/auction-profile/core/settings.ts";
 import { stableHash } from "../src/modules/auction-profile/core/canonical.ts";
 import { createAuctionProfileGrid } from "../src/modules/auction-profile/core/profileGrid.ts";
 import { resolveAuctionScopeWindows } from "../src/modules/auction-profile/core/scope.ts";
 import { auctionHistogramWidth, auctionProfileHorizontalBounds, auctionProfileStartX } from "../src/modules/auction-profile/rendering/histogram.ts";
+import { auctionCellRenderStrides, downsampleAuctionCells } from "../src/modules/auction-profile/rendering/cells.ts";
+import { auctionCellTextVisible, formatAuctionCellMetric } from "../src/modules/auction-profile/rendering/labels.ts";
+import { auctionCellColor } from "../src/modules/auction-profile/rendering/AuctionProfileRenderer.ts";
+import { validateAuctionProfileInvariants } from "../src/modules/auction-profile/testing/nativeValidation.ts";
 import { PINE_CVD_PROFILE_KNOWN_ANOMALIES } from "../src/modules/auction-profile/engines/pineCompatibility.ts";
-import { appendTradesToAuctionProfile, calculateAuctionProfile } from "../src/modules/auction-profile/engines/nativeEngine.ts";
+import { appendTradesToAuctionProfile, calculateAuctionProfile, calculateAuctionProfiles } from "../src/modules/auction-profile/engines/nativeEngine.ts";
 import { InMemoryCanonicalCvdService } from "../src/modules/auction-profile/data/tradeSource.ts";
 import { AuctionProfileWorkerRuntime } from "../src/modules/auction-profile/worker/auctionProfileWorker.ts";
 import type { Candle } from "../src/chart-engine/types.ts";
@@ -86,6 +90,24 @@ assert.ok(snapshot.keyLevels.poc !== null);
 assert.ok(snapshot.keyLevels.vah !== null);
 assert.ok(snapshot.keyLevels.val !== null);
 assert.ok(snapshot.profileVersion.startsWith("auction-"));
+assert.equal(settings.rendering.presentationMode, "DYNAMIC_KEY_LEVELS", "dynamic blocks plus restrained key levels must be the default presentation");
+assert.equal(settings.nodeDetection.showLvns, false, "dense node overlays must remain opt-in");
+assert.equal(settings.nodeDetection.showHvns, false, "dense node overlays must remain opt-in");
+assert.equal(settings.rendering.showNodeLabels, false);
+assert.equal(settings.rendering.showMidpoint, false);
+assert.equal(settings.rendering.showStructuralSr, false);
+assert.equal(settings.rendering.showHistoricalExtensions, false);
+assert.equal(settings.rendering.structuralDetail, "MINIMAL");
+assert.equal(settings.rendering.zoneExtensionMode, "PROFILE_ONLY");
+assert.equal(snapshot.engineVersion, "bc-meap-2.0.0");
+assert.ok(snapshot.matrix.blocks.length > 0);
+assert.ok(snapshot.matrix.cells.length > 0);
+assert.deepEqual(validateAuctionProfileInvariants(snapshot), []);
+assert.equal(
+  snapshot.matrix.cells.reduce((sum, cell) => sum + cell.totalValue, 0),
+  trades.reduce((sum, trade) => sum + trade.quantity, 0),
+  "the sparse matrix must conserve exact trade quantity"
+);
 
 const fullyVisibleProfile = auctionProfileHorizontalBounds(
   { start: 100, end: 500 },
@@ -128,6 +150,105 @@ const gridA = createAuctionProfileGrid(bars, settings, input.metadata);
 const gridB = createAuctionProfileGrid(bars, settings, input.metadata);
 assert.deepEqual(gridA, gridB, "native grid must be deterministic and camera-independent");
 assert.equal(stableHash(gridA), stableHash(gridB));
+
+const exactBars: Candle[] = [
+  { time: 1_800_000_000, open: 63000, high: 63100, low: 62950, close: 63050, volume: 20 },
+  { time: 1_800_000_060, open: 63050, high: 63150, low: 63000, close: 63100, volume: 30 }
+];
+const exactTrades: CanonicalTrade[] = [
+  { venue: "bybit", symbol: "BTCUSDT", timestamp: exactBars[0]!.time + 1, tradeId: "matrix-buy-a", price: 63000, quantity: 2, notional: 126000, aggressorSide: "BUY", source: "EXCHANGE_AGGRESSOR_FLAG" },
+  { venue: "bybit", symbol: "BTCUSDT", timestamp: exactBars[0]!.time + 2, tradeId: "matrix-buy-b", price: 63000, quantity: 1, notional: 63000, aggressorSide: "BUY", source: "EXCHANGE_AGGRESSOR_FLAG" },
+  { venue: "bybit", symbol: "BTCUSDT", timestamp: exactBars[0]!.time + 3, tradeId: "matrix-sell", price: 63050, quantity: 4, notional: 252200, aggressorSide: "SELL", source: "EXCHANGE_AGGRESSOR_FLAG" },
+  { venue: "bybit", symbol: "BTCUSDT", timestamp: exactBars[1]!.time + 1, tradeId: "matrix-buy-current", price: 63100, quantity: 6, notional: 378600, aggressorSide: "BUY", source: "EXCHANGE_AGGRESSOR_FLAG" }
+];
+const exactSettings = migrateAuctionProfileSettings({
+  ...AUCTION_PROFILE_DEFAULT_SETTINGS,
+  scopeMode: "ROLLING",
+  lookbackBars: exactBars.length,
+  calculationEngine: "CVD_REAL_TRADES",
+  cvdMetric: "NET_CVD",
+  dataSource: "LIVE_TRADE_STREAM",
+  rowSizingMode: "PRICE",
+  rowSizePrice: 50,
+  targetRows: 16,
+  maximumRows: 64,
+  blockResolution: "1m",
+  maximumTimeBlocks: 64
+});
+const exactSnapshot = calculateAuctionProfile({
+  venue: "bybit",
+  symbol: "BTCUSDT",
+  timeframe: "1m",
+  metadata: {
+    exchange: "bybit",
+    rawSymbol: "BTCUSDT",
+    normalizedSymbol: "BTC/USDT",
+    assetClass: "crypto",
+    tickSize: "0.5",
+    timezone: "UTC",
+    sessionPolicy: "24/7",
+    source: "matrix-fixture"
+  },
+  bars: exactBars,
+  trades: exactTrades,
+  settings: exactSettings,
+  sourceRevision: "matrix-fixture-v1"
+});
+assert.ok(exactSnapshot);
+assert.equal(exactSnapshot.matrix.blocks.length, 2);
+const exactCell = (blockIndex: number, price: number) => exactSnapshot.matrix.cells.find(cell =>
+  cell.blockIndex === blockIndex && cell.priceLow <= price && cell.priceHigh > price
+);
+assert.equal(exactCell(0, 63000)?.rawValue, 3, "aggressive buys at one price must occupy one positive cell");
+assert.equal(exactCell(0, 63050)?.rawValue, -4, "aggressive sells must remain negative in their exact price row");
+assert.equal(exactCell(1, 63100)?.rawValue, 6, "the live block must preserve its own time column");
+assert.equal(exactCell(0, 63000)?.isFinalized, true);
+assert.equal(exactCell(1, 63100)?.isDeveloping, true);
+const tpoSnapshot = calculateAuctionProfile({
+  venue: "bybit",
+  symbol: "BTCUSDT",
+  timeframe: "1m",
+  bars: exactBars,
+  trades: exactTrades,
+  settings: migrateAuctionProfileSettings({ ...exactSettings, calculationEngine: "TPO" }),
+  sourceRevision: "matrix-tpo-fixture-v1"
+});
+assert.ok(tpoSnapshot);
+assert.equal(
+  tpoSnapshot.matrix.cells.find(cell => cell.blockIndex === 0 && cell.priceLow <= 63000 && cell.priceHigh > 63000)?.rawValue,
+  1,
+  "multiple prints in one row and TPO bracket must remain one TPO observation"
+);
+const frozenValue = exactCell(0, 63000)!.rawValue;
+const developingBefore = exactCell(1, 63100)!.rawValue;
+appendTradesToAuctionProfile(exactSnapshot, [{
+  venue: "bybit", symbol: "BTCUSDT", timestamp: exactBars[1]!.time + 5, tradeId: "matrix-increment",
+  price: 63100, quantity: 2, notional: 126200, aggressorSide: "SELL", source: "EXCHANGE_AGGRESSOR_FLAG"
+}], exactSettings);
+assert.equal(exactCell(0, 63000)?.rawValue, frozenValue, "incremental updates must not mutate finalized historical cells");
+assert.equal(exactCell(1, 63100)?.rawValue, developingBefore - 2, "incremental trades must update only their active cell");
+assert.deepEqual(validateAuctionProfileInvariants(exactSnapshot), []);
+
+const projected = downsampleAuctionCells(exactSnapshot.matrix.cells, 2, 2);
+assert.equal(
+  projected.reduce((sum, cell) => sum + cell.rawValue, 0),
+  exactSnapshot.matrix.cells.reduce((sum, cell) => sum + cell.rawValue, 0),
+  "render-only downsampling must conserve signed matrix value"
+);
+assert.deepEqual(auctionCellRenderStrides(1000, 600, 500, 300), { columnStride: 2, rowStride: 2 });
+assert.equal(auctionCellTextVisible("AUTO", 30, 12, 0.5), true);
+assert.equal(auctionCellTextVisible("HOVER_ONLY", 30, 12, 1), false);
+assert.equal(formatAuctionCellMetric(-1250, "CVD_REAL_TRADES"), "-1.3K");
+assert.equal(formatAuctionCellMetric(0.34, "IMBALANCE_RATIO"), "+34%");
+assert.equal(formatAuctionCellMetric(0.34, "CVD_REAL_TRADES", "CVD_IMBALANCE_RATIO"), "+34%");
+assert.equal(formatAuctionCellMetric(84_000, "USD_VOLUME"), "$84.0K");
+assert.equal(formatAuctionCellMetric(7, "TPO"), "7");
+assert.equal(formatAuctionCellMetric(0.0042, "REALIZED_VOLATILITY"), "0.42%");
+assert.equal(auctionCellColor(0, 0, exactSettings.rendering), 0x333333, "neutral cells must use the configured balanced color");
+assert.equal(auctionCellColor(1, 1, exactSettings.rendering), 0xe2e3e5, "maximum positive cells must render silver-white");
+assert.equal(auctionCellColor(-1, 1, exactSettings.rendering), 0xec182a, "maximum negative cells must render blood red");
+assert.notEqual(auctionCellColor(1, 0.2, exactSettings.rendering), auctionCellColor(1, 0.9, exactSettings.rendering), "positive intensity must be continuous");
+assert.notEqual(auctionCellColor(-1, 0.2, exactSettings.rendering), auctionCellColor(-1, 0.9, exactSettings.rendering), "negative intensity must be continuous");
 
 const approximate = calculateAuctionProfile({ ...input, trades: [], sourceRevision: "bars-only" });
 assert.ok(approximate);
@@ -176,19 +297,37 @@ const scopeBars: Candle[] = Array.from({ length: 48 }, (_, index) => ({
 const utcSession = resolveAuctionScopeWindows(scopeBars, migrateAuctionProfileSettings({
   ...settings,
   scopeMode: "SESSION",
+  lookbackBars: 48,
   sessionTemplate: "UTC_DAY",
   sessionTimezone: "UTC"
 }));
-assert.equal(utcSession.length, 1);
-assert.equal(utcSession[0]!.start, scopeFixtureStart + 86_400, "session timestamps must remain in Black Terminal seconds");
-assert.equal(utcSession[0]!.startBarIndex, 24);
+assert.equal(utcSession.length, 2, "completed session matrices must be retained inside the selected lookback");
+assert.deepEqual(utcSession.map(window => window.startBarIndex), [0, 24]);
+assert.equal(utcSession[1]!.start, scopeFixtureStart + 86_400, "session timestamps must remain in Black Terminal seconds");
+
+const historicalSessions = calculateAuctionProfiles({
+  ...input,
+  bars: scopeBars,
+  trades: [],
+  settings: migrateAuctionProfileSettings({
+    ...settings,
+    scopeMode: "SESSION",
+    lookbackBars: 48,
+    dataSource: "CHART_BARS"
+  })
+});
+assert.equal(historicalSessions.length, 2);
+assert.ok(historicalSessions[0]!.matrix.blocks.every(block => block.isFinalized && !block.isDeveloping));
+assert.ok(historicalSessions[1]!.matrix.blocks.at(-1)!.isDeveloping);
 
 const londonSession = resolveAuctionScopeWindows(scopeBars, migrateAuctionProfileSettings({
   ...settings,
   scopeMode: "SESSION",
+  lookbackBars: 48,
   sessionTemplate: "LONDON"
 }));
-assert.equal(londonSession[0]!.start, Date.UTC(2024, 6, 2, 7) / 1000, "London session must respect summer time");
+assert.equal(londonSession.at(-1)!.start, Date.UTC(2024, 6, 2, 7) / 1000, "London session must respect summer time");
+assert.ok(londonSession.length >= 2, "session history must not collapse into the latest profile");
 
 const dailyPeriodic = resolveAuctionScopeWindows(scopeBars, migrateAuctionProfileSettings({
   ...settings,
@@ -207,6 +346,18 @@ const sixHourPeriodic = resolveAuctionScopeWindows(scopeBars, migrateAuctionProf
   lookbackBars: 48
 }));
 assert.equal(sixHourPeriodic.length, 8);
+
+const independentModes = [
+  ["MACRO_COMPOSITE", "DYNAMIC_BLOCKS"],
+  ["SESSION", "AGGREGATE_HISTOGRAM"],
+  ["COMPOSITE", "DYNAMIC_AGGREGATE"],
+  ["VISIBLE_RANGE", "DYNAMIC_KEY_LEVELS"]
+] as const;
+for (const [scopeMode, presentationMode] of independentModes) {
+  const independent = migrateAuctionProfileSettings({ ...settings, scopeMode, rendering: { ...settings.rendering, presentationMode } });
+  assert.equal(independent.scopeMode, scopeMode);
+  assert.equal(independent.rendering.presentationMode, presentationMode, `${scopeMode} must not force a presentation mode`);
+}
 
 const responses: AuctionProfileWorkerResponse[] = [];
 const runtime = new AuctionProfileWorkerRuntime({ postMessage: response => responses.push(response) });

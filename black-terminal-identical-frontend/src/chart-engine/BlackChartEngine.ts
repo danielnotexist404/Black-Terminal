@@ -144,7 +144,7 @@ export class BlackChartEngine {
   private kioseffSnapshot: KioseffSnapshot | null = null;
   private kioseffSettings: KioseffSettingsV1 = structuredClone(KIOSEFF_DEFAULT_SETTINGS);
   private auctionProfileRenderer = new AuctionProfileRenderer();
-  private auctionProfileSnapshot: AuctionProfileSnapshot | null = null;
+  private auctionProfileSnapshots: AuctionProfileSnapshot[] = [];
   private auctionProfileSettings: AuctionProfileSettings = structuredClone(AUCTION_PROFILE_DEFAULT_SETTINGS);
   private volumeProfileModel = new VolumeProfileModel();
   private lastVolumeProfileResult?: VolumeProfileResult;
@@ -314,7 +314,8 @@ export class BlackChartEngine {
       this.kioseffSettings = migrateKioseffSettings(options.kioseffSettings);
     }
     this.setHeatmapSource(options.candles);
-    if (options.auctionProfileSnapshot !== undefined) this.auctionProfileSnapshot = options.auctionProfileSnapshot;
+    if (options.auctionProfileSnapshots !== undefined) this.auctionProfileSnapshots = options.auctionProfileSnapshots;
+    else if (options.auctionProfileSnapshot !== undefined) this.auctionProfileSnapshots = options.auctionProfileSnapshot ? [options.auctionProfileSnapshot] : [];
     if (options.auctionProfileSettings) {
       this.auctionProfileSettings = migrateAuctionProfileSettings(options.auctionProfileSettings);
     }
@@ -399,6 +400,7 @@ export class BlackChartEngine {
         this.queueDraw();
       } else {
         this.drawCrosshair();
+        if (this.visibleIndicators.auctionProfile) this.auctionProfileRenderer.drawHover(e.global.x, e.global.y);
       }
     });
 
@@ -450,6 +452,7 @@ export class BlackChartEngine {
     this.app.stage.on("pointercancel", cleanUpPointer);
     this.app.stage.on("pointerleave", () => {
       this.pointer.active = false;
+      this.auctionProfileRenderer.clearHover();
       this.setPriceScaleHover(false);
       this.finishBrushDrawing();
       this.stopDragging();
@@ -721,8 +724,8 @@ export class BlackChartEngine {
     this.draw();
   }
 
-  setAuctionProfileState(snapshot: AuctionProfileSnapshot | null, settings = this.auctionProfileSettings) {
-    this.auctionProfileSnapshot = snapshot;
+  setAuctionProfileState(snapshots: AuctionProfileSnapshot | readonly AuctionProfileSnapshot[] | null, settings = this.auctionProfileSettings) {
+    this.auctionProfileSnapshots = snapshots ? (Array.isArray(snapshots) ? [...snapshots] : [snapshots as AuctionProfileSnapshot]) : [];
     this.auctionProfileSettings = migrateAuctionProfileSettings(settings);
     this.draw();
   }
@@ -1231,7 +1234,9 @@ export class BlackChartEngine {
       if (candles[middle]!.time <= time) low = middle + 1;
       else high = middle;
     }
-    const leftIndex = Math.max(0, low - 1);
+    const leftIndex = low >= candles.length && candles.length > 1
+      ? candles.length - 2
+      : Math.max(0, low - 1);
     const left = candles[leftIndex]!;
     const right = candles[Math.min(candles.length - 1, leftIndex + 1)]!;
     if (left.time === right.time) return this.xForIndex(leftIndex);
@@ -1538,7 +1543,7 @@ export class BlackChartEngine {
     );
     const kioseffMetrics = this.kioseffRenderer.metrics();
     this.auctionProfileRenderer.draw(
-      this.visibleIndicators.auctionProfile ? this.auctionProfileSnapshot : null,
+      this.visibleIndicators.auctionProfile ? this.auctionProfileSnapshots : null,
       this.auctionProfileSettings,
       {
         width: plotWidth,

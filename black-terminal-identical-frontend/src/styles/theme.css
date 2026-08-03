@@ -11944,6 +11944,21 @@ body.dom-pro-resize-active {
   border-color: #700010;
   color: #f4f6f7;
   background: #160207;
+.auction-profile-presets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin: 4px 0 8px;
+}
+.auction-profile-presets button {
+  min-height: 27px;
+  border: 1px solid #2a2e35;
+  border-radius: 2px;
+  background: #090b0e;
+  color: #cfd3d8;
+  font: 600 8px/1.2 "IBM Plex Mono", monospace;
+  cursor: pointer;
+}
 }
 .auction-profile-settings .indicator-settings-section > small {
   display: block;
@@ -11976,9 +11991,12 @@ body.dom-pro-resize-active {
 }
 .auction-profile-legend {
   top: 48px;
-  display: flex;
-  align-items: center;
-  gap: 9px;
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  gap: 3px 9px;
+  max-width: min(520px, calc(100vw - 220px));
+  white-space: nowrap;
   padding: 5px 8px;
   font-size: 8px;
 }

@@ -142,9 +142,19 @@ export function resolveAuctionScopeWindows(
     return [windowFromIndices(bars, start, Math.max(start, end - 1), settings, settings.scopeMode === "FIXED_START" ? "Fixed Start" : "Manual Range")];
   }
   if (settings.scopeMode === "SESSION") {
-    const startTime = sessionStart(bars[last]!.time, settings);
-    const start = Math.max(0, bars.findIndex(bar => bar.time >= startTime));
-    return [windowFromIndices(bars, start, last, settings, "Session")];
+    const windows: AuctionScopeWindow[] = [];
+    const first = Math.max(0, bars.length - settings.lookbackBars);
+    let start = first;
+    let bucket = sessionStart(bars[first]!.time, settings);
+    for (let index = first + 1; index <= last; index += 1) {
+      const nextBucket = sessionStart(bars[index]!.time, settings);
+      if (nextBucket === bucket) continue;
+      windows.push(windowFromIndices(bars, start, index - 1, settings, "Session " + (windows.length + 1)));
+      start = index;
+      bucket = nextBucket;
+    }
+    windows.push(windowFromIndices(bars, start, last, settings, "Session " + (windows.length + 1)));
+    return windows;
   }
   if (settings.scopeMode === "PERIODIC_COMPOSITE") {
     const windows: AuctionScopeWindow[] = [];

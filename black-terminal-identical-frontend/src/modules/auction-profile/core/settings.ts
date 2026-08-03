@@ -17,11 +17,14 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
   implementationMode: "BLACK_CORE_NATIVE",
   scopeMode: "ROLLING",
   calculationEngine: "CVD_REAL_TRADES",
-  cvdMetric: "ABSOLUTE_CVD",
+  cvdMetric: "NET_CVD",
   dataSource: "HYBRID",
   fallbackSource: "CHART_BARS",
   priceAllocation: "BODY_WICK_WEIGHTED",
   lookbackBars: 5000,
+  blockResolution: "CHART_TIMEFRAME",
+  customBlockMinutes: 60,
+  updateDevelopingBlock: true,
   compositeLocked: false,
   periodicity: "WEEKLY",
   periodicBars: 500,
@@ -39,7 +42,7 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
   atrFraction: 0.2,
   targetRows: 180,
   maximumRows: 1200,
-  maximumTimeBlocks: 4000,
+  maximumTimeBlocks: 5000,
   gridAnchor: "INSTRUMENT_TICK_ORIGIN",
   valueAreaFraction: 0.7,
   valueAreaBasis: "ABSOLUTE_VALUE",
@@ -57,8 +60,8 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
     minimumWidthRows: 1,
     maximumGapRows: 1,
     mergeContiguousRows: true,
-    showLvns: true,
-    showHvns: true
+    showLvns: false,
+    showHvns: false
   },
   hybridWeights: {
     volume: 0.18,
@@ -72,26 +75,47 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
   },
   rendering: {
     displayStyle: "COMBINED",
+    presentationMode: "DYNAMIC_KEY_LEVELS",
     palette: "BLACK_TERMINAL_INSTITUTIONAL",
     widthPercent: 32,
     opacity: 0.72,
     brightness: 100,
     showText: true,
     showKeyLevels: true,
-    showNodeLabels: true,
+    showNodeLabels: false,
     showValueArea: true,
     showInitialBalance: true,
+    showMidpoint: false,
+    showStructuralSr: false,
+    showHistoricalExtensions: false,
     showOffChart: false,
-    positiveColor: "#f4f6f7",
-    negativeColor: "#b00018",
-    balancedColor: "#7d838a",
+    cellTextMode: "AUTO",
+    cellTextSize: "AUTO",
+    cellBorder: "SUBTLE",
+    normalizationMode: "ROBUST_PERCENTILE",
+    colorScalingLifecycle: "FROZEN_ON_BLOCK_CLOSE",
+    robustLowerPercentile: 2,
+    robustUpperPercentile: 98,
+    absoluteFixedScale: 1000,
+    maximumVisibleColumns: 500,
+    maximumVisibleRows: 300,
+    maximumVisibleLabels: 2000,
+    structuralDetail: "MINIMAL",
+    maximumVisibleLvns: 3,
+    maximumVisibleHvns: 3,
+    maximumVisibleStructuralZones: 4,
+    zoneExtensionMode: "PROFILE_ONLY",
+    fixedExtensionBars: 100,
+    positiveColor: "#e2e3e5",
+    negativeColor: "#ec182a",
+    balancedColor: "#333333",
     valueAreaColor: "#d8dce2",
     pocColor: "#ffffff",
     lvnColor: "#4f555d",
     hvnColor: "#8e0014"
   },
   offChartMetrics: ["CVD_DELTA", "CVD_ACCELERATION", "CVD_EFFICIENCY", "CVD_PERSISTENCE"],
-  diagnosticsVisible: true,
+  diagnosticsVisible: false,
   settingsVersion: "auction-profile-default-v1"
 };
 
@@ -145,6 +169,9 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
     fallbackSource: choice(s.fallbackSource, DATA_SOURCES.filter(source => source !== "HYBRID"), d.fallbackSource),
     priceAllocation: choice(s.priceAllocation, ["UNIFORM_BAR_RANGE", "CLOSE_WEIGHTED", "TYPICAL_PRICE_WEIGHTED", "TRADE_AT_PRICE_EXACT", "VOLUME_AT_PRICE_EXACT", "GAUSSIAN_AROUND_VWAP", "BODY_WICK_WEIGHTED", "HYBRID"], d.priceAllocation),
     lookbackBars: integer(s.lookbackBars, d.lookbackBars, 1, 20000),
+    blockResolution: choice(s.blockResolution, ["CHART_TIMEFRAME", "1m", "5m", "15m", "30m", "1h", "4h", "1d", "ADAPTIVE", "CUSTOM"], d.blockResolution),
+    customBlockMinutes: integer(s.customBlockMinutes, d.customBlockMinutes, 1, 525_600),
+    updateDevelopingBlock: bool(s.updateDevelopingBlock, d.updateDevelopingBlock),
     fixedStartTime: typeof s.fixedStartTime === "number" ? s.fixedStartTime : undefined,
     fixedEndTime: typeof s.fixedEndTime === "number" ? s.fixedEndTime : undefined,
     visibleStartTime: typeof s.visibleStartTime === "number" ? s.visibleStartTime : undefined,
@@ -200,6 +227,7 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
     },
     rendering: {
       displayStyle: choice(r.displayStyle, DISPLAY_STYLES, d.rendering.displayStyle),
+      presentationMode: choice(r.presentationMode, ["DYNAMIC_BLOCKS", "AGGREGATE_HISTOGRAM", "STRUCTURAL_NODES", "DYNAMIC_KEY_LEVELS", "DYNAMIC_AGGREGATE", "MACRO_STRUCTURE"], d.rendering.presentationMode),
       palette: choice(r.palette, PALETTES, d.rendering.palette),
       widthPercent: finite(r.widthPercent, d.rendering.widthPercent, 5, 100),
       opacity: finite(r.opacity, d.rendering.opacity, 0.02, 1),
@@ -209,7 +237,27 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
       showNodeLabels: bool(r.showNodeLabels, d.rendering.showNodeLabels),
       showValueArea: bool(r.showValueArea, d.rendering.showValueArea),
       showInitialBalance: bool(r.showInitialBalance, d.rendering.showInitialBalance),
+      showMidpoint: bool(r.showMidpoint, d.rendering.showMidpoint),
+      showStructuralSr: bool(r.showStructuralSr, d.rendering.showStructuralSr),
+      showHistoricalExtensions: bool(r.showHistoricalExtensions, d.rendering.showHistoricalExtensions),
       showOffChart: bool(r.showOffChart, d.rendering.showOffChart),
+      cellTextMode: choice(r.cellTextMode, ["ALWAYS", "AUTO", "HOVER_ONLY", "STRONG_ONLY", "OFF"], d.rendering.cellTextMode),
+      cellTextSize: choice(r.cellTextSize, ["AUTO", "TINY", "SMALL", "NORMAL", "LARGE", "HUGE"], d.rendering.cellTextSize),
+      cellBorder: choice(r.cellBorder, ["NONE", "SUBTLE", "STANDARD", "HIGH_CONTRAST"], d.rendering.cellBorder),
+      normalizationMode: choice(r.normalizationMode, ["PER_PROFILE", "PER_TIME_BLOCK", "ROLLING", "ABSOLUTE_FIXED", "PERCENTILE", "LOGARITHMIC", "ROBUST_PERCENTILE"], d.rendering.normalizationMode),
+      colorScalingLifecycle: choice(r.colorScalingLifecycle, ["DEVELOPING_GLOBAL", "FROZEN_PER_BLOCK", "FROZEN_ON_BLOCK_CLOSE", "FROZEN_ON_PROFILE_LOCK", "ROLLING"], d.rendering.colorScalingLifecycle),
+      robustLowerPercentile: finite(r.robustLowerPercentile, d.rendering.robustLowerPercentile, 0, 49),
+      robustUpperPercentile: finite(r.robustUpperPercentile, d.rendering.robustUpperPercentile, 51, 100),
+      absoluteFixedScale: finite(r.absoluteFixedScale, d.rendering.absoluteFixedScale, Number.EPSILON),
+      maximumVisibleColumns: integer(r.maximumVisibleColumns, d.rendering.maximumVisibleColumns, 25, 2000),
+      maximumVisibleRows: integer(r.maximumVisibleRows, d.rendering.maximumVisibleRows, 25, 1000),
+      maximumVisibleLabels: integer(r.maximumVisibleLabels, d.rendering.maximumVisibleLabels, 0, 10000),
+      structuralDetail: choice(r.structuralDetail, ["MINIMAL", "STANDARD", "DETAILED", "RESEARCH"], d.rendering.structuralDetail),
+      maximumVisibleLvns: integer(r.maximumVisibleLvns, d.rendering.maximumVisibleLvns, 0, 100),
+      maximumVisibleHvns: integer(r.maximumVisibleHvns, d.rendering.maximumVisibleHvns, 0, 100),
+      maximumVisibleStructuralZones: integer(r.maximumVisibleStructuralZones, d.rendering.maximumVisibleStructuralZones, 0, 100),
+      zoneExtensionMode: choice(r.zoneExtensionMode, ["PROFILE_ONLY", "UNTIL_FIRST_TOUCH", "UNTIL_MITIGATED", "UNTIL_INVALIDATED", "FIXED_N_BARS", "EXTEND_RIGHT", "FULL_CHART"], d.rendering.zoneExtensionMode),
+      fixedExtensionBars: integer(r.fixedExtensionBars, d.rendering.fixedExtensionBars, 1, 20000),
       positiveColor: color(r.positiveColor, d.rendering.positiveColor),
       negativeColor: color(r.negativeColor, d.rendering.negativeColor),
       balancedColor: color(r.balancedColor, d.rendering.balancedColor),
@@ -222,8 +270,15 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
     diagnosticsVisible: bool(s.diagnosticsVisible, d.diagnosticsVisible),
     settingsVersion: typeof s.settingsVersion === "string" ? s.settingsVersion : d.settingsVersion
   };
-  if (result.implementationMode === "PINE_COMPATIBILITY" && result.calculationEngine === "CVD_REAL_TRADES") result.calculationEngine = "CVD_PINE_COMPATIBLE";
-  if (result.implementationMode === "PINE_COMPATIBILITY" && result.scopeMode !== "FIXED_START") result.scopeMode = "SESSION";
+  const legacyAggregateSettings = typeof r.presentationMode !== "string";
+  if (legacyAggregateSettings && ["CVD_REAL_TRADES", "CVD_PINE_COMPATIBLE"].includes(result.calculationEngine) && result.cvdMetric === "ABSOLUTE_CVD") {
+    result.cvdMetric = "NET_CVD";
+  }
+  if (result.implementationMode === "PINE_COMPATIBILITY") {
+    if (result.calculationEngine === "CVD_REAL_TRADES") result.calculationEngine = "CVD_PINE_COMPATIBLE";
+    if (result.scopeMode !== "FIXED_START") result.scopeMode = "SESSION";
+    result.rendering.colorScalingLifecycle = "DEVELOPING_GLOBAL";
+  }
   return { ...result, settingsVersion: auctionProfileSettingsHash(result) };
 }
 
@@ -233,8 +288,17 @@ export function auctionProfileSettingsHash(settings: AuctionProfileSettings) {
 }
 
 export function auctionProfileCalculationSettingsHash(settings: AuctionProfileSettings) {
-  const { rendering: _rendering, diagnosticsVisible: _diagnosticsVisible, settingsVersion: _settingsVersion, ...calculation } = settings;
-  return "ap-calc-" + stableHash(calculation);
+  const { rendering, diagnosticsVisible: _diagnosticsVisible, settingsVersion: _settingsVersion, ...calculation } = settings;
+  return "ap-calc-" + stableHash({
+    ...calculation,
+    matrixPresentation: {
+      normalizationMode: rendering.normalizationMode,
+      robustLowerPercentile: rendering.robustLowerPercentile,
+      robustUpperPercentile: rendering.robustUpperPercentile,
+      absoluteFixedScale: rendering.absoluteFixedScale,
+      colorScalingLifecycle: rendering.colorScalingLifecycle
+    }
+  });
 }
 
 export function auctionProfileLookbackWarnings(settings: AuctionProfileSettings, loadedBars: number) {

@@ -1338,3 +1338,13 @@ Remaining:
 - Added Pixi GPU rendering, full settings/diagnostics/workspace integration, 20,000-bar history selection, and a Black Terminal red/silver/white visual system.
 - Added the `black_core_profiles` Python package, deterministic TypeScript/Python fixtures, methodology docs, limitations, audit, and completion report.
 - Preserved the prior Market Maker Heatmap brightness work and did not alter OMS/EMS, Black Cloud, DOM Pro, HDLX, AIF, Kioseff calculations, or IMM.
+
+## 2026-08-03 — Auction Profile Dynamic Block Restoration
+
+- Confirmed the visual mismatch originated in the aggregate-only row snapshot and renderer, not opacity.
+- Added the sparse BC-MEAP 2.0 time-block matrix and exact native trade-at-price allocation.
+- Restored dynamic red/gray/white cells, compact values, current-column highlighting, cell hover inspection, and camera-synchronized geometry.
+- Made Dynamic Blocks + Key Levels the default and preserved Aggregate Histogram and Macro Structure as optional presentations.
+- Retained completed session matrices, finalized their cells, and used the same renderer for Session, Composite, and Macro scopes.
+- Added deterministic block cadence, render budgets, semantic signed downsampling, node/detail budgets, extension choices, and five presets.
+- Added native `+3 / -4 / +6` certification, matrix conservation/lifecycle checks, palette/text tests, and capacity benchmarks.

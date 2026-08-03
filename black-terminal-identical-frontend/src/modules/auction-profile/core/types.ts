@@ -2,7 +2,7 @@ import type { Candle } from "../../../chart-engine/types.ts";
 import type { ExchangeId, SymbolMetadata, Timeframe, TradeTick } from "../../../market-data/types.ts";
 
 export const AUCTION_PROFILE_SCHEMA_VERSION = 1;
-export const AUCTION_PROFILE_ENGINE_VERSION = "bc-meap-1.0.0";
+export const AUCTION_PROFILE_ENGINE_VERSION = "bc-meap-2.0.0";
 
 export type AuctionImplementationMode = "PINE_COMPATIBILITY" | "BLACK_CORE_NATIVE";
 export type AuctionScopeMode =
@@ -129,6 +129,34 @@ export type AuctionDisplayStyle =
   | "STRUCTURAL_ZONES"
   | "COMBINED";
 
+export type AuctionPresentationMode =
+  | "DYNAMIC_BLOCKS"
+  | "AGGREGATE_HISTOGRAM"
+  | "STRUCTURAL_NODES"
+  | "DYNAMIC_KEY_LEVELS"
+  | "DYNAMIC_AGGREGATE"
+  | "MACRO_STRUCTURE";
+
+export type AuctionBlockResolution =
+  | "CHART_TIMEFRAME"
+  | "1m"
+  | "5m"
+  | "15m"
+  | "30m"
+  | "1h"
+  | "4h"
+  | "1d"
+  | "ADAPTIVE"
+  | "CUSTOM";
+
+export type AuctionCellTextMode = "ALWAYS" | "AUTO" | "HOVER_ONLY" | "STRONG_ONLY" | "OFF";
+export type AuctionCellTextSize = "AUTO" | "TINY" | "SMALL" | "NORMAL" | "LARGE" | "HUGE";
+export type AuctionNormalizationMode = "PER_PROFILE" | "PER_TIME_BLOCK" | "ROLLING" | "ABSOLUTE_FIXED" | "PERCENTILE" | "LOGARITHMIC" | "ROBUST_PERCENTILE";
+export type AuctionColorScalingLifecycle = "DEVELOPING_GLOBAL" | "FROZEN_PER_BLOCK" | "FROZEN_ON_BLOCK_CLOSE" | "FROZEN_ON_PROFILE_LOCK" | "ROLLING";
+export type AuctionCellBorder = "NONE" | "SUBTLE" | "STANDARD" | "HIGH_CONTRAST";
+export type AuctionStructuralDetail = "MINIMAL" | "STANDARD" | "DETAILED" | "RESEARCH";
+export type AuctionZoneExtensionMode = "PROFILE_ONLY" | "UNTIL_FIRST_TOUCH" | "UNTIL_MITIGATED" | "UNTIL_INVALIDATED" | "FIXED_N_BARS" | "EXTEND_RIGHT" | "FULL_CHART";
+
 export type AuctionPalette =
   | "ORIGINAL"
   | "BLACK_TERMINAL_INSTITUTIONAL"
@@ -196,6 +224,7 @@ export interface NodeDetectionSettings {
 
 export interface AuctionProfileRenderingSettings {
   displayStyle: AuctionDisplayStyle;
+  presentationMode: AuctionPresentationMode;
   palette: AuctionPalette;
   widthPercent: number;
   opacity: number;
@@ -205,7 +234,27 @@ export interface AuctionProfileRenderingSettings {
   showNodeLabels: boolean;
   showValueArea: boolean;
   showInitialBalance: boolean;
+  showMidpoint: boolean;
+  showStructuralSr: boolean;
+  showHistoricalExtensions: boolean;
   showOffChart: boolean;
+  cellTextMode: AuctionCellTextMode;
+  cellTextSize: AuctionCellTextSize;
+  cellBorder: AuctionCellBorder;
+  normalizationMode: AuctionNormalizationMode;
+  colorScalingLifecycle: AuctionColorScalingLifecycle;
+  robustLowerPercentile: number;
+  robustUpperPercentile: number;
+  absoluteFixedScale: number;
+  maximumVisibleColumns: number;
+  maximumVisibleRows: number;
+  maximumVisibleLabels: number;
+  structuralDetail: AuctionStructuralDetail;
+  maximumVisibleLvns: number;
+  maximumVisibleHvns: number;
+  maximumVisibleStructuralZones: number;
+  zoneExtensionMode: AuctionZoneExtensionMode;
+  fixedExtensionBars: number;
   positiveColor: string;
   negativeColor: string;
   balancedColor: string;
@@ -225,6 +274,9 @@ export interface AuctionProfileSettings {
   fallbackSource: Exclude<AuctionDataSource, "HYBRID">;
   priceAllocation: AuctionPriceAllocation;
   lookbackBars: number;
+  blockResolution: AuctionBlockResolution;
+  customBlockMinutes: number;
+  updateDevelopingBlock: boolean;
   fixedStartTime?: number;
   fixedEndTime?: number;
   visibleStartTime?: number;
@@ -300,6 +352,54 @@ export interface AuctionProfileRow {
   cvdPersistence: number;
   hybridScore: number;
   inValueArea: boolean;
+}
+
+export interface AuctionTimeBlock {
+  id: string;
+  index: number;
+  startTime: number;
+  endTime: number;
+  isDeveloping: boolean;
+  isFinalized: boolean;
+}
+
+export interface AuctionBlockCell {
+  id: string;
+  rowIndex: number;
+  blockIndex: number;
+  priceLow: number;
+  priceHigh: number;
+  startTime: number;
+  endTime: number;
+  rawValue: number;
+  normalizedValue: number;
+  buyValue: number;
+  sellValue: number;
+  unknownValue: number;
+  totalValue: number;
+  notional: number;
+  tradeCount: number;
+  tpoCount: number;
+  realizedVariance: number;
+  garmanKlassVariance: number;
+  parkinsonVariance: number;
+  rangeExpansion: number;
+  sign: -1 | 0 | 1;
+  isDeveloping: boolean;
+  isFinalized: boolean;
+  dataQuality: "EXACT_TRADES" | "LOWER_TF_APPROXIMATION" | "CHART_BAR_APPROXIMATION";
+}
+
+export interface AuctionBlockMatrix {
+  rows: AuctionProfileRow[];
+  blocks: AuctionTimeBlock[];
+  cells: AuctionBlockCell[];
+  blockDurationSeconds: number;
+  normalizationLower: number;
+  normalizationUpper: number;
+  normalizationMode: AuctionNormalizationMode;
+  sourceCellCount: number;
+  matrixVersion: string;
 }
 
 export interface AuctionNodeZone {
@@ -402,6 +502,7 @@ export interface AuctionProfileSnapshot {
   range: { start: number; end: number; loadedBars: number; requestedBars: number };
   grid: AuctionProfileGrid;
   rows: AuctionProfileRow[];
+  matrix: AuctionBlockMatrix;
   nodes: AuctionNodeZone[];
   keyLevels: AuctionProfileKeyLevels;
   offChart: AuctionOffChartPoint[];
@@ -482,5 +583,4 @@ export function canonicalTradeFromTick(
     source
   };
 }
-
 

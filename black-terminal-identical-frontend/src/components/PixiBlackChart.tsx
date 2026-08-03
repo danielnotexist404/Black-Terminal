@@ -348,7 +348,8 @@ export function PixiBlackChart({
   const [lastCandle, setLastCandle] = useState<Candle | null>(null);
   const [aifPriceTransform, setAifPriceTransform] = useState<ChartPriceTransformSnapshot | null>(null);
   const [kioseffSnapshot, setKioseffSnapshot] = useState<KioseffSnapshot | null>(null);
-  const [auctionProfileSnapshot, setAuctionProfileSnapshot] = useState<AuctionProfileSnapshot | null>(null);
+  const [auctionProfileSnapshots, setAuctionProfileSnapshots] = useState<AuctionProfileSnapshot[]>([]);
+  const auctionProfileSnapshot = auctionProfileSnapshots.at(-1) ?? null;
   const [auctionProfileLoading, setAuctionProfileLoading] = useState(false);
   const [auctionProfileError, setAuctionProfileError] = useState<string | null>(null);
   const [auctionProfileSourceRevision, setAuctionProfileSourceRevision] = useState(0);
@@ -826,9 +827,8 @@ export function PixiBlackChart({
             const client = auctionWorkerRef.current;
             if (!client || !buffered.length) return;
             void client.appendTrades(buffered, "live:" + Date.now()).then((snapshots) => {
-              const snapshot = snapshots.at(-1) ?? null;
-              setAuctionProfileSnapshot(snapshot);
-              engineRef.current?.setAuctionProfileState(snapshot, normalizedAuctionProfileSettings);
+              setAuctionProfileSnapshots(snapshots);
+              engineRef.current?.setAuctionProfileState(snapshots, normalizedAuctionProfileSettings);
             }).catch(() => undefined);
           }, 180);
         }
@@ -998,7 +998,7 @@ export function PixiBlackChart({
       customPlots: customPlots || [],
       onAlertFired: (alertId, price) => onAlertFired?.(alertId, price),
       auctionProfileSettings: normalizedAuctionProfileSettings,
-      auctionProfileSnapshot,
+      auctionProfileSnapshots,
       onAlertEditRequest: (alertId) => {
         setEditingChartAlertId(alertId);
         setChartContextMenu(null);
@@ -1683,7 +1683,7 @@ export function PixiBlackChart({
     if (!visibleIndicators.auctionProfile) {
       auctionWorkerRef.current?.dispose();
       auctionWorkerRef.current = null;
-      setAuctionProfileSnapshot(null);
+      setAuctionProfileSnapshots([]);
       setAuctionProfileLoading(false);
       setAuctionProfileError(null);
       engineRef.current?.setAuctionProfileState(null, normalizedAuctionProfileSettings);
@@ -1719,10 +1719,9 @@ export function PixiBlackChart({
       sourceRevision: auctionProfileDataRevision
     }).then(snapshots => {
       if (disposed) return;
-      const snapshot = snapshots.at(-1) ?? null;
-      setAuctionProfileSnapshot(snapshot);
+      setAuctionProfileSnapshots(snapshots);
       setAuctionProfileLoading(false);
-      engineRef.current?.setAuctionProfileState(snapshot, normalizedAuctionProfileSettings);
+      engineRef.current?.setAuctionProfileState(snapshots, normalizedAuctionProfileSettings);
     }).catch(error => {
       if (disposed || String(error).includes("CANCELLED")) return;
       setAuctionProfileLoading(false);
@@ -1747,11 +1746,11 @@ export function PixiBlackChart({
 
   useEffect(() => {
     engineRef.current?.setAuctionProfileState(
-      visibleIndicators.auctionProfile ? auctionProfileSnapshot : null,
+      visibleIndicators.auctionProfile ? auctionProfileSnapshots : null,
       normalizedAuctionProfileSettings
     );
   }, [
-    auctionProfileSnapshot,
+    auctionProfileSnapshots,
     normalizedAuctionProfileSettings.rendering,
     normalizedAuctionProfileSettings.diagnosticsVisible,
     visibleIndicators.auctionProfile

@@ -107,6 +107,7 @@ export type ChartEngineOptions = {
   kioseffSnapshot?: KioseffSnapshot | null;
   kioseffSettings?: KioseffSettingsV1;
   auctionProfileSnapshot?: AuctionProfileSnapshot | null;
+  auctionProfileSnapshots?: AuctionProfileSnapshot[];
   auctionProfileSettings?: AuctionProfileSettings;
   alertDefinitions?: IndicatorAlertDefinition[];
   customPlots?: any[];

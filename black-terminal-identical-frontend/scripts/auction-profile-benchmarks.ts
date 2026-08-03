@@ -2,10 +2,16 @@ import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
 import { migrateAuctionProfileSettings } from "../src/modules/auction-profile/core/settings.ts";
 import { appendTradesToAuctionProfile, calculateAuctionProfile } from "../src/modules/auction-profile/engines/nativeEngine.ts";
+import { auctionCellRenderStrides, downsampleAuctionCells } from "../src/modules/auction-profile/rendering/cells.ts";
+import { auctionCellTextVisible, formatAuctionCellMetric } from "../src/modules/auction-profile/rendering/labels.ts";
 import { auctionFixture } from "../src/modules/auction-profile/testing/fixtures.ts";
 import { validateAuctionProfileInvariants } from "../src/modules/auction-profile/testing/nativeValidation.ts";
 
 const cases = [
+  [100, 100],
+  [250, 200],
+  [500, 300],
+  [1000, 500],
   [5000, 256],
   [10000, 512],
   [20000, 1024],
@@ -49,6 +55,19 @@ for (const [barCount, targetRows] of cases) {
   const serializeStart = performance.now();
   JSON.stringify(first);
   const serializationMs = performance.now() - serializeStart;
+  const projectionStart = performance.now();
+  const strides = auctionCellRenderStrides(first.matrix.blocks.length, first.matrix.rows.length, 500, 300);
+  const projectedCells = downsampleAuctionCells(first.matrix.cells, strides.columnStride, strides.rowStride);
+  const renderProjectionMs = performance.now() - projectionStart;
+  const textStart = performance.now();
+  let visibleLabels = 0;
+  for (const cell of projectedCells) {
+    if (visibleLabels >= settings.rendering.maximumVisibleLabels) break;
+    if (!auctionCellTextVisible(settings.rendering.cellTextMode, 28, 11, Math.abs(cell.normalizedValue))) continue;
+    formatAuctionCellMetric(cell.rawValue, settings.calculationEngine, settings.cvdMetric);
+    visibleLabels += 1;
+  }
+  const textLayoutMs = performance.now() - textStart;
   const incrementalTrade = {
     venue: "bybit",
     symbol: "BTCUSDT",
@@ -66,10 +85,15 @@ for (const [barCount, targetRows] of cases) {
   results.push({
     bars: barCount,
     rows: first.rows.length,
+    blocks: first.matrix.blocks.length,
+    cells: first.matrix.cells.length,
     coldMs: Number(coldMs.toFixed(2)),
     warmMs: Number(warmMs.toFixed(2)),
     incrementalMs: Number(incrementalMs.toFixed(2)),
     serializationMs: Number(serializationMs.toFixed(2)),
+    renderProjectionMs: Number(renderProjectionMs.toFixed(2)),
+    textLayoutMs: Number(textLayoutMs.toFixed(2)),
+    visibleLabels,
     estimatedBytes: first.diagnostics.memoryEstimateBytes,
     measuredHeapDeltaBytes: Math.max(0, process.memoryUsage().heapUsed - memoryBefore)
   });

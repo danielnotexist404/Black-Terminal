@@ -1,9 +1,11 @@
 import type { Candle } from "../../../chart-engine/types.ts";
 import { auctionProfileLookbackWarnings } from "../core/settings.ts";
+import { appendTradesToAuctionMatrix, buildAuctionBlockMatrix } from "../core/blockMatrix.ts";
 import { auctionProfileVersion, stableHash } from "../core/canonical.ts";
 import { detectAuctionNodes } from "../core/nodes.ts";
 import { auctionRowIndex, createAuctionProfileGrid } from "../core/profileGrid.ts";
 import { resolveAuctionScopeWindows, scopeBars } from "../core/scope.ts";
+import { AUCTION_PROFILE_ENGINE_VERSION } from "../core/types.ts";
 import type {
   AuctionOffChartPoint,
   AuctionProfileCalculationInput,
@@ -246,8 +248,19 @@ function buildScope(
     trades: trades.map(trade => [trade.timestamp, trade.tradeId, trade.price, trade.quantity, trade.aggressorSide, trade.source])
   });
   const settingsHash = input.settings.settingsVersion;
-  const baseVersion = auctionProfileVersion({ dataHash, settingsHash, grid, range: { start: scope.start, end: scope.end }, engineVersion: "bc-meap-1.0.0" });
+  const baseVersion = auctionProfileVersion({ dataHash, settingsHash, grid, range: { start: scope.start, end: scope.end }, engineVersion: AUCTION_PROFILE_ENGINE_VERSION });
   const nodes = detectAuctionNodes(rows, input.settings, input.now ?? Date.now(), baseVersion);
+  const matrix = buildAuctionBlockMatrix({
+    bars,
+    lowerBars,
+    trades,
+    rows,
+    grid,
+    settings: input.settings,
+    timeframe: input.timeframe,
+    start: scope.start,
+    end: scope.end
+  });
   const keyLevels = calculateAuctionKeyLevels(rows, input.settings, initialBalance);
   keyLevels.dominantLvn = nodes.filter(node => node.type === "LVN").sort((left, right) => right.prominence - left.prominence)[0]?.weightedCenter ?? null;
   keyLevels.dominantHvn = nodes.filter(node => node.type === "HVN").sort((left, right) => right.normalizedScore - left.normalizedScore)[0]?.weightedCenter ?? null;
@@ -272,7 +285,7 @@ function buildScope(
     schemaVersion: 1,
     profileId: scope.id,
     profileVersion: baseVersion,
-    engineVersion: "bc-meap-1.0.0",
+    engineVersion: AUCTION_PROFILE_ENGINE_VERSION,
     symbol: input.symbol,
     venue: input.venue,
     timeframe: input.timeframe,
@@ -282,6 +295,7 @@ function buildScope(
     range: { start: scope.start, end: scope.end, loadedBars: bars.length, requestedBars: input.settings.lookbackBars },
     grid,
     rows,
+    matrix,
     nodes,
     keyLevels,
     offChart: offChartSeries(bars, trades),
@@ -295,10 +309,10 @@ function buildScope(
       engine: input.settings.calculationEngine,
       lookback: input.settings.lookbackBars,
       rows: rows.length,
-      timeBlocks: Math.min(input.settings.maximumTimeBlocks, bars.length),
+      timeBlocks: matrix.blocks.length,
       buildDurationMs,
       incrementalUpdateDurationMs: 0,
-      memoryEstimateBytes: rows.length * 256 + trades.length * 96 + bars.length * 48,
+      memoryEstimateBytes: rows.length * 256 + matrix.cells.length * 168 + matrix.blocks.length * 48 + trades.length * 96 + bars.length * 48,
       exactCoveragePercent: quality.exactTradeCoveragePercent,
       fallbackCoveragePercent: quality.lowerTimeframeCoveragePercent + quality.chartBarCoveragePercent,
       nodeCount: nodes.length,
@@ -314,7 +328,18 @@ export function calculateAuctionProfiles(input: AuctionProfileCalculationInput) 
   const boundedBars = input.bars.slice(-Math.min(20000, Math.max(1, input.settings.lookbackBars)));
   const boundedInput = { ...input, bars: boundedBars };
   const scopes = resolveAuctionScopeWindows(boundedBars, input.settings, input.visibleRange);
-  return scopes.map(scope => buildScope(boundedInput, scope, startedAt));
+  const snapshots = scopes.map(scope => buildScope(boundedInput, scope, startedAt));
+  snapshots.slice(0, -1).forEach(snapshot => {
+    snapshot.matrix.blocks.forEach(block => {
+      block.isDeveloping = false;
+      block.isFinalized = true;
+    });
+    snapshot.matrix.cells.forEach(cell => {
+      cell.isDeveloping = false;
+      cell.isFinalized = true;
+    });
+  });
+  return snapshots;
 }
 
 export function calculateAuctionProfile(input: AuctionProfileCalculationInput) {
@@ -330,6 +355,7 @@ export function appendTradesToAuctionProfile(
   const accepted = trades.filter(trade => trade.timestamp >= snapshot.range.start && trade.timestamp <= snapshot.range.end && trade.price >= snapshot.grid.priceLow && trade.price <= snapshot.grid.priceHigh);
   if (!accepted.length) return snapshot;
   accepted.forEach(trade => allocateTrade(snapshot.rows, snapshot.grid, trade));
+  appendTradesToAuctionMatrix(snapshot.matrix, accepted, snapshot.grid, settings);
   applySelectedEngine(snapshot.rows, { venue: snapshot.venue as AuctionProfileCalculationInput["venue"], symbol: snapshot.symbol, timeframe: snapshot.timeframe, bars: [], trades: [...accepted], settings, sourceRevision: snapshot.profileVersion });
   snapshot.keyLevels = calculateAuctionKeyLevels(snapshot.rows, settings, snapshot.keyLevels.ibHigh !== null && snapshot.keyLevels.ibLow !== null ? { high: snapshot.keyLevels.ibHigh, low: snapshot.keyLevels.ibLow } : undefined);
   const incrementalHash = stableHash(accepted.map(trade => [trade.timestamp, trade.tradeId, trade.price, trade.quantity, trade.aggressorSide]));

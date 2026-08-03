@@ -39,6 +39,45 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
     ...current,
     offChartMetrics: checked ? [...new Set([...current.offChartMetrics, metric])] : current.offChartMetrics.filter(item => item !== metric)
   }));
+  const applyPreset = (preset: "PINE" | "SESSION" | "MACRO" | "STRUCTURE" | "TPO") => onChange(current => {
+    const next = structuredClone(current);
+    if (preset === "PINE") {
+      next.implementationMode = "PINE_COMPATIBILITY";
+      next.scopeMode = "SESSION";
+      next.calculationEngine = "CVD_PINE_COMPATIBLE";
+      next.blockResolution = "CHART_TIMEFRAME";
+      next.rendering.presentationMode = "DYNAMIC_BLOCKS";
+      next.rendering.cellTextMode = "ALWAYS";
+    } else if (preset === "SESSION") {
+      next.implementationMode = "BLACK_CORE_NATIVE";
+      next.scopeMode = "SESSION";
+      next.calculationEngine = "CVD_REAL_TRADES";
+      next.cvdMetric = "NET_CVD";
+      next.rendering.presentationMode = "DYNAMIC_KEY_LEVELS";
+    } else if (preset === "MACRO") {
+      next.implementationMode = "BLACK_CORE_NATIVE";
+      next.scopeMode = "MACRO_COMPOSITE";
+      next.lookbackBars = 5000;
+      next.blockResolution = "ADAPTIVE";
+      next.rendering.presentationMode = "DYNAMIC_KEY_LEVELS";
+      next.nodeDetection.showLvns = true;
+      next.nodeDetection.showHvns = true;
+      next.rendering.structuralDetail = "MINIMAL";
+    } else if (preset === "STRUCTURE") {
+      next.implementationMode = "BLACK_CORE_NATIVE";
+      next.scopeMode = "MACRO_COMPOSITE";
+      next.lookbackBars = 20000;
+      next.rendering.presentationMode = "MACRO_STRUCTURE";
+      next.nodeDetection.showLvns = true;
+      next.nodeDetection.showHvns = true;
+      next.rendering.structuralDetail = "STANDARD";
+    } else {
+      next.scopeMode = "SESSION";
+      next.calculationEngine = "TPO";
+      next.rendering.presentationMode = "DYNAMIC_KEY_LEVELS";
+    }
+    return next;
+  });
 
   return (
     <div className="indicator-settings auction-profile-settings" role="dialog" aria-label="Auction Profile settings" data-testid="auction-profile-settings">
@@ -48,6 +87,12 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
       </div>
 
       {tab === "engine" && <div className="indicator-settings-section">
+        <b>Presets</b>
+        <div className="auction-profile-presets">
+          <button type="button" onClick={() => applyPreset("PINE")}>Original Pine</button><button type="button" onClick={() => applyPreset("SESSION")}>CVD Session</button>
+          <button type="button" onClick={() => applyPreset("MACRO")}>CVD Macro Matrix</button><button type="button" onClick={() => applyPreset("STRUCTURE")}>Macro Structure</button>
+          <button type="button" onClick={() => applyPreset("TPO")}>TPO Session</button>
+        </div>
         <b>Calculation Engine</b>
         <label>Implementation<select value={settings.implementationMode} onChange={event => patch({ implementationMode: event.target.value as AuctionProfileSettings["implementationMode"] })}><option value="BLACK_CORE_NATIVE">Black Core Native</option><option value="PINE_COMPATIBILITY">Pine Compatibility</option></select></label>
         <label>Engine<select value={settings.calculationEngine} onChange={event => patch({ calculationEngine: event.target.value as AuctionProfileSettings["calculationEngine"] })}>
@@ -65,6 +110,11 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
         <b>Scope / Composite</b>
         <label>Scope<select value={settings.scopeMode} onChange={event => patch({ scopeMode: event.target.value as AuctionProfileSettings["scopeMode"] })}><option value="SESSION">Session</option><option value="ROLLING">Rolling</option><option value="FIXED_START">Fixed Start</option><option value="VISIBLE_RANGE">Visible Range</option><option value="COMPOSITE">Composite</option><option value="PERIODIC_COMPOSITE">Periodic Composite</option><option value="MACRO_COMPOSITE">Macro Composite</option><option value="MANUAL_RANGE">Manual Range</option></select></label>
         <label>Lookback<select value={settings.lookbackBars} onChange={event => patch({ lookbackBars: Number(event.target.value) })}>{AUCTION_PROFILE_LOOKBACK_OPTIONS.map(value => <option key={value} value={value}>{value.toLocaleString()} bars</option>)}</select></label>
+        <b>Block Construction</b>
+        <label>Block Resolution<select value={settings.blockResolution} onChange={event => patch({ blockResolution: event.target.value as AuctionProfileSettings["blockResolution"] })}><option value="CHART_TIMEFRAME">Chart Timeframe</option><option value="1m">1 minute</option><option value="5m">5 minutes</option><option value="15m">15 minutes</option><option value="30m">30 minutes</option><option value="1h">1 hour</option><option value="4h">4 hours</option><option value="1d">1 day</option><option value="ADAPTIVE">Adaptive</option><option value="CUSTOM">Custom</option></select></label>
+        {settings.blockResolution === "CUSTOM" && <label>Custom Block (minutes)<input type="number" min={1} max={525600} value={settings.customBlockMinutes} onChange={event => patch({ customBlockMinutes: Number(event.target.value) })} /></label>}
+        <label>Developing Block Live<input type="checkbox" checked={settings.updateDevelopingBlock} onChange={event => patch({ updateDevelopingBlock: event.target.checked })} /></label>
+        <label>Maximum Matrix Blocks<input type="number" min={16} max={20000} value={settings.maximumTimeBlocks} onChange={event => patch({ maximumTimeBlocks: Number(event.target.value) })} /></label>
         <label>Session<select value={settings.sessionTemplate} onChange={event => patch({ sessionTemplate: event.target.value as AuctionProfileSettings["sessionTemplate"] })}><option value="UTC_DAY">UTC Day</option><option value="EXCHANGE_DAY">Exchange Day</option><option value="ASIA">Asia</option><option value="LONDON">London</option><option value="NEW_YORK">New York</option><option value="WEEK">Week</option><option value="MONTH">Month</option><option value="CUSTOM">Custom</option></select></label>
         <label>Session Timezone<input type="text" value={settings.sessionTimezone} onChange={event => patch({ sessionTimezone: event.target.value })} /></label>
         <label>Initial Balance (minutes)<input type="number" min={1} max={1440} value={settings.initialBalanceMinutes} onChange={event => patch({ initialBalanceMinutes: Number(event.target.value) })} /></label>
@@ -108,15 +158,32 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
         <label>Merge Contiguous Rows<input type="checkbox" checked={settings.nodeDetection.mergeContiguousRows} onChange={event => patchNodes({ mergeContiguousRows: event.target.checked })} /></label>
         <label>Show LVNs<input type="checkbox" checked={settings.nodeDetection.showLvns} onChange={event => patchNodes({ showLvns: event.target.checked })} /></label>
         <label>Show HVNs<input type="checkbox" checked={settings.nodeDetection.showHvns} onChange={event => patchNodes({ showHvns: event.target.checked })} /></label>
+        <label>Structural Detail<select value={settings.rendering.structuralDetail} onChange={event => patchRendering({ structuralDetail: event.target.value as AuctionProfileSettings["rendering"]["structuralDetail"] })}><option value="MINIMAL">Minimal</option><option value="STANDARD">Standard</option><option value="DETAILED">Detailed</option><option value="RESEARCH">Research</option></select></label>
+        <label>Maximum Visible LVNs<input type="number" min={0} max={100} value={settings.rendering.maximumVisibleLvns} onChange={event => patchRendering({ maximumVisibleLvns: Number(event.target.value) })} /></label>
+        <label>Maximum Visible HVNs<input type="number" min={0} max={100} value={settings.rendering.maximumVisibleHvns} onChange={event => patchRendering({ maximumVisibleHvns: Number(event.target.value) })} /></label>
+        <label>Maximum Structural Zones<input type="number" min={0} max={100} value={settings.rendering.maximumVisibleStructuralZones} onChange={event => patchRendering({ maximumVisibleStructuralZones: Number(event.target.value) })} /></label>
+        <label>Zone Extension<select value={settings.rendering.zoneExtensionMode} onChange={event => patchRendering({ zoneExtensionMode: event.target.value as AuctionProfileSettings["rendering"]["zoneExtensionMode"] })}><option value="PROFILE_ONLY">Profile Only</option><option value="UNTIL_FIRST_TOUCH">Until First Touch</option><option value="UNTIL_MITIGATED">Until Mitigated</option><option value="UNTIL_INVALIDATED">Until Invalidated</option><option value="FIXED_N_BARS">Fixed N Bars</option><option value="EXTEND_RIGHT">Extend Right</option><option value="FULL_CHART">Full Chart</option></select></label>
       </div>}
+        {settings.rendering.zoneExtensionMode === "FIXED_N_BARS" && <label>Extension Bars<input type="number" min={1} max={20000} value={settings.rendering.fixedExtensionBars} onChange={event => patchRendering({ fixedExtensionBars: Number(event.target.value) })} /></label>}
 
       {tab === "style" && <div className="indicator-settings-section">
         <b>Black Terminal Rendering</b>
-        <label>Display<select value={settings.rendering.displayStyle} onChange={event => patchRendering({ displayStyle: event.target.value as AuctionProfileSettings["rendering"]["displayStyle"] })}><option value="COMBINED">Combined</option><option value="HEATMAP_BLOCKS">Heatmap Blocks</option><option value="HORIZONTAL_HISTOGRAM">Horizontal Histogram</option><option value="PROFILE_COLUMNS">Profile Columns</option><option value="LETTERS_TPO">TPO Letters</option><option value="CONTOUR">Contour</option><option value="NODES_ONLY">Nodes Only</option><option value="STRUCTURAL_ZONES">Structural Zones</option></select></label>
+        <label>Display Mode<select value={settings.rendering.presentationMode} onChange={event => patchRendering({ presentationMode: event.target.value as AuctionProfileSettings["rendering"]["presentationMode"] })}><option value="DYNAMIC_BLOCKS">Dynamic Blocks</option><option value="AGGREGATE_HISTOGRAM">Aggregate Histogram</option><option value="STRUCTURAL_NODES">Structural Nodes</option><option value="DYNAMIC_KEY_LEVELS">Dynamic Blocks + Key Levels</option><option value="DYNAMIC_AGGREGATE">Dynamic Blocks + Aggregate</option><option value="MACRO_STRUCTURE">Macro Structure</option></select></label>
+        {["AGGREGATE_HISTOGRAM", "DYNAMIC_AGGREGATE", "MACRO_STRUCTURE"].includes(settings.rendering.presentationMode) && <label>Aggregate Style<select value={settings.rendering.displayStyle} onChange={event => patchRendering({ displayStyle: event.target.value as AuctionProfileSettings["rendering"]["displayStyle"] })}><option value="HORIZONTAL_HISTOGRAM">Horizontal Histogram</option><option value="PROFILE_COLUMNS">Profile Columns</option><option value="COMBINED">Combined</option></select></label>}
+        <label>Cell Text<select value={settings.rendering.cellTextMode} onChange={event => patchRendering({ cellTextMode: event.target.value as AuctionProfileSettings["rendering"]["cellTextMode"] })}><option value="AUTO">Auto</option><option value="ALWAYS">Always</option><option value="HOVER_ONLY">Hover Only</option><option value="STRONG_ONLY">Strong Cells Only</option><option value="OFF">Off</option></select></label>
+        <label>Text Size<select value={settings.rendering.cellTextSize} onChange={event => patchRendering({ cellTextSize: event.target.value as AuctionProfileSettings["rendering"]["cellTextSize"] })}><option value="AUTO">Adaptive GPU Text</option><option value="TINY">Tiny</option><option value="SMALL">Small</option><option value="NORMAL">Normal</option><option value="LARGE">Large</option><option value="HUGE">Huge</option></select></label>
+        <label>Cell Border<select value={settings.rendering.cellBorder} onChange={event => patchRendering({ cellBorder: event.target.value as AuctionProfileSettings["rendering"]["cellBorder"] })}><option value="NONE">None</option><option value="SUBTLE">Subtle</option><option value="STANDARD">Standard</option><option value="HIGH_CONTRAST">High Contrast</option></select></label>
         <label>Palette<select value={settings.rendering.palette} onChange={event => patchRendering({ palette: event.target.value as AuctionProfileSettings["rendering"]["palette"] })}><option value="BLACK_TERMINAL_INSTITUTIONAL">Black Terminal Institutional</option><option value="ORIGINAL">Original</option><option value="THERMAL">Thermal</option><option value="BLOOD_RED">Blood Red</option><option value="CVD_DIRECTIONAL">CVD Directional</option><option value="MONOCHROME">Monochrome</option><option value="CUSTOM">Custom</option></select></label>
         <label>Width ({settings.rendering.widthPercent}%)<input type="range" min={5} max={100} value={settings.rendering.widthPercent} onChange={event => patchRendering({ widthPercent: Number(event.target.value) })} /></label>
         <label>Opacity ({Math.round(settings.rendering.opacity * 100)}%)<input type="range" min={2} max={100} value={settings.rendering.opacity * 100} onChange={event => patchRendering({ opacity: Number(event.target.value) / 100 })} /></label>
         <label>Brightness ({settings.rendering.brightness}%)<input type="range" min={10} max={300} step={5} value={settings.rendering.brightness} onChange={event => patchRendering({ brightness: Number(event.target.value) })} /></label>
+        <label>Normalization<select value={settings.rendering.normalizationMode} onChange={event => patchRendering({ normalizationMode: event.target.value as AuctionProfileSettings["rendering"]["normalizationMode"] })}><option value="ROBUST_PERCENTILE">Robust Percentile</option><option value="PER_PROFILE">Per Profile</option><option value="PER_TIME_BLOCK">Per Time Block</option><option value="ROLLING">Rolling</option><option value="ABSOLUTE_FIXED">Absolute Fixed</option><option value="PERCENTILE">Percentile</option><option value="LOGARITHMIC">Logarithmic</option></select></label>
+        <label>Color Lifecycle<select value={settings.rendering.colorScalingLifecycle} onChange={event => patchRendering({ colorScalingLifecycle: event.target.value as AuctionProfileSettings["rendering"]["colorScalingLifecycle"] })}><option value="FROZEN_ON_BLOCK_CLOSE">Frozen On Block Close</option><option value="FROZEN_PER_BLOCK">Frozen Per Block</option><option value="DEVELOPING_GLOBAL">Developing Global</option><option value="FROZEN_ON_PROFILE_LOCK">Frozen On Profile Lock</option><option value="ROLLING">Rolling</option></select></label>
+        <label>Visible Column Budget<input type="number" min={25} max={2000} value={settings.rendering.maximumVisibleColumns} onChange={event => patchRendering({ maximumVisibleColumns: Number(event.target.value) })} /></label>
+        <label>Visible Row Budget<input type="number" min={25} max={1000} value={settings.rendering.maximumVisibleRows} onChange={event => patchRendering({ maximumVisibleRows: Number(event.target.value) })} /></label>
+        <label>Visible Label Budget<input type="number" min={0} max={10000} value={settings.rendering.maximumVisibleLabels} onChange={event => patchRendering({ maximumVisibleLabels: Number(event.target.value) })} /></label>
+        <label>Show Midpoint<input type="checkbox" checked={settings.rendering.showMidpoint} onChange={event => patchRendering({ showMidpoint: event.target.checked })} /></label>
+        <label>Show Structural S/R<input type="checkbox" checked={settings.rendering.showStructuralSr} onChange={event => patchRendering({ showStructuralSr: event.target.checked })} /></label>
         <label>Positive<input type="color" value={settings.rendering.positiveColor} onChange={event => patchRendering({ positiveColor: event.target.value })} /></label><label>Negative<input type="color" value={settings.rendering.negativeColor} onChange={event => patchRendering({ negativeColor: event.target.value })} /></label><label>Balanced<input type="color" value={settings.rendering.balancedColor} onChange={event => patchRendering({ balancedColor: event.target.value })} /></label>
         <label>Value Area<input type="color" value={settings.rendering.valueAreaColor} onChange={event => patchRendering({ valueAreaColor: event.target.value })} /></label><label>POC<input type="color" value={settings.rendering.pocColor} onChange={event => patchRendering({ pocColor: event.target.value })} /></label><label>LVN<input type="color" value={settings.rendering.lvnColor} onChange={event => patchRendering({ lvnColor: event.target.value })} /></label><label>HVN<input type="color" value={settings.rendering.hvnColor} onChange={event => patchRendering({ hvnColor: event.target.value })} /></label>
         <label>Show Values<input type="checkbox" checked={settings.rendering.showText} onChange={event => patchRendering({ showText: event.target.checked })} /></label><label>Show Key Levels<input type="checkbox" checked={settings.rendering.showKeyLevels} onChange={event => patchRendering({ showKeyLevels: event.target.checked })} /></label><label>Show Node Labels<input type="checkbox" checked={settings.rendering.showNodeLabels} onChange={event => patchRendering({ showNodeLabels: event.target.checked })} /></label>

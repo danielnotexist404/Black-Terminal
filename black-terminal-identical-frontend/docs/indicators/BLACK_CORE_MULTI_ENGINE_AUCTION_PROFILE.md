@@ -12,3 +12,14 @@ BC-MEAP is a worker-owned, Pixi-rendered auction map. It retains the supplied Pi
 6. Pixi draws bounded geometry and pooled text without React cells.
 
 Native profiles support 20,000 chart bars. Except for explicitly selected Visible Range or pixel-adaptive sizing, chart panning and zooming do not alter the calculation.
+
+## BC-MEAP 2.0 matrix layer
+
+The canonical snapshot now carries both:
+
+- aggregate `rows` for value area, POC, nodes, and optional histogram presentation;
+- a sparse `matrix` for discrete time-by-price evidence.
+
+Native trades allocate at exact trade price and time. Pine Compatibility retains its lower-timeframe distributed model. Session calculation returns every retained session snapshot, finalizes completed matrices, and leaves only the latest session developing.
+
+The display default is Dynamic Blocks + Key Levels. Scope and presentation are independent, so Macro Composite can remain a block matrix and Session may intentionally use the aggregate view.

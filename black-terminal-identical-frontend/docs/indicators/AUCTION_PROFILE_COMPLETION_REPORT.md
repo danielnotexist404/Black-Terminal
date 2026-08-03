@@ -61,3 +61,51 @@ This implementation is local and is not committed, pushed, or deployed. It requi
 - Pine Compatibility preserves the supplied formulas and documented anomalies, but pixel-level parity remains pending a same-market, same-window TradingView golden export.
 - Interactive browser visual smoke was unavailable in this session; deterministic rendering, production compilation, and renderer lifecycle checks passed.
 - The venue-neutral correlation interface is prepared for future HDLX, DOM, and IMM confluence; it does not fabricate unavailable depth or liquidation history.
+
+## BC-MEAP 2.0 dynamic restoration addendum
+
+This section supersedes the original aggregate-first rendering status.
+
+### Root cause and responsible files
+
+The first implementation serialized only cumulative price rows. `nativeEngine.ts` had no time-block matrix, while `AuctionProfileRenderer.ts` could only draw row histograms and node extensions. Legacy defaults enabled those structural layers together. The missing time dimension—not styling—caused the mismatch.
+
+### Delivered architecture
+
+- `core/types.ts`: versioned block, cell, matrix, presentation, normalization, density, and extension contracts.
+- `core/blockMatrix.ts`: deterministic block cadence, sparse cell construction, exact/fallback allocation, normalization, TPO/volatility components, lifecycle, and indexed live mutation.
+- `engines/nativeEngine.ts`: matrix snapshots, retained/finalized historical sessions, and BC-MEAP 2.0 versions.
+- `rendering/AuctionProfileRenderer.ts`: batched cells, stable keyed label reuse, optional aggregate/nodes, precise key levels, current-column border, hover inspection, and multi-session drawing.
+- `rendering/cells.ts`: display-only row/column aggregation with signed conservation.
+- `components/AuctionProfileSettings.tsx`: independent scope/presentation, presets, cell controls, budgets, and structural controls.
+
+### Behavioral result
+
+Native Real CVD maps each trade to exactly one time block and price row. Pine Compatibility keeps lower-timeframe directional distribution and observed source quirks. The latest block updates incrementally; closed blocks and prior sessions remain finalized. Default rendering is Dynamic Blocks + Key Levels with aggregate, LVN/HVN, labels, midpoint, macro S/R, and historical extensions off.
+
+Cell text supports signed compact CVD, ratios, USD, TPO/activity, and volatility formatting. Hover exposes the complete cell evidence record. Continuous positive intensity runs dark gray to silver-white; negative intensity runs dark red to blood red; borders are near-black.
+
+### Certification
+
+- native exact fixture: `+3` at 63,000, `-4` at 63,050, and `+6` at 63,100 passed;
+- multiple trades per cell, block creation, current-cell increment, frozen history, conservation, data quality, label culling, compact formatting, palette endpoints, session retention, worker incrementality, and locked composites passed;
+- Pine semantic compatibility remains implemented with seven documented source anomalies;
+- pixel-identical Pine certification remains pending synchronized TradingView cell exports.
+
+### Performance
+
+Capacity tests cover requested 100×100, 250×200, 500×300, and approximately 1,000×500 matrices plus 5,000–20,000-bar macro cases. The largest recorded run produced 286,675 sparse cells: 1,736.96 ms cold worker build, 2,073.34 ms warm build, 5.20 ms incremental update, 73.66 ms display projection, and 4.16 ms label culling/formatting. Full numbers and the browser-FPS truth boundary are in `AUCTION_PROFILE_PERFORMANCE.md`.
+
+### Build and deployment boundary
+
+Typecheck, Auction Profile certification, 27 security contracts, production Vite build, and secret audit pass. No Supabase migration is required. Git/Vercel deployment status is reported with the release handoff because it is external state.
+
+### Visual evidence and remaining limitations
+
+The supplied Pine and Black Terminal images remain the comparison evidence. Automated in-app screenshot capture could not be executed because the browser-control runtime was unavailable; no screenshot is fabricated.
+
+- exact historical CVD still requires a venue trade archive;
+- pixel Pine parity requires a synchronized export;
+- touch/mitigation/invalidation extension modes currently extend right; event-terminated zone state is future work;
+- TPO display downsampling sums finalized bracket counts because bracket identities are not serialized;
+- color freeze is guaranteed for incremental updates; a deliberate full source rebuild may recompute robust profile bounds.

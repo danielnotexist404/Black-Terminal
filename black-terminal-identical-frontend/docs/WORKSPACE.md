@@ -235,3 +235,15 @@ Chapter II-D adds safe node health to the same authenticated payload: stable nod
 ## Auction Profile persistence
 
 Workspace snapshots persist the versioned `auctionProfileSettings` object independently from visibility. Opening an older workspace migrates missing fields to safe Black Core defaults. Presentation-only edits do not change the calculation hash; engine, scope, source, grid, value-area, and node edits do. Strategy consumers should store the immutable profile version and boundaries rather than a mutable rolling reference.
+
+BC-MEAP 2.0 adds persisted block construction, presentation, cell text/border, normalization, color lifecycle, render budgets, structural density, and zone-extension settings. Legacy aggregate workspaces migrate to the safe Dynamic Blocks + Key Levels presentation and Net CVD where applicable.
+
+Runtime matrix state is not duplicated in local storage. The worker rebuilds it from canonical bars/trades and immutable settings. The chart retains the returned session snapshot array in memory so historical sessions remain visible; the latest snapshot alone supplies legend and diagnostics.
+
+The built-in preset buttons update the same scoped settings record:
+
+- Original Pine;
+- CVD Session;
+- CVD Macro Matrix;
+- Macro Structure;
+- TPO Session.

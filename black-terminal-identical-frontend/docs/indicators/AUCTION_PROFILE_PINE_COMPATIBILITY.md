@@ -15,3 +15,9 @@ Known source anomalies retained for compatibility:
 - `max_bars_back=1500` conflicts with `calc_bars_count=10000`.
 
 Compatibility and native output must never be compared as if they represented the same data model. Pixel-level TradingView certification still requires a golden export from the same venue, history window, and Pine settings.
+
+## Dynamic-cell compatibility
+
+Compatibility now preserves a cell per price row and time block instead of collapsing rows into one histogram. It uses equal lower-timeframe range allocation, close-to-close direction, source overwrite behavior, Session reset semantics, source-like signed labels, and Developing Global normalization.
+
+The Original Pine preset selects Dynamic Blocks with values always visible. The supplied screenshot certifies the intended topology only. Cell-by-cell and pixel-level parity remain pending a synchronized machine-readable TradingView export.

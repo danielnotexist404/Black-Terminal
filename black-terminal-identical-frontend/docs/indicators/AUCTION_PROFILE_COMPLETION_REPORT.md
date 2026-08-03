@@ -53,7 +53,7 @@ The local deterministic benchmark covers 5,000, 10,000, and 20,000 bars at 256 t
 
 ## Deployment and isolation
 
-This implementation is local and is not committed, pushed, or deployed. It requires no Supabase migration. Broker credentials, order submission, portfolio execution, and risk controls were not modified by this chapter.
+The implementation is committed to and pushed on the repository's `main` release path, and the linked Vercel production deployment was verified Ready. It requires no Supabase migration. Broker credentials, order submission, portfolio execution, and risk controls were not modified by this chapter.
 
 ## Remaining limitations
 

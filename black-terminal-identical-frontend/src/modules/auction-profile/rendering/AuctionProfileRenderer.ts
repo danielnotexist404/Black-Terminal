@@ -1,7 +1,7 @@
 import { Container, Graphics, Text } from "pixi.js";
 import type { AuctionProfileSettings, AuctionProfileSnapshot } from "../core/types.ts";
 import { auctionBrightnessAlpha, normalizedAuctionRowStrength } from "./heatmap.ts";
-import { auctionHistogramWidth, auctionProfileHorizontalBounds } from "./histogram.ts";
+import { auctionHistogramWidth, auctionProfileHorizontalBounds, auctionProfileStartX } from "./histogram.ts";
 import { formatAuctionMetric } from "./labels.ts";
 import { auctionNodeAlpha } from "./nodes.ts";
 
@@ -11,6 +11,7 @@ export type AuctionProfileRenderTransform = {
   top: number;
   bottom: number;
   xForTime(time: number): number;
+  xForLookbackBars(bars: number): number;
   yForPrice(price: number): number;
 };
 
@@ -22,6 +23,7 @@ function colorNumber(color: string) {
 export class AuctionProfileRenderer {
   readonly container = new Container();
   private clip = new Graphics();
+  private extensions = new Graphics();
   private heatmap = new Graphics();
   private histogram = new Graphics();
   private zones = new Graphics();
@@ -31,7 +33,7 @@ export class AuctionProfileRenderer {
   private metricsState = { rows: 0, nodes: 0, labels: 0, commands: 0 };
 
   constructor() {
-    this.container.addChild(this.clip, this.heatmap, this.histogram, this.zones, this.levels, this.textLayer);
+    this.container.addChild(this.clip, this.heatmap, this.extensions, this.histogram, this.zones, this.levels, this.textLayer);
     this.container.mask = this.clip;
   }
 
@@ -59,6 +61,7 @@ export class AuctionProfileRenderer {
 
   draw(snapshot: AuctionProfileSnapshot | null, settings: AuctionProfileSettings, transform: AuctionProfileRenderTransform) {
     this.clip.clear().rect(0, transform.top, transform.width, Math.max(1, transform.bottom - transform.top)).fill(0xffffff);
+    this.extensions.clear();
     this.heatmap.clear();
     this.histogram.clear();
     this.zones.clear();
@@ -70,7 +73,13 @@ export class AuctionProfileRenderer {
     }
     const rendering = settings.rendering;
     const maximum = Math.max(...snapshot.rows.map(row => Math.abs(row.value)), Number.EPSILON);
-    const bounds = auctionProfileHorizontalBounds(snapshot.range, transform.width, transform.xForTime);
+    const startX = auctionProfileStartX(
+      snapshot.scope,
+      snapshot.range,
+      transform.xForTime,
+      transform.xForLookbackBars
+    );
+    const bounds = auctionProfileHorizontalBounds(snapshot.range, transform.width, transform.xForTime, startX);
     if (!bounds.visible || bounds.width < 1) {
       this.metricsState = { rows: snapshot.rows.length, nodes: snapshot.nodes.length, labels: 0, commands: 0 };
       return;
@@ -90,6 +99,13 @@ export class AuctionProfileRenderer {
       const positive = row.value >= 0;
       const color = colorNumber(positive ? rendering.positiveColor : rendering.negativeColor);
       const strength = normalizedAuctionRowStrength(row, maximum);
+      const levelY = y + height / 2;
+      this.extensions.moveTo(bounds.left, levelY).lineTo(bounds.right, levelY).stroke({
+        color,
+        width: strength >= 0.72 ? 1 : 0.6,
+        alpha: auctionBrightnessAlpha((0.035 + strength * 0.2) * rendering.opacity, rendering.brightness)
+      });
+      commands += 1;
       if (heatmapEnabled) {
         this.heatmap.rect(bounds.left, y, profileWidth, height).fill({
           color,

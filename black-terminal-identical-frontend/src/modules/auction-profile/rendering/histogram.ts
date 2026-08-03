@@ -1,4 +1,4 @@
-import type { AuctionProfileRow } from "../core/types.ts";
+import type { AuctionProfileRow, AuctionScopeMode } from "../core/types.ts";
 
 export type AuctionProfileHorizontalBounds = {
   left: number;
@@ -7,13 +7,31 @@ export type AuctionProfileHorizontalBounds = {
   visible: boolean;
 };
 
+const LOOKBACK_ANCHORED_SCOPES = new Set<AuctionScopeMode>([
+  "ROLLING",
+  "COMPOSITE",
+  "MACRO_COMPOSITE"
+]);
+
+export function auctionProfileStartX(
+  scope: AuctionScopeMode,
+  range: { start: number; loadedBars: number },
+  xForTime: (time: number) => number,
+  xForLookbackBars: (bars: number) => number
+) {
+  return LOOKBACK_ANCHORED_SCOPES.has(scope)
+    ? xForLookbackBars(range.loadedBars)
+    : xForTime(range.start);
+}
+
 export function auctionProfileHorizontalBounds(
   range: { start: number; end: number },
   viewportWidth: number,
-  xForTime: (time: number) => number
+  xForTime: (time: number) => number,
+  startX = xForTime(range.start)
 ): AuctionProfileHorizontalBounds {
   const width = Math.max(0, viewportWidth);
-  const rawStart = xForTime(range.start);
+  const rawStart = startX;
   const rawEnd = xForTime(range.end);
   const rawLeft = Math.min(rawStart, rawEnd);
   const rawRight = Math.max(rawStart, rawEnd);

@@ -3,7 +3,7 @@ import { migrateAuctionProfileSettings } from "../src/modules/auction-profile/co
 import { stableHash } from "../src/modules/auction-profile/core/canonical.ts";
 import { createAuctionProfileGrid } from "../src/modules/auction-profile/core/profileGrid.ts";
 import { resolveAuctionScopeWindows } from "../src/modules/auction-profile/core/scope.ts";
-import { auctionHistogramWidth, auctionProfileHorizontalBounds } from "../src/modules/auction-profile/rendering/histogram.ts";
+import { auctionHistogramWidth, auctionProfileHorizontalBounds, auctionProfileStartX } from "../src/modules/auction-profile/rendering/histogram.ts";
 import { PINE_CVD_PROFILE_KNOWN_ANOMALIES } from "../src/modules/auction-profile/engines/pineCompatibility.ts";
 import { appendTradesToAuctionProfile, calculateAuctionProfile } from "../src/modules/auction-profile/engines/nativeEngine.ts";
 import { InMemoryCanonicalCvdService } from "../src/modules/auction-profile/data/tradeSource.ts";
@@ -105,6 +105,16 @@ const offscreenProfile = auctionProfileHorizontalBounds(
   time => time * 2 + 700
 );
 assert.equal(offscreenProfile.visible, false);
+assert.equal(
+  auctionProfileStartX("ROLLING", { start: 100, loadedBars: 5000 }, time => time * 2, bars => 1000 - bars / 10),
+  500,
+  "rolling profiles must use the loaded bar count as their visual anchor"
+);
+assert.equal(
+  auctionProfileStartX("MANUAL_RANGE", { start: 100, loadedBars: 5000 }, time => time * 2, bars => 1000 - bars / 10),
+  200,
+  "manual profiles must retain their explicit timestamp anchor"
+);
 const strongestRow = { value: 100 } as Parameters<typeof auctionHistogramWidth>[0];
 const weakerRow = { value: 25 } as Parameters<typeof auctionHistogramWidth>[0];
 assert.equal(auctionHistogramWidth(strongestRow, 100, fullyVisibleProfile.width, 5), fullyVisibleProfile.width);

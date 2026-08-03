@@ -1546,6 +1546,7 @@ export class BlackChartEngine {
         top: this.view.topPadding,
         bottom: plotHeight,
         xForTime: (time) => this.xForTimestamp(time),
+        xForLookbackBars: (bars) => this.xForIndex(Math.max(0, this.getDisplayCandles().length - Math.max(1, Math.round(bars)))),
         yForPrice: (price) => this.yForPrice(price)
       }
     );

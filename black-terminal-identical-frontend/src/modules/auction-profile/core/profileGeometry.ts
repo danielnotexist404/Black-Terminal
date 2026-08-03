@@ -47,6 +47,12 @@ export interface AuctionProfilePlacementBounds {
   width: number;
 }
 
+export interface AuctionProfileRangeBounds {
+  left: number;
+  right: number;
+  width: number;
+}
+
 export interface AuctionProfileBarSpan {
   left: number;
   right: number;
@@ -203,11 +209,28 @@ export function resolveAuctionProfilePlacement(
   } else if (placement === "RANGE_START") {
     left = Math.max(0, Math.min(plotWidth, rangeLeft));
     right = Math.min(plotWidth, left + requestedWidth);
+  } else if (placement === "RANGE_END") {
+    right = Math.max(0, Math.min(plotWidth, rangeRight));
+    left = Math.max(0, right - requestedWidth);
   } else {
     right = plotWidth;
     left = Math.max(0, right - requestedWidth);
   }
   return { left, right, center: (left + right) / 2, width: Math.max(1, right - left) };
+}
+
+export function resolveAuctionProfileRangeBounds(
+  plotWidth: number,
+  rawRangeLeft: number,
+  rawRangeRight: number
+): AuctionProfileRangeBounds {
+  const left = Math.max(0, Math.min(plotWidth, Math.min(rawRangeLeft, rawRangeRight)));
+  const right = Math.max(0, Math.min(plotWidth, Math.max(rawRangeLeft, rawRangeRight)));
+  return { left, right, width: Math.max(0, right - left) };
+}
+
+export function auctionProfileEffectiveWidthPercent(widthPercent: number, lengthPercent: number) {
+  return Math.max(5, Math.min(100, widthPercent * Math.max(25, Math.min(160, lengthPercent)) / 100));
 }
 
 export function auctionProfileBarSpans(

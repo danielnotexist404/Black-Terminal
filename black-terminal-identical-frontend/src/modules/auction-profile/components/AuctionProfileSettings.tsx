@@ -57,6 +57,8 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
       next.rendering.rowLabelMode = "OFF";
       next.rendering.cellTextMode = "ALWAYS";
       next.rendering.widthPercent = 30;
+      next.rendering.profileSide = "LEFT";
+      next.rendering.profileLengthPercent = 75;
     } else if (preset === "SESSION") {
       next.implementationMode = "BLACK_CORE_NATIVE";
       next.scopeMode = "SESSION";
@@ -72,6 +74,8 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
       next.rendering.rowLabelMode = "OFF";
       next.rendering.cellTextMode = "ALWAYS";
       next.rendering.widthPercent = 30;
+      next.rendering.profileSide = "LEFT";
+      next.rendering.profileLengthPercent = 75;
     } else if (preset === "MACRO") {
       next.implementationMode = "BLACK_CORE_NATIVE";
       next.scopeMode = "MACRO_COMPOSITE";
@@ -87,6 +91,8 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
       next.rendering.timeSegmentsMode = "STACKED";
       next.rendering.rowLabelMode = "OFF";
       next.rendering.cellTextMode = "ALWAYS";
+      next.rendering.profileSide = "LEFT";
+      next.rendering.profileLengthPercent = 75;
       next.nodeDetection.showLvns = true;
       next.nodeDetection.showHvns = true;
       next.rendering.structuralDetail = "MINIMAL";
@@ -104,6 +110,8 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
       next.rendering.timeSegmentsMode = "STACKED";
       next.rendering.rowLabelMode = "OFF";
       next.rendering.cellTextMode = "ALWAYS";
+      next.rendering.profileSide = "LEFT";
+      next.rendering.profileLengthPercent = 75;
       next.nodeDetection.showLvns = true;
       next.nodeDetection.showHvns = true;
       next.rendering.structuralDetail = "STANDARD";
@@ -217,9 +225,14 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
             <label>Block Value<select value={settings.rendering.profileBlockValueMode} onChange={event => patchRendering({ profileBlockValueMode: event.target.value as AuctionProfileSettings["rendering"]["profileBlockValueMode"] })}><option value="CUMULATIVE_CVD">Developing CVD · Reference</option><option value="BLOCK_DELTA">Block Delta · Non-cumulative</option></select></label>
             <label>Matrix Block Width ({settings.rendering.profileBlockPixelWidth}px)<input type="range" min={14} max={80} step={1} value={settings.rendering.profileBlockPixelWidth} onChange={event => patchRendering({ profileBlockPixelWidth: Number(event.target.value) })} /></label>
             <label>Profile Cell Text<select value={settings.rendering.cellTextMode} onChange={event => patchRendering({ cellTextMode: event.target.value as AuctionProfileSettings["rendering"]["cellTextMode"] })}><option value="AUTO">Auto</option><option value="ALWAYS">Always</option><option value="HOVER_ONLY">Hover Only</option><option value="STRONG_ONLY">Strong Cells Only</option><option value="OFF">Off</option></select></label>
+            <label>Profile Side<select value={settings.rendering.profileSide} onChange={event => patchRendering({ profileSide: event.target.value as AuctionProfileSettings["rendering"]["profileSide"] })}><option value="LEFT">Left · Lookback Start</option><option value="RIGHT">Right · Latest Edge</option></select></label>
+            <label>Profile Length ({settings.rendering.profileLengthPercent}%)<input type="range" min={25} max={160} step={5} value={settings.rendering.profileLengthPercent} onChange={event => patchRendering({ profileLengthPercent: Number(event.target.value) })} /></label>
+            <small>Contract or stretch the matrix body without shortening the historical POC, VAH, VAL, and node extensions.</small>
           </>}
-          <label>Profile Geometry<select value={settings.rendering.profileGeometry} onChange={event => patchRendering({ profileGeometry: event.target.value as AuctionProfileSettings["rendering"]["profileGeometry"] })}><option value="BIDIRECTIONAL_DELTA">Bidirectional Delta</option><option value="ABSOLUTE_DIRECTIONAL">Absolute Width + Directional Color</option><option value="POSITIVE_NEGATIVE_SPLIT">Positive / Negative Split</option><option value="MIRRORED">Mirrored</option><option value="SINGLE_SIDED_RIGHT">Single-Sided Right</option><option value="SINGLE_SIDED_LEFT">Single-Sided Left</option><option value="CENTERED">Centered</option></select></label>
-          <label>Profile Placement<select value={settings.rendering.profilePlacement} onChange={event => patchRendering({ profilePlacement: event.target.value as AuctionProfileSettings["rendering"]["profilePlacement"] })}><option value="RANGE_START">Range Start · HDLX/Pine</option><option value="RIGHT">Right</option><option value="LEFT">Left</option><option value="OVERLAY">Overlay</option><option value="INSIDE_RANGE">Inside Range</option><option value="DETACHED_PANEL">Detached Profile Rail</option></select></label>
+          {settings.rendering.profileBodyStyle === "SOLID_HISTOGRAM" && <>
+            <label>Profile Geometry<select value={settings.rendering.profileGeometry} onChange={event => patchRendering({ profileGeometry: event.target.value as AuctionProfileSettings["rendering"]["profileGeometry"] })}><option value="BIDIRECTIONAL_DELTA">Bidirectional Delta</option><option value="ABSOLUTE_DIRECTIONAL">Absolute Width + Directional Color</option><option value="POSITIVE_NEGATIVE_SPLIT">Positive / Negative Split</option><option value="MIRRORED">Mirrored</option><option value="SINGLE_SIDED_RIGHT">Single-Sided Right</option><option value="SINGLE_SIDED_LEFT">Single-Sided Left</option><option value="CENTERED">Centered</option></select></label>
+            <label>Profile Placement<select value={settings.rendering.profilePlacement} onChange={event => patchRendering({ profilePlacement: event.target.value as AuctionProfileSettings["rendering"]["profilePlacement"] })}><option value="RANGE_START">Range Start</option><option value="RANGE_END">Range End</option><option value="RIGHT">Right</option><option value="LEFT">Left</option><option value="OVERLAY">Overlay</option><option value="INSIDE_RANGE">Inside Range</option><option value="DETACHED_PANEL">Detached Profile Rail</option></select></label>
+          </>}
           <label>Width Metric<select value={settings.rendering.profileWidthMetric} onChange={event => patchRendering({ profileWidthMetric: event.target.value as AuctionProfileSettings["rendering"]["profileWidthMetric"] })}><option value="CVD_ACTIVITY">CVD Activity · Σ|Delta|</option><option value="NET_CVD">Net CVD</option><option value="ABSOLUTE_CVD">Absolute CVD</option><option value="BUY_VOLUME">Buy Volume</option><option value="SELL_VOLUME">Sell Volume</option><option value="TOTAL_VOLUME">Total Volume</option><option value="CVD_EFFICIENCY">CVD Efficiency</option><option value="IMBALANCE_RATIO">Imbalance Ratio</option><option value="SELECTED_ENGINE">Selected Engine</option></select></label>
           <label>Row Labels<select value={settings.rendering.rowLabelMode} onChange={event => patchRendering({ rowLabelMode: event.target.value as AuctionProfileSettings["rendering"]["rowLabelMode"] })}><option value="ALWAYS">Always</option><option value="AUTO">Auto</option><option value="STRONG_ONLY">Strong Rows Only</option><option value="HOVER">Hover</option><option value="OFF">Off</option></select></label>
           <label>Time Segments<select value={settings.rendering.timeSegmentsMode} onChange={event => patchRendering({ timeSegmentsMode: event.target.value as AuctionProfileSettings["rendering"]["timeSegmentsMode"] })}><option value="OFF">Off · Unified Profile</option><option value="STACKED">Stacked</option><option value="LATEST_N">Latest N</option><option value="SESSION_BLOCKS">Session Blocks</option><option value="CUSTOM">Custom</option></select></label>
@@ -231,7 +244,7 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
         </>}
         <label>Row / Cell Border<select value={settings.rendering.cellBorder} onChange={event => patchRendering({ cellBorder: event.target.value as AuctionProfileSettings["rendering"]["cellBorder"] })}><option value="NONE">None</option><option value="SUBTLE">Subtle</option><option value="STANDARD">Standard</option><option value="HIGH_CONTRAST">High Contrast</option></select></label>
         <label>Palette<select value={settings.rendering.palette} onChange={event => patchRendering({ palette: event.target.value as AuctionProfileSettings["rendering"]["palette"] })}><option value="BLACK_TERMINAL_INSTITUTIONAL">Black Terminal Institutional</option><option value="ORIGINAL">Original</option><option value="THERMAL">Thermal</option><option value="BLOOD_RED">Blood Red</option><option value="CVD_DIRECTIONAL">CVD Directional</option><option value="MONOCHROME">Monochrome</option><option value="CUSTOM">Custom</option></select></label>
-        <label>Width ({settings.rendering.widthPercent}%)<input type="range" min={5} max={100} value={settings.rendering.widthPercent} onChange={event => patchRendering({ widthPercent: Number(event.target.value) })} /></label>
+        <label>Maximum Profile Width ({settings.rendering.widthPercent}%)<input type="range" min={5} max={100} value={settings.rendering.widthPercent} onChange={event => patchRendering({ widthPercent: Number(event.target.value) })} /></label>
         <label>Automatic Profile Width<input type="checkbox" checked={settings.rendering.profileWidthAuto} onChange={event => patchRendering({ profileWidthAuto: event.target.checked })} /></label>
         <label>Opacity ({Math.round(settings.rendering.opacity * 100)}%)<input type="range" min={2} max={100} value={settings.rendering.opacity * 100} onChange={event => patchRendering({ opacity: Number(event.target.value) / 100 })} /></label>
         <label>Brightness ({settings.rendering.brightness}%)<input type="range" min={10} max={300} step={5} value={settings.rendering.brightness} onChange={event => patchRendering({ brightness: Number(event.target.value) })} /></label>
@@ -243,7 +256,10 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
         <label>Show Midpoint<input type="checkbox" checked={settings.rendering.showMidpoint} onChange={event => patchRendering({ showMidpoint: event.target.checked })} /></label>
         <label>Show Structural S/R<input type="checkbox" checked={settings.rendering.showStructuralSr} onChange={event => patchRendering({ showStructuralSr: event.target.checked })} /></label>
         <label>Positive<input type="color" value={settings.rendering.positiveColor} onChange={event => patchRendering({ positiveColor: event.target.value })} /></label><label>Negative<input type="color" value={settings.rendering.negativeColor} onChange={event => patchRendering({ negativeColor: event.target.value })} /></label><label>Balanced<input type="color" value={settings.rendering.balancedColor} onChange={event => patchRendering({ balancedColor: event.target.value })} /></label>
-        <label>Value Area<input type="color" value={settings.rendering.valueAreaColor} onChange={event => patchRendering({ valueAreaColor: event.target.value })} /></label><label>POC<input type="color" value={settings.rendering.pocColor} onChange={event => patchRendering({ pocColor: event.target.value })} /></label><label>LVN<input type="color" value={settings.rendering.lvnColor} onChange={event => patchRendering({ lvnColor: event.target.value })} /></label><label>HVN<input type="color" value={settings.rendering.hvnColor} onChange={event => patchRendering({ hvnColor: event.target.value })} /></label>
+        <label>VAH / VAL Neon<input type="color" value={settings.rendering.valueAreaColor} onChange={event => patchRendering({ valueAreaColor: event.target.value })} /></label><label>POC Neon<input type="color" value={settings.rendering.pocColor} onChange={event => patchRendering({ pocColor: event.target.value })} /></label>
+        <label>Value Area Background<input type="color" value={settings.rendering.valueAreaFillColor} onChange={event => patchRendering({ valueAreaFillColor: event.target.value })} /></label>
+        <label>Value Area Intensity ({Math.round(settings.rendering.valueAreaFillOpacity * 100)}%)<input type="range" min={0} max={60} step={1} value={settings.rendering.valueAreaFillOpacity * 100} onChange={event => patchRendering({ valueAreaFillOpacity: Number(event.target.value) / 100 })} /></label>
+        <label>LVN<input type="color" value={settings.rendering.lvnColor} onChange={event => patchRendering({ lvnColor: event.target.value })} /></label><label>HVN<input type="color" value={settings.rendering.hvnColor} onChange={event => patchRendering({ hvnColor: event.target.value })} /></label>
         <label>Show Values<input type="checkbox" checked={settings.rendering.showText} onChange={event => patchRendering({ showText: event.target.checked })} /></label><label>Show Key Levels<input type="checkbox" checked={settings.rendering.showKeyLevels} onChange={event => patchRendering({ showKeyLevels: event.target.checked })} /></label><label>Show Node Labels<input type="checkbox" checked={settings.rendering.showNodeLabels} onChange={event => patchRendering({ showNodeLabels: event.target.checked })} /></label>
         <label>Show Value Area<input type="checkbox" checked={settings.rendering.showValueArea} onChange={event => patchRendering({ showValueArea: event.target.checked })} /></label><label>Show Initial Balance<input type="checkbox" checked={settings.rendering.showInitialBalance} onChange={event => patchRendering({ showInitialBalance: event.target.checked })} /></label><label>Show Off-Chart Panel<input type="checkbox" checked={settings.rendering.showOffChart} onChange={event => patchRendering({ showOffChart: event.target.checked })} /></label>
         {settings.rendering.showOffChart && <>{OFF_CHART_METRICS.map(metric => <label key={metric.value}>{metric.label}<input type="checkbox" checked={settings.offChartMetrics.includes(metric.value)} onChange={event => toggleOffChartMetric(metric.value, event.target.checked)} /></label>)}</>}

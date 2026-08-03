@@ -77,10 +77,12 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
     displayStyle: "COMBINED",
     presentationMode: "AGGREGATE_HISTOGRAM",
     visualizationType: "AUCTION_PROFILE",
-    profileLayoutRevision: 2,
+    profileLayoutRevision: 3,
     profileBodyStyle: "HDLX_CVD_BLOCKS",
     profileBlockValueMode: "CUMULATIVE_CVD",
     profileBlockPixelWidth: 24,
+    profileSide: "LEFT",
+    profileLengthPercent: 75,
     profileGeometry: "SINGLE_SIDED_RIGHT",
     profilePlacement: "RANGE_START",
     profileWidthMetric: "CVD_ACTIVITY",
@@ -122,7 +124,9 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
     negativeColor: "#ec182a",
     balancedColor: "#333333",
     valueAreaColor: "#d8dce2",
-    pocColor: "#ffffff",
+    valueAreaFillColor: "#24272d",
+    valueAreaFillOpacity: 0.1,
+    pocColor: "#ff1738",
     lvnColor: "#4f555d",
     hvnColor: "#8e0014"
   },
@@ -245,8 +249,10 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
       profileBodyStyle: choice(r.profileBodyStyle, ["HDLX_CVD_BLOCKS", "SOLID_HISTOGRAM"], d.rendering.profileBodyStyle),
       profileBlockValueMode: choice(r.profileBlockValueMode, ["CUMULATIVE_CVD", "BLOCK_DELTA"], d.rendering.profileBlockValueMode),
       profileBlockPixelWidth: finite(r.profileBlockPixelWidth, d.rendering.profileBlockPixelWidth, 14, 80),
+      profileSide: choice(r.profileSide, ["LEFT", "RIGHT"], d.rendering.profileSide),
+      profileLengthPercent: finite(r.profileLengthPercent, d.rendering.profileLengthPercent, 25, 160),
       profileGeometry: choice(r.profileGeometry, ["BIDIRECTIONAL_DELTA", "ABSOLUTE_DIRECTIONAL", "POSITIVE_NEGATIVE_SPLIT", "MIRRORED", "SINGLE_SIDED_RIGHT", "SINGLE_SIDED_LEFT", "CENTERED"], d.rendering.profileGeometry),
-      profilePlacement: choice(r.profilePlacement, ["RIGHT", "LEFT", "OVERLAY", "INSIDE_RANGE", "RANGE_START", "DETACHED_PANEL"], d.rendering.profilePlacement),
+      profilePlacement: choice(r.profilePlacement, ["RIGHT", "LEFT", "OVERLAY", "INSIDE_RANGE", "RANGE_START", "RANGE_END", "DETACHED_PANEL"], d.rendering.profilePlacement),
       profileWidthMetric: choice(r.profileWidthMetric, ["CVD_ACTIVITY", "NET_CVD", "ABSOLUTE_CVD", "BUY_VOLUME", "SELL_VOLUME", "TOTAL_VOLUME", "CVD_EFFICIENCY", "IMBALANCE_RATIO", "SELECTED_ENGINE"], d.rendering.profileWidthMetric),
       rowLabelMode: choice(r.rowLabelMode, ["ALWAYS", "AUTO", "STRONG_ONLY", "HOVER", "OFF"], d.rendering.rowLabelMode),
       timeSegmentsMode: choice(r.timeSegmentsMode, ["OFF", "STACKED", "LATEST_N", "SESSION_BLOCKS", "CUSTOM"], d.rendering.timeSegmentsMode),
@@ -286,6 +292,8 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
       negativeColor: color(r.negativeColor, d.rendering.negativeColor),
       balancedColor: color(r.balancedColor, d.rendering.balancedColor),
       valueAreaColor: color(r.valueAreaColor, d.rendering.valueAreaColor),
+      valueAreaFillColor: color(r.valueAreaFillColor, d.rendering.valueAreaFillColor),
+      valueAreaFillOpacity: finite(r.valueAreaFillOpacity, d.rendering.valueAreaFillOpacity, 0, 0.6),
       pocColor: color(r.pocColor, d.rendering.pocColor),
       lvnColor: color(r.lvnColor, d.rendering.lvnColor),
       hvnColor: color(r.hvnColor, d.rendering.hvnColor)
@@ -315,13 +323,18 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
     result.rendering.cellTextMode = "ALWAYS";
     result.rendering.maximumVisibleLabels = Math.max(result.rendering.maximumVisibleLabels, 3000);
   }
-  // Revision 2 corrects the first block-profile release, which covered too much
-  // of the chart and emitted low-prominence structure. This migration runs once;
-  // later user-selected widths remain untouched.
-  if (r.profileLayoutRevision !== 2) {
-    result.rendering.profileLayoutRevision = 2;
+  // Revision 3 introduces a frameless, side-selectable matrix profile with
+  // independently adjustable horizontal length and a configurable value-area
+  // wash. This migration runs once; later user choices remain untouched.
+  if (r.profileLayoutRevision !== 3) {
+    result.rendering.profileLayoutRevision = 3;
     if (result.rendering.profileBodyStyle === "HDLX_CVD_BLOCKS") {
       result.rendering.widthPercent = 30;
+      result.rendering.profileSide = "LEFT";
+      result.rendering.profileLengthPercent = 75;
+      result.rendering.valueAreaFillColor = "#24272d";
+      result.rendering.valueAreaFillOpacity = 0.1;
+      result.rendering.pocColor = "#ff1738";
       result.nodeDetection.sensitivityPercentile = 10;
       result.nodeDetection.neighborhood = Math.max(5, result.nodeDetection.neighborhood);
       result.nodeDetection.prominence = Math.max(0.42, result.nodeDetection.prominence);

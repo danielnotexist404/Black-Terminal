@@ -1,10 +1,12 @@
 import { Container, Graphics, Text } from "pixi.js";
 import {
   AUCTION_PROFILE_RENDERER_KIND,
+  auctionProfileEffectiveWidthPercent,
   auctionProfileBarSpans,
   buildAuctionProfileRows,
   compressAuctionProfileSegments,
   resolveAuctionProfilePlacement,
+  resolveAuctionProfileRangeBounds,
   type AuctionProfileBarSpan,
   type AuctionProfileDisplayBlock,
   type AuctionProfileRowProjection
@@ -170,14 +172,24 @@ export class AuctionProfileRenderer {
   private drawSnapshot(snapshot: AuctionProfileSnapshot, settings: AuctionProfileSettings, transform: AuctionProfileRenderTransform, snapshotIndex: number, snapshotCount: number) {
     const rawRangeLeft = transform.xForTime(snapshot.range.start);
     const rawRangeRight = transform.xForTime(snapshot.range.end + 1);
-    const rangeLeft = Math.max(0, Math.min(transform.width, Math.min(rawRangeLeft, rawRangeRight)));
-    const rangeRight = Math.max(0, Math.min(transform.width, Math.max(rawRangeLeft, rawRangeRight)));
+    const range = resolveAuctionProfileRangeBounds(transform.width, rawRangeLeft, rawRangeRight);
+    const { left: rangeLeft, right: rangeRight } = range;
     if (rangeRight <= 0 || rangeLeft >= transform.width) return;
     if (snapshot.scope === "SESSION" && snapshotIndex < snapshotCount - 1 && rangeRight - rangeLeft < 18) return;
-    const placement = snapshot.scope === "SESSION" && settings.rendering.profilePlacement === "RIGHT" ? "INSIDE_RANGE" : settings.rendering.profilePlacement;
-    const widthPercent = settings.rendering.profileWidthAuto
+    const matrixProfile = settings.rendering.profileBodyStyle === "HDLX_CVD_BLOCKS";
+    const profileGeometry = matrixProfile
+      ? settings.rendering.profileSide === "LEFT" ? "SINGLE_SIDED_RIGHT" : "SINGLE_SIDED_LEFT"
+      : settings.rendering.profileGeometry;
+    const configuredPlacement = matrixProfile
+      ? settings.rendering.profileSide === "LEFT" ? "RANGE_START" : "RANGE_END"
+      : settings.rendering.profilePlacement;
+    const placement = snapshot.scope === "SESSION" && configuredPlacement === "RIGHT" ? "INSIDE_RANGE" : configuredPlacement;
+    const baseWidthPercent = settings.rendering.profileWidthAuto
       ? snapshot.scope === "MACRO_COMPOSITE" ? 30 : snapshot.scope === "SESSION" ? 28 : 32
       : settings.rendering.widthPercent;
+    const widthPercent = matrixProfile
+      ? auctionProfileEffectiveWidthPercent(baseWidthPercent, settings.rendering.profileLengthPercent)
+      : baseWidthPercent;
     const bounds = resolveAuctionProfilePlacement(placement, transform.width, rangeLeft, rangeRight, widthPercent);
     const rows = buildAuctionProfileRows(snapshot, settings);
     const visibleRows = rows.filter(row => {
@@ -189,17 +201,36 @@ export class AuctionProfileRenderer {
     const blockValues = visibleRows.flatMap(row => row.timeSegments.map(segment => Math.abs(segment.value))).filter(value => value > 0).sort((a, b) => a - b);
     const robustIndex = Math.max(0, Math.min(blockValues.length - 1, Math.floor(blockValues.length * 0.98)));
     const blockMaximum = blockValues[robustIndex] ?? 1;
-    const matrixProfile = settings.rendering.profileBodyStyle === "HDLX_CVD_BLOCKS";
     const profileTop = Math.max(transform.top, Math.min(...visibleRows.map(row => transform.yForPrice(row.priceHigh))));
     const profileBottom = Math.min(transform.bottom, Math.max(...visibleRows.map(row => transform.yForPrice(row.priceLow))));
-    this.background.rect(bounds.left, profileTop, bounds.width, Math.max(1, profileBottom - profileTop))
-      .fill({ color: 0x080a0d, alpha: matrixProfile ? 0.035 : 0.34 })
-      .stroke({ color: snapshot.matrix.blocks.at(-1)?.isDeveloping ? 0xaeb4bc : 0x3c4148, width: 0.7, alpha: matrixProfile ? 0.22 : 0.62 });
-    if (!matrixProfile && ["BIDIRECTIONAL_DELTA", "POSITIVE_NEGATIVE_SPLIT", "MIRRORED", "CENTERED"].includes(settings.rendering.profileGeometry)) {
+    if (!matrixProfile) {
+      this.background.rect(bounds.left, profileTop, bounds.width, Math.max(1, profileBottom - profileTop))
+        .fill({ color: 0x080a0d, alpha: 0.34 })
+        .stroke({ color: snapshot.matrix.blocks.at(-1)?.isDeveloping ? 0xaeb4bc : 0x3c4148, width: 0.7, alpha: 0.62 });
+    }
+    if (!matrixProfile && ["BIDIRECTIONAL_DELTA", "POSITIVE_NEGATIVE_SPLIT", "MIRRORED", "CENTERED"].includes(profileGeometry)) {
       this.background.moveTo(bounds.center, profileTop).lineTo(bounds.center, profileBottom).stroke({ color: 0xb9bec5, width: 0.7, alpha: 0.36 });
     }
 
     const structureVisible = snapshotIndex === snapshotCount - 1 || settings.rendering.showHistoricalExtensions;
+    if (
+      structureVisible
+      && settings.rendering.showValueArea
+      && snapshot.keyLevels.vah !== null
+      && snapshot.keyLevels.val !== null
+      && settings.rendering.valueAreaFillOpacity > 0
+    ) {
+      const vahY = transform.yForPrice(snapshot.keyLevels.vah);
+      const valY = transform.yForPrice(snapshot.keyLevels.val);
+      const fillTop = Math.max(transform.top, Math.min(vahY, valY));
+      const fillBottom = Math.min(transform.bottom, Math.max(vahY, valY));
+      if (fillBottom > fillTop && range.width > 0) {
+        this.background.rect(range.left, fillTop, range.width, fillBottom - fillTop).fill({
+          color: auctionColorNumber(settings.rendering.valueAreaFillColor),
+          alpha: auctionBrightnessAlpha(settings.rendering.valueAreaFillOpacity, settings.rendering.brightness)
+        });
+      }
+    }
     const minimumProminence = Math.max(settings.nodeDetection.prominence, settings.rendering.structuralDetail === "MINIMAL" ? 0.42 : 0.3);
     const ranked = structureVisible
       ? [...snapshot.nodes]
@@ -216,9 +247,17 @@ export class AuctionProfileRenderer {
       const height = Math.max(2, Math.abs(bottom - top));
       if (y + height < transform.top || y > transform.bottom) continue;
       const color = auctionColorNumber(node.type === "LVN" ? settings.rendering.lvnColor : settings.rendering.hvnColor);
-      this.nodes.rect(bounds.left, y, bounds.width, height).fill({ color, alpha: node.type === "LVN" ? 0.1 : 0.16 }).stroke({ color, width: 0.65, alpha: 0.6 });
+      this.nodes.rect(range.left, y, range.width, height).stroke({ color, width: node.type === "LVN" ? 0.75 : 1, alpha: node.type === "LVN" ? 0.58 : 0.76 });
       if (settings.rendering.showNodeLabels && this.activeTextKeys.size < settings.rendering.maximumVisibleLabels) {
-        this.text(`profile-node:${snapshot.profileId}:${node.id}`, node.classification.replaceAll("_", " "), bounds.left + 3, y + height / 2, color);
+        const labelAtLeft = settings.rendering.profileSide === "LEFT";
+        this.text(
+          `profile-node:${snapshot.profileId}:${node.id}`,
+          node.classification.replaceAll("_", " "),
+          labelAtLeft ? range.left + 3 : range.right - 3,
+          y + height / 2,
+          color,
+          labelAtLeft ? "left" : "right"
+        );
       }
       this.metricsState.nodes += 1;
     }
@@ -228,7 +267,7 @@ export class AuctionProfileRenderer {
       const bottom = transform.yForPrice(row.priceLow);
       const y = Math.min(top, bottom);
       const height = Math.max(1, Math.abs(bottom - top) - 0.35);
-      const spans = auctionProfileBarSpans(row, settings.rendering.profileGeometry, bounds);
+      const spans = auctionProfileBarSpans(row, profileGeometry, bounds);
       for (const span of spans) {
         const width = Math.max(0, span.right - span.left);
         if (width < 0.5) continue;
@@ -253,24 +292,30 @@ export class AuctionProfileRenderer {
       this.metricsState.rows += 1;
     }
 
-    const keyLevels: Array<[string, number | null, string, boolean, boolean]> = structureVisible ? [
-      ["POC", snapshot.keyLevels.poc, settings.rendering.pocColor, settings.rendering.showKeyLevels, false],
-      ["VAH", snapshot.keyLevels.vah, settings.rendering.valueAreaColor, settings.rendering.showValueArea, true],
-      ["VAL", snapshot.keyLevels.val, settings.rendering.valueAreaColor, settings.rendering.showValueArea, true],
-      ["IBH", snapshot.keyLevels.ibHigh, settings.rendering.negativeColor, settings.rendering.showInitialBalance, true],
-      ["IBL", snapshot.keyLevels.ibLow, settings.rendering.negativeColor, settings.rendering.showInitialBalance, true]
+    const keyLevels: Array<[string, number | null, string, boolean, "POC" | "VALUE" | "DASHED"]> = structureVisible ? [
+      ["POC", snapshot.keyLevels.poc, settings.rendering.pocColor, settings.rendering.showKeyLevels, "POC"],
+      ["VAH", snapshot.keyLevels.vah, settings.rendering.valueAreaColor, settings.rendering.showValueArea, "VALUE"],
+      ["VAL", snapshot.keyLevels.val, settings.rendering.valueAreaColor, settings.rendering.showValueArea, "VALUE"],
+      ["IBH", snapshot.keyLevels.ibHigh, settings.rendering.negativeColor, settings.rendering.showInitialBalance, "DASHED"],
+      ["IBL", snapshot.keyLevels.ibLow, settings.rendering.negativeColor, settings.rendering.showInitialBalance, "DASHED"]
     ] : [];
-    for (const [name, price, colorValue, visible, dashed] of keyLevels) {
+    for (const [name, price, colorValue, visible, role] of keyLevels) {
       if (!visible || price === null) continue;
       const y = transform.yForPrice(price);
       if (y < transform.top || y > transform.bottom) continue;
       const color = auctionColorNumber(colorValue);
-      if (dashed) {
-        for (let x = bounds.left; x < bounds.right; x += 12) this.levels.moveTo(x, y).lineTo(Math.min(bounds.right, x + 6), y).stroke({ color, width: 0.8, alpha: 0.7 });
+      if (role === "DASHED") {
+        for (let x = range.left; x < range.right; x += 12) this.levels.moveTo(x, y).lineTo(Math.min(range.right, x + 6), y).stroke({ color, width: 0.8, alpha: 0.7 });
       } else {
-        this.levels.moveTo(bounds.left, y).lineTo(bounds.right, y).stroke({ color, width: 1.25, alpha: 0.94 });
+        const glowWidth = role === "POC" ? 5 : 3.2;
+        const coreWidth = role === "POC" ? 2.2 : 1.25;
+        this.levels.moveTo(range.left, y).lineTo(range.right, y).stroke({ color, width: glowWidth, alpha: role === "POC" ? 0.17 : 0.12 });
+        this.levels.moveTo(range.left, y).lineTo(range.right, y).stroke({ color, width: coreWidth, alpha: 0.98 });
       }
-      if (this.activeTextKeys.size < settings.rendering.maximumVisibleLabels) this.text(`profile-level:${snapshot.profileId}:${name}`, name, bounds.left + 3, y - 6, color);
+      if (this.activeTextKeys.size < settings.rendering.maximumVisibleLabels) {
+        const labelAtLeft = settings.rendering.profileSide === "LEFT";
+        this.text(`profile-level:${snapshot.profileId}:${name}`, name, labelAtLeft ? range.left + 3 : range.right - 3, y - 6, color, labelAtLeft ? "left" : "right");
+      }
     }
   }
 

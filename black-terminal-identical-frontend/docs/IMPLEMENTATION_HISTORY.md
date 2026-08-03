@@ -1359,3 +1359,4 @@ Remaining:
 - Added CVD Session, CVD Macro, CVD Deep Macro, Original Pine Profile, and CVD Footprint presets.
 - Added renderer-separation, block-chain, signed-direction, cumulative-CVD, compression, live-update, and 20,000-bar performance certification plus the corrective documentation set.
 - Corrected the first block-profile polish: reduced the default footprint to 30%, cached unchanged GPU frames to eliminate tick-driven flashing, retained the last certified snapshot through background refreshes, and restricted VAH/VAL/LVN/HVN structure to the active profile with high-prominence node filtering.
+- Completed the annotated visual refinement: removed the matrix pane frame, added left/right profile anchoring and independent contract/stretch length, extended continuous neon VAH/VAL and a thicker blood-red POC across the full calculation range, extended significant hollow node zones, and added configurable value-area background color/intensity.

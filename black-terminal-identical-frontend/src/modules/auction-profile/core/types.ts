@@ -150,7 +150,8 @@ export type AuctionProfileGeometry =
   | "SINGLE_SIDED_RIGHT"
   | "SINGLE_SIDED_LEFT"
   | "CENTERED";
-export type AuctionProfilePlacement = "RIGHT" | "LEFT" | "OVERLAY" | "INSIDE_RANGE" | "RANGE_START" | "DETACHED_PANEL";
+export type AuctionProfilePlacement = "RIGHT" | "LEFT" | "OVERLAY" | "INSIDE_RANGE" | "RANGE_START" | "RANGE_END" | "DETACHED_PANEL";
+export type AuctionProfileSide = "LEFT" | "RIGHT";
 export type AuctionProfileWidthMetric = "CVD_ACTIVITY" | "NET_CVD" | "ABSOLUTE_CVD" | "BUY_VOLUME" | "SELL_VOLUME" | "TOTAL_VOLUME" | "CVD_EFFICIENCY" | "IMBALANCE_RATIO" | "SELECTED_ENGINE";
 export type AuctionProfileTimeSegments = "OFF" | "STACKED" | "LATEST_N" | "SESSION_BLOCKS" | "CUSTOM";
 export type AuctionRowLabelMode = "ALWAYS" | "AUTO" | "STRONG_ONLY" | "HOVER" | "OFF";
@@ -248,6 +249,8 @@ export interface AuctionProfileRenderingSettings {
   profileBodyStyle: AuctionProfileBodyStyle;
   profileBlockValueMode: AuctionProfileBlockValueMode;
   profileBlockPixelWidth: number;
+  profileSide: AuctionProfileSide;
+  profileLengthPercent: number;
   profileGeometry: AuctionProfileGeometry;
   profilePlacement: AuctionProfilePlacement;
   profileWidthMetric: AuctionProfileWidthMetric;
@@ -289,6 +292,8 @@ export interface AuctionProfileRenderingSettings {
   negativeColor: string;
   balancedColor: string;
   valueAreaColor: string;
+  valueAreaFillColor: string;
+  valueAreaFillOpacity: number;
   pocColor: string;
   lvnColor: string;
   hvnColor: string;

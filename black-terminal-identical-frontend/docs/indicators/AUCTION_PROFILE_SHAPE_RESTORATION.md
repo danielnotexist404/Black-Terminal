@@ -17,7 +17,7 @@ This remains different from the separate **CVD Footprint** chart type. Profile b
 
 The default is Auction Profile → HDLX CVD Matrix Blocks → Single-Sided Right → Range Start → CVD Activity. Selling pressure is independently graded from dark red to blood red. Buying pressure is independently graded from dark graphite through silver to white. Every block receives its own color from its own signed CVD value.
 
-The corrected default 30% width, 24-pixel cells, and 72-row grid keep the full 5,000-bar profile legible without covering the market structure. Macro and Deep Macro presets use 32% and 36%. The same renderer supports 10,000 and 20,000 bars without changing the calculation when the camera moves. Solid Histogram remains an explicit optional construction, not the default.
+The corrected default uses a 30% maximum width with a separate 75% profile-length multiplier, 24-pixel cells, and a 72-row grid. The length control contracts or stretches only the matrix body, keeping the full 5,000-bar profile legible without covering the market structure. The profile can anchor at either the calculation-range start (left) or latest edge (right). Macro and Deep Macro presets use 32% and 36% maximum widths. The same renderer supports 10,000 and 20,000 bars without changing the calculation when the camera moves. Solid Histogram remains an explicit optional construction, not the default.
 
 ## Scope semantics
 
@@ -30,7 +30,7 @@ Camera movement does not alter calculation data except when Visible Range or Vis
 
 ## Structure and live behavior
 
-POC, VAH, VAL, IB, LVN, and HVN remain constrained to the profile boundary. Classified live trades update only their active price/time cell; the block's delta and developing row CVD update together while finalized history remains frozen.
+POC, VAH, VAL, and the selected significant hollow LVN/HVN zones extend continuously across the selected calculation range, independently of the contracted profile body. VAH/VAL are continuous silver-neon lines; POC is a thicker blood-red neon line. The old matrix border frame is removed. The region between VAH and VAL has independent background color and intensity controls. Classified live trades update only their active price/time cell; the block's delta and developing row CVD update together while finalized history remains frozen.
 
 VAH, VAL, and structural nodes are emitted only for the active profile unless Historical Extensions is explicitly enabled. Minimal structure requires at least 42% local prominence, excludes incomplete edge neighborhoods, and caps the visible context at two LVNs, one HVN, and two total zones. This prevents routine local minima from filling the chart.
 
@@ -38,4 +38,4 @@ The renderer fingerprints its snapshot, settings, and camera projection. Ordinar
 
 ## Certification
 
-`npm run test:auction-profile` certifies signed matrix conservation, cumulative row CVD, deterministic chronological compression, source-cell disclosure, stable placement, render-cache invalidation, significant-node defaults, live updates, renderer separation, and exact/mixed provenance. `npm run benchmark:auction-profile` covers 100 through 20,000 bars.
+`npm run test:auction-profile` certifies signed matrix conservation, cumulative row CVD, deterministic chronological compression, source-cell disclosure, stable left/right placement, independent contraction/stretch geometry, calculation-range extensions, render-cache invalidation, significant-node defaults, live updates, renderer separation, and exact/mixed provenance. `npm run benchmark:auction-profile` covers 100 through 20,000 bars.

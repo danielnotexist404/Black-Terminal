@@ -48,30 +48,45 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
       next.calculationEngine = "CVD_PINE_COMPATIBLE";
       next.blockResolution = "CHART_TIMEFRAME";
       next.rendering.visualizationType = "AUCTION_PROFILE";
-      next.rendering.profileGeometry = "BIDIRECTIONAL_DELTA";
-      next.rendering.profilePlacement = "RIGHT";
-      next.rendering.profileWidthMetric = "NET_CVD";
+      next.rendering.profileBodyStyle = "HDLX_CVD_BLOCKS";
+      next.rendering.profileBlockValueMode = "CUMULATIVE_CVD";
+      next.rendering.profileGeometry = "SINGLE_SIDED_RIGHT";
+      next.rendering.profilePlacement = "RANGE_START";
+      next.rendering.profileWidthMetric = "CVD_ACTIVITY";
       next.rendering.timeSegmentsMode = "STACKED";
-      next.rendering.rowLabelMode = "ALWAYS";
+      next.rendering.rowLabelMode = "OFF";
+      next.rendering.cellTextMode = "ALWAYS";
+      next.rendering.widthPercent = 44;
     } else if (preset === "SESSION") {
       next.implementationMode = "BLACK_CORE_NATIVE";
       next.scopeMode = "SESSION";
       next.calculationEngine = "CVD_REAL_TRADES";
       next.cvdMetric = "NET_CVD";
       next.rendering.visualizationType = "AUCTION_PROFILE";
-      next.rendering.profileGeometry = "BIDIRECTIONAL_DELTA";
-      next.rendering.profilePlacement = "RIGHT";
-      next.rendering.timeSegmentsMode = "OFF";
+      next.rendering.profileBodyStyle = "HDLX_CVD_BLOCKS";
+      next.rendering.profileBlockValueMode = "CUMULATIVE_CVD";
+      next.rendering.profileGeometry = "SINGLE_SIDED_RIGHT";
+      next.rendering.profilePlacement = "RANGE_START";
+      next.rendering.profileWidthMetric = "CVD_ACTIVITY";
+      next.rendering.timeSegmentsMode = "STACKED";
+      next.rendering.rowLabelMode = "OFF";
+      next.rendering.cellTextMode = "ALWAYS";
+      next.rendering.widthPercent = 44;
     } else if (preset === "MACRO") {
       next.implementationMode = "BLACK_CORE_NATIVE";
       next.scopeMode = "MACRO_COMPOSITE";
       next.lookbackBars = 5000;
       next.blockResolution = "ADAPTIVE";
       next.rendering.visualizationType = "AUCTION_PROFILE";
-      next.rendering.profileGeometry = "BIDIRECTIONAL_DELTA";
-      next.rendering.profilePlacement = "RIGHT";
-      next.rendering.widthPercent = 30;
-      next.rendering.timeSegmentsMode = "OFF";
+      next.rendering.profileBodyStyle = "HDLX_CVD_BLOCKS";
+      next.rendering.profileBlockValueMode = "CUMULATIVE_CVD";
+      next.rendering.profileGeometry = "SINGLE_SIDED_RIGHT";
+      next.rendering.profilePlacement = "RANGE_START";
+      next.rendering.profileWidthMetric = "CVD_ACTIVITY";
+      next.rendering.widthPercent = 48;
+      next.rendering.timeSegmentsMode = "STACKED";
+      next.rendering.rowLabelMode = "OFF";
+      next.rendering.cellTextMode = "ALWAYS";
       next.nodeDetection.showLvns = true;
       next.nodeDetection.showHvns = true;
       next.rendering.structuralDetail = "MINIMAL";
@@ -80,10 +95,15 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
       next.scopeMode = "MACRO_COMPOSITE";
       next.lookbackBars = 20000;
       next.rendering.visualizationType = "AUCTION_PROFILE";
-      next.rendering.profileGeometry = "BIDIRECTIONAL_DELTA";
-      next.rendering.profilePlacement = "RIGHT";
-      next.rendering.widthPercent = 36;
-      next.rendering.timeSegmentsMode = "OFF";
+      next.rendering.profileBodyStyle = "HDLX_CVD_BLOCKS";
+      next.rendering.profileBlockValueMode = "CUMULATIVE_CVD";
+      next.rendering.profileGeometry = "SINGLE_SIDED_RIGHT";
+      next.rendering.profilePlacement = "RANGE_START";
+      next.rendering.profileWidthMetric = "CVD_ACTIVITY";
+      next.rendering.widthPercent = 55;
+      next.rendering.timeSegmentsMode = "STACKED";
+      next.rendering.rowLabelMode = "OFF";
+      next.rendering.cellTextMode = "ALWAYS";
       next.nodeDetection.showLvns = true;
       next.nodeDetection.showHvns = true;
       next.rendering.structuralDetail = "STANDARD";
@@ -109,7 +129,7 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
       {tab === "engine" && <div className="indicator-settings-section">
         <b>Visualization</b>
         <label>Renderer<select value={settings.rendering.visualizationType} onChange={event => patchRendering({ visualizationType: event.target.value as AuctionProfileSettings["rendering"]["visualizationType"] })}><option value="AUCTION_PROFILE">Auction Profile</option><option value="CVD_FOOTPRINT">CVD Footprint</option><option value="COMBINED">Combined</option></select></label>
-        <small>Profile aggregates the selected range by price. Footprint preserves the time × price cell matrix.</small>
+        <small>Profile builds an HDLX-style silhouette from chronological CVD matrix blocks. Footprint remains the separate candle-aligned time × price view.</small>
         <b>Presets</b>
         <div className="auction-profile-presets">
           <button type="button" onClick={() => applyPreset("PINE")}>Original Pine</button><button type="button" onClick={() => applyPreset("SESSION")}>CVD Session</button>
@@ -192,9 +212,15 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
       {tab === "style" && <div className="indicator-settings-section">
         <b>Black Terminal Rendering</b>
         {settings.rendering.visualizationType !== "CVD_FOOTPRINT" && <>
+          <label>Profile Construction<select value={settings.rendering.profileBodyStyle} onChange={event => patchRendering({ profileBodyStyle: event.target.value as AuctionProfileSettings["rendering"]["profileBodyStyle"] })}><option value="HDLX_CVD_BLOCKS">HDLX CVD Matrix Blocks</option><option value="SOLID_HISTOGRAM">Solid Histogram</option></select></label>
+          {settings.rendering.profileBodyStyle === "HDLX_CVD_BLOCKS" && <>
+            <label>Block Value<select value={settings.rendering.profileBlockValueMode} onChange={event => patchRendering({ profileBlockValueMode: event.target.value as AuctionProfileSettings["rendering"]["profileBlockValueMode"] })}><option value="CUMULATIVE_CVD">Developing CVD · Reference</option><option value="BLOCK_DELTA">Block Delta · Non-cumulative</option></select></label>
+            <label>Matrix Block Width ({settings.rendering.profileBlockPixelWidth}px)<input type="range" min={14} max={80} step={1} value={settings.rendering.profileBlockPixelWidth} onChange={event => patchRendering({ profileBlockPixelWidth: Number(event.target.value) })} /></label>
+            <label>Profile Cell Text<select value={settings.rendering.cellTextMode} onChange={event => patchRendering({ cellTextMode: event.target.value as AuctionProfileSettings["rendering"]["cellTextMode"] })}><option value="AUTO">Auto</option><option value="ALWAYS">Always</option><option value="HOVER_ONLY">Hover Only</option><option value="STRONG_ONLY">Strong Cells Only</option><option value="OFF">Off</option></select></label>
+          </>}
           <label>Profile Geometry<select value={settings.rendering.profileGeometry} onChange={event => patchRendering({ profileGeometry: event.target.value as AuctionProfileSettings["rendering"]["profileGeometry"] })}><option value="BIDIRECTIONAL_DELTA">Bidirectional Delta</option><option value="ABSOLUTE_DIRECTIONAL">Absolute Width + Directional Color</option><option value="POSITIVE_NEGATIVE_SPLIT">Positive / Negative Split</option><option value="MIRRORED">Mirrored</option><option value="SINGLE_SIDED_RIGHT">Single-Sided Right</option><option value="SINGLE_SIDED_LEFT">Single-Sided Left</option><option value="CENTERED">Centered</option></select></label>
-          <label>Profile Placement<select value={settings.rendering.profilePlacement} onChange={event => patchRendering({ profilePlacement: event.target.value as AuctionProfileSettings["rendering"]["profilePlacement"] })}><option value="RIGHT">Right</option><option value="LEFT">Left</option><option value="OVERLAY">Overlay</option><option value="INSIDE_RANGE">Inside Range</option><option value="DETACHED_PANEL">Detached Profile Rail</option></select></label>
-          <label>Width Metric<select value={settings.rendering.profileWidthMetric} onChange={event => patchRendering({ profileWidthMetric: event.target.value as AuctionProfileSettings["rendering"]["profileWidthMetric"] })}><option value="NET_CVD">Net CVD</option><option value="ABSOLUTE_CVD">Absolute CVD</option><option value="BUY_VOLUME">Buy Volume</option><option value="SELL_VOLUME">Sell Volume</option><option value="TOTAL_VOLUME">Total Volume</option><option value="CVD_EFFICIENCY">CVD Efficiency</option><option value="IMBALANCE_RATIO">Imbalance Ratio</option><option value="SELECTED_ENGINE">Selected Engine</option></select></label>
+          <label>Profile Placement<select value={settings.rendering.profilePlacement} onChange={event => patchRendering({ profilePlacement: event.target.value as AuctionProfileSettings["rendering"]["profilePlacement"] })}><option value="RANGE_START">Range Start · HDLX/Pine</option><option value="RIGHT">Right</option><option value="LEFT">Left</option><option value="OVERLAY">Overlay</option><option value="INSIDE_RANGE">Inside Range</option><option value="DETACHED_PANEL">Detached Profile Rail</option></select></label>
+          <label>Width Metric<select value={settings.rendering.profileWidthMetric} onChange={event => patchRendering({ profileWidthMetric: event.target.value as AuctionProfileSettings["rendering"]["profileWidthMetric"] })}><option value="CVD_ACTIVITY">CVD Activity · Σ|Delta|</option><option value="NET_CVD">Net CVD</option><option value="ABSOLUTE_CVD">Absolute CVD</option><option value="BUY_VOLUME">Buy Volume</option><option value="SELL_VOLUME">Sell Volume</option><option value="TOTAL_VOLUME">Total Volume</option><option value="CVD_EFFICIENCY">CVD Efficiency</option><option value="IMBALANCE_RATIO">Imbalance Ratio</option><option value="SELECTED_ENGINE">Selected Engine</option></select></label>
           <label>Row Labels<select value={settings.rendering.rowLabelMode} onChange={event => patchRendering({ rowLabelMode: event.target.value as AuctionProfileSettings["rendering"]["rowLabelMode"] })}><option value="ALWAYS">Always</option><option value="AUTO">Auto</option><option value="STRONG_ONLY">Strong Rows Only</option><option value="HOVER">Hover</option><option value="OFF">Off</option></select></label>
           <label>Time Segments<select value={settings.rendering.timeSegmentsMode} onChange={event => patchRendering({ timeSegmentsMode: event.target.value as AuctionProfileSettings["rendering"]["timeSegmentsMode"] })}><option value="OFF">Off · Unified Profile</option><option value="STACKED">Stacked</option><option value="LATEST_N">Latest N</option><option value="SESSION_BLOCKS">Session Blocks</option><option value="CUSTOM">Custom</option></select></label>
           {["LATEST_N", "CUSTOM"].includes(settings.rendering.timeSegmentsMode) && <label>Segment Count<input type="number" min={1} max={5000} value={settings.rendering.latestSegmentCount} onChange={event => patchRendering({ latestSegmentCount: Number(event.target.value) })} /></label>}

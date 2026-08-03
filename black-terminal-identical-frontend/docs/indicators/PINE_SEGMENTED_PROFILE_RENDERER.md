@@ -1,7 +1,7 @@
 # Pine Segmented Profile Renderer
 
-The Original Pine preset remains a profile, not a footprint. It selects Pine Compatibility, Session scope, source-compatible CVD, chart-timeframe blocks, Bidirectional Delta geometry, and Stacked time segments.
+The supplied Pine source confirmed the intended profile construction: each price row is drawn as a chronological sequence of equal matrix boxes, every box carries the row's developing CVD, and every box is colored from its own signed intensity. The Original Pine preset now selects that block-built topology: Pine Compatibility, Session scope, chart-timeframe blocks, Single-Sided Right, Range Start, Developing CVD labels, and Stacked segments.
 
-Each price row first receives its range aggregate width. Historical contributions are then packed horizontally inside that row in chronological order. The segmentation exposes Pine-like internal composition while preserving one coherent profile boundary.
+Black Core Native uses the same visual contract with canonical aggressor-side trades and 5,000/10,000/20,000-bar ranges. When display compression is necessary, only adjacent source cells are grouped; the group delta is summed and its terminal developing CVD is retained.
 
-Known Pine anomalies remain documented in `AUCTION_PROFILE_PINE_COMPATIBILITY.md`. Native mode does not inherit those anomalies. Pixel-identical certification remains pending a synchronized TradingView export; the topology and deterministic calculation contracts are implemented, but screenshots alone are not treated as machine-readable golden data.
+The separate CVD Footprint renderer remains candle-time aligned. It is not used to construct this profile.

@@ -1353,7 +1353,8 @@ Remaining:
 
 - Correctly reclassified the deployed time × price matrix as CVD Footprint and preserved it behind a dedicated renderer.
 - Removed the synthetic sinusoidal Volume Footprint candle painter; the candle-type toggle now loads canonical Auction worker data and renders the professional CVD footprint with subdued OHLC reference candles.
-- Restored Auction Profile as the default range × price distribution with one horizontal aggregate per price row.
-- Added seven profile geometries, five placements, eight width metrics, unified/segmented time modes, row-label policies, square-root scaling, and Profile/Footprint/Combined selection.
+- Restored Auction Profile as a range × price distribution whose silhouette is built from compact chronological CVD matrix blocks rather than one solid bar per row.
+- Added real block delta and developing row-CVD labels, per-cell blood-red/silver intensity, deterministic conservation-preserving compression, Range Start anchoring, and the CVD Activity width metric.
+- Retained Solid Histogram as an optional construction plus seven geometries, six placements, row-label policies, square-root scaling, and Profile/Footprint/Combined selection.
 - Added CVD Session, CVD Macro, CVD Deep Macro, Original Pine Profile, and CVD Footprint presets.
-- Added renderer-separation, aggregate-shape, signed-direction, segmentation, live-update, and 20,000-bar performance certification plus the corrective documentation set.
+- Added renderer-separation, block-chain, signed-direction, cumulative-CVD, compression, live-update, and 20,000-bar performance certification plus the corrective documentation set.

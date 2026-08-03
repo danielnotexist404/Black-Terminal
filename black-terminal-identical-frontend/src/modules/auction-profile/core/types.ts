@@ -140,6 +140,8 @@ export type AuctionPresentationMode =
   | "MACRO_STRUCTURE";
 
 export type AuctionVisualizationType = "AUCTION_PROFILE" | "CVD_FOOTPRINT" | "COMBINED";
+export type AuctionProfileBodyStyle = "HDLX_CVD_BLOCKS" | "SOLID_HISTOGRAM";
+export type AuctionProfileBlockValueMode = "CUMULATIVE_CVD" | "BLOCK_DELTA";
 export type AuctionProfileGeometry =
   | "BIDIRECTIONAL_DELTA"
   | "ABSOLUTE_DIRECTIONAL"
@@ -148,8 +150,8 @@ export type AuctionProfileGeometry =
   | "SINGLE_SIDED_RIGHT"
   | "SINGLE_SIDED_LEFT"
   | "CENTERED";
-export type AuctionProfilePlacement = "RIGHT" | "LEFT" | "OVERLAY" | "INSIDE_RANGE" | "DETACHED_PANEL";
-export type AuctionProfileWidthMetric = "NET_CVD" | "ABSOLUTE_CVD" | "BUY_VOLUME" | "SELL_VOLUME" | "TOTAL_VOLUME" | "CVD_EFFICIENCY" | "IMBALANCE_RATIO" | "SELECTED_ENGINE";
+export type AuctionProfilePlacement = "RIGHT" | "LEFT" | "OVERLAY" | "INSIDE_RANGE" | "RANGE_START" | "DETACHED_PANEL";
+export type AuctionProfileWidthMetric = "CVD_ACTIVITY" | "NET_CVD" | "ABSOLUTE_CVD" | "BUY_VOLUME" | "SELL_VOLUME" | "TOTAL_VOLUME" | "CVD_EFFICIENCY" | "IMBALANCE_RATIO" | "SELECTED_ENGINE";
 export type AuctionProfileTimeSegments = "OFF" | "STACKED" | "LATEST_N" | "SESSION_BLOCKS" | "CUSTOM";
 export type AuctionRowLabelMode = "ALWAYS" | "AUTO" | "STRONG_ONLY" | "HOVER" | "OFF";
 
@@ -242,6 +244,9 @@ export interface AuctionProfileRenderingSettings {
   displayStyle: AuctionDisplayStyle;
   presentationMode: AuctionPresentationMode;
   visualizationType: AuctionVisualizationType;
+  profileBodyStyle: AuctionProfileBodyStyle;
+  profileBlockValueMode: AuctionProfileBlockValueMode;
+  profileBlockPixelWidth: number;
   profileGeometry: AuctionProfileGeometry;
   profilePlacement: AuctionProfilePlacement;
   profileWidthMetric: AuctionProfileWidthMetric;

@@ -12,9 +12,14 @@ export interface AuctionProfileSegment {
   startTime: number;
   endTime: number;
   value: number;
+  deltaValue: number;
+  cumulativeValue: number;
   normalizedWidth: number;
   finalized: boolean;
+  sourceCount: number;
 }
+
+export interface AuctionProfileDisplayBlock extends AuctionProfileSegment {}
 
 export interface AuctionProfileRowProjection {
   rowIndex: number;
@@ -31,6 +36,7 @@ export interface AuctionProfileRowProjection {
   normalizedBuyWidth: number;
   normalizedSellWidth: number;
   direction: "POSITIVE" | "NEGATIVE" | "NEUTRAL";
+  inValueArea: boolean;
   timeSegments: AuctionProfileSegment[];
 }
 
@@ -66,6 +72,7 @@ export function auctionProfileRowMetric(row: AuctionProfileRow, settings: Auctio
     case "CVD_EFFICIENCY": return row.cvdEfficiency;
     case "IMBALANCE_RATIO": return delta / Math.max(row.buyQuantity + row.sellQuantity, Number.EPSILON);
     case "SELECTED_ENGINE": return row.value;
+    case "CVD_ACTIVITY": return Math.abs(delta);
     case "NET_CVD":
     default: return delta;
   }
@@ -79,7 +86,19 @@ function normalized(value: number, maximum: number, settings: AuctionProfileSett
 }
 
 export function buildAuctionProfileRows(snapshot: AuctionProfileSnapshot, settings: AuctionProfileSettings) {
-  const values = snapshot.rows.map(row => auctionProfileRowMetric(row, settings));
+  const needsCells = settings.rendering.profileBodyStyle === "HDLX_CVD_BLOCKS" || settings.rendering.timeSegmentsMode !== "OFF" || settings.rendering.profileWidthMetric === "CVD_ACTIVITY";
+  const cellsByRow = new Map<number, typeof snapshot.matrix.cells>();
+  if (needsCells) {
+    for (const cell of snapshot.matrix.cells) {
+      const cells = cellsByRow.get(cell.rowIndex);
+      if (cells) cells.push(cell);
+      else cellsByRow.set(cell.rowIndex, [cell]);
+    }
+    for (const cells of cellsByRow.values()) cells.sort((left, right) => left.startTime - right.startTime || left.blockIndex - right.blockIndex);
+  }
+  const values = snapshot.rows.map(row => settings.rendering.profileWidthMetric === "CVD_ACTIVITY"
+    ? (cellsByRow.get(row.index) ?? []).reduce((sum, cell) => sum + Math.abs(cell.rawValue), 0)
+    : auctionProfileRowMetric(row, settings));
   const sorted = values.map(Math.abs).filter(value => value > 0).sort((a, b) => a - b);
   const maximum = settings.rendering.normalizationMode === "ABSOLUTE_FIXED"
     ? settings.rendering.absoluteFixedScale
@@ -93,26 +112,24 @@ export function buildAuctionProfileRows(snapshot: AuctionProfileSnapshot, settin
   const segmentLimit = settings.rendering.timeSegmentsMode === "LATEST_N" || settings.rendering.timeSegmentsMode === "CUSTOM"
     ? settings.rendering.latestSegmentCount
     : Number.POSITIVE_INFINITY;
-  const cellsByRow = new Map<number, typeof snapshot.matrix.cells>();
-  if (settings.rendering.timeSegmentsMode !== "OFF") {
-    for (const cell of snapshot.matrix.cells) {
-      const cells = cellsByRow.get(cell.rowIndex);
-      if (cells) cells.push(cell);
-      else cellsByRow.set(cell.rowIndex, [cell]);
-    }
-  }
-
   return snapshot.rows.map((row, index): AuctionProfileRowProjection => {
     const rawWidthValue = values[index]!;
-    const rowSegments = (cellsByRow.get(row.index) ?? [])
-      .slice(-segmentLimit)
-      .map((cell): AuctionProfileSegment => ({
+    let cumulativeValue = 0;
+    const completeSegments = (cellsByRow.get(row.index) ?? []).map((cell): AuctionProfileSegment => {
+      cumulativeValue += cell.rawValue;
+      return {
         startTime: cell.startTime,
         endTime: cell.endTime,
-        value: cell.rawValue,
+        value: settings.rendering.profileBlockValueMode === "CUMULATIVE_CVD" ? cumulativeValue : cell.rawValue,
+        deltaValue: cell.rawValue,
+        cumulativeValue,
         normalizedWidth: normalized(cell.rawValue, maximum, settings),
-        finalized: cell.isFinalized
-      }));
+        finalized: cell.isFinalized,
+        sourceCount: 1
+      };
+    });
+    const rowSegments = Number.isFinite(segmentLimit) ? completeSegments.slice(-segmentLimit) : completeSegments;
+    const netCvd = row.buyQuantity - row.sellQuantity;
     return {
       rowIndex: row.index,
       priceLow: row.low,
@@ -120,17 +137,48 @@ export function buildAuctionProfileRows(snapshot: AuctionProfileSnapshot, settin
       buyVolume: row.buyQuantity,
       sellVolume: row.sellQuantity,
       totalVolume: row.totalQuantity,
-      netCvd: row.buyQuantity - row.sellQuantity,
-      absoluteCvd: Math.abs(row.buyQuantity - row.sellQuantity),
+      netCvd,
+      absoluteCvd: Math.abs(netCvd),
       cvdEfficiency: row.cvdEfficiency,
       rawWidthValue,
       normalizedWidth: normalized(rawWidthValue, maximum, settings),
       normalizedBuyWidth: row.buyQuantity / buyMaximum,
       normalizedSellWidth: row.sellQuantity / sellMaximum,
-      direction: rawWidthValue > 0 ? "POSITIVE" : rawWidthValue < 0 ? "NEGATIVE" : "NEUTRAL",
-      timeSegments: settings.rendering.timeSegmentsMode === "OFF" ? [] : rowSegments
+      direction: netCvd > 0 ? "POSITIVE" : netCvd < 0 ? "NEGATIVE" : "NEUTRAL",
+      inValueArea: row.inValueArea,
+      timeSegments: needsCells ? rowSegments : []
     };
   });
+}
+
+export function compressAuctionProfileSegments(
+  segments: readonly AuctionProfileSegment[],
+  maximumBlocks: number,
+  mode: AuctionProfileSettings["rendering"]["profileBlockValueMode"]
+): AuctionProfileDisplayBlock[] {
+  const cap = Math.max(1, Math.floor(maximumBlocks));
+  if (segments.length <= cap) return segments.map(segment => ({ ...segment }));
+  const result: AuctionProfileDisplayBlock[] = [];
+  for (let index = 0; index < cap; index += 1) {
+    const start = Math.floor(index * segments.length / cap);
+    const end = Math.floor((index + 1) * segments.length / cap);
+    const group = segments.slice(start, Math.max(start + 1, end));
+    const first = group[0]!;
+    const last = group.at(-1)!;
+    const deltaValue = group.reduce((sum, segment) => sum + segment.deltaValue, 0);
+    const sourceCount = group.reduce((sum, segment) => sum + segment.sourceCount, 0);
+    result.push({
+      startTime: first.startTime,
+      endTime: last.endTime,
+      value: mode === "CUMULATIVE_CVD" ? last.cumulativeValue : deltaValue,
+      deltaValue,
+      cumulativeValue: last.cumulativeValue,
+      normalizedWidth: Math.max(...group.map(segment => segment.normalizedWidth)),
+      finalized: group.every(segment => segment.finalized),
+      sourceCount
+    });
+  }
+  return result;
 }
 
 export function resolveAuctionProfilePlacement(
@@ -152,6 +200,9 @@ export function resolveAuctionProfilePlacement(
   } else if (placement === "INSIDE_RANGE") {
     right = Math.max(0, Math.min(plotWidth, rangeRight));
     left = Math.max(0, right - Math.min(requestedWidth, Math.max(36, rangeRight - rangeLeft)));
+  } else if (placement === "RANGE_START") {
+    left = Math.max(0, Math.min(plotWidth, rangeLeft));
+    right = Math.min(plotWidth, left + requestedWidth);
   } else {
     right = plotWidth;
     left = Math.max(0, right - requestedWidth);

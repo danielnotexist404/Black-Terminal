@@ -11,7 +11,11 @@ export function AuctionProfileLegend({ snapshot, settings, chartType }: { snapsh
     <em>Block · {Math.round(snapshot.matrix.blockDurationSeconds / 60).toLocaleString()}m</em>
     {forcedFootprint || settings.rendering.visualizationType !== "AUCTION_PROFILE"
       ? <><em>Matrix · {snapshot.matrix.blocks.length.toLocaleString()} × {snapshot.matrix.rows.length.toLocaleString()}</em><em>Cells · {snapshot.matrix.cells.length.toLocaleString()}</em></>
-      : <><em>Rows · {snapshot.rows.length.toLocaleString()}</em><em>Geometry · {settings.rendering.profileGeometry.replaceAll("_", " ")}</em></>}
+      : <>
+        <em>Rows · {snapshot.rows.length.toLocaleString()}</em>
+        <em>Body · {settings.rendering.profileBodyStyle === "HDLX_CVD_BLOCKS" ? "HDLX CVD BLOCKS" : "SOLID HISTOGRAM"}</em>
+        {settings.rendering.profileBodyStyle === "HDLX_CVD_BLOCKS" && <em>Values · {settings.rendering.profileBlockValueMode === "CUMULATIVE_CVD" ? "DEVELOPING CVD" : "BLOCK DELTA"}</em>}
+      </>}
     <em>Data · {snapshot.quality.quality} {snapshot.quality.exactTradeCoveragePercent.toFixed(0)}%</em>
     <em>Scale · {snapshot.matrix.normalizationMode.replaceAll("_", " ")}</em>
     <em>POC · {price(snapshot.keyLevels.poc)}</em>

@@ -3,14 +3,16 @@ import {
   AUCTION_PROFILE_RENDERER_KIND,
   auctionProfileBarSpans,
   buildAuctionProfileRows,
+  compressAuctionProfileSegments,
   resolveAuctionProfilePlacement,
   type AuctionProfileBarSpan,
+  type AuctionProfileDisplayBlock,
   type AuctionProfileRowProjection
 } from "../core/profileGeometry.ts";
 import type { AuctionProfileSettings, AuctionProfileSnapshot } from "../core/types.ts";
 import { auctionBrightnessAlpha } from "./heatmap.ts";
 import { auctionColorNumber, auctionDirectionalColor } from "./colors.ts";
-import { formatAuctionMetric, formatAuctionProfileRowMetric } from "./labels.ts";
+import { auctionCellTextVisible, formatAuctionCellMetric, formatAuctionMetric, formatAuctionProfileRowMetric } from "./labels.ts";
 
 export { AUCTION_PROFILE_RENDERER_KIND };
 
@@ -46,9 +48,10 @@ export class AuctionProfileRenderer {
   private hoverLayer = new Graphics();
   private hoverText = new Text({ text: "", style: { fontFamily: "IBM Plex Mono", fontSize: 8, lineHeight: 11, fill: 0xf4f6f7 } });
   private hitRows: Array<{ left: number; right: number; top: number; bottom: number; row: AuctionProfileRowProjection; snapshot: AuctionProfileSnapshot }> = [];
+  private hitBlocks: Array<{ left: number; right: number; top: number; bottom: number; row: AuctionProfileRowProjection; block: AuctionProfileDisplayBlock; snapshot: AuctionProfileSnapshot }> = [];
   private viewport = { width: 0, top: 0, bottom: 0 };
   private settings: AuctionProfileSettings | null = null;
-  private metricsState = { rows: 0, nodes: 0, labels: 0, commands: 0, footprintCells: 0 };
+  private metricsState = { rows: 0, nodes: 0, labels: 0, commands: 0, footprintCells: 0, profileBlocks: 0 };
 
   constructor() {
     this.hoverLayer.visible = false;
@@ -91,24 +94,45 @@ export class AuctionProfileRenderer {
     span: AuctionProfileBarSpan,
     top: number,
     height: number,
-    settings: AuctionProfileSettings
+    settings: AuctionProfileSettings,
+    blockMaximum: number
   ) {
     if (!row.timeSegments.length || span.right <= span.left) return;
-    const relevant = row.timeSegments.filter(segment => span.role === "POSITIVE" ? segment.value >= 0 : span.role === "NEGATIVE" ? segment.value <= 0 : true);
-    const source = relevant.length ? relevant : row.timeSegments;
-    const total = source.reduce((sum, segment) => sum + Math.abs(segment.value), 0) || 1;
+    const spanWidth = span.right - span.left;
+    const maximumBlocks = Math.max(1, Math.min(
+      settings.rendering.maximumVisibleColumns,
+      Math.floor(spanWidth / settings.rendering.profileBlockPixelWidth)
+    ));
+    const source = compressAuctionProfileSegments(row.timeSegments, maximumBlocks, settings.rendering.profileBlockValueMode);
+    const width = spanWidth / source.length;
     let cursor = span.left;
-    source.forEach((segment, index) => {
-      const width = Math.max(0.5, (span.right - span.left) * Math.abs(segment.value) / total);
-      const strength = Math.min(1, segment.normalizedWidth);
-      const color = auctionDirectionalColor(segment.value, strength, settings.rendering);
-      this.segments.rect(cursor, top, Math.min(width, span.right - cursor), height)
-        .fill({ color, alpha: auctionBrightnessAlpha((0.44 + strength * 0.5) * settings.rendering.opacity, settings.rendering.brightness) })
-        .stroke({ color: 0x080808, width: 0.55, alpha: 0.82 });
-      if (settings.rendering.showText && this.activeTextKeys.size < settings.rendering.maximumVisibleLabels && width >= 25 && height >= 9) {
-        this.text(`profile-segment:${snapshot.profileId}:${row.rowIndex}:${index}`, formatAuctionMetric(segment.value), cursor + width / 2, top + height / 2, 0xffffff, "center", 7);
+    source.forEach((block, index) => {
+      const right = index === source.length - 1 ? span.right : Math.min(span.right, cursor + width);
+      const blockWidth = Math.max(0.5, right - cursor);
+      const strength = Math.min(1, Math.abs(block.value) / Math.max(blockMaximum, Number.EPSILON));
+      const color = auctionDirectionalColor(block.value, strength, settings.rendering);
+      const valueAreaAlpha = row.inValueArea ? 1 : 0.62;
+      this.segments.rect(cursor, top, blockWidth, height)
+        .fill({ color, alpha: auctionBrightnessAlpha((0.36 + strength * 0.62) * settings.rendering.opacity * valueAreaAlpha, settings.rendering.brightness) })
+        .stroke({ color: 0x070707, width: settings.rendering.cellBorder === "NONE" ? 0 : 0.7, alpha: 0.92 });
+      if (
+        settings.rendering.showText
+        && this.activeTextKeys.size < settings.rendering.maximumVisibleLabels
+        && auctionCellTextVisible(settings.rendering.cellTextMode, blockWidth, height, strength)
+      ) {
+        this.text(
+          `profile-block:${snapshot.profileId}:${row.rowIndex}:${index}`,
+          formatAuctionCellMetric(block.value, snapshot.engine, settings.cvdMetric),
+          cursor + blockWidth / 2,
+          top + height / 2,
+          block.value < 0 ? 0xffffff : strength > 0.66 ? 0x080808 : 0xffffff,
+          "center",
+          Math.max(6, Math.min(8, height - 1))
+        );
       }
-      cursor += width;
+      this.hitBlocks.push({ left: cursor, right, top, bottom: top + height, row, block, snapshot });
+      this.metricsState.profileBlocks += 1;
+      cursor = right;
     });
   }
 
@@ -131,12 +155,16 @@ export class AuctionProfileRenderer {
       return Math.max(top, bottom) >= transform.top && Math.min(top, bottom) <= transform.bottom;
     });
     if (!visibleRows.length) return;
+    const blockValues = visibleRows.flatMap(row => row.timeSegments.map(segment => Math.abs(segment.value))).filter(value => value > 0).sort((a, b) => a - b);
+    const robustIndex = Math.max(0, Math.min(blockValues.length - 1, Math.floor(blockValues.length * 0.98)));
+    const blockMaximum = blockValues[robustIndex] ?? 1;
+    const matrixProfile = settings.rendering.profileBodyStyle === "HDLX_CVD_BLOCKS";
     const profileTop = Math.max(transform.top, Math.min(...visibleRows.map(row => transform.yForPrice(row.priceHigh))));
     const profileBottom = Math.min(transform.bottom, Math.max(...visibleRows.map(row => transform.yForPrice(row.priceLow))));
     this.background.rect(bounds.left, profileTop, bounds.width, Math.max(1, profileBottom - profileTop))
-      .fill({ color: 0x080a0d, alpha: 0.34 })
-      .stroke({ color: snapshot.matrix.blocks.at(-1)?.isDeveloping ? 0xaeb4bc : 0x3c4148, width: 0.8, alpha: 0.62 });
-    if (["BIDIRECTIONAL_DELTA", "POSITIVE_NEGATIVE_SPLIT", "MIRRORED", "CENTERED"].includes(settings.rendering.profileGeometry)) {
+      .fill({ color: 0x080a0d, alpha: matrixProfile ? 0.035 : 0.34 })
+      .stroke({ color: snapshot.matrix.blocks.at(-1)?.isDeveloping ? 0xaeb4bc : 0x3c4148, width: 0.7, alpha: matrixProfile ? 0.22 : 0.62 });
+    if (!matrixProfile && ["BIDIRECTIONAL_DELTA", "POSITIVE_NEGATIVE_SPLIT", "MIRRORED", "CENTERED"].includes(settings.rendering.profileGeometry)) {
       this.background.moveTo(bounds.center, profileTop).lineTo(bounds.center, profileBottom).stroke({ color: 0xb9bec5, width: 0.7, alpha: 0.36 });
     }
 
@@ -167,18 +195,22 @@ export class AuctionProfileRenderer {
       for (const span of spans) {
         const width = Math.max(0, span.right - span.left);
         if (width < 0.5) continue;
-        const signedValue = span.role === "NEGATIVE" ? -Math.abs(row.rawWidthValue) : span.role === "POSITIVE" ? Math.abs(row.rawWidthValue) : 0;
-        const color = auctionDirectionalColor(signedValue, row.normalizedWidth, settings.rendering);
-        this.profiles.rect(span.left, y, width, height)
-          .fill({ color, alpha: auctionBrightnessAlpha((0.28 + row.normalizedWidth * 0.66) * settings.rendering.opacity, settings.rendering.brightness) })
-          .stroke({ color: 0x080808, width: settings.rendering.cellBorder === "NONE" ? 0 : 0.6, alpha: 0.78 });
-        if (settings.rendering.timeSegmentsMode !== "OFF") this.drawSegments(snapshot, row, span, y, height, settings);
+        if (matrixProfile) {
+          this.drawSegments(snapshot, row, span, y, height, settings, blockMaximum);
+        } else {
+          const signedValue = span.role === "NEGATIVE" ? -Math.abs(row.rawWidthValue) : span.role === "POSITIVE" ? Math.abs(row.rawWidthValue) : 0;
+          const color = auctionDirectionalColor(signedValue, row.normalizedWidth, settings.rendering);
+          this.profiles.rect(span.left, y, width, height)
+            .fill({ color, alpha: auctionBrightnessAlpha((0.28 + row.normalizedWidth * 0.66) * settings.rendering.opacity, settings.rendering.brightness) })
+            .stroke({ color: 0x080808, width: settings.rendering.cellBorder === "NONE" ? 0 : 0.6, alpha: 0.78 });
+          if (settings.rendering.timeSegmentsMode !== "OFF") this.drawSegments(snapshot, row, span, y, height, settings, blockMaximum);
+        }
         this.hitRows.push({ left: span.left, right: span.right, top: y, bottom: y + height, row, snapshot });
         this.metricsState.commands += 1;
       }
       const widest = spans.reduce((winner, span) => span.right - span.left > winner.right - winner.left ? span : winner, spans[0]!);
       const labelWidth = widest ? widest.right - widest.left : 0;
-      if (widest && settings.rendering.showText && this.activeTextKeys.size < settings.rendering.maximumVisibleLabels && labelVisible(settings.rendering.rowLabelMode, labelWidth, height, row.normalizedWidth)) {
+      if (!matrixProfile && widest && settings.rendering.showText && this.activeTextKeys.size < settings.rendering.maximumVisibleLabels && labelVisible(settings.rendering.rowLabelMode, labelWidth, height, row.normalizedWidth)) {
         this.text(`profile-row:${snapshot.profileId}:${row.rowIndex}`, formatAuctionProfileRowMetric(row.rawWidthValue, settings.rendering.profileWidthMetric), widest.left + labelWidth / 2, y + height / 2, 0xffffff, "center", Math.max(7, Math.min(10, height - 1)));
       }
       this.metricsState.rows += 1;
@@ -214,7 +246,8 @@ export class AuctionProfileRenderer {
     this.nodes.clear();
     this.levels.clear();
     this.hitRows = [];
-    this.metricsState = { rows: 0, nodes: 0, labels: 0, commands: 0, footprintCells: 0 };
+    this.hitBlocks = [];
+    this.metricsState = { rows: 0, nodes: 0, labels: 0, commands: 0, footprintCells: 0, profileBlocks: 0 };
     this.viewport = { width: transform.width, top: transform.top, bottom: transform.bottom };
     this.clip.clear().rect(0, transform.top, transform.width, Math.max(1, transform.bottom - transform.top)).fill(0xffffff);
     this.clearHover();
@@ -230,6 +263,20 @@ export class AuctionProfileRenderer {
   }
 
   drawHover(x: number, y: number) {
+    const blockHit = [...this.hitBlocks].reverse().find(candidate => x >= candidate.left && x <= candidate.right && y >= candidate.top && y <= candidate.bottom);
+    if (blockHit && this.settings) {
+      const { row, block, snapshot } = blockHit;
+      this.hoverText.text = [
+        `CVD PROFILE BLOCK · ${block.finalized ? "FINALIZED" : "DEVELOPING"}`,
+        `Price       ${row.priceLow.toLocaleString()} — ${row.priceHigh.toLocaleString()}`,
+        `Block Delta ${formatAuctionCellMetric(block.deltaValue, snapshot.engine, this.settings.cvdMetric)}`,
+        `Develop CVD ${formatAuctionCellMetric(block.cumulativeValue, snapshot.engine, this.settings.cvdMetric)}`,
+        `Period      ${new Date(block.startTime * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC`,
+        `Sources     ${block.sourceCount.toLocaleString()} matrix ${block.sourceCount === 1 ? "cell" : "cells"}`,
+        `Data        ${snapshot.quality.quality} · ${snapshot.quality.exactTradeCoveragePercent.toFixed(0)}% exact`
+      ].join("\n");
+      return this.placeHover(x, y);
+    }
     const hit = [...this.hitRows].reverse().find(candidate => x >= candidate.left && x <= candidate.right && y >= candidate.top && y <= candidate.bottom);
     if (!hit || !this.settings) return this.clearHover();
     const { row, snapshot } = hit;
@@ -243,6 +290,10 @@ export class AuctionProfileRenderer {
       `Total  ${formatAuctionMetric(row.totalVolume)}`,
       `Data   ${snapshot.quality.quality} · ${snapshot.quality.exactTradeCoveragePercent.toFixed(0)}% exact`
     ].join("\n");
+    this.placeHover(x, y);
+  }
+
+  private placeHover(x: number, y: number) {
     const padding = 7;
     const boxWidth = Math.max(230, this.hoverText.width + padding * 2);
     const boxHeight = this.hoverText.height + padding * 2;

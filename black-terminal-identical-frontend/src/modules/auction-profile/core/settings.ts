@@ -40,7 +40,7 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
   rowSizePrice: 1,
   basisPointsPerRow: 4,
   atrFraction: 0.2,
-  targetRows: 180,
+  targetRows: 72,
   maximumRows: 1200,
   maximumTimeBlocks: 5000,
   gridAnchor: "INSTRUMENT_TICK_ORIGIN",
@@ -77,16 +77,19 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
     displayStyle: "COMBINED",
     presentationMode: "AGGREGATE_HISTOGRAM",
     visualizationType: "AUCTION_PROFILE",
-    profileGeometry: "BIDIRECTIONAL_DELTA",
-    profilePlacement: "RIGHT",
-    profileWidthMetric: "NET_CVD",
-    rowLabelMode: "AUTO",
-    timeSegmentsMode: "OFF",
+    profileBodyStyle: "HDLX_CVD_BLOCKS",
+    profileBlockValueMode: "CUMULATIVE_CVD",
+    profileBlockPixelWidth: 24,
+    profileGeometry: "SINGLE_SIDED_RIGHT",
+    profilePlacement: "RANGE_START",
+    profileWidthMetric: "CVD_ACTIVITY",
+    rowLabelMode: "OFF",
+    timeSegmentsMode: "STACKED",
     latestSegmentCount: 24,
     palette: "BLACK_TERMINAL_INSTITUTIONAL",
-    widthPercent: 32,
+    widthPercent: 48,
     profileWidthAuto: false,
-    opacity: 0.72,
+    opacity: 0.82,
     brightness: 100,
     showText: true,
     showKeyLevels: true,
@@ -97,7 +100,7 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
     showStructuralSr: false,
     showHistoricalExtensions: false,
     showOffChart: false,
-    cellTextMode: "AUTO",
+    cellTextMode: "ALWAYS",
     cellTextSize: "AUTO",
     cellBorder: "SUBTLE",
     normalizationMode: "ROBUST_PERCENTILE",
@@ -107,7 +110,7 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
     absoluteFixedScale: 1000,
     maximumVisibleColumns: 500,
     maximumVisibleRows: 300,
-    maximumVisibleLabels: 2000,
+    maximumVisibleLabels: 3000,
     structuralDetail: "MINIMAL",
     maximumVisibleLvns: 3,
     maximumVisibleHvns: 3,
@@ -237,9 +240,12 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
       displayStyle: choice(r.displayStyle, DISPLAY_STYLES, d.rendering.displayStyle),
       presentationMode: choice(r.presentationMode, ["DYNAMIC_BLOCKS", "AGGREGATE_HISTOGRAM", "STRUCTURAL_NODES", "DYNAMIC_KEY_LEVELS", "DYNAMIC_AGGREGATE", "MACRO_STRUCTURE"], d.rendering.presentationMode),
       visualizationType: choice(r.visualizationType, ["AUCTION_PROFILE", "CVD_FOOTPRINT", "COMBINED"], d.rendering.visualizationType),
+      profileBodyStyle: choice(r.profileBodyStyle, ["HDLX_CVD_BLOCKS", "SOLID_HISTOGRAM"], d.rendering.profileBodyStyle),
+      profileBlockValueMode: choice(r.profileBlockValueMode, ["CUMULATIVE_CVD", "BLOCK_DELTA"], d.rendering.profileBlockValueMode),
+      profileBlockPixelWidth: finite(r.profileBlockPixelWidth, d.rendering.profileBlockPixelWidth, 14, 80),
       profileGeometry: choice(r.profileGeometry, ["BIDIRECTIONAL_DELTA", "ABSOLUTE_DIRECTIONAL", "POSITIVE_NEGATIVE_SPLIT", "MIRRORED", "SINGLE_SIDED_RIGHT", "SINGLE_SIDED_LEFT", "CENTERED"], d.rendering.profileGeometry),
-      profilePlacement: choice(r.profilePlacement, ["RIGHT", "LEFT", "OVERLAY", "INSIDE_RANGE", "DETACHED_PANEL"], d.rendering.profilePlacement),
-      profileWidthMetric: choice(r.profileWidthMetric, ["NET_CVD", "ABSOLUTE_CVD", "BUY_VOLUME", "SELL_VOLUME", "TOTAL_VOLUME", "CVD_EFFICIENCY", "IMBALANCE_RATIO", "SELECTED_ENGINE"], d.rendering.profileWidthMetric),
+      profilePlacement: choice(r.profilePlacement, ["RIGHT", "LEFT", "OVERLAY", "INSIDE_RANGE", "RANGE_START", "DETACHED_PANEL"], d.rendering.profilePlacement),
+      profileWidthMetric: choice(r.profileWidthMetric, ["CVD_ACTIVITY", "NET_CVD", "ABSOLUTE_CVD", "BUY_VOLUME", "SELL_VOLUME", "TOTAL_VOLUME", "CVD_EFFICIENCY", "IMBALANCE_RATIO", "SELECTED_ENGINE"], d.rendering.profileWidthMetric),
       rowLabelMode: choice(r.rowLabelMode, ["ALWAYS", "AUTO", "STRONG_ONLY", "HOVER", "OFF"], d.rendering.rowLabelMode),
       timeSegmentsMode: choice(r.timeSegmentsMode, ["OFF", "STACKED", "LATEST_N", "SESSION_BLOCKS", "CUSTOM"], d.rendering.timeSegmentsMode),
       latestSegmentCount: integer(r.latestSegmentCount, d.rendering.latestSegmentCount, 1, 5000),
@@ -289,6 +295,22 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
   const legacyAggregateSettings = typeof r.presentationMode !== "string";
   if (legacyAggregateSettings && ["CVD_REAL_TRADES", "CVD_PINE_COMPATIBLE"].includes(result.calculationEngine) && result.cvdMetric === "ABSOLUTE_CVD") {
     result.cvdMetric = "NET_CVD";
+  }
+  // Existing workspaces predate the reference-faithful matrix profile. Promote
+  // them once so a saved solid histogram cannot mask the corrected default.
+  if (typeof r.profileBodyStyle !== "string") {
+    result.targetRows = Math.min(result.targetRows, 72);
+    result.rendering.profileBodyStyle = "HDLX_CVD_BLOCKS";
+    result.rendering.profileBlockValueMode = "CUMULATIVE_CVD";
+    result.rendering.profileBlockPixelWidth = 24;
+    result.rendering.profileGeometry = "SINGLE_SIDED_RIGHT";
+    result.rendering.profilePlacement = "RANGE_START";
+    result.rendering.profileWidthMetric = "CVD_ACTIVITY";
+    result.rendering.rowLabelMode = "OFF";
+    result.rendering.timeSegmentsMode = "STACKED";
+    result.rendering.widthPercent = 48;
+    result.rendering.cellTextMode = "ALWAYS";
+    result.rendering.maximumVisibleLabels = Math.max(result.rendering.maximumVisibleLabels, 3000);
   }
   if (result.implementationMode === "PINE_COMPATIBILITY") {
     if (result.calculationEngine === "CVD_REAL_TRADES") result.calculationEngine = "CVD_PINE_COMPATIBLE";

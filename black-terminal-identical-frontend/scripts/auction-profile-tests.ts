@@ -8,7 +8,7 @@ import { auctionHistogramWidth, auctionProfileHorizontalBounds, auctionProfileSt
 import { auctionCellRenderStrides, downsampleAuctionCells } from "../src/modules/auction-profile/rendering/cells.ts";
 import { auctionCellTextVisible, formatAuctionCellMetric } from "../src/modules/auction-profile/rendering/labels.ts";
 import { CVD_FOOTPRINT_RENDERER_KIND, auctionCellColor } from "../src/modules/auction-profile/rendering/footprint/CvdFootprintRenderer.ts";
-import { AUCTION_PROFILE_RENDERER_KIND, auctionProfileBarSpans, buildAuctionProfileRows, resolveAuctionProfilePlacement } from "../src/modules/auction-profile/core/profileGeometry.ts";
+import { AUCTION_PROFILE_RENDERER_KIND, auctionProfileBarSpans, buildAuctionProfileRows, compressAuctionProfileSegments, resolveAuctionProfilePlacement } from "../src/modules/auction-profile/core/profileGeometry.ts";
 import { resolveAuctionVisualizationLayers } from "../src/modules/auction-profile/rendering/visualization.ts";
 import { validateAuctionProfileInvariants } from "../src/modules/auction-profile/testing/nativeValidation.ts";
 import { PINE_CVD_PROFILE_KNOWN_ANOMALIES } from "../src/modules/auction-profile/engines/pineCompatibility.ts";
@@ -107,10 +107,12 @@ assert.ok(snapshot.keyLevels.vah !== null);
 assert.ok(snapshot.keyLevels.val !== null);
 assert.ok(snapshot.profileVersion.startsWith("auction-"));
 assert.equal(settings.rendering.visualizationType, "AUCTION_PROFILE", "range × price Auction Profile must be the default visualization");
-assert.equal(settings.rendering.profileGeometry, "BIDIRECTIONAL_DELTA");
-assert.equal(settings.rendering.profilePlacement, "RIGHT");
-assert.equal(settings.rendering.profileWidthMetric, "NET_CVD");
-assert.equal(settings.rendering.timeSegmentsMode, "OFF", "macro profiles must begin as one unified profile");
+assert.equal(settings.rendering.profileBodyStyle, "HDLX_CVD_BLOCKS");
+assert.equal(settings.rendering.profileBlockValueMode, "CUMULATIVE_CVD");
+assert.equal(settings.rendering.profileGeometry, "SINGLE_SIDED_RIGHT");
+assert.equal(settings.rendering.profilePlacement, "RANGE_START");
+assert.equal(settings.rendering.profileWidthMetric, "CVD_ACTIVITY");
+assert.equal(settings.rendering.timeSegmentsMode, "STACKED", "the profile silhouette must be built from chronological CVD cells");
 assert.equal(settings.nodeDetection.showLvns, true, "restrained LVN context is enabled by default");
 assert.equal(settings.nodeDetection.showHvns, true, "restrained HVN context is enabled by default");
 assert.equal(settings.rendering.maximumVisibleLvns, 3);
@@ -255,21 +257,35 @@ assert.equal(AUCTION_PROFILE_RENDERER_KIND, "RANGE_PRICE_PROFILE");
 assert.equal(CVD_FOOTPRINT_RENDERER_KIND, "TIME_PRICE_FOOTPRINT");
 assert.notEqual(AUCTION_PROFILE_RENDERER_KIND, CVD_FOOTPRINT_RENDERER_KIND, "profile and footprint must remain separate renderer contracts");
 const profileRows = buildAuctionProfileRows(exactSnapshot, exactSettings);
-assert.equal(profileRows.length, exactSnapshot.rows.length, "profile renderer projects exactly one aggregate bar per price row");
+assert.equal(profileRows.length, exactSnapshot.rows.length, "profile renderer projects one CVD matrix chain per price row");
 const aggregate63000 = profileRows.find(row => row.priceLow <= 63000 && row.priceHigh > 63000);
 const aggregate63050 = profileRows.find(row => row.priceLow <= 63050 && row.priceHigh > 63050);
 const aggregate63100 = profileRows.find(row => row.priceLow <= 63100 && row.priceHigh > 63100);
 assert.equal(aggregate63000?.netCvd, 3);
 assert.equal(aggregate63050?.netCvd, -4);
 assert.equal(aggregate63100?.netCvd, 4, "profile row must dynamically include the developing-cell update");
-assert.ok(profileRows.every(row => row.timeSegments.length === 0), "unified Auction Profile must not leak footprint cells into its shape");
+assert.ok(profileRows.some(row => row.timeSegments.length > 0), "the HDLX profile body must retain chronological matrix cells");
+assert.equal(aggregate63100?.timeSegments.at(-1)?.deltaValue, 4, "the developing cell must expose its real signed block delta");
+assert.equal(aggregate63100?.timeSegments.at(-1)?.cumulativeValue, 4, "the displayed developing CVD must track the row history");
 const segmentedRows = buildAuctionProfileRows(exactSnapshot, migrateAuctionProfileSettings({
   ...exactSettings,
   rendering: { ...exactSettings.rendering, timeSegmentsMode: "STACKED" }
 }));
 assert.ok(segmentedRows.some(row => row.timeSegments.length > 0), "optional segmented profile mode must retain time contribution detail inside price rows");
+const syntheticSegments = [
+  { startTime: 1, endTime: 2, value: 3, deltaValue: 3, cumulativeValue: 3, normalizedWidth: 0.2, finalized: true, sourceCount: 1 },
+  { startTime: 2, endTime: 3, value: 1, deltaValue: -2, cumulativeValue: 1, normalizedWidth: 0.3, finalized: true, sourceCount: 1 },
+  { startTime: 3, endTime: 4, value: 5, deltaValue: 4, cumulativeValue: 5, normalizedWidth: 0.5, finalized: false, sourceCount: 1 }
+];
+const compressed = compressAuctionProfileSegments(syntheticSegments, 2, "CUMULATIVE_CVD");
+assert.equal(compressed.length, 2);
+assert.equal(compressed.reduce((sum, block) => sum + block.deltaValue, 0), 5, "render compression must conserve signed CVD delta");
+assert.equal(compressed.at(-1)?.cumulativeValue, 5, "render compression must retain the final developing CVD");
+assert.equal(compressed.at(-1)?.sourceCount, 2, "compressed blocks must disclose their real source-cell count");
 const rightBounds = resolveAuctionProfilePlacement("RIGHT", 1000, 100, 900, 32);
 assert.deepEqual(rightBounds, { left: 680, right: 1000, center: 840, width: 320 });
+const rangeStartBounds = resolveAuctionProfilePlacement("RANGE_START", 1000, 100, 900, 48);
+assert.deepEqual(rangeStartBounds, { left: 100, right: 580, center: 340, width: 480 });
 const negativeSpan = auctionProfileBarSpans(aggregate63050!, "BIDIRECTIONAL_DELTA", rightBounds)[0]!;
 const positiveSpan = auctionProfileBarSpans(aggregate63000!, "BIDIRECTIONAL_DELTA", rightBounds)[0]!;
 assert.equal(negativeSpan.right, rightBounds.center, "negative delta must grow left from the profile centerline");

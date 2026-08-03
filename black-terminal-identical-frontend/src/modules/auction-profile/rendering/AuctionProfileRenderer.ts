@@ -370,7 +370,7 @@ export class AuctionProfileRenderer {
     if (!hit || !this.settings) return this.clearHover();
     const { row, snapshot } = hit;
     this.hoverText.text = [
-      `AUCTION PROFILE · ${snapshot.matrix.blocks.at(-1)?.isDeveloping ? "DEVELOPING" : "FINALIZED"}`,
+      `RADAP · ${snapshot.matrix.blocks.at(-1)?.isDeveloping ? "DEVELOPING" : "FINALIZED"}`,
       `Price  ${row.priceLow.toLocaleString()} — ${row.priceHigh.toLocaleString()}`,
       `Width  ${formatAuctionProfileRowMetric(row.rawWidthValue, this.settings.rendering.profileWidthMetric)}`,
       `CVD    ${formatAuctionMetric(row.netCvd)}`,

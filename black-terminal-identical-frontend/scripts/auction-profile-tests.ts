@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { AUCTION_PROFILE_DEFAULT_SETTINGS, migrateAuctionProfileSettings } from "../src/modules/auction-profile/core/settings.ts";
+import { AUCTION_PROFILE_DEFAULT_SETTINGS, auctionProfileCalculationSettingsHash, migrateAuctionProfileSettings } from "../src/modules/auction-profile/core/settings.ts";
 import { stableHash } from "../src/modules/auction-profile/core/canonical.ts";
+import { RADAP_DISPLAY_NAME, RADAP_FULL_NAME, RADAP_SHORT_NAME } from "../src/modules/auction-profile/core/identity.ts";
+import { retainCertifiedRadapSnapshots } from "../src/modules/auction-profile/core/stability.ts";
 import { createAuctionProfileGrid } from "../src/modules/auction-profile/core/profileGrid.ts";
 import { resolveAuctionScopeWindows } from "../src/modules/auction-profile/core/scope.ts";
 import { auctionHistogramWidth, auctionProfileHorizontalBounds, auctionProfileStartX } from "../src/modules/auction-profile/rendering/histogram.ts";
@@ -90,6 +92,11 @@ assert.deepEqual(resolveAuctionVisualizationLayers(true, false, "COMBINED"), { d
 
 const snapshot = calculateAuctionProfile(input);
 assert.ok(snapshot, "native profile must be produced");
+assert.equal(RADAP_SHORT_NAME, "RADAP");
+assert.equal(RADAP_FULL_NAME, "Range Anchored Directional Auction Profile");
+assert.equal(RADAP_DISPLAY_NAME, "RADAP · Range Anchored Directional Auction Profile");
+assert.deepEqual(retainCertifiedRadapSnapshots([snapshot], []), [snapshot], "an empty rebuild must retain the last certified RADAP snapshot");
+assert.deepEqual(retainCertifiedRadapSnapshots([], [snapshot]), [snapshot], "a certified rebuild must replace an empty display");
 assert.equal(snapshot.quality.quality, "EXACT");
 assert.equal(snapshot.quality.exactTradeCoveragePercent, 100);
 assert.equal(snapshot.diagnostics.viewportAffectsCalculation, false);
@@ -107,7 +114,7 @@ assert.ok(snapshot.keyLevels.poc !== null);
 assert.ok(snapshot.keyLevels.vah !== null);
 assert.ok(snapshot.keyLevels.val !== null);
 assert.ok(snapshot.profileVersion.startsWith("auction-"));
-assert.equal(settings.rendering.visualizationType, "AUCTION_PROFILE", "range × price Auction Profile must be the default visualization");
+assert.equal(settings.rendering.visualizationType, "AUCTION_PROFILE", "range × price RADAP must be the default visualization");
 assert.equal(settings.rendering.profileBodyStyle, "HDLX_CVD_BLOCKS");
 assert.equal(settings.rendering.profileBlockValueMode, "CUMULATIVE_CVD");
 assert.equal(settings.rendering.profileGeometry, "SINGLE_SIDED_RIGHT");
@@ -120,6 +127,20 @@ assert.equal(settings.rendering.profileLengthPercent, 75);
 assert.equal(settings.rendering.valueAreaFillColor, "#24272d");
 assert.equal(settings.rendering.valueAreaFillOpacity, 0.1);
 assert.equal(settings.rendering.pocColor, "#ff1738");
+const presentationOnlySettings = migrateAuctionProfileSettings({
+  ...settings,
+  rendering: { ...settings.rendering, profileSide: "RIGHT", profileLengthPercent: 125, brightness: 175 }
+});
+assert.equal(
+  auctionProfileCalculationSettingsHash(presentationOnlySettings),
+  auctionProfileCalculationSettingsHash(settings),
+  "presentation controls must redraw RADAP without restarting its calculation worker"
+);
+assert.notEqual(
+  auctionProfileCalculationSettingsHash(migrateAuctionProfileSettings({ ...settings, targetRows: settings.targetRows + 1 })),
+  auctionProfileCalculationSettingsHash(settings),
+  "calculation controls must still schedule a certified RADAP rebuild"
+);
 assert.equal(settings.rendering.timeSegmentsMode, "STACKED", "the profile silhouette must be built from chronological CVD cells");
 assert.equal(settings.nodeDetection.showLvns, true, "restrained LVN context is enabled by default");
 assert.equal(settings.nodeDetection.showHvns, true, "restrained HVN context is enabled by default");
@@ -527,7 +548,7 @@ const lockedAppend = lockedResponses.find(response => response.type === "RESULT"
 assert.ok(lockedAppend && lockedAppend.type === "RESULT");
 assert.equal(lockedAppend.snapshots[0]?.profileVersion, lockedInitial.snapshots[0]?.profileVersion, "locked composites must not repaint");
 
-console.log("Auction Profile certification passed", {
+console.log("RADAP certification passed", {
   profileVersion: snapshot.profileVersion,
   rows: snapshot.rows.length,
   nodes: snapshot.nodes.length,

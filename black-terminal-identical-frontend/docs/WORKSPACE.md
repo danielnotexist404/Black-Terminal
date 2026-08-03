@@ -232,9 +232,9 @@ Black Cloud connection health, lifecycle, control state, mandates, follower plan
 
 Chapter II-D adds safe node health to the same authenticated payload: stable node ID, stale-aware status, heartbeat age, deployment commit, connection/strategy counts, queue depth and clock state. Hostname/IP, image internals, keys and raw cryptographic state remain server-only. The UI reports `OFFLINE` after 45 seconds without heartbeat even if the last database status was `READY`.
 
-## Auction Profile persistence
+## RADAP persistence
 
-Workspace snapshots persist the versioned `auctionProfileSettings` object independently from visibility. Opening an older workspace migrates missing fields to safe Black Core defaults. Presentation-only edits do not change the calculation hash; engine, scope, source, grid, value-area, and node edits do. Strategy consumers should store the immutable profile version and boundaries rather than a mutable rolling reference.
+Workspace snapshots persist the versioned `auctionProfileSettings` object independently from visibility. The legacy internal key is deliberately retained so the RADAP rename never invalidates an existing workspace. Opening an older workspace migrates missing fields to safe Black Core defaults. Presentation-only edits do not change the calculation hash; engine, scope, source, grid, value-area, and node edits do. Strategy consumers should store the immutable profile version and boundaries rather than a mutable rolling reference.
 
 BC-MEAP 2.0 adds persisted block construction, presentation, cell text/border, normalization, color lifecycle, render budgets, structural density, and zone-extension settings. Legacy aggregate workspaces migrate to the safe Dynamic Blocks + Key Levels presentation and Net CVD where applicable.
 

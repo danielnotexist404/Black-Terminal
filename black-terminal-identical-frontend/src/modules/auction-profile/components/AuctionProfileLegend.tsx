@@ -1,11 +1,16 @@
 import type { AuctionProfileSettings, AuctionProfileSnapshot } from "../core/types.ts";
+import { RADAP_SHORT_NAME } from "../core/identity.ts";
 
 export function AuctionProfileLegend({ snapshot, settings, chartType }: { snapshot: AuctionProfileSnapshot | null; settings: AuctionProfileSettings; chartType: string }) {
   if (!snapshot) return null;
   const price = (value: number | null) => value === null ? "—" : value.toLocaleString(undefined, { maximumFractionDigits: 2 });
   const forcedFootprint = chartType === "volumeFootprint";
-  const title = forcedFootprint ? "CVD FOOTPRINT" : settings.rendering.visualizationType.replaceAll("_", " ");
-  return <div className="auction-profile-legend" aria-label="Auction Profile legend">
+  const title = forcedFootprint
+    ? "CVD FOOTPRINT"
+    : settings.rendering.visualizationType === "AUCTION_PROFILE"
+      ? RADAP_SHORT_NAME
+      : settings.rendering.visualizationType === "COMBINED" ? "RADAP + CVD FOOTPRINT" : "CVD FOOTPRINT";
+  return <div className="auction-profile-legend" aria-label="RADAP legend">
     <b>{title}</b><span>{snapshot.engine.replaceAll("_", " ")}</span>
     <em>Scope · {snapshot.scope.replaceAll("_", " ")}</em>
     <em>Block · {Math.round(snapshot.matrix.blockDurationSeconds / 60).toLocaleString()}m</em>

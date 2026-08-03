@@ -56,7 +56,7 @@ const builtInIndicators: BuiltInIndicator[] = [
   },
   {
     key: "auctionProfile",
-    title: "Auction Profile · BC-MEAP",
+    title: "RADAP · Range Anchored Directional Auction Profile",
     group: "Black Core / Auction Intelligence",
     type: "Overlay + Optional Pane",
     signal: "Real CVD, TPO, volume, volatility, composite structure, LVNs and HVNs",

@@ -26,7 +26,7 @@ export class AuctionProfileWorkerClient {
   constructor(workerFactory: () => AuctionProfileWorkerLike = () => new Worker(new URL("./auction-profile.worker.ts", import.meta.url), { type: "module", name: "black-core-auction-profile" })) {
     this.worker = workerFactory();
     this.worker.onmessage = event => this.receive(event.data);
-    this.worker.onerror = event => this.rejectAll(new Error(event.message || "Auction Profile worker failed."));
+    this.worker.onerror = event => this.rejectAll(new Error(event.message || "RADAP worker failed."));
   }
 
   private nextId(prefix: string) {
@@ -59,7 +59,7 @@ export class AuctionProfileWorkerClient {
   }
 
   private send(request: AuctionProfileWorkerRequest) {
-    if (this.disposed) return Promise.reject(new Error("Auction Profile worker client is disposed."));
+    if (this.disposed) return Promise.reject(new Error("RADAP worker client is disposed."));
     return new Promise<AuctionProfileSnapshot[]>((resolve, reject) => {
       this.pending.set(request.requestId, { resolve, reject, generation: this.generation });
       this.worker.postMessage(request);

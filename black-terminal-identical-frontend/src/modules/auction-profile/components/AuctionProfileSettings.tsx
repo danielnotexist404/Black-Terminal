@@ -1,5 +1,6 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { AUCTION_PROFILE_DEFAULT_SETTINGS, AUCTION_PROFILE_LOOKBACK_OPTIONS } from "../core/settings.ts";
+import { RADAP_DISPLAY_NAME } from "../core/identity.ts";
 import type { AuctionProfileSettings } from "../core/types.ts";
 
 const OFF_CHART_METRICS: Array<{ value: AuctionProfileSettings["offChartMetrics"][number]; label: string }> = [
@@ -128,15 +129,15 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
   });
 
   return (
-    <div className="indicator-settings auction-profile-settings" role="dialog" aria-label="Auction Profile settings" data-testid="auction-profile-settings">
-      <div className="indicator-settings-title"><span>Auction Profile · BC-MEAP</span><button type="button" onClick={onClose}>DONE</button></div>
+    <div className="indicator-settings auction-profile-settings" role="dialog" aria-label="RADAP settings" data-testid="auction-profile-settings">
+      <div className="indicator-settings-title"><span>{RADAP_DISPLAY_NAME}</span><button type="button" onClick={onClose}>DONE</button></div>
       <div className="indicator-settings-tabs" role="tablist">
         {(["engine", "scope", "grid", "nodes", "style", "quality"] as const).map(item => <button key={item} type="button" role="tab" aria-selected={tab === item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item.toUpperCase()}</button>)}
       </div>
 
       {tab === "engine" && <div className="indicator-settings-section">
         <b>Visualization</b>
-        <label>Renderer<select value={settings.rendering.visualizationType} onChange={event => patchRendering({ visualizationType: event.target.value as AuctionProfileSettings["rendering"]["visualizationType"] })}><option value="AUCTION_PROFILE">Auction Profile</option><option value="CVD_FOOTPRINT">CVD Footprint</option><option value="COMBINED">Combined</option></select></label>
+        <label>Renderer<select value={settings.rendering.visualizationType} onChange={event => patchRendering({ visualizationType: event.target.value as AuctionProfileSettings["rendering"]["visualizationType"] })}><option value="AUCTION_PROFILE">RADAP Profile</option><option value="CVD_FOOTPRINT">CVD Footprint</option><option value="COMBINED">RADAP + Footprint</option></select></label>
         <small>Profile builds an HDLX-style silhouette from chronological CVD matrix blocks. Footprint remains the separate candle-aligned time × price view.</small>
         <b>Presets</b>
         <div className="auction-profile-presets">

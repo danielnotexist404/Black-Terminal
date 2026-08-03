@@ -70,11 +70,20 @@ import { AuctionProfileDiagnostics } from "../modules/auction-profile/components
 import { AuctionProfileLegend } from "../modules/auction-profile/components/AuctionProfileLegend";
 import { auctionProfileCalculationSettingsHash, migrateAuctionProfileSettings } from "../modules/auction-profile/core/settings";
 import type { AuctionProfileSettings, AuctionProfileSnapshot, CanonicalTrade } from "../modules/auction-profile/core/types";
+import { retainCertifiedRadapSnapshots } from "../modules/auction-profile/core/stability";
 import { canonicalCvdService, normalizeCanonicalTrade } from "../modules/auction-profile/data/tradeSource";
 import { AuctionProfileWorkerClient } from "../modules/auction-profile/worker/AuctionProfileWorkerClient";
 import { resolveAuctionVisualizationLayers } from "../modules/auction-profile/rendering/visualization";
 import type { TradeTick } from "../market-data/types";
 
+function useDebouncedValue<T>(value: T, delayMs: number) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
 
 
 type PixiBlackChartProps = {
@@ -363,14 +372,17 @@ export function PixiBlackChart({
   const [kioseffSourceRevision, setKioseffSourceRevision] = useState(0);
   const kioseffCalculationVersion = kioseffCalculationSettingsHash(kioseffSettings);
   const normalizedAuctionProfileSettings = useMemo(() => migrateAuctionProfileSettings(auctionProfileSettings), [auctionProfileSettings]);
+  const latestAuctionProfileSettingsRef = useRef(normalizedAuctionProfileSettings);
+  latestAuctionProfileSettingsRef.current = normalizedAuctionProfileSettings;
   const auctionDataRequired = resolveAuctionVisualizationLayers(
     visibleIndicators.auctionProfile,
     chartType === "volumeFootprint",
     normalizedAuctionProfileSettings.rendering.visualizationType
   ).dataRequired;
   const auctionProfileCalculationVersion = auctionProfileCalculationSettingsHash(normalizedAuctionProfileSettings);
+  const debouncedAuctionProfileCalculationVersion = useDebouncedValue(auctionProfileCalculationVersion, 220);
   const auctionProfileDataRevision = normalizedAuctionProfileSettings.compositeLocked
-    ? "locked:" + auctionProfileCalculationVersion
+    ? "locked:" + debouncedAuctionProfileCalculationVersion
     : "chart:" + auctionProfileSourceRevision;
   const [dataStatus, setDataStatus] = useState("CONNECTING");
   const [chartHistoryState, setChartHistoryState] = useState<
@@ -837,9 +849,10 @@ export function PixiBlackChart({
               const previousFingerprint = auctionProfileSnapshotsRef.current.map(snapshot => snapshot.profileVersion).join("|");
               const nextFingerprint = snapshots.map(snapshot => snapshot.profileVersion).join("|");
               if (previousFingerprint === nextFingerprint) return;
-              auctionProfileSnapshotsRef.current = snapshots;
-              setAuctionProfileSnapshots(snapshots);
-              engineRef.current?.setAuctionProfileState(snapshots, normalizedAuctionProfileSettings);
+              const retained = retainCertifiedRadapSnapshots(auctionProfileSnapshotsRef.current, snapshots);
+              auctionProfileSnapshotsRef.current = retained;
+              setAuctionProfileSnapshots(retained);
+              engineRef.current?.setAuctionProfileState(retained, latestAuctionProfileSettingsRef.current);
             }).catch(() => undefined);
           }, 600);
         }
@@ -1731,16 +1744,18 @@ export function PixiBlackChart({
       sourceRevision: auctionProfileDataRevision
     }).then(snapshots => {
       if (disposed) return;
-      auctionProfileSnapshotsRef.current = snapshots;
-      setAuctionProfileSnapshots(snapshots);
+      const retained = retainCertifiedRadapSnapshots(auctionProfileSnapshotsRef.current, snapshots);
+      auctionProfileSnapshotsRef.current = retained;
+      setAuctionProfileSnapshots(retained);
       setAuctionProfileLoading(false);
-      engineRef.current?.setAuctionProfileState(snapshots, normalizedAuctionProfileSettings);
+      if (!retained.length) setAuctionProfileError("RADAP produced no certified range for the selected parameters.");
+      engineRef.current?.setAuctionProfileState(retained, latestAuctionProfileSettingsRef.current);
     }).catch(error => {
       if (disposed || String(error).includes("CANCELLED")) return;
       setAuctionProfileLoading(false);
       setAuctionProfileError(error instanceof Error ? error.message : String(error));
       if (auctionProfileSnapshotsRef.current.length === 0) {
-        engineRef.current?.setAuctionProfileState(null, normalizedAuctionProfileSettings);
+        engineRef.current?.setAuctionProfileState(null, latestAuctionProfileSettingsRef.current);
       }
     });
 
@@ -1755,7 +1770,7 @@ export function PixiBlackChart({
     marketSymbol.rawSymbol,
     timeframe,
     chartHistoryState,
-    auctionProfileCalculationVersion,
+    debouncedAuctionProfileCalculationVersion,
     auctionProfileDataRevision
   ]);
 
@@ -2530,7 +2545,7 @@ export function PixiBlackChart({
     { key: "aif", label: "A.I.F.", value: "auction intelligence" },
     {
       key: "auctionProfile",
-      label: "Auction Profile",
+      label: "RADAP",
       value: auctionProfileLoading ? "building…" : auctionProfileError ? "unavailable" : normalizedAuctionProfileSettings.calculationEngine.replaceAll("_", " ")
     },
     { key: "liquidationHeatmap", label: "Liq Heatmap", value: "model" },
@@ -4141,8 +4156,8 @@ export function PixiBlackChart({
       {auctionDataRequired && <>
         <AuctionProfileLegend snapshot={auctionProfileSnapshot} settings={normalizedAuctionProfileSettings} chartType={chartType} />
         {normalizedAuctionProfileSettings.diagnosticsVisible && <AuctionProfileDiagnostics snapshot={auctionProfileSnapshot} />}
-        {auctionProfileLoading && <div className="auction-profile-loading"><b>BLACK CORE AUCTION ENGINE</b><span>Rebuilding deterministic range × price data…</span><i /></div>}
-        {auctionProfileError && <div className="auction-profile-error"><b>AUCTION DATA UNAVAILABLE</b><span>{auctionProfileError}</span></div>}
+        {auctionProfileLoading && <div className="auction-profile-loading"><b>BLACK CORE RADAP ENGINE</b><span>Rebuilding deterministic range × price data…</span><i /></div>}
+        {auctionProfileError && <div className="auction-profile-error"><b>RADAP DATA UNAVAILABLE</b><span>{auctionProfileError}</span></div>}
       </>}
 
 

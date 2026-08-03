@@ -28,7 +28,7 @@ export class AuctionProfileWorkerRuntime {
 
   private rebuild(request: AuctionProfileWorkerRequest, input = this.input) {
     if (!input) {
-      this.response(request, { type: "ERROR", code: "NOT_INITIALIZED", message: "Auction Profile worker has not been initialized." });
+      this.response(request, { type: "ERROR", code: "NOT_INITIALIZED", message: "RADAP worker has not been initialized." });
       return;
     }
     const started = performance.now();
@@ -45,7 +45,7 @@ export class AuctionProfileWorkerRuntime {
 
   handle(request: AuctionProfileWorkerRequest) {
     if (this.disposed && request.type !== "DISPOSE") {
-      this.response(request, { type: "ERROR", code: "DISPOSED", message: "Auction Profile worker is disposed." });
+      this.response(request, { type: "ERROR", code: "DISPOSED", message: "RADAP worker is disposed." });
       return;
     }
     try {
@@ -66,7 +66,7 @@ export class AuctionProfileWorkerRuntime {
         return;
       }
       if (!this.input) {
-        this.response(request, { type: "ERROR", code: "NOT_INITIALIZED", message: "Auction Profile worker has not been initialized." });
+        this.response(request, { type: "ERROR", code: "NOT_INITIALIZED", message: "RADAP worker has not been initialized." });
         return;
       }
       if (request.type === "SETTINGS_UPDATE") {

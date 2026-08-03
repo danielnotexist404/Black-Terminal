@@ -1360,3 +1360,9 @@ Remaining:
 - Added renderer-separation, block-chain, signed-direction, cumulative-CVD, compression, live-update, and 20,000-bar performance certification plus the corrective documentation set.
 - Corrected the first block-profile polish: reduced the default footprint to 30%, cached unchanged GPU frames to eliminate tick-driven flashing, retained the last certified snapshot through background refreshes, and restricted VAH/VAL/LVN/HVN structure to the active profile with high-prominence node filtering.
 - Completed the annotated visual refinement: removed the matrix pane frame, added left/right profile anchoring and independent contract/stretch length, extended continuous neon VAH/VAL and a thicker blood-red POC across the full calculation range, extended significant hollow node zones, and added configurable value-area background color/intensity.
+
+## 2026-08-04 — RADAP Identity and Settings Stability
+
+- Renamed the user-facing indicator to RADAP — Range Anchored Directional Auction Profile — while preserving the `auctionProfile` workspace, worker protocol, and engine contracts for backward compatibility.
+- Separated immediate presentation redraws from calculation rebuilds, debounced calculation-sensitive slider changes, forced asynchronous results to use the newest menu settings, and retained the last certified snapshot through empty or cancelled intermediate generations.
+- Preserved the current finalized/developing CVD block model; genuinely live per-cell number mutation remains the next explicitly scoped phase.

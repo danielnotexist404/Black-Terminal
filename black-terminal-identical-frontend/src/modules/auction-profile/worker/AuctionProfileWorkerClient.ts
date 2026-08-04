@@ -1,6 +1,5 @@
 import type { AuctionProfileCalculationInput, AuctionProfileSettings, AuctionProfileSnapshot, CanonicalTrade } from "../core/types.ts";
 import type { AuctionProfileWorkerRequest, AuctionProfileWorkerResponse } from "./protocol.ts";
-import { AuctionProfileWorkerRuntime } from "./auctionProfileWorker.ts";
 
 type Pending = {
   resolve: (snapshots: AuctionProfileSnapshot[]) => void;
@@ -13,23 +12,30 @@ export class InlineAuctionProfileWorker implements AuctionProfileWorkerLike {
   onmessage: AuctionProfileWorkerLike["onmessage"] = null;
   onerror: AuctionProfileWorkerLike["onerror"] = null;
   private terminated = false;
-  private runtime = new AuctionProfileWorkerRuntime({
-    postMessage: message => {
-      queueMicrotask(() => {
-        if (!this.terminated) this.onmessage?.({ data: message } as MessageEvent<AuctionProfileWorkerResponse>);
-      });
+  private runtimePromise: Promise<import("./auctionProfileWorker.ts").AuctionProfileWorkerRuntime> | null = null;
+  private queue = Promise.resolve();
+
+  private runtime() {
+    if (!this.runtimePromise) {
+      this.runtimePromise = import("./auctionProfileWorker.ts").then(({ AuctionProfileWorkerRuntime }) => new AuctionProfileWorkerRuntime({
+        postMessage: message => {
+          queueMicrotask(() => {
+            if (!this.terminated) this.onmessage?.({ data: message } as MessageEvent<AuctionProfileWorkerResponse>);
+          });
+        }
+      }));
     }
-  });
+    return this.runtimePromise;
+  }
 
   postMessage(message: AuctionProfileWorkerRequest) {
-    globalThis.setTimeout(() => {
+    this.queue = this.queue.then(() => new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0))).then(async () => {
       if (this.terminated) return;
-      try {
-        this.runtime.handle(message);
-      } catch (error) {
-        this.onerror?.({ message: error instanceof Error ? error.message : String(error) } as ErrorEvent);
-      }
-    }, 0);
+      const runtime = await this.runtime();
+      if (!this.terminated) runtime.handle(message);
+    }).catch(error => {
+      if (!this.terminated) this.onerror?.({ message: error instanceof Error ? error.message : String(error) } as ErrorEvent);
+    });
   }
 
   terminate() {

@@ -67,7 +67,7 @@ function normalizePermissions(value: unknown): TerminalCapability[] {
 }
 
 // Helper: Get all users
-export async function dbGetUsers(): Promise<DBUser[]> {
+export async function dbGetUsers(options: { allowLocalFallback?: boolean } = {}): Promise<DBUser[]> {
   if (isSupabaseConfigured && supabase) {
     try {
       const { data, error } = await supabase
@@ -111,6 +111,7 @@ export async function dbGetUsers(): Promise<DBUser[]> {
       }
     } catch (e) {
       console.error("Supabase error dbGetUsers, falling back:", e);
+      if (options.allowLocalFallback === false) throw e;
     }
   }
 

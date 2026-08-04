@@ -962,7 +962,7 @@ export default function App() {
 
     const syncActive = async () => {
       try {
-        const users = await dbGetUsers();
+        const users = await dbGetUsers({ allowLocalFallback: false });
         const userObj = users.find((u) => u.username === currentUser.username);
         if (userObj) {
           if (JSON.stringify(userObj.activeIndicators) !== JSON.stringify(activeList)) {
@@ -981,13 +981,18 @@ export default function App() {
     if (!currentUser) return;
     const username = currentUser.username;
     let disposed = false;
+    let preferencesHydrated = false;
+    let retryAttempt = 0;
+    let retryTimer: number | undefined;
     setIndicatorPreferencesUser(null);
     const fetchUserConfig = async () => {
       try {
-        const users = await dbGetUsers();
+        const users = await dbGetUsers({ allowLocalFallback: false });
         if (disposed) return;
         const record = users.find((u) => u.username === username);
+        if (!record) throw new Error("Signed-in indicator preferences are not available yet.");
         if (record) {
+          preferencesHydrated = true;
           const activeIndicators = new Set(Array.isArray(record.activeIndicators) ? record.activeIndicators : []);
           const nextVisible = { ...defaultVisibleIndicators };
           const recordPermissions = new Set(record.permissions || []);
@@ -1040,13 +1045,18 @@ export default function App() {
         }
       } catch (e) {
         console.error("Failed to load user config from database:", e);
+        if (!disposed && retryAttempt < 4) {
+          retryAttempt += 1;
+          retryTimer = window.setTimeout(fetchUserConfig, Math.min(12_000, 1_500 * 2 ** (retryAttempt - 1)));
+        }
       } finally {
-        if (!disposed) setIndicatorPreferencesUser(username);
+        if (!disposed && preferencesHydrated) setIndicatorPreferencesUser(username);
       }
     };
     void fetchUserConfig();
     return () => {
       disposed = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
   }, [currentUser?.username]);
 
@@ -1057,7 +1067,7 @@ export default function App() {
     let channel: ReturnType<NonNullable<typeof supabase>["channel"]> | null = null;
     const syncAccess = async () => {
       try {
-        const users = await dbGetUsers();
+        const users = await dbGetUsers({ allowLocalFallback: false });
         if (disposed) return;
         const record = users.find((u) => u.username === currentUser.username);
         if (record) {

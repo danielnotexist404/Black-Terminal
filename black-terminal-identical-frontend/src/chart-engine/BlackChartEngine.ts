@@ -57,18 +57,18 @@ import {
 } from "./types";
 
 const theme: ChartTheme = {
-  background: 0x050607,
-  grid: 0xffffff,
-  gridAlpha: 0.032,
-  text: 0xf1f2f4,
-  muted: 0x8d929a,
-  red: 0xd62839,
-  redBright: 0xff303d,
+  background: 0x050507,
+  grid: 0xff344a,
+  gridAlpha: 0.052,
+  text: 0xf7f2f4,
+  muted: 0x8f878d,
+  red: 0xe3132d,
+  redBright: 0xff3d52,
   orange: 0xff6a00,
   orangeBright: 0xffb000,
-  silver: 0xa7abb2,
-  silverBright: 0xd9dce1,
-  green: 0x46b866
+  silver: 0xa9a3a8,
+  silverBright: 0xeee9ec,
+  green: 0x4bd58a
 };
 
 const MIN_CANDLE_WIDTH = 0.18;

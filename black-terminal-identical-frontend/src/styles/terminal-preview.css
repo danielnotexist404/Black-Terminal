@@ -1,0 +1,1023 @@
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap");
+
+.terminal-command-center {
+  --bg: #060608;
+  --panel: #0c0c0f;
+  --panel-2: #111115;
+  --panel-3: #16161b;
+  --line: rgba(255, 255, 255, 0.09);
+  --line-soft: rgba(255, 255, 255, 0.055);
+  --text: #d8d2d6;
+  --strong: #faf7f8;
+  --muted: #918a90;
+  --dim: #625c62;
+  --red: #e3132d;
+  --red-hot: #ff3047;
+  --green: #4bd58a;
+  height: 100%;
+  grid-template-rows: 82px minmax(0, 1fr) 34px;
+  grid-template-columns: 224px minmax(0, 1fr);
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 11% 16%, rgba(255, 35, 58, 0.08), transparent 24%),
+    #070709;
+  color: var(--text);
+  font-family: "Manrope", system-ui, sans-serif;
+}
+
+.terminal-command-center button,
+.terminal-command-center select,
+.terminal-command-center input,
+.terminal-command-center textarea {
+  font-family: "Manrope", system-ui, sans-serif;
+}
+
+.terminal-command-center .topbar {
+  position: relative;
+  height: 82px;
+  gap: 8px;
+  padding: 13px 15px;
+  overflow: visible;
+  border: 0;
+  background: rgba(7, 7, 9, 0.96);
+  box-shadow: none;
+}
+
+.terminal-command-center .topbar::after {
+  content: "";
+  position: absolute;
+  right: 15px;
+  bottom: 0;
+  left: 15px;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(255, 48, 71, 0.45), rgba(255, 255, 255, 0.06) 28%, rgba(255, 255, 255, 0.04));
+}
+
+.terminal-command-center .brand {
+  width: 258px;
+  min-width: 258px;
+  gap: 9px;
+}
+
+.terminal-command-center .brand-mark {
+  width: 50px;
+  height: 46px;
+  flex-basis: 50px;
+  filter: drop-shadow(0 0 15px rgba(255, 48, 71, 0.3));
+}
+
+.terminal-command-center .brand-title {
+  color: #fbf8f9;
+  font: 800 15px "Manrope", sans-serif;
+  letter-spacing: -0.025em;
+}
+
+.terminal-command-center .brand-sub {
+  margin-top: 5px;
+  color: #706a70;
+  font: 600 6px "JetBrains Mono", monospace;
+  letter-spacing: 0.13em;
+}
+
+.brand-live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 5px 7px;
+  border: 1px solid rgba(75, 213, 138, 0.18);
+  border-radius: 8px;
+  background: rgba(75, 213, 138, 0.05);
+  color: #70dda1;
+  font: 700 6px "JetBrains Mono", monospace;
+  letter-spacing: 0.08em;
+}
+
+.brand-live-pill i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 9px rgba(75, 213, 138, 0.7);
+}
+
+.terminal-command-center .symbol-control,
+.terminal-command-center .exchange-control,
+.terminal-command-center .workspace-control,
+.terminal-command-center .icon-btn,
+.terminal-command-center .select,
+.terminal-command-center .replay-toggle,
+.terminal-command-center .replay-icon,
+.terminal-command-center .replay-speed {
+  height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018));
+  color: #d9d4d7;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+  transition: 160ms ease;
+}
+
+.terminal-command-center .symbol-control:hover,
+.terminal-command-center .exchange-control:hover,
+.terminal-command-center .workspace-control:hover,
+.terminal-command-center .icon-btn:hover,
+.terminal-command-center .replay-toggle:hover,
+.terminal-command-center .replay-icon:hover {
+  border-color: rgba(255, 48, 71, 0.32);
+  background: rgba(255, 48, 71, 0.07);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.terminal-command-center .symbol-control {
+  min-width: 150px;
+  font-size: 12px;
+}
+
+.terminal-command-center .coin-token,
+.terminal-command-center .exchange-badge {
+  width: 27px;
+  height: 25px;
+  border-radius: 8px;
+  background: rgba(255, 48, 71, 0.08);
+  border-color: rgba(255, 48, 71, 0.22);
+  color: #ff6678;
+  font: 700 8px "JetBrains Mono", monospace;
+}
+
+.terminal-command-center .exchange-badge {
+  border-color: rgba(255, 190, 70, 0.22);
+  background: rgba(255, 190, 70, 0.06);
+  color: #e4bc63;
+}
+
+.terminal-command-center .timeframes {
+  height: 40px;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.terminal-command-center .timeframes button {
+  min-width: 31px;
+  height: 30px;
+  border-radius: 8px;
+  color: #777178;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.terminal-command-center .timeframes button:hover {
+  color: #ddd8db;
+}
+
+.terminal-command-center .timeframes button.active {
+  background: linear-gradient(135deg, #ff3b50, #b9001a);
+  color: #fff;
+  box-shadow: 0 7px 16px rgba(212, 0, 30, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.terminal-command-center .tool-cluster,
+.terminal-command-center .replay-controls {
+  height: 40px;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+}
+
+.terminal-command-center .icon-btn {
+  width: 40px;
+}
+
+.terminal-command-center .icon-btn.active {
+  border-color: rgba(255, 48, 71, 0.46);
+  background: rgba(255, 48, 71, 0.12);
+  color: #ff6576;
+  box-shadow: 0 0 20px rgba(255, 48, 71, 0.08);
+}
+
+.terminal-command-center .exchange-control {
+  min-width: 120px;
+  font-size: 10px;
+}
+
+.terminal-command-center .workspace-control {
+  min-width: 138px;
+}
+
+.terminal-command-center .workspace-control span {
+  color: #666067;
+  font-size: 8px;
+}
+
+.terminal-command-center .workspace-control strong {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.terminal-command-center .replay-toggle {
+  min-width: 80px;
+  color: #b9a56e;
+  font-size: 8px;
+}
+
+.terminal-command-center .latency,
+.terminal-command-center .live {
+  font: 700 8px "JetBrains Mono", monospace;
+}
+
+.terminal-command-center .latency {
+  margin-inline: 4px;
+  color: #58cf8c;
+}
+
+.terminal-command-center .upgrade-btn {
+  height: 38px;
+  margin-left: 3px;
+  padding: 0 15px;
+  border: 1px solid #ff3b50;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #ff3b50, #bd001b);
+  box-shadow: 0 10px 22px rgba(205, 0, 29, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  font: 800 8px "Manrope", sans-serif;
+}
+
+.terminal-command-center .top-separator {
+  display: none;
+}
+
+.terminal-command-center .dropdown-menu {
+  top: 47px;
+  padding: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 16px;
+  background: rgba(14, 14, 17, 0.97);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.58), 0 0 34px rgba(255, 35, 58, 0.05);
+  backdrop-filter: blur(22px);
+  animation: terminalMenuEnter 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes terminalMenuEnter {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.terminal-command-center .dropdown-search,
+.terminal-command-center .workspace-menu-actions input {
+  height: 38px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.terminal-command-center .menu-option {
+  min-height: 38px;
+  border-radius: 10px;
+  font-size: 10px;
+}
+
+.terminal-command-center .menu-option:hover,
+.terminal-command-center .menu-option.selected {
+  background: rgba(255, 48, 71, 0.09);
+  color: #fff;
+}
+
+.terminal-command-center .menu-option.selected {
+  box-shadow: inset 2px 0 0 #ff3b50;
+}
+
+.terminal-command-center .sidebar {
+  position: relative;
+  padding: 12px 10px 10px 14px;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+}
+
+.terminal-command-center .sidebar::before {
+  content: "";
+  position: absolute;
+  inset: 12px 7px 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 48, 71, 0.035), transparent 22%),
+    rgba(12, 12, 15, 0.94);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025), 0 18px 40px rgba(0, 0, 0, 0.2);
+}
+
+.terminal-command-center .nav-list,
+.terminal-command-center .side-watermark {
+  position: relative;
+  z-index: 1;
+}
+
+.terminal-command-center .nav-list {
+  gap: 4px;
+  padding: 12px 8px 4px;
+  scrollbar-width: none;
+}
+
+.terminal-command-center .sidebar-command-label {
+  display: grid;
+  gap: 4px;
+  padding: 5px 10px 14px;
+  margin-bottom: 5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.terminal-command-center .sidebar-command-label span {
+  color: #5f5960;
+  font: 600 7px "JetBrains Mono", monospace;
+  letter-spacing: 0.13em;
+}
+
+.terminal-command-center .sidebar-command-label b {
+  color: #d9d4d7;
+  font-size: 11px;
+  letter-spacing: -0.01em;
+}
+
+.terminal-command-center .nav {
+  height: 43px;
+  gap: 12px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: #878188;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  transition: 150ms ease;
+}
+
+.terminal-command-center .nav svg {
+  width: 17px;
+  color: #69636a;
+  stroke-width: 1.8;
+}
+
+.terminal-command-center .nav:hover {
+  border-color: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.035);
+  color: #f0ecee;
+  transform: translateX(2px);
+}
+
+.terminal-command-center .nav.active {
+  border-color: rgba(255, 48, 71, 0.2);
+  background: linear-gradient(90deg, rgba(255, 48, 71, 0.14), rgba(255, 48, 71, 0.035));
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.terminal-command-center .nav.active svg {
+  color: #ff5367;
+  filter: drop-shadow(0 0 8px rgba(255, 48, 71, 0.3));
+}
+
+.terminal-command-center .nav.active::before {
+  left: -8px;
+  width: 3px;
+  height: 22px;
+  border-radius: 999px;
+  background: #ff3b50;
+  box-shadow: 0 0 15px rgba(255, 48, 71, 0.52);
+}
+
+.terminal-command-center .side-watermark {
+  height: 118px;
+  margin: 0 14px 16px 20px;
+  padding: 0;
+  justify-content: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  opacity: 0.42;
+}
+
+.terminal-command-center .wm-mark {
+  width: 90px;
+  height: 90px;
+  transform: scale(0.62);
+}
+
+.terminal-command-center .wm-wordmark {
+  display: none;
+}
+
+.terminal-command-center .terminal-grid {
+  gap: 10px;
+  padding: 12px 14px 12px 2px;
+  overflow: hidden;
+  background: transparent;
+}
+
+.terminal-command-center .chart-panel,
+.terminal-command-center .right-panel,
+.terminal-command-center .bottom-panel {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.085);
+  border-radius: 18px;
+  background: #0a0a0d;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025), 0 18px 44px rgba(0, 0, 0, 0.18);
+}
+
+.terminal-command-center .chart-panel {
+  isolation: isolate;
+}
+
+.terminal-command-center .chart-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(255, 48, 71, 0.025), inset 0 30px 80px rgba(255, 48, 71, 0.012);
+  pointer-events: none;
+}
+
+.terminal-command-center .chart-wrap {
+  background: #050507;
+}
+
+.terminal-command-center .chart-wrap::after {
+  opacity: 0.45;
+  background-image:
+    radial-gradient(circle at 10% 10%, rgba(255, 48, 71, 0.035), transparent 22%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.008), transparent);
+}
+
+.terminal-command-center .chart-header {
+  height: 52px;
+  padding: 0 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  background: rgba(13, 13, 16, 0.92);
+  backdrop-filter: blur(14px);
+}
+
+.terminal-command-center .pair {
+  color: #f0ecef;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.terminal-command-center .status-dot {
+  width: 7px;
+  height: 7px;
+  background: #4bd58a;
+  box-shadow: 0 0 12px rgba(75, 213, 138, 0.58);
+}
+
+.terminal-command-center .ohlc,
+.terminal-command-center .chart-metrics,
+.terminal-command-center .ticker-cell b,
+.terminal-command-center .book-row,
+.terminal-command-center .tape-row,
+.terminal-command-center .stat-row b {
+  font-family: "JetBrains Mono", monospace;
+}
+
+.terminal-command-center .ohlc {
+  color: #ff6677;
+  font-size: 9px;
+}
+
+.terminal-command-center .chart-metrics {
+  gap: 9px;
+  color: #70dda1;
+  font-size: 8px;
+}
+
+.terminal-command-center .indicator-stack {
+  top: 67px;
+  left: 17px;
+}
+
+.terminal-command-center .indicator-row {
+  min-height: 27px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: rgba(8, 8, 10, 0.58);
+  color: #8d878e;
+  font-size: 10px;
+  backdrop-filter: blur(8px);
+}
+
+.terminal-command-center .indicator-row:hover {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(18, 18, 22, 0.82);
+}
+
+.terminal-command-center .drawing-toolbar {
+  top: 68px;
+  left: 14px;
+  width: 47px;
+  gap: 5px;
+  padding: 7px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 15px;
+  background: rgba(15, 15, 18, 0.94);
+  box-shadow: 0 20px 42px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(18px);
+}
+
+.terminal-command-center .drawing-toolbar button {
+  width: 35px;
+  height: 35px;
+  border-radius: 10px;
+}
+
+.terminal-command-center .drawing-toolbar button.active {
+  border-color: rgba(255, 48, 71, 0.35);
+  background: rgba(255, 48, 71, 0.13);
+  color: #ff6577;
+}
+
+.terminal-command-center .right-panel {
+  grid-template-rows: minmax(0, var(--right-top-height, 410px)) minmax(0, 1fr);
+}
+
+.terminal-command-center .orderbook,
+.terminal-command-center .market-stats,
+.terminal-command-center .tape,
+.terminal-command-center .panel-block,
+.terminal-command-center .bottom-blank {
+  background: #0b0b0e;
+}
+
+.terminal-command-center .tabs,
+.terminal-command-center .panel-title {
+  min-height: 44px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.012);
+}
+
+.terminal-command-center .tabs button,
+.terminal-command-center .panel-title {
+  color: #918b92;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+.terminal-command-center .tabs button.active {
+  color: #fff;
+}
+
+.terminal-command-center .tabs button.active::after,
+.terminal-command-center .underlined {
+  border-color: #ff3b50;
+}
+
+.terminal-command-center .book-head,
+.terminal-command-center .book-status,
+.terminal-command-center .depth-head,
+.terminal-command-center .trade-head {
+  color: #6e686e;
+  font: 600 7px "JetBrains Mono", monospace;
+}
+
+.terminal-command-center .book-row,
+.terminal-command-center .depth-row,
+.terminal-command-center .terminal-trade-row,
+.terminal-command-center .tape-row,
+.terminal-command-center .stat-row {
+  border-color: rgba(255, 255, 255, 0.025);
+  transition: background 120ms ease;
+}
+
+.terminal-command-center .book-row:hover,
+.terminal-command-center .depth-row:hover,
+.terminal-command-center .terminal-trade-row:hover,
+.terminal-command-center .tape-row:hover,
+.terminal-command-center .stat-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.terminal-command-center .mid-price {
+  border-block: 1px solid rgba(255, 48, 71, 0.12);
+  background: rgba(255, 48, 71, 0.035);
+}
+
+.terminal-command-center .right-bottom {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.terminal-command-center .market-stats {
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.terminal-command-center .bottom-panel {
+  background: #0a0a0d;
+}
+
+.terminal-command-center .bottom-blank {
+  position: relative;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255, 48, 71, 0.02), transparent 70%),
+    #09090b;
+  background-size: 64px 100%, 100% 100%, 100% 100%;
+}
+
+.terminal-command-center .bottom-blank::after {
+  content: "EXECUTION TIMELINE  /  READY FOR SIGNAL";
+  position: absolute;
+  top: 16px;
+  left: 18px;
+  color: #4f494f;
+  font: 600 7px "JetBrains Mono", monospace;
+  letter-spacing: 0.12em;
+}
+
+.terminal-command-center .layout-resizer::after,
+.terminal-command-center .right-stack-resizer::after,
+.terminal-command-center .right-bottom-resizer::after {
+  border-radius: 99px;
+}
+
+.terminal-command-center .layout-resizer:hover::after,
+.terminal-command-center .right-stack-resizer:hover::after,
+.terminal-command-center .right-bottom-resizer:hover::after {
+  background: rgba(255, 48, 71, 0.6);
+  box-shadow: 0 0 10px rgba(255, 48, 71, 0.28);
+}
+
+.terminal-command-center .statusbar {
+  height: 34px;
+  padding: 0 17px;
+  border: 0;
+  background: #070709;
+  color: #5f5960;
+  font: 600 7px "JetBrains Mono", monospace;
+  letter-spacing: 0.05em;
+}
+
+.terminal-command-center .statusbar > span {
+  min-height: 14px;
+  padding-inline: 17px;
+  border-color: rgba(255, 255, 255, 0.045);
+}
+
+.terminal-command-center .statusbar b {
+  color: #aaa4aa;
+}
+
+.terminal-command-center .green-dot {
+  width: 6px;
+  height: 6px;
+  background: #4bd58a;
+}
+
+/* Indicator library becomes a premium floating workspace. */
+.terminal-command-center .indicator-library {
+  inset: 14px;
+  width: min(900px, calc(100% - 28px));
+  max-height: calc(100% - 28px);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 0 0, rgba(255, 48, 71, 0.08), transparent 28%),
+    rgba(13, 13, 16, 0.97);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.65), 0 0 50px rgba(255, 35, 58, 0.05);
+  backdrop-filter: blur(22px);
+  animation: terminalPanelEnter 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes terminalPanelEnter {
+  from { opacity: 0; transform: translateY(14px) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.terminal-command-center .library-head {
+  min-height: 64px;
+  padding: 0 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.012);
+}
+
+.terminal-command-center .library-head strong {
+  color: #f8f4f6;
+  font-size: 17px;
+  letter-spacing: -0.025em;
+}
+
+.terminal-command-center .library-head span,
+.terminal-command-center .library-row-main em,
+.terminal-command-center .library-signal,
+.terminal-command-center .library-period.static {
+  color: #746e74;
+}
+
+.terminal-command-center .library-head button,
+.terminal-command-center .library-action,
+.terminal-command-center .script-library-empty button,
+.terminal-command-center .community-meta button {
+  border-radius: 10px;
+}
+
+.terminal-command-center .library-tabs {
+  gap: 5px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.terminal-command-center .library-tabs button {
+  min-height: 34px;
+  padding-inline: 13px;
+  border: 0;
+  border-radius: 9px;
+  color: #746e75;
+  font-size: 8px;
+}
+
+.terminal-command-center .library-tabs button.active {
+  background: rgba(255, 48, 71, 0.11);
+  color: #ff6c7d;
+  box-shadow: inset 0 0 0 1px rgba(255, 48, 71, 0.16);
+}
+
+.terminal-command-center .library-search {
+  height: 44px;
+  margin: 11px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.terminal-command-center .library-row,
+.terminal-command-center .community-row {
+  margin: 0 11px 7px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.terminal-command-center .library-row:hover,
+.terminal-command-center .community-row:hover {
+  border-color: rgba(255, 48, 71, 0.18);
+  background: rgba(255, 48, 71, 0.045);
+  transform: translateX(2px);
+}
+
+.terminal-command-center .library-row.active,
+.terminal-command-center .community-row.active-strategy {
+  border-color: rgba(255, 48, 71, 0.26);
+  background: rgba(255, 48, 71, 0.075);
+}
+
+/* Settings is now a complete control room rather than a legacy form. */
+.terminal-command-center .settings-panel-container {
+  padding: 14px 16px 16px 2px;
+  background: transparent;
+  color: var(--text);
+  font-family: "Manrope", sans-serif;
+}
+
+.terminal-command-center .settings-header {
+  min-height: 88px;
+  padding: 18px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.085);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 0 0, rgba(255, 48, 71, 0.09), transparent 36%),
+    #0c0c0f;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.terminal-command-center .settings-title-badge {
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 48, 71, 0.25);
+  border-radius: 8px;
+  background: rgba(255, 48, 71, 0.08);
+  color: #ff6375;
+  font: 700 7px "JetBrains Mono", monospace;
+}
+
+.terminal-command-center .settings-title {
+  color: #fbf8fa;
+  font: 800 24px "Manrope", sans-serif;
+  letter-spacing: -0.04em;
+  text-shadow: none;
+}
+
+.terminal-command-center .settings-close-btn {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #d7d2d5;
+  font: 700 9px "Manrope", sans-serif;
+}
+
+.terminal-command-center .settings-content {
+  gap: 14px;
+  padding: 14px 0 0;
+}
+
+.terminal-command-center .settings-section.card {
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background:
+    linear-gradient(145deg, rgba(255, 48, 71, 0.03), transparent 32%),
+    #0c0c0f;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025), 0 18px 36px rgba(0, 0, 0, 0.16);
+}
+
+.terminal-command-center .settings-sec-title {
+  padding-bottom: 13px;
+  border-color: rgba(255, 255, 255, 0.065);
+  color: #f1edef;
+  font: 750 14px "Manrope", sans-serif;
+}
+
+.terminal-command-center .settings-sec-title svg {
+  color: #ff5266;
+}
+
+.terminal-command-center .telemetry-status-box {
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.terminal-command-center .telemetry-lbl,
+.terminal-command-center .telemetry-val,
+.terminal-command-center .settings-label {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 8px;
+}
+
+.terminal-command-center .telemetry-val.highlight,
+.terminal-command-center .indicator-badge {
+  border-radius: 8px;
+}
+
+.terminal-command-center .settings-input {
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+  color: #eee9ec;
+  font: 500 10px "Manrope", sans-serif;
+}
+
+.terminal-command-center .settings-input:focus {
+  border-color: rgba(255, 48, 71, 0.5);
+  background: rgba(255, 48, 71, 0.035);
+  box-shadow: 0 0 0 4px rgba(255, 48, 71, 0.07);
+}
+
+.terminal-command-center .settings-submit-btn {
+  min-height: 44px;
+  border: 1px solid #ff3d52;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #ff3d52, #bd001c);
+  box-shadow: 0 11px 24px rgba(205, 0, 29, 0.2);
+  font: 800 9px "Manrope", sans-serif;
+}
+
+.terminal-command-center .module-focus {
+  border: 1px solid rgba(255, 48, 71, 0.24);
+  border-radius: 12px;
+  background: rgba(13, 13, 16, 0.9);
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(16px);
+}
+
+.terminal-command-center.collapsed-sidebar,
+.terminal-command-center.app-shell.collapsed-sidebar {
+  grid-template-columns: 76px minmax(0, 1fr) !important;
+}
+
+.terminal-command-center .sidebar.collapsed {
+  width: 76px !important;
+}
+
+.terminal-command-center .sidebar.collapsed::before {
+  inset-inline: 9px;
+}
+
+.terminal-command-center .sidebar.collapsed .sidebar-command-label {
+  display: none;
+}
+
+.terminal-command-center .sidebar.collapsed .nav {
+  width: 42px;
+  height: 42px;
+  margin-inline: auto;
+  border-radius: 12px;
+}
+
+@media (max-width: 1680px) {
+  .terminal-command-center {
+    grid-template-columns: 204px minmax(0, 1fr);
+  }
+
+  .terminal-command-center .brand {
+    width: 218px;
+    min-width: 218px;
+  }
+
+  .brand-live-pill,
+  .terminal-command-center .workspace-control span,
+  .terminal-command-center .statusbar > span:nth-child(5) {
+    display: none;
+  }
+
+  .terminal-command-center .workspace-control {
+    min-width: 112px;
+  }
+
+  .terminal-command-center .timeframes button:nth-child(-n + 2) {
+    display: none;
+  }
+}
+
+@media (max-width: 1380px) {
+  .terminal-command-center {
+    grid-template-columns: 78px minmax(0, 1fr);
+  }
+
+  .terminal-command-center .sidebar {
+    width: 78px;
+    padding-inline: 9px;
+  }
+
+  .terminal-command-center .sidebar::before {
+    inset-inline: 9px;
+  }
+
+  .terminal-command-center .sidebar-command-label,
+  .terminal-command-center .sidebar .nav span,
+  .terminal-command-center .side-watermark,
+  .terminal-command-center .brand-sub,
+  .terminal-command-center .live,
+  .terminal-command-center .latency {
+    display: none !important;
+  }
+
+  .terminal-command-center .sidebar .nav {
+    width: 44px;
+    height: 44px;
+    justify-content: center;
+    margin-inline: auto;
+    padding: 0;
+  }
+
+  .terminal-command-center .brand {
+    width: 190px;
+    min-width: 190px;
+  }
+
+  .terminal-command-center .brand-title {
+    font-size: 12px;
+  }
+
+  .terminal-command-center .exchange-control,
+  .terminal-command-center .workspace-control {
+    display: none;
+  }
+}
+
+@media (max-width: 1080px) {
+  .terminal-command-center .brand {
+    width: 54px;
+    min-width: 54px;
+  }
+
+  .terminal-command-center .brand > div:nth-child(2) {
+    display: none;
+  }
+
+  .terminal-command-center .timeframes button:nth-child(-n + 4),
+  .terminal-command-center .replay-controls,
+  .terminal-command-center .upgrade-btn {
+    display: none;
+  }
+
+  .terminal-command-center .settings-content {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-command-center .dropdown-menu,
+  .terminal-command-center .indicator-library {
+    animation: none;
+  }
+
+  .terminal-command-center .nav,
+  .terminal-command-center button {
+    transition: none;
+  }
+}

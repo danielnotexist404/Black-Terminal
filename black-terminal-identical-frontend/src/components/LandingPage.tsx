@@ -90,7 +90,11 @@ const countryDialCodes: Record<string, string> = Object.fromEntries(
 
 
 export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
-  const [view, setView] = useState<ViewState>("landing");
+  const [view, setView] = useState<ViewState>(() => {
+    if (window.location.hostname !== "127.0.0.1") return "landing";
+    const requestedView = new URLSearchParams(window.location.search).get("authPreview");
+    return requestedView === "signin" || requestedView === "signup" ? requestedView : "landing";
+  });
   const [heroMessageIndex, setHeroMessageIndex] = useState(0);
 
   useEffect(() => {
@@ -413,53 +417,73 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
     if (view === "landing") return null;
     const isSignIn = view === "signin";
     return (
-      <div className="login-container">
+      <div className={`login-container auth-page ${isSignIn ? "signin-page" : "signup-page"}`}>
         <div className="login-bg-decor" />
-        <div className="login-card">
-          {/* Left Visual Column */}
-          <div className="login-visual">
-            <div className="CRT-glitch-line" />
+        <header className="auth-page-nav">
+          <button type="button" className="auth-page-brand" onClick={() => setView("landing")}>
+            <span className="auth-brand-mark" aria-hidden="true" />
+            <span><b>BLACK TERMINAL</b><small>QUANTITATIVE EXECUTION SYSTEM</small></span>
+          </button>
+          <div className="auth-page-status"><i /> BLACK CORE ONLINE <span>01</span></div>
+          <button type="button" className="auth-page-switch" onClick={isSignIn ? handleOpenSignUp : handleOpenSignIn}>
+            {isSignIn ? "Create account" : "Sign in"}
+          </button>
+        </header>
+
+        <main className="login-card">
+          <section className="login-visual">
+            <div className="auth-visual-grid" aria-hidden="true" />
             <div className="visual-top">
-              <span className="visual-badge">DECRYPTED LINK</span>
-              <h2 className="visual-title">BLACK TERMINAL <span>v1.0.7</span></h2>
+              <span className="visual-badge"><Activity size={13} /> INSTITUTIONAL ACCESS</span>
+              <h1 className="visual-title">
+                {isSignIn ? <>Enter the <span>decision layer.</span></> : <>Build your <span>trading edge.</span></>}
+              </h1>
               <p className="visual-desc">
-                High-density cryptographic telemetry workspace. Low latency data node feeds straight on your viewport canvas.
+                {isSignIn
+                  ? "One secure workspace for market structure, execution intelligence and real-time risk control."
+                  : "Create a private Black Terminal workspace engineered for high-signal research and decisive execution."}
               </p>
-            </div>
-            
-            <div className="visual-bottom">
-              <div className="login-live-stats">
-                <div className="login-stat-item">
-                  <span className="login-stat-lbl">NODE LATENCY</span>
-                  <span className="login-stat-val up">1.42ms</span>
-                </div>
-                <div className="login-stat-item">
-                  <span className="login-stat-lbl">PIXI RUNTIME</span>
-                  <span className="login-stat-val">120 FPS</span>
-                </div>
-                <div className="login-stat-item">
-                  <span className="login-stat-lbl">VOLUME (24H)</span>
-                  <span className="login-stat-val">$18.73B</span>
-                </div>
-                <div className="login-stat-item">
-                  <span className="login-stat-lbl">SSL CERT</span>
-                  <span className="login-stat-val up">ACTIVE</span>
-                </div>
+              <div className="auth-feature-pills">
+                <span><Layers size={14} /> Unified market intelligence</span>
+                <span><Shield size={14} /> Encrypted workspace</span>
+                <span><Cpu size={14} /> Black Core runtime</span>
               </div>
             </div>
-          </div>
 
-          {/* Right Form Column */}
-          <div className="login-form-area">
-            <button className="modal-close-btn" style={{ position: "absolute", top: "20px", right: "20px" }} onClick={() => setView("landing")}>
+            <div className="auth-terminal-preview">
+              <div className="auth-preview-bar">
+                <span><i /> LIVE / BTCUSDT</span>
+                <small>BLACK CORE ENGINE</small>
+              </div>
+              <img src={terminalLiveChart} alt="Black Terminal live trading workspace" />
+              <div className="auth-preview-signal">
+                <span>MARKET SIGNAL</span>
+                <b>STRUCTURE CONFIRMED</b>
+              </div>
+            </div>
+
+            <div className="visual-bottom">
+              <div className="login-live-stats">
+                <div className="login-stat-item"><span className="login-stat-lbl">ENGINE LATENCY</span><span className="login-stat-val up">1.42ms</span></div>
+                <div className="login-stat-item"><span className="login-stat-lbl">RENDER PIPELINE</span><span className="login-stat-val">120 FPS</span></div>
+                <div className="login-stat-item"><span className="login-stat-lbl">DATA COVERAGE</span><span className="login-stat-val">24 / 7</span></div>
+              </div>
+              <div className="auth-engine-signature"><span className="auth-core-mini" /> Powered by <b>Black Code Engine</b></div>
+            </div>
+          </section>
+
+          <section className="login-form-area">
+            <button type="button" className="modal-close-btn auth-back-button" onClick={() => setView("landing")}>
               <ArrowLeft size={18} />
+              <span>Back to home</span>
             </button>
 
             <div className="login-header">
               <div className="login-logo" />
               <div className="login-title-group">
-                <h2 className="login-title">{isSignIn ? "SECURE ACCESS" : "INITIALIZE SHELL"}</h2>
-                <p className="login-subtitle">{isSignIn ? "BLACK TERMINAL ENCRYPTED LINK" : "GENERATE CLIENT CREDENTIALS"}</p>
+                <span className="login-kicker">{isSignIn ? "WELCOME BACK" : "NEW WORKSPACE"}</span>
+                <h2 className="login-title">{isSignIn ? "Access your terminal" : "Create your account"}</h2>
+                <p className="login-subtitle">{isSignIn ? "Continue to your encrypted execution workspace." : "Three short steps to initialize your private terminal."}</p>
               </div>
             </div>
 
@@ -485,12 +509,12 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                {isSignIn && (
                  <>
                    <div className="login-field">
-                     <label className="login-label">Identity (Username)</label>
+                     <label className="login-label">Email or terminal handle</label>
                      <input
                        className="login-input"
                        type="text"
                        value={username}
-                       placeholder="USERNAME"
+                       placeholder="name@company.com"
                        onChange={(e) => setUsername(e.target.value)}
                        disabled={loading}
                        autoComplete="off"
@@ -498,12 +522,12 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                      />
                    </div>
                    <div className="login-field">
-                     <label className="login-label">Access Code (Password)</label>
+                     <label className="login-label">Password</label>
                      <input
                        className="login-input"
                        type="password"
                        value={password}
-                       placeholder="PASSWORD"
+                       placeholder="Enter your secure password"
                        onChange={(e) => setPassword(e.target.value)}
                        disabled={loading}
                        autoComplete="off"
@@ -511,7 +535,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                      />
                    </div>
                    <button className="login-submit-btn" type="submit" disabled={loading}>
-                     {loading ? "Establishing handshake..." : "Link Terminal"}
+                     {loading ? "Establishing secure session..." : "Enter Black Terminal"}
                    </button>
                  </>
                )}
@@ -535,24 +559,24 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                      </span>
                    </div>
                    <div className="login-field">
-                     <label className="login-label">Verified Email</label>
+                     <label className="login-label">Terminal Handle</label>
                      <input
                        className="login-input"
                        type="text"
                        value={username}
-                       placeholder="EMAIL ADDRESS"
+                       placeholder="YOUR USERNAME"
                        onChange={(e) => setUsername(e.target.value)}
                        disabled={loading}
                        autoComplete="email"
                      />
                    </div>
                    <div className="login-field">
-                     <label className="login-label">Secure Email Address</label>
+                     <label className="login-label">Email Address</label>
                      <input
                        className="login-input"
                        type="email"
                        value={email}
-                       placeholder="EMAIL@DOMAIN.COM"
+                       placeholder="name@company.com"
                        onChange={(e) => setEmail(e.target.value)}
                        disabled={loading}
                        autoComplete="off"
@@ -562,12 +586,12 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                      </span>
                    </div>
                    <div className="login-field">
-                     <label className="login-label">Access Code (Password)</label>
+                     <label className="login-label">Password</label>
                      <input
                        className="login-input"
                        type="password"
                        value={password}
-                       placeholder="PASSWORD"
+                       placeholder="Create a secure password"
                        onChange={(e) => setPassword(e.target.value)}
                        disabled={loading}
                        autoComplete="off"
@@ -579,7 +603,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                        className="login-input"
                        type="password"
                        value={confirmPassword}
-                       placeholder="CONFIRM PASSWORD"
+                       placeholder="Repeat your password"
                        onChange={(e) => setConfirmPassword(e.target.value)}
                        disabled={loading}
                        autoComplete="off"
@@ -791,59 +815,44 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                )}
              </form>
 
-            {/* SSO federated auth */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "4px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.06)" }} />
-                <span style={{ fontSize: "9px", color: "var(--dim)", fontFamily: "IBM Plex Mono" }}>FEDERATED SSO</span>
-                <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.06)" }} />
+            <div className="auth-sso-area">
+              <div className="auth-sso-divider">
+                <div />
+                <span>OR CONTINUE WITH</span>
+                <div />
               </div>
 
-              <button 
-                className="btn-signin" 
-                style={{ 
-                  display: "flex", 
-                  alignItems: "center", 
-                  justifyContent: "center", 
-                  gap: "10px", 
-                  cursor: "not-allowed",
-                  borderColor: "rgba(255,0,0,0.25)",
-                  color: "var(--strong)",
-                  background: "rgba(255,0,0,0.05)",
-                  height: "36px",
-                  borderRadius: "3px",
-                  transition: "all 0.2s"
-                }}
-                disabled
-              >
-                <Chrome size={14} style={{ color: "#ff0000" }} />
-                <span style={{ fontWeight: 600, fontSize: "11px" }}>Google Single-Sign On</span>
-                <span className="premium-badge" style={{ background: "rgba(255,0,0,0.1)", border: "1px solid rgba(255,0,0,0.3)", color: "#ff0000", fontSize: "8px", padding: "2px 6px", borderRadius: "2px", fontWeight: 800 }}>COMING SOON</span>
+              <button className="auth-google-btn" disabled>
+                <Chrome size={17} />
+                <span>Continue with Google</span>
+                <small>COMING SOON</small>
               </button>
             </div>
 
-            <div style={{ textAlign: "center", fontSize: "11px", color: "var(--dim)", marginTop: "4px" }}>
+            <div className="auth-form-switch">
               {isSignIn ? (
                 <>
-                  Need secure terminal credentials?{" "}
-                  <span style={{ color: "var(--red-hot)", cursor: "pointer", fontWeight: "600" }} onClick={handleOpenSignUp}>
-                    Create keys
-                  </span>
+                  New to Black Terminal? <button type="button" onClick={handleOpenSignUp}>Create an account</button>
                 </>
               ) : (
                 <>
-                  Credentials already configured?{" "}
-                  <span style={{ color: "var(--red-hot)", cursor: "pointer", fontWeight: "600" }} onClick={handleOpenSignIn}>
-                    Login
-                  </span>
+                  Already have an account? <button type="button" onClick={handleOpenSignIn}>Sign in</button>
                 </>
               )}
             </div>
-          </div>
-        </div>
+          </section>
+        </main>
+
+        <footer className="auth-page-footer">
+          <span>© 2026 BLACK TERMINAL</span>
+          <span>SECURE SESSION / AES-256</span>
+          <span>PRIVACY · TERMS · SYSTEM STATUS</span>
+        </footer>
       </div>
     );
   };
+
+  if (view !== "landing") return renderAuthModal();
 
   return (
     <div className="landing-container">
@@ -1127,7 +1136,6 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
         </div>
       </footer>
 
-      {renderAuthModal()}
     </div>
   );
 }

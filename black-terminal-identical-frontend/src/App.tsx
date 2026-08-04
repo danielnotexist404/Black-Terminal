@@ -454,7 +454,21 @@ type AppUser = CapabilityUser & {
 };
 
 export default function App() {
+  const isLocalUiPreview = window.location.hostname === "127.0.0.1" && new URLSearchParams(window.location.search).get("uiPreview") === "1";
+  const isLocalAuthPreview = window.location.hostname === "127.0.0.1" && new URLSearchParams(window.location.search).has("authPreview");
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
+    if (isLocalAuthPreview) return null;
+    if (isLocalUiPreview) {
+      return {
+        username: "preview.user",
+        displayName: "Preview Trader",
+        email: "preview@blackterminal.dev",
+        role: "user",
+        allowedIndicators: [...new Set([...DEFAULT_ALLOWED_INDICATORS, "auctionProfile"])],
+        productTier: "professional",
+        authSessionReady: true
+      };
+    }
     const stored = localStorage.getItem("bt_current_user");
     if (stored) {
       try { return JSON.parse(stored); } catch (e) {}
@@ -702,10 +716,10 @@ export default function App() {
   const [replayControls, setReplayControls] = useState<ReplayControls>(defaultReplayControls);
   const [replayStatus, setReplayStatus] = useState<ReplayStatus>(defaultReplayStatus);
   const [layout, setLayout] = useState({
-    rightPanelWidth: 200,
-    bottomPanelHeight: 210,
-    rightTopHeight: 430,
-    rightStatsWidth: 80
+    rightPanelWidth: 330,
+    bottomPanelHeight: 132,
+    rightTopHeight: 410,
+    rightStatsWidth: 148
   });
 
   useEffect(() => {
@@ -978,7 +992,7 @@ export default function App() {
 
   // Load user database configuration on boot/refresh
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || isLocalUiPreview) return;
     const username = currentUser.username;
     let disposed = false;
     let preferencesHydrated = false;
@@ -1058,11 +1072,11 @@ export default function App() {
       disposed = true;
       if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
-  }, [currentUser?.username]);
+  }, [currentUser?.username, isLocalUiPreview]);
 
   // Real-time allowed indicators sync (and automatic turn-off of revoked indicators)
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || isLocalUiPreview) return;
     let disposed = false;
     let channel: ReturnType<NonNullable<typeof supabase>["channel"]> | null = null;
     const syncAccess = async () => {
@@ -1139,7 +1153,7 @@ export default function App() {
       clearInterval(interval);
       if (channel && supabase) void supabase.removeChannel(channel);
     };
-  }, [currentUser?.username]);
+  }, [currentUser?.username, isLocalUiPreview]);
 
   useEffect(() => {
     let disposed = false;
@@ -1503,14 +1517,15 @@ export default function App() {
   }
 
   return (
-    <div className={sidebarCollapsed ? "app-shell collapsed-sidebar" : "app-shell"}>
+    <div className={sidebarCollapsed ? "app-shell terminal-command-center collapsed-sidebar" : "app-shell terminal-command-center"}>
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark" aria-hidden />
           <div>
-            <div className="brand-title">BLACK-TERMINAL</div>
-            <div className="brand-sub">BY BLACK TRIANGLE GROUP</div>
+            <div className="brand-title">BLACK TERMINAL</div>
+            <div className="brand-sub">POWERED BY BLACK CORE ENGINE</div>
           </div>
+          <span className="brand-live-pill"><i /> LIVE</span>
         </div>
 
         <div className="menu-wrap">
@@ -1911,6 +1926,10 @@ export default function App() {
 
       <aside className={sidebarCollapsed ? "sidebar collapsed" : "sidebar"}>
         <div className="nav-list" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+          <div className="sidebar-command-label">
+            <span>PRIVATE WORKSPACE</span>
+            <b>COMMAND DECK</b>
+          </div>
           {visibleNav.map(({ label, icon: Icon }) => (
             <button
               key={label}

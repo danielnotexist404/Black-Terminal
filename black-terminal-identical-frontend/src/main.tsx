@@ -9,6 +9,7 @@ import { blackCorePerformanceMonitor } from "./performance/performanceMonitor";
 import { blackCoreMarketDataEngine } from "./market-data/engine/marketDataEngine";
 import type { MarketSymbol } from "./market-data/types";
 import "./styles/theme.css";
+import "./styles/terminal-preview.css";
 
 registerBlackCoreServices();
 

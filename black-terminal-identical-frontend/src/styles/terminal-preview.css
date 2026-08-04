@@ -15,8 +15,8 @@
   --red-hot: #ff3047;
   --green: #4bd58a;
   height: 100%;
-  grid-template-rows: 82px minmax(0, 1fr) 34px;
-  grid-template-columns: 224px minmax(0, 1fr);
+  grid-template-rows: 68px minmax(0, 1fr) 26px;
+  grid-template-columns: 190px minmax(0, 1fr);
   overflow: hidden;
   background:
     radial-gradient(circle at 11% 16%, rgba(255, 35, 58, 0.08), transparent 24%),
@@ -34,9 +34,9 @@
 
 .terminal-command-center .topbar {
   position: relative;
-  height: 82px;
-  gap: 8px;
-  padding: 13px 15px;
+  height: 68px;
+  gap: 6px;
+  padding: 7px 9px;
   overflow: visible;
   border: 0;
   background: rgba(7, 7, 9, 0.96);
@@ -46,23 +46,23 @@
 .terminal-command-center .topbar::after {
   content: "";
   position: absolute;
-  right: 15px;
+  right: 9px;
   bottom: 0;
-  left: 15px;
+  left: 9px;
   height: 1px;
   background: linear-gradient(90deg, rgba(255, 48, 71, 0.45), rgba(255, 255, 255, 0.06) 28%, rgba(255, 255, 255, 0.04));
 }
 
 .terminal-command-center .brand {
-  width: 258px;
-  min-width: 258px;
-  gap: 9px;
+  width: 238px;
+  min-width: 238px;
+  gap: 7px;
 }
 
 .terminal-command-center .brand-mark {
-  width: 50px;
-  height: 46px;
-  flex-basis: 50px;
+  width: 44px;
+  height: 42px;
+  flex-basis: 44px;
   filter: drop-shadow(0 0 15px rgba(255, 48, 71, 0.3));
 }
 
@@ -73,7 +73,7 @@
 }
 
 .terminal-command-center .brand-sub {
-  margin-top: 5px;
+  margin-top: 3px;
   color: #706a70;
   font: 600 6px "JetBrains Mono", monospace;
   letter-spacing: 0.13em;
@@ -109,9 +109,9 @@
 .terminal-command-center .replay-toggle,
 .terminal-command-center .replay-icon,
 .terminal-command-center .replay-speed {
-  height: 40px;
+  height: 36px;
   border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 12px;
+  border-radius: 10px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018));
   color: #d9d4d7;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
@@ -153,17 +153,17 @@
 }
 
 .terminal-command-center .timeframes {
-  height: 40px;
+  height: 36px;
   gap: 2px;
-  padding: 4px;
+  padding: 3px;
   border: 1px solid rgba(255, 255, 255, 0.075);
-  border-radius: 12px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.018);
 }
 
 .terminal-command-center .timeframes button {
   min-width: 31px;
-  height: 30px;
+  height: 28px;
   border-radius: 8px;
   color: #777178;
   font-size: 9px;
@@ -182,14 +182,14 @@
 
 .terminal-command-center .tool-cluster,
 .terminal-command-center .replay-controls {
-  height: 40px;
+  height: 36px;
   gap: 4px;
   padding: 0;
   border: 0;
 }
 
 .terminal-command-center .icon-btn {
-  width: 40px;
+  width: 36px;
 }
 
 .terminal-command-center .icon-btn.active {
@@ -235,7 +235,7 @@
 }
 
 .terminal-command-center .upgrade-btn {
-  height: 38px;
+  height: 36px;
   margin-left: 3px;
   padding: 0 15px;
   border: 1px solid #ff3b50;
@@ -292,7 +292,7 @@
 
 .terminal-command-center .sidebar {
   position: relative;
-  padding: 12px 10px 10px 14px;
+  padding: 5px 4px 4px 5px;
   overflow: hidden;
   border: 0;
   background: transparent;
@@ -301,9 +301,9 @@
 .terminal-command-center .sidebar::before {
   content: "";
   position: absolute;
-  inset: 12px 7px 12px 14px;
+  inset: 5px 4px 5px 5px;
   border: 1px solid rgba(255, 255, 255, 0.075);
-  border-radius: 18px;
+  border-radius: 13px;
   background:
     linear-gradient(180deg, rgba(255, 48, 71, 0.035), transparent 22%),
     rgba(12, 12, 15, 0.94);
@@ -317,16 +317,16 @@
 }
 
 .terminal-command-center .nav-list {
-  gap: 4px;
-  padding: 12px 8px 4px;
+  gap: 2px;
+  padding: 7px 5px 3px;
   scrollbar-width: none;
 }
 
 .terminal-command-center .sidebar-command-label {
   display: grid;
-  gap: 4px;
-  padding: 5px 10px 14px;
-  margin-bottom: 5px;
+  gap: 2px;
+  padding: 3px 7px 8px;
+  margin-bottom: 3px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
@@ -343,11 +343,11 @@
 }
 
 .terminal-command-center .nav {
-  height: 43px;
-  gap: 12px;
-  padding: 0 11px;
+  height: 36px;
+  gap: 9px;
+  padding: 0 9px;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: 9px;
   color: #878188;
   font-size: 9px;
   font-weight: 700;
@@ -356,7 +356,7 @@
 }
 
 .terminal-command-center .nav svg {
-  width: 17px;
+  width: 15px;
   color: #69636a;
   stroke-width: 1.8;
 }
@@ -381,7 +381,7 @@
 }
 
 .terminal-command-center .nav.active::before {
-  left: -8px;
+  left: -5px;
   width: 3px;
   height: 22px;
   border-radius: 999px;
@@ -390,9 +390,9 @@
 }
 
 .terminal-command-center .side-watermark {
-  height: 154px;
-  margin: 0 14px 16px 20px;
-  padding: 8px 10px 10px;
+  height: 112px;
+  margin: 0 8px 7px 10px;
+  padding: 5px 6px 7px;
   justify-content: flex-start;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   opacity: 1;
@@ -423,12 +423,13 @@
   flex: 1 1 auto;
   object-fit: contain;
   object-position: center;
+  background: transparent;
   filter: brightness(1.12) saturate(1.08) drop-shadow(0 0 14px rgba(255, 35, 58, 0.15));
 }
 
 .terminal-command-center .terminal-grid {
-  gap: 10px;
-  padding: 12px 14px 12px 2px;
+  gap: 5px;
+  padding: 5px 6px 5px 0;
   overflow: hidden;
   background: transparent;
 }
@@ -438,7 +439,7 @@
 .terminal-command-center .bottom-panel {
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.085);
-  border-radius: 18px;
+  border-radius: 12px;
   background: #0a0a0d;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025), 0 18px 44px rgba(0, 0, 0, 0.18);
 }
@@ -469,8 +470,8 @@
 }
 
 .terminal-command-center .chart-header {
-  height: 52px;
-  padding: 0 16px;
+  height: 44px;
+  padding: 0 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.065);
   background: rgba(13, 13, 16, 0.92);
   backdrop-filter: blur(14px);
@@ -510,8 +511,8 @@
 }
 
 .terminal-command-center .indicator-stack {
-  top: 67px;
-  left: 17px;
+  top: 55px;
+  left: 12px;
 }
 
 .terminal-command-center .indicator-row {
@@ -531,13 +532,13 @@
 }
 
 .terminal-command-center .drawing-toolbar {
-  top: 68px;
-  left: 14px;
+  top: 56px;
+  left: 10px;
   width: 47px;
   gap: 5px;
   padding: 7px 5px;
   border: 1px solid rgba(255, 255, 255, 0.11);
-  border-radius: 15px;
+  border-radius: 12px;
   background: rgba(15, 15, 18, 0.94);
   box-shadow: 0 20px 42px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(18px);
@@ -569,7 +570,7 @@
 
 .terminal-command-center .tabs,
 .terminal-command-center .panel-title {
-  min-height: 44px;
+  min-height: 38px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.012);
 }
@@ -644,8 +645,8 @@
 .terminal-command-center .bottom-blank::after {
   content: "EXECUTION TIMELINE  /  READY FOR SIGNAL";
   position: absolute;
-  top: 16px;
-  left: 18px;
+  top: 10px;
+  left: 12px;
   color: #4f494f;
   font: 600 7px "JetBrains Mono", monospace;
   letter-spacing: 0.12em;
@@ -665,8 +666,8 @@
 }
 
 .terminal-command-center .statusbar {
-  height: 34px;
-  padding: 0 17px;
+  height: 26px;
+  padding: 0 9px;
   border: 0;
   background: #070709;
   color: #5f5960;
@@ -676,7 +677,7 @@
 
 .terminal-command-center .statusbar > span {
   min-height: 14px;
-  padding-inline: 17px;
+  padding-inline: 11px;
   border-color: rgba(255, 255, 255, 0.045);
 }
 
@@ -938,12 +939,12 @@
 
 @media (max-width: 1680px) {
   .terminal-command-center {
-    grid-template-columns: 204px minmax(0, 1fr);
+    grid-template-columns: 184px minmax(0, 1fr);
   }
 
   .terminal-command-center .brand {
-    width: 218px;
-    min-width: 218px;
+    width: 205px;
+    min-width: 205px;
   }
 
   .brand-live-pill,

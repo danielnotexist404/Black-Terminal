@@ -105,7 +105,7 @@ import { getCapabilities, type CapabilityUser, type ProductTier, type TerminalCa
 import { blackCoreWindowDockManager } from "./core/windows/windowDockManager";
 import type { BlackCoreModuleMode } from "./core/modules/moduleRegistry";
 import { PerformanceHud } from "./performance/PerformanceHud";
-import blackCoreEngine from "./assets/black-core-engine.png";
+import blackCoreEngine from "./assets/black-core-engine-transparent.png";
 import {
   ADMIN_ALLOWED_INDICATORS,
   canUseIndicator,
@@ -717,10 +717,10 @@ export default function App() {
   const [replayControls, setReplayControls] = useState<ReplayControls>(defaultReplayControls);
   const [replayStatus, setReplayStatus] = useState<ReplayStatus>(defaultReplayStatus);
   const [layout, setLayout] = useState({
-    rightPanelWidth: 330,
-    bottomPanelHeight: 132,
-    rightTopHeight: 410,
-    rightStatsWidth: 148
+    rightPanelWidth: 300,
+    bottomPanelHeight: 76,
+    rightTopHeight: 390,
+    rightStatsWidth: 132
   });
 
   useEffect(() => {
@@ -2221,7 +2221,7 @@ export default function App() {
               exchangeLabel={selectedExchange.label}
               domProAllowed={canUseDomPro}
               onOpenDomPro={openDomPro}
-              onResetDomLayout={() => setLayout((current) => ({ ...current, rightPanelWidth: 366, rightTopHeight: 420, rightStatsWidth: 170 }))}
+              onResetDomLayout={() => setLayout((current) => ({ ...current, rightPanelWidth: 300, rightTopHeight: 390, rightStatsWidth: 132 }))}
             />
             <div className="right-stack-resizer" onPointerDown={(event) => startLayoutResize("rightTop", event)} />
             <div className="right-bottom">

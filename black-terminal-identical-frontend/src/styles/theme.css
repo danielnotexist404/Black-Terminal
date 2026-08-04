@@ -88,7 +88,7 @@ body.resizing-layout * {
   width: 56px;
   height: 48px;
   flex: 0 0 56px;
-  background: url("../assets/brand-icon.png") center / contain no-repeat;
+  background: url("../assets/brand-icon-transparent.png") center / contain no-repeat;
 }
 
 .brand-title {

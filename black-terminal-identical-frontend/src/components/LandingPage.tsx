@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 // Trigger Vercel Webhook sync
-import { Check, Activity, Bell, Code2, Shield, Lock, X, ArrowLeft, Chrome, Layers, Cpu, TrendingUp, Users } from "lucide-react";
+import { Check, Activity, Code2, Shield, ArrowLeft, Chrome, Layers, Cpu, TrendingUp } from "lucide-react";
 import "../styles/landing.css";
 import "../styles/login.css";
 import {
@@ -14,15 +14,22 @@ import {
 } from "../lib/supabase";
 import { DEFAULT_ALLOWED_INDICATORS } from "../features/premium";
 
-// Import generated images
+// Landing page product and brand imagery
 import terminalMockup from "../assets/terminal_mockup.jpg";
-import chartPreview from "../assets/chart_preview.jpg";
+import terminalLiveChart from "../assets/terminal-live-chart.png";
+import blackCoreEngine from "../assets/black-core-engine.png";
 
 interface LandingPageProps {
   onLoginSuccess: (username: string, role: "admin" | "user") => void;
 }
 
 type ViewState = "landing" | "signin" | "signup";
+
+const rotatingHeroMessages = [
+  "Execution intelligence without the noise.",
+  "Market structure at institutional speed.",
+  "One terminal. Every decisive signal."
+] as const;
 
 const phoneDialOptions = [
   { code: "IL", label: "IL Israel", dial: "+972" },
@@ -84,6 +91,40 @@ const countryDialCodes: Record<string, string> = Object.fromEntries(
 
 export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
   const [view, setView] = useState<ViewState>("landing");
+  const [heroMessageIndex, setHeroMessageIndex] = useState(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setHeroMessageIndex((current) => (current + 1) % rotatingHeroMessages.length);
+    }, 2800);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const elements = Array.from(document.querySelectorAll<HTMLElement>(".landing-reveal"));
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (reduceMotion || !("IntersectionObserver" in window)) {
+      elements.forEach((element) => element.classList.add("is-visible"));
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("is-visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.14, rootMargin: "0px 0px -8%" }
+    );
+
+    elements.forEach((element) => observer.observe(element));
+    return () => observer.disconnect();
+  }, []);
 
   // Form states
   const [displayName, setDisplayName] = useState("");
@@ -806,218 +847,286 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
 
   return (
     <div className="landing-container">
-      <div className="login-bg-decor" />
+      <div className="landing-ambient landing-ambient-one" aria-hidden="true" />
+      <div className="landing-ambient landing-ambient-two" aria-hidden="true" />
 
-      {/* Header */}
       <header className="landing-header">
-        <div className="landing-logo-group">
-          <div className="landing-logo-icon" />
-          <span className="landing-logo-title">BLACK-TERMINAL</span>
-        </div>
-        <nav className="landing-nav">
-          <a href="#features" className="landing-nav-link">Features</a>
-          <a href="#preview" className="landing-nav-link">Previews</a>
-          <a href="#pricing" className="landing-nav-link">Pricing</a>
+        <div className="landing-shell landing-header-inner">
+          <a className="landing-logo-group" href="#top" aria-label="Black Terminal home">
+            <div className="landing-logo-icon" />
+            <div className="landing-logo-copy">
+              <span className="landing-logo-title">BLACK TERMINAL</span>
+              <span className="landing-logo-subtitle">QUANTITATIVE EXECUTION SYSTEM</span>
+            </div>
+          </a>
+
+          <nav className="landing-nav" aria-label="Primary navigation">
+            <a href="#features" className="landing-nav-link">Features</a>
+            <a href="#engine" className="landing-nav-link">Platform</a>
+            <a href="#pricing" className="landing-nav-link">Pricing</a>
+            <a href="#footer" className="landing-nav-link">Resources</a>
+          </nav>
+
           <div className="landing-auth-btns">
-            <button className="btn-signin" onClick={handleOpenSignIn}>Sign In</button>
-            <button className="btn-signup" onClick={handleOpenSignUp}>Sign Up</button>
+            <button type="button" className="btn-signin" onClick={handleOpenSignIn}>Sign In</button>
+            <button type="button" className="btn-signup" onClick={handleOpenSignUp}>Start Trading</button>
           </div>
-        </nav>
+        </div>
       </header>
 
-      {/* Hero */}
-      <section className="hero-section" style={{ position: "relative" }}>
-        <div className="CRT-glitch-line" />
-        <span className="hero-badge">Cybernetic Release v1.0.7-alpha</span>
-        <h1 className="hero-title">
-          The Ultimate Quantum <br />
-          <span>Crypto Trading Terminal</span>
-        </h1>
-        <p className="hero-desc">
-          Institutional grade execution desk designed for top level traders, hedge funds and large investment firms.
-        </p>
-        <div className="hero-ctas">
-          <button className="btn-primary" onClick={handleOpenSignUp}>Start Trading Now</button>
-          <button className="btn-secondary" onClick={handleOpenSignIn}>Open Live Demo</button>
-        </div>
-
-        <div className="hero-telemetry" style={{ display: "flex", gap: "16px", marginTop: "40px", flexWrap: "wrap", justifyContent: "center" }}>
-          <div className="login-stat-item" style={{ minWidth: "130px", alignItems: "center" }}>
-            <span className="login-stat-lbl">SYSTEM LATENCY</span>
-            <span className="login-stat-val up">0.82ms</span>
-          </div>
-          <div className="login-stat-item" style={{ minWidth: "130px", alignItems: "center" }}>
-            <span className="login-stat-lbl">24H VOLUME</span>
-            <span className="login-stat-val">$18.73B</span>
-          </div>
-          <div className="login-stat-item" style={{ minWidth: "130px", alignItems: "center" }}>
-            <span className="login-stat-lbl">ACTIVE NODES</span>
-            <span className="login-stat-val up">1,402</span>
-          </div>
-          <div className="login-stat-item" style={{ minWidth: "130px", alignItems: "center" }}>
-            <span className="login-stat-lbl">UPTIME</span>
-            <span className="login-stat-val">99.999%</span>
-          </div>
-        </div>
-      </section>
-
-      {/* Image Previews Section */}
-      <section id="preview" className="preview-section" style={{ padding: "80px 40px", maxWidth: "1200px", margin: "0 auto", textAlign: "center" }}>
-        <div className="section-header" style={{ marginBottom: "60px" }}>
-          <h2 className="section-title">Institutional Interface Viewports</h2>
-          <p className="section-desc">Sleek high-density telemetry dashboards optimized for multi-monitor desktop environments.</p>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: "60px" }}>
-          {/* Mockup 1 */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "20px", alignItems: "center" }}>
-            <div style={{ border: "1px solid rgba(255,0,0,0.15)", borderRadius: "6px", overflow: "hidden", boxShadow: "0 20px 50px rgba(0,0,0,0.6), 0 0 20px rgba(255,0,0,0.05)" }}>
-              <img src={terminalMockup} alt="Black Terminal Interface Mockup" style={{ display: "block", width: "100%", maxWidth: "960px", height: "auto" }} />
+      <main id="top">
+        <section className="hero-section landing-shell">
+          <div className="hero-copy landing-reveal is-visible">
+            <div className="hero-system-line">
+              <span className="hero-status-dot" />
+              SYSTEM ONLINE <span>v1.0.7</span> <span>ALL SYSTEMS NOMINAL</span>
             </div>
-            <div style={{ maxWidth: "600px" }}>
-              <h3 style={{ fontFamily: "Georgia, serif", fontSize: "20px", color: "var(--strong)", marginBottom: "8px" }}>Quantitative Order Book Desk</h3>
-              <p style={{ fontSize: "13px", color: "var(--muted)", lineHeight: "1.5" }}>
-                Cross-market execution interface featuring microsecond tick resolution, real-time volume profiles, and order book depth analytics.
+            <h1 className="hero-title">
+              The Ultimate Quantum
+              <span>Crypto Trading Terminal</span>
+            </h1>
+            <div className="hero-rotator" aria-live="polite">
+              <span key={heroMessageIndex} className="hero-rotating-text">
+                {rotatingHeroMessages[heroMessageIndex]}
+              </span>
+            </div>
+            <p className="hero-desc">
+              Institutional-grade execution, live market intelligence, and quantitative workflows built for traders who need clarity at speed.
+            </p>
+            <div className="hero-ctas">
+              <button type="button" className="btn-primary" onClick={handleOpenSignUp}>Start Trading</button>
+              <button type="button" className="btn-secondary" onClick={handleOpenSignIn}>View Live Demo</button>
+            </div>
+            <div className="hero-trust-row" aria-label="Platform highlights">
+              <span><Shield size={15} /> Institutional Security</span>
+              <span><Activity size={15} /> Sub-Millisecond</span>
+              <span><Layers size={15} /> Multi-Exchange</span>
+            </div>
+          </div>
+
+          <div className="hero-product landing-reveal is-visible">
+            <div className="hero-product-glow" aria-hidden="true" />
+            <div className="terminal-window">
+              <div className="terminal-window-bar">
+                <span className="terminal-window-brand"><i /> BLACK TERMINAL / LIVE DESK</span>
+                <span className="terminal-window-market">BTCUSDT · 1D · BINANCE</span>
+                <span className="terminal-window-live">LIVE</span>
+              </div>
+              <img src={terminalLiveChart} alt="Black Terminal live BTCUSDT market workspace" />
+            </div>
+          </div>
+
+          <div className="hero-metrics landing-reveal is-visible">
+            <article>
+              <span>LATENCY</span>
+              <strong>0.42ms</strong>
+              <small>Average</small>
+            </article>
+            <article>
+              <span>DAILY VOLUME</span>
+              <strong>$18.73B</strong>
+              <small>24 hours</small>
+            </article>
+            <article>
+              <span>ACTIVE STRATEGIES</span>
+              <strong>1,402</strong>
+              <small>Running</small>
+            </article>
+            <article>
+              <span>UPTIME</span>
+              <strong>99.999%</strong>
+              <small>Verified</small>
+            </article>
+          </div>
+        </section>
+
+        <section id="engine" className="engine-section">
+          <div className="landing-shell engine-grid landing-reveal">
+            <div className="engine-artwork-wrap">
+              <div className="engine-orbit engine-orbit-one" aria-hidden="true" />
+              <div className="engine-orbit engine-orbit-two" aria-hidden="true" />
+              <img className="engine-artwork" src={blackCoreEngine} alt="Black Core Engine triangular mark" />
+            </div>
+
+            <div className="engine-copy">
+              <span className="section-kicker">ENGINE CORE</span>
+              <h2>Powered by <span>Black Code Engine</span></h2>
+              <p>
+                Proprietary execution intelligence connects live data, analytics, and resilient routing in one focused operating layer.
               </p>
-            </div>
-          </div>
-
-          {/* Mockup 2 */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "20px", alignItems: "center" }}>
-            <div style={{ border: "1px solid rgba(255,0,0,0.15)", borderRadius: "6px", overflow: "hidden", boxShadow: "0 20px 50px rgba(0,0,0,0.6), 0 0 20px rgba(255,0,0,0.05)" }}>
-              <img src={chartPreview} alt="Black Terminal Holographic Chart Projection" style={{ display: "block", width: "100%", maxWidth: "960px", height: "auto" }} />
-            </div>
-            <div style={{ maxWidth: "600px" }}>
-              <h3 style={{ fontFamily: "Georgia, serif", fontSize: "20px", color: "var(--strong)", marginBottom: "8px" }}>Real-Time Liquidity Heatmap Visualizer</h3>
-              <p style={{ fontSize: "13px", color: "var(--muted)", lineHeight: "1.5" }}>
-                High-performance WebGL charting engine plotting order-book depth, liquidation clusters, and historical volume profiles.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Expanded Features Section */}
-      <section id="features" className="features-section">
-        <div className="section-header">
-          <h2 className="section-title">Institutional-Grade Capabilities</h2>
-          <p className="section-desc">Engineered for sub-millisecond execution pipelines, sandboxed execution, and decentralized data nodes.</p>
-        </div>
-
-        <div className="features-grid">
-          <div className="feature-card">
-            <div className="feature-icon"><Activity size={24} /></div>
-            <h3 className="feature-name">High-Throughput WebGL Engine</h3>
-            <p className="feature-text">
-              Hardware-accelerated rendering capable of processing millions of data points at 120 FPS, optimized for multi-monitor workstations.
-            </p>
-          </div>
-
-          <div className="feature-card">
-            <div className="feature-icon"><Code2 size={24} /></div>
-            <h3 className="feature-name">Strategy Simulation Sandbox</h3>
-            <p className="feature-text">
-              Develop, compile, and backtest custom strategies using sandboxed Python environments with native low-latency data feeds.
-            </p>
-          </div>
-
-          <div className="feature-card">
-            <div className="feature-icon"><Shield size={24} /></div>
-            <h3 className="feature-name">Military-Grade Security Protocol</h3>
-            <p className="feature-text">
-              Client-side API key management. Handshakes are locally signed using advanced cryptography and routed directly to institutional endpoints.
-            </p>
-          </div>
-
-          <div className="feature-card">
-            <div className="feature-icon"><Cpu size={24} /></div>
-            <h3 className="feature-name">Algorithmic Optimization Suite</h3>
-            <p className="feature-text">
-              Execute robust historical backtests with walk-forward diagnostic matrices, optimizer grids, and institutional risk metrics.
-            </p>
-          </div>
-
-          <div className="feature-card">
-            <div className="feature-icon"><TrendingUp size={24} /></div>
-            <h3 className="feature-name">Order Flow & Liquidity Intelligence</h3>
-            <p className="feature-text">
-              Granular Level 2 order-book tracking and market maker activity analytics with real-time institutional liquidity delta alerts.
-            </p>
-          </div>
-
-          <div className="feature-card">
-            <div className="feature-icon"><Layers size={24} /></div>
-            <h3 className="feature-name">Fault-Tolerant Redundant Infrastructure</h3>
-            <p className="feature-text">
-              Dynamically routed failovers utilizing high-availability REST backup arrays to prevent execution disruptions or connection loss.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* Pricing Section */}
-      <section id="pricing" className="pricing-section">
-        <div className="section-header">
-          <h2 className="section-title">Flexible Deployment Licensing</h2>
-          <p className="section-desc">Tailored operational environments designed for individual quantitative researchers, hedge funds, and enterprises.</p>
-        </div>
-
-        <div className="pricing-grid">
-          <div className="pricing-card">
-            <div className="plan-header">
-              <span className="plan-name">Quantum Sandbox</span>
-              <div className="plan-price">
-                <span className="price-amount">$0</span>
-                <span className="price-period">/ forever</span>
+              <div className="engine-capabilities">
+                <article><Activity size={20} /><strong>Sub-Millisecond</strong><span>Execution</span></article>
+                <article><Cpu size={20} /><strong>Multi-Core</strong><span>Processing</span></article>
+                <article><TrendingUp size={20} /><strong>Predictive</strong><span>Analytics</span></article>
+                <article><Shield size={20} /><strong>Institutional</strong><span>Reliability</span></article>
               </div>
-              <p className="plan-desc">Complimentary tier for quantitative research, strategy validation, and basic API evaluation.</p>
             </div>
-            <ul className="plan-features">
-              <li><Check size={16} /> Standard Charting Environment</li>
-              <li><Check size={16} /> Real-Time Exchange Data Stream</li>
-              <li><Check size={16} /> 2 Active Sandbox Strategy Slots</li>
-            </ul>
-            <button className="btn-plan" onClick={handleOpenSignUp}>Register Free</button>
+          </div>
+        </section>
+
+        <section id="preview" className="preview-section landing-shell landing-reveal">
+          <div className="section-header section-header-split">
+            <div>
+              <span className="section-kicker">THE PLATFORM</span>
+              <h2 className="section-title">Institutional Interface, <span>Reimagined.</span></h2>
+            </div>
+            <p className="section-desc">Powerful, intuitive workspaces built for speed, precision, and institutional scale.</p>
           </div>
 
-          <div className="pricing-card popular">
-            <span className="popular-badge">Most Popular</span>
-            <div className="plan-header">
-              <span className="plan-name">Professional Terminal</span>
-              <div className="plan-price">
-                <span className="price-amount">$49</span>
-                <span className="price-period">/ month</span>
+          <div className="preview-grid">
+            <article className="preview-card">
+              <div className="preview-media">
+                <img src={terminalMockup} alt="Black Terminal quantitative order book desk" />
               </div>
-              <p className="plan-desc">Full access to multi-exchange execution desks, backtest environments, and advanced heatmaps.</p>
-            </div>
-            <ul className="plan-features">
-              <li><Check size={16} /> Order-Book & Liquidation Heatmaps</li>
-              <li><Check size={16} /> Multi-Exchange Feed (Bybit, OKX)</li>
-              <li><Check size={16} /> Unlimited Indicators & Backtesting</li>
-              <li><Check size={16} /> Priority Alert System Webhooks</li>
-            </ul>
-            <button className="btn-plan" onClick={handleOpenSignUp}>Activate Pro</button>
+              <div className="preview-card-copy">
+                <h3>Quantitative Order Book Desk</h3>
+                <p>Cross-market execution with real-time volume profiles, risk context, and deep order-book analytics.</p>
+                <a href="#features">Explore Order Book <span>→</span></a>
+              </div>
+            </article>
+
+            <article className="preview-card">
+              <div className="preview-media preview-media-live">
+                <img src={terminalLiveChart} alt="Live Black Terminal BTCUSDT chart workspace" />
+                <span className="preview-live-pill"><i /> LIVE WORKSPACE</span>
+              </div>
+              <div className="preview-card-copy">
+                <h3>Real-Time Market Workspace</h3>
+                <p>Your real Black Terminal chart, market depth, order book, and execution controls in one high-density viewport.</p>
+                <a href="#features">Explore Live Chart <span>→</span></a>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="features" className="features-section landing-shell landing-reveal">
+          <div className="section-header">
+            <span className="section-kicker">BUILT FOR SERIOUS MARKET WORK</span>
+            <h2 className="section-title">Advanced Tools. Institutional Edge.</h2>
+            <p className="section-desc">Every workflow stays focused, fast, and visually consistent from research to execution.</p>
           </div>
 
-          <div className="pricing-card" style={{ borderColor: "rgba(70,184,102,0.3)", boxShadow: "0 16px 40px rgba(70,184,102,0.05)" }}>
-            <div className="plan-header">
-              <span className="plan-name" style={{ color: "var(--green)" }}>Enterprise Execution Suite</span>
-              <div className="plan-price">
-                <span className="price-amount">$199</span>
-                <span className="price-period">/ month</span>
-              </div>
-              <p className="plan-desc">Dedicated cloud infrastructure, sub-millisecond execution arrays, and custom compliance frameworks.</p>
-            </div>
-            <ul className="plan-features">
-              <li><Check size={16} /> AI-Assisted Strategy Optimizer</li>
-              <li><Check size={16} /> Sub-millisecond direct socket adapters</li>
-              <li style={{ color: "var(--green)", fontWeight: "600" }}><Check size={16} /> INCL. INVESTOR ACCESS PANEL (VC & Angel backing)</li>
-              <li style={{ color: "var(--green)", fontWeight: "600" }}><Check size={16} /> Portfolio metrics pipeline & Equity reports</li>
-            </ul>
-            <button className="btn-plan" style={{ borderColor: "rgba(70,184,102,0.4)", color: "var(--green)" }} onClick={handleOpenSignUp}>Contact Sales</button>
+          <div className="features-grid">
+            <article className="feature-card">
+              <div className="feature-icon"><Activity size={24} /></div>
+              <h3 className="feature-name">High-Throughput WebGL Engine</h3>
+              <p className="feature-text">Hardware-accelerated rendering for dense data and fluid multi-monitor workflows.</p>
+            </article>
+            <article className="feature-card">
+              <div className="feature-icon"><Code2 size={24} /></div>
+              <h3 className="feature-name">Strategy Simulation Sandbox</h3>
+              <p className="feature-text">Develop, compile, and backtest strategies against native low-latency feeds.</p>
+            </article>
+            <article className="feature-card">
+              <div className="feature-icon"><Shield size={24} /></div>
+              <h3 className="feature-name">Institutional Security Protocol</h3>
+              <p className="feature-text">Locally signed credentials, protected routes, and controlled execution boundaries.</p>
+            </article>
+            <article className="feature-card">
+              <div className="feature-icon"><Cpu size={24} /></div>
+              <h3 className="feature-name">Algorithmic Optimization Suite</h3>
+              <p className="feature-text">Walk-forward diagnostics, optimizer grids, and rigorous risk analytics.</p>
+            </article>
+            <article className="feature-card">
+              <div className="feature-icon"><TrendingUp size={24} /></div>
+              <h3 className="feature-name">Order Flow & Liquidity Intelligence</h3>
+              <p className="feature-text">Level 2 context and market-activity signals presented without visual noise.</p>
+            </article>
+            <article className="feature-card">
+              <div className="feature-icon"><Layers size={24} /></div>
+              <h3 className="feature-name">Fault-Tolerant Infrastructure</h3>
+              <p className="feature-text">Resilient routing and failover paths designed to reduce execution disruption.</p>
+            </article>
           </div>
+        </section>
+
+        <section id="pricing" className="pricing-section landing-shell landing-reveal">
+          <div className="section-header">
+            <span className="section-kicker">SIMPLE, TRANSPARENT PRICING</span>
+            <h2 className="section-title">Choose the Plan That Powers Your Edge</h2>
+            <p className="section-desc">Flexible access for independent researchers, professional traders, and institutions.</p>
+          </div>
+
+          <div className="pricing-grid">
+            <article className="pricing-card">
+              <div className="plan-header">
+                <span className="plan-name">Quantum Sandbox</span>
+                <div className="plan-price"><span className="price-amount">$0</span><span className="price-period">/ forever</span></div>
+                <p className="plan-desc">A focused environment for quantitative research and strategy validation.</p>
+              </div>
+              <ul className="plan-features">
+                <li><Check size={16} /> Standard Charting Environment</li>
+                <li><Check size={16} /> Real-Time Exchange Data</li>
+                <li><Check size={16} /> Two Strategy Slots</li>
+              </ul>
+              <button type="button" className="btn-plan" onClick={handleOpenSignUp}>Register Free</button>
+            </article>
+
+            <article className="pricing-card popular">
+              <span className="popular-badge">Most Popular</span>
+              <div className="plan-header">
+                <span className="plan-name">Professional Terminal</span>
+                <div className="plan-price"><span className="price-amount">$49</span><span className="price-period">/ month</span></div>
+                <p className="plan-desc">Advanced execution desks, backtests, heatmaps, and professional workflows.</p>
+              </div>
+              <ul className="plan-features">
+                <li><Check size={16} /> Order Book & Liquidity Heatmaps</li>
+                <li><Check size={16} /> Multi-Exchange Data Feeds</li>
+                <li><Check size={16} /> Unlimited Indicators</li>
+                <li><Check size={16} /> Priority Alert Webhooks</li>
+              </ul>
+              <button type="button" className="btn-plan" onClick={handleOpenSignUp}>Activate Pro</button>
+            </article>
+
+            <article className="pricing-card">
+              <div className="plan-header">
+                <span className="plan-name">Enterprise Execution Suite</span>
+                <div className="plan-price"><span className="price-amount">$199</span><span className="price-period">/ month</span></div>
+                <p className="plan-desc">Dedicated infrastructure, execution controls, and custom compliance support.</p>
+              </div>
+              <ul className="plan-features">
+                <li><Check size={16} /> AI-Assisted Strategy Optimizer</li>
+                <li><Check size={16} /> Direct Socket Execution</li>
+                <li><Check size={16} /> Institutional Access Panel</li>
+                <li><Check size={16} /> Portfolio & Equity Reports</li>
+              </ul>
+              <button type="button" className="btn-plan" onClick={handleOpenSignUp}>Contact Sales</button>
+            </article>
+          </div>
+        </section>
+
+        <section className="landing-cta landing-shell landing-reveal">
+          <div className="landing-cta-mark"><TrendingUp size={27} /></div>
+          <div>
+            <h2>Ready to elevate your trading infrastructure?</h2>
+            <p>Enter a faster, clearer, and more focused quantitative workspace.</p>
+          </div>
+          <div className="landing-cta-actions">
+            <button type="button" className="btn-primary" onClick={handleOpenSignUp}>Start Trading</button>
+            <button type="button" className="btn-secondary" onClick={handleOpenSignIn}>View Live Demo</button>
+          </div>
+        </section>
+      </main>
+
+      <footer id="footer" className="landing-footer">
+        <div className="landing-shell landing-footer-grid">
+          <div className="landing-footer-brand">
+            <div className="landing-logo-group">
+              <div className="landing-logo-icon" />
+              <span className="landing-logo-title">BLACK TERMINAL</span>
+            </div>
+            <p>Institutional-grade crypto trading technology for quantitative researchers and professional traders.</p>
+          </div>
+          <div><strong>Platform</strong><a href="#features">Features</a><a href="#preview">Trading Terminal</a><a href="#engine">Black Code Engine</a></div>
+          <div><strong>Resources</strong><a href="#preview">Product Preview</a><a href="#pricing">Plans</a><a href="#top">System Status</a></div>
+          <div><strong>Company</strong><a href="#top">About Us</a><a href="#footer">Contact</a><a href="#footer">Legal</a></div>
         </div>
-      </section>
+        <div className="landing-shell landing-footer-bottom">
+          <span>© 2026 BLACK TERMINAL. All rights reserved.</span>
+          <span>Privacy Policy · Terms of Service · Cookie Policy</span>
+        </div>
+      </footer>
+
       {renderAuthModal()}
     </div>
   );

@@ -390,22 +390,40 @@
 }
 
 .terminal-command-center .side-watermark {
-  height: 118px;
+  height: 154px;
   margin: 0 14px 16px 20px;
-  padding: 0;
-  justify-content: center;
+  padding: 8px 10px 10px;
+  justify-content: flex-start;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
-  opacity: 0.42;
+  opacity: 1;
 }
 
-.terminal-command-center .wm-mark {
-  width: 90px;
-  height: 90px;
-  transform: scale(0.62);
+.terminal-command-center .side-core-engine {
+  gap: 3px;
+  overflow: hidden;
+  color: #777078;
+  font: 700 6.5px "JetBrains Mono", monospace;
+  letter-spacing: 0.12em;
 }
 
-.terminal-command-center .wm-wordmark {
+.terminal-command-center .side-core-engine::before {
   display: none;
+}
+
+.terminal-command-center .side-core-engine > span {
+  position: relative;
+  z-index: 1;
+  align-self: flex-start;
+  margin-left: 6px;
+}
+
+.terminal-command-center .side-core-engine img {
+  width: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  object-fit: contain;
+  object-position: center;
+  filter: brightness(1.12) saturate(1.08) drop-shadow(0 0 14px rgba(255, 35, 58, 0.15));
 }
 
 .terminal-command-center .terminal-grid {

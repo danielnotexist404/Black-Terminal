@@ -468,7 +468,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                 <div className="login-stat-item"><span className="login-stat-lbl">RENDER PIPELINE</span><span className="login-stat-val">120 FPS</span></div>
                 <div className="login-stat-item"><span className="login-stat-lbl">DATA COVERAGE</span><span className="login-stat-val">24 / 7</span></div>
               </div>
-              <div className="auth-engine-signature"><span className="auth-core-mini" /> Powered by <b>Black Code Engine</b></div>
+              <div className="auth-engine-signature"><span className="auth-core-mini" /> Powered by <b>Black Core Engine</b></div>
             </div>
           </section>
 
@@ -959,7 +959,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
 
             <div className="engine-copy">
               <span className="section-kicker">ENGINE CORE</span>
-              <h2>Powered by <span>Black Code Engine</span></h2>
+              <h2>Powered by <span>Black Core Engine</span></h2>
               <p>
                 Proprietary execution intelligence connects live data, analytics, and resilient routing in one focused operating layer.
               </p>
@@ -1126,7 +1126,7 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
             </div>
             <p>Institutional-grade crypto trading technology for quantitative researchers and professional traders.</p>
           </div>
-          <div><strong>Platform</strong><a href="#features">Features</a><a href="#preview">Trading Terminal</a><a href="#engine">Black Code Engine</a></div>
+          <div><strong>Platform</strong><a href="#features">Features</a><a href="#preview">Trading Terminal</a><a href="#engine">Black Core Engine</a></div>
           <div><strong>Resources</strong><a href="#preview">Product Preview</a><a href="#pricing">Plans</a><a href="#top">System Status</a></div>
           <div><strong>Company</strong><a href="#top">About Us</a><a href="#footer">Contact</a><a href="#footer">Legal</a></div>
         </div>

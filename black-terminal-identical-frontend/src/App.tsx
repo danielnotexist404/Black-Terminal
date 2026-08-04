@@ -105,6 +105,7 @@ import { getCapabilities, type CapabilityUser, type ProductTier, type TerminalCa
 import { blackCoreWindowDockManager } from "./core/windows/windowDockManager";
 import type { BlackCoreModuleMode } from "./core/modules/moduleRegistry";
 import { PerformanceHud } from "./performance/PerformanceHud";
+import blackCoreEngine from "./assets/black-core-engine.png";
 import {
   ADMIN_ALLOWED_INDICATORS,
   canUseIndicator,
@@ -1981,40 +1982,9 @@ export default function App() {
             <span>STOP &amp; SIGN OUT</span>
           </button>
         </div>
-        <div className="side-watermark" aria-hidden>
-          <div className="wm-mark">
-            <div className="wm-triangle">
-              <i className="wm-facet wm-facet-left" />
-              <i className="wm-facet wm-facet-right" />
-              <i className="wm-facet wm-facet-base" />
-            </div>
-            <svg viewBox="0 0 164 132" className="wm-arrow">
-              <path
-                className="wm-arrow-shaft-shadow"
-                d="M12 105 L45 67 L61 80 L94 40 L111 53 L132 30"
-              />
-              <path
-                className="wm-arrow-head-shadow"
-                d="M125 25 L151 11 L143 39 L136 32 L131 31 Z"
-              />
-              <path
-                className="wm-arrow-shaft"
-                d="M12 105 L45 67 L61 80 L94 40 L111 53 L132 30"
-              />
-              <path
-                className="wm-arrow-head"
-                d="M125 25 L151 11 L143 39 L136 32 L131 31 Z"
-              />
-            </svg>
-          </div>
-          <div className="wm-wordmark">
-            <strong>
-              BLACK
-              <br />
-              TRIANGLE
-            </strong>
-            <span>GROUP</span>
-          </div>
+        <div className="side-watermark side-core-engine" aria-label="Powered by Black Core Engine">
+          <span>POWERED BY BLACK CORE</span>
+          <img src={blackCoreEngine} alt="Black Core Engine" />
         </div>
       </aside>
 

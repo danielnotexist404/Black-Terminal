@@ -636,10 +636,8 @@
 .terminal-command-center .bottom-blank {
   position: relative;
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
     linear-gradient(180deg, rgba(255, 48, 71, 0.02), transparent 70%),
     #09090b;
-  background-size: 64px 100%, 100% 100%, 100% 100%;
 }
 
 .terminal-command-center .bottom-blank::after {

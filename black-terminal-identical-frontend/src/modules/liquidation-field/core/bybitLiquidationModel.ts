@@ -42,6 +42,11 @@ export function bybitLiquidationInput(
   marginMode: "ISOLATED" | "CROSS" | "UNKNOWN" = "UNKNOWN"
 ): LiquidationModelInput {
   const tier = selectTier(rules, notional);
+  // Bybit initial margin is position value / the position's selected leverage.
+  // A risk tier supplies the maintenance rate and only a lower bound for IMR
+  // through its maximum permitted leverage; it is not the position's IMR.
+  const selectedLeverageInitialMarginRate = 1 / Math.max(1, leverage);
+  const tierMinimumInitialMarginRate = Math.max(0, tier?.initialMarginRate ?? 0);
   return {
     side,
     entryPrice,
@@ -49,7 +54,7 @@ export function bybitLiquidationInput(
     positionNotional: notional,
     leverage,
     marginMode,
-    initialMarginRate: tier?.initialMarginRate ?? 1 / Math.max(1, leverage),
+    initialMarginRate: Math.max(selectedLeverageInitialMarginRate, tierMinimumInitialMarginRate),
     maintenanceMarginRate: tier?.maintenanceMarginRate ?? null,
     maintenanceMarginDeduction: tier?.maintenanceMarginDeduction ?? null,
     fundingEstimate: 0,
@@ -92,6 +97,6 @@ export function estimateBybitLinearLiquidationDistribution(input: LiquidationMod
     upperBound: mean + standardDeviation * 2.2,
     confidence: input.marginMode === "ISOLATED" ? 0.82 : input.marginMode === "CROSS" ? 0.34 : 0.48,
     assumptions,
-    modelVersion: "BCLIF_BYBIT_LINEAR_LIQ_V1"
+    modelVersion: "BCLIF_BYBIT_LINEAR_LIQ_V2"
   };
 }

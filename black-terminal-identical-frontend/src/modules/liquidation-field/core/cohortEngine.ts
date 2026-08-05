@@ -13,6 +13,10 @@ import { BCLIF_MODEL_VERSION } from "./types.ts";
 
 const MAX_ACTIVE_COHORTS = 640;
 const MAX_PARTICLES = 4_096;
+const MARGIN_MODE_PRIOR = [
+  { model: "ISOLATED" as const, label: "ISOLATED_ESTIMATE", weight: 0.72 },
+  { model: "UNKNOWN" as const, label: "CROSS_ESTIMATE", weight: 0.28 }
+] as const;
 
 function weightedMean(values: Array<{ value: number; weight: number }>) {
   const total = values.reduce((sum, item) => sum + item.weight, 0) || 1;
@@ -41,6 +45,7 @@ export class LiquidationCohortEngine {
   private particles: LiquidationExposureParticle[] = [];
   private previousFrame?: LiquidationMarketFrame;
   private cohortOrdinal = 0;
+  private traversedCohorts = new Set<string>();
 
   constructor(rules: LiquidationInstrumentRules, modelPreset: LiquidationFieldModelPreset) {
     this.rules = rules;
@@ -52,6 +57,7 @@ export class LiquidationCohortEngine {
     this.particles = [];
     this.previousFrame = undefined;
     this.cohortOrdinal = 0;
+    this.traversedCohorts.clear();
   }
 
   processFrame(frame: LiquidationMarketFrame, events: readonly ConfirmedLiquidationEvent[] = []) {
@@ -93,28 +99,31 @@ export class LiquidationCohortEngine {
       const cohortNotional = grossNotionalPerSide * vulnerability;
 
       for (const bucket of prior.buckets) {
-        const allocatedNotional = cohortNotional * bucket.probability;
-        if (allocatedNotional <= 0) continue;
-        const distribution = estimateBybitLinearLiquidationDistribution(
-          bybitLiquidationInput(side, entryMean, frame.markPrice, allocatedNotional, bucket.leverage, this.rules, "UNKNOWN")
-        );
-        const tier = [...this.rules.riskTiers]
-          .sort((a, b) => a.riskLimitValue - b.riskLimitValue)
-          .find((candidate) => allocatedNotional <= candidate.riskLimitValue) ?? this.rules.riskTiers.at(-1);
-        cohortParticles.push({
-          cohortId: id,
-          side,
-          entryPrice: entryMean,
-          leverage: bucket.leverage,
-          marginMode: "UNKNOWN",
-          riskTier: tier?.tierId ?? "UNAVAILABLE",
-          notional: cohortNotional,
-          liquidationPrice: distribution.mean,
-          liquidationStdDev: distribution.standardDeviation,
-          survival: 1,
-          weight: bucket.probability,
-          confidence: Math.max(0.08, frameConfidence * prior.confidence * distribution.confidence)
-        });
+        for (const margin of MARGIN_MODE_PRIOR) {
+          const particleWeight = bucket.probability * margin.weight;
+          const allocatedNotional = cohortNotional * particleWeight;
+          if (allocatedNotional <= 0) continue;
+          const distribution = estimateBybitLinearLiquidationDistribution(
+            bybitLiquidationInput(side, entryMean, frame.markPrice, allocatedNotional, bucket.leverage, this.rules, margin.model)
+          );
+          const tier = [...this.rules.riskTiers]
+            .sort((a, b) => a.riskLimitValue - b.riskLimitValue)
+            .find((candidate) => allocatedNotional <= candidate.riskLimitValue) ?? this.rules.riskTiers.at(-1);
+          cohortParticles.push({
+            cohortId: id,
+            side,
+            entryPrice: entryMean,
+            leverage: bucket.leverage,
+            marginMode: margin.label,
+            riskTier: tier?.tierId ?? "UNAVAILABLE",
+            notional: cohortNotional,
+            liquidationPrice: distribution.mean,
+            liquidationStdDev: distribution.standardDeviation,
+            survival: 1,
+            weight: particleWeight,
+            confidence: Math.max(0.08, frameConfidence * prior.confidence * distribution.confidence)
+          });
+        }
       }
 
       if (!cohortParticles.length) continue;
@@ -146,7 +155,7 @@ export class LiquidationCohortEngine {
         leverageUpper: Math.max(...cohortParticles.map((particle) => particle.leverage)),
         estimatedInitialNotional: cohortNotional,
         estimatedRemainingNotional: cohortNotional,
-        marginMode: "UNKNOWN",
+        marginMode: "MIXED",
         riskTierDistribution: this.riskTierDistribution(cohortParticles),
         liquidationMean,
         liquidationStdDev,
@@ -181,8 +190,12 @@ export class LiquidationCohortEngine {
       cohort.survivalProbability *= decay;
       cohort.estimatedRemainingNotional *= decay;
       if (cohort.state === "FORMING") cohort.state = "ACTIVE";
-      const traversed = frame.markPrice >= cohort.liquidationLower && frame.markPrice <= cohort.liquidationUpper;
-      if (traversed) {
+      const previousMark = this.previousFrame.markPrice;
+      const crossedLiquidationCore = cohort.side === "LONG"
+        ? previousMark > cohort.liquidationMean && frame.markPrice <= cohort.liquidationMean
+        : previousMark < cohort.liquidationMean && frame.markPrice >= cohort.liquidationMean;
+      if (crossedLiquidationCore && !this.traversedCohorts.has(cohort.id)) {
+        this.traversedCohorts.add(cohort.id);
         cohort.state = "PARTIALLY_LIQUIDATED";
         cohort.survivalProbability *= 0.82;
         cohort.estimatedRemainingNotional *= 0.82;
@@ -269,6 +282,9 @@ export class LiquidationCohortEngine {
         .map((cohort) => cohort.id)
     );
     this.cohorts = this.cohorts.filter((cohort) => activeIds.has(cohort.id));
+    for (const cohortId of this.traversedCohorts) {
+      if (!activeIds.has(cohortId)) this.traversedCohorts.delete(cohortId);
+    }
     this.particles = this.particles
       .filter((particle) => activeIds.has(particle.cohortId) && particle.notional > 0 && particle.survival > 0)
       .sort((a, b) => b.notional * b.weight * b.survival - a.notional * a.weight * a.survival)

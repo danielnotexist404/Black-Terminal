@@ -22,15 +22,23 @@ assert.ok(Math.abs(prior.buckets.reduce((sum, bucket) => sum + bucket.probabilit
 const isolatedLong = estimateBybitLinearLiquidationDistribution(bybitLiquidationInput("LONG", 64_000, 64_000, 1_000_000, 20, fixture.rules, "ISOLATED"));
 const isolatedShort = estimateBybitLinearLiquidationDistribution(bybitLiquidationInput("SHORT", 64_000, 64_000, 1_000_000, 20, fixture.rules, "ISOLATED"));
 const unknownLong = estimateBybitLinearLiquidationDistribution(bybitLiquidationInput("LONG", 64_000, 64_000, 1_000_000, 20, fixture.rules, "UNKNOWN"));
+const isolatedFiveXLong = estimateBybitLinearLiquidationDistribution(bybitLiquidationInput("LONG", 64_000, 64_000, 1_000_000, 5, fixture.rules, "ISOLATED"));
+const isolatedFiftyXLong = estimateBybitLinearLiquidationDistribution(bybitLiquidationInput("LONG", 64_000, 64_000, 1_000_000, 50, fixture.rules, "ISOLATED"));
+const isolatedFiveXShort = estimateBybitLinearLiquidationDistribution(bybitLiquidationInput("SHORT", 64_000, 64_000, 1_000_000, 5, fixture.rules, "ISOLATED"));
+const isolatedFiftyXShort = estimateBybitLinearLiquidationDistribution(bybitLiquidationInput("SHORT", 64_000, 64_000, 1_000_000, 50, fixture.rules, "ISOLATED"));
 assert.ok(isolatedLong.mean < 64_000, "long liquidation distribution must lie below entry");
 assert.ok(isolatedShort.mean > 64_000, "short liquidation distribution must lie above entry");
 assert.ok(unknownLong.standardDeviation > isolatedLong.standardDeviation, "unknown/cross margin must widen uncertainty");
+assert.ok(isolatedFiveXLong.mean < isolatedFiftyXLong.mean, "lower-leverage longs must liquidate farther below entry");
+assert.ok(isolatedFiveXShort.mean > isolatedFiftyXShort.mean, "lower-leverage shorts must liquidate farther above entry");
 
 const engine = new LiquidationCohortEngine(fixture.rules, "REGIME_ADAPTIVE");
 const paired = engine.processFrame(fixture.frames[0]!, []);
 assert.ok(paired.cohorts.some((cohort) => cohort.side === "LONG"), "positive OI must create a long cohort hypothesis");
 assert.ok(paired.cohorts.some((cohort) => cohort.side === "SHORT"), "positive OI must create a short cohort hypothesis");
 assert.ok(paired.cohorts.every((cohort) => cohort.confidence < 1), "modeled cohorts must never masquerade as observed positions");
+assert.ok(paired.particles.some((particle) => particle.marginMode === "ISOLATED_ESTIMATE"), "mixed-margin inference must retain narrow isolated cores");
+assert.ok(paired.particles.some((particle) => particle.marginMode === "CROSS_ESTIMATE"), "mixed-margin inference must retain broad cross-margin uncertainty");
 
 const started = performance.now();
 const snapshot = buildLiquidationFieldSnapshot(fixture.frames, fixture.events, fixture.rules, settings, fixture.coverage);
@@ -44,6 +52,18 @@ assert.ok(snapshot.normalizedIntensity.some((value) => value > 150), "robust nor
 assert.equal(snapshot.confirmedEvents.length, fixture.events.length);
 assert.ok(snapshot.header.checksum.startsWith("fnv1a-"));
 assert.ok(buildMs < 8_000, `deterministic field build exceeded the safety boundary: ${buildMs.toFixed(1)}ms`);
+
+const finalColumn = snapshot.normalizedIntensity.slice((snapshot.header.columns - 1) * snapshot.header.rows);
+const finalMaximum = Math.max(...finalColumn);
+let significantShelfCount = 0;
+for (let row = 1; row < finalColumn.length - 1; row++) {
+  if (
+    finalColumn[row]! > finalColumn[row - 1]!
+    && finalColumn[row]! >= finalColumn[row + 1]!
+    && finalColumn[row]! >= finalMaximum * 0.18
+  ) significantShelfCount += 1;
+}
+assert.ok(significantShelfCount >= 6, "selected leverage hypotheses must remain separated into multiple price shelves");
 
 const reference = createThermalPalette("REFERENCE_THERMAL");
 assert.deepEqual([...reference.slice(0, 3)], [7, 3, 16], "low exposure must remain dark purple rather than transparent black");

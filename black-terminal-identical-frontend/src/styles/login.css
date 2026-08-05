@@ -88,7 +88,7 @@
 .auth-brand-mark,
 .auth-core-mini {
   display: block;
-  background: url("../assets/brand-icon.png") center / contain no-repeat;
+  background: url("../assets/brand-icon-transparent.png") center / contain no-repeat;
   filter: drop-shadow(0 0 14px rgba(255, 36, 59, 0.4));
 }
 
@@ -477,7 +477,7 @@
 .login-logo {
   width: 54px;
   height: 48px;
-  background: url("../assets/brand-icon.png") center / contain no-repeat;
+  background: url("../assets/brand-icon-transparent.png") center / contain no-repeat;
   filter: drop-shadow(0 0 15px rgba(255, 36, 59, 0.32));
 }
 

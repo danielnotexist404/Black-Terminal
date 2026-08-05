@@ -1268,9 +1268,14 @@ export class BlackChartEngine {
       this.visibleIndicators.waveTrendOscillator;
     if (!hasOscillator) return 0;
 
+    return this.configuredOscillatorPaneHeight() + 20;
+  }
+
+  private configuredOscillatorPaneHeight() {
     const plotHeight = this.view.height - this.view.bottomAxisHeight;
-    const paneHeight = Math.max(82, Math.min(128, plotHeight * 0.19));
-    return paneHeight + 20;
+    const maximum = Math.max(82, Math.min(420, plotHeight - this.view.topPadding - 44));
+    const requested = Number(this.indicatorAdvancedSettings.oscillatorPane?.height ?? 128);
+    return Math.max(82, Math.min(maximum, Number.isFinite(requested) ? requested : 128));
   }
 
   private getPricePlotHeight() {
@@ -1985,6 +1990,37 @@ export class BlackChartEngine {
     return out;
   }
 
+  private rmaSeries(values: number[], period: number) {
+    const alpha = 1 / Math.max(1, period);
+    const out: number[] = [];
+    let average = values[0] ?? 0;
+    for (let i = 0; i < values.length; i++) {
+      const value = values[i] ?? average;
+      average = i === 0 ? value : average + alpha * (value - average);
+      out.push(average);
+    }
+    return out;
+  }
+
+  private median(values: number[]) {
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((left, right) => left - right);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0
+      ? ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2
+      : sorted[middle] ?? 0;
+  }
+
+  private oscillatorSourceSeries(data: Candle[]) {
+    const source = this.indicatorAdvancedSettings.zScoreOscillator?.source ?? "close";
+    return data.map((candle) => {
+      if (source === "hl2") return (candle.high + candle.low) / 2;
+      if (source === "hlc3") return (candle.high + candle.low + candle.close) / 3;
+      if (source === "ohlc4") return (candle.open + candle.high + candle.low + candle.close) / 4;
+      return candle.close;
+    });
+  }
+
   private openInterestOscillatorSeries(data: Candle[], period: number) {
     const signedFlow = data.map((candle) => {
       const span = Math.max(candle.high - candle.low, candle.close * 0.00001, 1e-8);
@@ -2001,14 +2037,78 @@ export class BlackChartEngine {
   }
 
   private zScoreOscillatorSeries(data: Candle[], period: number) {
-    const closes = data.map((candle) => candle.close);
-    return closes.map((close, index) => {
-      const slice = closes.slice(Math.max(0, index - period + 1), index + 1);
-      const mean = slice.reduce((sum, value) => sum + value, 0) / Math.max(1, slice.length);
-      const variance = slice.reduce((sum, value) => sum + (value - mean) ** 2, 0) / Math.max(1, slice.length);
-      const deviation = Math.sqrt(variance);
-      return deviation > 0 ? Math.max(-5, Math.min(5, (close - mean) / deviation)) * 24 : 0;
+    const settings = this.indicatorAdvancedSettings.zScoreOscillator;
+    const safePeriod = Math.max(2, Math.min(500, Math.round(period)));
+    const source = this.oscillatorSourceSeries(data);
+    const method = settings?.calculationMethod ?? "price";
+    const values = source.map((value, index) => {
+      if (method === "logReturn") {
+        const previous = source[index - 1] ?? value;
+        return previous > 0 && value > 0 ? Math.log(value / previous) : 0;
+      }
+      if (method === "percentReturn") {
+        const previous = source[index - 1] ?? value;
+        return previous !== 0 ? ((value - previous) / previous) * 100 : 0;
+      }
+      return value;
     });
+
+    let raw: number[];
+    if (method === "robust") {
+      raw = new Array(values.length).fill(0);
+      const start = Math.max(0, this.view.firstIndex - safePeriod * 2);
+      for (let index = start; index < values.length; index++) {
+        const sample = values.slice(Math.max(0, index - safePeriod + 1), index + 1);
+        const center = this.median(sample);
+        const mad = this.median(sample.map((value) => Math.abs(value - center)));
+        raw[index] = mad > 1e-12 ? (values[index]! - center) / (mad * 1.4826) : 0;
+      }
+    } else if ((settings?.basisMethod ?? "sma") === "ema") {
+      const mean = this.emaSeries(values, safePeriod);
+      const secondMoment = this.emaSeries(values.map((value) => value * value), safePeriod);
+      const sampleCorrection = settings?.deviationMode === "sample" && safePeriod > 1
+        ? safePeriod / (safePeriod - 1)
+        : 1;
+      raw = values.map((value, index) => {
+        const center = mean[index] ?? value;
+        const variance = Math.max(0, (secondMoment[index] ?? value * value) - center * center);
+        const deviation = Math.sqrt(variance * sampleCorrection);
+        return deviation > 1e-12 ? (value - (mean[index] ?? value)) / deviation : 0;
+      });
+    } else {
+      raw = [];
+      let sum = 0;
+      let sumSquares = 0;
+      for (let index = 0; index < values.length; index++) {
+        const value = values[index] ?? 0;
+        sum += value;
+        sumSquares += value * value;
+        const dropIndex = index - safePeriod;
+        if (dropIndex >= 0) {
+          const dropped = values[dropIndex] ?? 0;
+          sum -= dropped;
+          sumSquares -= dropped * dropped;
+        }
+        const count = Math.min(index + 1, safePeriod);
+        const mean = sum / Math.max(1, count);
+        const divisor = settings?.deviationMode === "sample" ? Math.max(1, count - 1) : Math.max(1, count);
+        const variance = Math.max(0, (sumSquares - (sum * sum) / Math.max(1, count)) / divisor);
+        const deviation = Math.sqrt(variance);
+        raw.push(deviation > 1e-12 ? (value - mean) / deviation : 0);
+      }
+    }
+
+    const smoothingLength = Math.max(1, Math.min(100, Math.round(settings?.smoothingLength ?? 3)));
+    const smoothingMethod = settings?.smoothingMethod ?? "ema";
+    const smoothed = smoothingMethod === "sma"
+      ? this.smaSeries(raw, smoothingLength)
+      : smoothingMethod === "ema"
+        ? this.emaSeries(raw, smoothingLength)
+        : smoothingMethod === "rma"
+          ? this.rmaSeries(raw, smoothingLength)
+          : raw;
+    const clamp = Math.max(1, Math.min(20, Number(settings?.clamp ?? 5)));
+    return smoothed.map((value) => Math.max(-clamp, Math.min(clamp, value)) * 24);
   }
 
   private waveTrendOscillatorSeries(data: Candle[], channelLength: number) {
@@ -2038,17 +2138,23 @@ export class BlackChartEngine {
     const plotWidth = this.view.width - this.view.rightAxisWidth;
     const plotHeight = this.view.height - this.view.bottomAxisHeight;
     const paneBottom = plotHeight - 16;
-    const paneHeight = Math.max(82, Math.min(128, plotHeight * 0.19));
+    const paneHeight = this.configuredOscillatorPaneHeight();
     const paneTop = Math.max(this.view.topPadding + 22, paneBottom - paneHeight);
     const paneMid = (paneTop + paneBottom) / 2;
     const paneHalf = Math.max(1, (paneBottom - paneTop) / 2);
+    const paneSettings = this.indicatorAdvancedSettings.oscillatorPane;
+    const zSettings = this.indicatorAdvancedSettings.zScoreOscillator;
+    const backgroundColor = this.hexColor(paneSettings?.backgroundColor ?? "#000000", 0x000000);
+    const backgroundAlpha = Math.max(0, Math.min(1, Number(paneSettings?.backgroundIntensity ?? 62) / 100));
+    const zeroLineColor = this.visibleIndicators.zScoreOscillator
+      ? this.hexColor(zSettings?.midlineColor ?? "#8a8a90", theme.muted)
+      : this.hexColor(paneSettings?.zeroLineColor ?? "#b8b8bc", theme.silverBright);
+    const zeroLineAlpha = Math.max(0, Math.min(1, Number(paneSettings?.zeroLineIntensity ?? 24) / 100));
 
     g.rect(0, paneTop, plotWidth, paneBottom - paneTop)
-      .fill({ color: 0x020304, alpha: 0.58 })
+      .fill({ color: backgroundColor, alpha: backgroundAlpha })
       .stroke({ width: 1, color: 0xffffff, alpha: 0.055 });
-    g.moveTo(0, paneMid).lineTo(plotWidth, paneMid).stroke({ width: 1, color: theme.silverBright, alpha: 0.18 });
-    g.moveTo(0, paneTop + paneHalf * 0.5).lineTo(plotWidth, paneTop + paneHalf * 0.5).stroke({ width: 1, color: theme.red, alpha: 0.10 });
-    g.moveTo(0, paneBottom - paneHalf * 0.5).lineTo(plotWidth, paneBottom - paneHalf * 0.5).stroke({ width: 1, color: theme.red, alpha: 0.10 });
+    g.moveTo(0, paneMid).lineTo(plotWidth, paneMid).stroke({ width: 1, color: zeroLineColor, alpha: zeroLineAlpha });
 
     const series: Array<{
       key: keyof VisibleIndicators;
@@ -2095,11 +2201,31 @@ export class BlackChartEngine {
       });
     }
 
+    const zUpper = Math.max(Number(zSettings?.upperBand ?? 2), Number(zSettings?.lowerBand ?? -2)) * 24;
+    const zLower = Math.min(Number(zSettings?.upperBand ?? 2), Number(zSettings?.lowerBand ?? -2)) * 24;
     const visibleValues = series.flatMap((item) =>
       item.values.slice(this.view.firstIndex, this.view.lastIndex + 1).map((value) => Math.abs(value))
     );
-    const maxAbs = Math.max(60, Math.min(180, Math.max(...visibleValues, 1) * 1.16));
+    const maxAbs = Math.max(60, Math.min(288, Math.max(...visibleValues, Math.abs(zUpper), Math.abs(zLower), 1) * 1.16));
     const yForOsc = (value: number) => paneMid - (Math.max(-maxAbs, Math.min(maxAbs, value)) / maxAbs) * paneHalf * 0.88;
+
+    if (this.visibleIndicators.zScoreOscillator) {
+      const upperY = yForOsc(zUpper);
+      const lowerY = yForOsc(zLower);
+      const upperColor = this.hexColor(zSettings?.upperBandColor ?? "#b40020", theme.redBright);
+      const lowerColor = this.hexColor(zSettings?.lowerBandColor ?? "#d7d7da", theme.silverBright);
+      const bandAlpha = Math.max(0, Math.min(1, Number(zSettings?.bandIntensity ?? 72) / 100));
+      if (zSettings?.showBandFill ?? true) {
+        const fillAlpha = Math.max(0, Math.min(0.5, Number(zSettings?.bandFillIntensity ?? 9) / 100));
+        g.rect(0, paneTop, plotWidth, Math.max(0, upperY - paneTop)).fill({ color: upperColor, alpha: fillAlpha });
+        g.rect(0, lowerY, plotWidth, Math.max(0, paneBottom - lowerY)).fill({ color: lowerColor, alpha: fillAlpha });
+      }
+      g.moveTo(0, upperY).lineTo(plotWidth, upperY).stroke({ width: 1, color: upperColor, alpha: bandAlpha });
+      g.moveTo(0, lowerY).lineTo(plotWidth, lowerY).stroke({ width: 1, color: lowerColor, alpha: bandAlpha });
+    } else {
+      g.moveTo(0, paneTop + paneHalf * 0.5).lineTo(plotWidth, paneTop + paneHalf * 0.5).stroke({ width: 1, color: theme.red, alpha: 0.10 });
+      g.moveTo(0, paneBottom - paneHalf * 0.5).lineTo(plotWidth, paneBottom - paneHalf * 0.5).stroke({ width: 1, color: theme.red, alpha: 0.10 });
+    }
 
     for (const item of series) {
       const visual = this.visualFor(item.key, item.fallbackColor);
@@ -2131,10 +2257,17 @@ export class BlackChartEngine {
       }
 
       if (started) {
+        const isZScore = item.key === "zScoreOscillator";
+        const lineWidth = isZScore
+          ? Math.max(0.5, Math.min(4, Number(zSettings?.lineWidth ?? 1.35)))
+          : item.dashed ? 1 : 1.35;
+        const lineAlpha = isZScore
+          ? visual.alpha * Math.max(0, Math.min(1, Number(zSettings?.lineIntensity ?? 82) / 100))
+          : item.dashed ? visual.alpha * 0.42 : visual.alpha * 0.78;
         g.stroke({
-          width: item.dashed ? 1 : 1.35,
+          width: lineWidth,
           color: visual.color,
-          alpha: item.dashed ? visual.alpha * 0.42 : visual.alpha * 0.78
+          alpha: lineAlpha
         });
       }
     }

@@ -1,4 +1,10 @@
-import type { AdaptiveSwingStrategySettings, IndicatorAdvancedSettings, VolumeProfileSettings } from "../types";
+import type {
+  AdaptiveSwingStrategySettings,
+  IndicatorAdvancedSettings,
+  OscillatorPaneSettings,
+  VolumeProfileSettings,
+  ZScoreOscillatorSettings
+} from "../types";
 
 export const defaultVolumeProfileSettings: VolumeProfileSettings = {
   showVolumeProfile: true,
@@ -122,7 +128,37 @@ export const defaultAdaptiveSwingStrategySettings: AdaptiveSwingStrategySettings
   robustnessMode: "Balanced"
 };
 
+export const defaultOscillatorPaneSettings: OscillatorPaneSettings = {
+  height: 128,
+  backgroundColor: "#000000",
+  backgroundIntensity: 62,
+  zeroLineColor: "#b8b8bc",
+  zeroLineIntensity: 24
+};
+
+export const defaultZScoreOscillatorSettings: ZScoreOscillatorSettings = {
+  source: "close",
+  calculationMethod: "price",
+  basisMethod: "sma",
+  deviationMode: "population",
+  smoothingMethod: "ema",
+  smoothingLength: 3,
+  upperBand: 2,
+  lowerBand: -2,
+  clamp: 5,
+  upperBandColor: "#b40020",
+  lowerBandColor: "#d7d7da",
+  midlineColor: "#8a8a90",
+  lineWidth: 1.35,
+  lineIntensity: 82,
+  bandIntensity: 72,
+  showBandFill: true,
+  bandFillIntensity: 9
+};
+
 export const defaultIndicatorAdvancedSettings: IndicatorAdvancedSettings = {
   volumeProfile: defaultVolumeProfileSettings,
-  adaptiveSwingStrategy: defaultAdaptiveSwingStrategySettings
+  adaptiveSwingStrategy: defaultAdaptiveSwingStrategySettings,
+  oscillatorPane: defaultOscillatorPaneSettings,
+  zScoreOscillator: defaultZScoreOscillatorSettings
 };

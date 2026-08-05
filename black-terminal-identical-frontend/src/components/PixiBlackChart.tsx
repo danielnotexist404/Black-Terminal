@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Dispatch, MouseEvent as ReactMouseEvent, SetStateAction } from "react";
+import type { Dispatch, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, SetStateAction } from "react";
 import { Bell, Brush, Columns3, Copy, Eye, EyeOff, Minus, Play, Plus, SlidersHorizontal, Square, TrendingUp, Type, X } from "lucide-react";
 import { BlackChartEngine } from "../chart-engine/BlackChartEngine";
 import type { ChartPoint, IndicatorAlertLevel, IndicatorAlertLine } from "../chart-engine/BlackChartEngine";
@@ -13,14 +13,21 @@ import {
   IndicatorAdvancedSettings,
   IndicatorColorKey,
   IndicatorPeriods,
+  OscillatorPaneSettings,
   IndicatorVisualSettings,
   ReplayControls,
   ReplaySelection,
   ReplayStatus,
   VisibleIndicators,
-  VolumeProfileSettings
+  VolumeProfileSettings,
+  ZScoreOscillatorSettings
 } from "../chart-engine/types";
-import { defaultAdaptiveSwingStrategySettings, defaultVolumeProfileSettings } from "../chart-engine/profile/volumeProfileDefaults";
+import {
+  defaultAdaptiveSwingStrategySettings,
+  defaultOscillatorPaneSettings,
+  defaultVolumeProfileSettings,
+  defaultZScoreOscillatorSettings
+} from "../chart-engine/profile/volumeProfileDefaults";
 import { createMockCandles } from "../data/mockMarket";
 import type { AlertCondition, AlertIndicatorTarget, IndicatorAlertDefinition } from "../automation/alerts";
 import { canUseIndicator } from "../features/premium";
@@ -353,6 +360,12 @@ export function PixiBlackChart({
 }: PixiBlackChartProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<BlackChartEngine | null>(null);
+  const oscillatorResizeRef = useRef<{
+    pointerId: number;
+    startY: number;
+    startHeight: number;
+    maximumHeight: number;
+  } | null>(null);
   const aifActiveRef = useRef(visibleIndicators.aif);
   const [lastPrice, setLastPrice] = useState(66678.1);
   const [lastCandle, setLastCandle] = useState<Candle | null>(null);
@@ -2613,6 +2626,88 @@ export function PixiBlackChart({
 
   const volumeProfileSettings = indicatorAdvancedSettings.volumeProfile ?? defaultVolumeProfileSettings;
   const adaptiveSwingSettings = indicatorAdvancedSettings.adaptiveSwingStrategy ?? defaultAdaptiveSwingStrategySettings;
+  const oscillatorPaneSettings: OscillatorPaneSettings = {
+    ...defaultOscillatorPaneSettings,
+    ...indicatorAdvancedSettings.oscillatorPane
+  };
+  const zScoreSettings: ZScoreOscillatorSettings = {
+    ...defaultZScoreOscillatorSettings,
+    ...indicatorAdvancedSettings.zScoreOscillator
+  };
+  const oscillatorPaneVisible =
+    visibleIndicators.openInterestOscillator ||
+    visibleIndicators.zScoreOscillator ||
+    visibleIndicators.waveTrendOscillator;
+  const oscillatorSettingsOpen =
+    activeIndicator === "openInterestOscillator" ||
+    activeIndicator === "zScoreOscillator" ||
+    activeIndicator === "waveTrendOscillator";
+
+  const updateOscillatorPaneSetting = <Key extends keyof OscillatorPaneSettings>(
+    key: Key,
+    value: OscillatorPaneSettings[Key]
+  ) => {
+    onIndicatorAdvancedSettingsChange((current) => ({
+      ...current,
+      oscillatorPane: {
+        ...defaultOscillatorPaneSettings,
+        ...current.oscillatorPane,
+        [key]: value
+      }
+    }));
+  };
+
+  const updateZScoreSetting = <Key extends keyof ZScoreOscillatorSettings>(
+    key: Key,
+    value: ZScoreOscillatorSettings[Key]
+  ) => {
+    onIndicatorAdvancedSettingsChange((current) => ({
+      ...current,
+      zScoreOscillator: {
+        ...defaultZScoreOscillatorSettings,
+        ...current.zScoreOscillator,
+        [key]: value
+      }
+    }));
+  };
+
+  const beginOscillatorResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const hostHeight = hostRef.current?.clientHeight ?? 0;
+    oscillatorResizeRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startHeight: oscillatorPaneSettings.height,
+      maximumHeight: Math.max(82, Math.min(420, hostHeight - 140))
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const resizeOscillatorPane = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const resize = oscillatorResizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    const nextHeight = clampNumber(
+      Math.round(resize.startHeight + resize.startY - event.clientY),
+      82,
+      resize.maximumHeight
+    );
+    updateOscillatorPaneSetting("height", nextHeight);
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const finishOscillatorResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const resize = oscillatorResizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    oscillatorResizeRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  };
 
   const updateVolumeProfileSetting = <Key extends keyof VolumeProfileSettings>(
     key: Key,
@@ -3821,7 +3916,7 @@ export function PixiBlackChart({
 
 
       {activeIndicator && activeIndicator !== "aif" && activeIndicator !== "auctionProfile" && activeIndicator !== "volumeProfile" && activeIndicator !== "adaptiveSwingStrategy" && activeIndicator !== "volatilityHeatmap" && (
-        <div className="indicator-settings">
+        <div className={activeIndicator === "zScoreOscillator" ? "indicator-settings profile-settings oscillator-settings" : "indicator-settings"}>
           <div className="indicator-settings-title">
             <span>{indicatorRows.find((indicator) => indicator.key === activeIndicator)?.label}</span>
             <button type="button" onClick={() => setActiveIndicator(null)}>DONE</button>
@@ -3870,6 +3965,258 @@ export function PixiBlackChart({
               <b>{indicatorVisualSettings[activeIndicator].intensity}</b>
             </span>
           </label>
+          {oscillatorSettingsOpen && (
+            <>
+              <div className="indicator-settings-section">Pane</div>
+              <label className="indicator-range-row">
+                Pane Height
+                <span>
+                  <input
+                    type="range"
+                    min={82}
+                    max={420}
+                    value={oscillatorPaneSettings.height}
+                    onChange={(event) => updateOscillatorPaneSetting("height", Number(event.target.value))}
+                  />
+                  <b>{oscillatorPaneSettings.height}px</b>
+                </span>
+              </label>
+              <label className="indicator-color-setting">
+                Pane Background
+                <input
+                  type="color"
+                  value={oscillatorPaneSettings.backgroundColor}
+                  onChange={(event) => updateOscillatorPaneSetting("backgroundColor", event.target.value)}
+                />
+              </label>
+              <label className="indicator-range-row">
+                Background Intensity
+                <span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={oscillatorPaneSettings.backgroundIntensity}
+                    onChange={(event) => updateOscillatorPaneSetting("backgroundIntensity", Number(event.target.value))}
+                  />
+                  <b>{oscillatorPaneSettings.backgroundIntensity}</b>
+                </span>
+              </label>
+              <label className="indicator-color-setting">
+                Zero Line
+                <input
+                  type="color"
+                  value={oscillatorPaneSettings.zeroLineColor}
+                  onChange={(event) => updateOscillatorPaneSetting("zeroLineColor", event.target.value)}
+                />
+              </label>
+              <label className="indicator-range-row">
+                Zero Line Intensity
+                <span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={oscillatorPaneSettings.zeroLineIntensity}
+                    onChange={(event) => updateOscillatorPaneSetting("zeroLineIntensity", Number(event.target.value))}
+                  />
+                  <b>{oscillatorPaneSettings.zeroLineIntensity}</b>
+                </span>
+              </label>
+            </>
+          )}
+          {activeIndicator === "zScoreOscillator" && (
+            <>
+              <div className="indicator-settings-section">Z-Score Engine</div>
+              <label>
+                Price Source
+                <select
+                  value={zScoreSettings.source}
+                  onChange={(event) => updateZScoreSetting("source", event.target.value as ZScoreOscillatorSettings["source"])}
+                >
+                  <option value="close">Close</option>
+                  <option value="hl2">HL2</option>
+                  <option value="hlc3">HLC3</option>
+                  <option value="ohlc4">OHLC4</option>
+                </select>
+              </label>
+              <label>
+                Calculation
+                <select
+                  value={zScoreSettings.calculationMethod}
+                  onChange={(event) => updateZScoreSetting("calculationMethod", event.target.value as ZScoreOscillatorSettings["calculationMethod"])}
+                >
+                  <option value="price">Price Z-Score</option>
+                  <option value="logReturn">Log Return Z-Score</option>
+                  <option value="percentReturn">Percent Return Z-Score</option>
+                  <option value="robust">Robust Median / MAD</option>
+                </select>
+              </label>
+              <label>
+                Basis
+                <select
+                  value={zScoreSettings.basisMethod}
+                  onChange={(event) => updateZScoreSetting("basisMethod", event.target.value as ZScoreOscillatorSettings["basisMethod"])}
+                >
+                  <option value="sma">SMA</option>
+                  <option value="ema">EMA</option>
+                </select>
+              </label>
+              <label>
+                Deviation
+                <select
+                  value={zScoreSettings.deviationMode}
+                  onChange={(event) => updateZScoreSetting("deviationMode", event.target.value as ZScoreOscillatorSettings["deviationMode"])}
+                >
+                  <option value="population">Population</option>
+                  <option value="sample">Sample</option>
+                </select>
+              </label>
+              <label>
+                Smoothing
+                <select
+                  value={zScoreSettings.smoothingMethod}
+                  onChange={(event) => updateZScoreSetting("smoothingMethod", event.target.value as ZScoreOscillatorSettings["smoothingMethod"])}
+                >
+                  <option value="none">None</option>
+                  <option value="sma">SMA</option>
+                  <option value="ema">EMA</option>
+                  <option value="rma">RMA / Wilder</option>
+                </select>
+              </label>
+              <label>
+                Smoothing Length
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  disabled={zScoreSettings.smoothingMethod === "none"}
+                  value={zScoreSettings.smoothingLength}
+                  onChange={(event) => updateZScoreSetting("smoothingLength", clampNumber(Number(event.target.value), 1, 100))}
+                />
+              </label>
+              <label>
+                Extreme Clamp
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  step={0.25}
+                  value={zScoreSettings.clamp}
+                  onChange={(event) => updateZScoreSetting("clamp", clampNumber(Number(event.target.value), 1, 20))}
+                />
+              </label>
+              <div className="indicator-settings-section">Bands & Style</div>
+              <label>
+                Upper Band
+                <input
+                  type="number"
+                  min={0.25}
+                  max={10}
+                  step={0.25}
+                  value={zScoreSettings.upperBand}
+                  onChange={(event) => updateZScoreSetting("upperBand", clampNumber(Number(event.target.value), 0.25, 10))}
+                />
+              </label>
+              <label className="indicator-color-setting">
+                Upper Band Color
+                <input
+                  type="color"
+                  value={zScoreSettings.upperBandColor}
+                  onChange={(event) => updateZScoreSetting("upperBandColor", event.target.value)}
+                />
+              </label>
+              <label>
+                Lower Band
+                <input
+                  type="number"
+                  min={-10}
+                  max={-0.25}
+                  step={0.25}
+                  value={zScoreSettings.lowerBand}
+                  onChange={(event) => updateZScoreSetting("lowerBand", clampNumber(Number(event.target.value), -10, -0.25))}
+                />
+              </label>
+              <label className="indicator-color-setting">
+                Lower Band Color
+                <input
+                  type="color"
+                  value={zScoreSettings.lowerBandColor}
+                  onChange={(event) => updateZScoreSetting("lowerBandColor", event.target.value)}
+                />
+              </label>
+              <label className="indicator-color-setting">
+                Midline Color
+                <input
+                  type="color"
+                  value={zScoreSettings.midlineColor}
+                  onChange={(event) => updateZScoreSetting("midlineColor", event.target.value)}
+                />
+              </label>
+              <label className="indicator-range-row">
+                Band Intensity
+                <span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={zScoreSettings.bandIntensity}
+                    onChange={(event) => updateZScoreSetting("bandIntensity", Number(event.target.value))}
+                  />
+                  <b>{zScoreSettings.bandIntensity}</b>
+                </span>
+              </label>
+              <label className="indicator-range-row">
+                Line Width
+                <span>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={4}
+                    step={0.25}
+                    value={zScoreSettings.lineWidth}
+                    onChange={(event) => updateZScoreSetting("lineWidth", Number(event.target.value))}
+                  />
+                  <b>{zScoreSettings.lineWidth.toFixed(2)}</b>
+                </span>
+              </label>
+              <label className="indicator-range-row">
+                Line Intensity
+                <span>
+                  <input
+                    type="range"
+                    min={10}
+                    max={100}
+                    value={zScoreSettings.lineIntensity}
+                    onChange={(event) => updateZScoreSetting("lineIntensity", Number(event.target.value))}
+                  />
+                  <b>{zScoreSettings.lineIntensity}</b>
+                </span>
+              </label>
+              <label>
+                Extreme Fill
+                <input
+                  type="checkbox"
+                  checked={zScoreSettings.showBandFill}
+                  onChange={(event) => updateZScoreSetting("showBandFill", event.target.checked)}
+                />
+              </label>
+              <label className="indicator-range-row">
+                Fill Intensity
+                <span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={50}
+                    disabled={!zScoreSettings.showBandFill}
+                    value={zScoreSettings.bandFillIntensity}
+                    onChange={(event) => updateZScoreSetting("bandFillIntensity", Number(event.target.value))}
+                  />
+                  <b>{zScoreSettings.bandFillIntensity}</b>
+                </span>
+              </label>
+            </>
+          )}
           {activeIndicator === "liquidationHeatmap" ? (
             <label>
               Model
@@ -3877,7 +4224,7 @@ export function PixiBlackChart({
                 <option value="leverage-volume">Leverage + volume zones</option>
               </select>
             </label>
-          ) : (
+          ) : !oscillatorSettingsOpen ? (
             <label>
               Source
               <select value="close" onChange={() => undefined}>
@@ -3885,7 +4232,7 @@ export function PixiBlackChart({
                 <option value="hlc3">HLC3</option>
               </select>
             </label>
-          )}
+          ) : null}
         </div>
       )}
 
@@ -4153,6 +4500,26 @@ export function PixiBlackChart({
         {indicatorsCollapsed ? "v" : "^"}
       </button>
       <div ref={hostRef} className="pixi-chart-host" onContextMenu={handleChartContextMenu} onClick={() => setChartContextMenu(null)} />
+      {oscillatorPaneVisible && (
+        <div
+          className="oscillator-pane-resizer"
+          style={{ bottom: `min(${74 + clampNumber(Number(oscillatorPaneSettings.height), 82, 420)}px, calc(100% - 110px))` }}
+          role="separator"
+          aria-label="Resize oscillator pane"
+          aria-orientation="horizontal"
+          onPointerDown={beginOscillatorResize}
+          onPointerMove={resizeOscillatorPane}
+          onPointerUp={finishOscillatorResize}
+          onPointerCancel={finishOscillatorResize}
+          onDoubleClick={() => updateOscillatorPaneSetting("height", defaultOscillatorPaneSettings.height)}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+        >
+          <span />
+        </div>
+      )}
       {auctionDataRequired && <>
         <AuctionProfileLegend snapshot={auctionProfileSnapshot} settings={normalizedAuctionProfileSettings} chartType={chartType} />
         {normalizedAuctionProfileSettings.diagnosticsVisible && <AuctionProfileDiagnostics snapshot={auctionProfileSnapshot} />}

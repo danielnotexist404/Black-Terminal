@@ -410,6 +410,14 @@ function migrateIndicatorAdvancedSettings(value: Partial<IndicatorAdvancedSettin
     adaptiveSwingStrategy: {
       ...defaultIndicatorAdvancedSettings.adaptiveSwingStrategy,
       ...(value?.adaptiveSwingStrategy ?? {})
+    },
+    oscillatorPane: {
+      ...defaultIndicatorAdvancedSettings.oscillatorPane,
+      ...(value?.oscillatorPane ?? {})
+    },
+    zScoreOscillator: {
+      ...defaultIndicatorAdvancedSettings.zScoreOscillator,
+      ...(value?.zScoreOscillator ?? {})
     }
   };
 }

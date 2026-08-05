@@ -5546,6 +5546,14 @@ body.resizing-layout * {
   background: rgba(255, 255, 255, 0.16);
 }
 
+.indicator-settings.oscillator-settings {
+  max-height: min(720px, calc(100% - 78px));
+}
+
+.indicator-settings.oscillator-settings select {
+  width: 168px;
+}
+
 .indicator-settings-title {
   display: flex;
   align-items: center;
@@ -5957,6 +5965,40 @@ body.resizing-layout * {
   position: absolute;
   inset: 44px 0 0;
   overflow: hidden;
+}
+
+.oscillator-pane-resizer {
+  position: absolute;
+  right: 88px;
+  left: 0;
+  z-index: 8;
+  height: 14px;
+  transform: translateY(50%);
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.oscillator-pane-resizer span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 52px;
+  height: 4px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(5, 6, 7, 0.92);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.65);
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+  pointer-events: none;
+}
+
+.oscillator-pane-resizer:hover span,
+.oscillator-pane-resizer:active span {
+  border-color: rgba(220, 0, 38, 0.78);
+  background: rgba(112, 0, 20, 0.92);
+  box-shadow: 0 0 10px rgba(180, 0, 32, 0.32);
 }
 
 .order-management-menu {

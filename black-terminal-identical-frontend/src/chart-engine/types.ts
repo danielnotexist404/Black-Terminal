@@ -291,9 +291,39 @@ export type AdaptiveSwingStrategySettings = {
   robustnessMode: "Balanced" | "Profit First" | "Drawdown First";
 };
 
+export type OscillatorPaneSettings = {
+  height: number;
+  backgroundColor: string;
+  backgroundIntensity: number;
+  zeroLineColor: string;
+  zeroLineIntensity: number;
+};
+
+export type ZScoreOscillatorSettings = {
+  source: "close" | "hl2" | "hlc3" | "ohlc4";
+  calculationMethod: "price" | "logReturn" | "percentReturn" | "robust";
+  basisMethod: "sma" | "ema";
+  deviationMode: "population" | "sample";
+  smoothingMethod: "none" | "sma" | "ema" | "rma";
+  smoothingLength: number;
+  upperBand: number;
+  lowerBand: number;
+  clamp: number;
+  upperBandColor: string;
+  lowerBandColor: string;
+  midlineColor: string;
+  lineWidth: number;
+  lineIntensity: number;
+  bandIntensity: number;
+  showBandFill: boolean;
+  bandFillIntensity: number;
+};
+
 export type IndicatorAdvancedSettings = {
   volumeProfile: VolumeProfileSettings;
   adaptiveSwingStrategy: AdaptiveSwingStrategySettings;
+  oscillatorPane: OscillatorPaneSettings;
+  zScoreOscillator: ZScoreOscillatorSettings;
 };
 
 export type FeedEvent = {

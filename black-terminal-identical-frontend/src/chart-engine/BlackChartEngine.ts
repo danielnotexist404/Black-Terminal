@@ -42,6 +42,7 @@ import { resolveChartDeviceCapabilities } from "./deviceCapabilities";
 import type { LiquidationFieldSettings, LiquidationFieldSnapshot } from "../modules/liquidation-field/core/types";
 import { migrateLiquidationFieldSettings } from "../modules/liquidation-field/core/settings";
 import { BlackCoreLiquidationFieldRenderer } from "../modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer";
+import { bclifTimestampMsToChartSeconds } from "../modules/liquidation-field/rendering/timeProjection";
 
 import {
   fromAxisValue,
@@ -1592,7 +1593,7 @@ export class BlackChartEngine {
       height: plotHeight,
       top: this.view.topPadding,
       bottom: plotHeight,
-      xForTime: (time) => this.xForTimestamp(time),
+      xForTimestampMs: (timestampMs) => this.xForTimestamp(bclifTimestampMsToChartSeconds(timestampMs)),
       yForPrice: (price) => this.yForPrice(price)
     });
     this.kioseffRenderer.draw(

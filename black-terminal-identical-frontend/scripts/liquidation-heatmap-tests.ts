@@ -6,9 +6,15 @@ import { buildLiquidationFieldSnapshot } from "../src/modules/liquidation-field/
 import { createLeveragePrior } from "../src/modules/liquidation-field/core/leveragePriors.ts";
 import { DEFAULT_LIQUIDATION_FIELD_SETTINGS } from "../src/modules/liquidation-field/core/settings.ts";
 import { createThermalPalette } from "../src/modules/liquidation-field/rendering/thermalPalette.ts";
+import { bclifTimestampMsToChartSeconds } from "../src/modules/liquidation-field/rendering/timeProjection.ts";
 import { createLiquidationFieldFixture } from "../src/modules/liquidation-field/testing/fixtures.ts";
 
 const fixture = createLiquidationFieldFixture();
+assert.equal(
+  bclifTimestampMsToChartSeconds(fixture.frames[0]!.timestamp),
+  fixture.frames[0]!.timestamp / 1_000,
+  "BCLIF millisecond timestamps must project into the chart's second-based time domain"
+);
 const settings = { ...DEFAULT_LIQUIDATION_FIELD_SETTINGS, timeColumns: 256, priceRows: 256, minimumConfidence: 0 };
 const prior = createLeveragePrior("REGIME_ADAPTIVE", fixture.frames[40]!, fixture.rules.maxLeverage);
 assert.ok(Math.abs(prior.buckets.reduce((sum, bucket) => sum + bucket.probability, 0) - 1) < 1e-9, "leverage prior must normalize to one");

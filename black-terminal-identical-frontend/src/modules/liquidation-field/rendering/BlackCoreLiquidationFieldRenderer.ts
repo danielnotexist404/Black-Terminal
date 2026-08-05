@@ -7,7 +7,7 @@ export interface LiquidationFieldRenderTransform {
   height: number;
   top: number;
   bottom: number;
-  xForTime(time: number): number;
+  xForTimestampMs(timestampMs: number): number;
   yForPrice(price: number): number;
 }
 
@@ -61,8 +61,8 @@ export class BlackCoreLiquidationFieldRenderer {
     const sprite = this.sprite;
     if (!snapshot || !settings || !sprite) return;
 
-    const left = transform.xForTime(snapshot.header.startTime);
-    const right = transform.xForTime(snapshot.header.endTime);
+    const left = transform.xForTimestampMs(snapshot.header.startTime);
+    const right = transform.xForTimestampMs(snapshot.header.endTime);
     const top = transform.yForPrice(snapshot.header.maxPrice);
     const bottom = transform.yForPrice(snapshot.header.minPrice);
     sprite.x = Math.min(left, right);
@@ -74,7 +74,7 @@ export class BlackCoreLiquidationFieldRenderer {
 
     if (settings.confirmedMarkersVisible) {
       for (const event of snapshot.confirmedEvents) {
-        const x = transform.xForTime(event.timestamp);
+        const x = transform.xForTimestampMs(event.timestamp);
         const y = transform.yForPrice(event.bankruptcyPrice);
         if (x < 0 || x > transform.width || y < transform.top || y > transform.bottom) continue;
         const color = event.liquidatedPositionSide === "LONG" ? 0xff1738 : 0xf4f2f3;

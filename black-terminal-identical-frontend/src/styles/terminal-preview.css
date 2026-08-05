@@ -1154,7 +1154,13 @@
 }
 
 .terminal-command-center .chart-wrap {
-  background: #020203;
+  background: #000;
+}
+
+.terminal-command-center .chart-wrap::after {
+  content: none;
+  background: none;
+  opacity: 0;
 }
 
 .terminal-command-center .chart-header {

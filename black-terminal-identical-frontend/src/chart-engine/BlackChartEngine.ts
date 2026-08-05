@@ -57,7 +57,7 @@ import {
 } from "./types";
 
 const theme: ChartTheme = {
-  background: 0x050507,
+  background: 0x000000,
   grid: 0xff344a,
   gridAlpha: 0.052,
   text: 0xf7f2f4,
@@ -1520,17 +1520,6 @@ export class BlackChartEngine {
     const plotHeight = this.view.height - this.view.bottomAxisHeight;
 
     g.rect(0, 0, this.view.width, this.view.height).fill({ color: theme.background });
-
-    for (let i = 0; i <= 8; i++) {
-      const y = this.view.topPadding + ((plotHeight - this.view.topPadding) / 8) * i;
-      g.moveTo(0, y).lineTo(plotWidth, y).stroke({ width: 1, color: theme.grid, alpha: theme.gridAlpha });
-    }
-
-    const data = this.getDisplayCandles();
-    const ticks = this.getAlignedTimeTicks(data);
-    for (const tick of ticks) {
-      g.moveTo(tick.x, this.view.topPadding).lineTo(tick.x, plotHeight).stroke({ width: 1, color: theme.grid, alpha: theme.gridAlpha });
-    }
 
     g.moveTo(plotWidth, 0).lineTo(plotWidth, this.view.height).stroke({ width: 1, color: 0xffffff, alpha: 0.08 });
     g.moveTo(0, plotHeight).lineTo(this.view.width, plotHeight).stroke({ width: 1, color: 0xffffff, alpha: 0.08 });

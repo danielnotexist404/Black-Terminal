@@ -12,6 +12,10 @@ This document explains how Black Terminal is built today and how its major syste
 - Icons and UI primitives: lucide-react plus project CSS in `src/styles/`.
 - Package baseline: Node 22, npm 10+.
 
+## Liquidation Intelligence build path
+
+The Event Horizon indicator lives in `src/modules/liquidation-field/`. REST/WS inputs normalize into canonical frames; a dedicated module worker executes the persistent cohort and exposure raster; Pixi uploads one RGBA buffer as a GPU texture below candles. `npm run test:liquidation-heatmap` validates the mathematical and truth-model contracts. Apply `202608050001_bclif_liquidation_intelligence_foundation.sql` before deploying a future persistent tile collector; the browser-only release does not write storage objects.
+
 ## Black Cloud data plane
 
 The persistent execution service is a separate Node 22 container. `Dockerfile.black-cloud` and

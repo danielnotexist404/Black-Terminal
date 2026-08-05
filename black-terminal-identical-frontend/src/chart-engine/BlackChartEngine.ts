@@ -6,7 +6,6 @@ import {
   Text
 } from "pixi.js";
 import { CandleBuffer } from "./data/CandleBuffer";
-import { LiquidationHeatmapModel } from "./heatmap/LiquidationHeatmapModel";
 import { VolumeProfileModel, VolumeProfileResult, VolumeProfileRow } from "./profile/VolumeProfileModel";
 import {
   defaultIndicatorAdvancedSettings,
@@ -40,6 +39,9 @@ import { resolveAuctionVisualizationLayers } from "../modules/auction-profile/re
 import { AUCTION_PROFILE_DEFAULT_SETTINGS, migrateAuctionProfileSettings } from "../modules/auction-profile/core/settings";
 import type { AuctionProfileSettings, AuctionProfileSnapshot } from "../modules/auction-profile/core/types";
 import { resolveChartDeviceCapabilities } from "./deviceCapabilities";
+import type { LiquidationFieldSettings, LiquidationFieldSnapshot } from "../modules/liquidation-field/core/types";
+import { migrateLiquidationFieldSettings } from "../modules/liquidation-field/core/settings";
+import { BlackCoreLiquidationFieldRenderer } from "../modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer";
 
 import {
   fromAxisValue,
@@ -90,13 +92,6 @@ const MAX_CANDLE_GAP = 8;
 function clampNumber(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
 }
-
-type LiquidationHeatmapRow = {
-  price: number;
-  strength: number;
-  longScore: number;
-  shortScore: number;
-};
 
 type DrawingPoint = {
   index: number;
@@ -157,7 +152,9 @@ export class BlackChartEngine {
   private app = new Application();
   private candles: CandleBuffer;
   private displayedCandles: Candle[] = [];
-  private heatmapModel = new LiquidationHeatmapModel();
+  private liquidationFieldRenderer = new BlackCoreLiquidationFieldRenderer();
+  private liquidationFieldSnapshot: LiquidationFieldSnapshot | null = null;
+  private liquidationFieldSettings: LiquidationFieldSettings = migrateLiquidationFieldSettings();
   private kioseffRenderer = new KioseffPixiRenderer();
   private kioseffSnapshot: KioseffSnapshot | null = null;
   private kioseffSettings: KioseffSettingsV1 = structuredClone(KIOSEFF_DEFAULT_SETTINGS);
@@ -330,6 +327,7 @@ export class BlackChartEngine {
     if (options.indicatorPeriods) this.indicatorPeriods = options.indicatorPeriods;
     if (options.indicatorVisualSettings) this.indicatorVisualSettings = options.indicatorVisualSettings;
     if (options.indicatorAdvancedSettings) this.indicatorAdvancedSettings = options.indicatorAdvancedSettings;
+    this.liquidationFieldSettings = migrateLiquidationFieldSettings(this.indicatorAdvancedSettings.liquidationField);
     if (options.kioseffSnapshot !== undefined) this.kioseffSnapshot = options.kioseffSnapshot;
     if (options.kioseffSettings) {
       this.kioseffSettings = migrateKioseffSettings(options.kioseffSettings);
@@ -375,6 +373,7 @@ export class BlackChartEngine {
     this.rootLayer.addChild(
       this.gridLayer,
       this.watermarkLayer,
+      this.liquidationFieldRenderer.container,
       this.heatmapLayer,
       this.kioseffRenderer.container,
       this.volumeLayer,
@@ -732,8 +731,23 @@ export class BlackChartEngine {
     this.indicatorPeriods = indicatorPeriods;
     this.indicatorVisualSettings = indicatorVisualSettings;
     this.indicatorAdvancedSettings = indicatorAdvancedSettings;
+    this.liquidationFieldSettings = migrateLiquidationFieldSettings(indicatorAdvancedSettings.liquidationField);
     this.setHeatmapSource(this.candles.all(), this.heatmapVisibleUntilIndex);
     this.draw();
+  }
+
+  setLiquidationFieldState(snapshot: LiquidationFieldSnapshot | null, settings = this.liquidationFieldSettings) {
+    this.liquidationFieldSnapshot = snapshot;
+    this.liquidationFieldSettings = migrateLiquidationFieldSettings(settings);
+    this.liquidationFieldRenderer.setState(
+      this.visibleIndicators.liquidationHeatmap ? snapshot : null,
+      this.liquidationFieldSettings
+    );
+    this.draw();
+  }
+
+  getSourceCandles() {
+    return this.candles.all().map((candle) => ({ ...candle }));
   }
 
   setKioseffState(snapshot: KioseffSnapshot | null, settings = this.kioseffSettings) {
@@ -864,9 +878,6 @@ export class BlackChartEngine {
 
   private setHeatmapSource(candles: Candle[], visibleUntilIndex = candles.length - 1) {
     this.heatmapVisibleUntilIndex = Math.max(0, Math.min(Math.max(0, candles.length - 1), visibleUntilIndex));
-    if (this.visibleIndicators.liquidationHeatmap) {
-      this.heatmapModel.setSource(candles);
-    }
   }
 
   destroy() {
@@ -888,6 +899,7 @@ export class BlackChartEngine {
     this.clearProfileTexts();
     this.clearHeatmapTexts();
     this.kioseffRenderer.dispose();
+    this.liquidationFieldRenderer.dispose();
     this.auctionProfileRenderer.dispose();
     this.cvdFootprintRenderer.dispose();
     this.app.destroy(true, { children: true, texture: true });
@@ -1571,6 +1583,18 @@ export class BlackChartEngine {
     this.clearHeatmapTexts();
     const plotWidth = this.view.width - this.view.rightAxisWidth;
     const plotHeight = this.view.height - this.view.bottomAxisHeight;
+    this.liquidationFieldRenderer.setState(
+      this.visibleIndicators.liquidationHeatmap ? this.liquidationFieldSnapshot : null,
+      this.liquidationFieldSettings
+    );
+    this.liquidationFieldRenderer.draw({
+      width: plotWidth,
+      height: plotHeight,
+      top: this.view.topPadding,
+      bottom: plotHeight,
+      xForTime: (time) => this.xForTimestamp(time),
+      yForPrice: (price) => this.yForPrice(price)
+    });
     this.kioseffRenderer.draw(
       this.visibleIndicators.volatilityHeatmap ? this.kioseffSnapshot : null,
       this.kioseffSettings,
@@ -1623,323 +1647,6 @@ export class BlackChartEngine {
         kioseffMetrics.textObjects + auctionProfileMetrics.labels + footprintMetrics.labels
     );
 
-    if (!this.visibleIndicators.liquidationHeatmap) return;
-
-    const visual = this.visualFor("liquidationHeatmap", "red");
-    const untilIndex = this.heatmapVisibleUntilIndex ?? this.candles.all().length - 1;
-    const cells = this.heatmapModel.visibleCells(
-      this.view.firstIndex,
-      this.view.lastIndex,
-      untilIndex,
-      this.view.priceMin,
-      this.view.priceMax
-    );
-    const step = this.timeStep();
-    const profile = new Map<string, { price: number; strength: number }>();
-
-    for (const cell of cells) {
-      const startIndex = Math.max(this.view.firstIndex, cell.startIndex);
-      const endIndex = Math.min(this.view.lastIndex, untilIndex, cell.endIndex);
-      if (endIndex < startIndex) continue;
-
-      const x1 = this.xForIndex(startIndex) - step * 0.5;
-      const x2 = this.xForIndex(endIndex) + step * 0.5;
-      if (x2 < 0 || x1 > plotWidth) continue;
-
-      const yTop = this.yForPrice(cell.priceHigh);
-      const yBottom = this.yForPrice(cell.priceLow);
-      const y = Math.min(yTop, yBottom);
-      const h = Math.max(1.1, Math.abs(yBottom - yTop));
-      if (y + h < this.view.topPadding || y > plotHeight) continue;
-
-      const color = this.liquidationColor(cell.strength);
-      const alpha = (0.032 + cell.strength * 0.22) * Math.max(0.35, visual.alpha);
-      g.rect(Math.max(0, x1), y, Math.min(plotWidth, x2) - Math.max(0, x1), h)
-        .fill({ color, alpha });
-
-      if (cell.strength >= 0.55) {
-        const coreHeight = Math.max(1, h * 0.42);
-        g.rect(Math.max(0, x1), y + h * 0.29, Math.min(plotWidth, x2) - Math.max(0, x1), coreHeight)
-          .fill({ color, alpha: Math.min(0.48, alpha + 0.075) });
-      }
-
-      const profileKey = String(Math.round(cell.price / Math.max(1, (this.view.priceMax - this.view.priceMin) / 180)));
-      const current = profile.get(profileKey);
-      if (!current || cell.strength > current.strength) {
-        profile.set(profileKey, { price: cell.price, strength: cell.strength });
-      }
-    }
-
-    const profileLevels = [...profile.values()]
-      .filter((level) => level.strength >= 0.15)
-      .sort((a, b) => b.strength - a.strength)
-      .slice(0, 80);
-
-    for (const lvl of profileLevels) {
-      const y = this.yForPrice(lvl.price);
-      if (y < this.view.topPadding || y > plotHeight) continue;
-      const color = this.liquidationColor(lvl.strength);
-      const width = plotWidth * (0.08 + lvl.strength * 0.28);
-      const height = 1.2 + lvl.strength * 2.8;
-      g.rect(plotWidth - width - 16, y - height / 2, width, height)
-        .fill({ color, alpha: (0.08 + lvl.strength * 0.18) * Math.max(0.35, visual.alpha) });
-    }
-
-    for (const lvl of this.liquidityLevels()) {
-      const y = this.yForPrice(lvl.price);
-      if (y < this.view.topPadding || y > plotHeight) continue;
-      const width = plotWidth * (0.20 + lvl.strength * 0.42);
-      const x = plotWidth - width - 18;
-      const h = 7 + lvl.strength * 12;
-      g.rect(x, y - h / 2, width, h).fill({ color: lvl.color, alpha: (lvl.color === theme.orangeBright ? 0.36 : 0.24) * Math.max(0.35, visual.alpha) });
-      for (let k = 0; k < 8; k++) {
-        const bw = width * this.profileBandScale(lvl.strength, k);
-        g.rect(plotWidth - bw - 18, y - h / 2 + k * 2.2, bw, 1.05)
-          .fill({ color: lvl.color, alpha: (lvl.color === theme.orangeBright ? 0.24 : 0.15) * Math.max(0.35, visual.alpha) });
-      }
-    }
-  }
-
-  private drawVolatilityLadderCell(
-    g: Graphics,
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    strength: number,
-    side: "support" | "resistance",
-    selectedColor: number,
-    visualAlpha: number
-  ) {
-    const boundedY = Math.max(this.view.topPadding, y);
-    const boundedH = Math.min(this.view.height - this.view.bottomAxisHeight, y + h) - boundedY;
-    if (boundedH <= 0 || w <= 0) return;
-
-    const alphaScale = Math.max(0.35, visualAlpha);
-    const rowGap = side === "support"
-      ? Math.max(4.2, Math.min(8.2, 8.0 - strength * 2.4))
-      : Math.max(4.8, Math.min(9.5, 9.2 - strength * 2.8));
-    const rows = Math.max(2, Math.min(28, Math.floor(boundedH / rowGap)));
-    const rowAlpha = side === "resistance"
-      ? (0.045 + strength * 0.18) * alphaScale
-      : (0.14 + strength * 0.28) * alphaScale;
-
-    if (side === "resistance") {
-      const baseColor = strength > 0.84 ? theme.orangeBright : strength > 0.68 ? theme.redBright : selectedColor;
-      g.rect(x, boundedY, w, boundedH)
-        .fill({ color: 0x170306, alpha: Math.min(0.13, (0.012 + strength * 0.045) * alphaScale) });
-
-      for (let row = 0; row <= rows; row++) {
-        const p = rows === 0 ? 0.5 : row / rows;
-        const yy = boundedY + p * boundedH;
-        const taper = 0.78 + Math.sin((p * Math.PI) || 0) * 0.22;
-        const lineWidth = w * taper;
-        const x2 = x + lineWidth;
-        g.moveTo(x, yy).lineTo(x2, yy)
-          .stroke({ width: strength > 0.72 ? 1.05 : 0.7, color: baseColor, alpha: Math.min(0.36, rowAlpha) });
-      }
-
-      const coreY = boundedY + boundedH * (0.48 + Math.sin(strength * 5.2) * 0.04);
-      g.rect(x, coreY - 1, w, 2)
-        .fill({ color: baseColor, alpha: Math.min(0.62, (0.18 + strength * 0.34) * alphaScale) });
-      if (strength >= 0.82) {
-        g.rect(x, coreY - 3.4, w, 6.8)
-          .fill({ color: theme.orangeBright, alpha: Math.min(0.15, 0.05 + strength * 0.07) * alphaScale });
-      }
-      return;
-    }
-
-    g.rect(x, boundedY, w, boundedH)
-      .fill({ color: 0x010203, alpha: Math.min(0.82, (0.46 + strength * 0.34) * alphaScale) });
-    g.rect(x, boundedY, w, boundedH)
-      .stroke({ width: 0.85, color: 0x6f7781, alpha: Math.min(0.34, (0.14 + strength * 0.18) * alphaScale) });
-
-    for (let row = 0; row <= rows; row++) {
-      const p = rows === 0 ? 0.5 : row / rows;
-      const yy = boundedY + p * boundedH;
-      const notch = 0.88 + Math.cos(p * Math.PI * 2.2 + strength) * 0.07;
-      const lineWidth = w * notch;
-      g.moveTo(x, yy).lineTo(x + lineWidth, yy)
-        .stroke({ width: strength > 0.7 ? 0.95 : 0.75, color: 0x8a929d, alpha: Math.min(0.46, rowAlpha) });
-    }
-
-    const voidY = boundedY + boundedH * 0.5;
-    g.rect(x, voidY - Math.max(1.4, boundedH * 0.035), w, Math.max(2.4, boundedH * 0.07))
-      .fill({ color: 0x000000, alpha: Math.min(0.96, (0.64 + strength * 0.26) * alphaScale) });
-
-    if (strength >= 0.76) {
-      g.moveTo(x, voidY).lineTo(x + w, voidY)
-        .stroke({ width: 1.15, color: theme.silverBright, alpha: Math.min(0.46, 0.18 + strength * 0.24) * alphaScale });
-      g.moveTo(x, boundedY + boundedH * 0.18).lineTo(x + w, boundedY + boundedH * 0.18)
-        .stroke({ width: 0.85, color: theme.green, alpha: Math.min(0.28, 0.08 + strength * 0.14) * alphaScale });
-    }
-  }
-
-  private liquidationColor(strength: number) {
-    if (strength >= 0.86) return theme.orangeBright;
-    if (strength >= 0.68) return theme.orange;
-    if (strength >= 0.44) return theme.redBright;
-    return theme.red;
-  }
-
-  private liquidationHeatmapRows(rowCount: number): LiquidationHeatmapRow[] {
-    const source = this.candles.all().slice(-900);
-    const last = source[source.length - 1];
-    const range = Math.max(1, this.view.priceMax - this.view.priceMin);
-    const rows = Array.from({ length: rowCount }, (_, index) => ({
-      price: this.view.priceMin + (range * index) / Math.max(1, rowCount - 1),
-      score: 0,
-      longScore: 0,
-      shortScore: 0
-    }));
-
-    if (!last || source.length < 12) {
-      return rows.map((row) => ({ ...row, strength: 0 }));
-    }
-
-    const maxVol = Math.max(...source.map((candle) => candle.volume), 1);
-    const current = last.close;
-    const visibleMin = this.view.priceMin - range * 0.12;
-    const visibleMax = this.view.priceMax + range * 0.12;
-    const leverageTiers = [
-      { leverage: 5, weight: 0.42 },
-      { leverage: 10, weight: 0.66 },
-      { leverage: 25, weight: 0.98 },
-      { leverage: 50, weight: 1.14 },
-      { leverage: 100, weight: 0.86 }
-    ];
-
-    const addLevel = (price: number, score: number, side: "long" | "short") => {
-      if (price < visibleMin || price > visibleMax || !Number.isFinite(price)) return;
-      const index = Math.round(((price - this.view.priceMin) / range) * (rowCount - 1));
-
-      for (let offset = -4; offset <= 4; offset++) {
-        const target = index + offset;
-        const row = rows[target];
-        if (!row) continue;
-        const gaussian = Math.exp(-(offset * offset) / 6.2);
-        const weighted = score * gaussian;
-        row.score += weighted;
-        if (side === "long") row.longScore += weighted;
-        else row.shortScore += weighted;
-      }
-    };
-
-    for (const candle of source) {
-      const span = Math.max(candle.high - candle.low, range * 0.002);
-      const bodyPressure = Math.min(1, Math.abs(candle.close - candle.open) / span);
-      const volWeight = Math.sqrt(candle.volume / maxVol) * (0.58 + bodyPressure * 0.72);
-      const references = [
-        { price: candle.close, weight: 1 },
-        { price: candle.open, weight: 0.62 },
-        { price: candle.high, weight: 0.34 },
-        { price: candle.low, weight: 0.34 }
-      ];
-
-      for (const reference of references) {
-        for (const tier of leverageTiers) {
-          const liquidationDistance = 0.92 / tier.leverage;
-          const proximityBoost = 1 + Math.exp(-Math.abs(reference.price - current) / (range * 0.42)) * 0.65;
-          const score = reference.weight * tier.weight * volWeight * proximityBoost;
-          addLevel(reference.price * (1 + liquidationDistance), score, "short");
-          addLevel(reference.price * (1 - liquidationDistance), score, "long");
-        }
-      }
-    }
-
-    for (let i = 2; i < source.length - 2; i++) {
-      const candle = source[i];
-      const prevA = source[i - 1];
-      const prevB = source[i - 2];
-      const nextA = source[i + 1];
-      const nextB = source[i + 2];
-      const swingHigh = candle.high >= prevA.high && candle.high >= prevB.high && candle.high >= nextA.high && candle.high >= nextB.high;
-      const swingLow = candle.low <= prevA.low && candle.low <= prevB.low && candle.low <= nextA.low && candle.low <= nextB.low;
-      const swingWeight = Math.sqrt(candle.volume / maxVol) * 4.2;
-
-      if (swingHigh) {
-        addLevel(candle.high * 1.018, swingWeight, "short");
-        addLevel(candle.high * 1.036, swingWeight * 0.68, "short");
-      }
-      if (swingLow) {
-        addLevel(candle.low * 0.982, swingWeight, "long");
-        addLevel(candle.low * 0.964, swingWeight * 0.68, "long");
-      }
-    }
-
-    const maxScore = Math.max(...rows.map((row) => row.score), 1);
-    return rows.map((row) => ({
-      price: row.price,
-      strength: Math.min(1, Math.pow(row.score / maxScore, 0.72)),
-      longScore: row.longScore,
-      shortScore: row.shortScore
-    }));
-  }
-
-  private liquidityLevels() {
-    if (!this.visibleIndicators.liquidationHeatmap) return [];
-
-    const untilIndex = this.heatmapVisibleUntilIndex ?? this.candles.all().length - 1;
-    const candidates = this.heatmapModel.liquidityLevels(
-      untilIndex,
-      this.view.priceMin,
-      this.view.priceMax,
-      6
-    );
-
-    const selected: Array<{
-      price: number;
-      strength: number;
-      color: number;
-      label: string;
-      labelColor: number;
-    }> = [];
-    for (const candidate of candidates) {
-      const side = candidate.side === "short" ? "Short" : "Long";
-      const strongest = candidate.strength >= 0.86;
-      const color = this.liquidationColor(candidate.strength);
-      selected.push({
-        price: candidate.price,
-        strength: candidate.strength,
-        color,
-        label: strongest ? "Max Liq" : `${side} Liq`,
-        labelColor: strongest ? theme.orangeBright : theme.redBright
-      });
-      if (selected.length >= 5) break;
-    }
-
-    return selected;
-  }
-
-  private resolvedLiquidityLabelPositions(plotHeight: number) {
-    const minY = this.view.topPadding + 12;
-    const maxY = plotHeight - 16;
-    const levels = this.liquidityLevels()
-      .map((level) => ({
-        ...level,
-        y: Math.max(minY, Math.min(maxY, this.yForPrice(level.price)))
-      }))
-      .sort((a, b) => a.y - b.y);
-
-    for (let i = 1; i < levels.length; i++) {
-      if (levels[i].y - levels[i - 1].y < 18) {
-        levels[i].y = levels[i - 1].y + 18;
-      }
-    }
-
-    const overflow = levels.length ? levels[levels.length - 1].y - maxY : 0;
-    if (overflow > 0) {
-      for (const level of levels) {
-        level.y = Math.max(minY, level.y - overflow);
-      }
-    }
-
-    return levels;
-  }
-
-  private profileBandScale(strength: number, index: number) {
-    const seed = (Math.round(strength * 100) + index * 37) % 82;
-    return 0.18 + seed / 100;
   }
 
   private indicatorColor(color: IndicatorColorKey, fallback = theme.silverBright) {
@@ -3743,8 +3450,12 @@ export class BlackChartEngine {
     const highY = this.yForPrice(c.high);
     const lowY = this.yForPrice(c.low);
     const bullish = c.close >= c.open;
-    const color = override?.color ?? (bullish ? theme.silver : theme.red);
-    const wick = override?.wick ?? (bullish ? theme.silverBright : theme.redBright);
+    const referencePalette = this.visibleIndicators.liquidationHeatmap
+      && this.liquidationFieldSettings.candlePalette === "REFERENCE_CYAN_MAGENTA";
+    const defaultColor = bullish ? (referencePalette ? 0x31d5cf : theme.silver) : (referencePalette ? 0xec145d : theme.red);
+    const defaultWick = bullish ? (referencePalette ? 0x7ff7ee : theme.silverBright) : (referencePalette ? 0xff4b83 : theme.redBright);
+    const color = override?.color ?? defaultColor;
+    const wick = override?.wick ?? defaultWick;
     const alpha = override?.alpha ?? 0.98;
     const bodyTop = Math.min(openY, closeY);
     const bodyHeight = Math.max(1, Math.abs(openY - closeY));
@@ -4345,11 +4056,6 @@ export class BlackChartEngine {
         0xff0055,
         "600"
       );
-    }
-
-    for (const lvl of this.resolvedLiquidityLabelPositions(plotHeight)) {
-      g.moveTo(plotWidth - 190, lvl.y).lineTo(plotWidth, lvl.y).stroke({ width: 1, color: lvl.labelColor, alpha: 0.18 });
-      this.addText(this.labelTexts, lvl.label, plotWidth - 132, lvl.y - 13, 11, lvl.labelColor, "600", "Inter");
     }
 
     // bottom time axis

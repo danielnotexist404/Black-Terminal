@@ -1,5 +1,11 @@
 # Architecture
 
+## Phase V Chapter III-B — Black Core Liquidation Intelligence Field
+
+`src/modules/liquidation-field/` owns the BCLIF canonical frame, Bybit public adapter, persistent cohort/particle model, confidence engine, worker rasterizer and one-texture Pixi renderer. The browser collects live public trades, all-liquidation events and L2 depth for its session; OI history and venue risk tiers come from Bybit REST. Dense historical tiles are reserved for a future persistent collector and the service-only metadata schema in migration `202608050001`.
+
+The stable `liquidationHeatmap` permission key now activates Liquidation Intelligence. It does not share calculations with Market Maker Heatmap, DOM Pro, RADAP or execution systems. See `docs/liquidation/BLACK_CORE_LIQUIDATION_INTELLIGENCE_FIELD.md`.
+
 ## Phase V Chapter II-B control/data-plane separation
 
 Persistent trading is not part of the React runtime. The authenticated UI authorizes a versioned

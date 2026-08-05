@@ -6066,6 +6066,152 @@ body.resizing-layout * {
   height: 100% !important;
 }
 
+.liquidation-field-settings {
+  display: grid;
+  gap: 8px;
+  min-width: 310px;
+}
+
+.liquidation-field-settings .indicator-settings-section {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid rgba(132, 139, 151, 0.16);
+  border-radius: 9px;
+  background: linear-gradient(145deg, rgba(11, 12, 15, 0.78), rgba(1, 1, 3, 0.66));
+}
+
+.liquidation-field-settings .indicator-settings-section > b {
+  color: #e7e9ec;
+  font-size: 9px;
+  letter-spacing: 0.13em;
+}
+
+.liquidation-field-settings label {
+  display: grid;
+  grid-template-columns: minmax(112px, 1fr) minmax(130px, 1.15fr);
+  align-items: center;
+  gap: 9px;
+}
+
+.liquidation-field-settings .indicator-range-row > span,
+.liquidation-inline-inputs {
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+}
+
+.liquidation-field-settings .liquidation-inline-inputs { grid-template-columns: 1fr 1fr; }
+.liquidation-field-toggles label { grid-template-columns: 1fr auto; }
+
+.liquidation-field-legend,
+.liquidation-field-diagnostics,
+.liquidation-field-status {
+  position: absolute;
+  z-index: 18;
+  pointer-events: none;
+  font-family: "IBM Plex Mono", monospace;
+  border: 1px solid rgba(99, 105, 116, 0.36);
+  border-radius: 7px;
+  color: #ebedf0;
+  background: linear-gradient(145deg, rgba(7, 8, 11, 0.88), rgba(0, 0, 2, 0.78));
+  backdrop-filter: blur(12px) saturate(120%);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.4);
+}
+
+.liquidation-field-legend {
+  left: 18px;
+  bottom: 72px;
+  width: 232px;
+  padding: 8px 10px;
+}
+
+.liquidation-field-legend header,
+.liquidation-field-diagnostics header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+}
+
+.liquidation-field-legend header span,
+.liquidation-field-diagnostics header span { color: #a6a9b0; }
+
+.liquidation-field-legend .thermal-ramp {
+  height: 7px;
+  margin: 8px 0 5px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #070310, #43085d, #334078, #27728b, #229f7e, #82cd45, #d9e323);
+  box-shadow: 0 0 12px rgba(44, 129, 143, 0.2);
+}
+
+.liquidation-field-legend .thermal-ramp.black_terminal_blood {
+  background: linear-gradient(90deg, #030205, #2b030c, #88091f, #ed3347, #f5aeb8, #fff);
+}
+
+.liquidation-field-legend footer {
+  display: flex;
+  justify-content: space-between;
+  color: #8a8f99;
+  font-size: 7px;
+}
+
+.liquidation-field-diagnostics {
+  right: 102px;
+  top: 48px;
+  width: min(350px, calc(100% - 140px));
+  overflow: hidden;
+}
+
+.liquidation-field-diagnostics header,
+.liquidation-field-diagnostics > div,
+.liquidation-field-diagnostics footer { padding: 6px 9px; }
+.liquidation-field-diagnostics > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  border-top: 1px solid rgba(120, 126, 136, 0.12);
+  font-size: 8px;
+}
+.liquidation-field-diagnostics > div span { color: #808691; }
+.liquidation-field-diagnostics > div b { color: #eef0f2; }
+.liquidation-field-diagnostics footer {
+  border-top: 1px solid rgba(180, 0, 32, 0.24);
+  color: #9ea3ab;
+  font-size: 7px;
+  line-height: 1.45;
+}
+
+.liquidation-field-status {
+  left: 50%;
+  top: 50%;
+  display: grid;
+  width: min(410px, calc(100% - 60px));
+  padding: 14px;
+  transform: translate(-50%, -50%);
+  gap: 7px;
+}
+.liquidation-field-status b { color: #f1f2f4; font-size: 10px; letter-spacing: 0.1em; }
+.liquidation-field-status span { color: #a5aab2; font-size: 8px; line-height: 1.5; }
+.liquidation-field-status i {
+  display: block;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #250008, #d00024, #f3f3f4, #d00024, #250008);
+  background-size: 220% 100%;
+  animation: liquidation-energy 1.8s linear infinite;
+}
+.liquidation-field-status.error,
+.liquidation-field-status.unavailable { border-color: rgba(211, 0, 36, 0.45); }
+@keyframes liquidation-energy { to { background-position: -220% 0; } }
+
+@media (max-width: 760px) {
+  .liquidation-field-diagnostics { right: 72px; top: 45px; width: min(280px, calc(100% - 86px)); }
+  .liquidation-field-legend { left: 8px; bottom: 66px; width: 190px; }
+}
+
 .kioseff-settings {
   width: min(440px, calc(100% - 24px));
   max-height: calc(100% - 80px);

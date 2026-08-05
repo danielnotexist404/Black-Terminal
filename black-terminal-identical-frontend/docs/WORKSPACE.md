@@ -15,6 +15,16 @@ npm install
 npm run dev
 ```
 
+Liquidation Intelligence verification:
+
+```bash
+npm run test:liquidation-heatmap
+npm run typecheck
+npm run build
+```
+
+The deterministic visual fixture is available only through the indicator's developer toggle and is labeled `SYNTHETIC_TEST`. Normal runtime requires a Bybit linear symbol and public network access.
+
 Open the Vite URL shown in the terminal for browser development.
 
 For the native desktop shell:

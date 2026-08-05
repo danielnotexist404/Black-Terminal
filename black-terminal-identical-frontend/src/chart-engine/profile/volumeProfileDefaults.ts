@@ -7,6 +7,7 @@ import type {
   WaveTrendOscillatorSettings,
   ZScoreOscillatorSettings
 } from "../types";
+import { DEFAULT_LIQUIDATION_FIELD_SETTINGS } from "../../modules/liquidation-field/core/settings";
 
 export const defaultVolumeProfileSettings: VolumeProfileSettings = {
   showVolumeProfile: true,
@@ -220,6 +221,7 @@ export const defaultVwapSettings: VwapSettings = {
 };
 
 export const defaultIndicatorAdvancedSettings: IndicatorAdvancedSettings = {
+  liquidationField: DEFAULT_LIQUIDATION_FIELD_SETTINGS,
   volumeProfile: defaultVolumeProfileSettings,
   adaptiveSwingStrategy: defaultAdaptiveSwingStrategySettings,
   oscillatorPane: defaultOscillatorPaneSettings,

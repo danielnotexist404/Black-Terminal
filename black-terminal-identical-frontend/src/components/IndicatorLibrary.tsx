@@ -65,10 +65,11 @@ const builtInIndicators: BuiltInIndicator[] = [
 
   {
     key: "liquidationHeatmap",
-    title: "Liquidation Heatmap",
-    group: "Liquidity",
+    title: "Liquidation Intelligence",
+    group: "Black Core / Liquidation Intelligence",
     type: "Overlay",
-    signal: "Modeled leverage clusters"
+    signal: "Persistent OI cohorts, observed liquidations and cascade-aware thermal exposure",
+    runtime: "Worker"
   },
   {
     key: "volatilityHeatmap",

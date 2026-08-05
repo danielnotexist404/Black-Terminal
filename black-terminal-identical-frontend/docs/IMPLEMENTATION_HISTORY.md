@@ -1,5 +1,14 @@
 # Implementation History
 
+## 2026-08-05 — Event Horizon / BCLIF foundation
+
+- Replaced and deleted the OHLCV-distance Liquidation Heatmap model and histogram renderer.
+- Added Bybit OI/risk-tier bootstrap, live public trades, all-liquidation events and L2 order-book reconstruction.
+- Added explicit paired OI cohorts, leverage particles, venue liquidation distributions, cross-margin uncertainty, survival/decay, event assimilation, confidence/validity channels and forward cascade scaffolding.
+- Added a worker-built time × price raster, single Pixi GPU texture, reference and Black Terminal palettes, full settings, legend and truthful coverage diagnostics.
+- Added deterministic model tests, service-only metadata/object-storage migration and `docs/liquidation/`.
+- Persistent multi-week collector, calibration, SSIM matrix and production live-soak remain open and are not claimed complete.
+
 ## 2026-08-03 — Market Maker Heatmap brightness control
 
 - Added a persisted 25–300% heatmap brightness slider to Style settings.

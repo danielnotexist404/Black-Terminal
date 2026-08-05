@@ -2169,3 +2169,9 @@ Migration: `supabase/migrations/202608020003_phase5_chapter2d_black_cloud_node01
 This additive migration creates the service-role-only `black_cloud_nodes` registry and immutable `black_cloud_certification_records`. Both tables enable RLS and revoke direct `anon`/`authenticated` access. The status API reads only safe node fields through the server service identity and applies a 45-second stale threshold.
 
 The linked production ledger for `jdwlspxzoudgzxcghbjo` records II-B `202608020001`, II-C `202608020002`, and II-D `202608020003`. Do not reapply them manually or destructively roll them back. The Chapter II-D source file is the exact deployable SQL artifact to retain for review.
+
+# 2026-08-05 - Phase V Chapter III-B BCLIF
+
+Migration: `supabase/migrations/202608050001_bclif_liquidation_intelligence_foundation.sql`.
+
+This additive migration creates service-role-only BCLIF source, coverage, confirmed-event, field-chunk and evaluation metadata and the private `bclif-field-chunks` object bucket. It stores no per-cell SQL rows and grants no browser-role access. The current browser runtime does not write these tables; deployment is foundation for the future persistent IMM/BCLIF collector.

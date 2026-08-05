@@ -45,7 +45,7 @@ interface AuditLog {
 const ALL_INDICATORS_METADATA = [
   { key: "aif", name: "A.I.F. Auction Intelligence", desc: "Native proprietary long-horizon auction framework" },
   { key: "volumeProfile", name: "HDLX Profile (hdlx)", desc: "Fixed locked/visible volume profile" },
-  { key: "liquidationHeatmap", name: "Liquidation Heatmap", desc: "Modeled leverage clusters" },
+  { key: "liquidationHeatmap", name: "Liquidation Intelligence", desc: "Black Core persistent exposure and confirmed-event engine" },
   { key: MARKET_MAKER_HEATMAP_KEY, name: "Market Maker Heatmap", desc: "Admin-controlled intrabar maker-wall activity and modeled liquidation pressure", adminControlled: true },
   { key: "adaptiveSwingStrategy", name: "Adaptive Swing Reversal", desc: "Native strategy overlay" },
   { key: "vwap", name: "VWAP", desc: "Volume weighted average price" },

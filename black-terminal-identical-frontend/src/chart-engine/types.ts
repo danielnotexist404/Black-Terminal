@@ -3,6 +3,7 @@ import type { ChartPriceTransformSnapshot } from "./priceTransform";
 import type { KioseffSnapshot } from "../modules/kioseff-stop-loss-clustering/core/canonical";
 import type { KioseffSettingsV1 } from "../modules/kioseff-stop-loss-clustering/core/settings";
 import type { AuctionProfileSettings, AuctionProfileSnapshot } from "../modules/auction-profile/core/types";
+import type { LiquidationFieldSettings } from "../modules/liquidation-field/core/types";
 
 
 export type Candle = {
@@ -409,6 +410,7 @@ export type VwapSettings = {
 };
 
 export type IndicatorAdvancedSettings = {
+  liquidationField: LiquidationFieldSettings;
   volumeProfile: VolumeProfileSettings;
   adaptiveSwingStrategy: AdaptiveSwingStrategySettings;
   oscillatorPane: OscillatorPaneSettings;

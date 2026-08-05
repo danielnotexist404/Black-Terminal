@@ -28,6 +28,7 @@
     "test:performance": "node --experimental-strip-types scripts/performance-regression-tests.js",
     "test:chart-csp": "node scripts/chart-csp-regression.js",
     "test:liquidation-heatmap": "node --experimental-strip-types scripts/liquidation-heatmap-tests.ts",
+    "benchmark:liquidation-field": "node --experimental-strip-types scripts/liquidation-field-performance.ts",
     "test:vwap": "node --experimental-strip-types scripts/vwap-engine-tests.ts",
     "test:oscillator-layout": "node --experimental-strip-types scripts/oscillator-layout-tests.ts",
     "test:kioseff-fixtures": "node --experimental-strip-types scripts/kioseff-fixture-contract-tests.ts",

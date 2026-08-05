@@ -88,6 +88,11 @@ import { canonicalCvdService, normalizeCanonicalTrade } from "../modules/auction
 import { AuctionProfileWorkerClient } from "../modules/auction-profile/worker/AuctionProfileWorkerClient";
 import { resolveAuctionVisualizationLayers } from "../modules/auction-profile/rendering/visualization";
 import type { TradeTick } from "../market-data/types";
+import { migrateLiquidationFieldSettings } from "../modules/liquidation-field/core/settings";
+import type { LiquidationFieldRuntimeStatus, LiquidationFieldSettings, LiquidationFieldSnapshot } from "../modules/liquidation-field/core/types";
+import { LiquidationFieldController } from "../modules/liquidation-field/data/LiquidationFieldController";
+import { LiquidationFieldSettingsPanel } from "../modules/liquidation-field/components/LiquidationFieldSettingsPanel";
+import { LiquidationFieldOverlays } from "../modules/liquidation-field/components/LiquidationFieldOverlays";
 
 function useDebouncedValue<T>(value: T, delayMs: number) {
   const [debounced, setDebounced] = useState(value);
@@ -402,6 +407,11 @@ export function PixiBlackChart({
   const auctionProfileSnapshot = auctionProfileSnapshots.at(-1) ?? null;
   const [auctionProfileLoading, setAuctionProfileLoading] = useState(false);
   const [auctionProfileError, setAuctionProfileError] = useState<string | null>(null);
+  const [liquidationFieldSnapshot, setLiquidationFieldSnapshot] = useState<LiquidationFieldSnapshot | null>(null);
+  const [liquidationFieldStatus, setLiquidationFieldStatus] = useState<LiquidationFieldRuntimeStatus>({
+    state: "IDLE", message: "Awaiting activation", source: "NONE", lastInputAt: null
+  });
+  const liquidationFieldControllerRef = useRef<LiquidationFieldController | null>(null);
   const [auctionProfileSourceRevision, setAuctionProfileSourceRevision] = useState(0);
   const [kioseffUnavailable, setKioseffUnavailable] = useState<KioseffUnavailableDiagnostic | null>(null);
   const [kioseffLoadState, setKioseffLoadState] = useState<KioseffLoadState>({ stage: "idle" });
@@ -411,6 +421,23 @@ export function PixiBlackChart({
   const [kioseffSourceRevision, setKioseffSourceRevision] = useState(0);
   const kioseffCalculationVersion = kioseffCalculationSettingsHash(kioseffSettings);
   const normalizedAuctionProfileSettings = useMemo(() => migrateAuctionProfileSettings(auctionProfileSettings), [auctionProfileSettings]);
+  const liquidationFieldSettings = useMemo(
+    () => migrateLiquidationFieldSettings(indicatorAdvancedSettings.liquidationField),
+    [indicatorAdvancedSettings.liquidationField]
+  );
+  const latestLiquidationFieldSettingsRef = useRef(liquidationFieldSettings);
+  latestLiquidationFieldSettingsRef.current = liquidationFieldSettings;
+  const liquidationFieldCalculationKey = [
+    liquidationFieldSettings.horizon,
+    liquidationFieldSettings.customHours,
+    liquidationFieldSettings.venue,
+    liquidationFieldSettings.modelPreset,
+    liquidationFieldSettings.priceRows,
+    liquidationFieldSettings.timeColumns,
+    liquidationFieldSettings.leverageMinimum,
+    liquidationFieldSettings.leverageMaximum,
+    liquidationFieldSettings.visualFixture
+  ].join(":");
   const latestAuctionProfileSettingsRef = useRef(normalizedAuctionProfileSettings);
   latestAuctionProfileSettingsRef.current = normalizedAuctionProfileSettings;
   const auctionDataRequired = resolveAuctionVisualizationLayers(
@@ -1933,6 +1960,62 @@ export function PixiBlackChart({
   }, [visibleIndicators, indicatorPeriods, indicatorVisualSettings, indicatorAdvancedSettings]);
 
   useEffect(() => {
+    liquidationFieldControllerRef.current?.updateSettings(liquidationFieldSettings);
+    engineRef.current?.setLiquidationFieldState(
+      visibleIndicators.liquidationHeatmap ? liquidationFieldSnapshot : null,
+      liquidationFieldSettings
+    );
+  }, [liquidationFieldSettings, liquidationFieldSnapshot, visibleIndicators.liquidationHeatmap]);
+
+  useEffect(() => {
+    liquidationFieldControllerRef.current?.dispose();
+    liquidationFieldControllerRef.current = null;
+    if (!visibleIndicators.liquidationHeatmap) {
+      setLiquidationFieldSnapshot(null);
+      setLiquidationFieldStatus({ state: "IDLE", message: "Awaiting activation", source: "NONE", lastInputAt: null });
+      engineRef.current?.setLiquidationFieldState(null, liquidationFieldSettings);
+      return;
+    }
+    if (!liquidationFieldSettings.visualFixture && marketSymbol.exchange !== "bybit") {
+      const status: LiquidationFieldRuntimeStatus = {
+        state: "UNAVAILABLE",
+        message: "This build currently has venue-calibrated liquidation intelligence for Bybit linear contracts only.",
+        source: "NONE",
+        lastInputAt: null
+      };
+      setLiquidationFieldStatus(status);
+      setLiquidationFieldSnapshot(null);
+      return;
+    }
+    if (chartHistoryState !== "ready" || !engineRef.current) {
+      setLiquidationFieldStatus({ state: "LOADING", message: "Waiting for canonical chart history…", source: "BYBIT_PUBLIC", lastInputAt: null });
+      return;
+    }
+    const controller = new LiquidationFieldController({
+      symbol: marketSymbol.rawSymbol,
+      settings: liquidationFieldSettings,
+      getCandles: () => engineRef.current?.getSourceCandles() ?? [],
+      onSnapshot: (snapshot) => {
+        setLiquidationFieldSnapshot(snapshot);
+        engineRef.current?.setLiquidationFieldState(snapshot, latestLiquidationFieldSettingsRef.current);
+      },
+      onStatus: setLiquidationFieldStatus
+    });
+    liquidationFieldControllerRef.current = controller;
+    void controller.start();
+    return () => {
+      controller.dispose();
+      if (liquidationFieldControllerRef.current === controller) liquidationFieldControllerRef.current = null;
+    };
+  }, [
+    visibleIndicators.liquidationHeatmap,
+    marketSymbol.exchange,
+    marketSymbol.rawSymbol,
+    chartHistoryState,
+    liquidationFieldCalculationKey
+  ]);
+
+  useEffect(() => {
     if (!visibleIndicators.aif) {
       setAifPriceTransform(null);
       return;
@@ -2639,7 +2722,11 @@ export function PixiBlackChart({
       label: "RADAP",
       value: auctionProfileLoading ? "building…" : auctionProfileError ? "unavailable" : normalizedAuctionProfileSettings.calculationEngine.replaceAll("_", " ")
     },
-    { key: "liquidationHeatmap", label: "Liq Heatmap", value: "model" },
+    {
+      key: "liquidationHeatmap",
+      label: "Liquidation Intelligence",
+      value: `${liquidationFieldSettings.horizon} · ${liquidationFieldStatus.state.toLowerCase()}`
+    },
     {
       key: "volatilityHeatmap",
       label: "Market Maker Heatmap",
@@ -5028,12 +5115,10 @@ export function PixiBlackChart({
             </>
           )}
           {activeIndicator === "liquidationHeatmap" ? (
-            <label>
-              Model
-              <select value="leverage-volume" onChange={() => undefined}>
-                <option value="leverage-volume">Leverage + volume zones</option>
-              </select>
-            </label>
+            <LiquidationFieldSettingsPanel
+              settings={liquidationFieldSettings}
+              onChange={(settings) => onIndicatorAdvancedSettingsChange((current) => ({ ...current, liquidationField: settings }))}
+            />
           ) : !oscillatorSettingsOpen && activeIndicator !== "vwap" ? (
             <label>
               Source
@@ -5337,6 +5422,13 @@ export function PixiBlackChart({
         {auctionProfileLoading && <div className="auction-profile-loading"><b>BLACK CORE RADAP ENGINE</b><span>Rebuilding deterministic range × price data…</span><i /></div>}
         {auctionProfileError && <div className="auction-profile-error"><b>RADAP DATA UNAVAILABLE</b><span>{auctionProfileError}</span></div>}
       </>}
+
+      <LiquidationFieldOverlays
+        visible={visibleIndicators.liquidationHeatmap}
+        snapshot={liquidationFieldSnapshot}
+        settings={liquidationFieldSettings}
+        status={liquidationFieldStatus}
+      />
 
 
 

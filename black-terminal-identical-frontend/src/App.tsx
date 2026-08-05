@@ -403,6 +403,10 @@ function loadWorkspaceSnapshots(): Record<string, WorkspaceSnapshot> {
 
 function migrateIndicatorAdvancedSettings(value: Partial<IndicatorAdvancedSettings> | null | undefined): IndicatorAdvancedSettings {
   return {
+    liquidationField: {
+      ...defaultIndicatorAdvancedSettings.liquidationField,
+      ...(value?.liquidationField ?? {})
+    },
     volumeProfile: {
       ...defaultIndicatorAdvancedSettings.volumeProfile,
       ...(value?.volumeProfile ?? {})

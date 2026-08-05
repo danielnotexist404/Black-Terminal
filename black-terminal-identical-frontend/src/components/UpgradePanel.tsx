@@ -28,7 +28,7 @@ const PLANS: Plan[] = [
     price: 99.00,
     desc: "Unlocks the full Black Terminal algorithmic toolkit for professional retail traders.",
     indicators: [
-      "Liquidation Heatmap (Liquidity Gaps)",
+      "Liquidation Intelligence (BCLIF)",
       "Market Maker Heatmap",
       "Adaptive Swing Strategy",
       "VWAP & EMA Arrays (20, 50, 200)",

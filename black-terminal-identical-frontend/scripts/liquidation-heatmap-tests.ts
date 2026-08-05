@@ -1,44 +1,67 @@
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
-import { LiquidationHeatmapModel } from "../src/chart-engine/heatmap/LiquidationHeatmapModel.ts";
-import type { Candle } from "../src/chart-engine/types.ts";
+import { bybitLiquidationInput, estimateBybitLinearLiquidationDistribution } from "../src/modules/liquidation-field/core/bybitLiquidationModel.ts";
+import { LiquidationCohortEngine } from "../src/modules/liquidation-field/core/cohortEngine.ts";
+import { buildLiquidationFieldSnapshot } from "../src/modules/liquidation-field/core/exposureRaster.ts";
+import { createLeveragePrior } from "../src/modules/liquidation-field/core/leveragePriors.ts";
+import { DEFAULT_LIQUIDATION_FIELD_SETTINGS } from "../src/modules/liquidation-field/core/settings.ts";
+import { createThermalPalette } from "../src/modules/liquidation-field/rendering/thermalPalette.ts";
+import { createLiquidationFieldFixture } from "../src/modules/liquidation-field/testing/fixtures.ts";
 
-const candles: Candle[] = Array.from({ length: 5_000 }, (_, index) => {
-  const center = 64_000 + index * 0.45 + Math.sin(index / 19) * 850;
-  return {
-    time: 1_700_000_000 + index * 60,
-    open: center - 35,
-    high: center + 125 + index % 17,
-    low: center - 135 - index % 13,
-    close: center + 42,
-    volume: 80 + index % 97
-  };
-});
+const fixture = createLiquidationFieldFixture();
+const settings = { ...DEFAULT_LIQUIDATION_FIELD_SETTINGS, timeColumns: 256, priceRows: 256, minimumConfidence: 0 };
+const prior = createLeveragePrior("REGIME_ADAPTIVE", fixture.frames[40]!, fixture.rules.maxLeverage);
+assert.ok(Math.abs(prior.buckets.reduce((sum, bucket) => sum + bucket.probability, 0) - 1) < 1e-9, "leverage prior must normalize to one");
 
-const model = new LiquidationHeatmapModel();
+const isolatedLong = estimateBybitLinearLiquidationDistribution(bybitLiquidationInput("LONG", 64_000, 64_000, 1_000_000, 20, fixture.rules, "ISOLATED"));
+const isolatedShort = estimateBybitLinearLiquidationDistribution(bybitLiquidationInput("SHORT", 64_000, 64_000, 1_000_000, 20, fixture.rules, "ISOLATED"));
+const unknownLong = estimateBybitLinearLiquidationDistribution(bybitLiquidationInput("LONG", 64_000, 64_000, 1_000_000, 20, fixture.rules, "UNKNOWN"));
+assert.ok(isolatedLong.mean < 64_000, "long liquidation distribution must lie below entry");
+assert.ok(isolatedShort.mean > 64_000, "short liquidation distribution must lie above entry");
+assert.ok(unknownLong.standardDeviation > isolatedLong.standardDeviation, "unknown/cross margin must widen uncertainty");
+
+const engine = new LiquidationCohortEngine(fixture.rules, "REGIME_ADAPTIVE");
+const paired = engine.processFrame(fixture.frames[0]!, []);
+assert.ok(paired.cohorts.some((cohort) => cohort.side === "LONG"), "positive OI must create a long cohort hypothesis");
+assert.ok(paired.cohorts.some((cohort) => cohort.side === "SHORT"), "positive OI must create a short cohort hypothesis");
+assert.ok(paired.cohorts.every((cohort) => cohort.confidence < 1), "modeled cohorts must never masquerade as observed positions");
+
 const started = performance.now();
-model.setSource(candles);
+const snapshot = buildLiquidationFieldSnapshot(fixture.frames, fixture.events, fixture.rules, settings, fixture.coverage);
 const buildMs = performance.now() - started;
-const diagnostics = model.diagnostics();
-assert.equal(diagnostics.rebuilds, 1);
-assert.ok(diagnostics.retainedCells > 0, "native liquidation model must produce visible data");
-assert.ok(diagnostics.retainedCells <= 16_000, "retained liquidation cells must remain bounded");
-assert.ok(buildMs < 1_500, `initial liquidation build exceeded the freeze boundary: ${buildMs.toFixed(1)}ms`);
+assert.equal(snapshot.header.columns, Math.min(settings.timeColumns, fixture.frames.length));
+assert.equal(snapshot.header.rows, 256);
+assert.equal(snapshot.certainty, "SYNTHETIC_TEST");
+assert.ok(snapshot.longExposure.some((value) => value > 0), "long exposure channel must be populated");
+assert.ok(snapshot.shortExposure.some((value) => value > 0), "short exposure channel must be populated");
+assert.ok(snapshot.normalizedIntensity.some((value) => value > 150), "robust normalization must preserve bright shelves");
+assert.equal(snapshot.confirmedEvents.length, fixture.events.length);
+assert.ok(snapshot.header.checksum.startsWith("fnv1a-"));
+assert.ok(buildMs < 8_000, `deterministic field build exceeded the safety boundary: ${buildMs.toFixed(1)}ms`);
 
-const visible = model.visibleCells(0, candles.length - 1, candles.length - 1, 40_000, 90_000);
-assert.ok(visible.length > 0);
-assert.ok(visible.every((cell) => cell.startIndex >= 2_000), "bounded source indices must remain aligned to the full candle array");
+const reference = createThermalPalette("REFERENCE_THERMAL");
+assert.deepEqual([...reference.slice(0, 3)], [7, 3, 16], "low exposure must remain dark purple rather than transparent black");
+assert.deepEqual([...reference.slice(-4, -1)], [217, 227, 35], "extreme exposure must reach the reference yellow endpoint");
 
-const intrabar = candles.slice();
-intrabar[intrabar.length - 1] = { ...intrabar[intrabar.length - 1], close: intrabar[intrabar.length - 1].close + 25, volume: 999 };
-const intrabarStarted = performance.now();
-model.setSource(intrabar);
-const intrabarMs = performance.now() - intrabarStarted;
-assert.equal(model.diagnostics().rebuilds, 1, "same-candle trades must not trigger a full historical rebuild");
-assert.ok(intrabarMs < 5, `same-candle update should be constant-time, got ${intrabarMs.toFixed(2)}ms`);
+const absentOiFrames = fixture.frames.slice(0, 8).map((frame) => ({
+  ...frame,
+  openInterest: 0,
+  openInterestDelta: 0,
+  certainty: { ...frame.certainty, openInterest: "UNAVAILABLE" as const }
+}));
+const unavailable = buildLiquidationFieldSnapshot(absentOiFrames, [], fixture.rules, settings, {
+  ...fixture.coverage,
+  state: "UNAVAILABLE",
+  openInterestCoveragePercent: 0
+});
+assert.ok(unavailable.validity.every((value) => value === 0), "missing OI intervals must remain explicit invalid cells");
+assert.ok(unavailable.combinedExposure.every((value) => value === 0), "missing OI must not fabricate exposure");
 
-const next = candles.concat({ ...candles[candles.length - 1], time: candles[candles.length - 1].time + 60 });
-model.setSource(next);
-assert.equal(model.diagnostics().rebuilds, 2, "a new candle must refresh the model");
-
-console.log(JSON.stringify({ decision: "PASS", initialBuildMs: Number(buildMs.toFixed(2)), intrabarMs: Number(intrabarMs.toFixed(3)), ...model.diagnostics() }, null, 2));
+console.log(JSON.stringify({
+  decision: "PASS",
+  model: snapshot.header.modelVersion,
+  grid: `${snapshot.header.columns}x${snapshot.header.rows}`,
+  cohorts: snapshot.cohorts.length,
+  buildMs: Number(buildMs.toFixed(2)),
+  checksum: snapshot.header.checksum
+}, null, 2));

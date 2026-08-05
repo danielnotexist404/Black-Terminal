@@ -14,6 +14,9 @@ Every meaningful platform change must update documentation in the same work cycl
 - `ROADMAP.md` - milestone sequence and future direction.
 - `SUPABASE_MIGRATIONS.md` - database migration ledger and rules.
 - `BYBIT_MAINNET_ENVIRONMENT_SETUP.md` - Bybit mainnet validation env, worker, verifier, and emergency-disable guide.
+- `liquidation/BLACK_CORE_LIQUIDATION_INTELLIGENCE_FIELD.md` - Event Horizon BCLIF architecture, data truth, model, renderer and completion status.
+- `liquidation/EXISTING_LIQUIDATION_SYSTEM_AUDIT.md` - classification and removal record for the previous synthetic model.
+- `liquidation/REFERENCE_SCREENSHOT_VISUAL_SPEC.md` - measured thermal golden-target contract.
 
 ## Phase Docs
 

@@ -9,6 +9,17 @@ function quantile(sorted: number[], q: number) {
   return (sorted[lower] ?? 0) * (1 - t) + (sorted[upper] ?? 0) * t;
 }
 
+function confidenceAdjustedLogExposure(
+  exposure: number,
+  confidence: number,
+  settings: LiquidationFieldSettings
+) {
+  const confidenceWeight = settings.scale === "CONFIDENCE_WEIGHTED_LOG"
+    ? Math.max(0, Math.min(1, confidence / 255))
+    : 1;
+  return Math.log1p(Math.max(0, exposure) * confidenceWeight);
+}
+
 export function normalizeExposure(
   exposure: Float32Array,
   confidence: Uint8Array,
@@ -18,8 +29,8 @@ export function normalizeExposure(
   const logValues: number[] = [];
   for (let index = 0; index < exposure.length; index++) {
     if (!validity[index] || exposure[index]! <= 0) continue;
-    const value = Math.log1p(exposure[index]!);
-    if (Number.isFinite(value)) logValues.push(value);
+    const value = confidenceAdjustedLogExposure(exposure[index]!, confidence[index]!, settings);
+    if (Number.isFinite(value) && value > 0) logValues.push(value);
   }
   logValues.sort((a, b) => a - b);
   const low = quantile(logValues, settings.lowQuantile);
@@ -27,11 +38,9 @@ export function normalizeExposure(
   const normalized = new Uint8Array(exposure.length);
   for (let index = 0; index < exposure.length; index++) {
     if (!validity[index] || exposure[index]! <= 0) continue;
-    const raw = Math.max(0, Math.min(1, (Math.log1p(exposure[index]!) - low) / (high - low)));
-    const confidenceWeight = settings.scale === "CONFIDENCE_WEIGHTED_LOG"
-      ? Math.max(0, Math.min(1, confidence[index]! / 255))
-      : 1;
-    normalized[index] = Math.round(255 * Math.pow(raw * confidenceWeight, settings.gamma));
+    const adjusted = confidenceAdjustedLogExposure(exposure[index]!, confidence[index]!, settings);
+    const raw = Math.max(0, Math.min(1, (adjusted - low) / (high - low)));
+    normalized[index] = Math.round(255 * Math.pow(raw, settings.gamma));
   }
   return { normalized, low, high };
 }

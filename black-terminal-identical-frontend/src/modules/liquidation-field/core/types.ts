@@ -294,5 +294,5 @@ export interface LiquidationFieldRuntimeStatus {
   error?: string;
 }
 
-export const BCLIF_MODEL_VERSION = "BCLIF_MODEL_V2";
+export const BCLIF_MODEL_VERSION = "BCLIF_MODEL_V3";
 export const BCLIF_SOURCE_VERSION = "BYBIT_V5_PUBLIC_2026_06";

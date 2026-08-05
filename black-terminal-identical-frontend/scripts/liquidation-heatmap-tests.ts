@@ -4,6 +4,7 @@ import { bybitLiquidationInput, estimateBybitLinearLiquidationDistribution } fro
 import { LiquidationCohortEngine } from "../src/modules/liquidation-field/core/cohortEngine.ts";
 import { buildLiquidationFieldSnapshot } from "../src/modules/liquidation-field/core/exposureRaster.ts";
 import { createLeveragePrior } from "../src/modules/liquidation-field/core/leveragePriors.ts";
+import { normalizeExposure } from "../src/modules/liquidation-field/core/normalization.ts";
 import { DEFAULT_LIQUIDATION_FIELD_SETTINGS } from "../src/modules/liquidation-field/core/settings.ts";
 import { createThermalPalette } from "../src/modules/liquidation-field/rendering/thermalPalette.ts";
 import { bclifTimestampMsToChartSeconds } from "../src/modules/liquidation-field/rendering/timeProjection.ts";
@@ -16,6 +17,21 @@ assert.equal(
   "BCLIF millisecond timestamps must project into the chart's second-based time domain"
 );
 const settings = { ...DEFAULT_LIQUIDATION_FIELD_SETTINGS, timeColumns: 256, priceRows: 256, minimumConfidence: 0 };
+
+const normalizationExposure = new Float32Array([1_000, 10_000, 100_000, 1_000_000]);
+const normalizationValidity = new Uint8Array(4).fill(255);
+const uniformMediumConfidence = new Uint8Array(4).fill(Math.round(255 * 0.6));
+const mediumConfidenceNormalization = normalizeExposure(
+  normalizationExposure,
+  uniformMediumConfidence,
+  normalizationValidity,
+  { ...settings, lowQuantile: 0, highQuantile: 1, gamma: 1, scale: "CONFIDENCE_WEIGHTED_LOG" }
+);
+assert.equal(
+  Math.max(...mediumConfidenceNormalization.normalized),
+  255,
+  "uniform medium confidence must preserve full relative thermal dynamic range"
+);
 const prior = createLeveragePrior("REGIME_ADAPTIVE", fixture.frames[40]!, fixture.rules.maxLeverage);
 assert.ok(Math.abs(prior.buckets.reduce((sum, bucket) => sum + bucket.probability, 0) - 1) < 1e-9, "leverage prior must normalize to one");
 

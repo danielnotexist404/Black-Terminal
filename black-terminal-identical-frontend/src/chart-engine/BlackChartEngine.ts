@@ -1523,8 +1523,7 @@ export class BlackChartEngine {
     const gridStroke = {
       width: 1,
       color: theme.grid,
-      alpha: theme.gridAlpha,
-      pixelLine: true
+      alpha: theme.gridAlpha
     } as const;
 
     g.rect(0, 0, this.view.width, this.view.height).fill({ color: theme.background });
@@ -1547,7 +1546,7 @@ export class BlackChartEngine {
 
     const rightEdge = pixelAlign(plotWidth);
     const bottomEdge = pixelAlign(plotHeight);
-    const edgeStroke = { width: 1, color: 0xffffff, alpha: 0.055, pixelLine: true } as const;
+    const edgeStroke = { width: 1, color: 0xffffff, alpha: 0.055 } as const;
     g.moveTo(rightEdge, 0).lineTo(rightEdge, pixelAlign(this.view.height)).stroke(edgeStroke);
     g.moveTo(0, bottomEdge).lineTo(pixelAlign(this.view.width), bottomEdge).stroke(edgeStroke);
   }

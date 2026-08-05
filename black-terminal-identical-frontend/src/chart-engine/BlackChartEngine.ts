@@ -58,8 +58,8 @@ import {
 
 const theme: ChartTheme = {
   background: 0x050507,
-  grid: 0x5c1824,
-  gridAlpha: 0.065,
+  grid: 0xff344a,
+  gridAlpha: 0.052,
   text: 0xf7f2f4,
   muted: 0x8f878d,
   red: 0xe3132d,
@@ -1518,37 +1518,22 @@ export class BlackChartEngine {
     g.clear();
     const plotWidth = this.view.width - this.view.rightAxisWidth;
     const plotHeight = this.view.height - this.view.bottomAxisHeight;
-    const resolution = Math.max(1, this.app.renderer.resolution || 1);
-    const pixelAlign = (coordinate: number) => Math.round(coordinate * resolution) / resolution;
-    const gridStroke = {
-      width: 1,
-      color: theme.grid,
-      alpha: theme.gridAlpha
-    } as const;
 
     g.rect(0, 0, this.view.width, this.view.height).fill({ color: theme.background });
 
     for (let i = 0; i <= 8; i++) {
-      const y = pixelAlign(this.view.topPadding + ((plotHeight - this.view.topPadding) / 8) * i);
-      g.moveTo(0, y).lineTo(pixelAlign(plotWidth), y).stroke(gridStroke);
+      const y = this.view.topPadding + ((plotHeight - this.view.topPadding) / 8) * i;
+      g.moveTo(0, y).lineTo(plotWidth, y).stroke({ width: 1, color: theme.grid, alpha: theme.gridAlpha });
     }
 
     const data = this.getDisplayCandles();
     const ticks = this.getAlignedTimeTicks(data);
-    const renderedColumns = new Set<number>();
     for (const tick of ticks) {
-      const physicalColumn = Math.round(tick.x * resolution);
-      if (physicalColumn <= 0 || physicalColumn >= Math.round(plotWidth * resolution) || renderedColumns.has(physicalColumn)) continue;
-      renderedColumns.add(physicalColumn);
-      const x = physicalColumn / resolution;
-      g.moveTo(x, pixelAlign(this.view.topPadding)).lineTo(x, pixelAlign(plotHeight)).stroke(gridStroke);
+      g.moveTo(tick.x, this.view.topPadding).lineTo(tick.x, plotHeight).stroke({ width: 1, color: theme.grid, alpha: theme.gridAlpha });
     }
 
-    const rightEdge = pixelAlign(plotWidth);
-    const bottomEdge = pixelAlign(plotHeight);
-    const edgeStroke = { width: 1, color: 0xffffff, alpha: 0.055 } as const;
-    g.moveTo(rightEdge, 0).lineTo(rightEdge, pixelAlign(this.view.height)).stroke(edgeStroke);
-    g.moveTo(0, bottomEdge).lineTo(pixelAlign(this.view.width), bottomEdge).stroke(edgeStroke);
+    g.moveTo(plotWidth, 0).lineTo(plotWidth, this.view.height).stroke({ width: 1, color: 0xffffff, alpha: 0.08 });
+    g.moveTo(0, plotHeight).lineTo(this.view.width, plotHeight).stroke({ width: 1, color: 0xffffff, alpha: 0.08 });
   }
 
   private drawWatermark() {

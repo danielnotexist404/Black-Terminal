@@ -12101,3 +12101,364 @@ body.dom-pro-resize-active {
 @media (prefers-reduced-motion: reduce) {
   .auction-profile-loading i::after { animation: none; width: 100%; }
 }
+
+/* High-DPI Black Terminal glass system for settings, menus, and popovers. */
+:root {
+  --bt-glass-surface: linear-gradient(145deg, rgba(22, 24, 29, 0.78), rgba(5, 6, 9, 0.88));
+  --bt-glass-surface-strong: linear-gradient(145deg, rgba(17, 19, 23, 0.9), rgba(3, 4, 6, 0.94));
+  --bt-glass-border: rgba(235, 239, 246, 0.14);
+  --bt-glass-border-soft: rgba(235, 239, 246, 0.075);
+  --bt-glass-control: rgba(0, 0, 0, 0.42);
+  --bt-glass-highlight: rgba(255, 255, 255, 0.055);
+  --bt-glass-red: rgba(190, 0, 31, 0.55);
+  --bt-glass-radius: 12px;
+  --bt-glass-control-radius: 7px;
+  --bt-glass-shadow:
+    0 26px 80px rgba(0, 0, 0, 0.72),
+    0 8px 24px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.075),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.28);
+}
+
+:is(
+  .indicator-settings,
+  .dropdown-menu,
+  .chart-context-menu,
+  .custom-context-menu,
+  .order-management-menu,
+  .dom-compact-menu,
+  .position-context-menu,
+  .dom-pro-panel-popover,
+  .pn-action-menu > div,
+  .pn-share-menu > div,
+  .pn-save-menu > div,
+  .network-modal,
+  .pn-editor
+) {
+  border: 1px solid var(--bt-glass-border);
+  border-radius: var(--bt-glass-radius);
+  background: var(--bt-glass-surface);
+  box-shadow: var(--bt-glass-shadow);
+  -webkit-backdrop-filter: blur(24px) saturate(145%);
+  backdrop-filter: blur(24px) saturate(145%);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+:is(
+  .indicator-settings,
+  .dropdown-menu,
+  .chart-context-menu,
+  .order-management-menu,
+  .dom-compact-menu,
+  .position-context-menu,
+  .dom-pro-panel-popover,
+  .network-modal,
+  .pn-editor
+) {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(221, 225, 232, 0.22) transparent;
+}
+
+:is(
+  .indicator-settings,
+  .dropdown-menu,
+  .chart-context-menu,
+  .order-management-menu,
+  .dom-compact-menu,
+  .position-context-menu,
+  .dom-pro-panel-popover,
+  .network-modal,
+  .pn-editor
+)::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+:is(
+  .indicator-settings,
+  .dropdown-menu,
+  .chart-context-menu,
+  .order-management-menu,
+  .dom-compact-menu,
+  .position-context-menu,
+  .dom-pro-panel-popover,
+  .network-modal,
+  .pn-editor
+)::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(221, 225, 232, 0.22);
+}
+
+.indicator-settings {
+  padding: 12px;
+}
+
+.indicator-settings.tv-profile-settings {
+  padding: 0;
+  overflow: hidden;
+  border-color: rgba(235, 239, 246, 0.14);
+  border-radius: 14px;
+  background: var(--bt-glass-surface-strong);
+  box-shadow:
+    var(--bt-glass-shadow),
+    inset 1px 0 0 rgba(190, 0, 31, 0.34);
+}
+
+.indicator-settings.profile-settings:not(.tv-profile-settings) {
+  border-radius: 14px;
+}
+
+.indicator-settings-title {
+  min-height: 28px;
+  margin: -2px -2px 9px;
+  padding: 0 2px 8px;
+  border-bottom: 1px solid var(--bt-glass-border-soft);
+}
+
+.indicator-settings-title span {
+  letter-spacing: 0.045em;
+}
+
+:is(.tv-settings-head, .tv-settings-tabs, .tv-settings-footer) {
+  background: rgba(7, 8, 11, 0.38);
+  -webkit-backdrop-filter: blur(12px) saturate(130%);
+  backdrop-filter: blur(12px) saturate(130%);
+}
+
+.tv-settings-head {
+  border-radius: 13px 13px 0 0;
+}
+
+.tv-settings-footer {
+  border-radius: 0 0 13px 13px;
+}
+
+.tv-settings-body,
+.strategy-overlay-settings .tv-settings-body {
+  background: rgba(1, 2, 4, 0.22);
+}
+
+:is(.indicator-settings-tabs, .tv-settings-tabs) {
+  gap: 5px;
+}
+
+:is(.indicator-settings-tabs, .tv-settings-tabs) button {
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.018);
+  transition:
+    color 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+:is(.indicator-settings-tabs, .tv-settings-tabs) button:hover {
+  border-color: rgba(235, 239, 246, 0.12);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+:is(.indicator-settings-tabs, .tv-settings-tabs) button.active {
+  border-color: rgba(220, 0, 38, 0.46);
+  background: linear-gradient(180deg, rgba(128, 0, 23, 0.34), rgba(52, 0, 10, 0.26));
+  box-shadow:
+    inset 0 -2px 0 rgba(238, 0, 40, 0.76),
+    0 0 14px rgba(150, 0, 26, 0.14);
+  color: #f7f8fa;
+}
+
+.indicator-settings-section {
+  border-top-color: var(--bt-glass-border-soft);
+}
+
+:is(
+  .indicator-settings,
+  .dropdown-menu,
+  .chart-context-menu,
+  .order-management-menu,
+  .dom-pro-panel-popover,
+  .network-modal,
+  .pn-editor
+) :is(
+  input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+  select,
+  textarea
+) {
+  border-color: rgba(235, 239, 246, 0.12) !important;
+  border-radius: var(--bt-glass-control-radius) !important;
+  background: var(--bt-glass-control) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 1px 0 rgba(0, 0, 0, 0.48);
+}
+
+:is(
+  .indicator-settings,
+  .dropdown-menu,
+  .chart-context-menu,
+  .order-management-menu,
+  .dom-pro-panel-popover,
+  .network-modal,
+  .pn-editor
+) :is(
+  input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+  select,
+  textarea
+):focus-visible {
+  border-color: rgba(232, 0, 40, 0.72) !important;
+  outline: 1px solid rgba(232, 0, 40, 0.4);
+  outline-offset: 1px;
+  box-shadow:
+    0 0 0 3px rgba(176, 0, 30, 0.13),
+    inset 0 1px 0 rgba(255, 255, 255, 0.045);
+}
+
+.indicator-settings input[type="color"],
+.tv-profile-settings input[type="color"] {
+  overflow: hidden;
+  border-color: rgba(235, 239, 246, 0.14);
+  border-radius: var(--bt-glass-control-radius);
+  background: rgba(0, 0, 0, 0.42);
+}
+
+:is(
+  .indicator-settings-title button,
+  .tv-settings-head button,
+  .tv-settings-footer button,
+  .workspace-menu-actions button,
+  .replay-menu-actions button,
+  .order-management-menu button,
+  .dom-pro-panel-popover button,
+  .network-modal button,
+  .pn-editor button
+) {
+  border-radius: var(--bt-glass-control-radius);
+}
+
+.dropdown-menu {
+  padding: 7px;
+}
+
+.menu-option {
+  border-radius: 8px;
+  transition: color 110ms ease, background 110ms ease, box-shadow 110ms ease;
+}
+
+.menu-option:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.menu-option.selected {
+  background: linear-gradient(90deg, rgba(144, 0, 25, 0.34), rgba(144, 0, 25, 0.08));
+  box-shadow: inset 2px 0 0 rgba(235, 0, 40, 0.82);
+}
+
+:is(.dropdown-search, .dropdown-scope-lock, .chart-context-head) {
+  border-color: var(--bt-glass-border-soft);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.24);
+}
+
+:is(.chart-context-menu, .dom-compact-menu) {
+  padding: 7px;
+}
+
+:is(.chart-context-section button, .dom-compact-menu button) {
+  border-radius: 7px;
+}
+
+:is(.chart-context-section button, .dom-compact-menu button):hover {
+  background: linear-gradient(90deg, rgba(152, 0, 27, 0.3), rgba(152, 0, 27, 0.06));
+}
+
+.custom-context-menu {
+  min-width: 190px;
+  padding: 6px;
+  overflow: hidden;
+}
+
+.custom-context-menu button {
+  border-radius: 7px !important;
+}
+
+.custom-context-menu button:hover {
+  background: rgba(170, 0, 29, 0.18) !important;
+}
+
+:is(.order-management-menu, .position-context-menu) {
+  overflow: hidden;
+}
+
+:is(.order-management-menu header, .position-context-head) {
+  background: rgba(74, 0, 14, 0.16);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.dom-pro-panel-popover {
+  border-color: rgba(235, 239, 246, 0.15);
+  border-radius: 12px;
+}
+
+.dom-pro-panel-popover footer {
+  background: rgba(7, 8, 11, 0.72);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+
+.dom-pro-panel-popover details {
+  border-color: var(--bt-glass-border-soft);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.dom-pro-settings-panel {
+  margin: 8px 10px;
+  border: 1px solid rgba(235, 239, 246, 0.1);
+  border-radius: 10px;
+  background: rgba(8, 10, 13, 0.66);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 10px 26px rgba(0, 0, 0, 0.28);
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+  backdrop-filter: blur(18px) saturate(135%);
+}
+
+:is(.network-modal, .pn-editor) {
+  border-radius: 15px;
+  background: var(--bt-glass-surface-strong);
+}
+
+:is(.network-modal, .pn-editor) > :is(header, footer) {
+  background: rgba(7, 8, 11, 0.38);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+
+@media (max-width: 720px) {
+  .indicator-settings:not(.tv-profile-settings) {
+    right: 8px;
+    left: 8px;
+    width: auto;
+    max-width: calc(100% - 16px);
+  }
+
+  .indicator-settings.tv-profile-settings {
+    right: 8px;
+    left: 8px;
+    width: auto;
+  }
+
+  :is(.dropdown-menu, .chart-context-menu) {
+    max-width: calc(100vw - 16px);
+  }
+
+  .auction-profile-settings .indicator-settings-tabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .dom-pro-settings-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

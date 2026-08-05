@@ -2294,13 +2294,7 @@ export default function App() {
               position: "fixed",
               top: `${contextMenu.y}px`,
               left: `${contextMenu.x}px`,
-              zIndex: 10000,
-              background: "rgba(10, 12, 14, 0.98)",
-              border: "1px solid var(--red-hot)",
-              boxShadow: "0 8px 32px rgba(0,0,0,0.85)",
-              borderRadius: "3px",
-              padding: "4px 0",
-              backdropFilter: "blur(4px)"
+              zIndex: 10000
             }}
             onClick={(e) => e.stopPropagation()}
           >

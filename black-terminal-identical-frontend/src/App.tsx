@@ -105,7 +105,7 @@ import { getCapabilities, type CapabilityUser, type ProductTier, type TerminalCa
 import { blackCoreWindowDockManager } from "./core/windows/windowDockManager";
 import type { BlackCoreModuleMode } from "./core/modules/moduleRegistry";
 import { PerformanceHud } from "./performance/PerformanceHud";
-import blackCoreEngine from "./assets/black-core-engine.png";
+import blackCoreEngine from "./assets/black-core-engine-transparent.png";
 import {
   ADMIN_ALLOWED_INDICATORS,
   canUseIndicator,
@@ -1990,8 +1990,7 @@ export default function App() {
             <span>STOP &amp; SIGN OUT</span>
           </button>
         </div>
-        <div className="side-watermark side-core-engine" aria-label="Powered by Black Core Engine">
-          <span>POWERED BY BLACK CORE</span>
+        <div className="side-watermark side-core-engine" aria-label="Black Core Engine">
           <img src={blackCoreEngine} alt="Black Core Engine" />
         </div>
       </aside>

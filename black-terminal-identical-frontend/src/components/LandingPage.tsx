@@ -17,7 +17,7 @@ import { DEFAULT_ALLOWED_INDICATORS } from "../features/premium";
 // Landing page product and brand imagery
 import terminalMockup from "../assets/terminal_mockup.jpg";
 import terminalLiveChart from "../assets/terminal-live-chart.png";
-import blackCoreEngine from "../assets/black-core-engine.png";
+import blackCoreEngine from "../assets/black-core-engine-transparent.png";
 
 interface LandingPageProps {
   onLoginSuccess: (username: string, role: "admin" | "user") => void;

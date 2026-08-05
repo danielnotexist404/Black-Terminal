@@ -413,11 +413,22 @@ function migrateIndicatorAdvancedSettings(value: Partial<IndicatorAdvancedSettin
     },
     oscillatorPane: {
       ...defaultIndicatorAdvancedSettings.oscillatorPane,
-      ...(value?.oscillatorPane ?? {})
+      ...(value?.oscillatorPane ?? {}),
+      paneHeights: {
+        ...defaultIndicatorAdvancedSettings.oscillatorPane.paneHeights,
+        ...(value?.oscillatorPane?.paneHeights ?? {})
+      },
+      order: Array.isArray(value?.oscillatorPane?.order)
+        ? value.oscillatorPane.order
+        : defaultIndicatorAdvancedSettings.oscillatorPane.order
     },
     zScoreOscillator: {
       ...defaultIndicatorAdvancedSettings.zScoreOscillator,
       ...(value?.zScoreOscillator ?? {})
+    },
+    waveTrendOscillator: {
+      ...defaultIndicatorAdvancedSettings.waveTrendOscillator,
+      ...(value?.waveTrendOscillator ?? {})
     },
     vwap: {
       ...defaultIndicatorAdvancedSettings.vwap,

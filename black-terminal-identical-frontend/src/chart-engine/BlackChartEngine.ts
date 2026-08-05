@@ -8,12 +8,18 @@ import {
 import { CandleBuffer } from "./data/CandleBuffer";
 import { LiquidationHeatmapModel } from "./heatmap/LiquidationHeatmapModel";
 import { VolumeProfileModel, VolumeProfileResult, VolumeProfileRow } from "./profile/VolumeProfileModel";
-import { defaultIndicatorAdvancedSettings, defaultVwapSettings } from "./profile/volumeProfileDefaults";
+import {
+  defaultIndicatorAdvancedSettings,
+  defaultOscillatorPaneSettings,
+  defaultVwapSettings,
+  defaultWaveTrendOscillatorSettings
+} from "./profile/volumeProfileDefaults";
 import {
   calculateInstitutionalVwap,
   type InstitutionalVwapPoint,
   type InstitutionalVwapResult
 } from "./indicators/institutionalVwap";
+import { resolveOscillatorStack } from "./indicators/oscillatorLayout";
 import type { IndicatorAlertDefinition } from "../automation/alerts";
 import type { CompiledPlot } from "../components/ScriptCompiler";
 import { createAdaptiveSwingSignals } from "../modules/strategy-lab/adapters/signalAdapter";
@@ -1272,20 +1278,34 @@ export class BlackChartEngine {
   }
 
   private getOscillatorPaneHeight() {
-    const hasOscillator =
-      this.visibleIndicators.openInterestOscillator ||
-      this.visibleIndicators.zScoreOscillator ||
-      this.visibleIndicators.waveTrendOscillator;
-    if (!hasOscillator) return 0;
+    return this.oscillatorStackLayout().reservedHeight;
+  }
 
-    return this.configuredOscillatorPaneHeight() + 20;
+  private oscillatorStackLayout() {
+    const configuredPane = this.indicatorAdvancedSettings.oscillatorPane;
+    return resolveOscillatorStack(
+      this.visibleIndicators,
+      {
+        ...defaultOscillatorPaneSettings,
+        ...configuredPane,
+        paneHeights: {
+          ...defaultOscillatorPaneSettings.paneHeights,
+          ...(configuredPane?.paneHeights ?? {})
+        },
+        order: configuredPane?.order ?? defaultOscillatorPaneSettings.order
+      },
+      {
+        ...defaultWaveTrendOscillatorSettings,
+        ...(this.indicatorAdvancedSettings.waveTrendOscillator ?? {})
+      },
+      this.view.height,
+      this.view.bottomAxisHeight,
+      this.view.topPadding
+    );
   }
 
   private configuredOscillatorPaneHeight() {
-    const plotHeight = this.view.height - this.view.bottomAxisHeight;
-    const maximum = Math.max(82, Math.min(420, plotHeight - this.view.topPadding - 44));
-    const requested = Number(this.indicatorAdvancedSettings.oscillatorPane?.height ?? 128);
-    return Math.max(82, Math.min(maximum, Number.isFinite(requested) ? requested : 128));
+    return this.oscillatorStackLayout().panes[0]?.height ?? defaultOscillatorPaneSettings.height;
   }
 
   private getPricePlotHeight() {
@@ -2137,7 +2157,7 @@ export class BlackChartEngine {
     };
   }
 
-  private drawOscillatorPane(data: Candle[]) {
+  private drawLegacyOscillatorPane(data: Candle[]) {
     const hasOscillator =
       this.visibleIndicators.openInterestOscillator ||
       this.visibleIndicators.zScoreOscillator ||
@@ -2288,6 +2308,186 @@ export class BlackChartEngine {
       g.rect(labelX, paneTop + 9, Math.max(18, item.label.length * 5.6), 2)
         .fill({ color: visual.color, alpha: visual.alpha * 0.78 });
       labelX += item.label.length * 6 + 22;
+    }
+  }
+
+  private drawOscillatorPanes(data: Candle[]) {
+    const stack = this.oscillatorStackLayout();
+    if (stack.panes.length === 0) return;
+
+    const g = this.indicatorLayer;
+    const plotWidth = this.view.width - this.view.rightAxisWidth;
+    const plotHeight = this.view.height - this.view.bottomAxisHeight;
+    const basePaneBottom = plotHeight - 16;
+    const paneSettings = {
+      ...defaultOscillatorPaneSettings,
+      ...(this.indicatorAdvancedSettings.oscillatorPane ?? {})
+    };
+    const zSettings = this.indicatorAdvancedSettings.zScoreOscillator;
+    const waveSettings = {
+      ...defaultWaveTrendOscillatorSettings,
+      ...(this.indicatorAdvancedSettings.waveTrendOscillator ?? {})
+    };
+    const backgroundColor = this.hexColor(paneSettings.backgroundColor, 0x000000);
+    const backgroundAlpha = Math.max(0, Math.min(1, Number(paneSettings.backgroundIntensity) / 100));
+    const genericZeroColor = this.hexColor(paneSettings.zeroLineColor, theme.silverBright);
+    const zeroLineAlpha = Math.max(0, Math.min(1, Number(paneSettings.zeroLineIntensity) / 100));
+    const waveTrend = this.visibleIndicators.waveTrendOscillator
+      ? this.waveTrendOscillatorSeries(data, this.indicatorPeriods.waveTrendOscillator)
+      : undefined;
+
+    for (const pane of stack.panes) {
+      const paneBottom = basePaneBottom - pane.bottomOffset;
+      const paneTop = paneBottom - pane.height;
+      const paneMid = (paneTop + paneBottom) / 2;
+      const paneHalf = Math.max(1, pane.height / 2);
+      const isZScorePane = pane.key === "zScoreOscillator";
+      const zeroLineColor = isZScorePane
+        ? this.hexColor(zSettings?.midlineColor ?? "#8a8a90", theme.muted)
+        : genericZeroColor;
+
+      g.rect(0, paneTop, plotWidth, pane.height)
+        .fill({ color: backgroundColor, alpha: backgroundAlpha })
+        .stroke({ width: 1, color: 0xffffff, alpha: 0.055 });
+      g.moveTo(0, paneMid).lineTo(plotWidth, paneMid).stroke({
+        width: 1,
+        color: zeroLineColor,
+        alpha: zeroLineAlpha
+      });
+
+      const series: Array<{
+        key: "openInterestOscillator" | "zScoreOscillator" | "waveTrendOscillator";
+        label: string;
+        values: number[];
+        fallbackColor: IndicatorColorKey;
+        histogram?: boolean;
+        colorOverride?: number;
+        alphaOverride?: number;
+        widthOverride?: number;
+      }> = [];
+
+      if (pane.key === "openInterestOscillator") {
+        series.push({
+          key: pane.key,
+          label: "OI OSC",
+          values: this.openInterestOscillatorSeries(data, this.indicatorPeriods.openInterestOscillator),
+          fallbackColor: "red",
+          histogram: true
+        });
+      } else if (isZScorePane) {
+        series.push({
+          key: pane.key,
+          label: "Z-SCORE",
+          values: this.zScoreOscillatorSeries(data, this.indicatorPeriods.zScoreOscillator),
+          fallbackColor: "white"
+        });
+      }
+
+      const includesWave = pane.key === "waveTrendOscillator" || stack.injectionTarget === pane.key;
+      if (includesWave && waveTrend) {
+        series.push({
+          key: "waveTrendOscillator",
+          label: stack.injectionTarget === pane.key ? "WT INJECT" : "WT",
+          values: waveTrend.main,
+          fallbackColor: "silver",
+          widthOverride: Math.max(0.5, Math.min(4, Number(waveSettings.mainLineWidth)))
+        });
+        series.push({
+          key: "waveTrendOscillator",
+          label: "WT SIGNAL",
+          values: waveTrend.signal,
+          fallbackColor: "gray",
+          colorOverride: this.hexColor(waveSettings.signalColor, theme.muted),
+          alphaOverride: Math.max(0, Math.min(1, Number(waveSettings.signalIntensity) / 100)),
+          widthOverride: Math.max(0.5, Math.min(4, Number(waveSettings.signalLineWidth)))
+        });
+      }
+
+      const zUpper = Math.max(Number(zSettings?.upperBand ?? 2), Number(zSettings?.lowerBand ?? -2)) * 24;
+      const zLower = Math.min(Number(zSettings?.upperBand ?? 2), Number(zSettings?.lowerBand ?? -2)) * 24;
+      const visibleValues = series.flatMap((item) =>
+        item.values.slice(this.view.firstIndex, this.view.lastIndex + 1).map((value) => Math.abs(value))
+      );
+      const scaleReferences = isZScorePane
+        ? [...visibleValues, Math.abs(zUpper), Math.abs(zLower), 1]
+        : [...visibleValues, 1];
+      const maxAbs = Math.max(60, Math.min(288, Math.max(...scaleReferences) * 1.16));
+      const yForOsc = (value: number) =>
+        paneMid - (Math.max(-maxAbs, Math.min(maxAbs, value)) / maxAbs) * paneHalf * 0.88;
+
+      if (isZScorePane) {
+        const upperY = yForOsc(zUpper);
+        const lowerY = yForOsc(zLower);
+        const upperColor = this.hexColor(zSettings?.upperBandColor ?? "#b40020", theme.redBright);
+        const lowerColor = this.hexColor(zSettings?.lowerBandColor ?? "#d7d7da", theme.silverBright);
+        const bandAlpha = Math.max(0, Math.min(1, Number(zSettings?.bandIntensity ?? 72) / 100));
+        if (zSettings?.showBandFill ?? true) {
+          const fillAlpha = Math.max(0, Math.min(0.5, Number(zSettings?.bandFillIntensity ?? 9) / 100));
+          g.rect(0, paneTop, plotWidth, Math.max(0, upperY - paneTop)).fill({ color: upperColor, alpha: fillAlpha });
+          g.rect(0, lowerY, plotWidth, Math.max(0, paneBottom - lowerY)).fill({ color: lowerColor, alpha: fillAlpha });
+        }
+        g.moveTo(0, upperY).lineTo(plotWidth, upperY).stroke({ width: 1, color: upperColor, alpha: bandAlpha });
+        g.moveTo(0, lowerY).lineTo(plotWidth, lowerY).stroke({ width: 1, color: lowerColor, alpha: bandAlpha });
+      } else {
+        g.moveTo(0, paneTop + paneHalf * 0.5).lineTo(plotWidth, paneTop + paneHalf * 0.5)
+          .stroke({ width: 1, color: theme.red, alpha: 0.10 });
+        g.moveTo(0, paneBottom - paneHalf * 0.5).lineTo(plotWidth, paneBottom - paneHalf * 0.5)
+          .stroke({ width: 1, color: theme.red, alpha: 0.10 });
+      }
+
+      for (const item of series) {
+        const visual = this.visualFor(item.key, item.fallbackColor);
+        const itemColor = item.colorOverride ?? visual.color;
+        const itemAlpha = item.alphaOverride ?? visual.alpha;
+        if (item.histogram) {
+          const barWidth = Math.max(0.5, Math.min(this.timeStep() * 0.76, 5));
+          for (let i = this.view.firstIndex; i <= this.view.lastIndex; i++) {
+            const value = item.values[i];
+            if (!Number.isFinite(value)) continue;
+            const x = this.xForIndex(i) - barWidth / 2;
+            const y = yForOsc(value);
+            g.rect(x, Math.min(y, paneMid), barWidth, Math.max(1, Math.abs(y - paneMid)))
+              .fill({ color: value >= 0 ? theme.silverBright : itemColor, alpha: 0.12 + itemAlpha * 0.38 });
+          }
+          continue;
+        }
+
+        let started = false;
+        for (let i = this.view.firstIndex; i <= this.view.lastIndex; i++) {
+          const value = item.values[i];
+          if (!Number.isFinite(value)) continue;
+          const x = this.xForIndex(i);
+          const y = yForOsc(value);
+          if (!started) {
+            g.moveTo(x, y);
+            started = true;
+          } else {
+            g.lineTo(x, y);
+          }
+        }
+
+        if (started) {
+          const isZScore = item.key === "zScoreOscillator";
+          const lineWidth = item.widthOverride ?? (isZScore
+            ? Math.max(0.5, Math.min(4, Number(zSettings?.lineWidth ?? 1.35)))
+            : 1.35);
+          const lineAlpha = item.alphaOverride ?? (isZScore
+            ? visual.alpha * Math.max(0, Math.min(1, Number(zSettings?.lineIntensity ?? 82) / 100))
+            : visual.alpha * 0.78);
+          g.stroke({ width: lineWidth, color: itemColor, alpha: lineAlpha });
+        }
+      }
+
+      let labelX = 10;
+      for (const item of series) {
+        const visual = this.visualFor(item.key, item.fallbackColor);
+        g.rect(labelX, paneTop + 9, Math.max(18, item.label.length * 5.6), 2)
+          .fill({
+            color: item.colorOverride ?? visual.color,
+            alpha: item.alphaOverride ?? visual.alpha * 0.78
+          });
+        labelX += item.label.length * 6 + 22;
+      }
     }
   }
 
@@ -3430,7 +3630,7 @@ export class BlackChartEngine {
       g.stroke({ width: plot.width || 1, color, alpha: 0.95 });
     }
 
-    this.drawOscillatorPane(data);
+    this.drawOscillatorPanes(data);
   }
 
   public setCustomPlots(plots: CompiledPlot[]) {

@@ -4,6 +4,7 @@ import type {
   OscillatorPaneSettings,
   VolumeProfileSettings,
   VwapSettings,
+  WaveTrendOscillatorSettings,
   ZScoreOscillatorSettings
 } from "../types";
 
@@ -131,10 +132,24 @@ export const defaultAdaptiveSwingStrategySettings: AdaptiveSwingStrategySettings
 
 export const defaultOscillatorPaneSettings: OscillatorPaneSettings = {
   height: 128,
+  paneHeights: {
+    openInterestOscillator: 128,
+    zScoreOscillator: 128,
+    waveTrendOscillator: 128
+  },
+  order: [],
   backgroundColor: "#000000",
   backgroundIntensity: 62,
   zeroLineColor: "#b8b8bc",
   zeroLineIntensity: 24
+};
+
+export const defaultWaveTrendOscillatorSettings: WaveTrendOscillatorSettings = {
+  injectIntoPrimary: false,
+  mainLineWidth: 1.35,
+  signalLineWidth: 1,
+  signalColor: "#777b83",
+  signalIntensity: 46
 };
 
 export const defaultZScoreOscillatorSettings: ZScoreOscillatorSettings = {
@@ -209,5 +224,6 @@ export const defaultIndicatorAdvancedSettings: IndicatorAdvancedSettings = {
   adaptiveSwingStrategy: defaultAdaptiveSwingStrategySettings,
   oscillatorPane: defaultOscillatorPaneSettings,
   zScoreOscillator: defaultZScoreOscillatorSettings,
+  waveTrendOscillator: defaultWaveTrendOscillatorSettings,
   vwap: defaultVwapSettings
 };

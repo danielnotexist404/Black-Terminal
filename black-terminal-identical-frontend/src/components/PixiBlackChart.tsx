@@ -13,6 +13,7 @@ import {
   IndicatorAdvancedSettings,
   IndicatorColorKey,
   IndicatorPeriods,
+  OscillatorIndicatorKey,
   OscillatorPaneSettings,
   IndicatorVisualSettings,
   ReplayControls,
@@ -21,6 +22,7 @@ import {
   VisibleIndicators,
   VolumeProfileSettings,
   VwapSettings,
+  WaveTrendOscillatorSettings,
   ZScoreOscillatorSettings
 } from "../chart-engine/types";
 import {
@@ -28,8 +30,10 @@ import {
   defaultOscillatorPaneSettings,
   defaultVolumeProfileSettings,
   defaultVwapSettings,
+  defaultWaveTrendOscillatorSettings,
   defaultZScoreOscillatorSettings
 } from "../chart-engine/profile/volumeProfileDefaults";
+import { OSCILLATOR_KEYS, resolveOscillatorStack } from "../chart-engine/indicators/oscillatorLayout";
 import { createMockCandles } from "../data/mockMarket";
 import type { AlertCondition, AlertIndicatorTarget, IndicatorAlertDefinition } from "../automation/alerts";
 import { canUseIndicator } from "../features/premium";
@@ -376,12 +380,19 @@ export function PixiBlackChart({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<BlackChartEngine | null>(null);
   const oscillatorResizeRef = useRef<{
+    key: OscillatorIndicatorKey;
     pointerId: number;
     startY: number;
     startHeight: number;
     maximumHeight: number;
   } | null>(null);
+  const previousOscillatorVisibilityRef = useRef<Record<OscillatorIndicatorKey, boolean>>({
+    openInterestOscillator: visibleIndicators.openInterestOscillator,
+    zScoreOscillator: visibleIndicators.zScoreOscillator,
+    waveTrendOscillator: visibleIndicators.waveTrendOscillator
+  });
   const aifActiveRef = useRef(visibleIndicators.aif);
+  const [oscillatorHostHeight, setOscillatorHostHeight] = useState(600);
   const [lastPrice, setLastPrice] = useState(66678.1);
   const [lastCandle, setLastCandle] = useState<Candle | null>(null);
   const [aifPriceTransform, setAifPriceTransform] = useState<ChartPriceTransformSnapshot | null>(null);
@@ -1953,6 +1964,58 @@ export function PixiBlackChart({
   }, [visibleIndicators]);
 
   useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const updateHeight = () => setOscillatorHostHeight(host.clientHeight || 600);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const previous = previousOscillatorVisibilityRef.current;
+    onIndicatorAdvancedSettingsChange((current) => {
+      const existing = current.oscillatorPane?.order ?? [];
+      const nextOrder: OscillatorIndicatorKey[] = [];
+      for (const key of existing) {
+        if (visibleIndicators[key] && !nextOrder.includes(key)) nextOrder.push(key);
+      }
+      for (const key of OSCILLATOR_KEYS) {
+        if (previous[key] && visibleIndicators[key] && !nextOrder.includes(key)) nextOrder.push(key);
+      }
+      for (const key of OSCILLATOR_KEYS) {
+        if (!previous[key] && visibleIndicators[key] && !nextOrder.includes(key)) nextOrder.push(key);
+      }
+      if (nextOrder.length === existing.length && nextOrder.every((key, index) => key === existing[index])) {
+        return current;
+      }
+      return {
+        ...current,
+        oscillatorPane: {
+          ...defaultOscillatorPaneSettings,
+          ...current.oscillatorPane,
+          paneHeights: {
+            ...defaultOscillatorPaneSettings.paneHeights,
+            ...(current.oscillatorPane?.paneHeights ?? {})
+          },
+          order: nextOrder
+        }
+      };
+    });
+    previousOscillatorVisibilityRef.current = {
+      openInterestOscillator: visibleIndicators.openInterestOscillator,
+      zScoreOscillator: visibleIndicators.zScoreOscillator,
+      waveTrendOscillator: visibleIndicators.waveTrendOscillator
+    };
+  }, [
+    onIndicatorAdvancedSettingsChange,
+    visibleIndicators.openInterestOscillator,
+    visibleIndicators.zScoreOscillator,
+    visibleIndicators.waveTrendOscillator
+  ]);
+
+  useEffect(() => {
     return () => {
       if (alertToastTimerRef.current) window.clearTimeout(alertToastTimerRef.current);
     };
@@ -2647,24 +2710,51 @@ export function PixiBlackChart({
   const adaptiveSwingSettings = indicatorAdvancedSettings.adaptiveSwingStrategy ?? defaultAdaptiveSwingStrategySettings;
   const oscillatorPaneSettings: OscillatorPaneSettings = {
     ...defaultOscillatorPaneSettings,
-    ...indicatorAdvancedSettings.oscillatorPane
+    ...indicatorAdvancedSettings.oscillatorPane,
+    paneHeights: {
+      ...defaultOscillatorPaneSettings.paneHeights,
+      ...(indicatorAdvancedSettings.oscillatorPane?.paneHeights ?? {})
+    },
+    order: indicatorAdvancedSettings.oscillatorPane?.order ?? defaultOscillatorPaneSettings.order
   };
   const zScoreSettings: ZScoreOscillatorSettings = {
     ...defaultZScoreOscillatorSettings,
     ...indicatorAdvancedSettings.zScoreOscillator
   };
+  const waveTrendSettings: WaveTrendOscillatorSettings = {
+    ...defaultWaveTrendOscillatorSettings,
+    ...indicatorAdvancedSettings.waveTrendOscillator
+  };
   const vwapSettings: VwapSettings = {
     ...defaultVwapSettings,
     ...indicatorAdvancedSettings.vwap
   };
-  const oscillatorPaneVisible =
-    visibleIndicators.openInterestOscillator ||
-    visibleIndicators.zScoreOscillator ||
-    visibleIndicators.waveTrendOscillator;
+  const oscillatorStack = resolveOscillatorStack(
+    visibleIndicators,
+    oscillatorPaneSettings,
+    waveTrendSettings,
+    oscillatorHostHeight,
+    58,
+    38
+  );
+  const oscillatorPaneVisible = oscillatorStack.panes.length > 0;
   const oscillatorSettingsOpen =
     activeIndicator === "openInterestOscillator" ||
     activeIndicator === "zScoreOscillator" ||
     activeIndicator === "waveTrendOscillator";
+  const activeOscillatorKey = oscillatorSettingsOpen
+    ? activeIndicator as OscillatorIndicatorKey
+    : undefined;
+  const activeOscillatorPaneHeight = activeOscillatorKey
+    ? oscillatorPaneSettings.paneHeights[activeOscillatorKey]
+    : oscillatorPaneSettings.height;
+  const primaryOscillator = oscillatorPaneSettings.order.find((key) =>
+    key !== "waveTrendOscillator" && visibleIndicators[key]
+  ) ?? (visibleIndicators.zScoreOscillator
+    ? "zScoreOscillator"
+    : visibleIndicators.openInterestOscillator
+      ? "openInterestOscillator"
+      : undefined);
 
   const updateOscillatorPaneSetting = <Key extends keyof OscillatorPaneSettings>(
     key: Key,
@@ -2675,7 +2765,29 @@ export function PixiBlackChart({
       oscillatorPane: {
         ...defaultOscillatorPaneSettings,
         ...current.oscillatorPane,
+        paneHeights: {
+          ...defaultOscillatorPaneSettings.paneHeights,
+          ...(current.oscillatorPane?.paneHeights ?? {})
+        },
         [key]: value
+      }
+    }));
+  };
+
+  const updateOscillatorPaneHeight = (key: OscillatorIndicatorKey, value: number) => {
+    const height = clampNumber(Math.round(value), 82, 420);
+    onIndicatorAdvancedSettingsChange((current) => ({
+      ...current,
+      oscillatorPane: {
+        ...defaultOscillatorPaneSettings,
+        ...current.oscillatorPane,
+        paneHeights: {
+          ...defaultOscillatorPaneSettings.paneHeights,
+          ...(current.oscillatorPane?.paneHeights ?? {}),
+          [key]: height
+        },
+        order: current.oscillatorPane?.order ?? defaultOscillatorPaneSettings.order,
+        height
       }
     }));
   };
@@ -2689,6 +2801,20 @@ export function PixiBlackChart({
       zScoreOscillator: {
         ...defaultZScoreOscillatorSettings,
         ...current.zScoreOscillator,
+        [key]: value
+      }
+    }));
+  };
+
+  const updateWaveTrendSetting = <Key extends keyof WaveTrendOscillatorSettings>(
+    key: Key,
+    value: WaveTrendOscillatorSettings[Key]
+  ) => {
+    onIndicatorAdvancedSettingsChange((current) => ({
+      ...current,
+      waveTrendOscillator: {
+        ...defaultWaveTrendOscillatorSettings,
+        ...current.waveTrendOscillator,
         [key]: value
       }
     }));
@@ -2787,13 +2913,17 @@ export function PixiBlackChart({
     }));
   };
 
-  const beginOscillatorResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const beginOscillatorResize = (
+    event: ReactPointerEvent<HTMLDivElement>,
+    key: OscillatorIndicatorKey
+  ) => {
     if (event.button !== 0) return;
     const hostHeight = hostRef.current?.clientHeight ?? 0;
     oscillatorResizeRef.current = {
+      key,
       pointerId: event.pointerId,
       startY: event.clientY,
-      startHeight: oscillatorPaneSettings.height,
+      startHeight: oscillatorPaneSettings.paneHeights[key],
       maximumHeight: Math.max(82, Math.min(420, hostHeight - 140))
     };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -2809,7 +2939,7 @@ export function PixiBlackChart({
       82,
       resize.maximumHeight
     );
-    updateOscillatorPaneSetting("height", nextHeight);
+    updateOscillatorPaneHeight(resize.key, nextHeight);
     event.preventDefault();
     event.stopPropagation();
   };
@@ -4578,10 +4708,12 @@ export function PixiBlackChart({
                     type="range"
                     min={82}
                     max={420}
-                    value={oscillatorPaneSettings.height}
-                    onChange={(event) => updateOscillatorPaneSetting("height", Number(event.target.value))}
+                    value={activeOscillatorPaneHeight}
+                    onChange={(event) => {
+                      if (activeOscillatorKey) updateOscillatorPaneHeight(activeOscillatorKey, Number(event.target.value));
+                    }}
                   />
-                  <b>{oscillatorPaneSettings.height}px</b>
+                  <b>{activeOscillatorPaneHeight}px</b>
                 </span>
               </label>
               <label className="indicator-color-setting">
@@ -4624,6 +4756,81 @@ export function PixiBlackChart({
                     onChange={(event) => updateOscillatorPaneSetting("zeroLineIntensity", Number(event.target.value))}
                   />
                   <b>{oscillatorPaneSettings.zeroLineIntensity}</b>
+                </span>
+              </label>
+            </>
+          )}
+          {activeIndicator === "waveTrendOscillator" && (
+            <>
+              <div className="indicator-settings-section">Wave Injection</div>
+              {primaryOscillator ? (
+                <>
+                  <label>
+                    Inject Wave in Main Oscillator
+                    <input
+                      type="checkbox"
+                      checked={waveTrendSettings.injectIntoPrimary}
+                      onChange={(event) => updateWaveTrendSetting("injectIntoPrimary", event.target.checked)}
+                    />
+                  </label>
+                  <div className="vwap-mode-note">
+                    {waveTrendSettings.injectIntoPrimary
+                      ? `WaveTrend is injected into ${primaryOscillator === "zScoreOscillator" ? "Z-Score" : "OI Osc"}; its separate pane is hidden.`
+                      : "WaveTrend remains in its own independently resizable pane above the existing oscillator stack."}
+                  </div>
+                </>
+              ) : (
+                <div className="vwap-mode-note">
+                  Load Z-Score or OI Osc first to unlock WaveTrend injection.
+                </div>
+              )}
+              <label className="indicator-range-row">
+                Main Wave Width
+                <span>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={4}
+                    step={0.05}
+                    value={waveTrendSettings.mainLineWidth}
+                    onChange={(event) => updateWaveTrendSetting("mainLineWidth", Number(event.target.value))}
+                  />
+                  <b>{waveTrendSettings.mainLineWidth.toFixed(2)}</b>
+                </span>
+              </label>
+              <label className="indicator-color-setting">
+                Signal Wave
+                <input
+                  type="color"
+                  value={waveTrendSettings.signalColor}
+                  onChange={(event) => updateWaveTrendSetting("signalColor", event.target.value)}
+                />
+              </label>
+              <label className="indicator-range-row">
+                Signal Intensity
+                <span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={waveTrendSettings.signalIntensity}
+                    onChange={(event) => updateWaveTrendSetting("signalIntensity", Number(event.target.value))}
+                  />
+                  <b>{waveTrendSettings.signalIntensity}</b>
+                </span>
+              </label>
+              <label className="indicator-range-row">
+                Signal Wave Width
+                <span>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={4}
+                    step={0.05}
+                    value={waveTrendSettings.signalLineWidth}
+                    onChange={(event) => updateWaveTrendSetting("signalLineWidth", Number(event.target.value))}
+                  />
+                  <b>{waveTrendSettings.signalLineWidth.toFixed(2)}</b>
                 </span>
               </label>
             </>
@@ -5103,18 +5310,19 @@ export function PixiBlackChart({
         {indicatorsCollapsed ? "v" : "^"}
       </button>
       <div ref={hostRef} className="pixi-chart-host" onContextMenu={handleChartContextMenu} onClick={() => setChartContextMenu(null)} />
-      {oscillatorPaneVisible && (
+      {oscillatorPaneVisible && oscillatorStack.panes.map((pane) => (
         <div
+          key={pane.key}
           className="oscillator-pane-resizer"
-          style={{ bottom: `min(${74 + clampNumber(Number(oscillatorPaneSettings.height), 82, 420)}px, calc(100% - 110px))` }}
+          style={{ bottom: `min(${74 + pane.topOffset}px, calc(100% - 110px))` }}
           role="separator"
-          aria-label="Resize oscillator pane"
+          aria-label={`Resize ${pane.key === "zScoreOscillator" ? "Z-Score" : pane.key === "waveTrendOscillator" ? "WaveTrend" : "OI Osc"} pane`}
           aria-orientation="horizontal"
-          onPointerDown={beginOscillatorResize}
+          onPointerDown={(event) => beginOscillatorResize(event, pane.key)}
           onPointerMove={resizeOscillatorPane}
           onPointerUp={finishOscillatorResize}
           onPointerCancel={finishOscillatorResize}
-          onDoubleClick={() => updateOscillatorPaneSetting("height", defaultOscillatorPaneSettings.height)}
+          onDoubleClick={() => updateOscillatorPaneHeight(pane.key, defaultOscillatorPaneSettings.paneHeights[pane.key])}
           onContextMenu={(event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -5122,7 +5330,7 @@ export function PixiBlackChart({
         >
           <span />
         </div>
-      )}
+      ))}
       {auctionDataRequired && <>
         <AuctionProfileLegend snapshot={auctionProfileSnapshot} settings={normalizedAuctionProfileSettings} chartType={chartType} />
         {normalizedAuctionProfileSettings.diagnosticsVisible && <AuctionProfileDiagnostics snapshot={auctionProfileSnapshot} />}

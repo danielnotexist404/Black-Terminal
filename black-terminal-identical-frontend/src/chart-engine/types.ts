@@ -291,12 +291,27 @@ export type AdaptiveSwingStrategySettings = {
   robustnessMode: "Balanced" | "Profit First" | "Drawdown First";
 };
 
+export type OscillatorIndicatorKey =
+  | "openInterestOscillator"
+  | "zScoreOscillator"
+  | "waveTrendOscillator";
+
 export type OscillatorPaneSettings = {
   height: number;
+  paneHeights: Record<OscillatorIndicatorKey, number>;
+  order: OscillatorIndicatorKey[];
   backgroundColor: string;
   backgroundIntensity: number;
   zeroLineColor: string;
   zeroLineIntensity: number;
+};
+
+export type WaveTrendOscillatorSettings = {
+  injectIntoPrimary: boolean;
+  mainLineWidth: number;
+  signalLineWidth: number;
+  signalColor: string;
+  signalIntensity: number;
 };
 
 export type ZScoreOscillatorSettings = {
@@ -398,6 +413,7 @@ export type IndicatorAdvancedSettings = {
   adaptiveSwingStrategy: AdaptiveSwingStrategySettings;
   oscillatorPane: OscillatorPaneSettings;
   zScoreOscillator: ZScoreOscillatorSettings;
+  waveTrendOscillator: WaveTrendOscillatorSettings;
   vwap: VwapSettings;
 };
 

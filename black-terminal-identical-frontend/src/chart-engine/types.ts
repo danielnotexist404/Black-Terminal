@@ -319,11 +319,86 @@ export type ZScoreOscillatorSettings = {
   bandFillIntensity: number;
 };
 
+export type VwapAnchorMode =
+  | "session"
+  | "week"
+  | "month"
+  | "fullHistory"
+  | "rolling"
+  | "swingHigh"
+  | "swingLow"
+  | "volumeClimax"
+  | "volatilityBreak"
+  | "autoRegime";
+
+export type VwapWeightingModel =
+  | "volume"
+  | "time"
+  | "exponentialVolume"
+  | "liquidityAdjusted"
+  | "volatilityParticipation"
+  | "directionalConviction"
+  | "blackCoreHybrid";
+
+export type VwapSettings = {
+  preset:
+    | "Custom"
+    | "Institutional Session"
+    | "Rolling Execution"
+    | "Liquidity Discovery"
+    | "Event Shock"
+    | "Black Core Adaptive";
+  anchorMode: VwapAnchorMode;
+  source: "close" | "hl2" | "hlc3" | "ohlc4" | "weightedClose";
+  weightingModel: VwapWeightingModel;
+  sessionAnchorHourUtc: number;
+  lookbackBars: number;
+  anchorLookbackBars: number;
+  atrLength: number;
+  decayHalfLife: number;
+  directionalBias: number;
+  regimeSensitivity: number;
+  volumeThreshold: number;
+  minimumBarsBetweenAnchors: number;
+  smoothingMethod: "none" | "ema" | "rma";
+  smoothingLength: number;
+  bandMode: "weightedStd" | "atr" | "percentage" | "microstructure";
+  bandPercentage: number;
+  showBand1: boolean;
+  showBand2: boolean;
+  showBand3: boolean;
+  band1Multiplier: number;
+  band2Multiplier: number;
+  band3Multiplier: number;
+  band1Color: string;
+  band2Color: string;
+  band3Color: string;
+  bandIntensity: number;
+  showBandFill: boolean;
+  bandFillColor: string;
+  bandFillIntensity: number;
+  lineWidth: number;
+  useCustomLineColor: boolean;
+  lineColor: string;
+  dynamicSlopeColor: boolean;
+  bullishColor: string;
+  bearishColor: string;
+  neutralColor: string;
+  slopeLookback: number;
+  slopeThresholdBps: number;
+  showAnchorMarkers: boolean;
+  anchorMarkerColor: string;
+  showPreviousVwap: boolean;
+  previousVwapColor: string;
+  previousVwapIntensity: number;
+};
+
 export type IndicatorAdvancedSettings = {
   volumeProfile: VolumeProfileSettings;
   adaptiveSwingStrategy: AdaptiveSwingStrategySettings;
   oscillatorPane: OscillatorPaneSettings;
   zScoreOscillator: ZScoreOscillatorSettings;
+  vwap: VwapSettings;
 };
 
 export type FeedEvent = {

@@ -3,6 +3,7 @@ import type {
   IndicatorAdvancedSettings,
   OscillatorPaneSettings,
   VolumeProfileSettings,
+  VwapSettings,
   ZScoreOscillatorSettings
 } from "../types";
 
@@ -156,9 +157,57 @@ export const defaultZScoreOscillatorSettings: ZScoreOscillatorSettings = {
   bandFillIntensity: 9
 };
 
+export const defaultVwapSettings: VwapSettings = {
+  preset: "Institutional Session",
+  anchorMode: "session",
+  source: "hlc3",
+  weightingModel: "volume",
+  sessionAnchorHourUtc: 0,
+  lookbackBars: 250,
+  anchorLookbackBars: 500,
+  atrLength: 21,
+  decayHalfLife: 72,
+  directionalBias: 1.25,
+  regimeSensitivity: 2.2,
+  volumeThreshold: 1.8,
+  minimumBarsBetweenAnchors: 24,
+  smoothingMethod: "none",
+  smoothingLength: 3,
+  bandMode: "weightedStd",
+  bandPercentage: 0.75,
+  showBand1: true,
+  showBand2: true,
+  showBand3: false,
+  band1Multiplier: 1,
+  band2Multiplier: 2,
+  band3Multiplier: 3,
+  band1Color: "#b9bdc5",
+  band2Color: "#6d7078",
+  band3Color: "#3d4047",
+  bandIntensity: 42,
+  showBandFill: true,
+  bandFillColor: "#5b0712",
+  bandFillIntensity: 5,
+  lineWidth: 1.5,
+  useCustomLineColor: false,
+  lineColor: "#f1f1f3",
+  dynamicSlopeColor: false,
+  bullishColor: "#f1f1f3",
+  bearishColor: "#d30024",
+  neutralColor: "#94979e",
+  slopeLookback: 5,
+  slopeThresholdBps: 0.35,
+  showAnchorMarkers: true,
+  anchorMarkerColor: "#ff1738",
+  showPreviousVwap: true,
+  previousVwapColor: "#7f828a",
+  previousVwapIntensity: 28
+};
+
 export const defaultIndicatorAdvancedSettings: IndicatorAdvancedSettings = {
   volumeProfile: defaultVolumeProfileSettings,
   adaptiveSwingStrategy: defaultAdaptiveSwingStrategySettings,
   oscillatorPane: defaultOscillatorPaneSettings,
-  zScoreOscillator: defaultZScoreOscillatorSettings
+  zScoreOscillator: defaultZScoreOscillatorSettings,
+  vwap: defaultVwapSettings
 };

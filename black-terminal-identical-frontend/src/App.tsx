@@ -418,6 +418,10 @@ function migrateIndicatorAdvancedSettings(value: Partial<IndicatorAdvancedSettin
     zScoreOscillator: {
       ...defaultIndicatorAdvancedSettings.zScoreOscillator,
       ...(value?.zScoreOscillator ?? {})
+    },
+    vwap: {
+      ...defaultIndicatorAdvancedSettings.vwap,
+      ...(value?.vwap ?? {})
     }
   };
 }

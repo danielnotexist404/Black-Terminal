@@ -28,6 +28,7 @@
     "test:performance": "node --experimental-strip-types scripts/performance-regression-tests.js",
     "test:chart-csp": "node scripts/chart-csp-regression.js",
     "test:liquidation-heatmap": "node --experimental-strip-types scripts/liquidation-heatmap-tests.ts",
+    "test:vwap": "node --experimental-strip-types scripts/vwap-engine-tests.ts",
     "test:kioseff-fixtures": "node --experimental-strip-types scripts/kioseff-fixture-contract-tests.ts",
     "test:kioseff-metadata": "node --experimental-strip-types scripts/kioseff-symbol-metadata-tests.ts",
     "test:kioseff-data": "node --experimental-strip-types scripts/kioseff-intrabar-data-tests.ts",

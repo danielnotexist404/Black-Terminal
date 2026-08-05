@@ -12209,6 +12209,35 @@ body.dom-pro-resize-active {
   border-radius: 14px;
 }
 
+.indicator-settings.vwap-settings {
+  width: 426px;
+  max-height: min(760px, calc(100% - 78px));
+  padding: 14px;
+  border-color: rgba(230, 234, 241, 0.14);
+  background:
+    radial-gradient(circle at 18% 4%, rgba(138, 0, 24, 0.13), transparent 34%),
+    var(--bt-glass-surface-strong);
+  box-shadow:
+    var(--bt-glass-shadow),
+    inset 1px 0 0 rgba(208, 0, 35, 0.3);
+}
+
+.indicator-settings.vwap-settings select {
+  width: 188px;
+}
+
+.vwap-settings .vwap-mode-note {
+  margin: 4px 0 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(217, 221, 228, 0.08);
+  border-left-color: rgba(212, 0, 36, 0.52);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.018);
+  color: rgba(215, 218, 224, 0.58);
+  font: 8.5px/1.45 "IBM Plex Mono", monospace;
+  letter-spacing: 0.018em;
+}
+
 .indicator-settings-title {
   min-height: 28px;
   margin: -2px -2px 9px;

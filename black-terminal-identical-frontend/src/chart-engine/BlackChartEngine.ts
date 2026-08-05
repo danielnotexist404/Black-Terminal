@@ -8,7 +8,12 @@ import {
 import { CandleBuffer } from "./data/CandleBuffer";
 import { LiquidationHeatmapModel } from "./heatmap/LiquidationHeatmapModel";
 import { VolumeProfileModel, VolumeProfileResult, VolumeProfileRow } from "./profile/VolumeProfileModel";
-import { defaultIndicatorAdvancedSettings } from "./profile/volumeProfileDefaults";
+import { defaultIndicatorAdvancedSettings, defaultVwapSettings } from "./profile/volumeProfileDefaults";
+import {
+  calculateInstitutionalVwap,
+  type InstitutionalVwapPoint,
+  type InstitutionalVwapResult
+} from "./indicators/institutionalVwap";
 import type { IndicatorAlertDefinition } from "../automation/alerts";
 import type { CompiledPlot } from "../components/ScriptCompiler";
 import { createAdaptiveSwingSignals } from "../modules/strategy-lab/adapters/signalAdapter";
@@ -75,6 +80,10 @@ const MIN_CANDLE_WIDTH = 0.18;
 const MAX_CANDLE_WIDTH = 26;
 const MIN_CANDLE_GAP = 0.04;
 const MAX_CANDLE_GAP = 8;
+
+function clampNumber(value: number, minimum: number, maximum: number) {
+  return Math.max(minimum, Math.min(maximum, value));
+}
 
 type LiquidationHeatmapRow = {
   price: number;
@@ -228,6 +237,7 @@ export class BlackChartEngine {
     volume: { color: "red", intensity: 62 }
   };
   private indicatorAdvancedSettings: IndicatorAdvancedSettings = defaultIndicatorAdvancedSettings;
+  private institutionalVwapCache?: { key: string; result: InstitutionalVwapResult };
 
   private rootLayer = new Container();
   private gridLayer = new Graphics();
@@ -1952,30 +1962,30 @@ export class BlackChartEngine {
   }
 
   private vwapSeriesForAlerts(data: Candle[]) {
-    const out: number[] = [];
-    let cumulativePriceVolume = 0;
-    let cumulativeVolume = 0;
-    const startIndex = Math.max(0, Math.min(this.view.firstIndex, data.length - 1));
+    return this.institutionalVwap(data).points.map((point) => point.value);
+  }
 
-    for (let i = 0; i < data.length; i++) {
-      const candle = data[i];
-      if (!candle) {
-        out.push(Number.NaN);
-        continue;
-      }
-
-      if (i < startIndex) {
-        out.push(Number.NaN);
-        continue;
-      }
-
-      const typicalPrice = (candle.high + candle.low + candle.close) / 3;
-      cumulativePriceVolume += typicalPrice * candle.volume;
-      cumulativeVolume += candle.volume;
-      out.push(cumulativeVolume > 0 ? cumulativePriceVolume / cumulativeVolume : typicalPrice);
-    }
-
-    return out;
+  private institutionalVwap(data: Candle[]) {
+    const settings = {
+      ...defaultVwapSettings,
+      ...this.indicatorAdvancedSettings.vwap
+    };
+    const last = data[data.length - 1];
+    const key = [
+      this.volumeProfileDataVersion,
+      this.chartType,
+      data.length,
+      last?.time ?? 0,
+      last?.high ?? 0,
+      last?.low ?? 0,
+      last?.close ?? 0,
+      last?.volume ?? 0,
+      JSON.stringify(settings)
+    ].join("|");
+    if (this.institutionalVwapCache?.key === key) return this.institutionalVwapCache.result;
+    const result = calculateInstitutionalVwap(data, settings);
+    this.institutionalVwapCache = { key, result };
+    return result;
   }
 
   private smaSeries(values: number[], period: number) {
@@ -3081,6 +3091,168 @@ export class BlackChartEngine {
     });
   }
 
+  private drawInstitutionalVwap(g: Graphics, data: Candle[]) {
+    const settings = {
+      ...defaultVwapSettings,
+      ...this.indicatorAdvancedSettings.vwap
+    };
+    const result = this.institutionalVwap(data);
+    const points = result.points;
+    const first = Math.max(0, this.view.firstIndex);
+    const last = Math.min(points.length - 1, this.view.lastIndex);
+    if (first > last) return;
+
+    const visual = this.visualFor("vwap", "gray");
+    const bandAlpha = clampNumber(settings.bandIntensity, 0, 100) / 100;
+    const fillAlpha = clampNumber(settings.bandFillIntensity, 0, 100) / 100;
+    const lineColor = settings.useCustomLineColor
+      ? this.hexColor(settings.lineColor, visual.color)
+      : visual.color;
+    const bullishColor = this.hexColor(settings.bullishColor, theme.silverBright);
+    const bearishColor = this.hexColor(settings.bearishColor, theme.redBright);
+    const neutralColor = this.hexColor(settings.neutralColor, theme.muted);
+
+    const isValid = (point: InstitutionalVwapPoint | undefined, field: keyof InstitutionalVwapPoint) =>
+      point !== undefined && typeof point[field] === "number" && Number.isFinite(point[field] as number);
+
+    const drawSeries = (
+      field: keyof Pick<InstitutionalVwapPoint, "value" | "upper1" | "lower1" | "upper2" | "lower2" | "upper3" | "lower3" | "previousVwap">,
+      color: number,
+      alpha: number,
+      width: number
+    ) => {
+      let started = false;
+      let drew = false;
+      let lastValue = Number.NaN;
+      for (let index = first; index <= last; index += 1) {
+        const point = points[index];
+        if (!isValid(point, field)) {
+          started = false;
+          continue;
+        }
+        const value = point[field] as number;
+        const discontinuity = point.anchor
+          || (field === "previousVwap" && Number.isFinite(lastValue) && Math.abs(value - lastValue) > Math.max(1, Math.abs(lastValue)) * 1e-10);
+        const x = this.xForIndex(index);
+        const y = this.yForPrice(value);
+        if (!started || discontinuity) {
+          g.moveTo(x, y);
+          started = true;
+        } else {
+          g.lineTo(x, y);
+          drew = true;
+        }
+        lastValue = value;
+      }
+      if (drew) g.stroke({ width, color, alpha });
+    };
+
+    if (settings.showBandFill && fillAlpha > 0) {
+      const fillColor = this.hexColor(settings.bandFillColor, theme.red);
+      let segment: number[] = [];
+      const fillSegment = () => {
+        if (segment.length < 2) {
+          segment = [];
+          return;
+        }
+        const polygon: number[] = [];
+        for (const index of segment) {
+          polygon.push(this.xForIndex(index), this.yForPrice(points[index].upper1));
+        }
+        for (let cursor = segment.length - 1; cursor >= 0; cursor -= 1) {
+          const index = segment[cursor];
+          polygon.push(this.xForIndex(index), this.yForPrice(points[index].lower1));
+        }
+        if (polygon.length >= 6) g.poly(polygon).fill({ color: fillColor, alpha: fillAlpha });
+        segment = [];
+      };
+
+      for (let index = first; index <= last; index += 1) {
+        const point = points[index];
+        if (!isValid(point, "upper1") || !isValid(point, "lower1")) {
+          fillSegment();
+          continue;
+        }
+        if (point.anchor && segment.length) fillSegment();
+        segment.push(index);
+      }
+      fillSegment();
+    }
+
+    if (settings.showBand3) {
+      const color = this.hexColor(settings.band3Color, theme.muted);
+      drawSeries("upper3", color, bandAlpha * 0.68, 0.7);
+      drawSeries("lower3", color, bandAlpha * 0.68, 0.7);
+    }
+    if (settings.showBand2) {
+      const color = this.hexColor(settings.band2Color, theme.silver);
+      drawSeries("upper2", color, bandAlpha * 0.82, 0.85);
+      drawSeries("lower2", color, bandAlpha * 0.82, 0.85);
+    }
+    if (settings.showBand1) {
+      const color = this.hexColor(settings.band1Color, theme.silverBright);
+      drawSeries("upper1", color, bandAlpha, 1);
+      drawSeries("lower1", color, bandAlpha, 1);
+    }
+
+    if (settings.showPreviousVwap) {
+      drawSeries(
+        "previousVwap",
+        this.hexColor(settings.previousVwapColor, theme.muted),
+        clampNumber(settings.previousVwapIntensity, 0, 100) / 100,
+        0.8
+      );
+    }
+
+    if (settings.dynamicSlopeColor) {
+      const directionalColors: Array<{ direction: -1 | 0 | 1; color: number }> = [
+        { direction: -1, color: bearishColor },
+        { direction: 0, color: neutralColor },
+        { direction: 1, color: bullishColor }
+      ];
+      for (const target of directionalColors) {
+        let drew = false;
+        for (let index = Math.max(1, first); index <= last; index += 1) {
+          const point = points[index];
+          const previous = points[index - 1];
+          if (
+            point.direction !== target.direction
+            || point.anchor
+            || !isValid(point, "value")
+            || !isValid(previous, "value")
+          ) {
+            continue;
+          }
+          g.moveTo(this.xForIndex(index - 1), this.yForPrice(previous.value));
+          g.lineTo(this.xForIndex(index), this.yForPrice(point.value));
+          drew = true;
+        }
+        if (drew) {
+          g.stroke({
+            width: clampNumber(settings.lineWidth, 0.5, 6),
+            color: target.color,
+            alpha: visual.alpha
+          });
+        }
+      }
+    } else {
+      drawSeries("value", lineColor, visual.alpha, clampNumber(settings.lineWidth, 0.5, 6));
+    }
+
+    if (settings.showAnchorMarkers) {
+      const markerColor = this.hexColor(settings.anchorMarkerColor, theme.redBright);
+      const markerRadius = clampNumber(1.7 + this.view.candleWidth * 0.08, 1.7, 3.2);
+      for (const index of result.anchorIndices) {
+        if (index < first || index > last) continue;
+        const point = points[index];
+        if (!isValid(point, "value")) continue;
+        g.circle(this.xForIndex(index), this.yForPrice(point.value), markerRadius)
+          .fill({ color: markerColor, alpha: 0.92 })
+          .stroke({ width: 0.8, color: 0x050506, alpha: 0.9 });
+      }
+    }
+  }
+
   private drawIndicators() {
     const g = this.indicatorLayer;
     g.clear();
@@ -3210,32 +3382,8 @@ export class BlackChartEngine {
       }
     };
 
-    const vwapLine = () => {
-      let started = false;
-      let cumulativePriceVolume = 0;
-      let cumulativeVolume = 0;
-      for (let i = this.view.firstIndex; i <= this.view.lastIndex; i++) {
-        const candle = data[i];
-        if (!candle) continue;
-        const typicalPrice = (candle.high + candle.low + candle.close) / 3;
-        cumulativePriceVolume += typicalPrice * candle.volume;
-        cumulativeVolume += candle.volume;
-        const vwap = cumulativeVolume > 0 ? cumulativePriceVolume / cumulativeVolume : typicalPrice;
-        const x = this.xForIndex(i);
-        const y = this.yForPrice(vwap);
-        if (!started) {
-          g.moveTo(x, y);
-          started = true;
-        } else {
-          g.lineTo(x, y);
-        }
-      }
-      const visual = this.visualFor("vwap", "gray");
-      g.stroke({ width: 1, color: visual.color, alpha: visual.alpha * 0.66 });
-    };
-
     if (this.visibleIndicators.bollinger) bollingerBands(this.indicatorPeriods.bollinger);
-    if (this.visibleIndicators.vwap) vwapLine();
+    if (this.visibleIndicators.vwap) this.drawInstitutionalVwap(g, data);
     if (this.visibleIndicators.sma20) {
       const visual = this.visualFor("sma20", "silver");
       smaLine(this.indicatorPeriods.sma20, visual.color, visual.alpha * 0.72, 1);

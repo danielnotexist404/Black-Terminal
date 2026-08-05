@@ -20,12 +20,14 @@ import {
   ReplayStatus,
   VisibleIndicators,
   VolumeProfileSettings,
+  VwapSettings,
   ZScoreOscillatorSettings
 } from "../chart-engine/types";
 import {
   defaultAdaptiveSwingStrategySettings,
   defaultOscillatorPaneSettings,
   defaultVolumeProfileSettings,
+  defaultVwapSettings,
   defaultZScoreOscillatorSettings
 } from "../chart-engine/profile/volumeProfileDefaults";
 import { createMockCandles } from "../data/mockMarket";
@@ -142,6 +144,19 @@ type HistoryDepth = 1000 | 2500 | 5000 | 10000 | 20000;
 type VolumeProfileSettingsTab = "inputs" | "style" | "visibility";
 type AdaptiveSwingSettingsTab = "signals" | "engine" | "optimization" | "alerts";
 type LineAlertIndicatorKey = "vwap" | "ema20" | "ema50" | "ema200";
+const vwapAnchorLabels: Record<VwapSettings["anchorMode"], string> = {
+  session: "Session / UTC",
+  week: "Weekly Auction",
+  month: "Monthly Auction",
+  fullHistory: "Full History",
+  rolling: "Rolling Execution",
+  swingHigh: "Swing High Supply",
+  swingLow: "Swing Low Demand",
+  volumeClimax: "Volume Climax",
+  volatilityBreak: "Volatility Break",
+  autoRegime: "Black Core Auto-Regime"
+};
+
 type ChartContextMenuState = {
   x: number;
   y: number;
@@ -2573,7 +2588,11 @@ export function PixiBlackChart({
       label: "Adaptive Swing Reversal",
       value: `L${indicatorAdvancedSettings.adaptiveSwingStrategy?.swingLookback ?? defaultAdaptiveSwingStrategySettings.swingLookback} / ATR ${indicatorAdvancedSettings.adaptiveSwingStrategy?.atrStopMultiplier ?? defaultAdaptiveSwingStrategySettings.atrStopMultiplier}`
     },
-    { key: "vwap", label: "VWAP", value: "session" },
+    {
+      key: "vwap",
+      label: "VWAP",
+      value: vwapAnchorLabels[indicatorAdvancedSettings.vwap?.anchorMode ?? defaultVwapSettings.anchorMode]
+    },
     { key: "ema20", label: "EMA", value: String(indicatorPeriods.ema20) },
     { key: "ema50", label: "EMA", value: String(indicatorPeriods.ema50) },
     { key: "ema200", label: "EMA", value: String(indicatorPeriods.ema200) },
@@ -2634,6 +2653,10 @@ export function PixiBlackChart({
     ...defaultZScoreOscillatorSettings,
     ...indicatorAdvancedSettings.zScoreOscillator
   };
+  const vwapSettings: VwapSettings = {
+    ...defaultVwapSettings,
+    ...indicatorAdvancedSettings.vwap
+  };
   const oscillatorPaneVisible =
     visibleIndicators.openInterestOscillator ||
     visibleIndicators.zScoreOscillator ||
@@ -2667,6 +2690,99 @@ export function PixiBlackChart({
         ...defaultZScoreOscillatorSettings,
         ...current.zScoreOscillator,
         [key]: value
+      }
+    }));
+  };
+
+  const updateVwapSetting = <Key extends keyof VwapSettings>(
+    key: Key,
+    value: VwapSettings[Key]
+  ) => {
+    onIndicatorAdvancedSettingsChange((current) => ({
+      ...current,
+      vwap: {
+        ...defaultVwapSettings,
+        ...current.vwap,
+        preset: key === "preset" ? value as VwapSettings["preset"] : "Custom",
+        [key]: value
+      }
+    }));
+  };
+
+  const applyVwapPreset = (preset: VwapSettings["preset"]) => {
+    const presetValues = {
+      Custom: {},
+      "Institutional Session": {
+        anchorMode: "session",
+        source: "hlc3",
+        weightingModel: "volume",
+        smoothingMethod: "none",
+        bandMode: "weightedStd",
+        showBand1: true,
+        showBand2: true,
+        showBand3: false,
+        dynamicSlopeColor: false,
+        showPreviousVwap: true
+      },
+      "Rolling Execution": {
+        anchorMode: "rolling",
+        source: "ohlc4",
+        weightingModel: "volume",
+        lookbackBars: 250,
+        smoothingMethod: "ema",
+        smoothingLength: 3,
+        bandMode: "weightedStd",
+        showBand1: true,
+        showBand2: true,
+        showPreviousVwap: false
+      },
+      "Liquidity Discovery": {
+        anchorMode: "session",
+        source: "weightedClose",
+        weightingModel: "liquidityAdjusted",
+        smoothingMethod: "rma",
+        smoothingLength: 2,
+        bandMode: "microstructure",
+        dynamicSlopeColor: true,
+        showBand1: true,
+        showBand2: true
+      },
+      "Event Shock": {
+        anchorMode: "volatilityBreak",
+        source: "hlc3",
+        weightingModel: "volatilityParticipation",
+        anchorLookbackBars: 1_000,
+        bandMode: "atr",
+        dynamicSlopeColor: true,
+        showAnchorMarkers: true,
+        showPreviousVwap: false
+      },
+      "Black Core Adaptive": {
+        anchorMode: "autoRegime",
+        source: "weightedClose",
+        weightingModel: "blackCoreHybrid",
+        smoothingMethod: "ema",
+        smoothingLength: 3,
+        bandMode: "microstructure",
+        regimeSensitivity: 2.2,
+        volumeThreshold: 1.8,
+        minimumBarsBetweenAnchors: 24,
+        dynamicSlopeColor: true,
+        showBand1: true,
+        showBand2: true,
+        showBand3: true,
+        showAnchorMarkers: true,
+        showPreviousVwap: true
+      }
+    } satisfies Record<VwapSettings["preset"], Partial<VwapSettings>>;
+
+    onIndicatorAdvancedSettingsChange((current) => ({
+      ...current,
+      vwap: {
+        ...defaultVwapSettings,
+        ...current.vwap,
+        preset,
+        ...presetValues[preset]
       }
     }));
   };
@@ -3916,7 +4032,15 @@ export function PixiBlackChart({
 
 
       {activeIndicator && activeIndicator !== "aif" && activeIndicator !== "auctionProfile" && activeIndicator !== "volumeProfile" && activeIndicator !== "adaptiveSwingStrategy" && activeIndicator !== "volatilityHeatmap" && (
-        <div className={activeIndicator === "zScoreOscillator" ? "indicator-settings profile-settings oscillator-settings" : "indicator-settings"}>
+        <div
+          className={
+            activeIndicator === "zScoreOscillator"
+              ? "indicator-settings profile-settings oscillator-settings"
+              : activeIndicator === "vwap"
+                ? "indicator-settings profile-settings vwap-settings"
+                : "indicator-settings"
+          }
+        >
           <div className="indicator-settings-title">
             <span>{indicatorRows.find((indicator) => indicator.key === activeIndicator)?.label}</span>
             <button type="button" onClick={() => setActiveIndicator(null)}>DONE</button>
@@ -3965,6 +4089,485 @@ export function PixiBlackChart({
               <b>{indicatorVisualSettings[activeIndicator].intensity}</b>
             </span>
           </label>
+          {activeIndicator === "vwap" && (
+            <>
+              <div className="indicator-settings-section">Institutional Engine</div>
+              <label>
+                Engine Preset
+                <select
+                  value={vwapSettings.preset}
+                  onChange={(event) => applyVwapPreset(event.target.value as VwapSettings["preset"])}
+                >
+                  <option value="Custom">Custom</option>
+                  <option value="Institutional Session">Institutional Session</option>
+                  <option value="Rolling Execution">Rolling Execution</option>
+                  <option value="Liquidity Discovery">Liquidity Discovery</option>
+                  <option value="Event Shock">Event Shock</option>
+                  <option value="Black Core Adaptive">Black Core Adaptive</option>
+                </select>
+              </label>
+              <label>
+                Anchor Architecture
+                <select
+                  value={vwapSettings.anchorMode}
+                  onChange={(event) => updateVwapSetting("anchorMode", event.target.value as VwapSettings["anchorMode"])}
+                >
+                  {Object.entries(vwapAnchorLabels).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="vwap-mode-note">
+                Stable candle/time anchors—never recalculated from the visible chart edge.
+              </div>
+              <label>
+                Price Source
+                <select
+                  value={vwapSettings.source}
+                  onChange={(event) => updateVwapSetting("source", event.target.value as VwapSettings["source"])}
+                >
+                  <option value="close">Close</option>
+                  <option value="hl2">HL2</option>
+                  <option value="hlc3">HLC3 / Typical</option>
+                  <option value="ohlc4">OHLC4</option>
+                  <option value="weightedClose">Weighted Close</option>
+                </select>
+              </label>
+              <label>
+                Weighting Model
+                <select
+                  value={vwapSettings.weightingModel}
+                  onChange={(event) => updateVwapSetting("weightingModel", event.target.value as VwapSettings["weightingModel"])}
+                >
+                  <option value="volume">Canonical Volume</option>
+                  <option value="time">Execution TWAP</option>
+                  <option value="exponentialVolume">Decayed Volume</option>
+                  <option value="liquidityAdjusted">Liquidity Adjusted</option>
+                  <option value="volatilityParticipation">Volatility Participation</option>
+                  <option value="directionalConviction">Directional Conviction</option>
+                  <option value="blackCoreHybrid">Black Core Hybrid</option>
+                </select>
+              </label>
+              {(vwapSettings.anchorMode === "session" || vwapSettings.anchorMode === "week" || vwapSettings.anchorMode === "month") && (
+                <label>
+                  UTC Anchor Hour
+                  <input
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={vwapSettings.sessionAnchorHourUtc}
+                    onChange={(event) => updateVwapSetting("sessionAnchorHourUtc", clampNumber(Number(event.target.value), 0, 23))}
+                  />
+                </label>
+              )}
+              {vwapSettings.anchorMode === "rolling" && (
+                <label>
+                  Rolling Window
+                  <input
+                    type="number"
+                    min={2}
+                    max={20_000}
+                    value={vwapSettings.lookbackBars}
+                    onChange={(event) => updateVwapSetting("lookbackBars", clampNumber(Number(event.target.value), 2, 20_000))}
+                  />
+                </label>
+              )}
+              {(["swingHigh", "swingLow", "volumeClimax", "volatilityBreak"] as VwapSettings["anchorMode"][]).includes(vwapSettings.anchorMode) && (
+                <label>
+                  Event Search Depth
+                  <input
+                    type="number"
+                    min={10}
+                    max={20_000}
+                    value={vwapSettings.anchorLookbackBars}
+                    onChange={(event) => updateVwapSetting("anchorLookbackBars", clampNumber(Number(event.target.value), 10, 20_000))}
+                  />
+                </label>
+              )}
+              {vwapSettings.weightingModel === "exponentialVolume" && (
+                <label>
+                  Decay Half-Life
+                  <input
+                    type="number"
+                    min={2}
+                    max={5_000}
+                    value={vwapSettings.decayHalfLife}
+                    onChange={(event) => updateVwapSetting("decayHalfLife", clampNumber(Number(event.target.value), 2, 5_000))}
+                  />
+                </label>
+              )}
+              <label>
+                Volatility Length
+                <input
+                  type="number"
+                  min={2}
+                  max={500}
+                  value={vwapSettings.atrLength}
+                  onChange={(event) => updateVwapSetting("atrLength", clampNumber(Number(event.target.value), 2, 500))}
+                />
+              </label>
+              {(vwapSettings.weightingModel === "directionalConviction" || vwapSettings.weightingModel === "blackCoreHybrid") && (
+                <label>
+                  Conviction Bias
+                  <input
+                    type="number"
+                    min={0}
+                    max={5}
+                    step={0.05}
+                    value={vwapSettings.directionalBias}
+                    onChange={(event) => updateVwapSetting("directionalBias", clampNumber(Number(event.target.value), 0, 5))}
+                  />
+                </label>
+              )}
+              {vwapSettings.anchorMode === "autoRegime" && (
+                <>
+                  <label>
+                    Shock Sensitivity
+                    <input
+                      type="number"
+                      min={0.5}
+                      max={10}
+                      step={0.1}
+                      value={vwapSettings.regimeSensitivity}
+                      onChange={(event) => updateVwapSetting("regimeSensitivity", clampNumber(Number(event.target.value), 0.5, 10))}
+                    />
+                  </label>
+                  <label>
+                    Volume Trigger
+                    <input
+                      type="number"
+                      min={0.25}
+                      max={10}
+                      step={0.05}
+                      value={vwapSettings.volumeThreshold}
+                      onChange={(event) => updateVwapSetting("volumeThreshold", clampNumber(Number(event.target.value), 0.25, 10))}
+                    />
+                  </label>
+                  <label>
+                    Anchor Cooldown
+                    <input
+                      type="number"
+                      min={2}
+                      max={5_000}
+                      value={vwapSettings.minimumBarsBetweenAnchors}
+                      onChange={(event) => updateVwapSetting("minimumBarsBetweenAnchors", clampNumber(Number(event.target.value), 2, 5_000))}
+                    />
+                  </label>
+                </>
+              )}
+              <label>
+                Execution Smoothing
+                <select
+                  value={vwapSettings.smoothingMethod}
+                  onChange={(event) => updateVwapSetting("smoothingMethod", event.target.value as VwapSettings["smoothingMethod"])}
+                >
+                  <option value="none">None / Exact</option>
+                  <option value="ema">EMA</option>
+                  <option value="rma">RMA / Wilder</option>
+                </select>
+              </label>
+              {vwapSettings.smoothingMethod !== "none" && (
+                <label>
+                  Smoothing Length
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={vwapSettings.smoothingLength}
+                    onChange={(event) => updateVwapSetting("smoothingLength", clampNumber(Number(event.target.value), 1, 100))}
+                  />
+                </label>
+              )}
+
+              <div className="indicator-settings-section">Institutional Envelopes</div>
+              <label>
+                Dispersion Model
+                <select
+                  value={vwapSettings.bandMode}
+                  onChange={(event) => updateVwapSetting("bandMode", event.target.value as VwapSettings["bandMode"])}
+                >
+                  <option value="weightedStd">Weighted Deviation</option>
+                  <option value="atr">ATR Execution Bands</option>
+                  <option value="percentage">Percentage Bands</option>
+                  <option value="microstructure">Microstructure Composite</option>
+                </select>
+              </label>
+              {vwapSettings.bandMode === "percentage" && (
+                <label>
+                  Base Distance %
+                  <input
+                    type="number"
+                    min={0.01}
+                    max={25}
+                    step={0.01}
+                    value={vwapSettings.bandPercentage}
+                    onChange={(event) => updateVwapSetting("bandPercentage", clampNumber(Number(event.target.value), 0.01, 25))}
+                  />
+                </label>
+              )}
+              <label>
+                Inner Band
+                <input
+                  type="checkbox"
+                  checked={vwapSettings.showBand1}
+                  onChange={(event) => updateVwapSetting("showBand1", event.target.checked)}
+                />
+              </label>
+              <label>
+                Inner Multiplier
+                <input
+                  type="number"
+                  min={0.1}
+                  max={20}
+                  step={0.1}
+                  value={vwapSettings.band1Multiplier}
+                  onChange={(event) => updateVwapSetting("band1Multiplier", clampNumber(Number(event.target.value), 0.1, 20))}
+                />
+              </label>
+              <label className="indicator-color-setting">
+                Inner Band Color
+                <input
+                  type="color"
+                  value={vwapSettings.band1Color}
+                  onChange={(event) => updateVwapSetting("band1Color", event.target.value)}
+                />
+              </label>
+              <label>
+                Outer Band
+                <input
+                  type="checkbox"
+                  checked={vwapSettings.showBand2}
+                  onChange={(event) => updateVwapSetting("showBand2", event.target.checked)}
+                />
+              </label>
+              <label>
+                Outer Multiplier
+                <input
+                  type="number"
+                  min={0.1}
+                  max={20}
+                  step={0.1}
+                  value={vwapSettings.band2Multiplier}
+                  onChange={(event) => updateVwapSetting("band2Multiplier", clampNumber(Number(event.target.value), 0.1, 20))}
+                />
+              </label>
+              <label className="indicator-color-setting">
+                Outer Band Color
+                <input
+                  type="color"
+                  value={vwapSettings.band2Color}
+                  onChange={(event) => updateVwapSetting("band2Color", event.target.value)}
+                />
+              </label>
+              <label>
+                Tail-Risk Band
+                <input
+                  type="checkbox"
+                  checked={vwapSettings.showBand3}
+                  onChange={(event) => updateVwapSetting("showBand3", event.target.checked)}
+                />
+              </label>
+              <label>
+                Tail Multiplier
+                <input
+                  type="number"
+                  min={0.1}
+                  max={20}
+                  step={0.1}
+                  value={vwapSettings.band3Multiplier}
+                  onChange={(event) => updateVwapSetting("band3Multiplier", clampNumber(Number(event.target.value), 0.1, 20))}
+                />
+              </label>
+              <label className="indicator-color-setting">
+                Tail Band Color
+                <input
+                  type="color"
+                  value={vwapSettings.band3Color}
+                  onChange={(event) => updateVwapSetting("band3Color", event.target.value)}
+                />
+              </label>
+              <label className="indicator-range-row">
+                Band Intensity
+                <span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={vwapSettings.bandIntensity}
+                    onChange={(event) => updateVwapSetting("bandIntensity", Number(event.target.value))}
+                  />
+                  <b>{vwapSettings.bandIntensity}</b>
+                </span>
+              </label>
+              <label>
+                Value Corridor Fill
+                <input
+                  type="checkbox"
+                  checked={vwapSettings.showBandFill}
+                  onChange={(event) => updateVwapSetting("showBandFill", event.target.checked)}
+                />
+              </label>
+              <label className="indicator-color-setting">
+                Corridor Color
+                <input
+                  type="color"
+                  value={vwapSettings.bandFillColor}
+                  onChange={(event) => updateVwapSetting("bandFillColor", event.target.value)}
+                />
+              </label>
+              <label className="indicator-range-row">
+                Corridor Intensity
+                <span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={35}
+                    value={vwapSettings.bandFillIntensity}
+                    onChange={(event) => updateVwapSetting("bandFillIntensity", Number(event.target.value))}
+                  />
+                  <b>{vwapSettings.bandFillIntensity}</b>
+                </span>
+              </label>
+
+              <div className="indicator-settings-section">Signal & Execution Style</div>
+              <label className="indicator-range-row">
+                Core Line Width
+                <span>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={6}
+                    step={0.25}
+                    value={vwapSettings.lineWidth}
+                    onChange={(event) => updateVwapSetting("lineWidth", Number(event.target.value))}
+                  />
+                  <b>{vwapSettings.lineWidth.toFixed(2)}</b>
+                </span>
+              </label>
+              <label>
+                Custom Core Color
+                <input
+                  type="checkbox"
+                  checked={vwapSettings.useCustomLineColor}
+                  onChange={(event) => updateVwapSetting("useCustomLineColor", event.target.checked)}
+                />
+              </label>
+              <label className="indicator-color-setting">
+                Core Line Color
+                <input
+                  type="color"
+                  disabled={!vwapSettings.useCustomLineColor}
+                  value={vwapSettings.lineColor}
+                  onChange={(event) => updateVwapSetting("lineColor", event.target.value)}
+                />
+              </label>
+              <label>
+                Dynamic Slope Regime
+                <input
+                  type="checkbox"
+                  checked={vwapSettings.dynamicSlopeColor}
+                  onChange={(event) => updateVwapSetting("dynamicSlopeColor", event.target.checked)}
+                />
+              </label>
+              {vwapSettings.dynamicSlopeColor && (
+                <>
+                  <label className="indicator-color-setting">
+                    Bullish Regime
+                    <input
+                      type="color"
+                      value={vwapSettings.bullishColor}
+                      onChange={(event) => updateVwapSetting("bullishColor", event.target.value)}
+                    />
+                  </label>
+                  <label className="indicator-color-setting">
+                    Bearish Regime
+                    <input
+                      type="color"
+                      value={vwapSettings.bearishColor}
+                      onChange={(event) => updateVwapSetting("bearishColor", event.target.value)}
+                    />
+                  </label>
+                  <label className="indicator-color-setting">
+                    Neutral Regime
+                    <input
+                      type="color"
+                      value={vwapSettings.neutralColor}
+                      onChange={(event) => updateVwapSetting("neutralColor", event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Slope Window
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={vwapSettings.slopeLookback}
+                      onChange={(event) => updateVwapSetting("slopeLookback", clampNumber(Number(event.target.value), 1, 100))}
+                    />
+                  </label>
+                  <label>
+                    Neutral Threshold
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.05}
+                      value={vwapSettings.slopeThresholdBps}
+                      onChange={(event) => updateVwapSetting("slopeThresholdBps", clampNumber(Number(event.target.value), 0, 100))}
+                    />
+                  </label>
+                </>
+              )}
+              <label>
+                Anchor Markers
+                <input
+                  type="checkbox"
+                  checked={vwapSettings.showAnchorMarkers}
+                  onChange={(event) => updateVwapSetting("showAnchorMarkers", event.target.checked)}
+                />
+              </label>
+              <label className="indicator-color-setting">
+                Anchor Marker Color
+                <input
+                  type="color"
+                  disabled={!vwapSettings.showAnchorMarkers}
+                  value={vwapSettings.anchorMarkerColor}
+                  onChange={(event) => updateVwapSetting("anchorMarkerColor", event.target.value)}
+                />
+              </label>
+              <label>
+                Previous Auction VWAP
+                <input
+                  type="checkbox"
+                  checked={vwapSettings.showPreviousVwap}
+                  onChange={(event) => updateVwapSetting("showPreviousVwap", event.target.checked)}
+                />
+              </label>
+              <label className="indicator-color-setting">
+                Previous VWAP Color
+                <input
+                  type="color"
+                  disabled={!vwapSettings.showPreviousVwap}
+                  value={vwapSettings.previousVwapColor}
+                  onChange={(event) => updateVwapSetting("previousVwapColor", event.target.value)}
+                />
+              </label>
+              <label className="indicator-range-row">
+                Previous Intensity
+                <span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    disabled={!vwapSettings.showPreviousVwap}
+                    value={vwapSettings.previousVwapIntensity}
+                    onChange={(event) => updateVwapSetting("previousVwapIntensity", Number(event.target.value))}
+                  />
+                  <b>{vwapSettings.previousVwapIntensity}</b>
+                </span>
+              </label>
+            </>
+          )}
           {oscillatorSettingsOpen && (
             <>
               <div className="indicator-settings-section">Pane</div>
@@ -4224,7 +4827,7 @@ export function PixiBlackChart({
                 <option value="leverage-volume">Leverage + volume zones</option>
               </select>
             </label>
-          ) : !oscillatorSettingsOpen ? (
+          ) : !oscillatorSettingsOpen && activeIndicator !== "vwap" ? (
             <label>
               Source
               <select value="close" onChange={() => undefined}>

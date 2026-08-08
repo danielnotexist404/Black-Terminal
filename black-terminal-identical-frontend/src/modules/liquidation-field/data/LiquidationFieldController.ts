@@ -1,171 +1,367 @@
 import type { Candle } from "../../../chart-engine/types.ts";
 import { migrateLiquidationFieldSettings } from "../core/settings.ts";
 import type {
-  ConfirmedLiquidationEvent,
+  BclifModelAuthority,
   LiquidationFieldRuntimeStatus,
   LiquidationFieldSettings,
-  LiquidationFieldSnapshot,
-  LiquidationMarketFrame
+  LiquidationFieldSnapshot
 } from "../core/types.ts";
-import { createLiquidationFieldFixture } from "../testing/fixtures.ts";
+import { applyBclifVisualCertificationProfile, createLiquidationFieldFixture } from "../testing/fixtures.ts";
 import { LiquidationFieldWorkerClient } from "../worker/LiquidationFieldWorkerClient.ts";
-import { bootstrapBybitLiquidationField, type BybitLiquidationBootstrap } from "./bybitPublicData.ts";
-import { BybitLiquidationStream, type BybitLiquidationLiveState } from "./bybitLiquidationStream.ts";
+import { BrowserLiquidationFieldFallback } from "./BrowserLiquidationFieldFallback.ts";
+import {
+  PersistentLiquidationFieldAccessError,
+  PersistentLiquidationFieldClient,
+  PersistentLiquidationFieldUnavailableError,
+  persistentErrorAllowsInitialBrowserFallback,
+  type PersistentLiquidationFieldLoadResult
+} from "./PersistentLiquidationFieldClient.ts";
+import { LiquidationFieldTileContractError } from "./LiquidationFieldTileCodec.ts";
 
 export interface LiquidationFieldControllerOptions {
   symbol: string;
   settings: LiquidationFieldSettings;
   getCandles: () => Candle[];
+  getReplayActive?: () => boolean;
   onSnapshot: (snapshot: LiquidationFieldSnapshot | null) => void;
   onStatus: (status: LiquidationFieldRuntimeStatus) => void;
+  persistentClient?: PersistentLiquidationFieldAuthorityClient;
+  createBrowserFallback?: (options: ConstructorParameters<typeof BrowserLiquidationFieldFallback>[0]) => BrowserLiquidationFieldHandle;
 }
 
+export interface PersistentLiquidationFieldAuthorityClient {
+  load(signal: AbortSignal): Promise<PersistentLiquidationFieldLoadResult>;
+  probe(signal: AbortSignal): Promise<boolean>;
+  updateSettings(settings: LiquidationFieldSettings): boolean;
+  clear(): void;
+}
+
+export interface BrowserLiquidationFieldHandle {
+  start(reason?: string): Promise<void>;
+  updateSettings(settings: LiquidationFieldSettings): void;
+  dispose(): void;
+}
+
+type SelectedAuthority = BclifModelAuthority | "PROBING";
+
+/**
+ * Authority selector for BCLIF. Persistent market memory is resolved before a
+ * browser WebSocket can be constructed. Once selected, an authority remains
+ * exclusive for the lifetime of this controller.
+ */
 export class LiquidationFieldController {
   private settings: LiquidationFieldSettings;
-  private worker = new LiquidationFieldWorkerClient();
-  private stream: BybitLiquidationStream | null = null;
-  private bootstrap: BybitLiquidationBootstrap | null = null;
-  private live: BybitLiquidationLiveState | null = null;
-  private rebuildTimer: number | null = null;
-  private refreshTimer: number | null = null;
-  private abort = new AbortController();
+  private readonly persistent: PersistentLiquidationFieldAuthorityClient;
+  private fallback: BrowserLiquidationFieldHandle | null = null;
+  private fixtureWorker: LiquidationFieldWorkerClient | null = null;
+  private persistentRefreshTimer: number | null = null;
+  private fallbackProbeTimer: number | null = null;
+  private readonly abort = new AbortController();
   private disposed = false;
-  private buildGeneration = 0;
-  private liveStartedAt = Date.now();
+  private persistentRefreshInFlight = false;
+  private fallbackProbeInFlight = false;
+  private fallbackProbeAttempt = 0;
+  private persistentGeneration = 0;
+  private hasPersistentSnapshot = false;
+  private selectedAuthority: SelectedAuthority = "PROBING";
 
   constructor(private readonly options: LiquidationFieldControllerOptions) {
     this.settings = migrateLiquidationFieldSettings(options.settings);
+    this.persistent = options.persistentClient ?? new PersistentLiquidationFieldClient({
+      symbol: options.symbol,
+      settings: this.settings,
+      getCandles: options.getCandles,
+      getReplayActive: options.getReplayActive
+    });
   }
 
   async start() {
-    this.status("LOADING", "Loading Bybit OI history and risk tiers…", "BYBIT_PUBLIC");
-    if (this.settings.visualFixture) {
+    if (isBclifVisualFixtureEnabled()) {
+      this.selectedAuthority = "TEST_FIXTURE";
       await this.buildFixture();
       return;
     }
-    const symbol = this.options.symbol.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
-    this.stream = new BybitLiquidationStream(symbol, (state) => {
-      this.live = state;
-      this.scheduleBuild();
-      this.status(state.connected ? "COLLECTING" : "STALE", state.connected
-        ? "Live trades, liquidations and L2 depth connected; historical event coverage is still accumulating."
-        : "Bybit public stream reconnecting…", "BYBIT_PUBLIC");
+    this.status({
+      state: "LOADING",
+      message: "Resolving protected persistent BCLIF authority before opening any browser market stream.",
+      source: "PERSISTENT_COLLECTOR",
+      authority: "PERSISTENT_NODE",
+      persistence: "ON",
+      collectorNodeId: null,
+      lastInputAt: null
     });
-    this.stream.start();
     try {
-      await this.refreshBootstrap();
-      if (!this.bootstrap?.frames.length || this.bootstrap.coverage.openInterestCoveragePercent <= 0) {
-        this.status("UNAVAILABLE", "Open-interest history is unavailable for this venue/symbol window.", "BYBIT_PUBLIC");
-        this.options.onSnapshot(null);
+      const generation = this.persistentGeneration;
+      const result = await this.persistent.load(this.abort.signal);
+      if (this.disposed || generation !== this.persistentGeneration) {
+        if (!this.disposed) void this.start();
         return;
       }
-      await this.build();
-      this.refreshTimer = window.setInterval(() => void this.refreshBootstrap().then(() => this.build()).catch((error) => this.fail(error)), 60_000);
+      if (result.kind === "FALLBACK") {
+        await this.startBrowserFallback(result.reason);
+        return;
+      }
+      this.selectedAuthority = "PERSISTENT_NODE";
+      if (result.kind === "SNAPSHOT") {
+        this.hasPersistentSnapshot = true;
+        this.options.onSnapshot(result.snapshot);
+        this.persistentStatus(result.freshness, result.message, result.collectorNodeId, result.snapshot.generatedAt);
+      } else {
+        this.options.onSnapshot(null);
+        this.persistentStatus("COLLECTING", result.message, result.collectorNodeId, null);
+      }
+      this.schedulePersistentRefresh();
     } catch (error) {
-      this.fail(error);
+      if (this.disposed || isAbort(error)) return;
+      if (persistentErrorAllowsInitialBrowserFallback(error)) {
+        await this.startBrowserFallback(fallbackReason(error));
+        return;
+      }
+      this.failClosed(error);
     }
   }
 
   updateSettings(settings: LiquidationFieldSettings) {
     this.settings = migrateLiquidationFieldSettings(settings);
-    this.scheduleBuild(60);
+    if (this.persistent.updateSettings(this.settings)) {
+      this.persistentGeneration += 1;
+      if (this.selectedAuthority === "PERSISTENT_NODE") this.schedulePersistentRefresh(0);
+      if (this.selectedAuthority === "BROWSER_FALLBACK") this.scheduleFallbackProbe(0);
+    }
+    this.fallback?.updateSettings(this.settings);
   }
 
   dispose() {
     this.disposed = true;
     this.abort.abort();
-    if (this.rebuildTimer !== null) window.clearTimeout(this.rebuildTimer);
-    if (this.refreshTimer !== null) window.clearInterval(this.refreshTimer);
-    this.stream?.stop();
-    this.worker.dispose();
+    if (this.persistentRefreshTimer !== null) window.clearTimeout(this.persistentRefreshTimer);
+    if (this.fallbackProbeTimer !== null) window.clearTimeout(this.fallbackProbeTimer);
+    this.fallback?.dispose();
+    this.fixtureWorker?.dispose();
+    this.persistent.clear();
   }
 
-  private async refreshBootstrap() {
-    this.bootstrap = await bootstrapBybitLiquidationField(
-      this.options.getCandles(),
-      this.options.symbol,
-      this.settings,
-      this.abort.signal
-    );
+  private async startBrowserFallback(reason: string) {
+    if (this.disposed || this.selectedAuthority === "PERSISTENT_NODE") return;
+    this.selectedAuthority = "BROWSER_FALLBACK";
+    this.fallback?.dispose();
+    const fallbackOptions = {
+      symbol: this.options.symbol,
+      settings: this.settings,
+      getCandles: this.options.getCandles,
+      onSnapshot: this.options.onSnapshot,
+      onStatus: this.options.onStatus
+    };
+    this.fallback = this.options.createBrowserFallback?.(fallbackOptions) ?? new BrowserLiquidationFieldFallback(fallbackOptions);
+    await this.fallback.start(reason);
+    this.scheduleFallbackProbe();
   }
 
-  private scheduleBuild(delay = this.settings.liveUpdateCadenceMs) {
-    if (this.disposed || !this.bootstrap) return;
-    if (this.rebuildTimer !== null) window.clearTimeout(this.rebuildTimer);
-    this.rebuildTimer = window.setTimeout(() => {
-      this.rebuildTimer = null;
-      void this.build().catch((error) => this.fail(error));
-    }, delay);
+  private scheduleFallbackProbe(delayMs?: number) {
+    if (this.disposed || this.selectedAuthority !== "BROWSER_FALLBACK") return;
+    if (this.fallbackProbeTimer !== null) window.clearTimeout(this.fallbackProbeTimer);
+    const seed = [...this.options.symbol].reduce((sum, character) => (sum * 33 + character.charCodeAt(0)) >>> 0, 5381);
+    const jitter = (seed + this.fallbackProbeAttempt++ * 7_919) % 15_001;
+    this.fallbackProbeTimer = window.setTimeout(() => {
+      this.fallbackProbeTimer = null;
+      void this.probePersistentRecovery();
+    }, delayMs ?? 30_000 + jitter);
+  }
+
+  private async probePersistentRecovery() {
+    if (this.disposed || this.selectedAuthority !== "BROWSER_FALLBACK" || this.fallbackProbeInFlight) return;
+    this.fallbackProbeInFlight = true;
+    try {
+      const available = await this.persistent.probe(this.abort.signal);
+      if (this.disposed || this.selectedAuthority !== "BROWSER_FALLBACK" || !available) return;
+
+      // Atomic authority handoff: stop the browser stream before requesting and
+      // verifying any persistent tile. The last browser frame may remain frozen
+      // until a verified persistent snapshot replaces it, but no second stream
+      // or model runs concurrently.
+      this.fallback?.dispose();
+      this.fallback = null;
+      this.selectedAuthority = "PROBING";
+      this.status({
+        state: "LOADING",
+        message: "Persistent BCLIF authority recovered; verifying durable tiles before handoff.",
+        source: "PERSISTENT_COLLECTOR",
+        authority: "PERSISTENT_NODE",
+        persistence: "ON",
+        collectorNodeId: null,
+        lastInputAt: null
+      });
+      const result = await this.persistent.load(this.abort.signal);
+      if (this.disposed) return;
+      if (result.kind === "FALLBACK") {
+        await this.startBrowserFallback(`persistent recovery verification failed: ${result.reason}`);
+        return;
+      }
+      this.selectedAuthority = "PERSISTENT_NODE";
+      if (result.kind === "SNAPSHOT") {
+        this.hasPersistentSnapshot = true;
+        this.options.onSnapshot(result.snapshot);
+        this.persistentStatus(result.freshness, result.message, result.collectorNodeId, result.snapshot.generatedAt);
+      } else {
+        this.hasPersistentSnapshot = false;
+        this.options.onSnapshot(null);
+        this.persistentStatus("COLLECTING", result.message, result.collectorNodeId, null);
+      }
+      this.schedulePersistentRefresh();
+    } catch (error) {
+      if (this.disposed || isAbort(error)) return;
+      if (error instanceof PersistentLiquidationFieldAccessError || error instanceof LiquidationFieldTileContractError) {
+        this.fallback?.dispose();
+        this.fallback = null;
+        this.selectedAuthority = "PROBING";
+        this.failClosed(error);
+        return;
+      }
+      if (this.selectedAuthority === "PROBING") {
+        await this.startBrowserFallback(`persistent recovery attempt failed: ${fallbackReason(error)}`);
+      }
+    } finally {
+      this.fallbackProbeInFlight = false;
+      if (this.selectedAuthority === "BROWSER_FALLBACK") this.scheduleFallbackProbe();
+    }
+  }
+
+  private schedulePersistentRefresh(delayMs?: number) {
+    if (this.disposed || this.selectedAuthority !== "PERSISTENT_NODE") return;
+    if (this.persistentRefreshTimer !== null) window.clearTimeout(this.persistentRefreshTimer);
+    const cadence = Math.max(15_000, Math.min(60_000, this.settings.liveUpdateCadenceMs * 5));
+    this.persistentRefreshTimer = window.setTimeout(() => {
+      this.persistentRefreshTimer = null;
+      void this.refreshPersistentLiveEdge();
+    }, delayMs ?? cadence);
+  }
+
+  private async refreshPersistentLiveEdge() {
+    if (this.disposed || this.selectedAuthority !== "PERSISTENT_NODE" || this.persistentRefreshInFlight) return;
+    this.persistentRefreshInFlight = true;
+    const generation = this.persistentGeneration;
+    try {
+      const result = await this.persistent.load(this.abort.signal);
+      if (this.disposed || this.selectedAuthority !== "PERSISTENT_NODE" || generation !== this.persistentGeneration) return;
+      if (result.kind === "SNAPSHOT") {
+        this.hasPersistentSnapshot = true;
+        this.options.onSnapshot(result.snapshot);
+        this.persistentStatus(result.freshness, result.message, result.collectorNodeId, result.snapshot.generatedAt);
+      } else if (result.kind === "WAITING") {
+        this.persistentStatus(
+          this.hasPersistentSnapshot ? "STALE" : "COLLECTING",
+          this.hasPersistentSnapshot
+            ? "Persistent manifest is temporarily empty; retaining only the last verified persistent field."
+            : result.message,
+          result.collectorNodeId,
+          null
+        );
+      } else {
+        this.persistentStatus(
+          "STALE",
+          "Persistent collector is temporarily unavailable; browser fallback remains disabled while verified persistent data is active.",
+          null,
+          null
+        );
+      }
+    } catch (error) {
+      if (this.disposed || isAbort(error)) return;
+      if (error instanceof PersistentLiquidationFieldAccessError) {
+        this.hasPersistentSnapshot = false;
+        this.options.onSnapshot(null);
+        this.failClosed(error);
+        return;
+      }
+      const detail = error instanceof Error ? error.message : String(error);
+      this.status({
+        state: "STALE",
+        message: "Persistent live-edge refresh failed; the last verified tile set remains visible without browser data mixing.",
+        source: "PERSISTENT_COLLECTOR",
+        authority: "PERSISTENT_NODE",
+        persistence: "ON",
+        collectorNodeId: null,
+        lastInputAt: null,
+        error: detail
+      });
+    } finally {
+      this.persistentRefreshInFlight = false;
+      this.schedulePersistentRefresh(generation === this.persistentGeneration ? undefined : 0);
+    }
   }
 
   private async buildFixture() {
-    const fixture = createLiquidationFieldFixture();
-    const snapshot = await this.worker.build({ ...fixture, settings: this.settings });
+    this.fixtureWorker = new LiquidationFieldWorkerClient();
+    const lastCandle = this.options.getCandles().at(-1);
+    const alignedNow = lastCandle ? lastCandle.time * 1_000 : Date.now();
+    const fixture = createLiquidationFieldFixture(alignedNow);
+    const snapshot = applyBclifVisualCertificationProfile(await this.fixtureWorker.build({ ...fixture, settings: this.settings }));
     if (this.disposed) return;
     this.options.onSnapshot(snapshot);
-    this.status("LIVE", "Deterministic visual fixture — synthetic test data, never trading data.", "SYNTHETIC_TEST");
-  }
-
-  private async build() {
-    if (!this.bootstrap || this.disposed) return;
-    const generation = ++this.buildGeneration;
-    const frames = this.applyLiveState(this.bootstrap.frames, this.live);
-    const events = this.live?.events ?? [];
-    const liveCoverageMs = Math.max(0, Date.now() - this.liveStartedAt);
-    const requestedMs = Math.max(1, this.bootstrap.coverage.requestedEnd - this.bootstrap.coverage.requestedStart);
-    const coverage = {
-      ...this.bootstrap.coverage,
-      liquidationEventCoveragePercent: Math.min(100, liveCoverageMs / requestedMs * 100),
-      orderbookCoveragePercent: this.live?.bidDepthCurve.certainty === "OBSERVED" ? Math.min(100, liveCoverageMs / requestedMs * 100) : 0,
-      state: this.live?.connected ? "COLLECTING" as const : this.bootstrap.coverage.state
-    };
-    const snapshot = await this.worker.build({
-      frames,
-      events,
-      rules: this.bootstrap.rules,
-      settings: this.settings,
-      coverage
+    this.status({
+      state: "LIVE",
+      message: "Deterministic localhost visual fixture — synthetic test data, never trading data.",
+      source: "SYNTHETIC_TEST",
+      authority: "TEST_FIXTURE",
+      persistence: "OFF",
+      collectorNodeId: null,
+      lastInputAt: alignedNow
     });
-    if (this.disposed || generation !== this.buildGeneration) return;
-    this.options.onSnapshot(snapshot);
-    this.status(this.live?.connected ? "COLLECTING" : "LIVE",
-      `${coverage.openInterestCoveragePercent.toFixed(0)}% OI coverage; confirmed-liquidation history ${coverage.liquidationEventCoveragePercent.toFixed(2)}% (live session).`,
-      "BYBIT_PUBLIC");
   }
 
-  private applyLiveState(source: readonly LiquidationMarketFrame[], live: BybitLiquidationLiveState | null) {
-    const frames = source.map((frame) => ({ ...frame, certainty: { ...frame.certainty } }));
-    const last = frames.at(-1);
-    if (!last || !live) return frames;
-    const recentEvents = live.events.filter((event) => event.timestamp > last.timestamp - 24 * 60 * 60 * 1_000);
-    last.aggressiveBuyNotional = live.aggressiveBuyNotional;
-    last.aggressiveSellNotional = live.aggressiveSellNotional;
-    last.cvd = live.cvd;
-    last.cvdEfficiency = (live.aggressiveBuyNotional + live.aggressiveSellNotional) > 0
-      ? Math.abs(live.cvd) / (live.aggressiveBuyNotional + live.aggressiveSellNotional)
-      : 0;
-    last.bidDepthCurve = live.bidDepthCurve;
-    last.askDepthCurve = live.askDepthCurve;
-    last.confirmedLongLiquidations = recentEvents.filter((event) => event.liquidatedPositionSide === "LONG").reduce((sum, event) => sum + event.notional, 0);
-    last.confirmedShortLiquidations = recentEvents.filter((event) => event.liquidatedPositionSide === "SHORT").reduce((sum, event) => sum + event.notional, 0);
-    last.certainty.trades = live.lastInputAt ? "OBSERVED" : "UNAVAILABLE";
-    last.certainty.confirmedLiquidations = live.events.length ? "OBSERVED" : "UNAVAILABLE";
-    last.certainty.orderbook = live.bidDepthCurve.certainty;
-    return frames;
-  }
-
-  private status(
+  private persistentStatus(
     state: LiquidationFieldRuntimeStatus["state"],
     message: string,
-    source: LiquidationFieldRuntimeStatus["source"]
+    collectorNodeId: string | null,
+    lastInputAt: number | null
   ) {
-    if (this.disposed) return;
-    this.options.onStatus({ state, message, source, lastInputAt: this.live?.lastInputAt ?? null });
+    this.status({
+      state,
+      message,
+      source: "PERSISTENT_COLLECTOR",
+      authority: "PERSISTENT_NODE",
+      persistence: "ON",
+      collectorNodeId,
+      lastInputAt
+    });
   }
 
-  private fail(error: unknown) {
-    if (this.disposed || (error instanceof DOMException && error.name === "AbortError")) return;
-    const message = error instanceof Error ? error.message : String(error);
-    this.options.onStatus({ state: "ERROR", message: "Liquidation Intelligence unavailable", source: "BYBIT_PUBLIC", lastInputAt: this.live?.lastInputAt ?? null, error: message });
+  private failClosed(error: unknown) {
+    const access = error instanceof PersistentLiquidationFieldAccessError;
+    const contractFailure = error instanceof LiquidationFieldTileContractError;
+    const detail = error instanceof Error ? error.message : String(error);
+    this.options.onSnapshot(null);
+    this.status({
+      state: access ? "UNAVAILABLE" : "ERROR",
+      message: access
+        ? "Persistent Liquidation Intelligence access is not authorized. Browser fallback was not started."
+        : contractFailure
+          ? "Persistent BCLIF tile verification failed. Browser fallback was not started."
+          : "Persistent Liquidation Intelligence is unavailable.",
+      source: "PERSISTENT_COLLECTOR",
+      authority: "PERSISTENT_NODE",
+      persistence: "ON",
+      collectorNodeId: null,
+      lastInputAt: null,
+      error: detail
+    });
   }
+
+  private status(status: LiquidationFieldRuntimeStatus) {
+    if (!this.disposed) this.options.onStatus(status);
+  }
+}
+
+export function isBclifVisualFixtureEnabled(locationValue?: Pick<Location, "hostname" | "search">) {
+  const resolved = locationValue ?? (typeof window === "undefined" ? { hostname: "", search: "" } : window.location);
+  const local = resolved.hostname === "localhost" || resolved.hostname === "127.0.0.1" || resolved.hostname === "::1";
+  return local && new URLSearchParams(resolved.search).get("bclifVisualFixture") === "1";
+}
+
+function isAbort(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function fallbackReason(error: unknown) {
+  if (error instanceof PersistentLiquidationFieldUnavailableError) return error.reason;
+  return error instanceof Error ? error.name : "NETWORK";
 }

@@ -22,6 +22,10 @@ pnpm-debug.log*
 !.env.example
 !.env.bybit-mainnet.example
 !.env.black-cloud.example
+!.env.liquidation-intelligence.example
+
+# Generated visual-comparison output (reviewed baselines live in tests/golden)
+tests/.artifacts/
 
 # Supabase CLI local linkage/cache
 supabase/.temp/

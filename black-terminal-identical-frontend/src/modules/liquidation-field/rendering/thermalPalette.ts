@@ -1,4 +1,4 @@
-import type { LiquidationFieldPalette } from "../core/types.ts";
+import type { LiquidationFieldPalette, LiquidationFieldSettings, LiquidationFieldSnapshot } from "../core/types.ts";
 
 type PaletteStop = readonly [number, string];
 
@@ -64,6 +64,62 @@ export function createThermalPalette(name: LiquidationFieldPalette, entries = 25
     lut[index * 4 + 3] = 255;
   }
   return lut;
+}
+
+/**
+ * Render-only transfer function for the thermal field. It preserves the
+ * immutable model matrix while compressing the broad low-energy population
+ * into the dark-purple range and reserving teal/green/yellow for progressively
+ * rarer shelves and cores. Increasing sharpness raises both the black floor
+ * and the contrast exponent; gamma remains an independent display control.
+ */
+export function shapeThermalIntensity(value: number, sharpness: number, gamma = 1) {
+  const unit = Math.max(0, Math.min(1, value / 255));
+  if (unit <= 0) return 0;
+  const adjusted = Math.pow(unit, Math.max(0.2, Math.min(2.5, gamma)));
+  const strength = Math.max(0, Math.min(1, sharpness / 100));
+  const floor = 0.91 + strength * 0.035;
+  const lifted = Math.max(0, Math.min(1, (adjusted - floor) / Math.max(1e-9, 1 - floor)));
+  const exponent = 1.15 + strength * 0.85;
+  return Math.max(0, Math.min(255, Math.round(255 * Math.pow(lifted, exponent))));
+}
+
+/**
+ * Resolves a renderer sample entirely from immutable, causally normalized
+ * snapshot channels. Directional views must never divide historical cells by
+ * a later atlas-wide maximum because that would repaint an old replay prefix.
+ */
+export function resolveLiquidationFieldRenderIntensity(
+  snapshot: LiquidationFieldSnapshot,
+  settings: LiquidationFieldSettings,
+  sourceIndex: number
+) {
+  let intensity = snapshot.normalizedIntensity[sourceIndex] ?? 0;
+  let palette: LiquidationFieldPalette = settings.palette;
+  if (settings.viewMode === "LONG_EXPOSURE") {
+    intensity = snapshot.longNormalizedIntensity[sourceIndex] ?? 0;
+    palette = "BLACK_TERMINAL_BLOOD";
+  } else if (settings.viewMode === "SHORT_EXPOSURE") {
+    intensity = snapshot.shortNormalizedIntensity[sourceIndex] ?? 0;
+    palette = "INSTITUTIONAL_MONOCHROME";
+  } else if (settings.viewMode === "CONFIDENCE_FIELD") {
+    intensity = snapshot.confidence[sourceIndex] ?? 0;
+  } else if (settings.viewMode === "CONFIRMED_LIQUIDATIONS") {
+    intensity = snapshot.confirmedIntensity[sourceIndex] ?? 0;
+  } else if (settings.viewMode === "DIRECTIONAL_SPLIT") {
+    const long = snapshot.longExposure[sourceIndex] ?? 0;
+    const short = snapshot.shortExposure[sourceIndex] ?? 0;
+    intensity = Math.max(
+      snapshot.longNormalizedIntensity[sourceIndex] ?? 0,
+      snapshot.shortNormalizedIntensity[sourceIndex] ?? 0
+    );
+    palette = long >= short ? "BLACK_TERMINAL_BLOOD" : "INSTITUTIONAL_MONOCHROME";
+  }
+  if (settings.viewMode !== "CONFIRMED_LIQUIDATIONS") {
+    const gamma = snapshot.authority === "PERSISTENT_NODE" ? settings.gamma : 1;
+    intensity = shapeThermalIntensity(intensity, settings.sharpness, gamma);
+  }
+  return { intensity, palette };
 }
 
 export const REFERENCE_THERMAL_LUT = createThermalPalette("REFERENCE_THERMAL");

@@ -108,6 +108,7 @@ import { PerformanceHud } from "./performance/PerformanceHud";
 import blackCoreEngine from "./assets/black-core-engine-transparent.png";
 import {
   ADMIN_ALLOWED_INDICATORS,
+  BCLIF_INDICATOR_KEY,
   canUseIndicator,
   DEFAULT_ALLOWED_INDICATORS,
   MARKET_MAKER_HEATMAP_KEY,
@@ -483,6 +484,7 @@ type AppUser = CapabilityUser & {
 
 export default function App() {
   const isLocalUiPreview = window.location.hostname === "127.0.0.1" && new URLSearchParams(window.location.search).get("uiPreview") === "1";
+  const isBclifVisualFixture = isLocalUiPreview && new URLSearchParams(window.location.search).get("bclifVisualFixture") === "1";
   const isLocalAuthPreview = window.location.hostname === "127.0.0.1" && new URLSearchParams(window.location.search).has("authPreview");
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     if (isLocalAuthPreview) return null;
@@ -609,6 +611,14 @@ export default function App() {
     });
   }, [currentUser?.allowedIndicators, currentUser?.role]);
 
+  useEffect(() => {
+    if (canUseIndicator(BCLIF_INDICATOR_KEY, currentUser)) return;
+    setVisibleIndicators((current) => {
+      if (!current.liquidationHeatmap) return current;
+      return { ...current, liquidationHeatmap: false };
+    });
+  }, [currentUser?.allowedIndicators, currentUser?.role]);
+
   // Bootstrap Database
   useEffect(() => {
     // Database pre-population is done automatically in supabase.ts
@@ -670,15 +680,17 @@ export default function App() {
       window.alert(`Stop-and-logout was not completed. You remain signed in. ${error instanceof Error ? error.message : String(error)}`);
     }
   };
-  const [selectedExchange, setSelectedExchange] = useState<ExchangeOption>(marketCatalog[0]);
+  const initialExchange = isBclifVisualFixture ? getExchangeOption("bybit") : marketCatalog[0];
+  const [selectedExchange, setSelectedExchange] = useState<ExchangeOption>(initialExchange);
   const [symbol, setSymbol] = useState<MarketSymbolOption>(() => {
+    if (isBclifVisualFixture) return initialExchange.symbols.find((item) => item.rawSymbol === "BTCUSDT") ?? initialExchange.symbols[0];
     const stored = localStorage.getItem("bt_last_symbol");
     if (stored) {
       try { return JSON.parse(stored); } catch (e) {}
     }
-    return marketCatalog[0].symbols[0];
+    return initialExchange.symbols[0];
   });
-  const [availableSymbols, setAvailableSymbols] = useState<MarketSymbolOption[]>(marketCatalog[0].symbols);
+  const [availableSymbols, setAvailableSymbols] = useState<MarketSymbolOption[]>(initialExchange.symbols);
   const [timeframe, setTimeframe] = useState<Timeframe>(() => (localStorage.getItem("bt_last_timeframe") as Timeframe) || "15m");
   const [chartType, setChartType] = useState<ChartDisplayType>(() => (localStorage.getItem("bt_last_chart_type") as ChartDisplayType) || "candlesticks");
 

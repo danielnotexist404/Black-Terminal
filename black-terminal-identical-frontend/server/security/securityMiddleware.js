@@ -27,6 +27,13 @@ export async function requireApiSecurity(req, res, policy = {}) {
   enforcePayloadLimit(req, policy.maxBytes || 50 * 1024);
   const { supabase, user } = await requireUser(req);
   const identity = await loadSecurityIdentity(supabase, user);
+  assertIdentityPolicy(identity, policy);
+  const rateLimit = typeof policy.rateLimit === "function" ? policy.rateLimit(identity) : policy.rateLimit || {};
+  await enforceRateLimit(supabase, req, user.id, policy.endpoint || req.url || "api", rateLimit);
+  return { handled: false, supabase, user, identity };
+}
+
+export function assertIdentityPolicy(identity, policy = {}) {
   if (identity.status === "suspended") throw httpError(403, "Account access is suspended.", "ACCOUNT_SUSPENDED");
   if (policy.allowedTiers?.length && !policy.allowedTiers.includes(identity.productTier)) {
     throw httpError(403, "Subscription level does not permit this API.", "SUBSCRIPTION_REQUIRED");
@@ -34,9 +41,9 @@ export async function requireApiSecurity(req, res, policy = {}) {
   if (policy.permission && !identity.permissions.has(policy.permission) && identity.role !== "admin") {
     throw httpError(403, "API permission is not granted.", "API_PERMISSION_REQUIRED");
   }
-  const rateLimit = typeof policy.rateLimit === "function" ? policy.rateLimit(identity) : policy.rateLimit || {};
-  await enforceRateLimit(supabase, req, user.id, policy.endpoint || req.url || "api", rateLimit);
-  return { handled: false, supabase, user, identity };
+  if (policy.indicator && !identity.allowedIndicators?.has(policy.indicator) && identity.role !== "admin") {
+    throw httpError(403, "Indicator access is not granted.", "INDICATOR_ENTITLEMENT_REQUIRED");
+  }
 }
 
 export async function enforceAnonymousSecurity(req, res, policy = {}) {
@@ -61,19 +68,28 @@ export async function writeSecurityAudit(supabase, event) {
 }
 
 async function loadSecurityIdentity(supabase, user) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("bt_users")
-    .select("role,status,product_tier,permissions")
+    .select("role,status,product_tier,permissions,allowed_indicators")
     .eq("auth_user_id", user.id)
     .maybeSingle();
-  const role = data?.role || user.app_metadata?.role || "user";
-  const productTier = role === "admin" ? "admin" : data?.product_tier || user.app_metadata?.productTier || "retail";
+  // Administrative roles and indicator grants are revocable control-plane
+  // state. If that state cannot be read, never resurrect authority from a
+  // stale signed access token; fail closed and let the caller retry.
+  if (error) throw httpError(503, "Security identity service is unavailable.", "SECURITY_IDENTITY_UNAVAILABLE");
+  const role = data?.role || "user";
+  const productTier = role === "admin" ? "admin" : data?.product_tier || "retail";
   const permissions = new Set([
     ...(TIER_PERMISSIONS[productTier] || TIER_PERMISSIONS.retail),
     ...(Array.isArray(data?.permissions) ? data.permissions : []),
     ...(Array.isArray(user.app_metadata?.permissions) ? user.app_metadata.permissions : [])
   ]);
-  return { role, productTier, permissions, status: data?.status || "online" };
+  // Indicator entitlements are revocable control-plane state. A stale JWT
+  // claim must never resurrect an indicator removed by an administrator.
+  const allowedIndicators = new Set(
+    Array.isArray(data?.allowed_indicators) ? data.allowed_indicators : []
+  );
+  return { role, productTier, permissions, allowedIndicators, status: data?.status || "online" };
 }
 
 function validateJsonEnvelope(body) {

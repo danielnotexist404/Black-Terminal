@@ -2175,3 +2175,11 @@ The linked production ledger for `jdwlspxzoudgzxcghbjo` records II-B `2026080200
 Migration: `supabase/migrations/202608050001_bclif_liquidation_intelligence_foundation.sql`.
 
 This additive migration creates service-role-only BCLIF source, coverage, confirmed-event, field-chunk and evaluation metadata and the private `bclif-field-chunks` object bucket. It stores no per-cell SQL rows and grants no browser-role access. The current browser runtime does not write these tables; deployment is foundation for the future persistent IMM/BCLIF collector.
+
+# 2026-08-05 - Phase V Chapter III-C BCLIF Persistent Market Memory
+
+Successor migration: `supabase/migrations/202608050002_bclif_persistent_market_memory.sql`.
+
+The successor evolves the existing BCLIF domain rather than creating a parallel schema. It adds collector/instance identity, offsets, canonical event chunks, durable deduplication, cohort checkpoints, per-horizon truthful coverage, immutable versioned tiles and supersession, compaction/retention state, calibration records, strict constraints, service-only grants, and the private object boundary. No dense raster cells are stored in SQL.
+
+Activation order is `202608050001` then `202608050002`. Both are intentionally unapplied in State A. Do not paste or deploy them merely to make the schema look complete: first run the isolated apply/rollback, RLS, private storage, route fail-closed, collector package, and recovery gates and confirm a separate analytics host. The frontend must continue returning `NOT_DEPLOYED`/`UNAVAILABLE` rather than HTTP 500 while the schema is absent.

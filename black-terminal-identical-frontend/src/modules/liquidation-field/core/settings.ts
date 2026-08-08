@@ -1,6 +1,7 @@
 import type { LiquidationFieldHorizon, LiquidationFieldSettings } from "./types.ts";
 
 export const LIQUIDATION_FIELD_SETTINGS_VERSION = 1 as const;
+export const BCLIF_MAX_REQUEST_HOURS = 90 * 24;
 
 export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   schemaVersion: LIQUIDATION_FIELD_SETTINGS_VERSION,
@@ -49,7 +50,10 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     ...merged,
     schemaVersion: LIQUIDATION_FIELD_SETTINGS_VERSION,
     horizon: horizons.has(merged.horizon) ? merged.horizon : DEFAULT_LIQUIDATION_FIELD_SETTINGS.horizon,
-    customHours: clamp(merged.customHours, 72, 1, 24 * 90),
+    // The protected manifest API accepts one bounded window of at most 90 days.
+    // Keep persisted settings inside that contract instead of allowing a value
+    // that can only produce a permanent HTTP 400 response.
+    customHours: clamp(merged.customHours, 72, 1, BCLIF_MAX_REQUEST_HOURS),
     opacity: clamp(merged.opacity, 82, 0, 100),
     gamma: clamp(merged.gamma, 0.8, 0.35, 2.5),
     lowQuantile: clamp(merged.lowQuantile, 0.05, 0, 0.5),

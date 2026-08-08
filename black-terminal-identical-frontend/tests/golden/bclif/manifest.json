@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "fixture": "BCLIF_DETERMINISTIC_VISUAL_FIXTURE_V2_HIRES",
+  "certificationStatus": "BLOCKED_NOT_RUN_AFTER_V2_HIRES_CHANGE",
+  "blocker": "Headless Brave launch was not approved because the Codex account reached its usage limit; all baselines require regeneration.",
+  "palette": "REFERENCE_THERMAL",
+  "camera": "FIXED_SOURCE_RANGE",
+  "comparison": "8x8 luminance SSIM + normalized YCbCr perceptual delta",
+  "updateCommand": "BCLIF_UPDATE_GOLDENS=1 node scripts/bclif-visual-regression.js",
+  "cases": [
+    {
+      "width": 1920,
+      "height": 1080,
+      "baseline": "bclif-1920x1080.png",
+      "status": "STALE_REGENERATION_REQUIRED",
+      "thresholds": {
+        "ssimMinimum": 0.985,
+        "meanPerceptualDeltaMaximum": 0.025
+      },
+      "sha256": "c0e668521ab1e72c4123591b06cf6255fa52491401a0d511fc2e8722a5d47e0b",
+      "recordedAt": "2026-08-05T15:15:24.140Z"
+    },
+    {
+      "width": 2560,
+      "height": 1440,
+      "baseline": "bclif-2560x1440.png",
+      "status": "STALE_REGENERATION_REQUIRED",
+      "thresholds": {
+        "ssimMinimum": 0.985,
+        "meanPerceptualDeltaMaximum": 0.025
+      },
+      "sha256": "a2f498bfbafc9490b2f245d66fc873d44d9e13f76a36979fbb763c9b1b5c3a24",
+      "recordedAt": "2026-08-05T14:35:43.735Z"
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "baseline": "bclif-3840x2160.png",
+      "status": "STALE_REGENERATION_REQUIRED",
+      "thresholds": {
+        "ssimMinimum": 0.985,
+        "meanPerceptualDeltaMaximum": 0.025
+      },
+      "sha256": "0f1d162585b3aee86c01324953180400373c7005f9cd5bf529a3de0616a56f8c",
+      "recordedAt": "2026-08-05T14:36:36.717Z"
+    }
+  ]
+}

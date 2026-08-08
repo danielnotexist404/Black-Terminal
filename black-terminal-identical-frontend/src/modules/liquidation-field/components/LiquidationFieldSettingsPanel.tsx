@@ -1,4 +1,5 @@
 import type { LiquidationFieldSettings } from "../core/types";
+import { BCLIF_MAX_REQUEST_HOURS } from "../core/settings";
 
 interface Props {
   settings: LiquidationFieldSettings;
@@ -17,7 +18,7 @@ export function LiquidationFieldSettingsPanel({ settings, onChange }: Props) {
         <option value="3D">3 Days</option><option value="1W">1 Week</option><option value="3W">Event Horizon · 3 Weeks</option>
         <option value="1M">1 Month</option><option value="CUSTOM">Custom</option>
       </select></label>
-      {settings.horizon === "CUSTOM" && <label>Custom Hours<input type="number" min={1} max={2160} value={settings.customHours} onChange={(event) => update("customHours", Number(event.target.value))} /></label>}
+      {settings.horizon === "CUSTOM" && <label>Custom Hours<input type="number" min={1} max={BCLIF_MAX_REQUEST_HOURS} value={settings.customHours} onChange={(event) => update("customHours", Number(event.target.value))} /></label>}
       <label>View<select value={settings.viewMode} onChange={(event) => update("viewMode", event.target.value as LiquidationFieldSettings["viewMode"])}>
         <option value="COMBINED_THERMAL">Combined Thermal</option><option value="LONG_EXPOSURE">Long Exposure</option>
         <option value="SHORT_EXPOSURE">Short Exposure</option><option value="DIRECTIONAL_SPLIT">Directional Split</option>
@@ -66,7 +67,6 @@ export function LiquidationFieldSettingsPanel({ settings, onChange }: Props) {
       <label>Diagnostics<input type="checkbox" checked={settings.diagnosticsVisible} onChange={(event) => update("diagnosticsVisible", event.target.checked)} /></label>
       <label>Confirmed Events<input type="checkbox" checked={settings.confirmedMarkersVisible} onChange={(event) => update("confirmedMarkersVisible", event.target.checked)} /></label>
       <label>Cascade Paths<input type="checkbox" checked={settings.cascadePathsVisible} onChange={(event) => update("cascadePathsVisible", event.target.checked)} /></label>
-      <label title="Developer-only deterministic renderer fixture. Never use as trading data.">Visual Test Fixture<input type="checkbox" checked={settings.visualFixture} onChange={(event) => update("visualFixture", event.target.checked)} /></label>
     </section>
   </div>;
 }

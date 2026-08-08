@@ -90,9 +90,10 @@ import { resolveAuctionVisualizationLayers } from "../modules/auction-profile/re
 import type { TradeTick } from "../market-data/types";
 import { migrateLiquidationFieldSettings } from "../modules/liquidation-field/core/settings";
 import type { LiquidationFieldRuntimeStatus, LiquidationFieldSettings, LiquidationFieldSnapshot } from "../modules/liquidation-field/core/types";
-import { LiquidationFieldController } from "../modules/liquidation-field/data/LiquidationFieldController";
+import { LiquidationFieldController, isBclifVisualFixtureEnabled } from "../modules/liquidation-field/data/LiquidationFieldController";
 import { LiquidationFieldSettingsPanel } from "../modules/liquidation-field/components/LiquidationFieldSettingsPanel";
 import { LiquidationFieldOverlays } from "../modules/liquidation-field/components/LiquidationFieldOverlays";
+import { createBclifVisualChartCandles } from "../modules/liquidation-field/testing/fixtures";
 
 function useDebouncedValue<T>(value: T, delayMs: number) {
   const [debounced, setDebounced] = useState(value);
@@ -435,8 +436,7 @@ export function PixiBlackChart({
     liquidationFieldSettings.priceRows,
     liquidationFieldSettings.timeColumns,
     liquidationFieldSettings.leverageMinimum,
-    liquidationFieldSettings.leverageMaximum,
-    liquidationFieldSettings.visualFixture
+    liquidationFieldSettings.leverageMaximum
   ].join(":");
   const latestAuctionProfileSettingsRef = useRef(normalizedAuctionProfileSettings);
   latestAuctionProfileSettingsRef.current = normalizedAuctionProfileSettings;
@@ -737,9 +737,10 @@ export function PixiBlackChart({
     const seenTradeOrder: string[] = [];
     const host = hostRef.current;
     if (!host) return;
-    const adapter = getMarketDataEngineAdapter(marketSymbol.exchange);
+    const bclifVisualFixture = isBclifVisualFixtureEnabled();
+    const adapter = bclifVisualFixture ? undefined : getMarketDataEngineAdapter(marketSymbol.exchange);
     const allowSimulatedFallback =
-      marketSymbol.exchange === "mock" || import.meta.env.VITE_ALLOW_SIMULATED_MARKET_FALLBACK === "true";
+      bclifVisualFixture || marketSymbol.exchange === "mock" || import.meta.env.VITE_ALLOW_SIMULATED_MARKET_FALLBACK === "true";
     replaySourceRef.current = [];
     replayCursorRef.current = 0;
     replayAppliedRef.current = false;
@@ -1075,7 +1076,9 @@ export function PixiBlackChart({
     const engine = new BlackChartEngine({
       host,
       candles: !adapter && allowSimulatedFallback
-        ? createMockCandles(historyDepth, timeframeSeconds[timeframe], lastPrice)
+        ? bclifVisualFixture
+          ? createBclifVisualChartCandles(marketHistoryTarget, timeframeSeconds[timeframe])
+          : createMockCandles(historyDepth, timeframeSeconds[timeframe], lastPrice)
         : [],
       chartType,
       snapToLatest,
@@ -1121,6 +1124,15 @@ export function PixiBlackChart({
         initialized = true;
         if (disposed) {
           engine.destroy();
+          return;
+        }
+
+        if (bclifVisualFixture) {
+          const candles = createBclifVisualChartCandles(marketHistoryTarget, timeframeSeconds[timeframe]);
+          chartSourceVenueRef.current = marketSymbol.exchange;
+          setReplaySource(candles);
+          setChartHistoryState("ready");
+          setDataStatus(`BCLIF VISUAL FIXTURE - ${candles.length.toLocaleString()} BARS`);
           return;
         }
 
@@ -1976,7 +1988,7 @@ export function PixiBlackChart({
       engineRef.current?.setLiquidationFieldState(null, liquidationFieldSettings);
       return;
     }
-    if (!liquidationFieldSettings.visualFixture && marketSymbol.exchange !== "bybit") {
+    if (!isBclifVisualFixtureEnabled() && marketSymbol.exchange !== "bybit") {
       const status: LiquidationFieldRuntimeStatus = {
         state: "UNAVAILABLE",
         message: "This build currently has venue-calibrated liquidation intelligence for Bybit linear contracts only.",
@@ -1988,13 +2000,21 @@ export function PixiBlackChart({
       return;
     }
     if (chartHistoryState !== "ready" || !engineRef.current) {
-      setLiquidationFieldStatus({ state: "LOADING", message: "Waiting for canonical chart history…", source: "BYBIT_PUBLIC", lastInputAt: null });
+      setLiquidationFieldStatus({
+        state: "LOADING",
+        message: "Waiting for canonical chart history before resolving persistent BCLIF authority…",
+        source: "PERSISTENT_COLLECTOR",
+        authority: "PERSISTENT_NODE",
+        persistence: "ON",
+        lastInputAt: null
+      });
       return;
     }
     const controller = new LiquidationFieldController({
       symbol: marketSymbol.rawSymbol,
       settings: liquidationFieldSettings,
       getCandles: () => engineRef.current?.getSourceCandles() ?? [],
+      getReplayActive: () => replayActiveRef.current,
       onSnapshot: (snapshot) => {
         setLiquidationFieldSnapshot(snapshot);
         engineRef.current?.setLiquidationFieldState(snapshot, latestLiquidationFieldSettingsRef.current);

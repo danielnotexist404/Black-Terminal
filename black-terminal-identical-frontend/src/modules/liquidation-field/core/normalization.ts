@@ -45,6 +45,61 @@ export function normalizeExposure(
   return { normalized, low, high };
 }
 
+/**
+ * Chronological normalization for a time × price field. Every output column
+ * is scaled only with values available in that column and its trailing
+ * window, so appending future frames cannot repaint finalized history.
+ */
+export function normalizeExposureCausal(
+  exposure: Float32Array,
+  confidence: Uint8Array,
+  validity: Uint8Array,
+  columns: number,
+  rows: number,
+  settings: LiquidationFieldSettings,
+  trailingColumns = 1
+) {
+  if (exposure.length !== columns * rows || confidence.length !== exposure.length || validity.length !== exposure.length) {
+    throw new Error("BCLIF causal normalization dimensions do not match");
+  }
+  const normalized = new Uint8Array(exposure.length);
+  const lows = new Float32Array(columns);
+  const highs = new Float32Array(columns);
+  let lastLow = 0;
+  let lastHigh = 1e-6;
+  const windowSize = Math.max(1, Math.min(columns, Math.round(trailingColumns)));
+
+  for (let column = 0; column < columns; column++) {
+    const values: number[] = [];
+    const firstColumn = Math.max(0, column - windowSize + 1);
+    for (let sourceColumn = firstColumn; sourceColumn <= column; sourceColumn++) {
+      const start = sourceColumn * rows;
+      for (let row = 0; row < rows; row++) {
+        const index = start + row;
+        if (!validity[index] || exposure[index]! <= 0) continue;
+        const value = confidenceAdjustedLogExposure(exposure[index]!, confidence[index]!, settings);
+        if (Number.isFinite(value) && value > 0) values.push(value);
+      }
+    }
+    values.sort((a, b) => a - b);
+    if (values.length) {
+      lastLow = quantile(values, settings.lowQuantile);
+      lastHigh = Math.max(lastLow + 1e-6, quantile(values, settings.highQuantile));
+    }
+    lows[column] = lastLow;
+    highs[column] = lastHigh;
+    const start = column * rows;
+    for (let row = 0; row < rows; row++) {
+      const index = start + row;
+      if (!validity[index] || exposure[index]! <= 0) continue;
+      const adjusted = confidenceAdjustedLogExposure(exposure[index]!, confidence[index]!, settings);
+      const raw = Math.max(0, Math.min(1, (adjusted - lastLow) / Math.max(1e-6, lastHigh - lastLow)));
+      normalized[index] = Math.round(255 * Math.pow(raw, settings.gamma));
+    }
+  }
+  return { normalized, lows, highs, low: lows.at(-1) ?? 0, high: highs.at(-1) ?? 1e-6 };
+}
+
 function gaussianKernel(sigma: number) {
   if (sigma <= 0.01) return new Float32Array([1]);
   const radius = Math.max(1, Math.ceil(sigma * 2.5));
@@ -55,7 +110,7 @@ function gaussianKernel(sigma: number) {
     kernel[offset + radius] = weight;
     total += weight;
   }
-  for (let index = 0; index < kernel.length; index++) kernel[index] /= total;
+  for (let index = 0; index < kernel.length; index++) kernel[index] = (kernel[index] ?? 0) / total;
   return kernel;
 }
 
@@ -80,7 +135,8 @@ export function smoothField(
       if (!validity[index]) continue;
       let weighted = 0;
       let total = 0;
-      for (let offset = -timeRadius; offset <= timeRadius; offset++) {
+      // Causal/trailing kernel: a historical column never reads future state.
+      for (let offset = -timeRadius; offset <= 0; offset++) {
         const targetColumn = column + offset;
         if (targetColumn < 0 || targetColumn >= columns) continue;
         const targetIndex = targetColumn * rows + row;

@@ -14,7 +14,7 @@ This document explains how Black Terminal is built today and how its major syste
 
 ## Liquidation Intelligence build path
 
-The Event Horizon indicator lives in `src/modules/liquidation-field/`. REST/WS inputs normalize into canonical frames; a dedicated module worker executes the persistent cohort and exposure raster; Pixi uploads one RGBA buffer as a GPU texture below candles. `npm run test:liquidation-heatmap` validates the mathematical and truth-model contracts. Apply `202608050001_bclif_liquidation_intelligence_foundation.sql` before deploying a future persistent tile collector; the browser-only release does not write storage objects.
+The Event Horizon indicator lives in `src/modules/liquidation-field/`. REST/WS inputs normalize into canonical frames; a dedicated browser module worker executes stateful browser-session cohorts and the exposure raster; Pixi uploads one RGBA buffer as a GPU texture below candles. The packaged persistent authority lives separately under `server/liquidation-intelligence/` and is not active without its dedicated analytics host. `npm run test:liquidation-heatmap` validates the mathematical and truth-model contracts. Migrations `202608050001` and `202608050002` remain unapplied in State A; never apply the foundation alone or activate either migration before the separate schema/RLS/storage, recovery, client, and host gates in the BCLIF deployment runbook pass.
 
 ## Black Cloud data plane
 
@@ -417,3 +417,9 @@ Run `npm run test:bybit-canonical-orders`, `npm run test:bybit-external-orders`,
 # DOM Pro Shared Camera Certification
 
 Run `npm run test:dom-pro-panels`, `npm run test:dom-pro-visual`, `npm run certify:dom-pro-camera`, `npm run test:performance`, `npm run perf:dom-pro-smoke`, and `npm run build`. The live certification uses public read-only Bybit depth and places no order. Confirm the evidence reports exact raw/rendered bucket sums, unavailable wide-range rows and camera preservation across the second snapshot.
+
+# BCLIF Persistent Collector Build and Rollout
+
+Run the aggregate BCLIF model, adapter, order-book, checkpoint/recovery, tile-codec, no-lookahead, persistence-security, visual, benchmark, TypeScript, security, migration-source, and production-build gates documented in `docs/liquidation/BCLIF_DEPLOYMENT_RUNBOOK.md`. Build `Dockerfile.liquidation-intelligence` for linux/amd64 and linux/arm64 and deploy only with `docker-compose.liquidation-intelligence.yml` on `LIQUIDATION_INTELLIGENCE_NODE_01` or `IMM_NODE_01`.
+
+Use a separate root-owned environment file based on `.env.liquidation-intelligence.example`. Never reuse Black Cloud credentials or place this workload on `BLACK_CLOUD_NODE_01`. Apply `202608050001` followed by `202608050002` only after isolated migration/RLS/storage tests and an actual analytics host pass the activation gate. In the current State A package, both migrations remain unapplied and no persistent history is claimed.

@@ -1,0 +1,13 @@
+# BCLIF Coverage Contract
+
+Coverage is keyed by venue, symbol, and horizon and reports requested bounds, actual model bounds, per-source percentages, continuity, source mode, quality, source cutoff, update time, and explicit gaps with missing-source names.
+
+`PERSISTENT_COLLECTOR`, `BROWSER_SESSION`, `MIXED`, and `UNAVAILABLE` are distinct modes. Missing history is not a measured zero. Explicit hard OI/model gaps invalidate affected columns; `*_COVERAGE_UNKNOWN` ledger-provenance edges remain visible with a soft confidence penalty because their tile bytes and validity are still verified. Earlier finalized tiles remain unchanged.
+
+Freshness is source-specific. Trades, liquidations, book, OI, funding, mark price, ratios, rules, and instrument metadata have independent age thresholds. Missing OI prevents reliable new cohort formation; missing trades lowers entry inference; missing liquidation data pauses observed assimilation; missing book data disables/degrades cascade absorption. A stale secondary source does not automatically destroy otherwise valid exposure history.
+
+The protected coverage API returns truthful `UNAVAILABLE` with null model bounds when persistence is not deployed. It never translates an unapplied migration into an HTTP 500.
+
+Coverage version 2 persists a bounded, merged continuity ledger for every source. The API intersects that ledger with the caller's exact bounded window and derives the percentages, quality, model bounds and gaps for that request; it never relabels broader percentages as query-specific evidence. A source with no continuity interval inside a fully retained evidence window is measured as `0%` transport coverage (not zero market exposure). A request that reaches outside the retained ledger has null aggregate percentages, `INSUFFICIENT` quality, and explicit `*_COVERAGE_UNKNOWN` edge gaps. The effective API cutoff is capped at the request's `to` boundary. Version-1 rows retain the stricter legacy behavior: all query-derived percentages, model bounds, gaps, and cutoff are returned only when their `requested_start` / `requested_end` exactly match the request; a mismatch is unknown rather than clipped.
+
+Manifests and direct tile reads are pinned to the supported source/model generation, schema 2, tile version 1, `gzip-v1`, `PERSISTENT_NODE`, and the caller's exact causal cutoff. Roots are finalized and immutable; LIVE mode may additionally expose only its current fenced `STAGING` live edge, while REPLAY remains finalized-only. Legacy, replay-authority, mixed-generation, superseded, future-cutoff, or out-of-window tiles fail closed before private object storage is accessed.

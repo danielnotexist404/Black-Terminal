@@ -21,9 +21,13 @@ workerScope.onmessage = (message: MessageEvent<LiquidationFieldWorkerRequest>) =
       snapshot.shortExposure.buffer,
       snapshot.combinedExposure.buffer,
       snapshot.normalizedIntensity.buffer,
+      snapshot.longNormalizedIntensity.buffer,
+      snapshot.shortNormalizedIntensity.buffer,
       snapshot.confidence.buffer,
       snapshot.validity.buffer,
-      snapshot.confirmedIntensity.buffer
+      snapshot.confirmedIntensity.buffer,
+      snapshot.confirmedNotional.buffer,
+      snapshot.confirmedCount.buffer
     ]);
   } catch (error) {
     const response: LiquidationFieldWorkerResponse = {

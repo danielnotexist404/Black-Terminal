@@ -6,6 +6,7 @@ const certaintyScore: Record<LiquidationDataCertainty, number> = {
   ESTIMATED_HIGH: 0.78,
   ESTIMATED_MEDIUM: 0.62,
   ESTIMATED_LOW: 0.38,
+  MISSING: 0,
   SYNTHETIC_TEST: 0,
   UNAVAILABLE: 0
 };

@@ -4,4 +4,4 @@ BCLIF replaces the old Liquidation Heatmap renderer. It converts positive open-i
 
 The chart receives one typed snapshot from a worker and uploads one RGBA texture to Pixi. Candles render later in the layer stack. The default Event Horizon preset requests three weeks, 512 time columns, 384 price rows, confidence-weighted log scaling, and the reference thermal palette.
 
-The browser is a live-session collector only. Persistent multi-week trade, book and liquidation history requires the future IMM/BCLIF collector node; browser uptime is never described as complete historical coverage.
+The packaged `LIQUIDATION_INTELLIGENCE_NODE_01` becomes historical authority only after its private schema, storage, and external host are activated. Until then the browser remains a clearly labeled live-session fallback; browser uptime is never described as persistent or complete historical coverage.

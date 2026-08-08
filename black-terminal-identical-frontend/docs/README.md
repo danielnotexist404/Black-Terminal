@@ -160,3 +160,17 @@ The critical chart-coordinate and automatic 20,000-bar initialization contract i
 - `SOCIAL_RLS_POLICIES.md` - table and storage authorization contracts.
 - `SOCIAL_MODERATION.md` - reporting, administrative review and rate limits.
 - `PROFESSIONAL_NETWORK_TEST_REPORT.md` - deterministic evidence and hosted certification matrix.
+
+# BCLIF Persistent Market Memory
+
+- `liquidation/BCLIF_PERSISTENCE_GAP_AUDIT.md` - browser/persistence boundary and unavailable-history audit.
+- `liquidation/BCLIF_PERSISTENT_COLLECTOR.md` - public-source collector and model ownership.
+- `liquidation/BCLIF_EVENT_STORAGE.md` - canonical chunks, deduplication, and private objects.
+- `liquidation/BCLIF_COHORT_CHECKPOINTS.md` - shared state and immutable checkpoint publication.
+- `liquidation/BCLIF_MULTI_HORIZON_TILES.md` and `liquidation/BCLIF_TILE_CODEC.md` - numerical tile/codec contracts.
+- `liquidation/BCLIF_STORAGE_RETENTION.md` and `liquidation/BCLIF_COVERAGE_CONTRACT.md` - bounded retention and truthful gaps.
+- `liquidation/BCLIF_BROWSER_FALLBACK.md` - authority priority and mandatory provenance.
+- `liquidation/BCLIF_COLLECTOR_HEALTH.md` and `liquidation/BCLIF_COLLECTOR_RECOVERY.md` - readiness, metrics, drain, and restart.
+- `liquidation/BCLIF_VISUAL_CERTIFICATION.md` - repository-owned Playwright evidence.
+- `liquidation/BCLIF_DEPLOYMENT_RUNBOOK.md` - separate analytics-node rollout.
+- `liquidation/BCLIF_CHAPTER_IIIC_COMPLETION_REPORT.md` - exact certification evidence and remaining boundary.

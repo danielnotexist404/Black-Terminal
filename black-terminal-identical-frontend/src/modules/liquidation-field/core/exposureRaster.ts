@@ -1,7 +1,7 @@
 import { performance } from "../testing/performanceClock.ts";
 import { confidenceForFrame } from "./certainty.ts";
 import { LiquidationCohortEngine } from "./cohortEngine.ts";
-import { normalizeExposure, smoothField } from "./normalization.ts";
+import { normalizeExposureCausal, smoothField } from "./normalization.ts";
 import type {
   CascadeRiskSnapshot,
   ConfirmedLiquidationEvent,
@@ -13,12 +13,25 @@ import type {
   LiquidationMarketFrame
 } from "./types.ts";
 import { BCLIF_MODEL_VERSION } from "./types.ts";
+import { liquidationHorizonMs } from "./settings.ts";
 
-function outputFrameIndices(frameCount: number, maximumColumns: number) {
-  const columns = Math.max(1, Math.min(frameCount, maximumColumns));
+export function outputFrameIndices(
+  frames: readonly LiquidationMarketFrame[],
+  settings: Pick<LiquidationFieldSettings, "horizon" | "customHours" | "timeColumns">
+) {
+  // A fixed UTC time lattice makes down-sampling append-stable. Selecting
+  // columns from the eventual frame count would allow a future append to
+  // choose different historical frames and repaint the past.
+  // Reserve one column for a UTC bucket-edge crossing so an arbitrarily
+  // aligned requested window still respects the configured GPU column bound.
+  const bucketMs = Math.max(1, Math.ceil(liquidationHorizonMs(settings) / Math.max(1, settings.timeColumns - 1)));
   const indices = new Set<number>();
-  for (let column = 0; column < columns; column++) {
-    indices.add(Math.round((column / Math.max(1, columns - 1)) * Math.max(0, frameCount - 1)));
+  let previousBucket: number | null = null;
+  for (let index = 0; index < frames.length; index++) {
+    const bucket = Math.floor(frames[index]!.timestamp / bucketMs);
+    if (bucket === previousBucket) continue;
+    indices.add(index);
+    previousBucket = bucket;
   }
   return indices;
 }
@@ -93,9 +106,13 @@ export function buildLiquidationFieldSnapshot(
   const frames = [...sourceFrames].sort((a, b) => a.timestamp - b.timestamp);
   if (!frames.length) throw new Error("BCLIF requires at least one canonical market frame");
   const events = [...sourceEvents].sort((a, b) => a.timestamp - b.timestamp);
-  const selectedIndices = outputFrameIndices(frames.length, settings.timeColumns);
-  const minimumObserved = Math.min(...frames.map((frame) => Math.min(frame.markPrice, frame.lastPrice)));
-  const maximumObserved = Math.max(...frames.map((frame) => Math.max(frame.markPrice, frame.lastPrice)));
+  const selectedIndices = outputFrameIndices(frames, settings);
+  // Anchor the price lattice to information available at the first source
+  // cutoff. Using the eventual range of the full replay would let a future
+  // price extreme move every earlier raster row.
+  const anchorFrame = frames[0]!;
+  const minimumObserved = Math.min(anchorFrame.markPrice, anchorFrame.lastPrice);
+  const maximumObserved = Math.max(anchorFrame.markPrice, anchorFrame.lastPrice);
   const leverageEnvelope = Math.max(0.08, Math.min(0.52, 1 / Math.max(2, settings.leverageMinimum) + 0.025));
   const minPrice = Math.max(1e-8, minimumObserved * (1 - leverageEnvelope));
   const maxPrice = maximumObserved * (1 + leverageEnvelope);
@@ -107,6 +124,8 @@ export function buildLiquidationFieldSnapshot(
   const confidence = new Uint8Array(columns * rows);
   const validity = new Uint8Array(columns * rows);
   const confirmedIntensity = new Uint8Array(columns * rows);
+  const confirmedNotional = new Float32Array(columns * rows);
+  const confirmedCount = new Uint16Array(columns * rows);
   const timestamps = new Float64Array(columns);
   const cohortEngine = new LiquidationCohortEngine(rules, settings.modelPreset);
   let column = 0;
@@ -120,7 +139,8 @@ export function buildLiquidationFieldSnapshot(
     latestConfidence = confidenceForFrame(frame);
     timestamps[column] = frame.timestamp;
     const columnStart = column * rows;
-    const frameIsValid = frame.certainty.openInterest !== "UNAVAILABLE";
+    const frameIsValid = frame.certainty.openInterest !== "UNAVAILABLE"
+      && frame.certainty.openInterest !== "MISSING";
     for (let row = 0; row < rows; row++) {
       const index = columnStart + row;
       validity[index] = frameIsValid ? 255 : 0;
@@ -136,7 +156,17 @@ export function buildLiquidationFieldSnapshot(
       priceStep,
       settings
     );
-    rasterizeConfirmedEvents(events, confirmedIntensity, frame, columnStart, rows, minPrice, priceStep);
+    rasterizeConfirmedEvents(
+      events,
+      confirmedIntensity,
+      confirmedNotional,
+      confirmedCount,
+      frame,
+      columnStart,
+      rows,
+      minPrice,
+      priceStep
+    );
     column += 1;
   }
 
@@ -155,7 +185,30 @@ export function buildLiquidationFieldSnapshot(
   const normalizationConfidence = coverage.state === "SYNTHETIC_TEST"
     ? new Uint8Array(confidence.length).fill(255)
     : confidence;
-  const { normalized, high } = normalizeExposure(combinedExposure, normalizationConfidence, validity, settings);
+  const { normalized, high } = normalizeExposureCausal(
+    combinedExposure,
+    normalizationConfidence,
+    validity,
+    columns,
+    rows,
+    settings
+  );
+  const { normalized: longNormalizedIntensity } = normalizeExposureCausal(
+    longExposure,
+    normalizationConfidence,
+    validity,
+    columns,
+    rows,
+    settings
+  );
+  const { normalized: shortNormalizedIntensity } = normalizeExposureCausal(
+    shortExposure,
+    normalizationConfidence,
+    validity,
+    columns,
+    rows,
+    settings
+  );
   const lastFrame = frames.at(-1)!;
   const cascade = buildCascade(lastFrame, latestState.particles, priceStep);
   const buildTimeMs = performance.now() - started;
@@ -185,9 +238,13 @@ export function buildLiquidationFieldSnapshot(
     shortExposure,
     combinedExposure,
     normalizedIntensity: normalized,
+    longNormalizedIntensity,
+    shortNormalizedIntensity,
     confidence,
     validity,
     confirmedIntensity,
+    confirmedNotional,
+    confirmedCount,
     cohorts: latestState.cohorts,
     confirmedEvents: events.filter((event) => event.timestamp >= timestamps[0]! && event.timestamp <= timestamps.at(-1)!),
     cascade,
@@ -195,6 +252,8 @@ export function buildLiquidationFieldSnapshot(
     confidenceBreakdown: latestConfidence,
     buildTimeMs,
     generatedAt: Date.now(),
+    authority: coverage.state === "SYNTHETIC_TEST" ? "TEST_FIXTURE" : "BROWSER_FALLBACK",
+    collectorNodeId: null,
     certainty: coverage.state === "SYNTHETIC_TEST"
       ? "SYNTHETIC_TEST"
       : latestConfidence.total >= 80
@@ -232,14 +291,17 @@ function rasterizeParticles(
       const row = center + offset;
       if (row < 0 || row >= rows) continue;
       const kernel = gaussianKernel(offset, sigmaRows);
-      target[columnStart + row] += effectiveNotional * particle.confidence * kernel;
+      const targetIndex = columnStart + row;
+      target[targetIndex] = (target[targetIndex] ?? 0) + effectiveNotional * particle.confidence * kernel;
     }
   }
 }
 
 function rasterizeConfirmedEvents(
   events: readonly ConfirmedLiquidationEvent[],
-  target: Uint8Array,
+  intensityTarget: Uint8Array,
+  notionalTarget: Float32Array,
+  countTarget: Uint16Array,
   frame: LiquidationMarketFrame,
   columnStart: number,
   rows: number,
@@ -247,7 +309,10 @@ function rasterizeConfirmedEvents(
   priceStep: number
 ) {
   const previousBoundary = frame.timestamp - 15 * 60 * 1_000;
-  const relevant = events.filter((event) => event.timestamp > previousBoundary && event.timestamp <= frame.timestamp);
+  const relevant = events.filter((event) => {
+    const knownAt = Math.max(event.timestamp, event.receivedAt);
+    return knownAt > previousBoundary && knownAt <= frame.timestamp;
+  });
   if (!relevant.length) return;
   const maximum = Math.max(...relevant.map((event) => event.notional), 1);
   for (const event of relevant) {
@@ -255,8 +320,12 @@ function rasterizeConfirmedEvents(
     for (let offset = -2; offset <= 2; offset++) {
       const row = center + offset;
       if (row < 0 || row >= rows) continue;
-      const intensity = Math.round(255 * Math.sqrt(event.notional / maximum) * Math.exp(-(offset * offset) / 2));
-      target[columnStart + row] = Math.max(target[columnStart + row]!, intensity);
+      const index = columnStart + row;
+      const kernel = Math.exp(-(offset * offset) / 2);
+      const intensity = Math.round(255 * Math.sqrt(event.notional / maximum) * kernel);
+      intensityTarget[index] = Math.max(intensityTarget[index]!, intensity);
+      notionalTarget[index] = notionalTarget[index]! + event.notional * kernel;
+      countTarget[index] = Math.min(65_535, countTarget[index]! + 1);
     }
   }
 }

@@ -4,8 +4,15 @@ export type LiquidationDataCertainty =
   | "ESTIMATED_HIGH"
   | "ESTIMATED_MEDIUM"
   | "ESTIMATED_LOW"
+  | "MISSING"
   | "SYNTHETIC_TEST"
   | "UNAVAILABLE";
+
+export type BclifModelAuthority =
+  | "PERSISTENT_NODE"
+  | "BROWSER_FALLBACK"
+  | "REPLAY"
+  | "TEST_FIXTURE";
 
 export type LiquidationFieldHorizon = "6H" | "12H" | "1D" | "3D" | "1W" | "3W" | "1M" | "CUSTOM";
 export type LiquidationFieldViewMode =
@@ -173,6 +180,23 @@ export interface LiquidationPositionCohort {
   modelVersion: string;
 }
 
+/**
+ * Versioned, JSON-safe state owned by the shared cohort engine. The browser
+ * may use it for deterministic tests, while only the persistent collector is
+ * allowed to publish it as an authoritative checkpoint.
+ */
+export interface LiquidationCohortEngineState {
+  schemaVersion: 1;
+  modelVersion: string;
+  sourceVersion: string;
+  modelPreset: LiquidationFieldModelPreset;
+  previousFrame: LiquidationMarketFrame | null;
+  cohortOrdinal: number;
+  cohorts: LiquidationPositionCohort[];
+  particles: LiquidationExposureParticle[];
+  traversedCohortIds: string[];
+}
+
 export interface LiquidationExposureParticle {
   cohortId: string;
   side: "LONG" | "SHORT";
@@ -220,6 +244,32 @@ export interface LiquidationCoverage {
   state: "COLLECTING" | "LIVE" | "STALE" | "UNAVAILABLE" | "SYNTHETIC_TEST";
 }
 
+export interface BclifCoverageGap {
+  start: number;
+  end: number;
+  missingSources: string[];
+}
+
+export interface BclifPersistentCoverage {
+  venue: string;
+  symbol: string;
+  horizon: string;
+  requestedStart: number;
+  requestedEnd: number;
+  modelStart: number | null;
+  modelEnd: number | null;
+  openInterestCoveragePercent: number | null;
+  tradeCoveragePercent: number | null;
+  liquidationCoveragePercent: number | null;
+  orderbookCoveragePercent: number | null;
+  fundingCoveragePercent: number | null;
+  continuityPercent: number | null;
+  sourceMode: "PERSISTENT_COLLECTOR" | "BROWSER_SESSION" | "MIXED" | "UNAVAILABLE";
+  quality: "EXCELLENT" | "HIGH" | "MIXED" | "LOW" | "INSUFFICIENT";
+  gaps: BclifCoverageGap[];
+  updatedAt: number;
+}
+
 export interface LiquidationConfidenceBreakdown {
   total: number;
   tradeCoverage: number;
@@ -264,6 +314,9 @@ export interface LiquidationFieldTileHeader {
   confidenceScale: number;
   compression: string;
   checksum: string;
+  sourceCutoffTimestamp?: number;
+  tileId?: string;
+  tileVersion?: number;
 }
 
 export interface LiquidationFieldSnapshot {
@@ -273,9 +326,13 @@ export interface LiquidationFieldSnapshot {
   shortExposure: Float32Array;
   combinedExposure: Float32Array;
   normalizedIntensity: Uint8Array;
+  longNormalizedIntensity: Uint8Array;
+  shortNormalizedIntensity: Uint8Array;
   confidence: Uint8Array;
   validity: Uint8Array;
   confirmedIntensity: Uint8Array;
+  confirmedNotional: Float32Array;
+  confirmedCount: Uint16Array;
   cohorts: LiquidationPositionCohort[];
   confirmedEvents: ConfirmedLiquidationEvent[];
   cascade: CascadeRiskSnapshot[];
@@ -284,15 +341,21 @@ export interface LiquidationFieldSnapshot {
   buildTimeMs: number;
   generatedAt: number;
   certainty: LiquidationDataCertainty;
+  authority: BclifModelAuthority;
+  collectorNodeId: string | null;
+  persistentCoverage?: BclifPersistentCoverage;
 }
 
 export interface LiquidationFieldRuntimeStatus {
   state: "IDLE" | "LOADING" | "LIVE" | "COLLECTING" | "STALE" | "UNAVAILABLE" | "ERROR";
   message: string;
   lastInputAt: number | null;
-  source: "BYBIT_PUBLIC" | "SYNTHETIC_TEST" | "NONE";
+  source: "PERSISTENT_COLLECTOR" | "BYBIT_PUBLIC" | "SYNTHETIC_TEST" | "NONE";
+  authority?: BclifModelAuthority;
+  persistence?: "ON" | "OFF";
+  collectorNodeId?: string | null;
   error?: string;
 }
 
-export const BCLIF_MODEL_VERSION = "BCLIF_MODEL_V3";
-export const BCLIF_SOURCE_VERSION = "BYBIT_V5_PUBLIC_2026_06";
+export const BCLIF_MODEL_VERSION = "BCLIF_MODEL_V4_CAUSAL";
+export const BCLIF_SOURCE_VERSION = "BYBIT_V5_PUBLIC_2026_08";

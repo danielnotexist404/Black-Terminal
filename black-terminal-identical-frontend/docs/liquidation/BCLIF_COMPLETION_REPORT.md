@@ -2,7 +2,7 @@
 
 ## Delivered
 
-The prior visual mismatch and synthetic OHLCV/leverage projection were confirmed. The old model and histogram renderer were removed. BCLIF now has canonical frames, OI semantics, explicit leverage priors, Bybit risk-tier liquidation distributions, paired persistent cohorts, survival/decay, confirmed-event assimilation, confidence and validity channels, cascade scaffolding, worker rasterization, one-texture Pixi rendering, the reference and Black Terminal palettes, operator settings, diagnostics, deterministic fixtures, model tests, storage migration and documentation.
+The prior visual mismatch and synthetic OHLCV/leverage projection were confirmed. The old model and histogram renderer were removed. This Chapter III-B baseline has canonical frames, OI semantics, explicit leverage priors, Bybit risk-tier liquidation distributions, stateful browser-session cohorts, survival/decay, confirmed-event assimilation, confidence and validity channels, cascade scaffolding, worker rasterization, one-texture Pixi rendering, the reference and Black Terminal palettes, operator settings, diagnostics, deterministic fixtures, model tests, storage migration and documentation. These browser cohorts were not persistent market memory; Chapter III-C owns that boundary.
 
 Exposure at `(t,p)` is the sum of active particle notional × leverage weight × survival × liquidation-price kernel. Combined exposure is gap-preserving anisotropically smoothed, log transformed, robustly quantile normalized and optionally confidence weighted. Cross-margin distributions are deliberately wider.
 

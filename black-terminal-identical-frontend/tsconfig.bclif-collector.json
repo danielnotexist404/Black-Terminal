@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "lib": ["ES2023", "DOM"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": true,
+    "noUncheckedIndexedAccess": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2023",
+    "types": ["node", "ws"]
+  },
+  "include": [
+    "server/liquidation-intelligence/**/*.ts",
+    "scripts/bclif-collector-worker.ts",
+    "scripts/bclif-collector-tests.ts",
+    "scripts/bclif-orderbook-tests.ts",
+    "scripts/bclif-recovery-tests.ts",
+    "scripts/bclif-tile-codec-tests.ts",
+    "scripts/bclif-no-lookahead-tests.ts",
+    "scripts/bclif-collector-benchmarks.ts",
+    "src/modules/liquidation-field/core/**/*.ts",
+    "src/modules/liquidation-field/testing/performanceClock.ts"
+  ]
+}

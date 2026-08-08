@@ -6107,6 +6107,7 @@ body.resizing-layout * {
 
 .liquidation-field-legend,
 .liquidation-field-diagnostics,
+.liquidation-field-provenance,
 .liquidation-field-status {
   position: absolute;
   z-index: 18;
@@ -6128,7 +6129,8 @@ body.resizing-layout * {
 }
 
 .liquidation-field-legend header,
-.liquidation-field-diagnostics header {
+.liquidation-field-diagnostics header,
+.liquidation-field-provenance header {
   display: flex;
   justify-content: space-between;
   gap: 10px;
@@ -6137,7 +6139,8 @@ body.resizing-layout * {
 }
 
 .liquidation-field-legend header span,
-.liquidation-field-diagnostics header span { color: #a6a9b0; }
+.liquidation-field-diagnostics header span,
+.liquidation-field-provenance header span { color: #a6a9b0; }
 
 .liquidation-field-legend .thermal-ramp {
   height: 7px;
@@ -6183,6 +6186,43 @@ body.resizing-layout * {
   line-height: 1.45;
 }
 
+.liquidation-field-provenance {
+  right: 102px;
+  bottom: 72px;
+  width: min(330px, calc(100% - 140px));
+  overflow: hidden;
+  border-color: rgba(208, 0, 36, 0.34);
+  background: linear-gradient(145deg, rgba(8, 8, 11, 0.94), rgba(1, 1, 3, 0.86));
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.44), inset 2px 0 rgba(208, 0, 36, 0.52);
+}
+
+.liquidation-field-provenance header,
+.liquidation-field-provenance > div { padding: 5px 9px; }
+.liquidation-field-provenance > div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 8px;
+  border-top: 1px solid rgba(120, 126, 136, 0.11);
+  font-size: 7px;
+  letter-spacing: 0.035em;
+}
+.liquidation-field-provenance > div span { color: #777d87; }
+.liquidation-field-provenance > div b {
+  overflow: hidden;
+  color: #eef0f2;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.liquidation-field-provenance.authority-browser_fallback {
+  border-color: rgba(141, 147, 157, 0.3);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.44), inset 2px 0 rgba(194, 198, 204, 0.4);
+}
+.liquidation-field-provenance.authority-test_fixture {
+  border-color: rgba(224, 174, 34, 0.42);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.44), inset 2px 0 rgba(224, 174, 34, 0.62);
+}
+
 .liquidation-field-status {
   left: 50%;
   top: 50%;
@@ -6210,6 +6250,8 @@ body.resizing-layout * {
 @media (max-width: 760px) {
   .liquidation-field-diagnostics { right: 72px; top: 45px; width: min(280px, calc(100% - 86px)); }
   .liquidation-field-legend { left: 8px; bottom: 66px; width: 190px; }
+  .liquidation-field-provenance { right: 72px; bottom: 66px; width: min(268px, calc(100% - 86px)); }
+  .liquidation-field-provenance > div { grid-template-columns: 72px minmax(0, 1fr); }
 }
 
 .kioseff-settings {

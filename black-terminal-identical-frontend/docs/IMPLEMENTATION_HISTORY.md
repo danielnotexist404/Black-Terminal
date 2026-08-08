@@ -1375,3 +1375,13 @@ Remaining:
 - Renamed the user-facing indicator to RADAP — Range Anchored Directional Auction Profile — while preserving the `auctionProfile` workspace, worker protocol, and engine contracts for backward compatibility.
 - Separated immediate presentation redraws from calculation rebuilds, debounced calculation-sensitive slider changes, forced asynchronous results to use the newest menu settings, and retained the last certified snapshot through empty or cancelled intermediate generations.
 - Preserved the current finalized/developing CVD block model; genuinely live per-cell number mutation remains the next explicitly scoped phase.
+
+## 2026-08-05 — Phase V Chapter III-C BCLIF Persistent Market Memory
+
+- Audited the browser-only BCLIF lifecycle and the intentionally unapplied foundation migration; recorded unavailable trade/book/liquidation history without synthesizing it.
+- Added one shared model authority contract, versioned cohort checkpoint export/import, explicit missing-data certainty, causal normalization, and trailing-only time smoothing.
+- Packaged a dedicated Node 22 public-data collector with Bybit adapters, exact local-book reconstruction, canonical event chunks, source offsets/deduplication, recovery, checkpoints, multi-horizon tiles, compaction, retention, health, metrics, and graceful drain.
+- Added a successor service-only Supabase schema, immutable private object metadata, protected entitlement-aware APIs, and truthful deferred-infrastructure responses.
+- Added persistent-first client orchestration, bounded verified tile caching/assembly, fail-closed entitlement behavior, and an always-visible persistent-versus-browser provenance label.
+- Added repository-owned collector, recovery, codec, no-lookahead, security, benchmark, soak, container, and Playwright visual-certification paths.
+- Stopped at State A because no separate analytics host exists: collector not deployed, migrations not applied, browser fallback active. Black Cloud execution, OMS/EMS, PositionManager, mandates, RADAP, HDLX, Kioseff, and DOM Pro calculations were not changed.

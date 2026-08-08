@@ -4,6 +4,7 @@ import { createLeveragePrior } from "./leveragePriors.ts";
 import type {
   ConfirmedLiquidationEvent,
   LiquidationExposureParticle,
+  LiquidationCohortEngineState,
   LiquidationFieldModelPreset,
   LiquidationInstrumentRules,
   LiquidationMarketFrame,
@@ -62,10 +63,13 @@ export class LiquidationCohortEngine {
 
   processFrame(frame: LiquidationMarketFrame, events: readonly ConfirmedLiquidationEvent[] = []) {
     this.propagate(frame);
-    if (frame.openInterestDelta > 0 && frame.openInterest > 0) this.createPairedCohorts(frame);
-    if (frame.openInterestDelta < 0 && this.previousFrame?.openInterest) this.reduceFromOiContraction(frame);
+    const openInterestUsable = frame.certainty.openInterest !== "UNAVAILABLE"
+      && frame.certainty.openInterest !== "MISSING";
+    if (openInterestUsable && frame.openInterestDelta > 0 && frame.openInterest > 0) this.createPairedCohorts(frame);
+    if (openInterestUsable && frame.openInterestDelta < 0 && this.previousFrame?.openInterest) this.reduceFromOiContraction(frame);
     for (const event of events) {
-      if (event.timestamp > (this.previousFrame?.timestamp ?? -Infinity) && event.timestamp <= frame.timestamp) {
+      const knownAt = Math.max(event.timestamp, event.receivedAt);
+      if (knownAt > (this.previousFrame?.timestamp ?? -Infinity) && knownAt <= frame.timestamp) {
         this.assimilateConfirmedEvent(event);
       }
     }
@@ -79,6 +83,33 @@ export class LiquidationCohortEngine {
       cohorts: this.cohorts.map((cohort) => ({ ...cohort, riskTierDistribution: [...cohort.riskTierDistribution] })),
       particles: this.particles.map((particle) => ({ ...particle }))
     };
+  }
+
+  exportState(): LiquidationCohortEngineState {
+    return {
+      schemaVersion: 1,
+      modelVersion: BCLIF_MODEL_VERSION,
+      sourceVersion: this.rules.sourceVersion,
+      modelPreset: this.modelPreset,
+      previousFrame: this.previousFrame ? cloneFrame(this.previousFrame) : null,
+      cohortOrdinal: this.cohortOrdinal,
+      cohorts: this.cohorts.map((cohort) => ({ ...cohort, riskTierDistribution: cohort.riskTierDistribution.map((tier) => ({ ...tier })) })),
+      particles: this.particles.map((particle) => ({ ...particle })),
+      traversedCohortIds: [...this.traversedCohorts].sort()
+    };
+  }
+
+  importState(state: LiquidationCohortEngineState) {
+    validateCheckpointState(state, this.rules.sourceVersion, this.modelPreset);
+    this.previousFrame = state.previousFrame ? cloneFrame(state.previousFrame) : undefined;
+    this.cohortOrdinal = state.cohortOrdinal;
+    this.cohorts = state.cohorts.map((cohort) => ({
+      ...cohort,
+      riskTierDistribution: cohort.riskTierDistribution.map((tier) => ({ ...tier }))
+    }));
+    this.particles = state.particles.map((particle) => ({ ...particle }));
+    this.traversedCohorts = new Set(state.traversedCohortIds);
+    this.prune();
   }
 
   private createPairedCohorts(frame: LiquidationMarketFrame) {
@@ -290,4 +321,39 @@ export class LiquidationCohortEngine {
       .sort((a, b) => b.notional * b.weight * b.survival - a.notional * a.weight * a.survival)
       .slice(0, MAX_PARTICLES);
   }
+}
+
+function cloneFrame(frame: LiquidationMarketFrame): LiquidationMarketFrame {
+  return {
+    ...frame,
+    bidDepthCurve: { ...frame.bidDepthCurve, points: frame.bidDepthCurve.points.map((point) => ({ ...point })) },
+    askDepthCurve: { ...frame.askDepthCurve, points: frame.askDepthCurve.points.map((point) => ({ ...point })) },
+    certainty: { ...frame.certainty }
+  };
+}
+
+function validateCheckpointState(
+  state: LiquidationCohortEngineState,
+  expectedSourceVersion: string,
+  expectedPreset: LiquidationFieldModelPreset
+) {
+  if (state?.schemaVersion !== 1) throw new Error("Unsupported BCLIF cohort checkpoint schema");
+  if (state.modelVersion !== BCLIF_MODEL_VERSION) throw new Error("BCLIF cohort checkpoint model version mismatch");
+  if (state.sourceVersion !== expectedSourceVersion) throw new Error("BCLIF cohort checkpoint source version mismatch");
+  if (state.modelPreset !== expectedPreset) throw new Error("BCLIF cohort checkpoint model preset mismatch");
+  if (!Number.isSafeInteger(state.cohortOrdinal) || state.cohortOrdinal < 0) throw new Error("Invalid BCLIF cohort checkpoint ordinal");
+  if (!Array.isArray(state.cohorts) || state.cohorts.length > MAX_ACTIVE_COHORTS) throw new Error("Invalid BCLIF cohort checkpoint cohorts");
+  if (!Array.isArray(state.particles) || state.particles.length > MAX_PARTICLES) throw new Error("Invalid BCLIF cohort checkpoint particles");
+  if (!Array.isArray(state.traversedCohortIds) || state.traversedCohortIds.length > MAX_ACTIVE_COHORTS) {
+    throw new Error("Invalid BCLIF cohort checkpoint traversal state");
+  }
+  const cohortIds = new Set(state.cohorts.map((cohort) => cohort.id));
+  if (cohortIds.size !== state.cohorts.length || state.particles.some((particle) => !cohortIds.has(particle.cohortId))) {
+    throw new Error("BCLIF cohort checkpoint relationships are corrupt");
+  }
+  const numericValues = [
+    ...state.cohorts.flatMap((cohort) => [cohort.createdAt, cohort.updatedAt, cohort.entryMean, cohort.estimatedRemainingNotional, cohort.survivalProbability]),
+    ...state.particles.flatMap((particle) => [particle.entryPrice, particle.leverage, particle.notional, particle.liquidationPrice, particle.survival, particle.weight])
+  ];
+  if (numericValues.some((value) => !Number.isFinite(value))) throw new Error("BCLIF cohort checkpoint contains non-finite values");
 }

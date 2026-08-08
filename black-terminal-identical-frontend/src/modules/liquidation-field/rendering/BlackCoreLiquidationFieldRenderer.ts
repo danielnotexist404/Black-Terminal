@@ -1,6 +1,6 @@
 import { BufferImageSource, Container, Graphics, Sprite, Texture } from "pixi.js";
 import type { LiquidationFieldSettings, LiquidationFieldSnapshot } from "../core/types.ts";
-import { createThermalPalette } from "./thermalPalette.ts";
+import { createThermalPalette, resolveLiquidationFieldRenderIntensity } from "./thermalPalette.ts";
 
 export interface LiquidationFieldRenderTransform {
   width: number;
@@ -13,11 +13,6 @@ export interface LiquidationFieldRenderTransform {
 
 function clampByte(value: number) {
   return Math.max(0, Math.min(255, Math.round(value)));
-}
-
-function exposureIntensity(value: number, scale: number, gamma: number) {
-  const normalized = Math.log1p(Math.max(0, value)) / Math.max(1e-9, Math.log1p(Math.max(1, scale)));
-  return clampByte(255 * Math.pow(Math.max(0, Math.min(1, normalized)), Math.max(0.2, gamma)));
 }
 
 /**
@@ -45,8 +40,8 @@ export class BlackCoreLiquidationFieldRenderer {
     this.snapshot = snapshot;
     this.settings = settings;
     const nextKey = snapshot
-      ? [snapshot.header.checksum, snapshot.generatedAt, settings.viewMode, settings.palette, settings.opacity,
-          settings.gamma, settings.minimumConfidence, settings.sideFilter].join(":")
+      ? [snapshot.header.checksum, snapshot.authority, snapshot.header.sourceCutoffTimestamp, settings.viewMode, settings.palette, settings.opacity,
+          settings.gamma, settings.sharpness, settings.minimumConfidence, settings.sideFilter].join(":")
       : "empty";
     if (nextKey === this.textureKey) return;
     this.textureKey = nextKey;
@@ -103,7 +98,7 @@ export class BlackCoreLiquidationFieldRenderer {
       if (this.sprite) this.sprite.visible = false;
       return;
     }
-    const { columns, rows, exposureScale } = snapshot.header;
+    const { columns, rows } = snapshot.header;
     const required = columns * rows * 4;
     const rgba = this.rgba?.length === required ? this.rgba : new Uint8Array(required);
     this.rgba = rgba;
@@ -118,25 +113,13 @@ export class BlackCoreLiquidationFieldRenderer {
         const valid = snapshot.validity[sourceIndex]! > 0;
         const confidence = snapshot.confidence[sourceIndex]!;
         const confidencePass = snapshot.certainty === "SYNTHETIC_TEST" || confidence >= settings.minimumConfidence * 2.55;
-        let intensity = snapshot.normalizedIntensity[sourceIndex]!;
-        let selectedLut = lut;
-
-        if (settings.viewMode === "LONG_EXPOSURE") {
-          intensity = exposureIntensity(snapshot.longExposure[sourceIndex]!, exposureScale, settings.gamma);
-          selectedLut = longLut;
-        } else if (settings.viewMode === "SHORT_EXPOSURE") {
-          intensity = exposureIntensity(snapshot.shortExposure[sourceIndex]!, exposureScale, settings.gamma);
-          selectedLut = shortLut;
-        } else if (settings.viewMode === "CONFIDENCE_FIELD") {
-          intensity = confidence;
-        } else if (settings.viewMode === "CONFIRMED_LIQUIDATIONS") {
-          intensity = snapshot.confirmedIntensity[sourceIndex]!;
-        } else if (settings.viewMode === "DIRECTIONAL_SPLIT") {
-          const long = snapshot.longExposure[sourceIndex]!;
-          const short = snapshot.shortExposure[sourceIndex]!;
-          intensity = exposureIntensity(Math.max(long, short), exposureScale, settings.gamma);
-          selectedLut = long >= short ? longLut : shortLut;
-        }
+        const resolved = resolveLiquidationFieldRenderIntensity(snapshot, settings, sourceIndex);
+        let intensity = resolved.intensity;
+        const selectedLut = resolved.palette === "BLACK_TERMINAL_BLOOD"
+          ? longLut
+          : resolved.palette === "INSTITUTIONAL_MONOCHROME"
+            ? shortLut
+            : lut;
 
         // Unavailable intervals remain visibly distinct; they are never silently interpolated.
         if (!valid) {
@@ -174,7 +157,15 @@ export class BlackCoreLiquidationFieldRenderer {
   metrics() {
     return {
       textures: this.texture ? 1 : 0,
-      cells: this.snapshot ? this.snapshot.header.columns * this.snapshot.header.rows : 0
+      cells: this.snapshot ? this.snapshot.header.columns * this.snapshot.header.rows : 0,
+      authority: this.snapshot?.authority ?? null,
+      checksum: this.snapshot?.header.checksum ?? null,
+      bounds: this.snapshot ? {
+        startTime: this.snapshot.header.startTime,
+        endTime: this.snapshot.header.endTime,
+        minPrice: this.snapshot.header.minPrice,
+        maxPrice: this.snapshot.header.maxPrice
+      } : null
     };
   }
 

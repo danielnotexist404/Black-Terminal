@@ -2,7 +2,7 @@
 
 ## Phase V Chapter III-B — Black Core Liquidation Intelligence Field
 
-`src/modules/liquidation-field/` owns the BCLIF canonical frame, Bybit public adapter, persistent cohort/particle model, confidence engine, worker rasterizer and one-texture Pixi renderer. The browser collects live public trades, all-liquidation events and L2 depth for its session; OI history and venue risk tiers come from Bybit REST. Dense historical tiles are reserved for a future persistent collector and the service-only metadata schema in migration `202608050001`.
+`src/modules/liquidation-field/` owns the BCLIF canonical frame, Bybit public adapter, stateful browser-session cohort/particle model, confidence engine, worker rasterizer and one-texture Pixi renderer. The browser collects live public trades, all-liquidation events and L2 depth only for its session; OI history and current venue risk tiers come from Bybit REST. Chapter III-C adds the separate persistent-collector package and successor schema described below, but both BCLIF migrations (`202608050001`, `202608050002`) and that service remain inactive in State A.
 
 The stable `liquidationHeatmap` permission key now activates Liquidation Intelligence. It does not share calculations with Market Maker Heatmap, DOM Pro, RADAP or execution systems. See `docs/liquidation/BLACK_CORE_LIQUIDATION_INTELLIGENCE_FIELD.md`.
 
@@ -404,3 +404,9 @@ golden-master, and known-divergence documents under `docs/indicators/`.
 The chart owns one canonical CVD ingestion service and one versioned RADAP worker per active chart. Venue adapters preserve aggressor provenance before the chart consumes trades. Worker snapshots are immutable calculation products; Pixi receives only a snapshot plus presentation settings. This keeps OMS/EMS, Black Cloud, DOM Pro, Kioseff, HDLX, AIF, and IMM outside the profile calculation boundary. Internal `auctionProfile` keys remain stable solely for backward-compatible workspace persistence.
 
 The browser path is incremental for live trades. Python is an optional offline/server rebuild and validation layer. See `docs/indicators/BLACK_CORE_MULTI_ENGINE_AUCTION_PROFILE.md`.
+
+## BCLIF Persistent Market Memory
+
+Phase V Chapter III-C introduces a separate Node 22 public-market analytics service, `LIQUIDATION_INTELLIGENCE_NODE_01`. Bybit public sources flow through canonical event chunks, durable offsets/deduplication, the shared BCLIF cohort engine, checkpoints, and immutable multi-resolution numerical tiles in private object storage. Supabase holds only service-owned metadata, coverage, versioning, and calibration evidence. The service has no broker credentials and cannot share the Black Cloud execution node.
+
+Every snapshot names one authority: persistent node, browser fallback, replay, or test fixture. The client probes protected persistent status before opening fallback sockets, verifies and caches bounded tiles, renders gaps as unavailable, and never merges two historical model authorities. Until a dedicated analytics host and audited migrations are activated, the packaged service remains undeployed and the browser path is visibly labeled non-persistent. See `docs/liquidation/BCLIF_PERSISTENT_COLLECTOR.md` and the Chapter III-C completion report.

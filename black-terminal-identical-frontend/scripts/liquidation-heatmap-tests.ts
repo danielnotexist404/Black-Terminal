@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
 import { bybitLiquidationInput, estimateBybitLinearLiquidationDistribution } from "../src/modules/liquidation-field/core/bybitLiquidationModel.ts";
 import { LiquidationCohortEngine } from "../src/modules/liquidation-field/core/cohortEngine.ts";
-import { buildLiquidationFieldSnapshot } from "../src/modules/liquidation-field/core/exposureRaster.ts";
+import { buildLiquidationFieldSnapshot, outputFrameIndices } from "../src/modules/liquidation-field/core/exposureRaster.ts";
 import { createLeveragePrior } from "../src/modules/liquidation-field/core/leveragePriors.ts";
-import { normalizeExposure } from "../src/modules/liquidation-field/core/normalization.ts";
+import { normalizeExposure, normalizeExposureCausal, smoothField } from "../src/modules/liquidation-field/core/normalization.ts";
 import { DEFAULT_LIQUIDATION_FIELD_SETTINGS } from "../src/modules/liquidation-field/core/settings.ts";
 import { createThermalPalette } from "../src/modules/liquidation-field/rendering/thermalPalette.ts";
 import { bclifTimestampMsToChartSeconds } from "../src/modules/liquidation-field/rendering/timeProjection.ts";
@@ -17,6 +17,9 @@ assert.equal(
   "BCLIF millisecond timestamps must project into the chart's second-based time domain"
 );
 const settings = { ...DEFAULT_LIQUIDATION_FIELD_SETTINGS, timeColumns: 256, priceRows: 256, minimumConfidence: 0 };
+const visualColumnIndices = outputFrameIndices(fixture.frames, { ...settings, timeColumns: 512 });
+assert.ok(visualColumnIndices.size <= 512, "the high-resolution visual fixture must respect the configured GPU column ceiling");
+assert.ok(visualColumnIndices.size >= 480, "the high-resolution visual fixture must retain dense multi-week time detail");
 
 const normalizationExposure = new Float32Array([1_000, 10_000, 100_000, 1_000_000]);
 const normalizationValidity = new Uint8Array(4).fill(255);
@@ -56,10 +59,104 @@ assert.ok(paired.cohorts.every((cohort) => cohort.confidence < 1), "modeled coho
 assert.ok(paired.particles.some((particle) => particle.marginMode === "ISOLATED_ESTIMATE"), "mixed-margin inference must retain narrow isolated cores");
 assert.ok(paired.particles.some((particle) => particle.marginMode === "CROSS_ESTIMATE"), "mixed-margin inference must retain broad cross-margin uncertainty");
 
+const missingOiEngine = new LiquidationCohortEngine(fixture.rules, "REGIME_ADAPTIVE");
+const missingOiFrame = {
+  ...fixture.frames[0]!,
+  certainty: { ...fixture.frames[0]!.certainty, openInterest: "MISSING" as const }
+};
+assert.equal(
+  missingOiEngine.processFrame(missingOiFrame, []).cohorts.length,
+  0,
+  "missing OI must not create numerical cohorts from placeholder values"
+);
+
+const uninterrupted = new LiquidationCohortEngine(fixture.rules, "REGIME_ADAPTIVE");
+const resumed = new LiquidationCohortEngine(fixture.rules, "REGIME_ADAPTIVE");
+for (const frame of fixture.frames.slice(0, 80)) uninterrupted.processFrame(frame, fixture.events);
+resumed.importState(uninterrupted.exportState());
+for (const frame of fixture.frames.slice(80, 100)) {
+  uninterrupted.processFrame(frame, fixture.events);
+  resumed.processFrame(frame, fixture.events);
+}
+assert.deepEqual(resumed.exportState(), uninterrupted.exportState(), "checkpoint recovery must resume without duplicating or losing cohort state");
+
+const causalExposure = new Float32Array([
+  1, 4, 16, 64,
+  2, 8, 32, 128,
+  3, 12, 48, 192
+]);
+const causalConfidence = new Uint8Array(causalExposure.length).fill(255);
+const causalValidity = new Uint8Array(causalExposure.length).fill(255);
+const firstTwoColumns = normalizeExposureCausal(
+  causalExposure.slice(0, 8), causalConfidence.slice(0, 8), causalValidity.slice(0, 8), 2, 4,
+  { ...settings, lowQuantile: 0, highQuantile: 1, gamma: 1 }, 2
+);
+const withFutureColumn = normalizeExposureCausal(
+  causalExposure, causalConfidence, causalValidity, 3, 4,
+  { ...settings, lowQuantile: 0, highQuantile: 1, gamma: 1 }, 2
+);
+assert.deepEqual(
+  [...withFutureColumn.normalized.slice(0, 8)],
+  [...firstTwoColumns.normalized],
+  "future exposure must not rewrite historical normalized columns"
+);
+const smoothedPast = smoothField(causalExposure.slice(0, 8), causalValidity.slice(0, 8), 2, 4, 1, 0,);
+const smoothedWithFuture = smoothField(causalExposure, causalValidity, 3, 4, 1, 0);
+assert.deepEqual(
+  [...smoothedWithFuture.slice(0, 8)],
+  [...smoothedPast],
+  "future exposure must not leak through the time smoother"
+);
+
+const prefixFrames = fixture.frames.slice(0, 60);
+const futureBase = prefixFrames.at(-1)!;
+const appendedExtreme = {
+  ...futureBase,
+  timestamp: futureBase.timestamp + 2 * 60 * 60 * 1_000,
+  lastPrice: futureBase.lastPrice * 4,
+  markPrice: futureBase.markPrice * 4,
+  indexPrice: futureBase.indexPrice * 4,
+  bestBid: futureBase.bestBid * 4,
+  bestAsk: futureBase.bestAsk * 4,
+  openInterestDelta: Math.max(1, futureBase.openInterestDelta)
+};
+const prefixSettings = { ...settings, timeColumns: 128, priceRows: 64 };
+const prefixSnapshot = buildLiquidationFieldSnapshot(prefixFrames, [], fixture.rules, prefixSettings, fixture.coverage);
+const withExtremeFuture = buildLiquidationFieldSnapshot([...prefixFrames, appendedExtreme], [], fixture.rules, prefixSettings, fixture.coverage);
+const historicalCells = prefixSnapshot.header.columns * prefixSnapshot.header.rows;
+assert.deepEqual(
+  [...withExtremeFuture.combinedExposure.slice(0, historicalCells)],
+  [...prefixSnapshot.combinedExposure],
+  "a future price extreme must not move or rewrite historical exposure cells"
+);
+assert.deepEqual(
+  [...withExtremeFuture.normalizedIntensity.slice(0, historicalCells)],
+  [...prefixSnapshot.normalizedIntensity],
+  "a future price extreme must not renormalize historical thermal intensity"
+);
+
+const lateEvent = {
+  ...fixture.events[0]!,
+  id: "late-arrival-causality-test",
+  timestamp: prefixFrames[8]!.timestamp,
+  receivedAt: prefixFrames[20]!.timestamp
+};
+const beforeLateArrival = buildLiquidationFieldSnapshot(
+  prefixFrames.slice(0, 20),
+  [lateEvent],
+  fixture.rules,
+  prefixSettings,
+  fixture.coverage
+);
+assert.ok(
+  beforeLateArrival.confirmedIntensity.every((value) => value === 0),
+  "a liquidation received after the replay cutoff must not appear in historical cells"
+);
+
 const started = performance.now();
 const snapshot = buildLiquidationFieldSnapshot(fixture.frames, fixture.events, fixture.rules, settings, fixture.coverage);
 const buildMs = performance.now() - started;
-assert.equal(snapshot.header.columns, Math.min(settings.timeColumns, fixture.frames.length));
+assert.ok(snapshot.header.columns > 0 && snapshot.header.columns <= Math.min(settings.timeColumns, fixture.frames.length));
 assert.equal(snapshot.header.rows, 256);
 assert.equal(snapshot.certainty, "SYNTHETIC_TEST");
 assert.ok(snapshot.longExposure.some((value) => value > 0), "long exposure channel must be populated");
@@ -98,6 +195,15 @@ const unavailable = buildLiquidationFieldSnapshot(absentOiFrames, [], fixture.ru
 });
 assert.ok(unavailable.validity.every((value) => value === 0), "missing OI intervals must remain explicit invalid cells");
 assert.ok(unavailable.combinedExposure.every((value) => value === 0), "missing OI must not fabricate exposure");
+
+const missing = buildLiquidationFieldSnapshot(
+  absentOiFrames.map((frame) => ({ ...frame, certainty: { ...frame.certainty, openInterest: "MISSING" as const } })),
+  [],
+  fixture.rules,
+  settings,
+  { ...fixture.coverage, state: "UNAVAILABLE", openInterestCoveragePercent: 0 }
+);
+assert.ok(missing.validity.every((value) => value === 0), "MISSING OI must remain invalid rather than a zero-valued observation");
 
 console.log(JSON.stringify({
   decision: "PASS",

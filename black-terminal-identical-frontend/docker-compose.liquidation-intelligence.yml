@@ -1,0 +1,49 @@
+name: black-terminal-liquidation-intelligence
+
+services:
+  bclif-collector:
+    image: ${BCLIF_IMAGE_REFERENCE:?Set an immutable commit-tagged BCLIF_IMAGE_REFERENCE}
+    pull_policy: never
+    container_name: bclif-collector
+    hostname: liquidation-intelligence-node-01
+    restart: unless-stopped
+    init: true
+    env_file:
+      - ${BCLIF_ENV_FILE:-/etc/black-terminal/liquidation-intelligence.env}
+    environment:
+      BCLIF_DEPLOYMENT_COMMIT: ${BCLIF_DEPLOYMENT_COMMIT:?Set the exact deployed Git commit}
+      BCLIF_IMAGE_DIGEST: ${BCLIF_IMAGE_DIGEST:?Set the exact deployed image digest}
+      BCLIF_HEALTH_BIND_ADDRESS: 0.0.0.0
+      BCLIF_HEALTH_PORT: "8091"
+      BCLIF_SPOOL_DIRECTORY: /var/lib/bclif-spool
+    ports:
+      - "127.0.0.1:${BCLIF_HOST_HEALTH_PORT:-8091}:8091"
+    volumes:
+      - bclif-spool:/var/lib/bclif-spool
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777,nosuid,nodev,noexec
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${BCLIF_MEMORY_LIMIT:-2g}
+    cpus: ${BCLIF_CPU_LIMIT:-2.0}
+    pids_limit: 256
+    stop_grace_period: 60s
+    stop_signal: SIGTERM
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8091/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 90s
+      retries: 3
+
+volumes:
+  bclif-spool:
+    name: black-terminal-bclif-spool

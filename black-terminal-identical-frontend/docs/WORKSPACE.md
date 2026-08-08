@@ -19,11 +19,16 @@ Liquidation Intelligence verification:
 
 ```bash
 npm run test:liquidation-heatmap
+npm run test:bclif-persistence-security
+npm run test:bclif-client-contracts
+npm run test:bclif-collector-contracts
+npm run benchmark:bclif-collector
+npm run test:bclif-visual
 npm run typecheck
 npm run build
 ```
 
-The deterministic visual fixture is available only through the indicator's developer toggle and is labeled `SYNTHETIC_TEST`. Normal runtime requires a Bybit linear symbol and public network access.
+The deterministic visual fixture is available only through the indicator's developer toggle and is labeled `SYNTHETIC_TEST`. Normal runtime requires a Bybit linear symbol and public network access. In Chapter III-C State A, `test:bclif-visual` returns a structured `SKIP` because its baselines are explicitly stale; that is not visual certification. Collector build/deploy/status/drain/restart/rollback/certify/soak commands and their host prerequisites are listed in `liquidation/BCLIF_DEPLOYMENT_RUNBOOK.md`. Neither BCLIF migration is applied by an npm or deployment command.
 
 Open the Vite URL shown in the terminal for browser development.
 
@@ -257,3 +262,9 @@ The built-in preset buttons update the same scoped settings record:
 - CVD Macro Matrix;
 - Macro Structure;
 - TPO Session.
+
+## BCLIF Persistent Workspace State
+
+BCLIF presentation settings remain versioned browser workspace preferences. Historical events, source offsets, cohorts, checkpoints, tiles, coverage, and calibration are never stored in workspace state. When the protected collector is available, the client holds only a bounded verified in-memory tile cache keyed by venue, symbol, horizon, tile/model/schema version, and checksum.
+
+Workspace restoration cannot override entitlement or model authority. A revoked user cannot reactivate BCLIF from an older workspace. Persistent-node history and browser-session history are never merged; browser fallback is visibly marked persistence off and is discarded with the session. The deterministic fixture is available only in explicit local test mode.

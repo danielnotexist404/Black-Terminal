@@ -5,7 +5,7 @@ import type {
   LiquidationFieldSnapshot,
   LiquidationMarketFrame
 } from "../core/types.ts";
-import { migrateLiquidationFieldSettings } from "../core/settings.ts";
+import { liquidationFieldModelSettingsKey, migrateLiquidationFieldSettings } from "../core/settings.ts";
 import { LiquidationFieldWorkerClient } from "../worker/LiquidationFieldWorkerClient.ts";
 import { bootstrapBybitLiquidationField, type BybitLiquidationBootstrap } from "./bybitPublicData.ts";
 import { BybitLiquidationStream, type BybitLiquidationLiveState } from "./bybitLiquidationStream.ts";
@@ -73,8 +73,9 @@ export class BrowserLiquidationFieldFallback {
   }
 
   updateSettings(settings: LiquidationFieldSettings) {
+    const previousModelKey = liquidationFieldModelSettingsKey(this.settings);
     this.settings = migrateLiquidationFieldSettings(settings);
-    this.scheduleBuild(60);
+    if (previousModelKey !== liquidationFieldModelSettingsKey(this.settings)) this.scheduleBuild(60);
   }
 
   dispose() {

@@ -88,12 +88,15 @@ import { canonicalCvdService, normalizeCanonicalTrade } from "../modules/auction
 import { AuctionProfileWorkerClient } from "../modules/auction-profile/worker/AuctionProfileWorkerClient";
 import { resolveAuctionVisualizationLayers } from "../modules/auction-profile/rendering/visualization";
 import type { TradeTick } from "../market-data/types";
-import { migrateLiquidationFieldSettings } from "../modules/liquidation-field/core/settings";
+import { liquidationFieldModelSettingsKey, migrateLiquidationFieldSettings } from "../modules/liquidation-field/core/settings";
 import type { LiquidationFieldRuntimeStatus, LiquidationFieldSettings, LiquidationFieldSnapshot } from "../modules/liquidation-field/core/types";
 import { LiquidationFieldController, isBclifVisualFixtureEnabled } from "../modules/liquidation-field/data/LiquidationFieldController";
 import { LiquidationFieldSettingsPanel } from "../modules/liquidation-field/components/LiquidationFieldSettingsPanel";
 import { LiquidationFieldOverlays } from "../modules/liquidation-field/components/LiquidationFieldOverlays";
-import { createBclifVisualChartCandles } from "../modules/liquidation-field/testing/fixtures";
+import {
+  applyBclifVisualFixtureSettings,
+  createBclifVisualChartCandles
+} from "../modules/liquidation-field/testing/fixtures";
 
 function useDebouncedValue<T>(value: T, delayMs: number) {
   const [debounced, setDebounced] = useState(value);
@@ -398,6 +401,7 @@ export function PixiBlackChart({
     waveTrendOscillator: visibleIndicators.waveTrendOscillator
   });
   const aifActiveRef = useRef(visibleIndicators.aif);
+  const liquidationFieldActiveRef = useRef(visibleIndicators.liquidationHeatmap);
   const [oscillatorHostHeight, setOscillatorHostHeight] = useState(600);
   const [lastPrice, setLastPrice] = useState(66678.1);
   const [lastCandle, setLastCandle] = useState<Candle | null>(null);
@@ -423,21 +427,15 @@ export function PixiBlackChart({
   const kioseffCalculationVersion = kioseffCalculationSettingsHash(kioseffSettings);
   const normalizedAuctionProfileSettings = useMemo(() => migrateAuctionProfileSettings(auctionProfileSettings), [auctionProfileSettings]);
   const liquidationFieldSettings = useMemo(
-    () => migrateLiquidationFieldSettings(indicatorAdvancedSettings.liquidationField),
+    () => {
+      const migrated = migrateLiquidationFieldSettings(indicatorAdvancedSettings.liquidationField);
+      return isBclifVisualFixtureEnabled() ? applyBclifVisualFixtureSettings(migrated) : migrated;
+    },
     [indicatorAdvancedSettings.liquidationField]
   );
   const latestLiquidationFieldSettingsRef = useRef(liquidationFieldSettings);
   latestLiquidationFieldSettingsRef.current = liquidationFieldSettings;
-  const liquidationFieldCalculationKey = [
-    liquidationFieldSettings.horizon,
-    liquidationFieldSettings.customHours,
-    liquidationFieldSettings.venue,
-    liquidationFieldSettings.modelPreset,
-    liquidationFieldSettings.priceRows,
-    liquidationFieldSettings.timeColumns,
-    liquidationFieldSettings.leverageMinimum,
-    liquidationFieldSettings.leverageMaximum
-  ].join(":");
+  const liquidationFieldCalculationKey = liquidationFieldModelSettingsKey(liquidationFieldSettings);
   const latestAuctionProfileSettingsRef = useRef(normalizedAuctionProfileSettings);
   latestAuctionProfileSettingsRef.current = normalizedAuctionProfileSettings;
   const auctionDataRequired = resolveAuctionVisualizationLayers(
@@ -500,6 +498,7 @@ export function PixiBlackChart({
   const configuredAlertRuntimeRef = useRef(new Map<string, { lastFiredAt: number; fired: boolean }>());
   const alertToastTimerRef = useRef<number | undefined>(undefined);
   aifActiveRef.current = visibleIndicators.aif;
+  liquidationFieldActiveRef.current = visibleIndicators.liquidationHeatmap;
 
   const scopedChartAlerts = useMemo(() => {
     return alertDefinitions.filter((definition) =>
@@ -1107,7 +1106,7 @@ export function PixiBlackChart({
         onCandleChange?.(candle);
       },
       onPriceTransformChange: (transform) => {
-        if (aifActiveRef.current) setAifPriceTransform(transform);
+        if (aifActiveRef.current || liquidationFieldActiveRef.current) setAifPriceTransform(transform);
       },
       priceLineColor,
       priceLineIntensity
@@ -2036,13 +2035,13 @@ export function PixiBlackChart({
   ]);
 
   useEffect(() => {
-    if (!visibleIndicators.aif) {
+    if (!visibleIndicators.aif && !visibleIndicators.liquidationHeatmap) {
       setAifPriceTransform(null);
       return;
     }
     const engine = engineRef.current;
     if (engine) setAifPriceTransform(engine.getPriceTransformSnapshot());
-  }, [visibleIndicators.aif]);
+  }, [visibleIndicators.aif, visibleIndicators.liquidationHeatmap]);
 
   useEffect(() => {
     engineRef.current?.setPriceLineSettings(priceLineColor ?? "", priceLineIntensity ?? 75);
@@ -5448,6 +5447,8 @@ export function PixiBlackChart({
         snapshot={liquidationFieldSnapshot}
         settings={liquidationFieldSettings}
         status={liquidationFieldStatus}
+        currentPrice={lastPrice}
+        priceTransform={aifPriceTransform}
       />
 
 

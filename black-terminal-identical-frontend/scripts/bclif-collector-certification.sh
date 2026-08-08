@@ -39,6 +39,8 @@ required_test_files=(
   scripts/bclif-tile-codec-tests.ts
   scripts/bclif-no-lookahead-tests.ts
   scripts/bclif-collector-benchmarks.ts
+  scripts/bclif-operational-clarity-tests.ts
+  scripts/bclif-operational-performance.ts
   scripts/bclif-visual-regression.js
 )
 for test_file in "${required_test_files[@]}"; do
@@ -49,6 +51,7 @@ required_package_scripts=(
   test:bclif-api-security test:bclif-migration-contracts test:bclif-client-contracts
   test:bclif-collector test:bclif-orderbook test:bclif-recovery test:bclif-tile-codec
   test:bclif-no-lookahead test:bclif-collector-contracts benchmark:bclif-collector
+  test:bclif-operational-clarity benchmark:bclif-operational
   test:bclif-visual bclif:collector bclif:preflight bclif:build bclif:deploy bclif:status
   bclif:drain bclif:restart bclif:rollback bclif:certify bclif:soak
 )
@@ -69,6 +72,7 @@ run_gate frontend-typecheck npm run typecheck
 run_gate production-build npm run build
 run_gate collector-typecheck npx tsc --noEmit -p tsconfig.bclif-collector.json
 run_gate model-regression npm run test:liquidation-heatmap
+run_gate operational-clarity npm run test:bclif-operational-clarity
 run_gate api-security npm run test:bclif-api-security
 run_gate migration-contracts npm run test:bclif-migration-contracts
 run_gate client-contracts npm run test:bclif-client-contracts
@@ -78,6 +82,7 @@ run_gate checkpoint-recovery npm run test:bclif-recovery
 run_gate tile-codec npm run test:bclif-tile-codec
 run_gate chronological-no-lookahead npm run test:bclif-no-lookahead
 run_gate collector-benchmarks npm run benchmark:bclif-collector
+run_gate operational-benchmarks npm run benchmark:bclif-operational
 run_gate security-contracts npm run security:contracts
 run_gate migration-source-security npm run security:verify-migration-source
 

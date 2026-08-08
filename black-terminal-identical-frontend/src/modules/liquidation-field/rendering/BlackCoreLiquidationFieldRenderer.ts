@@ -1,12 +1,22 @@
 import { BufferImageSource, Container, Graphics, Sprite, Texture } from "pixi.js";
 import type { LiquidationFieldSettings, LiquidationFieldSnapshot } from "../core/types.ts";
-import { createThermalPalette, resolveLiquidationFieldRenderIntensity } from "./thermalPalette.ts";
+import { extractBclifOperationalClusters } from "../core/operationalClusters.ts";
+import {
+  bclifRenderSettingsHash,
+  buildBclifDisplayProjection,
+  type BclifDisplayProjection
+} from "./displayProjection.ts";
+import { createThermalPalette } from "./thermalPalette.ts";
 
 export interface LiquidationFieldRenderTransform {
   width: number;
   height: number;
   top: number;
   bottom: number;
+  priceMin: number;
+  priceMax: number;
+  currentPrice: number;
+  constrainedTouchRenderer: boolean;
   xForTimestampMs(timestampMs: number): number;
   yForPrice(price: number): number;
 }
@@ -28,24 +38,51 @@ export class BlackCoreLiquidationFieldRenderer {
   private source: BufferImageSource | null = null;
   private snapshot: LiquidationFieldSnapshot | null = null;
   private settings: LiquidationFieldSettings | null = null;
+  private stateKey = "";
   private textureKey = "";
   private rgba: Uint8Array | null = null;
+  private projection: BclifDisplayProjection | null = null;
+  private projectionWorker: Worker | null = null;
+  private projectionGeneration = 0;
+  private pendingProjectionKey = "";
 
-  constructor() {
+  constructor(private readonly onProjectionReady?: () => void) {
     this.container.addChild(this.clip, this.overlay);
     this.container.mask = this.clip;
+    if (typeof Worker !== "undefined") {
+      this.projectionWorker = new Worker(new URL("./displayProjectionWorker.ts", import.meta.url), {
+        type: "module",
+        name: "black-core-bclif-display-projection"
+      });
+      this.projectionWorker.onmessage = (event: MessageEvent<{
+        generation: number;
+        key: string;
+        projection: BclifDisplayProjection | null;
+      }>) => {
+        if (event.data.generation !== this.projectionGeneration || event.data.key !== this.pendingProjectionKey) return;
+        this.pendingProjectionKey = "";
+        this.textureKey = event.data.key;
+        this.projection = event.data.projection;
+        this.rebuildTexture();
+        this.onProjectionReady?.();
+      };
+    }
   }
 
   setState(snapshot: LiquidationFieldSnapshot | null, settings: LiquidationFieldSettings) {
+    const snapshotChanged = this.snapshot !== snapshot;
     this.snapshot = snapshot;
     this.settings = settings;
     const nextKey = snapshot
-      ? [snapshot.header.checksum, snapshot.authority, snapshot.header.sourceCutoffTimestamp, settings.viewMode, settings.palette, settings.opacity,
-          settings.gamma, settings.sharpness, settings.minimumConfidence, settings.sideFilter].join(":")
+      ? [snapshot.header.checksum, snapshot.authority, snapshot.header.sourceCutoffTimestamp, bclifRenderSettingsHash(settings)].join(":")
       : "empty";
-    if (nextKey === this.textureKey) return;
-    this.textureKey = nextKey;
-    this.rebuildTexture();
+    if (snapshotChanged || nextKey !== this.stateKey) {
+      this.stateKey = nextKey;
+      this.projection = null;
+      this.projectionGeneration += 1;
+      this.pendingProjectionKey = "";
+    }
+    if (!snapshot && this.sprite) this.sprite.visible = false;
   }
 
   draw(transform: LiquidationFieldRenderTransform) {
@@ -53,19 +90,77 @@ export class BlackCoreLiquidationFieldRenderer {
     this.overlay.clear();
     const snapshot = this.snapshot;
     const settings = this.settings;
+    if (!snapshot || !settings) return;
+
+    const projectionKey = [
+      this.stateKey,
+      Math.round(transform.priceMin / Math.max(snapshot.header.priceStep, 1e-8)),
+      Math.round(transform.priceMax / Math.max(snapshot.header.priceStep, 1e-8)),
+      Math.round(transform.width / 64),
+      Math.round((transform.bottom - transform.top) / 64),
+      Math.round(transform.currentPrice / Math.max(snapshot.header.priceStep, 1e-8)),
+      transform.constrainedTouchRenderer ? 1 : 0
+    ].join(":");
+    if (!this.projection || this.textureKey !== projectionKey) {
+      const context = {
+        chartPriceMinimum: transform.priceMin,
+        chartPriceMaximum: transform.priceMax,
+        currentPrice: transform.currentPrice,
+        plotWidth: transform.width,
+        plotHeight: transform.bottom - transform.top,
+        constrainedTouchRenderer: transform.constrainedTouchRenderer
+      };
+      if (this.projectionWorker) {
+        this.requestProjection(projectionKey, snapshot, settings, context);
+      } else {
+        this.textureKey = projectionKey;
+        this.projection = buildBclifDisplayProjection(snapshot, settings, context);
+        this.rebuildTexture();
+      }
+    }
+    const projection = this.projection;
     const sprite = this.sprite;
-    if (!snapshot || !settings || !sprite) return;
+    if (!projection || !sprite) return;
 
     const left = transform.xForTimestampMs(snapshot.header.startTime);
     const right = transform.xForTimestampMs(snapshot.header.endTime);
-    const top = transform.yForPrice(snapshot.header.maxPrice);
-    const bottom = transform.yForPrice(snapshot.header.minPrice);
+    const top = transform.yForPrice(projection.maxPrice);
+    const bottom = transform.yForPrice(projection.minPrice);
     sprite.x = Math.min(left, right);
     sprite.y = Math.min(top, bottom);
     sprite.width = Math.max(1, Math.abs(right - left));
     sprite.height = Math.max(1, Math.abs(bottom - top));
     sprite.alpha = Math.max(0, Math.min(1, settings.opacity / 100));
     sprite.visible = right >= 0 && left <= transform.width && bottom >= transform.top && top <= transform.bottom;
+
+    const focusPercent = settings.focusBand === "PERCENT_2" ? 2
+      : settings.focusBand === "PERCENT_5" ? 5
+        : settings.focusBand === "PERCENT_10" ? 10
+          : settings.focusBand === "CUSTOM" ? settings.customFocusBandPercent : 0;
+    if (focusPercent > 0) {
+      const focusTop = transform.yForPrice(transform.currentPrice * (1 + focusPercent / 100));
+      const focusBottom = transform.yForPrice(transform.currentPrice * (1 - focusPercent / 100));
+      this.overlay.rect(0, Math.min(focusTop, focusBottom), transform.width, Math.abs(focusBottom - focusTop))
+        .fill({ color: 0x8390a3, alpha: 0.018 })
+        .stroke({ color: 0xc6ccd5, alpha: 0.075, width: 1 });
+    }
+
+    if (settings.collectionStartMarkerVisible && projection.liveCalibrationStartTime !== null) {
+      const sourceStartX = transform.xForTimestampMs(projection.liveCalibrationStartTime);
+      if (sourceStartX >= 0 && sourceStartX <= transform.width) {
+        this.overlay.moveTo(sourceStartX, transform.top).lineTo(sourceStartX, transform.bottom)
+          .stroke({ color: 0xaab2be, alpha: 0.24, width: 1 });
+      }
+    }
+
+    if (settings.uncertaintyEnvelopesVisible) {
+      for (const cluster of extractBclifOperationalClusters(snapshot, transform.currentPrice, settings).slice(0, 12)) {
+        const yTop = transform.yForPrice(cluster.priceHigh);
+        const yBottom = transform.yForPrice(cluster.priceLow);
+        this.overlay.rect(0, Math.min(yTop, yBottom), transform.width, Math.abs(yBottom - yTop))
+          .stroke({ color: cluster.side === "LONG_LIQUIDATION" ? 0xb20b2a : 0xcbd1d9, alpha: 0.11, width: 1 });
+      }
+    }
 
     if (settings.confirmedMarkersVisible) {
       for (const event of snapshot.confirmedEvents) {
@@ -92,13 +187,14 @@ export class BlackCoreLiquidationFieldRenderer {
   }
 
   private rebuildTexture() {
-    const snapshot = this.snapshot;
+    const startedAt = typeof performance === "undefined" ? 0 : performance.now();
+    const projection = this.projection;
     const settings = this.settings;
-    if (!snapshot || !settings) {
+    if (!projection || !settings) {
       if (this.sprite) this.sprite.visible = false;
       return;
     }
-    const { columns, rows } = snapshot.header;
+    const { columns, rows } = projection;
     const required = columns * rows * 4;
     const rgba = this.rgba?.length === required ? this.rgba : new Uint8Array(required);
     this.rgba = rgba;
@@ -110,14 +206,11 @@ export class BlackCoreLiquidationFieldRenderer {
       for (let row = 0; row < rows; row++) {
         const sourceIndex = column * rows + row;
         const targetIndex = ((rows - 1 - row) * columns + column) * 4;
-        const valid = snapshot.validity[sourceIndex]! > 0;
-        const confidence = snapshot.confidence[sourceIndex]!;
-        const confidencePass = snapshot.certainty === "SYNTHETIC_TEST" || confidence >= settings.minimumConfidence * 2.55;
-        const resolved = resolveLiquidationFieldRenderIntensity(snapshot, settings, sourceIndex);
-        let intensity = resolved.intensity;
-        const selectedLut = resolved.palette === "BLACK_TERMINAL_BLOOD"
+        const valid = projection.validity[sourceIndex]! > 0;
+        const intensity = projection.intensity[sourceIndex]!;
+        const selectedLut = settings.viewMode === "LONG_EXPOSURE"
           ? longLut
-          : resolved.palette === "INSTITUTIONAL_MONOCHROME"
+          : settings.viewMode === "SHORT_EXPOSURE"
             ? shortLut
             : lut;
 
@@ -127,15 +220,14 @@ export class BlackCoreLiquidationFieldRenderer {
           rgba[targetIndex] = hatch;
           rgba[targetIndex + 1] = 4;
           rgba[targetIndex + 2] = 18;
-          rgba[targetIndex + 3] = 255;
+          rgba[targetIndex + 3] = 72;
           continue;
         }
-        if (!confidencePass) intensity = Math.min(intensity, 22);
         const lutIndex = Math.max(0, Math.min(255, intensity)) * 4;
         rgba[targetIndex] = selectedLut[lutIndex]!;
         rgba[targetIndex + 1] = selectedLut[lutIndex + 1]!;
         rgba[targetIndex + 2] = selectedLut[lutIndex + 2]!;
-        rgba[targetIndex + 3] = 255;
+        rgba[targetIndex + 3] = projection.alpha[sourceIndex]!;
       }
     }
 
@@ -152,29 +244,64 @@ export class BlackCoreLiquidationFieldRenderer {
       this.source.resource = rgba;
       this.source.update();
     }
+    if (typeof globalThis !== "undefined") {
+      const instrumentation = globalThis as typeof globalThis & {
+        __BCLIF_RENDER_METRICS__?: Record<string, unknown>;
+      };
+      instrumentation.__BCLIF_RENDER_METRICS__ = {
+        ...this.metrics(),
+        texturePreparationAndUpdateMs: typeof performance === "undefined"
+          ? null
+          : Number((performance.now() - startedAt).toFixed(3)),
+        recordedAt: Date.now()
+      };
+    }
+  }
+
+  private requestProjection(
+    key: string,
+    snapshot: LiquidationFieldSnapshot,
+    settings: LiquidationFieldSettings,
+    context: Parameters<typeof buildBclifDisplayProjection>[2]
+  ) {
+    if (!this.projectionWorker || this.pendingProjectionKey === key) return;
+    this.pendingProjectionKey = key;
+    const generation = ++this.projectionGeneration;
+    this.projectionWorker.postMessage({ generation, key, snapshot, settings, context });
   }
 
   metrics() {
     return {
       textures: this.texture ? 1 : 0,
-      cells: this.snapshot ? this.snapshot.header.columns * this.snapshot.header.rows : 0,
+      cells: this.projection ? this.projection.columns * this.projection.rows : 0,
       authority: this.snapshot?.authority ?? null,
       checksum: this.snapshot?.header.checksum ?? null,
-      bounds: this.snapshot ? {
+      bounds: this.projection && this.snapshot ? {
         startTime: this.snapshot.header.startTime,
         endTime: this.snapshot.header.endTime,
-        minPrice: this.snapshot.header.minPrice,
-        maxPrice: this.snapshot.header.maxPrice
-      } : null
+        minPrice: this.projection.minPrice,
+        maxPrice: this.projection.maxPrice
+      } : null,
+      displayPriceStep: this.projection?.priceStep ?? null,
+      displayTimeStepMs: this.projection?.timeStepMs ?? null,
+      modelHash: this.projection?.modelHash ?? null,
+      exposureHash: this.projection?.exposureHash ?? null,
+      renderSettingsHash: this.projection?.renderSettingsHash ?? null,
+      displayRasterHash: this.projection?.displayRasterHash ?? null,
+      yellowEligibleCells: this.projection?.yellowEligibleCells ?? 0
     };
   }
 
   dispose() {
+    this.projectionGeneration += 1;
+    this.projectionWorker?.terminate();
+    this.projectionWorker = null;
     this.texture?.destroy(true);
     this.texture = null;
     this.source = null;
     this.sprite = null;
     this.rgba = null;
+    this.projection = null;
     this.container.destroy({ children: true });
   }
 }

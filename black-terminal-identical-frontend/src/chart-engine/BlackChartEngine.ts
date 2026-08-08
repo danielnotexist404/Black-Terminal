@@ -42,6 +42,7 @@ import { resolveChartDeviceCapabilities } from "./deviceCapabilities";
 import type { LiquidationFieldSettings, LiquidationFieldSnapshot } from "../modules/liquidation-field/core/types";
 import { migrateLiquidationFieldSettings } from "../modules/liquidation-field/core/settings";
 import { BlackCoreLiquidationFieldRenderer } from "../modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer";
+import { resolveBclifDisplayDomain } from "../modules/liquidation-field/rendering/displayProjection";
 import { bclifTimestampMsToChartSeconds } from "../modules/liquidation-field/rendering/timeProjection";
 
 import {
@@ -151,9 +152,10 @@ export type IndicatorAlertSnapshot = {
 export class BlackChartEngine {
   private host: HTMLDivElement;
   private app = new Application();
+  private destroyed = false;
   private candles: CandleBuffer;
   private displayedCandles: Candle[] = [];
-  private liquidationFieldRenderer = new BlackCoreLiquidationFieldRenderer();
+  private liquidationFieldRenderer = new BlackCoreLiquidationFieldRenderer(() => this.queueDraw());
   private liquidationFieldSnapshot: LiquidationFieldSnapshot | null = null;
   private liquidationFieldSettings: LiquidationFieldSettings = migrateLiquidationFieldSettings();
   private kioseffRenderer = new KioseffPixiRenderer();
@@ -260,6 +262,7 @@ export class BlackChartEngine {
   private timeTexts: Text[] = [];
   private labelTexts: Text[] = [];
   private hudTexts: Text[] = [];
+  private axisTextPool: Text[] = [];
   private crosshairTexts: Text[] = [];
   private drawingTexts: Text[] = [];
   private profileTexts: Text[] = [];
@@ -882,6 +885,8 @@ export class BlackChartEngine {
   }
 
   destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
     if (this.mockTimer) window.clearInterval(this.mockTimer);
     this.host.removeEventListener("wheel", this.onWheel);
     this.host.removeEventListener("dblclick", this.onDoubleClick);
@@ -899,11 +904,27 @@ export class BlackChartEngine {
     this.clearAlertTexts();
     this.clearProfileTexts();
     this.clearHeatmapTexts();
+    this.clearTexts();
+    for (const text of this.axisTextPool) text.destroy();
+    this.axisTextPool = [];
+    this.rootLayer.removeChild(
+      this.kioseffRenderer.container,
+      this.liquidationFieldRenderer.container,
+      this.auctionProfileRenderer.container,
+      this.cvdFootprintRenderer.container
+    );
     this.kioseffRenderer.dispose();
     this.liquidationFieldRenderer.dispose();
     this.auctionProfileRenderer.dispose();
     this.cvdFootprintRenderer.dispose();
-    this.app.destroy(true, { children: true, texture: true });
+    // PIXI's canvas-text TexturePool is process-global. Passing boolean `true`
+    // as renderer options also releases that global pool, leaving still-active
+    // text keys from a neighbouring/remounting Application without a bucket.
+    // Remove only this canvas; module-owned textures were disposed above.
+    this.app.destroy(
+      { removeView: true, releaseGlobalResources: false },
+      { children: true, texture: false }
+    );
     blackCoreResourceTracker.clearGauge("pixi-container", this.resourceOwner);
     blackCoreResourceTracker.clearGauge("pixi-graphics", this.resourceOwner);
     blackCoreResourceTracker.clearGauge("pixi-text", this.resourceOwner);
@@ -983,14 +1004,16 @@ export class BlackChartEngine {
   };
 
   private queueDraw() {
-    if (this.drawRaf || document.visibilityState !== "visible") return;
+    if (this.destroyed || this.drawRaf || document.visibilityState !== "visible") return;
     this.drawRaf = window.requestAnimationFrame(() => {
       this.drawRaf = undefined;
+      if (this.destroyed) return;
       this.draw();
     });
   }
 
   private handleVisibilityChange = () => {
+    if (this.destroyed) return;
     if (document.visibilityState === "visible") {
       this.app.ticker.start();
       this.queueDraw();
@@ -1244,6 +1267,23 @@ export class BlackChartEngine {
       );
       min = indicatorDomain.minimum;
       max = indicatorDomain.maximum;
+    }
+
+    if (
+      this.visibleIndicators.liquidationHeatmap
+      && this.liquidationFieldSnapshot
+      && this.liquidationFieldSettings.priceDisplay !== "CHART_SCALE"
+      && last
+    ) {
+      const displayDomain = resolveBclifDisplayDomain(this.liquidationFieldSnapshot, this.liquidationFieldSettings, {
+        chartPriceMinimum: min,
+        chartPriceMaximum: max,
+        currentPrice: last.close
+      });
+      if (displayDomain) {
+        min = displayDomain.minimum;
+        max = displayDomain.maximum;
+      }
     }
 
     const pad = (max - min) * 0.035 || 100;
@@ -1526,6 +1566,7 @@ export class BlackChartEngine {
   }
 
   private draw() {
+    if (this.destroyed) return;
     this.calculateView();
     this.drawGrid();
     this.drawWatermark();
@@ -1593,6 +1634,10 @@ export class BlackChartEngine {
       height: plotHeight,
       top: this.view.topPadding,
       bottom: plotHeight,
+      priceMin: this.view.priceMin,
+      priceMax: this.view.priceMax,
+      currentPrice: this.getDisplayCandles().at(-1)?.close ?? (this.view.priceMin + this.view.priceMax) / 2,
+      constrainedTouchRenderer: this.constrainedTouchRenderer,
       xForTimestampMs: (timestampMs) => this.xForTimestamp(bclifTimestampMsToChartSeconds(timestampMs)),
       yForPrice: (price) => this.yForPrice(price)
     });
@@ -3457,20 +3502,28 @@ export class BlackChartEngine {
     const defaultWick = bullish ? (referencePalette ? 0x7ff7ee : theme.silverBright) : (referencePalette ? 0xff4b83 : theme.redBright);
     const color = override?.color ?? defaultColor;
     const wick = override?.wick ?? defaultWick;
-    const alpha = override?.alpha ?? 0.98;
+    const bclifActive = this.visibleIndicators.liquidationHeatmap;
+    const alpha = bclifActive ? Math.max(0.95, override?.alpha ?? 0.98) : override?.alpha ?? 0.98;
     const bodyTop = Math.min(openY, closeY);
     const bodyHeight = Math.max(1, Math.abs(openY - closeY));
 
     if (this.view.candleWidth < 1.2) {
       const wickWidth = Math.max(0.35, Math.min(0.85, this.view.candleWidth * 1.7));
       const bodyWidth = Math.max(0.55, Math.min(1.15, this.view.candleWidth * 2.6));
-      g.moveTo(x, highY).lineTo(x, lowY).stroke({ width: wickWidth, color: wick, alpha: 0.54 });
-      g.moveTo(x, openY).lineTo(x, closeY).stroke({ width: bodyWidth, color, alpha: alpha * 0.92 });
+      g.moveTo(x, highY).lineTo(x, lowY).stroke({ width: wickWidth, color: wick, alpha: bclifActive ? 0.95 : 0.54 });
+      g.moveTo(x, openY).lineTo(x, closeY).stroke({ width: bodyWidth, color, alpha: bclifActive ? alpha : alpha * 0.92 });
       return;
     }
 
     const bodyWidth = Math.max(1, this.view.candleWidth);
-    g.moveTo(x, highY).lineTo(x, lowY).stroke({ width: 1.15, color: wick, alpha: 0.95 });
+    const contrast = this.visibleIndicators.liquidationHeatmap ? this.liquidationFieldSettings.candleContrast : "STANDARD";
+    const haloWidth = contrast === "MAXIMUM" ? 3.15 : contrast === "HIGH" ? 2.35 : 0;
+    if (haloWidth > 0) {
+      g.moveTo(x, highY).lineTo(x, lowY).stroke({ width: haloWidth, color: 0x000000, alpha: 0.78 });
+      g.rect(x - bodyWidth / 2 - 0.7, bodyTop - 0.7, bodyWidth + 1.4, bodyHeight + 1.4)
+        .fill({ color: 0x000000, alpha: contrast === "MAXIMUM" ? 0.88 : 0.68 });
+    }
+    g.moveTo(x, highY).lineTo(x, lowY).stroke({ width: contrast === "MAXIMUM" ? 1.45 : 1.15, color: wick, alpha: 0.98 });
     g.rect(x - bodyWidth / 2, bodyTop, bodyWidth, bodyHeight).fill({ color, alpha });
   }
 
@@ -3792,7 +3845,9 @@ export class BlackChartEngine {
 
   private clearTexts() {
     for (const t of [...this.priceTexts, ...this.timeTexts, ...this.labelTexts, ...this.hudTexts]) {
-      t.destroy();
+      t.removeFromParent();
+      t.visible = false;
+      this.axisTextPool.push(t);
     }
     this.priceTexts = [];
     this.timeTexts = [];
@@ -3810,17 +3865,15 @@ export class BlackChartEngine {
     weight: "400" | "500" | "600" | "700" = "400",
     family = "IBM Plex Mono"
   ) {
-    const t = new Text({
-      text,
-      style: {
-        fontFamily: family,
-        fontSize: size,
-        fill: color,
-        fontWeight: weight
-      }
-    });
+    const t = this.axisTextPool.pop() ?? new Text({ text: "", style: {} });
+    t.text = text;
+    t.style.fontFamily = family;
+    t.style.fontSize = size;
+    t.style.fill = color;
+    t.style.fontWeight = weight;
     t.x = x;
     t.y = y;
+    t.visible = true;
     target.push(t);
     this.axisLayer.addChild(t);
     return t;

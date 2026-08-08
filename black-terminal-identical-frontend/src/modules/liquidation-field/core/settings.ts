@@ -1,11 +1,11 @@
-import type { LiquidationFieldHorizon, LiquidationFieldSettings } from "./types.ts";
+import type { BclifPresentationPreset, LiquidationFieldHorizon, LiquidationFieldSettings } from "./types.ts";
 
-export const LIQUIDATION_FIELD_SETTINGS_VERSION = 1 as const;
+export const LIQUIDATION_FIELD_SETTINGS_VERSION = 2 as const;
 export const BCLIF_MAX_REQUEST_HOURS = 90 * 24;
 
 export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   schemaVersion: LIQUIDATION_FIELD_SETTINGS_VERSION,
-  preset: "EVENT_HORIZON_3W",
+  preset: "TRADE_FOCUS",
   viewMode: "COMBINED_THERMAL",
   horizon: "3W",
   customHours: 72,
@@ -13,10 +13,10 @@ export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   modelPreset: "REGIME_ADAPTIVE",
   scale: "CONFIDENCE_WEIGHTED_LOG",
   palette: "REFERENCE_THERMAL",
-  opacity: 82,
-  gamma: 0.8,
-  lowQuantile: 0.05,
-  highQuantile: 0.995,
+  opacity: 45,
+  gamma: 1.55,
+  lowQuantile: 0.5,
+  highQuantile: 0.998,
   smoothing: "BALANCED",
   priceSigmaRows: 1.15,
   timeSigmaColumns: 0.55,
@@ -26,7 +26,7 @@ export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   diagnosticsVisible: true,
   confirmedMarkersVisible: false,
   cascadePathsVisible: false,
-  minimumConfidence: 40,
+  minimumConfidence: 60,
   minimumNotionalUsd: 0,
   sideFilter: "BOTH",
   leverageMinimum: 2,
@@ -34,7 +34,27 @@ export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   priceRows: 384,
   timeColumns: 512,
   liveUpdateCadenceMs: 2_000,
-  visualFixture: false
+  visualFixture: false,
+  priceDisplay: "CHART_SCALE",
+  customPriceMinimum: 50_000,
+  customPriceMaximum: 80_000,
+  autoFocusMarginPercent: 3,
+  visualChannel: "COMBINED",
+  thermalNormalization: "HYBRID",
+  confidenceWeightEnabled: true,
+  backgroundFloor: 7,
+  yellowTailPercent: 0.3,
+  historicalContextOpacity: 24,
+  liveCalibratedOpacity: 88,
+  requireMultipleEvidenceChannels: true,
+  uncertaintyEnvelopesVisible: false,
+  adaptiveResolution: "AUTO",
+  focusBand: "PERCENT_5",
+  customFocusBandPercent: 5,
+  candleContrast: "HIGH",
+  maximumClusterLabels: 4,
+  operationalSummaryVisible: true,
+  collectionStartMarkerVisible: true
 };
 
 const horizons = new Set<LiquidationFieldHorizon>(["6H", "12H", "1D", "3D", "1W", "3W", "1M", "CUSTOM"]);
@@ -45,7 +65,11 @@ function clamp(value: unknown, fallback: number, minimum: number, maximum: numbe
 }
 
 export function migrateLiquidationFieldSettings(value?: Partial<LiquidationFieldSettings> | null): LiquidationFieldSettings {
-  const merged = { ...DEFAULT_LIQUIDATION_FIELD_SETTINGS, ...(value ?? {}) } as LiquidationFieldSettings;
+  const legacy = value as (Partial<LiquidationFieldSettings> & { preset?: string }) | null | undefined;
+  const merged = { ...DEFAULT_LIQUIDATION_FIELD_SETTINGS, ...(legacy ?? {}) } as LiquidationFieldSettings;
+  if ((value as { preset?: string } | null | undefined)?.preset === "EVENT_HORIZON_3W") merged.preset = "TRADE_FOCUS";
+  const customMinimum = clamp(merged.customPriceMinimum, 50_000, 1e-8, 10_000_000);
+  const customMaximum = Math.max(customMinimum + 1e-8, clamp(merged.customPriceMaximum, 80_000, 1e-8, 10_000_000));
   return {
     ...merged,
     schemaVersion: LIQUIDATION_FIELD_SETTINGS_VERSION,
@@ -54,17 +78,17 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     // Keep persisted settings inside that contract instead of allowing a value
     // that can only produce a permanent HTTP 400 response.
     customHours: clamp(merged.customHours, 72, 1, BCLIF_MAX_REQUEST_HOURS),
-    opacity: clamp(merged.opacity, 82, 0, 100),
-    gamma: clamp(merged.gamma, 0.8, 0.35, 2.5),
-    lowQuantile: clamp(merged.lowQuantile, 0.05, 0, 0.5),
+    opacity: clamp(merged.opacity, 45, 10, 100),
+    gamma: clamp(merged.gamma, 1.55, 0.35, 2.5),
+    lowQuantile: clamp(merged.lowQuantile, 0.5, 0, 0.95),
     highQuantile: Math.max(
-      clamp(merged.lowQuantile, 0.05, 0, 0.5) + 0.05,
-      clamp(merged.highQuantile, 0.995, 0.5, 1)
+      clamp(merged.lowQuantile, 0.5, 0, 0.95) + 0.001,
+      clamp(merged.highQuantile, 0.998, 0.5, 1)
     ),
     priceSigmaRows: clamp(merged.priceSigmaRows, 1.15, 0, 4),
     timeSigmaColumns: clamp(merged.timeSigmaColumns, 0.55, 0, 3),
     sharpness: clamp(merged.sharpness, 58, 0, 100),
-    minimumConfidence: clamp(merged.minimumConfidence, 40, 0, 100),
+    minimumConfidence: clamp(merged.minimumConfidence, 60, 0, 100),
     minimumNotionalUsd: clamp(merged.minimumNotionalUsd, 0, 0, 100_000_000_000),
     leverageMinimum: clamp(merged.leverageMinimum, 2, 1, 125),
     leverageMaximum: Math.max(
@@ -73,8 +97,63 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     ),
     priceRows: Math.round(clamp(merged.priceRows, 384, 128, 1024)),
     timeColumns: Math.round(clamp(merged.timeColumns, 512, 128, 1024)),
-    liveUpdateCadenceMs: Math.round(clamp(merged.liveUpdateCadenceMs, 2_000, 500, 15_000))
+    liveUpdateCadenceMs: Math.round(clamp(merged.liveUpdateCadenceMs, 2_000, 500, 15_000)),
+    customPriceMinimum: customMinimum,
+    customPriceMaximum: customMaximum,
+    autoFocusMarginPercent: clamp(merged.autoFocusMarginPercent, 3, 0, 25),
+    backgroundFloor: Math.round(clamp(merged.backgroundFloor, 7, 0, 32)),
+    yellowTailPercent: clamp(merged.yellowTailPercent, 0.3, 0.1, 0.5),
+    historicalContextOpacity: clamp(merged.historicalContextOpacity, 24, 0, 100),
+    liveCalibratedOpacity: clamp(merged.liveCalibratedOpacity, 88, 0, 100),
+    customFocusBandPercent: clamp(merged.customFocusBandPercent, 5, 0.25, 50),
+    maximumClusterLabels: Math.round(clamp(merged.maximumClusterLabels, 4, 0, 6))
   };
+}
+
+export function applyBclifPresentationPreset(
+  source: LiquidationFieldSettings,
+  preset: Exclude<BclifPresentationPreset, "CUSTOM">
+): LiquidationFieldSettings {
+  const common = { ...source, preset };
+  if (preset === "TRADE_FOCUS") return migrateLiquidationFieldSettings({
+    ...common, priceDisplay: "CHART_SCALE", minimumConfidence: 60, palette: "REFERENCE_THERMAL",
+    thermalNormalization: "HYBRID", opacity: 45, gamma: 1.55, lowQuantile: 0.5, highQuantile: 0.998,
+    visualChannel: "COMBINED", historicalContextOpacity: 24, liveCalibratedOpacity: 88,
+    requireMultipleEvidenceChannels: true, diagnosticsVisible: false, maximumClusterLabels: 4,
+    operationalSummaryVisible: true, candleContrast: "HIGH"
+  });
+  if (preset === "HIGH_CONFIDENCE") return migrateLiquidationFieldSettings({
+    ...common, priceDisplay: "CHART_SCALE", minimumConfidence: 75, opacity: 52, gamma: 1.65,
+    visualChannel: "COMBINED", historicalContextOpacity: 8, liveCalibratedOpacity: 95,
+    requireMultipleEvidenceChannels: true, maximumClusterLabels: 6, operationalSummaryVisible: true,
+    diagnosticsVisible: false, candleContrast: "MAXIMUM"
+  });
+  if (preset === "LIVE_CALIBRATED") return migrateLiquidationFieldSettings({
+    ...common, priceDisplay: "CHART_SCALE", minimumConfidence: 60, opacity: 58,
+    visualChannel: "LIVE_CALIBRATED", historicalContextOpacity: 14, liveCalibratedOpacity: 100,
+    requireMultipleEvidenceChannels: true, collectionStartMarkerVisible: true, maximumClusterLabels: 4
+  });
+  if (preset === "FULL_SPECTRUM_RESEARCH") return migrateLiquidationFieldSettings({
+    ...common, priceDisplay: "FULL_MODEL_RANGE", minimumConfidence: 0, opacity: 75,
+    visualChannel: "COMBINED", historicalContextOpacity: 58, liveCalibratedOpacity: 92,
+    requireMultipleEvidenceChannels: false, diagnosticsVisible: true, maximumClusterLabels: 4,
+    candleContrast: "HIGH"
+  });
+  return migrateLiquidationFieldSettings({
+    ...common, priceDisplay: "FULL_MODEL_RANGE", minimumConfidence: 0, opacity: 72,
+    thermalNormalization: "GLOBAL_MODEL", visualChannel: "COMBINED", historicalContextOpacity: 100,
+    liveCalibratedOpacity: 100, confidenceWeightEnabled: false, requireMultipleEvidenceChannels: false,
+    maximumClusterLabels: 0, operationalSummaryVisible: false, diagnosticsVisible: true
+  });
+}
+
+export function liquidationFieldModelSettingsKey(settings: LiquidationFieldSettings) {
+  return [
+    settings.horizon, settings.customHours, settings.venue, settings.modelPreset, settings.scale,
+    settings.smoothing, settings.priceSigmaRows, settings.timeSigmaColumns, settings.sideFilter,
+    settings.minimumNotionalUsd, settings.leverageMinimum, settings.leverageMaximum,
+    settings.priceRows, settings.timeColumns
+  ].join(":");
 }
 
 export function liquidationHorizonMs(settings: Pick<LiquidationFieldSettings, "horizon" | "customHours">) {

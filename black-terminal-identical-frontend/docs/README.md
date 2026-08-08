@@ -174,3 +174,11 @@ The critical chart-coordinate and automatic 20,000-bar initialization contract i
 - `liquidation/BCLIF_VISUAL_CERTIFICATION.md` - repository-owned Playwright evidence.
 - `liquidation/BCLIF_DEPLOYMENT_RUNBOOK.md` - separate analytics-node rollout.
 - `liquidation/BCLIF_CHAPTER_IIIC_COMPLETION_REPORT.md` - exact certification evidence and remaining boundary.
+
+# BCLIF Operational Clarity
+
+- `liquidation/BCLIF_OPERATIONAL_CLARITY.md` and `liquidation/BCLIF_MODEL_VS_DISPLAY_DOMAIN.md` - chart-scale separation and operational modes.
+- `liquidation/BCLIF_SOURCE_AWARE_RENDERING.md` and `liquidation/BCLIF_CONFIDENCE_GATED_VISUALS.md` - evidence composition, truth-weighted authority, and rare-yellow rules.
+- `liquidation/BCLIF_ADAPTIVE_RESOLUTION.md` and `liquidation/BCLIF_OPERATIONAL_CLUSTER_EXTRACTION.md` - display LOD and actionable shelf ranking.
+- `liquidation/BCLIF_VISUAL_CERTIFICATION_V2.md` - the 21-case repository-owned Playwright certification matrix.
+- `liquidation/BCLIF_CHAPTER_IIIC2_COMPLETION_REPORT.md` - Chapter III-C2 implementation evidence and preserved State A boundary.

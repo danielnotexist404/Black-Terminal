@@ -43,10 +43,36 @@ export type LiquidationFieldModelPreset =
   | "REGIME_ADAPTIVE"
   | "CUSTOM";
 export type LiquidationFieldSmoothing = "SHARP" | "BALANCED" | "SMOOTH" | "CUSTOM";
+export type BclifPresentationPreset =
+  | "TRADE_FOCUS"
+  | "HIGH_CONFIDENCE"
+  | "LIVE_CALIBRATED"
+  | "FULL_SPECTRUM_RESEARCH"
+  | "RAW_MODEL"
+  | "CUSTOM";
+export type BclifPriceDisplay =
+  | "CHART_SCALE"
+  | "CURRENT_PRICE_5"
+  | "CURRENT_PRICE_10"
+  | "CURRENT_PRICE_20"
+  | "CURRENT_PRICE_40"
+  | "AUTO_FOCUS"
+  | "FULL_MODEL_RANGE"
+  | "CUSTOM";
+export type BclifVisualChannel = "HISTORICAL_CONTEXT" | "LIVE_CALIBRATED" | "COMBINED";
+export type BclifThermalNormalization =
+  | "GLOBAL_MODEL"
+  | "VISIBLE_FOCUS"
+  | "HYBRID"
+  | "FIXED_ABSOLUTE"
+  | "OI_RELATIVE"
+  | "CONFIDENCE_WEIGHTED";
+export type BclifAdaptiveResolution = "AUTO" | "HIGH" | "BALANCED" | "LOW_PERFORMANCE";
+export type BclifFocusBand = "OFF" | "PERCENT_2" | "PERCENT_5" | "PERCENT_10" | "CUSTOM";
 
 export interface LiquidationFieldSettings {
-  schemaVersion: 1;
-  preset: "EVENT_HORIZON_3W" | "CUSTOM";
+  schemaVersion: 2;
+  preset: BclifPresentationPreset;
   viewMode: LiquidationFieldViewMode;
   horizon: LiquidationFieldHorizon;
   customHours: number;
@@ -76,6 +102,63 @@ export interface LiquidationFieldSettings {
   timeColumns: number;
   liveUpdateCadenceMs: number;
   visualFixture: boolean;
+  priceDisplay: BclifPriceDisplay;
+  customPriceMinimum: number;
+  customPriceMaximum: number;
+  autoFocusMarginPercent: number;
+  visualChannel: BclifVisualChannel;
+  thermalNormalization: BclifThermalNormalization;
+  confidenceWeightEnabled: boolean;
+  backgroundFloor: number;
+  yellowTailPercent: number;
+  historicalContextOpacity: number;
+  liveCalibratedOpacity: number;
+  requireMultipleEvidenceChannels: boolean;
+  uncertaintyEnvelopesVisible: boolean;
+  adaptiveResolution: BclifAdaptiveResolution;
+  focusBand: BclifFocusBand;
+  customFocusBandPercent: number;
+  candleContrast: "STANDARD" | "HIGH" | "MAXIMUM";
+  maximumClusterLabels: number;
+  operationalSummaryVisible: boolean;
+  collectionStartMarkerVisible: boolean;
+}
+
+export interface BclifEvidenceComposition {
+  openInterest: number;
+  trades: number;
+  confirmedLiquidations: number;
+  orderBook: number;
+  funding: number;
+  markPrice: number;
+  positioning: number;
+}
+
+export type BclifEvidenceClass =
+  | "OI_ONLY"
+  | "OI_PLUS_PRICE"
+  | "OI_PLUS_TRADES"
+  | "OI_PLUS_TRADES_PLUS_LIQUIDATIONS"
+  | "OI_PLUS_TRADES_PLUS_BOOK"
+  | "FULL_CONTEXT";
+
+export interface BclifOperationalCluster {
+  id: string;
+  side: "LONG_LIQUIDATION" | "SHORT_LIQUIDATION";
+  priceLow: number;
+  priceHigh: number;
+  peakPrice: number;
+  distanceFromMarkBps: number;
+  estimatedExposureLow: number;
+  estimatedExposureHigh: number;
+  confidence: number;
+  persistence: number;
+  survivalProbability: number;
+  evidenceComposition: BclifEvidenceComposition;
+  observedLiquidationNotionalNearby: number;
+  state: "FORMING" | "ACTIVE" | "STRENGTHENING" | "DECAYING" | "TRIGGERED" | "ABSORBED" | "EXHAUSTED";
+  prominence: number;
+  rankScore: number;
 }
 
 export interface DepthCurvePoint {

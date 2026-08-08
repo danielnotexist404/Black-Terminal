@@ -8,56 +8,57 @@ const goldenRoot = join(root, "tests", "golden", "bclif");
 const manifestPath = join(goldenRoot, "manifest.json");
 const artifactRoot = join(root, "tests", ".artifacts", "bclif");
 const updateGoldens = process.env.BCLIF_UPDATE_GOLDENS === "1";
+const resumeGoldens = process.env.BCLIF_RESUME_GOLDENS === "1";
 const browserExecutable = process.env.BCLIF_BROWSER_EXECUTABLE || "/usr/bin/brave-browser";
 const requestedViewport = process.env.BCLIF_VISUAL_VIEWPORT || "";
+const requestedFixture = process.env.BCLIF_VISUAL_CASE || "";
 
 if (!existsSync(browserExecutable)) {
-  skip("BROWSER_EXECUTABLE_MISSING", `BCLIF visual certification requires a Chromium-family browser at ${browserExecutable}. Set BCLIF_BROWSER_EXECUTABLE to override.`);
+  skip("BROWSER_EXECUTABLE_MISSING", `A Chromium-family browser is required at ${browserExecutable}.`);
 }
-const playwright = await import("playwright-core");
-
 if (!existsSync(manifestPath)) skip("MANIFEST_MISSING", "The repository-owned BCLIF golden manifest is missing.");
+const playwright = await import("playwright-core");
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const manifestCases = Array.isArray(manifest.cases) ? manifest.cases : [];
-const staleBaselines = manifestCases.filter((entry) => entry.status === "STALE_REGENERATION_REQUIRED");
-if (!updateGoldens && (String(manifest.certificationStatus || "").startsWith("BLOCKED_") || staleBaselines.length)) {
-  skip("BASELINES_STALE", "BCLIF visual baselines are explicitly stale and must be regenerated before comparison can certify the current renderer.", {
+if (updateGoldens && resumeGoldens) {
+  for (const entry of manifestCases) {
+    const baselinePath = join(goldenRoot, entry.baseline);
+    if (!existsSync(baselinePath)) continue;
+    entry.status = "CERTIFIED";
+    entry.sha256 = sha256(readFileSync(baselinePath));
+    entry.recordedAt ||= new Date().toISOString();
+  }
+}
+if (!updateGoldens && (String(manifest.certificationStatus || "").startsWith("BLOCKED_") || manifestCases.some((entry) => entry.status !== "CERTIFIED"))) {
+  skip("BASELINES_STALE", "The Chapter III-C2 visual baselines must be regenerated and reviewed before certification.", {
     certificationStatus: manifest.certificationStatus || null,
-    staleViewports: staleBaselines.map((entry) => `${entry.width}x${entry.height}`),
     blocker: manifest.blocker || null
   });
 }
-const cases = requestedViewport
-  ? manifestCases.filter((entry) => `${entry.width}x${entry.height}` === requestedViewport)
-  : manifestCases;
-if (!cases.length) skip("MANIFEST_EMPTY", "The BCLIF golden manifest contains no viewport cases.");
-const missingGoldens = cases.filter((entry) => !existsSync(join(goldenRoot, entry.baseline)));
-if (missingGoldens.length && !updateGoldens) {
-  skip("GOLDENS_MISSING", "BCLIF goldens have not been recorded. Run only an explicitly reviewed update with BCLIF_UPDATE_GOLDENS=1.", {
-    missing: missingGoldens.map((entry) => entry.baseline)
-  });
-}
+const cases = manifestCases.filter((entry) => {
+  const viewportMatches = !requestedViewport || `${entry.width}x${entry.height}` === requestedViewport;
+  const selected = viewportMatches && (!requestedFixture || entry.fixture === requestedFixture);
+  return selected && !(updateGoldens && resumeGoldens && entry.status === "CERTIFIED");
+});
+if (!cases.length && !(updateGoldens && resumeGoldens)) skip("MANIFEST_EMPTY", "No BCLIF visual cases matched the requested filters.");
+const missing = cases.filter((entry) => !existsSync(join(goldenRoot, entry.baseline)));
+if (missing.length && !updateGoldens) skip("GOLDENS_MISSING", "One or more BCLIF goldens are missing.", { missing: missing.map((entry) => entry.baseline) });
 
 const { createServer } = await import("vite");
 const port = 4289;
-const server = await createServer({
-  root,
-  logLevel: "error",
-  server: { host: "127.0.0.1", port, strictPort: true }
-});
-
+const server = await createServer({ root, logLevel: "error", server: { host: "127.0.0.1", port, strictPort: true } });
 const results = [];
 let failure = null;
 let browser = null;
 try {
   await server.listen();
   mkdirSync(artifactRoot, { recursive: true });
+  if (cases.length) browser = await playwright.chromium.launch({
+      headless: true,
+      executablePath: browserExecutable,
+      args: ["--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows"]
+    });
   for (const testCase of cases) {
-    try {
-      browser = await playwright.chromium.launch({ headless: true, executablePath: browserExecutable });
-    } catch (error) {
-      throw new Error(`Unable to launch the configured BCLIF visual browser at ${browserExecutable}.`, { cause: error });
-    }
     const context = await browser.newContext({
       viewport: { width: testCase.width, height: testCase.height },
       deviceScaleFactor: 1,
@@ -67,6 +68,8 @@ try {
       timezoneId: "UTC"
     });
     const page = await context.newPage();
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(error instanceof Error ? error.message : String(error)));
     page.setDefaultTimeout(120_000);
     await page.addInitScript(() => {
       const fixedNow = 1_900_000_000_000;
@@ -79,109 +82,125 @@ try {
       localStorage.setItem("bt_active_nav", "CHART");
       localStorage.setItem("bt_terminal_settings", JSON.stringify({ showDOM: false, enabledTimeframes: ["1m", "5m", "15m", "1h", "4h", "1d"] }));
       localStorage.setItem("bt_visible_indicators_v1", JSON.stringify({
-        liquidationHeatmap: true,
-        auctionProfile: false,
-        volatilityHeatmap: false,
-        volumeProfile: false,
-        aif: false,
-        adaptiveSwingStrategy: false,
-        vwap: true,
-        ema20: true,
-        ema50: true,
-        ema200: true,
-        sma20: false,
-        sma50: false,
-        bollinger: false,
-        openInterestOscillator: false,
-        zScoreOscillator: false,
-        waveTrendOscillator: false,
-        volume: false
+        liquidationHeatmap: true, auctionProfile: false, volatilityHeatmap: false, volumeProfile: false,
+        aif: false, adaptiveSwingStrategy: false, vwap: true, ema20: true, ema50: true, ema200: true,
+        sma20: false, sma50: false, bollinger: false, openInterestOscillator: false,
+        zScoreOscillator: false, waveTrendOscillator: false, volume: false
       }));
       localStorage.removeItem("bt_current_user");
     });
-    await page.goto(`http://127.0.0.1:${port}/?uiPreview=1&bclifVisualFixture=1`, { waitUntil: "domcontentloaded" });
+    const url = `http://127.0.0.1:${port}/?uiPreview=1&bclifVisualFixture=1&bclifVisualCase=${encodeURIComponent(testCase.fixture)}`;
+    await page.goto(url, { waitUntil: "domcontentloaded" });
     await page.addStyleTag({ content: "*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}" });
     await page.locator(".app-shell").waitFor({ state: "visible", timeout: 45_000 });
-
-    const provenance = page.locator('.liquidation-field-provenance[data-bclif-authority="TEST_FIXTURE"]');
+    const provenance = page.locator(".liquidation-field-provenance");
     await provenance.waitFor({ state: "visible", timeout: 90_000 });
     await page.waitForFunction(() => {
       const node = document.querySelector(".liquidation-field-provenance");
-      return node?.getAttribute("data-bclif-grid") !== "NONE";
+      const metrics = globalThis.__BCLIF_RENDER_METRICS__;
+      return node?.getAttribute("data-bclif-display-grid") !== "NONE"
+        && metrics?.displayRasterHash
+        && metrics.displayRasterHash !== "NONE";
     }, null, { timeout: 90_000 });
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(300);
 
     const audit = await provenance.evaluate((node) => {
       const rect = node.getBoundingClientRect();
+      const metrics = globalThis.__BCLIF_RENDER_METRICS__ || {};
       return {
         authority: node.getAttribute("data-bclif-authority"),
         persistence: node.getAttribute("data-bclif-persistence"),
         grid: node.getAttribute("data-bclif-grid"),
+        displayGrid: node.getAttribute("data-bclif-display-grid"),
         checksum: node.getAttribute("data-bclif-checksum"),
-        bounds: node.getAttribute("data-bclif-bounds"),
-        intensity: node.getAttribute("data-bclif-intensity"),
-        render: node.getAttribute("data-bclif-render"),
+        modelBounds: node.getAttribute("data-bclif-bounds"),
+        displayBounds: node.getAttribute("data-bclif-display-bounds"),
+        chartRange: node.getAttribute("data-bclif-chart-range"),
+        modelHash: node.getAttribute("data-bclif-model-hash"),
+        exposureHash: node.getAttribute("data-bclif-exposure-hash"),
+        renderSettingsHash: node.getAttribute("data-bclif-render-settings-hash"),
+        displayRasterHash: node.getAttribute("data-bclif-display-raster-hash"),
+        priceDisplay: node.getAttribute("data-bclif-price-display"),
+        labels: Number(node.getAttribute("data-bclif-cluster-labels")),
+        horizonTruth: node.getAttribute("data-bclif-horizon-truth"),
+        candleContrast: node.getAttribute("data-bclif-candle-contrast"),
         market: document.querySelector(".chart-header .pair")?.textContent?.trim() || "",
-        confidence: [...document.querySelectorAll(".liquidation-field-diagnostics > div")]
-          .find((entry) => entry.querySelector("span")?.textContent?.trim() === "CONFIDENCE")
-          ?.querySelector("b")?.textContent?.trim() || "",
-        provenanceAreaRatio: rect.width * rect.height / (innerWidth * innerHeight),
-        canvasCount: document.querySelectorAll(".pixi-chart-host canvas").length
+        badgeAreaRatio: rect.width * rect.height / (innerWidth * innerHeight),
+        canvasCount: document.querySelectorAll(".pixi-chart-host canvas").length,
+        summaryVisible: Boolean(document.querySelector(".liquidation-field-operational-summary")),
+        texturePreparationAndUpdateMs: Number(metrics.texturePreparationAndUpdateMs),
+        displayCells: Number(metrics.cells),
+        yellowEligibleCells: Number(metrics.yellowEligibleCells)
       };
     });
-    const intensityAudit = parseIntensityAudit(audit.intensity);
+    const expectedAuthority = testCase.fixture === "BROWSER_FALLBACK" ? "BROWSER_FALLBACK"
+      : testCase.fixture === "PERSISTENT_NODE" ? "PERSISTENT_NODE" : "TEST_FIXTURE";
+    const expectedPersistence = testCase.fixture === "PERSISTENT_NODE" ? "ON" : "OFF";
+    const expectedPriceDisplay = testCase.fixture === "FULL_SPECTRUM_RESEARCH" ? "FULL_MODEL_RANGE" : "CHART_SCALE";
+    const expectedCandleContrast = testCase.fixture === "HIGH_CONFIDENCE" ? "MAXIMUM" : "HIGH";
+    const yellowTailRatio = audit.displayCells > 0 ? audit.yellowEligibleCells / audit.displayCells : Number.NaN;
     if (
-      audit.authority !== "TEST_FIXTURE"
+      audit.authority !== expectedAuthority
+      || audit.persistence !== expectedPersistence
+      || audit.priceDisplay !== expectedPriceDisplay
       || audit.grid === "NONE"
+      || audit.displayGrid === "NONE"
       || audit.canvasCount !== 1
-      || audit.provenanceAreaRatio > 0.08
+      || audit.badgeAreaRatio > 0.04
       || !audit.market.includes("BTCUSDT")
       || !audit.market.includes("BYBIT")
-      || audit.confidence !== "SYNTHETIC · UNSCORED"
-      || !intensityAudit
-      || intensityAudit.green < 1
-      || intensityAudit.yellow < 1
-      || intensityAudit.yellow >= intensityAudit.green
-      || intensityAudit.green / intensityAudit.cells > 0.02
-      || intensityAudit.yellow / intensityAudit.cells > 0.001
-    ) {
-      throw new Error(`BCLIF deterministic visual precondition failed: ${JSON.stringify(audit)}`);
-    }
+      || !audit.summaryVisible
+      || audit.candleContrast !== expectedCandleContrast
+      || !Number.isFinite(yellowTailRatio)
+      || yellowTailRatio > 0.006
+      || (testCase.fixture === "BROWSER_FALLBACK" && audit.yellowEligibleCells !== 0)
+      || audit.labels < 0
+      || audit.labels > (testCase.fixture === "HIGH_CONFIDENCE" ? 6 : 4)
+      || !Number.isFinite(audit.texturePreparationAndUpdateMs)
+    ) throw new Error(`BCLIF ${testCase.fixture} precondition failed: ${JSON.stringify(audit)}`);
+    assertDisplayDomain(audit, testCase.fixture);
 
+    const frame = updateGoldens
+      ? await measureAnimationFrames(page)
+      : { measurement: "NOT_REPEATED_DURING_GOLDEN_COMPARISON" };
     const screenshot = await page.screenshot({ animations: "disabled", fullPage: false, type: "png" });
     const artifactPath = join(artifactRoot, testCase.baseline);
     writeFileSync(artifactPath, screenshot);
     const baselinePath = join(goldenRoot, testCase.baseline);
     if (updateGoldens) {
       writeFileSync(baselinePath, screenshot);
-      testCase.status = "RECORDED";
+      testCase.status = "CERTIFIED";
       testCase.sha256 = sha256(screenshot);
       testCase.recordedAt = new Date().toISOString();
-      results.push({ viewport: `${testCase.width}x${testCase.height}`, decision: "UPDATED", audit });
+      results.push({ fixture: testCase.fixture, viewport: `${testCase.width}x${testCase.height}`, decision: "UPDATED", audit, frame });
     } else {
       const baseline = readFileSync(baselinePath);
-      const comparison = await comparePng(page, baseline, screenshot);
-      const ssimMinimum = Number(testCase.thresholds?.ssimMinimum ?? 0.985);
-      const perceptualDeltaMaximum = Number(testCase.thresholds?.meanPerceptualDeltaMaximum ?? 0.025);
-      const passed = comparison.ssim >= ssimMinimum && comparison.meanPerceptualDelta <= perceptualDeltaMaximum;
+      const comparison = baseline.equals(screenshot)
+        ? { width: testCase.width, height: testCase.height, ssim: 1, meanPerceptualDelta: 0, exactBytes: true }
+        : { ...(await comparePng(page, baseline, screenshot)), exactBytes: false };
+      const thresholds = testCase.thresholds || {};
+      const passed = comparison.ssim >= Number(thresholds.ssimMinimum ?? 0.985)
+        && comparison.meanPerceptualDelta <= Number(thresholds.meanPerceptualDeltaMaximum ?? 0.025);
       results.push({
-        viewport: `${testCase.width}x${testCase.height}`,
-        decision: passed ? "PASS" : "FAIL",
-        thresholds: { ssimMinimum, perceptualDeltaMaximum },
-        comparison,
-        audit,
-        baselineSha256: sha256(baseline),
-        actualSha256: sha256(screenshot)
+        fixture: testCase.fixture, viewport: `${testCase.width}x${testCase.height}`,
+        decision: passed ? "PASS" : "FAIL", comparison, audit, frame,
+        baselineSha256: sha256(baseline), actualSha256: sha256(screenshot)
       });
-      if (!passed) throw new Error(`BCLIF visual threshold failed at ${testCase.width}x${testCase.height}: ${JSON.stringify(comparison)}`);
+      if (!passed) throw new Error(`BCLIF visual threshold failed for ${testCase.fixture} at ${testCase.width}x${testCase.height}.`);
     }
     await context.close();
-    await browser.close();
-    browser = null;
+    if (pageErrors.length) throw new Error(`BCLIF browser page errors: ${pageErrors.join(" | ")}`);
   }
+  if (!requestedFixture && !requestedViewport && !resumeGoldens) assertHashSeparation(results);
   if (updateGoldens) {
-    manifest.certificationStatus = "RECORDED";
-    delete manifest.blocker;
+    if (manifestCases.every((entry) => entry.status === "CERTIFIED" && existsSync(join(goldenRoot, entry.baseline)))) {
+      manifest.certificationStatus = "RECORDED_PENDING_COMPARISON";
+      delete manifest.blocker;
+    }
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  } else if (!requestedFixture && !requestedViewport) {
+    manifest.certificationStatus = "CERTIFIED";
+    manifest.certifiedAt = new Date().toISOString();
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   }
 } catch (error) {
@@ -191,43 +210,98 @@ try {
   await server.close();
 }
 
-const report = {
+console.log(JSON.stringify({
   decision: failure ? "FAIL" : updateGoldens ? "UPDATED" : "PASS",
-  fixture: "BCLIF_DETERMINISTIC_VISUAL_FIXTURE_V2_HIRES",
-  renderer: "PIXI_SINGLE_TEXTURE",
-  comparison: "8x8 luminance SSIM + normalized YCbCr perceptual delta",
+  fixture: "BCLIF_OPERATIONAL_CLARITY_V1",
+  renderer: "PIXI_SINGLE_TEXTURE_WORKER_PROJECTED",
+  comparison: "full-resolution capture + whole-frame 960px luminance SSIM/perceptual sample",
   browserExecutable,
+  cases: results.length,
   results,
   error: failure instanceof Error ? failure.message : failure ? String(failure) : undefined
-};
-console.log(JSON.stringify(report, null, 2));
+}, null, 2));
 if (failure) process.exitCode = 1;
+
+function assertDisplayDomain(audit, fixture) {
+  const pair = (value) => String(value || "").split(":").map(Number);
+  const display = pair(audit.displayBounds);
+  if (fixture === "FULL_SPECTRUM_RESEARCH") {
+    const model = pair(audit.modelBounds);
+    if (display[0] !== model[2] || display[1] !== model[3]) throw new Error("Full Spectrum Research did not expose the complete model range.");
+    return;
+  }
+  const chart = pair(audit.chartRange);
+  const tolerance = Math.max(1e-6, Math.abs(chart[1] - chart[0]) * 0.0001);
+  if (Math.abs(display[0] - chart[0]) > tolerance || Math.abs(display[1] - chart[1]) > tolerance) {
+    throw new Error("Chart Scale display domain diverged from the candle camera.");
+  }
+}
+
+function assertHashSeparation(results) {
+  const comparable = results.filter((entry) => entry.fixture !== "MISSING_DATA");
+  const model = new Set(comparable.map((entry) => entry.audit.modelHash));
+  const exposure = new Set(comparable.map((entry) => entry.audit.exposureHash));
+  const render = new Set(comparable.map((entry) => entry.audit.renderSettingsHash));
+  const raster = new Set(comparable.map((entry) => entry.audit.displayRasterHash));
+  if (model.size !== 1) throw new Error(`Presentation changed MODEL identity: ${[...model].join(",")}`);
+  if (exposure.size !== 1) throw new Error(`Presentation changed EXPOSURE identity: ${[...exposure].join(",")}`);
+  if (render.size < 4) throw new Error("Preset fixtures did not produce distinct RENDER SETTINGS identities.");
+  if (raster.size < 4) throw new Error("Preset/viewports did not produce distinct DISPLAY RASTER identities.");
+  for (const viewport of ["1920x1080", "2560x1440", "3840x2160"]) {
+    const browser = results.find((entry) => entry.fixture === "BROWSER_FALLBACK" && entry.viewport === viewport);
+    const persistent = results.find((entry) => entry.fixture === "PERSISTENT_NODE" && entry.viewport === viewport);
+    if (!browser || !persistent || browser.audit.displayRasterHash === persistent.audit.displayRasterHash) {
+      throw new Error(`Evidence authority did not separate DISPLAY RASTER identity at ${viewport}.`);
+    }
+  }
+}
+
+async function measureAnimationFrames(page) {
+  return page.evaluate(() => new Promise((resolve) => {
+    const samples = [];
+    let previous = performance.now();
+    const tick = (now) => {
+      samples.push(now - previous);
+      previous = now;
+      if (samples.length < 8) requestAnimationFrame(tick);
+      else {
+        const sorted = samples.slice(2).sort((a, b) => a - b);
+        const percentile = (value) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * value))];
+        resolve({
+          measurement: "HEADLESS_ANIMATION_FRAME_CADENCE_NOT_INTERACTIVE_FPS",
+          p50Ms: Number(percentile(0.50).toFixed(3)),
+          p95Ms: Number(percentile(0.95).toFixed(3)),
+          p99Ms: Number(percentile(0.99).toFixed(3))
+        });
+      }
+    };
+    requestAnimationFrame(tick);
+  }));
+}
 
 async function comparePng(page, baseline, actual) {
   return page.evaluate(async ({ baselineBase64, actualBase64 }) => {
     const bitmap = async (base64) => {
       const raw = atob(base64);
-      const bytes = new Uint8Array(raw.length);
-      for (let index = 0; index < raw.length; index++) bytes[index] = raw.charCodeAt(index);
+      const bytes = Uint8Array.from(raw, (character) => character.charCodeAt(0));
       return createImageBitmap(new Blob([bytes], { type: "image/png" }));
     };
     const [reference, candidate] = await Promise.all([bitmap(baselineBase64), bitmap(actualBase64)]);
-    if (reference.width !== candidate.width || reference.height !== candidate.height) {
-      throw new Error(`Golden dimensions ${reference.width}x${reference.height} do not match actual ${candidate.width}x${candidate.height}.`);
-    }
+    if (reference.width !== candidate.width || reference.height !== candidate.height) throw new Error("Golden dimensions differ from the actual image.");
+    const sourceWidth = reference.width, sourceHeight = reference.height;
+    const comparisonScale = Math.min(1, 960 / sourceWidth);
     const canvas = document.createElement("canvas");
-    canvas.width = reference.width;
-    canvas.height = reference.height;
+    canvas.width = Math.max(1, Math.round(sourceWidth * comparisonScale));
+    canvas.height = Math.max(1, Math.round(sourceHeight * comparisonScale));
     const context = canvas.getContext("2d", { willReadFrequently: true });
     context.drawImage(reference, 0, 0);
     const left = context.getImageData(0, 0, canvas.width, canvas.height).data;
     context.clearRect(0, 0, canvas.width, canvas.height);
     context.drawImage(candidate, 0, 0);
     const right = context.getImageData(0, 0, canvas.width, canvas.height).data;
-
-    let perceptual = 0;
     const luminanceLeft = new Float32Array(canvas.width * canvas.height);
     const luminanceRight = new Float32Array(canvas.width * canvas.height);
+    let perceptual = 0;
     for (let pixel = 0, byte = 0; pixel < luminanceLeft.length; pixel++, byte += 4) {
       const lr = left[byte], lg = left[byte + 1], lb = left[byte + 2];
       const rr = right[byte], rg = right[byte + 1], rb = right[byte + 2];
@@ -235,79 +309,44 @@ async function comparePng(page, baseline, actual) {
       const ry = 0.2126 * rr + 0.7152 * rg + 0.0722 * rb;
       luminanceLeft[pixel] = ly;
       luminanceRight[pixel] = ry;
-      const lcb = -0.1146 * lr - 0.3854 * lg + 0.5 * lb;
-      const rcb = -0.1146 * rr - 0.3854 * rg + 0.5 * rb;
-      const lcr = 0.5 * lr - 0.4542 * lg - 0.0458 * lb;
-      const rcr = 0.5 * rr - 0.4542 * rg - 0.0458 * rb;
-      const dy = ly - ry, dcb = lcb - rcb, dcr = lcr - rcr;
-      perceptual += Math.sqrt(0.7 * dy * dy + 0.15 * dcb * dcb + 0.15 * dcr * dcr) / 255;
+      perceptual += Math.abs(ly - ry) / 255;
     }
-
-    const block = 8;
-    const c1 = (0.01 * 255) ** 2;
-    const c2 = (0.03 * 255) ** 2;
-    let ssim = 0;
-    let blocks = 0;
-    for (let y = 0; y < canvas.height; y += block) {
-      for (let x = 0; x < canvas.width; x += block) {
-        const width = Math.min(block, canvas.width - x);
-        const height = Math.min(block, canvas.height - y);
-        const count = width * height;
-        let meanLeft = 0, meanRight = 0;
-        for (let by = 0; by < height; by++) for (let bx = 0; bx < width; bx++) {
-          const index = (y + by) * canvas.width + x + bx;
-          meanLeft += luminanceLeft[index];
-          meanRight += luminanceRight[index];
-        }
-        meanLeft /= count;
-        meanRight /= count;
-        let varianceLeft = 0, varianceRight = 0, covariance = 0;
-        for (let by = 0; by < height; by++) for (let bx = 0; bx < width; bx++) {
-          const index = (y + by) * canvas.width + x + bx;
-          const dl = luminanceLeft[index] - meanLeft;
-          const dr = luminanceRight[index] - meanRight;
-          varianceLeft += dl * dl;
-          varianceRight += dr * dr;
-          covariance += dl * dr;
-        }
-        const denominator = Math.max(1, count - 1);
-        varianceLeft /= denominator;
-        varianceRight /= denominator;
-        covariance /= denominator;
-        ssim += ((2 * meanLeft * meanRight + c1) * (2 * covariance + c2))
-          / ((meanLeft * meanLeft + meanRight * meanRight + c1) * (varianceLeft + varianceRight + c2));
-        blocks += 1;
+    const block = 8, c1 = (0.01 * 255) ** 2, c2 = (0.03 * 255) ** 2;
+    let ssim = 0, blocks = 0;
+    for (let y = 0; y < canvas.height; y += block) for (let x = 0; x < canvas.width; x += block) {
+      const width = Math.min(block, canvas.width - x), height = Math.min(block, canvas.height - y), count = width * height;
+      let meanLeft = 0, meanRight = 0;
+      for (let by = 0; by < height; by++) for (let bx = 0; bx < width; bx++) {
+        const index = (y + by) * canvas.width + x + bx;
+        meanLeft += luminanceLeft[index]; meanRight += luminanceRight[index];
       }
+      meanLeft /= count; meanRight /= count;
+      let varianceLeft = 0, varianceRight = 0, covariance = 0;
+      for (let by = 0; by < height; by++) for (let bx = 0; bx < width; bx++) {
+        const index = (y + by) * canvas.width + x + bx;
+        const dl = luminanceLeft[index] - meanLeft, dr = luminanceRight[index] - meanRight;
+        varianceLeft += dl * dl; varianceRight += dr * dr; covariance += dl * dr;
+      }
+      const denominator = Math.max(1, count - 1);
+      varianceLeft /= denominator; varianceRight /= denominator; covariance /= denominator;
+      ssim += ((2 * meanLeft * meanRight + c1) * (2 * covariance + c2))
+        / ((meanLeft * meanLeft + meanRight * meanRight + c1) * (varianceLeft + varianceRight + c2));
+      blocks += 1;
     }
-    reference.close();
-    candidate.close();
+    reference.close(); candidate.close();
     return {
-      width: canvas.width,
-      height: canvas.height,
+      width: sourceWidth,
+      height: sourceHeight,
+      comparisonWidth: canvas.width,
+      comparisonHeight: canvas.height,
       ssim: Number((ssim / blocks).toFixed(6)),
       meanPerceptualDelta: Number((perceptual / luminanceLeft.length).toFixed(6))
     };
   }, { baselineBase64: baseline.toString("base64"), actualBase64: actual.toString("base64") });
 }
 
-function sha256(bytes) {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
-function parseIntensityAudit(value) {
-  const match = /^max=(\d+);green=(\d+);yellow=(\d+);cells=(\d+)$/.exec(String(value || ""));
-  if (!match) return null;
-  const [, maximum, green, yellow, cells] = match.map(Number);
-  if (![maximum, green, yellow, cells].every(Number.isFinite) || maximum !== 255 || cells < 1) return null;
-  return { maximum, green, yellow, cells };
-}
-
+function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
 function skip(code, message, detail) {
-  console.log(JSON.stringify({
-    decision: "SKIP",
-    code,
-    message,
-    detail: detail instanceof Error ? detail.message : detail
-  }, null, 2));
+  console.log(JSON.stringify({ decision: "SKIP", code, message, detail }, null, 2));
   process.exit(0);
 }

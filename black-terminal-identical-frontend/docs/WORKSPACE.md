@@ -19,16 +19,18 @@ Liquidation Intelligence verification:
 
 ```bash
 npm run test:liquidation-heatmap
+npm run test:bclif-operational-clarity
 npm run test:bclif-persistence-security
 npm run test:bclif-client-contracts
 npm run test:bclif-collector-contracts
+npm run benchmark:bclif-operational
 npm run benchmark:bclif-collector
 npm run test:bclif-visual
 npm run typecheck
 npm run build
 ```
 
-The deterministic visual fixture is available only through the indicator's developer toggle and is labeled `SYNTHETIC_TEST`. Normal runtime requires a Bybit linear symbol and public network access. In Chapter III-C State A, `test:bclif-visual` returns a structured `SKIP` because its baselines are explicitly stale; that is not visual certification. Collector build/deploy/status/drain/restart/rollback/certify/soak commands and their host prerequisites are listed in `liquidation/BCLIF_DEPLOYMENT_RUNBOOK.md`. Neither BCLIF migration is applied by an npm or deployment command.
+The deterministic visual fixture is localhost-only, query-gated, and labeled `SYNTHETIC_TEST`; normal runtime requires a Bybit linear symbol and public network access. Chapter III-C2 owns 21 full-resolution baselines (seven truth/display cases at three viewports). Golden generation is deliberately non-passing until a later normal comparison promotes the manifest to `CERTIFIED`. Collector build/deploy/status/drain/restart/rollback/certify/soak commands and their host prerequisites are listed in `liquidation/BCLIF_DEPLOYMENT_RUNBOOK.md`. Neither BCLIF migration is applied by an npm or deployment command.
 
 Open the Vite URL shown in the terminal for browser development.
 

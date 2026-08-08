@@ -6,7 +6,12 @@ import type {
   LiquidationFieldSettings,
   LiquidationFieldSnapshot
 } from "../core/types.ts";
-import { applyBclifVisualCertificationProfile, createLiquidationFieldFixture } from "../testing/fixtures.ts";
+import {
+  applyBclifVisualCase,
+  applyBclifVisualCertificationProfile,
+  createLiquidationFieldFixture,
+  resolveBclifVisualCase
+} from "../testing/fixtures.ts";
 import { LiquidationFieldWorkerClient } from "../worker/LiquidationFieldWorkerClient.ts";
 import { BrowserLiquidationFieldFallback } from "./BrowserLiquidationFieldFallback.ts";
 import {
@@ -294,16 +299,22 @@ export class LiquidationFieldController {
     const lastCandle = this.options.getCandles().at(-1);
     const alignedNow = lastCandle ? lastCandle.time * 1_000 : Date.now();
     const fixture = createLiquidationFieldFixture(alignedNow);
-    const snapshot = applyBclifVisualCertificationProfile(await this.fixtureWorker.build({ ...fixture, settings: this.settings }));
+    const visualCase = resolveBclifVisualCase();
+    const snapshot = applyBclifVisualCase(
+      applyBclifVisualCertificationProfile(await this.fixtureWorker.build({ ...fixture, settings: this.settings })),
+      visualCase
+    );
     if (this.disposed) return;
     this.options.onSnapshot(snapshot);
+    const browserFallback = visualCase === "BROWSER_FALLBACK";
+    const persistentNode = visualCase === "PERSISTENT_NODE";
     this.status({
       state: "LIVE",
-      message: "Deterministic localhost visual fixture — synthetic test data, never trading data.",
-      source: "SYNTHETIC_TEST",
-      authority: "TEST_FIXTURE",
-      persistence: "OFF",
-      collectorNodeId: null,
+      message: `Deterministic localhost ${visualCase} visual fixture — synthetic test data, never trading data.`,
+      source: persistentNode ? "PERSISTENT_COLLECTOR" : browserFallback ? "BYBIT_PUBLIC" : "SYNTHETIC_TEST",
+      authority: persistentNode ? "PERSISTENT_NODE" : browserFallback ? "BROWSER_FALLBACK" : "TEST_FIXTURE",
+      persistence: persistentNode ? "ON" : "OFF",
+      collectorNodeId: persistentNode ? "LIQUIDATION_INTELLIGENCE_NODE_01" : null,
       lastInputAt: alignedNow
     });
   }

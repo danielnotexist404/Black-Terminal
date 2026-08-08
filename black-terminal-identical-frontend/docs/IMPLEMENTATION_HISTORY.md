@@ -1385,3 +1385,13 @@ Remaining:
 - Added persistent-first client orchestration, bounded verified tile caching/assembly, fail-closed entitlement behavior, and an always-visible persistent-versus-browser provenance label.
 - Added repository-owned collector, recovery, codec, no-lookahead, security, benchmark, soak, container, and Playwright visual-certification paths.
 - Stopped at State A because no separate analytics host exists: collector not deployed, migrations not applied, browser fallback active. Black Cloud execution, OMS/EMS, PositionManager, mandates, RADAP, HDLX, Kioseff, and DOM Pro calculations were not changed.
+
+## 2026-08-08 — Phase V Chapter III-C2 BCLIF Operational Clarity
+
+- Separated the complete causal model domain from the disposable display domain and made Chart Scale the Trade Focus default, preventing distant exposure from compressing candles while retaining Full Spectrum Research.
+- Added Trade Focus, High Confidence, Live Calibrated, Full Spectrum Research, and Raw Model presets; source-aware historical/live channels; confidence authority; selective thermal normalization; rare-yellow eligibility; adaptive price/time projection; and uncertainty envelopes.
+- Added actionable long/short liquidation shelf extraction with explicit multi-factor ranking, ranged exposure, a four-label default, movable/collapsible summary, permanent authority badge, and truthful three-week horizon labeling.
+- Split MODEL, EXPOSURE, RENDER SETTINGS, and DISPLAY RASTER identities and proved display/camera changes do not mutate model/exposure data.
+- Moved display projection off the main thread, retained the last certified texture during refresh, pooled chart labels, and added explicit texture-preparation instrumentation.
+- Replaced stale visual evidence with 21 repository-owned full-resolution fixtures covering seven data-quality/presentation states at 1080p, 1440p, and 4K; generation remains non-passing until a normal comparison certifies it.
+- Preserved State A: no persistent host, collector deployment, migration application, or execution-system change.

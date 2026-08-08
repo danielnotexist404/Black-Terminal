@@ -1,5 +1,5 @@
 import type { LiquidationFieldSettings } from "../core/types";
-import { BCLIF_MAX_REQUEST_HOURS } from "../core/settings";
+import { applyBclifPresentationPreset, BCLIF_MAX_REQUEST_HOURS } from "../core/settings";
 
 interface Props {
   settings: LiquidationFieldSettings;
@@ -11,6 +11,30 @@ export function LiquidationFieldSettingsPanel({ settings, onChange }: Props) {
     onChange({ ...settings, preset: key === "preset" ? value as LiquidationFieldSettings["preset"] : "CUSTOM", [key]: value });
   };
   return <div className="liquidation-field-settings">
+    <section className="indicator-settings-section">
+      <b>OPERATIONAL PRESENTATION</b>
+      <label>Preset<select value={settings.preset} onChange={(event) => {
+        const preset = event.target.value as LiquidationFieldSettings["preset"];
+        onChange(preset === "CUSTOM" ? { ...settings, preset } : applyBclifPresentationPreset(settings, preset));
+      }}>
+        <option value="TRADE_FOCUS">BCLIF — Trade Focus</option>
+        <option value="HIGH_CONFIDENCE">BCLIF — High Confidence</option>
+        <option value="LIVE_CALIBRATED">BCLIF — Live Calibrated</option>
+        <option value="FULL_SPECTRUM_RESEARCH">BCLIF — Full Spectrum Research</option>
+        <option value="RAW_MODEL">BCLIF — Raw Model</option>
+        <option value="CUSTOM">Custom</option>
+      </select></label>
+      <label>Price Display<select value={settings.priceDisplay} onChange={(event) => update("priceDisplay", event.target.value as LiquidationFieldSettings["priceDisplay"])}>
+        <option value="CHART_SCALE">Chart Scale · operational</option><option value="CURRENT_PRICE_5">Current Price ±5%</option>
+        <option value="CURRENT_PRICE_10">Current Price ±10%</option><option value="CURRENT_PRICE_20">Current Price ±20%</option>
+        <option value="CURRENT_PRICE_40">Current Price ±40%</option><option value="AUTO_FOCUS">Auto Focus</option>
+        <option value="FULL_MODEL_RANGE">Full Model Range · research</option><option value="CUSTOM">Custom Range</option>
+      </select></label>
+      {settings.priceDisplay === "CUSTOM" && <label>Custom Range<span className="liquidation-inline-inputs"><input type="number" min={0} value={settings.customPriceMinimum} onChange={(event) => update("customPriceMinimum", Number(event.target.value))} /><input type="number" min={0} value={settings.customPriceMaximum} onChange={(event) => update("customPriceMaximum", Number(event.target.value))} /></span></label>}
+      {settings.priceDisplay === "AUTO_FOCUS" && <label className="indicator-range-row">Auto-Focus Margin<span><input type="range" min={0} max={25} value={settings.autoFocusMarginPercent} onChange={(event) => update("autoFocusMarginPercent", Number(event.target.value))} /><strong>{settings.autoFocusMarginPercent}%</strong></span></label>}
+      <label>Visual Channel<select value={settings.visualChannel} onChange={(event) => update("visualChannel", event.target.value as LiquidationFieldSettings["visualChannel"])}><option value="COMBINED">Combined</option><option value="HISTORICAL_CONTEXT">Historical Context</option><option value="LIVE_CALIBRATED">Live Calibrated</option></select></label>
+    </section>
+
     <section className="indicator-settings-section">
       <b>BLACK CORE LIQUIDATION INTELLIGENCE</b>
       <label>Horizon<select value={settings.horizon} onChange={(event) => update("horizon", event.target.value as LiquidationFieldSettings["horizon"])}>
@@ -51,14 +75,23 @@ export function LiquidationFieldSettingsPanel({ settings, onChange }: Props) {
         <option value="REFERENCE_THERMAL">Reference Thermal</option><option value="BLACK_TERMINAL_BLOOD">Black Terminal Blood</option>
         <option value="INSTITUTIONAL_MONOCHROME">Institutional Monochrome</option><option value="DIRECTIONAL_SPLIT">Directional Split</option><option value="CONFIDENCE">Confidence</option>
       </select></label>
-      <label className="indicator-range-row">Opacity<span><input type="range" min={0} max={100} value={settings.opacity} onChange={(event) => update("opacity", Number(event.target.value))} /><strong>{settings.opacity}</strong></span></label>
+      <label className="indicator-range-row">Opacity<span><input type="range" min={10} max={100} value={settings.opacity} onChange={(event) => update("opacity", Number(event.target.value))} /><strong>{settings.opacity}</strong></span></label>
       <label className="indicator-range-row">Gamma<span><input type="range" min={35} max={250} value={Math.round(settings.gamma * 100)} onChange={(event) => update("gamma", Number(event.target.value) / 100)} /><strong>{settings.gamma.toFixed(2)}</strong></span></label>
+      <label className="indicator-range-row">Lower Intensity Percentile<span><input type="range" min={0} max={95} value={Math.round(settings.lowQuantile * 100)} onChange={(event) => update("lowQuantile", Number(event.target.value) / 100)} /><strong>{(settings.lowQuantile * 100).toFixed(1)}%</strong></span></label>
+      <label className="indicator-range-row">Upper Intensity Percentile<span><input type="range" min={950} max={1000} value={Math.round(settings.highQuantile * 1000)} onChange={(event) => update("highQuantile", Number(event.target.value) / 1000)} /><strong>{(settings.highQuantile * 100).toFixed(1)}%</strong></span></label>
+      <label className="indicator-range-row">Background Floor<span><input type="range" min={0} max={32} value={settings.backgroundFloor} onChange={(event) => update("backgroundFloor", Number(event.target.value))} /><strong>{settings.backgroundFloor}</strong></span></label>
+      <label className="indicator-range-row">Yellow Tail<span><input type="range" min={1} max={5} value={Math.round(settings.yellowTailPercent * 10)} onChange={(event) => update("yellowTailPercent", Number(event.target.value) / 10)} /><strong>{settings.yellowTailPercent.toFixed(1)}%</strong></span></label>
+      <label>Normalization<select value={settings.thermalNormalization} onChange={(event) => update("thermalNormalization", event.target.value as LiquidationFieldSettings["thermalNormalization"])}><option value="HYBRID">Hybrid · recommended</option><option value="GLOBAL_MODEL">Global Model</option><option value="VISIBLE_FOCUS">Visible Focus · camera-relative</option><option value="FIXED_ABSOLUTE">Fixed Absolute</option><option value="OI_RELATIVE">OI Relative</option><option value="CONFIDENCE_WEIGHTED">Confidence Weighted</option></select></label>
+      <label className="indicator-range-row">Historical Context<span><input type="range" min={0} max={100} value={settings.historicalContextOpacity} onChange={(event) => update("historicalContextOpacity", Number(event.target.value))} /><strong>{settings.historicalContextOpacity}%</strong></span></label>
+      <label className="indicator-range-row">Live Calibrated<span><input type="range" min={0} max={100} value={settings.liveCalibratedOpacity} onChange={(event) => update("liveCalibratedOpacity", Number(event.target.value))} /><strong>{settings.liveCalibratedOpacity}%</strong></span></label>
       <label>Smoothing<select value={settings.smoothing} onChange={(event) => update("smoothing", event.target.value as LiquidationFieldSettings["smoothing"])}><option value="SHARP">Sharp</option><option value="BALANCED">Balanced</option><option value="SMOOTH">Smooth</option><option value="CUSTOM">Custom</option></select></label>
-      <label>Resolution<select value={`${settings.timeColumns}x${settings.priceRows}`} onChange={(event) => {
+      <label>Model Grid<select value={`${settings.timeColumns}x${settings.priceRows}`} onChange={(event) => {
         const [timeColumns, priceRows] = event.target.value.split("x").map(Number);
         onChange({ ...settings, preset: "CUSTOM", timeColumns, priceRows });
       }}><option value="256x256">Touch · 256²</option><option value="512x384">Desktop · 512×384</option><option value="1024x512">Research · 1024×512</option></select></label>
+      <label>Display LOD<select value={settings.adaptiveResolution} onChange={(event) => update("adaptiveResolution", event.target.value as LiquidationFieldSettings["adaptiveResolution"])}><option value="AUTO">Auto · device aware</option><option value="HIGH">High Resolution</option><option value="BALANCED">Balanced</option><option value="LOW_PERFORMANCE">Low-Performance Fallback</option></select></label>
       <label>Candles<select value={settings.candlePalette} onChange={(event) => update("candlePalette", event.target.value as LiquidationFieldSettings["candlePalette"])}><option value="BLACK_TERMINAL_HIGH_CONTRAST">Black Terminal High Contrast</option><option value="REFERENCE_CYAN_MAGENTA">Reference Cyan / Magenta</option></select></label>
+      <label>Candle Contrast<select value={settings.candleContrast} onChange={(event) => update("candleContrast", event.target.value as LiquidationFieldSettings["candleContrast"])}><option value="STANDARD">Standard</option><option value="HIGH">High</option><option value="MAXIMUM">Maximum</option></select></label>
     </section>
 
     <section className="indicator-settings-section liquidation-field-toggles">
@@ -67,6 +100,14 @@ export function LiquidationFieldSettingsPanel({ settings, onChange }: Props) {
       <label>Diagnostics<input type="checkbox" checked={settings.diagnosticsVisible} onChange={(event) => update("diagnosticsVisible", event.target.checked)} /></label>
       <label>Confirmed Events<input type="checkbox" checked={settings.confirmedMarkersVisible} onChange={(event) => update("confirmedMarkersVisible", event.target.checked)} /></label>
       <label>Cascade Paths<input type="checkbox" checked={settings.cascadePathsVisible} onChange={(event) => update("cascadePathsVisible", event.target.checked)} /></label>
+      <label>Confidence Weight<input type="checkbox" checked={settings.confidenceWeightEnabled} onChange={(event) => update("confidenceWeightEnabled", event.target.checked)} /></label>
+      <label>Require 2+ Evidence Channels<input type="checkbox" checked={settings.requireMultipleEvidenceChannels} onChange={(event) => update("requireMultipleEvidenceChannels", event.target.checked)} /></label>
+      <label>Uncertainty Envelopes<input type="checkbox" checked={settings.uncertaintyEnvelopesVisible} onChange={(event) => update("uncertaintyEnvelopesVisible", event.target.checked)} /></label>
+      <label>Operational Summary<input type="checkbox" checked={settings.operationalSummaryVisible} onChange={(event) => update("operationalSummaryVisible", event.target.checked)} /></label>
+      <label>Live Calibration Marker<input type="checkbox" checked={settings.collectionStartMarkerVisible} onChange={(event) => update("collectionStartMarkerVisible", event.target.checked)} /></label>
+      <label>Focus Band<select value={settings.focusBand} onChange={(event) => update("focusBand", event.target.value as LiquidationFieldSettings["focusBand"])}><option value="OFF">Off</option><option value="PERCENT_2">±2%</option><option value="PERCENT_5">±5%</option><option value="PERCENT_10">±10%</option><option value="CUSTOM">Custom</option></select></label>
+      {settings.focusBand === "CUSTOM" && <label className="indicator-range-row">Custom Focus<span><input type="range" min={1} max={50} value={settings.customFocusBandPercent} onChange={(event) => update("customFocusBandPercent", Number(event.target.value))} /><strong>{settings.customFocusBandPercent}%</strong></span></label>}
+      <label className="indicator-range-row">Cluster Labels<span><input type="range" min={0} max={6} value={settings.maximumClusterLabels} onChange={(event) => update("maximumClusterLabels", Number(event.target.value))} /><strong>{settings.maximumClusterLabels}</strong></span></label>
     </section>
   </div>;
 }

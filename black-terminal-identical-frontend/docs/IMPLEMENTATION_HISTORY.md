@@ -1395,3 +1395,12 @@ Remaining:
 - Moved display projection off the main thread, retained the last certified texture during refresh, pooled chart labels, and added explicit texture-preparation instrumentation.
 - Replaced stale visual evidence with 21 repository-owned full-resolution fixtures covering seven data-quality/presentation states at 1080p, 1440p, and 4K; generation remains non-passing until a normal comparison certifies it.
 - Preserved State A: no persistent host, collector deployment, migration application, or execution-system change.
+
+## 2026-08-09 — Phase V Chapter III-C3 BCLIF Authentic Exposure Reconstruction
+
+- Proved the swing-following root cause before editing: browser OI was mapped onto chart candles/current closes, every positive fluctuation birthed mark-centered cohorts, fallback rebuilt rolling inventory, and one-column normalization promoted each local region.
+- Added a canonical five-minute OI clock, versioned hybrid materiality floor, interval-specific entry distributions, equal paired long/short births, content-stable cohort IDs, immutable entry/liquidation anchors, and a stable versioned price grid.
+- Rebuilt lifecycle accounting around deterministic OI contraction, observed-event assimilation, unresolved traversal, explicit decay/expiry, bounded state, and an enforced mass-conservation ledger.
+- Added isolated/cross/unknown authority caps, source-aware entry confidence, 5x/10x/20x leverage support, causal 64-column normalization, local shelf-specificity metrics, cohort birth markers, and full shelf provenance diagnostics.
+- Moved upload-ready texture preparation into the display worker and added independent model, raster, texture, and browser visual performance evidence.
+- Added 18 causal invariants and the 27-case C3 Playwright matrix at 1080p, 1440p, and 4K. Kept infrastructure truth at State A and did not alter execution, broker, Black Cloud, HDLX, RADAP, Kioseff, DOM Pro, Portfolio, Investment, Obsidian, OMS, or EMS systems.

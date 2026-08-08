@@ -1,4 +1,5 @@
 import type { ConfirmedLiquidationEvent, LiquidationMarketFrame } from "../../../src/modules/liquidation-field/core/types.ts";
+import { buildCohortEntryDistribution } from "../../../src/modules/liquidation-field/core/entryDistribution.ts";
 import type { BclifBookFrame, BclifCanonicalEvent, BclifFrameEnvelope, BclifOpenInterestPoint, PersistentLiquidationEvent, PersistentPublicTrade } from "../contracts.ts";
 
 export interface BclifTickerContext {
@@ -77,6 +78,26 @@ export function buildCanonicalFrame(input: {
   const book = input.book;
   const oi = input.currentOpenInterest?.singleSideOpenInterest ?? input.ticker.singleSideOpenInterest;
   const previousOi = input.previousOpenInterest?.singleSideOpenInterest ?? oi;
+  const oiAdvanced = Boolean(input.currentOpenInterest && input.previousOpenInterest
+    && (input.currentOpenInterest.availableAt > input.previousOpenInterest.availableAt
+      || input.currentOpenInterest.timestamp > input.previousOpenInterest.timestamp));
+  const oiIntervalStart = oiAdvanced ? input.previousOpenInterest!.timestamp : undefined;
+  const oiIntervalEnd = oiAdvanced ? input.currentOpenInterest!.timestamp : undefined;
+  const oiDelta = oi - previousOi;
+  const entryTrades = oiIntervalStart !== undefined && oiIntervalEnd !== undefined
+    ? inside(input.trades, oiIntervalStart, oiIntervalEnd, input.sourceCutoffTimestamp)
+    : [];
+  const entryDistribution = oiDelta > 0 && oiIntervalStart !== undefined && oiIntervalEnd !== undefined && oiIntervalEnd > oiIntervalStart
+    ? buildCohortEntryDistribution({
+        observations: entryTrades.map((event) => ({ price: event.payload.price, weight: event.payload.notional })),
+        source: entryTrades.length ? "EXACT_TRADES" : "CHART_BAR_APPROXIMATION",
+        intervalStart: oiIntervalStart,
+        intervalEnd: oiIntervalEnd,
+        confidence: entryTrades.length ? 0.94 : 0.28,
+        fallbackPrice: input.ticker.markPrice,
+        maximumRows: 7
+      })
+    : undefined;
   const frame: LiquidationMarketFrame = {
     venue: "BYBIT",
     symbol: input.symbol,
@@ -86,7 +107,10 @@ export function buildCanonicalFrame(input: {
     indexPrice: input.ticker.indexPrice,
     basisBps: input.ticker.basisBps,
     openInterest: oi,
-    openInterestDelta: oi - previousOi,
+    openInterestDelta: oiDelta,
+    oiIntervalStart,
+    oiIntervalEnd,
+    entryDistribution,
     fundingRate: input.ticker.fundingRate,
     longAccountRatio: input.ratio?.longAccountRatio ?? null,
     shortAccountRatio: input.ratio?.shortAccountRatio ?? null,
@@ -111,7 +135,7 @@ export function buildCanonicalFrame(input: {
       funding: input.sourceAvailability.funding && input.ticker.fundingRate !== null ? "OBSERVED" : "MISSING",
       markPrice: "OBSERVED",
       positioning: input.sourceAvailability.positioning && input.ratio ? "OBSERVED" : "MISSING",
-      entryPrice: input.sourceAvailability.trades ? "DERIVED" : "MISSING",
+      entryPrice: entryTrades.length ? "DERIVED" : oiDelta > 0 ? "ESTIMATED_LOW" : "MISSING",
       leveragePrior: "ESTIMATED_MEDIUM",
       marginModel: "ESTIMATED_LOW",
       confirmedLiquidations: input.sourceAvailability.liquidations ? "OBSERVED" : "MISSING",

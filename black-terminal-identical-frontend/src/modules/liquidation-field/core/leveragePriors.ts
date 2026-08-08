@@ -12,7 +12,7 @@ const bases: Record<Exclude<LiquidationFieldModelPreset, "CUSTOM">, Array<[numbe
   CONSERVATIVE: [[2, 0.12], [3, 0.22], [5, 0.30], [10, 0.22], [20, 0.10], [50, 0.04]],
   BALANCED: [[2, 0.06], [3, 0.10], [5, 0.24], [10, 0.28], [20, 0.18], [50, 0.10], [100, 0.04]],
   VENUE_CALIBRATED: [[2, 0.05], [3, 0.08], [5, 0.20], [10, 0.28], [25, 0.20], [50, 0.13], [100, 0.06]],
-  REGIME_ADAPTIVE: [[2, 0.05], [3, 0.08], [5, 0.20], [10, 0.28], [25, 0.20], [50, 0.13], [100, 0.06]]
+  REGIME_ADAPTIVE: [[2, 0.05], [3, 0.08], [5, 0.20], [10, 0.28], [20, 0.20], [50, 0.13], [100, 0.06]]
 };
 
 function normalize(buckets: Array<{ leverage: number; probability: number }>) {
@@ -50,6 +50,6 @@ export function createLeveragePrior(
     side: "BOTH",
     source: preset === "REGIME_ADAPTIVE" ? "ADAPTIVE" : preset === "VENUE_CALIBRATED" ? "CALIBRATED" : "DEFAULT",
     confidence: preset === "VENUE_CALIBRATED" ? 0.72 : preset === "REGIME_ADAPTIVE" ? 0.66 : 0.54,
-    version: "BCLIF_LEVERAGE_PRIOR_V1"
+    version: "BCLIF_LEVERAGE_PRIOR_V2"
   };
 }

@@ -1,7 +1,8 @@
 import type { BclifPresentationPreset, LiquidationFieldHorizon, LiquidationFieldSettings } from "./types.ts";
 
-export const LIQUIDATION_FIELD_SETTINGS_VERSION = 2 as const;
+export const LIQUIDATION_FIELD_SETTINGS_VERSION = 3 as const;
 export const BCLIF_MAX_REQUEST_HOURS = 90 * 24;
+export const BCLIF_BROWSER_OI_INTERVAL = "5min" as const;
 
 export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   schemaVersion: LIQUIDATION_FIELD_SETTINGS_VERSION,
@@ -54,7 +55,16 @@ export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   candleContrast: "HIGH",
   maximumClusterLabels: 4,
   operationalSummaryVisible: true,
-  collectionStartMarkerVisible: true
+  collectionStartMarkerVisible: true,
+  cohortProvenanceVisible: false,
+  cohortBirthMarkersVisible: false,
+  oiNoiseMethod: "HYBRID_ROBUST",
+  oiNoiseAbsoluteNotionalUsd: 100_000,
+  oiNoisePercent: 0.000075,
+  oiNoiseMadMultiplier: 3.5,
+  isolatedContributionCap: 0.82,
+  crossContributionCap: 0.12,
+  unknownContributionCap: 0.06
 };
 
 const horizons = new Set<LiquidationFieldHorizon>(["6H", "12H", "1D", "3D", "1W", "3W", "1M", "CUSTOM"]);
@@ -106,7 +116,13 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     historicalContextOpacity: clamp(merged.historicalContextOpacity, 24, 0, 100),
     liveCalibratedOpacity: clamp(merged.liveCalibratedOpacity, 88, 0, 100),
     customFocusBandPercent: clamp(merged.customFocusBandPercent, 5, 0.25, 50),
-    maximumClusterLabels: Math.round(clamp(merged.maximumClusterLabels, 4, 0, 6))
+    maximumClusterLabels: Math.round(clamp(merged.maximumClusterLabels, 4, 0, 6)),
+    oiNoiseAbsoluteNotionalUsd: clamp(merged.oiNoiseAbsoluteNotionalUsd, 100_000, 0, 100_000_000),
+    oiNoisePercent: clamp(merged.oiNoisePercent, 0.000075, 0, 0.1),
+    oiNoiseMadMultiplier: clamp(merged.oiNoiseMadMultiplier, 3.5, 0, 20),
+    isolatedContributionCap: clamp(merged.isolatedContributionCap, 0.82, 0, 1),
+    crossContributionCap: clamp(merged.crossContributionCap, 0.12, 0, 1),
+    unknownContributionCap: clamp(merged.unknownContributionCap, 0.06, 0, 1)
   };
 }
 
@@ -135,6 +151,7 @@ export function applyBclifPresentationPreset(
   });
   if (preset === "FULL_SPECTRUM_RESEARCH") return migrateLiquidationFieldSettings({
     ...common, priceDisplay: "FULL_MODEL_RANGE", minimumConfidence: 0, opacity: 75,
+    thermalNormalization: "VISIBLE_FOCUS", gamma: 1.25, backgroundFloor: 3,
     visualChannel: "COMBINED", historicalContextOpacity: 58, liveCalibratedOpacity: 92,
     requireMultipleEvidenceChannels: false, diagnosticsVisible: true, maximumClusterLabels: 4,
     candleContrast: "HIGH"
@@ -152,7 +169,10 @@ export function liquidationFieldModelSettingsKey(settings: LiquidationFieldSetti
     settings.horizon, settings.customHours, settings.venue, settings.modelPreset, settings.scale,
     settings.smoothing, settings.priceSigmaRows, settings.timeSigmaColumns, settings.sideFilter,
     settings.minimumNotionalUsd, settings.leverageMinimum, settings.leverageMaximum,
-    settings.priceRows, settings.timeColumns
+    settings.priceRows, settings.timeColumns,
+    settings.oiNoiseMethod, settings.oiNoiseAbsoluteNotionalUsd, settings.oiNoisePercent,
+    settings.oiNoiseMadMultiplier, settings.isolatedContributionCap, settings.crossContributionCap,
+    settings.unknownContributionCap
   ].join(":");
 }
 
@@ -171,10 +191,9 @@ export function liquidationHorizonMs(settings: Pick<LiquidationFieldSettings, "h
     : fixed[settings.horizon];
 }
 
-export function bybitOiIntervalForHorizon(horizon: LiquidationFieldHorizon) {
-  if (horizon === "6H" || horizon === "12H" || horizon === "1D") return "5min";
-  if (horizon === "3D") return "30min";
-  if (horizon === "1W") return "1h";
-  if (horizon === "3W" || horizon === "1M") return "4h";
-  return "1h";
+export function bybitOiIntervalForHorizon(_horizon: LiquidationFieldHorizon) {
+  // Cohort birth is owned by one canonical five-minute OI clock. The selected
+  // chart/model horizon changes only the requested history span; it must never
+  // change OI interval boundaries or cohort identity.
+  return BCLIF_BROWSER_OI_INTERVAL;
 }

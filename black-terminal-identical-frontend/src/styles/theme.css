@@ -6336,6 +6336,34 @@ body.resizing-layout * {
 .liquidation-field-cluster-label.short_liquidation {
   box-shadow: inset 2px 0 rgba(222, 226, 232, .62), 0 4px 16px rgba(0, 0, 0, .38);
 }
+.liquidation-field-cluster-label.provenance-enabled { pointer-events: auto; cursor: crosshair; }
+
+.liquidation-field-cohort-provenance {
+  position: absolute;
+  z-index: 20;
+  left: 18px;
+  top: 78px;
+  width: min(390px, calc(100% - 150px));
+  max-height: min(620px, calc(100% - 160px));
+  overflow: auto;
+  border: 1px solid rgba(126, 132, 143, .34);
+  border-radius: 9px;
+  background: linear-gradient(145deg, rgba(7, 8, 11, .95), rgba(0, 0, 2, .88));
+  color: #e9ebef;
+  font: 7px/1.35 "IBM Plex Mono", monospace;
+  backdrop-filter: blur(14px) saturate(118%);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, .52), inset 2px 0 rgba(208, 0, 36, .45);
+  pointer-events: auto;
+}
+.liquidation-field-cohort-provenance header,
+.liquidation-field-cohort-provenance > div,
+.liquidation-field-cohort-provenance footer { padding: 6px 9px; }
+.liquidation-field-cohort-provenance header { display: flex; justify-content: space-between; gap: 8px; letter-spacing: .08em; }
+.liquidation-field-cohort-provenance header span { color: #9aa0a9; }
+.liquidation-field-cohort-provenance > div { display: grid; grid-template-columns: 94px minmax(0, 1fr); gap: 8px; border-top: 1px solid rgba(124, 130, 140, .11); }
+.liquidation-field-cohort-provenance > div span { color: #777f8a; }
+.liquidation-field-cohort-provenance > div b { overflow: hidden; color: #eceef1; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.liquidation-field-cohort-provenance footer { border-top: 1px solid rgba(208, 0, 36, .2); color: #969ca5; }
 
 .liquidation-field-diagnostics { right: 456px; top: 48px; }
 

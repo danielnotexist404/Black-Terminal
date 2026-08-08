@@ -29,6 +29,8 @@ interface Props {
 export function LiquidationFieldOverlays({ visible, snapshot, settings, status, currentPrice, priceTransform }: Props) {
   const [summaryOffset, setSummaryOffset] = useState({ x: 0, y: 0 });
   const [summaryOpen, setSummaryOpen] = useState(true);
+  const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
+  const [hoveredClusterId, setHoveredClusterId] = useState<string | null>(null);
   const summaryDrag = useRef<{ pointerId: number; x: number; y: number; originX: number; originY: number } | null>(null);
   const clusters = useMemo(
     () => snapshot ? extractBclifOperationalClusters(snapshot, currentPrice, settings) : [],
@@ -67,6 +69,10 @@ export function LiquidationFieldOverlays({ visible, snapshot, settings, status, 
   const nearestLong = clusters.filter((cluster) => cluster.peakPrice < currentPrice).sort((a, b) => b.peakPrice - a.peakPrice)[0];
   const shortPressure = clusters.filter((cluster) => cluster.side === "SHORT_LIQUIDATION").reduce((sum, cluster) => sum + cluster.estimatedExposureHigh * cluster.rankScore, 0);
   const longPressure = clusters.filter((cluster) => cluster.side === "LONG_LIQUIDATION").reduce((sum, cluster) => sum + cluster.estimatedExposureHigh * cluster.rankScore, 0);
+  const focusedCluster = clusters.find((cluster) => cluster.id === (hoveredClusterId ?? selectedClusterId)) ?? labels[0];
+  const focusedCohorts = focusedCluster && snapshot
+    ? snapshot.cohorts.filter((cohort) => focusedCluster.cohortIds.includes(cohort.id))
+    : [];
   return <>
     <div
       className={`liquidation-field-provenance authority-${authority.toLowerCase()}`}
@@ -89,6 +95,12 @@ export function LiquidationFieldOverlays({ visible, snapshot, settings, status, 
       data-bclif-cluster-labels={labels.length}
       data-bclif-horizon-truth={horizonTruth}
       data-bclif-candle-contrast={settings.candleContrast}
+      data-bclif-provenance-coverage={clusters.length ? Math.min(...clusters.map((cluster) => cluster.provenanceCoverage)) : 0}
+      data-bclif-cohort-count={snapshot?.cohorts.length ?? 0}
+      data-bclif-birth-count={snapshot?.lifecycleEvents.filter((event) => event.kind === "BIRTH").length ?? 0}
+      data-bclif-contraction-count={snapshot?.lifecycleEvents.filter((event) => event.kind === "OI_CONTRACTION").length ?? 0}
+      data-bclif-confirmed-assimilation-count={snapshot?.lifecycleEvents.filter((event) => event.kind === "CONFIRMED_LIQUIDATION").length ?? 0}
+      data-bclif-mass-error={snapshot?.massLedger.conservationError ?? 0}
       aria-label={`BCLIF authority ${authority}`}
     >
       <b>{authority.replaceAll("_", " ")}</b>
@@ -142,11 +154,40 @@ export function LiquidationFieldOverlays({ visible, snapshot, settings, status, 
       const y = priceToScreenY(cluster.peakPrice, priceTransform);
       if (y === null || y < priceTransform.plotTop || y > priceTransform.plotBottom) return null;
       const evidence = classifyBclifEvidence(cluster.evidenceComposition).replaceAll("_", " ");
-      return <div key={cluster.id} className={`liquidation-field-cluster-label ${cluster.side.toLowerCase()}`} style={{ top: y }} title={`${evidence} · ${settings.visualChannel.replaceAll("_", " ")} · ${cluster.state}`}>
+      return <div
+        key={cluster.id}
+        className={`liquidation-field-cluster-label ${cluster.side.toLowerCase()} ${settings.cohortProvenanceVisible ? "provenance-enabled" : ""}`}
+        style={{ top: y }}
+        title={`${evidence} · ${settings.visualChannel.replaceAll("_", " ")} · ${cluster.state}`}
+        onPointerEnter={() => settings.cohortProvenanceVisible && setHoveredClusterId(cluster.id)}
+        onPointerLeave={() => setHoveredClusterId(null)}
+        onClick={() => settings.cohortProvenanceVisible && setSelectedClusterId((current) => current === cluster.id ? null : cluster.id)}
+      >
         <b>{cluster.side === "SHORT_LIQUIDATION" ? "SHORT LIQ" : "LONG LIQ"}</b>
         <span>{formatPriceRange(cluster.priceLow, cluster.priceHigh)} · {formatCompactUsd(cluster.estimatedExposureLow)}–{formatCompactUsd(cluster.estimatedExposureHigh)} · {cluster.confidence.toFixed(0)}%</span>
       </div>;
     })}
+
+    {settings.cohortProvenanceVisible && focusedCluster && <div className="liquidation-field-cohort-provenance" data-bclif-shelf-id={focusedCluster.id}>
+      <header><b>BCLIF — COHORT PROVENANCE</b><span>{focusedCluster.state}</span></header>
+      <ProvenanceRow label="Shelf ID" value={focusedCluster.id} />
+      <ProvenanceRow label="Price Range" value={formatPriceRange(focusedCluster.priceLow, focusedCluster.priceHigh)} />
+      <ProvenanceRow label="Creation" value={focusedCohorts.length ? new Date(Math.min(...focusedCohorts.map((cohort) => cohort.createdAt))).toISOString() : "UNAVAILABLE"} />
+      <ProvenanceRow label="Cohorts" value={`${focusedCluster.cohortOverlapCount} · ${(focusedCluster.provenanceCoverage * 100).toFixed(0)}% ATTRIBUTED`} />
+      <ProvenanceRow label="Cohort IDs" value={focusedCluster.cohortIds.join(", ") || "NO COHORT SIDECAR"} />
+      <ProvenanceRow label="OI Intervals" value={focusedCohorts.map((cohort) => `${cohort.sourceIntervalStart}-${cohort.sourceIntervalEnd}`).join(", ") || "UNAVAILABLE"} />
+      <ProvenanceRow label="Entry Ranges" value={focusedCohorts.map((cohort) => `${Math.round(cohort.entryLower)}-${Math.round(cohort.entryUpper)} ${cohort.entryDistribution.source}`).join(", ") || "UNAVAILABLE"} />
+      <ProvenanceRow label="Leverage" value={focusedCohorts.map((cohort) => `${cohort.leverageMean.toFixed(1)}x [${cohort.leverageLower}-${cohort.leverageUpper}]`).join(", ") || "UNAVAILABLE"} />
+      <ProvenanceRow label="Risk Tiers" value={[...new Set(focusedCohorts.flatMap((cohort) => cohort.riskTierDistribution.map((tier) => tier.tierId)))].join(", ") || "UNAVAILABLE"} />
+      <ProvenanceRow label="Margin" value={focusedCohorts.map((cohort) => cohort.marginMode).join(", ") || "UNAVAILABLE"} />
+      <ProvenanceRow label="Remaining" value={formatCompactUsd(focusedCohorts.reduce((sum, cohort) => sum + cohort.estimatedRemainingNotional, 0))} />
+      <ProvenanceRow label="Survival" value={focusedCohorts.length ? `${(focusedCohorts.reduce((sum, cohort) => sum + cohort.survivalProbability, 0) / focusedCohorts.length * 100).toFixed(1)}%` : "UNAVAILABLE"} />
+      <ProvenanceRow label="Confidence" value={`${focusedCluster.confidence.toFixed(1)}%`} />
+      <ProvenanceRow label="Evidence" value={focusedCohorts.flatMap((cohort) => cohort.evidenceChannels).filter((value, index, all) => all.indexOf(value) === index).join(", ") || "UNAVAILABLE"} />
+      <ProvenanceRow label="Last Event" value={focusedCohorts.map((cohort) => cohort.lastLifecycleEvent.kind).join(", ") || "UNAVAILABLE"} />
+      <ProvenanceRow label="Why It Exists" value={focusedCohorts.map((cohort) => cohort.creationReason).join(" · ") || "PERSISTENT TILE PROVENANCE SIDECAR UNAVAILABLE"} />
+      <footer>CONCENTRATION {(focusedCluster.exposureConcentration * 100).toFixed(2)}% · ENTROPY {(focusedCluster.priceEntropy * 100).toFixed(1)}% · WIDTH ${focusedCluster.shelfWidth.toFixed(2)}</footer>
+    </div>}
 
     {settings.legendVisible && <div className="liquidation-field-legend">
       <header><b>LIQUIDATION INTELLIGENCE</b><span>{horizonTruth}</span></header>
@@ -169,6 +210,9 @@ export function LiquidationFieldOverlays({ visible, snapshot, settings, status, 
       <div><span>DISPLAY GRID</span><b>{displayDimensions ? `${displayDimensions.columns}×${displayDimensions.rows}` : "—"}</b></div>
       <div><span>DISPLAY PRICE STEP</span><b>{displayPriceStep === null ? "—" : `$${displayPriceStep.toFixed(2)}`}</b></div>
       <div><span>DISPLAY TIME STEP</span><b>{snapshot && displayDimensions ? formatDuration((snapshot.header.endTime - snapshot.header.startTime) / Math.max(1, displayDimensions.columns - 1)) : "—"}</b></div>
+      <div><span>GRID ORIGIN / VERSION</span><b>{snapshot ? `${snapshot.header.gridOrigin ?? snapshot.header.minPrice} · ${snapshot.header.gridVersion ?? "LEGACY"}` : "—"}</b></div>
+      <div><span>COHORTS / PROVENANCE</span><b>{snapshot ? `${snapshot.cohorts.length} · ${clusters.length ? (Math.min(...clusters.map((cluster) => cluster.provenanceCoverage)) * 100).toFixed(0) : "100"}%` : "—"}</b></div>
+      <div><span>MASS CONSERVATION</span><b>{snapshot ? `${snapshot.massLedger.conservationError.toExponential(2)} / ${snapshot.massLedger.tolerance.toExponential(2)}` : "—"}</b></div>
       <footer>{status.error ?? status.message}</footer>
     </div>}
     {(status.state === "LOADING" || status.state === "ERROR" || status.state === "UNAVAILABLE") && <div className={`liquidation-field-status ${status.state.toLowerCase()}`}>
@@ -177,6 +221,10 @@ export function LiquidationFieldOverlays({ visible, snapshot, settings, status, 
       {status.state === "LOADING" && <i />}
     </div>}
   </>;
+}
+
+function ProvenanceRow({ label, value }: { label: string; value: string }) {
+  return <div><span>{label.toUpperCase()}</span><b title={value}>{value}</b></div>;
 }
 
 function ClusterSummary({ label, cluster, currentPrice }: { label: string; cluster: ReturnType<typeof extractBclifOperationalClusters>[number] | undefined; currentPrice: number }) {

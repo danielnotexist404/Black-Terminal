@@ -244,6 +244,16 @@ export function assemblePersistentLiquidationField(
     confirmedNotional,
     confirmedCount,
     cohorts: [],
+    massLedger: {
+      totalCreatedMass: 0,
+      voluntaryClosureMass: 0,
+      confirmedLiquidationMass: 0,
+      decayExpiryMass: 0,
+      totalRemainingMass: 0,
+      conservationError: 0,
+      tolerance: 0.01
+    },
+    lifecycleEvents: [],
     confirmedEvents: [],
     cascade: [],
     coverage,

@@ -297,7 +297,7 @@ await assert.rejects(
   "an unavailable supersession ledger must fail closed"
 );
 for (const expected of [
-  ["model_version", "BCLIF_MODEL_V4_CAUSAL"],
+  ["model_version", "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE"],
   ["schema_version", 2],
   ["tile_version", 1],
   ["compression", "gzip-v1"],
@@ -314,7 +314,7 @@ const missingBucketStatus = await readBclifStatus(makeSupabase({
     environment: "PRODUCTION",
     region: "eu",
     deployment_commit: "921c7a2",
-    model_version: "BCLIF_MODEL_V4_CAUSAL",
+    model_version: "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE",
     fencing_epoch: 7,
     lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
     status: "LIVE",
@@ -334,7 +334,7 @@ const degradedStatus = await readBclifStatus(makeSupabase({
     environment: "PRODUCTION",
     region: "eu",
     deployment_commit: "921c7a2",
-    model_version: "BCLIF_MODEL_V4_CAUSAL",
+    model_version: "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE",
     fencing_epoch: 7,
     lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
     status: "DEGRADED",
@@ -358,7 +358,7 @@ const expiredLeaseStatus = await readBclifStatus(makeSupabase({
     environment: "PRODUCTION",
     region: "eu",
     deployment_commit: "921c7a2",
-    model_version: "BCLIF_MODEL_V4_CAUSAL",
+    model_version: "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE",
     status: "LIVE",
     lifecycle_state: "LIVE",
     started_at: new Date().toISOString(),
@@ -379,7 +379,7 @@ const authorityNode = (instanceId, epoch) => ({
   environment: "PRODUCTION",
   region: "eu",
   deployment_commit: "921c7a2",
-  model_version: "BCLIF_MODEL_V4_CAUSAL",
+  model_version: "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE",
   status: "LIVE",
   lifecycle_state: "LIVE",
   started_at: new Date().toISOString(),
@@ -436,7 +436,7 @@ await assert.rejects(
 );
 assert.equal(replayLiveTileSupabase.downloadedPath, null);
 for (const expected of [
-  ["model_version", "BCLIF_MODEL_V4_CAUSAL"],
+  ["model_version", "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE"],
   ["schema_version", 2],
   ["tile_version", 1],
   ["compression", "gzip-v1"],
@@ -535,7 +535,7 @@ function tileRow() {
   return {
     id: tileId,
     source_id: "source-1",
-    model_version: "BCLIF_MODEL_V4_CAUSAL",
+    model_version: "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE",
     horizon: "1D",
     chunk_start: new Date(startMs).toISOString(),
     chunk_end: new Date(startMs + 60000).toISOString(),

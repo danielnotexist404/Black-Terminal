@@ -57,7 +57,8 @@ export async function fetchBybitRiskRules(symbolValue: string, instrument: Instr
     riskTiers: tiers,
     fetchedAt: Date.now(),
     sourceVersion,
-    certainty: "OBSERVED"
+    certainty: "OBSERVED",
+    tickSize: instrument.tickSize
   };
 }
 

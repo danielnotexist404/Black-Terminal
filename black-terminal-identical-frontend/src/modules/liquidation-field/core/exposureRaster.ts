@@ -71,7 +71,7 @@ function buildCascade(
       .sort((a, b) => Math.abs(a.liquidationPrice - frame.markPrice) - Math.abs(b.liquidationPrice - frame.markPrice));
     const trigger = relevant[0];
     const next = relevant.find((particle) => trigger && Math.abs(particle.liquidationPrice - trigger.liquidationPrice) > priceStep * 3);
-    const forced = trigger ? trigger.notional * trigger.survival * trigger.weight : 0;
+    const forced = trigger ? trigger.notional * trigger.weight : 0;
     const absorption = depthCapacity(frame, direction);
     const observedDepth = (direction === "UP" ? frame.askDepthCurve : frame.bidDepthCurve).certainty === "OBSERVED";
     const ratio = forced > 0 && observedDepth ? forced / Math.max(1, absorption) : 0;
@@ -107,17 +107,19 @@ export function buildLiquidationFieldSnapshot(
   if (!frames.length) throw new Error("BCLIF requires at least one canonical market frame");
   const events = [...sourceEvents].sort((a, b) => a.timestamp - b.timestamp);
   const selectedIndices = outputFrameIndices(frames, settings);
-  // Anchor the price lattice to information available at the first source
-  // cutoff. Using the eventual range of the full replay would let a future
-  // price extreme move every earlier raster row.
+  // A versioned origin-zero price lattice is chosen once from the first
+  // canonical source frame. Later price swings and appended data cannot move
+  // earlier rows. The display may resample this authoritative field, but does
+  // not redefine it.
   const anchorFrame = frames[0]!;
-  const minimumObserved = Math.min(anchorFrame.markPrice, anchorFrame.lastPrice);
-  const maximumObserved = Math.max(anchorFrame.markPrice, anchorFrame.lastPrice);
   const leverageEnvelope = Math.max(0.08, Math.min(0.52, 1 / Math.max(2, settings.leverageMinimum) + 0.025));
-  const minPrice = Math.max(1e-8, minimumObserved * (1 - leverageEnvelope));
-  const maxPrice = maximumObserved * (1 + leverageEnvelope);
   const rows = settings.priceRows;
-  const priceStep = (maxPrice - minPrice) / Math.max(1, rows - 1);
+  const { minPrice, maxPrice, priceStep, gridOrigin, gridVersion } = stableBrowserPriceGrid(
+    anchorFrame.markPrice,
+    rules.tickSize ?? 0,
+    rows,
+    leverageEnvelope
+  );
   const columns = selectedIndices.size;
   const longExposure = new Float32Array(columns * rows);
   const shortExposure = new Float32Array(columns * rows);
@@ -127,7 +129,15 @@ export function buildLiquidationFieldSnapshot(
   const confirmedNotional = new Float32Array(columns * rows);
   const confirmedCount = new Uint16Array(columns * rows);
   const timestamps = new Float64Array(columns);
-  const cohortEngine = new LiquidationCohortEngine(rules, settings.modelPreset);
+  const cohortEngine = new LiquidationCohortEngine(rules, settings.modelPreset, {
+    oiNoiseMethod: settings.oiNoiseMethod,
+    oiNoiseAbsoluteNotionalUsd: settings.oiNoiseAbsoluteNotionalUsd,
+    oiNoisePercent: settings.oiNoisePercent,
+    oiNoiseMadMultiplier: settings.oiNoiseMadMultiplier,
+    isolatedContributionCap: settings.isolatedContributionCap,
+    crossContributionCap: settings.crossContributionCap,
+    unknownContributionCap: settings.unknownContributionCap
+  });
   let column = 0;
   let latestState = cohortEngine.snapshot();
   let latestConfidence = confidenceForFrame(frames[0]!);
@@ -191,7 +201,8 @@ export function buildLiquidationFieldSnapshot(
     validity,
     columns,
     rows,
-    settings
+    settings,
+    64
   );
   const { normalized: longNormalizedIntensity } = normalizeExposureCausal(
     longExposure,
@@ -199,7 +210,8 @@ export function buildLiquidationFieldSnapshot(
     validity,
     columns,
     rows,
-    settings
+    settings,
+    64
   );
   const { normalized: shortNormalizedIntensity } = normalizeExposureCausal(
     shortExposure,
@@ -207,7 +219,8 @@ export function buildLiquidationFieldSnapshot(
     validity,
     columns,
     rows,
-    settings
+    settings,
+    64
   );
   const lastFrame = frames.at(-1)!;
   const cascade = buildCascade(lastFrame, latestState.particles, priceStep);
@@ -228,6 +241,8 @@ export function buildLiquidationFieldSnapshot(
       rows,
       timeStepMs: columns > 1 ? Math.max(1, (timestamps.at(-1)! - timestamps[0]!) / (columns - 1)) : 1,
       priceStep,
+      gridOrigin,
+      gridVersion,
       exposureScale: Math.expm1(high),
       confidenceScale: 255,
       compression: "rgba8-gpu-v1",
@@ -246,6 +261,8 @@ export function buildLiquidationFieldSnapshot(
     confirmedNotional,
     confirmedCount,
     cohorts: latestState.cohorts,
+    massLedger: latestState.massLedger,
+    lifecycleEvents: latestState.lifecycleEvents,
     confirmedEvents: events.filter((event) => event.timestamp >= timestamps[0]! && event.timestamp <= timestamps.at(-1)!),
     cascade,
     coverage,
@@ -264,6 +281,29 @@ export function buildLiquidationFieldSnapshot(
   };
 }
 
+export function stableBrowserPriceGrid(
+  anchorPrice: number,
+  tickSize: number,
+  rows: number,
+  leverageEnvelope: number
+) {
+  if (!(anchorPrice > 0) || !Number.isSafeInteger(rows) || rows < 2) throw new Error("BCLIF stable grid input is invalid");
+  const safeTick = tickSize > 0 ? tickSize : 10 ** Math.floor(Math.log10(anchorPrice) - 5);
+  const symmetricEnvelope = Math.max(0.6, leverageEnvelope * 1.35);
+  const requiredMinimum = Math.max(safeTick, anchorPrice * (1 - symmetricEnvelope));
+  const requiredMaximum = anchorPrice * (1 + symmetricEnvelope);
+  const anchoredMinimum = Math.max(safeTick, Math.floor(requiredMinimum / safeTick) * safeTick);
+  const rawStep = (requiredMaximum - anchoredMinimum) / Math.max(1, rows - 1);
+  const decade = 10 ** Math.floor(Math.log10(Math.max(safeTick, rawStep)));
+  const normalized = rawStep / decade;
+  const quantum = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10;
+  const priceStep = Math.max(safeTick, Math.ceil(quantum * decade / safeTick) * safeTick);
+  const gridOrigin = 0;
+  const minPrice = Math.floor(anchoredMinimum / priceStep) * priceStep;
+  const maxPrice = minPrice + priceStep * (rows - 1);
+  return { minPrice, maxPrice, priceStep, gridOrigin, gridVersion: "BCLIF_ANCHORED_NICE_STEP_V2" };
+}
+
 function rasterizeParticles(
   particles: readonly LiquidationExposureParticle[],
   longExposure: Float32Array,
@@ -278,7 +318,9 @@ function rasterizeParticles(
     if (particle.leverage < settings.leverageMinimum || particle.leverage > settings.leverageMaximum) continue;
     if (settings.sideFilter === "LONG" && particle.side !== "LONG") continue;
     if (settings.sideFilter === "SHORT" && particle.side !== "SHORT") continue;
-    const effectiveNotional = particle.notional * particle.survival * particle.weight;
+    // particle.notional is synchronized to the cohort's already decayed
+    // remaining mass. Applying survival again here would double-discount it.
+    const effectiveNotional = particle.notional * particle.weight;
     if (effectiveNotional < settings.minimumNotionalUsd) continue;
     // Confidence is encoded separately and applied by the renderer. Filtering
     // here would turn honest low-confidence historical coverage into a false

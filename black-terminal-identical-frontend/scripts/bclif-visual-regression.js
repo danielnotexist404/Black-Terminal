@@ -9,6 +9,7 @@ const manifestPath = join(goldenRoot, "manifest.json");
 const artifactRoot = join(root, "tests", ".artifacts", "bclif");
 const updateGoldens = process.env.BCLIF_UPDATE_GOLDENS === "1";
 const resumeGoldens = process.env.BCLIF_RESUME_GOLDENS === "1";
+const resumeComparison = process.env.BCLIF_RESUME_COMPARISON === "1";
 const browserExecutable = process.env.BCLIF_BROWSER_EXECUTABLE || "/usr/bin/brave-browser";
 const requestedViewport = process.env.BCLIF_VISUAL_VIEWPORT || "";
 const requestedFixture = process.env.BCLIF_VISUAL_CASE || "";
@@ -25,12 +26,14 @@ if (updateGoldens && resumeGoldens) {
     const baselinePath = join(goldenRoot, entry.baseline);
     if (!existsSync(baselinePath)) continue;
     entry.status = "CERTIFIED";
+    entry.comparisonStatus = "PENDING";
+    delete entry.comparedAt;
     entry.sha256 = sha256(readFileSync(baselinePath));
     entry.recordedAt ||= new Date().toISOString();
   }
 }
 if (!updateGoldens && (String(manifest.certificationStatus || "").startsWith("BLOCKED_") || manifestCases.some((entry) => entry.status !== "CERTIFIED"))) {
-  skip("BASELINES_STALE", "The Chapter III-C2 visual baselines must be regenerated and reviewed before certification.", {
+  skip("BASELINES_STALE", "The Chapter III-C3 visual baselines must be regenerated and reviewed before certification.", {
     certificationStatus: manifest.certificationStatus || null,
     blocker: manifest.blocker || null
   });
@@ -38,9 +41,11 @@ if (!updateGoldens && (String(manifest.certificationStatus || "").startsWith("BL
 const cases = manifestCases.filter((entry) => {
   const viewportMatches = !requestedViewport || `${entry.width}x${entry.height}` === requestedViewport;
   const selected = viewportMatches && (!requestedFixture || entry.fixture === requestedFixture);
-  return selected && !(updateGoldens && resumeGoldens && entry.status === "CERTIFIED");
+  return selected
+    && !(updateGoldens && resumeGoldens && entry.status === "CERTIFIED")
+    && !(!updateGoldens && resumeComparison && entry.comparisonStatus === "PASS");
 });
-if (!cases.length && !(updateGoldens && resumeGoldens)) skip("MANIFEST_EMPTY", "No BCLIF visual cases matched the requested filters.");
+if (!cases.length && !(updateGoldens && resumeGoldens) && !resumeComparison) skip("MANIFEST_EMPTY", "No BCLIF visual cases matched the requested filters.");
 const missing = cases.filter((entry) => !existsSync(join(goldenRoot, entry.baseline)));
 if (missing.length && !updateGoldens) skip("GOLDENS_MISSING", "One or more BCLIF goldens are missing.", { missing: missing.map((entry) => entry.baseline) });
 
@@ -130,14 +135,21 @@ try {
         summaryVisible: Boolean(document.querySelector(".liquidation-field-operational-summary")),
         texturePreparationAndUpdateMs: Number(metrics.texturePreparationAndUpdateMs),
         displayCells: Number(metrics.cells),
-        yellowEligibleCells: Number(metrics.yellowEligibleCells)
+        yellowEligibleCells: Number(metrics.yellowEligibleCells),
+        provenanceCoverage: Number(node.getAttribute("data-bclif-provenance-coverage")),
+        cohortCount: Number(node.getAttribute("data-bclif-cohort-count")),
+        birthCount: Number(node.getAttribute("data-bclif-birth-count")),
+        contractionCount: Number(node.getAttribute("data-bclif-contraction-count")),
+        confirmedAssimilationCount: Number(node.getAttribute("data-bclif-confirmed-assimilation-count")),
+        massError: Number(node.getAttribute("data-bclif-mass-error")),
+        provenancePanelVisible: Boolean(document.querySelector(".liquidation-field-cohort-provenance"))
       };
     });
     const expectedAuthority = testCase.fixture === "BROWSER_FALLBACK" ? "BROWSER_FALLBACK"
       : testCase.fixture === "PERSISTENT_NODE" ? "PERSISTENT_NODE" : "TEST_FIXTURE";
     const expectedPersistence = testCase.fixture === "PERSISTENT_NODE" ? "ON" : "OFF";
     const expectedPriceDisplay = testCase.fixture === "FULL_SPECTRUM_RESEARCH" ? "FULL_MODEL_RANGE" : "CHART_SCALE";
-    const expectedCandleContrast = testCase.fixture === "HIGH_CONFIDENCE" ? "MAXIMUM" : "HIGH";
+    const expectedCandleContrast = "HIGH";
     const yellowTailRatio = audit.displayCells > 0 ? audit.yellowEligibleCells / audit.displayCells : Number.NaN;
     if (
       audit.authority !== expectedAuthority
@@ -157,7 +169,11 @@ try {
       || audit.labels < 0
       || audit.labels > (testCase.fixture === "HIGH_CONFIDENCE" ? 6 : 4)
       || !Number.isFinite(audit.texturePreparationAndUpdateMs)
+      || audit.texturePreparationAndUpdateMs >= 16.7
+      || !Number.isFinite(audit.massError)
+      || Math.abs(audit.massError) > 0.01
     ) throw new Error(`BCLIF ${testCase.fixture} precondition failed: ${JSON.stringify(audit)}`);
+    assertAuthenticFixture(audit, testCase.fixture);
     assertDisplayDomain(audit, testCase.fixture);
 
     const frame = updateGoldens
@@ -170,8 +186,12 @@ try {
     if (updateGoldens) {
       writeFileSync(baselinePath, screenshot);
       testCase.status = "CERTIFIED";
+      testCase.comparisonStatus = "PENDING";
+      delete testCase.comparedAt;
       testCase.sha256 = sha256(screenshot);
       testCase.recordedAt = new Date().toISOString();
+      testCase.audit = audit;
+      writeManifestProgress(manifestPath, manifest);
       results.push({ fixture: testCase.fixture, viewport: `${testCase.width}x${testCase.height}`, decision: "UPDATED", audit, frame });
     } else {
       const baseline = readFileSync(baselinePath);
@@ -181,6 +201,10 @@ try {
       const thresholds = testCase.thresholds || {};
       const passed = comparison.ssim >= Number(thresholds.ssimMinimum ?? 0.985)
         && comparison.meanPerceptualDelta <= Number(thresholds.meanPerceptualDeltaMaximum ?? 0.025);
+      testCase.comparisonStatus = passed ? "PASS" : "FAIL";
+      testCase.comparedAt = new Date().toISOString();
+      testCase.audit = audit;
+      writeManifestProgress(manifestPath, manifest);
       results.push({
         fixture: testCase.fixture, viewport: `${testCase.width}x${testCase.height}`,
         decision: passed ? "PASS" : "FAIL", comparison, audit, frame,
@@ -191,16 +215,29 @@ try {
     await context.close();
     if (pageErrors.length) throw new Error(`BCLIF browser page errors: ${pageErrors.join(" | ")}`);
   }
-  if (!requestedFixture && !requestedViewport && !resumeGoldens) assertHashSeparation(results);
+  if (!requestedFixture && !resumeGoldens) {
+    const scopedEntries = manifestCases.filter((entry) => !requestedViewport || `${entry.width}x${entry.height}` === requestedViewport);
+    if (scopedEntries.length && scopedEntries.every((entry) => entry.audit)) {
+      assertHashSeparation(scopedEntries.map((entry) => ({ fixture: entry.fixture, viewport: `${entry.width}x${entry.height}`, audit: entry.audit })));
+    } else if (!resumeComparison) {
+      assertHashSeparation(results);
+    }
+  }
   if (updateGoldens) {
     if (manifestCases.every((entry) => entry.status === "CERTIFIED" && existsSync(join(goldenRoot, entry.baseline)))) {
       manifest.certificationStatus = "RECORDED_PENDING_COMPARISON";
       delete manifest.blocker;
     }
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  } else if (!requestedFixture && !requestedViewport) {
-    manifest.certificationStatus = "CERTIFIED";
-    manifest.certifiedAt = new Date().toISOString();
+  } else {
+    if (manifestCases.every((entry) => entry.status === "CERTIFIED" && entry.comparisonStatus === "PASS")) {
+      manifest.certificationStatus = "CERTIFIED";
+      manifest.certifiedAt = new Date().toISOString();
+      delete manifest.blocker;
+    } else {
+      manifest.certificationStatus = "RECORDED_PENDING_COMPARISON";
+      delete manifest.certifiedAt;
+    }
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   }
 } catch (error) {
@@ -212,15 +249,20 @@ try {
 
 console.log(JSON.stringify({
   decision: failure ? "FAIL" : updateGoldens ? "UPDATED" : "PASS",
-  fixture: "BCLIF_OPERATIONAL_CLARITY_V1",
+  fixture: "BCLIF_AUTHENTIC_EXPOSURE_V1",
   renderer: "PIXI_SINGLE_TEXTURE_WORKER_PROJECTED",
   comparison: "full-resolution capture + whole-frame 960px luminance SSIM/perceptual sample",
   browserExecutable,
   cases: results.length,
+  performance: summarizeVisualPerformance(results),
   results,
   error: failure instanceof Error ? failure.message : failure ? String(failure) : undefined
 }, null, 2));
 if (failure) process.exitCode = 1;
+
+function writeManifestProgress(path, value) {
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+}
 
 function assertDisplayDomain(audit, fixture) {
   const pair = (value) => String(value || "").split(":").map(Number);
@@ -238,22 +280,65 @@ function assertDisplayDomain(audit, fixture) {
 }
 
 function assertHashSeparation(results) {
-  const comparable = results.filter((entry) => entry.fixture !== "MISSING_DATA");
+  const presentationCases = new Set(["COHORT_PROVENANCE", "TRADE_FOCUS", "FULL_SPECTRUM_RESEARCH", "BROWSER_FALLBACK", "PERSISTENT_NODE"]);
+  const comparable = results.filter((entry) => presentationCases.has(entry.fixture));
   const model = new Set(comparable.map((entry) => entry.audit.modelHash));
   const exposure = new Set(comparable.map((entry) => entry.audit.exposureHash));
   const render = new Set(comparable.map((entry) => entry.audit.renderSettingsHash));
   const raster = new Set(comparable.map((entry) => entry.audit.displayRasterHash));
   if (model.size !== 1) throw new Error(`Presentation changed MODEL identity: ${[...model].join(",")}`);
   if (exposure.size !== 1) throw new Error(`Presentation changed EXPOSURE identity: ${[...exposure].join(",")}`);
-  if (render.size < 4) throw new Error("Preset fixtures did not produce distinct RENDER SETTINGS identities.");
-  if (raster.size < 4) throw new Error("Preset/viewports did not produce distinct DISPLAY RASTER identities.");
-  for (const viewport of ["1920x1080", "2560x1440", "3840x2160"]) {
+  if (render.size < 2) throw new Error("Presentation fixtures did not produce distinct RENDER SETTINGS identities.");
+  if (raster.size < 3) throw new Error("Presentation/viewports did not produce distinct DISPLAY RASTER identities.");
+  for (const viewport of [...new Set(comparable.map((entry) => entry.viewport))]) {
     const browser = results.find((entry) => entry.fixture === "BROWSER_FALLBACK" && entry.viewport === viewport);
     const persistent = results.find((entry) => entry.fixture === "PERSISTENT_NODE" && entry.viewport === viewport);
     if (!browser || !persistent || browser.audit.displayRasterHash === persistent.audit.displayRasterHash) {
       throw new Error(`Evidence authority did not separate DISPLAY RASTER identity at ${viewport}.`);
     }
   }
+}
+
+function assertAuthenticFixture(audit, fixture) {
+  const completeModelFixtures = new Set([
+    "COHORT_PROVENANCE", "TRADE_FOCUS", "FULL_SPECTRUM_RESEARCH", "BROWSER_FALLBACK", "PERSISTENT_NODE"
+  ]);
+  if (completeModelFixtures.has(fixture) && (audit.cohortCount !== 6 || audit.birthCount !== 6)) {
+    throw new Error(`Presentation fixture was captured before the complete cohort model was ready: ${JSON.stringify(audit)}`);
+  }
+  if (fixture === "SWING_INDEPENDENCE" && (audit.cohortCount !== 0 || audit.birthCount !== 0 || audit.labels !== 0)) {
+    throw new Error(`Flat-OI swing fixture created false shelves: ${JSON.stringify(audit)}`);
+  }
+  if (fixture === "OI_EXPANSION" && (audit.cohortCount !== 2 || audit.birthCount !== 2 || audit.contractionCount !== 0)) {
+    throw new Error(`OI expansion fixture violated paired birth semantics: ${JSON.stringify(audit)}`);
+  }
+  if (fixture === "OI_CONTRACTION" && (audit.birthCount !== 6 || audit.contractionCount < 1)) {
+    throw new Error(`OI contraction fixture did not reduce born cohorts: ${JSON.stringify(audit)}`);
+  }
+  if (fixture === "CONFIRMED_LIQUIDATION" && audit.confirmedAssimilationCount < 1) {
+    throw new Error(`Confirmed-liquidation fixture did not assimilate an event: ${JSON.stringify(audit)}`);
+  }
+  if (fixture === "COHORT_PROVENANCE" && (!audit.provenancePanelVisible || audit.provenanceCoverage !== 1)) {
+    throw new Error(`Cohort provenance fixture is not fully attributable: ${JSON.stringify(audit)}`);
+  }
+}
+
+function summarizeVisualPerformance(results) {
+  const summarize = (values) => {
+    const ordered = values.filter(Number.isFinite).sort((left, right) => left - right);
+    if (!ordered.length) return { samples: 0, p50Ms: null, p95Ms: null, p99Ms: null };
+    const percentile = (quantile) => ordered[Math.min(ordered.length - 1, Math.floor((ordered.length - 1) * quantile))];
+    return {
+      samples: ordered.length,
+      p50Ms: Number(percentile(0.5).toFixed(3)),
+      p95Ms: Number(percentile(0.95).toFixed(3)),
+      p99Ms: Number(percentile(0.99).toFixed(3))
+    };
+  };
+  return {
+    texturePreparationAndGpuUpdate: summarize(results.map((entry) => entry.audit.texturePreparationAndUpdateMs)),
+    headlessAnimationFrameP95: summarize(results.map((entry) => entry.frame?.p95Ms))
+  };
 }
 
 async function measureAnimationFrames(page) {

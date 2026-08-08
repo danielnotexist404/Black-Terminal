@@ -68,27 +68,46 @@ export function normalizeExposureCausal(
   let lastLow = 0;
   let lastHigh = 1e-6;
   const windowSize = Math.max(1, Math.min(columns, Math.round(trailingColumns)));
+  // Fixed-domain log histograms preserve causal rolling quantiles without
+  // repeatedly sorting up to 64 complete price columns. The domain covers
+  // log1p notionals far beyond the model's bounded USD mass.
+  const histogramBins = 4_096;
+  const maximumLogExposure = 40;
+  const windowHistogram = new Uint32Array(histogramBins);
+  const queuedColumns: Uint16Array[] = [];
+  let windowPopulation = 0;
 
   for (let column = 0; column < columns; column++) {
-    const values: number[] = [];
-    const firstColumn = Math.max(0, column - windowSize + 1);
-    for (let sourceColumn = firstColumn; sourceColumn <= column; sourceColumn++) {
-      const start = sourceColumn * rows;
-      for (let row = 0; row < rows; row++) {
-        const index = start + row;
-        if (!validity[index] || exposure[index]! <= 0) continue;
-        const value = confidenceAdjustedLogExposure(exposure[index]!, confidence[index]!, settings);
-        if (Number.isFinite(value) && value > 0) values.push(value);
+    const columnHistogram = new Uint16Array(histogramBins);
+    const start = column * rows;
+    for (let row = 0; row < rows; row++) {
+      const index = start + row;
+      if (!validity[index] || exposure[index]! <= 0) continue;
+      const value = confidenceAdjustedLogExposure(exposure[index]!, confidence[index]!, settings);
+      if (!Number.isFinite(value) || value <= 0) continue;
+      const bin = Math.max(0, Math.min(histogramBins - 1,
+        Math.floor(value / maximumLogExposure * (histogramBins - 1))));
+      columnHistogram[bin] = Math.min(65_535, columnHistogram[bin]! + 1);
+      windowHistogram[bin] = windowHistogram[bin]! + 1;
+      windowPopulation += 1;
+    }
+    queuedColumns.push(columnHistogram);
+    if (queuedColumns.length > windowSize) {
+      const expired = queuedColumns.shift()!;
+      for (let bin = 0; bin < histogramBins; bin++) {
+        const count = expired[bin]!;
+        if (!count) continue;
+        windowHistogram[bin] = windowHistogram[bin]! - count;
+        windowPopulation -= count;
       }
     }
-    values.sort((a, b) => a - b);
-    if (values.length) {
-      lastLow = quantile(values, settings.lowQuantile);
-      lastHigh = Math.max(lastLow + 1e-6, quantile(values, settings.highQuantile));
+    if (windowPopulation > 0) {
+      lastLow = histogramQuantile(windowHistogram, windowPopulation, settings.lowQuantile, maximumLogExposure);
+      lastHigh = Math.max(lastLow + 1e-6,
+        histogramQuantile(windowHistogram, windowPopulation, settings.highQuantile, maximumLogExposure));
     }
     lows[column] = lastLow;
     highs[column] = lastHigh;
-    const start = column * rows;
     for (let row = 0; row < rows; row++) {
       const index = start + row;
       if (!validity[index] || exposure[index]! <= 0) continue;
@@ -98,6 +117,21 @@ export function normalizeExposureCausal(
     }
   }
   return { normalized, lows, highs, low: lows.at(-1) ?? 0, high: highs.at(-1) ?? 1e-6 };
+}
+
+function histogramQuantile(
+  histogram: Uint32Array,
+  population: number,
+  quantileValue: number,
+  maximum: number
+) {
+  const target = Math.max(0, Math.min(population - 1, quantileValue * (population - 1)));
+  let cumulative = 0;
+  for (let bin = 0; bin < histogram.length; bin++) {
+    cumulative += histogram[bin]!;
+    if (cumulative > target) return (bin + 0.5) / histogram.length * maximum;
+  }
+  return maximum;
 }
 
 function gaussianKernel(sigma: number) {

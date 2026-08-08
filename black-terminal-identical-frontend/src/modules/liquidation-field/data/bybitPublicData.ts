@@ -1,6 +1,7 @@
 import type { Candle } from "../../../chart-engine/types.ts";
 import { marketDataFetchJson } from "../../../market-data/transport.ts";
-import { liquidationHorizonMs, bybitOiIntervalForHorizon } from "../core/settings.ts";
+import { buildCohortEntryDistribution } from "../core/entryDistribution.ts";
+import { BCLIF_BROWSER_OI_INTERVAL, liquidationHorizonMs } from "../core/settings.ts";
 import type {
   LiquidationCoverage,
   LiquidationFieldSettings,
@@ -18,6 +19,8 @@ type RiskResult = { list: Array<{ id: number; riskLimitValue: string; maintenanc
 type TickerResult = { list: Array<{ lastPrice: string; markPrice: string; indexPrice: string; openInterest: string; singleOpenInterest?: string; fundingRate?: string; bid1Price?: string; ask1Price?: string }> };
 type AccountRatioResult = { list: Array<{ buyRatio: string; sellRatio: string; timestamp: string }> };
 type FundingResult = { list: Array<{ fundingRate: string; fundingRateTimestamp: string }> };
+type KlineResult = { list: Array<[string, string, string, string, string, string, string]> };
+type InstrumentResult = { list: Array<{ priceFilter?: { tickSize?: string } }> };
 
 async function bybitGet<T>(path: string, params: URLSearchParams, signal?: AbortSignal) {
   const payload = await marketDataFetchJson<BybitEnvelope<T>>(`${BYBIT_REST}${path}?${params}`, { signal });
@@ -29,7 +32,7 @@ async function fetchBybitOiHistory(params: URLSearchParams, signal?: AbortSignal
   const list: OiResult["list"] = [];
   let cursor = "";
   const seen = new Set<string>();
-  for (let page = 0; page < 20; page++) {
+  for (let page = 0; page < 200; page++) {
     const pageParams = new URLSearchParams(params);
     if (cursor) pageParams.set("cursor", cursor);
     const result = await bybitGet<OiResult>("/v5/market/open-interest", pageParams, signal);
@@ -40,6 +43,56 @@ async function fetchBybitOiHistory(params: URLSearchParams, signal?: AbortSignal
     cursor = next;
   }
   return { list };
+}
+
+async function fetchBybitCanonicalKlines(symbol: string, startTime: number, endTime: number, signal?: AbortSignal) {
+  const rows: Array<{ time: number; open: number; high: number; low: number; close: number; volume: number; turnover: number }> = [];
+  let cursorEnd = endTime;
+  for (let page = 0; page < 100 && cursorEnd >= startTime; page += 1) {
+    const result = await bybitGet<KlineResult>("/v5/market/kline", new URLSearchParams({
+      category: "linear",
+      symbol,
+      interval: "5",
+      start: String(startTime),
+      end: String(cursorEnd),
+      limit: "1000"
+    }), signal);
+    if (!result.list?.length) break;
+    let earliest = Infinity;
+    for (const row of result.list) {
+      const time = finite(row[0]);
+      earliest = Math.min(earliest, time);
+      rows.push({
+        time,
+        open: finite(row[1]),
+        high: finite(row[2]),
+        low: finite(row[3]),
+        close: finite(row[4]),
+        volume: finite(row[5]),
+        turnover: finite(row[6])
+      });
+    }
+    if (!Number.isFinite(earliest) || earliest <= startTime) break;
+    cursorEnd = earliest - 1;
+    if (page === 99) throw new Error("Bybit canonical kline history exceeded pagination safety bound");
+  }
+  const unique = new Map<number, (typeof rows)[number]>();
+  for (const row of rows) if (row.time >= startTime && row.time <= endTime && row.close > 0) unique.set(row.time, row);
+  return [...unique.values()].sort((left, right) => left.time - right.time);
+}
+
+function candlesInOiInterval<T extends { time: number }>(candles: readonly T[], startExclusive: number, endInclusive: number) {
+  const firstAfter = (timestamp: number) => {
+    let low = 0;
+    let high = candles.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (candles[middle]!.time <= timestamp) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
+  return candles.slice(firstAfter(startExclusive), firstAfter(endInclusive));
 }
 
 function finite(value: unknown, fallback = 0) {
@@ -108,7 +161,7 @@ export interface BybitLiquidationBootstrap {
 }
 
 export async function bootstrapBybitLiquidationField(
-  sourceCandles: readonly Candle[],
+  _sourceCandles: readonly Candle[],
   rawSymbol: string,
   settings: LiquidationFieldSettings,
   signal?: AbortSignal
@@ -119,7 +172,9 @@ export async function bootstrapBybitLiquidationField(
   const oiParams = new URLSearchParams({
     category: "linear",
     symbol,
-    intervalTime: bybitOiIntervalForHorizon(settings.horizon),
+    // The inventory clock is fixed and does not inherit chart timeframe or
+    // presentation horizon. Horizon selects only the requested span.
+    intervalTime: BCLIF_BROWSER_OI_INTERVAL,
     startTime: String(requestedStart),
     endTime: String(requestedEnd),
     limit: "200"
@@ -127,20 +182,24 @@ export async function bootstrapBybitLiquidationField(
   const tickerParams = new URLSearchParams({ category: "linear", symbol });
   const ratioParams = new URLSearchParams({
     category: "linear", symbol,
-    period: bybitOiIntervalForHorizon(settings.horizon),
+    period: "1h",
     limit: "500"
   });
   const fundingParams = new URLSearchParams({
     category: "linear", symbol,
     startTime: String(requestedStart), endTime: String(requestedEnd), limit: "200"
   });
-  const [rules, oiResult, tickerResult, ratioResult, fundingResult] = await Promise.all([
+  const [rules, oiResult, tickerResult, ratioResult, fundingResult, canonicalKlines, instrumentResult] = await Promise.all([
     fetchBybitRiskRules(symbol, signal),
     fetchBybitOiHistory(oiParams, signal).catch(() => ({ list: [] })),
     bybitGet<TickerResult>("/v5/market/tickers", tickerParams, signal).catch(() => ({ list: [] })),
     bybitGet<AccountRatioResult>("/v5/market/account-ratio", ratioParams, signal).catch(() => ({ list: [] })),
-    bybitGet<FundingResult>("/v5/market/funding/history", fundingParams, signal).catch(() => ({ list: [] }))
+    bybitGet<FundingResult>("/v5/market/funding/history", fundingParams, signal).catch(() => ({ list: [] })),
+    fetchBybitCanonicalKlines(symbol, requestedStart, requestedEnd, signal),
+    bybitGet<InstrumentResult>("/v5/market/instruments-info", new URLSearchParams({ category: "linear", symbol }), signal).catch(() => ({ list: [] }))
   ]);
+  const tickSize = finite(instrumentResult.list[0]?.priceFilter?.tickSize, 0);
+  if (tickSize > 0) rules.tickSize = tickSize;
   const ticker = tickerResult.list[0];
   const oiPoints = oiResult.list.map((item) => ({
     timestamp: finite(item.timestamp),
@@ -155,13 +214,12 @@ export async function bootstrapBybitLiquidationField(
     timestamp: finite(item.fundingRateTimestamp), rate: finite(item.fundingRate)
   })).filter((point) => point.timestamp > 0).sort((a, b) => a.timestamp - b.timestamp);
 
-  const candles = sourceCandles
-    .filter((candle) => candle.time * 1_000 >= requestedStart - 24 * 60 * 60 * 1_000)
-    .sort((a, b) => a.time - b.time);
+  const candles = canonicalKlines;
+  if (!candles.length) throw new Error("Canonical 5-minute Bybit history is unavailable; chart candles are not allowed to define BCLIF inventory");
   let oiIndex = 0;
   let ratioIndex = 0;
   let fundingIndex = 0;
-  let previousOi = 0;
+  let consumedOi: { timestamp: number; value: number } | null = null;
   let mappedOiFrames = 0;
   const returns: number[] = [];
   const frames: LiquidationMarketFrame[] = [];
@@ -169,7 +227,7 @@ export async function bootstrapBybitLiquidationField(
 
   for (let index = 0; index < candles.length; index++) {
     const candle = candles[index]!;
-    const timestamp = candle.time * 1_000;
+    const timestamp = candle.time;
     while (oiIndex + 1 < oiPoints.length && oiPoints[oiIndex + 1]!.timestamp <= timestamp) oiIndex += 1;
     while (ratioIndex + 1 < ratioPoints.length && ratioPoints[ratioIndex + 1]!.timestamp <= timestamp) ratioIndex += 1;
     while (fundingIndex + 1 < fundingPoints.length && fundingPoints[fundingIndex + 1]!.timestamp <= timestamp) fundingIndex += 1;
@@ -192,8 +250,32 @@ export async function bootstrapBybitLiquidationField(
     const indexPrice = index === candles.length - 1 && ticker ? finite(ticker.indexPrice, markPrice) : markPrice;
     const bestBid = index === candles.length - 1 && ticker ? finite(ticker.bid1Price, markPrice) : markPrice;
     const bestAsk = index === candles.length - 1 && ticker ? finite(ticker.ask1Price, markPrice) : markPrice;
-    const openInterestDelta = previousOi > 0 && openInterest > 0 ? openInterest - previousOi : 0;
-    previousOi = openInterest || previousOi;
+    const advancedOi = Boolean(point && point.timestamp <= timestamp && (!consumedOi || point.timestamp > consumedOi.timestamp));
+    const openInterestDelta = advancedOi && consumedOi && openInterest > 0 ? openInterest - consumedOi.value : 0;
+    const oiIntervalStart = advancedOi && consumedOi ? consumedOi.timestamp : undefined;
+    const oiIntervalEnd = advancedOi && consumedOi ? point!.timestamp : undefined;
+    const intervalCandles = oiIntervalStart !== undefined && oiIntervalEnd !== undefined
+      ? candlesInOiInterval(candles, oiIntervalStart, oiIntervalEnd)
+      : [];
+    const entryDistribution = openInterestDelta > 0 && oiIntervalStart !== undefined && oiIntervalEnd !== undefined
+      ? buildCohortEntryDistribution({
+          observations: intervalCandles.flatMap((candidate) => {
+            const weight = candidate.turnover > 0 ? candidate.turnover : candidate.volume * candidate.close;
+            return [
+              { price: candidate.low, weight: weight * 0.18 },
+              { price: (candidate.high + candidate.low + candidate.close) / 3, weight: weight * 0.64 },
+              { price: candidate.high, weight: weight * 0.18 }
+            ];
+          }),
+          source: "LOWER_TF_APPROXIMATION",
+          intervalStart: oiIntervalStart,
+          intervalEnd: oiIntervalEnd,
+          confidence: 0.58,
+          fallbackPrice: markPrice,
+          maximumRows: 7
+        })
+      : undefined;
+    if (advancedOi && point) consumedOi = { timestamp: point.timestamp, value: point.value };
     // Historical aggressor flow is intentionally left unavailable. Candle
     // direction is not silently relabeled as real CVD.
     runningCvd += 0;
@@ -207,6 +289,9 @@ export async function bootstrapBybitLiquidationField(
       basisBps: indexPrice ? ((markPrice - indexPrice) / indexPrice) * 10_000 : 0,
       openInterest,
       openInterestDelta,
+      oiIntervalStart,
+      oiIntervalEnd,
+      entryDistribution,
       fundingRate: fundingPoint?.timestamp <= timestamp
         ? fundingPoint.rate
         : index === candles.length - 1 && ticker?.fundingRate != null ? finite(ticker.fundingRate) : null,

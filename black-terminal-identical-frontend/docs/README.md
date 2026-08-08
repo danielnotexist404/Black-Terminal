@@ -182,3 +182,13 @@ The critical chart-coordinate and automatic 20,000-bar initialization contract i
 - `liquidation/BCLIF_ADAPTIVE_RESOLUTION.md` and `liquidation/BCLIF_OPERATIONAL_CLUSTER_EXTRACTION.md` - display LOD and actionable shelf ranking.
 - `liquidation/BCLIF_VISUAL_CERTIFICATION_V2.md` - the 21-case repository-owned Playwright certification matrix.
 - `liquidation/BCLIF_CHAPTER_IIIC2_COMPLETION_REPORT.md` - Chapter III-C2 implementation evidence and preserved State A boundary.
+
+# BCLIF Authentic Exposure Reconstruction
+
+- `liquidation/BCLIF_SWING_FOLLOWING_ROOT_CAUSE_AUDIT.md` - proved pre-change data/model causes.
+- `liquidation/BCLIF_AUTHENTIC_EXPOSURE_RECONSTRUCTION.md` - V5 causal architecture and authority boundary.
+- `liquidation/BCLIF_OI_BIRTH_DEATH_MODEL.md` and `liquidation/BCLIF_ENTRY_PRICE_DISTRIBUTION.md` - interval materiality and entry evidence.
+- `liquidation/BCLIF_COHORT_ANCHORING.md`, `liquidation/BCLIF_COHORT_LIFECYCLE.md`, and `liquidation/BCLIF_MODEL_MASS_CONSERVATION.md` - immutable inventory and accounting.
+- `liquidation/BCLIF_SWING_INDEPENDENCE.md` and `liquidation/BCLIF_COHORT_PROVENANCE.md` - core invariants and explainability.
+- `liquidation/BCLIF_HIGH_RESOLUTION_FIELD.md` and `liquidation/BCLIF_MODEL_CERTIFICATION.md` - stable-grid rendering, performance, and 27-case visual gates.
+- `liquidation/BCLIF_CHAPTER_IIIC3_COMPLETION_REPORT.md` - exact implementation/test evidence and remaining deployment limits.

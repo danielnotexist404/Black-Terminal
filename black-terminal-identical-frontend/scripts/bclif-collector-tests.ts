@@ -247,7 +247,7 @@ const adoptionNode = {
   region: "local",
   deploymentCommit: "test-commit",
   imageDigest: "sha256:test",
-  modelVersion: "BCLIF_MODEL_V4_CAUSAL",
+  modelVersion: "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE",
   startedAt: 1_000,
   lastHeartbeatAt: 1_000,
   status: "STARTING" as const,
@@ -284,7 +284,7 @@ console.log(JSON.stringify({ decision: "PASS", oiDeltaAppliedOnce: true, quietSt
 function predictionRow(id: string, offset: number) {
   return {
     id,
-    model_version: "BCLIF_MODEL_V4_CAUSAL",
+    model_version: "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE",
     source_cutoff_at: new Date(1_000 + offset).toISOString(),
     created_at: new Date(2_000 + offset).toISOString(),
     price_min: 60_000,

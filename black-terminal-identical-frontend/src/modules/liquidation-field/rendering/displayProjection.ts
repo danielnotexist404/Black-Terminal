@@ -23,6 +23,7 @@ export interface BclifDisplayProjection {
   alpha: Uint8Array;
   validity: Uint8Array;
   yellowEligible: Uint8Array;
+  rgba?: Uint8Array;
   yellowEligibleCells: number;
   historicalCells: number;
   liveCalibratedCells: number;
@@ -45,13 +46,19 @@ export function bclifModelHash(snapshot: LiquidationFieldSnapshot) {
     end: snapshot.header.endTime,
     min: snapshot.header.minPrice,
     max: snapshot.header.maxPrice,
+    gridOrigin: snapshot.header.gridOrigin ?? null,
+    gridVersion: snapshot.header.gridVersion ?? null,
     rows: snapshot.header.rows,
     columns: snapshot.header.columns,
     cohorts: snapshot.cohorts.map((cohort) => [
-      cohort.id, cohort.side, cohort.createdAt, cohort.updatedAt, cohort.entryMean, cohort.leverageMean,
+      cohort.id, cohort.side, cohort.createdAt, cohort.updatedAt, cohort.sourceIntervalStart,
+      cohort.sourceIntervalEnd, cohort.entryMean, cohort.entryDistribution.hash, cohort.leverageMean,
+      cohort.initialOpenMass, cohort.remainingMass, cohort.massUnit,
       cohort.estimatedRemainingNotional, cohort.liquidationMean, cohort.liquidationStdDev,
-      cohort.survivalProbability, cohort.posteriorWeight, cohort.confidence, cohort.state
-    ])
+      cohort.survivalProbability, cohort.posteriorWeight, cohort.confidence, cohort.state,
+      cohort.fundingAdjustmentBps, cohort.lastLifecycleEvent?.id ?? null
+    ]),
+    massLedger: snapshot.massLedger
   }));
 }
 
@@ -112,6 +119,8 @@ export function bclifRenderSettingsHash(settings: LiquidationFieldSettings) {
     maximumClusterLabels: settings.maximumClusterLabels,
     operationalSummaryVisible: settings.operationalSummaryVisible,
     collectionStartMarkerVisible: settings.collectionStartMarkerVisible,
+    cohortProvenanceVisible: settings.cohortProvenanceVisible,
+    cohortBirthMarkersVisible: settings.cohortBirthMarkersVisible,
     legendVisible: settings.legendVisible,
     diagnosticsVisible: settings.diagnosticsVisible,
     confirmedMarkersVisible: settings.confirmedMarkersVisible,

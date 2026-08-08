@@ -298,8 +298,8 @@ export class LiquidationFieldController {
     this.fixtureWorker = new LiquidationFieldWorkerClient();
     const lastCandle = this.options.getCandles().at(-1);
     const alignedNow = lastCandle ? lastCandle.time * 1_000 : Date.now();
-    const fixture = createLiquidationFieldFixture(alignedNow);
     const visualCase = resolveBclifVisualCase();
+    const fixture = createLiquidationFieldFixture(alignedNow, visualCase);
     const snapshot = applyBclifVisualCase(
       applyBclifVisualCertificationProfile(await this.fixtureWorker.build({ ...fixture, settings: this.settings })),
       visualCase

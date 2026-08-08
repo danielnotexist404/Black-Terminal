@@ -6,7 +6,7 @@ import {
   buildBclifDisplayProjection,
   type BclifDisplayProjection
 } from "./displayProjection.ts";
-import { createThermalPalette } from "./thermalPalette.ts";
+import { buildBclifDisplayTexture } from "./displayTexture.ts";
 
 export interface LiquidationFieldRenderTransform {
   width: number;
@@ -153,6 +153,18 @@ export class BlackCoreLiquidationFieldRenderer {
       }
     }
 
+    if (settings.cohortBirthMarkersVisible) {
+      for (const cohort of snapshot.cohorts) {
+        const x = transform.xForTimestampMs(cohort.createdAt);
+        const y = transform.yForPrice(cohort.liquidationMean);
+        if (x < 0 || x > transform.width || y < transform.top || y > transform.bottom) continue;
+        const color = cohort.side === "LONG" ? 0xd00024 : 0xe2e5e9;
+        this.overlay.moveTo(x, Math.max(transform.top, y - 8)).lineTo(x, Math.min(transform.bottom, y + 8))
+          .stroke({ color, alpha: 0.42, width: 1 });
+        this.overlay.circle(x, y, 1.8).fill({ color, alpha: 0.78 });
+      }
+    }
+
     if (settings.uncertaintyEnvelopesVisible) {
       for (const cluster of extractBclifOperationalClusters(snapshot, transform.currentPrice, settings).slice(0, 12)) {
         const yTop = transform.yForPrice(cluster.priceHigh);
@@ -195,41 +207,8 @@ export class BlackCoreLiquidationFieldRenderer {
       return;
     }
     const { columns, rows } = projection;
-    const required = columns * rows * 4;
-    const rgba = this.rgba?.length === required ? this.rgba : new Uint8Array(required);
+    const rgba = projection.rgba ?? buildBclifDisplayTexture(projection, settings, this.rgba);
     this.rgba = rgba;
-    const lut = createThermalPalette(settings.palette);
-    const longLut = createThermalPalette("BLACK_TERMINAL_BLOOD");
-    const shortLut = createThermalPalette("INSTITUTIONAL_MONOCHROME");
-
-    for (let column = 0; column < columns; column++) {
-      for (let row = 0; row < rows; row++) {
-        const sourceIndex = column * rows + row;
-        const targetIndex = ((rows - 1 - row) * columns + column) * 4;
-        const valid = projection.validity[sourceIndex]! > 0;
-        const intensity = projection.intensity[sourceIndex]!;
-        const selectedLut = settings.viewMode === "LONG_EXPOSURE"
-          ? longLut
-          : settings.viewMode === "SHORT_EXPOSURE"
-            ? shortLut
-            : lut;
-
-        // Unavailable intervals remain visibly distinct; they are never silently interpolated.
-        if (!valid) {
-          const hatch = ((column + row) % 9) < 2 ? 14 : 5;
-          rgba[targetIndex] = hatch;
-          rgba[targetIndex + 1] = 4;
-          rgba[targetIndex + 2] = 18;
-          rgba[targetIndex + 3] = 72;
-          continue;
-        }
-        const lutIndex = Math.max(0, Math.min(255, intensity)) * 4;
-        rgba[targetIndex] = selectedLut[lutIndex]!;
-        rgba[targetIndex + 1] = selectedLut[lutIndex + 1]!;
-        rgba[targetIndex + 2] = selectedLut[lutIndex + 2]!;
-        rgba[targetIndex + 3] = projection.alpha[sourceIndex]!;
-      }
-    }
 
     const dimensionsChanged = !this.source || this.source.width !== columns || this.source.height !== rows;
     if (dimensionsChanged) {

@@ -69,9 +69,44 @@ export type BclifThermalNormalization =
   | "CONFIDENCE_WEIGHTED";
 export type BclifAdaptiveResolution = "AUTO" | "HIGH" | "BALANCED" | "LOW_PERFORMANCE";
 export type BclifFocusBand = "OFF" | "PERCENT_2" | "PERCENT_5" | "PERCENT_10" | "CUSTOM";
+export type BclifOiNoiseMethod = "HYBRID_ROBUST" | "ABSOLUTE_NOTIONAL" | "OI_PERCENT" | "ROBUST_MAD";
+export type CohortEntrySource =
+  | "EXACT_TRADES"
+  | "LOWER_TF_VOLUME_AT_PRICE"
+  | "LOWER_TF_APPROXIMATION"
+  | "CHART_BAR_APPROXIMATION";
+
+export interface CohortEntryDistribution {
+  priceRows: number[];
+  weights: number[];
+  source: CohortEntrySource;
+  intervalStart: number;
+  intervalEnd: number;
+  confidence: number;
+  hash: string;
+}
+
+export interface BclifOiMaterialityDecision {
+  rawDelta: number;
+  effectiveDelta: number;
+  threshold: number;
+  method: BclifOiNoiseMethod;
+  version: string;
+  material: boolean;
+}
+
+export interface BclifCohortModelConfiguration {
+  oiNoiseMethod: BclifOiNoiseMethod;
+  oiNoiseAbsoluteNotionalUsd: number;
+  oiNoisePercent: number;
+  oiNoiseMadMultiplier: number;
+  isolatedContributionCap: number;
+  crossContributionCap: number;
+  unknownContributionCap: number;
+}
 
 export interface LiquidationFieldSettings {
-  schemaVersion: 2;
+  schemaVersion: 3;
   preset: BclifPresentationPreset;
   viewMode: LiquidationFieldViewMode;
   horizon: LiquidationFieldHorizon;
@@ -122,6 +157,15 @@ export interface LiquidationFieldSettings {
   maximumClusterLabels: number;
   operationalSummaryVisible: boolean;
   collectionStartMarkerVisible: boolean;
+  cohortProvenanceVisible: boolean;
+  cohortBirthMarkersVisible: boolean;
+  oiNoiseMethod: BclifOiNoiseMethod;
+  oiNoiseAbsoluteNotionalUsd: number;
+  oiNoisePercent: number;
+  oiNoiseMadMultiplier: number;
+  isolatedContributionCap: number;
+  crossContributionCap: number;
+  unknownContributionCap: number;
 }
 
 export interface BclifEvidenceComposition {
@@ -159,6 +203,12 @@ export interface BclifOperationalCluster {
   state: "FORMING" | "ACTIVE" | "STRENGTHENING" | "DECAYING" | "TRIGGERED" | "ABSORBED" | "EXHAUSTED";
   prominence: number;
   rankScore: number;
+  exposureConcentration: number;
+  shelfWidth: number;
+  priceEntropy: number;
+  cohortOverlapCount: number;
+  cohortIds: string[];
+  provenanceCoverage: number;
 }
 
 export interface DepthCurvePoint {
@@ -181,6 +231,10 @@ export interface LiquidationMarketFrame {
   basisBps: number;
   openInterest: number;
   openInterestDelta: number;
+  oiIntervalStart?: number;
+  oiIntervalEnd?: number;
+  entryDistribution?: CohortEntryDistribution;
+  oiMateriality?: BclifOiMaterialityDecision;
   fundingRate: number | null;
   longAccountRatio: number | null;
   shortAccountRatio: number | null;
@@ -223,6 +277,7 @@ export interface LiquidationInstrumentRules {
   fetchedAt: number;
   sourceVersion: string;
   certainty: LiquidationDataCertainty;
+  tickSize?: number;
 }
 
 export interface LiquidationPositionCohort {
@@ -232,6 +287,17 @@ export interface LiquidationPositionCohort {
   side: "LONG" | "SHORT";
   createdAt: number;
   updatedAt: number;
+  sourceIntervalStart: number;
+  sourceIntervalEnd: number;
+  initialOpenMass: number;
+  remainingMass: number;
+  massUnit: "QUOTE_NOTIONAL";
+  entryDistribution: CohortEntryDistribution;
+  leverageDistribution: Array<{ leverage: number; probability: number }>;
+  evidenceChannels: string[];
+  creationReason: string;
+  fundingAdjustmentBps: number;
+  lastLifecycleEvent: BclifCohortLifecycleEvent;
   entryMean: number;
   entryStdDev: number;
   entryLower: number;
@@ -263,13 +329,33 @@ export interface LiquidationPositionCohort {
   modelVersion: string;
 }
 
+export interface BclifCohortLifecycleEvent {
+  id: string;
+  cohortId: string;
+  timestamp: number;
+  kind: "BIRTH" | "OI_CONTRACTION" | "CONFIRMED_LIQUIDATION" | "UNRESOLVED_TRAVERSAL" | "TIME_DECAY" | "EXPIRY";
+  massRemoved: number;
+  evidenceId: string | null;
+  reason: string;
+}
+
+export interface BclifModelMassLedger {
+  totalCreatedMass: number;
+  voluntaryClosureMass: number;
+  confirmedLiquidationMass: number;
+  decayExpiryMass: number;
+  totalRemainingMass: number;
+  conservationError: number;
+  tolerance: number;
+}
+
 /**
  * Versioned, JSON-safe state owned by the shared cohort engine. The browser
  * may use it for deterministic tests, while only the persistent collector is
  * allowed to publish it as an authoritative checkpoint.
  */
 export interface LiquidationCohortEngineState {
-  schemaVersion: 1;
+  schemaVersion: 2;
   modelVersion: string;
   sourceVersion: string;
   modelPreset: LiquidationFieldModelPreset;
@@ -278,6 +364,10 @@ export interface LiquidationCohortEngineState {
   cohorts: LiquidationPositionCohort[];
   particles: LiquidationExposureParticle[];
   traversedCohortIds: string[];
+  oiDeltaHistory: number[];
+  configuration: BclifCohortModelConfiguration;
+  massLedger: BclifModelMassLedger;
+  lifecycleEvents: BclifCohortLifecycleEvent[];
 }
 
 export interface LiquidationExposureParticle {
@@ -293,6 +383,8 @@ export interface LiquidationExposureParticle {
   survival: number;
   weight: number;
   confidence: number;
+  entrySource: CohortEntrySource;
+  uncertaintyClass: "ISOLATED_ESTIMATE" | "CROSS_ESTIMATE" | "UNKNOWN";
 }
 
 export interface ConfirmedLiquidationEvent {
@@ -393,6 +485,8 @@ export interface LiquidationFieldTileHeader {
   rows: number;
   timeStepMs: number;
   priceStep: number;
+  gridOrigin?: number;
+  gridVersion?: string;
   exposureScale: number;
   confidenceScale: number;
   compression: string;
@@ -417,6 +511,8 @@ export interface LiquidationFieldSnapshot {
   confirmedNotional: Float32Array;
   confirmedCount: Uint16Array;
   cohorts: LiquidationPositionCohort[];
+  massLedger: BclifModelMassLedger;
+  lifecycleEvents: BclifCohortLifecycleEvent[];
   confirmedEvents: ConfirmedLiquidationEvent[];
   cascade: CascadeRiskSnapshot[];
   coverage: LiquidationCoverage;
@@ -440,5 +536,5 @@ export interface LiquidationFieldRuntimeStatus {
   error?: string;
 }
 
-export const BCLIF_MODEL_VERSION = "BCLIF_MODEL_V4_CAUSAL";
+export const BCLIF_MODEL_VERSION = "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE";
 export const BCLIF_SOURCE_VERSION = "BYBIT_V5_PUBLIC_2026_08";

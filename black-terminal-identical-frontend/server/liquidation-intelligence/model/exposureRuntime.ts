@@ -57,7 +57,9 @@ export class BclifExposureRuntime {
     const longExposure = new Float32Array(this.rows);
     const shortExposure = new Float32Array(this.rows);
     for (const particle of particles) {
-      const effective = particle.notional * particle.survival * particle.weight * particle.confidence;
+      // The engine has already synchronized notional to remaining cohort mass.
+      // Survival is provenance/state, not a second mass multiplier.
+      const effective = particle.notional * particle.weight * particle.confidence;
       if (!(effective > 0)) continue;
       const center = Math.round((particle.liquidationPrice - this.minPrice) / this.priceStep);
       const sigma = Math.max(0.75, particle.liquidationStdDev / this.priceStep);

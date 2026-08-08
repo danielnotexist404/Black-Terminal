@@ -112,11 +112,17 @@ export function extractBclifOperationalClusters(
         if (offset >= 4 && offset <= 8) priorIntensity += intensity / 5;
       }
       const persistence = activeColumns / recentColumns;
-      const matchingCohorts = snapshot.cohorts.filter((cohort) =>
-        (side === "LONG_LIQUIDATION" ? cohort.side === "LONG" : cohort.side === "SHORT")
-        && cohort.liquidationUpper >= minPrice + lowRow * priceStep
-        && cohort.liquidationLower <= minPrice + highRow * priceStep
-      );
+      const bandLow = minPrice + lowRow * priceStep;
+      const bandHigh = minPrice + highRow * priceStep;
+      const matchingCohorts = snapshot.cohorts.filter((cohort) => {
+        if ((side === "LONG_LIQUIDATION" ? cohort.side !== "LONG" : cohort.side !== "SHORT")) return false;
+        // A shelf can be a shoulder of a multi-entry/multi-leverage mixture,
+        // not only the aggregate cohort core. Keep the provenance envelope
+        // conservative enough to capture those contributing tails.
+        const provenancePadding = Math.max(priceStep * 2, cohort.liquidationStdDev * 2);
+        return cohort.liquidationUpper + provenancePadding >= bandLow
+          && cohort.liquidationLower - provenancePadding <= bandHigh;
+      });
       const survivalProbability = matchingCohorts.length
         ? matchingCohorts.reduce((sum, cohort) => sum + cohort.survivalProbability, 0) / matchingCohorts.length
         : 0.45;
@@ -124,6 +130,13 @@ export function extractBclifOperationalClusters(
         .filter((event) => event.bankruptcyPrice >= minPrice + lowRow * priceStep && event.bankruptcyPrice <= minPrice + highRow * priceStep)
         .reduce((sum, event) => sum + event.notional, 0);
       const prominence = Math.max(0, Math.min(1, value / maximum));
+      const localValues = Array.from(profile.slice(lowRow, highRow + 1));
+      const localTotal = localValues.reduce((sum, item) => sum + item, 0) || 1;
+      const priceEntropy = localValues.reduce((entropy, item) => {
+        const probability = item / localTotal;
+        return probability > 0 ? entropy - probability * Math.log(probability) : entropy;
+      }, 0) / Math.max(1e-9, Math.log(Math.max(2, localValues.length)));
+      const exposureConcentration = value / Math.max(1e-9, profile.reduce((sum, item) => sum + item, 0));
       const distanceFromMarkBps = (peakPrice - markPrice) / markPrice * 10_000;
       const exposureScore = Math.min(1, Math.log1p(value) / Math.max(1, Math.log1p(maximum)));
       const proximityScore = Math.exp(-Math.abs(distanceFromMarkBps) / 2_000);
@@ -147,8 +160,8 @@ export function extractBclifOperationalClusters(
       candidates.push({
         id: `${side}:${Math.round(peakPrice / Math.max(priceStep, 1e-8))}`,
         side,
-        priceLow: minPrice + lowRow * priceStep,
-        priceHigh: minPrice + highRow * priceStep,
+        priceLow: bandLow,
+        priceHigh: bandHigh,
         peakPrice,
         distanceFromMarkBps,
         estimatedExposureLow: value * 0.82,
@@ -160,7 +173,13 @@ export function extractBclifOperationalClusters(
         observedLiquidationNotionalNearby,
         state,
         prominence,
-        rankScore
+        rankScore,
+        exposureConcentration,
+        shelfWidth: (highRow - lowRow + 1) * priceStep,
+        priceEntropy,
+        cohortOverlapCount: matchingCohorts.length,
+        cohortIds: matchingCohorts.map((cohort) => cohort.id).sort(),
+        provenanceCoverage: matchingCohorts.length ? 1 : 0
       });
     }
   }

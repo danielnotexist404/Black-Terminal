@@ -1415,3 +1415,10 @@ Remaining:
 - Added full-path mark perturbation, event-window, normalization, low-information, raw-export, and deterministic replay tests.
 - Preserved all protected BCLIF API behavior while consolidating its Vercel entry behind the analytics function so the Hobby deployment remains within 12 functions.
 - Kept infrastructure at State A; the public capture and corrected production visual certification were not claimed before their runtime gates completed.
+## 2026-08-09 — Phase V Chapter III-C5
+
+- Proved the blank hard-refresh field was renderer/presentation state, not cohort mathematics.
+- Added independent context, label and high-authority color gates plus an explicit strict filter.
+- Added schema V7 migration, a replaying latest-snapshot store, bounded public IndexedDB checkpoint recovery, generation handoff and WebGL restoration.
+- Replaced default open diagnostics/cluster dashboards with one compact operational HUD.
+- Added deterministic cold-start, mount-order, corrupt-cache, confidence-gate and browser hard-refresh/WebGL evidence.

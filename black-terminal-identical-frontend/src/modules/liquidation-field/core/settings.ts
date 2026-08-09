@@ -1,6 +1,6 @@
 import type { BclifPresentationPreset, LiquidationFieldHorizon, LiquidationFieldSettings } from "./types.ts";
 
-export const LIQUIDATION_FIELD_SETTINGS_VERSION = 3 as const;
+export const LIQUIDATION_FIELD_SETTINGS_VERSION = 7 as const;
 export const BCLIF_MAX_REQUEST_HOURS = 90 * 24;
 export const BCLIF_BROWSER_OI_INTERVAL = "5min" as const;
 
@@ -23,11 +23,17 @@ export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   timeSigmaColumns: 0.55,
   sharpness: 58,
   candlePalette: "BLACK_TERMINAL_HIGH_CONTRAST",
-  legendVisible: true,
-  diagnosticsVisible: true,
+  legendVisible: false,
+  diagnosticsVisible: false,
   confirmedMarkersVisible: false,
   cascadePathsVisible: false,
-  minimumConfidence: 60,
+  contextVisibilityFloor: 25,
+  clusterLabelFloor: 60,
+  highAuthorityColorFloor: 75,
+  strictHideBelowEnabled: false,
+  strictHideBelowConfidence: 60,
+  historicalContextEnabled: true,
+  liveCalibratedEnabled: true,
   minimumNotionalUsd: 0,
   sideFilter: "BOTH",
   leverageMinimum: 2,
@@ -54,7 +60,7 @@ export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   customFocusBandPercent: 5,
   candleContrast: "HIGH",
   maximumClusterLabels: 4,
-  operationalSummaryVisible: true,
+  operationalSummaryVisible: false,
   collectionStartMarkerVisible: true,
   cohortProvenanceVisible: false,
   cohortBirthMarkersVisible: false,
@@ -80,7 +86,11 @@ function clamp(value: unknown, fallback: number, minimum: number, maximum: numbe
 }
 
 export function migrateLiquidationFieldSettings(value?: Partial<LiquidationFieldSettings> | null): LiquidationFieldSettings {
-  const legacy = value as (Partial<LiquidationFieldSettings> & { preset?: string }) | null | undefined;
+  const legacy = value as (Partial<LiquidationFieldSettings> & {
+    preset?: string;
+    schemaVersion?: number;
+    minimumConfidence?: number;
+  }) | null | undefined;
   const merged = { ...DEFAULT_LIQUIDATION_FIELD_SETTINGS, ...(legacy ?? {}) } as LiquidationFieldSettings;
   if ((value as { preset?: string } | null | undefined)?.preset === "EVENT_HORIZON_3W") merged.preset = "TRADE_FOCUS";
   const customMinimum = clamp(merged.customPriceMinimum, 50_000, 1e-8, 10_000_000);
@@ -103,8 +113,26 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     priceSigmaRows: clamp(merged.priceSigmaRows, 1.15, 0, 4),
     timeSigmaColumns: clamp(merged.timeSigmaColumns, 0.55, 0, 3),
     sharpness: clamp(merged.sharpness, 58, 0, 100),
-    minimumConfidence: clamp(merged.minimumConfidence, 60, 0, 100),
+    // V3 and older used one threshold for visibility, labels, and authority.
+    // Preserve it as the label floor only; the V7 context floor stays safe.
+    contextVisibilityFloor: clamp(merged.contextVisibilityFloor, 25, 0, 100),
+    clusterLabelFloor: clamp(
+      legacy && Number(legacy.schemaVersion ?? 0) < 7 && legacy.minimumConfidence !== undefined
+        ? legacy.minimumConfidence
+        : merged.clusterLabelFloor,
+      60,
+      0,
+      100
+    ),
+    highAuthorityColorFloor: clamp(merged.highAuthorityColorFloor, 75, 60, 100),
+    strictHideBelowEnabled: Boolean(merged.strictHideBelowEnabled),
+    strictHideBelowConfidence: clamp(merged.strictHideBelowConfidence, 60, 0, 100),
+    historicalContextEnabled: merged.historicalContextEnabled !== false,
+    liveCalibratedEnabled: merged.liveCalibratedEnabled !== false,
     minimumNotionalUsd: clamp(merged.minimumNotionalUsd, 0, 0, 100_000_000_000),
+    legendVisible: Number(legacy?.schemaVersion ?? 0) < 7 ? false : Boolean(merged.legendVisible),
+    diagnosticsVisible: Number(legacy?.schemaVersion ?? 0) < 7 ? false : Boolean(merged.diagnosticsVisible),
+    operationalSummaryVisible: Number(legacy?.schemaVersion ?? 0) < 7 ? false : Boolean(merged.operationalSummaryVisible),
     leverageMinimum: clamp(merged.leverageMinimum, 2, 1, 125),
     leverageMaximum: Math.max(
       clamp(merged.leverageMinimum, 2, 1, 125),
@@ -141,32 +169,37 @@ export function applyBclifPresentationPreset(
 ): LiquidationFieldSettings {
   const common = { ...source, preset };
   if (preset === "TRADE_FOCUS") return migrateLiquidationFieldSettings({
-    ...common, priceDisplay: "CHART_SCALE", minimumConfidence: 60, palette: "REFERENCE_THERMAL",
+    ...common, priceDisplay: "CHART_SCALE", contextVisibilityFloor: 25, clusterLabelFloor: 60,
+    highAuthorityColorFloor: 75, strictHideBelowEnabled: false, palette: "REFERENCE_THERMAL",
     thermalNormalization: "HYBRID", opacity: 45, gamma: 1.55, lowQuantile: 0.5, highQuantile: 0.998,
     visualChannel: "COMBINED", historicalContextOpacity: 24, liveCalibratedOpacity: 88,
     requireMultipleEvidenceChannels: true, diagnosticsVisible: false, maximumClusterLabels: 4,
-    operationalSummaryVisible: true, candleContrast: "HIGH"
+    operationalSummaryVisible: false, candleContrast: "HIGH"
   });
   if (preset === "HIGH_CONFIDENCE") return migrateLiquidationFieldSettings({
-    ...common, priceDisplay: "CHART_SCALE", minimumConfidence: 75, opacity: 52, gamma: 1.65,
+    ...common, priceDisplay: "CHART_SCALE", contextVisibilityFloor: 25, clusterLabelFloor: 75,
+    highAuthorityColorFloor: 85, strictHideBelowEnabled: false, opacity: 52, gamma: 1.65,
     visualChannel: "COMBINED", historicalContextOpacity: 8, liveCalibratedOpacity: 95,
-    requireMultipleEvidenceChannels: true, maximumClusterLabels: 6, operationalSummaryVisible: true,
+    requireMultipleEvidenceChannels: true, maximumClusterLabels: 6, operationalSummaryVisible: false,
     diagnosticsVisible: false, candleContrast: "MAXIMUM"
   });
   if (preset === "LIVE_CALIBRATED") return migrateLiquidationFieldSettings({
-    ...common, priceDisplay: "CHART_SCALE", minimumConfidence: 60, opacity: 58,
+    ...common, priceDisplay: "CHART_SCALE", contextVisibilityFloor: 25, clusterLabelFloor: 60,
+    highAuthorityColorFloor: 75, strictHideBelowEnabled: false, opacity: 58,
     visualChannel: "LIVE_CALIBRATED", historicalContextOpacity: 14, liveCalibratedOpacity: 100,
     requireMultipleEvidenceChannels: true, collectionStartMarkerVisible: true, maximumClusterLabels: 4
   });
   if (preset === "FULL_SPECTRUM_RESEARCH") return migrateLiquidationFieldSettings({
-    ...common, priceDisplay: "FULL_MODEL_RANGE", minimumConfidence: 0, opacity: 75,
+    ...common, priceDisplay: "FULL_MODEL_RANGE", contextVisibilityFloor: 0, clusterLabelFloor: 0,
+    highAuthorityColorFloor: 75, strictHideBelowEnabled: false, opacity: 75,
     thermalNormalization: "VISIBLE_FOCUS", gamma: 1.25, backgroundFloor: 3,
     visualChannel: "COMBINED", historicalContextOpacity: 58, liveCalibratedOpacity: 92,
     requireMultipleEvidenceChannels: false, diagnosticsVisible: true, maximumClusterLabels: 4,
     candleContrast: "HIGH"
   });
   return migrateLiquidationFieldSettings({
-    ...common, priceDisplay: "FULL_MODEL_RANGE", minimumConfidence: 0, opacity: 72,
+    ...common, priceDisplay: "FULL_MODEL_RANGE", contextVisibilityFloor: 0, clusterLabelFloor: 0,
+    highAuthorityColorFloor: 75, strictHideBelowEnabled: false, opacity: 72,
     thermalNormalization: "GLOBAL_MODEL", visualChannel: "COMBINED", historicalContextOpacity: 100,
     liveCalibratedOpacity: 100, confidenceWeightEnabled: false, requireMultipleEvidenceChannels: false,
     maximumClusterLabels: 0, operationalSummaryVisible: false, diagnosticsVisible: true,

@@ -18,3 +18,6 @@ to model cutoff. No cell objects or DOM matrix is added. V6 display projection
 uses 88% expanding source normalization and at most 12% visible-range detail in
 the default HYBRID mode. Historical browser OI-only cells are explicitly
 ineligible for yellow.
+## Chapter III-C5 recovery instrumentation
+
+The renderer validates projection dimensions, channel lengths and price domains before upload and publishes readiness, raw/visible/filtered counts, alpha bounds, texture dimensions, upload timing/count, draw state and generation lag. BlackChartEngine handles WebGL context loss/restoration and rebuilds from the retained snapshot without awaiting new market input. Confidence gates are presentation-only.

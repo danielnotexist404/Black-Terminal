@@ -91,7 +91,9 @@ import type { TradeTick } from "../market-data/types";
 import { liquidationFieldModelSettingsKey, migrateLiquidationFieldSettings } from "../modules/liquidation-field/core/settings";
 import type { LiquidationFieldRuntimeStatus, LiquidationFieldSettings, LiquidationFieldSnapshot } from "../modules/liquidation-field/core/types";
 import { LiquidationFieldController, isBclifVisualFixtureEnabled } from "../modules/liquidation-field/data/LiquidationFieldController";
+import { InMemoryBclifSnapshotStore } from "../modules/liquidation-field/data/BclifSnapshotStore";
 import { LiquidationFieldSettingsPanel } from "../modules/liquidation-field/components/LiquidationFieldSettingsPanel";
+import type { BclifRendererMetrics } from "../modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer";
 import { LiquidationFieldOverlays } from "../modules/liquidation-field/components/LiquidationFieldOverlays";
 import {
   applyBclifVisualFixtureSettings,
@@ -413,10 +415,12 @@ export function PixiBlackChart({
   const [auctionProfileLoading, setAuctionProfileLoading] = useState(false);
   const [auctionProfileError, setAuctionProfileError] = useState<string | null>(null);
   const [liquidationFieldSnapshot, setLiquidationFieldSnapshot] = useState<LiquidationFieldSnapshot | null>(null);
+  const [liquidationFieldRendererMetrics, setLiquidationFieldRendererMetrics] = useState<BclifRendererMetrics | null>(null);
   const [liquidationFieldStatus, setLiquidationFieldStatus] = useState<LiquidationFieldRuntimeStatus>({
-    state: "IDLE", message: "Awaiting activation", source: "NONE", lastInputAt: null
+    state: "IDLE", message: "Awaiting activation", source: "NONE", lastInputAt: null, lifecycle: "UNMOUNTED"
   });
   const liquidationFieldControllerRef = useRef<LiquidationFieldController | null>(null);
+  const liquidationFieldSnapshotStoreRef = useRef(new InMemoryBclifSnapshotStore());
   const [auctionProfileSourceRevision, setAuctionProfileSourceRevision] = useState(0);
   const [kioseffUnavailable, setKioseffUnavailable] = useState<KioseffUnavailableDiagnostic | null>(null);
   const [kioseffLoadState, setKioseffLoadState] = useState<KioseffLoadState>({ stage: "idle" });
@@ -719,6 +723,7 @@ export function PixiBlackChart({
   useEffect(() => {
     let disposed = false;
     let initialized = false;
+    let releaseBclifSnapshotReplay: (() => void) | undefined;
     let liveCandles: MarketDataSubscription<unknown> | undefined;
     let liveTrades: MarketDataSubscription<unknown> | undefined;
     let tradePollTimer: number | undefined;
@@ -1108,6 +1113,7 @@ export function PixiBlackChart({
       onPriceTransformChange: (transform) => {
         if (aifActiveRef.current || liquidationFieldActiveRef.current) setAifPriceTransform(transform);
       },
+      onLiquidationRendererMetrics: setLiquidationFieldRendererMetrics,
       priceLineColor,
       priceLineIntensity
     });
@@ -1125,6 +1131,11 @@ export function PixiBlackChart({
           engine.destroy();
           return;
         }
+        releaseBclifSnapshotReplay = liquidationFieldSnapshotStoreRef.current.subscribe((snapshot) => {
+          if (disposed || !liquidationFieldActiveRef.current) return;
+          setLiquidationFieldSnapshot(snapshot);
+          engine.setLiquidationFieldState(snapshot, latestLiquidationFieldSettingsRef.current);
+        });
 
         if (bclifVisualFixture) {
           const candles = createBclifVisualChartCandles(marketHistoryTarget, timeframeSeconds[timeframe]);
@@ -1219,6 +1230,7 @@ export function PixiBlackChart({
 
     return () => {
       disposed = true;
+      releaseBclifSnapshotReplay?.();
       liveCandles?.unsubscribe();
       liveTrades?.unsubscribe();
       if (tradePollTimer) window.clearInterval(tradePollTimer);
@@ -1979,23 +1991,40 @@ export function PixiBlackChart({
   }, [liquidationFieldSettings, liquidationFieldSnapshot, visibleIndicators.liquidationHeatmap]);
 
   useEffect(() => {
+    liquidationFieldSnapshotStoreRef.current.clear();
+    setLiquidationFieldSnapshot(null);
+    setLiquidationFieldRendererMetrics(null);
+  }, [marketSymbol.rawSymbol, liquidationFieldCalculationKey]);
+
+  useEffect(() => {
     liquidationFieldControllerRef.current?.dispose();
     liquidationFieldControllerRef.current = null;
     if (!visibleIndicators.liquidationHeatmap) {
       setLiquidationFieldSnapshot(null);
-      setLiquidationFieldStatus({ state: "IDLE", message: "Awaiting activation", source: "NONE", lastInputAt: null });
+      setLiquidationFieldRendererMetrics(null);
+      setLiquidationFieldStatus({
+        state: "IDLE",
+        message: "Awaiting activation",
+        source: "NONE",
+        lastInputAt: null,
+        lifecycle: "UNMOUNTED"
+      });
       engineRef.current?.setLiquidationFieldState(null, liquidationFieldSettings);
       return;
     }
     if (!isBclifVisualFixtureEnabled() && marketSymbol.exchange !== "bybit") {
-      const status: LiquidationFieldRuntimeStatus = {
+      const nextStatus: LiquidationFieldRuntimeStatus = {
         state: "UNAVAILABLE",
         message: "This build currently has venue-calibrated liquidation intelligence for Bybit linear contracts only.",
         source: "NONE",
-        lastInputAt: null
+        lastInputAt: null,
+        lifecycle: "VENUE_UNSUPPORTED"
       };
-      setLiquidationFieldStatus(status);
+      setLiquidationFieldStatus(nextStatus);
       setLiquidationFieldSnapshot(null);
+      setLiquidationFieldRendererMetrics(null);
+      liquidationFieldSnapshotStoreRef.current.clear();
+      engineRef.current?.setLiquidationFieldState(null, liquidationFieldSettings);
       return;
     }
     if (chartHistoryState !== "ready" || !engineRef.current) {
@@ -2005,9 +2034,15 @@ export function PixiBlackChart({
         source: "PERSISTENT_COLLECTOR",
         authority: "PERSISTENT_NODE",
         persistence: "ON",
-        lastInputAt: null
+        lastInputAt: null,
+        lifecycle: "WAITING_FOR_MODEL"
       });
       return;
+    }
+    const retainedBeforeMount = liquidationFieldSnapshotStoreRef.current.getLatestSnapshot();
+    if (retainedBeforeMount) {
+      setLiquidationFieldSnapshot(retainedBeforeMount);
+      engineRef.current.setLiquidationFieldState(retainedBeforeMount, liquidationFieldSettings);
     }
     const controller = new LiquidationFieldController({
       symbol: marketSymbol.rawSymbol,
@@ -2015,8 +2050,15 @@ export function PixiBlackChart({
       getCandles: () => engineRef.current?.getSourceCandles() ?? [],
       getReplayActive: () => replayActiveRef.current,
       onSnapshot: (snapshot) => {
-        setLiquidationFieldSnapshot(snapshot);
-        engineRef.current?.setLiquidationFieldState(snapshot, latestLiquidationFieldSettingsRef.current);
+        if (!snapshot) {
+          liquidationFieldSnapshotStoreRef.current.clear();
+          setLiquidationFieldSnapshot(null);
+          engineRef.current?.setLiquidationFieldState(null, latestLiquidationFieldSettingsRef.current);
+          return;
+        }
+        const retained = liquidationFieldSnapshotStoreRef.current.publish(snapshot);
+        setLiquidationFieldSnapshot(retained);
+        engineRef.current?.setLiquidationFieldState(retained, latestLiquidationFieldSettingsRef.current);
       },
       onStatus: setLiquidationFieldStatus
     });
@@ -5443,7 +5485,21 @@ export function PixiBlackChart({
       </>}
 
       <LiquidationFieldOverlays
+        rendererMetrics={liquidationFieldRendererMetrics}
         visible={visibleIndicators.liquidationHeatmap}
+        onOpenSettings={() => setActiveIndicator("liquidationHeatmap")}
+        onShowContext={() => onIndicatorAdvancedSettingsChange((current) => {
+          const source = migrateLiquidationFieldSettings(current.liquidationField);
+          return {
+            ...current,
+            liquidationField: {
+              ...source,
+              historicalContextEnabled: true,
+              strictHideBelowEnabled: false,
+              contextVisibilityFloor: Math.min(25, source.contextVisibilityFloor)
+            }
+          };
+        })}
         snapshot={liquidationFieldSnapshot}
         settings={liquidationFieldSettings}
         status={liquidationFieldStatus}

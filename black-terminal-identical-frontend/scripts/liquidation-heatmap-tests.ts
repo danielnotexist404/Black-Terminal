@@ -16,7 +16,7 @@ assert.equal(
   fixture.frames[0]!.timestamp / 1_000,
   "BCLIF millisecond timestamps must project into the chart's second-based time domain"
 );
-const settings = { ...DEFAULT_LIQUIDATION_FIELD_SETTINGS, timeColumns: 256, priceRows: 256, minimumConfidence: 0 };
+const settings = { ...DEFAULT_LIQUIDATION_FIELD_SETTINGS, timeColumns: 256, priceRows: 256, contextVisibilityFloor: 0, clusterLabelFloor: 0 };
 const visualColumnIndices = outputFrameIndices(fixture.frames, { ...settings, timeColumns: 512 });
 assert.ok(visualColumnIndices.size <= 512, "the high-resolution visual fixture must respect the configured GPU column ceiling");
 assert.ok(visualColumnIndices.size >= 480, "the high-resolution visual fixture must retain dense multi-week time detail");
@@ -52,7 +52,8 @@ assert.ok(isolatedFiveXLong.mean < isolatedFiftyXLong.mean, "lower-leverage long
 assert.ok(isolatedFiveXShort.mean > isolatedFiftyXShort.mean, "lower-leverage shorts must liquidate farther above entry");
 
 const engine = new LiquidationCohortEngine(fixture.rules, "REGIME_ADAPTIVE");
-const paired = engine.processFrame(fixture.frames[0]!, []);
+let paired = engine.processFrame(fixture.frames[0]!, []);
+for (const frame of fixture.frames.slice(1, 121)) paired = engine.processFrame(frame, []);
 assert.ok(paired.cohorts.some((cohort) => cohort.side === "LONG"), "positive OI must create a long cohort hypothesis");
 assert.ok(paired.cohorts.some((cohort) => cohort.side === "SHORT"), "positive OI must create a short cohort hypothesis");
 assert.ok(paired.cohorts.every((cohort) => cohort.confidence < 1), "modeled cohorts must never masquerade as observed positions");

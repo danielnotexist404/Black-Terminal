@@ -56,7 +56,7 @@ const settings = migrateLiquidationFieldSettings({
   smoothing: "SHARP",
   leverageMinimum: 2,
   leverageMaximum: 5,
-  minimumConfidence: 0,
+  contextVisibilityFloor: 0, clusterLabelFloor: 0,
   minimumNotionalUsd: 0,
   oiNoiseAbsoluteNotionalUsd: 10_000,
   oiNoisePercent: 0,

@@ -33,3 +33,6 @@ This indicator is decision support, not guaranteed liquidation location or tradi
   before network execution by approval timeout.
 - Persistent host, collector, migrations, soak, and persistent replay remain
   inactive.
+- Local Browser Fallback checkpoints are bounded convenience state, not continuous persistence; closed-browser gaps remain.
+- The deterministic 1920×1080 full-app hard-refresh fixture measured 5.465 s to a visible field and bypasses IndexedDB. The 1–2 s compatible-checkpoint target is therefore not yet certified in a production authenticated session.
+- Headless visual frame cadence is not an interactive FPS claim. Texture preparation/upload measured 3.0 ms in the selected browser fixture; broader baseline and production acceptance remain required.

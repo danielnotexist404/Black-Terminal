@@ -41,10 +41,15 @@ export function applyBclifVisualFixtureSettings(settings: LiquidationFieldSettin
     // Synthetic fixtures are intentionally unscored. Expose their complete
     // deterministic topology during localhost certification without lowering
     // the production confidence threshold or renderer authority rules.
-    minimumConfidence: 0,
+    contextVisibilityFloor: 0, clusterLabelFloor: 0,
     minimumNotionalUsd: 0
   });
   if (visualCase === "FULL_SPECTRUM_RESEARCH") return diagnosticSettings("FULL_SPECTRUM_RESEARCH");
+  if (visualCase === "BROWSER_FALLBACK") return {
+    ...applyBclifPresentationPreset(settings, "TRADE_FOCUS"),
+    contextVisibilityFloor: 25, clusterLabelFloor: 60, highAuthorityColorFloor: 75,
+    strictHideBelowEnabled: false, minimumNotionalUsd: 0
+  };
   if (visualCase === "COHORT_PROVENANCE") return {
     ...diagnosticSettings("TRADE_FOCUS"),
     cohortProvenanceVisible: true,

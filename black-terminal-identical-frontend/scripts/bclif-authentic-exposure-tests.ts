@@ -55,7 +55,7 @@ const settings = migrateLiquidationFieldSettings({
   priceRows: 256,
   timeColumns: 256,
   smoothing: "SHARP",
-  minimumConfidence: 0,
+  contextVisibilityFloor: 0, clusterLabelFloor: 0,
   minimumNotionalUsd: 0
 });
 

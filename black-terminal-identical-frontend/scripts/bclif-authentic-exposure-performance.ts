@@ -15,7 +15,7 @@ const settings = migrateLiquidationFieldSettings({
   priceRows: 384,
   timeColumns: 512,
   adaptiveResolution: "BALANCED",
-  minimumConfidence: 0
+  contextVisibilityFloor: 0, clusterLabelFloor: 0
 });
 const base = fixture.frames[0]!;
 const birth = fixture.frames.find((value) => value.openInterestDelta > 2 && value.oiIntervalStart !== undefined)!;

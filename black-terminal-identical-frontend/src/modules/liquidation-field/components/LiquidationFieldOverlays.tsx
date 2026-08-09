@@ -17,24 +17,29 @@ import {
   resolveBclifDisplayDomain
 } from "../rendering/displayProjection";
 
+import type { BclifRendererMetrics } from "../rendering/BlackCoreLiquidationFieldRenderer";
 interface Props {
   visible: boolean;
   snapshot: LiquidationFieldSnapshot | null;
   settings: LiquidationFieldSettings;
   status: LiquidationFieldRuntimeStatus;
   currentPrice: number;
+  rendererMetrics: BclifRendererMetrics | null;
+  onOpenSettings?: () => void;
+  onShowContext?: () => void;
   priceTransform: ChartPriceTransformSnapshot | null;
 }
 
-export function LiquidationFieldOverlays({ visible, snapshot, settings, status, currentPrice, priceTransform }: Props) {
+export function LiquidationFieldOverlays({ visible, snapshot, settings, status, currentPrice, priceTransform, rendererMetrics, onOpenSettings, onShowContext }: Props) {
+  const [hudOpen, setHudOpen] = useState(false);
   const [summaryOffset, setSummaryOffset] = useState({ x: 0, y: 0 });
-  const [summaryOpen, setSummaryOpen] = useState(true);
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
   const [hoveredClusterId, setHoveredClusterId] = useState<string | null>(null);
   const summaryDrag = useRef<{ pointerId: number; x: number; y: number; originX: number; originY: number } | null>(null);
   const clusters = useMemo(
     () => snapshot ? extractBclifOperationalClusters(snapshot, currentPrice, settings) : [],
-    [snapshot, currentPrice, settings.minimumConfidence, settings.sideFilter]
+    [snapshot, currentPrice, settings.clusterLabelFloor, settings.sideFilter]
   );
   const labels = useMemo(
     () => selectBclifOperationalLabels(clusters, currentPrice, settings.maximumClusterLabels),
@@ -73,9 +78,10 @@ export function LiquidationFieldOverlays({ visible, snapshot, settings, status, 
   const focusedCohorts = focusedCluster && snapshot
     ? snapshot.cohorts.filter((cohort) => focusedCluster.cohortIds.includes(cohort.id))
     : [];
+  const hudState = resolveHudState(status, rendererMetrics, snapshot, displayDomain !== null);
   return <>
-    <div
-      className={`liquidation-field-provenance authority-${authority.toLowerCase()}`}
+    <details
+      className={`liquidation-field-hud authority-${authority.toLowerCase()}`}
       data-bclif-authority={authority}
       data-bclif-persistence={provenance.persistence}
       data-bclif-state={status.state}
@@ -102,12 +108,26 @@ export function LiquidationFieldOverlays({ visible, snapshot, settings, status, 
       data-bclif-confirmed-assimilation-count={snapshot?.lifecycleEvents.filter((event) => event.kind === "CONFIRMED_LIQUIDATION").length ?? 0}
       data-bclif-mass-error={snapshot?.massLedger.conservationError ?? 0}
       aria-label={`BCLIF authority ${authority}`}
+      open={hudOpen}
+      onToggle={(event) => setHudOpen(event.currentTarget.open)}
     >
-      <b>{authority.replaceAll("_", " ")}</b>
-      <span>{provenance.persistence === "ON" ? "HISTORY CONTINUOUS" : "PERSISTENCE OFF"}</span>
-    </div>
+      <summary>
+        <b>{hudState.title}</b>
+        <span>{authority.replaceAll("_", " ")}</span>
+        <i>OI {formatCoverage(persistentCoverage?.openInterestCoveragePercent, coverage?.openInterestCoveragePercent, 0)} · EVENTS {formatCoverage(persistentCoverage?.liquidationCoveragePercent, coverage?.liquidationEventCoveragePercent, 0)}</i>
+        <em>CONF {snapshot ? `${snapshot.confidenceBreakdown.total}%` : "—"}</em>
+      </summary>
+      {hudOpen && <div className="liquidation-field-hud-details">
+        <p>{hudState.detail}</p>
+        <span>RAW {rendererMetrics?.rawNonZeroCells.toLocaleString() ?? "—"} · VISIBLE {rendererMetrics?.visibleCells.toLocaleString() ?? "—"} · UPLOADS {rendererMetrics?.textureUploadCount ?? 0}</span>
+        <span>MODEL GEN {rendererMetrics?.latestModelGeneration ?? snapshot?.generations?.modelGeneration ?? 0} · RENDER GEN {rendererMetrics?.latestRenderedGeneration ?? 0} · LAG {rendererMetrics?.generationLag ?? "—"}</span>
+        <div>
+          {hudState.filtered && <button type="button" onClick={onShowContext}>SHOW OI CONTEXT</button>}
+          <button type="button" onClick={onOpenSettings}>OPEN SETTINGS</button>
+        </div>
+      </div>}
+    </details>
 
-    <div className="liquidation-field-horizon-truth"><b>{horizonTruth}</b><span>{settings.preset.replaceAll("_", " ")}</span></div>
 
     {settings.operationalSummaryVisible && snapshot && <details
       className="liquidation-field-operational-summary"
@@ -215,12 +235,37 @@ export function LiquidationFieldOverlays({ visible, snapshot, settings, status, 
       <div><span>MASS CONSERVATION</span><b>{snapshot ? `${snapshot.massLedger.conservationError.toExponential(2)} / ${snapshot.massLedger.tolerance.toExponential(2)}` : "—"}</b></div>
       <footer>{status.error ?? status.message}</footer>
     </div>}
-    {(status.state === "LOADING" || status.state === "ERROR" || status.state === "UNAVAILABLE") && <div className={`liquidation-field-status ${status.state.toLowerCase()}`}>
-      <b>{status.state === "LOADING" ? "EVENT HORIZON INITIALIZING" : "LIQUIDATION INTELLIGENCE UNAVAILABLE"}</b>
-      <span>{status.error ?? status.message}</span>
-      {status.state === "LOADING" && <i />}
-    </div>}
   </>;
+}
+
+function resolveHudState(
+  status: LiquidationFieldRuntimeStatus,
+  renderer: BclifRendererMetrics | null,
+  snapshot: LiquidationFieldSnapshot | null,
+  displayIntersects: boolean
+) {
+  if (status.state === "UNAVAILABLE" || status.lifecycle === "VENUE_UNSUPPORTED") {
+    return { title: "BCLIF UNAVAILABLE", detail: status.error ?? status.message, filtered: false };
+  }
+  if (renderer?.readiness === "TEXTURE_ERROR" || status.lifecycle === "TEXTURE_ERROR") {
+    return { title: "BCLIF — TEXTURE ERROR", detail: renderer?.error ?? status.error ?? status.message, filtered: false };
+  }
+  if (renderer?.readiness === "FILTERED_EMPTY") {
+    return { title: "BCLIF — FILTERED, 0 CELLS VISIBLE", detail: "Model has exposure. Current confidence or channel filters intentionally hide every cell.", filtered: true };
+  }
+  if (renderer?.readiness === "INVISIBLE_TEXTURE" && renderer.rawNonZeroCells === 0) {
+    return { title: "BCLIF — NO MODEL EXPOSURE", detail: "The verified model is ready, but this requested domain contains no non-zero exposure cells.", filtered: false };
+  }
+  if (renderer?.readiness === "INVISIBLE_TEXTURE") {
+    return { title: "BCLIF — INVISIBLE TEXTURE", detail: "Exposure exists, but the current raster has no visible alpha. Review the renderer state before trusting the display.", filtered: false };
+  }
+  if (snapshot && !displayIntersects) {
+    return { title: "BCLIF — OUTSIDE PRICE DISPLAY", detail: "The verified model exists outside the current chart price domain.", filtered: false };
+  }
+  if (!snapshot) {
+    return { title: "BCLIF — INITIALIZING OI CONTEXT", detail: status.error ?? status.message, filtered: false };
+  }
+  return { title: "BCLIF V6", detail: status.message, filtered: false };
 }
 
 function ProvenanceRow({ label, value }: { label: string; value: string }) {

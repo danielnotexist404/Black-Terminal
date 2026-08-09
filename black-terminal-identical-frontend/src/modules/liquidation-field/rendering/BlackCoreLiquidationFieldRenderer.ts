@@ -21,6 +21,52 @@ export interface LiquidationFieldRenderTransform {
   xForTimestampMs(timestampMs: number): number;
   yForPrice(price: number): number;
 }
+export type BclifRendererReadiness =
+  | "RENDERER_INITIALIZING"
+  | "WEBGL_CONTEXT_READY"
+  | "FILTERED_EMPTY"
+  | "INVISIBLE_TEXTURE"
+  | "TEXTURE_ERROR";
+
+export interface BclifRendererMetrics {
+  readiness: BclifRendererReadiness;
+  webglContextReady: boolean;
+  textureAllocated: boolean;
+  bufferValid: boolean;
+  snapshotApplied: boolean;
+  textureUploaded: boolean;
+  drawPassActive: boolean;
+  textureUploadCount: number;
+  rendererAttachmentTimestamp: number;
+  textureUploadTimestamp: number | null;
+  textureUploadDurationMs: number | null;
+  texturePreparationAndUpdateMs: number | null;
+  latestModelGeneration: number;
+  latestRenderedGeneration: number;
+  generationLag: number;
+  rawNonZeroCells: number;
+  validCells: number;
+  visibleCells: number;
+  filteredCells: number;
+  nonZeroTexels: number;
+  minimumAlpha: number;
+  maximumAlpha: number;
+  textureDimensions: string | null;
+  error: string | null;
+}
+export function validateBclifProjection(projection: BclifDisplayProjection) {
+  if (!Number.isInteger(projection.columns) || !Number.isInteger(projection.rows) || projection.columns <= 0 || projection.rows <= 0) {
+    throw new Error("BCLIF_TEXTURE_DIMENSIONS_INVALID");
+  }
+  const cells = projection.columns * projection.rows;
+  for (const channel of [projection.intensity, projection.alpha, projection.validity, projection.yellowEligible]) {
+    if (channel.length !== cells) throw new Error("BCLIF_TEXTURE_BUFFER_LENGTH_INVALID");
+  }
+  if (!Number.isFinite(projection.minPrice) || !Number.isFinite(projection.maxPrice) || projection.maxPrice <= projection.minPrice) {
+    throw new Error("BCLIF_TEXTURE_PRICE_DOMAIN_INVALID");
+  }
+}
+
 
 function clampByte(value: number) {
   return Math.max(0, Math.min(255, Math.round(value)));
@@ -46,8 +92,21 @@ export class BlackCoreLiquidationFieldRenderer {
   private projectionWorker: Worker | null = null;
   private projectionGeneration = 0;
   private pendingProjectionKey = "";
+  private readonly rendererAttachmentTimestamp = Date.now();
+  private webglContextReady = true;
+  private textureUploadCount = 0;
+  private textureUploadTimestamp: number | null = null;
+  private textureUploadDurationMs: number | null = null;
+  private texturePreparationAndUpdateMs: number | null = null;
+  private latestRenderedGeneration = 0;
+  private lastError: string | null = null;
+  private drawPassActive = false;
+  private bufferValid = false;
+  private currentTextureUploaded = false;
+  private readonly onProjectionReady?: (metrics: BclifRendererMetrics) => void;
 
-  constructor(private readonly onProjectionReady?: () => void) {
+  constructor(onProjectionReady?: (metrics: BclifRendererMetrics) => void) {
+    this.onProjectionReady = onProjectionReady;
     this.container.addChild(this.clip, this.overlay);
     this.container.mask = this.clip;
     if (typeof Worker !== "undefined") {
@@ -65,7 +124,13 @@ export class BlackCoreLiquidationFieldRenderer {
         this.textureKey = event.data.key;
         this.projection = event.data.projection;
         this.rebuildTexture();
-        this.onProjectionReady?.();
+        this.emitMetrics();
+      };
+      this.projectionWorker.onerror = (event) => {
+        this.pendingProjectionKey = "";
+        this.lastError = event.message || "BCLIF_PROJECTION_WORKER_FAILED";
+        if (this.sprite) this.sprite.visible = false;
+        this.emitMetrics();
       };
     }
   }
@@ -82,11 +147,15 @@ export class BlackCoreLiquidationFieldRenderer {
       this.projection = null;
       this.projectionGeneration += 1;
       this.pendingProjectionKey = "";
+      this.bufferValid = false;
+      this.currentTextureUploaded = false;
+      this.drawPassActive = false;
     }
     if (!snapshot && this.sprite) this.sprite.visible = false;
   }
 
   draw(transform: LiquidationFieldRenderTransform) {
+    this.drawPassActive = false;
     this.clip.clear().rect(0, transform.top, transform.width, Math.max(0, transform.bottom - transform.top)).fill(0xffffff);
     this.overlay.clear();
     const snapshot = this.snapshot;
@@ -117,6 +186,7 @@ export class BlackCoreLiquidationFieldRenderer {
         this.textureKey = projectionKey;
         this.projection = buildBclifDisplayProjection(snapshot, settings, context);
         this.rebuildTexture();
+        this.emitMetrics();
       }
     }
     const projection = this.projection;
@@ -134,6 +204,7 @@ export class BlackCoreLiquidationFieldRenderer {
     sprite.alpha = Math.max(0, Math.min(1, settings.opacity / 100));
     sprite.visible = !settings.rawCohortShelvesVisible
       && right >= 0 && left <= transform.width && bottom >= transform.top && top <= transform.bottom;
+    this.drawPassActive = sprite.visible;
 
     if (settings.rawCohortShelvesVisible) {
       const shelves = snapshot.rawCohortShelves ?? snapshot.cohorts.map((cohort) => ({
@@ -249,7 +320,20 @@ export class BlackCoreLiquidationFieldRenderer {
       return;
     }
     const { columns, rows } = projection;
-    const rgba = projection.rgba ?? buildBclifDisplayTexture(projection, settings, this.rgba);
+    let rgba: Uint8Array;
+    try {
+      validateBclifProjection(projection);
+      rgba = projection.rgba ?? buildBclifDisplayTexture(projection, settings, this.rgba);
+      if (rgba.length !== columns * rows * 4) throw new Error("BCLIF_RGBA_BUFFER_LENGTH_INVALID");
+      this.bufferValid = true;
+    } catch (error) {
+      this.bufferValid = false;
+      this.currentTextureUploaded = false;
+      this.lastError = error instanceof Error ? error.message : "BCLIF_TEXTURE_VALIDATION_FAILED";
+      if (this.sprite) this.sprite.visible = false;
+      this.emitMetrics();
+      return;
+    }
     this.rgba = rgba;
 
     const dimensionsChanged = !this.source || this.source.width !== columns || this.source.height !== rows;
@@ -265,6 +349,14 @@ export class BlackCoreLiquidationFieldRenderer {
       this.source.resource = rgba;
       this.source.update();
     }
+    this.textureUploadCount += 1;
+    this.currentTextureUploaded = true;
+    this.textureUploadTimestamp = Date.now();
+    this.textureUploadDurationMs = typeof performance === "undefined" ? null : performance.now() - startedAt;
+    this.texturePreparationAndUpdateMs = this.textureUploadDurationMs === null
+      ? null : Number(this.textureUploadDurationMs.toFixed(3));
+    this.latestRenderedGeneration = this.snapshot?.generations?.modelGeneration ?? this.projectionGeneration;
+    this.lastError = null;
     if (typeof globalThis !== "undefined") {
       const instrumentation = globalThis as typeof globalThis & {
         __BCLIF_RENDER_METRICS__?: Record<string, unknown>;
@@ -272,9 +364,7 @@ export class BlackCoreLiquidationFieldRenderer {
       };
       instrumentation.__BCLIF_RENDER_METRICS__ = {
         ...this.metrics(),
-        texturePreparationAndUpdateMs: typeof performance === "undefined"
-          ? null
-          : Number((performance.now() - startedAt).toFixed(3)),
+        texturePreparationAndUpdateMs: this.texturePreparationAndUpdateMs,
         recordedAt: Date.now()
       };
       instrumentation.__BCLIF_RAW_EXPOSURE_EXPORT__ = () => this.snapshot
@@ -296,7 +386,34 @@ export class BlackCoreLiquidationFieldRenderer {
   }
 
   metrics() {
+    const latestModelGeneration = this.snapshot?.generations?.modelGeneration ?? 0;
+    const maximumAlpha = this.projection?.maximumAlpha ?? 0;
+    const readiness = this.resolveReadiness(maximumAlpha);
     return {
+      readiness,
+      webglContextReady: this.webglContextReady,
+      textureAllocated: Boolean(this.texture),
+      bufferValid: this.bufferValid,
+      snapshotApplied: Boolean(this.snapshot),
+      textureUploaded: this.currentTextureUploaded,
+      drawPassActive: this.drawPassActive,
+      textureUploadCount: this.textureUploadCount,
+      rendererAttachmentTimestamp: this.rendererAttachmentTimestamp,
+      textureUploadTimestamp: this.textureUploadTimestamp,
+      textureUploadDurationMs: this.textureUploadDurationMs,
+      texturePreparationAndUpdateMs: this.texturePreparationAndUpdateMs,
+      latestModelGeneration,
+      latestRenderedGeneration: this.latestRenderedGeneration,
+      generationLag: Math.max(0, latestModelGeneration - this.latestRenderedGeneration),
+      rawNonZeroCells: this.projection?.rawNonZeroCells ?? 0,
+      validCells: this.projection?.validCells ?? 0,
+      visibleCells: this.projection?.visibleCells ?? 0,
+      filteredCells: this.projection?.filteredCells ?? 0,
+      nonZeroTexels: this.projection?.visibleCells ?? 0,
+      minimumAlpha: this.projection?.minimumVisibleAlpha ?? 0,
+      maximumAlpha,
+      textureDimensions: this.projection ? `${this.projection.columns}x${this.projection.rows}` : null,
+      error: this.lastError,
       textures: this.texture ? 1 : 0,
       cells: this.projection ? this.projection.columns * this.projection.rows : 0,
       authority: this.snapshot?.authority ?? null,
@@ -315,6 +432,41 @@ export class BlackCoreLiquidationFieldRenderer {
       displayRasterHash: this.projection?.displayRasterHash ?? null,
       yellowEligibleCells: this.projection?.yellowEligibleCells ?? 0
     };
+  }
+
+  handleContextLost() {
+    this.webglContextReady = false;
+    this.drawPassActive = false;
+    this.currentTextureUploaded = false;
+    this.lastError = "WEBGL_CONTEXT_LOST";
+    if (this.sprite) this.sprite.visible = false;
+    this.emitMetrics();
+  }
+
+  handleContextRestored() {
+    this.webglContextReady = true;
+    this.lastError = null;
+    this.textureKey = "";
+    this.projectionGeneration += 1;
+    this.rebuildTexture();
+    this.emitMetrics();
+  }
+
+  private emitMetrics() {
+    const metrics = this.metrics();
+    this.onProjectionReady?.(metrics);
+    if (typeof globalThis !== "undefined") {
+      const target = globalThis as typeof globalThis & { __BCLIF_RENDER_METRICS__?: BclifRendererMetrics };
+      target.__BCLIF_RENDER_METRICS__ = metrics;
+    }
+  }
+
+  private resolveReadiness(maximumAlpha: number): BclifRendererReadiness {
+    if (this.lastError) return "TEXTURE_ERROR";
+    if (!this.webglContextReady || !this.projection) return "RENDERER_INITIALIZING";
+    if (this.projection.rawNonZeroCells > 0 && this.projection.visibleCells === 0) return "FILTERED_EMPTY";
+    if (maximumAlpha === 0) return "INVISIBLE_TEXTURE";
+    return "WEBGL_CONTEXT_READY";
   }
 
   dispose() {

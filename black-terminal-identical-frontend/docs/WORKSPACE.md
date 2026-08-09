@@ -279,3 +279,4 @@ keeps one absolute price grid only in controller memory; periodic refresh does
 not persist it in workspace state. `__BCLIF_RAW_EXPOSURE_EXPORT__` is a
 runtime diagnostic function and no raw field is written to localStorage or
 IndexedDB.
+Chapter III-C5 upgrades BCLIF renderer preferences to schema V7. Only BCLIF presentation fields migrate; unrelated workspace preferences are preserved. Browser Fallback may store up to three public snapshot checkpoints in black-terminal-bclif-public-v1 (24 h, 64 MiB each, 128 MiB total). This storage never includes authentication, broker or private-account state and is not persistent-collector authority.

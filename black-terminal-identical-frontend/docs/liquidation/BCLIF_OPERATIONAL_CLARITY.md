@@ -32,3 +32,6 @@ For a three-week view, browser/test contexts say `3W OI CONTEXT · LIVE EVENTS C
 DISPLAY RASTER identity includes exposure bytes, evidence authority and coverage, confidence and confirmed-event channels, display settings, camera domain, grid, and current-price lattice. MODEL and EXPOSURE identities stay unchanged when presentation settings change.
 
 State A remains unchanged: repository complete; persistent host not provided; collector not deployed; migrations not applied; browser fallback active.
+## Chapter III-C5 cold-start behavior
+
+Renderer schema V7 separates context visibility (25%), labels (60%) and high-authority color (75%). Strict filtering is off by default and produces an explicit FILTERED_EMPTY HUD state when enabled. The replaying snapshot store makes model-first and renderer-first mount orders equivalent. One compact overlay badge replaces open diagnostics and cluster panels by default.

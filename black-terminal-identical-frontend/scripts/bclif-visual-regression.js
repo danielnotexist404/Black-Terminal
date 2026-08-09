@@ -95,18 +95,27 @@ try {
       localStorage.removeItem("bt_current_user");
     });
     const url = `http://127.0.0.1:${port}/?uiPreview=1&bclifVisualFixture=1&bclifVisualCase=${encodeURIComponent(testCase.fixture)}`;
+    let coldStartStartedAt = Date.now();
     await page.goto(url, { waitUntil: "domcontentloaded" });
-    await page.addStyleTag({ content: "*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}" });
-    await page.locator(".app-shell").waitFor({ state: "visible", timeout: 45_000 });
-    const provenance = page.locator(".liquidation-field-provenance");
-    await provenance.waitFor({ state: "visible", timeout: 90_000 });
-    await page.waitForFunction(() => {
-      const node = document.querySelector(".liquidation-field-provenance");
-      const metrics = globalThis.__BCLIF_RENDER_METRICS__;
-      return node?.getAttribute("data-bclif-display-grid") !== "NONE"
-        && metrics?.displayRasterHash
-        && metrics.displayRasterHash !== "NONE";
-    }, null, { timeout: 90_000 });
+    await waitForBclif(page, testCase.fixture === "SWING_INDEPENDENCE");
+    if (testCase.fixture === "BROWSER_FALLBACK") {
+      coldStartStartedAt = Date.now();
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await waitForBclif(page, testCase.fixture === "SWING_INDEPENDENCE");
+    }
+    const hardRefreshToFieldMs = Date.now() - coldStartStartedAt;
+    const provenance = page.locator(".liquidation-field-hud");
+    let webglRecovered = false;
+    if (testCase.fixture === "BROWSER_FALLBACK" && testCase.width === 1920) {
+      const uploadCount = await page.evaluate(() => Number(globalThis.__BCLIF_RENDER_METRICS__?.textureUploadCount || 0));
+      await page.locator(".pixi-chart-host canvas").dispatchEvent("webglcontextlost");
+      await page.locator(".pixi-chart-host canvas").dispatchEvent("webglcontextrestored");
+      await page.waitForFunction((before) => {
+        const metrics = globalThis.__BCLIF_RENDER_METRICS__;
+        return metrics?.readiness === "WEBGL_CONTEXT_READY" && Number(metrics.textureUploadCount) > Number(before);
+      }, uploadCount, { timeout: 30_000 });
+      webglRecovered = true;
+    }
     await page.waitForTimeout(300);
 
     const audit = await provenance.evaluate((node) => {
@@ -132,9 +141,13 @@ try {
         market: document.querySelector(".chart-header .pair")?.textContent?.trim() || "",
         badgeAreaRatio: rect.width * rect.height / (innerWidth * innerHeight),
         canvasCount: document.querySelectorAll(".pixi-chart-host canvas").length,
+        hudVisible: Boolean(document.querySelector(".liquidation-field-hud")),
         summaryVisible: Boolean(document.querySelector(".liquidation-field-operational-summary")),
         texturePreparationAndUpdateMs: Number(metrics.texturePreparationAndUpdateMs),
         displayCells: Number(metrics.cells),
+        rawNonZeroCells: Number(metrics.rawNonZeroCells),
+        visibleCells: Number(metrics.visibleCells),
+        rendererReadiness: String(metrics.readiness || ""),
         yellowEligibleCells: Number(metrics.yellowEligibleCells),
         provenanceCoverage: Number(node.getAttribute("data-bclif-provenance-coverage")),
         cohortCount: Number(node.getAttribute("data-bclif-cohort-count")),
@@ -145,6 +158,8 @@ try {
         provenancePanelVisible: Boolean(document.querySelector(".liquidation-field-cohort-provenance"))
       };
     });
+    audit.hardRefreshToFieldMs = hardRefreshToFieldMs;
+    audit.webglRecovered = webglRecovered;
     const expectedAuthority = testCase.fixture === "BROWSER_FALLBACK" ? "BROWSER_FALLBACK"
       : testCase.fixture === "PERSISTENT_NODE" ? "PERSISTENT_NODE" : "TEST_FIXTURE";
     const expectedPersistence = testCase.fixture === "PERSISTENT_NODE" ? "ON" : "OFF";
@@ -161,11 +176,13 @@ try {
       || audit.badgeAreaRatio > 0.04
       || !audit.market.includes("BTCUSDT")
       || !audit.market.includes("BYBIT")
-      || !audit.summaryVisible
+      || !audit.hudVisible
+      || audit.summaryVisible
       || audit.candleContrast !== expectedCandleContrast
       || !Number.isFinite(yellowTailRatio)
       || yellowTailRatio > 0.006
       || (testCase.fixture === "BROWSER_FALLBACK" && audit.yellowEligibleCells !== 0)
+      || (testCase.fixture === "BROWSER_FALLBACK" && (audit.rawNonZeroCells <= 0 || audit.visibleCells <= 0 || audit.rendererReadiness !== "WEBGL_CONTEXT_READY"))
       || audit.labels < 0
       || audit.labels > (testCase.fixture === "HIGH_CONFIDENCE" ? 6 : 4)
       || !Number.isFinite(audit.texturePreparationAndUpdateMs)
@@ -259,6 +276,20 @@ console.log(JSON.stringify({
   error: failure instanceof Error ? failure.message : failure ? String(failure) : undefined
 }, null, 2));
 if (failure) process.exitCode = 1;
+
+async function waitForBclif(page, allowNoExposure = false) {
+  await page.addStyleTag({ content: "*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}" });
+  await page.locator(".app-shell").waitFor({ state: "visible", timeout: 45_000 });
+  await page.locator(".liquidation-field-hud").waitFor({ state: "visible", timeout: 90_000 });
+  await page.waitForFunction((allowEmpty) => {
+    const node = document.querySelector(".liquidation-field-hud");
+    const metrics = globalThis.__BCLIF_RENDER_METRICS__;
+    return node?.getAttribute("data-bclif-display-grid") !== "NONE"
+      && metrics?.displayRasterHash
+      && metrics.displayRasterHash !== "NONE"
+      && (allowEmpty || metrics.visibleCells > 0);
+  }, allowNoExposure, { timeout: 90_000 });
+}
 
 function writeManifestProgress(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);

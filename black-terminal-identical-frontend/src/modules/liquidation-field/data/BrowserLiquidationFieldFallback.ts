@@ -11,6 +11,8 @@ import { liquidationFieldModelSettingsKey, migrateLiquidationFieldSettings } fro
 import { LiquidationFieldWorkerClient } from "../worker/LiquidationFieldWorkerClient.ts";
 import { bootstrapBybitLiquidationField, type BybitLiquidationBootstrap } from "./bybitPublicData.ts";
 import { BybitLiquidationStream, type BybitLiquidationLiveState } from "./bybitLiquidationStream.ts";
+import { createBrowserCheckpointStore, type BclifBrowserCheckpointStore } from "./BclifBrowserCheckpoint.ts";
+
 
 export interface BrowserLiquidationFieldFallbackOptions {
   symbol: string;
@@ -18,6 +20,7 @@ export interface BrowserLiquidationFieldFallbackOptions {
   getCandles: () => Candle[];
   onSnapshot: (snapshot: LiquidationFieldSnapshot | null) => void;
   onStatus: (status: LiquidationFieldRuntimeStatus) => void;
+  checkpointStore?: BclifBrowserCheckpointStore | null;
 }
 
 /**
@@ -38,15 +41,30 @@ export class BrowserLiquidationFieldFallback {
   private buildGeneration = 0;
   private readonly liveStartedAt = Date.now();
   private absoluteGrid: BclifAbsolutePriceGrid | null = null;
+  private hasRestoredCheckpoint = false;
+  private readonly checkpoint: BclifBrowserCheckpointStore | null;
 
   constructor(private readonly options: BrowserLiquidationFieldFallbackOptions) {
     this.settings = migrateLiquidationFieldSettings(options.settings);
+    this.checkpoint = options.checkpointStore === undefined ? createBrowserCheckpointStore() : options.checkpointStore;
   }
 
   async start(reason?: string) {
+    this.status("LOADING", "Restoring the bounded local public BCLIF checkpoint.", "RESTORING_LOCAL_PUBLIC_CACHE");
+    try {
+      const restored = await this.checkpoint?.restore(this.options.symbol, this.settings);
+      if (restored && !this.disposed) {
+        this.hasRestoredCheckpoint = true;
+        this.options.onSnapshot(restored);
+        this.status("LOADING", "Local browser checkpoint restored; reconciling fresh public OI.", "OI_CONTEXT_READY");
+      }
+    } catch {
+      // Corrupt/inaccessible public cache is disposable; source rebuild remains authoritative.
+    }
+
     this.status("LOADING", reason
       ? `Persistent market memory is unavailable (${reason}); building the browser-session model.`
-      : "Building the browser-session liquidation model.");
+      : "Building the browser-session liquidation model.", "BACKFILLING_OI");
     const symbol = this.options.symbol.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
     this.stream = new BybitLiquidationStream(symbol, (state) => {
       this.live = state;
@@ -55,15 +73,16 @@ export class BrowserLiquidationFieldFallback {
         state.connected ? "COLLECTING" : "STALE",
         state.connected
           ? "Live trades, liquidations and L2 depth connected; history accumulates only in this browser session."
-          : "Bybit public stream reconnecting; the last browser-session field remains visible."
+          : "Bybit public stream reconnecting; the last browser-session field remains visible.",
+        state.connected ? "LIVE_CALIBRATING" : "SOURCE_UNAVAILABLE"
       );
     });
     this.stream.start();
     try {
       await this.refreshBootstrap();
       if (!this.bootstrap?.frames.length || this.bootstrap.coverage.openInterestCoveragePercent <= 0) {
-        this.status("UNAVAILABLE", "Open-interest history is unavailable for this venue/symbol window.");
-        this.options.onSnapshot(null);
+        this.status("UNAVAILABLE", "Open-interest history is unavailable for this venue/symbol window.", "SOURCE_UNAVAILABLE");
+        if (!this.hasRestoredCheckpoint) this.options.onSnapshot(null);
         return;
       }
       await this.build();
@@ -145,9 +164,11 @@ export class BrowserLiquidationFieldFallback {
     });
     if (this.disposed || generation !== this.buildGeneration) return;
     this.options.onSnapshot(snapshot);
+    void this.checkpoint?.save(this.options.symbol, this.settings, snapshot).catch(() => undefined);
     this.status(
       this.live?.connected ? "COLLECTING" : "LIVE",
-      `${coverage.openInterestCoveragePercent.toFixed(0)}% OI coverage; confirmed-liquidation history ${coverage.liquidationEventCoveragePercent.toFixed(2)}% (browser session).`
+      `${coverage.openInterestCoveragePercent.toFixed(0)}% OI coverage; confirmed-liquidation history ${coverage.liquidationEventCoveragePercent.toFixed(2)}% (browser session).`,
+      "LIVE_CALIBRATING"
     );
   }
 
@@ -176,7 +197,11 @@ export class BrowserLiquidationFieldFallback {
     return frames;
   }
 
-  private status(state: LiquidationFieldRuntimeStatus["state"], message: string) {
+  private status(
+    state: LiquidationFieldRuntimeStatus["state"],
+    message: string,
+    lifecycle: LiquidationFieldRuntimeStatus["lifecycle"]
+  ) {
     if (this.disposed) return;
     this.options.onStatus({
       state,
@@ -185,7 +210,8 @@ export class BrowserLiquidationFieldFallback {
       authority: "BROWSER_FALLBACK",
       persistence: "OFF",
       collectorNodeId: null,
-      lastInputAt: this.live?.lastInputAt ?? null
+      lastInputAt: this.live?.lastInputAt ?? null,
+      lifecycle,
     });
   }
 
@@ -200,7 +226,8 @@ export class BrowserLiquidationFieldFallback {
       persistence: "OFF",
       collectorNodeId: null,
       lastInputAt: this.live?.lastInputAt ?? null,
-      error: detail
+      error: detail,
+      lifecycle: "FATAL",
     });
   }
 }

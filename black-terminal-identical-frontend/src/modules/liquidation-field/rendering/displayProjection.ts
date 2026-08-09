@@ -28,6 +28,15 @@ export interface BclifDisplayProjection {
   historicalCells: number;
   liveCalibratedCells: number;
   missingCells: number;
+  validCells: number;
+  rawNonZeroCells: number;
+  visibleCells: number;
+  filteredCells: number;
+  minimumVisibleAlpha: number;
+  maximumAlpha: number;
+  validModelRowsInDisplay: number;
+  rowsClippedBelow: number;
+  rowsClippedAbove: number;
   evidenceCounts: Record<BclifEvidenceClass, number>;
   liveCalibrationStartTime: number | null;
   modelHash: string;
@@ -96,7 +105,13 @@ export function bclifRenderSettingsHash(settings: LiquidationFieldSettings) {
     lowQuantile: settings.lowQuantile,
     highQuantile: settings.highQuantile,
     sharpness: settings.sharpness,
-    confidence: settings.minimumConfidence,
+    contextVisibilityFloor: settings.contextVisibilityFloor,
+    clusterLabelFloor: settings.clusterLabelFloor,
+    highAuthorityColorFloor: settings.highAuthorityColorFloor,
+    strictHideBelowEnabled: settings.strictHideBelowEnabled,
+    strictHideBelowConfidence: settings.strictHideBelowConfidence,
+    historicalContextEnabled: settings.historicalContextEnabled,
+    liveCalibratedEnabled: settings.liveCalibratedEnabled,
     priceDisplay: settings.priceDisplay,
     channel: settings.visualChannel,
     normalization: settings.thermalNormalization,
@@ -293,6 +308,12 @@ export function buildBclifDisplayProjection(
   let liveCalibratedCells = 0;
   let missingCells = 0;
   let yellowEligibleCells = 0;
+  let validCells = 0;
+  let rawNonZeroCells = 0;
+  let visibleCells = 0;
+  let filteredCells = 0;
+  let minimumVisibleAlpha = 255;
+  let maximumAlpha = 0;
 
   for (let column = 0; column < columns; column++) {
     const live = column >= liveStartColumn;
@@ -303,6 +324,7 @@ export function buildBclifDisplayProjection(
         missingCells += 1;
         continue;
       }
+      validCells += 1;
       const sourceIndex = sourceIndices[targetIndex]!;
       const browserHistorical = !live && snapshot.authority === "BROWSER_FALLBACK";
       const cellTrade = browserHistorical ? 0 : tradeWeight;
@@ -328,15 +350,18 @@ export function buildBclifDisplayProjection(
       unit = Math.pow(clamp01(unit), settings.gamma);
       unit = Math.pow(unit, 1 + settings.sharpness / 170);
 
+      const rawValue = raw[targetIndex]!;
+      if (rawValue > 0) rawNonZeroCells += 1;
       const multipleEvidence = evidenceChannels >= 2;
-      const yellow = confidencePercent >= 75
-        && raw[targetIndex]! >= yellowThreshold
+      const yellow = confidencePercent >= settings.highAuthorityColorFloor
+        && rawValue >= yellowThreshold
         && continuity >= 80
         && multipleEvidence
         && !browserHistorical;
       const historicalOnly = !live || evidenceClass === "OI_ONLY" || evidenceClass === "OI_PLUS_PRICE";
       let cap = 255;
       if (!yellow) cap = confidencePercent < 40 ? 108 : confidencePercent < 60 ? 145 : confidencePercent < 75 ? 190 : 232;
+      if (confidencePercent < settings.highAuthorityColorFloor) cap = Math.min(cap, 190);
       if (historicalOnly) cap = Math.min(cap, 176);
       if (settings.requireMultipleEvidenceChannels && !multipleEvidence) cap = Math.min(cap, 168);
       let displayIntensity = Math.round(unit * 255);
@@ -350,13 +375,25 @@ export function buildBclifDisplayProjection(
           : confidencePercent < 75 ? 0.58
             : confidencePercent < 90 ? 0.82 : 1;
       let channelAlpha = live ? settings.liveCalibratedOpacity / 100 : settings.historicalContextOpacity / 100;
+      if (!settings.historicalContextEnabled && !live) channelAlpha = 0;
+      if (!settings.liveCalibratedEnabled && live) channelAlpha = 0;
       if (settings.visualChannel === "HISTORICAL_CONTEXT") channelAlpha = live ? 0.08 : settings.historicalContextOpacity / 100;
       if (settings.visualChannel === "LIVE_CALIBRATED") channelAlpha = live ? settings.liveCalibratedOpacity / 100 : 0;
-      if (confidencePercent < settings.minimumConfidence) {
-        channelAlpha *= settings.preset === "HIGH_CONFIDENCE" ? 0 : 0.2;
+      const contextFiltered = confidencePercent < settings.contextVisibilityFloor;
+      const strictFiltered = settings.strictHideBelowEnabled
+        && confidencePercent < settings.strictHideBelowConfidence;
+      const cellAlpha = rawValue <= 0 || contextFiltered || strictFiltered
+        ? 0
+        : clamp(Math.round(255 * confidenceAuthority * channelAlpha), 0, 255);
+      alpha[targetIndex] = cellAlpha;
+      if (rawValue > 0) {
+        if (cellAlpha > 0) {
+          visibleCells += 1;
+          minimumVisibleAlpha = Math.min(minimumVisibleAlpha, cellAlpha);
+          maximumAlpha = Math.max(maximumAlpha, cellAlpha);
+        } else filteredCells += 1;
       }
-      if (settings.requireMultipleEvidenceChannels && !multipleEvidence) channelAlpha *= 0.55;
-      alpha[targetIndex] = clamp(Math.round(255 * confidenceAuthority * channelAlpha), 0, 255);
+
       if (live) liveCalibratedCells += 1;
       else historicalCells += 1;
     }
@@ -382,6 +419,15 @@ export function buildBclifDisplayProjection(
     historicalCells,
     liveCalibratedCells,
     missingCells,
+    validCells,
+    rawNonZeroCells,
+    visibleCells,
+    filteredCells,
+    minimumVisibleAlpha: visibleCells ? minimumVisibleAlpha : 0,
+    maximumAlpha,
+    validModelRowsInDisplay: sourceRowMaximum - sourceRowMinimum + 1,
+    rowsClippedBelow: sourceRowMinimum,
+    rowsClippedAbove: Math.max(0, sourceRows - 1 - sourceRowMaximum),
     evidenceCounts,
     liveCalibrationStartTime: liveStartColumn < columns
       ? snapshot.header.startTime + liveStartColumn / Math.max(1, columns - 1) * (snapshot.header.endTime - snapshot.header.startTime)

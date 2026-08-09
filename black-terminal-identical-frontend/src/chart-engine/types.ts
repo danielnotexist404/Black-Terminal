@@ -4,6 +4,7 @@ import type { KioseffSnapshot } from "../modules/kioseff-stop-loss-clustering/co
 import type { KioseffSettingsV1 } from "../modules/kioseff-stop-loss-clustering/core/settings";
 import type { AuctionProfileSettings, AuctionProfileSnapshot } from "../modules/auction-profile/core/types";
 import type { LiquidationFieldSettings } from "../modules/liquidation-field/core/types";
+import type { BclifRendererMetrics } from "../modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer";
 
 
 export type Candle = {
@@ -118,6 +119,7 @@ export type ChartEngineOptions = {
   onPriceChange?: (price: number) => void;
   onCandleChange?: (candle: Candle) => void;
   onPriceTransformChange?: (transform: ChartPriceTransformSnapshot) => void;
+  onLiquidationRendererMetrics?: (metrics: BclifRendererMetrics) => void;
   onFps?: (fps: number) => void;
   priceLineColor?: string;
   priceLineIntensity?: number;

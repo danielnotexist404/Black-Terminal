@@ -31,7 +31,7 @@ const modelSettings = migrateLiquidationFieldSettings({
   ...DEFAULT_LIQUIDATION_FIELD_SETTINGS,
   priceRows: 256,
   timeColumns: 256,
-  minimumConfidence: 0
+  contextVisibilityFloor: 0, clusterLabelFloor: 0
 });
 const model = applyBclifVisualCertificationProfile(buildLiquidationFieldSnapshot(
   fixture.frames,
@@ -52,7 +52,10 @@ const chartContext = {
 
 assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.preset, "TRADE_FOCUS");
 assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.priceDisplay, "CHART_SCALE");
-assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.minimumConfidence, 60);
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.contextVisibilityFloor, 25);
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.clusterLabelFloor, 60);
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.highAuthorityColorFloor, 75);
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.strictHideBelowEnabled, false);
 assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.opacity, 45);
 assert.ok(DEFAULT_LIQUIDATION_FIELD_SETTINGS.gamma > 1);
 assert.ok(DEFAULT_LIQUIDATION_FIELD_SETTINGS.lowQuantile >= 0.4);

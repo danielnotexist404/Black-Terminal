@@ -56,7 +56,7 @@ export function classifyBclifEvidence(composition: BclifEvidenceComposition): Bc
 export function extractBclifOperationalClusters(
   snapshot: LiquidationFieldSnapshot,
   markPrice: number,
-  settings: Pick<LiquidationFieldSettings, "minimumConfidence" | "sideFilter">
+  settings: Pick<LiquidationFieldSettings, "clusterLabelFloor" | "sideFilter">
 ): BclifOperationalCluster[] {
   if (!Number.isFinite(markPrice) || markPrice <= 0 || snapshot.header.columns < 1 || snapshot.header.rows < 3) return [];
   const { rows, columns, minPrice, priceStep } = snapshot.header;
@@ -101,7 +101,7 @@ export function extractBclifOperationalClusters(
 
       const sourceIndex = latestColumn * rows + row;
       const confidence = (snapshot.confidence[sourceIndex] ?? 0) / 2.55;
-      if (confidence + 8 < settings.minimumConfidence) continue;
+      if (confidence < settings.clusterLabelFloor) continue;
       const evidenceComposition = bclifEvidenceComposition(snapshot, sourceIndex);
       let activeColumns = 0;
       let priorIntensity = 0;

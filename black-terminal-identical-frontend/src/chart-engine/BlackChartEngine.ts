@@ -41,7 +41,7 @@ import type { AuctionProfileSettings, AuctionProfileSnapshot } from "../modules/
 import { resolveChartDeviceCapabilities } from "./deviceCapabilities";
 import type { LiquidationFieldSettings, LiquidationFieldSnapshot } from "../modules/liquidation-field/core/types";
 import { migrateLiquidationFieldSettings } from "../modules/liquidation-field/core/settings";
-import { BlackCoreLiquidationFieldRenderer } from "../modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer";
+import { BlackCoreLiquidationFieldRenderer, type BclifRendererMetrics } from "../modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer";
 import { resolveBclifDisplayDomain } from "../modules/liquidation-field/rendering/displayProjection";
 import { bclifTimestampMsToChartSeconds } from "../modules/liquidation-field/rendering/timeProjection";
 
@@ -155,7 +155,10 @@ export class BlackChartEngine {
   private destroyed = false;
   private candles: CandleBuffer;
   private displayedCandles: Candle[] = [];
-  private liquidationFieldRenderer = new BlackCoreLiquidationFieldRenderer(() => this.queueDraw());
+  private liquidationFieldRenderer = new BlackCoreLiquidationFieldRenderer((metrics) => {
+    this.queueDraw();
+    this.onLiquidationRendererMetrics?.(metrics);
+  });
   private liquidationFieldSnapshot: LiquidationFieldSnapshot | null = null;
   private liquidationFieldSettings: LiquidationFieldSettings = migrateLiquidationFieldSettings();
   private kioseffRenderer = new KioseffPixiRenderer();
@@ -183,6 +186,7 @@ export class BlackChartEngine {
   private onPriceChange?: (price: number) => void;
   private onCandleChange?: (candle: Candle) => void;
   private onPriceTransformChange?: (transform: ChartPriceTransformSnapshot) => void;
+  private onLiquidationRendererMetrics?: (metrics: BclifRendererMetrics) => void;
   private onNeedMoreHistory?: (oldestCandle: Candle) => void;
   private onFps?: (fps: number) => void;
   private onAlertEditRequest?: (alertId: string) => void;
@@ -345,6 +349,7 @@ export class BlackChartEngine {
     this.onPriceChange = options.onPriceChange;
     this.onCandleChange = options.onCandleChange;
     this.onPriceTransformChange = options.onPriceTransformChange;
+    this.onLiquidationRendererMetrics = options.onLiquidationRendererMetrics;
     this.onNeedMoreHistory = options.onNeedMoreHistory;
     this.onFps = options.onFps;
     this.alertDefinitions = options.alertDefinitions ?? [];
@@ -371,6 +376,8 @@ export class BlackChartEngine {
       powerPreference: "high-performance"
     });
 
+    this.app.canvas.addEventListener("webglcontextlost", this.onBclifContextLost);
+    this.app.canvas.addEventListener("webglcontextrestored", this.onBclifContextRestored);
     this.host.appendChild(this.app.canvas);
     this.app.stage.addChild(this.rootLayer);
 
@@ -884,6 +891,17 @@ export class BlackChartEngine {
     this.heatmapVisibleUntilIndex = Math.max(0, Math.min(Math.max(0, candles.length - 1), visibleUntilIndex));
   }
 
+  private onBclifContextLost = (event: Event) => {
+    event.preventDefault();
+    this.liquidationFieldRenderer.handleContextLost();
+  };
+
+  private onBclifContextRestored = () => {
+    this.liquidationFieldRenderer.handleContextRestored();
+    this.liquidationFieldRenderer.setState(this.liquidationFieldSnapshot, this.liquidationFieldSettings);
+    this.queueDraw();
+  };
+
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
@@ -892,6 +910,8 @@ export class BlackChartEngine {
     this.host.removeEventListener("dblclick", this.onDoubleClick);
     this.host.removeEventListener("contextmenu", this.onContextMenu);
     window.removeEventListener("black-terminal-layout-resize", this.queueResize);
+    this.app.canvas.removeEventListener("webglcontextlost", this.onBclifContextLost);
+    this.app.canvas.removeEventListener("webglcontextrestored", this.onBclifContextRestored);
     window.removeEventListener("visibilitychange", this.handleVisibilityChange);
     if (this.resizeRaf) window.cancelAnimationFrame(this.resizeRaf);
     if (this.drawRaf) window.cancelAnimationFrame(this.drawRaf);

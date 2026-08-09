@@ -177,7 +177,7 @@ export interface BclifRawCohortShelf {
 }
 
 export interface LiquidationFieldSettings {
-  schemaVersion: 3;
+  schemaVersion: 7;
   preset: BclifPresentationPreset;
   viewMode: LiquidationFieldViewMode;
   horizon: LiquidationFieldHorizon;
@@ -199,7 +199,17 @@ export interface LiquidationFieldSettings {
   diagnosticsVisible: boolean;
   confirmedMarkersVisible: boolean;
   cascadePathsVisible: boolean;
-  minimumConfidence: number;
+  /** Minimum confidence at which estimated context may be drawn at all. */
+  contextVisibilityFloor: number;
+  /** Minimum confidence for shelf labels and operational summaries. */
+  clusterLabelFloor: number;
+  /** Minimum confidence permitted to use high-authority green/yellow colors. */
+  highAuthorityColorFloor: number;
+  /** Explicit destructive filter. Off by default; never implied by a preset. */
+  strictHideBelowEnabled: boolean;
+  strictHideBelowConfidence: number;
+  historicalContextEnabled: boolean;
+  liveCalibratedEnabled: boolean;
   minimumNotionalUsd: number;
   sideFilter: "BOTH" | "LONG" | "SHORT";
   leverageMinimum: number;
@@ -602,7 +612,33 @@ export interface LiquidationFieldSnapshot {
   persistentCoverage?: BclifPersistentCoverage;
   absoluteDistribution?: AbsoluteLiquidationDistribution;
   rawCohortShelves?: BclifRawCohortShelf[];
+  generations?: BclifGenerationHandoff;
 }
+
+export interface BclifGenerationHandoff {
+  modelGeneration: number;
+  exposureGeneration: number;
+  rendererGeneration: number;
+  settingsGeneration: number;
+  authority: BclifModelAuthority;
+  modelVersion: string;
+}
+
+export type BclifClientLifecycle =
+  | "UNMOUNTED"
+  | "MOUNTING"
+  | "RESTORING_LOCAL_PUBLIC_CACHE"
+  | "WAITING_FOR_MODEL"
+  | "BACKFILLING_OI"
+  | "OI_CONTEXT_READY"
+  | "LIVE_CALIBRATING"
+  | "PERSISTENT_READY"
+  | "FILTERED_EMPTY"
+  | "RENDERER_INITIALIZING"
+  | "TEXTURE_ERROR"
+  | "SOURCE_UNAVAILABLE"
+  | "VENUE_UNSUPPORTED"
+  | "FATAL";
 
 export interface LiquidationFieldRuntimeStatus {
   state: "IDLE" | "LOADING" | "LIVE" | "COLLECTING" | "STALE" | "UNAVAILABLE" | "ERROR";
@@ -613,6 +649,7 @@ export interface LiquidationFieldRuntimeStatus {
   persistence?: "ON" | "OFF";
   collectorNodeId?: string | null;
   error?: string;
+  lifecycle?: BclifClientLifecycle;
 }
 
 export const BCLIF_MODEL_VERSION = "BCLIF_MODEL_V6_ABSOLUTE_SHELVES";

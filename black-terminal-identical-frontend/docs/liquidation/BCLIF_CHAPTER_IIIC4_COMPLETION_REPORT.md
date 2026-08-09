@@ -2,9 +2,9 @@
 
 ## Outcome
 
-The local live-path model is corrected and certified against deterministic
-production-path fixtures. Production is not yet certified because the alias
-still serves the old V3 deployment.
+The live-path model is corrected, certified against deterministic
+production-path fixtures and a bounded public Bybit replay, and published as
+the verified V6 production bundle. Authenticated visual capture remains pending.
 
 ## Implemented
 
@@ -61,12 +61,25 @@ Actual browser GPU upload/FPS is not inferred from these Node measurements.
 
 ## Deployment truth
 
-The original production alias was verified at deployment
-`dpl_69nieZzvsMAatfKSTqp7DEShiBc1`, inferred commit `921c7a2`, serving V3.
-A clean d63d30f V5 build passed every build gate but publication was rejected
-because 13 functions exceeded the Hobby limit. The packaging correction reduces
-the function count without changing the public BCLIF URL; a post-C4 deploy must
-still be completed and inspected before visual certification.
+The original alias served V3 at deployment
+`dpl_69nieZzvsMAatfKSTqp7DEShiBc1` (inferred commit `921c7a2`). A clean
+`d63d30f` V5 build passed every build gate but publication was rejected because
+13 functions exceeded the Hobby limit.
+
+Corrected code commit `541c6d37d9e5721637ccd6296855676815c32e71` is now
+published at production deployment `dpl_6JXKDs5GVwXjbYrefT5BGyPuuXVs` and
+aliased to both `black-terminal.live` and `www.black-terminal.live`. Vercel
+reports `READY`; the apex redirects to `www` and the canonical page returns 200.
+
+- production application asset: `index-BqyBsMPl.js`
+- asset SHA-256: `d31c7be87ae1643b846f5c3b4e07e6cc6c0b978e3c6432d8e73ec638fed40708`
+- verified signatures: V6 model/source, raw shelf toggle, raw export hook
+- external BCLIF status path: secured 401 without a token, not 404
+- production build: TypeScript, 27 route contracts, Vite, and 26-asset secret
+  audit PASS
+
+The packaging correction preserved the public BCLIF URL while remaining within
+the 12-function Hobby limit.
 
 ## Deferred / not claimed
 
@@ -81,9 +94,11 @@ still be completed and inspected before visual certification.
 - COLLECTOR NOT DEPLOYED
 - MIGRATIONS NOT APPLIED
 - AUTHORITY BROWSER FALLBACK
+- PRODUCTION MODEL V6 DEPLOYED
 
 ## Final verdict
 
-**LIVE PIPELINE DEFECT REMAINS** for the deployed alias until the corrected V6
-bundle is published and visually certified. The repository model itself is
-corrected; this report does not collapse code completion into deployment proof.
+**LIVE MODEL CORRECTED.** The production alias runs the inspected V6 bundle and
+the absolute-shelf/event-window/normalization contracts pass deterministic and
+public replay evidence. Authenticated visual certification is explicitly still
+NOT RUN, so this verdict does not claim user-session screenshot parity.

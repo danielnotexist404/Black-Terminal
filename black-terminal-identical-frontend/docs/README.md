@@ -204,3 +204,4 @@ The live-pipeline forensic set is under `docs/liquidation/`:
 `BCLIF_MODEL_GENERATION_CONTINUITY.md`,
 `BCLIF_LIVE_CAPTURE_REPLAY.md`, and the III-C4 completion report.
 Chapter III-C5 cold-start documentation: BCLIF_COLD_START_RASTER_AUDIT.md, BCLIF_COLD_START_RASTER_RECOVERY.md, BCLIF_CONFIDENCE_GATE_CONTRACT.md, BCLIF_INITIAL_SNAPSHOT_REPLAY.md, BCLIF_BROWSER_CHECKPOINT.md, BCLIF_RENDERER_STATE_MACHINE.md, BCLIF_COMPACT_HUD.md and BCLIF_CHAPTER_IIIC5_COMPLETION_REPORT.md.
+The renderer V8 shelf-only recovery and thermal-layer contract are documented in liquidation/BCLIF_THERMAL_FIELD_RECOVERY.md.

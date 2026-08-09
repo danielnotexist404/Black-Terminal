@@ -1422,3 +1422,10 @@ Remaining:
 - Added schema V7 migration, a replaying latest-snapshot store, bounded public IndexedDB checkpoint recovery, generation handoff and WebGL restoration.
 - Replaced default open diagnostics/cluster dashboards with one compact operational HUD.
 - Added deterministic cold-start, mount-order, corrupt-cache, confidence-gate and browser hard-refresh/WebGL evidence.
+
+## 2026-08-09 — BCLIF Thermal Presentation Recovery
+
+- Identified the surviving red/white strokes as the opt-in raw cohort diagnostic, not the thermal field.
+- Removed the exclusive shelf-mode gate so raw shelves can only overlay the CoinGlass-style GPU raster.
+- Added renderer schema V8 migration for persisted shelf-only workspaces, restoring the default three-week Trade Focus thermal presentation without changing cohort mathematics.
+- Added regression coverage for legacy recovery, operational-preset cleanup, and the permanent thermal/shelf layer separation.

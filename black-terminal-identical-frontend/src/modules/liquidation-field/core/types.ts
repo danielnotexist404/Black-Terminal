@@ -177,7 +177,7 @@ export interface BclifRawCohortShelf {
 }
 
 export interface LiquidationFieldSettings {
-  schemaVersion: 7;
+  schemaVersion: 8;
   preset: BclifPresentationPreset;
   viewMode: LiquidationFieldViewMode;
   horizon: LiquidationFieldHorizon;

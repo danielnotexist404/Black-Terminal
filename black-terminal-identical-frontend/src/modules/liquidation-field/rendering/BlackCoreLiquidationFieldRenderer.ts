@@ -274,8 +274,11 @@ export class BlackCoreLiquidationFieldRenderer {
     sprite.width = Math.max(1, Math.abs(right - left));
     sprite.height = Math.max(1, Math.abs(bottom - top));
     sprite.alpha = Math.max(0, Math.min(1, settings.opacity / 100));
-    sprite.visible = !settings.rawCohortShelvesVisible
-      && right >= 0 && left <= transform.width && bottom >= transform.top && top <= transform.bottom;
+    // Raw shelves are a diagnostic overlay, never an exclusive replacement
+    // for the thermal field. The old gate here caused the production symptom
+    // where two moving shelf strokes survived while the GPU raster vanished.
+    sprite.visible = right >= 0 && left <= transform.width
+      && bottom >= transform.top && top <= transform.bottom;
     this.drawPassActive = sprite.visible;
 
     if (settings.rawCohortShelvesVisible) {

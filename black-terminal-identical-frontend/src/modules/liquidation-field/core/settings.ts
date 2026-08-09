@@ -1,6 +1,6 @@
 import type { BclifPresentationPreset, LiquidationFieldHorizon, LiquidationFieldSettings } from "./types.ts";
 
-export const LIQUIDATION_FIELD_SETTINGS_VERSION = 7 as const;
+export const LIQUIDATION_FIELD_SETTINGS_VERSION = 8 as const;
 export const BCLIF_MAX_REQUEST_HOURS = 90 * 24;
 export const BCLIF_BROWSER_OI_INTERVAL = "5min" as const;
 
@@ -92,13 +92,25 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     minimumConfidence?: number;
   }) | null | undefined;
   const merged = { ...DEFAULT_LIQUIDATION_FIELD_SETTINGS, ...(legacy ?? {}) } as LiquidationFieldSettings;
+  const legacySchemaVersion = Number(legacy?.schemaVersion ?? 0);
+  // Before renderer V8 the diagnostic shelf switch was an exclusive mode: it
+  // hid the thermal texture entirely. Some restored workspaces therefore open
+  // as a couple of red/white shelf strokes with no heatmap. Recover only that
+  // incompatible presentation state to the production thermal defaults. Model
+  // parameters and unrelated workspace settings remain untouched.
+  const recoverLegacyShelfOnlyPresentation = legacySchemaVersion < 8
+    && Boolean(legacy?.rawCohortShelvesVisible);
   if ((value as { preset?: string } | null | undefined)?.preset === "EVENT_HORIZON_3W") merged.preset = "TRADE_FOCUS";
   const customMinimum = clamp(merged.customPriceMinimum, 50_000, 1e-8, 10_000_000);
   const customMaximum = Math.max(customMinimum + 1e-8, clamp(merged.customPriceMaximum, 80_000, 1e-8, 10_000_000));
   return {
     ...merged,
     schemaVersion: LIQUIDATION_FIELD_SETTINGS_VERSION,
-    horizon: horizons.has(merged.horizon) ? merged.horizon : DEFAULT_LIQUIDATION_FIELD_SETTINGS.horizon,
+    horizon: recoverLegacyShelfOnlyPresentation
+      ? DEFAULT_LIQUIDATION_FIELD_SETTINGS.horizon
+      : horizons.has(merged.horizon) ? merged.horizon : DEFAULT_LIQUIDATION_FIELD_SETTINGS.horizon,
+    preset: recoverLegacyShelfOnlyPresentation ? "TRADE_FOCUS" : merged.preset,
+    viewMode: recoverLegacyShelfOnlyPresentation ? "COMBINED_THERMAL" : merged.viewMode,
     // The protected manifest API accepts one bounded window of at most 90 days.
     // Keep persisted settings inside that contract instead of allowing a value
     // that can only produce a permanent HTTP 400 response.
@@ -114,7 +126,7 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     timeSigmaColumns: clamp(merged.timeSigmaColumns, 0.55, 0, 3),
     sharpness: clamp(merged.sharpness, 58, 0, 100),
     // V3 and older used one threshold for visibility, labels, and authority.
-    // Preserve it as the label floor only; the V7 context floor stays safe.
+    // Preserve it as the label floor only; the V8 context floor stays safe.
     contextVisibilityFloor: clamp(merged.contextVisibilityFloor, 25, 0, 100),
     clusterLabelFloor: clamp(
       legacy && Number(legacy.schemaVersion ?? 0) < 7 && legacy.minimumConfidence !== undefined
@@ -130,9 +142,12 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     historicalContextEnabled: merged.historicalContextEnabled !== false,
     liveCalibratedEnabled: merged.liveCalibratedEnabled !== false,
     minimumNotionalUsd: clamp(merged.minimumNotionalUsd, 0, 0, 100_000_000_000),
-    legendVisible: Number(legacy?.schemaVersion ?? 0) < 7 ? false : Boolean(merged.legendVisible),
-    diagnosticsVisible: Number(legacy?.schemaVersion ?? 0) < 7 ? false : Boolean(merged.diagnosticsVisible),
-    operationalSummaryVisible: Number(legacy?.schemaVersion ?? 0) < 7 ? false : Boolean(merged.operationalSummaryVisible),
+    legendVisible: legacySchemaVersion < 7 || recoverLegacyShelfOnlyPresentation
+      ? false : Boolean(merged.legendVisible),
+    diagnosticsVisible: legacySchemaVersion < 7 || recoverLegacyShelfOnlyPresentation
+      ? false : Boolean(merged.diagnosticsVisible),
+    operationalSummaryVisible: legacySchemaVersion < 7 || recoverLegacyShelfOnlyPresentation
+      ? false : Boolean(merged.operationalSummaryVisible),
     leverageMinimum: clamp(merged.leverageMinimum, 2, 1, 125),
     leverageMaximum: Math.max(
       clamp(merged.leverageMinimum, 2, 1, 125),
@@ -159,7 +174,11 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     oiEventWindowMs: Math.round(clamp(merged.oiEventWindowMs, 15 * 60 * 1_000, 5 * 60 * 1_000, 60 * 60 * 1_000)),
     oiEventContinuationRatio: clamp(merged.oiEventContinuationRatio, 0.35, 0.05, 1),
     oiEventTerminationRatio: clamp(merged.oiEventTerminationRatio, 0.25, 0, 1),
-    oiEventHysteresisIntervals: Math.round(clamp(merged.oiEventHysteresisIntervals, 2, 1, 12))
+    oiEventHysteresisIntervals: Math.round(clamp(merged.oiEventHysteresisIntervals, 2, 1, 12)),
+    rawCohortShelvesVisible: recoverLegacyShelfOnlyPresentation
+      ? false : Boolean(merged.rawCohortShelvesVisible),
+    priceDisplay: recoverLegacyShelfOnlyPresentation ? "CHART_SCALE" : merged.priceDisplay,
+    palette: recoverLegacyShelfOnlyPresentation ? "REFERENCE_THERMAL" : merged.palette
   };
 }
 
@@ -167,7 +186,11 @@ export function applyBclifPresentationPreset(
   source: LiquidationFieldSettings,
   preset: Exclude<BclifPresentationPreset, "CUSTOM">
 ): LiquidationFieldSettings {
-  const common = { ...source, preset };
+  const common = {
+    ...source,
+    preset,
+    rawCohortShelvesVisible: preset === "RAW_MODEL" ? source.rawCohortShelvesVisible : false
+  };
   if (preset === "TRADE_FOCUS") return migrateLiquidationFieldSettings({
     ...common, priceDisplay: "CHART_SCALE", contextVisibilityFloor: 25, clusterLabelFloor: 60,
     highAuthorityColorFloor: 75, strictHideBelowEnabled: false, palette: "REFERENCE_THERMAL",

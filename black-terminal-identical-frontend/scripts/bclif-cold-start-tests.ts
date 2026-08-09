@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { buildLiquidationFieldSnapshot } from "../src/modules/liquidation-field/core/exposureRaster.ts";
 import {
+  applyBclifPresentationPreset,
   DEFAULT_LIQUIDATION_FIELD_SETTINGS,
   migrateLiquidationFieldSettings
 } from "../src/modules/liquidation-field/core/settings.ts";
@@ -83,6 +84,12 @@ assert.match(fallbackSource, /if \(this\.rebuildTimer !== null\) return/);
 const engineSource = readFileSync(new URL("../src/chart-engine/BlackChartEngine.ts", import.meta.url), "utf8");
 assert.match(engineSource, /webglcontextlost/);
 assert.match(engineSource, /webglcontextrestored/);
+const rendererSource = readFileSync(new URL("../src/modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer.ts", import.meta.url), "utf8");
+assert.doesNotMatch(
+  rendererSource,
+  /sprite\.visible\s*=\s*!settings\.rawCohortShelvesVisible/,
+  "the diagnostic shelf overlay must never replace or hide the thermal texture"
+);
 
 const strictSettings = migrateLiquidationFieldSettings({
   ...settings,
@@ -108,6 +115,36 @@ assert.equal(legacy.highAuthorityColorFloor, 75);
 assert.equal(legacy.opacity, 10);
 assert.equal(legacy.diagnosticsVisible, false);
 assert.equal(legacy.operationalSummaryVisible, false);
+
+const legacyShelfOnly = migrateLiquidationFieldSettings({
+  ...settings,
+  schemaVersion: 7,
+  preset: "RAW_MODEL",
+  horizon: "1D",
+  viewMode: "COMBINED_THERMAL",
+  rawCohortShelvesVisible: true,
+  priceDisplay: "FULL_MODEL_RANGE",
+  palette: "BLACK_TERMINAL_BLOOD"
+} as never);
+assert.equal(legacyShelfOnly.schemaVersion, 8);
+assert.equal(legacyShelfOnly.preset, "TRADE_FOCUS");
+assert.equal(legacyShelfOnly.horizon, "3W");
+assert.equal(legacyShelfOnly.viewMode, "COMBINED_THERMAL");
+assert.equal(legacyShelfOnly.rawCohortShelvesVisible, false);
+assert.equal(legacyShelfOnly.priceDisplay, "CHART_SCALE");
+assert.equal(legacyShelfOnly.palette, "REFERENCE_THERMAL");
+
+const explicitV8ShelfOverlay = migrateLiquidationFieldSettings({
+  ...settings,
+  schemaVersion: 8,
+  rawCohortShelvesVisible: true
+});
+assert.equal(explicitV8ShelfOverlay.rawCohortShelvesVisible, true, "V8 shelves remain an explicit overlay choice");
+assert.equal(
+  applyBclifPresentationPreset(explicitV8ShelfOverlay, "TRADE_FOCUS").rawCohortShelvesVisible,
+  false,
+  "returning to an operational preset must remove the optional diagnostic shelf overlay"
+);
 
 const before = new InMemoryBclifSnapshotStore();
 let orderA = "NONE";

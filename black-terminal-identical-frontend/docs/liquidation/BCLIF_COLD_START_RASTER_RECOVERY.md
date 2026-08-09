@@ -28,3 +28,10 @@ Browser Fallback raster construction is now guarded by a single-flight coalescer
 The stream scheduler now throttles instead of resetting a debounce timer on every market message, so a continuously active market cannot postpone updates forever. Before the first snapshot, the HUD truthfully remains `BACKFILLING_OI` or `RENDERER_INITIALIZING`; `LIVE_CALIBRATING` is reported only after a snapshot has actually published.
 
 The cold-start regression injects 1,000 updates while the first build is blocked and proves one active build, two total invocations (initial plus one coalesced refresh), maximum concurrency one, and publication order `[1, 2]`. Typecheck, security contracts, production build, cold-start, model, operational-clarity, authentic-exposure, and live-pipeline gates pass.
+
+
+## Renderer projection recovery
+
+The display worker now uses a latest-only single-flight projection queue. A completed projection is allowed to publish and upload; updates received while it is active collapse to one newest follow-up. Same-market snapshots retain the last certified texture while the replacement is constructed, eliminating label-only frames and parameter-change blinking. A semantic scope change (authority, venue, symbol, horizon, schema/model, price lattice or dimensions) resets the queue and rejects an old-scope response.
+
+The regression floods an active projection with 1,000 distinct updates and proves that only `initial` and `update-999` start. It also proves that a response from a reset scope is rejected. A wide 4H domain matching the production capture retains 566,366 visible cells. The focused 1920 x 1080 Brave Browser Fallback comparison passes at SSIM 1.0 with 349,074 raw and visible cells, WebGL context recovery, and one active texture.

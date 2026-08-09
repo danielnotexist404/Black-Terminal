@@ -93,3 +93,12 @@ Production-origin probes disproved an upstream-data outage: Bybit returned 720 o
 The fault was the browser controller generation policy. The live stream connected before the first multi-second worker build completed. Every trade/depth update scheduled another build, incremented `buildGeneration`, and caused the completed snapshot to fail the generation equality check. Because worker builds serialize and market updates arrive faster than a raster can finish, valid snapshots could be discarded indefinitely. The same high-frequency stream also continuously reset the rebuild debounce timer, postponing refresh indefinitely.
 
 This is a client concurrency/lifecycle defect. It is not an OI availability, CORS, model, cohort, price-grid, or WebGL texture defect.
+
+
+## Post-hotfix label-only production finding
+
+A later authenticated production capture showed three small crimson/white/grey shelf accents but no thermal raster. Those accents are operational cluster labels computed directly from the published snapshot; their presence proves that OI bootstrap, cohort construction, exposure generation and React snapshot delivery completed.
+
+The missing layer was the asynchronous display projection. Each newly published live snapshot reset `projectionGeneration` while the projection worker was still rasterizing the prior snapshot. The worker response then failed its generation check and was discarded. This is the renderer equivalent of the earlier model-build starvation path: metadata and shelf labels can render while no projection reaches GPU upload.
+
+The screenshot-scale 4H price domain was reproduced in the deterministic contract and contains 566,366 visible exposure cells, disproving a genuinely sparse or out-of-domain model. The three accents were therefore valid shelf markers presented without their required thermal context, not a complete healthy display.

@@ -68,6 +68,68 @@ export function validateBclifProjection(projection: BclifDisplayProjection) {
 }
 
 
+type BclifProjectionStarter<T> = (token: number, value: T) => void;
+
+/**
+ * Keeps one projection active and remembers only the newest replacement.
+ * Live snapshots may arrive faster than the display worker can project them;
+ * completed work must still publish instead of being invalidated forever.
+ */
+export class BclifLatestProjectionQueue<T> {
+  private token = 0;
+  private active: { token: number; value: T } | null = null;
+  private latest: T | null = null;
+
+  request(value: T, start: BclifProjectionStarter<T>, equal: (left: T, right: T) => boolean = Object.is) {
+    if (this.active) {
+      if (!equal(this.active.value, value)) this.latest = value;
+      return this.active.token;
+    }
+    return this.launch(value, start);
+  }
+
+  isActive(token: number) {
+    return this.active?.token === token;
+  }
+
+  activeToken() {
+    return this.active?.token ?? null;
+  }
+
+  activeValue() {
+    return this.active?.value ?? null;
+  }
+
+  complete(token: number, start: BclifProjectionStarter<T>) {
+    if (!this.active || this.active.token !== token) return false;
+    this.active = null;
+    const next = this.latest;
+    this.latest = null;
+    if (next) this.launch(next, start);
+    return true;
+  }
+
+  reset() {
+    this.token += 1;
+    this.active = null;
+    this.latest = null;
+  }
+
+  private launch(value: T, start: BclifProjectionStarter<T>) {
+    const token = ++this.token;
+    this.active = { token, value };
+    start(token, value);
+    return token;
+  }
+}
+
+interface BclifProjectionRequest {
+  key: string;
+  snapshot: LiquidationFieldSnapshot;
+  settings: LiquidationFieldSettings;
+  context: Parameters<typeof buildBclifDisplayProjection>[2];
+}
+
 function clampByte(value: number) {
   return Math.max(0, Math.min(255, Math.round(value)));
 }
@@ -90,7 +152,8 @@ export class BlackCoreLiquidationFieldRenderer {
   private rgba: Uint8Array | null = null;
   private projection: BclifDisplayProjection | null = null;
   private projectionWorker: Worker | null = null;
-  private projectionGeneration = 0;
+  private readonly projectionQueue = new BclifLatestProjectionQueue<BclifProjectionRequest>();
+  private projectionScopeKey = "";
   private pendingProjectionKey = "";
   private readonly rendererAttachmentTimestamp = Date.now();
   private webglContextReady = true;
@@ -119,33 +182,42 @@ export class BlackCoreLiquidationFieldRenderer {
         key: string;
         projection: BclifDisplayProjection | null;
       }>) => {
-        if (event.data.generation !== this.projectionGeneration || event.data.key !== this.pendingProjectionKey) return;
+        if (!this.projectionQueue.isActive(event.data.generation) || event.data.key !== this.pendingProjectionKey) return;
+        const renderedRequest = this.projectionQueue.activeValue();
         this.pendingProjectionKey = "";
         this.textureKey = event.data.key;
         this.projection = event.data.projection;
+        this.latestRenderedGeneration = renderedRequest?.snapshot.generations?.modelGeneration ?? this.latestRenderedGeneration + 1;
         this.rebuildTexture();
         this.emitMetrics();
+        this.projectionQueue.complete(event.data.generation, this.startProjectionRequest);
       };
       this.projectionWorker.onerror = (event) => {
+        const failedToken = this.projectionQueue.activeToken();
+        if (failedToken === null) return;
         this.pendingProjectionKey = "";
         this.lastError = event.message || "BCLIF_PROJECTION_WORKER_FAILED";
-        if (this.sprite) this.sprite.visible = false;
+        if (!this.projection && this.sprite) this.sprite.visible = false;
         this.emitMetrics();
+        this.projectionQueue.complete(failedToken, this.startProjectionRequest);
       };
     }
   }
 
   setState(snapshot: LiquidationFieldSnapshot | null, settings: LiquidationFieldSettings) {
-    const snapshotChanged = this.snapshot !== snapshot;
+    const nextScopeKey = snapshot ? projectionScopeKey(snapshot) : "empty";
+    const scopeChanged = nextScopeKey !== this.projectionScopeKey;
     this.snapshot = snapshot;
     this.settings = settings;
     const nextKey = snapshot
       ? [snapshot.header.checksum, snapshot.authority, snapshot.header.sourceCutoffTimestamp, bclifRenderSettingsHash(settings)].join(":")
       : "empty";
-    if (snapshotChanged || nextKey !== this.stateKey) {
-      this.stateKey = nextKey;
+    this.stateKey = nextKey;
+    if (scopeChanged) {
+      this.projectionScopeKey = nextScopeKey;
       this.projection = null;
-      this.projectionGeneration += 1;
+      this.textureKey = "";
+      this.projectionQueue.reset();
       this.pendingProjectionKey = "";
       this.bufferValid = false;
       this.currentTextureUploaded = false;
@@ -355,7 +427,9 @@ export class BlackCoreLiquidationFieldRenderer {
     this.textureUploadDurationMs = typeof performance === "undefined" ? null : performance.now() - startedAt;
     this.texturePreparationAndUpdateMs = this.textureUploadDurationMs === null
       ? null : Number(this.textureUploadDurationMs.toFixed(3));
-    this.latestRenderedGeneration = this.snapshot?.generations?.modelGeneration ?? this.projectionGeneration;
+    if (!this.projectionWorker) {
+      this.latestRenderedGeneration = this.snapshot?.generations?.modelGeneration ?? this.latestRenderedGeneration + 1;
+    }
     this.lastError = null;
     if (typeof globalThis !== "undefined") {
       const instrumentation = globalThis as typeof globalThis & {
@@ -379,11 +453,19 @@ export class BlackCoreLiquidationFieldRenderer {
     settings: LiquidationFieldSettings,
     context: Parameters<typeof buildBclifDisplayProjection>[2]
   ) {
-    if (!this.projectionWorker || this.pendingProjectionKey === key) return;
-    this.pendingProjectionKey = key;
-    const generation = ++this.projectionGeneration;
-    this.projectionWorker.postMessage({ generation, key, snapshot, settings, context });
+    if (!this.projectionWorker) return;
+    this.projectionQueue.request(
+      { key, snapshot, settings, context },
+      this.startProjectionRequest,
+      (left, right) => left.key === right.key
+    );
   }
+
+  private readonly startProjectionRequest = (generation: number, request: BclifProjectionRequest) => {
+    if (!this.projectionWorker) return;
+    this.pendingProjectionKey = request.key;
+    this.projectionWorker.postMessage({ generation, ...request });
+  };
 
   metrics() {
     const latestModelGeneration = this.snapshot?.generations?.modelGeneration ?? 0;
@@ -447,7 +529,8 @@ export class BlackCoreLiquidationFieldRenderer {
     this.webglContextReady = true;
     this.lastError = null;
     this.textureKey = "";
-    this.projectionGeneration += 1;
+    this.projectionQueue.reset();
+    this.pendingProjectionKey = "";
     this.rebuildTexture();
     this.emitMetrics();
   }
@@ -470,7 +553,7 @@ export class BlackCoreLiquidationFieldRenderer {
   }
 
   dispose() {
-    this.projectionGeneration += 1;
+    this.projectionQueue.reset();
     this.projectionWorker?.terminate();
     this.projectionWorker = null;
     this.texture?.destroy(true);
@@ -481,4 +564,15 @@ export class BlackCoreLiquidationFieldRenderer {
     this.projection = null;
     this.container.destroy({ children: true });
   }
+}
+
+
+function projectionScopeKey(snapshot: LiquidationFieldSnapshot) {
+  const header = snapshot.header;
+  return [
+    snapshot.authority, header.venue, header.symbol, header.horizon, header.schemaVersion,
+    header.modelVersion, header.minPrice, header.maxPrice,
+    header.priceStep, header.gridOrigin ?? "", header.gridVersion ?? "",
+    header.rows, header.columns
+  ].join(":");
 }

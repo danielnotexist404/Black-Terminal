@@ -11,7 +11,7 @@ import {
   bclifModelHash,
   buildBclifDisplayProjection
 } from "../src/modules/liquidation-field/rendering/displayProjection.ts";
-import { validateBclifProjection } from "../src/modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer.ts";
+import { BclifLatestProjectionQueue, validateBclifProjection } from "../src/modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer.ts";
 import {
   applyBclifVisualCase,
   createLiquidationFieldFixture
@@ -47,6 +47,15 @@ const context = {
 
 const projection = buildBclifDisplayProjection(snapshot, settings, context);
 validateBclifProjection(projection);
+const wideProjection = buildBclifDisplayProjection(snapshot, settings, {
+  ...context,
+  chartPriceMinimum: currentPrice * 0.45,
+  chartPriceMaximum: currentPrice * 1.65
+});
+assert.ok(wideProjection, "the screenshot-scale chart domain must intersect the absolute model grid");
+validateBclifProjection(wideProjection!);
+assert.ok(wideProjection!.rawNonZeroCells > 0, "wide 4H domains must retain modeled exposure behind their shelf labels");
+assert.ok(wideProjection!.visibleCells > 0, "wide 4H domains must publish a visible thermal raster, not labels alone");
 const projectionSamples = Array.from({ length: 20 }, () => {
   const started = performance.now();
   validateBclifProjection(buildBclifDisplayProjection(snapshot, settings, context));
@@ -141,6 +150,25 @@ assert.equal(maximumConcurrentBuilds, 1, "live updates must never overlap expens
 assert.equal(buildInvocations, 2, "one thousand live updates must coalesce into one follow-up build");
 assert.deepEqual(publishedBuilds, [1, 2], "the first valid snapshot must publish before the coalesced refresh");
 
+const projectionQueue = new BclifLatestProjectionQueue<{ key: string }>();
+const startedProjectionKeys: string[] = [];
+const projectionTokens: number[] = [];
+const startProjection = (token: number, value: { key: string }) => {
+  projectionTokens.push(token);
+  startedProjectionKeys.push(value.key);
+};
+const firstProjectionToken = projectionQueue.request({ key: "initial" }, startProjection, (left, right) => left.key === right.key);
+for (let update = 0; update < 1_000; update += 1) {
+  projectionQueue.request({ key: "update-" + update }, startProjection, (left, right) => left.key === right.key);
+}
+assert.deepEqual(startedProjectionKeys, ["initial"], "display projection must remain single-flight under a live snapshot flood");
+assert.equal(projectionQueue.complete(firstProjectionToken, startProjection), true);
+assert.deepEqual(startedProjectionKeys, ["initial", "update-999"], "only the newest waiting projection must follow the first published raster");
+assert.equal(projectionQueue.complete(projectionTokens[1]!, startProjection), true);
+const cancelledProjectionToken = projectionQueue.request({ key: "old-scope" }, startProjection);
+projectionQueue.reset();
+assert.equal(projectionQueue.complete(cancelledProjectionToken, startProjection), false, "a semantic scope reset must reject its stale worker response");
+
 class MemoryCheckpointAdapter implements BclifBrowserCheckpointAdapter {
   readonly records = new Map<string, BclifBrowserCheckpointRecord>();
   async get(key: string) { return this.records.get(key) ?? null; }
@@ -182,11 +210,13 @@ console.log(JSON.stringify({
   rawCells: projection.intensity.length,
   rawNonZeroCells: projection.rawNonZeroCells,
   visibleCellsAfterCorrection: projection.visibleCells,
+  wideDomainVisibleCells: wideProjection!.visibleCells,
   filteredCells: projection.filteredCells,
   minimumAlpha: projection.minimumVisibleAlpha,
   maximumAlpha: projection.maximumAlpha,
   yellowEligibleCells: projection.yellowEligibleCells,
   singleFlightBuildGate: { buildInvocations, maximumConcurrentBuilds, publishedBuilds },
+  latestProjectionQueue: { startedProjectionKeys, projectionTokens },
   performance: {
     projectionKernel: summarize(projectionSamples),
     snapshotReplay: summarize(replaySamples),

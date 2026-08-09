@@ -53,3 +53,16 @@ The custom domain publication and static artifact verification are complete. Fin
 The three crimson/white/grey accents reported after the first hotfix are valid operational liquidation-shelf markers, but labels without the thermal field are not an acceptable healthy state. The model snapshot was present; the asynchronous display-projection generation was being invalidated by newer live snapshots before GPU publication. A latest-only single-flight projection queue now publishes completed work, coalesces an arbitrary update flood to one newest follow-up, retains the last same-scope texture during replacement, and rejects stale responses after semantic scope changes.
 
 Focused evidence: 1,000 queued projection updates start only the initial and newest request; a reset-scope response is rejected; the screenshot-scale wide 4H domain retains 566,366 visible cells; Browser Fallback 1920 x 1080 visual comparison is SSIM 1.0 with 349,074 visible cells and WebGL recovery PASS. Model mathematics and authority policy remain unchanged.
+
+
+### Label-only correction production evidence
+
+- Renderer corrective commit: `b6be303`
+- Production deployment: `dpl_8VSJE8GcEcEUssqB4tY9TqcfaVbS` (`READY`)
+- Production URL: `https://black-terminal-9g7tfp34m-danielnotexist404s-projects.vercel.app`
+- Custom aliases: `https://www.black-terminal.live` and `https://black-terminal.live`
+- Production entry: `assets/index-BGhOHXJA.js`; SHA-256 `92d795809133082aeeceeeeff92516a9ff6b61240468d1a73acae05acd79525d`
+- Production worker references: `assets/rasterWorker-JlVs_h9Q.js` and `assets/displayProjectionWorker-BCHcAaKv.js`
+- Deployment build/type/security gates: PASS.
+
+Static artifact verification is complete. Authenticated production acceptance remains the user-session hard-refresh observation because chart access is private.

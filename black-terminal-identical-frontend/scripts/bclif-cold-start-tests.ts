@@ -23,6 +23,7 @@ import {
   type BclifBrowserCheckpointAdapter,
   type BclifBrowserCheckpointRecord
 } from "../src/modules/liquidation-field/data/BclifBrowserCheckpoint.ts";
+import { BclifSingleFlightBuildGate } from "../src/modules/liquidation-field/data/BrowserLiquidationFieldFallback.ts";
 
 const fixture = createLiquidationFieldFixture();
 const settings = migrateLiquidationFieldSettings(DEFAULT_LIQUIDATION_FIELD_SETTINGS);
@@ -66,6 +67,10 @@ const overlaySource = readFileSync(new URL("../src/modules/liquidation-field/com
 assert.match(overlaySource, /BCLIF — FILTERED, 0 CELLS VISIBLE/);
 assert.match(overlaySource, /SHOW OI CONTEXT/);
 assert.match(overlaySource, /BCLIF UNAVAILABLE/);
+const fallbackSource = readFileSync(new URL("../src/modules/liquidation-field/data/BrowserLiquidationFieldFallback.ts", import.meta.url), "utf8");
+assert.doesNotMatch(fallbackSource, /buildGeneration/);
+assert.match(fallbackSource, /buildGate\.run/);
+assert.match(fallbackSource, /if \(this\.rebuildTimer !== null\) return/);
 const engineSource = readFileSync(new URL("../src/chart-engine/BlackChartEngine.ts", import.meta.url), "utf8");
 assert.match(engineSource, /webglcontextlost/);
 assert.match(engineSource, /webglcontextrestored/);
@@ -113,6 +118,29 @@ const replaySamples = Array.from({ length: 100 }, () => {
   return performance.now() - started;
 });
 
+const buildGate = new BclifSingleFlightBuildGate();
+let buildInvocations = 0;
+let concurrentBuilds = 0;
+let maximumConcurrentBuilds = 0;
+let releaseFirstBuild!: () => void;
+const firstBuildBlocker = new Promise<void>((resolve) => { releaseFirstBuild = resolve; });
+const publishedBuilds: number[] = [];
+const buildTask = async () => {
+  const invocation = ++buildInvocations;
+  concurrentBuilds += 1;
+  maximumConcurrentBuilds = Math.max(maximumConcurrentBuilds, concurrentBuilds);
+  if (invocation === 1) await firstBuildBlocker;
+  publishedBuilds.push(invocation);
+  concurrentBuilds -= 1;
+};
+const firstBuild = buildGate.run(buildTask);
+for (let update = 0; update < 1_000; update += 1) void buildGate.run(buildTask);
+releaseFirstBuild();
+await firstBuild;
+assert.equal(maximumConcurrentBuilds, 1, "live updates must never overlap expensive raster builds");
+assert.equal(buildInvocations, 2, "one thousand live updates must coalesce into one follow-up build");
+assert.deepEqual(publishedBuilds, [1, 2], "the first valid snapshot must publish before the coalesced refresh");
+
 class MemoryCheckpointAdapter implements BclifBrowserCheckpointAdapter {
   readonly records = new Map<string, BclifBrowserCheckpointRecord>();
   async get(key: string) { return this.records.get(key) ?? null; }
@@ -158,6 +186,7 @@ console.log(JSON.stringify({
   minimumAlpha: projection.minimumVisibleAlpha,
   maximumAlpha: projection.maximumAlpha,
   yellowEligibleCells: projection.yellowEligibleCells,
+  singleFlightBuildGate: { buildInvocations, maximumConcurrentBuilds, publishedBuilds },
   performance: {
     projectionKernel: summarize(projectionSamples),
     snapshotReplay: summarize(replaySamples),

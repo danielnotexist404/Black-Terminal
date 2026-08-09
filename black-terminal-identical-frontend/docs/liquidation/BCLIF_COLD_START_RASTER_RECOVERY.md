@@ -19,3 +19,12 @@ The repair separates visibility, labels and color authority, migrates legacy sta
 ## Browser evidence
 
 The deterministic Browser Fallback case at 1920×1080 produced 349,074 raw non-zero cells and 349,074 visible cells, zero yellow cells, zero cluster labels at 52% confidence, a 396,288-cell display raster, 3.0 ms texture preparation/upload, generation lag zero, and successful synthetic WebGL context restoration. The full deterministic fixture reload measured 5.465 seconds; it bypasses the production IndexedDB restoration route, so it is not used as a checkpoint-latency claim.
+
+
+## Production follow-up: single-flight live raster publication
+
+Browser Fallback raster construction is now guarded by a single-flight coalescer. While one worker build is active, any number of public-stream updates set one pending refresh instead of starting or invalidating additional builds. The completed first snapshot always publishes; the gate then runs at most one follow-up using the latest state.
+
+The stream scheduler now throttles instead of resetting a debounce timer on every market message, so a continuously active market cannot postpone updates forever. Before the first snapshot, the HUD truthfully remains `BACKFILLING_OI` or `RENDERER_INITIALIZING`; `LIVE_CALIBRATING` is reported only after a snapshot has actually published.
+
+The cold-start regression injects 1,000 updates while the first build is blocked and proves one active build, two total invocations (initial plus one coalesced refresh), maximum concurrency one, and publication order `[1, 2]`. Typecheck, security contracts, production build, cold-start, model, operational-clarity, authentic-exposure, and live-pipeline gates pass.

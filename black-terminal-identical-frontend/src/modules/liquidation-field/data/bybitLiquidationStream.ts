@@ -20,6 +20,8 @@ function finite(value: unknown, fallback = 0) {
 }
 
 export class BybitLiquidationStream {
+  private readonly symbol: string;
+  private readonly listener: Listener;
   private ws: WebSocket | null = null;
   private reconnectTimer: number | null = null;
   private pingTimer: number | null = null;
@@ -38,7 +40,10 @@ export class BybitLiquidationStream {
     events: []
   };
 
-  constructor(private readonly symbol: string, private readonly listener: Listener) {}
+  constructor(symbol: string, listener: Listener) {
+    this.symbol = symbol;
+    this.listener = listener;
+  }
 
   start() {
     this.stopped = false;

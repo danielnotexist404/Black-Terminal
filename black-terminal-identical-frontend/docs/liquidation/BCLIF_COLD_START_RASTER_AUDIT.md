@@ -82,3 +82,14 @@ No cohort, liquidation-price, leverage, risk-tier, lifecycle, mass-conservation
 or no-lookahead formula requires modification. The correction belongs entirely
 to renderer settings, snapshot replay, browser public-state recovery, texture
 diagnostics and compact HUD presentation.
+
+
+## Post-deployment live-stream starvation finding
+
+The authenticated 4H production capture exposed a second, distinct blank-field failure after the original transparency repair. The compact HUD remained at `INITIALIZING OI CONTEXT` / Browser Fallback while the live indicator row reported collecting.
+
+Production-origin probes disproved an upstream-data outage: Bybit returned 720 one-hour OI observations and 8,640 canonical five-minute candles with HTTP 200 and valid production CORS in approximately 4.43 seconds. The exact bootstrap completed in approximately 10.05 seconds and the exact V6 model build in approximately 5.49 seconds (approximately 15.54 seconds total), producing 8,640 frames, a 384 x 512 field, 24 cohorts and 196,608 raw cells.
+
+The fault was the browser controller generation policy. The live stream connected before the first multi-second worker build completed. Every trade/depth update scheduled another build, incremented `buildGeneration`, and caused the completed snapshot to fail the generation equality check. Because worker builds serialize and market updates arrive faster than a raster can finish, valid snapshots could be discarded indefinitely. The same high-frequency stream also continuously reset the rebuild debounce timer, postponing refresh indefinitely.
+
+This is a client concurrency/lifecycle defect. It is not an OI availability, CORS, model, cohort, price-grid, or WebGL texture defect.

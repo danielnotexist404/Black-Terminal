@@ -23,12 +23,46 @@ export interface BrowserLiquidationFieldFallbackOptions {
   checkpointStore?: BclifBrowserCheckpointStore | null;
 }
 
+type BclifBuildTask = () => Promise<void>;
+
+/**
+ * Collapses any number of live updates received during an expensive model build
+ * into one follow-up build. A completed first snapshot can therefore never be
+ * invalidated forever by a faster public stream.
+ */
+export class BclifSingleFlightBuildGate {
+  private inFlight: Promise<void> | null = null;
+  private queued = false;
+  private latestTask: BclifBuildTask | null = null;
+
+  run(task: BclifBuildTask) {
+    this.latestTask = task;
+    if (this.inFlight) {
+      this.queued = true;
+      return this.inFlight;
+    }
+    this.inFlight = this.drain().finally(() => {
+      this.inFlight = null;
+    });
+    return this.inFlight;
+  }
+
+  private async drain() {
+    do {
+      this.queued = false;
+      const task = this.latestTask;
+      if (task) await task();
+    } while (this.queued);
+  }
+}
+
 /**
  * Explicitly session-scoped browser model. The controller starts this class
  * only after the persistent authority has returned a fallback-safe result.
  * It never consumes or merges a persistent tile.
  */
 export class BrowserLiquidationFieldFallback {
+  private readonly options: BrowserLiquidationFieldFallbackOptions;
   private settings: LiquidationFieldSettings;
   private readonly worker = new LiquidationFieldWorkerClient();
   private stream: BybitLiquidationStream | null = null;
@@ -38,13 +72,15 @@ export class BrowserLiquidationFieldFallback {
   private refreshTimer: number | null = null;
   private readonly abort = new AbortController();
   private disposed = false;
-  private buildGeneration = 0;
+  private readonly buildGate = new BclifSingleFlightBuildGate();
   private readonly liveStartedAt = Date.now();
   private absoluteGrid: BclifAbsolutePriceGrid | null = null;
   private hasRestoredCheckpoint = false;
+  private hasPublishedSnapshot = false;
   private readonly checkpoint: BclifBrowserCheckpointStore | null;
 
-  constructor(private readonly options: BrowserLiquidationFieldFallbackOptions) {
+  constructor(options: BrowserLiquidationFieldFallbackOptions) {
+    this.options = options;
     this.settings = migrateLiquidationFieldSettings(options.settings);
     this.checkpoint = options.checkpointStore === undefined ? createBrowserCheckpointStore() : options.checkpointStore;
   }
@@ -55,6 +91,7 @@ export class BrowserLiquidationFieldFallback {
       const restored = await this.checkpoint?.restore(this.options.symbol, this.settings);
       if (restored && !this.disposed) {
         this.hasRestoredCheckpoint = true;
+        this.hasPublishedSnapshot = true;
         this.options.onSnapshot(restored);
         this.status("LOADING", "Local browser checkpoint restored; reconciling fresh public OI.", "OI_CONTEXT_READY");
       }
@@ -69,12 +106,17 @@ export class BrowserLiquidationFieldFallback {
     this.stream = new BybitLiquidationStream(symbol, (state) => {
       this.live = state;
       this.scheduleBuild();
+      const modelReady = this.hasPublishedSnapshot;
       this.status(
-        state.connected ? "COLLECTING" : "STALE",
+        state.connected ? modelReady ? "COLLECTING" : "LOADING" : "STALE",
         state.connected
-          ? "Live trades, liquidations and L2 depth connected; history accumulates only in this browser session."
+          ? modelReady
+            ? "Live trades, liquidations and L2 depth connected; history accumulates only in this browser session."
+            : "Live source connected; backfilling canonical OI and preparing the first thermal raster."
           : "Bybit public stream reconnecting; the last browser-session field remains visible.",
-        state.connected ? "LIVE_CALIBRATING" : "SOURCE_UNAVAILABLE"
+        state.connected
+          ? modelReady ? "LIVE_CALIBRATING" : this.bootstrap ? "RENDERER_INITIALIZING" : "BACKFILLING_OI"
+          : "SOURCE_UNAVAILABLE"
       );
     });
     this.stream.start();
@@ -85,6 +127,7 @@ export class BrowserLiquidationFieldFallback {
         if (!this.hasRestoredCheckpoint) this.options.onSnapshot(null);
         return;
       }
+      this.status("LOADING", "Open-interest history ready; constructing the first thermal raster.", "RENDERER_INITIALIZING");
       await this.build();
       this.refreshTimer = window.setInterval(() => {
         void this.refreshBootstrap().then(() => this.build()).catch((error) => this.fail(error));
@@ -132,37 +175,45 @@ export class BrowserLiquidationFieldFallback {
 
   private scheduleBuild(delay = this.settings.liveUpdateCadenceMs) {
     if (this.disposed || !this.bootstrap) return;
-    if (this.rebuildTimer !== null) window.clearTimeout(this.rebuildTimer);
+    // Throttle rather than debounce. Public trades can arrive continuously;
+    // resetting the timer on every message would postpone the next raster
+    // forever even though the single-flight gate has capacity to coalesce it.
+    if (this.rebuildTimer !== null) return;
     this.rebuildTimer = window.setTimeout(() => {
       this.rebuildTimer = null;
       void this.build().catch((error) => this.fail(error));
     }, delay);
   }
 
-  private async build() {
-    if (!this.bootstrap || this.disposed) return;
-    const generation = ++this.buildGeneration;
-    const frames = this.applyLiveState(this.bootstrap.frames, this.live);
+  private build() {
+    return this.buildGate.run(() => this.buildOnce());
+  }
+
+  private async buildOnce() {
+    const bootstrap = this.bootstrap;
+    if (!bootstrap || this.disposed) return;
+    const frames = this.applyLiveState(bootstrap.frames, this.live);
     const events = this.live?.events ?? [];
     const liveCoverageMs = Math.max(0, Date.now() - this.liveStartedAt);
-    const requestedMs = Math.max(1, this.bootstrap.coverage.requestedEnd - this.bootstrap.coverage.requestedStart);
+    const requestedMs = Math.max(1, bootstrap.coverage.requestedEnd - bootstrap.coverage.requestedStart);
     const coverage = {
-      ...this.bootstrap.coverage,
+      ...bootstrap.coverage,
       liquidationEventCoveragePercent: Math.min(100, liveCoverageMs / requestedMs * 100),
       orderbookCoveragePercent: this.live?.bidDepthCurve.certainty === "OBSERVED"
         ? Math.min(100, liveCoverageMs / requestedMs * 100)
         : 0,
-      state: this.live?.connected ? "COLLECTING" as const : this.bootstrap.coverage.state
+      state: this.live?.connected ? "COLLECTING" as const : bootstrap.coverage.state
     };
     const snapshot = await this.worker.build({
       frames,
       events,
-      rules: this.bootstrap.rules,
+      rules: bootstrap.rules,
       settings: this.settings,
       coverage,
       absoluteGrid: this.absoluteGrid ?? undefined
     });
-    if (this.disposed || generation !== this.buildGeneration) return;
+    if (this.disposed) return;
+    this.hasPublishedSnapshot = true;
     this.options.onSnapshot(snapshot);
     void this.checkpoint?.save(this.options.symbol, this.settings, snapshot).catch(() => undefined);
     this.status(

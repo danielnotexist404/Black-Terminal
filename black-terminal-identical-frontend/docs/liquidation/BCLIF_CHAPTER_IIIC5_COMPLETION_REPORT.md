@@ -25,3 +25,10 @@ Status: local implementation and repository certification complete; production p
 - Execution systems, migrations, collector architecture and cohort mathematics: untouched.
 
 Repository evidence: typecheck PASS; model, operational-clarity, authentic-exposure, live-pipeline, and cold-start contracts PASS; production build/security contracts/security audit PASS; 27/27 repository-owned Brave visual comparisons PASS across 1920×1080, 2560×1440, and 3840×2160. Production publication is complete. Remaining acceptance evidence is the authenticated private/incognito hard-refresh procedure. No production result is claimed prematurely.
+
+
+## Post-deployment corrective release
+
+A later authenticated production capture identified a separate Browser Fallback starvation path: the public live stream could invalidate every expensive first raster before publication and continuously postpone the debounced refresh. Production-origin network probes and exact bootstrap/model measurements confirmed healthy OI/candle inputs and a valid V6 field; the defect was confined to browser build scheduling.
+
+The correction replaces generation-discard concurrency with a single-flight/coalescing build gate, changes live updates to a throttle, preserves the first completed snapshot, and prevents `LIVE_CALIBRATING` from appearing before a model has published. The focused regression blocks the first build, injects 1,000 live updates, and proves exactly two serial builds with publication order `[1, 2]`. This corrective release changes no exposure mathematics, cohorts, liquidation pricing, absolute grid, authority rules, or persistent collector behavior.

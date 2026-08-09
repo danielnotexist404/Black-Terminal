@@ -4,7 +4,10 @@ Status: local implementation and repository certification complete; production p
 
 - Starting commit: e9edaa11e85195e95480b95ba2949cc12318ae70
 - Final commit: recorded as the immutable release SHA in the publication handoff (not embedded here to avoid a self-referential commit)
-- Production deployment SHA / asset hash: NOT DEPLOYED YET
+- Production code commit: 591461d1c09518f8c207f3b9c2b26e3ba0911ba3
+- Production deployment: dpl_DCabsvGMHFB9tzqyzZ1JCrhUZKHy · Ready · black-terminal.live
+- Production entry asset: assets/index-DwzfyNTc.js · SHA-256 30254903da80112b55cf5dc324c1834f6c5c5e6974b1edcb5ab006b3b802000c
+- Production BCLIF worker: assets/displayProjectionWorker-BCHcAaKv.js · SHA-256 4b45e7d2e787c1f4b65e3c7ae71f4cb1d2186df287a1564a2fb43ee682ee90fe
 - Exact root cause: healthy V6 exposure was compounded into an operationally transparent texture by legacy shared confidence/evidence/opacity gates; latest-snapshot replay was also absent.
 - Original audit: 65,536 model cells, 36,730 non-zero raw cells, 131,072 projected cells, alpha 2/255, effective maximum composite alpha 0.35%.
 - Corrected browser visual at 1920×1080: 349,074 raw non-zero and visible cells, alpha non-zero, yellow 0, labels 0, renderer ready.
@@ -21,4 +24,4 @@ Status: local implementation and repository certification complete; production p
 - Persistent collector: unchanged by this chapter; production deployment/certification remains a separate operational state.
 - Execution systems, migrations, collector architecture and cohort mathematics: untouched.
 
-Repository evidence: typecheck PASS; model, operational-clarity, authentic-exposure, live-pipeline, and cold-start contracts PASS; production build/security contracts/security audit PASS; 27/27 repository-owned Brave visual comparisons PASS across 1920×1080, 2560×1440, and 3840×2160. Remaining evidence before a production PASS is limited to publishing the final commit, deploying the exact asset, and performing authenticated private-session acceptance. No production result is claimed prematurely.
+Repository evidence: typecheck PASS; model, operational-clarity, authentic-exposure, live-pipeline, and cold-start contracts PASS; production build/security contracts/security audit PASS; 27/27 repository-owned Brave visual comparisons PASS across 1920×1080, 2560×1440, and 3840×2160. Production publication is complete. Remaining acceptance evidence is the authenticated private/incognito hard-refresh procedure. No production result is claimed prematurely.

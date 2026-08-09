@@ -32,3 +32,17 @@ Repository evidence: typecheck PASS; model, operational-clarity, authentic-expos
 A later authenticated production capture identified a separate Browser Fallback starvation path: the public live stream could invalidate every expensive first raster before publication and continuously postpone the debounced refresh. Production-origin network probes and exact bootstrap/model measurements confirmed healthy OI/candle inputs and a valid V6 field; the defect was confined to browser build scheduling.
 
 The correction replaces generation-discard concurrency with a single-flight/coalescing build gate, changes live updates to a throttle, preserves the first completed snapshot, and prevents `LIVE_CALIBRATING` from appearing before a model has published. The focused regression blocks the first build, injects 1,000 live updates, and proves exactly two serial builds with publication order `[1, 2]`. This corrective release changes no exposure mathematics, cohorts, liquidation pricing, absolute grid, authority rules, or persistent collector behavior.
+
+
+### Corrective production evidence
+
+- Corrective code commit: `972a7fa134d9a8efd9a7451a22f275d4945e9be9`
+- Production deployment: `dpl_9Pwm8Td8BwvBxMXNVTpoN2H4ZBup` (`READY`)
+- Production URL: `https://black-terminal-gb2jrksew-danielnotexist404s-projects.vercel.app`
+- Custom aliases: `https://www.black-terminal.live` and `https://black-terminal.live`
+- Production entry: `assets/index-W5SUTd-A.js`; SHA-256 `7d85e902638260b4c15d040cc7844ab2b9f8ca1c9f696a87b1ec1f4424df71f8`
+- Browser model worker: `assets/rasterWorker-JlVs_h9Q.js`; SHA-256 `b67c4efd714bbbc804010fc6c17b1386af47be67d83203f0a8081ad4f2d037bb`
+- Display projection worker: `assets/displayProjectionWorker-BCHcAaKv.js`; SHA-256 `4b45e7d2e787c1f4b65e3c7ae71f4cb1d2186df287a1564a2fb43ee682ee90fe`
+- Production bundle string audit confirms the corrected pre-publication initialization messages and first-raster lifecycle are present on the custom domain.
+
+The custom domain publication and static artifact verification are complete. Final authenticated rendering confirmation remains a user-session acceptance check because production chart access is private.

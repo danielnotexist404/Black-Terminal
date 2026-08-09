@@ -1,5 +1,3 @@
-import { publicMarketGet } from "../lib/tauri";
-
 const DEV_PROXY_ROUTES: Record<string, string> = {
   "https://api.binance.com": "/market-proxy/binance-spot",
   "https://fapi.binance.com": "/market-proxy/binance-usdm",
@@ -8,8 +6,11 @@ const DEV_PROXY_ROUTES: Record<string, string> = {
 };
 
 class MarketDataHttpError extends Error {
-  constructor(readonly status: number, detail: string) {
+  readonly status: number;
+
+  constructor(status: number, detail: string) {
     super(`Market data request failed with ${status}${detail}`);
+    this.status = status;
     this.name = "MarketDataHttpError";
   }
 }
@@ -46,6 +47,7 @@ async function fetchJson<T>(url: string, init?: RequestInit) {
 export async function marketDataFetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   if (isTauriRuntime()) {
     try {
+      const { publicMarketGet } = await import("../lib/tauri.ts");
       return await publicMarketGet<T>(url);
     } catch (err) {
       console.warn("Tauri market data bridge failed; falling back to browser fetch", err);

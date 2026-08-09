@@ -85,6 +85,15 @@ The mock feed randomly triggers alert events and sends them through the Tauri Ru
 7. Add indicator plugin loader.
 8. Add alert condition builder.
 
+## BCLIF V6 live-pipeline correction
+
+The liquidation intelligence model now stores and exports absolute quote-price
+shelves, groups related five-minute OI changes into bounded causal events, uses
+expanding causal normalization, and exposes an opt-in raw shelf diagnostic.
+Run `npm run test:bclif-live-pipeline` for the full mark-perturbation and
+low-information authority contract. Persistent hosting and migrations remain
+inactive until the separate deployment runbook is completed.
+
 
 ## v0.3 concept-matching update
 

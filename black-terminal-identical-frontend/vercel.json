@@ -1,6 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["fra1"],
+  "rewrites": [
+    {
+      "source": "/api/liquidation-intelligence/:action",
+      "destination": "/api/market-depth/bclif?bclifAction=:action"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",

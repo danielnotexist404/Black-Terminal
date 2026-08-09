@@ -11,6 +11,7 @@ import type {
   BclifCohortLifecycleEvent,
   BclifCohortModelConfiguration,
   BclifModelMassLedger,
+  BclifOiEventWindowState,
   CohortEntryDistribution,
   ConfirmedLiquidationEvent,
   LiquidationCohortEngineState,
@@ -95,6 +96,7 @@ export class LiquidationCohortEngine {
   private oiDeltaHistory: number[] = [];
   private massLedger = emptyMassLedger();
   private lifecycleEvents: BclifCohortLifecycleEvent[] = [];
+  private oiEventWindow: BclifOiEventWindowState | null = null;
 
   constructor(
     rules: LiquidationInstrumentRules,
@@ -115,6 +117,7 @@ export class LiquidationCohortEngine {
     this.oiDeltaHistory = [];
     this.massLedger = emptyMassLedger();
     this.lifecycleEvents = [];
+    this.oiEventWindow = null;
   }
 
   processFrame(frame: LiquidationMarketFrame, events: readonly ConfirmedLiquidationEvent[] = []) {
@@ -135,10 +138,9 @@ export class LiquidationCohortEngine {
       if (this.oiDeltaHistory.length > MAX_OI_DELTA_HISTORY) this.oiDeltaHistory.splice(0, this.oiDeltaHistory.length - MAX_OI_DELTA_HISTORY);
     }
     const canonicalFrame = { ...frame, oiMateriality: materiality };
-    if (isOiObservation && openInterestUsable && materiality.effectiveDelta > 0 && frame.openInterest > 0) {
-      this.createPairedCohorts(canonicalFrame, materiality.effectiveDelta);
-    }
+    if (isOiObservation && openInterestUsable && frame.openInterest > 0) this.updateOiEventWindow(canonicalFrame, materiality);
     if (isOiObservation && openInterestUsable && materiality.effectiveDelta < 0 && this.previousFrame?.openInterest) {
+      this.finalizeOiEventWindow();
       this.reduceFromOiContraction(canonicalFrame, materiality.effectiveDelta);
     }
     for (const event of events) {
@@ -160,6 +162,16 @@ export class LiquidationCohortEngine {
     };
   }
 
+  /**
+   * Closes the currently known causal prefix for bounded replay/export. Live
+   * collectors normally let timeout or hysteresis close the window instead.
+   */
+  flushPendingOiEvent() {
+    this.finalizeOiEventWindow();
+    this.reconcileMass();
+    return this.snapshot();
+  }
+
   exportState(): LiquidationCohortEngineState {
     return {
       schemaVersion: 2,
@@ -172,6 +184,7 @@ export class LiquidationCohortEngine {
       particles: this.particles.map((particle) => ({ ...particle })),
       traversedCohortIds: [...this.traversedCohorts].sort(),
       oiDeltaHistory: [...this.oiDeltaHistory],
+      oiEventWindow: this.oiEventWindow ? cloneOiEventWindow(this.oiEventWindow) : null,
       configuration: { ...this.configuration },
       massLedger: { ...this.massLedger },
       lifecycleEvents: this.lifecycleEvents.map((event) => ({ ...event }))
@@ -186,10 +199,70 @@ export class LiquidationCohortEngine {
     this.particles = state.particles.map((particle) => ({ ...particle }));
     this.traversedCohorts = new Set(state.traversedCohortIds);
     this.oiDeltaHistory = [...state.oiDeltaHistory];
+    this.oiEventWindow = state.oiEventWindow ? cloneOiEventWindow(state.oiEventWindow) : null;
     this.configuration = { ...state.configuration };
     this.massLedger = { ...state.massLedger };
     this.lifecycleEvents = state.lifecycleEvents.map((event) => ({ ...event }));
     this.reconcileMass();
+  }
+
+  /**
+   * Converts related five-minute OI observations into one bounded causal
+   * position-opening event. This prevents exchange polling noise from creating
+   * a fresh pair of cohorts on every positive tick.
+   */
+  private updateOiEventWindow(frame: LiquidationMarketFrame, materiality: LiquidationMarketFrame["oiMateriality"]) {
+    if (!materiality) return;
+    const raw = frame.openInterestDelta;
+    const positiveBirth = materiality.effectiveDelta > 0;
+    const continuation = this.oiEventWindow
+      && raw > 0
+      && raw >= materiality.threshold * this.configuration.oiEventContinuationRatio;
+    if (positiveBirth || continuation) {
+      if (!this.oiEventWindow) this.oiEventWindow = createOiEventWindow(frame, Math.max(0, positiveBirth ? materiality.effectiveDelta : raw), materiality.threshold);
+      else appendOiEventWindow(this.oiEventWindow, frame, Math.max(0, positiveBirth ? materiality.effectiveDelta : raw), materiality.threshold);
+      if (this.oiEventWindow.intervalEnd - this.oiEventWindow.intervalStart >= this.configuration.oiEventWindowMs) {
+        this.finalizeOiEventWindow();
+      }
+      return;
+    }
+    if (!this.oiEventWindow) return;
+    const terminating = raw <= materiality.threshold * this.configuration.oiEventTerminationRatio;
+    this.oiEventWindow.quietIntervals = terminating ? this.oiEventWindow.quietIntervals + 1 : 0;
+    if (this.oiEventWindow.quietIntervals >= this.configuration.oiEventHysteresisIntervals) this.finalizeOiEventWindow();
+  }
+
+  private finalizeOiEventWindow() {
+    const window = this.oiEventWindow;
+    if (!window) return;
+    this.oiEventWindow = null;
+    if (!(window.effectiveDelta > 0) || !(window.intervalEnd > window.intervalStart)) return;
+    const distribution = buildCohortEntryDistribution({
+      observations: window.observations,
+      source: window.source,
+      intervalStart: window.intervalStart,
+      intervalEnd: window.intervalEnd,
+      confidence: window.confidence,
+      fallbackPrice: window.latestFrame.markPrice,
+      maximumRows: 12
+    });
+    const eventFrame: LiquidationMarketFrame = {
+      ...cloneFrame(window.latestFrame),
+      timestamp: window.intervalEnd,
+      openInterestDelta: window.effectiveDelta,
+      oiIntervalStart: window.intervalStart,
+      oiIntervalEnd: window.intervalEnd,
+      entryDistribution: distribution,
+      oiMateriality: {
+        rawDelta: window.effectiveDelta,
+        effectiveDelta: window.effectiveDelta,
+        threshold: window.threshold,
+        method: this.configuration.oiNoiseMethod,
+        version: "BCLIF_OI_EVENT_WINDOW_V1",
+        material: true
+      }
+    };
+    this.createPairedCohorts(eventFrame, window.effectiveDelta);
   }
 
   private createPairedCohorts(frame: LiquidationMarketFrame, effectiveDelta: number) {
@@ -356,21 +429,9 @@ export class LiquidationCohortEngine {
         : previousMark < cohort.liquidationMean && frame.markPrice >= cohort.liquidationMean;
       if (crossedLiquidationCore && !this.traversedCohorts.has(cohort.id)) {
         this.traversedCohorts.add(cohort.id);
-        const eventCoverageMissing = frame.certainty.confirmedLiquidations === "UNAVAILABLE"
-          || frame.certainty.confirmedLiquidations === "MISSING";
-        if (eventCoverageMissing) {
-          const unresolvedRemoved = cohort.estimatedRemainingNotional * 0.1;
-          cohort.estimatedRemainingNotional -= unresolvedRemoved;
-          cohort.remainingMass = cohort.estimatedRemainingNotional;
-          cohort.survivalProbability *= 0.88;
-          cohort.confidence *= 0.72;
-          cohort.state = "PARTIALLY_LIQUIDATED";
-          this.massLedger.decayExpiryMass += unresolvedRemoved;
-          const event = lifecycleEvent(cohort.id, frame.timestamp, "UNRESOLVED_TRAVERSAL", unresolvedRemoved, null,
-            "Price traversed the estimated shelf while confirmed-liquidation coverage was unavailable; outcome remains uncertain");
-          cohort.lastLifecycleEvent = event;
-          this.recordLifecycle(event);
-        }
+        // Crossing an estimated shelf is not evidence that liquidation
+        // occurred. Without a confirmed event or OI contraction, mutating mass
+        // here would make a mere mark-price perturbation rewrite raw exposure.
       }
       if (cohort.survivalProbability < 0.035 || cohort.estimatedRemainingNotional < 1) this.expireCohort(cohort, frame.timestamp, "Cohort fell below survival or mass floor");
     }
@@ -602,6 +663,63 @@ function cloneFrame(frame: LiquidationMarketFrame): LiquidationMarketFrame {
   };
 }
 
+const ENTRY_SOURCE_RANK = {
+  EXACT_TRADES: 0,
+  LOWER_TF_VOLUME_AT_PRICE: 1,
+  LOWER_TF_APPROXIMATION: 2,
+  CHART_BAR_APPROXIMATION: 3
+} as const;
+
+function observationsForOiFrame(frame: LiquidationMarketFrame, delta: number) {
+  const distribution = frame.entryDistribution;
+  if (!distribution) return [{ price: frame.markPrice, weight: Math.max(delta, 1e-12) }];
+  return distribution.priceRows.map((price, index) => ({
+    price,
+    weight: distribution.weights[index]! * Math.max(delta, 1e-12)
+  }));
+}
+
+function createOiEventWindow(frame: LiquidationMarketFrame, delta: number, threshold: number): BclifOiEventWindowState {
+  const intervalEnd = frame.oiIntervalEnd ?? frame.timestamp;
+  const intervalStart = Math.min(intervalEnd - 1, frame.oiIntervalStart ?? intervalEnd - 1);
+  return {
+    startedAt: frame.timestamp,
+    lastObservedAt: frame.timestamp,
+    intervalStart,
+    intervalEnd,
+    effectiveDelta: delta,
+    threshold,
+    quietIntervals: 0,
+    source: frame.entryDistribution?.source ?? "CHART_BAR_APPROXIMATION",
+    confidence: frame.entryDistribution?.confidence ?? 0.32,
+    observations: observationsForOiFrame(frame, delta),
+    latestFrame: cloneFrame(frame)
+  };
+}
+
+function appendOiEventWindow(window: BclifOiEventWindowState, frame: LiquidationMarketFrame, delta: number, threshold: number) {
+  window.lastObservedAt = frame.timestamp;
+  window.intervalStart = Math.min(window.intervalStart, frame.oiIntervalStart ?? frame.timestamp - 1);
+  window.intervalEnd = Math.max(window.intervalEnd, frame.oiIntervalEnd ?? frame.timestamp);
+  window.effectiveDelta += delta;
+  window.threshold = Math.max(window.threshold, threshold);
+  window.quietIntervals = 0;
+  const source = frame.entryDistribution?.source ?? "CHART_BAR_APPROXIMATION";
+  if (ENTRY_SOURCE_RANK[source] > ENTRY_SOURCE_RANK[window.source]) window.source = source;
+  window.confidence = Math.min(window.confidence, frame.entryDistribution?.confidence ?? 0.32);
+  window.observations.push(...observationsForOiFrame(frame, delta));
+  if (window.observations.length > 256) window.observations.splice(0, window.observations.length - 256);
+  window.latestFrame = cloneFrame(frame);
+}
+
+function cloneOiEventWindow(window: BclifOiEventWindowState): BclifOiEventWindowState {
+  return {
+    ...window,
+    observations: window.observations.map((observation) => ({ ...observation })),
+    latestFrame: cloneFrame(window.latestFrame)
+  };
+}
+
 function validateCheckpointState(
   state: LiquidationCohortEngineState,
   expectedSourceVersion: string,
@@ -616,6 +734,16 @@ function validateCheckpointState(
   if (!Array.isArray(state.particles) || state.particles.length > MAX_PARTICLES) throw new Error("Invalid BCLIF cohort checkpoint particles");
   if (!Array.isArray(state.traversedCohortIds) || state.traversedCohortIds.length > MAX_ACTIVE_COHORTS) throw new Error("Invalid BCLIF cohort checkpoint traversal state");
   if (!Array.isArray(state.oiDeltaHistory) || state.oiDeltaHistory.length > MAX_OI_DELTA_HISTORY || state.oiDeltaHistory.some((value) => !Number.isFinite(value))) throw new Error("Invalid BCLIF OI materiality history");
+  if (state.oiEventWindow) {
+    const window = state.oiEventWindow;
+    if (!Number.isFinite(window.effectiveDelta) || window.effectiveDelta <= 0
+      || !Number.isFinite(window.intervalStart) || !Number.isFinite(window.intervalEnd)
+      || window.intervalEnd <= window.intervalStart || window.observations.length > 256
+      || window.observations.some((observation) => !Number.isFinite(observation.price)
+        || observation.price <= 0 || !Number.isFinite(observation.weight) || observation.weight <= 0)) {
+      throw new Error("Invalid BCLIF OI event-window checkpoint");
+    }
+  }
   if (!Array.isArray(state.lifecycleEvents) || state.lifecycleEvents.length > MAX_LIFECYCLE_EVENTS) throw new Error("Invalid BCLIF lifecycle history");
   validateBclifCohortConfiguration(state.configuration);
   const cohortIds = new Set(state.cohorts.map((cohort) => cohort.id));

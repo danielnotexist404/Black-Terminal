@@ -272,3 +272,10 @@ BCLIF presentation settings remain versioned browser workspace preferences. Hist
 Workspace restoration cannot override entitlement or model authority. A revoked user cannot reactivate BCLIF from an older workspace. Persistent-node history and browser-session history are never merged; browser fallback is visibly marked persistence off and is discarded with the session. The deterministic fixture is available only in explicit local test mode.
 
 Chapter III-C3 settings schema 3 persists provenance visibility, cohort birth markers, OI materiality method/floors, and isolated/cross/unknown contribution caps. These are model/presentation preferences only; cohort inventory, lifecycle events, mass ledgers, source offsets, canonical OI intervals, and field tiles remain runtime or protected collector state. Chart timeframe and viewport are never persisted as model inputs. Provenance mode is disabled by default.
+
+Chapter III-C4 adds persisted OI event-window parameters and the opt-in raw shelf
+diagnostic. They remain versioned indicator preferences. The browser fallback
+keeps one absolute price grid only in controller memory; periodic refresh does
+not persist it in workspace state. `__BCLIF_RAW_EXPOSURE_EXPORT__` is a
+runtime diagnostic function and no raw field is written to localStorage or
+IndexedDB.

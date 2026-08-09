@@ -39,7 +39,8 @@ export class LiquidationFieldWorkerClient {
         payload.events,
         payload.rules,
         payload.settings,
-        payload.coverage
+        payload.coverage,
+        payload.absoluteGrid
       ));
     }
     const id = this.nextId++;

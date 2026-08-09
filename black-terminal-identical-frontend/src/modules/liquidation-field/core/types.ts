@@ -103,6 +103,77 @@ export interface BclifCohortModelConfiguration {
   isolatedContributionCap: number;
   crossContributionCap: number;
   unknownContributionCap: number;
+  oiEventWindowMs: number;
+  oiEventContinuationRatio: number;
+  oiEventTerminationRatio: number;
+  oiEventHysteresisIntervals: number;
+}
+
+/**
+ * Authoritative model storage is always expressed on the exchange quote-price
+ * axis. Screen pixels, normalized intensity and the current mark are not valid
+ * coordinates for this distribution.
+ */
+export interface AbsoluteLiquidationDistribution {
+  priceUnit: "QUOTE_PRICE";
+  gridOrigin: number;
+  priceStep: number;
+  minPrice: number;
+  maxPrice: number;
+  rows: number;
+  modelVersion: string;
+  gridVersion: string;
+}
+
+export interface BclifAbsolutePriceGrid {
+  minPrice: number;
+  maxPrice: number;
+  priceStep: number;
+  gridOrigin: number;
+  gridVersion: string;
+  rows: number;
+}
+
+export interface BclifAbsolutePriceGrid {
+  minPrice: number;
+  maxPrice: number;
+  priceStep: number;
+  gridOrigin: number;
+  gridVersion: string;
+  rows: number;
+}
+
+export interface BclifOiEventWindowState {
+  startedAt: number;
+  lastObservedAt: number;
+  intervalStart: number;
+  intervalEnd: number;
+  effectiveDelta: number;
+  threshold: number;
+  quietIntervals: number;
+  source: CohortEntrySource;
+  confidence: number;
+  observations: Array<{ price: number; weight: number }>;
+  latestFrame: LiquidationMarketFrame;
+}
+
+export interface BclifRawCohortShelf {
+  cohortId: string;
+  side: "LONG" | "SHORT";
+  createdAt: number;
+  sourceIntervalStart: number;
+  sourceIntervalEnd: number;
+  entryLower: number;
+  entryMean: number;
+  entryUpper: number;
+  liquidationLower: number;
+  liquidationMean: number;
+  liquidationUpper: number;
+  remainingMass: number;
+  confidence: number;
+  entrySource: CohortEntrySource;
+  leverageContributions: Array<{ leverage: number; probability: number }>;
+  marginMode: LiquidationPositionCohort["marginMode"];
 }
 
 export interface LiquidationFieldSettings {
@@ -166,6 +237,11 @@ export interface LiquidationFieldSettings {
   isolatedContributionCap: number;
   crossContributionCap: number;
   unknownContributionCap: number;
+  oiEventWindowMs: number;
+  oiEventContinuationRatio: number;
+  oiEventTerminationRatio: number;
+  oiEventHysteresisIntervals: number;
+  rawCohortShelvesVisible: boolean;
 }
 
 export interface BclifEvidenceComposition {
@@ -365,6 +441,7 @@ export interface LiquidationCohortEngineState {
   particles: LiquidationExposureParticle[];
   traversedCohortIds: string[];
   oiDeltaHistory: number[];
+  oiEventWindow?: BclifOiEventWindowState | null;
   configuration: BclifCohortModelConfiguration;
   massLedger: BclifModelMassLedger;
   lifecycleEvents: BclifCohortLifecycleEvent[];
@@ -523,6 +600,8 @@ export interface LiquidationFieldSnapshot {
   authority: BclifModelAuthority;
   collectorNodeId: string | null;
   persistentCoverage?: BclifPersistentCoverage;
+  absoluteDistribution?: AbsoluteLiquidationDistribution;
+  rawCohortShelves?: BclifRawCohortShelf[];
 }
 
 export interface LiquidationFieldRuntimeStatus {
@@ -536,5 +615,5 @@ export interface LiquidationFieldRuntimeStatus {
   error?: string;
 }
 
-export const BCLIF_MODEL_VERSION = "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE";
-export const BCLIF_SOURCE_VERSION = "BYBIT_V5_PUBLIC_2026_08";
+export const BCLIF_MODEL_VERSION = "BCLIF_MODEL_V6_ABSOLUTE_SHELVES";
+export const BCLIF_SOURCE_VERSION = "BYBIT_V6_PUBLIC_2026_08";

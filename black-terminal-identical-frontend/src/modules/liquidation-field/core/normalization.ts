@@ -119,6 +119,23 @@ export function normalizeExposureCausal(
   return { normalized, lows, highs, low: lows.at(-1) ?? 0, high: highs.at(-1) ?? 1e-6 };
 }
 
+/**
+ * Causal expanding-horizon normalization. Unlike a short rolling or
+ * per-column percentile, the evidence domain can only grow. A local generation
+ * therefore cannot manufacture a fresh yellow maximum simply because older
+ * context rolled out of a 64-column window.
+ */
+export function normalizeExposureExpanding(
+  exposure: Float32Array,
+  confidence: Uint8Array,
+  validity: Uint8Array,
+  columns: number,
+  rows: number,
+  settings: LiquidationFieldSettings
+) {
+  return normalizeExposureCausal(exposure, confidence, validity, columns, rows, settings, columns);
+}
+
 function histogramQuantile(
   histogram: Uint32Array,
   population: number,

@@ -1,8 +1,9 @@
 import { performance } from "../testing/performanceClock.ts";
 import { confidenceForFrame } from "./certainty.ts";
 import { LiquidationCohortEngine } from "./cohortEngine.ts";
-import { normalizeExposureCausal, smoothField } from "./normalization.ts";
+import { normalizeExposureExpanding, smoothField } from "./normalization.ts";
 import type {
+  BclifAbsolutePriceGrid,
   CascadeRiskSnapshot,
   ConfirmedLiquidationEvent,
   LiquidationCoverage,
@@ -100,7 +101,8 @@ export function buildLiquidationFieldSnapshot(
   sourceEvents: readonly ConfirmedLiquidationEvent[],
   rules: LiquidationInstrumentRules,
   settings: LiquidationFieldSettings,
-  coverage: LiquidationCoverage
+  coverage: LiquidationCoverage,
+  requestedGrid?: BclifAbsolutePriceGrid
 ): LiquidationFieldSnapshot {
   const started = performance.now();
   const frames = [...sourceFrames].sort((a, b) => a.timestamp - b.timestamp);
@@ -113,13 +115,10 @@ export function buildLiquidationFieldSnapshot(
   // not redefine it.
   const anchorFrame = frames[0]!;
   const leverageEnvelope = Math.max(0.08, Math.min(0.52, 1 / Math.max(2, settings.leverageMinimum) + 0.025));
-  const rows = settings.priceRows;
-  const { minPrice, maxPrice, priceStep, gridOrigin, gridVersion } = stableBrowserPriceGrid(
-    anchorFrame.markPrice,
-    rules.tickSize ?? 0,
-    rows,
-    leverageEnvelope
-  );
+  const rows = requestedGrid?.rows ?? settings.priceRows;
+  const { minPrice, maxPrice, priceStep, gridOrigin, gridVersion } = requestedGrid
+    ? validateAbsolutePriceGrid(requestedGrid)
+    : stableBrowserPriceGrid(anchorFrame.markPrice, rules.tickSize ?? 0, rows, leverageEnvelope);
   const columns = selectedIndices.size;
   const longExposure = new Float32Array(columns * rows);
   const shortExposure = new Float32Array(columns * rows);
@@ -136,7 +135,11 @@ export function buildLiquidationFieldSnapshot(
     oiNoiseMadMultiplier: settings.oiNoiseMadMultiplier,
     isolatedContributionCap: settings.isolatedContributionCap,
     crossContributionCap: settings.crossContributionCap,
-    unknownContributionCap: settings.unknownContributionCap
+    unknownContributionCap: settings.unknownContributionCap,
+    oiEventWindowMs: settings.oiEventWindowMs,
+    oiEventContinuationRatio: settings.oiEventContinuationRatio,
+    oiEventTerminationRatio: settings.oiEventTerminationRatio,
+    oiEventHysteresisIntervals: settings.oiEventHysteresisIntervals
   });
   let column = 0;
   let latestState = cohortEngine.snapshot();
@@ -195,32 +198,29 @@ export function buildLiquidationFieldSnapshot(
   const normalizationConfidence = coverage.state === "SYNTHETIC_TEST"
     ? new Uint8Array(confidence.length).fill(255)
     : confidence;
-  const { normalized, high } = normalizeExposureCausal(
+  const { normalized, high } = normalizeExposureExpanding(
     combinedExposure,
     normalizationConfidence,
     validity,
     columns,
     rows,
-    settings,
-    64
+    settings
   );
-  const { normalized: longNormalizedIntensity } = normalizeExposureCausal(
+  const { normalized: longNormalizedIntensity } = normalizeExposureExpanding(
     longExposure,
     normalizationConfidence,
     validity,
     columns,
     rows,
-    settings,
-    64
+    settings
   );
-  const { normalized: shortNormalizedIntensity } = normalizeExposureCausal(
+  const { normalized: shortNormalizedIntensity } = normalizeExposureExpanding(
     shortExposure,
     normalizationConfidence,
     validity,
     columns,
     rows,
-    settings,
-    64
+    settings
   );
   const lastFrame = frames.at(-1)!;
   const cascade = buildCascade(lastFrame, latestState.particles, priceStep);
@@ -271,6 +271,34 @@ export function buildLiquidationFieldSnapshot(
     generatedAt: Date.now(),
     authority: coverage.state === "SYNTHETIC_TEST" ? "TEST_FIXTURE" : "BROWSER_FALLBACK",
     collectorNodeId: null,
+    absoluteDistribution: {
+      priceUnit: "QUOTE_PRICE",
+      gridOrigin,
+      priceStep,
+      minPrice,
+      maxPrice,
+      rows,
+      modelVersion: BCLIF_MODEL_VERSION,
+      gridVersion
+    },
+    rawCohortShelves: latestState.cohorts.map((cohort) => ({
+      cohortId: cohort.id,
+      side: cohort.side,
+      createdAt: cohort.createdAt,
+      sourceIntervalStart: cohort.sourceIntervalStart,
+      sourceIntervalEnd: cohort.sourceIntervalEnd,
+      entryLower: cohort.entryLower,
+      entryMean: cohort.entryMean,
+      entryUpper: cohort.entryUpper,
+      liquidationLower: cohort.liquidationLower,
+      liquidationMean: cohort.liquidationMean,
+      liquidationUpper: cohort.liquidationUpper,
+      remainingMass: cohort.estimatedRemainingNotional,
+      confidence: cohort.confidence,
+      entrySource: cohort.entryDistribution.source,
+      leverageContributions: cohort.leverageDistribution.map((bucket) => ({ ...bucket })),
+      marginMode: cohort.marginMode
+    })),
     certainty: coverage.state === "SYNTHETIC_TEST"
       ? "SYNTHETIC_TEST"
       : latestConfidence.total >= 80
@@ -301,7 +329,20 @@ export function stableBrowserPriceGrid(
   const gridOrigin = 0;
   const minPrice = Math.floor(anchoredMinimum / priceStep) * priceStep;
   const maxPrice = minPrice + priceStep * (rows - 1);
-  return { minPrice, maxPrice, priceStep, gridOrigin, gridVersion: "BCLIF_ANCHORED_NICE_STEP_V2" };
+  return { minPrice, maxPrice, priceStep, gridOrigin, gridVersion: "BCLIF_ANCHORED_NICE_STEP_V3", rows };
+}
+
+export function validateAbsolutePriceGrid(grid: BclifAbsolutePriceGrid) {
+  const expectedMaximum = grid.minPrice + grid.priceStep * (grid.rows - 1);
+  if (!Number.isSafeInteger(grid.rows) || grid.rows < 2
+    || !Number.isFinite(grid.gridOrigin) || !Number.isFinite(grid.minPrice)
+    || !Number.isFinite(grid.maxPrice) || !Number.isFinite(grid.priceStep)
+    || grid.minPrice < 0 || grid.priceStep <= 0
+    || Math.abs(grid.maxPrice - expectedMaximum) > Math.max(1e-8, grid.priceStep * 1e-8)
+    || !grid.gridVersion.trim()) {
+    throw new Error("BCLIF absolute price grid is invalid");
+  }
+  return { ...grid };
 }
 
 function rasterizeParticles(
@@ -334,7 +375,7 @@ function rasterizeParticles(
       if (row < 0 || row >= rows) continue;
       const kernel = gaussianKernel(offset, sigmaRows);
       const targetIndex = columnStart + row;
-      target[targetIndex] = (target[targetIndex] ?? 0) + effectiveNotional * particle.confidence * kernel;
+      target[targetIndex] = (target[targetIndex] ?? 0) + effectiveNotional * kernel;
     }
   }
 }

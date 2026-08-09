@@ -64,7 +64,12 @@ export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   oiNoiseMadMultiplier: 3.5,
   isolatedContributionCap: 0.82,
   crossContributionCap: 0.12,
-  unknownContributionCap: 0.06
+  unknownContributionCap: 0.06,
+  oiEventWindowMs: 15 * 60 * 1_000,
+  oiEventContinuationRatio: 0.35,
+  oiEventTerminationRatio: 0.25,
+  oiEventHysteresisIntervals: 2,
+  rawCohortShelvesVisible: false
 };
 
 const horizons = new Set<LiquidationFieldHorizon>(["6H", "12H", "1D", "3D", "1W", "3W", "1M", "CUSTOM"]);
@@ -122,7 +127,11 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     oiNoiseMadMultiplier: clamp(merged.oiNoiseMadMultiplier, 3.5, 0, 20),
     isolatedContributionCap: clamp(merged.isolatedContributionCap, 0.82, 0, 1),
     crossContributionCap: clamp(merged.crossContributionCap, 0.12, 0, 1),
-    unknownContributionCap: clamp(merged.unknownContributionCap, 0.06, 0, 1)
+    unknownContributionCap: clamp(merged.unknownContributionCap, 0.06, 0, 1),
+    oiEventWindowMs: Math.round(clamp(merged.oiEventWindowMs, 15 * 60 * 1_000, 5 * 60 * 1_000, 60 * 60 * 1_000)),
+    oiEventContinuationRatio: clamp(merged.oiEventContinuationRatio, 0.35, 0.05, 1),
+    oiEventTerminationRatio: clamp(merged.oiEventTerminationRatio, 0.25, 0, 1),
+    oiEventHysteresisIntervals: Math.round(clamp(merged.oiEventHysteresisIntervals, 2, 1, 12))
   };
 }
 
@@ -160,7 +169,8 @@ export function applyBclifPresentationPreset(
     ...common, priceDisplay: "FULL_MODEL_RANGE", minimumConfidence: 0, opacity: 72,
     thermalNormalization: "GLOBAL_MODEL", visualChannel: "COMBINED", historicalContextOpacity: 100,
     liveCalibratedOpacity: 100, confidenceWeightEnabled: false, requireMultipleEvidenceChannels: false,
-    maximumClusterLabels: 0, operationalSummaryVisible: false, diagnosticsVisible: true
+    maximumClusterLabels: 0, operationalSummaryVisible: false, diagnosticsVisible: true,
+    rawCohortShelvesVisible: true, smoothing: "SHARP"
   });
 }
 
@@ -172,7 +182,8 @@ export function liquidationFieldModelSettingsKey(settings: LiquidationFieldSetti
     settings.priceRows, settings.timeColumns,
     settings.oiNoiseMethod, settings.oiNoiseAbsoluteNotionalUsd, settings.oiNoisePercent,
     settings.oiNoiseMadMultiplier, settings.isolatedContributionCap, settings.crossContributionCap,
-    settings.unknownContributionCap
+    settings.unknownContributionCap, settings.oiEventWindowMs, settings.oiEventContinuationRatio,
+    settings.oiEventTerminationRatio, settings.oiEventHysteresisIntervals
   ].join(":");
 }
 

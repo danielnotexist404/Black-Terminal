@@ -151,6 +151,7 @@ function engineRun(frames: readonly LiquidationMarketFrame[], events: readonly C
   });
   let state = engine.snapshot();
   for (const value of frames) state = engine.processFrame(value, events);
+  state = engine.flushPendingOiEvent();
   return { engine, state };
 }
 

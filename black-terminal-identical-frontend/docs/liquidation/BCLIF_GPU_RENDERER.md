@@ -9,3 +9,12 @@ Projection generations are keyed by the model/exposure identity and complete ren
 The renderer records texture preparation/update timing in `__BCLIF_RENDER_METRICS__`. Axis labels are pooled, and normal redraws reuse the same GPU/display objects instead of destroying shared Pixi textures. These diagnostics are instrumentation, not an interactive-FPS claim.
 
 Chapter III-C3 separates a stable 512–1024-row authoritative price lattice from adaptive 512–2048-row presentation. Camera movement changes only projection/display hashes. Model and exposure hashes include cohort/grid provenance but exclude viewport state. Visual smoothing cannot create raw model exposure outside a cohort distribution.
+# Chapter III-C4 raw shelf path
+
+The renderer retains one thermal texture for the operational path. The internal
+`rawCohortShelvesVisible` diagnostic hides that sprite and draws only thin
+PIXI lines at immutable absolute liquidation means and bounds from cohort birth
+to model cutoff. No cell objects or DOM matrix is added. V6 display projection
+uses 88% expanding source normalization and at most 12% visible-range detail in
+the default HYBRID mode. Historical browser OI-only cells are explicitly
+ineligible for yellow.

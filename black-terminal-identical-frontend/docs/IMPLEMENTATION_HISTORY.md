@@ -1404,3 +1404,14 @@ Remaining:
 - Added isolated/cross/unknown authority caps, source-aware entry confidence, 5x/10x/20x leverage support, causal 64-column normalization, local shelf-specificity metrics, cohort birth markers, and full shelf provenance diagnostics.
 - Moved upload-ready texture preparation into the display worker and added independent model, raster, texture, and browser visual performance evidence.
 - Added 18 causal invariants and the 27-case C3 Playwright matrix at 1080p, 1440p, and 4K. Kept infrastructure truth at State A and did not alter execution, broker, Black Cloud, HDLX, RADAP, Kioseff, DOM Pro, Portfolio, Investment, Obsidian, OMS, or EMS systems.
+
+## 2026-08-09 — Phase V Chapter III-C4 BCLIF Live-Pipeline Forensics
+
+- Proved production was still serving the August 5 V3 deployment, then traced the exact chart/controller/browser/worker/cohort/raster/projection/PIXI path.
+- Added V6 absolute-price distribution metadata, one browser-generation grid, raw cohort shelf diagnostics, a machine-readable raw exposure export, and a 20-cell provenance/leverage audit.
+- Replaced per-tick OI births with a bounded 15-minute causal event window and two-interval termination hysteresis.
+- Stopped treating an unconfirmed price traversal as a fabricated 10% liquidation; raw modeled mass is now independent of display confidence.
+- Replaced 64-column rolling normalization with expanding causal normalization, bounded default camera-relative contrast at 12%, and prohibited yellow authority for historical browser OI-only context.
+- Added full-path mark perturbation, event-window, normalization, low-information, raw-export, and deterministic replay tests.
+- Preserved all protected BCLIF API behavior while consolidating its Vercel entry behind the analytics function so the Hobby deployment remains within 12 functions.
+- Kept infrastructure at State A; the public capture and corrected production visual certification were not claimed before their runtime gates completed.

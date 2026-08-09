@@ -410,3 +410,11 @@ The browser path is incremental for live trades. Python is an optional offline/s
 Phase V Chapter III-C introduces a separate Node 22 public-market analytics service, `LIQUIDATION_INTELLIGENCE_NODE_01`. Bybit public sources flow through canonical event chunks, durable offsets/deduplication, the shared BCLIF cohort engine, checkpoints, and immutable multi-resolution numerical tiles in private object storage. Supabase holds only service-owned metadata, coverage, versioning, and calibration evidence. The service has no broker credentials and cannot share the Black Cloud execution node.
 
 Every snapshot names one authority: persistent node, browser fallback, replay, or test fixture. The client probes protected persistent status before opening fallback sockets, verifies and caches bounded tiles, renders gaps as unavailable, and never merges two historical model authorities. Until a dedicated analytics host and audited migrations are activated, the packaged service remains undeployed and the browser path is visibly labeled non-persistent. See `docs/liquidation/BCLIF_PERSISTENT_COLLECTOR.md` and the Chapter III-C completion report.
+
+Chapter III-C4 makes the canonical browser/collector cohort engine window
+related OI observations before birth and makes the raw raster an explicitly
+absolute quote-price distribution. Browser fallback owns one grid per
+controller generation. Source intensity uses an expanding causal epoch; the
+default display adds at most 12% viewport contrast. The raw shelf renderer and
+export bypass presentation normalization, and historical browser OI-only
+context cannot receive yellow authority.

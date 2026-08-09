@@ -121,6 +121,7 @@ export function bclifRenderSettingsHash(settings: LiquidationFieldSettings) {
     collectionStartMarkerVisible: settings.collectionStartMarkerVisible,
     cohortProvenanceVisible: settings.cohortProvenanceVisible,
     cohortBirthMarkersVisible: settings.cohortBirthMarkersVisible,
+    rawCohortShelvesVisible: settings.rawCohortShelvesVisible,
     legendVisible: settings.legendVisible,
     diagnosticsVisible: settings.diagnosticsVisible,
     confirmedMarkersVisible: settings.confirmedMarkersVisible,
@@ -316,7 +317,9 @@ export function buildBclifDisplayProjection(
       const visibleUnit = high > low ? clamp01((Math.log1p(raw[targetIndex]!) - logLow) / logSpan) : 0;
       let unit = global[targetIndex]!;
       if (settings.thermalNormalization === "VISIBLE_FOCUS") unit = visibleUnit;
-      else if (settings.thermalNormalization === "HYBRID") unit = unit * 0.68 + visibleUnit * 0.32;
+      // Visible-range contrast is deliberately bounded. It may reveal detail,
+      // but the expanding model normalization remains the visual authority.
+      else if (settings.thermalNormalization === "HYBRID") unit = unit * 0.88 + visibleUnit * 0.12;
       else if (settings.thermalNormalization === "FIXED_ABSOLUTE") unit = Math.min(1, Math.log1p(raw[targetIndex]!) / Math.log1p(1_000_000_000));
       else if (settings.thermalNormalization === "OI_RELATIVE") unit = unit * Math.max(0.15, oiWeight);
       if (settings.thermalNormalization === "CONFIDENCE_WEIGHTED" || settings.confidenceWeightEnabled) {
@@ -329,7 +332,8 @@ export function buildBclifDisplayProjection(
       const yellow = confidencePercent >= 75
         && raw[targetIndex]! >= yellowThreshold
         && continuity >= 80
-        && multipleEvidence;
+        && multipleEvidence
+        && !browserHistorical;
       const historicalOnly = !live || evidenceClass === "OI_ONLY" || evidenceClass === "OI_PLUS_PRICE";
       let cap = 255;
       if (!yellow) cap = confidencePercent < 40 ? 108 : confidencePercent < 60 ? 145 : confidencePercent < 75 ? 190 : 232;

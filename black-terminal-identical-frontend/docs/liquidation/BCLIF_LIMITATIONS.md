@@ -18,3 +18,18 @@
 Current release state remains repository complete, persistent host not provided, collector not deployed, migrations not applied, and browser fallback active.
 
 This indicator is decision support, not guaranteed liquidation location or trading advice.
+# Chapter III-C4 limitations
+
+- Browser fallback still reconstructs a bounded session model and is not
+  durable market memory.
+- Historical browser trade, liquidation, and order-book evidence remains
+  unavailable and is not synthesized; those columns are OI/price context.
+- The V6 event window reduces OI polling fragmentation but cannot identify
+  individual accounts or exact leverage/collateral.
+- Cross and unknown margin estimates are broad, low-authority hypotheses.
+- A controller-generation grid is stable during refresh; a deliberate model
+  grid-row change creates a new generation.
+- The public 2-hour replay harness exists, but the 2026-08-09 run was blocked
+  before network execution by approval timeout.
+- Persistent host, collector, migrations, soak, and persistent replay remain
+  inactive.

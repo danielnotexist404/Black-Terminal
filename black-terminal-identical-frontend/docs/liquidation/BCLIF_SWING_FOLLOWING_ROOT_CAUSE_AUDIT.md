@@ -123,3 +123,12 @@ Chapter III-C3 must correct the model before palette or resolution work by intro
 - stable causal normalization epochs rather than per-column local authority.
 
 No excluded execution, broker, Black Cloud, HDLX, RADAP, Kioseff, DOM Pro, OMS, or EMS component is implicated by this finding.
+
+## III-C4 resolution note
+
+This document is the pre-C3 baseline audit. The later live-path audit proved
+that raw C3/V5 cohort coordinates were horizontal but 64-column rolling
+normalization, 32% visible-range contrast, repeated browser generations, and
+per-positive-tick cohort births still created swing-following thermal topology.
+V6 corrects those remaining causes. See
+`BCLIF_LIVE_PIPELINE_FORENSIC_AUDIT.md`.

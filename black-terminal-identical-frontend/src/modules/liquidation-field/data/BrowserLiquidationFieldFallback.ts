@@ -1,10 +1,12 @@
 import type { Candle } from "../../../chart-engine/types.ts";
 import type {
+  BclifAbsolutePriceGrid,
   LiquidationFieldRuntimeStatus,
   LiquidationFieldSettings,
   LiquidationFieldSnapshot,
   LiquidationMarketFrame
 } from "../core/types.ts";
+import { stableBrowserPriceGrid } from "../core/exposureRaster.ts";
 import { liquidationFieldModelSettingsKey, migrateLiquidationFieldSettings } from "../core/settings.ts";
 import { LiquidationFieldWorkerClient } from "../worker/LiquidationFieldWorkerClient.ts";
 import { bootstrapBybitLiquidationField, type BybitLiquidationBootstrap } from "./bybitPublicData.ts";
@@ -35,6 +37,7 @@ export class BrowserLiquidationFieldFallback {
   private disposed = false;
   private buildGeneration = 0;
   private readonly liveStartedAt = Date.now();
+  private absoluteGrid: BclifAbsolutePriceGrid | null = null;
 
   constructor(private readonly options: BrowserLiquidationFieldFallbackOptions) {
     this.settings = migrateLiquidationFieldSettings(options.settings);
@@ -74,7 +77,9 @@ export class BrowserLiquidationFieldFallback {
 
   updateSettings(settings: LiquidationFieldSettings) {
     const previousModelKey = liquidationFieldModelSettingsKey(this.settings);
+    const previousRows = this.settings.priceRows;
     this.settings = migrateLiquidationFieldSettings(settings);
+    if (previousRows !== this.settings.priceRows) this.absoluteGrid = null;
     if (previousModelKey !== liquidationFieldModelSettingsKey(this.settings)) this.scheduleBuild(60);
   }
 
@@ -94,6 +99,16 @@ export class BrowserLiquidationFieldFallback {
       this.settings,
       this.abort.signal
     );
+    const anchor = this.bootstrap.frames[0];
+    if (anchor && (!this.absoluteGrid || this.absoluteGrid.rows !== this.settings.priceRows)) {
+      const leverageEnvelope = Math.max(0.08, Math.min(0.52, 1 / Math.max(2, this.settings.leverageMinimum) + 0.025));
+      this.absoluteGrid = stableBrowserPriceGrid(
+        anchor.markPrice,
+        this.bootstrap.rules.tickSize ?? 0,
+        this.settings.priceRows,
+        leverageEnvelope
+      );
+    }
   }
 
   private scheduleBuild(delay = this.settings.liveUpdateCadenceMs) {
@@ -125,7 +140,8 @@ export class BrowserLiquidationFieldFallback {
       events,
       rules: this.bootstrap.rules,
       settings: this.settings,
-      coverage
+      coverage,
+      absoluteGrid: this.absoluteGrid ?? undefined
     });
     if (this.disposed || generation !== this.buildGeneration) return;
     this.options.onSnapshot(snapshot);

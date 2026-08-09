@@ -39,3 +39,14 @@ Browser fallback is labeled `OI-DERIVED LIQUIDATION CONTEXT`, is capped at 60% f
 - `rendering/displayProjectionWorker.ts`: off-main-thread projection and RGBA preparation.
 
 The pre-change cause and evidence trail are recorded in `BCLIF_SWING_FOLLOWING_ROOT_CAUSE_AUDIT.md`.
+
+## Chapter III-C4 superseding refinement
+
+V6 retains the C3 absolute entry/liquidation math and adds event-level OI
+windowing, a controller-generation absolute grid, expanding causal
+normalization, and raw shelf/export diagnostics. Related positive OI points no
+longer each create a family. Price crossing without a confirmed liquidation or
+OI contraction no longer removes an arbitrary 10% of mass. The current
+contract and production-path evidence are in
+`BCLIF_LIVE_PIPELINE_FORENSIC_AUDIT.md` and
+`BCLIF_CHAPTER_IIIC4_COMPLETION_REPORT.md`.

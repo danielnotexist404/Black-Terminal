@@ -7,6 +7,7 @@ import tiles from "../../server/market-depth/routes/tiles.js";
 import walls from "../../server/market-depth/routes/walls.js";
 import { enforceAnonymousSecurity, requireApiSecurity } from "../../server/security/securityMiddleware.js";
 import { sendError } from "../../server/portfolio-api.js";
+import bclifVercelHandler from "../../server/liquidation-intelligence/api/vercelHandler.js";
 
 const handlers = {
   alerts,
@@ -21,6 +22,7 @@ const handlers = {
 export default async function handler(req, res) {
   try {
     const action = String(req.query?.action || "").replace(/\.js$/, "");
+    if (action === "bclif") return bclifVercelHandler(req, res, req.query?.bclifAction);
     const routeHandler = handlers[action];
     if (!routeHandler) return res.status(404).json({ error: "Unknown market depth memory route." });
     if (["ingest", "prune"].includes(action)) {

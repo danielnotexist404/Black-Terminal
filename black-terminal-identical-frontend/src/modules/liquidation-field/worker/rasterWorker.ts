@@ -12,7 +12,8 @@ workerScope.onmessage = (message: MessageEvent<LiquidationFieldWorkerRequest>) =
       request.events,
       request.rules,
       request.settings,
-      request.coverage
+      request.coverage,
+      request.absoluteGrid
     );
     const response: LiquidationFieldWorkerResponse = { id: request.id, snapshot };
     workerScope.postMessage(response, [

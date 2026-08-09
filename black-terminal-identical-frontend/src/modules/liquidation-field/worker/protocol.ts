@@ -1,4 +1,5 @@
 import type {
+  BclifAbsolutePriceGrid,
   ConfirmedLiquidationEvent,
   LiquidationCoverage,
   LiquidationFieldSettings,
@@ -14,6 +15,7 @@ export interface LiquidationFieldWorkerRequest {
   rules: LiquidationInstrumentRules;
   settings: LiquidationFieldSettings;
   coverage: LiquidationCoverage;
+  absoluteGrid?: BclifAbsolutePriceGrid;
 }
 
 export type LiquidationFieldWorkerResponse =

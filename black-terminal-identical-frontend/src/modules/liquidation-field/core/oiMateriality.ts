@@ -8,7 +8,11 @@ export const DEFAULT_BCLIF_COHORT_CONFIGURATION: BclifCohortModelConfiguration =
   oiNoiseMadMultiplier: 3.5,
   isolatedContributionCap: 0.82,
   crossContributionCap: 0.12,
-  unknownContributionCap: 0.06
+  unknownContributionCap: 0.06,
+  oiEventWindowMs: 15 * 60 * 1_000,
+  oiEventContinuationRatio: 0.35,
+  oiEventTerminationRatio: 0.25,
+  oiEventHysteresisIntervals: 2
 };
 
 export function classifyBclifOiChange(input: {
@@ -41,6 +45,10 @@ export function validateBclifCohortConfiguration(value: BclifCohortModelConfigur
   if (!Number.isFinite(value.oiNoiseAbsoluteNotionalUsd) || value.oiNoiseAbsoluteNotionalUsd < 0) throw new Error("Invalid BCLIF absolute OI noise floor");
   if (!Number.isFinite(value.oiNoisePercent) || value.oiNoisePercent < 0 || value.oiNoisePercent > 0.1) throw new Error("Invalid BCLIF percentage OI noise floor");
   if (!Number.isFinite(value.oiNoiseMadMultiplier) || value.oiNoiseMadMultiplier < 0 || value.oiNoiseMadMultiplier > 20) throw new Error("Invalid BCLIF OI MAD multiplier");
+  if (!Number.isFinite(value.oiEventWindowMs) || value.oiEventWindowMs < 5 * 60_000 || value.oiEventWindowMs > 60 * 60_000) throw new Error("Invalid BCLIF OI event window");
+  if (!Number.isFinite(value.oiEventContinuationRatio) || value.oiEventContinuationRatio <= 0 || value.oiEventContinuationRatio > 1) throw new Error("Invalid BCLIF OI continuation ratio");
+  if (!Number.isFinite(value.oiEventTerminationRatio) || value.oiEventTerminationRatio < 0 || value.oiEventTerminationRatio > 1) throw new Error("Invalid BCLIF OI termination ratio");
+  if (!Number.isSafeInteger(value.oiEventHysteresisIntervals) || value.oiEventHysteresisIntervals < 1 || value.oiEventHysteresisIntervals > 12) throw new Error("Invalid BCLIF OI event hysteresis");
   if (caps.some((cap) => !Number.isFinite(cap) || cap < 0 || cap > 1) || Math.abs(caps.reduce((sum, cap) => sum + cap, 0) - 1) > 1e-9) {
     throw new Error("BCLIF margin contribution caps must conserve unit mass");
   }

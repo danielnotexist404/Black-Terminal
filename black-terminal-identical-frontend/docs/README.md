@@ -192,3 +192,14 @@ The critical chart-coordinate and automatic 20,000-bar initialization contract i
 - `liquidation/BCLIF_SWING_INDEPENDENCE.md` and `liquidation/BCLIF_COHORT_PROVENANCE.md` - core invariants and explainability.
 - `liquidation/BCLIF_HIGH_RESOLUTION_FIELD.md` and `liquidation/BCLIF_MODEL_CERTIFICATION.md` - stable-grid rendering, performance, and 27-case visual gates.
 - `liquidation/BCLIF_CHAPTER_IIIC3_COMPLETION_REPORT.md` - exact implementation/test evidence and remaining deployment limits.
+# BCLIF Chapter III-C4
+
+The live-pipeline forensic set is under `docs/liquidation/`:
+`BCLIF_LIVE_PIPELINE_FORENSIC_AUDIT.md`,
+`BCLIF_ABSOLUTE_PRICE_CONTRACT.md`,
+`BCLIF_RAW_COHORT_SHELF_VIEW.md`,
+`BCLIF_NORMALIZATION_AUDIT.md`,
+`BCLIF_LEVERAGE_CONTRIBUTIONS.md`,
+`BCLIF_OI_EVENT_WINDOWING.md`,
+`BCLIF_MODEL_GENERATION_CONTINUITY.md`,
+`BCLIF_LIVE_CAPTURE_REPLAY.md`, and the III-C4 completion report.

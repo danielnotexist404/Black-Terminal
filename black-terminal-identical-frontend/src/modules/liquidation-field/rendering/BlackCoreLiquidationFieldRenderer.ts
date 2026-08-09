@@ -7,6 +7,7 @@ import {
   type BclifDisplayProjection
 } from "./displayProjection.ts";
 import { buildBclifDisplayTexture } from "./displayTexture.ts";
+import { buildBclifRawExposureExport } from "../core/rawShelfDiagnostics.ts";
 
 export interface LiquidationFieldRenderTransform {
   width: number;
@@ -131,7 +132,48 @@ export class BlackCoreLiquidationFieldRenderer {
     sprite.width = Math.max(1, Math.abs(right - left));
     sprite.height = Math.max(1, Math.abs(bottom - top));
     sprite.alpha = Math.max(0, Math.min(1, settings.opacity / 100));
-    sprite.visible = right >= 0 && left <= transform.width && bottom >= transform.top && top <= transform.bottom;
+    sprite.visible = !settings.rawCohortShelvesVisible
+      && right >= 0 && left <= transform.width && bottom >= transform.top && top <= transform.bottom;
+
+    if (settings.rawCohortShelvesVisible) {
+      const shelves = snapshot.rawCohortShelves ?? snapshot.cohorts.map((cohort) => ({
+        cohortId: cohort.id,
+        side: cohort.side,
+        createdAt: cohort.createdAt,
+        sourceIntervalStart: cohort.sourceIntervalStart,
+        sourceIntervalEnd: cohort.sourceIntervalEnd,
+        entryLower: cohort.entryLower,
+        entryMean: cohort.entryMean,
+        entryUpper: cohort.entryUpper,
+        liquidationLower: cohort.liquidationLower,
+        liquidationMean: cohort.liquidationMean,
+        liquidationUpper: cohort.liquidationUpper,
+        remainingMass: cohort.estimatedRemainingNotional,
+        confidence: cohort.confidence,
+        entrySource: cohort.entryDistribution.source,
+        leverageContributions: cohort.leverageDistribution,
+        marginMode: cohort.marginMode
+      }));
+      const maximumMass = Math.max(1, ...shelves.map((shelf) => shelf.remainingMass));
+      for (const shelf of shelves) {
+        if (!(shelf.remainingMass > 0)) continue;
+        const x1 = transform.xForTimestampMs(shelf.createdAt);
+        const x2 = transform.xForTimestampMs(snapshot.header.endTime);
+        if (x2 < 0 || x1 > transform.width) continue;
+        const y = transform.yForPrice(shelf.liquidationMean);
+        if (y < transform.top || y > transform.bottom) continue;
+        const color = shelf.side === "LONG" ? 0xc8102e : 0xe7eaee;
+        const strength = Math.sqrt(shelf.remainingMass / maximumMass);
+        this.overlay.moveTo(Math.max(0, x1), y).lineTo(Math.min(transform.width, x2), y)
+          .stroke({ color, alpha: 0.28 + strength * 0.62, width: 0.75 + strength * 1.25 });
+        for (const boundary of [shelf.liquidationLower, shelf.liquidationUpper]) {
+          const boundaryY = transform.yForPrice(boundary);
+          if (boundaryY < transform.top || boundaryY > transform.bottom) continue;
+          this.overlay.moveTo(Math.max(0, x1), boundaryY).lineTo(Math.min(transform.width, x2), boundaryY)
+            .stroke({ color, alpha: 0.08 + strength * 0.14, width: 0.5 });
+        }
+      }
+    }
 
     const focusPercent = settings.focusBand === "PERCENT_2" ? 2
       : settings.focusBand === "PERCENT_5" ? 5
@@ -226,6 +268,7 @@ export class BlackCoreLiquidationFieldRenderer {
     if (typeof globalThis !== "undefined") {
       const instrumentation = globalThis as typeof globalThis & {
         __BCLIF_RENDER_METRICS__?: Record<string, unknown>;
+        __BCLIF_RAW_EXPOSURE_EXPORT__?: () => ReturnType<typeof buildBclifRawExposureExport> | null;
       };
       instrumentation.__BCLIF_RENDER_METRICS__ = {
         ...this.metrics(),
@@ -234,6 +277,9 @@ export class BlackCoreLiquidationFieldRenderer {
           : Number((performance.now() - startedAt).toFixed(3)),
         recordedAt: Date.now()
       };
+      instrumentation.__BCLIF_RAW_EXPOSURE_EXPORT__ = () => this.snapshot
+        ? buildBclifRawExposureExport(this.snapshot)
+        : null;
     }
   }
 

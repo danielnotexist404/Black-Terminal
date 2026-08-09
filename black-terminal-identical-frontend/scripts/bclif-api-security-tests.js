@@ -15,7 +15,7 @@ import {
 } from "../server/liquidation-intelligence/api/contracts.js";
 import { loadVerifiedBclifTile, readBclifCoverage, readBclifManifest, readBclifStatus } from "../server/liquidation-intelligence/api/service.js";
 import { assertIdentityPolicy } from "../server/security/securityMiddleware.js";
-import bclifApiHandler from "../api/liquidation-intelligence/[action].js";
+import bclifApiHandler from "../server/liquidation-intelligence/api/vercelHandler.js";
 
 const tileId = "a3d7b9c1-2e44-4b75-8f90-123456789abc";
 const bytes = Buffer.from("deterministic-bclif-object-bytes", "utf8");

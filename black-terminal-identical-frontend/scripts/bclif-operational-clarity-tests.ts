@@ -56,10 +56,12 @@ assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.contextVisibilityFloor, 25);
 assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.clusterLabelFloor, 60);
 assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.highAuthorityColorFloor, 75);
 assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.strictHideBelowEnabled, false);
-assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.opacity, 45);
-assert.ok(DEFAULT_LIQUIDATION_FIELD_SETTINGS.gamma > 1);
-assert.ok(DEFAULT_LIQUIDATION_FIELD_SETTINGS.lowQuantile >= 0.4);
-assert.ok(DEFAULT_LIQUIDATION_FIELD_SETTINGS.highQuantile >= 0.997);
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.opacity, 100);
+assert.ok(DEFAULT_LIQUIDATION_FIELD_SETTINGS.gamma <= 1);
+assert.ok(DEFAULT_LIQUIDATION_FIELD_SETTINGS.lowQuantile >= 0.5);
+assert.ok(DEFAULT_LIQUIDATION_FIELD_SETTINGS.highQuantile >= 0.995);
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.plasmaBackgroundOpacity, 94);
+assert.ok(DEFAULT_LIQUIDATION_FIELD_SETTINGS.residualShelfVisibility > 0);
 assert.ok(DEFAULT_LIQUIDATION_FIELD_SETTINGS.yellowTailPercent <= 0.5);
 assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.maximumClusterLabels, 4);
 
@@ -172,13 +174,16 @@ const maximumByte = (values: Uint8Array) => values.reduce((maximum, value) => Ma
 const oiOnly50Snapshot = withQuality(50, "BROWSER_FALLBACK", coverage({ sourceMode: "BROWSER_SESSION" }));
 const oiOnly50 = project(oiOnly50Snapshot);
 assert.equal(oiOnly50.yellowEligible.filter(Boolean).length, 0, "50% OI-only context must never become yellow");
-assert.ok(maximumByte(oiOnly50.intensity) <= 176, "historical OI-only context must remain below high-authority thermal colors");
+assert.equal(maximumByte(oiOnly50.intensity), 255, "the rarest modeled relative peak must remain visually legible");
+assert.ok(maximumByte(oiOnly50.alpha) > 96, "OI-only modeled shelves must not disappear against the plasma canvas");
+assert.equal(oiOnly50.yellowEligibleCells, 0, "visual peak color must not upgrade OI-only evidence authority");
 assert.ok(oiOnly50.historicalCells > 0 && oiOnly50.liveCalibratedCells === 0);
 
 const trades80Snapshot = withQuality(80, "PERSISTENT_NODE", coverage({ tradeCoveragePercent: 100 }));
 const trades80 = project(trades80Snapshot);
 assert.ok(trades80.liveCalibratedCells > 0);
-assert.ok(maximumByte(trades80.alpha) > maximumByte(oiOnly50.alpha), "verified exact trades must gain visual authority");
+assert.ok(maximumByte(trades80.alpha) >= maximumByte(oiOnly50.alpha), "verified exact trades must retain maximum shelf clarity");
+assert.ok(trades80.yellowEligibleCells > oiOnly50.yellowEligibleCells, "verified exact trades must gain evidence-authorized peak color");
 assert.equal(classifyBclifEvidence(bclifEvidenceComposition(trades80Snapshot)), "OI_PLUS_TRADES");
 assert.equal(bclifModelHash(trades80Snapshot), baselineModelHash);
 assert.equal(bclifExposureHash(trades80Snapshot), baselineExposureHash);

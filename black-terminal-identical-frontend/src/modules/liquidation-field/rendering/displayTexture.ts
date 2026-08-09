@@ -1,6 +1,6 @@
 import type { LiquidationFieldSettings } from "../core/types.ts";
 import type { BclifDisplayProjection } from "./displayProjection.ts";
-import { createThermalPalette } from "./thermalPalette.ts";
+import { bclifThermalBackdropStyle, createThermalPalette } from "./thermalPalette.ts";
 
 /** Build the upload-ready, row-flipped RGBA texture. In normal browsers this
  * runs in the projection worker, keeping million-cell palette work off the
@@ -16,6 +16,7 @@ export function buildBclifDisplayTexture(
   const lut = createThermalPalette(settings.palette);
   const longLut = createThermalPalette("BLACK_TERMINAL_BLOOD");
   const shortLut = createThermalPalette("INSTITUTIONAL_MONOCHROME");
+  const invalid = bclifThermalBackdropStyle(settings.palette).invalid;
   const selectedLut = settings.viewMode === "LONG_EXPOSURE" ? longLut
     : settings.viewMode === "SHORT_EXPOSURE" ? shortLut : lut;
 
@@ -24,11 +25,10 @@ export function buildBclifDisplayTexture(
       const sourceIndex = column * rows + row;
       const targetIndex = ((rows - 1 - row) * columns + column) * 4;
       if (!projection.validity[sourceIndex]) {
-        const hatch = ((column + row) % 9) < 2 ? 14 : 5;
-        rgba[targetIndex] = hatch;
-        rgba[targetIndex + 1] = 4;
-        rgba[targetIndex + 2] = 18;
-        rgba[targetIndex + 3] = 72;
+        rgba[targetIndex] = (invalid >> 16) & 0xff;
+        rgba[targetIndex + 1] = (invalid >> 8) & 0xff;
+        rgba[targetIndex + 2] = invalid & 0xff;
+        rgba[targetIndex + 3] = 255;
         continue;
       }
       const lutIndex = projection.intensity[sourceIndex]! * 4;

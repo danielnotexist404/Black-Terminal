@@ -8,6 +8,7 @@ import {
 } from "./displayProjection.ts";
 import { buildBclifDisplayTexture } from "./displayTexture.ts";
 import { buildBclifRawExposureExport } from "../core/rawShelfDiagnostics.ts";
+import { bclifThermalBackdropStyle, interpolateBclifThermalColor } from "./thermalPalette.ts";
 
 export interface LiquidationFieldRenderTransform {
   width: number;
@@ -144,6 +145,7 @@ export class BlackCoreLiquidationFieldRenderer {
   private overlay = new Graphics();
   private sprite: Sprite | null = null;
   private texture: Texture<BufferImageSource> | null = null;
+  private backdrop = new Graphics();
   private source: BufferImageSource | null = null;
   private snapshot: LiquidationFieldSnapshot | null = null;
   private settings: LiquidationFieldSettings | null = null;
@@ -170,7 +172,11 @@ export class BlackCoreLiquidationFieldRenderer {
 
   constructor(onProjectionReady?: (metrics: BclifRendererMetrics) => void) {
     this.onProjectionReady = onProjectionReady;
-    this.container.addChild(this.clip, this.overlay);
+    this.container.sortableChildren = true;
+    this.backdrop.zIndex = -100;
+    this.clip.zIndex = 90;
+    this.overlay.zIndex = 100;
+    this.container.addChild(this.backdrop, this.clip, this.overlay);
     this.container.mask = this.clip;
     if (typeof Worker !== "undefined") {
       this.projectionWorker = new Worker(new URL("./displayProjectionWorker.ts", import.meta.url), {
@@ -229,10 +235,13 @@ export class BlackCoreLiquidationFieldRenderer {
   draw(transform: LiquidationFieldRenderTransform) {
     this.drawPassActive = false;
     this.clip.clear().rect(0, transform.top, transform.width, Math.max(0, transform.bottom - transform.top)).fill(0xffffff);
+    this.backdrop.clear();
     this.overlay.clear();
     const snapshot = this.snapshot;
     const settings = this.settings;
-    if (!snapshot || !settings) return;
+    if (!settings) return;
+    drawBclifThermalBackdrop(this.backdrop, transform, settings);
+    if (!snapshot) return;
 
     const projectionKey = [
       this.stateKey,
@@ -419,6 +428,7 @@ export class BlackCoreLiquidationFieldRenderer {
       this.source.style.scaleMode = "linear";
       this.texture = new Texture({ source: this.source });
       this.sprite = new Sprite(this.texture);
+      this.sprite.zIndex = 0;
       this.container.addChildAt(this.sprite, 1);
     } else if (this.source) {
       this.source.resource = rgba;
@@ -569,6 +579,28 @@ export class BlackCoreLiquidationFieldRenderer {
   }
 }
 
+
+/** Full-canvas presentation only: uniform plasma never carries exposure data. */
+function drawBclifThermalBackdrop(
+  graphics: Graphics,
+  transform: LiquidationFieldRenderTransform,
+  settings: LiquidationFieldSettings
+) {
+  const height = Math.max(0, transform.bottom - transform.top);
+  if (height <= 0 || transform.width <= 0 || settings.plasmaBackgroundOpacity <= 0) return;
+  const style = bclifThermalBackdropStyle(settings.palette);
+  const alpha = Math.max(0, Math.min(1, settings.plasmaBackgroundOpacity / 100));
+  const bands = Math.max(24, Math.min(64, Math.round(height / 18)));
+  const bandHeight = height / bands;
+  for (let band = 0; band < bands; band += 1) {
+    const center = (band + 0.5) / bands;
+    const color = center <= 0.5
+      ? interpolateBclifThermalColor(style.top, style.middle, center * 2)
+      : interpolateBclifThermalColor(style.middle, style.bottom, (center - 0.5) * 2);
+    graphics.rect(0, transform.top + band * bandHeight, transform.width, bandHeight + 1)
+      .fill({ color, alpha });
+  }
+}
 
 function projectionScopeKey(snapshot: LiquidationFieldSnapshot) {
   const header = snapshot.header;

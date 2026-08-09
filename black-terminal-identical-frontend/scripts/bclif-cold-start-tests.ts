@@ -10,7 +10,8 @@ import { extractBclifOperationalClusters } from "../src/modules/liquidation-fiel
 import {
   bclifExposureHash,
   bclifModelHash,
-  buildBclifDisplayProjection
+  buildBclifDisplayProjection,
+  applyBclifCausalShelfPersistence
 } from "../src/modules/liquidation-field/rendering/displayProjection.ts";
 import { BclifLatestProjectionQueue, validateBclifProjection } from "../src/modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer.ts";
 import {
@@ -45,6 +46,21 @@ const context = {
   plotHeight: 1080,
   constrainedTouchRenderer: false
 };
+
+const causalRows = 128;
+const causalIntensity = new Uint8Array(causalRows * 5);
+const causalAlpha = new Uint8Array(causalRows * 5);
+for (let column = 0; column < 5; column += 1) {
+  causalIntensity[column * causalRows + 20] = column === 0 ? 214 : 18;
+  causalAlpha[column * causalRows + 20] = column === 2 ? 0 : 255;
+}
+causalIntensity[4 * causalRows + 100] = 255;
+causalAlpha[4 * causalRows + 100] = 255;
+applyBclifCausalShelfPersistence(causalIntensity, causalAlpha, causalRows, 5, 0.999, 196, 18);
+assert.ok(causalIntensity[1 * causalRows + 20]! > 18, "a strong shelf must retain color while residual mass remains");
+assert.equal(causalIntensity[3 * causalRows + 20], 18, "zero remaining mass must reset shelf persistence immediately");
+assert.equal(causalIntensity[0 * causalRows + 100], 0, "a future shelf must never repaint a historical prefix");
+assert.ok(causalIntensity[1 * causalRows + 30]! > 0, "retained shelves must keep a continuous thermal shoulder");
 
 const projection = buildBclifDisplayProjection(snapshot, settings, context);
 validateBclifProjection(projection);
@@ -90,6 +106,8 @@ assert.doesNotMatch(
   /sprite\.visible\s*=\s*!settings\.rawCohortShelvesVisible/,
   "the diagnostic shelf overlay must never replace or hide the thermal texture"
 );
+assert.match(rendererSource, /drawBclifThermalBackdrop/);
+assert.match(rendererSource, /plasmaBackgroundOpacity/);
 
 const strictSettings = migrateLiquidationFieldSettings({
   ...settings,
@@ -112,7 +130,7 @@ const legacy = migrateLiquidationFieldSettings({
 assert.equal(legacy.contextVisibilityFloor, 25);
 assert.equal(legacy.clusterLabelFloor, 68);
 assert.equal(legacy.highAuthorityColorFloor, 75);
-assert.equal(legacy.opacity, 10);
+assert.equal(legacy.opacity, 100);
 assert.equal(legacy.diagnosticsVisible, false);
 assert.equal(legacy.operationalSummaryVisible, false);
 
@@ -126,7 +144,7 @@ const legacyShelfOnly = migrateLiquidationFieldSettings({
   priceDisplay: "FULL_MODEL_RANGE",
   palette: "BLACK_TERMINAL_BLOOD"
 } as never);
-assert.equal(legacyShelfOnly.schemaVersion, 8);
+assert.equal(legacyShelfOnly.schemaVersion, 9);
 assert.equal(legacyShelfOnly.preset, "TRADE_FOCUS");
 assert.equal(legacyShelfOnly.horizon, "3W");
 assert.equal(legacyShelfOnly.viewMode, "COMBINED_THERMAL");
@@ -139,7 +157,11 @@ const explicitV8ShelfOverlay = migrateLiquidationFieldSettings({
   schemaVersion: 8,
   rawCohortShelvesVisible: true
 });
+assert.equal(explicitV8ShelfOverlay.schemaVersion, 9);
 assert.equal(explicitV8ShelfOverlay.rawCohortShelvesVisible, true, "V8 shelves remain an explicit overlay choice");
+assert.equal(explicitV8ShelfOverlay.opacity, 100);
+assert.equal(explicitV8ShelfOverlay.plasmaBackgroundOpacity, 94);
+assert.equal(explicitV8ShelfOverlay.historicalContextOpacity, 100);
 assert.equal(
   applyBclifPresentationPreset(explicitV8ShelfOverlay, "TRADE_FOCUS").rawCohortShelvesVisible,
   false,

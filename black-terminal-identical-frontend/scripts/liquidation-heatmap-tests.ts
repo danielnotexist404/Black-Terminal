@@ -6,7 +6,7 @@ import { buildLiquidationFieldSnapshot, outputFrameIndices } from "../src/module
 import { createLeveragePrior } from "../src/modules/liquidation-field/core/leveragePriors.ts";
 import { normalizeExposure, normalizeExposureCausal, smoothField } from "../src/modules/liquidation-field/core/normalization.ts";
 import { DEFAULT_LIQUIDATION_FIELD_SETTINGS } from "../src/modules/liquidation-field/core/settings.ts";
-import { createThermalPalette } from "../src/modules/liquidation-field/rendering/thermalPalette.ts";
+import { bclifThermalBackdropStyle, createThermalPalette } from "../src/modules/liquidation-field/rendering/thermalPalette.ts";
 import { bclifTimestampMsToChartSeconds } from "../src/modules/liquidation-field/rendering/timeProjection.ts";
 import { createLiquidationFieldFixture } from "../src/modules/liquidation-field/testing/fixtures.ts";
 
@@ -180,8 +180,17 @@ for (let row = 1; row < finalColumn.length - 1; row++) {
 assert.ok(significantShelfCount >= 6, "selected leverage hypotheses must remain separated into multiple price shelves");
 
 const reference = createThermalPalette("REFERENCE_THERMAL");
-assert.deepEqual([...reference.slice(0, 3)], [7, 3, 16], "low exposure must remain dark purple rather than transparent black");
-assert.deepEqual([...reference.slice(-4, -1)], [217, 227, 35], "extreme exposure must reach the reference yellow endpoint");
+assert.deepEqual([...reference.slice(0, 3)], [22, 0, 39], "low exposure must remain deep plasma rather than transparent black");
+assert.deepEqual([...reference.slice(-4, -1)], [255, 240, 74], "extreme exposure must reach the crisp plasma-yellow endpoint");
+assert.deepEqual(bclifThermalBackdropStyle("REFERENCE_THERMAL"), {
+  top: 0x28003f, middle: 0x071435, bottom: 0x31003d, invalid: 0x23003c
+});
+const blood = createThermalPalette("BLACK_TERMINAL_BLOOD");
+assert.deepEqual([...blood.slice(0, 3)], [3, 2, 5], "Black Terminal thermal background must remain near-black");
+assert.deepEqual([...blood.slice(-4, -1)], [255, 255, 255], "Black Terminal thermal cores must reach white");
+assert.deepEqual(bclifThermalBackdropStyle("BLACK_TERMINAL_BLOOD"), {
+  top: 0x210007, middle: 0x080205, bottom: 0x260008, invalid: 0x120207
+});
 
 const absentOiFrames = fixture.frames.slice(0, 8).map((frame) => ({
   ...frame,

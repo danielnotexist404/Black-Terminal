@@ -1429,3 +1429,13 @@ Remaining:
 - Removed the exclusive shelf-mode gate so raw shelves can only overlay the CoinGlass-style GPU raster.
 - Added renderer schema V8 migration for persisted shelf-only workspaces, restoring the default three-week Trade Focus thermal presentation without changing cohort mathematics.
 - Added regression coverage for legacy recovery, operational-preset cleanup, and the permanent thermal/shelf layer separation.
+
+
+## 2026-08-09 — BCLIF V9 Plasma Thermal Shelf Presentation
+
+- Replaced transparent/black raster voids with a theme-aware full-plot plasma backdrop and made invalid texture cells resolve to the selected thermal background.
+- Rebuilt Purple Plasma with a CoinGlass-style violet/blue/cyan/green/yellow progression and added the selectable Blood / White / Silver Black Terminal theme.
+- Added high-DPI projection, bounded causal shelf retention, distinct price-local peaks, residual half-mitigated visibility, and crisp thermal halos without changing raw exposure or evidence authority.
+- Added persisted Plasma Background, Shelf Clarity, and Residual Shelf controls plus schema V9 migration for older Reference Thermal workspaces.
+- Preserved State A truth: browser-fallback relative peaks can be visually vivid but remain non-authoritative, persistence-off, and zero yellow-eligible.
+- Added palette, backdrop, migration, residual-mass, immediate-reset, and no-lookahead regression coverage.

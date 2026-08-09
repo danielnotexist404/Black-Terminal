@@ -3,10 +3,10 @@ import type { LiquidationFieldPalette, LiquidationFieldSettings, LiquidationFiel
 type PaletteStop = readonly [number, string];
 
 const REFERENCE_STOPS: readonly PaletteStop[] = [
-  [0.00, "#070310"], [0.05, "#30004c"], [0.12, "#43085d"], [0.22, "#3e1864"],
-  [0.34, "#392b6d"], [0.46, "#334078"], [0.57, "#2d5883"], [0.67, "#27728b"],
-  [0.76, "#228887"], [0.84, "#229f7e"], [0.91, "#3bb469"], [0.96, "#82cd45"],
-  [1.00, "#d9e323"]
+  [0.00, "#160027"], [0.05, "#2c0049"], [0.12, "#480078"], [0.22, "#3f1790"],
+  [0.34, "#214fac"], [0.46, "#087fc0"], [0.57, "#00a5b5"], [0.67, "#00c99c"],
+  [0.76, "#1be777"], [0.84, "#89f23a"], [0.91, "#ddf51f"], [0.96, "#f2f532"],
+  [1.00, "#fff04a"]
 ];
 
 const PALETTES: Record<LiquidationFieldPalette, readonly PaletteStop[]> = {
@@ -42,6 +42,36 @@ function srgbToLinear(value: number) {
 function linearToSrgb(value: number) {
   const normalized = value <= 0.0031308 ? value * 12.92 : 1.055 * value ** (1 / 2.4) - 0.055;
   return Math.max(0, Math.min(255, Math.round(normalized * 255)));
+}
+
+export interface BclifThermalBackdropStyle {
+  top: number;
+  middle: number;
+  bottom: number;
+  invalid: number;
+}
+
+/**
+ * Uniform plasma is presentation chrome, not modeled exposure. It deliberately
+ * fills the entire plot so unavailable time/price space is deep-colored rather
+ * than confused with a valid zero-liquidity cell.
+ */
+export function bclifThermalBackdropStyle(name: LiquidationFieldPalette): BclifThermalBackdropStyle {
+  if (name === "BLACK_TERMINAL_BLOOD" || name === "DIRECTIONAL_SPLIT") return {
+    top: 0x210007, middle: 0x080205, bottom: 0x260008, invalid: 0x120207
+  };
+  if (name === "INSTITUTIONAL_MONOCHROME" || name === "CONFIDENCE") return {
+    top: 0x12151a, middle: 0x05070a, bottom: 0x171a1f, invalid: 0x0c0f13
+  };
+  return { top: 0x28003f, middle: 0x071435, bottom: 0x31003d, invalid: 0x23003c };
+}
+
+export function interpolateBclifThermalColor(left: number, right: number, amount: number) {
+  const t = Math.max(0, Math.min(1, amount));
+  const channel = (shift: number) => Math.round(
+    ((left >> shift) & 0xff) + (((right >> shift) & 0xff) - ((left >> shift) & 0xff)) * t
+  );
+  return (channel(16) << 16) | (channel(8) << 8) | channel(0);
 }
 
 export function createThermalPalette(name: LiquidationFieldPalette, entries = 256) {

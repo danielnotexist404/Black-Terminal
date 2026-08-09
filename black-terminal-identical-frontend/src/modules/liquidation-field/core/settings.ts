@@ -1,6 +1,6 @@
 import type { BclifPresentationPreset, LiquidationFieldHorizon, LiquidationFieldSettings } from "./types.ts";
 
-export const LIQUIDATION_FIELD_SETTINGS_VERSION = 8 as const;
+export const LIQUIDATION_FIELD_SETTINGS_VERSION = 9 as const;
 export const BCLIF_MAX_REQUEST_HOURS = 90 * 24;
 export const BCLIF_BROWSER_OI_INTERVAL = "5min" as const;
 
@@ -14,14 +14,14 @@ export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   modelPreset: "REGIME_ADAPTIVE",
   scale: "CONFIDENCE_WEIGHTED_LOG",
   palette: "REFERENCE_THERMAL",
-  opacity: 45,
-  gamma: 1.55,
-  lowQuantile: 0.5,
-  highQuantile: 0.998,
+  opacity: 100,
+  gamma: 0.9,
+  lowQuantile: 0.55,
+  highQuantile: 0.997,
   smoothing: "BALANCED",
   priceSigmaRows: 1.15,
   timeSigmaColumns: 0.55,
-  sharpness: 58,
+  sharpness: 74,
   candlePalette: "BLACK_TERMINAL_HIGH_CONTRAST",
   legendVisible: false,
   diagnosticsVisible: false,
@@ -48,12 +48,15 @@ export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   autoFocusMarginPercent: 3,
   visualChannel: "COMBINED",
   thermalNormalization: "HYBRID",
-  confidenceWeightEnabled: true,
-  backgroundFloor: 7,
+  confidenceWeightEnabled: false,
+  backgroundFloor: 18,
+  plasmaBackgroundOpacity: 94,
+  shelfContrast: 88,
+  residualShelfVisibility: 32,
   yellowTailPercent: 0.3,
-  historicalContextOpacity: 24,
-  liveCalibratedOpacity: 88,
-  requireMultipleEvidenceChannels: true,
+  historicalContextOpacity: 100,
+  liveCalibratedOpacity: 100,
+  requireMultipleEvidenceChannels: false,
   uncertaintyEnvelopesVisible: false,
   adaptiveResolution: "AUTO",
   focusBand: "PERCENT_5",
@@ -100,6 +103,10 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
   // parameters and unrelated workspace settings remain untouched.
   const recoverLegacyShelfOnlyPresentation = legacySchemaVersion < 8
     && Boolean(legacy?.rawCohortShelvesVisible);
+  const upgradeReferenceThermalPresentation = legacySchemaVersion < 9
+    && (recoverLegacyShelfOnlyPresentation || merged.palette === "REFERENCE_THERMAL");
+  const vivid = <T>(current: T, upgraded: T) => upgradeReferenceThermalPresentation ? upgraded : current;
+
   if ((value as { preset?: string } | null | undefined)?.preset === "EVENT_HORIZON_3W") merged.preset = "TRADE_FOCUS";
   const customMinimum = clamp(merged.customPriceMinimum, 50_000, 1e-8, 10_000_000);
   const customMaximum = Math.max(customMinimum + 1e-8, clamp(merged.customPriceMaximum, 80_000, 1e-8, 10_000_000));
@@ -115,18 +122,18 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     // Keep persisted settings inside that contract instead of allowing a value
     // that can only produce a permanent HTTP 400 response.
     customHours: clamp(merged.customHours, 72, 1, BCLIF_MAX_REQUEST_HOURS),
-    opacity: clamp(merged.opacity, 45, 10, 100),
-    gamma: clamp(merged.gamma, 1.55, 0.35, 2.5),
-    lowQuantile: clamp(merged.lowQuantile, 0.5, 0, 0.95),
+    opacity: clamp(vivid(merged.opacity, 100), 100, 10, 100),
+    gamma: clamp(vivid(merged.gamma, 0.9), 0.9, 0.35, 2.5),
+    lowQuantile: clamp(vivid(merged.lowQuantile, 0.55), 0.55, 0, 0.95),
     highQuantile: Math.max(
-      clamp(merged.lowQuantile, 0.5, 0, 0.95) + 0.001,
-      clamp(merged.highQuantile, 0.998, 0.5, 1)
+      clamp(vivid(merged.lowQuantile, 0.55), 0.55, 0, 0.95) + 0.001,
+      clamp(vivid(merged.highQuantile, 0.997), 0.997, 0.5, 1)
     ),
     priceSigmaRows: clamp(merged.priceSigmaRows, 1.15, 0, 4),
     timeSigmaColumns: clamp(merged.timeSigmaColumns, 0.55, 0, 3),
-    sharpness: clamp(merged.sharpness, 58, 0, 100),
+    sharpness: clamp(vivid(merged.sharpness, 74), 74, 0, 100),
     // V3 and older used one threshold for visibility, labels, and authority.
-    // Preserve it as the label floor only; the V8 context floor stays safe.
+    // Preserve it as the label floor only; the V9 context floor stays safe.
     contextVisibilityFloor: clamp(merged.contextVisibilityFloor, 25, 0, 100),
     clusterLabelFloor: clamp(
       legacy && Number(legacy.schemaVersion ?? 0) < 7 && legacy.minimumConfidence !== undefined
@@ -159,10 +166,17 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     customPriceMinimum: customMinimum,
     customPriceMaximum: customMaximum,
     autoFocusMarginPercent: clamp(merged.autoFocusMarginPercent, 3, 0, 25),
-    backgroundFloor: Math.round(clamp(merged.backgroundFloor, 7, 0, 32)),
+    backgroundFloor: Math.round(clamp(vivid(merged.backgroundFloor, 18), 18, 0, 64)),
+    plasmaBackgroundOpacity: clamp(merged.plasmaBackgroundOpacity, 94, 0, 100),
+    shelfContrast: clamp(merged.shelfContrast, 88, 0, 100),
+    residualShelfVisibility: clamp(merged.residualShelfVisibility, 32, 0, 100),
     yellowTailPercent: clamp(merged.yellowTailPercent, 0.3, 0.1, 0.5),
-    historicalContextOpacity: clamp(merged.historicalContextOpacity, 24, 0, 100),
-    liveCalibratedOpacity: clamp(merged.liveCalibratedOpacity, 88, 0, 100),
+    historicalContextOpacity: clamp(vivid(merged.historicalContextOpacity, 100), 100, 0, 100),
+    liveCalibratedOpacity: clamp(vivid(merged.liveCalibratedOpacity, 100), 100, 0, 100),
+    confidenceWeightEnabled: upgradeReferenceThermalPresentation ? false : Boolean(merged.confidenceWeightEnabled),
+    requireMultipleEvidenceChannels: upgradeReferenceThermalPresentation
+      ? false : Boolean(merged.requireMultipleEvidenceChannels),
+    adaptiveResolution: upgradeReferenceThermalPresentation ? "AUTO" : merged.adaptiveResolution,
     customFocusBandPercent: clamp(merged.customFocusBandPercent, 5, 0.25, 50),
     maximumClusterLabels: Math.round(clamp(merged.maximumClusterLabels, 4, 0, 6)),
     oiNoiseAbsoluteNotionalUsd: clamp(merged.oiNoiseAbsoluteNotionalUsd, 100_000, 0, 100_000_000),
@@ -194,9 +208,11 @@ export function applyBclifPresentationPreset(
   if (preset === "TRADE_FOCUS") return migrateLiquidationFieldSettings({
     ...common, priceDisplay: "CHART_SCALE", contextVisibilityFloor: 25, clusterLabelFloor: 60,
     highAuthorityColorFloor: 75, strictHideBelowEnabled: false, palette: "REFERENCE_THERMAL",
-    thermalNormalization: "HYBRID", opacity: 45, gamma: 1.55, lowQuantile: 0.5, highQuantile: 0.998,
-    visualChannel: "COMBINED", historicalContextOpacity: 24, liveCalibratedOpacity: 88,
-    requireMultipleEvidenceChannels: true, diagnosticsVisible: false, maximumClusterLabels: 4,
+    thermalNormalization: "HYBRID", opacity: 100, gamma: 0.9, lowQuantile: 0.55, highQuantile: 0.997,
+    sharpness: 74, backgroundFloor: 18, plasmaBackgroundOpacity: 94, shelfContrast: 88,
+    residualShelfVisibility: 32, visualChannel: "COMBINED", historicalContextOpacity: 100,
+    liveCalibratedOpacity: 100, confidenceWeightEnabled: false, requireMultipleEvidenceChannels: false,
+    diagnosticsVisible: false, maximumClusterLabels: 4,
     operationalSummaryVisible: false, candleContrast: "HIGH"
   });
   if (preset === "HIGH_CONFIDENCE") return migrateLiquidationFieldSettings({

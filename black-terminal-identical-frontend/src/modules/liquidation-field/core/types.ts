@@ -177,7 +177,7 @@ export interface BclifRawCohortShelf {
 }
 
 export interface LiquidationFieldSettings {
-  schemaVersion: 8;
+  schemaVersion: 9;
   preset: BclifPresentationPreset;
   viewMode: LiquidationFieldViewMode;
   horizon: LiquidationFieldHorizon;
@@ -226,6 +226,12 @@ export interface LiquidationFieldSettings {
   thermalNormalization: BclifThermalNormalization;
   confidenceWeightEnabled: boolean;
   backgroundFloor: number;
+  /** Full-plot presentation layer; never interpreted as modeled exposure. */
+  plasmaBackgroundOpacity: number;
+  /** Render-only contrast for modeled shelf bodies and high-energy cores. */
+  shelfContrast: number;
+  /** Minimum visibility retained while a mitigated shelf still has mass. */
+  residualShelfVisibility: number;
   yellowTailPercent: number;
   historicalContextOpacity: number;
   liveCalibratedOpacity: number;

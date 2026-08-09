@@ -117,6 +117,9 @@ export function bclifRenderSettingsHash(settings: LiquidationFieldSettings) {
     normalization: settings.thermalNormalization,
     confidenceWeightEnabled: settings.confidenceWeightEnabled,
     backgroundFloor: settings.backgroundFloor,
+    plasmaBackgroundOpacity: settings.plasmaBackgroundOpacity,
+    shelfContrast: settings.shelfContrast,
+    residualShelfVisibility: settings.residualShelfVisibility,
     yellowTailPercent: settings.yellowTailPercent,
     historicalContextOpacity: settings.historicalContextOpacity,
     liveCalibratedOpacity: settings.liveCalibratedOpacity,
@@ -211,9 +214,12 @@ export function resolveBclifDisplayDimensions(
   else rows = research
     ? clamp(Math.round(context.plotHeight * 0.72), 512, 1024)
     : clamp(Math.round(context.plotHeight * 1.18), 768, 2048);
+  // Projection is display-resolution, not model-resolution. Re-sampling the
+  // immutable source lattice to one column per plot pixel removes the coarse
+  // 512-column appearance while preserving source values and causality.
   const columns = fallback
     ? Math.min(snapshot.header.columns, 512)
-    : Math.min(snapshot.header.columns, clamp(Math.round(context.plotWidth), 512, 1536));
+    : clamp(Math.round(context.plotWidth), 512, 1536);
   return { rows, columns };
 }
 
@@ -341,7 +347,7 @@ export function buildBclifDisplayProjection(
       if (settings.thermalNormalization === "VISIBLE_FOCUS") unit = visibleUnit;
       // Visible-range contrast is deliberately bounded. It may reveal detail,
       // but the expanding model normalization remains the visual authority.
-      else if (settings.thermalNormalization === "HYBRID") unit = unit * 0.88 + visibleUnit * 0.12;
+      else if (settings.thermalNormalization === "HYBRID") unit = unit * 0.15 + visibleUnit * 0.85;
       else if (settings.thermalNormalization === "FIXED_ABSOLUTE") unit = Math.min(1, Math.log1p(raw[targetIndex]!) / Math.log1p(1_000_000_000));
       else if (settings.thermalNormalization === "OI_RELATIVE") unit = unit * Math.max(0.15, oiWeight);
       if (settings.thermalNormalization === "CONFIDENCE_WEIGHTED" || settings.confidenceWeightEnabled) {
@@ -349,6 +355,14 @@ export function buildBclifDisplayProjection(
       }
       unit = Math.pow(clamp01(unit), settings.gamma);
       unit = Math.pow(unit, 1 + settings.sharpness / 170);
+      const contrast = settings.shelfContrast / 100;
+      // Preserve residual mass instead of cutting the lower shelf shoulder
+      // away. The low percentile already separates the plasma floor; this
+      // concave transfer expands the remaining dynamic range into the full
+      // purple/blue/cyan/green/yellow thermal ramp.
+      const contrastFloor = contrast * 0.05;
+      unit = clamp01((unit - contrastFloor) / Math.max(1e-9, 1 - contrastFloor));
+      unit = Math.pow(unit, 0.58 - contrast * 0.22);
 
       const rawValue = raw[targetIndex]!;
       if (rawValue > 0) rawNonZeroCells += 1;
@@ -358,22 +372,31 @@ export function buildBclifDisplayProjection(
         && continuity >= 80
         && multipleEvidence
         && !browserHistorical;
+      const modeledPeak = rawValue > 0
+        && rawValue >= yellowThreshold
+        && confidencePercent >= settings.contextVisibilityFloor;
       const historicalOnly = !live || evidenceClass === "OI_ONLY" || evidenceClass === "OI_PLUS_PRICE";
       let cap = 255;
-      if (!yellow) cap = confidencePercent < 40 ? 108 : confidencePercent < 60 ? 145 : confidencePercent < 75 ? 190 : 232;
-      if (confidencePercent < settings.highAuthorityColorFloor) cap = Math.min(cap, 190);
-      if (historicalOnly) cap = Math.min(cap, 176);
-      if (settings.requireMultipleEvidenceChannels && !multipleEvidence) cap = Math.min(cap, 168);
+      // Yellow eligibility remains strict evidence metadata. In the two
+      // operational thermal themes, however, the rarest modeled relative peak
+      // may use the visual endpoint while the HUD still states its authority.
+      const relativePeakColor = modeledPeak
+        && (settings.palette === "REFERENCE_THERMAL" || settings.palette === "BLACK_TERMINAL_BLOOD");
+      if (!yellow && !relativePeakColor) cap = confidencePercent < 40 ? 155 : confidencePercent < 60 ? 214 : confidencePercent < 75 ? 232 : 244;
       let displayIntensity = Math.round(unit * 255);
       displayIntensity = clamp(Math.max(settings.backgroundFloor, displayIntensity), settings.backgroundFloor, cap);
       intensity[targetIndex] = displayIntensity;
       yellowEligible[targetIndex] = yellow ? 255 : 0;
       if (yellow) yellowEligibleCells += 1;
 
-      const confidenceAuthority = confidencePercent < 40 ? 0.12
-        : confidencePercent < 60 ? 0.3
-          : confidencePercent < 75 ? 0.58
-            : confidencePercent < 90 ? 0.82 : 1;
+      const confidenceAuthority = confidencePercent < 40 ? 0.42
+        : confidencePercent < 60 ? 0.68
+          : confidencePercent < 75 ? 0.82
+            : confidencePercent < 90 ? 0.92 : 1;
+      const operationalThermalTheme = settings.palette === "REFERENCE_THERMAL"
+        || settings.palette === "BLACK_TERMINAL_BLOOD";
+      const visualAuthority = operationalThermalTheme
+        ? Math.max(confidenceAuthority, 0.58 + unit * 0.42) : confidenceAuthority;
       let channelAlpha = live ? settings.liveCalibratedOpacity / 100 : settings.historicalContextOpacity / 100;
       if (!settings.historicalContextEnabled && !live) channelAlpha = 0;
       if (!settings.liveCalibratedEnabled && live) channelAlpha = 0;
@@ -384,7 +407,23 @@ export function buildBclifDisplayProjection(
         && confidencePercent < settings.strictHideBelowConfidence;
       const cellAlpha = rawValue <= 0 || contextFiltered || strictFiltered
         ? 0
-        : clamp(Math.round(255 * confidenceAuthority * channelAlpha), 0, 255);
+        : operationalThermalTheme
+          // A thermal atlas is a color field, not a translucent line overlay.
+          // Keep every still-live shelf opaque enough to retain its body and
+          // use color (rather than vanishing alpha) for density. The residual
+          // control governs the floor for partially mitigated mass; evidence
+          // authority remains explicit in yellowEligible/HUD metadata.
+          ? clamp(Math.max(
+            Math.round(255 * channelAlpha * (0.96 + unit * 0.04)),
+            Math.round((190 + settings.residualShelfVisibility * 0.85) * channelAlpha)
+          ), 0, 255)
+          : clamp(Math.max(
+            Math.round(255 * visualAuthority * channelAlpha * (0.58 + unit * 0.42)),
+            Math.round(
+              255 * settings.residualShelfVisibility / 100
+              * visualAuthority * channelAlpha
+            )
+          ), 0, 255);
       alpha[targetIndex] = cellAlpha;
       if (rawValue > 0) {
         if (cellAlpha > 0) {
@@ -397,6 +436,17 @@ export function buildBclifDisplayProjection(
       if (live) liveCalibratedCells += 1;
       else historicalCells += 1;
     }
+  }
+
+  if (settings.palette === "REFERENCE_THERMAL" || settings.palette === "BLACK_TERMINAL_BLOOD") {
+    applyBclifCausalShelfPersistence(
+      intensity, alpha, rows, columns,
+      0.99955 + settings.residualShelfVisibility / 100 * 0.00035,
+      Math.round(214 - settings.shelfContrast * 0.1),
+      Math.max(settings.backgroundFloor, 1),
+      validity,
+      !settings.strictHideBelowEnabled
+    );
   }
 
   const modelHash = bclifModelHash(snapshot);
@@ -483,6 +533,145 @@ function evidenceClassFor(
   if (trades >= 0.35) return "OI_PLUS_TRADES";
   if (openInterest >= 0.01) return "OI_PLUS_PRICE";
   return "OI_ONLY";
+}
+
+/**
+ * Render-only, causal shelf retention. A high-energy shelf keeps its thermal
+ * identity while the current model still reports non-zero mass on that price
+ * row. Once the mass disappears (alpha=0), the retained visual state is reset
+ * immediately. Iteration is strictly past-to-present, so a replay prefix can
+ * never be repainted by a future shelf.
+ */
+export function applyBclifCausalShelfPersistence(
+  intensity: Uint8Array,
+  alpha: Uint8Array,
+  rows: number,
+  columns: number,
+  retention: number,
+  activationFloor = 196,
+  continuationFloor = 18,
+  validity?: Uint8Array,
+  expandThermalBody = true
+) {
+  if (intensity.length !== rows * columns || alpha.length !== intensity.length
+    || (validity && validity.length !== intensity.length)) {
+    throw new Error("BCLIF_SHELF_PERSISTENCE_DIMENSIONS_INVALID");
+  }
+  const decay = clamp(retention, 0, 0.9999);
+  const source = intensity.slice();
+  const cores = new Uint8Array(intensity.length);
+  const activationMask = selectBclifShelfActivations(source, alpha, rows, columns, activationFloor, 10);
+  for (let row = 0; row < rows; row += 1) {
+    let retained = 0;
+    for (let column = 0; column < columns; column += 1) {
+      const index = column * rows + row;
+      const current = source[index]!;
+      if (!alpha[index] || current < continuationFloor) {
+        retained = 0;
+        continue;
+      }
+      if (activationMask[index]) {
+        retained = Math.max(current, activationMask[index]!, retained * decay);
+      } else if (retained >= activationFloor * 0.34) {
+        retained *= decay;
+      } else {
+        retained = 0;
+      }
+      if (retained > 0) cores[index] = Math.round(retained);
+    }
+  }
+
+  // Preserve the continuous thermal body around each retained shelf, then
+  // overlay a narrow high-DPI core. The wide Gaussian shoulder is what makes
+  // low/medium/strong liquidity read as purple -> blue -> cyan -> green while
+  // the inner core stays crystal sharp. This is visual resampling only: raw
+  // exposure, validity, confidence and evidence authority are not mutated.
+  const coreRadius = clamp(Math.round(rows / 300), 3, 5);
+  const thermalRadius = clamp(Math.round(rows / 26), 18, 54);
+  for (let column = 0; column < columns; column += 1) {
+    const candidates: Array<{ row: number; value: number }> = [];
+    for (let row = 0; row < rows; row += 1) {
+      const value = cores[column * rows + row]!;
+      if (value) candidates.push({ row, value });
+    }
+    candidates.sort((left, right) => right.value - left.value || left.row - right.row);
+    const accepted: number[] = [];
+    for (const candidate of candidates) {
+      const shelfSeparation = Math.max(coreRadius * 2, Math.round(thermalRadius * 0.27));
+      if (accepted.some((row) => Math.abs(row - candidate.row) <= shelfSeparation)) continue;
+      const rankStrength = Math.max(0.58, 1 - accepted.length * 0.055);
+      const shelfValue = Math.max(continuationFloor, Math.round(candidate.value * rankStrength));
+      accepted.push(candidate.row);
+      const sourceIndex = column * rows + candidate.row;
+      const sourceAlpha = alpha[sourceIndex]!;
+      if (expandThermalBody) {
+        for (let offset = -thermalRadius; offset <= thermalRadius; offset += 1) {
+          const targetRow = candidate.row + offset;
+          if (targetRow < 0 || targetRow >= rows) continue;
+          const targetIndex = column * rows + targetRow;
+          if (validity && !validity[targetIndex]) continue;
+          const distance = Math.abs(offset) / Math.max(1, thermalRadius);
+          const falloff = Math.exp(-4.2 * distance * distance);
+          const fieldValue = continuationFloor
+            + (shelfValue - continuationFloor) * falloff * 0.72;
+          intensity[targetIndex] = Math.max(intensity[targetIndex]!, Math.round(fieldValue));
+          alpha[targetIndex] = Math.max(
+            alpha[targetIndex]!,
+            Math.round(sourceAlpha * (0.54 + falloff * 0.46))
+          );
+        }
+      }
+      for (let offset = -coreRadius; offset <= coreRadius; offset += 1) {
+        const targetRow = candidate.row + offset;
+        if (targetRow < 0 || targetRow >= rows) continue;
+        const targetIndex = column * rows + targetRow;
+        if (validity && !validity[targetIndex]) continue;
+        if (!expandThermalBody && !alpha[targetIndex]) continue;
+        const falloff = 1 - Math.abs(offset) / (coreRadius + 1) * 0.32;
+        intensity[targetIndex] = Math.max(intensity[targetIndex]!, Math.round(shelfValue * falloff));
+        alpha[targetIndex] = Math.max(alpha[targetIndex]!, Math.round(sourceAlpha * falloff));
+      }
+      if (accepted.length >= 10) break;
+    }
+  }
+}
+
+function selectBclifShelfActivations(
+  intensity: Uint8Array,
+  alpha: Uint8Array,
+  rows: number,
+  columns: number,
+  activationFloor: number,
+  maximumPerColumn: number
+) {
+  const selected = new Uint8Array(intensity.length);
+  const offsets = [3, 7, 12];
+  for (let column = 0; column < columns; column += 1) {
+    const candidates: Array<{ row: number; value: number }> = [];
+    for (let row = 0; row < rows; row += 1) {
+      const index = column * rows + row;
+      const value = intensity[index]!;
+      if (!alpha[index] || value < activationFloor) continue;
+      const localPeak = offsets.every((offset) => {
+        const lower = Math.max(0, row - offset);
+        const upper = Math.min(rows - 1, row + offset);
+        return value >= intensity[column * rows + lower]!
+          && value >= intensity[column * rows + upper]!;
+      });
+      if (localPeak) candidates.push({ row, value });
+    }
+    candidates.sort((left, right) => right.value - left.value || left.row - right.row);
+    const accepted: number[] = [];
+    const priceQuantum = clamp(Math.round(rows / 150), 4, 10);
+    for (const candidate of candidates) {
+      const snappedRow = clamp(Math.round(candidate.row / priceQuantum) * priceQuantum, 0, rows - 1);
+      if (accepted.some((row) => Math.abs(row - snappedRow) <= 10)) continue;
+      selected[column * rows + snappedRow] = Math.max(selected[column * rows + snappedRow]!, candidate.value);
+      accepted.push(snappedRow);
+      if (accepted.length >= maximumPerColumn) break;
+    }
+  }
+  return selected;
 }
 
 function quantile(sorted: readonly number[], q: number) {

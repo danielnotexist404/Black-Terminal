@@ -6105,6 +6105,101 @@ body.resizing-layout * {
 .liquidation-field-settings .liquidation-inline-inputs { grid-template-columns: 1fr 1fr; }
 .liquidation-field-toggles label { grid-template-columns: 1fr auto; }
 
+.bclif-quick-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0 10px;
+  padding: 4px 5px;
+  border: 1px solid rgba(226, 230, 237, 0.12);
+  border-radius: 9px;
+  background: linear-gradient(145deg, rgba(13, 15, 19, 0.82), rgba(2, 3, 5, 0.72));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 8px 28px rgba(0, 0, 0, 0.3);
+  -webkit-backdrop-filter: blur(14px) saturate(125%);
+  backdrop-filter: blur(14px) saturate(125%);
+}
+
+.bclif-quick-controls select {
+  width: auto;
+  max-width: 130px;
+  height: 24px;
+  padding: 0 22px 0 7px;
+  border: 1px solid rgba(226, 230, 237, 0.12);
+  border-radius: 6px;
+  background: rgba(5, 6, 9, 0.9);
+  color: rgba(235, 238, 243, 0.82);
+  font: 8px "IBM Plex Mono", monospace;
+  letter-spacing: 0.025em;
+}
+
+.bclif-quick-intensity {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: rgba(224, 227, 233, 0.56);
+  font: 700 7px "IBM Plex Mono", monospace;
+}
+
+.bclif-quick-intensity input { width: 72px; accent-color: #d00024; }
+.bclif-quick-intensity b { min-width: 20px; color: #f3f4f6; font-size: 7px; }
+
+.indicator-settings.bclif-settings-shell {
+  top: 52px;
+  left: 154px;
+  width: 420px;
+  max-height: min(760px, calc(100% - 66px));
+  padding: 12px;
+  overflow-y: auto;
+  border: 1px solid rgba(226, 230, 237, 0.14);
+  border-left-color: rgba(204, 0, 34, 0.34);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 12% 2%, rgba(119, 0, 22, 0.13), transparent 32%),
+    linear-gradient(145deg, rgba(12, 14, 18, 0.94), rgba(2, 3, 5, 0.9));
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), inset 1px 0 0 rgba(210, 0, 36, 0.22);
+  -webkit-backdrop-filter: blur(22px) saturate(135%);
+  backdrop-filter: blur(22px) saturate(135%);
+}
+
+.bclif-settings-v12 { min-width: 0; gap: 7px; }
+.bclif-settings-v12 .bclif-primary-section { margin: 0; }
+.bclif-settings-v12 .indicator-settings-section {
+  border-color: rgba(226, 230, 237, 0.1);
+  background: linear-gradient(145deg, rgba(15, 17, 21, 0.62), rgba(3, 4, 7, 0.52));
+}
+.bclif-settings-v12 label { grid-template-columns: minmax(142px, 1fr) minmax(150px, 1.05fr); }
+.bclif-settings-v12 select { width: 100%; min-width: 150px; }
+.bclif-settings-v12 .indicator-range-row > span { min-width: 150px; }
+.bclif-settings-v12 small {
+  display: block;
+  padding: 8px 9px;
+  border-left: 2px solid rgba(205, 0, 35, 0.5);
+  color: rgba(205, 209, 216, 0.53);
+  font: 7.5px/1.55 "IBM Plex Mono", monospace;
+}
+
+.bclif-advanced-settings {
+  overflow: hidden;
+  border: 1px solid rgba(226, 230, 237, 0.1);
+  border-radius: 9px;
+  background: rgba(3, 4, 7, 0.48);
+}
+.bclif-advanced-settings > summary {
+  padding: 10px 11px;
+  cursor: pointer;
+  color: rgba(226, 230, 237, 0.64);
+  font: 800 8.5px "IBM Plex Mono", monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.bclif-advanced-settings[open] > summary {
+  color: #f3f4f6;
+  border-bottom: 1px solid rgba(226, 230, 237, 0.08);
+  background: rgba(116, 0, 21, 0.12);
+}
+.bclif-advanced-settings .indicator-settings-section { margin: 7px; }
+
 .liquidation-field-legend,
 .liquidation-field-diagnostics,
 .liquidation-field-provenance,
@@ -12844,4 +12939,11 @@ body.dom-pro-resize-active {
   .dom-pro-settings-panel {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .bclif-quick-controls { margin-left: auto; }
+  .bclif-quick-intensity span, .bclif-quick-intensity b { display: none; }
+  .bclif-quick-intensity input { width: 52px; }
+  .bclif-quick-controls select { max-width: 88px; font-size: 7px; }
+  .indicator-settings.bclif-settings-shell { right: 8px; left: 8px; width: auto; }
+  .bclif-settings-v12 label { grid-template-columns: minmax(120px, 1fr) minmax(126px, 1fr); }
 }

@@ -105,6 +105,9 @@ export function LiquidationFieldOverlays({ visible, snapshot, settings, status, 
       data-bclif-render-settings-hash={renderSettingsHash}
       data-bclif-display-raster-hash={displayRasterHash}
       data-bclif-price-display={settings.priceDisplay}
+      data-bclif-range-mode={settings.rangeMode}
+      data-bclif-noise-suppression={settings.noiseSuppression}
+      data-bclif-background-field={settings.showBackgroundField ? "on" : "off"}
       data-bclif-cluster-labels={visibleLabels.length}
       data-bclif-horizon-truth={horizonTruth}
       data-bclif-candle-contrast={settings.candleContrast}

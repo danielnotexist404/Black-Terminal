@@ -29,6 +29,7 @@
     "test:chart-csp": "node scripts/chart-csp-regression.js",
     "test:liquidation-heatmap": "node --experimental-strip-types scripts/liquidation-heatmap-tests.ts",
     "test:bclif-operational-clarity": "node --experimental-strip-types scripts/bclif-operational-clarity-tests.ts",
+    "test:bclif-finalization": "node --experimental-strip-types scripts/bclif-finalization-tests.ts",
     "test:bclif-authentic-exposure": "node --experimental-strip-types scripts/bclif-authentic-exposure-tests.ts",
     "test:bclif-live-pipeline": "node --experimental-strip-types scripts/bclif-live-pipeline-tests.ts",
     "test:bclif-cold-start": "node --experimental-strip-types scripts/bclif-cold-start-tests.ts",

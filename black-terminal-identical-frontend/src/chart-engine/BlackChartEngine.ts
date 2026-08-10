@@ -1292,7 +1292,7 @@ export class BlackChartEngine {
     if (
       this.visibleIndicators.liquidationHeatmap
       && this.liquidationFieldSnapshot
-      && this.liquidationFieldSettings.priceDisplay !== "CHART_SCALE"
+      && this.liquidationFieldSettings.rangeMode !== "VISIBLE"
       && last
     ) {
       const displayDomain = resolveBclifDisplayDomain(this.liquidationFieldSnapshot, this.liquidationFieldSettings, {

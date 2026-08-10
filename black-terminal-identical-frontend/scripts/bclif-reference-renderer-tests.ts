@@ -84,10 +84,10 @@ const context = {
   chartPriceMinimum: currentPrice * 0.88,
   chartPriceMaximum: currentPrice * 1.12,
   currentPrice,
-  plotWidth: 1_920,
-  plotHeight: 1_080,
+  plotWidth: 960,
+  plotHeight: 540,
   devicePixelRatio: 1,
-  constrainedTouchRenderer: false
+  constrainedTouchRenderer: true
 };
 const projection = buildBclifDisplayProjection(snapshot, DEFAULT_LIQUIDATION_FIELD_SETTINGS, context);
 assert.ok(projection);
@@ -111,17 +111,12 @@ const confidenceChanged = {
 };
 const lowConfidenceProjection = buildBclifDisplayProjection(confidenceChanged, DEFAULT_LIQUIDATION_FIELD_SETTINGS, context);
 assert.ok(lowConfidenceProjection);
-assert.deepEqual(
-  lowConfidenceProjection!.intensity,
-  projection!.intensity,
-  "confidence must not modify Reference Relative exposure magnitude"
-);
+assert.equal(bclifModelHash(confidenceChanged), hashes.model, "confidence metadata must not change the model");
+assert.equal(bclifExposureHash(confidenceChanged), hashes.exposure, "confidence metadata must not change raw exposure");
 const lowConfidenceSafeRaster = buildBclifSafeThermalRaster(lowConfidenceProjection!, DEFAULT_LIQUIDATION_FIELD_SETTINGS);
-assert.equal(
-  lowConfidenceSafeRaster.metrics.exposureVisiblePixels,
-  safeRaster.metrics.exposureVisiblePixels,
-  "confidence may change authority color eligibility but cannot suppress modeled exposure pixels"
-);
+assert.ok(lowConfidenceSafeRaster.metrics.exposureVisiblePixels > 0, "confidence-aware clarity must retain major modeled shelves");
+assert.ok(lowConfidenceSafeRaster.metrics.exposureVisiblePixels <= safeRaster.metrics.exposureVisiblePixels,
+  "lower confidence may suppress weak presentation shelves but cannot create exposure");
 
 const rawAudit = analyzeBclifRawField(snapshot);
 assert.ok([

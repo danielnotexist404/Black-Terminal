@@ -15,6 +15,7 @@ const timeframes = (process.env.BCLIF_SMOKE_TIMEFRAMES || "1h,4h")
   .filter(Boolean);
 const switchTimeframe = (process.env.BCLIF_SMOKE_SWITCH_TIMEFRAME || "").trim().toLowerCase();
 const port = Number(process.env.BCLIF_SMOKE_PORT || 4291);
+const readinessTimeout = Number(process.env.BCLIF_SMOKE_READINESS_TIMEOUT_MS || 180_000);
 
 if (!existsSync(browserExecutable)) {
   throw new Error(`BCLIF_BROWSER_EXECUTABLE_MISSING:${browserExecutable}`);
@@ -106,7 +107,8 @@ try {
             && truth?.viewportIntersection === true
             && truth?.drawPassActive === true
             && ["WEBGL_CONTEXT_READY", "SAFE_FALLBACK_ACTIVE"].includes(String(truth?.readiness));
-        }, { requestedSymbol: symbol }, { timeout: 180_000 });
+        }, { requestedSymbol: symbol }, { timeout: readinessTimeout });
+        console.log(`BCLIF_SMOKE_STAGE:${symbol}:${timeframe}:FIELD_READY`);
 
         const before = await readTruth(page);
         await page.locator(".pixi-chart-host canvas").hover();
@@ -117,8 +119,13 @@ try {
           throw new Error("BCLIF_CAMERA_MUTATED_MODEL_STATE");
         }
         assertTruth(after);
+        console.log(`BCLIF_SMOKE_STAGE:${symbol}:${timeframe}:BASELINE_VALID`);
 
         const ui = await page.evaluate(() => ({
+          quickControlCount: document.querySelectorAll('[aria-label="BCLIF quick controls"]').length,
+          quickIntensity: document.querySelector('[aria-label="BCLIF quick intensity"]')?.value ?? null,
+          quickRange: document.querySelector('[aria-label="BCLIF range"]')?.value ?? null,
+          quickTheme: document.querySelector('[aria-label="BCLIF thermal theme"]')?.value ?? null,
           compactBadgeCount: document.querySelectorAll(".liquidation-field-hud").length,
           expandedDiagnostics: document.querySelectorAll(".liquidation-field-hud[open]").length,
           operationalSummaryCount: document.querySelectorAll(".liquidation-field-operational-summary").length,
@@ -129,8 +136,63 @@ try {
         if (ui.expandedDiagnostics !== 0 || ui.operationalSummaryCount !== 0 || ui.shelfLabelCount !== 0) {
           throw new Error(`BCLIF_DEFAULT_OVERLAY_INTRUSION:${JSON.stringify(ui)}`);
         }
+        if (ui.quickControlCount !== 1
+          || ui.quickIntensity !== "100"
+          || ui.quickRange !== "AUTO"
+          || ui.quickTheme !== "REFERENCE_THERMAL") {
+          throw new Error(`BCLIF_C7_QUICK_CONTROL_DEFAULTS_INVALID:${JSON.stringify(ui)}`);
+        }
         const screenshot = join(artifactRoot, `${symbol}-${timeframe}.png`);
         await page.screenshot({ path: screenshot, fullPage: true });
+
+        await page.getByLabel("BCLIF range").selectOption("SWING");
+        await page.getByLabel("BCLIF thermal theme").selectOption("BLACK_TERMINAL_BLOOD");
+        await page.getByLabel("BCLIF quick intensity").evaluate((node, value) => {
+          const input = /** @type {HTMLInputElement} */ (node);
+          input.value = value;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+        }, "150");
+        console.log(`BCLIF_SMOKE_STAGE:${symbol}:${timeframe}:PRESENTATION_CHANGED`);
+        await page.waitForFunction(({ modelHash, exposureHash, renderSettingsHash }) => {
+          const truth = globalThis.__BCLIF_RENDER_TRUTH__;
+          return truth?.modelHash === modelHash
+            && truth?.exposureHash === exposureHash
+            && truth?.renderSettingsHash !== renderSettingsHash
+            && Number(truth?.finalVisiblePixels) > 0;
+        }, {
+          modelHash: after.modelHash,
+          exposureHash: after.exposureHash,
+          renderSettingsHash: after.renderSettingsHash
+        }, { timeout: 30_000 });
+        const presentationChanged = await readTruth(page);
+        assertTruth(presentationChanged);
+        console.log(`BCLIF_SMOKE_STAGE:${symbol}:${timeframe}:PRESENTATION_VALID`);
+
+        await page.getByLabel("BCLIF range").selectOption("AUTO");
+        await page.getByLabel("BCLIF thermal theme").selectOption("REFERENCE_THERMAL");
+        await page.getByLabel("BCLIF quick intensity").evaluate((node, value) => {
+          const input = /** @type {HTMLInputElement} */ (node);
+          input.value = value;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+        }, "100");
+        await page.waitForFunction(({ changedRenderSettingsHash }) => {
+          const truth = globalThis.__BCLIF_RENDER_TRUTH__;
+          const intensity = document.querySelector('[aria-label="BCLIF quick intensity"]');
+          const range = document.querySelector('[aria-label="BCLIF range"]');
+          const theme = document.querySelector('[aria-label="BCLIF thermal theme"]');
+          const unavailable = /unavailable/i.test(document.querySelector(".liquidation-field-hud")?.textContent || "");
+          return (truth?.renderSettingsHash !== changedRenderSettingsHash || unavailable)
+            && intensity?.value === "100"
+            && range?.value === "AUTO"
+            && theme?.value === "REFERENCE_THERMAL";
+        }, {
+          changedRenderSettingsHash: presentationChanged.renderSettingsHash
+        }, { timeout: 30_000 });
+        const restored = await readTruth(page);
+        if (Number(restored.finalVisiblePixels) > 0) assertTruth(restored);
+        console.log(`BCLIF_SMOKE_STAGE:${symbol}:${timeframe}:RESTORED_VALID`);
         results.push({
           decision: "PASS",
           symbol,
@@ -140,6 +202,16 @@ try {
           screenshot,
           truth: after,
           ui,
+          c7PresentationProof: {
+            beforeRenderSettingsHash: after.renderSettingsHash,
+            changedRenderSettingsHash: presentationChanged.renderSettingsHash,
+            restoredRenderSettingsHash: restored.renderSettingsHash,
+            modelHashStableDuringPresentationChange: after.modelHash === presentationChanged.modelHash,
+            exposureHashStableDuringPresentationChange: after.exposureHash === presentationChanged.exposureHash,
+            restorationAcceptedIndependentLiveUpdates: true,
+            restoredControlsDefault: true,
+            restoredFieldAvailable: Number(restored.finalVisiblePixels) > 0
+          },
           pageErrors,
           consoleErrors: consoleErrors.filter((value) => !isExpectedNetworkNoise(value))
         });
@@ -193,7 +265,9 @@ try {
       } catch (error) {
         const screenshot = join(artifactRoot, `${symbol}-${timeframe}-failure.png`);
         await page.screenshot({ path: screenshot, fullPage: true }).catch(() => undefined);
-        throw new Error(`${symbol}/${timeframe}: ${error instanceof Error ? error.message : String(error)}; screenshot=${screenshot}; pageErrors=${JSON.stringify(pageErrors)}; consoleErrors=${JSON.stringify(consoleErrors)}`);
+        const failureTruth = await readTruth(page).catch(() => null);
+        const failureMarket = await page.locator(".chart-header .pair").textContent().catch(() => null);
+        throw new Error(`${symbol}/${timeframe}: ${error instanceof Error ? error.message : String(error)}; screenshot=${screenshot}; market=${JSON.stringify(failureMarket)}; truth=${JSON.stringify(failureTruth)}; pageErrors=${JSON.stringify(pageErrors)}; consoleErrors=${JSON.stringify(consoleErrors)}`);
       } finally {
         await context.close();
       }
@@ -202,7 +276,7 @@ try {
 
   const report = {
     decision: "PASS",
-    evidenceBoundary: "LOCAL_BROWSER_UI_WITH_REAL_BYBIT_PUBLIC_BROWSER_FALLBACK; NO_SYNTHETIC_BCLIF_FIXTURE; NOT_A_PRODUCTION_AUTH_SESSION",
+    evidenceBoundary: "LOCAL_BROWSER_UI_WITH_REAL_BYBIT_PUBLIC_MARKET_DATA; AUTHORITY_RECORDED_PER_CASE; NO_SYNTHETIC_BCLIF_FIXTURE; NOT_A_PRODUCTION_AUTH_SESSION",
     cases: results
   };
   writeFileSync(join(artifactRoot, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
@@ -253,6 +327,7 @@ async function readTruth(page) {
       modelHash: truth.modelHash,
       exposureHash: truth.exposureHash,
       displayRasterHash: truth.displayRasterHash,
+      renderSettingsHash: truth.renderSettingsHash,
       rawMinimum: truth.rawExposureRange?.minimum,
       rawMaximum: truth.rawExposureRange?.maximum,
       normalizedMinimum: truth.normalizedScalarRange?.minimum,

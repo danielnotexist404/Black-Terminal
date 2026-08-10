@@ -51,12 +51,14 @@ export function buildBclifSafeThermalRaster(
         rgba[targetIndex] = (invalid >> 16) & 0xff;
         rgba[targetIndex + 1] = (invalid >> 8) & 0xff;
         rgba[targetIndex + 2] = invalid & 0xff;
-        rgba[targetIndex + 3] = 255;
+        rgba[targetIndex + 3] = settings.showBackgroundField ? 255 : 0;
         continue;
       }
 
       const scalar = projection.intensity[sourceIndex]!;
-      const alpha = opacityFloor;
+      const alpha = scalar > 0 || settings.showBackgroundField
+        ? Math.min(opacityFloor, projection.alpha[sourceIndex] ?? opacityFloor)
+        : 0;
       if (settings.viewMode === "RAW_EXPOSURE") {
         rgba[targetIndex] = scalar;
         rgba[targetIndex + 1] = scalar;
@@ -79,17 +81,19 @@ export function buildBclifSafeThermalRaster(
         const shelfOnly = settings.viewMode === "SHELF_LINES_ONLY";
         const paletteIndex = shelfOnly && scalar < 160
           ? Math.max(1, Math.round(settings.backgroundFloor * 0.35))
-          : Math.max(settings.backgroundFloor, scalar);
+          : settings.showBackgroundField ? Math.max(settings.backgroundFloor, scalar) : scalar;
         const offset = Math.min(255, paletteIndex) * 4;
         rgba[targetIndex] = palette[offset]!;
         rgba[targetIndex + 1] = palette[offset + 1]!;
         rgba[targetIndex + 2] = palette[offset + 2]!;
       }
       rgba[targetIndex + 3] = alpha;
-      finalVisiblePixels += 1;
-      if (scalar > 0) exposureVisiblePixels += 1;
-      minimumAlpha = Math.min(minimumAlpha, alpha);
-      maximumAlpha = Math.max(maximumAlpha, alpha);
+      if (alpha > 0) {
+        finalVisiblePixels += 1;
+        if (scalar > 0) exposureVisiblePixels += 1;
+        minimumAlpha = Math.min(minimumAlpha, alpha);
+        maximumAlpha = Math.max(maximumAlpha, alpha);
+      }
     }
   }
 

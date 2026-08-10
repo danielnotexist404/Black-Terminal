@@ -146,6 +146,10 @@ export function bclifRenderSettingsHash(settings: LiquidationFieldSettings) {
     strictHideBelowConfidence: settings.strictHideBelowConfidence,
     historicalContextEnabled: settings.historicalContextEnabled,
     liveCalibratedEnabled: settings.liveCalibratedEnabled,
+    rangeMode: settings.rangeMode,
+    noiseSuppression: settings.noiseSuppression,
+    showBackgroundField: settings.showBackgroundField,
+    strongShelvesOnly: settings.strongShelvesOnly,
     priceDisplay: settings.priceDisplay,
     channel: settings.visualChannel,
     normalization: settings.thermalNormalization,
@@ -208,20 +212,20 @@ export function resolveBclifDisplayDomain(
   const modelMaximum = snapshot.header.maxPrice;
   let minimum = context.chartPriceMinimum;
   let maximum = context.chartPriceMaximum;
-  const percent = settings.priceDisplay === "CURRENT_PRICE_5" ? 5
-    : settings.priceDisplay === "CURRENT_PRICE_10" ? 10
-      : settings.priceDisplay === "CURRENT_PRICE_20" ? 20
-        : settings.priceDisplay === "CURRENT_PRICE_40" ? 40 : null;
+  const rangeMode = settings.rangeMode;
+  const percent = rangeMode === "SESSION" ? 5
+    : rangeMode === "SWING" ? 15
+      : rangeMode === "MACRO" ? 40 : null;
   if (percent !== null) {
     minimum = context.currentPrice * (1 - percent / 100);
     maximum = context.currentPrice * (1 + percent / 100);
-  } else if (settings.priceDisplay === "FULL_MODEL_RANGE") {
+  } else if (rangeMode === "FULL_LOADED") {
     minimum = modelMinimum;
     maximum = modelMaximum;
   } else if (settings.priceDisplay === "CUSTOM") {
     minimum = settings.customPriceMinimum;
     maximum = settings.customPriceMaximum;
-  } else if (settings.priceDisplay === "AUTO_FOCUS") {
+  } else if (rangeMode === "AUTO") {
     const clusters = extractBclifOperationalClusters(snapshot, context.currentPrice, settings);
     const nearestAbove = clusters.filter((cluster) => cluster.peakPrice > context.currentPrice).sort((a, b) => a.peakPrice - b.peakPrice)[0];
     const nearestBelow = clusters.filter((cluster) => cluster.peakPrice < context.currentPrice).sort((a, b) => b.peakPrice - a.peakPrice)[0];
@@ -242,7 +246,7 @@ export function resolveBclifDisplayDimensions(
   settings: LiquidationFieldSettings,
   context: Pick<BclifDisplayContext, "plotWidth" | "plotHeight" | "constrainedTouchRenderer" | "devicePixelRatio">
 ) {
-  const research = settings.priceDisplay === "FULL_MODEL_RANGE"
+  const research = settings.rangeMode === "FULL_LOADED"
     || settings.preset === "FULL_SPECTRUM_RESEARCH" || settings.preset === "RESEARCH_DIAGNOSTICS"
     || settings.preset === "RAW_MODEL";
   const dpr = clamp(context.devicePixelRatio ?? 1, 1, 2);
@@ -297,7 +301,7 @@ export function buildBclifDisplayProjection(
   const priceStep = (domain.maximum - domain.minimum) / Math.max(1, rows - 1);
   const timeStepMs = (snapshot.header.endTime - snapshot.header.startTime) / Math.max(1, columns - 1);
   const anchoredThermalIntensity = settings.rendererVersion === "REFERENCE_THERMAL_V2"
-    ? buildAnchoredThermalIntensity(snapshot, settings)
+    ? buildBclifCausalClarityIntensity(snapshot, settings)
     : null;
 
   const sourceRowMinimum = clamp(Math.floor((domain.minimum - snapshot.header.minPrice) / snapshot.header.priceStep), 0, sourceRows - 1);
@@ -460,14 +464,17 @@ export function buildBclifDisplayProjection(
       // may use the visual endpoint while the HUD still states its authority.
       const relativePeakColor = modeledPeak
         && (settings.palette === "REFERENCE_THERMAL" || settings.palette === "BLACK_TERMINAL_BLOOD");
-      if (!yellow && !relativePeakColor) cap = confidencePercent < 40 ? 155 : confidencePercent < 60 ? 214 : confidencePercent < 75 ? 232 : 244;
+      if (!yellow && !relativePeakColor) cap = confidencePercent < 40 ? 172 : confidencePercent < 60 ? 228 : confidencePercent < 75 ? 236 : 244;
       let displayIntensity = Math.round(unit * 255);
       if (settings.rendererVersion === "LEGACY_RGBA_V1") {
         displayIntensity = clamp(Math.max(settings.backgroundFloor, displayIntensity), settings.backgroundFloor, cap);
       } else if (rawValue > 0) {
         // Preserve a distinguishable non-zero texel for every modeled shelf.
         // The purple floor is presentation-only and remains separate.
-        displayIntensity = Math.max(Math.min(255, settings.backgroundFloor + 1), displayIntensity);
+        displayIntensity = Math.min(
+          cap,
+          Math.max(Math.min(255, settings.backgroundFloor + 1), displayIntensity)
+        );
       }
       intensity[targetIndex] = displayIntensity;
       yellowEligible[targetIndex] = yellow ? 255 : 0;
@@ -490,7 +497,9 @@ export function buildBclifDisplayProjection(
         && confidencePercent < settings.contextVisibilityFloor;
       const strictFiltered = settings.strictHideBelowEnabled
         && confidencePercent < settings.strictHideBelowConfidence;
-      const cellAlpha = (settings.rendererVersion === "LEGACY_RGBA_V1" && rawValue <= 0) || contextFiltered || strictFiltered
+      const cellAlpha = (settings.rendererVersion === "LEGACY_RGBA_V1" && rawValue <= 0)
+        || (settings.rendererVersion === "REFERENCE_THERMAL_V2" && rawValue <= 0 && !settings.showBackgroundField)
+        || contextFiltered || strictFiltered
         ? 0
         : settings.rendererVersion === "REFERENCE_THERMAL_V2"
           ? Math.round(255 * channelAlpha)
@@ -653,7 +662,7 @@ function resolveSourceSample(
  * evaluated independently, so neither later time columns nor camera geometry
  * can repaint an earlier shelf.
  */
-function buildAnchoredThermalIntensity(
+export function buildBclifCausalClarityIntensity(
   snapshot: LiquidationFieldSnapshot,
   settings: LiquidationFieldSettings
 ) {
@@ -667,9 +676,17 @@ function buildAnchoredThermalIntensity(
     return new Uint8Array(snapshot.normalizedIntensity);
   }
   const output = new Uint8Array(rows * columns);
+  const persistence = new Float32Array(rows);
+  const noiseFloor = settings.noiseSuppression === "LOW" ? 0.52
+    : settings.noiseSuppression === "HIGH" ? 0.76 : 0.66;
+  const rangePenalty = settings.rangeMode === "FULL_LOADED" ? 0.09
+    : settings.rangeMode === "MACRO" ? 0.07
+      : settings.rangeMode === "SWING" ? 0.035 : 0;
+  const activationFloor = Math.min(0.86, noiseFloor + rangePenalty + (settings.strongShelvesOnly ? 0.14 : 0));
   for (let column = 0; column < columns; column += 1) {
     const offset = column * rows;
     const columnExposure: number[] = [];
+    const ranks = new Float32Array(rows);
     for (let row = 0; row < rows; row += 1) {
       const index = offset + row;
       if (!snapshot.validity[index]) continue;
@@ -685,14 +702,46 @@ function buildAnchoredThermalIntensity(
       const value = selected
         ? selected[index] ?? 0
         : (snapshot.longExposure[index] ?? 0) + (snapshot.shortExposure[index] ?? 0);
-      const rank = normalizeEmpiricalRank(value, columnExposure, 0, 1);
-      const unit = rank < 0.91
-        ? 0.04 + rank / 0.91 * 0.51
-        : rank < 0.97
-          ? 0.58 + (rank - 0.91) / 0.06 * 0.21
-          : rank < 0.998
-            ? 0.80 + (rank - 0.97) / 0.028 * 0.15
-            : 0.96 + (rank - 0.998) / 0.002 * 0.04;
+      ranks[row] = value > 0 ? normalizeEmpiricalRank(value, columnExposure, 0, 1) : 0;
+    }
+    for (let row = 0; row < rows; row += 1) {
+      const index = offset + row;
+      if (!snapshot.validity[index] || ranks[row] <= 0) {
+        persistence[row] *= 0.91;
+        continue;
+      }
+      const rank = ranks[row]!;
+      const adjacent = Math.max(
+        rank,
+        (ranks[Math.max(0, row - 1)]! + rank * 2 + ranks[Math.min(rows - 1, row + 1)]!) / 4,
+        (ranks[Math.max(0, row - 2)]! + rank + ranks[Math.min(rows - 1, row + 2)]!) / 3
+      );
+      persistence[row] = Math.max(rank, persistence[row]! * 0.955);
+      const confidence = (snapshot.confidence[index] ?? 0) / 255;
+      // Every term is sourced from the present or prior immutable columns.
+      // The pass can suppress or merge presentation bands, but a zero raw
+      // cell can never become a liquidity shelf.
+      const significance = clamp01(
+        rank * 0.48
+        + adjacent * 0.22
+        + persistence[row]! * 0.20
+        + confidence * 0.10
+      );
+      if (significance < activationFloor) continue;
+      const primaryFloor = Math.min(0.94, activationFloor + (settings.strongShelvesOnly ? 0.05 : 0.18));
+      let unit: number;
+      if (significance < primaryFloor) {
+        const phase = (significance - activationFloor) / Math.max(1e-6, primaryFloor - activationFloor);
+        unit = 0.18 + phase * 0.40;
+      } else {
+        const phase = (significance - primaryFloor) / Math.max(1e-6, 1 - primaryFloor);
+        unit = 0.60 + phase * 0.34;
+      }
+      // The endpoint is deliberately scarce: only the strongest raw tail can
+      // enter the yellow/silver palette segment.
+      if (rank >= 1 - settings.yellowTailPercent / 100 && significance >= 0.94) {
+        unit = 0.965 + Math.min(0.035, (significance - 0.94) * 0.58);
+      }
       output[index] = Math.round(clamp01(unit) * 255);
     }
   }

@@ -294,6 +294,10 @@ export class BlackCoreLiquidationFieldRenderer {
     if (!snapshot) {
       if (this.sprite) this.sprite.visible = false;
       this.referenceRenderer.setVisible(false);
+      // Invalidate browser diagnostics with the same state transition that
+      // removes the field. Leaving a prior successful probe behind would let
+      // an unavailable snapshot masquerade as a currently rendered atlas.
+      this.publishInstrumentation();
     }
   }
 
@@ -752,6 +756,14 @@ export class BlackCoreLiquidationFieldRenderer {
       __BCLIF_RENDER_METRICS__?: BclifRendererMetrics & { recordedAt?: number };
       __BCLIF_RENDER_TRUTH__?: BclifRendererMetrics & { recordedAt?: number };
     };
+    // Browser lifecycle/HMR and privacy tooling may clear optional globals
+    // while the already-uploaded field remains visible. Re-publish the full
+    // immutable evidence record from renderer state before updating placement
+    // so diagnostics never report an empty field solely because the probe was
+    // removed between projection and draw.
+    if (!target.__BCLIF_RENDER_METRICS__ || !target.__BCLIF_RENDER_TRUTH__) {
+      this.publishInstrumentation();
+    }
     for (const key of ["__BCLIF_RENDER_METRICS__", "__BCLIF_RENDER_TRUTH__"] as const) {
       const current = target[key];
       if (!current) continue;
@@ -796,6 +808,7 @@ function drawBclifThermalBackdrop(
 ) {
   const height = Math.max(0, transform.bottom - transform.top);
   if (settings.rendererVersion === "REFERENCE_THERMAL_V2") {
+    if (!settings.showBackgroundField || height <= 0 || transform.width <= 0) return;
     const style = bclifThermalBackdropStyle(settings.palette);
     graphics.rect(0, transform.top, transform.width, height).fill({ color: style.invalid, alpha: 1 });
     const strength = Math.max(0.14, Math.min(0.72, settings.backgroundFloor / 64));

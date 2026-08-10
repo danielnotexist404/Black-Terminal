@@ -88,7 +88,11 @@ import { canonicalCvdService, normalizeCanonicalTrade } from "../modules/auction
 import { AuctionProfileWorkerClient } from "../modules/auction-profile/worker/AuctionProfileWorkerClient";
 import { resolveAuctionVisualizationLayers } from "../modules/auction-profile/rendering/visualization";
 import type { TradeTick } from "../market-data/types";
-import { liquidationFieldModelSettingsKey, migrateLiquidationFieldSettings } from "../modules/liquidation-field/core/settings";
+import {
+  bclifPriceDisplayForRangeMode,
+  liquidationFieldModelSettingsKey,
+  migrateLiquidationFieldSettings
+} from "../modules/liquidation-field/core/settings";
 import type { LiquidationFieldRuntimeStatus, LiquidationFieldSettings, LiquidationFieldSnapshot } from "../modules/liquidation-field/core/types";
 import { LiquidationFieldController, isBclifVisualFixtureEnabled } from "../modules/liquidation-field/data/LiquidationFieldController";
 import { InMemoryBclifSnapshotStore } from "../modules/liquidation-field/data/BclifSnapshotStore";
@@ -437,6 +441,16 @@ export function PixiBlackChart({
     },
     [indicatorAdvancedSettings.liquidationField]
   );
+  const patchLiquidationFieldSettings = (patch: Partial<LiquidationFieldSettings>) => {
+    onIndicatorAdvancedSettingsChange((current) => ({
+      ...current,
+      liquidationField: migrateLiquidationFieldSettings({
+        ...migrateLiquidationFieldSettings(current.liquidationField),
+        ...patch,
+        preset: "CUSTOM"
+      })
+    }));
+  };
   const latestLiquidationFieldSettingsRef = useRef(liquidationFieldSettings);
   latestLiquidationFieldSettingsRef.current = liquidationFieldSettings;
   const liquidationFieldCalculationKey = liquidationFieldModelSettingsKey(liquidationFieldSettings);
@@ -4211,6 +4225,39 @@ export function PixiBlackChart({
             {change.toFixed(1)} ({changePercent.toFixed(2)}%)
           </span>
         </div>
+        {visibleIndicators.liquidationHeatmap && <div className="bclif-quick-controls" role="group" aria-label="BCLIF quick controls">
+          <label className="bclif-quick-intensity" title="Display intensity only — model exposure is unchanged">
+            <span>INT</span>
+            <input
+              aria-label="BCLIF quick intensity"
+              type="range"
+              min={50}
+              max={200}
+              value={liquidationFieldSettings.intensityGain}
+              onChange={(event) => patchLiquidationFieldSettings({ intensityGain: Number(event.target.value) })}
+            />
+            <b>{liquidationFieldSettings.intensityGain}</b>
+          </label>
+          <select
+            aria-label="BCLIF range"
+            value={liquidationFieldSettings.rangeMode}
+            onChange={(event) => {
+              const rangeMode = event.target.value as LiquidationFieldSettings["rangeMode"];
+              patchLiquidationFieldSettings({ rangeMode, priceDisplay: bclifPriceDisplayForRangeMode(rangeMode) });
+            }}
+          >
+            <option value="AUTO">Auto</option><option value="VISIBLE">Visible</option><option value="SESSION">Session</option>
+            <option value="SWING">Swing</option><option value="MACRO">Macro</option><option value="FULL_LOADED">Full Loaded</option>
+          </select>
+          <select
+            aria-label="BCLIF thermal theme"
+            value={liquidationFieldSettings.palette === "BLACK_TERMINAL_BLOOD" ? "BLACK_TERMINAL_BLOOD" : "REFERENCE_THERMAL"}
+            onChange={(event) => patchLiquidationFieldSettings({ palette: event.target.value as LiquidationFieldSettings["palette"] })}
+          >
+            <option value="REFERENCE_THERMAL">Reference Thermal</option>
+            <option value="BLACK_TERMINAL_BLOOD">Black Terminal Blood</option>
+          </select>
+        </div>}
         <div className="chart-metrics">
           <span>{dataStatus}</span>
           <select
@@ -4316,6 +4363,8 @@ export function PixiBlackChart({
               ? "indicator-settings profile-settings oscillator-settings"
               : activeIndicator === "vwap"
                 ? "indicator-settings profile-settings vwap-settings"
+                : activeIndicator === "liquidationHeatmap"
+                  ? "indicator-settings profile-settings bclif-settings-shell"
                 : "indicator-settings"
           }
         >
@@ -4323,7 +4372,7 @@ export function PixiBlackChart({
             <span>{indicatorRows.find((indicator) => indicator.key === activeIndicator)?.label}</span>
             <button type="button" onClick={() => setActiveIndicator(null)}>DONE</button>
           </div>
-          <label>
+          {activeIndicator !== "liquidationHeatmap" && <><label>
             Visible
             <input
               type="checkbox"
@@ -4366,7 +4415,7 @@ export function PixiBlackChart({
               />
               <b>{indicatorVisualSettings[activeIndicator].intensity}</b>
             </span>
-          </label>
+          </label></>}
           {activeIndicator === "vwap" && (
             <>
               <div className="indicator-settings-section">Institutional Engine</div>
@@ -5178,6 +5227,8 @@ export function PixiBlackChart({
           {activeIndicator === "liquidationHeatmap" ? (
             <LiquidationFieldSettingsPanel
               settings={liquidationFieldSettings}
+              visible={visibleIndicators.liquidationHeatmap}
+              onVisibleChange={(visible) => onVisibleIndicatorsChange((current) => ({ ...current, liquidationHeatmap: visible }))}
               onChange={(settings) => onIndicatorAdvancedSettingsChange((current) => ({ ...current, liquidationField: settings }))}
             />
           ) : !oscillatorSettingsOpen && activeIndicator !== "vwap" ? (

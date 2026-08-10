@@ -149,13 +149,14 @@ const legacyShelfOnly = migrateLiquidationFieldSettings({
   priceDisplay: "FULL_MODEL_RANGE",
   palette: "BLACK_TERMINAL_BLOOD"
 } as never);
-assert.equal(legacyShelfOnly.schemaVersion, 11);
+assert.equal(legacyShelfOnly.schemaVersion, 12);
 assert.equal(legacyShelfOnly.preset, "REFERENCE_THERMAL");
 assert.equal(legacyShelfOnly.rendererVersion, "REFERENCE_THERMAL_V2");
 assert.equal(legacyShelfOnly.horizon, "3W");
 assert.equal(legacyShelfOnly.viewMode, "COMBINED_THERMAL");
 assert.equal(legacyShelfOnly.rawCohortShelvesVisible, false);
-assert.equal(legacyShelfOnly.priceDisplay, "CHART_SCALE");
+assert.equal(legacyShelfOnly.rangeMode, "AUTO");
+assert.equal(legacyShelfOnly.priceDisplay, "AUTO_FOCUS");
 assert.equal(legacyShelfOnly.palette, "REFERENCE_THERMAL");
 
 const explicitV8ShelfOverlay = migrateLiquidationFieldSettings({
@@ -163,7 +164,7 @@ const explicitV8ShelfOverlay = migrateLiquidationFieldSettings({
   schemaVersion: 8,
   rawCohortShelvesVisible: true
 });
-assert.equal(explicitV8ShelfOverlay.schemaVersion, 11);
+assert.equal(explicitV8ShelfOverlay.schemaVersion, 12);
 assert.equal(explicitV8ShelfOverlay.rawCohortShelvesVisible, false, "pre-V10 reference workspaces migrate to the clean scalar presentation");
 assert.equal(explicitV8ShelfOverlay.opacity, 96);
 assert.equal(explicitV8ShelfOverlay.backgroundFloor, 15);
@@ -188,7 +189,7 @@ const emergencyV10 = migrateLiquidationFieldSettings({
   cohortBirthMarkersVisible: true,
   rawCohortShelvesVisible: true
 } as never);
-assert.equal(emergencyV10.schemaVersion, 11);
+assert.equal(emergencyV10.schemaVersion, 12);
 assert.equal(emergencyV10.viewMode, "COMBINED_THERMAL");
 assert.equal(emergencyV10.compactBadgeVisible, true);
 assert.equal(emergencyV10.eventNodesVisible, false);

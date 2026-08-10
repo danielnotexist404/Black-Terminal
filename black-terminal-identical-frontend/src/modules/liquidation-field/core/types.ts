@@ -67,6 +67,8 @@ export type BclifPriceDisplay =
   | "AUTO_FOCUS"
   | "FULL_MODEL_RANGE"
   | "CUSTOM";
+export type BclifRangeMode = "AUTO" | "VISIBLE" | "SESSION" | "SWING" | "MACRO" | "FULL_LOADED";
+export type BclifNoiseSuppression = "LOW" | "MEDIUM" | "HIGH";
 export type BclifVisualChannel = "HISTORICAL_CONTEXT" | "LIVE_CALIBRATED" | "COMBINED";
 export type BclifThermalNormalization =
   | "GLOBAL_MODEL"
@@ -187,7 +189,7 @@ export interface BclifRawCohortShelf {
 }
 
 export interface LiquidationFieldSettings {
-  schemaVersion: 11;
+  schemaVersion: 12;
   rendererVersion: BclifRendererVersion;
   authoritySemantics: BclifAuthoritySemantics;
   preset: BclifPresentationPreset;
@@ -237,6 +239,14 @@ export interface LiquidationFieldSettings {
   timeColumns: number;
   liveUpdateCadenceMs: number;
   visualFixture: boolean;
+  /** Product-facing contextual range. This changes projection, never exposure. */
+  rangeMode: BclifRangeMode;
+  /** Display-only causal clarity compression strength. */
+  noiseSuppression: BclifNoiseSuppression;
+  /** Uniform presentation floor; it never represents modeled exposure. */
+  showBackgroundField: boolean;
+  /** Display-only secondary-shelf suppression. */
+  strongShelvesOnly: boolean;
   priceDisplay: BclifPriceDisplay;
   customPriceMinimum: number;
   customPriceMaximum: number;

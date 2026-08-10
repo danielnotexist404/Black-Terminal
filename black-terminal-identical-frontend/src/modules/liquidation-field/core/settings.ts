@@ -1,6 +1,12 @@
-import type { BclifPresentationPreset, LiquidationFieldHorizon, LiquidationFieldSettings } from "./types.ts";
+import type {
+  BclifPresentationPreset,
+  BclifPriceDisplay,
+  BclifRangeMode,
+  LiquidationFieldHorizon,
+  LiquidationFieldSettings
+} from "./types.ts";
 
-export const LIQUIDATION_FIELD_SETTINGS_VERSION = 11 as const;
+export const LIQUIDATION_FIELD_SETTINGS_VERSION = 12 as const;
 export const BCLIF_MAX_REQUEST_HOURS = 90 * 24;
 export const BCLIF_BROWSER_OI_INTERVAL = "5min" as const;
 
@@ -13,7 +19,7 @@ export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   horizon: "3W",
   customHours: 72,
   venue: "BYBIT",
-  modelPreset: "REGIME_ADAPTIVE",
+  modelPreset: "BALANCED",
   scale: "LOG_NOTIONAL",
   palette: "REFERENCE_THERMAL",
   opacity: 96,
@@ -49,7 +55,11 @@ export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   timeColumns: 512,
   liveUpdateCadenceMs: 2_000,
   visualFixture: false,
-  priceDisplay: "CHART_SCALE",
+  rangeMode: "AUTO",
+  noiseSuppression: "MEDIUM",
+  showBackgroundField: true,
+  strongShelvesOnly: false,
+  priceDisplay: "AUTO_FOCUS",
   customPriceMinimum: 50_000,
   customPriceMaximum: 80_000,
   autoFocusMarginPercent: 3,
@@ -89,6 +99,25 @@ export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
 };
 
 const horizons = new Set<LiquidationFieldHorizon>(["6H", "12H", "1D", "3D", "1W", "3W", "1M", "CUSTOM"]);
+const rangeModes = new Set<BclifRangeMode>(["AUTO", "VISIBLE", "SESSION", "SWING", "MACRO", "FULL_LOADED"]);
+
+export function bclifPriceDisplayForRangeMode(mode: BclifRangeMode): BclifPriceDisplay {
+  if (mode === "VISIBLE") return "CHART_SCALE";
+  if (mode === "SESSION") return "CURRENT_PRICE_5";
+  if (mode === "SWING") return "CURRENT_PRICE_10";
+  if (mode === "MACRO") return "CURRENT_PRICE_40";
+  if (mode === "FULL_LOADED") return "FULL_MODEL_RANGE";
+  return "AUTO_FOCUS";
+}
+
+export function bclifRangeModeForPriceDisplay(display: BclifPriceDisplay): BclifRangeMode {
+  if (display === "CHART_SCALE") return "VISIBLE";
+  if (display === "CURRENT_PRICE_5") return "SESSION";
+  if (display === "CURRENT_PRICE_10" || display === "CURRENT_PRICE_20") return "SWING";
+  if (display === "CURRENT_PRICE_40") return "MACRO";
+  if (display === "FULL_MODEL_RANGE") return "FULL_LOADED";
+  return "AUTO";
+}
 
 function clamp(value: unknown, fallback: number, minimum: number, maximum: number) {
   const numeric = Number(value);
@@ -103,6 +132,12 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
   }) | null | undefined;
   const merged = { ...DEFAULT_LIQUIDATION_FIELD_SETTINGS, ...(legacy ?? {}) } as LiquidationFieldSettings;
   const legacySchemaVersion = Number(legacy?.schemaVersion ?? 0);
+  const suppliedRangeMode = legacy?.rangeMode as BclifRangeMode | undefined;
+  const upgradedRangeMode = suppliedRangeMode && rangeModes.has(suppliedRangeMode)
+    ? suppliedRangeMode
+    : legacySchemaVersion < 12
+      ? bclifRangeModeForPriceDisplay(legacy?.priceDisplay ?? merged.priceDisplay)
+      : DEFAULT_LIQUIDATION_FIELD_SETTINGS.rangeMode;
   // Before renderer V8 the diagnostic shelf switch was an exclusive mode: it
   // hid the thermal texture entirely. Some restored workspaces therefore open
   // as a couple of red/white shelf strokes with no heatmap. Recover only that
@@ -122,6 +157,11 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
   return {
     ...merged,
     schemaVersion: LIQUIDATION_FIELD_SETTINGS_VERSION,
+    rangeMode: upgradedRangeMode,
+    noiseSuppression: merged.noiseSuppression === "LOW" || merged.noiseSuppression === "HIGH"
+      ? merged.noiseSuppression : "MEDIUM",
+    showBackgroundField: merged.showBackgroundField !== false,
+    strongShelvesOnly: Boolean(merged.strongShelvesOnly),
     horizon: recoverLegacyShelfOnlyPresentation
       ? DEFAULT_LIQUIDATION_FIELD_SETTINGS.horizon
       : horizons.has(merged.horizon) ? merged.horizon : DEFAULT_LIQUIDATION_FIELD_SETTINGS.horizon,
@@ -213,7 +253,11 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     collectionStartMarkerVisible: emergencyVisibilityUpgrade || upgradeReferenceThermalPresentation ? false : Boolean(merged.collectionStartMarkerVisible),
     cohortBirthMarkersVisible: emergencyVisibilityUpgrade || upgradeReferenceThermalPresentation ? false : Boolean(merged.cohortBirthMarkersVisible),
     focusBand: upgradeReferenceThermalPresentation ? "OFF" : merged.focusBand,
-    priceDisplay: recoverLegacyShelfOnlyPresentation ? "CHART_SCALE" : merged.priceDisplay,
+    priceDisplay: recoverLegacyShelfOnlyPresentation
+      ? "AUTO_FOCUS"
+      : legacySchemaVersion < 12
+        ? bclifPriceDisplayForRangeMode(upgradedRangeMode)
+        : bclifPriceDisplayForRangeMode(upgradedRangeMode),
     palette: recoverLegacyShelfOnlyPresentation ? "REFERENCE_THERMAL" : merged.palette
   };
 }
@@ -229,7 +273,7 @@ export function applyBclifPresentationPreset(
   };
   if (preset === "REFERENCE_THERMAL") return migrateLiquidationFieldSettings({
     ...common, rendererVersion: "REFERENCE_THERMAL_V2", authoritySemantics: "RELATIVE_MODELED_EXPOSURE",
-    viewMode: "COMBINED_THERMAL", priceDisplay: "CHART_SCALE", scale: "LOG_NOTIONAL", palette: "REFERENCE_THERMAL",
+    viewMode: "COMBINED_THERMAL", rangeMode: "AUTO", priceDisplay: "AUTO_FOCUS", scale: "LOG_NOTIONAL", palette: "REFERENCE_THERMAL",
     thermalNormalization: "GLOBAL_MODEL", opacity: 96, intensityGain: 100, thermalContrast: 100,
     gamma: 0.85, lowQuantile: 0.05, highQuantile: 0.9986,
     contextVisibilityFloor: 0, strictHideBelowEnabled: false, backgroundFloor: 15, plasmaBackgroundOpacity: 0,
@@ -243,7 +287,7 @@ export function applyBclifPresentationPreset(
   });
   if (preset === "VERIFIED_AUTHORITY") return migrateLiquidationFieldSettings({
     ...common, rendererVersion: "REFERENCE_THERMAL_V2", authoritySemantics: "VERIFIED_AUTHORITY",
-    viewMode: "COMBINED_THERMAL", priceDisplay: "CHART_SCALE", scale: "LOG_NOTIONAL", palette: "REFERENCE_THERMAL",
+    viewMode: "COMBINED_THERMAL", rangeMode: "AUTO", priceDisplay: "AUTO_FOCUS", scale: "LOG_NOTIONAL", palette: "REFERENCE_THERMAL",
     thermalNormalization: "GLOBAL_MODEL", opacity: 96, gamma: 0.85, lowQuantile: 0.05, highQuantile: 0.9986,
     contextVisibilityFloor: 0, strictHideBelowEnabled: false, highAuthorityColorFloor: 75,
     confidenceWeightEnabled: false, requireMultipleEvidenceChannels: true, diagnosticsVisible: false,
@@ -253,7 +297,7 @@ export function applyBclifPresentationPreset(
   });
   if (preset === "RESEARCH_DIAGNOSTICS") return migrateLiquidationFieldSettings({
     ...common, rendererVersion: "REFERENCE_THERMAL_V2", authoritySemantics: "RELATIVE_MODELED_EXPOSURE",
-    viewMode: "RAW_EXPOSURE", priceDisplay: "FULL_MODEL_RANGE", palette: "INSTITUTIONAL_MONOCHROME",
+    viewMode: "RAW_EXPOSURE", rangeMode: "FULL_LOADED", priceDisplay: "FULL_MODEL_RANGE", palette: "INSTITUTIONAL_MONOCHROME",
     thermalNormalization: "GLOBAL_MODEL", opacity: 100, gamma: 1, lowQuantile: 0, highQuantile: 1,
     contextVisibilityFloor: 0, strictHideBelowEnabled: false, smoothing: "SHARP", diagnosticsVisible: true,
     legendVisible: true, operationalSummaryVisible: false, maximumClusterLabels: 0, confirmedMarkersVisible: false,
@@ -261,7 +305,7 @@ export function applyBclifPresentationPreset(
     cohortBirthMarkersVisible: false, rawCohortShelvesVisible: false, focusBand: "OFF", candleContrast: "HIGH"
   });
   if (preset === "TRADE_FOCUS") return migrateLiquidationFieldSettings({
-    ...common, priceDisplay: "CHART_SCALE", contextVisibilityFloor: 25, clusterLabelFloor: 60,
+    ...common, rangeMode: "VISIBLE", priceDisplay: "CHART_SCALE", contextVisibilityFloor: 25, clusterLabelFloor: 60,
     highAuthorityColorFloor: 75, strictHideBelowEnabled: false, palette: "REFERENCE_THERMAL",
     thermalNormalization: "HYBRID", opacity: 100, gamma: 0.9, lowQuantile: 0.55, highQuantile: 0.997,
     sharpness: 74, backgroundFloor: 18, plasmaBackgroundOpacity: 94, shelfContrast: 88,
@@ -271,20 +315,20 @@ export function applyBclifPresentationPreset(
     operationalSummaryVisible: false, candleContrast: "HIGH"
   });
   if (preset === "HIGH_CONFIDENCE") return migrateLiquidationFieldSettings({
-    ...common, priceDisplay: "CHART_SCALE", contextVisibilityFloor: 25, clusterLabelFloor: 75,
+    ...common, rangeMode: "VISIBLE", priceDisplay: "CHART_SCALE", contextVisibilityFloor: 25, clusterLabelFloor: 75,
     highAuthorityColorFloor: 85, strictHideBelowEnabled: false, opacity: 52, gamma: 1.65,
     visualChannel: "COMBINED", historicalContextOpacity: 8, liveCalibratedOpacity: 95,
     requireMultipleEvidenceChannels: true, maximumClusterLabels: 6, operationalSummaryVisible: false,
     diagnosticsVisible: false, candleContrast: "MAXIMUM"
   });
   if (preset === "LIVE_CALIBRATED") return migrateLiquidationFieldSettings({
-    ...common, priceDisplay: "CHART_SCALE", contextVisibilityFloor: 25, clusterLabelFloor: 60,
+    ...common, rangeMode: "VISIBLE", priceDisplay: "CHART_SCALE", contextVisibilityFloor: 25, clusterLabelFloor: 60,
     highAuthorityColorFloor: 75, strictHideBelowEnabled: false, opacity: 58,
     visualChannel: "LIVE_CALIBRATED", historicalContextOpacity: 14, liveCalibratedOpacity: 100,
     requireMultipleEvidenceChannels: true, collectionStartMarkerVisible: true, maximumClusterLabels: 4
   });
   if (preset === "FULL_SPECTRUM_RESEARCH") return migrateLiquidationFieldSettings({
-    ...common, priceDisplay: "FULL_MODEL_RANGE", contextVisibilityFloor: 0, clusterLabelFloor: 0,
+    ...common, rangeMode: "FULL_LOADED", priceDisplay: "FULL_MODEL_RANGE", contextVisibilityFloor: 0, clusterLabelFloor: 0,
     highAuthorityColorFloor: 75, strictHideBelowEnabled: false, opacity: 75,
     thermalNormalization: "VISIBLE_FOCUS", gamma: 1.25, backgroundFloor: 3,
     visualChannel: "COMBINED", historicalContextOpacity: 58, liveCalibratedOpacity: 92,
@@ -292,7 +336,7 @@ export function applyBclifPresentationPreset(
     candleContrast: "HIGH"
   });
   return migrateLiquidationFieldSettings({
-    ...common, priceDisplay: "FULL_MODEL_RANGE", contextVisibilityFloor: 0, clusterLabelFloor: 0,
+    ...common, rangeMode: "FULL_LOADED", priceDisplay: "FULL_MODEL_RANGE", contextVisibilityFloor: 0, clusterLabelFloor: 0,
     highAuthorityColorFloor: 75, strictHideBelowEnabled: false, opacity: 72,
     thermalNormalization: "GLOBAL_MODEL", visualChannel: "COMBINED", historicalContextOpacity: 100,
     liveCalibratedOpacity: 100, confidenceWeightEnabled: false, requireMultipleEvidenceChannels: false,

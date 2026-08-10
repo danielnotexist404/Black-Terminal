@@ -1,6 +1,6 @@
 import type { BclifPresentationPreset, LiquidationFieldHorizon, LiquidationFieldSettings } from "./types.ts";
 
-export const LIQUIDATION_FIELD_SETTINGS_VERSION = 10 as const;
+export const LIQUIDATION_FIELD_SETTINGS_VERSION = 11 as const;
 export const BCLIF_MAX_REQUEST_HOURS = 90 * 24;
 export const BCLIF_BROWSER_OI_INTERVAL = "5min" as const;
 
@@ -17,6 +17,8 @@ export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   scale: "LOG_NOTIONAL",
   palette: "REFERENCE_THERMAL",
   opacity: 96,
+  intensityGain: 100,
+  thermalContrast: 100,
   gamma: 0.85,
   lowQuantile: 0.05,
   highQuantile: 0.9986,
@@ -26,6 +28,9 @@ export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   sharpness: 74,
   candlePalette: "BLACK_TERMINAL_HIGH_CONTRAST",
   legendVisible: false,
+  compactBadgeVisible: true,
+  eventNodesVisible: false,
+  shelfLabelsVisible: false,
   diagnosticsVisible: false,
   confirmedMarkersVisible: false,
   cascadePathsVisible: false,
@@ -105,7 +110,9 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
   // parameters and unrelated workspace settings remain untouched.
   const recoverLegacyShelfOnlyPresentation = legacySchemaVersion < 8
     && Boolean(legacy?.rawCohortShelvesVisible);
-  const upgradeReferenceThermalPresentation = legacySchemaVersion < 10
+  const emergencyVisibilityUpgrade = legacySchemaVersion < 11
+    && merged.rendererVersion === "REFERENCE_THERMAL_V2";
+  const upgradeReferenceThermalPresentation = legacySchemaVersion < 11
     && (recoverLegacyShelfOnlyPresentation || merged.palette === "REFERENCE_THERMAL");
   const vivid = <T>(current: T, upgraded: T) => upgradeReferenceThermalPresentation ? upgraded : current;
 
@@ -121,12 +128,14 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     rendererVersion: upgradeReferenceThermalPresentation ? "REFERENCE_THERMAL_V2" : merged.rendererVersion,
     authoritySemantics: upgradeReferenceThermalPresentation ? "RELATIVE_MODELED_EXPOSURE" : merged.authoritySemantics,
     preset: upgradeReferenceThermalPresentation ? "REFERENCE_THERMAL" : merged.preset,
-    viewMode: recoverLegacyShelfOnlyPresentation ? "COMBINED_THERMAL" : merged.viewMode,
+    viewMode: recoverLegacyShelfOnlyPresentation || emergencyVisibilityUpgrade ? "COMBINED_THERMAL" : merged.viewMode,
     // The protected manifest API accepts one bounded window of at most 90 days.
     // Keep persisted settings inside that contract instead of allowing a value
     // that can only produce a permanent HTTP 400 response.
     customHours: clamp(merged.customHours, 72, 1, BCLIF_MAX_REQUEST_HOURS),
     opacity: clamp(vivid(merged.opacity, 96), 96, 10, 100),
+    intensityGain: clamp(vivid(merged.intensityGain, 100), 100, 50, 300),
+    thermalContrast: clamp(vivid(merged.thermalContrast, 100), 100, 50, 250),
     gamma: clamp(vivid(merged.gamma, 0.85), 0.85, 0.35, 2.5),
     lowQuantile: clamp(vivid(merged.lowQuantile, 0.05), 0.05, 0, 0.95),
     highQuantile: Math.max(
@@ -153,11 +162,14 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     historicalContextEnabled: merged.historicalContextEnabled !== false,
     liveCalibratedEnabled: merged.liveCalibratedEnabled !== false,
     minimumNotionalUsd: clamp(merged.minimumNotionalUsd, 0, 0, 100_000_000_000),
-    legendVisible: legacySchemaVersion < 7 || recoverLegacyShelfOnlyPresentation
+    legendVisible: emergencyVisibilityUpgrade || legacySchemaVersion < 7 || recoverLegacyShelfOnlyPresentation
       ? false : Boolean(merged.legendVisible),
-    diagnosticsVisible: legacySchemaVersion < 7 || recoverLegacyShelfOnlyPresentation
+    compactBadgeVisible: emergencyVisibilityUpgrade ? true : merged.compactBadgeVisible !== false,
+    eventNodesVisible: emergencyVisibilityUpgrade ? false : Boolean(merged.eventNodesVisible),
+    shelfLabelsVisible: emergencyVisibilityUpgrade ? false : Boolean(merged.shelfLabelsVisible),
+    diagnosticsVisible: emergencyVisibilityUpgrade || legacySchemaVersion < 7 || recoverLegacyShelfOnlyPresentation
       ? false : Boolean(merged.diagnosticsVisible),
-    operationalSummaryVisible: legacySchemaVersion < 7 || recoverLegacyShelfOnlyPresentation
+    operationalSummaryVisible: emergencyVisibilityUpgrade || legacySchemaVersion < 7 || recoverLegacyShelfOnlyPresentation
       ? false : Boolean(merged.operationalSummaryVisible),
     leverageMinimum: clamp(merged.leverageMinimum, 2, 1, 125),
     leverageMaximum: Math.max(
@@ -182,7 +194,7 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
       ? false : Boolean(merged.requireMultipleEvidenceChannels),
     adaptiveResolution: upgradeReferenceThermalPresentation ? "AUTO" : merged.adaptiveResolution,
     customFocusBandPercent: clamp(merged.customFocusBandPercent, 5, 0.25, 50),
-    maximumClusterLabels: Math.round(clamp(upgradeReferenceThermalPresentation ? 0 : merged.maximumClusterLabels, 0, 0, 6)),
+    maximumClusterLabels: Math.round(clamp(emergencyVisibilityUpgrade || upgradeReferenceThermalPresentation ? 0 : merged.maximumClusterLabels, 0, 0, 6)),
     oiNoiseAbsoluteNotionalUsd: clamp(merged.oiNoiseAbsoluteNotionalUsd, 100_000, 0, 100_000_000),
     oiNoisePercent: clamp(merged.oiNoisePercent, 0.000075, 0, 0.1),
     oiNoiseMadMultiplier: clamp(merged.oiNoiseMadMultiplier, 3.5, 0, 20),
@@ -195,11 +207,11 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     oiEventHysteresisIntervals: Math.round(clamp(merged.oiEventHysteresisIntervals, 2, 1, 12)),
     rawCohortShelvesVisible: upgradeReferenceThermalPresentation
       ? false : Boolean(merged.rawCohortShelvesVisible),
-    confirmedMarkersVisible: upgradeReferenceThermalPresentation ? false : Boolean(merged.confirmedMarkersVisible),
-    cascadePathsVisible: upgradeReferenceThermalPresentation ? false : Boolean(merged.cascadePathsVisible),
-    uncertaintyEnvelopesVisible: upgradeReferenceThermalPresentation ? false : Boolean(merged.uncertaintyEnvelopesVisible),
-    collectionStartMarkerVisible: upgradeReferenceThermalPresentation ? false : Boolean(merged.collectionStartMarkerVisible),
-    cohortBirthMarkersVisible: upgradeReferenceThermalPresentation ? false : Boolean(merged.cohortBirthMarkersVisible),
+    confirmedMarkersVisible: emergencyVisibilityUpgrade || upgradeReferenceThermalPresentation ? false : Boolean(merged.confirmedMarkersVisible),
+    cascadePathsVisible: emergencyVisibilityUpgrade || upgradeReferenceThermalPresentation ? false : Boolean(merged.cascadePathsVisible),
+    uncertaintyEnvelopesVisible: emergencyVisibilityUpgrade || upgradeReferenceThermalPresentation ? false : Boolean(merged.uncertaintyEnvelopesVisible),
+    collectionStartMarkerVisible: emergencyVisibilityUpgrade || upgradeReferenceThermalPresentation ? false : Boolean(merged.collectionStartMarkerVisible),
+    cohortBirthMarkersVisible: emergencyVisibilityUpgrade || upgradeReferenceThermalPresentation ? false : Boolean(merged.cohortBirthMarkersVisible),
     focusBand: upgradeReferenceThermalPresentation ? "OFF" : merged.focusBand,
     priceDisplay: recoverLegacyShelfOnlyPresentation ? "CHART_SCALE" : merged.priceDisplay,
     palette: recoverLegacyShelfOnlyPresentation ? "REFERENCE_THERMAL" : merged.palette
@@ -218,11 +230,13 @@ export function applyBclifPresentationPreset(
   if (preset === "REFERENCE_THERMAL") return migrateLiquidationFieldSettings({
     ...common, rendererVersion: "REFERENCE_THERMAL_V2", authoritySemantics: "RELATIVE_MODELED_EXPOSURE",
     viewMode: "COMBINED_THERMAL", priceDisplay: "CHART_SCALE", scale: "LOG_NOTIONAL", palette: "REFERENCE_THERMAL",
-    thermalNormalization: "GLOBAL_MODEL", opacity: 96, gamma: 0.85, lowQuantile: 0.05, highQuantile: 0.9986,
+    thermalNormalization: "GLOBAL_MODEL", opacity: 96, intensityGain: 100, thermalContrast: 100,
+    gamma: 0.85, lowQuantile: 0.05, highQuantile: 0.9986,
     contextVisibilityFloor: 0, strictHideBelowEnabled: false, backgroundFloor: 15, plasmaBackgroundOpacity: 0,
     visualChannel: "COMBINED", historicalContextOpacity: 100, liveCalibratedOpacity: 100,
     confidenceWeightEnabled: false, requireMultipleEvidenceChannels: false, smoothing: "BALANCED",
-    diagnosticsVisible: false, legendVisible: false, operationalSummaryVisible: false, maximumClusterLabels: 0,
+    diagnosticsVisible: false, legendVisible: false, compactBadgeVisible: true, eventNodesVisible: false,
+    shelfLabelsVisible: false, operationalSummaryVisible: false, maximumClusterLabels: 0,
     confirmedMarkersVisible: false, cascadePathsVisible: false, uncertaintyEnvelopesVisible: false,
     collectionStartMarkerVisible: false, cohortBirthMarkersVisible: false, rawCohortShelvesVisible: false,
     focusBand: "OFF", candleContrast: "HIGH", adaptiveResolution: "AUTO"

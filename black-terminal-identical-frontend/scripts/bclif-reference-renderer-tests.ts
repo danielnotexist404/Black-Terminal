@@ -14,6 +14,7 @@ import {
   buildBclifDisplayProjection
 } from "../src/modules/liquidation-field/rendering/displayProjection.ts";
 import { measureBclifReferenceThermalField } from "../src/modules/liquidation-field/rendering/referenceThermalMetrics.ts";
+import { buildBclifSafeThermalRaster } from "../src/modules/liquidation-field/rendering/safeThermalRaster.ts";
 import {
   REFERENCE_THERMAL_CALIBRATION_SHA256,
   createThermalPalette
@@ -92,6 +93,17 @@ const projection = buildBclifDisplayProjection(snapshot, DEFAULT_LIQUIDATION_FIE
 assert.ok(projection);
 assert.equal(projection!.rgba, undefined, "V2 must not allocate a pre-colored RGBA field");
 assert.equal(bclifUint8ToHalf(projection!.intensity).length, projection!.intensity.length);
+const safeRaster = buildBclifSafeThermalRaster(projection!, DEFAULT_LIQUIDATION_FIELD_SETTINGS);
+assert.equal(safeRaster.rgba.length, projection!.rows * projection!.columns * 4);
+assert.equal(safeRaster.metrics.finalVisiblePixels, projection!.validCells);
+assert.ok(safeRaster.metrics.exposureVisiblePixels > 0);
+assert.ok(safeRaster.metrics.minimumAlpha >= 46);
+assert.ok(safeRaster.metrics.maximumAlpha > 0);
+assert.equal(
+  projection!.rawNonZeroCells > 0 && safeRaster.metrics.exposureVisiblePixels === 0,
+  false,
+  "raw model exposure must reach at least one visible final thermal pixel"
+);
 
 const confidenceChanged = {
   ...snapshot,
@@ -103,6 +115,12 @@ assert.deepEqual(
   lowConfidenceProjection!.intensity,
   projection!.intensity,
   "confidence must not modify Reference Relative exposure magnitude"
+);
+const lowConfidenceSafeRaster = buildBclifSafeThermalRaster(lowConfidenceProjection!, DEFAULT_LIQUIDATION_FIELD_SETTINGS);
+assert.equal(
+  lowConfidenceSafeRaster.metrics.exposureVisiblePixels,
+  safeRaster.metrics.exposureVisiblePixels,
+  "confidence may change authority color eligibility but cannot suppress modeled exposure pixels"
 );
 
 const rawAudit = analyzeBclifRawField(snapshot);
@@ -121,8 +139,15 @@ assert.match(rendererSource, /"r8unorm"/);
 assert.match(rendererSource, /uPaletteTexture/);
 assert.match(rendererSource, /blendMode = "normal"/);
 assert.doesNotMatch(rendererSource, /multiply|DST_COLOR/i);
-assert.match(rendererSource, /max\(0\.82, uOpacity/);
+assert.match(rendererSource, /max\(0\.18, uOpacity/);
 assert.match(rendererSource, /0\.5 \/ 255/);
+const controllerSource = readFileSync(new URL(
+  "../src/modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer.ts",
+  import.meta.url
+), "utf8");
+assert.match(controllerSource, /BCLIF_RENDER_VISIBILITY_FAILURE/);
+assert.match(controllerSource, /safeCompositingPlane/);
+assert.match(controllerSource, /__BCLIF_RENDER_TRUTH__/);
 
 console.log(JSON.stringify({
   decision: "PASS",

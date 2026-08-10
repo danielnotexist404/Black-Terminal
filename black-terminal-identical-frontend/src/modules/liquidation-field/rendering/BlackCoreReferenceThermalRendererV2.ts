@@ -90,7 +90,7 @@ const FRAGMENT = [
   "void main(void) {",
   "  vec2 uv = fieldUv(vUV);",
   "  float valid = validAt(uv);",
-  "  if (uViewMode > 1.5) {",
+  "  if (uViewMode > 1.5 && uViewMode < 2.5) {",
   "    vec3 diagnostic = vec3(valid);",
   "    finalColor = vec4(diagnostic, 1.0);",
   "    return;",
@@ -100,13 +100,22 @@ const FRAGMENT = [
   "    return;",
   "  }",
   "  float scalar = filteredExposure(uv);",
-  "  if (uViewMode > 0.5) {",
+  "  if (uViewMode > 0.5 && uViewMode < 1.5) {",
   "    finalColor = vec4(vec3(scalar), 1.0);",
   "    return;",
   "  }",
   "  float confidence = texture(uConfidenceTexture, uv).r;",
   "  float visible = texture(uVisibilityTexture, uv).r;",
   "  float yellowEligible = texture(uYellowTexture, uv).r;",
+  "  if (uViewMode > 2.5 && uViewMode < 3.5) {",
+  "    finalColor = vec4(vec3(confidence), 1.0);",
+  "    return;",
+  "  }",
+  "  if (uViewMode > 3.5 && uViewMode < 4.5) {",
+  "    finalColor = vec4(vec3(visible), 1.0);",
+  "    return;",
+  "  }",
+  "  if (uViewMode > 4.5 && scalar < 0.63) scalar = uPurpleFloor * 0.35;",
   "  if (uAuthorityMode > 0.5 && yellowEligible < 0.5) scalar = min(scalar, 0.94);",
   "  scalar = max(scalar, uPurpleFloor);",
   "  scalar = clamp(scalar + dither(gl_FragCoord.xy) * uDitherStrength, 0.0, 1.0);",
@@ -116,7 +125,7 @@ const FRAGMENT = [
   "    float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));",
   "    color = mix(vec3(luminance), color, 0.38 + 0.62 * saturationAuthority);",
   "  }",
-  "  float alpha = visible * max(0.82, uOpacity * (0.82 + 0.18 * pow(confidence, 0.7)));",
+  "  float alpha = visible * max(0.18, uOpacity * (0.82 + 0.18 * pow(confidence, 0.7)));",
   "  finalColor = vec4(color * alpha, alpha);",
   "}"
 ].join("\n");
@@ -217,7 +226,7 @@ export class BlackCoreReferenceThermalRendererV2 {
       uMissingColor: { value: new Float32Array([5 / 255, 2 / 255, 11 / 255]), type: "vec3<f32>" },
       uOpacity: { value: settings.opacity / 100, type: "f32" },
       uAuthorityMode: { value: settings.authoritySemantics === "VERIFIED_AUTHORITY" ? 1 : 0, type: "f32" },
-      uViewMode: { value: settings.viewMode === "RAW_EXPOSURE" ? 1 : settings.viewMode === "VALIDITY_MASK" ? 2 : 0, type: "f32" },
+      uViewMode: { value: referenceViewMode(settings), type: "f32" },
       uPriceSmoothing: { value: smoothingWeight(settings.priceSigmaRows, 0.9), type: "f32" },
       uTimeSmoothing: { value: smoothingWeight(settings.timeSigmaColumns, 0.65), type: "f32" },
       uPurpleFloor: { value: settings.backgroundFloor / 255, type: "f32" },
@@ -249,7 +258,7 @@ export class BlackCoreReferenceThermalRendererV2 {
     });
     geometry.batchMode = "no-batch";
     this.mesh = new Mesh({ geometry, shader: this.shader });
-    this.mesh.zIndex = 0;
+    this.mesh.zIndex = -10;
     this.mesh.blendMode = "normal";
   }
 
@@ -271,7 +280,7 @@ export class BlackCoreReferenceThermalRendererV2 {
     if (!this.uniforms) return;
     this.uniforms.uniforms.uOpacity = settings.opacity / 100;
     this.uniforms.uniforms.uAuthorityMode = settings.authoritySemantics === "VERIFIED_AUTHORITY" ? 1 : 0;
-    this.uniforms.uniforms.uViewMode = settings.viewMode === "RAW_EXPOSURE" ? 1 : settings.viewMode === "VALIDITY_MASK" ? 2 : 0;
+    this.uniforms.uniforms.uViewMode = referenceViewMode(settings);
     this.uniforms.uniforms.uPriceSmoothing = smoothingWeight(settings.priceSigmaRows, 0.9);
     this.uniforms.uniforms.uTimeSmoothing = smoothingWeight(settings.timeSigmaColumns, 0.65);
     this.uniforms.uniforms.uPurpleFloor = settings.backgroundFloor / 255;
@@ -325,4 +334,13 @@ function paletteSource(resource: Uint8Array) {
 
 function smoothingWeight(value: number, maximum: number) {
   return Math.max(0, Math.min(maximum, value / 1.5));
+}
+
+function referenceViewMode(settings: LiquidationFieldSettings) {
+  if (settings.viewMode === "RAW_EXPOSURE") return 1;
+  if (settings.viewMode === "VALIDITY_MASK") return 2;
+  if (settings.viewMode === "CONFIDENCE_FIELD") return 3;
+  if (settings.viewMode === "ALPHA_OUTPUT") return 4;
+  if (settings.viewMode === "SHELF_LINES_ONLY") return 5;
+  return 0;
 }

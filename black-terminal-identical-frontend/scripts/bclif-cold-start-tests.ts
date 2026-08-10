@@ -27,6 +27,11 @@ import {
 } from "../src/modules/liquidation-field/data/BclifBrowserCheckpoint.ts";
 import { BclifSingleFlightBuildGate } from "../src/modules/liquidation-field/data/BrowserLiquidationFieldFallback.ts";
 
+const controllerSource = readFileSync(new URL("../src/modules/liquidation-field/data/LiquidationFieldController.ts", import.meta.url), "utf8");
+assert.match(controllerSource, /isBclifLiveBrowserFallbackProbeEnabled\(\)/);
+assert.match(controllerSource, /resolved\.hostname === "localhost"[\s\S]*resolved\.hostname === "127\.0\.0\.1"[\s\S]*resolved\.hostname === "::1"/);
+assert.match(controllerSource, /get\("bclifLiveProbe"\) === "1"/);
+
 const fixture = createLiquidationFieldFixture();
 const settings = migrateLiquidationFieldSettings(DEFAULT_LIQUIDATION_FIELD_SETTINGS);
 const base = buildLiquidationFieldSnapshot(
@@ -144,7 +149,7 @@ const legacyShelfOnly = migrateLiquidationFieldSettings({
   priceDisplay: "FULL_MODEL_RANGE",
   palette: "BLACK_TERMINAL_BLOOD"
 } as never);
-assert.equal(legacyShelfOnly.schemaVersion, 10);
+assert.equal(legacyShelfOnly.schemaVersion, 11);
 assert.equal(legacyShelfOnly.preset, "REFERENCE_THERMAL");
 assert.equal(legacyShelfOnly.rendererVersion, "REFERENCE_THERMAL_V2");
 assert.equal(legacyShelfOnly.horizon, "3W");
@@ -158,7 +163,7 @@ const explicitV8ShelfOverlay = migrateLiquidationFieldSettings({
   schemaVersion: 8,
   rawCohortShelvesVisible: true
 });
-assert.equal(explicitV8ShelfOverlay.schemaVersion, 10);
+assert.equal(explicitV8ShelfOverlay.schemaVersion, 11);
 assert.equal(explicitV8ShelfOverlay.rawCohortShelvesVisible, false, "pre-V10 reference workspaces migrate to the clean scalar presentation");
 assert.equal(explicitV8ShelfOverlay.opacity, 96);
 assert.equal(explicitV8ShelfOverlay.backgroundFloor, 15);
@@ -169,6 +174,32 @@ assert.equal(
   false,
   "returning to an operational preset must remove the optional diagnostic shelf overlay"
 );
+
+const emergencyV10 = migrateLiquidationFieldSettings({
+  ...settings,
+  schemaVersion: 10,
+  rendererVersion: "REFERENCE_THERMAL_V2",
+  viewMode: "SHELF_LINES_ONLY",
+  diagnosticsVisible: true,
+  operationalSummaryVisible: true,
+  legendVisible: true,
+  maximumClusterLabels: 6,
+  confirmedMarkersVisible: true,
+  cohortBirthMarkersVisible: true,
+  rawCohortShelvesVisible: true
+} as never);
+assert.equal(emergencyV10.schemaVersion, 11);
+assert.equal(emergencyV10.viewMode, "COMBINED_THERMAL");
+assert.equal(emergencyV10.compactBadgeVisible, true);
+assert.equal(emergencyV10.eventNodesVisible, false);
+assert.equal(emergencyV10.shelfLabelsVisible, false);
+assert.equal(emergencyV10.diagnosticsVisible, false);
+assert.equal(emergencyV10.operationalSummaryVisible, false);
+assert.equal(emergencyV10.legendVisible, false);
+assert.equal(emergencyV10.maximumClusterLabels, 0);
+assert.equal(emergencyV10.confirmedMarkersVisible, false);
+assert.equal(emergencyV10.cohortBirthMarkersVisible, false);
+assert.equal(emergencyV10.rawCohortShelvesVisible, false);
 
 const before = new InMemoryBclifSnapshotStore();
 let orderA = "NONE";

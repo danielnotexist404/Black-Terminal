@@ -27,6 +27,10 @@ export interface BclifDisplayProjection {
   validity: Uint8Array;
   yellowEligible: Uint8Array;
   rgba?: Uint8Array;
+  safeRasterFinalVisiblePixels?: number;
+  safeRasterExposureVisiblePixels?: number;
+  safeRasterMinimumAlpha?: number;
+  safeRasterMaximumAlpha?: number;
   yellowEligibleCells: number;
   historicalCells: number;
   liveCalibratedCells: number;
@@ -37,6 +41,13 @@ export interface BclifDisplayProjection {
   filteredCells: number;
   minimumVisibleAlpha: number;
   maximumAlpha: number;
+  rawExposureMinimum: number;
+  rawExposureMaximum: number;
+  normalizedScalarMinimum: number;
+  normalizedScalarMaximum: number;
+  confidenceMinimum: number;
+  confidenceMaximum: number;
+  validityRatio: number;
   validModelRowsInDisplay: number;
   rowsClippedBelow: number;
   rowsClippedAbove: number;
@@ -122,6 +133,8 @@ export function bclifRenderSettingsHash(settings: LiquidationFieldSettings) {
     viewMode: settings.viewMode,
     palette: settings.palette,
     opacity: settings.opacity,
+    intensityGain: settings.intensityGain,
+    thermalContrast: settings.thermalContrast,
     gamma: settings.gamma,
     lowQuantile: settings.lowQuantile,
     highQuantile: settings.highQuantile,
@@ -161,6 +174,9 @@ export function bclifRenderSettingsHash(settings: LiquidationFieldSettings) {
     cohortProvenanceVisible: settings.cohortProvenanceVisible,
     cohortBirthMarkersVisible: settings.cohortBirthMarkersVisible,
     rawCohortShelvesVisible: settings.rawCohortShelvesVisible,
+    compactBadgeVisible: settings.compactBadgeVisible,
+    eventNodesVisible: settings.eventNodesVisible,
+    shelfLabelsVisible: settings.shelfLabelsVisible,
     legendVisible: settings.legendVisible,
     diagnosticsVisible: settings.diagnosticsVisible,
     confirmedMarkersVisible: settings.confirmedMarkersVisible,
@@ -273,12 +289,16 @@ export function buildBclifDisplayProjection(
   const validity = new Uint8Array(cellCount);
   const yellowEligible = new Uint8Array(cellCount);
   const raw = new Float32Array(cellCount);
+  const modelNormalized = new Float32Array(cellCount);
   const confidence = new Float32Array(cellCount);
   const sourceIndices = new Uint32Array(cellCount);
   const globalRaw: number[] = [];
   const visibleRaw: number[] = [];
   const priceStep = (domain.maximum - domain.minimum) / Math.max(1, rows - 1);
   const timeStepMs = (snapshot.header.endTime - snapshot.header.startTime) / Math.max(1, columns - 1);
+  const anchoredThermalIntensity = settings.rendererVersion === "REFERENCE_THERMAL_V2"
+    ? buildAnchoredThermalIntensity(snapshot, settings)
+    : null;
 
   const sourceRowMinimum = clamp(Math.floor((domain.minimum - snapshot.header.minPrice) / snapshot.header.priceStep), 0, sourceRows - 1);
   const sourceRowMaximum = clamp(Math.ceil((domain.maximum - snapshot.header.minPrice) / snapshot.header.priceStep), 0, sourceRows - 1);
@@ -303,8 +323,9 @@ export function buildBclifDisplayProjection(
       const valid = snapshot.validity[sourceIndex] ?? 0;
       validity[targetIndex] = valid;
       if (!valid) continue;
-      const sample = resolveSourceSample(snapshot, settings, sourceColumn, sourcePosition);
+      const sample = resolveSourceSample(snapshot, settings, sourceColumn, sourcePosition, anchoredThermalIntensity);
       raw[targetIndex] = sample.raw;
+      modelNormalized[targetIndex] = sample.normalized / 255;
       if (Number.isFinite(sample.raw) && sample.raw > 0) visibleRaw.push(sample.raw);
       confidence[targetIndex] = sample.confidence / 255;
       confidenceBytes[targetIndex] = Math.round(sample.confidence);
@@ -381,8 +402,17 @@ export function buildBclifDisplayProjection(
         + Number(cellBook >= 0.35) + Number(cellFunding >= 0.35);
       const confidencePercent = confidence[targetIndex]! * 100;
       const rawValue = raw[targetIndex]!;
-      const globalUnit = normalizeRaw(rawValue, globalLow, globalHigh);
-      const visibleUnit = normalizeRaw(rawValue, visibleLow, visibleHigh);
+      const percentileNormalized = settings.rendererVersion === "REFERENCE_THERMAL_V2"
+        && settings.viewMode !== "RAW_EXPOSURE";
+      const globalUnit = percentileNormalized
+        // The model intensity is expanding-horizon, causal, and anchored to
+        // the immutable full price grid. Reusing it here keeps shelf colors
+        // stable while the camera pans or zooms.
+        ? modelNormalized[targetIndex]!
+        : normalizeRaw(rawValue, globalLow, globalHigh);
+      const visibleUnit = percentileNormalized
+        ? normalizeEmpiricalRank(rawValue, visibleRaw, settings.lowQuantile, settings.highQuantile)
+        : normalizeRaw(rawValue, visibleLow, visibleHigh);
       let unit = globalUnit;
       if (settings.viewMode === "VALIDITY_MASK") unit = 1;
       else if (settings.viewMode === "RAW_EXPOSURE") unit = globalUnit;
@@ -404,9 +434,14 @@ export function buildBclifDisplayProjection(
         const contrastFloor = contrast * 0.05;
         unit = clamp01((unit - contrastFloor) / Math.max(1e-9, 1 - contrastFloor));
         unit = Math.pow(unit, 0.58 - contrast * 0.22);
-      } else if (settings.viewMode !== "RAW_EXPOSURE" && settings.viewMode !== "VALIDITY_MASK") {
+      } else if (settings.viewMode !== "RAW_EXPOSURE" && settings.viewMode !== "VALIDITY_MASK"
+        && settings.viewMode !== "ALPHA_OUTPUT") {
+        unit = clamp01(unit * settings.intensityGain / 100);
+        unit = clamp01(0.5 + (unit - 0.5) * settings.thermalContrast / 100);
         unit = unit * unit * (3 - 2 * unit);
-        unit = Math.pow(unit, settings.gamma);
+        // V2 gamma follows photographic display semantics: values below one
+        // deepen the plasma floor instead of bleaching most cells to yellow.
+        unit = Math.pow(unit, 1 / Math.max(0.05, settings.gamma));
       }
       if (rawValue > 0) rawNonZeroCells += 1;
       const multipleEvidence = evidenceChannels >= 2;
@@ -429,6 +464,10 @@ export function buildBclifDisplayProjection(
       let displayIntensity = Math.round(unit * 255);
       if (settings.rendererVersion === "LEGACY_RGBA_V1") {
         displayIntensity = clamp(Math.max(settings.backgroundFloor, displayIntensity), settings.backgroundFloor, cap);
+      } else if (rawValue > 0) {
+        // Preserve a distinguishable non-zero texel for every modeled shelf.
+        // The purple floor is presentation-only and remains separate.
+        displayIntensity = Math.max(Math.min(255, settings.backgroundFloor + 1), displayIntensity);
       }
       intensity[targetIndex] = displayIntensity;
       yellowEligible[targetIndex] = yellow ? 255 : 0;
@@ -502,6 +541,17 @@ export function buildBclifDisplayProjection(
   const exposureHash = bclifExposureHash(snapshot);
   const renderSettingsHash = bclifRenderSettingsHash(settings);
   const displayRasterHash = bclifDisplayRasterIdentity(snapshot, settings, context);
+  let normalizedScalarMinimum = 1;
+  let normalizedScalarMaximum = 0;
+  let confidenceMinimum = 1;
+  let confidenceMaximum = 0;
+  for (let index = 0; index < intensity.length; index += 1) {
+    if (!validity[index]) continue;
+    normalizedScalarMinimum = Math.min(normalizedScalarMinimum, intensity[index]! / 255);
+    normalizedScalarMaximum = Math.max(normalizedScalarMaximum, intensity[index]! / 255);
+    confidenceMinimum = Math.min(confidenceMinimum, confidenceBytes[index]! / 255);
+    confidenceMaximum = Math.max(confidenceMaximum, confidenceBytes[index]! / 255);
+  }
 
   return {
     columns,
@@ -525,6 +575,13 @@ export function buildBclifDisplayProjection(
     filteredCells,
     minimumVisibleAlpha: visibleCells ? minimumVisibleAlpha : 0,
     maximumAlpha,
+    rawExposureMinimum: visibleRaw.length ? visibleRaw[0]! : 0,
+    rawExposureMaximum: visibleRaw.length ? visibleRaw.at(-1)! : 0,
+    normalizedScalarMinimum: validCells ? normalizedScalarMinimum : 0,
+    normalizedScalarMaximum: validCells ? normalizedScalarMaximum : 0,
+    confidenceMinimum: validCells ? confidenceMinimum : 0,
+    confidenceMaximum: validCells ? confidenceMaximum : 0,
+    validityRatio: cellCount ? validCells / cellCount : 0,
     validModelRowsInDisplay: sourceRowMaximum - sourceRowMinimum + 1,
     rowsClippedBelow: sourceRowMinimum,
     rowsClippedAbove: Math.max(0, sourceRows - 1 - sourceRowMaximum),
@@ -556,7 +613,8 @@ function resolveSourceSample(
   snapshot: LiquidationFieldSnapshot,
   settings: LiquidationFieldSettings,
   column: number,
-  rowPosition: number
+  rowPosition: number,
+  anchoredThermalIntensity?: Uint8Array | null
 ) {
   const rows = snapshot.header.rows;
   const lower = clamp(Math.floor(rowPosition), 0, rows - 1);
@@ -575,13 +633,70 @@ function resolveSourceSample(
         : settings.viewMode === "SHORT_EXPOSURE" ? short
           : settings.viewMode === "CONFIRMED_LIQUIDATIONS" ? sample(snapshot.confirmedNotional)
             : long + short;
-  const normalized = settings.viewMode === "LONG_EXPOSURE" ? sample(snapshot.longNormalizedIntensity)
+  const normalized = anchoredThermalIntensity ? sample(anchoredThermalIntensity)
+    : settings.viewMode === "LONG_EXPOSURE" ? sample(snapshot.longNormalizedIntensity)
     : settings.viewMode === "SHORT_EXPOSURE" ? sample(snapshot.shortNormalizedIntensity)
       : settings.viewMode === "CONFIRMED_LIQUIDATIONS" ? sample(snapshot.confirmedIntensity)
         : settings.viewMode === "CONFIDENCE_FIELD" ? sample(snapshot.confidence)
           : sample(snapshot.normalizedIntensity);
   const confidence = sample(snapshot.confidence);
   return { raw, normalized, confidence };
+}
+
+/**
+ * Maps each immutable model column by its cross-price exposure rank.
+ *
+ * BCLIF shelves are intentionally broad along the price axis. Subtracting a
+ * local price mean therefore erases the signal and leaves only a purple
+ * canvas. A within-column rank retains those broad shelves while reserving the
+ * progressively rarer upper tail for cyan, green, and yellow. Each column is
+ * evaluated independently, so neither later time columns nor camera geometry
+ * can repaint an earlier shelf.
+ */
+function buildAnchoredThermalIntensity(
+  snapshot: LiquidationFieldSnapshot,
+  settings: LiquidationFieldSettings
+) {
+  const { rows, columns } = snapshot.header;
+  const selected = settings.viewMode === "LONG_EXPOSURE" ? snapshot.longExposure
+    : settings.viewMode === "SHORT_EXPOSURE" ? snapshot.shortExposure
+      : settings.viewMode === "CONFIRMED_LIQUIDATIONS" ? snapshot.confirmedNotional
+        : null;
+  if (settings.viewMode === "VALIDITY_MASK" || settings.viewMode === "CONFIDENCE_FIELD"
+    || settings.viewMode === "RAW_EXPOSURE" || settings.viewMode === "ALPHA_OUTPUT") {
+    return new Uint8Array(snapshot.normalizedIntensity);
+  }
+  const output = new Uint8Array(rows * columns);
+  for (let column = 0; column < columns; column += 1) {
+    const offset = column * rows;
+    const columnExposure: number[] = [];
+    for (let row = 0; row < rows; row += 1) {
+      const index = offset + row;
+      if (!snapshot.validity[index]) continue;
+      const value = selected
+        ? selected[index] ?? 0
+        : (snapshot.longExposure[index] ?? 0) + (snapshot.shortExposure[index] ?? 0);
+      if (Number.isFinite(value) && value > 0) columnExposure.push(value);
+    }
+    columnExposure.sort((left, right) => left - right);
+    for (let row = 0; row < rows; row += 1) {
+      const index = offset + row;
+      if (!snapshot.validity[index]) continue;
+      const value = selected
+        ? selected[index] ?? 0
+        : (snapshot.longExposure[index] ?? 0) + (snapshot.shortExposure[index] ?? 0);
+      const rank = normalizeEmpiricalRank(value, columnExposure, 0, 1);
+      const unit = rank < 0.91
+        ? 0.04 + rank / 0.91 * 0.51
+        : rank < 0.97
+          ? 0.58 + (rank - 0.91) / 0.06 * 0.21
+          : rank < 0.998
+            ? 0.80 + (rank - 0.97) / 0.028 * 0.15
+            : 0.96 + (rank - 0.998) / 0.002 * 0.04;
+      output[index] = Math.round(clamp01(unit) * 255);
+    }
+  }
+  return output;
 }
 
 function evidenceClassFor(
@@ -746,6 +861,25 @@ function quantile(sorted: readonly number[], q: number) {
   const upper = Math.min(sorted.length - 1, lower + 1);
   const fraction = position - lower;
   return sorted[lower]! + (sorted[upper]! - sorted[lower]!) * fraction;
+}
+
+function normalizeEmpiricalRank(
+  value: number,
+  sorted: readonly number[],
+  lowQuantile: number,
+  highQuantile: number
+) {
+  if (!(value > 0) || !sorted.length) return 0;
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (sorted[middle]! < value) low = middle + 1;
+    else high = middle;
+  }
+  const rank = sorted.length === 1 ? 1 : low / (sorted.length - 1);
+  const span = Math.max(1e-6, highQuantile - lowQuantile);
+  return clamp01((rank - lowQuantile) / span);
 }
 
 function fnvText(value: string, seed = 0x811c9dc5) {

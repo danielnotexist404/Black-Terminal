@@ -2,6 +2,7 @@
 import type { LiquidationFieldSettings, LiquidationFieldSnapshot } from "../core/types.ts";
 import { bclifUint8ToHalf, buildBclifDisplayProjection, type BclifDisplayContext } from "./displayProjection.ts";
 import { buildBclifDisplayTexture } from "./displayTexture.ts";
+import { buildBclifSafeThermalRaster } from "./safeThermalRaster.ts";
 import { createBclifReferenceThermalStyleFixture } from "../testing/referenceThermalFixture.ts";
 
 interface ProjectionRequest {
@@ -33,6 +34,12 @@ scope.onmessage = (event: MessageEvent<ProjectionRequest>) => {
     }
     if (projection && settings.rendererVersion === "REFERENCE_THERMAL_V2") {
       projection.exposureHalf = bclifUint8ToHalf(projection.intensity);
+      const safe = buildBclifSafeThermalRaster(projection, settings);
+      projection.rgba = safe.rgba;
+      projection.safeRasterFinalVisiblePixels = safe.metrics.finalVisiblePixels;
+      projection.safeRasterExposureVisiblePixels = safe.metrics.exposureVisiblePixels;
+      projection.safeRasterMinimumAlpha = safe.metrics.minimumAlpha;
+      projection.safeRasterMaximumAlpha = safe.metrics.maximumAlpha;
     }
     if (projection && settings.rendererVersion === "LEGACY_RGBA_V1") {
       projection.rgba = buildBclifDisplayTexture(projection, settings);

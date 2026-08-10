@@ -65,7 +65,9 @@ export function applyBclifVisualFixtureSettings(settings: LiquidationFieldSettin
     ...diagnosticSettings("REFERENCE_THERMAL"),
     cohortProvenanceVisible: true,
     cohortBirthMarkersVisible: true,
-    diagnosticsVisible: true
+    diagnosticsVisible: true,
+    shelfLabelsVisible: true,
+    maximumClusterLabels: 4
   };
   if (["SWING_INDEPENDENCE", "OI_EXPANSION", "OI_CONTRACTION", "CONFIRMED_LIQUIDATION"].includes(visualCase)) {
     return {

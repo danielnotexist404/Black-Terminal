@@ -86,6 +86,13 @@ export class LiquidationFieldController {
       await this.buildFixture();
       return;
     }
+    // Local certification can exercise the authentic Bybit browser-fallback
+    // path without weakening production authentication or substituting a
+    // synthetic fixture. The query is deliberately loopback-only.
+    if (isBclifLiveBrowserFallbackProbeEnabled()) {
+      await this.startBrowserFallback("LOCAL_LIVE_BROWSER_FALLBACK_PROBE");
+      return;
+    }
     this.status({
       state: "LOADING",
       message: "Resolving protected persistent BCLIF authority before opening any browser market stream.",
@@ -366,6 +373,12 @@ export function isBclifVisualFixtureEnabled(locationValue?: Pick<Location, "host
   const resolved = locationValue ?? (typeof window === "undefined" ? { hostname: "", search: "" } : window.location);
   const local = resolved.hostname === "localhost" || resolved.hostname === "127.0.0.1" || resolved.hostname === "::1";
   return local && new URLSearchParams(resolved.search).get("bclifVisualFixture") === "1";
+}
+
+export function isBclifLiveBrowserFallbackProbeEnabled(locationValue?: Pick<Location, "hostname" | "search">) {
+  const resolved = locationValue ?? (typeof window === "undefined" ? { hostname: "", search: "" } : window.location);
+  const local = resolved.hostname === "localhost" || resolved.hostname === "127.0.0.1" || resolved.hostname === "::1";
+  return local && new URLSearchParams(resolved.search).get("bclifLiveProbe") === "1";
 }
 
 function isAbort(error: unknown) {

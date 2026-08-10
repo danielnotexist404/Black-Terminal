@@ -47,6 +47,7 @@ export function LiquidationFieldOverlays({ visible, snapshot, settings, status, 
     () => selectBclifOperationalLabels(clusters, currentPrice, settings.maximumClusterLabels),
     [clusters, currentPrice, settings.maximumClusterLabels]
   );
+  const visibleLabels = settings.shelfLabelsVisible ? labels : [];
   if (!visible) return null;
   const coverage = snapshot?.coverage;
   const persistentCoverage = snapshot?.persistentCoverage;
@@ -78,13 +79,13 @@ export function LiquidationFieldOverlays({ visible, snapshot, settings, status, 
   const nearestLong = clusters.filter((cluster) => cluster.peakPrice < currentPrice).sort((a, b) => b.peakPrice - a.peakPrice)[0];
   const shortPressure = clusters.filter((cluster) => cluster.side === "SHORT_LIQUIDATION").reduce((sum, cluster) => sum + cluster.estimatedExposureHigh * cluster.rankScore, 0);
   const longPressure = clusters.filter((cluster) => cluster.side === "LONG_LIQUIDATION").reduce((sum, cluster) => sum + cluster.estimatedExposureHigh * cluster.rankScore, 0);
-  const focusedCluster = clusters.find((cluster) => cluster.id === (hoveredClusterId ?? selectedClusterId)) ?? labels[0];
+  const focusedCluster = clusters.find((cluster) => cluster.id === (hoveredClusterId ?? selectedClusterId)) ?? visibleLabels[0];
   const focusedCohorts = focusedCluster && snapshot
     ? snapshot.cohorts.filter((cohort) => focusedCluster.cohortIds.includes(cohort.id))
     : [];
   const hudState = resolveHudState(status, rendererMetrics, snapshot, displayDomain !== null);
   return <>
-    <details
+    {settings.compactBadgeVisible && <details
       className={`liquidation-field-hud authority-${authority.toLowerCase()}`}
       data-bclif-authority={authority}
       data-bclif-persistence={provenance.persistence}
@@ -104,7 +105,7 @@ export function LiquidationFieldOverlays({ visible, snapshot, settings, status, 
       data-bclif-render-settings-hash={renderSettingsHash}
       data-bclif-display-raster-hash={displayRasterHash}
       data-bclif-price-display={settings.priceDisplay}
-      data-bclif-cluster-labels={labels.length}
+      data-bclif-cluster-labels={visibleLabels.length}
       data-bclif-horizon-truth={horizonTruth}
       data-bclif-candle-contrast={settings.candleContrast}
       data-bclif-provenance-coverage={clusters.length ? Math.min(...clusters.map((cluster) => cluster.provenanceCoverage)) : 0}
@@ -132,7 +133,7 @@ export function LiquidationFieldOverlays({ visible, snapshot, settings, status, 
           <button type="button" onClick={onOpenSettings}>OPEN SETTINGS</button>
         </div>
       </div>}
-    </details>
+    </details>}
 
 
     {settings.operationalSummaryVisible && snapshot && <details
@@ -176,7 +177,7 @@ export function LiquidationFieldOverlays({ visible, snapshot, settings, status, 
       <div><span>EVENT HISTORY</span><b>{formatCoverage(persistentCoverage?.liquidationCoveragePercent, coverage?.liquidationEventCoveragePercent, 1)}</b></div>
     </details>}
 
-    {priceTransform && labels.map((cluster) => {
+    {priceTransform && visibleLabels.map((cluster) => {
       const y = priceToScreenY(cluster.peakPrice, priceTransform);
       if (y === null || y < priceTransform.plotTop || y > priceTransform.plotBottom) return null;
       const evidence = classifyBclifEvidence(cluster.evidenceComposition).replaceAll("_", " ");
@@ -257,6 +258,9 @@ function resolveHudState(
   }
   if (renderer?.readiness === "TEXTURE_ERROR" || status.lifecycle === "TEXTURE_ERROR") {
     return { title: "BCLIF — TEXTURE ERROR", detail: renderer?.error ?? status.error ?? status.message, filtered: false };
+  }
+  if (renderer?.readiness === "SAFE_FALLBACK_ACTIVE") {
+    return { title: "BCLIF — SAFE THERMAL", detail: `Reference shader unavailable; the full-resolution safety raster is active. ${renderer.shaderError ?? ""}`.trim(), filtered: false };
   }
   if (renderer?.readiness === "FILTERED_EMPTY") {
     return { title: "BCLIF — FILTERED, 0 CELLS VISIBLE", detail: "Model has exposure. Current confidence or channel filters intentionally hide every cell.", filtered: true };

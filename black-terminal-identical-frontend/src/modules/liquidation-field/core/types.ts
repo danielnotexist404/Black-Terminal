@@ -17,7 +17,10 @@ export type BclifModelAuthority =
 export type LiquidationFieldHorizon = "6H" | "12H" | "1D" | "3D" | "1W" | "3W" | "1M" | "CUSTOM";
 export type LiquidationFieldViewMode =
   | "COMBINED_THERMAL"
+  | "FINAL_THERMAL"
   | "RAW_EXPOSURE"
+  | "ALPHA_OUTPUT"
+  | "SHELF_LINES_ONLY"
   | "VALIDITY_MASK"
   | "LONG_EXPOSURE"
   | "SHORT_EXPOSURE"
@@ -184,7 +187,7 @@ export interface BclifRawCohortShelf {
 }
 
 export interface LiquidationFieldSettings {
-  schemaVersion: 10;
+  schemaVersion: 11;
   rendererVersion: BclifRendererVersion;
   authoritySemantics: BclifAuthoritySemantics;
   preset: BclifPresentationPreset;
@@ -196,6 +199,10 @@ export interface LiquidationFieldSettings {
   scale: LiquidationFieldScale;
   palette: LiquidationFieldPalette;
   opacity: number;
+  /** Display-only scalar gain. It never changes the underlying exposure model. */
+  intensityGain: number;
+  /** Display-only midpoint contrast. It never changes shelf classification. */
+  thermalContrast: number;
   gamma: number;
   lowQuantile: number;
   highQuantile: number;
@@ -205,6 +212,9 @@ export interface LiquidationFieldSettings {
   sharpness: number;
   candlePalette: "BLACK_TERMINAL_HIGH_CONTRAST" | "REFERENCE_CYAN_MAGENTA";
   legendVisible: boolean;
+  compactBadgeVisible: boolean;
+  eventNodesVisible: boolean;
+  shelfLabelsVisible: boolean;
   diagnosticsVisible: boolean;
   confirmedMarkersVisible: boolean;
   cascadePathsVisible: boolean;

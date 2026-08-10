@@ -55,10 +55,12 @@ export function LiquidationFieldSettingsPanel({ settings, onChange }: Props) {
       </select></label>
       {settings.horizon === "CUSTOM" && <label>Custom Hours<input type="number" min={1} max={BCLIF_MAX_REQUEST_HOURS} value={settings.customHours} onChange={(event) => update("customHours", Number(event.target.value))} /></label>}
       <label>View<select value={settings.viewMode} onChange={(event) => update("viewMode", event.target.value as LiquidationFieldSettings["viewMode"])}>
-        <option value="COMBINED_THERMAL">Combined Thermal</option><option value="LONG_EXPOSURE">Long Exposure</option>
+        <option value="COMBINED_THERMAL">Combined Thermal</option><option value="FINAL_THERMAL">Final Thermal Output · debug</option>
+        <option value="LONG_EXPOSURE">Long Exposure</option>
         <option value="SHORT_EXPOSURE">Short Exposure</option><option value="DIRECTIONAL_SPLIT">Directional Split</option>
         <option value="RAW_EXPOSURE">Raw Exposure · grayscale</option><option value="CONFIDENCE_FIELD">Confidence Field</option>
-        <option value="VALIDITY_MASK">Validity Mask</option><option value="CONFIRMED_LIQUIDATIONS">Confirmed Liquidations</option>
+        <option value="VALIDITY_MASK">Validity Mask</option><option value="ALPHA_OUTPUT">Final Alpha Output · debug</option>
+        <option value="SHELF_LINES_ONLY">Shelf Lines Only · debug</option><option value="CONFIRMED_LIQUIDATIONS">Confirmed Liquidations</option>
         <option value="CASCADE_RISK">Cascade Risk</option><option value="COMBINED_INTELLIGENCE">Combined Intelligence</option>
       </select></label>
       <label>Venue<select value={settings.venue} onChange={(event) => update("venue", event.target.value as LiquidationFieldSettings["venue"])}>
@@ -101,6 +103,8 @@ export function LiquidationFieldSettingsPanel({ settings, onChange }: Props) {
         <option value="INSTITUTIONAL_MONOCHROME">Institutional Monochrome</option><option value="DIRECTIONAL_SPLIT">Directional Split</option><option value="CONFIDENCE">Confidence</option>
       </select></label>
       <label className="indicator-range-row">Opacity<span><input type="range" min={10} max={100} value={settings.opacity} onChange={(event) => update("opacity", Number(event.target.value))} /><strong>{settings.opacity}</strong></span></label>
+      <label className="indicator-range-row">Intensity Gain<span><input type="range" min={50} max={300} value={settings.intensityGain} onChange={(event) => update("intensityGain", Number(event.target.value))} /><strong>{settings.intensityGain}%</strong></span></label>
+      <label className="indicator-range-row">Thermal Contrast<span><input type="range" min={50} max={250} value={settings.thermalContrast} onChange={(event) => update("thermalContrast", Number(event.target.value))} /><strong>{settings.thermalContrast}%</strong></span></label>
       {settings.rendererVersion === "LEGACY_RGBA_V1" && <>
         <label className="indicator-range-row">Legacy Plasma Background<span><input type="range" min={0} max={100} value={settings.plasmaBackgroundOpacity} onChange={(event) => update("plasmaBackgroundOpacity", Number(event.target.value))} /><strong>{settings.plasmaBackgroundOpacity}%</strong></span></label>
         <label className="indicator-range-row">Legacy Shelf Clarity<span><input type="range" min={0} max={100} value={settings.shelfContrast} onChange={(event) => update("shelfContrast", Number(event.target.value))} /><strong>{settings.shelfContrast}%</strong></span></label>
@@ -126,8 +130,11 @@ export function LiquidationFieldSettingsPanel({ settings, onChange }: Props) {
 
     <section className="indicator-settings-section liquidation-field-toggles">
       <b>ANNOTATIONS & INTERFACE</b>
+      <label>Compact Status Badge<input type="checkbox" checked={settings.compactBadgeVisible} onChange={(event) => update("compactBadgeVisible", event.target.checked)} /></label>
+      <label>Show Event Nodes<input type="checkbox" checked={settings.eventNodesVisible} onChange={(event) => update("eventNodesVisible", event.target.checked)} /></label>
+      <label>Show Shelf Labels<input type="checkbox" checked={settings.shelfLabelsVisible} onChange={(event) => update("shelfLabelsVisible", event.target.checked)} /></label>
       <label>Compact Legend<input type="checkbox" checked={settings.legendVisible} onChange={(event) => update("legendVisible", event.target.checked)} /></label>
-      <label>Diagnostics Drawer<input type="checkbox" checked={settings.diagnosticsVisible} onChange={(event) => update("diagnosticsVisible", event.target.checked)} /></label>
+      <label>Show Full Diagnostics<input type="checkbox" checked={settings.diagnosticsVisible} onChange={(event) => update("diagnosticsVisible", event.target.checked)} /></label>
       <label>Confirmed Liquidations<input type="checkbox" checked={settings.confirmedMarkersVisible} onChange={(event) => update("confirmedMarkersVisible", event.target.checked)} /></label>
       <label>Cascade Paths<input type="checkbox" checked={settings.cascadePathsVisible} onChange={(event) => update("cascadePathsVisible", event.target.checked)} /></label>
       <label>Weight Magnitude by Confidence · expert<input type="checkbox" checked={settings.confidenceWeightEnabled} onChange={(event) => update("confidenceWeightEnabled", event.target.checked)} /></label>

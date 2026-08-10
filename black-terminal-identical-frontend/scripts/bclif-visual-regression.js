@@ -148,6 +148,10 @@ try {
         displayCells: Number(metrics.cells),
         rawNonZeroCells: Number(metrics.rawNonZeroCells),
         visibleCells: Number(metrics.visibleCells),
+        finalVisiblePixels: Number(metrics.finalVisiblePixels),
+        exposureVisiblePixels: Number(metrics.exposureVisiblePixels),
+        safeCompositingPlane: Boolean(metrics.safeCompositingPlane),
+        fallbackActive: Boolean(metrics.fallbackActive),
         fieldMetrics: metrics.fieldMetrics || null,
         rendererVersion: String(metrics.rendererVersion || ""),
         scalarTextureFormat: String(metrics.scalarTextureFormat || ""),
@@ -188,7 +192,14 @@ try {
       || !Number.isFinite(yellowTailRatio)
       || yellowTailRatio > 0.03
       || (testCase.fixture === "BROWSER_FALLBACK" && audit.yellowEligibleCells !== 0)
-      || (testCase.fixture === "BROWSER_FALLBACK" && (audit.rawNonZeroCells <= 0 || audit.visibleCells <= 0 || audit.rendererReadiness !== "WEBGL_CONTEXT_READY"))
+      || (testCase.fixture === "BROWSER_FALLBACK" && (
+        audit.rawNonZeroCells <= 0
+        || audit.visibleCells <= 0
+        || audit.finalVisiblePixels <= 0
+        || audit.exposureVisiblePixels <= 0
+        || !audit.safeCompositingPlane
+        || !["WEBGL_CONTEXT_READY", "SAFE_FALLBACK_ACTIVE"].includes(audit.rendererReadiness)
+      ))
       || audit.labels < 0
       || audit.labels > (testCase.fixture === "HIGH_CONFIDENCE" ? 6 : 4)
       || !Number.isFinite(audit.texturePreparationAndUpdateMs)

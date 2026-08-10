@@ -311,8 +311,8 @@ export class BlackCoreLiquidationFieldRenderer {
     const snapshot = this.snapshot;
     const settings = this.settings;
     if (!settings) return;
-    drawBclifThermalBackdrop(this.backdrop, transform, settings);
     if (!snapshot) return;
+    drawBclifThermalBackdrop(this.backdrop, transform, settings);
 
     const projectionKey = [
       this.stateKey,

@@ -96,6 +96,7 @@ assert.equal(withoutFloor.metrics.exposureVisiblePixels, 2);
 assert.notDeepEqual(createThermalPalette("REFERENCE_THERMAL"), createThermalPalette("BLACK_TERMINAL_BLOOD"));
 const settingsSource = readFileSync(new URL("../src/modules/liquidation-field/components/LiquidationFieldSettingsPanel.tsx", import.meta.url), "utf8");
 const chartSource = readFileSync(new URL("../src/components/PixiBlackChart.tsx", import.meta.url), "utf8");
+const rendererSource = readFileSync(new URL("../src/modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer.ts", import.meta.url), "utf8");
 assert.match(settingsSource, /Advanced \/ Diagnostics/);
 assert.match(settingsSource, /<details className="bclif-advanced-settings">/);
 assert.match(settingsSource, /Show Background Field/);
@@ -103,6 +104,9 @@ assert.match(settingsSource, /Strong Shelves Only/);
 assert.match(chartSource, /aria-label="BCLIF quick intensity"/);
 assert.match(chartSource, /aria-label="BCLIF range"/);
 assert.match(chartSource, /aria-label="BCLIF thermal theme"/);
+const emptySnapshotGuard = rendererSource.indexOf("if (!snapshot) return;", rendererSource.indexOf("draw(transform:"));
+const backdropDraw = rendererSource.indexOf("drawBclifThermalBackdrop(this.backdrop, transform, settings);", rendererSource.indexOf("draw(transform:"));
+assert.ok(emptySnapshotGuard >= 0 && backdropDraw > emptySnapshotGuard, "BCLIF backdrop must remain hidden when the indicator snapshot is absent");
 
 console.log(JSON.stringify({
   decision: "PASS",

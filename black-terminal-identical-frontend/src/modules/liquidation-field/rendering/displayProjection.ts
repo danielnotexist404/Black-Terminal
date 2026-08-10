@@ -10,6 +10,7 @@ export interface BclifDisplayContext {
   plotWidth: number;
   plotHeight: number;
   constrainedTouchRenderer: boolean;
+  devicePixelRatio?: number;
 }
 
 export interface BclifDisplayProjection {
@@ -20,6 +21,8 @@ export interface BclifDisplayProjection {
   priceStep: number;
   timeStepMs: number;
   intensity: Uint8Array;
+  exposureHalf?: Uint16Array;
+  confidence: Uint8Array;
   alpha: Uint8Array;
   validity: Uint8Array;
   yellowEligible: Uint8Array;
@@ -79,6 +82,22 @@ export function bclifExposureHash(snapshot: LiquidationFieldSnapshot) {
   return `fnv1a-${hash.toString(16).padStart(8, "0")}`;
 }
 
+/**
+ * Identity of the immutable combined scalar field before display LOD, tone,
+ * palette, confidence treatment, annotations, or camera projection. Keeping
+ * this separate from the render hash makes presentation changes auditable.
+ */
+export function bclifScalarFieldHash(snapshot: LiquidationFieldSnapshot) {
+  const combined = new Float32Array(snapshot.longExposure.length);
+  for (let index = 0; index < combined.length; index += 1) {
+    combined[index] = (snapshot.longExposure[index] ?? 0) + (snapshot.shortExposure[index] ?? 0);
+  }
+  let hash = fnvTextState(`${snapshot.header.rows}:${snapshot.header.columns}:${snapshot.header.startTime}:${snapshot.header.endTime}`);
+  hash = fnvBuffer(combined, hash);
+  hash = fnvBuffer(snapshot.validity, hash);
+  return `fnv1a-${hash.toString(16).padStart(8, "0")}`;
+}
+
 export function bclifDisplayEvidenceHash(snapshot: LiquidationFieldSnapshot) {
   let hash = fnvTextState(JSON.stringify({
     authority: snapshot.authority,
@@ -97,6 +116,8 @@ export function bclifDisplayEvidenceHash(snapshot: LiquidationFieldSnapshot) {
 
 export function bclifRenderSettingsHash(settings: LiquidationFieldSettings) {
   return fnvText(JSON.stringify({
+    renderer: settings.rendererVersion,
+    authoritySemantics: settings.authoritySemantics,
     preset: settings.preset,
     viewMode: settings.viewMode,
     palette: settings.palette,
@@ -201,28 +222,39 @@ export function resolveBclifDisplayDomain(
 }
 
 export function resolveBclifDisplayDimensions(
-  snapshot: LiquidationFieldSnapshot,
+  _snapshot: LiquidationFieldSnapshot,
   settings: LiquidationFieldSettings,
-  context: Pick<BclifDisplayContext, "plotWidth" | "plotHeight" | "constrainedTouchRenderer">
+  context: Pick<BclifDisplayContext, "plotWidth" | "plotHeight" | "constrainedTouchRenderer" | "devicePixelRatio">
 ) {
-  const research = settings.priceDisplay === "FULL_MODEL_RANGE" || settings.preset === "FULL_SPECTRUM_RESEARCH" || settings.preset === "RAW_MODEL";
-  const fallback = settings.adaptiveResolution === "LOW_PERFORMANCE" || context.constrainedTouchRenderer;
-  let rows: number;
-  if (fallback) rows = research ? 384 : 512;
-  else if (settings.adaptiveResolution === "HIGH") rows = research ? 1024 : 2048;
-  else if (settings.adaptiveResolution === "BALANCED") rows = research ? 768 : 1024;
-  else rows = research
-    ? clamp(Math.round(context.plotHeight * 0.72), 512, 1024)
-    : clamp(Math.round(context.plotHeight * 1.18), 768, 2048);
-  // Projection is display-resolution, not model-resolution. Re-sampling the
-  // immutable source lattice to one column per plot pixel removes the coarse
-  // 512-column appearance while preserving source values and causality.
-  const columns = fallback
-    ? Math.min(snapshot.header.columns, 512)
-    : clamp(Math.round(context.plotWidth), 512, 1536);
-  return { rows, columns };
+  const research = settings.priceDisplay === "FULL_MODEL_RANGE"
+    || settings.preset === "FULL_SPECTRUM_RESEARCH" || settings.preset === "RESEARCH_DIAGNOSTICS"
+    || settings.preset === "RAW_MODEL";
+  const dpr = clamp(context.devicePixelRatio ?? 1, 1, 2);
+  const physicalWidth = Math.max(1, context.plotWidth * dpr);
+  const physicalHeight = Math.max(1, context.plotHeight * dpr);
+  const focusMinimumRows = research ? 768 : 1_024;
+  const focusMaximumRows = research ? 1_536 : 2_048;
+  if (settings.adaptiveResolution === "LOW_PERFORMANCE" || context.constrainedTouchRenderer) return {
+    rows: clamp(Math.round(physicalHeight * 0.75), 512, 768),
+    columns: clamp(Math.round(physicalWidth * 0.75), 1_024, 2_048)
+  };
+  if (settings.adaptiveResolution === "ULTRA") return {
+    rows: clamp(Math.round(physicalHeight), focusMinimumRows, focusMaximumRows),
+    columns: clamp(Math.round(physicalWidth), 2_048, 4_096)
+  };
+  if (settings.adaptiveResolution === "HIGH") return {
+    rows: clamp(Math.round(physicalHeight * 0.92), focusMinimumRows, focusMaximumRows),
+    columns: clamp(Math.round(physicalWidth * 0.92), 1_536, 3_072)
+  };
+  if (settings.adaptiveResolution === "BALANCED") return {
+    rows: clamp(Math.round(physicalHeight * 0.78), research ? 768 : 1_024, research ? 1_280 : 1_536),
+    columns: clamp(Math.round(physicalWidth * 0.82), 1_024, 2_560)
+  };
+  return {
+    rows: clamp(Math.round(physicalHeight * 0.88), focusMinimumRows, focusMaximumRows),
+    columns: clamp(Math.round(physicalWidth * 0.90), 1_536, 4_096)
+  };
 }
-
 export function buildBclifDisplayProjection(
   snapshot: LiquidationFieldSnapshot,
   settings: LiquidationFieldSettings,
@@ -237,27 +269,25 @@ export function buildBclifDisplayProjection(
   const cellCount = rows * columns;
   const intensity = new Uint8Array(cellCount);
   const alpha = new Uint8Array(cellCount);
+  const confidenceBytes = new Uint8Array(cellCount);
   const validity = new Uint8Array(cellCount);
   const yellowEligible = new Uint8Array(cellCount);
   const raw = new Float32Array(cellCount);
-  const global = new Float32Array(cellCount);
   const confidence = new Float32Array(cellCount);
   const sourceIndices = new Uint32Array(cellCount);
-  const validRaw: number[] = [];
+  const globalRaw: number[] = [];
+  const visibleRaw: number[] = [];
   const priceStep = (domain.maximum - domain.minimum) / Math.max(1, rows - 1);
   const timeStepMs = (snapshot.header.endTime - snapshot.header.startTime) / Math.max(1, columns - 1);
 
   const sourceRowMinimum = clamp(Math.floor((domain.minimum - snapshot.header.minPrice) / snapshot.header.priceStep), 0, sourceRows - 1);
   const sourceRowMaximum = clamp(Math.ceil((domain.maximum - snapshot.header.minPrice) / snapshot.header.priceStep), 0, sourceRows - 1);
   for (let sourceColumn = 0; sourceColumn < sourceColumns; sourceColumn++) {
-    for (let sourceRow = sourceRowMinimum; sourceRow <= sourceRowMaximum; sourceRow++) {
+    for (let sourceRow = 0; sourceRow < sourceRows; sourceRow++) {
       const sourceIndex = sourceColumn * sourceRows + sourceRow;
       if (!snapshot.validity[sourceIndex]) continue;
-      const value = settings.viewMode === "LONG_EXPOSURE" ? snapshot.longExposure[sourceIndex]!
-        : settings.viewMode === "SHORT_EXPOSURE" ? snapshot.shortExposure[sourceIndex]!
-          : settings.viewMode === "CONFIRMED_LIQUIDATIONS" ? snapshot.confirmedNotional[sourceIndex]!
-            : snapshot.longExposure[sourceIndex]! + snapshot.shortExposure[sourceIndex]!;
-      if (value > 0) validRaw.push(value);
+      const value = sourceValue(snapshot, settings, sourceIndex);
+      if (Number.isFinite(value) && value > 0) globalRaw.push(value);
     }
   }
 
@@ -275,15 +305,25 @@ export function buildBclifDisplayProjection(
       if (!valid) continue;
       const sample = resolveSourceSample(snapshot, settings, sourceColumn, sourcePosition);
       raw[targetIndex] = sample.raw;
-      global[targetIndex] = sample.normalized / 255;
+      if (Number.isFinite(sample.raw) && sample.raw > 0) visibleRaw.push(sample.raw);
       confidence[targetIndex] = sample.confidence / 255;
+      confidenceBytes[targetIndex] = Math.round(sample.confidence);
     }
   }
 
-  validRaw.sort((a, b) => a - b);
-  const low = quantile(validRaw, settings.lowQuantile);
-  const high = Math.max(low + Number.EPSILON, quantile(validRaw, settings.highQuantile));
-  const yellowThreshold = quantile(validRaw, 1 - settings.yellowTailPercent / 100);
+  globalRaw.sort((a, b) => a - b);
+  visibleRaw.sort((a, b) => a - b);
+  const globalLow = quantile(globalRaw, settings.lowQuantile);
+  const globalHigh = Math.max(globalLow + Number.EPSILON, quantile(globalRaw, settings.highQuantile));
+  const visibleLow = quantile(visibleRaw, settings.lowQuantile);
+  const visibleHigh = Math.max(visibleLow + Number.EPSILON, quantile(visibleRaw, settings.highQuantile));
+  const yellowThreshold = quantile(globalRaw, 1 - settings.yellowTailPercent / 100);
+  const normalizeRaw = (value: number, low: number, high: number) => {
+    if (!(value > 0) || !(high > low)) return 0;
+    const lowLog = Math.log1p(Math.max(0, low));
+    const span = Math.max(Number.EPSILON, Math.log1p(Math.max(0, high)) - lowLog);
+    return clamp01((Math.log1p(value) - lowLog) / span);
+  };
   const persistent = snapshot.persistentCoverage;
   const tradeCoverage = (persistent?.tradeCoveragePercent ?? snapshot.coverage.observedTradeCoveragePercent) ?? 0;
   const eventCoverage = (persistent?.liquidationCoveragePercent ?? snapshot.coverage.liquidationEventCoveragePercent) ?? 0;
@@ -300,8 +340,6 @@ export function buildBclifDisplayProjection(
   const bookWeight = Math.max(0, Math.min(1, bookCoverage / 100));
   const fundingWeight = Math.max(0, Math.min(1, ((persistent?.fundingCoveragePercent ?? 0) ?? 0) / 100));
   const positioningWeight = Math.max(0, Math.min(1, snapshot.confidenceBreakdown.entryPrice / 100));
-  const logLow = Math.log1p(low);
-  const logSpan = Math.max(Number.EPSILON, Math.log1p(high) - logLow);
   const evidenceCounts: Record<BclifEvidenceClass, number> = {
     OI_ONLY: 0,
     OI_PLUS_PRICE: 0,
@@ -342,29 +380,34 @@ export function buildBclifDisplayProjection(
       const evidenceChannels = Number(oiWeight >= 0.35) + Number(cellTrade >= 0.35) + Number(cellEvent >= 0.35)
         + Number(cellBook >= 0.35) + Number(cellFunding >= 0.35);
       const confidencePercent = confidence[targetIndex]! * 100;
-      const visibleUnit = high > low ? clamp01((Math.log1p(raw[targetIndex]!) - logLow) / logSpan) : 0;
-      let unit = global[targetIndex]!;
-      if (settings.thermalNormalization === "VISIBLE_FOCUS") unit = visibleUnit;
-      // Visible-range contrast is deliberately bounded. It may reveal detail,
-      // but the expanding model normalization remains the visual authority.
-      else if (settings.thermalNormalization === "HYBRID") unit = unit * 0.15 + visibleUnit * 0.85;
-      else if (settings.thermalNormalization === "FIXED_ABSOLUTE") unit = Math.min(1, Math.log1p(raw[targetIndex]!) / Math.log1p(1_000_000_000));
-      else if (settings.thermalNormalization === "OI_RELATIVE") unit = unit * Math.max(0.15, oiWeight);
+      const rawValue = raw[targetIndex]!;
+      const globalUnit = normalizeRaw(rawValue, globalLow, globalHigh);
+      const visibleUnit = normalizeRaw(rawValue, visibleLow, visibleHigh);
+      let unit = globalUnit;
+      if (settings.viewMode === "VALIDITY_MASK") unit = 1;
+      else if (settings.viewMode === "RAW_EXPOSURE") unit = globalUnit;
+      else if (settings.thermalNormalization === "VISIBLE_FOCUS") unit = visibleUnit;
+      else if (settings.thermalNormalization === "HYBRID") unit = globalUnit * 0.65 + visibleUnit * 0.35;
+      else if (settings.thermalNormalization === "FIXED_ABSOLUTE") {
+        unit = Math.min(1, Math.log1p(rawValue) / Math.log1p(1_000_000_000));
+      } else if (settings.thermalNormalization === "OI_RELATIVE") {
+        unit = globalUnit * Math.max(0.15, oiWeight);
+      }
       if (settings.thermalNormalization === "CONFIDENCE_WEIGHTED" || settings.confidenceWeightEnabled) {
         unit *= 0.35 + confidence[targetIndex]! * 0.65;
       }
-      unit = Math.pow(clamp01(unit), settings.gamma);
-      unit = Math.pow(unit, 1 + settings.sharpness / 170);
-      const contrast = settings.shelfContrast / 100;
-      // Preserve residual mass instead of cutting the lower shelf shoulder
-      // away. The low percentile already separates the plasma floor; this
-      // concave transfer expands the remaining dynamic range into the full
-      // purple/blue/cyan/green/yellow thermal ramp.
-      const contrastFloor = contrast * 0.05;
-      unit = clamp01((unit - contrastFloor) / Math.max(1e-9, 1 - contrastFloor));
-      unit = Math.pow(unit, 0.58 - contrast * 0.22);
-
-      const rawValue = raw[targetIndex]!;
+      unit = clamp01(unit);
+      if (settings.rendererVersion === "LEGACY_RGBA_V1") {
+        unit = Math.pow(unit, settings.gamma);
+        unit = Math.pow(unit, 1 + settings.sharpness / 170);
+        const contrast = settings.shelfContrast / 100;
+        const contrastFloor = contrast * 0.05;
+        unit = clamp01((unit - contrastFloor) / Math.max(1e-9, 1 - contrastFloor));
+        unit = Math.pow(unit, 0.58 - contrast * 0.22);
+      } else if (settings.viewMode !== "RAW_EXPOSURE" && settings.viewMode !== "VALIDITY_MASK") {
+        unit = unit * unit * (3 - 2 * unit);
+        unit = Math.pow(unit, settings.gamma);
+      }
       if (rawValue > 0) rawNonZeroCells += 1;
       const multipleEvidence = evidenceChannels >= 2;
       const yellow = confidencePercent >= settings.highAuthorityColorFloor
@@ -384,7 +427,9 @@ export function buildBclifDisplayProjection(
         && (settings.palette === "REFERENCE_THERMAL" || settings.palette === "BLACK_TERMINAL_BLOOD");
       if (!yellow && !relativePeakColor) cap = confidencePercent < 40 ? 155 : confidencePercent < 60 ? 214 : confidencePercent < 75 ? 232 : 244;
       let displayIntensity = Math.round(unit * 255);
-      displayIntensity = clamp(Math.max(settings.backgroundFloor, displayIntensity), settings.backgroundFloor, cap);
+      if (settings.rendererVersion === "LEGACY_RGBA_V1") {
+        displayIntensity = clamp(Math.max(settings.backgroundFloor, displayIntensity), settings.backgroundFloor, cap);
+      }
       intensity[targetIndex] = displayIntensity;
       yellowEligible[targetIndex] = yellow ? 255 : 0;
       if (yellow) yellowEligibleCells += 1;
@@ -402,12 +447,15 @@ export function buildBclifDisplayProjection(
       if (!settings.liveCalibratedEnabled && live) channelAlpha = 0;
       if (settings.visualChannel === "HISTORICAL_CONTEXT") channelAlpha = live ? 0.08 : settings.historicalContextOpacity / 100;
       if (settings.visualChannel === "LIVE_CALIBRATED") channelAlpha = live ? settings.liveCalibratedOpacity / 100 : 0;
-      const contextFiltered = confidencePercent < settings.contextVisibilityFloor;
+      const contextFiltered = settings.rendererVersion === "LEGACY_RGBA_V1"
+        && confidencePercent < settings.contextVisibilityFloor;
       const strictFiltered = settings.strictHideBelowEnabled
         && confidencePercent < settings.strictHideBelowConfidence;
-      const cellAlpha = rawValue <= 0 || contextFiltered || strictFiltered
+      const cellAlpha = (settings.rendererVersion === "LEGACY_RGBA_V1" && rawValue <= 0) || contextFiltered || strictFiltered
         ? 0
-        : operationalThermalTheme
+        : settings.rendererVersion === "REFERENCE_THERMAL_V2"
+          ? Math.round(255 * channelAlpha)
+          : operationalThermalTheme
           // A thermal atlas is a color field, not a translucent line overlay.
           // Keep every still-live shelf opaque enough to retain its body and
           // use color (rather than vanishing alpha) for density. The residual
@@ -425,7 +473,7 @@ export function buildBclifDisplayProjection(
             )
           ), 0, 255);
       alpha[targetIndex] = cellAlpha;
-      if (rawValue > 0) {
+      if (rawValue > 0 || settings.rendererVersion === "REFERENCE_THERMAL_V2") {
         if (cellAlpha > 0) {
           visibleCells += 1;
           minimumVisibleAlpha = Math.min(minimumVisibleAlpha, cellAlpha);
@@ -438,7 +486,8 @@ export function buildBclifDisplayProjection(
     }
   }
 
-  if (settings.palette === "REFERENCE_THERMAL" || settings.palette === "BLACK_TERMINAL_BLOOD") {
+  if (settings.rendererVersion === "LEGACY_RGBA_V1"
+    && (settings.palette === "REFERENCE_THERMAL" || settings.palette === "BLACK_TERMINAL_BLOOD")) {
     applyBclifCausalShelfPersistence(
       intensity, alpha, rows, columns,
       0.99955 + settings.residualShelfVisibility / 100 * 0.00035,
@@ -462,6 +511,7 @@ export function buildBclifDisplayProjection(
     priceStep,
     timeStepMs,
     intensity,
+    confidence: confidenceBytes,
     alpha,
     validity,
     yellowEligible,
@@ -489,6 +539,19 @@ export function buildBclifDisplayProjection(
   };
 }
 
+function sourceValue(
+  snapshot: LiquidationFieldSnapshot,
+  settings: LiquidationFieldSettings,
+  index: number
+) {
+  if (settings.viewMode === "VALIDITY_MASK") return snapshot.validity[index] ? 1 : 0;
+  if (settings.viewMode === "CONFIDENCE_FIELD") return snapshot.confidence[index] ?? 0;
+  if (settings.viewMode === "CONFIRMED_LIQUIDATIONS") return snapshot.confirmedNotional[index] ?? 0;
+  if (settings.viewMode === "LONG_EXPOSURE") return snapshot.longExposure[index] ?? 0;
+  if (settings.viewMode === "SHORT_EXPOSURE") return snapshot.shortExposure[index] ?? 0;
+  return (snapshot.longExposure[index] ?? 0) + (snapshot.shortExposure[index] ?? 0);
+}
+
 function resolveSourceSample(
   snapshot: LiquidationFieldSnapshot,
   settings: LiquidationFieldSettings,
@@ -506,10 +569,12 @@ function resolveSourceSample(
   };
   const long = sample(snapshot.longExposure);
   const short = sample(snapshot.shortExposure);
-  const raw = settings.viewMode === "LONG_EXPOSURE" ? long
-    : settings.viewMode === "SHORT_EXPOSURE" ? short
-      : settings.viewMode === "CONFIRMED_LIQUIDATIONS" ? sample(snapshot.confirmedNotional)
-        : long + short;
+  const raw = settings.viewMode === "VALIDITY_MASK" ? 1
+    : settings.viewMode === "CONFIDENCE_FIELD" ? sample(snapshot.confidence)
+      : settings.viewMode === "LONG_EXPOSURE" ? long
+        : settings.viewMode === "SHORT_EXPOSURE" ? short
+          : settings.viewMode === "CONFIRMED_LIQUIDATIONS" ? sample(snapshot.confirmedNotional)
+            : long + short;
   const normalized = settings.viewMode === "LONG_EXPOSURE" ? sample(snapshot.longNormalizedIntensity)
     : settings.viewMode === "SHORT_EXPOSURE" ? sample(snapshot.shortNormalizedIntensity)
       : settings.viewMode === "CONFIRMED_LIQUIDATIONS" ? sample(snapshot.confirmedIntensity)
@@ -705,6 +770,29 @@ function fnvBuffer(value: ArrayBufferView, seed: number | string = 0x811c9dc5) {
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return hash;
+}
+
+export function bclifUint8ToHalf(values: Uint8Array) {
+  const result = new Uint16Array(values.length);
+  for (let index = 0; index < values.length; index += 1) result[index] = floatToHalf(values[index]! / 255);
+  return result;
+}
+
+function floatToHalf(value: number) {
+  const bits = new Uint32Array(1);
+  const floats = new Float32Array(bits.buffer);
+  floats[0] = value;
+  const raw = bits[0]!;
+  const sign = (raw >> 16) & 0x8000;
+  const exponent = ((raw >> 23) & 0xff) - 127 + 15;
+  const mantissa = raw & 0x7fffff;
+  if (exponent <= 0) {
+    if (exponent < -10) return sign;
+    const shifted = (mantissa | 0x800000) >> (1 - exponent);
+    return sign | ((shifted + 0x1000) >> 13);
+  }
+  if (exponent >= 31) return sign | 0x7c00;
+  return sign | (exponent << 10) | ((mantissa + 0x1000) >> 13);
 }
 
 function clamp(value: number, minimum: number, maximum: number) {

@@ -32,6 +32,7 @@
     "test:bclif-authentic-exposure": "node --experimental-strip-types scripts/bclif-authentic-exposure-tests.ts",
     "test:bclif-live-pipeline": "node --experimental-strip-types scripts/bclif-live-pipeline-tests.ts",
     "test:bclif-cold-start": "node --experimental-strip-types scripts/bclif-cold-start-tests.ts",
+    "test:bclif-reference-renderer": "node --experimental-strip-types scripts/bclif-reference-renderer-tests.ts",
     "capture:bclif-public-replay": "node --experimental-strip-types scripts/bclif-public-capture-replay.ts",
     "benchmark:liquidation-field": "node --experimental-strip-types scripts/liquidation-field-performance.ts",
     "benchmark:bclif-operational": "node --experimental-strip-types scripts/bclif-operational-performance.ts",

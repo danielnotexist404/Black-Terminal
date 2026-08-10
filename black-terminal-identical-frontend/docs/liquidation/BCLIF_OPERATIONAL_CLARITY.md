@@ -1,5 +1,11 @@
 # BCLIF Operational Clarity
 
+## Chapter III-C6 operator defaults
+
+The default `Reference` preset is visual-first but truth-preserving: it shows the calibrated V2 scalar field with no open dashboards, labels, event nodes, provenance panels, or raw diagnostics. `Verified` raises evidence emphasis, and `Research` exposes wider diagnostic context. `Raw Exposure` and `Validity` are explicit audit views, never default market views. Renderer selection, visual mode, theme, opacity, purple floor, gamma, robust quantiles, normalization, and high-DPI LOD are persisted presentation settings.
+
+The permanent compact badge reports authority and collection state without covering the plot. Browser fallback remains visibly labeled as estimated context. Yellow is visually rare and remains gated by evidence metadata; a bright pixel is not a promise of liquidation or account inventory.
+
 Chapter III-C2 changes presentation and operator workflow without rewriting the causal cohort engine. The full modeled liquidation field remains available, while the default `Trade Focus` preset projects only the chart's operational price domain. Distant modeled cohorts therefore no longer compress candles by default.
 
 ## Operator views

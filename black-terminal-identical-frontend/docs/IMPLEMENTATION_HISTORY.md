@@ -1439,3 +1439,12 @@ Remaining:
 - Added persisted Plasma Background, Shelf Clarity, and Residual Shelf controls plus schema V9 migration for older Reference Thermal workspaces.
 - Preserved State A truth: browser-fallback relative peaks can be visually vivid but remain non-authoritative, persistence-off, and zero yellow-eligible.
 - Added palette, backdrop, migration, residual-mass, immediate-reset, and no-lookahead regression coverage.
+
+## 2026-08-10 — Phase V Chapter III-C6 Reference Thermal V2
+
+- Replaced the default pre-colored RGBA stretch path with a one-pass WebGL scalar renderer using `R16F` exposure, independent `R8` confidence/validity/visibility/yellow channels, and a calibrated 256-entry `RGBA8` LUT.
+- Calibrated the Purple Plasma palette from the supplied visual reference with a reproducible offline script and immutable source hash; the source screenshot itself is not committed.
+- Added high-DPI scalar projection, validity-aware edge-preserving smoothing, deterministic half-step dithering, strict normal blending, and a selectable Blood / White / Silver theme without changing cohort or exposure mathematics.
+- Added Reference, Verified, and Research presets plus Raw Exposure and Validity audit views. Raw shelves, nodes, labels, dashboards, provenance, and developer diagnostics are off by default.
+- Added renderer-only quantitative fixtures and dedicated 1080p, 1440p, and 4K goldens. Repeated pixels are deterministic (SSIM 1.0 / mean sampled perceptual delta 0), while the older 27-case V2 recertification remains pending.
+- Recorded the truthful source-resolution verdict: `RAW FIELD TOO SPARSE — SOURCE/MODEL RESOLUTION LIMIT`. Persistent collector deployment, migrations, and authenticated live acceptance remain unperformed.

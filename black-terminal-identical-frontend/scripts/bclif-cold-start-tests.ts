@@ -82,7 +82,7 @@ assert.ok(projection.rawNonZeroCells > 0, "fixture must contain raw exposure");
 assert.ok(projection.visibleCells > 0, "50% browser fallback must retain faint OI context");
 assert.ok(projection.maximumAlpha > 0, "visible context must produce non-zero alpha");
 assert.equal(projection.yellowEligibleCells, 0, "50% browser fallback must never receive yellow authority");
-assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.contextVisibilityFloor, 25);
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.contextVisibilityFloor, 0);
 assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.clusterLabelFloor, 60);
 assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.highAuthorityColorFloor, 75);
 assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.strictHideBelowEnabled, false);
@@ -117,7 +117,7 @@ const strictSettings = migrateLiquidationFieldSettings({
 const strictProjection = buildBclifDisplayProjection(snapshot, strictSettings, context);
 assert.ok(strictProjection.rawNonZeroCells > 0);
 assert.equal(strictProjection.visibleCells, 0);
-assert.equal(strictProjection.filteredCells, strictProjection.rawNonZeroCells);
+assert.equal(strictProjection.filteredCells, strictProjection.validCells);
 assert.equal(extractBclifOperationalClusters(snapshot, currentPrice, settings).length, 0);
 
 const legacy = migrateLiquidationFieldSettings({
@@ -127,10 +127,10 @@ const legacy = migrateLiquidationFieldSettings({
   diagnosticsVisible: true,
   operationalSummaryVisible: true
 } as never);
-assert.equal(legacy.contextVisibilityFloor, 25);
+assert.equal(legacy.contextVisibilityFloor, 0);
 assert.equal(legacy.clusterLabelFloor, 68);
 assert.equal(legacy.highAuthorityColorFloor, 75);
-assert.equal(legacy.opacity, 100);
+assert.equal(legacy.opacity, 96);
 assert.equal(legacy.diagnosticsVisible, false);
 assert.equal(legacy.operationalSummaryVisible, false);
 
@@ -144,8 +144,9 @@ const legacyShelfOnly = migrateLiquidationFieldSettings({
   priceDisplay: "FULL_MODEL_RANGE",
   palette: "BLACK_TERMINAL_BLOOD"
 } as never);
-assert.equal(legacyShelfOnly.schemaVersion, 9);
-assert.equal(legacyShelfOnly.preset, "TRADE_FOCUS");
+assert.equal(legacyShelfOnly.schemaVersion, 10);
+assert.equal(legacyShelfOnly.preset, "REFERENCE_THERMAL");
+assert.equal(legacyShelfOnly.rendererVersion, "REFERENCE_THERMAL_V2");
 assert.equal(legacyShelfOnly.horizon, "3W");
 assert.equal(legacyShelfOnly.viewMode, "COMBINED_THERMAL");
 assert.equal(legacyShelfOnly.rawCohortShelvesVisible, false);
@@ -157,10 +158,11 @@ const explicitV8ShelfOverlay = migrateLiquidationFieldSettings({
   schemaVersion: 8,
   rawCohortShelvesVisible: true
 });
-assert.equal(explicitV8ShelfOverlay.schemaVersion, 9);
-assert.equal(explicitV8ShelfOverlay.rawCohortShelvesVisible, true, "V8 shelves remain an explicit overlay choice");
-assert.equal(explicitV8ShelfOverlay.opacity, 100);
-assert.equal(explicitV8ShelfOverlay.plasmaBackgroundOpacity, 94);
+assert.equal(explicitV8ShelfOverlay.schemaVersion, 10);
+assert.equal(explicitV8ShelfOverlay.rawCohortShelvesVisible, false, "pre-V10 reference workspaces migrate to the clean scalar presentation");
+assert.equal(explicitV8ShelfOverlay.opacity, 96);
+assert.equal(explicitV8ShelfOverlay.backgroundFloor, 15);
+assert.equal(explicitV8ShelfOverlay.plasmaBackgroundOpacity, 0);
 assert.equal(explicitV8ShelfOverlay.historicalContextOpacity, 100);
 assert.equal(
   applyBclifPresentationPreset(explicitV8ShelfOverlay, "TRADE_FOCUS").rawCohortShelvesVisible,

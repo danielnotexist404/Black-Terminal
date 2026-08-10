@@ -13,9 +13,11 @@ import {
   bclifExposureHash,
   bclifModelHash,
   bclifRenderSettingsHash,
+  bclifScalarFieldHash,
   resolveBclifDisplayDimensions,
   resolveBclifDisplayDomain
 } from "../rendering/displayProjection";
+import { bclifThermalLutHash } from "../rendering/thermalPalette";
 
 import type { BclifRendererMetrics } from "../rendering/BlackCoreLiquidationFieldRenderer";
 interface Props {
@@ -64,6 +66,8 @@ export function LiquidationFieldOverlays({ visible, snapshot, settings, status, 
   const displayDimensions = snapshot && context ? resolveBclifDisplayDimensions(snapshot, settings, context) : null;
   const modelHash = snapshot ? bclifModelHash(snapshot) : "NONE";
   const exposureHash = snapshot ? bclifExposureHash(snapshot) : "NONE";
+  const scalarFieldHash = snapshot ? bclifScalarFieldHash(snapshot) : "NONE";
+  const lutHash = bclifThermalLutHash(settings.palette);
   const renderSettingsHash = bclifRenderSettingsHash(settings);
   const displayRasterHash = snapshot && context ? bclifDisplayRasterIdentity(snapshot, settings, context) : "NONE";
   const displayPriceStep = displayDomain && displayDimensions
@@ -95,6 +99,8 @@ export function LiquidationFieldOverlays({ visible, snapshot, settings, status, 
       data-bclif-render={`${settings.viewMode}:${settings.palette}:${settings.sharpness}:${settings.gamma}`}
       data-bclif-model-hash={modelHash}
       data-bclif-exposure-hash={exposureHash}
+      data-bclif-scalar-field-hash={scalarFieldHash}
+      data-bclif-lut-hash={lutHash}
       data-bclif-render-settings-hash={renderSettingsHash}
       data-bclif-display-raster-hash={displayRasterHash}
       data-bclif-price-display={settings.priceDisplay}
@@ -219,8 +225,10 @@ export function LiquidationFieldOverlays({ visible, snapshot, settings, status, 
       <div><span>MODEL</span><b>{snapshot?.header.modelVersion ?? "WAITING"}</b></div>
       <div><span>MODEL HASH</span><b>{modelHash}</b></div>
       <div><span>EXPOSURE HASH</span><b>{exposureHash}</b></div>
+      <div><span>SCALAR FIELD HASH</span><b>{scalarFieldHash}</b></div>
+      <div><span>LUT HASH</span><b>{lutHash}</b></div>
       <div><span>RENDER SETTINGS HASH</span><b>{renderSettingsHash}</b></div>
-      <div><span>DISPLAY RASTER HASH</span><b>{displayRasterHash}</b></div>
+      <div><span>FINAL FRAME HASH</span><b>{displayRasterHash}</b></div>
       <div><span>OI COVERAGE</span><b>{formatCoverage(persistentCoverage?.openInterestCoveragePercent, coverage?.openInterestCoveragePercent, 0)}</b></div>
       <div><span>EVENT HISTORY</span><b>{formatCoverage(persistentCoverage?.liquidationCoveragePercent, coverage?.liquidationEventCoveragePercent, 2)}</b></div>
       <div><span>CONTINUITY</span><b>{formatCoverage(persistentCoverage?.continuityPercent, coverage?.modelContinuityPercent, 2)}</b></div>

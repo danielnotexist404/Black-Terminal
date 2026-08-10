@@ -1,12 +1,11 @@
 import type { LiquidationFieldPalette, LiquidationFieldSettings, LiquidationFieldSnapshot } from "../core/types.ts";
+import { BCLIF_REFERENCE_LUT_RGB, BCLIF_REFERENCE_LUT_SOURCE_SHA256 } from "./referenceThermalLut.generated.ts";
 
 type PaletteStop = readonly [number, string];
 
 const REFERENCE_STOPS: readonly PaletteStop[] = [
-  [0.00, "#160027"], [0.05, "#2c0049"], [0.12, "#480078"], [0.22, "#3f1790"],
-  [0.34, "#214fac"], [0.46, "#087fc0"], [0.57, "#00a5b5"], [0.67, "#00c99c"],
-  [0.76, "#1be777"], [0.84, "#89f23a"], [0.91, "#ddf51f"], [0.96, "#f2f532"],
-  [1.00, "#fff04a"]
+  [0.00, "#350044"], [0.12, "#4a0c69"], [0.28, "#403075"], [0.46, "#275f89"],
+  [0.64, "#1f9580"], [0.82, "#4fbd5d"], [0.94, "#a8d22f"], [1.00, "#f0e705"]
 ];
 
 const PALETTES: Record<LiquidationFieldPalette, readonly PaletteStop[]> = {
@@ -75,6 +74,7 @@ export function interpolateBclifThermalColor(left: number, right: number, amount
 }
 
 export function createThermalPalette(name: LiquidationFieldPalette, entries = 256) {
+  if (name === "REFERENCE_THERMAL") return createReferenceThermalPalette(entries);
   const stops = PALETTES[name] ?? REFERENCE_STOPS;
   const lut = new Uint8Array(entries * 4);
   for (let index = 0; index < entries; index++) {
@@ -91,6 +91,24 @@ export function createThermalPalette(name: LiquidationFieldPalette, entries = 25
     lut[index * 4] = linearToSrgb(left[0]! + (right[0]! - left[0]!) * t);
     lut[index * 4 + 1] = linearToSrgb(left[1]! + (right[1]! - left[1]!) * t);
     lut[index * 4 + 2] = linearToSrgb(left[2]! + (right[2]! - left[2]!) * t);
+    lut[index * 4 + 3] = 255;
+  }
+  return lut;
+}
+
+function createReferenceThermalPalette(entries: number) {
+  const lut = new Uint8Array(entries * 4);
+  const sourceEntries = BCLIF_REFERENCE_LUT_RGB.length / 3;
+  for (let index = 0; index < entries; index += 1) {
+    const position = index / Math.max(1, entries - 1) * (sourceEntries - 1);
+    const lower = Math.floor(position);
+    const upper = Math.min(sourceEntries - 1, lower + 1);
+    const fraction = position - lower;
+    for (let channel = 0; channel < 3; channel += 1) {
+      const left = BCLIF_REFERENCE_LUT_RGB[lower * 3 + channel]!;
+      const right = BCLIF_REFERENCE_LUT_RGB[upper * 3 + channel]!;
+      lut[index * 4 + channel] = Math.round(left + (right - left) * fraction);
+    }
     lut[index * 4 + 3] = 255;
   }
   return lut;
@@ -153,3 +171,14 @@ export function resolveLiquidationFieldRenderIntensity(
 }
 
 export const REFERENCE_THERMAL_LUT = createThermalPalette("REFERENCE_THERMAL");
+export const REFERENCE_THERMAL_CALIBRATION_SHA256 = BCLIF_REFERENCE_LUT_SOURCE_SHA256;
+
+export function bclifThermalLutHash(name: LiquidationFieldPalette) {
+  const bytes = createThermalPalette(name);
+  let hash = 0x811c9dc5;
+  for (const value of bytes) {
+    hash ^= value;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `fnv1a-${hash.toString(16).padStart(8, "0")}`;
+}

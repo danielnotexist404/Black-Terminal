@@ -7,8 +7,10 @@ import {
   type BclifDisplayProjection
 } from "./displayProjection.ts";
 import { buildBclifDisplayTexture } from "./displayTexture.ts";
-import { buildBclifRawExposureExport } from "../core/rawShelfDiagnostics.ts";
+import { analyzeBclifRawField, buildBclifRawExposureExport } from "../core/rawShelfDiagnostics.ts";
 import { bclifThermalBackdropStyle, interpolateBclifThermalColor } from "./thermalPalette.ts";
+import { BlackCoreReferenceThermalRendererV2 } from "./BlackCoreReferenceThermalRendererV2.ts";
+import { measureBclifReferenceThermalField } from "./referenceThermalMetrics.ts";
 
 export interface LiquidationFieldRenderTransform {
   width: number;
@@ -19,6 +21,7 @@ export interface LiquidationFieldRenderTransform {
   priceMax: number;
   currentPrice: number;
   constrainedTouchRenderer: boolean;
+  devicePixelRatio?: number;
   xForTimestampMs(timestampMs: number): number;
   yForPrice(price: number): number;
 }
@@ -60,7 +63,7 @@ export function validateBclifProjection(projection: BclifDisplayProjection) {
     throw new Error("BCLIF_TEXTURE_DIMENSIONS_INVALID");
   }
   const cells = projection.columns * projection.rows;
-  for (const channel of [projection.intensity, projection.alpha, projection.validity, projection.yellowEligible]) {
+  for (const channel of [projection.intensity, projection.confidence, projection.alpha, projection.validity, projection.yellowEligible]) {
     if (channel.length !== cells) throw new Error("BCLIF_TEXTURE_BUFFER_LENGTH_INVALID");
   }
   if (!Number.isFinite(projection.minPrice) || !Number.isFinite(projection.maxPrice) || projection.maxPrice <= projection.minPrice) {
@@ -147,6 +150,7 @@ export class BlackCoreLiquidationFieldRenderer {
   private texture: Texture<BufferImageSource> | null = null;
   private backdrop = new Graphics();
   private source: BufferImageSource | null = null;
+  private readonly referenceRenderer = new BlackCoreReferenceThermalRendererV2();
   private snapshot: LiquidationFieldSnapshot | null = null;
   private settings: LiquidationFieldSettings | null = null;
   private stateKey = "";
@@ -229,7 +233,10 @@ export class BlackCoreLiquidationFieldRenderer {
       this.currentTextureUploaded = false;
       this.drawPassActive = false;
     }
-    if (!snapshot && this.sprite) this.sprite.visible = false;
+    if (!snapshot) {
+      if (this.sprite) this.sprite.visible = false;
+      this.referenceRenderer.setVisible(false);
+    }
   }
 
   draw(transform: LiquidationFieldRenderTransform) {
@@ -250,7 +257,8 @@ export class BlackCoreLiquidationFieldRenderer {
       Math.round(transform.width / 64),
       Math.round((transform.bottom - transform.top) / 64),
       Math.round(transform.currentPrice / Math.max(snapshot.header.priceStep, 1e-8)),
-      transform.constrainedTouchRenderer ? 1 : 0
+      transform.constrainedTouchRenderer ? 1 : 0,
+      Math.round((transform.devicePixelRatio ?? globalThis.devicePixelRatio ?? 1) * 100)
     ].join(":");
     if (!this.projection || this.textureKey !== projectionKey) {
       const context = {
@@ -259,7 +267,8 @@ export class BlackCoreLiquidationFieldRenderer {
         currentPrice: transform.currentPrice,
         plotWidth: transform.width,
         plotHeight: transform.bottom - transform.top,
-        constrainedTouchRenderer: transform.constrainedTouchRenderer
+        constrainedTouchRenderer: transform.constrainedTouchRenderer,
+        devicePixelRatio: transform.devicePixelRatio ?? globalThis.devicePixelRatio ?? 1
       };
       if (this.projectionWorker) {
         this.requestProjection(projectionKey, snapshot, settings, context);
@@ -271,24 +280,33 @@ export class BlackCoreLiquidationFieldRenderer {
       }
     }
     const projection = this.projection;
-    const sprite = this.sprite;
-    if (!projection || !sprite) return;
+    if (!projection) return;
 
     const left = transform.xForTimestampMs(snapshot.header.startTime);
     const right = transform.xForTimestampMs(snapshot.header.endTime);
     const top = transform.yForPrice(projection.maxPrice);
     const bottom = transform.yForPrice(projection.minPrice);
-    sprite.x = Math.min(left, right);
-    sprite.y = Math.min(top, bottom);
-    sprite.width = Math.max(1, Math.abs(right - left));
-    sprite.height = Math.max(1, Math.abs(bottom - top));
-    sprite.alpha = Math.max(0, Math.min(1, settings.opacity / 100));
-    // Raw shelves are a diagnostic overlay, never an exclusive replacement
-    // for the thermal field. The old gate here caused the production symptom
-    // where two moving shelf strokes survived while the GPU raster vanished.
-    sprite.visible = right >= 0 && left <= transform.width
+    const x = Math.min(left, right);
+    const y = Math.min(top, bottom);
+    const width = Math.max(1, Math.abs(right - left));
+    const height = Math.max(1, Math.abs(bottom - top));
+    const visible = right >= 0 && left <= transform.width
       && bottom >= transform.top && top <= transform.bottom;
-    this.drawPassActive = sprite.visible;
+    if (settings.rendererVersion === "REFERENCE_THERMAL_V2") {
+      if (this.sprite) this.sprite.visible = false;
+      this.drawPassActive = this.referenceRenderer.draw(x, y, width, height, visible);
+    } else {
+      this.referenceRenderer.setVisible(false);
+      const sprite = this.sprite;
+      if (!sprite) return;
+      sprite.x = x;
+      sprite.y = y;
+      sprite.width = width;
+      sprite.height = height;
+      sprite.alpha = Math.max(0, Math.min(1, settings.opacity / 100));
+      sprite.visible = visible;
+      this.drawPassActive = visible;
+    }
 
     if (settings.rawCohortShelvesVisible) {
       const shelves = snapshot.rawCohortShelves ?? snapshot.cohorts.map((cohort) => ({
@@ -401,38 +419,46 @@ export class BlackCoreLiquidationFieldRenderer {
     const settings = this.settings;
     if (!projection || !settings) {
       if (this.sprite) this.sprite.visible = false;
+      this.referenceRenderer.setVisible(false);
       return;
     }
     const { columns, rows } = projection;
-    let rgba: Uint8Array;
     try {
       validateBclifProjection(projection);
-      rgba = projection.rgba ?? buildBclifDisplayTexture(projection, settings, this.rgba);
-      if (rgba.length !== columns * rows * 4) throw new Error("BCLIF_RGBA_BUFFER_LENGTH_INVALID");
+      if (settings.rendererVersion === "REFERENCE_THERMAL_V2") {
+        this.referenceRenderer.upload(projection, settings);
+        const view = this.referenceRenderer.view;
+        if (view && !view.parent) this.container.addChildAt(view, 1);
+        if (this.sprite) this.sprite.visible = false;
+        this.rgba = null;
+      } else {
+        const rgba = projection.rgba ?? buildBclifDisplayTexture(projection, settings, this.rgba);
+        if (rgba.length !== columns * rows * 4) throw new Error("BCLIF_RGBA_BUFFER_LENGTH_INVALID");
+        this.rgba = rgba;
+        const dimensionsChanged = !this.source || this.source.width !== columns || this.source.height !== rows;
+        if (dimensionsChanged) {
+          if (this.sprite) this.container.removeChild(this.sprite);
+          this.texture?.destroy(true);
+          this.source = new BufferImageSource({ resource: rgba, width: columns, height: rows, format: "rgba8unorm" });
+          this.source.style.scaleMode = "linear";
+          this.texture = new Texture({ source: this.source });
+          this.sprite = new Sprite(this.texture);
+          this.sprite.zIndex = 0;
+          this.container.addChildAt(this.sprite, 1);
+        } else if (this.source) {
+          this.source.resource = rgba;
+          this.source.update();
+        }
+      }
       this.bufferValid = true;
     } catch (error) {
       this.bufferValid = false;
       this.currentTextureUploaded = false;
       this.lastError = error instanceof Error ? error.message : "BCLIF_TEXTURE_VALIDATION_FAILED";
       if (this.sprite) this.sprite.visible = false;
+      this.referenceRenderer.setVisible(false);
       this.emitMetrics();
       return;
-    }
-    this.rgba = rgba;
-
-    const dimensionsChanged = !this.source || this.source.width !== columns || this.source.height !== rows;
-    if (dimensionsChanged) {
-      if (this.sprite) this.container.removeChild(this.sprite);
-      this.texture?.destroy(true);
-      this.source = new BufferImageSource({ resource: rgba, width: columns, height: rows, format: "rgba8unorm" });
-      this.source.style.scaleMode = "linear";
-      this.texture = new Texture({ source: this.source });
-      this.sprite = new Sprite(this.texture);
-      this.sprite.zIndex = 0;
-      this.container.addChildAt(this.sprite, 1);
-    } else if (this.source) {
-      this.source.resource = rgba;
-      this.source.update();
     }
     this.textureUploadCount += 1;
     this.currentTextureUploaded = true;
@@ -487,7 +513,8 @@ export class BlackCoreLiquidationFieldRenderer {
     return {
       readiness,
       webglContextReady: this.webglContextReady,
-      textureAllocated: Boolean(this.texture),
+      textureAllocated: this.settings?.rendererVersion === "REFERENCE_THERMAL_V2"
+        ? Boolean(this.referenceRenderer.view) : Boolean(this.texture),
       bufferValid: this.bufferValid,
       snapshotApplied: Boolean(this.snapshot),
       textureUploaded: this.currentTextureUploaded,
@@ -509,7 +536,14 @@ export class BlackCoreLiquidationFieldRenderer {
       maximumAlpha,
       textureDimensions: this.projection ? `${this.projection.columns}x${this.projection.rows}` : null,
       error: this.lastError,
-      textures: this.texture ? 1 : 0,
+      textures: this.settings?.rendererVersion === "REFERENCE_THERMAL_V2"
+        ? this.referenceRenderer.metrics.textureCount : this.texture ? 1 : 0,
+      rendererVersion: this.settings?.rendererVersion ?? null,
+      scalarTextureFormat: this.settings?.rendererVersion === "REFERENCE_THERMAL_V2"
+        ? this.referenceRenderer.metrics.scalarFormat : "rgba8unorm",
+      shaderPasses: this.settings?.rendererVersion === "REFERENCE_THERMAL_V2" ? 1 : 0,
+      mipmaps: false,
+      blendMode: "normal",
       cells: this.projection ? this.projection.columns * this.projection.rows : 0,
       authority: this.snapshot?.authority ?? null,
       checksum: this.snapshot?.header.checksum ?? null,
@@ -525,7 +559,11 @@ export class BlackCoreLiquidationFieldRenderer {
       exposureHash: this.projection?.exposureHash ?? null,
       renderSettingsHash: this.projection?.renderSettingsHash ?? null,
       displayRasterHash: this.projection?.displayRasterHash ?? null,
-      yellowEligibleCells: this.projection?.yellowEligibleCells ?? 0
+      yellowEligibleCells: this.projection?.yellowEligibleCells ?? 0,
+      rawFieldAudit: this.snapshot ? analyzeBclifRawField(this.snapshot) : null,
+      fieldMetrics: this.projection && this.settings
+        ? measureBclifReferenceThermalField(this.projection, this.settings)
+        : null
     };
   }
 
@@ -535,6 +573,7 @@ export class BlackCoreLiquidationFieldRenderer {
     this.currentTextureUploaded = false;
     this.lastError = "WEBGL_CONTEXT_LOST";
     if (this.sprite) this.sprite.visible = false;
+    this.referenceRenderer.setVisible(false);
     this.emitMetrics();
   }
 
@@ -569,6 +608,7 @@ export class BlackCoreLiquidationFieldRenderer {
     this.projectionQueue.reset();
     this.projectionWorker?.terminate();
     this.projectionWorker = null;
+    this.referenceRenderer.destroy();
     this.texture?.destroy(true);
     this.texture = null;
     this.source = null;
@@ -587,6 +627,10 @@ function drawBclifThermalBackdrop(
   settings: LiquidationFieldSettings
 ) {
   const height = Math.max(0, transform.bottom - transform.top);
+  if (settings.rendererVersion === "REFERENCE_THERMAL_V2") {
+    graphics.rect(0, transform.top, transform.width, height).fill({ color: 0x05020b, alpha: 1 });
+    return;
+  }
   if (height <= 0 || transform.width <= 0 || settings.plasmaBackgroundOpacity <= 0) return;
   const style = bclifThermalBackdropStyle(settings.palette);
   const alpha = Math.max(0, Math.min(1, settings.plasmaBackgroundOpacity / 100));

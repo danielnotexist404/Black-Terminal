@@ -22,7 +22,8 @@ export const BCLIF_VISUAL_CASES = [
   "TRADE_FOCUS",
   "FULL_SPECTRUM_RESEARCH",
   "BROWSER_FALLBACK",
-  "PERSISTENT_NODE"
+  "PERSISTENT_NODE",
+  "REFERENCE_THERMAL_STYLE"
 ] as const;
 export type BclifVisualCase = typeof BCLIF_VISUAL_CASES[number];
 
@@ -36,7 +37,9 @@ export function resolveBclifVisualCase(locationValue?: Pick<Location, "search">)
 
 export function applyBclifVisualFixtureSettings(settings: LiquidationFieldSettings): LiquidationFieldSettings {
   const visualCase = resolveBclifVisualCase();
-  const diagnosticSettings = (preset: "TRADE_FOCUS" | "FULL_SPECTRUM_RESEARCH") => ({
+  const rawField = typeof window !== "undefined"
+    && new URLSearchParams(window.location.search).get("bclifRawField") === "1";
+  const diagnosticSettings = (preset: "REFERENCE_THERMAL" | "RESEARCH_DIAGNOSTICS") => ({
     ...applyBclifPresentationPreset(settings, preset),
     // Synthetic fixtures are intentionally unscored. Expose their complete
     // deterministic topology during localhost certification without lowering
@@ -44,27 +47,35 @@ export function applyBclifVisualFixtureSettings(settings: LiquidationFieldSettin
     contextVisibilityFloor: 0, clusterLabelFloor: 0,
     minimumNotionalUsd: 0
   });
-  if (visualCase === "FULL_SPECTRUM_RESEARCH") return diagnosticSettings("FULL_SPECTRUM_RESEARCH");
+  if (rawField) return {
+    ...diagnosticSettings("REFERENCE_THERMAL"),
+    rendererVersion: "REFERENCE_THERMAL_V2",
+    viewMode: "RAW_EXPOSURE",
+    diagnosticsVisible: false,
+    legendVisible: false,
+    maximumClusterLabels: 0
+  };
+  if (visualCase === "FULL_SPECTRUM_RESEARCH") return diagnosticSettings("RESEARCH_DIAGNOSTICS");
   if (visualCase === "BROWSER_FALLBACK") return {
-    ...applyBclifPresentationPreset(settings, "TRADE_FOCUS"),
+    ...applyBclifPresentationPreset(settings, "REFERENCE_THERMAL"),
     contextVisibilityFloor: 25, clusterLabelFloor: 60, highAuthorityColorFloor: 75,
     strictHideBelowEnabled: false, minimumNotionalUsd: 0
   };
   if (visualCase === "COHORT_PROVENANCE") return {
-    ...diagnosticSettings("TRADE_FOCUS"),
+    ...diagnosticSettings("REFERENCE_THERMAL"),
     cohortProvenanceVisible: true,
     cohortBirthMarkersVisible: true,
     diagnosticsVisible: true
   };
   if (["SWING_INDEPENDENCE", "OI_EXPANSION", "OI_CONTRACTION", "CONFIRMED_LIQUIDATION"].includes(visualCase)) {
     return {
-      ...diagnosticSettings("TRADE_FOCUS"),
+      ...diagnosticSettings("REFERENCE_THERMAL"),
       cohortBirthMarkersVisible: true,
       confirmedMarkersVisible: visualCase === "CONFIRMED_LIQUIDATION",
       diagnosticsVisible: true
     };
   }
-  return diagnosticSettings("TRADE_FOCUS");
+  return diagnosticSettings("REFERENCE_THERMAL");
 }
 
 export function createLiquidationFieldFixture(now = 1_900_000_000_000, visualCase?: BclifVisualCase) {
@@ -195,6 +206,13 @@ export function applyBclifVisualCertificationProfile(snapshot: LiquidationFieldS
 }
 
 export function applyBclifVisualCase(snapshot: LiquidationFieldSnapshot, visualCase: BclifVisualCase): LiquidationFieldSnapshot {
+  if (visualCase === "REFERENCE_THERMAL_STYLE") return {
+    ...snapshot,
+    header: {
+      ...snapshot.header,
+      checksum: `${snapshot.header.checksum}::SYNTHETIC_REFERENCE_THERMAL_STYLE_V3`
+    }
+  };
   if (visualCase === "BROWSER_FALLBACK") {
     const confidence = new Uint8Array(snapshot.confidence.length).fill(Math.round(52 * 2.55));
     return {

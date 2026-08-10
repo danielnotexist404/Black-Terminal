@@ -26,11 +26,12 @@ npm run test:bclif-collector-contracts
 npm run benchmark:bclif-operational
 npm run benchmark:bclif-collector
 npm run test:bclif-visual
+npm run test:bclif-reference-renderer
 npm run typecheck
 npm run build
 ```
 
-The deterministic visual fixture is localhost-only, query-gated, and labeled `SYNTHETIC_TEST`; normal runtime requires a Bybit linear symbol and public network access. Chapter III-C2 owns 21 full-resolution baselines (seven truth/display cases at three viewports). Golden generation is deliberately non-passing until a later normal comparison promotes the manifest to `CERTIFIED`. Collector build/deploy/status/drain/restart/rollback/certify/soak commands and their host prerequisites are listed in `liquidation/BCLIF_DEPLOYMENT_RUNBOOK.md`. Neither BCLIF migration is applied by an npm or deployment command.
+The deterministic visual fixture is localhost-only, query-gated, and labeled `SYNTHETIC_TEST`; normal runtime requires a Bybit linear symbol and public network access. Chapter III-C6 adds three dedicated Reference Thermal V2 full-resolution goldens and a quantitative renderer contract. Those three cases pass; the older 27-case matrix still requires a complete V2 re-record/approval and the combined manifest therefore remains pending. Collector build/deploy/status/drain/restart/rollback/certify/soak commands and their host prerequisites are listed in `liquidation/BCLIF_DEPLOYMENT_RUNBOOK.md`. Neither BCLIF migration is applied by an npm or deployment command.
 
 Open the Vite URL shown in the terminal for browser development.
 

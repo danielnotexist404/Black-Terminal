@@ -180,8 +180,8 @@ for (let row = 1; row < finalColumn.length - 1; row++) {
 assert.ok(significantShelfCount >= 6, "selected leverage hypotheses must remain separated into multiple price shelves");
 
 const reference = createThermalPalette("REFERENCE_THERMAL");
-assert.deepEqual([...reference.slice(0, 3)], [22, 0, 39], "low exposure must remain deep plasma rather than transparent black");
-assert.deepEqual([...reference.slice(-4, -1)], [255, 240, 74], "extreme exposure must reach the crisp plasma-yellow endpoint");
+assert.deepEqual([...reference.slice(0, 3)], [53, 0, 68], "the calibrated low endpoint must remain opaque deep plasma");
+assert.deepEqual([...reference.slice(-4, -1)], [240, 231, 5], "the calibrated extreme endpoint must reach the crisp reference-yellow core");
 assert.deepEqual(bclifThermalBackdropStyle("REFERENCE_THERMAL"), {
   top: 0x28003f, middle: 0x071435, bottom: 0x31003d, invalid: 0x23003c
 });

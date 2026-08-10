@@ -1,23 +1,25 @@
 import type { BclifPresentationPreset, LiquidationFieldHorizon, LiquidationFieldSettings } from "./types.ts";
 
-export const LIQUIDATION_FIELD_SETTINGS_VERSION = 9 as const;
+export const LIQUIDATION_FIELD_SETTINGS_VERSION = 10 as const;
 export const BCLIF_MAX_REQUEST_HOURS = 90 * 24;
 export const BCLIF_BROWSER_OI_INTERVAL = "5min" as const;
 
 export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   schemaVersion: LIQUIDATION_FIELD_SETTINGS_VERSION,
-  preset: "TRADE_FOCUS",
+  rendererVersion: "REFERENCE_THERMAL_V2",
+  authoritySemantics: "RELATIVE_MODELED_EXPOSURE",
+  preset: "REFERENCE_THERMAL",
   viewMode: "COMBINED_THERMAL",
   horizon: "3W",
   customHours: 72,
   venue: "BYBIT",
   modelPreset: "REGIME_ADAPTIVE",
-  scale: "CONFIDENCE_WEIGHTED_LOG",
+  scale: "LOG_NOTIONAL",
   palette: "REFERENCE_THERMAL",
-  opacity: 100,
-  gamma: 0.9,
-  lowQuantile: 0.55,
-  highQuantile: 0.997,
+  opacity: 96,
+  gamma: 0.85,
+  lowQuantile: 0.05,
+  highQuantile: 0.9986,
   smoothing: "BALANCED",
   priceSigmaRows: 1.15,
   timeSigmaColumns: 0.55,
@@ -27,7 +29,7 @@ export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   diagnosticsVisible: false,
   confirmedMarkersVisible: false,
   cascadePathsVisible: false,
-  contextVisibilityFloor: 25,
+  contextVisibilityFloor: 0,
   clusterLabelFloor: 60,
   highAuthorityColorFloor: 75,
   strictHideBelowEnabled: false,
@@ -47,10 +49,10 @@ export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   customPriceMaximum: 80_000,
   autoFocusMarginPercent: 3,
   visualChannel: "COMBINED",
-  thermalNormalization: "HYBRID",
+  thermalNormalization: "GLOBAL_MODEL",
   confidenceWeightEnabled: false,
-  backgroundFloor: 18,
-  plasmaBackgroundOpacity: 94,
+  backgroundFloor: 15,
+  plasmaBackgroundOpacity: 0,
   shelfContrast: 88,
   residualShelfVisibility: 32,
   yellowTailPercent: 0.3,
@@ -59,12 +61,12 @@ export const DEFAULT_LIQUIDATION_FIELD_SETTINGS: LiquidationFieldSettings = {
   requireMultipleEvidenceChannels: false,
   uncertaintyEnvelopesVisible: false,
   adaptiveResolution: "AUTO",
-  focusBand: "PERCENT_5",
+  focusBand: "OFF",
   customFocusBandPercent: 5,
   candleContrast: "HIGH",
-  maximumClusterLabels: 4,
+  maximumClusterLabels: 0,
   operationalSummaryVisible: false,
-  collectionStartMarkerVisible: true,
+  collectionStartMarkerVisible: false,
   cohortProvenanceVisible: false,
   cohortBirthMarkersVisible: false,
   oiNoiseMethod: "HYBRID_ROBUST",
@@ -103,7 +105,7 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
   // parameters and unrelated workspace settings remain untouched.
   const recoverLegacyShelfOnlyPresentation = legacySchemaVersion < 8
     && Boolean(legacy?.rawCohortShelvesVisible);
-  const upgradeReferenceThermalPresentation = legacySchemaVersion < 9
+  const upgradeReferenceThermalPresentation = legacySchemaVersion < 10
     && (recoverLegacyShelfOnlyPresentation || merged.palette === "REFERENCE_THERMAL");
   const vivid = <T>(current: T, upgraded: T) => upgradeReferenceThermalPresentation ? upgraded : current;
 
@@ -116,18 +118,20 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     horizon: recoverLegacyShelfOnlyPresentation
       ? DEFAULT_LIQUIDATION_FIELD_SETTINGS.horizon
       : horizons.has(merged.horizon) ? merged.horizon : DEFAULT_LIQUIDATION_FIELD_SETTINGS.horizon,
-    preset: recoverLegacyShelfOnlyPresentation ? "TRADE_FOCUS" : merged.preset,
+    rendererVersion: upgradeReferenceThermalPresentation ? "REFERENCE_THERMAL_V2" : merged.rendererVersion,
+    authoritySemantics: upgradeReferenceThermalPresentation ? "RELATIVE_MODELED_EXPOSURE" : merged.authoritySemantics,
+    preset: upgradeReferenceThermalPresentation ? "REFERENCE_THERMAL" : merged.preset,
     viewMode: recoverLegacyShelfOnlyPresentation ? "COMBINED_THERMAL" : merged.viewMode,
     // The protected manifest API accepts one bounded window of at most 90 days.
     // Keep persisted settings inside that contract instead of allowing a value
     // that can only produce a permanent HTTP 400 response.
     customHours: clamp(merged.customHours, 72, 1, BCLIF_MAX_REQUEST_HOURS),
-    opacity: clamp(vivid(merged.opacity, 100), 100, 10, 100),
-    gamma: clamp(vivid(merged.gamma, 0.9), 0.9, 0.35, 2.5),
-    lowQuantile: clamp(vivid(merged.lowQuantile, 0.55), 0.55, 0, 0.95),
+    opacity: clamp(vivid(merged.opacity, 96), 96, 10, 100),
+    gamma: clamp(vivid(merged.gamma, 0.85), 0.85, 0.35, 2.5),
+    lowQuantile: clamp(vivid(merged.lowQuantile, 0.05), 0.05, 0, 0.95),
     highQuantile: Math.max(
-      clamp(vivid(merged.lowQuantile, 0.55), 0.55, 0, 0.95) + 0.001,
-      clamp(vivid(merged.highQuantile, 0.997), 0.997, 0.5, 1)
+      clamp(vivid(merged.lowQuantile, 0.05), 0.05, 0, 0.95) + 0.001,
+      clamp(vivid(merged.highQuantile, 0.9986), 0.9986, 0.5, 1)
     ),
     priceSigmaRows: clamp(merged.priceSigmaRows, 1.15, 0, 4),
     timeSigmaColumns: clamp(merged.timeSigmaColumns, 0.55, 0, 3),
@@ -166,7 +170,7 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     customPriceMinimum: customMinimum,
     customPriceMaximum: customMaximum,
     autoFocusMarginPercent: clamp(merged.autoFocusMarginPercent, 3, 0, 25),
-    backgroundFloor: Math.round(clamp(vivid(merged.backgroundFloor, 18), 18, 0, 64)),
+    backgroundFloor: Math.round(clamp(vivid(merged.backgroundFloor, 15), 15, 0, 64)),
     plasmaBackgroundOpacity: clamp(merged.plasmaBackgroundOpacity, 94, 0, 100),
     shelfContrast: clamp(merged.shelfContrast, 88, 0, 100),
     residualShelfVisibility: clamp(merged.residualShelfVisibility, 32, 0, 100),
@@ -178,7 +182,7 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
       ? false : Boolean(merged.requireMultipleEvidenceChannels),
     adaptiveResolution: upgradeReferenceThermalPresentation ? "AUTO" : merged.adaptiveResolution,
     customFocusBandPercent: clamp(merged.customFocusBandPercent, 5, 0.25, 50),
-    maximumClusterLabels: Math.round(clamp(merged.maximumClusterLabels, 4, 0, 6)),
+    maximumClusterLabels: Math.round(clamp(upgradeReferenceThermalPresentation ? 0 : merged.maximumClusterLabels, 0, 0, 6)),
     oiNoiseAbsoluteNotionalUsd: clamp(merged.oiNoiseAbsoluteNotionalUsd, 100_000, 0, 100_000_000),
     oiNoisePercent: clamp(merged.oiNoisePercent, 0.000075, 0, 0.1),
     oiNoiseMadMultiplier: clamp(merged.oiNoiseMadMultiplier, 3.5, 0, 20),
@@ -189,8 +193,14 @@ export function migrateLiquidationFieldSettings(value?: Partial<LiquidationField
     oiEventContinuationRatio: clamp(merged.oiEventContinuationRatio, 0.35, 0.05, 1),
     oiEventTerminationRatio: clamp(merged.oiEventTerminationRatio, 0.25, 0, 1),
     oiEventHysteresisIntervals: Math.round(clamp(merged.oiEventHysteresisIntervals, 2, 1, 12)),
-    rawCohortShelvesVisible: recoverLegacyShelfOnlyPresentation
+    rawCohortShelvesVisible: upgradeReferenceThermalPresentation
       ? false : Boolean(merged.rawCohortShelvesVisible),
+    confirmedMarkersVisible: upgradeReferenceThermalPresentation ? false : Boolean(merged.confirmedMarkersVisible),
+    cascadePathsVisible: upgradeReferenceThermalPresentation ? false : Boolean(merged.cascadePathsVisible),
+    uncertaintyEnvelopesVisible: upgradeReferenceThermalPresentation ? false : Boolean(merged.uncertaintyEnvelopesVisible),
+    collectionStartMarkerVisible: upgradeReferenceThermalPresentation ? false : Boolean(merged.collectionStartMarkerVisible),
+    cohortBirthMarkersVisible: upgradeReferenceThermalPresentation ? false : Boolean(merged.cohortBirthMarkersVisible),
+    focusBand: upgradeReferenceThermalPresentation ? "OFF" : merged.focusBand,
     priceDisplay: recoverLegacyShelfOnlyPresentation ? "CHART_SCALE" : merged.priceDisplay,
     palette: recoverLegacyShelfOnlyPresentation ? "REFERENCE_THERMAL" : merged.palette
   };
@@ -205,6 +215,37 @@ export function applyBclifPresentationPreset(
     preset,
     rawCohortShelvesVisible: preset === "RAW_MODEL" ? source.rawCohortShelvesVisible : false
   };
+  if (preset === "REFERENCE_THERMAL") return migrateLiquidationFieldSettings({
+    ...common, rendererVersion: "REFERENCE_THERMAL_V2", authoritySemantics: "RELATIVE_MODELED_EXPOSURE",
+    viewMode: "COMBINED_THERMAL", priceDisplay: "CHART_SCALE", scale: "LOG_NOTIONAL", palette: "REFERENCE_THERMAL",
+    thermalNormalization: "GLOBAL_MODEL", opacity: 96, gamma: 0.85, lowQuantile: 0.05, highQuantile: 0.9986,
+    contextVisibilityFloor: 0, strictHideBelowEnabled: false, backgroundFloor: 15, plasmaBackgroundOpacity: 0,
+    visualChannel: "COMBINED", historicalContextOpacity: 100, liveCalibratedOpacity: 100,
+    confidenceWeightEnabled: false, requireMultipleEvidenceChannels: false, smoothing: "BALANCED",
+    diagnosticsVisible: false, legendVisible: false, operationalSummaryVisible: false, maximumClusterLabels: 0,
+    confirmedMarkersVisible: false, cascadePathsVisible: false, uncertaintyEnvelopesVisible: false,
+    collectionStartMarkerVisible: false, cohortBirthMarkersVisible: false, rawCohortShelvesVisible: false,
+    focusBand: "OFF", candleContrast: "HIGH", adaptiveResolution: "AUTO"
+  });
+  if (preset === "VERIFIED_AUTHORITY") return migrateLiquidationFieldSettings({
+    ...common, rendererVersion: "REFERENCE_THERMAL_V2", authoritySemantics: "VERIFIED_AUTHORITY",
+    viewMode: "COMBINED_THERMAL", priceDisplay: "CHART_SCALE", scale: "LOG_NOTIONAL", palette: "REFERENCE_THERMAL",
+    thermalNormalization: "GLOBAL_MODEL", opacity: 96, gamma: 0.85, lowQuantile: 0.05, highQuantile: 0.9986,
+    contextVisibilityFloor: 0, strictHideBelowEnabled: false, highAuthorityColorFloor: 75,
+    confidenceWeightEnabled: false, requireMultipleEvidenceChannels: true, diagnosticsVisible: false,
+    legendVisible: false, operationalSummaryVisible: false, maximumClusterLabels: 0, confirmedMarkersVisible: true,
+    cascadePathsVisible: false, uncertaintyEnvelopesVisible: false, collectionStartMarkerVisible: false,
+    cohortBirthMarkersVisible: false, rawCohortShelvesVisible: false, focusBand: "OFF", candleContrast: "HIGH"
+  });
+  if (preset === "RESEARCH_DIAGNOSTICS") return migrateLiquidationFieldSettings({
+    ...common, rendererVersion: "REFERENCE_THERMAL_V2", authoritySemantics: "RELATIVE_MODELED_EXPOSURE",
+    viewMode: "RAW_EXPOSURE", priceDisplay: "FULL_MODEL_RANGE", palette: "INSTITUTIONAL_MONOCHROME",
+    thermalNormalization: "GLOBAL_MODEL", opacity: 100, gamma: 1, lowQuantile: 0, highQuantile: 1,
+    contextVisibilityFloor: 0, strictHideBelowEnabled: false, smoothing: "SHARP", diagnosticsVisible: true,
+    legendVisible: true, operationalSummaryVisible: false, maximumClusterLabels: 0, confirmedMarkersVisible: false,
+    cascadePathsVisible: false, uncertaintyEnvelopesVisible: false, collectionStartMarkerVisible: true,
+    cohortBirthMarkersVisible: false, rawCohortShelvesVisible: false, focusBand: "OFF", candleContrast: "HIGH"
+  });
   if (preset === "TRADE_FOCUS") return migrateLiquidationFieldSettings({
     ...common, priceDisplay: "CHART_SCALE", contextVisibilityFloor: 25, clusterLabelFloor: 60,
     highAuthorityColorFloor: 75, strictHideBelowEnabled: false, palette: "REFERENCE_THERMAL",

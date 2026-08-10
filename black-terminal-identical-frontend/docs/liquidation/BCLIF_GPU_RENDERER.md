@@ -1,6 +1,14 @@
 # BCLIF GPU Renderer
 
-The causal worker builds typed-array model channels. The display-projection worker clips that immutable snapshot to the selected display domain, applies source/confidence authority, and now also prepares the row-flipped upload-ready RGBA buffer. `BlackCoreLiquidationFieldRenderer` performs one Pixi `BufferImageSource` create/update with one `Texture` and one `Sprite`. A small `Graphics` layer draws optional cohort births, confirmed events, cascades, focus bands, and uncertainty envelopes. There are no DOM cells, per-cell Pixi objects, histogram bars, or cell borders.
+## Chapter III-C6 reference-thermal path
+
+`BlackCoreReferenceThermalRendererV2` is the default renderer. The display worker sends scalar half-float exposure plus independent confidence, validity, visibility, and yellow-authority masks. WebGL uploads those channels as one `R16F` texture and four `R8` textures, with a calibrated 256-entry `RGBA8` LUT. A single normal-blend shader pass performs the LUT lookup, validity-aware edge-preserving smoothing, confidence-aware alpha, and half-step dithering. The V2 path does not upload or stretch a pre-colored RGBA heatmap.
+
+The authoritative scalar grid and price/time transforms remain unchanged by palette, opacity, gamma, smoothing, camera, or viewport DPI. Candles and EMAs are rendered after the thermal pass. Missing evidence is the explicit near-black missing color; valid low exposure is opaque purple. Legacy V1 remains available only as an explicit diagnostic selection and is not the default visual path.
+
+High-DPI projection is bounded by the selected display LOD. The repository golden fixture measured 1,536×1,024, 2,007×1,024, and 3,159×1,528 scalar rasters for the 1080p, 1440p, and 4K captures. These are presentation rasters, not model lattices. See `BCLIF_SCALAR_TEXTURE_PIPELINE.md` and `BCLIF_HIGH_RESOLUTION_RENDERING.md`.
+
+The following paragraphs describe the retained Legacy V1 implementation. They no longer describe the default V2 upload path. The causal worker builds typed-array model channels. V1 prepares a row-flipped upload-ready RGBA buffer and renders one Pixi sprite; V2 uses the scalar shader path above. A small `Graphics` layer draws optional cohort births, confirmed events, cascades, focus bands, and uncertainty envelopes. There are no DOM cells, per-cell Pixi objects, histogram bars, or cell borders.
 
 The sprite is projected with the chart's millisecond-aware `xForTimestampMs` and canonical `yForPrice` transforms and clipped to the plot. Candles remain later in the Pixi layer stack with high contrast and therefore stay crisp. Persistent tile assembly verifies one regular atlas, preserves invalid gap columns, and updates only the live edge; camera movements never recalculate model state.
 

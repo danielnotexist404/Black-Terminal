@@ -1,5 +1,70 @@
 import type { LiquidationFieldSnapshot } from "./types.ts";
 
+export type BclifRawFieldVerdict =
+  | "RAW FIELD VALID — RENDERER DEFECT"
+  | "RAW FIELD TOO SPARSE — SOURCE/MODEL RESOLUTION LIMIT"
+  | "RAW FIELD PRICE-PATH DEFECT REMAINS";
+
+export interface BclifRawFieldAudit {
+  verdict: BclifRawFieldVerdict;
+  rawCohortCount: number;
+  rawShelfCount: number;
+  distinctAbsolutePriceLevels: number;
+  persistentShelfCount: number;
+  validCellCount: number;
+  nonZeroCellCount: number;
+  nonZeroOccupancyPercent: number;
+  absolutePriceAnchored: boolean;
+  persistsAfterCreation: boolean;
+  sourceDetail: "DETAILED" | "LIMITED";
+}
+
+export function analyzeBclifRawField(snapshot: LiquidationFieldSnapshot): BclifRawFieldAudit {
+  const shelves = snapshot.rawCohortShelves ?? [];
+  const absolute = snapshot.absoluteDistribution;
+  const absolutePriceAnchored = Boolean(
+    absolute?.priceUnit === "QUOTE_PRICE"
+    && Number.isFinite(absolute.gridOrigin)
+    && absolute.priceStep > 0
+    && shelves.every((shelf) => Number.isFinite(shelf.liquidationMean)
+      && shelf.liquidationLower <= shelf.liquidationMean
+      && shelf.liquidationMean <= shelf.liquidationUpper)
+  );
+  const persistentShelfCount = shelves.filter((shelf) => shelf.remainingMass > 0
+    && shelf.createdAt < snapshot.header.endTime
+    && shelf.sourceIntervalEnd <= snapshot.header.endTime).length;
+  const distinctAbsolutePriceLevels = new Set(shelves.map((shelf) => Math.round(
+    (shelf.liquidationMean - snapshot.header.minPrice) / Math.max(snapshot.header.priceStep, 1e-8)
+  ))).size;
+  let validCellCount = 0;
+  let nonZeroCellCount = 0;
+  for (let index = 0; index < snapshot.validity.length; index += 1) {
+    if (!snapshot.validity[index]) continue;
+    validCellCount += 1;
+    if ((snapshot.longExposure[index] ?? 0) + (snapshot.shortExposure[index] ?? 0) > 0) nonZeroCellCount += 1;
+  }
+  const persistsAfterCreation = shelves.length > 0 && persistentShelfCount > 0;
+  const sourceDetail = shelves.length >= 12 && distinctAbsolutePriceLevels >= 8 ? "DETAILED" : "LIMITED";
+  const verdict: BclifRawFieldVerdict = !absolutePriceAnchored
+    ? "RAW FIELD PRICE-PATH DEFECT REMAINS"
+    : sourceDetail === "LIMITED" || !persistsAfterCreation
+      ? "RAW FIELD TOO SPARSE — SOURCE/MODEL RESOLUTION LIMIT"
+      : "RAW FIELD VALID — RENDERER DEFECT";
+  return {
+    verdict,
+    rawCohortCount: snapshot.cohorts.length,
+    rawShelfCount: shelves.length,
+    distinctAbsolutePriceLevels,
+    persistentShelfCount,
+    validCellCount,
+    nonZeroCellCount,
+    nonZeroOccupancyPercent: validCellCount ? nonZeroCellCount / validCellCount * 100 : 0,
+    absolutePriceAnchored,
+    persistsAfterCreation,
+    sourceDetail
+  };
+}
+
 export interface BclifHighIntensityCellAudit {
   column: number;
   row: number;
@@ -96,6 +161,7 @@ export function buildBclifRawExposureExport(snapshot: LiquidationFieldSnapshot) 
     shortExposure: Array.from(snapshot.shortExposure),
     validity: Array.from(snapshot.validity),
     rawCohortShelves: snapshot.rawCohortShelves ?? [],
+    rawFieldAudit: analyzeBclifRawField(snapshot),
     highIntensityCellAudit: auditBclifHighIntensityCells(snapshot, 20)
   };
 }

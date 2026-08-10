@@ -17,6 +17,11 @@ Every meaningful platform change must update documentation in the same work cycl
 - `liquidation/BLACK_CORE_LIQUIDATION_INTELLIGENCE_FIELD.md` - Event Horizon BCLIF architecture, data truth, model, renderer and completion status.
 - `liquidation/EXISTING_LIQUIDATION_SYSTEM_AUDIT.md` - classification and removal record for the previous synthetic model.
 - `liquidation/REFERENCE_SCREENSHOT_VISUAL_SPEC.md` - measured thermal golden-target contract.
+- `liquidation/BCLIF_REFERENCE_THERMAL_RENDERER.md` - Chapter III-C6 scalar renderer and shader contract.
+- `liquidation/BCLIF_REFERENCE_PALETTE_CALIBRATION.md` - reproducible reference-palette calibration and source hash.
+- `liquidation/BCLIF_SCALAR_TEXTURE_PIPELINE.md` - R16F/R8 texture path and presentation identity boundary.
+- `liquidation/BCLIF_VISUAL_GOLDEN_MASTER_V3.md` - three-resolution quantitative visual evidence.
+- `liquidation/BCLIF_CHAPTER_IIIC6_COMPLETION_REPORT.md` - Chapter III-C6 scope, evidence, limitations, and verdict.
 
 ## Phase Docs
 

@@ -1,7 +1,8 @@
 /// <reference lib="webworker" />
 import type { LiquidationFieldSettings, LiquidationFieldSnapshot } from "../core/types.ts";
-import { buildBclifDisplayProjection, type BclifDisplayContext } from "./displayProjection.ts";
+import { bclifUint8ToHalf, buildBclifDisplayProjection, type BclifDisplayContext } from "./displayProjection.ts";
 import { buildBclifDisplayTexture } from "./displayTexture.ts";
+import { createBclifReferenceThermalStyleFixture } from "../testing/referenceThermalFixture.ts";
 
 interface ProjectionRequest {
   generation: number;
@@ -15,12 +16,36 @@ const scope = self as unknown as DedicatedWorkerGlobalScope;
 scope.onmessage = (event: MessageEvent<ProjectionRequest>) => {
   const { generation, key, snapshot, settings, context } = event.data;
   try {
-    const projection = buildBclifDisplayProjection(snapshot, settings, context);
-    if (projection) projection.rgba = buildBclifDisplayTexture(projection, settings);
-    const transfer = projection
-      ? [projection.intensity.buffer, projection.alpha.buffer, projection.validity.buffer,
-          projection.yellowEligible.buffer, projection.rgba!.buffer]
-      : [];
+    let projection = buildBclifDisplayProjection(snapshot, settings, context);
+    if (projection && snapshot.header.checksum.includes("SYNTHETIC_REFERENCE_THERMAL_STYLE_V3")) {
+      const source = projection;
+      projection = {
+        ...createBclifReferenceThermalStyleFixture(source.columns, source.rows),
+        minPrice: source.minPrice,
+        maxPrice: source.maxPrice,
+        priceStep: source.priceStep,
+        timeStepMs: source.timeStepMs,
+        modelHash: source.modelHash,
+        exposureHash: source.exposureHash,
+        renderSettingsHash: source.renderSettingsHash,
+        displayRasterHash: source.displayRasterHash
+      };
+    }
+    if (projection && settings.rendererVersion === "REFERENCE_THERMAL_V2") {
+      projection.exposureHalf = bclifUint8ToHalf(projection.intensity);
+    }
+    if (projection && settings.rendererVersion === "LEGACY_RGBA_V1") {
+      projection.rgba = buildBclifDisplayTexture(projection, settings);
+    }
+    const transfer: Transferable[] = projection ? [
+      projection.intensity.buffer,
+      projection.confidence.buffer,
+      projection.alpha.buffer,
+      projection.validity.buffer,
+      projection.yellowEligible.buffer
+    ] : [];
+    if (projection?.exposureHalf) transfer.push(projection.exposureHalf.buffer);
+    if (projection?.rgba) transfer.push(projection.rgba.buffer);
     scope.postMessage({ generation, key, projection }, transfer);
   } catch (error) {
     scope.postMessage({

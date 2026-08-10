@@ -17,6 +17,8 @@ export type BclifModelAuthority =
 export type LiquidationFieldHorizon = "6H" | "12H" | "1D" | "3D" | "1W" | "3W" | "1M" | "CUSTOM";
 export type LiquidationFieldViewMode =
   | "COMBINED_THERMAL"
+  | "RAW_EXPOSURE"
+  | "VALIDITY_MASK"
   | "LONG_EXPOSURE"
   | "SHORT_EXPOSURE"
   | "DIRECTIONAL_SPLIT"
@@ -44,6 +46,9 @@ export type LiquidationFieldModelPreset =
   | "CUSTOM";
 export type LiquidationFieldSmoothing = "SHARP" | "BALANCED" | "SMOOTH" | "CUSTOM";
 export type BclifPresentationPreset =
+  | "REFERENCE_THERMAL"
+  | "VERIFIED_AUTHORITY"
+  | "RESEARCH_DIAGNOSTICS"
   | "TRADE_FOCUS"
   | "HIGH_CONFIDENCE"
   | "LIVE_CALIBRATED"
@@ -67,7 +72,9 @@ export type BclifThermalNormalization =
   | "FIXED_ABSOLUTE"
   | "OI_RELATIVE"
   | "CONFIDENCE_WEIGHTED";
-export type BclifAdaptiveResolution = "AUTO" | "HIGH" | "BALANCED" | "LOW_PERFORMANCE";
+export type BclifAdaptiveResolution = "AUTO" | "ULTRA" | "HIGH" | "BALANCED" | "LOW_PERFORMANCE";
+export type BclifRendererVersion = "REFERENCE_THERMAL_V2" | "LEGACY_RGBA_V1";
+export type BclifAuthoritySemantics = "RELATIVE_MODELED_EXPOSURE" | "VERIFIED_AUTHORITY";
 export type BclifFocusBand = "OFF" | "PERCENT_2" | "PERCENT_5" | "PERCENT_10" | "CUSTOM";
 export type BclifOiNoiseMethod = "HYBRID_ROBUST" | "ABSOLUTE_NOTIONAL" | "OI_PERCENT" | "ROBUST_MAD";
 export type CohortEntrySource =
@@ -177,7 +184,9 @@ export interface BclifRawCohortShelf {
 }
 
 export interface LiquidationFieldSettings {
-  schemaVersion: 9;
+  schemaVersion: 10;
+  rendererVersion: BclifRendererVersion;
+  authoritySemantics: BclifAuthoritySemantics;
   preset: BclifPresentationPreset;
   viewMode: LiquidationFieldViewMode;
   horizon: LiquidationFieldHorizon;

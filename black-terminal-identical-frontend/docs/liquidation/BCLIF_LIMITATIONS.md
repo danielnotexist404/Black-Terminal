@@ -1,5 +1,11 @@
 # BCLIF Limitations
 
+- Chapter III-C6 certifies the deterministic Reference Thermal V2 renderer against a localhost-only style fixture; it does not certify live market-data accuracy.
+- The current raw fixture exposes six absolute-price shelves. The renderer can present them clearly but cannot manufacture the micro-density seen in the visual reference; the formal verdict is `RAW FIELD TOO SPARSE — SOURCE/MODEL RESOLUTION LIMIT`.
+- Authenticated live Bybit 1H/4H visual acceptance has not been run for this chapter. Persistent history remains unavailable, the collector is not deployed, and persistent migrations remain unapplied.
+- The dedicated V3 1080p/1440p/4K goldens pass, but the older 27-case visual matrix has not been fully re-recorded under V2 and remains pending as a complete historical regression set.
+- Headless texture preparation/upload timing is not an interactive-FPS claim. The deterministic cold fixture did not meet the production `<2 s` compatible-checkpoint target.
+
 - Aggregate OI is paired and not directional.
 - Historical entry price, leverage, isolated/cross mix, collateral, hedges and voluntary closes are estimated.
 - Browser history uses canonical lower-timeframe volume/price approximation when exact historical public trades are unavailable; this is capped at 60% authority and is not observed account inventory.

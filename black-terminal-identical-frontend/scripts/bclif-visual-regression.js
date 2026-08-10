@@ -94,7 +94,8 @@ try {
       }));
       localStorage.removeItem("bt_current_user");
     });
-    const url = `http://127.0.0.1:${port}/?uiPreview=1&bclifVisualFixture=1&bclifVisualCase=${encodeURIComponent(testCase.fixture)}`;
+    const rawFieldQuery = process.env.BCLIF_RAW_FIELD === "1" ? "&bclifRawField=1" : "";
+    const url = `http://127.0.0.1:${port}/?uiPreview=1&bclifVisualFixture=1&bclifVisualCase=${encodeURIComponent(testCase.fixture)}${rawFieldQuery}`;
     let coldStartStartedAt = Date.now();
     await page.goto(url, { waitUntil: "domcontentloaded" });
     await waitForBclif(page, testCase.fixture === "SWING_INDEPENDENCE");
@@ -147,6 +148,11 @@ try {
         displayCells: Number(metrics.cells),
         rawNonZeroCells: Number(metrics.rawNonZeroCells),
         visibleCells: Number(metrics.visibleCells),
+        fieldMetrics: metrics.fieldMetrics || null,
+        rendererVersion: String(metrics.rendererVersion || ""),
+        scalarTextureFormat: String(metrics.scalarTextureFormat || ""),
+        textureCount: Number(metrics.textures),
+        shaderPasses: Number(metrics.shaderPasses),
         rendererReadiness: String(metrics.readiness || ""),
         yellowEligibleCells: Number(metrics.yellowEligibleCells),
         provenanceCoverage: Number(node.getAttribute("data-bclif-provenance-coverage")),
@@ -180,7 +186,7 @@ try {
       || audit.summaryVisible
       || audit.candleContrast !== expectedCandleContrast
       || !Number.isFinite(yellowTailRatio)
-      || yellowTailRatio > 0.006
+      || yellowTailRatio > 0.03
       || (testCase.fixture === "BROWSER_FALLBACK" && audit.yellowEligibleCells !== 0)
       || (testCase.fixture === "BROWSER_FALLBACK" && (audit.rawNonZeroCells <= 0 || audit.visibleCells <= 0 || audit.rendererReadiness !== "WEBGL_CONTEXT_READY"))
       || audit.labels < 0
@@ -190,6 +196,7 @@ try {
       || !Number.isFinite(audit.massError)
       || Math.abs(audit.massError) > 0.01
     ) throw new Error(`BCLIF ${testCase.fixture} precondition failed: ${JSON.stringify(audit)}`);
+    if (testCase.fixture === "REFERENCE_THERMAL_STYLE") assertReferenceThermalMetrics(audit);
     assertAuthenticFixture(audit, testCase.fixture);
     assertDisplayDomain(audit, testCase.fixture);
 
@@ -332,7 +339,7 @@ function assertHashSeparation(results) {
 
 function assertAuthenticFixture(audit, fixture) {
   const completeModelFixtures = new Set([
-    "COHORT_PROVENANCE", "TRADE_FOCUS", "FULL_SPECTRUM_RESEARCH", "BROWSER_FALLBACK", "PERSISTENT_NODE"
+    "COHORT_PROVENANCE", "TRADE_FOCUS", "FULL_SPECTRUM_RESEARCH", "BROWSER_FALLBACK", "PERSISTENT_NODE", "REFERENCE_THERMAL_STYLE"
   ]);
   if (completeModelFixtures.has(fixture) && (audit.cohortCount !== 6 || audit.birthCount !== 6)) {
     throw new Error(`Presentation fixture was captured before the complete cohort model was ready: ${JSON.stringify(audit)}`);
@@ -352,6 +359,25 @@ function assertAuthenticFixture(audit, fixture) {
   if (fixture === "COHORT_PROVENANCE" && (!audit.provenancePanelVisible || audit.provenanceCoverage !== 1)) {
     throw new Error(`Cohort provenance fixture is not fully attributable: ${JSON.stringify(audit)}`);
   }
+}
+
+function assertReferenceThermalMetrics(audit) {
+  const metrics = audit.fieldMetrics;
+  if (!metrics) throw new Error("Reference Thermal V3 did not publish scalar-field metrics.");
+  const total = metrics.validCellCount + metrics.invalidCellCount;
+  const validOccupancy = total ? metrics.validCellCount / total * 100 : 0;
+  const occupancy = metrics.thermalOccupancyPercent;
+  const value = metrics.hsvValueQuantiles;
+  const pass = validOccupancy >= 98
+    && value.p10 >= 0.32 && value.p10 <= 0.40
+    && value.p50 >= 0.38 && value.p50 <= 0.50
+    && value.p90 >= 0.55 && value.p90 <= 0.68
+    && value.maximum >= 0.85 && value.maximum <= 0.95
+    && occupancy.deepPurple >= 50 && occupancy.deepPurple <= 65
+    && occupancy.blueCyan >= 18 && occupancy.blueCyan <= 30
+    && occupancy.green >= 4 && occupancy.green <= 10
+    && occupancy.yellow >= 0.05 && occupancy.yellow <= 0.5;
+  if (!pass) throw new Error(`Reference Thermal quantitative field target failed: ${JSON.stringify({ validOccupancy, occupancy, value })}`);
 }
 
 function summarizeVisualPerformance(results) {

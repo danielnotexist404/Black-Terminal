@@ -12,17 +12,28 @@ export function LiquidationFieldSettingsPanel({ settings, onChange }: Props) {
   };
   return <div className="liquidation-field-settings">
     <section className="indicator-settings-section">
-      <b>OPERATIONAL PRESENTATION</b>
+      <b>VISUAL MODE</b>
       <label>Preset<select value={settings.preset} onChange={(event) => {
         const preset = event.target.value as LiquidationFieldSettings["preset"];
         onChange(preset === "CUSTOM" ? { ...settings, preset } : applyBclifPresentationPreset(settings, preset));
       }}>
-        <option value="TRADE_FOCUS">BCLIF — Trade Focus</option>
+        <option value="REFERENCE_THERMAL">BCLIF — Reference Thermal</option>
+        <option value="VERIFIED_AUTHORITY">BCLIF — Verified Authority</option>
+        <option value="RESEARCH_DIAGNOSTICS">BCLIF — Research Diagnostics</option>
+        <option value="TRADE_FOCUS">Legacy — Trade Focus</option>
         <option value="HIGH_CONFIDENCE">BCLIF — High Confidence</option>
         <option value="LIVE_CALIBRATED">BCLIF — Live Calibrated</option>
         <option value="FULL_SPECTRUM_RESEARCH">BCLIF — Full Spectrum Research</option>
         <option value="RAW_MODEL">BCLIF — Raw Model</option>
         <option value="CUSTOM">Custom</option>
+      </select></label>
+      <label>Renderer<select value={settings.rendererVersion} onChange={(event) => update("rendererVersion", event.target.value as LiquidationFieldSettings["rendererVersion"])}>
+        <option value="REFERENCE_THERMAL_V2">Reference Thermal Renderer V2</option>
+        <option value="LEGACY_RGBA_V1">Legacy BCLIF Renderer · comparison</option>
+      </select></label>
+      <label>Authority Semantics<select value={settings.authoritySemantics} onChange={(event) => update("authoritySemantics", event.target.value as LiquidationFieldSettings["authoritySemantics"])}>
+        <option value="RELATIVE_MODELED_EXPOSURE">Reference Relative Exposure</option>
+        <option value="VERIFIED_AUTHORITY">Verified Authority</option>
       </select></label>
       <label>Price Display<select value={settings.priceDisplay} onChange={(event) => update("priceDisplay", event.target.value as LiquidationFieldSettings["priceDisplay"])}>
         <option value="CHART_SCALE">Chart Scale · operational</option><option value="CURRENT_PRICE_5">Current Price ±5%</option>
@@ -46,7 +57,8 @@ export function LiquidationFieldSettingsPanel({ settings, onChange }: Props) {
       <label>View<select value={settings.viewMode} onChange={(event) => update("viewMode", event.target.value as LiquidationFieldSettings["viewMode"])}>
         <option value="COMBINED_THERMAL">Combined Thermal</option><option value="LONG_EXPOSURE">Long Exposure</option>
         <option value="SHORT_EXPOSURE">Short Exposure</option><option value="DIRECTIONAL_SPLIT">Directional Split</option>
-        <option value="CONFIDENCE_FIELD">Confidence Field</option><option value="CONFIRMED_LIQUIDATIONS">Confirmed Liquidations</option>
+        <option value="RAW_EXPOSURE">Raw Exposure · grayscale</option><option value="CONFIDENCE_FIELD">Confidence Field</option>
+        <option value="VALIDITY_MASK">Validity Mask</option><option value="CONFIRMED_LIQUIDATIONS">Confirmed Liquidations</option>
         <option value="CASCADE_RISK">Cascade Risk</option><option value="COMBINED_INTELLIGENCE">Combined Intelligence</option>
       </select></label>
       <label>Venue<select value={settings.venue} onChange={(event) => update("venue", event.target.value as LiquidationFieldSettings["venue"])}>
@@ -83,21 +95,23 @@ export function LiquidationFieldSettingsPanel({ settings, onChange }: Props) {
     </section>
 
     <section className="indicator-settings-section">
-      <b>THERMAL FIELD</b>
+      <b>REFERENCE THERMAL FIELD</b>
       <label>Thermal Theme<select value={settings.palette} onChange={(event) => update("palette", event.target.value as LiquidationFieldSettings["palette"])}>
-        <option value="REFERENCE_THERMAL">Purple Plasma · CoinGlass</option><option value="BLACK_TERMINAL_BLOOD">Blood / White / Silver · Black Terminal</option>
+        <option value="REFERENCE_THERMAL">Calibrated Purple / Cyan / Green / Yellow</option><option value="BLACK_TERMINAL_BLOOD">Blood / White / Silver · Black Terminal</option>
         <option value="INSTITUTIONAL_MONOCHROME">Institutional Monochrome</option><option value="DIRECTIONAL_SPLIT">Directional Split</option><option value="CONFIDENCE">Confidence</option>
       </select></label>
       <label className="indicator-range-row">Opacity<span><input type="range" min={10} max={100} value={settings.opacity} onChange={(event) => update("opacity", Number(event.target.value))} /><strong>{settings.opacity}</strong></span></label>
-      <label className="indicator-range-row">Plasma Background<span><input type="range" min={0} max={100} value={settings.plasmaBackgroundOpacity} onChange={(event) => update("plasmaBackgroundOpacity", Number(event.target.value))} /><strong>{settings.plasmaBackgroundOpacity}%</strong></span></label>
-      <label className="indicator-range-row">Shelf Clarity<span><input type="range" min={0} max={100} value={settings.shelfContrast} onChange={(event) => update("shelfContrast", Number(event.target.value))} /><strong>{settings.shelfContrast}%</strong></span></label>
-      <label className="indicator-range-row">Residual / Half-Mitigated Shelves<span><input type="range" min={0} max={100} value={settings.residualShelfVisibility} onChange={(event) => update("residualShelfVisibility", Number(event.target.value))} /><strong>{settings.residualShelfVisibility}%</strong></span></label>
+      {settings.rendererVersion === "LEGACY_RGBA_V1" && <>
+        <label className="indicator-range-row">Legacy Plasma Background<span><input type="range" min={0} max={100} value={settings.plasmaBackgroundOpacity} onChange={(event) => update("plasmaBackgroundOpacity", Number(event.target.value))} /><strong>{settings.plasmaBackgroundOpacity}%</strong></span></label>
+        <label className="indicator-range-row">Legacy Shelf Clarity<span><input type="range" min={0} max={100} value={settings.shelfContrast} onChange={(event) => update("shelfContrast", Number(event.target.value))} /><strong>{settings.shelfContrast}%</strong></span></label>
+        <label className="indicator-range-row">Legacy Residual Shelves<span><input type="range" min={0} max={100} value={settings.residualShelfVisibility} onChange={(event) => update("residualShelfVisibility", Number(event.target.value))} /><strong>{settings.residualShelfVisibility}%</strong></span></label>
+      </>}
       <label className="indicator-range-row">Gamma<span><input type="range" min={35} max={250} value={Math.round(settings.gamma * 100)} onChange={(event) => update("gamma", Number(event.target.value) / 100)} /><strong>{settings.gamma.toFixed(2)}</strong></span></label>
       <label className="indicator-range-row">Lower Intensity Percentile<span><input type="range" min={0} max={95} value={Math.round(settings.lowQuantile * 100)} onChange={(event) => update("lowQuantile", Number(event.target.value) / 100)} /><strong>{(settings.lowQuantile * 100).toFixed(1)}%</strong></span></label>
       <label className="indicator-range-row">Upper Intensity Percentile<span><input type="range" min={950} max={1000} value={Math.round(settings.highQuantile * 1000)} onChange={(event) => update("highQuantile", Number(event.target.value) / 1000)} /><strong>{(settings.highQuantile * 100).toFixed(1)}%</strong></span></label>
-      <label className="indicator-range-row">Thermal Color Floor<span><input type="range" min={0} max={64} value={settings.backgroundFloor} onChange={(event) => update("backgroundFloor", Number(event.target.value))} /><strong>{settings.backgroundFloor}</strong></span></label>
+      <label className="indicator-range-row">Purple Floor<span><input type="range" min={0} max={64} value={settings.backgroundFloor} onChange={(event) => update("backgroundFloor", Number(event.target.value))} /><strong>{settings.backgroundFloor}</strong></span></label>
       <label className="indicator-range-row">Yellow Tail<span><input type="range" min={1} max={5} value={Math.round(settings.yellowTailPercent * 10)} onChange={(event) => update("yellowTailPercent", Number(event.target.value) / 10)} /><strong>{settings.yellowTailPercent.toFixed(1)}%</strong></span></label>
-      <label>Normalization<select value={settings.thermalNormalization} onChange={(event) => update("thermalNormalization", event.target.value as LiquidationFieldSettings["thermalNormalization"])}><option value="HYBRID">Hybrid · recommended</option><option value="GLOBAL_MODEL">Global Model</option><option value="VISIBLE_FOCUS">Visible Focus · camera-relative</option><option value="FIXED_ABSOLUTE">Fixed Absolute</option><option value="OI_RELATIVE">OI Relative</option><option value="CONFIDENCE_WEIGHTED">Confidence Weighted</option></select></label>
+      <label>Normalization<select value={settings.thermalNormalization} onChange={(event) => update("thermalNormalization", event.target.value as LiquidationFieldSettings["thermalNormalization"])}><option value="GLOBAL_MODEL">Global Robust Log · recommended</option><option value="HYBRID">Hybrid</option><option value="VISIBLE_FOCUS">Visible Focus · camera-relative</option><option value="FIXED_ABSOLUTE">Fixed Absolute</option><option value="OI_RELATIVE">OI Relative</option><option value="CONFIDENCE_WEIGHTED">Confidence Weighted</option></select></label>
       <label className="indicator-range-row">Historical Context<span><input type="range" min={0} max={100} value={settings.historicalContextOpacity} onChange={(event) => update("historicalContextOpacity", Number(event.target.value))} /><strong>{settings.historicalContextOpacity}%</strong></span></label>
       <label className="indicator-range-row">Live Calibrated<span><input type="range" min={0} max={100} value={settings.liveCalibratedOpacity} onChange={(event) => update("liveCalibratedOpacity", Number(event.target.value))} /><strong>{settings.liveCalibratedOpacity}%</strong></span></label>
       <label>Smoothing<select value={settings.smoothing} onChange={(event) => update("smoothing", event.target.value as LiquidationFieldSettings["smoothing"])}><option value="SHARP">Sharp</option><option value="BALANCED">Balanced</option><option value="SMOOTH">Smooth</option><option value="CUSTOM">Custom</option></select></label>
@@ -105,18 +119,18 @@ export function LiquidationFieldSettingsPanel({ settings, onChange }: Props) {
         const [timeColumns, priceRows] = event.target.value.split("x").map(Number);
         onChange({ ...settings, preset: "CUSTOM", timeColumns, priceRows });
       }}><option value="256x256">Touch · 256²</option><option value="512x384">Desktop · 512×384</option><option value="1024x512">Research · 1024×512</option></select></label>
-      <label>Display LOD<select value={settings.adaptiveResolution} onChange={(event) => update("adaptiveResolution", event.target.value as LiquidationFieldSettings["adaptiveResolution"])}><option value="AUTO">Auto · device aware</option><option value="HIGH">High Resolution</option><option value="BALANCED">Balanced</option><option value="LOW_PERFORMANCE">Low-Performance Fallback</option></select></label>
+      <label>Quality<select value={settings.adaptiveResolution} onChange={(event) => update("adaptiveResolution", event.target.value as LiquidationFieldSettings["adaptiveResolution"])}><option value="AUTO">Auto · device aware</option><option value="ULTRA">Ultra · physical pixel target</option><option value="HIGH">High Resolution</option><option value="BALANCED">Balanced</option><option value="LOW_PERFORMANCE">Compatibility</option></select></label>
       <label>Candles<select value={settings.candlePalette} onChange={(event) => update("candlePalette", event.target.value as LiquidationFieldSettings["candlePalette"])}><option value="BLACK_TERMINAL_HIGH_CONTRAST">Black Terminal High Contrast</option><option value="REFERENCE_CYAN_MAGENTA">Reference Cyan / Magenta</option></select></label>
       <label>Candle Contrast<select value={settings.candleContrast} onChange={(event) => update("candleContrast", event.target.value as LiquidationFieldSettings["candleContrast"])}><option value="STANDARD">Standard</option><option value="HIGH">High</option><option value="MAXIMUM">Maximum</option></select></label>
     </section>
 
     <section className="indicator-settings-section liquidation-field-toggles">
-      <b>OVERLAYS</b>
-      <label>Legend<input type="checkbox" checked={settings.legendVisible} onChange={(event) => update("legendVisible", event.target.checked)} /></label>
-      <label>Diagnostics<input type="checkbox" checked={settings.diagnosticsVisible} onChange={(event) => update("diagnosticsVisible", event.target.checked)} /></label>
-      <label>Confirmed Events<input type="checkbox" checked={settings.confirmedMarkersVisible} onChange={(event) => update("confirmedMarkersVisible", event.target.checked)} /></label>
+      <b>ANNOTATIONS & INTERFACE</b>
+      <label>Compact Legend<input type="checkbox" checked={settings.legendVisible} onChange={(event) => update("legendVisible", event.target.checked)} /></label>
+      <label>Diagnostics Drawer<input type="checkbox" checked={settings.diagnosticsVisible} onChange={(event) => update("diagnosticsVisible", event.target.checked)} /></label>
+      <label>Confirmed Liquidations<input type="checkbox" checked={settings.confirmedMarkersVisible} onChange={(event) => update("confirmedMarkersVisible", event.target.checked)} /></label>
       <label>Cascade Paths<input type="checkbox" checked={settings.cascadePathsVisible} onChange={(event) => update("cascadePathsVisible", event.target.checked)} /></label>
-      <label>Confidence Weight<input type="checkbox" checked={settings.confidenceWeightEnabled} onChange={(event) => update("confidenceWeightEnabled", event.target.checked)} /></label>
+      <label>Weight Magnitude by Confidence · expert<input type="checkbox" checked={settings.confidenceWeightEnabled} onChange={(event) => update("confidenceWeightEnabled", event.target.checked)} /></label>
       <label>Require 2+ Evidence Channels<input type="checkbox" checked={settings.requireMultipleEvidenceChannels} onChange={(event) => update("requireMultipleEvidenceChannels", event.target.checked)} /></label>
       <label>Uncertainty Envelopes<input type="checkbox" checked={settings.uncertaintyEnvelopesVisible} onChange={(event) => update("uncertaintyEnvelopesVisible", event.target.checked)} /></label>
       <label>Operational Summary<input type="checkbox" checked={settings.operationalSummaryVisible} onChange={(event) => update("operationalSummaryVisible", event.target.checked)} /></label>

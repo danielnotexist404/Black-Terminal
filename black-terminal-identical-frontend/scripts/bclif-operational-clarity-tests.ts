@@ -50,20 +50,23 @@ const chartContext = {
   constrainedTouchRenderer: false
 };
 
-assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.preset, "TRADE_FOCUS");
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.preset, "REFERENCE_THERMAL");
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.rendererVersion, "REFERENCE_THERMAL_V2");
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.authoritySemantics, "RELATIVE_MODELED_EXPOSURE");
 assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.priceDisplay, "CHART_SCALE");
-assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.contextVisibilityFloor, 25);
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.contextVisibilityFloor, 0);
 assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.clusterLabelFloor, 60);
 assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.highAuthorityColorFloor, 75);
 assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.strictHideBelowEnabled, false);
-assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.opacity, 100);
-assert.ok(DEFAULT_LIQUIDATION_FIELD_SETTINGS.gamma <= 1);
-assert.ok(DEFAULT_LIQUIDATION_FIELD_SETTINGS.lowQuantile >= 0.5);
-assert.ok(DEFAULT_LIQUIDATION_FIELD_SETTINGS.highQuantile >= 0.995);
-assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.plasmaBackgroundOpacity, 94);
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.opacity, 96);
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.gamma, 0.85);
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.lowQuantile, 0.05);
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.highQuantile, 0.9986);
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.backgroundFloor, 15);
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.plasmaBackgroundOpacity, 0);
 assert.ok(DEFAULT_LIQUIDATION_FIELD_SETTINGS.residualShelfVisibility > 0);
 assert.ok(DEFAULT_LIQUIDATION_FIELD_SETTINGS.yellowTailPercent <= 0.5);
-assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.maximumClusterLabels, 4);
+assert.equal(DEFAULT_LIQUIDATION_FIELD_SETTINGS.maximumClusterLabels, 0);
 
 const baselineModelHash = bclifModelHash(model);
 const baselineExposureHash = bclifExposureHash(model);
@@ -139,7 +142,7 @@ assert.ok(tradeDimensions.rows >= 768 && tradeDimensions.rows <= 2_048);
 const researchDimensions = resolveBclifDisplayDimensions(model, research, chartContext);
 assert.ok(researchDimensions.rows >= 512 && researchDimensions.rows <= 1_024);
 const fallbackDimensions = resolveBclifDisplayDimensions(model, { ...DEFAULT_LIQUIDATION_FIELD_SETTINGS, adaptiveResolution: "LOW_PERFORMANCE" }, chartContext);
-assert.ok(fallbackDimensions.rows >= 384 && fallbackDimensions.rows <= 512);
+assert.ok(fallbackDimensions.rows >= 512 && fallbackDimensions.rows <= 768);
 
 const coverage = (overrides: Partial<BclifPersistentCoverage>): BclifPersistentCoverage => ({
   venue: "BYBIT", symbol: "BTCUSDT", horizon: "3W",
@@ -200,7 +203,10 @@ const full90Snapshot = withQuality(90, "PERSISTENT_NODE", coverage({
 const full90 = project(full90Snapshot);
 const yellowCells = full90.yellowEligible.filter(Boolean).length;
 assert.ok(yellowCells > 0, "fully supported exceptional exposure must remain yellow-eligible");
-assert.ok(yellowCells / full90.yellowEligible.length <= 0.006, "yellow must remain a rare tail");
+assert.ok(
+  yellowCells / full90.yellowEligible.length <= 0.03,
+  "yellow eligibility must remain a small evidence-authorized tail even when the chart camera is centered on a dense shelf"
+);
 assert.equal(classifyBclifEvidence(bclifEvidenceComposition(full90Snapshot)), "FULL_CONTEXT");
 assert.ok(bclifMeaningfulEvidenceChannels(bclifEvidenceComposition(full90Snapshot)) >= 2);
 

@@ -6,7 +6,8 @@ const successorPath = "supabase/migrations/202608050002_bclif_persistent_market_
 const foundation = fs.readFileSync(foundationPath, "utf8");
 const sql = fs.readFileSync(successorPath, "utf8");
 const security = fs.readFileSync("server/security/securityMiddleware.js", "utf8");
-const api = fs.readFileSync("api/liquidation-intelligence/[action].js", "utf8");
+const api = fs.readFileSync("server/liquidation-intelligence/api/vercelHandler.js", "utf8");
+const consolidatedApi = fs.readFileSync("api/market-depth/[action].js", "utf8");
 const apiService = fs.readFileSync("server/liquidation-intelligence/api/service.js", "utf8");
 
 for (const table of ["bclif_sources", "bclif_coverage", "bclif_confirmed_liquidation_events", "bclif_field_chunks", "bclif_model_evaluations"]) {
@@ -109,6 +110,8 @@ assert.doesNotMatch(security, /data\?\.role\s*\|\|\s*user\.app_metadata/);
 assert.match(security, /SECURITY_IDENTITY_UNAVAILABLE/);
 assert.match(api, /indicator:\s*BCLIF_INDICATOR_KEY/);
 assert.match(api, /normalizeBclifRouteError/);
+assert.match(consolidatedApi, /action === "bclif"/);
+assert.match(consolidatedApi, /bclifVercelHandler\(req, res, req\.query\?\.bclifAction\)/);
 assert.match(apiService, /lte\("chunk_end", replayCutoff\)/);
 assert.match(apiService, /lte\("source_cutoff_at", replayCutoff\)/);
 assert.match(apiService, /query = query\.gte\("chunk_end", new Date\(scope\.from\)\.toISOString\(\)\)/);

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 // Trigger Vercel Webhook sync
 import { Check, Activity, Code2, Shield, ArrowLeft, Chrome, Layers, Cpu, TrendingUp } from "lucide-react";
 import "../styles/landing.css";
@@ -9,8 +9,15 @@ import {
   dbRegisterUser,
   dbUpdateUser,
   dbAddAuditLog,
+  dbGetCurrentUserProfile,
   establishSupabaseAuthSession,
-  getGeoIPInfo
+  getGeoIPInfo,
+  clearGoogleOAuthIntent,
+  clearSupabaseAuthSession,
+  getGoogleOAuthError,
+  hasGoogleOAuthIntent,
+  signInWithGoogle,
+  supabase
 } from "../lib/supabase";
 import { DEFAULT_ALLOWED_INDICATORS } from "../features/premium";
 
@@ -91,6 +98,7 @@ const countryDialCodes: Record<string, string> = Object.fromEntries(
 
 export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
   const [view, setView] = useState<ViewState>(() => {
+    if (hasGoogleOAuthIntent()) return "signin";
     if (window.location.hostname !== "127.0.0.1") return "landing";
     const requestedView = new URLSearchParams(window.location.search).get("authPreview");
     return requestedView === "signin" || requestedView === "signup" ? requestedView : "landing";
@@ -138,6 +146,8 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const googleCompletionStarted = useRef(false);
 
   // New registration multi-step states
   const [signUpStep, setSignUpStep] = useState(1);
@@ -156,6 +166,106 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
   // Captcha & Code verification states
   const [mathCaptcha, setMathCaptcha] = useState({ num1: 0, num2: 0, result: 0 });
   const [captchaAnswer, setCaptchaAnswer] = useState("");
+
+  const completeGoogleSignIn = useCallback(async () => {
+    if (googleCompletionStarted.current) return;
+    googleCompletionStarted.current = true;
+    setGoogleLoading(true);
+    setErrorMsg("");
+    setSuccessMsg("Google identity verified. Loading your terminal profile...");
+
+    try {
+      const userObj = await dbGetCurrentUserProfile({ retries: 6 });
+      if (!userObj) throw new Error("Your Google identity is verified, but the Black Terminal profile could not be created.");
+      if (userObj.status === "suspended") {
+        await clearSupabaseAuthSession();
+        throw new Error("Access suspended by Administrator");
+      }
+
+      const geo = await getGeoIPInfo();
+      await dbUpdateUser(userObj.username, {
+        status: "online",
+        lastLogin: new Date().toISOString(),
+        ip: geo.ip,
+        countryCode: geo.countryCode,
+        countryName: geo.countryName,
+        emailVerified: true
+      });
+      await dbAddAuditLog("LOGIN", "Google SSO session established.");
+      clearGoogleOAuthIntent();
+      await Promise.resolve(onLoginSuccess(userObj.username, userObj.role));
+    } catch (error) {
+      googleCompletionStarted.current = false;
+      setGoogleLoading(false);
+      setSuccessMsg("");
+      setErrorMsg(error instanceof Error ? error.message : "Google sign-in could not be completed.");
+      clearGoogleOAuthIntent();
+    }
+  }, [onLoginSuccess]);
+
+  useEffect(() => {
+    if (!hasGoogleOAuthIntent()) return;
+    setView("signin");
+    setGoogleLoading(true);
+
+    const oauthError = getGoogleOAuthError();
+    if (oauthError) {
+      setErrorMsg(oauthError);
+      setGoogleLoading(false);
+      clearGoogleOAuthIntent();
+      return;
+    }
+    if (!supabase) {
+      setErrorMsg("Google SSO is unavailable because Supabase Auth is not configured.");
+      setGoogleLoading(false);
+      clearGoogleOAuthIntent();
+      return;
+    }
+
+    let disposed = false;
+    const sessionTimeout = window.setTimeout(() => {
+      if (disposed || googleCompletionStarted.current) return;
+      setErrorMsg("Google returned without an active session. Please try again or contact support if the issue continues.");
+      setGoogleLoading(false);
+      clearGoogleOAuthIntent();
+    }, 8000);
+    const finishIfSessionExists = (hasSession: boolean) => {
+      if (!disposed && hasSession) {
+        window.clearTimeout(sessionTimeout);
+        window.setTimeout(() => void completeGoogleSignIn(), 0);
+      }
+    };
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      finishIfSessionExists(Boolean(session?.user));
+    });
+    void supabase.auth.getSession().then(({ data, error }) => {
+      if (disposed) return;
+      if (error) {
+        setErrorMsg(error.message);
+        setGoogleLoading(false);
+        clearGoogleOAuthIntent();
+        return;
+      }
+      finishIfSessionExists(Boolean(data.session?.user));
+    });
+
+    return () => {
+      disposed = true;
+      window.clearTimeout(sessionTimeout);
+      authListener.subscription.unsubscribe();
+    };
+  }, [completeGoogleSignIn]);
+
+  const handleGoogleSignIn = async () => {
+    setErrorMsg("");
+    setSuccessMsg("");
+    setGoogleLoading(true);
+    const result = await signInWithGoogle();
+    if (!result.success) {
+      setGoogleLoading(false);
+      setErrorMsg(result.error || "Google sign-in could not be started.");
+    }
+  };
 
   const generateCaptcha = () => {
     const num1 = Math.floor(Math.random() * 9) + 2;
@@ -483,7 +593,27 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
               <div className="login-title-group">
                 <span className="login-kicker">{isSignIn ? "WELCOME BACK" : "NEW WORKSPACE"}</span>
                 <h2 className="login-title">{isSignIn ? "Access your terminal" : "Create your account"}</h2>
-                <p className="login-subtitle">{isSignIn ? "Continue to your encrypted execution workspace." : "Three short steps to initialize your private terminal."}</p>
+                <p className="login-subtitle">{isSignIn ? "Continue to your encrypted execution workspace." : "Use Google for instant access, or create credentials manually."}</p>
+              </div>
+            </div>
+
+            <div className="auth-sso-area auth-sso-primary">
+              <button
+                type="button"
+                className="auth-google-btn"
+                disabled={loading || googleLoading}
+                aria-busy={googleLoading}
+                onClick={() => void handleGoogleSignIn()}
+              >
+                <Chrome size={17} />
+                <span>{googleLoading ? "Connecting securely to Google..." : "Continue with Google"}</span>
+                <small>SSO</small>
+              </button>
+              <p className="auth-sso-note">No long form required. Complete optional account details later from your Profile.</p>
+              <div className="auth-sso-divider">
+                <div />
+                <span>OR USE EMAIL</span>
+                <div />
               </div>
             </div>
 
@@ -814,20 +944,6 @@ export default function LandingPage({ onLoginSuccess }: LandingPageProps) {
                  </>
                )}
              </form>
-
-            <div className="auth-sso-area">
-              <div className="auth-sso-divider">
-                <div />
-                <span>OR CONTINUE WITH</span>
-                <div />
-              </div>
-
-              <button className="auth-google-btn" disabled>
-                <Chrome size={17} />
-                <span>Continue with Google</span>
-                <small>COMING SOON</small>
-              </button>
-            </div>
 
             <div className="auth-form-switch">
               {isSignIn ? (

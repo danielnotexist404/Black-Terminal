@@ -2183,3 +2183,9 @@ Successor migration: `supabase/migrations/202608050002_bclif_persistent_market_m
 The successor evolves the existing BCLIF domain rather than creating a parallel schema. It adds collector/instance identity, offsets, canonical event chunks, durable deduplication, cohort checkpoints, per-horizon truthful coverage, immutable versioned tiles and supersession, compaction/retention state, calibration records, strict constraints, service-only grants, and the private object boundary. No dense raster cells are stored in SQL.
 
 Activation order is `202608050001` then `202608050002`. Both are intentionally unapplied in State A. Do not paste or deploy them merely to make the schema look complete: first run the isolated apply/rollback, RLS, private storage, route fail-closed, collector package, and recovery gates and confirm a separate analytics host. The frontend must continue returning `NOT_DEPLOYED`/`UNAVAILABLE` rather than HTTP 500 while the schema is absent.
+
+# 2026-08-10 - Google SSO profile bootstrap
+
+Migration: `supabase/migrations/202608100001_google_sso_profile_bootstrap.sql`.
+
+This migration replaces the existing `black_terminal_create_profile` trigger function with an OAuth-aware version. It keeps Supabase Auth as the identity authority, derives a collision-safe terminal handle, imports only standard Google name metadata, and leaves organization, billing, phone, purpose-of-use, referral, and newsletter fields optional for later completion in Profile. Provider and redirect configuration is documented in `docs/GOOGLE_SSO_PREVIEW.md`.

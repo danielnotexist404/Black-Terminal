@@ -10,6 +10,8 @@ export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
 
+const GOOGLE_OAUTH_INTENT_KEY = "bt_google_oauth_intent";
+
 export interface DBUser {
   username: string;
   displayName?: string;
@@ -66,6 +68,140 @@ function normalizePermissions(value: unknown): TerminalCapability[] {
   return Array.isArray(value) ? value.filter((item): item is TerminalCapability => typeof item === "string") : [];
 }
 
+function mapDatabaseUser(u: any): DBUser {
+  return {
+    username: u.username,
+    displayName: u.display_name || u.displayName || u.username,
+    email: u.email,
+    role: u.role,
+    status: u.status,
+    createdAt: u.created_at || u.createdAt || new Date().toISOString(),
+    lastLogin: u.last_login || u.lastLogin || new Date().toISOString(),
+    allowedIndicators: u.allowed_indicators || u.allowedIndicators || [],
+    activeIndicators: u.active_indicators || u.activeIndicators || [],
+    productTier: normalizeProductTier(u.product_tier || u.productTier, u.role),
+    permissions: normalizePermissions(u.permissions),
+    workspaces: u.workspaces || [],
+    workspaceSnapshots: u.workspace_snapshots || {},
+    activeWorkspace: u.active_workspace || "Quant Desk",
+    alerts: u.alerts || [],
+    scripts: u.scripts || [],
+    alertEventLogs: u.alert_event_logs || [],
+    ip: u.ip || "127.0.0.1",
+    countryCode: u.country_code || u.countryCode || "IL",
+    countryName: u.country_name || u.countryName || "Israel",
+    firstName: u.first_name || u.firstName || "",
+    lastName: u.last_name || u.lastName || "",
+    organization: u.organization || "",
+    billingAddress: u.billing_address || u.billingAddress || "",
+    purposeOfUse: u.purpose_of_use || u.purposeOfUse || "personal",
+    phone: u.phone || "",
+    newsletterOptIn: u.newsletter_opt_in ?? u.newsletterOptIn ?? false,
+    referredBy: u.referred_by || u.referredBy || "",
+    emailVerified: u.email_verified ?? u.emailVerified ?? false,
+    aiMessagesCount: u.ai_messages_count ?? u.aiMessagesCount ?? 0,
+    aiLastMessageTimestamp: u.ai_last_message_timestamp || u.aiLastMessageTimestamp || ""
+  };
+}
+
+export function hasGoogleOAuthIntent(): boolean {
+  if (typeof window === "undefined") return false;
+  const params = new URLSearchParams(window.location.search);
+  return params.get("auth") === "google" || window.sessionStorage.getItem(GOOGLE_OAUTH_INTENT_KEY) === "google";
+}
+
+export function getGoogleOAuthError(): string | null {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  return params.get("error_description") || params.get("error") || null;
+}
+
+export function clearGoogleOAuthIntent(): void {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.removeItem(GOOGLE_OAUTH_INTENT_KEY);
+  const url = new URL(window.location.href);
+  ["auth", "error", "error_code", "error_description"].forEach((key) => url.searchParams.delete(key));
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+export async function signInWithGoogle(): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured || !supabase) {
+    return { success: false, error: "Google SSO is unavailable because Supabase Auth is not configured." };
+  }
+  if (typeof window === "undefined") return { success: false, error: "Google SSO requires a browser session." };
+
+  const redirectUrl = new URL("/", window.location.origin);
+  redirectUrl.searchParams.set("auth", "google");
+  window.sessionStorage.setItem(GOOGLE_OAUTH_INTENT_KEY, "google");
+
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo: redirectUrl.toString() }
+  });
+  if (error) {
+    window.sessionStorage.removeItem(GOOGLE_OAUTH_INTENT_KEY);
+    return { success: false, error: error.message };
+  }
+  return { success: true };
+}
+
+export async function dbGetCurrentUserProfile(options: { retries?: number } = {}): Promise<DBUser | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError) throw authError;
+  if (!authData.user) return null;
+
+  const retries = Math.max(0, Math.min(options.retries ?? 4, 8));
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const { data, error } = await supabase
+      .from("bt_users")
+      .select("*")
+      .eq("auth_user_id", authData.user.id)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) return mapDatabaseUser(data);
+    if (attempt < retries) await new Promise((resolve) => window.setTimeout(resolve, 180 * (attempt + 1)));
+  }
+  return null;
+}
+
+export type CurrentUserProfilePatch = Pick<DBUser,
+  "displayName" | "firstName" | "lastName" | "organization" | "billingAddress" |
+  "purposeOfUse" | "phone" | "newsletterOptIn" | "referredBy"
+>;
+
+export async function dbUpdateCurrentUserProfile(patch: Partial<CurrentUserProfilePatch>): Promise<DBUser> {
+  if (!isSupabaseConfigured || !supabase) throw new Error("Secure profile storage is unavailable.");
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError) throw authError;
+  if (!authData.user) throw new Error("Sign in again to update your profile.");
+
+  const dbPatch: Record<string, unknown> = {};
+  if (patch.displayName !== undefined) dbPatch.display_name = patch.displayName;
+  if (patch.firstName !== undefined) dbPatch.first_name = patch.firstName;
+  if (patch.lastName !== undefined) dbPatch.last_name = patch.lastName;
+  if (patch.organization !== undefined) dbPatch.organization = patch.organization;
+  if (patch.billingAddress !== undefined) dbPatch.billing_address = patch.billingAddress;
+  if (patch.purposeOfUse !== undefined) dbPatch.purpose_of_use = patch.purposeOfUse;
+  if (patch.phone !== undefined) dbPatch.phone = patch.phone;
+  if (patch.newsletterOptIn !== undefined) dbPatch.newsletter_opt_in = patch.newsletterOptIn;
+  if (patch.referredBy !== undefined) dbPatch.referred_by = patch.referredBy;
+  if (Object.keys(dbPatch).length === 0) {
+    const existing = await dbGetCurrentUserProfile();
+    if (!existing) throw new Error("Secure user profile was not found.");
+    return existing;
+  }
+
+  const { data, error } = await supabase
+    .from("bt_users")
+    .update(dbPatch)
+    .eq("auth_user_id", authData.user.id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return mapDatabaseUser(data);
+}
+
 // Helper: Get all users
 export async function dbGetUsers(options: { allowLocalFallback?: boolean } = {}): Promise<DBUser[]> {
   if (isSupabaseConfigured && supabase) {
@@ -75,39 +211,7 @@ export async function dbGetUsers(options: { allowLocalFallback?: boolean } = {})
         .select("*");
       if (error) throw error;
       if (data) {
-        return data.map((u: any) => ({
-          username: u.username,
-          displayName: u.display_name || u.displayName || u.username,
-          email: u.email,
-          role: u.role,
-          status: u.status,
-          createdAt: u.created_at || u.createdAt || new Date().toISOString(),
-          lastLogin: u.last_login || u.lastLogin || new Date().toISOString(),
-          allowedIndicators: u.allowed_indicators || u.allowedIndicators || [],
-          activeIndicators: u.active_indicators || u.activeIndicators || [],
-          productTier: normalizeProductTier(u.product_tier || u.productTier, u.role),
-          permissions: normalizePermissions(u.permissions),
-          workspaces: u.workspaces || [],
-          workspaceSnapshots: u.workspace_snapshots || {},
-          activeWorkspace: u.active_workspace || "Quant Desk",
-          alerts: u.alerts || [],
-          scripts: u.scripts || [],
-          alertEventLogs: u.alert_event_logs || [],
-          ip: u.ip || "127.0.0.1",
-          countryCode: u.country_code || u.countryCode || "IL",
-          countryName: u.country_name || u.countryName || "Israel",
-          firstName: u.first_name || u.firstName || "",
-          lastName: u.last_name || u.lastName || "",
-          organization: u.organization || "",
-          billingAddress: u.billing_address || u.billingAddress || "",
-          purposeOfUse: u.purpose_of_use || u.purposeOfUse || "personal",
-          phone: u.phone || "",
-          newsletterOptIn: u.newsletter_opt_in ?? u.newsletterOptIn ?? false,
-          referredBy: u.referred_by || u.referredBy || "",
-          emailVerified: u.email_verified ?? u.emailVerified ?? false,
-          aiMessagesCount: u.ai_messages_count ?? u.aiMessagesCount ?? 0,
-          aiLastMessageTimestamp: u.ai_last_message_timestamp || u.aiLastMessageTimestamp || ""
-        }));
+        return data.map(mapDatabaseUser);
       }
     } catch (e) {
       console.error("Supabase error dbGetUsers, falling back:", e);

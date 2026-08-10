@@ -5245,6 +5245,9 @@ body.resizing-layout * {
 .pn-editor-section h3 { margin: 0 0 9px; color: #fff; font-size: 10px; text-transform: uppercase; }
 .pn-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .pn-field-grid label.wide { grid-column: 1 / -1; }
+.pn-account-note { grid-column: 1 / -1; margin: 0; border-left: 2px solid #c81729; background: #12090b; color: #8f969f; padding: 8px 9px; font-size: 8px; line-height: 1.55; }
+.pn-editor input:disabled,
+.pn-editor select:disabled { cursor: not-allowed; opacity: .58; }
 .pn-editor textarea { min-height: 82px; resize: vertical; }
 .pn-check { grid-template-columns: auto minmax(0, 1fr) !important; align-items: center; border: 1px solid #24272c; padding: 7px; }
 .pn-check input { width: 14px; min-height: 14px; }

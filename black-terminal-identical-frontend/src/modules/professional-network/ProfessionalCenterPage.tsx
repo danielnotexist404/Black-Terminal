@@ -1,6 +1,8 @@
 import { Bell, BookOpen, Building2, Home, Inbox, Library, Search, ShieldCheck, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CapabilityUser } from "../../core/permissions/capabilities";
+import type { DBUser } from "../../lib/supabase";
+import { AccountDetailsPanel } from "./components/AccountDetailsPanel";
 import { AssetsPanel } from "./components/AssetsPanel";
 import { DiscoveryPanel } from "./components/DiscoveryPanel";
 import { FeedComposer } from "./components/FeedComposer";
@@ -26,15 +28,17 @@ const feedFilters: Array<{ id: FeedMode; label: string }> = [
   { id: "strategies", label: "Strategies" }, { id: "investment_groups", label: "Investment Groups" }, { id: "saved", label: "Saved" }
 ];
 
-export function ProfessionalCenterPage({ currentUser, initialHandle, initialSection = "feed", onClose, onOpenInvestmentGroups }: {
+export function ProfessionalCenterPage({ currentUser, initialHandle, initialSection = "feed", preferInitialSection = false, onClose, onOpenInvestmentGroups, onAccountProfileUpdated }: {
   currentUser: CapabilityUser;
   initialHandle?: string | null;
   initialSection?: NetworkSection;
+  preferInitialSection?: boolean;
   onClose: () => void;
   onOpenInvestmentGroups: () => void;
+  onAccountProfileUpdated?: (profile: DBUser) => void;
 }) {
   const initialRoute = useMemo(() => typeof window === "undefined" ? null : parseProfessionalNetworkHash(window.location.hash), []);
-  const [section, setSection] = useState<NetworkSection>(initialHandle ? "profile" : initialRoute?.section || initialSection);
+  const [section, setSection] = useState<NetworkSection>(initialHandle ? "profile" : preferInitialSection ? initialSection : initialRoute?.section || initialSection);
   const [profileTab, setProfileTab] = useState(initialRoute?.profileTab || "overview");
   const [feedMode, setFeedMode] = useState<FeedMode>("for_you");
   const [activeHandle, setActiveHandle] = useState<string | undefined>(initialHandle || initialRoute?.handle || undefined);
@@ -232,6 +236,7 @@ export function ProfessionalCenterPage({ currentUser, initialHandle, initialSect
     </header>
     {status && <div className="pn-global-status">{status}<button type="button" onClick={() => setStatus("")}><X size={12} /></button></div>}
     <main className="pn-shell-body">
+      {section === "profile" && !initialHandle && <AccountDetailsPanel currentUser={currentUser} onProfileUpdated={onAccountProfileUpdated} />}
       {loading && <NetworkSkeleton />}
       {!loading && section === "feed" && <div className="pn-feed-layout"><div><FeedComposer groups={(ownProfile?.groups || []).map((group) => ({ id: group.id, firm_name: group.firm_name }))} assets={assets} onPublished={(post) => { mergePosts([post]); setFeedIds((ids) => [post.id, ...ids.filter((id) => id !== post.id)]); }} /><nav className="pn-feed-filters" aria-label="Feed filters">{feedFilters.map((filter) => <button type="button" className={feedMode === filter.id ? "active" : ""} key={filter.id} onClick={() => { setFeedMode(filter.id); loadFeed(filter.id); }}>{filter.label}</button>)}</nav><PostList posts={feedPosts} currentUserId={activeUserId} empty="No posts match this professional feed." onOpenProfile={openProfile} onChanged={updatePost} onHidden={hidePost} onShareMessage={shareMessage} />{nextCursor && <button type="button" className="pn-load-more" disabled={loadingMore} onClick={() => loadFeed(feedMode, nextCursor)}>{loadingMore ? "Loading" : "Load More Research"}</button>}</div><aside className="pn-feed-rail"><section><span>Network Pulse</span><strong>{feedPosts.length} loaded publications</strong><p>Research is ranked by professional relevance and recency. Engagement alone does not establish credibility.</p></section><section><span>Market Focus</span>{[...new Set(feedPosts.flatMap((post) => post.symbols))].slice(0, 12).map((symbol) => <em key={symbol}>{symbol}</em>)}</section><button type="button" onClick={() => void selectSection("discovery")}><Search size={13} /> Discover Professionals</button></aside></div>}
       {!loading && section === "research" && <div className="pn-research-page"><header><div><span>Research Desk</span><h1>Professional Market Intelligence</h1></div><select value={feedMode} onChange={(event) => { const mode = event.target.value as FeedMode; setFeedMode(mode); loadFeed(mode); }}><option value="research">All Research</option><option value="market_analysis">Market Analysis</option><option value="indicators">Indicators</option><option value="strategies">Strategies</option></select></header><PostList posts={activePosts} currentUserId={activeUserId} empty="No research publications match this filter." onOpenProfile={openProfile} onChanged={updatePost} onHidden={hidePost} onShareMessage={shareMessage} /></div>}

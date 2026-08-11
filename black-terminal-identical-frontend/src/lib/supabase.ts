@@ -269,8 +269,9 @@ export async function dbVerifyUser(username: string, accessCode: string): Promis
   if (!email.includes("@")) return { success: false, error: "Enter your verified email address, not a legacy username." };
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error || !data.session) return { success: false, error: "Access denied: Invalid credentials or unverified email." };
-  const role = data.user.app_metadata?.role === "admin" ? "admin" : "user";
-  return { success: true, role };
+  const profile = await dbGetCurrentUserProfile({ retries: 2 });
+  if (!profile) return { success: false, error: "Secure account profile is unavailable." };
+  return { success: true, role: profile.role };
 }
 
 export async function dbAdminGetUsers(): Promise<DBUser[]> {

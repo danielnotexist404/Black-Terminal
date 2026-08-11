@@ -8,13 +8,19 @@ export function applyCors(req, res) {
 
 export function getSupabaseAdmin() {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serverSecret = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error("Missing SUPABASE_URL/VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.");
+  if (!supabaseUrl || !serverSecret) {
+    const error = new Error("Professional Network server authentication is not configured.");
+    error.statusCode = 503;
+    error.code = "SERVER_AUTH_CONFIGURATION_MISSING";
+    error.publicDetails = {
+      required: ["SUPABASE_URL", "SUPABASE_SECRET_KEY"]
+    };
+    throw error;
   }
 
-  return createClient(supabaseUrl, serviceRoleKey, {
+  return createClient(supabaseUrl, serverSecret, {
     auth: {
       autoRefreshToken: false,
       persistSession: false
@@ -41,7 +47,37 @@ export async function requireUser(req) {
     throw authError;
   }
 
-  return { supabase, user: data.user };
+  const { data: controlPlaneProfile, error: profileError } = await supabase
+    .from("bt_users")
+    .select("role,status,product_tier,permissions")
+    .eq("auth_user_id", data.user.id)
+    .maybeSingle();
+
+  if (profileError) {
+    const identityError = new Error("Security identity service is unavailable.");
+    identityError.statusCode = 503;
+    identityError.code = "SECURITY_IDENTITY_UNAVAILABLE";
+    throw identityError;
+  }
+
+  // Database control-plane state is authoritative. Hydrating server-side Auth
+  // metadata here keeps older Professional Network routes compatible without
+  // trusting browser-editable user metadata or a stale OAuth token claim.
+  const user = {
+    ...data.user,
+    app_metadata: {
+      ...(data.user.app_metadata || {}),
+      role: controlPlaneProfile?.role || "user",
+      productTier: controlPlaneProfile?.role === "admin"
+        ? "admin"
+        : controlPlaneProfile?.product_tier || "retail",
+      permissions: Array.isArray(controlPlaneProfile?.permissions)
+        ? controlPlaneProfile.permissions
+        : []
+    }
+  };
+
+  return { supabase, user };
 }
 
 export function sendError(res, error) {

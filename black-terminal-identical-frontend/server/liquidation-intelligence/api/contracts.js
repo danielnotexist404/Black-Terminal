@@ -129,7 +129,7 @@ export function isDeferredBclifInfrastructureError(error) {
 export function normalizeBclifRouteError(error) {
   if (error?.statusCode) return error;
   const message = String(error?.message || "");
-  if (/Missing SUPABASE_URL\/VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY|supabase(?:Url| URL).*?(?:required|missing|invalid)|service.role.*?(?:required|missing)/i.test(message)) {
+  if (/Missing SUPABASE_URL\/VITE_SUPABASE_URL or SUPABASE_(?:SECRET_KEY\/)?SERVICE_ROLE_KEY|server authentication is not configured|supabase(?:Url| URL).*?(?:required|missing|invalid)|service.role.*?(?:required|missing)/i.test(message)) {
     return bclifHttpError(503, "BCLIF persistence control plane is unavailable.", "PERSISTENCE_CONTROL_PLANE_UNAVAILABLE", { retryable: true });
   }
   return error;

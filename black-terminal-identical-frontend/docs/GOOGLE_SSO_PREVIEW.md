@@ -49,10 +49,32 @@ The Preview environment needs the existing public Supabase values:
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 
+Authenticated Vercel Functions (Professional Network, Admin APIs, and other
+server-only routes) also require one server credential:
+
+- `SUPABASE_SECRET_KEY` (recommended), or the legacy
+  `SUPABASE_SERVICE_ROLE_KEY`
+
+Add it only in **Vercel Project Settings -> Environment Variables**, scoped to
+the `preview` branch/Preview environment, and redeploy Preview afterward. Never
+prefix this value with `VITE_`, paste it into chat, or commit it to Git.
+
 The Google Client Secret belongs only in Supabase and must not be copied to
 Vercel.
 
-## 5. Acceptance check
+## 5. Administrator identities
+
+Apply:
+
+`supabase/migrations/202608110001_google_sso_admin_identity.sql`
+
+The migration keeps the administrator email allowlist in protected database
+control-plane state and reconciles users who already completed Google SSO. Only
+a Google identity with a verified matching email is elevated; OAuth metadata
+cannot grant an administrator role. Sign out and sign in again after applying
+the migration.
+
+## 6. Acceptance check
 
 1. Open the Vercel Preview deployment in a private browser window.
 2. Select **Sign In** or **Create Account**.
@@ -61,4 +83,3 @@ Vercel.
 5. Confirm the app returns to the same Preview origin and opens the terminal.
 6. Open **Profile → Edit Profile** and confirm the private account fields can
    be completed and saved.
-

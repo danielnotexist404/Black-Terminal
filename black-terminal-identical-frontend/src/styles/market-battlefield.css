@@ -1,0 +1,331 @@
+.market-battlefield {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: #f5f7f6;
+  background: #050706;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.battlefield-canvas,
+.battlefield-scanlines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.battlefield-scanlines {
+  z-index: 1;
+  opacity: 0.17;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(0deg, transparent 0 3px, rgba(255,255,255,.03) 4px);
+  mix-blend-mode: screen;
+}
+
+.battlefield-hud {
+  position: absolute;
+  z-index: 4;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  display: grid;
+  grid-template-columns: minmax(230px, 1fr) auto minmax(230px, 1fr);
+  align-items: start;
+  gap: 18px;
+  pointer-events: none;
+}
+
+.battlefield-title,
+.battlefield-price,
+.battlefield-controls,
+.battlefield-army,
+.battlefield-command {
+  border: 1px solid rgba(255,255,255,.1);
+  background: linear-gradient(145deg, rgba(8,10,12,.88), rgba(6,7,8,.63));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 14px 40px rgba(0,0,0,.3);
+  backdrop-filter: blur(12px);
+}
+
+.battlefield-title {
+  justify-self: start;
+  min-width: 260px;
+  padding: 11px 14px;
+  border-left: 2px solid #ff3153;
+  border-radius: 4px 12px 12px 4px;
+}
+
+.battlefield-title span,
+.battlefield-army > span,
+.battlefield-command > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #ff4966;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .16em;
+}
+
+.battlefield-title strong {
+  display: block;
+  margin-top: 5px;
+  font-family: Inter, sans-serif;
+  font-size: 17px;
+  font-weight: 850;
+  letter-spacing: -.02em;
+}
+
+.battlefield-title small,
+.battlefield-command small {
+  display: block;
+  margin-top: 4px;
+  color: #7e8985;
+  font-size: 8px;
+  letter-spacing: .1em;
+}
+
+.battlefield-price {
+  min-width: 230px;
+  padding: 9px 20px 10px;
+  text-align: center;
+  border-radius: 14px;
+}
+
+.battlefield-price span {
+  color: #8e9994;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .12em;
+}
+
+.battlefield-price strong {
+  display: block;
+  margin: 1px 0;
+  color: #fff;
+  font-size: clamp(22px, 2.1vw, 34px);
+  line-height: 1.04;
+  letter-spacing: -.06em;
+  text-shadow: 0 0 24px rgba(255,255,255,.14);
+}
+
+.battlefield-price small {
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.battlefield-price .positive { color: #4dffb0; }
+.battlefield-price .negative { color: #ff405f; }
+
+.battlefield-controls {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 45px;
+  padding: 7px 8px 7px 12px;
+  border-radius: 12px;
+  pointer-events: auto;
+}
+
+.battlefield-controls > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 175px;
+  color: #7e8985;
+  font-size: 7px;
+  letter-spacing: .08em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.battlefield-controls > span i {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4dffb0;
+  box-shadow: 0 0 12px #4dffb0;
+}
+
+.battlefield-controls > span.waiting i { background: #ffb02e; box-shadow: 0 0 12px #ffb02e; }
+
+.battlefield-controls button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 31px;
+  padding: 0 10px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 7px;
+  background: rgba(255,255,255,.04);
+  color: #d6dcda;
+  font: 800 8px "IBM Plex Mono", monospace;
+  letter-spacing: .06em;
+  cursor: pointer;
+}
+
+.battlefield-controls button:hover,
+.battlefield-controls button[aria-pressed="true"] {
+  border-color: rgba(77,255,176,.48);
+  color: #67ffc0;
+  background: rgba(77,255,176,.1);
+  box-shadow: 0 0 22px rgba(77,255,176,.1);
+}
+
+.battlefield-army {
+  position: absolute;
+  z-index: 4;
+  top: 118px;
+  width: min(224px, 22vw);
+  padding: 12px 14px;
+  border-radius: 12px;
+}
+
+.seller-army { left: 14px; border-left: 2px solid #ff3153; }
+.buyer-army { right: 14px; border-right: 2px solid #4dffb0; text-align: right; }
+.buyer-army > span { justify-content: flex-end; color: #4dffb0; }
+
+.battlefield-army > strong {
+  display: block;
+  margin: 7px 0 10px;
+  font: 800 clamp(14px, 1.35vw, 20px) Inter, sans-serif;
+}
+
+.seller-army > strong { color: #ff5770; }
+.buyer-army > strong { color: #63ffc0; }
+
+.battlefield-army dl {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+.battlefield-army dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #79837f;
+  font-size: 8px;
+}
+
+.battlefield-army dt,
+.battlefield-army dd { margin: 0; }
+.battlefield-army dd { color: #e6eae8; font-weight: 800; }
+
+.battlefield-command {
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  bottom: 58px;
+  min-width: 260px;
+  padding: 10px 14px 11px 39px;
+  border-radius: 11px;
+  transform: translateX(-50%);
+}
+
+.battlefield-command > svg {
+  position: absolute;
+  left: 14px;
+  top: 15px;
+}
+
+.battlefield-command.buyers { border-color: rgba(77,255,176,.34); }
+.battlefield-command.sellers { border-color: rgba(255,49,83,.36); }
+.battlefield-command.buyers > svg,
+.battlefield-command.buyers > span,
+.battlefield-command.buyers > strong { color: #57ffb6; }
+.battlefield-command.sellers > svg,
+.battlefield-command.sellers > strong { color: #ff4966; }
+
+.battlefield-command strong {
+  display: block;
+  margin-top: 3px;
+  font: 850 13px Inter, sans-serif;
+  letter-spacing: .02em;
+}
+
+.battlefield-meter {
+  position: absolute;
+  z-index: 5;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  height: 30px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 8px;
+  background: rgba(5,6,7,.84);
+  box-shadow: 0 12px 30px rgba(0,0,0,.45);
+  backdrop-filter: blur(10px);
+}
+
+.battlefield-meter > div {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  transition: width 500ms cubic-bezier(.2,.8,.2,1);
+}
+
+.seller-meter { left: 0; background: linear-gradient(90deg, rgba(255,34,69,.42), rgba(255,34,69,.08)); }
+.buyer-meter { right: 0; background: linear-gradient(270deg, rgba(44,255,166,.42), rgba(44,255,166,.08)); }
+
+.battlefield-meter span,
+.battlefield-meter b {
+  position: relative;
+  z-index: 1;
+  padding: 0 11px;
+  font-size: 8px;
+  letter-spacing: .08em;
+}
+
+.battlefield-meter .seller-label { color: #ff6680; }
+.battlefield-meter .buyer-label { color: #64ffc2; text-align: right; }
+.battlefield-meter b { color: #fff; font-size: 9px; white-space: nowrap; }
+
+.battlefield-grid {
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: minmax(0, 1fr) !important;
+}
+
+.battlefield-grid .chart-panel {
+  grid-column: 1;
+  grid-row: 1;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+@media (max-width: 980px) {
+  .battlefield-hud { grid-template-columns: 1fr auto; }
+  .battlefield-price { grid-column: 2; grid-row: 1; }
+  .battlefield-controls { grid-column: 1 / -1; justify-self: stretch; justify-content: space-between; }
+  .battlefield-army { top: 148px; }
+}
+
+@media (max-width: 720px) {
+  .battlefield-hud { left: 8px; right: 8px; top: 8px; gap: 8px; }
+  .battlefield-title { min-width: 0; }
+  .battlefield-title strong { font-size: 13px; }
+  .battlefield-title small { display: none; }
+  .battlefield-price { min-width: 145px; padding-inline: 10px; }
+  .battlefield-controls > span { max-width: 135px; }
+  .battlefield-army { top: 128px; width: 145px; padding: 9px; }
+  .battlefield-army dl div { font-size: 7px; }
+  .battlefield-command { min-width: 230px; bottom: 52px; }
+  .battlefield-meter { left: 8px; right: 8px; bottom: 8px; }
+  .battlefield-meter b { display: none; }
+  .battlefield-meter { grid-template-columns: 1fr 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .battlefield-meter > div { transition: none; }
+  .battlefield-scanlines { display: none; }
+}

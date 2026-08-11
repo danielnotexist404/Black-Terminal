@@ -37,6 +37,7 @@ import {
   Rows3,
   Settings,
   Square,
+  Swords,
   Trash2,
   TrendingUp,
   Unlock,
@@ -49,6 +50,7 @@ import { AlertCenter } from "./components/AlertCenter";
 import { IndicatorLibrary } from "./components/IndicatorLibrary";
 import { OrderBook } from "./components/OrderBook";
 import { PixiBlackChart } from "./components/PixiBlackChart";
+import { MarketBattlefield } from "./components/MarketBattlefield";
 import { ScriptEditor } from "./components/ScriptEditor";
 import { TradesTape } from "./components/TradesTape";
 import LandingPage from "./components/LandingPage";
@@ -753,6 +755,7 @@ export default function App() {
   const [drawingClearSignal, setDrawingClearSignal] = useState(0);
   const [crosshairEnabled, setCrosshairEnabled] = useState(true);
   const [snapToLatest, setSnapToLatest] = useState(() => localStorage.getItem("bt_chart_snap_to_latest") !== "false");
+  const [battlefieldMode, setBattlefieldMode] = useState(false);
   const [replayControls, setReplayControls] = useState<ReplayControls>(defaultReplayControls);
   const [replayStatus, setReplayStatus] = useState<ReplayStatus>(defaultReplayStatus);
   const [layout, setLayout] = useState({
@@ -1762,6 +1765,19 @@ export default function App() {
           >
             <Magnet size={17} />
           </button>
+          <button
+            className={battlefieldMode ? "icon-btn active battlefield-mode-toggle" : "icon-btn battlefield-mode-toggle"}
+            aria-pressed={battlefieldMode}
+            aria-label={battlefieldMode ? "Return to market chart" : "Open live market battlefield"}
+            title={battlefieldMode ? "Return to chart" : "Live Market Battlefield"}
+            onClick={() => {
+              setBattlefieldMode((value) => !value);
+              setDrawingsEnabled(false);
+              setOpenMenu(null);
+            }}
+          >
+            <Swords size={17} />
+          </button>
         </div>
 
         <div className="menu-wrap">
@@ -2100,8 +2116,16 @@ export default function App() {
           />
         </div>
       ) : (
-        <main className={showCompactDom ? "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>
-        <section className={drawingsEnabled ? "chart-panel drawing-tools-open" : "chart-panel"}>
+        <main className={battlefieldMode ? "terminal-grid battlefield-grid" : showCompactDom ? "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>
+        <section className={battlefieldMode ? "chart-panel battlefield-active" : drawingsEnabled ? "chart-panel drawing-tools-open" : "chart-panel"}>
+          {battlefieldMode ? (
+            <MarketBattlefield
+              marketSymbol={symbol}
+              displaySymbol={symbol.label}
+              exchangeLabel={selectedExchange.label}
+              fallbackPrice={lastPrice}
+            />
+          ) : (
           <PixiBlackChart
             workspaceId={workspace}
             marketSymbol={symbol}
@@ -2152,7 +2176,8 @@ export default function App() {
             onRefreshOrders={() => refreshPortfolioState(true)}
             allowedIndicators={effectiveAllowedIndicators}
           />
-          {drawingsEnabled && (
+          )}
+          {!battlefieldMode && drawingsEnabled && (
             <div className="drawing-toolbar" aria-label="Drawing tools">
               {drawingTools.map(({ id, label, icon: Icon }) => (
                 <button
@@ -2251,7 +2276,7 @@ export default function App() {
             </div>
           )}
         </section>
-        {showCompactDom && (
+        {!battlefieldMode && showCompactDom && (
           <aside className="right-panel">
             <OrderBook
               marketSymbol={symbol}
@@ -2269,7 +2294,7 @@ export default function App() {
             </div>
           </aside>
         )}
-        <section className={activeNav === "SCRIPT EDITOR" ? "bottom-panel script-mode" : activeNav === "ALERTS" ? "bottom-panel alerts-mode" : activeNav === "POSITIONS" ? "bottom-panel positions-mode" : "bottom-panel"}>
+        {!battlefieldMode && <section className={activeNav === "SCRIPT EDITOR" ? "bottom-panel script-mode" : activeNav === "ALERTS" ? "bottom-panel alerts-mode" : activeNav === "POSITIONS" ? "bottom-panel positions-mode" : "bottom-panel"}>
           {activeNav === "SCRIPT EDITOR" ? (
             <ScriptEditor
               symbol={symbol.label}
@@ -2297,8 +2322,8 @@ export default function App() {
           ) : (
             <div className="bottom-blank" />
           )}
-        </section>
-        {domProOpen && canUseDomPro && (
+        </section>}
+        {!battlefieldMode && domProOpen && canUseDomPro && (
           <Suspense fallback={null}>
             <DomProWindow
               marketSymbol={symbol}
@@ -2311,10 +2336,10 @@ export default function App() {
             />
           </Suspense>
         )}
-        {showCompactDom && (
+        {!battlefieldMode && showCompactDom && (
           <div className="layout-resizer resize-main-x" onPointerDown={(event) => startLayoutResize("right", event)} />
         )}
-        <div className="layout-resizer resize-main-y" onPointerDown={(event) => startLayoutResize("bottom", event)} />
+        {!battlefieldMode && <div className="layout-resizer resize-main-y" onPointerDown={(event) => startLayoutResize("bottom", event)} />}
         
         {/* Watchlist Context Menu */}
         {contextMenu && (

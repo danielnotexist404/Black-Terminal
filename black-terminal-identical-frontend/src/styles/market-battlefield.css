@@ -18,6 +18,14 @@
   height: 100%;
 }
 
+.battlefield-canvas {
+  cursor: grab;
+  touch-action: none;
+}
+
+.battlefield-canvas:active { cursor: grabbing; }
+.battlefield-canvas.failed { visibility: hidden; }
+
 .battlefield-scanlines {
   z-index: 1;
   opacity: 0.17;
@@ -170,6 +178,10 @@
   cursor: pointer;
 }
 
+.battlefield-controls button em {
+  font-style: normal;
+}
+
 .battlefield-controls button:hover,
 .battlefield-controls button[aria-pressed="true"] {
   border-color: rgba(77,255,176,.48);
@@ -185,6 +197,7 @@
   width: min(224px, 22vw);
   padding: 12px 14px;
   border-radius: 12px;
+  pointer-events: none;
 }
 
 .seller-army { left: 14px; border-left: 2px solid #ff3153; }
@@ -227,6 +240,7 @@
   padding: 10px 14px 11px 39px;
   border-radius: 11px;
   transform: translateX(-50%);
+  pointer-events: none;
 }
 
 .battlefield-command > svg {
@@ -291,6 +305,150 @@
 .battlefield-meter .buyer-label { color: #64ffc2; text-align: right; }
 .battlefield-meter b { color: #fff; font-size: 9px; white-space: nowrap; }
 
+.battlefield-data-panel {
+  position: absolute;
+  z-index: 4;
+  bottom: 58px;
+  width: min(306px, 25vw);
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 11px;
+  background: linear-gradient(145deg, rgba(8,10,12,.9), rgba(6,7,8,.7));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 15px 38px rgba(0,0,0,.34);
+  backdrop-filter: blur(13px);
+}
+
+.depth-panel { left: 14px; }
+.feed-panel { right: 14px; }
+
+.battlefield-data-panel > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 0;
+  border-bottom: 1px solid rgba(255,255,255,.07);
+  background: rgba(255,255,255,.018);
+  color: #b6bfbb;
+  cursor: pointer;
+}
+
+.battlefield-data-panel > button:hover { background: rgba(255,255,255,.05); }
+
+.battlefield-data-panel > button span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font: 750 8px "IBM Plex Mono", monospace;
+  letter-spacing: .1em;
+}
+
+.battlefield-data-panel > button b {
+  color: #58fcb5;
+  font: 800 7px "IBM Plex Mono", monospace;
+  letter-spacing: .1em;
+}
+
+.battlefield-data-panel.collapsed { width: 210px; }
+.battlefield-data-panel.collapsed > button { border-bottom: 0; }
+
+.depth-visualization {
+  height: 96px;
+  padding: 4px 9px 7px;
+}
+
+.depth-visualization svg { width: 100%; height: 100%; overflow: visible; }
+.depth-visualization svg > line { stroke: rgba(255,255,255,.15); stroke-width: .7; stroke-dasharray: 2 3; }
+.depth-visualization polyline { fill: none; stroke-width: 1.8; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 5px currentColor); }
+.depth-visualization .bid-depth-line { color: #45ffad; stroke: #45ffad; }
+.depth-visualization .ask-depth-line { color: #ff3558; stroke: #ff3558; }
+.depth-visualization text { fill: #89938f; font: 700 7px "IBM Plex Mono", monospace; letter-spacing: .04em; }
+
+.feed-panel ol {
+  display: grid;
+  gap: 0;
+  max-height: 105px;
+  margin: 0;
+  padding: 3px 9px 7px;
+  overflow: hidden;
+  list-style: none;
+}
+
+.feed-panel li {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 20px;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+  color: #a7b0ac;
+  font-size: 7px;
+}
+
+.feed-panel li:last-child { border-bottom: 0; }
+.feed-panel li i { width: 5px; height: 5px; border-radius: 50%; background: #777; }
+.feed-panel li.buy i { background: #45ffad; box-shadow: 0 0 8px rgba(69,255,173,.68); }
+.feed-panel li.sell i { background: #ff3558; box-shadow: 0 0 8px rgba(255,53,88,.68); }
+.feed-panel li.buy span { color: #83dcb7; }
+.feed-panel li.sell span { color: #d98998; }
+.feed-panel li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed-panel li time { color: #646d69; font-size: 6px; }
+
+.battlefield-camera-help {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  bottom: 46px;
+  color: rgba(181,191,186,.52);
+  font-size: 6px;
+  letter-spacing: .1em;
+  transform: translateX(-50%);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.battlefield-camera-help b { color: rgba(232,238,235,.76); }
+
+.battlefield-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  color: #ff4a67;
+  background: radial-gradient(circle at 50% 45%, rgba(255,42,73,.1), transparent 40%), #050607;
+  font: 800 9px "IBM Plex Mono", monospace;
+  letter-spacing: .16em;
+}
+
+.battlefield-render-error {
+  position: absolute;
+  z-index: 8;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  width: min(430px, calc(100% - 40px));
+  padding: 25px;
+  border: 1px solid rgba(255,53,88,.45);
+  border-radius: 14px;
+  background: rgba(8,8,10,.92);
+  color: #a7afac;
+  text-align: center;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 25px 80px rgba(0,0,0,.6), 0 0 35px rgba(255,53,88,.1);
+  backdrop-filter: blur(16px);
+}
+
+.battlefield-render-error strong { color: #ff4a67; font: 850 14px Inter, sans-serif; }
+.battlefield-render-error span { color: #e8ecea; font-size: 10px; }
+.battlefield-render-error small { color: #747d79; font-size: 8px; }
+
 .battlefield-grid {
   grid-template-columns: minmax(0, 1fr) !important;
   grid-template-rows: minmax(0, 1fr) !important;
@@ -308,6 +466,8 @@
   .battlefield-price { grid-column: 2; grid-row: 1; }
   .battlefield-controls { grid-column: 1 / -1; justify-self: stretch; justify-content: space-between; }
   .battlefield-army { top: 148px; }
+  .battlefield-data-panel { width: 245px; }
+  .battlefield-command { bottom: 52px; }
 }
 
 @media (max-width: 720px) {
@@ -320,6 +480,8 @@
   .battlefield-army { top: 128px; width: 145px; padding: 9px; }
   .battlefield-army dl div { font-size: 7px; }
   .battlefield-command { min-width: 230px; bottom: 52px; }
+  .battlefield-data-panel { display: none; }
+  .battlefield-camera-help { display: none; }
   .battlefield-meter { left: 8px; right: 8px; bottom: 8px; }
   .battlefield-meter b { display: none; }
   .battlefield-meter { grid-template-columns: 1fr 1fr; }

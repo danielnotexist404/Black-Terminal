@@ -50,7 +50,6 @@ import { AlertCenter } from "./components/AlertCenter";
 import { IndicatorLibrary } from "./components/IndicatorLibrary";
 import { OrderBook } from "./components/OrderBook";
 import { PixiBlackChart } from "./components/PixiBlackChart";
-import { MarketBattlefield } from "./components/MarketBattlefield";
 import { ScriptEditor } from "./components/ScriptEditor";
 import { TradesTape } from "./components/TradesTape";
 import LandingPage from "./components/LandingPage";
@@ -119,6 +118,9 @@ import {
 
 const DomProWindow = lazy(() =>
   import("./modules/dom-pro/components/DomProWindow").then((module) => ({ default: module.DomProWindow }))
+);
+const MarketBattlefield = lazy(() =>
+  import("./components/MarketBattlefield").then((module) => ({ default: module.MarketBattlefield }))
 );
 
 const nav = [
@@ -2119,12 +2121,14 @@ export default function App() {
         <main className={battlefieldMode ? "terminal-grid battlefield-grid" : showCompactDom ? "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>
         <section className={battlefieldMode ? "chart-panel battlefield-active" : drawingsEnabled ? "chart-panel drawing-tools-open" : "chart-panel"}>
           {battlefieldMode ? (
-            <MarketBattlefield
-              marketSymbol={symbol}
-              displaySymbol={symbol.label}
-              exchangeLabel={selectedExchange.label}
-              fallbackPrice={lastPrice}
-            />
+            <Suspense fallback={<div className="battlefield-loading"><Swords size={24} /><span>INITIALIZING 3D BATTLEFIELD</span></div>}>
+              <MarketBattlefield
+                marketSymbol={symbol}
+                displaySymbol={symbol.label}
+                exchangeLabel={selectedExchange.label}
+                fallbackPrice={lastPrice}
+              />
+            </Suspense>
           ) : (
           <PixiBlackChart
             workspaceId={workspace}

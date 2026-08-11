@@ -1,5 +1,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import aircraftUnitUrl from "../assets/battlefield/aircraft-unit.png";
+import soldierUnitUrl from "../assets/battlefield/soldier-unit.png";
+import tankUnitUrl from "../assets/battlefield/tank-unit.png";
 
 export type BattlefieldTelemetry = {
   buyerShare: number;
@@ -16,6 +19,7 @@ export type BattlefieldTelemetry = {
 type Side = "buy" | "sell";
 type TankUnit = { group: THREE.Group; side: Side; phase: number; speed: number; lane: number; index: number };
 type AircraftUnit = { group: THREE.Group; side: Side; phase: number; speed: number; altitude: number; lane: number; bomber?: boolean };
+type SoldierUnit = { sprite: THREE.Sprite; side: Side; phase: number; speed: number; lane: number; rank: number; size: number; index: number };
 type ProjectileUnit = { mesh: THREE.Mesh; side: Side; phase: number; speed: number; lane: number };
 type ExplosionUnit = { group: THREE.Group; phase: number; speed: number; lane: number; side: Side };
 
@@ -109,81 +113,67 @@ function makeLabelTexture(text: string, color: string, emphasis = false) {
   return texture;
 }
 
-function createTank(side: Side, scale = 1) {
-  const group = new THREE.Group();
-  const color = side === "buy" ? 0x28d98a : 0xd51e40;
-  const dark = side === "buy" ? 0x0b4937 : 0x4a0c19;
-  const bodyMaterial = new THREE.MeshStandardMaterial({ color, roughness: 0.52, metalness: 0.38 });
-  const darkMaterial = new THREE.MeshStandardMaterial({ color: dark, roughness: 0.72, metalness: 0.18 });
-  const trackMaterial = new THREE.MeshStandardMaterial({ color: 0x07090a, roughness: 0.85, metalness: 0.3 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.65, 1.6), bodyMaterial);
-  body.position.y = 0.72;
-  body.castShadow = true;
-  group.add(body);
-  const upper = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.5, 1.25), darkMaterial);
-  upper.position.set(0.12, 1.26, 0);
-  upper.castShadow = true;
-  group.add(upper);
-  const turret = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.62, 0.36, 10), bodyMaterial);
-  turret.position.set(0.35, 1.7, 0);
-  turret.castShadow = true;
-  group.add(turret);
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 2.45, 7), bodyMaterial);
-  barrel.rotation.z = Math.PI / 2;
-  barrel.position.set(1.55, 1.75, 0);
-  barrel.castShadow = true;
-  group.add(barrel);
-  for (const z of [-0.72, 0.72]) {
-    const track = new THREE.Mesh(new THREE.BoxGeometry(2.9, 0.48, 0.32), trackMaterial);
-    track.position.set(0, 0.38, z);
-    track.castShadow = true;
-    group.add(track);
+function loadUnitTexture(url: string, mirrored = false) {
+  const texture = new THREE.TextureLoader().load(url);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.generateMipmaps = false;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.premultiplyAlpha = true;
+  if (mirrored) {
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.repeat.x = -1;
+    texture.offset.x = 1;
   }
-  const glow = new THREE.PointLight(color, 2.2, 6, 2);
-  glow.position.set(0.7, 1.6, 0);
+  return texture;
+}
+
+function createUnitMaterial(url: string, side: Side) {
+  return new THREE.SpriteMaterial({
+    map: loadUnitTexture(url, side === "sell"),
+    color: side === "buy" ? 0x68ffc2 : 0xff5a72,
+    transparent: true,
+    alphaTest: 0.035,
+    depthWrite: false,
+    toneMapped: false
+  });
+}
+
+function createGroundedUnit(material: THREE.SpriteMaterial, width: number, height: number, side: Side) {
+  const group = new THREE.Group();
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(width, height, 1);
+  sprite.position.y = height * 0.37;
+  sprite.renderOrder = 4;
+  group.add(sprite);
+
+  const glow = new THREE.Mesh(
+    new THREE.CircleGeometry(1, 24),
+    new THREE.MeshBasicMaterial({
+      color: side === "buy" ? BUY_COLOR : SELL_COLOR,
+      transparent: true,
+      opacity: 0.13,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    })
+  );
+  glow.rotation.x = -Math.PI / 2;
+  glow.scale.set(width * 0.32, width * 0.12, 1);
+  glow.position.y = 0.04;
   group.add(glow);
-  if (side === "buy") group.rotation.y = Math.PI;
-  group.scale.setScalar(scale);
   return group;
 }
 
-function createAircraft(side: Side, bomber = false) {
-  const color = side === "buy" ? 0x45f5a5 : 0xff3558;
-  const shape = new THREE.Shape();
-  if (bomber) {
-    shape.moveTo(4.8, 0);
-    shape.lineTo(0.8, -0.55);
-    shape.lineTo(-2.1, -3.1);
-    shape.lineTo(-0.5, -0.6);
-    shape.lineTo(-4.5, -0.3);
-    shape.lineTo(-4.5, 0.3);
-    shape.lineTo(-0.5, 0.6);
-    shape.lineTo(-2.1, 3.1);
-    shape.lineTo(0.8, 0.55);
-  } else {
-    shape.moveTo(3.4, 0);
-    shape.lineTo(0.5, -0.42);
-    shape.lineTo(-1.4, -2.1);
-    shape.lineTo(-0.6, -0.38);
-    shape.lineTo(-2.8, -0.15);
-    shape.lineTo(-2.8, 0.15);
-    shape.lineTo(-0.6, 0.38);
-    shape.lineTo(-1.4, 2.1);
-    shape.lineTo(0.5, 0.42);
-  }
-  shape.closePath();
-  const geometry = new THREE.ExtrudeGeometry(shape, { depth: bomber ? 0.34 : 0.22, bevelEnabled: true, bevelSize: 0.08, bevelThickness: 0.08, bevelSegments: 1 });
-  geometry.center();
-  geometry.rotateX(Math.PI / 2);
-  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.26, metalness: 0.72, emissive: color, emissiveIntensity: 0.25 });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.castShadow = true;
+function createTank(material: THREE.SpriteMaterial, side: Side, scale = 1) {
+  return createGroundedUnit(material, 6.1 * scale, 4.9 * scale, side);
+}
+
+function createAircraft(material: THREE.SpriteMaterial, bomber = false) {
   const group = new THREE.Group();
-  group.add(mesh);
-  const engineGlow = new THREE.PointLight(color, bomber ? 3 : 2, bomber ? 15 : 10, 2);
-  engineGlow.position.x = -2;
-  group.add(engineGlow);
-  if (side === "buy") group.rotation.y = Math.PI;
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(bomber ? 11.8 : 8.6, bomber ? 9.5 : 6.9, 1);
+  sprite.renderOrder = 5;
+  group.add(sprite);
   return group;
 }
 
@@ -245,10 +235,8 @@ export class BattlefieldScene {
   private readonly aircraft: AircraftUnit[] = [];
   private readonly projectiles: ProjectileUnit[] = [];
   private readonly explosions: ExplosionUnit[] = [];
-  private readonly buyerBodies: THREE.InstancedMesh;
-  private readonly buyerHeads: THREE.InstancedMesh;
-  private readonly sellerBodies: THREE.InstancedMesh;
-  private readonly sellerHeads: THREE.InstancedMesh;
+  private readonly buyerSoldiers: SoldierUnit[];
+  private readonly sellerSoldiers: SoldierUnit[];
   private readonly priceLabels: THREE.Sprite[] = [];
   private lastRenderedPrice = Number.NaN;
   private userInteracting = false;
@@ -273,7 +261,7 @@ export class BattlefieldScene {
 
     this.scene.background = new THREE.Color(0x050807);
     this.scene.fog = new THREE.FogExp2(0x050807, 0.014);
-    this.camera.position.set(0, 60, 64);
+    this.camera.position.set(0, 52, 58);
     this.camera.lookAt(0, 0, 0);
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.target.set(0, 0, 0);
@@ -313,8 +301,8 @@ export class BattlefieldScene {
     this.addBuildings();
     this.addBases();
     this.addTanks();
-    ({ bodies: this.buyerBodies, heads: this.buyerHeads } = this.createSoldierArmy("buy"));
-    ({ bodies: this.sellerBodies, heads: this.sellerHeads } = this.createSoldierArmy("sell"));
+    this.buyerSoldiers = this.createSoldierArmy("buy");
+    this.sellerSoldiers = this.createSoldierArmy("sell");
     this.addAircraft();
     this.addProjectiles();
     this.addExplosions();
@@ -358,7 +346,7 @@ export class BattlefieldScene {
   }
 
   recenter() {
-    this.camera.position.set(0, 60, 64);
+    this.camera.position.set(0, 52, 58);
     this.controls.target.set(0, 0, 0);
     this.controls.update();
   }
@@ -531,14 +519,15 @@ export class BattlefieldScene {
 
   private addTanks() {
     for (const side of ["sell", "buy"] as Side[]) {
+      const material = createUnitMaterial(tankUnitUrl, side);
       for (let index = 0; index < 14; index += 1) {
-        const group = createTank(side, 0.66 + seeded(index + (side === "buy" ? 300 : 0)) * 0.22);
+        const group = createTank(material, side, 0.72 + seeded(index + (side === "buy" ? 300 : 0)) * 0.2);
         this.scene.add(group);
         this.tanks.push({
           group,
           side,
           phase: seeded(index + (side === "buy" ? 500 : 100)),
-          speed: 0.015 + seeded(index + 1300) * 0.012,
+          speed: 0.0055 + seeded(index + 1300) * 0.0045,
           lane: -26 + ((index * 11 + (side === "buy" ? 5 : 0)) % 53),
           index
         });
@@ -547,31 +536,47 @@ export class BattlefieldScene {
   }
 
   private createSoldierArmy(side: Side) {
-    const capacity = 92;
-    const color = side === "buy" ? 0x63ffc0 : 0xff5871;
-    const bodyMaterial = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.22, roughness: 0.55 });
-    const bodies = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.12, 0.45, 2, 5), bodyMaterial, capacity);
-    const heads = new THREE.InstancedMesh(new THREE.SphereGeometry(0.16, 6, 5), bodyMaterial.clone(), capacity);
-    bodies.castShadow = true;
-    heads.castShadow = true;
-    this.scene.add(bodies, heads);
-    return { bodies, heads };
+    const capacity = 72;
+    const material = createUnitMaterial(soldierUnitUrl, side);
+    const units: SoldierUnit[] = [];
+    for (let index = 0; index < capacity; index += 1) {
+      const sprite = new THREE.Sprite(material);
+      const size = 1.35 + seeded(index + (side === "buy" ? 2300 : 1800)) * 0.42;
+      sprite.scale.set(size, size, 1);
+      sprite.renderOrder = 3;
+      this.scene.add(sprite);
+      units.push({
+        sprite,
+        side,
+        phase: seeded(index + (side === "buy" ? 900 : 200)),
+        speed: 0.0065 + seeded(index + 4200) * 0.005,
+        lane: -31 + seeded(index + (side === "buy" ? 5200 : 4700)) * 62,
+        rank: 0.85 + (index % 9) * 0.68 + seeded(index + 6100) * 0.35,
+        size,
+        index
+      });
+    }
+    return units;
   }
 
   private addAircraft() {
+    const materials = {
+      buy: createUnitMaterial(aircraftUnitUrl, "buy"),
+      sell: createUnitMaterial(aircraftUnitUrl, "sell")
+    };
     for (let index = 0; index < 5; index += 1) {
       const side: Side = index % 2 === 0 ? "buy" : "sell";
-      const group = createAircraft(side, false);
-      group.scale.setScalar(0.68 + seeded(index + 20) * 0.24);
+      const group = createAircraft(materials[side], false);
+      group.scale.setScalar(0.8 + seeded(index + 20) * 0.18);
       this.scene.add(group);
-      this.aircraft.push({ group, side, phase: seeded(index + 44), speed: 0.032 + seeded(index + 210) * 0.016, altitude: 8 + seeded(index + 70) * 5, lane: -24 + seeded(index + 430) * 48 });
+      this.aircraft.push({ group, side, phase: seeded(index + 44), speed: 0.009 + seeded(index + 210) * 0.005, altitude: 9 + seeded(index + 70) * 5, lane: -24 + seeded(index + 430) * 48 });
     }
     for (let index = 0; index < 2; index += 1) {
       const side: Side = index === 0 ? "sell" : "buy";
-      const group = createAircraft(side, true);
-      group.scale.setScalar(0.9);
+      const group = createAircraft(materials[side], true);
+      group.scale.setScalar(0.82);
       this.scene.add(group);
-      this.aircraft.push({ group, side, phase: seeded(index + 700), speed: 0.013 + index * 0.003, altitude: 13 + index * 2, lane: -10 + index * 20, bomber: true });
+      this.aircraft.push({ group, side, phase: seeded(index + 700), speed: 0.0045 + index * 0.0012, altitude: 14 + index * 2, lane: -10 + index * 20, bomber: true });
     }
   }
 
@@ -581,7 +586,7 @@ export class BattlefieldScene {
       const color = side === "buy" ? 0x65ffc3 : 0xff4b68;
       const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.1 + seeded(index) * 0.08, 6, 5), new THREE.MeshBasicMaterial({ color, blending: THREE.AdditiveBlending }));
       this.scene.add(mesh);
-      this.projectiles.push({ mesh, side, phase: seeded(index + 99), speed: 0.35 + seeded(index + 404) * 0.36, lane: -29 + seeded(index + 808) * 58 });
+      this.projectiles.push({ mesh, side, phase: seeded(index + 99), speed: 0.12 + seeded(index + 404) * 0.12, lane: -29 + seeded(index + 808) * 58 });
     }
   }
 
@@ -596,7 +601,7 @@ export class BattlefieldScene {
       group.add(core, shell, ring);
       group.visible = false;
       this.scene.add(group);
-      this.explosions.push({ group, phase: seeded(index + 190), speed: 0.12 + seeded(index + 720) * 0.09, lane: -27 + seeded(index + 920) * 54, side });
+      this.explosions.push({ group, phase: seeded(index + 190), speed: 0.045 + seeded(index + 720) * 0.035, lane: -27 + seeded(index + 920) * 54, side });
     }
   }
 
@@ -612,9 +617,10 @@ export class BattlefieldScene {
   }
 
   private render(delta: number, elapsed: number) {
-    const smoothing = 1 - Math.pow(0.0015, delta);
-    this.front += (this.targetFront - this.front) * smoothing;
-    this.buyerShare += (this.targetBuyerShare - this.buyerShare) * smoothing;
+    const frontSmoothing = 1 - Math.exp(-delta / 8.5);
+    const strengthSmoothing = 1 - Math.exp(-delta / 5.5);
+    this.front += (this.targetFront - this.front) * frontSmoothing;
+    this.buyerShare += (this.targetBuyerShare - this.buyerShare) * strengthSmoothing;
     this.updateZones();
     this.updateFrontGeometry(elapsed);
     this.updateTanks(elapsed);
@@ -670,47 +676,47 @@ export class BattlefieldScene {
       unit.group.visible = unit.index < (unit.side === "buy" ? buyerVisible : sellerVisible);
       if (!unit.group.visible) continue;
       const phase = (unit.phase + elapsed * unit.speed) % 1;
-      const laneWave = Math.sin(elapsed * 0.22 + unit.index) * 0.8;
+      const march = clamp(phase / 0.7, 0, 1);
+      const easedMarch = march * march * (3 - 2 * march);
+      const laneWave = Math.sin(elapsed * 0.11 + unit.index) * 0.55;
       let x: number;
       if (unit.side === "sell") {
         const span = Math.max(8, this.front + 49);
-        x = -49 + span * (0.18 + phase * 0.76);
-        x = Math.min(x, this.front - 2.4);
+        x = -49 + span * (0.12 + easedMarch * 0.84);
+        x = Math.min(x, this.front - 1.8);
       } else {
         const span = Math.max(8, 49 - this.front);
-        x = 49 - span * (0.18 + phase * 0.76);
-        x = Math.max(x, this.front + 2.4);
+        x = 49 - span * (0.12 + easedMarch * 0.84);
+        x = Math.max(x, this.front + 1.8);
       }
       const z = clamp(unit.lane + laneWave, -31, 31);
-      unit.group.position.set(x, terrainHeight(x, z) + 0.2 + Math.sin(elapsed * 3 + unit.index) * 0.04, z);
+      unit.group.position.set(x, terrainHeight(x, z) + 0.12 + Math.sin(elapsed * 1.1 + unit.index) * 0.025, z);
     }
   }
 
   private updateSoldiers(elapsed: number) {
-    this.updateSoldierSide("buy", this.buyerBodies, this.buyerHeads, Math.round(24 + this.buyerShare * 68), elapsed);
-    this.updateSoldierSide("sell", this.sellerBodies, this.sellerHeads, Math.round(24 + (1 - this.buyerShare) * 68), elapsed);
+    this.updateSoldierSide("buy", this.buyerSoldiers, Math.round(18 + this.buyerShare * 54), elapsed);
+    this.updateSoldierSide("sell", this.sellerSoldiers, Math.round(18 + (1 - this.buyerShare) * 54), elapsed);
   }
 
-  private updateSoldierSide(side: Side, bodies: THREE.InstancedMesh, heads: THREE.InstancedMesh, visibleCount: number, elapsed: number) {
-    const capacity = bodies.count;
-    for (let index = 0; index < capacity; index += 1) {
-      const lane = -31 + seeded(index + (side === "buy" ? 900 : 200)) * 62;
-      const rank = 0.9 + (index % 8) * 0.72 + Math.sin(index * 2.9) * 0.35;
-      const advance = Math.sin(elapsed * (1.5 + seeded(index) * 0.5) + index) * 0.42;
-      const x = this.front + (side === "buy" ? rank : -rank) + advance;
-      const y = terrainHeight(x, lane) + 0.54 + Math.abs(Math.sin(elapsed * 4 + index)) * 0.08;
-      const scale = index < visibleCount ? 1 : 0;
-      tempObject.position.set(x, y, lane);
-      tempObject.rotation.set(0, side === "buy" ? Math.PI : 0, 0);
-      tempObject.scale.setScalar(scale);
-      tempObject.updateMatrix();
-      bodies.setMatrixAt(index, tempObject.matrix);
-      tempObject.position.y = y + 0.56;
-      tempObject.updateMatrix();
-      heads.setMatrixAt(index, tempObject.matrix);
+  private updateSoldierSide(side: Side, units: SoldierUnit[], visibleCount: number, elapsed: number) {
+    for (const unit of units) {
+      unit.sprite.visible = unit.index < visibleCount;
+      if (!unit.sprite.visible) continue;
+      const phase = (unit.phase + elapsed * unit.speed) % 1;
+      const march = clamp(phase / 0.66, 0, 1);
+      const easedMarch = march * march * (3 - 2 * march);
+      const startX = side === "buy"
+        ? 45 - seeded(unit.index + 7300) * 9
+        : -45 + seeded(unit.index + 7300) * 9;
+      const frontX = this.front + (side === "buy" ? unit.rank : -unit.rank);
+      const combatDrift = phase >= 0.66 ? Math.sin(elapsed * 0.55 + unit.index) * 0.3 : 0;
+      const x = THREE.MathUtils.lerp(startX, frontX, easedMarch) + combatDrift;
+      const lane = clamp(unit.lane + Math.sin(elapsed * 0.18 + unit.index * 1.7) * 0.28, -31, 31);
+      const step = Math.abs(Math.sin(elapsed * 2.1 + unit.index)) * 0.035;
+      unit.sprite.position.set(x, terrainHeight(x, lane) + 0.72 + step, lane);
+      unit.sprite.scale.set(unit.size, unit.size, 1);
     }
-    bodies.instanceMatrix.needsUpdate = true;
-    heads.instanceMatrix.needsUpdate = true;
   }
 
   private updateAircraft(elapsed: number) {

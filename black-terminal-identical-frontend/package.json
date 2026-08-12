@@ -93,7 +93,7 @@
     "test:professional-network": "node --experimental-strip-types scripts/professional-network-tests.ts",
     "test:black-cloud": "node scripts/black-cloud-execution-tests.js",
     "test:broker-connectivity": "node scripts/broker-connectivity-tests.js",
-    "test:broker-production": "node scripts/broker-production-readiness-tests.js",
+    "test:broker-production": "node scripts/broker-production-readiness-tests.js && node --experimental-strip-types scripts/manual-trading-access-tests.ts",
     "test:investor-execution": "node scripts/investor-execution-tests.js",
     "test:mandates": "node scripts/mandate-tests.js",
     "test:reconciliation": "node scripts/reconciliation-tests.js",

@@ -449,13 +449,18 @@ export async function connectExchangeAccountViaApi(draft: ExchangeConnectionDraf
   const token = await getPortfolioApiToken();
   if (!token) return null;
 
+  const payload = {
+    ...draft,
+    passphrase: draft.passphrase?.trim() ? draft.passphrase : undefined
+  };
+
   const response = await fetch("/api/exchange-accounts/connect", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(draft)
+    body: JSON.stringify(payload)
   });
 
   if (!response.ok) throw new Error(await readApiError(response));

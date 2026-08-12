@@ -1,5 +1,5 @@
 import { applyCors, decryptCredentialPayload, getOwnedAccount, requireFields, requireMethod, requireUser, sendError } from "../../portfolio-api.js";
-import { cancelBybitOrder, validateBybitManagementGate } from "../../exchanges/bybit.js";
+import { createCloudExchangeAdapter } from "../../cloud-execution/adapters/registry.js";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -26,22 +26,7 @@ export default async function handler(req, res) {
     const exchange = existingOrder?.exchange_accounts?.exchange || existingOrder?.exchange || account.exchange;
     const venueOrderId = existingOrder?.exchange_order_id || req.body.venueOrderId || req.body.orderId;
     const symbol = existingOrder?.symbol || String(req.body.symbol).toUpperCase();
-    if (externalOrder && exchange !== "bybit") {
-      const unsupported = new Error(`External ${exchange} order cancellation is not certified by this route.`);
-      unsupported.statusCode = 501;
-      throw unsupported;
-    }
-    if (exchange === "bybit" && venueOrderId) {
-      const gate = validateBybitManagementGate({
-        account,
-        body: req.body,
-        symbol
-      });
-      if (!gate.ok) {
-        const blocked = new Error(gate.reasons.join(" "));
-        blocked.statusCode = 403;
-        throw blocked;
-      }
+    if (venueOrderId) {
       const { data: credential, error: credentialError } = await supabase
         .from("exchange_credentials")
         .select("encrypted_payload")
@@ -50,7 +35,21 @@ export default async function handler(req, res) {
 
       if (credentialError || !credential) throw credentialError || new Error("Missing encrypted credentials for venue cancel.");
       const credentials = decryptCredentialPayload(credential.encrypted_payload);
-      venueCancelResult = await cancelBybitOrder(credentials, {
+      const adapter = createCloudExchangeAdapter(exchange, {
+        credentials,
+        network: account.network || account.environment,
+        executionEnvironment: account.execution_environment || account.network || account.environment,
+        endpointProfile: account.endpoint_profile || "GLOBAL",
+        connectionId: account.id
+      });
+      const gate = adapter.validateManagementGate({ account, body: req.body, symbol });
+      if (!gate.ok) {
+        const blocked = new Error(gate.reasons.join(" "));
+        blocked.statusCode = 403;
+        blocked.code = "EXECUTION_BLOCKED";
+        throw blocked;
+      }
+      venueCancelResult = await adapter.cancelOrder({
         marketKind: existingOrder?.market_kind || req.body.marketKind || (req.body.category === "spot" ? "spot" : "perpetual"),
         symbol,
         orderId: venueOrderId,

@@ -7,7 +7,7 @@ import {
   requireUser,
   sendError
 } from "../../portfolio-api.js";
-import { syncBybitSnapshotAndReconcile } from "../../exchanges/bybit-reconciliation.js";
+import { createCloudExchangeAdapter } from "../../cloud-execution/adapters/registry.js";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -18,12 +18,6 @@ export default async function handler(req, res) {
 
     const { supabase, user } = await requireUser(req);
     const account = await getOwnedAccount(supabase, user.id, req.body.accountId);
-    if (account.exchange !== "bybit") {
-      const unsupported = new Error(`${account.exchange} snapshot reconciliation is not certified in this route yet.`);
-      unsupported.statusCode = 501;
-      throw unsupported;
-    }
-
     const { data: credential, error: credentialError } = await supabase
       .from("exchange_credentials")
       .select("encrypted_payload")
@@ -32,7 +26,17 @@ export default async function handler(req, res) {
 
     if (credentialError || !credential) throw credentialError || new Error("Missing encrypted credentials for account sync.");
     const credentials = decryptCredentialPayload(credential.encrypted_payload);
-    const sync = await syncBybitSnapshotAndReconcile(supabase, user.id, account, credentials, {
+    const adapter = createCloudExchangeAdapter(account.exchange, {
+      credentials,
+      network: account.network,
+      executionEnvironment: account.execution_environment,
+      endpointProfile: account.endpoint_profile,
+      connectionId: account.id
+    });
+    const sync = await adapter.synchronizeAccount({
+      supabase,
+      userId: user.id,
+      account,
       symbol: req.body.symbol || "BTCUSDT",
       marketKind: req.body.marketKind || "perpetual"
     });

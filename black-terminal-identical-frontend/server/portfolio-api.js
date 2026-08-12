@@ -182,6 +182,14 @@ export function toCamelAccount(row, riskControls) {
     credentialRef: row.credential_ref,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    network: row.network || null,
+    executionEnvironment: row.execution_environment || null,
+    endpointProfile: row.endpoint_profile || null,
+    brokerAccountUid: row.broker_account_uid || null,
+    permissionSnapshot: row.permission_snapshot || {},
+    permissionVerifiedAt: row.permission_verified_at || null,
+    lastSyncedAt: row.last_synced_at || null,
+    lastError: row.last_error || row.last_sync_error || null,
     riskControls: riskControls
       ? {
           maxLeverage: Number(riskControls.max_leverage),

@@ -12,6 +12,8 @@ const BYBIT_REQUEST_TIMEOUT_MS = Math.max(1500, Math.min(8000, Number(process.en
 const BYBIT_RUNTIME_REGION = process.env.VERCEL_REGION || process.env.AWS_REGION || "local";
 const bybitPublicMetadataCache = new Map();
 const bybitPermissionCache = new Map();
+const bybitRequestStartGates = new Map();
+const BYBIT_MIN_REQUEST_SPACING_MS = Math.max(10, Math.min(250, Number(process.env.BYBIT_MIN_REQUEST_SPACING_MS || 25)));
 const BYBIT_MAINNET_LIVE_CONFIRMATION = "LIVE";
 const BYBIT_ORDER_STATUS_TO_EXECUTION_STATUS = {
   created: "submitted",
@@ -554,7 +556,9 @@ export async function syncBybitAccountToSupabase(supabase, account, credentials,
     .update({
       status: "connected",
       api_health: "healthy",
-      latency_ms: 0
+      latency_ms: 0,
+      last_synced_at: new Date().toISOString(),
+      last_sync_error: null
     })
     .eq("id", account.id);
 
@@ -1223,6 +1227,21 @@ export async function getBybitPositions(credentials, options = {}) {
 }
 
 async function bybitRequest(credentials, method, path, query = {}, body) {
+  const maxRetries = method === "GET" ? 1 : 0;
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    await waitForBybitRequestSlot(credentials);
+    try {
+      return await bybitRequestOnce(credentials, method, path, query, body);
+    } catch (error) {
+      if (error?.code !== "RATE_LIMITED" || attempt >= maxRetries) throw error;
+      const retryAfterMs = Math.max(50, Math.min(1000, Number(error?.publicDetails?.retryAfterMs || 250)));
+      await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
+    }
+  }
+  throw Object.assign(new Error("Bybit request retry policy exhausted."), { code: "RATE_LIMITED", statusCode: 429 });
+}
+
+async function bybitRequestOnce(credentials, method, path, query = {}, body) {
   const queryString = buildQueryString(query);
   const bodyString = body ? JSON.stringify(body) : "";
   const { response, baseUrl } = await fetchBybitWithFallback(path, queryString, () => {
@@ -1255,7 +1274,15 @@ async function bybitRequest(credentials, method, path, query = {}, body) {
       ? `Bybit rejected the request from server region ${BYBIT_RUNTIME_REGION} (HTTP 403). The execution backend must run outside Bybit-restricted regions.`
       : "";
     const error = new Error(regionalMessage || bybitMessage || `Bybit request failed${bybitCode !== undefined ? ` with retCode ${bybitCode}` : ""} at ${path} (HTTP ${response.status})`);
-    error.statusCode = response.status === 401 ? 401 : response.status === 403 ? 503 : 502;
+    const normalized = normalizeBybitError(bybitCode, bybitMessage, response.status);
+    error.statusCode = normalized.statusCode;
+    error.code = normalized.code;
+    error.publicDetails = {
+      endpoint: path,
+      retryAfterMs: bybitRetryAfterMs(response),
+      rateLimitRemaining: response.headers.get("X-Bapi-Limit-Status"),
+      rateLimit: response.headers.get("X-Bapi-Limit")
+    };
     error.bybit = data;
     error.bybitEndpoint = path;
     error.bybitHttpStatus = response.status;
@@ -1265,6 +1292,40 @@ async function bybitRequest(credentials, method, path, query = {}, body) {
   }
 
   return data.result;
+}
+
+async function waitForBybitRequestSlot(credentials) {
+  const key = crypto.createHash("sha256").update(String(credentials?.apiKey || "anonymous")).digest("hex").slice(0, 16);
+  const previous = bybitRequestStartGates.get(key) || Promise.resolve();
+  const gate = previous.catch(() => undefined).then(async () => {
+    const lastStartedAt = Number(gate.lastStartedAt || bybitRequestStartGates.get(`${key}:time`) || 0);
+    const waitMs = Math.max(0, BYBIT_MIN_REQUEST_SPACING_MS - (Date.now() - lastStartedAt));
+    if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    bybitRequestStartGates.set(`${key}:time`, Date.now());
+  });
+  bybitRequestStartGates.set(key, gate);
+  await gate;
+  if (bybitRequestStartGates.get(key) === gate) bybitRequestStartGates.delete(key);
+}
+
+function normalizeBybitError(code, message, httpStatus) {
+  const numericCode = Number(code);
+  const text = String(message || "").toLowerCase();
+  if (numericCode === 10003) return { code: "INVALID_API_KEY", statusCode: 401 };
+  if (numericCode === 10004) return { code: "INVALID_SIGNATURE", statusCode: 401 };
+  if (numericCode === 10005) return { code: "INSUFFICIENT_PERMISSIONS", statusCode: 403 };
+  if (numericCode === 10006 || httpStatus === 429) return { code: "RATE_LIMITED", statusCode: 429 };
+  if (numericCode === 10010 || text.includes("ip")) return { code: "IP_RESTRICTION", statusCode: 403 };
+  if (text.includes("expired")) return { code: "TOKEN_EXPIRED", statusCode: 401 };
+  if (httpStatus === 403) return { code: "BROKER_REGION_RESTRICTED", statusCode: 503 };
+  return { code: "BROKER_UNAVAILABLE", statusCode: httpStatus === 401 ? 401 : 502 };
+}
+
+function bybitRetryAfterMs(response) {
+  const retryAfter = Number(response.headers.get("Retry-After"));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return retryAfter * 1000;
+  const reset = Number(response.headers.get("X-Bapi-Limit-Reset-Timestamp"));
+  return Number.isFinite(reset) && reset > Date.now() ? reset - Date.now() : null;
 }
 
 export async function getBybitApiKeyInformation(credentials) {
@@ -1319,6 +1380,7 @@ async function fetchWithTimeout(url, options = {}, endpoint = "bybit") {
         : `Bybit request failed at ${endpoint}: ${error instanceof Error ? error.message : String(error)}`
     );
     wrapped.statusCode = timedOut ? 504 : 502;
+    wrapped.code = timedOut ? "NETWORK_TIMEOUT" : "BROKER_UNAVAILABLE";
     wrapped.bybitEndpoint = endpoint;
     throw wrapped;
   } finally {

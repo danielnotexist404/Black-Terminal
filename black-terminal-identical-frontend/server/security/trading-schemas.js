@@ -124,6 +124,10 @@ const exchangeSchemas = {
   }).strict(),
   diagnostics: z.object({ accountId: id, symbol: symbol.optional() }).strict(),
   sync: z.object({ accountId: id, symbol: symbol.optional(), marketKind: marketKind.optional() }).strict(),
+  health: z.object({ accountId: id }).strict(),
+  "oauth-start": z.object({
+    provider: z.literal("bybit"), accountName: shortText.min(1), endpointProfile: z.enum(["GLOBAL", "NETHERLANDS", "TURKEY", "KAZAKHSTAN", "GEORGIA", "UAE", "EEA", "INDONESIA", "JAPAN"]).optional(), returnPath: shortText.optional()
+  }).strict(),
   "mainnet-validation": z.object({ accountId: id, action: z.enum(["enable", "disable"]), confirmation: shortText }).strict()
 };
 

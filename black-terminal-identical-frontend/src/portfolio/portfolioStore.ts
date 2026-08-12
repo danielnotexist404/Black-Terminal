@@ -1,4 +1,3 @@
-import { getBrokerAdapter } from "../broker/brokerRegistry";
 import { getVenueCertification } from "../connectivity/venueRegistry";
 import { createId } from "../core/ids";
 import { TauriSecureCredentialStore } from "../core/secureCredentialStore";
@@ -60,15 +59,13 @@ async function loadPortfolioSnapshot(activeAccountIds?: string[]): Promise<Portf
     const remoteSnapshot = await fetchPortfolioSnapshotFromApi(activeAccountIds);
     if (remoteSnapshot) return remoteSnapshot;
   } catch (error) {
-    console.error("Portfolio API snapshot failed, using local fallback.", error);
+    console.error("Portfolio API snapshot failed; returning the last verified local state without fabricating broker data.", error);
   }
 
   const scopedAccounts = activeAccountIds ? accounts.filter((account) => activeAccountIds.includes(account.id)) : accounts;
   const scopedAccountSet = new Set(scopedAccounts.map((account) => account.id));
-  const positionsByAccount = await Promise.all(scopedAccounts.map((account) => getBrokerAdapter(account.exchange).getPositions(account.id)));
-  const balancesByAccount = await Promise.all(scopedAccounts.map((account) => getBrokerAdapter(account.exchange).getBalances(account.id)));
-  const positions = positionsByAccount.flat();
-  const balances = balancesByAccount.flat();
+  const positions: PortfolioPosition[] = [];
+  const balances: PortfolioSnapshot["balances"] = [];
 
   const totalEquity = scopedAccounts.reduce((sum, account) => sum + account.equityUsd, 0);
   const totalBalance = scopedAccounts.reduce((sum, account) => sum + account.balanceUsd, 0);
@@ -173,7 +170,7 @@ export async function connectExchangeAccount(draft: ExchangeConnectionDraft): Pr
     isPaper: false,
     connectedAt: Date.now()
   };
-  const health = await getBrokerAdapter(draft.exchange).validateConnection(connection);
+  const health = { status: "read-only" as const, apiHealth: "warning" as const, latencyMs: 0, checkedAt: Date.now() };
 
   const account: PortfolioAccount = {
     ...connection,

@@ -101,6 +101,7 @@ import type { ExchangeId, MarketSymbol, Timeframe } from "./market-data/types";
 import { blackCoreConnectionManager } from "./connectivity/connectionManager";
 import { readActiveExecutionVenueId, setActiveExecutionVenueId, subscribeActiveExecutionVenue } from "./connectivity/activeExecutionVenue";
 import type { ConnectionDiagnostics } from "./connectivity/types";
+import { restoreCentralizedExchangeConnections } from "./connectivity/adapters/centralizedExchangeAdapter";
 import { getCapabilities, type CapabilityUser, type ProductTier, type TerminalCapability } from "./core/permissions/capabilities";
 import { blackCoreWindowDockManager } from "./core/windows/windowDockManager";
 import type { BlackCoreModuleMode } from "./core/modules/moduleRegistry";
@@ -784,6 +785,23 @@ export default function App() {
   useEffect(() => blackCoreConnectionManager.subscribe(setConnectionDiagnostics), []);
   useEffect(() => subscribeActiveExecutionVenue(setActiveExecutionVenueIdState), []);
   useEffect(() => blackCoreOrderSyncService.subscribe(setPortfolioOrders), []);
+
+  useEffect(() => {
+    if (!currentUser || isLocalUiPreview) return;
+    let active = true;
+    const restore = async () => {
+      try {
+        const connections = await restoreCentralizedExchangeConnections();
+        if (!active) return;
+        blackCoreConnectionManager.restoreExternalConnections(connections);
+        for (const connection of connections) void blackCoreConnectionManager.heartbeat(connection.id);
+      } catch (error) {
+        console.error("Secure broker connection restore failed.", error);
+      }
+    };
+    void restore();
+    return () => { active = false; };
+  }, [currentUser?.username, isLocalUiPreview]);
 
   const activeRuntimeConnections = useMemo(() => connectionDiagnostics.filter((connection) => !["disconnected", "offline", "unsupported"].includes(connection.status)), [connectionDiagnostics]);
   const connectedPortfolioAccountScope = useMemo(() => [...new Set(activeRuntimeConnections.map((connection) => connection.accountId).filter((accountId): accountId is string => Boolean(accountId)))].sort().join(","), [activeRuntimeConnections]);

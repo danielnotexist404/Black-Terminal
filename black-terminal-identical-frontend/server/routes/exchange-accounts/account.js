@@ -1,5 +1,4 @@
-import crypto from "node:crypto";
-import { applyCors, decryptCredentialPayload, getOwnedAccount, requireMethod, requireUser, sendError } from "../../portfolio-api.js";
+import { applyCors, getOwnedAccount, requireMethod, requireUser, sendError } from "../../portfolio-api.js";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -10,8 +9,20 @@ export default async function handler(req, res) {
     const { supabase, user } = await requireUser(req);
     const accountId = req.query.accountId;
     const account = await getOwnedAccount(supabase, user.id, accountId);
-    const duplicateAccountIds = await findCredentialDuplicateAccountIds(supabase, user.id, account);
-    const accountIdsToDelete = duplicateAccountIds.length > 0 ? duplicateAccountIds : [account.id];
+    const accountIdsToDelete = [account.id];
+    const now = new Date().toISOString();
+    const { data: cloudConnections } = await supabase.from("connectivity_connections").select("id").eq("user_id", user.id).eq("account_id", account.id);
+    const connectionIds = (cloudConnections || []).map((connection) => connection.id);
+    if (connectionIds.length > 0) {
+      await Promise.allSettled([
+        supabase.from("broker_automation_mandates").update({ status: "REVOKED", revoked_at: now, updated_at: now }).eq("user_id", user.id).in("connection_id", connectionIds),
+        supabase.from("group_execution_mandates").update({ status: "REVOKED", revoked_at: now, updated_at: now }).eq("follower_user_id", user.id).in("broker_connection_id", connectionIds),
+        supabase.from("strategy_deployments").update({ status: "STOPPED", updated_at: now }).eq("user_id", user.id).in("connection_id", connectionIds),
+        supabase.from("broker_secret_references").update({ status: "REVOKED", revoked_at: now }).eq("user_id", user.id).in("connection_id", connectionIds),
+        supabase.from("broker_secret_vault").update({ rotation_status: "REVOKED", revoked_at: now }).eq("user_id", user.id).in("connection_id", connectionIds),
+        supabase.from("connectivity_connections").update({ lifecycle_status: "REVOKED", health_status: "REVOKED", credential_state: "REVOKED", execution_readiness: "BLOCKED", revoked_at: now, disabled_at: now, last_error_code: "USER_DISCONNECTED" }).eq("user_id", user.id).in("id", connectionIds)
+      ]);
+    }
 
     const { error } = await supabase
       .from("exchange_accounts")
@@ -26,45 +37,12 @@ export default async function handler(req, res) {
       account_id: null,
       event_type: "exchange_account_deleted",
       severity: "warning",
-      message: `Deleted ${account.exchange} account ${account.account_name}.`,
-      metadata: { exchange: account.exchange, removedAccountIds: accountIdsToDelete }
+      message: `Disconnected ${account.exchange} account ${account.account_name} and revoked stored execution authorization.`,
+      metadata: { exchange: account.exchange, removedAccountIds: accountIdsToDelete, revokedConnectionIds: connectionIds, brokerNativeOrdersPreserved: true }
     });
 
     return res.status(200).json({ ok: true, removedAccountIds: accountIdsToDelete });
   } catch (error) {
     return sendError(res, error);
-  }
-}
-
-async function findCredentialDuplicateAccountIds(supabase, userId, account) {
-  const { data: accounts, error: accountError } = await supabase
-    .from("exchange_accounts")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("exchange", account.exchange);
-  if (accountError || !accounts?.length) return [account.id];
-
-  const accountIds = accounts.map((candidate) => candidate.id);
-  const { data: credentials, error: credentialError } = await supabase
-    .from("exchange_credentials")
-    .select("account_id, encrypted_payload")
-    .in("account_id", accountIds);
-  if (credentialError || !credentials?.length) return [account.id];
-
-  const target = credentials.find((credential) => credential.account_id === account.id);
-  const targetFingerprint = credentialFingerprint(target?.encrypted_payload);
-  if (!targetFingerprint) return [account.id];
-  return credentials
-    .filter((credential) => credentialFingerprint(credential.encrypted_payload) === targetFingerprint)
-    .map((credential) => credential.account_id);
-}
-
-function credentialFingerprint(encryptedPayload) {
-  try {
-    const credential = decryptCredentialPayload(encryptedPayload);
-    const apiKey = String(credential?.apiKey || "");
-    return apiKey ? crypto.createHash("sha256").update(apiKey).digest("hex") : null;
-  } catch {
-    return null;
   }
 }

@@ -16,6 +16,15 @@
   --green: #46b866;
   --silver: #a7abb2;
   --amber: #f59f18;
+  --font-micro: 8px;
+  --font-caption: 9px;
+  --font-ui: 10px;
+  --font-body: 11px;
+  --font-control: 11px;
+  --font-panel-title: 12px;
+  --font-title: 16px;
+  --line-height-compact: 1.3;
+  --line-height-body: 1.5;
 }
 
 /* Secure account profile --------------------------------------------------- */
@@ -153,6 +162,10 @@ body,
   background: var(--bg);
   color: var(--text);
   font-family: Inter, system-ui, sans-serif;
+  font-size: var(--font-body);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
 }
 
 button,
@@ -4470,6 +4483,150 @@ body.resizing-layout * {
   .unified-ticket-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* Institutional typography scale -----------------------------------------
+   Operational values never depend on micro text. The selectors below move
+   the existing dense terminal one deliberate step up without resizing chart
+   geometry or canvas labels. */
+:is(.nav, .sidebar-command-label, .topbar button, .topbar select, .dropdown-menu, .statusbar, .chart-title, .chart-ohlc,
+  .positions-orders-head, .positions-orders-title, .pm-table-head, .pm-table-row, .execution-dock button,
+  .execution-dock select, .execution-dock input, .pm-ticket button, .pm-ticket input, .pm-ticket select,
+  .settings-panel button, .settings-panel input, .settings-panel select, .admin-panel button, .admin-panel input,
+  .order-management-menu, .position-context-menu) {
+  font-size: var(--font-ui) !important;
+  line-height: var(--line-height-compact);
+}
+
+:is(.positions-connect-button, .positions-connect-status, .positions-connect-summary, .positions-wallet-link,
+  .connection-support-card, .execution-diagnostics-strip, .bybit-cert-panel, .black-cloud-panel) {
+  font-size: var(--font-caption) !important;
+  line-height: var(--line-height-compact);
+}
+
+:is(.settings-panel-container, .admin-panel-container, .network-page, .pn-shell, .pn-account-panel) {
+  font-size: var(--font-body);
+  line-height: var(--line-height-body);
+}
+
+:is(.settings-panel-container, .admin-panel-container, .network-page, .pn-shell, .pn-account-panel)
+  :is(button, input, select, textarea) {
+  font-size: var(--font-control) !important;
+}
+
+:is(.settings-panel-container, .admin-panel-container, .network-page, .pn-shell, .pn-account-panel)
+  :is(label, p, em, time, [class*="-hint"], [class*="-sub"], [class*="-label"], [class*="-status"]) {
+  font-size: var(--font-caption) !important;
+  line-height: var(--line-height-body);
+}
+
+:is(.settings-sec-title, .admin-card-title, .network-panel-title, .pn-shell-header strong) {
+  font-size: var(--font-panel-title) !important;
+}
+
+:is(.pm-title, .panel-title, .positions-orders-title > span, .execution-head > div > span, .sidebar-command-label b) {
+  font-size: var(--font-panel-title) !important;
+  line-height: var(--line-height-compact);
+}
+
+:is(.dom-price, .dom-size, .dom-total, .market-stats b, .pm-table-row, .positions-orders-row, .chart-ohlc) {
+  font-family: "IBM Plex Mono", "Cascadia Mono", "Consolas", monospace;
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+.broker-authorization-panel {
+  display: grid;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid rgba(49, 211, 132, 0.25);
+  border-radius: 5px;
+  background: linear-gradient(135deg, rgba(49, 211, 132, 0.07), rgba(49, 211, 132, 0.015));
+  color: #b9c1ca;
+  font: 700 var(--font-ui) "IBM Plex Mono", monospace;
+}
+
+.broker-authorization-panel > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.broker-authorization-panel b { color: #effff7; font-size: var(--font-control); text-transform: uppercase; }
+.broker-authorization-panel span { color: #4ddd91; font-size: var(--font-caption); text-transform: uppercase; }
+.broker-authorization-panel p, .broker-authorization-panel em { margin: 0; line-height: var(--line-height-body); }
+.broker-authorization-panel em { color: #d9a94f; font-style: normal; }
+.broker-authorization-panel button { min-height: 34px; }
+
+.broker-method-divider {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #7f8791;
+  font: 800 var(--font-caption) "IBM Plex Mono", monospace;
+  letter-spacing: .04em;
+}
+
+.broker-method-divider::before { content: ""; flex: 1; height: 1px; background: rgba(255,255,255,.08); }
+.broker-method-divider span { order: -1; }
+.broker-method-divider em { color: #d24b5d; font-style: normal; }
+
+.connection-support-card details {
+  border-top: 1px solid rgba(255,255,255,.075);
+  padding-top: 6px;
+  text-transform: none;
+}
+
+.connection-support-card summary {
+  color: #aeb5bf;
+  cursor: pointer;
+  font-size: var(--font-caption);
+  text-transform: uppercase;
+}
+
+.connection-support-card details p,
+.connection-support-card details em { display: block; margin-top: 6px; }
+
+.execution-connection-cockpit {
+  display: grid;
+  gap: 4px;
+  max-height: 126px;
+  overflow: auto;
+}
+
+.execution-connection-cockpit > button {
+  min-height: 39px;
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255,255,255,.075);
+  border-radius: 4px;
+  padding: 5px 8px;
+  color: #aeb4bd;
+  background: rgba(255,255,255,.018);
+  text-align: left;
+}
+
+.execution-connection-cockpit > button.active { border-color: rgba(255,31,54,.45); background: rgba(255,0,24,.08); }
+.execution-connection-cockpit i { width: 6px; height: 6px; border-radius: 50%; background: #f0a431; box-shadow: 0 0 9px currentColor; }
+.execution-connection-cockpit i.healthy { background: #32d788; color: #32d788; }
+.execution-connection-cockpit span { min-width: 0; display: grid; gap: 2px; }
+.execution-connection-cockpit b { overflow: hidden; color: #edf0f4; text-overflow: ellipsis; white-space: nowrap; }
+.execution-connection-cockpit em { color: #7e8791; font-size: var(--font-caption); font-style: normal; }
+.execution-connection-cockpit strong { color: #b8bec6; font: 700 var(--font-caption) "IBM Plex Mono", monospace; }
+
+@media (max-width: 1366px) {
+  :root {
+    --font-micro: 8px;
+    --font-caption: 9px;
+    --font-ui: 10px;
+    --font-body: 10px;
+    --font-control: 10px;
+    --font-panel-title: 11px;
+  }
+  .execution-connection-cockpit { max-height: 88px; }
 }
 
 /* Phase IV Professional Center - Supabase-backed market intelligence network */

@@ -21,6 +21,36 @@ export type ConnectionReadiness =
   | "reconnecting"
   | "error";
 
+export type ConnectionLifecycleState =
+  | "DISCONNECTED"
+  | "CONNECTING"
+  | "AUTHORIZING"
+  | "VALIDATING"
+  | "AUTHENTICATED"
+  | "SYNCING"
+  | "RESTORING"
+  | "CONNECTED_READ_ONLY"
+  | "CONNECTED_TRADING"
+  | "DEGRADED"
+  | "RECONNECTING"
+  | "TOKEN_EXPIRED"
+  | "PERMISSION_ERROR"
+  | "AUTHENTICATION_ERROR"
+  | "EXECUTION_BLOCKED"
+  | "DISCONNECTING"
+  | "DISCONNECTED_ERROR";
+
+export type BrokerAuthorizationCapabilities = {
+  oauthAuthorization: boolean;
+  oauthConfigured?: boolean;
+  oauthUnavailableReason?: string | null;
+  apiCredentials: boolean;
+  walletConnection: boolean;
+  institutionalSession: boolean;
+  readOnlyConnection: boolean;
+  tradingConnection: boolean;
+};
+
 export type ConnectionStatus =
   | "connecting"
   | "connected"
@@ -29,6 +59,7 @@ export type ConnectionStatus =
   | "offline"
   | "disconnected"
   | "auth-failed"
+  | "disconnecting"
   | "unsupported";
 
 export type ConnectionCapability =
@@ -71,6 +102,7 @@ export type ApiPermissionReport = {
 };
 
 export type ConnectionHealth = {
+  lifecycle?: ConnectionLifecycleState;
   status: ConnectionStatus;
   latencyMs: number;
   heartbeat: "ok" | "failed" | "unknown";

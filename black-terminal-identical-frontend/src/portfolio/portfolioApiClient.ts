@@ -1,5 +1,5 @@
 import { supabase } from "../lib/supabase";
-import type { ConnectionRecord } from "../connectivity/types";
+import type { BrokerAuthorizationCapabilities, ConnectionLifecycleState, ConnectionRecord } from "../connectivity/types";
 import type { ExecutionDestination, ExecutionSource, MarginMode, OrderType, OrderUpdate, SizingMethod, TriggerSource, VenueStrategyParameters } from "../execution/types";
 import type { ExchangeId, MarketKind } from "../market-data/types";
 import type { PortfolioPosition } from "../positions/types";
@@ -19,6 +19,59 @@ type ApiAccount = {
   createdAt?: string;
   updatedAt?: string;
   riskControls?: PortfolioAccount["riskControls"] | null;
+  network?: string | null;
+  executionEnvironment?: string | null;
+  endpointProfile?: string | null;
+  brokerAccountUid?: string | null;
+  lastSyncedAt?: string | null;
+  lastError?: string | null;
+};
+
+export type BrokerAdapterDescriptor = {
+  id: string;
+  label: string;
+  category: string;
+  authorization: BrokerAuthorizationCapabilities;
+  products: string[];
+  operations: string[];
+};
+
+export type PersistedExchangeConnection = {
+  account: PortfolioAccount & {
+    network?: string | null;
+    executionEnvironment?: string | null;
+    endpointProfile?: string | null;
+    brokerAccountUid?: string | null;
+    lastSyncedAt?: string | null;
+    lastError?: string | null;
+  };
+  lifecycle: ConnectionLifecycleState;
+  health: null | {
+    readiness?: string;
+    publicStream?: string;
+    privateStream?: string;
+    authentication?: string;
+    synchronization?: string;
+    latencyMs?: number;
+    reconnectCount?: number;
+    rateLimitUsage?: string | null;
+    capturedAt?: string;
+  };
+  cloud: null | Record<string, unknown>;
+};
+
+export type AuthenticatedConnectionHealth = {
+  lifecycle: ConnectionLifecycleState;
+  latencyMs: number;
+  authentication: "authenticated" | "failed";
+  synchronization: "synced" | "stale" | "unknown";
+  privateStream: "connected" | "disconnected" | "unknown";
+  publicStream: "connected" | "disconnected" | "unknown";
+  permissions: { read: boolean; trading: boolean; withdrawal: boolean; warnings: string[] };
+  clockSkewMs: number;
+  lastSuccessfulHeartbeat: number;
+  executionReady: boolean;
+  readinessReason: string;
 };
 
 type ApiSnapshot = {
@@ -410,6 +463,42 @@ export async function connectExchangeAccountViaApi(draft: ExchangeConnectionDraf
   return mapAccount(data.account);
 }
 
+export async function listPersistedExchangeConnectionsViaApi(): Promise<{ connections: PersistedExchangeConnection[]; adapters: BrokerAdapterDescriptor[] } | null> {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+  const response = await fetch("/api/exchange-accounts/list", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
+  if (!response.ok) throw new Error(await readApiError(response));
+  const data = await response.json() as { connections: Array<Omit<PersistedExchangeConnection, "account"> & { account: ApiAccount }>; adapters: BrokerAdapterDescriptor[] };
+  return {
+    adapters: data.adapters || [],
+    connections: (data.connections || []).map((item) => ({ ...item, account: { ...mapAccount(item.account), network: item.account.network, executionEnvironment: item.account.executionEnvironment, endpointProfile: item.account.endpointProfile, brokerAccountUid: item.account.brokerAccountUid, lastSyncedAt: item.account.lastSyncedAt, lastError: item.account.lastError } }))
+  };
+}
+
+export async function probeExchangeAccountHealthViaApi(accountId: string): Promise<AuthenticatedConnectionHealth | null> {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+  const response = await fetch("/api/exchange-accounts/health", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ accountId })
+  });
+  if (!response.ok) throw new Error(await readApiError(response));
+  return response.json();
+}
+
+export async function beginBrokerAuthorizationViaApi(input: { provider: "bybit"; accountName: string; endpointProfile?: string; returnPath?: string }): Promise<{ authorizationUrl: string; expiresInSeconds: number } | null> {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+  const response = await fetch("/api/exchange-accounts/oauth-start", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  if (!response.ok) throw new Error(await readApiError(response));
+  return response.json();
+}
+
 export async function disconnectExchangeAccountViaApi(accountId: string): Promise<void> {
   const token = await getPortfolioApiToken();
   if (!token) return;
@@ -705,7 +794,8 @@ async function readApiError(response: Response) {
 
   try {
     const data = JSON.parse(text);
-    return data.error || data.message || response.statusText || `HTTP ${response.status}`;
+    const message = data.error || data.message || response.statusText || `HTTP ${response.status}`;
+    return data.code ? `[${data.code}] ${message}` : message;
   } catch {
     const diagnostic = text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 240);
     return diagnostic || response.statusText || `HTTP ${response.status}`;

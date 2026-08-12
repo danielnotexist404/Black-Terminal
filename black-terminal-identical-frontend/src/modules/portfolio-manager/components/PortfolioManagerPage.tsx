@@ -19,7 +19,7 @@ import type { ConnectionCapability, ConnectionDiagnostics } from "../../../conne
 import { getVenueCertification, type VenueCertificationRecord } from "../../../connectivity/venueRegistry";
 import { submitOrder } from "../../../execution/executionEngine";
 import { MAINNET_ORDER_CONFIRMATION, disableMainnetValidationMode, promptEnableMainnetValidationMode, readMainnetValidationMode, validateMainnetOrderReadiness } from "../../../execution/mainnetValidationMode";
-import { activateBlackCloudConnectionViaApi, controlBlackCloudConnectionViaApi, fetchBlackCloudStatusViaApi, getBybitRuntimeStatusViaApi, runExchangeAccountDiagnosticsViaApi, type BlackCloudControlAction, type BlackCloudStatusPayload, type BybitRuntimeStatusPayload, type PortfolioOrderDraft } from "../../../portfolio/portfolioApiClient";
+import { activateBlackCloudConnectionViaApi, beginBrokerAuthorizationViaApi, controlBlackCloudConnectionViaApi, fetchBlackCloudStatusViaApi, getBybitRuntimeStatusViaApi, listPersistedExchangeConnectionsViaApi, runExchangeAccountDiagnosticsViaApi, type BlackCloudControlAction, type BlackCloudStatusPayload, type BrokerAdapterDescriptor, type BybitRuntimeStatusPayload, type PortfolioOrderDraft } from "../../../portfolio/portfolioApiClient";
 import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } from "../../../portfolio/types";
 import { getPortfolioSnapshot } from "../../../portfolio/portfolioStore";
 import { defaultRiskControls } from "../../../risk/types";
@@ -418,8 +418,18 @@ export function PositionsWorkspace({
   });
   const [cloudStatus, setCloudStatus] = useState<BlackCloudStatusPayload | null>(null);
   const [cloudStatusMessage, setCloudStatusMessage] = useState("");
+  const [brokerAdapters, setBrokerAdapters] = useState<BrokerAdapterDescriptor[]>([]);
 
   useEffect(() => blackCoreConnectionManager.subscribe(setConnectionDiagnostics), []);
+
+  useEffect(() => {
+    if (!showConnection) return;
+    let active = true;
+    void listPersistedExchangeConnectionsViaApi()
+      .then((payload) => { if (active && payload) setBrokerAdapters(payload.adapters); })
+      .catch((error) => { if (active) setConnectStatus(error instanceof Error ? error.message.toUpperCase() : String(error)); });
+    return () => { active = false; };
+  }, [showConnection]);
 
   useEffect(() => {
     let active = true;
@@ -572,6 +582,7 @@ export function PositionsWorkspace({
 
   const selectedDexVenue = dexVenues.find((venue) => venue.id === selectedDex) ?? dexVenues[0];
   const selectedCexCertification = getVenueCertification(selectedCex);
+  const selectedBrokerAdapter = brokerAdapters.find((adapter) => adapter.id === selectedCex);
   const selectedDexCertification = getVenueCertification(selectedDex);
   const venueValue = `${venueKind}:${venueKind === "cex" ? selectedCex : selectedDex}`;
   const centralizedConnectionCount = connectionDiagnostics.filter((connection) => connection.category === "centralized-exchange").length;
@@ -664,6 +675,22 @@ export function PositionsWorkspace({
     }
   }
 
+  async function handleBrokerAuthorization() {
+    if (selectedCex !== "bybit" || !selectedBrokerAdapter?.authorization.oauthConfigured) {
+      setConnectStatus((selectedBrokerAdapter?.authorization.oauthUnavailableReason || "BROKER AUTHORIZATION IS NOT CONFIGURED").toUpperCase());
+      return;
+    }
+    const accountName = connection.accountName.trim() || "Bybit Main Account";
+    try {
+      setConnectStatus("OPENING BYBIT AUTHORIZATION");
+      const result = await beginBrokerAuthorizationViaApi({ provider: "bybit", accountName, endpointProfile: connection.endpointProfile || "GLOBAL", returnPath: "/" });
+      if (!result?.authorizationUrl) throw new Error("Authenticated Black Terminal session is required.");
+      window.location.assign(result.authorizationUrl);
+    } catch (error) {
+      setConnectStatus(error instanceof Error ? error.message.toUpperCase() : String(error));
+    }
+  }
+
   async function handleConnectDex() {
     try {
       const isHyperliquid = selectedDex === "hyperliquid";
@@ -725,6 +752,7 @@ export function PositionsWorkspace({
 
   async function handleDisconnectExecutionVenue() {
     if (!activeExecutionVenue) return;
+    if (!window.confirm(`Disconnect ${activeExecutionVenue.label}? Encrypted credentials and active Black Cloud authorization for this account will be revoked. Existing broker-native orders are not cancelled.`)) return;
 
     const nextVenue = executionVenues.find((venue) => venue.id !== activeExecutionVenue.id);
     try {
@@ -937,6 +965,17 @@ export function PositionsWorkspace({
                   </>
                 )}
                 <input placeholder="Account name" value={connection.accountName} onChange={(event) => setConnection((current) => ({ ...current, accountName: event.target.value }))} />
+                {selectedCex === "bybit" && selectedBrokerAdapter?.authorization.oauthAuthorization && (
+                  <div className="broker-authorization-panel">
+                    <div><b>Connect with Bybit</b><span>Official broker authorization</span></div>
+                    <p>Authorize read and trading access on Bybit. Withdrawal access is never requested.</p>
+                    <button className="primary" disabled={!selectedBrokerAdapter.authorization.oauthConfigured} onClick={() => void handleBrokerAuthorization()}>
+                      {selectedBrokerAdapter.authorization.oauthConfigured ? "Connect with Bybit" : "Broker authorization unavailable"}
+                    </button>
+                    {!selectedBrokerAdapter.authorization.oauthConfigured && <em>{selectedBrokerAdapter.authorization.oauthUnavailableReason}</em>}
+                  </div>
+                )}
+                <div className="broker-method-divider"><span>OR CONNECT USING API KEY</span><em>ADVANCED</em></div>
                 <input placeholder="API key" value={connection.apiKey} onChange={(event) => setConnection((current) => ({ ...current, apiKey: event.target.value }))} />
                 <input placeholder="API secret" type="password" value={connection.apiSecret} onChange={(event) => setConnection((current) => ({ ...current, apiSecret: event.target.value }))} />
                 <input placeholder="Passphrase, if required" type="password" value={connection.passphrase} onChange={(event) => setConnection((current) => ({ ...current, passphrase: event.target.value }))} />
@@ -1072,18 +1111,23 @@ function ConnectionSupportCard({ certification }: { certification?: VenueCertifi
     <div className={`connection-support-card ${certification.executionMode}`}>
       <div>
         <span>{certification.label}</span>
-        <b>{certification.supportState}</b>
+        <b>{certification.authReady ? "AVAILABLE" : "READ ONLY"}</b>
       </div>
       <div>
-        <span>Readiness</span>
-        <b>{certification.readiness.replace(/-/g, " ").toUpperCase()}</b>
+        <span>Connection</span>
+        <b>{certification.authReady ? "SECURE SERVER AUTH" : "MARKET DATA ONLY"}</b>
       </div>
       <div>
         <span>Products</span>
         <b>{certification.supportedProducts.length ? certification.supportedProducts.join(", ").toUpperCase() : "NONE"}</b>
       </div>
-      <p>{certification.limitations[0]}</p>
-      {!certification.mainnetValidated && <em>MAINNET CERTIFICATION NOT RECORDED</em>}
+      <p>Required permissions: read account, positions and orders; trade, cancel and modify when enabled. Withdrawals are not required.</p>
+      <details>
+        <summary>Technical diagnostics</summary>
+        <em>{certification.supportState} · {certification.readiness.replace(/-/g, " ").toUpperCase()}</em>
+        <p>{certification.limitations[0]}</p>
+        {!certification.mainnetValidated && <em>MAINNET CANARY CERTIFICATION NOT RECORDED</em>}
+      </details>
     </div>
   );
 }
@@ -1306,6 +1350,16 @@ function ExecutionDock({
           <option key={item.id} value={item.id}>{item.label} / {item.detail}</option>
         ))}
       </select>
+
+      <div className="execution-connection-cockpit" aria-label="Connected execution destinations">
+        {venues.map((item) => (
+          <button key={item.id} className={item.id === activeVenueId ? "active" : ""} onClick={() => onVenueChange(item.id)}>
+            <i className={item.health.authentication === "authenticated" ? "healthy" : "warning"} />
+            <span><b>{item.label}</b><em>{item.health.permissions.trading ? "Execution ready" : "Read only"}</em></span>
+            <strong>{item.health.latencyMs || 0} ms</strong>
+          </button>
+        ))}
+      </div>
 
       <div className="execution-diagnostics-strip">
         <span>Status <b>{venue.health.status.toUpperCase()}</b></span>

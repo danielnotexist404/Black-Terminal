@@ -92,6 +92,13 @@ assert.equal(tradingSchemasForTests.execution.order.safeParse({ ...order, quanti
 assert.equal(tradingSchemasForTests.cloud.connection.safeParse({ accountId, confirmation: "yes" }).success, false);
 assert.equal(tradingSchemasForTests.cloud.mandate.safeParse({ action: "accept", mandateId: "mandate-123", confirmation: "yes" }).success, false);
 
+const emptyPassphraseRequest = {
+  method: "POST",
+  body: { exchange: "bybit", accountName: "Demo", apiKey: "key-12345", apiSecret: "secret-12345", passphrase: "", network: "demo", executionEnvironment: "DEMO", endpointProfile: "GLOBAL" }
+};
+validateTradingRequest(emptyPassphraseRequest, "exchange", "connect");
+assert.equal(emptyPassphraseRequest.body.passphrase, undefined, "Bybit connect must normalize an empty optional passphrase");
+
 enforcePayloadLimit({ headers: {}, body: { safe: true } }, 1024);
 assert.throws(() => enforcePayloadLimit({ headers: { "content-length": "2048" }, body: {} }, 1024), /too large/i);
 assert.throws(() => enforcePayloadLimit({ headers: {}, body: [] }, 1024), /must be an object/i);

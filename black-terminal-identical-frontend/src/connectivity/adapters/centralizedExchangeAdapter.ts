@@ -6,6 +6,7 @@ import type { ExchangeId } from "../../market-data/types";
 import type { ConnectionAdapter, ConnectionLifecycleState, ConnectionRecord, ConnectionStatus, ConnectRequest } from "../types";
 import { defaultConnectionHealth, defaultPermissionReport } from "../types";
 import { getVenueCertification } from "../venueRegistry";
+import { allowsManualExchangeTrading, isCloudExecutionReady } from "../manualTradingAccess";
 
 export function createCentralizedExchangeConnectionAdapter(exchange: ExchangeId, label: string): ConnectionAdapter {
   const certification = getVenueCertification(exchange);
@@ -133,7 +134,8 @@ export async function restoreCentralizedExchangeConnections(): Promise<Connectio
     const account = item.account;
     const certification = getVenueCertification(account.exchange);
     const descriptor = payload.adapters.find((adapter) => adapter.id === account.exchange);
-    const tradingEnabled = account.permissions.includes("place-orders") && item.lifecycle === "CONNECTED_TRADING";
+    const manualTradingEnabled = allowsManualExchangeTrading(account);
+    const cloudExecutionReady = isCloudExecutionReady(item.lifecycle);
     const status = lifecycleToStatus(item.lifecycle);
     const capturedAt = item.health?.capturedAt ? Date.parse(item.health.capturedAt) : 0;
     return {
@@ -160,9 +162,11 @@ export async function restoreCentralizedExchangeConnections(): Promise<Connectio
         rateLimitUsage: item.health?.rateLimitUsage || undefined,
         permissions: defaultPermissionReport({
           read: account.permissions.includes("read-account"),
-          trading: tradingEnabled,
+          trading: manualTradingEnabled,
           withdrawal: false,
-          warnings: tradingEnabled ? [] : ["This persisted account is currently read-only or execution-blocked."]
+          warnings: manualTradingEnabled
+            ? cloudExecutionReady ? [] : ["Manual trading is available; Black Cloud offline execution is not ready."]
+            : ["This persisted account is currently read-only or manual execution is blocked."]
         })
       }),
       metadata: {
@@ -176,8 +180,9 @@ export async function restoreCentralizedExchangeConnections(): Promise<Connectio
         brokerAccountUid: account.brokerAccountUid,
         authorization: descriptor?.authorization,
         executionMode: certification?.executionMode,
-        readiness: tradingEnabled ? "execution-ready" : "connected-read-only",
-        executionReady: tradingEnabled,
+        readiness: manualTradingEnabled ? "execution-ready" : "connected-read-only",
+        executionReady: manualTradingEnabled,
+        cloudExecutionReady,
         mainnetValidated: certification?.mainnetValidated,
         supportedProducts: certification?.supportedProducts || [],
         supportedOrderTypes: certification?.supportedOrderTypes || [],

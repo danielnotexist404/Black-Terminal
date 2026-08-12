@@ -3,6 +3,10 @@ import { httpError } from "./securityMiddleware.js";
 
 const id = z.string().trim().min(1).max(160);
 const secret = z.string().min(8).max(4096);
+const optionalSecret = z.preprocess(
+  (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+  secret.optional()
+);
 const symbol = z.string().trim().min(2).max(40).regex(/^[A-Za-z0-9:_/.-]+$/);
 const finite = z.number().finite();
 const positive = finite.positive();
@@ -117,7 +121,7 @@ const executionSchemas = {
 
 const exchangeSchemas = {
   connect: z.object({
-    exchange: z.literal("bybit"), accountName: shortText.min(1), apiKey: secret, apiSecret: secret, passphrase: secret.optional(),
+    exchange: z.literal("bybit"), accountName: shortText.min(1), apiKey: secret, apiSecret: secret, passphrase: optionalSecret,
     network: z.enum(["mainnet", "demo"]).optional(), executionEnvironment: z.enum(["DEMO", "MAINNET_LIVE"]),
     endpointProfile: z.enum(["GLOBAL", "NETHERLANDS", "TURKEY", "KAZAKHSTAN", "GEORGIA", "UAE", "EEA", "INDONESIA", "JAPAN"]).optional(),
     liveConfirmation: shortText.optional()

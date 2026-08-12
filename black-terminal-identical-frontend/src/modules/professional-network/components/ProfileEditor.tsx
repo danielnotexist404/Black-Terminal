@@ -1,5 +1,6 @@
 import { ImagePlus, Save, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { dbGetCurrentUserProfile, dbUpdateCurrentUserProfile } from "../../../lib/supabase";
 import { professionalNetworkApi, sanitizeNetworkImage } from "../networkApi";
 import type { ProfessionalProfile } from "../types";
 
@@ -34,9 +35,50 @@ export function ProfileEditor({ profile, onClose, onSaved }: { profile: Professi
   const [bannerPreview, setBannerPreview] = useState(profile.banner_signed_url || "");
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
+  const [accountLoading, setAccountLoading] = useState(true);
+  const [accountAvailable, setAccountAvailable] = useState(false);
+  const [accountDraft, setAccountDraft] = useState({
+    email: "",
+    firstName: "",
+    lastName: "",
+    organization: "",
+    billingAddress: "",
+    purposeOfUse: "personal" as "personal" | "commercial",
+    phone: "",
+    referredBy: "",
+    newsletterOptIn: false
+  });
   const objectUrls = useRef<{ avatar?: string; cover?: string }>({});
   const tags = useMemo(() => draft.marketSpecialties.split(",").map((item) => item.trim()).filter(Boolean), [draft.marketSpecialties]);
   useEffect(() => () => Object.values(objectUrls.current).forEach((url) => url && URL.revokeObjectURL(url)), []);
+  useEffect(() => {
+    let active = true;
+    void dbGetCurrentUserProfile().then((account) => {
+      if (!active || !account) return;
+      setAccountAvailable(true);
+      setAccountDraft({
+        email: account.email,
+        firstName: account.firstName || "",
+        lastName: account.lastName || "",
+        organization: account.organization || "",
+        billingAddress: account.billingAddress || "",
+        purposeOfUse: account.purposeOfUse || "personal",
+        phone: account.phone || "",
+        referredBy: account.referredBy || "",
+        newsletterOptIn: account.newsletterOptIn || false
+      });
+      setDraft((current) => ({
+        ...current,
+        displayName: current.displayName || account.displayName || "",
+        organization: current.organization || account.organization || ""
+      }));
+    }).catch((error) => {
+      if (active) setStatus(error instanceof Error ? error.message : String(error));
+    }).finally(() => {
+      if (active) setAccountLoading(false);
+    });
+    return () => { active = false; };
+  }, []);
 
   const upload = async (file: File | undefined, kind: "avatar" | "cover") => {
     if (!file) return;
@@ -65,6 +107,19 @@ export function ProfileEditor({ profile, onClose, onSaved }: { profile: Professi
         assetClasses: splitTags(draft.assetClasses),
         tradingStyleTags: splitTags(draft.tradingStyleTags)
       });
+      if (accountAvailable) {
+        await dbUpdateCurrentUserProfile({
+          displayName: draft.displayName.trim(),
+          firstName: accountDraft.firstName.trim(),
+          lastName: accountDraft.lastName.trim(),
+          organization: accountDraft.organization.trim(),
+          billingAddress: accountDraft.billingAddress.trim(),
+          purposeOfUse: accountDraft.purposeOfUse,
+          phone: accountDraft.phone.trim(),
+          referredBy: accountDraft.referredBy.trim(),
+          newsletterOptIn: accountDraft.newsletterOptIn
+        });
+      }
       onSaved();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -95,6 +150,19 @@ export function ProfileEditor({ profile, onClose, onSaved }: { profile: Professi
             <Field label="Location"><input value={draft.location} onChange={(event) => setDraft({ ...draft, location: event.target.value })} /></Field>
             <Field label="Country"><input value={draft.country} onChange={(event) => setDraft({ ...draft, country: event.target.value })} /></Field>
             <Field label="Timezone"><input value={draft.timezone} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })} /></Field>
+          </EditorSection>
+
+          <EditorSection title="Private Account Details">
+            <p className="pn-account-note">These details are optional and are never required for Google SSO. Add or update them here whenever you are ready.</p>
+            <Field label="Verified Email" wide><input type="email" value={accountDraft.email} disabled readOnly /></Field>
+            <Field label="First Name"><input value={accountDraft.firstName} disabled={accountLoading || !accountAvailable} onChange={(event) => setAccountDraft({ ...accountDraft, firstName: event.target.value })} /></Field>
+            <Field label="Last Name"><input value={accountDraft.lastName} disabled={accountLoading || !accountAvailable} onChange={(event) => setAccountDraft({ ...accountDraft, lastName: event.target.value })} /></Field>
+            <Field label="Organization / Company" wide><input value={accountDraft.organization} disabled={accountLoading || !accountAvailable} onChange={(event) => setAccountDraft({ ...accountDraft, organization: event.target.value })} /></Field>
+            <Field label="Residential Address" wide><input value={accountDraft.billingAddress} autoComplete="street-address" placeholder="Street, number, city and postal code" disabled={accountLoading || !accountAvailable} onChange={(event) => setAccountDraft({ ...accountDraft, billingAddress: event.target.value })} /></Field>
+            <Field label="Purpose of Use"><select value={accountDraft.purposeOfUse} disabled={accountLoading || !accountAvailable} onChange={(event) => setAccountDraft({ ...accountDraft, purposeOfUse: event.target.value as typeof accountDraft.purposeOfUse })}><option value="personal">Personal</option><option value="commercial">Commercial</option></select></Field>
+            <Field label="Phone"><input type="tel" value={accountDraft.phone} autoComplete="tel" placeholder="+972 50 000 0000" disabled={accountLoading || !accountAvailable} onChange={(event) => setAccountDraft({ ...accountDraft, phone: event.target.value })} /></Field>
+            <Field label="How did you find us?" wide><input value={accountDraft.referredBy} disabled={accountLoading || !accountAvailable} onChange={(event) => setAccountDraft({ ...accountDraft, referredBy: event.target.value })} /></Field>
+            <label className="pn-check wide"><input type="checkbox" checked={accountDraft.newsletterOptIn} disabled={accountLoading || !accountAvailable} onChange={(event) => setAccountDraft({ ...accountDraft, newsletterOptIn: event.target.checked })} /><span>Send me product and system updates</span></label>
           </EditorSection>
 
           <EditorSection title="Market Specialties">

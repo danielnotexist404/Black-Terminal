@@ -37,6 +37,7 @@ import {
   Rows3,
   Settings,
   Square,
+  Swords,
   Trash2,
   TrendingUp,
   Unlock,
@@ -58,7 +59,7 @@ import AdminPanel from "./components/AdminPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import UpgradePanel from "./components/UpgradePanel";
 import BlackGPT from "./components/BlackGPT";
-import { LogOut, Shield, ShieldCheck } from "lucide-react";
+import { LogOut, Shield } from "lucide-react";
 import type { IndicatorAlertDefinition } from "./automation/alerts";
 import { ScannerPage } from "./modules/scanner/components/ScannerPage";
 import type { ScannerResult } from "./modules/scanner/types/scanner.types";
@@ -94,18 +95,18 @@ import type {
 } from "./chart-engine/types";
 import { defaultIndicatorAdvancedSettings } from "./chart-engine/profile/volumeProfileDefaults";
 import { clearSupabaseAuthSession, dbGetUsers, dbUpdateUser, dbAddAuditLog, supabase } from "./lib/supabase";
-import { controlBlackCloudConnectionViaApi, fetchBlackCloudStatusViaApi } from "./portfolio/portfolioApiClient";
 import { getMarketDataEngineAdapter } from "./market-data/engine/marketDataEngine";
 import { ExchangeOption, MarketSymbolOption, getExchangeOption, marketCatalog } from "./market-data/marketCatalog";
 import type { ExchangeId, MarketSymbol, Timeframe } from "./market-data/types";
 import { blackCoreConnectionManager } from "./connectivity/connectionManager";
 import { readActiveExecutionVenueId, setActiveExecutionVenueId, subscribeActiveExecutionVenue } from "./connectivity/activeExecutionVenue";
 import type { ConnectionDiagnostics } from "./connectivity/types";
+import { restoreCentralizedExchangeConnections } from "./connectivity/adapters/centralizedExchangeAdapter";
 import { getCapabilities, type CapabilityUser, type ProductTier, type TerminalCapability } from "./core/permissions/capabilities";
 import { blackCoreWindowDockManager } from "./core/windows/windowDockManager";
 import type { BlackCoreModuleMode } from "./core/modules/moduleRegistry";
 import { PerformanceHud } from "./performance/PerformanceHud";
-import blackCoreEngine from "./assets/black-core-engine-transparent.png";
+import blackCoreEngine from "./assets/black-core-engine-sidebar.png";
 import {
   ADMIN_ALLOWED_INDICATORS,
   BCLIF_INDICATOR_KEY,
@@ -117,6 +118,9 @@ import {
 
 const DomProWindow = lazy(() =>
   import("./modules/dom-pro/components/DomProWindow").then((module) => ({ default: module.DomProWindow }))
+);
+const MarketBattlefield = lazy(() =>
+  import("./components/MarketBattlefield").then((module) => ({ default: module.MarketBattlefield }))
 );
 
 const nav = [
@@ -183,6 +187,11 @@ const defaultWorkspaces = ["Quant Desk", "Scalp Layout", "Strategy Lab"] as cons
 const workspaceStorageKey = "bt_workspaces_v1";
 const workspaceNamesStorageKey = "bt_workspace_names_v1";
 const visibleIndicatorsStorageKey = "bt_visible_indicators_v1";
+
+function resolveWelcomeName(displayName?: string, username?: string) {
+  const preferred = (displayName || username || "Trader").trim();
+  return preferred.split(/\s+/)[0].replace(/[._-]+/g, " ");
+}
 
 const defaultVisibleIndicators: VisibleIndicators = {
   liquidationHeatmap: false,
@@ -651,7 +660,7 @@ export default function App() {
   }, [currentUser]);
 
   const handleSignOut = async (skipWarning = false) => {
-    if (!skipWarning && !window.confirm("Log out of Black Terminal? Your explicitly authorized broker connections, deployed automations, and position protection will continue running in Black Cloud. Use Stop Automations & Log Out if you want to pause new automated execution first.")) return;
+    if (!skipWarning && !window.confirm("Sign out of Black Terminal? Your authorized broker connections and cloud-side protection will continue running.")) return;
     if (currentUser) {
       await dbUpdateUser(currentUser.username, { status: "offline" });
       await dbAddAuditLog("LOGOUT", `User ${currentUser.username} logged out.`);
@@ -668,18 +677,6 @@ export default function App() {
     setActiveNav("CHART");
   };
 
-  const handleStopAndSignOut = async () => {
-    if (!window.confirm("Pause new automated entries on every Black Cloud connection, preserve broker-native protective orders, and then log out?")) return;
-    try {
-      const status = await fetchBlackCloudStatusViaApi();
-      for (const connection of status?.connections || []) {
-        if (connection.control_state === "ACTIVE") await controlBlackCloudConnectionViaApi(connection.id, "pause-new-entries", { reason: "stop_and_logout" });
-      }
-      await handleSignOut(true);
-    } catch (error) {
-      window.alert(`Stop-and-logout was not completed. You remain signed in. ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
   const initialExchange = isBclifVisualFixture ? getExchangeOption("bybit") : marketCatalog[0];
   const [selectedExchange, setSelectedExchange] = useState<ExchangeOption>(initialExchange);
   const [symbol, setSymbol] = useState<MarketSymbolOption>(() => {
@@ -753,6 +750,7 @@ export default function App() {
   const [drawingClearSignal, setDrawingClearSignal] = useState(0);
   const [crosshairEnabled, setCrosshairEnabled] = useState(true);
   const [snapToLatest, setSnapToLatest] = useState(() => localStorage.getItem("bt_chart_snap_to_latest") !== "false");
+  const [battlefieldMode, setBattlefieldMode] = useState(false);
   const [replayControls, setReplayControls] = useState<ReplayControls>(defaultReplayControls);
   const [replayStatus, setReplayStatus] = useState<ReplayStatus>(defaultReplayStatus);
   const [layout, setLayout] = useState({
@@ -787,6 +785,23 @@ export default function App() {
   useEffect(() => blackCoreConnectionManager.subscribe(setConnectionDiagnostics), []);
   useEffect(() => subscribeActiveExecutionVenue(setActiveExecutionVenueIdState), []);
   useEffect(() => blackCoreOrderSyncService.subscribe(setPortfolioOrders), []);
+
+  useEffect(() => {
+    if (!currentUser || isLocalUiPreview) return;
+    let active = true;
+    const restore = async () => {
+      try {
+        const connections = await restoreCentralizedExchangeConnections();
+        if (!active) return;
+        blackCoreConnectionManager.restoreExternalConnections(connections);
+        for (const connection of connections) void blackCoreConnectionManager.heartbeat(connection.id);
+      } catch (error) {
+        console.error("Secure broker connection restore failed.", error);
+      }
+    };
+    void restore();
+    return () => { active = false; };
+  }, [currentUser?.username, isLocalUiPreview]);
 
   const activeRuntimeConnections = useMemo(() => connectionDiagnostics.filter((connection) => !["disconnected", "offline", "unsupported"].includes(connection.status)), [connectionDiagnostics]);
   const connectedPortfolioAccountScope = useMemo(() => [...new Set(activeRuntimeConnections.map((connection) => connection.accountId).filter((accountId): accountId is string => Boolean(accountId)))].sort().join(","), [activeRuntimeConnections]);
@@ -1762,6 +1777,19 @@ export default function App() {
           >
             <Magnet size={17} />
           </button>
+          <button
+            className={battlefieldMode ? "icon-btn active battlefield-mode-toggle" : "icon-btn battlefield-mode-toggle"}
+            aria-pressed={battlefieldMode}
+            aria-label={battlefieldMode ? "Return to market chart" : "Open live market battlefield"}
+            title={battlefieldMode ? "Return to chart" : "Live Market Battlefield"}
+            onClick={() => {
+              setBattlefieldMode((value) => !value);
+              setDrawingsEnabled(false);
+              setOpenMenu(null);
+            }}
+          >
+            <Swords size={17} />
+          </button>
         </div>
 
         <div className="menu-wrap">
@@ -1965,10 +1993,10 @@ export default function App() {
       </header>
 
       <aside className={sidebarCollapsed ? "sidebar collapsed" : "sidebar"}>
-        <div className="nav-list" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+        <div className="nav-list" style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}>
           <div className="sidebar-command-label">
-            <span>PRIVATE WORKSPACE</span>
-            <b>COMMAND DECK</b>
+            <span>AUTHENTICATED SESSION</span>
+            <b>Welcome, {resolveWelcomeName(currentUser.displayName, currentUser.username)}</b>
           </div>
           {visibleNav.map(({ label, icon: Icon }) => (
             <button
@@ -2011,14 +2039,6 @@ export default function App() {
           >
             <LogOut size={19} />
             <span>SIGN OUT</span>
-          </button>
-          <button
-            className="nav danger"
-            title="Pause new cloud entries, preserve protective orders, then sign out"
-            onClick={() => void handleStopAndSignOut()}
-          >
-            <ShieldCheck size={19} />
-            <span>STOP &amp; SIGN OUT</span>
           </button>
         </div>
         <div className="side-watermark side-core-engine" aria-label="Black Core Engine">
@@ -2085,6 +2105,12 @@ export default function App() {
               currentUser={currentUser}
               onClose={() => setActiveNav("CHART")}
               onOpenInvestmentGroups={() => setActiveNav("INVESTMENT GROUPS")}
+              onProfileUpdated={(profile) => setCurrentUser((existing) => existing ? {
+                ...existing,
+                displayName: profile.displayName,
+                email: profile.email,
+                emailVerified: profile.emailVerified
+              } : existing)}
             />
           )}
         </div>
@@ -2100,8 +2126,18 @@ export default function App() {
           />
         </div>
       ) : (
-        <main className={showCompactDom ? "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>
-        <section className={drawingsEnabled ? "chart-panel drawing-tools-open" : "chart-panel"}>
+        <main className={battlefieldMode ? "terminal-grid battlefield-grid" : showCompactDom ? "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>
+        <section className={battlefieldMode ? "chart-panel battlefield-active" : drawingsEnabled ? "chart-panel drawing-tools-open" : "chart-panel"}>
+          {battlefieldMode ? (
+            <Suspense fallback={<div className="battlefield-loading"><Swords size={24} /><span>INITIALIZING 3D BATTLEFIELD</span></div>}>
+              <MarketBattlefield
+                marketSymbol={symbol}
+                displaySymbol={symbol.label}
+                exchangeLabel={selectedExchange.label}
+                fallbackPrice={lastPrice}
+              />
+            </Suspense>
+          ) : (
           <PixiBlackChart
             workspaceId={workspace}
             marketSymbol={symbol}
@@ -2152,7 +2188,8 @@ export default function App() {
             onRefreshOrders={() => refreshPortfolioState(true)}
             allowedIndicators={effectiveAllowedIndicators}
           />
-          {drawingsEnabled && (
+          )}
+          {!battlefieldMode && drawingsEnabled && (
             <div className="drawing-toolbar" aria-label="Drawing tools">
               {drawingTools.map(({ id, label, icon: Icon }) => (
                 <button
@@ -2251,7 +2288,7 @@ export default function App() {
             </div>
           )}
         </section>
-        {showCompactDom && (
+        {!battlefieldMode && showCompactDom && (
           <aside className="right-panel">
             <OrderBook
               marketSymbol={symbol}
@@ -2269,7 +2306,7 @@ export default function App() {
             </div>
           </aside>
         )}
-        <section className={activeNav === "SCRIPT EDITOR" ? "bottom-panel script-mode" : activeNav === "ALERTS" ? "bottom-panel alerts-mode" : activeNav === "POSITIONS" ? "bottom-panel positions-mode" : "bottom-panel"}>
+        {!battlefieldMode && <section className={activeNav === "SCRIPT EDITOR" ? "bottom-panel script-mode" : activeNav === "ALERTS" ? "bottom-panel alerts-mode" : activeNav === "POSITIONS" ? "bottom-panel positions-mode" : "bottom-panel"}>
           {activeNav === "SCRIPT EDITOR" ? (
             <ScriptEditor
               symbol={symbol.label}
@@ -2297,8 +2334,8 @@ export default function App() {
           ) : (
             <div className="bottom-blank" />
           )}
-        </section>
-        {domProOpen && canUseDomPro && (
+        </section>}
+        {!battlefieldMode && domProOpen && canUseDomPro && (
           <Suspense fallback={null}>
             <DomProWindow
               marketSymbol={symbol}
@@ -2311,10 +2348,10 @@ export default function App() {
             />
           </Suspense>
         )}
-        {showCompactDom && (
+        {!battlefieldMode && showCompactDom && (
           <div className="layout-resizer resize-main-x" onPointerDown={(event) => startLayoutResize("right", event)} />
         )}
-        <div className="layout-resizer resize-main-y" onPointerDown={(event) => startLayoutResize("bottom", event)} />
+        {!battlefieldMode && <div className="layout-resizer resize-main-y" onPointerDown={(event) => startLayoutResize("bottom", event)} />}
         
         {/* Watchlist Context Menu */}
         {contextMenu && (

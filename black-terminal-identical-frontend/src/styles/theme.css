@@ -16,6 +16,137 @@
   --green: #46b866;
   --silver: #a7abb2;
   --amber: #f59f18;
+  --font-micro: 8px;
+  --font-caption: 9px;
+  --font-ui: 10px;
+  --font-body: 11px;
+  --font-control: 11px;
+  --font-panel-title: 12px;
+  --font-title: 16px;
+  --line-height-compact: 1.3;
+  --line-height-body: 1.5;
+}
+
+/* Secure account profile --------------------------------------------------- */
+.pn-account-panel {
+  width: min(1120px, calc(100% - 28px));
+  margin: 18px auto 22px;
+  border: 1px solid rgba(255, 66, 84, 0.24);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(255, 35, 58, 0.14), transparent 34%),
+    linear-gradient(145deg, rgba(14, 14, 18, 0.98), rgba(5, 5, 7, 0.99));
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  overflow: hidden;
+}
+
+.pn-account-hero {
+  min-height: 156px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  padding: 26px 30px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+}
+
+.pn-account-avatar {
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 62, 83, 0.48);
+  border-radius: 20px;
+  color: #fff;
+  background: linear-gradient(145deg, rgba(255, 45, 67, 0.22), rgba(80, 0, 12, 0.25));
+  box-shadow: 0 0 34px rgba(226, 0, 31, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.pn-account-hero > div:nth-child(2) { min-width: 0; }
+.pn-account-hero > div:nth-child(2) > span {
+  color: #ff5265;
+  font: 700 9px "JetBrains Mono", monospace;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.pn-account-hero h1 { margin: 5px 0 4px; color: #fff; font: 750 clamp(24px, 2.5vw, 38px) "Manrope", sans-serif; letter-spacing: -.04em; }
+.pn-account-hero p { max-width: 690px; margin: 0; color: #8f8990; font-size: 12px; line-height: 1.6; }
+
+.pn-account-completeness { width: 150px; display: grid; gap: 3px; text-align: right; }
+.pn-account-completeness strong { color: #fff; font: 750 24px "Manrope", sans-serif; }
+.pn-account-completeness span { color: #777179; font: 650 8px "JetBrains Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.pn-account-completeness i { height: 4px; margin-top: 8px; border-radius: 99px; background: linear-gradient(90deg, #ff3048 var(--account-progress), rgba(255,255,255,.07) var(--account-progress)); box-shadow: 0 0 15px rgba(255, 48, 72, 0.22); }
+
+.pn-account-security {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin: 18px 30px 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(45, 211, 126, 0.16);
+  border-radius: 12px;
+  color: #48dd8f;
+  background: rgba(17, 92, 57, 0.075);
+}
+.pn-account-security > div { min-width: 0; display: grid; gap: 2px; }
+.pn-account-security strong { overflow: hidden; color: #d9f6e7; font-size: 10px; text-overflow: ellipsis; }
+.pn-account-security span { color: #668174; font-size: 8px; }
+.pn-account-security > svg:last-child { margin-left: auto; }
+
+.pn-account-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+  padding: 24px 30px 28px;
+}
+.pn-account-form label { min-width: 0; display: grid; gap: 7px; color: #858087; font: 650 9px "Manrope", sans-serif; }
+.pn-account-form label > span { display: flex; align-items: center; gap: 6px; }
+.pn-account-form label.wide { grid-column: 1 / -1; }
+.pn-account-form input,
+.pn-account-form select {
+  width: 100%;
+  height: 46px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 11px;
+  outline: none;
+  padding: 0 14px;
+  color: #f3eff1;
+  background: rgba(3, 3, 5, 0.72);
+  font: 550 11px "Manrope", sans-serif;
+  transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+.pn-account-form input:focus,
+.pn-account-form select:focus { border-color: rgba(255, 48, 72, 0.54); background: rgba(9, 5, 8, 0.92); box-shadow: 0 0 0 3px rgba(255, 48, 72, 0.08); }
+.pn-account-form input:disabled { color: #878289; cursor: not-allowed; opacity: .74; }
+.pn-account-form .pn-account-check { grid-template-columns: auto minmax(0, 1fr); align-items: center; justify-content: start; padding: 4px 0; }
+.pn-account-form .pn-account-check input { width: 16px; height: 16px; accent-color: #ff3048; }
+.pn-account-form .pn-account-check span { color: #9b959c; }
+
+.pn-account-panel > footer {
+  min-height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 30px;
+  border-top: 1px solid rgba(255, 255, 255, 0.065);
+  background: rgba(0, 0, 0, 0.18);
+}
+.pn-account-panel > footer span { color: #6f6970; font-size: 9px; }
+.pn-account-panel > footer span.success { color: #49db8f; }
+.pn-account-panel > footer span.error { color: #ff5c6f; }
+.pn-account-panel > footer button { min-height: 42px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid #ff3f55; border-radius: 11px; padding: 0 18px; color: #fff; background: linear-gradient(135deg, #ff3149, #bd001c); box-shadow: 0 12px 28px rgba(192, 0, 27, 0.2); font: 750 10px "Manrope", sans-serif; }
+.pn-account-panel > footer button:disabled { cursor: wait; opacity: .58; }
+
+@media (max-width: 760px) {
+  .pn-account-panel { width: calc(100% - 18px); margin-block: 10px 16px; border-radius: 14px; }
+  .pn-account-hero { grid-template-columns: auto minmax(0, 1fr); padding: 20px; }
+  .pn-account-completeness { grid-column: 1 / -1; width: 100%; text-align: left; }
+  .pn-account-security { margin: 14px 18px 0; }
+  .pn-account-form { grid-template-columns: 1fr; padding: 20px 18px; }
+  .pn-account-form label.wide { grid-column: auto; }
+  .pn-account-panel > footer { align-items: stretch; flex-direction: column; padding: 15px 18px; }
+  .pn-account-panel > footer button { justify-content: center; }
 }
 
 * {
@@ -31,6 +162,10 @@ body,
   background: var(--bg);
   color: var(--text);
   font-family: Inter, system-ui, sans-serif;
+  font-size: var(--font-body);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
 }
 
 button,
@@ -4350,6 +4485,150 @@ body.resizing-layout * {
   }
 }
 
+/* Institutional typography scale -----------------------------------------
+   Operational values never depend on micro text. The selectors below move
+   the existing dense terminal one deliberate step up without resizing chart
+   geometry or canvas labels. */
+:is(.nav, .sidebar-command-label, .topbar button, .topbar select, .dropdown-menu, .statusbar, .chart-title, .chart-ohlc,
+  .positions-orders-head, .positions-orders-title, .pm-table-head, .pm-table-row, .execution-dock button,
+  .execution-dock select, .execution-dock input, .pm-ticket button, .pm-ticket input, .pm-ticket select,
+  .settings-panel button, .settings-panel input, .settings-panel select, .admin-panel button, .admin-panel input,
+  .order-management-menu, .position-context-menu) {
+  font-size: var(--font-ui) !important;
+  line-height: var(--line-height-compact);
+}
+
+:is(.positions-connect-button, .positions-connect-status, .positions-connect-summary, .positions-wallet-link,
+  .connection-support-card, .execution-diagnostics-strip, .bybit-cert-panel, .black-cloud-panel) {
+  font-size: var(--font-caption) !important;
+  line-height: var(--line-height-compact);
+}
+
+:is(.settings-panel-container, .admin-panel-container, .network-page, .pn-shell, .pn-account-panel) {
+  font-size: var(--font-body);
+  line-height: var(--line-height-body);
+}
+
+:is(.settings-panel-container, .admin-panel-container, .network-page, .pn-shell, .pn-account-panel)
+  :is(button, input, select, textarea) {
+  font-size: var(--font-control) !important;
+}
+
+:is(.settings-panel-container, .admin-panel-container, .network-page, .pn-shell, .pn-account-panel)
+  :is(label, p, em, time, [class*="-hint"], [class*="-sub"], [class*="-label"], [class*="-status"]) {
+  font-size: var(--font-caption) !important;
+  line-height: var(--line-height-body);
+}
+
+:is(.settings-sec-title, .admin-card-title, .network-panel-title, .pn-shell-header strong) {
+  font-size: var(--font-panel-title) !important;
+}
+
+:is(.pm-title, .panel-title, .positions-orders-title > span, .execution-head > div > span, .sidebar-command-label b) {
+  font-size: var(--font-panel-title) !important;
+  line-height: var(--line-height-compact);
+}
+
+:is(.dom-price, .dom-size, .dom-total, .market-stats b, .pm-table-row, .positions-orders-row, .chart-ohlc) {
+  font-family: "IBM Plex Mono", "Cascadia Mono", "Consolas", monospace;
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+.broker-authorization-panel {
+  display: grid;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid rgba(49, 211, 132, 0.25);
+  border-radius: 5px;
+  background: linear-gradient(135deg, rgba(49, 211, 132, 0.07), rgba(49, 211, 132, 0.015));
+  color: #b9c1ca;
+  font: 700 var(--font-ui) "IBM Plex Mono", monospace;
+}
+
+.broker-authorization-panel > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.broker-authorization-panel b { color: #effff7; font-size: var(--font-control); text-transform: uppercase; }
+.broker-authorization-panel span { color: #4ddd91; font-size: var(--font-caption); text-transform: uppercase; }
+.broker-authorization-panel p, .broker-authorization-panel em { margin: 0; line-height: var(--line-height-body); }
+.broker-authorization-panel em { color: #d9a94f; font-style: normal; }
+.broker-authorization-panel button { min-height: 34px; }
+
+.broker-method-divider {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #7f8791;
+  font: 800 var(--font-caption) "IBM Plex Mono", monospace;
+  letter-spacing: .04em;
+}
+
+.broker-method-divider::before { content: ""; flex: 1; height: 1px; background: rgba(255,255,255,.08); }
+.broker-method-divider span { order: -1; }
+.broker-method-divider em { color: #d24b5d; font-style: normal; }
+
+.connection-support-card details {
+  border-top: 1px solid rgba(255,255,255,.075);
+  padding-top: 6px;
+  text-transform: none;
+}
+
+.connection-support-card summary {
+  color: #aeb5bf;
+  cursor: pointer;
+  font-size: var(--font-caption);
+  text-transform: uppercase;
+}
+
+.connection-support-card details p,
+.connection-support-card details em { display: block; margin-top: 6px; }
+
+.execution-connection-cockpit {
+  display: grid;
+  gap: 4px;
+  max-height: 126px;
+  overflow: auto;
+}
+
+.execution-connection-cockpit > button {
+  min-height: 39px;
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255,255,255,.075);
+  border-radius: 4px;
+  padding: 5px 8px;
+  color: #aeb4bd;
+  background: rgba(255,255,255,.018);
+  text-align: left;
+}
+
+.execution-connection-cockpit > button.active { border-color: rgba(255,31,54,.45); background: rgba(255,0,24,.08); }
+.execution-connection-cockpit i { width: 6px; height: 6px; border-radius: 50%; background: #f0a431; box-shadow: 0 0 9px currentColor; }
+.execution-connection-cockpit i.healthy { background: #32d788; color: #32d788; }
+.execution-connection-cockpit span { min-width: 0; display: grid; gap: 2px; }
+.execution-connection-cockpit b { overflow: hidden; color: #edf0f4; text-overflow: ellipsis; white-space: nowrap; }
+.execution-connection-cockpit em { color: #7e8791; font-size: var(--font-caption); font-style: normal; }
+.execution-connection-cockpit strong { color: #b8bec6; font: 700 var(--font-caption) "IBM Plex Mono", monospace; }
+
+@media (max-width: 1366px) {
+  :root {
+    --font-micro: 8px;
+    --font-caption: 9px;
+    --font-ui: 10px;
+    --font-body: 10px;
+    --font-control: 10px;
+    --font-panel-title: 11px;
+  }
+  .execution-connection-cockpit { max-height: 88px; }
+}
+
 /* Phase IV Professional Center - Supabase-backed market intelligence network */
 .pn-shell {
   height: 100%;
@@ -5245,6 +5524,9 @@ body.resizing-layout * {
 .pn-editor-section h3 { margin: 0 0 9px; color: #fff; font-size: 10px; text-transform: uppercase; }
 .pn-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .pn-field-grid label.wide { grid-column: 1 / -1; }
+.pn-account-note { grid-column: 1 / -1; margin: 0; border-left: 2px solid #c81729; background: #12090b; color: #8f969f; padding: 8px 9px; font-size: 8px; line-height: 1.55; }
+.pn-editor input:disabled,
+.pn-editor select:disabled { cursor: not-allowed; opacity: .58; }
 .pn-editor textarea { min-height: 82px; resize: vertical; }
 .pn-check { grid-template-columns: auto minmax(0, 1fr) !important; align-items: center; border: 1px solid #24272c; padding: 7px; }
 .pn-check input { width: 14px; min-height: 14px; }

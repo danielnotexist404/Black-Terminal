@@ -8,7 +8,7 @@ import {
   sendError
 } from "../../portfolio-api.js";
 import { settleSupabaseQuery } from "../../supabase-query.js";
-import { getBybitDiagnostics } from "../../exchanges/bybit.js";
+import { createCloudExchangeAdapter } from "../../cloud-execution/adapters/registry.js";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -33,7 +33,7 @@ export default async function handler(req, res) {
     }
 
     const credentials = decryptCredentialPayload(credential.encrypted_payload);
-    const diagnostics = await runVenueDiagnostics(account.exchange, credentials, req.body);
+    const diagnostics = await runVenueDiagnostics(account, credentials, req.body);
     await persistDiagnostics(supabase, user.id, account, diagnostics);
 
     return res.status(200).json({ diagnostics });
@@ -42,14 +42,16 @@ export default async function handler(req, res) {
   }
 }
 
-async function runVenueDiagnostics(exchange, credentials, body) {
-  if (exchange === "bybit") {
-    return getBybitDiagnostics(credentials, { symbol: String(body.symbol || "BTCUSDT").toUpperCase() });
-  }
-
-  const unsupported = new Error(`${exchange} diagnostics are not certified yet.`);
-  unsupported.statusCode = 501;
-  throw unsupported;
+async function runVenueDiagnostics(account, credentials, body) {
+  const adapter = createCloudExchangeAdapter(account.exchange, {
+    credentials,
+    network: account.network,
+    executionEnvironment: account.execution_environment,
+    endpointProfile: account.endpoint_profile,
+    connectionId: account.id
+  });
+  const verification = await adapter.verifyCredentials({ symbol: String(body.symbol || "BTCUSDT").toUpperCase() });
+  return verification.diagnostics;
 }
 
 async function persistDiagnostics(supabase, userId, account, diagnostics) {

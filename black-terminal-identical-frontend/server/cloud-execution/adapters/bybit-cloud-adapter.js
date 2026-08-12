@@ -7,13 +7,25 @@ import {
   getBybitOpenOrders,
   getBybitPositions,
   getBybitTicker,
+  getBybitInstrumentMetadata,
+  getBybitApiKeyInformation,
+  getBybitServerTime,
+  getBybitWalletSnapshot,
+  findBybitOrderByClientOrderId,
   modifyBybitOrder,
   placeBybitOrder,
-  validateBybitCredentials
+  placeBybitStrategyOrder,
+  validateBybitMainnetValidationRequest,
+  validateBybitManagementGate,
+  validateBybitOrderDraft,
+  validateBybitCredentials,
+  normalizeBybitPermissionReport,
+  resolveBybitExecutionPolicy
 } from "../../exchanges/bybit.js";
 import { BybitPrivateStreamClient } from "../../exchanges/bybit-private-stream.js";
 import { syncBybitSnapshotAndReconcile } from "../../exchanges/bybit-reconciliation.js";
 import { ExchangeAdapter } from "./exchange-adapter.js";
+import { getBrokerAdapterDefinition } from "../../exchanges/broker-adapter-registry.js";
 
 export class BybitCloudAdapter extends ExchangeAdapter {
   constructor(options = {}) {
@@ -70,13 +82,46 @@ export class BybitCloudAdapter extends ExchangeAdapter {
   }
 
   async placeOrder(order, validation) { return placeBybitOrder(this.credentials, order, validation); }
+  async placeStrategyOrder(order, validation) { return placeBybitStrategyOrder(this.credentials, order, validation); }
   async cancelOrder(request) { return cancelBybitOrder(this.credentials, request); }
   async modifyOrder(request) { return modifyBybitOrder(this.credentials, request); }
   async cancelAll(request = {}) { return cancelAllBybitOrders(this.credentials, request); }
+  async validateOrderDraft(order) { return validateBybitOrderDraft(this.credentials, order); }
+  async getWalletSnapshot() { return getBybitWalletSnapshot(this.credentials); }
+  validateProductionGate(context) { return validateBybitMainnetValidationRequest(context); }
+  validateManagementGate(context) { return validateBybitManagementGate(context); }
+  async findOrderByClientOrderId(request) { return findBybitOrderByClientOrderId(this.credentials, request); }
   async fetchPositions(options = {}) { return getBybitPositions(this.credentials, options); }
   async fetchOpenOrders(options = {}) { return (await getBybitOpenOrders(this.credentials, options)).orders || []; }
   async fetchBalances() { return getBybitBalances(this.credentials); }
   async fetchExecutions(since) { return getBybitExecutions(this.credentials, { startTime: since }); }
+  async getInstruments({ category = "linear", symbol = "BTCUSDT" } = {}) { return [await getBybitInstrumentMetadata({ category, symbol, executionEnvironment: this.executionEnvironment, endpointProfile: this.endpointProfile })]; }
+  getCapabilities() { return getBrokerAdapterDefinition("bybit"); }
+  async healthCheck() {
+    const startedAt = Date.now();
+    const [time, apiKeyInfo] = await Promise.all([
+      getBybitServerTime(this.credentials),
+      getBybitApiKeyInformation(this.credentials)
+    ]);
+    const permissions = normalizeBybitPermissionReport(apiKeyInfo);
+    const executionPolicy = resolveBybitExecutionPolicy(permissions, {
+      executionEnvironment: this.executionEnvironment,
+      network: this.network
+    });
+    this.health = { ...this.health, state: "AUTHENTICATED", connected: true, lastAuthenticatedAt: Date.now(), degradationReasons: [] };
+    return {
+      ...this.getHealth(),
+      latencyMs: Date.now() - startedAt,
+      authentication: "authenticated",
+      permissions,
+      executionPolicy,
+      clockSkewMs: time.clockSkewMs
+    };
+  }
+  async reconnect(context = {}) {
+    await this.disconnect("reconnect");
+    return this.connect(context);
+  }
 
   async subscribeMarketData({ symbol = "BTCUSDT", category = "linear", onSnapshot } = {}) {
     const snapshot = await getBybitTicker({ symbol, category, executionEnvironment: this.executionEnvironment, endpointProfile: this.endpointProfile });

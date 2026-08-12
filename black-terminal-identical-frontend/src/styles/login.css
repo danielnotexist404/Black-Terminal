@@ -795,6 +795,22 @@
   background: rgba(255, 255, 255, 0.026);
   color: #a8a2a9;
   text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.auth-google-btn:hover:not(:disabled),
+.auth-google-btn:focus-visible {
+  border-color: rgba(255, 48, 71, 0.38);
+  background: rgba(255, 48, 71, 0.07);
+  color: #fff;
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.auth-google-btn:disabled {
+  cursor: wait;
+  opacity: 0.72;
 }
 
 .auth-google-btn svg {
@@ -813,6 +829,18 @@
   background: rgba(255, 36, 59, 0.06);
   color: #bd626c;
   font: 700 6px "JetBrains Mono", monospace;
+}
+
+.auth-sso-primary {
+  margin: 2px 0 4px;
+}
+
+.auth-sso-note {
+  margin: -3px 2px 0;
+  color: #777178;
+  font-size: 8px;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .auth-form-switch {

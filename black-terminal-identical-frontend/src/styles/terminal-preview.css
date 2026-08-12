@@ -332,14 +332,15 @@
 
 .terminal-command-center .sidebar-command-label span {
   color: #5f5960;
-  font: 600 7px "JetBrains Mono", monospace;
+  font: 650 7.75px "JetBrains Mono", monospace;
   letter-spacing: 0.13em;
 }
 
 .terminal-command-center .sidebar-command-label b {
   color: #d9d4d7;
-  font-size: 11px;
+  font-size: 12.5px;
   letter-spacing: -0.01em;
+  text-transform: none;
 }
 
 .terminal-command-center .nav {
@@ -349,7 +350,7 @@
   border: 1px solid transparent;
   border-radius: 12px;
   color: #878188;
-  font-size: 9px;
+  font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.01em;
   transition: 150ms ease;
@@ -390,9 +391,9 @@
 }
 
 .terminal-command-center .side-watermark {
-  height: 154px;
+  height: 184px;
   margin: 0 14px 16px 20px;
-  padding: 8px 10px 10px;
+  padding: 10px 4px 8px;
   justify-content: flex-start;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   opacity: 1;
@@ -418,7 +419,8 @@
 }
 
 .terminal-command-center .side-core-engine img {
-  width: 100%;
+  width: 112%;
+  max-width: none;
   min-height: 0;
   flex: 1 1 auto;
   object-fit: contain;

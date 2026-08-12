@@ -8,7 +8,7 @@ import {
   sendError
 } from "../../portfolio-api.js";
 import { settleSupabaseQuery } from "../../supabase-query.js";
-import { modifyBybitOrder, validateBybitManagementGate } from "../../exchanges/bybit.js";
+import { createCloudExchangeAdapter } from "../../cloud-execution/adapters/registry.js";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -19,19 +19,6 @@ export default async function handler(req, res) {
 
     const { supabase, user } = await requireUser(req);
     const account = await getOwnedAccount(supabase, user.id, req.body.accountId);
-    if (account.exchange !== "bybit") {
-      const unsupported = new Error(`${account.exchange} modify is not certified yet.`);
-      unsupported.statusCode = 501;
-      throw unsupported;
-    }
-
-    const gate = validateBybitManagementGate({ account, body: req.body, symbol: req.body.symbol });
-    if (!gate.ok) {
-      const blocked = new Error(gate.reasons.join(" "));
-      blocked.statusCode = 403;
-      throw blocked;
-    }
-
     const existingOrder = req.body.localOrderId ? await loadLocalOrder(supabase, user.id, req.body.localOrderId) : null;
     const { data: credential, error: credentialError } = await supabase
       .from("exchange_credentials")
@@ -41,7 +28,21 @@ export default async function handler(req, res) {
 
     if (credentialError || !credential) throw credentialError || new Error("Missing encrypted credentials for venue modify.");
     const credentials = decryptCredentialPayload(credential.encrypted_payload);
-    const report = await modifyBybitOrder(credentials, {
+    const adapter = createCloudExchangeAdapter(account.exchange, {
+      credentials,
+      network: account.network || account.environment,
+      executionEnvironment: account.execution_environment || account.network || account.environment,
+      endpointProfile: account.endpoint_profile || "GLOBAL",
+      connectionId: account.id
+    });
+    const gate = adapter.validateManagementGate({ account, body: req.body, symbol: req.body.symbol });
+    if (!gate.ok) {
+      const blocked = new Error(gate.reasons.join(" "));
+      blocked.statusCode = 403;
+      blocked.code = "EXECUTION_BLOCKED";
+      throw blocked;
+    }
+    const report = await adapter.modifyOrder({
       marketKind: req.body.marketKind || existingOrder?.market_kind || "perpetual",
       symbol: String(req.body.symbol || existingOrder?.symbol).toUpperCase(),
       orderId: req.body.exchangeOrderId || req.body.orderId || existingOrder?.exchange_order_id,
@@ -74,7 +75,7 @@ export default async function handler(req, res) {
       order_id: existingOrder?.id || null,
       event_type: "modify_submitted",
       severity: "info",
-      message: "Bybit modify submitted through certified adapter path.",
+      message: `${account.exchange} modify submitted through the registered adapter path.`,
       metadata: { report, symbol: req.body.symbol }
     }));
 

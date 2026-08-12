@@ -67,14 +67,14 @@ export class ConnectionManager {
     return next;
   }
 
-  upsertExternalConnection(connection: ConnectionRecord) {
+  upsertExternalConnection(connection: ConnectionRecord, source: "established" | "restored" = "established") {
     const next: ConnectionRecord = {
       ...connection,
       status: connection.status || "connected",
       health: {
         ...connection.health,
         status: connection.status || connection.health.status,
-        lastSuccessfulHeartbeat: Date.now()
+        lastSuccessfulHeartbeat: connection.health.lastSuccessfulHeartbeat
       },
       createdAt: connection.createdAt || Date.now(),
       updatedAt: Date.now()
@@ -82,25 +82,47 @@ export class ConnectionManager {
 
     this.connections.set(next.id, next);
     this.emit({
-      type: "connection.established",
+      type: source === "restored" ? "connection.restored" : "connection.established",
       connectionId: next.id,
       provider: next.provider,
       category: next.category,
       time: Date.now(),
       health: next.health,
       diagnostics: this.toDiagnostics(next),
-      message: `${next.label} connected.`
+      message: source === "restored" ? `${next.label} restored from secure server state.` : `${next.label} connected.`
     });
     this.startHeartbeat(next.id);
     this.notify();
     return next;
   }
 
+  restoreExternalConnections(connections: ConnectionRecord[]) {
+    const restoredIds = new Set(connections.map((connection) => connection.id));
+    for (const current of this.connections.values()) {
+      if (current.category === "centralized-exchange" && !restoredIds.has(current.id)) {
+        this.stopHeartbeat(current.id);
+        this.connections.delete(current.id);
+      }
+    }
+    for (const connection of connections) this.upsertExternalConnection(connection, "restored");
+    this.notify();
+    return this.listDiagnostics();
+  }
+
   async disconnect(connectionId: string) {
     const connection = this.connections.get(connectionId);
     if (!connection) return;
     const adapter = this.getAdapter(connection.adapterId);
-    await adapter.disconnect(connection);
+    this.patchConnection(connectionId, { status: "disconnecting", metadata: { ...connection.metadata, lifecycle: "DISCONNECTING" } });
+    this.notify();
+    try {
+      await adapter.disconnect(connection);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.patchConnection(connectionId, { status: "degraded", health: { ...connection.health, status: "degraded", lastError: message }, metadata: { ...connection.metadata, lifecycle: "DISCONNECTED_ERROR" } });
+      this.notify();
+      throw error;
+    }
     this.stopHeartbeat(connectionId);
     this.connections.delete(connectionId);
     this.emit({
@@ -120,6 +142,7 @@ export class ConnectionManager {
     const adapter = this.getAdapter(connection.adapterId);
     const reconnecting = this.patchConnection(connectionId, {
       status: "reconnecting",
+      metadata: { ...connection.metadata, lifecycle: "RECONNECTING" },
       health: {
         ...connection.health,
         status: "reconnecting",
@@ -178,6 +201,7 @@ export class ConnectionManager {
       const health = await adapter.heartbeat(connection);
       const next = this.patchConnection(connectionId, {
         status: health.status,
+        metadata: health.lifecycle ? { ...connection.metadata, lifecycle: health.lifecycle } : connection.metadata,
         health: {
           ...connection.health,
           ...health,
@@ -202,6 +226,7 @@ export class ConnectionManager {
       const message = error instanceof Error ? error.message : String(error);
       const failed = this.patchConnection(connectionId, {
         status: "degraded",
+        metadata: { ...connection.metadata, lifecycle: "DEGRADED" },
         health: {
           ...connection.health,
           status: "degraded",

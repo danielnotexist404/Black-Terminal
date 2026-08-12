@@ -1,4 +1,3 @@
-import { getBrokerAdapter } from "../broker/brokerRegistry";
 import { ServerExchangeBrokerAdapter } from "../broker/serverExchangeBroker";
 import type { ExchangeBrokerAdapter } from "../broker/types";
 import { blackCoreConnectionManager } from "../connectivity/connectionManager";
@@ -62,11 +61,9 @@ export class BrokerRouter {
       };
     }
 
-    return {
-      adapterType: connection?.category === "wallet" ? "wallet" : "centralized-exchange",
-      adapter: getBrokerAdapter(request.exchange),
-      connection: connection ?? undefined
-    };
+    const error = new Error(`No authenticated execution connection is available for account ${request.accountId}. Reconnect the broker before submitting or cancelling orders.`);
+    Object.assign(error, { code: "BROKER_CONNECTION_REQUIRED" });
+    throw error;
   }
 }
 

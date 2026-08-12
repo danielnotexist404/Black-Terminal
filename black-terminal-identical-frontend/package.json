@@ -93,6 +93,7 @@
     "test:professional-network": "node --experimental-strip-types scripts/professional-network-tests.ts",
     "test:black-cloud": "node scripts/black-cloud-execution-tests.js",
     "test:broker-connectivity": "node scripts/broker-connectivity-tests.js",
+    "test:broker-production": "node scripts/broker-production-readiness-tests.js",
     "test:investor-execution": "node scripts/investor-execution-tests.js",
     "test:mandates": "node scripts/mandate-tests.js",
     "test:reconciliation": "node scripts/reconciliation-tests.js",
@@ -120,6 +121,7 @@
     "pixi.js": "^8.12.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "three": "^0.185.1",
     "viem": "^2.54.3",
     "ws": "^8.21.0",
     "zod": "^3.25.76"
@@ -129,6 +131,7 @@
     "@types/node": "^26.1.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/three": "^0.185.4",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.0.3",
     "esbuild": "^0.28.1",

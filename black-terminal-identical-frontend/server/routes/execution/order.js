@@ -9,13 +9,7 @@ import {
   sendError
 } from "../../portfolio-api.js";
 import { settleSupabaseQuery } from "../../supabase-query.js";
-import {
-  placeBybitOrder,
-  placeBybitStrategyOrder,
-  getBybitWalletSnapshot,
-  validateBybitMainnetValidationRequest,
-  validateBybitOrderDraft
-} from "../../exchanges/bybit.js";
+import { createCloudExchangeAdapter } from "../../cloud-execution/adapters/registry.js";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -33,6 +27,26 @@ export default async function handler(req, res) {
     stageStartedAt = performance.now();
     const account = await getOwnedAccount(supabase, user.id, req.body.accountId);
     timings.push(["account", performance.now() - stageStartedAt]);
+    const requestedClientOrderId = String(req.body.clientOrderId || req.body.internalOrderId || "").trim();
+    if (!requestedClientOrderId) {
+      const missing = new Error("A stable OMS client order ID is required for idempotent broker submission.");
+      missing.statusCode = 400;
+      missing.code = "CLIENT_ORDER_ID_REQUIRED";
+      throw missing;
+    }
+    const { data: existingOrder, error: existingOrderError } = await supabase
+      .from("execution_orders")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("account_id", account.id)
+      .eq("client_order_id", requestedClientOrderId)
+      .maybeSingle();
+    if (existingOrderError) throw existingOrderError;
+    if (existingOrder) {
+      res.setHeader("X-Black-Terminal-Idempotent-Replay", "true");
+      setServerTiming(res, timings, routeStartedAt);
+      return res.status(200).json({ order: existingOrder, idempotentReplay: true });
+    }
 
     stageStartedAt = performance.now();
     const [riskResult, positionsResult] = await Promise.all([
@@ -62,100 +76,10 @@ export default async function handler(req, res) {
     let status = "rejected";
     let rejectionReason = risk.reasons.join(" ");
     let exchangeOrderId = null;
-    let clientOrderId = null;
+    let clientOrderId = requestedClientOrderId;
     let mainnetValidationRecordId = null;
 
-    if (risk.status === "approved") {
-      if (account.exchange === "bybit") {
-        try {
-          stageStartedAt = performance.now();
-          const { data: credential, error: credentialError } = await supabase
-            .from("exchange_credentials")
-            .select("encrypted_payload")
-            .eq("account_id", account.id)
-            .single();
-
-          if (credentialError || !credential) throw credentialError || new Error("Missing encrypted credentials.");
-          const credentials = decryptCredentialPayload(credential.encrypted_payload);
-          const venueOrderDraft = {
-            ...req.body,
-            marketKind: req.body.marketKind || "perpetual",
-            limitPrice: req.body.limitPrice,
-            timeInForce: req.body.timeInForce || "gtc"
-          };
-          const [venueValidation, walletSnapshot] = await Promise.all([
-            validateBybitOrderDraft(credentials, venueOrderDraft),
-            getBybitWalletSnapshot(credentials)
-          ]);
-          timings.push(["venue_prepare", performance.now() - stageStartedAt]);
-          const leverage = Math.max(1, Number(req.body.leverage || 1));
-          const requiredMargin = req.body.marketKind === "spot" ? risk.notional : risk.notional / leverage;
-          const requiredCollateral = requiredMargin + estimatedFees;
-          if (!req.body.reduceOnly && requiredCollateral > walletSnapshot.accountMetrics.availableBalanceUsd) {
-            const balanceError = new Error(`Order requires approximately ${requiredCollateral.toFixed(2)} USD collateral, but Bybit reports ${walletSnapshot.accountMetrics.availableBalanceUsd.toFixed(2)} USD available.`);
-            balanceError.statusCode = 403;
-            throw balanceError;
-          }
-          const mainnetGate = validateBybitMainnetValidationRequest({
-            account,
-            order: req.body,
-            risk,
-            validation: venueValidation
-          });
-          mainnetValidationRecordId = await recordBybitValidationAttempt(supabase, user.id, account, req.body, {
-            status: mainnetGate.ok ? "started" : "blocked",
-            stage: "pre_order_gate",
-            risk,
-            maxNotionalUsd: mainnetGate.maxNotionalUsd,
-            failureReason: mainnetGate.ok ? null : mainnetGate.reasons.join(" "),
-            venueValidation
-          });
-          if (!mainnetGate.ok) {
-            const validationError = new Error(mainnetGate.reasons.join(" "));
-            validationError.statusCode = 403;
-            throw validationError;
-          }
-          const normalizedVenueOrder = {
-            ...venueOrderDraft,
-            quantity: venueValidation.normalized.quantity,
-            quantityMode: "quantity",
-            sizingMethod: "quantity",
-            marketKind: req.body.marketKind || "perpetual",
-            limitPrice: req.body.limitPrice,
-            timeInForce: req.body.timeInForce || "gtc",
-            source: req.body.source || "order-ticket",
-            destinations: req.body.destinations || ["personal-portfolio"]
-          };
-          const strategyOrder = ["chase-limit", "twap", "iceberg", "pov"].includes(req.body.orderType);
-          stageStartedAt = performance.now();
-          const exchangeResult = strategyOrder
-            ? await placeBybitStrategyOrder(credentials, normalizedVenueOrder, venueValidation)
-            : await placeBybitOrder(credentials, normalizedVenueOrder, venueValidation);
-          timings.push(["venue_submit", performance.now() - stageStartedAt]);
-          status = "accepted";
-          rejectionReason = null;
-          exchangeOrderId = exchangeResult.exchangeOrderId || null;
-          clientOrderId = exchangeResult.clientOrderId || null;
-          await completeBybitValidationAttempt(supabase, mainnetValidationRecordId, {
-            status: "passed",
-            exchangeOrderId,
-            metadata: { exchangeResult }
-          });
-        } catch (exchangeError) {
-          status = "rejected";
-          rejectionReason = exchangeError instanceof Error ? exchangeError.message : String(exchangeError);
-          await completeBybitValidationAttempt(supabase, mainnetValidationRecordId, {
-            status: exchangeError?.statusCode === 403 ? "blocked" : "failed",
-            failureReason: rejectionReason
-          });
-        }
-      } else {
-        rejectionReason = "No live exchange execution adapter is configured for this venue yet.";
-      }
-    }
-
-    stageStartedAt = performance.now();
-    const { data: order, error: orderError } = await supabase
+    const reservationResult = await supabase
       .from("execution_orders")
       .insert({
         user_id: user.id,
@@ -173,17 +97,168 @@ export default async function handler(req, res) {
         post_only: Boolean(req.body.postOnly),
         reduce_only: Boolean(req.body.reduceOnly),
         time_in_force: req.body.timeInForce || "gtc",
-        status,
-        exchange_order_id: exchangeOrderId,
-        client_order_id: clientOrderId,
+        status: risk.status === "approved" ? "pending" : "rejected",
+        client_order_id: requestedClientOrderId,
         filled_quantity: 0,
-        rejection_reason: rejectionReason,
+        rejection_reason: risk.status === "approved" ? null : rejectionReason,
         estimated_fees: estimatedFees,
         estimated_margin: estimatedMargin,
         estimated_slippage: risk.notional * 0.0003,
         risk_check_status: risk.status,
         risk_check_reasons: risk.reasons
       })
+      .select("*")
+      .single();
+    if (reservationResult.error) {
+      if (reservationResult.error.code === "23505") {
+        const { data: replay } = await supabase.from("execution_orders").select("*").eq("user_id", user.id).eq("account_id", account.id).eq("client_order_id", requestedClientOrderId).single();
+        if (replay) {
+          res.setHeader("X-Black-Terminal-Idempotent-Replay", "true");
+          setServerTiming(res, timings, routeStartedAt);
+          return res.status(200).json({ order: replay, idempotentReplay: true });
+        }
+      }
+      throw reservationResult.error;
+    }
+    const reservedOrder = reservationResult.data;
+
+    if (risk.status === "approved") {
+      let credentials = null;
+      try {
+        stageStartedAt = performance.now();
+        const { data: credential, error: credentialError } = await supabase
+          .from("exchange_credentials")
+          .select("encrypted_payload")
+          .eq("account_id", account.id)
+          .single();
+
+        if (credentialError || !credential) throw credentialError || new Error("Missing encrypted credentials.");
+        credentials = decryptCredentialPayload(credential.encrypted_payload);
+        const adapter = createCloudExchangeAdapter(account.exchange, {
+          credentials,
+          network: account.network || account.environment,
+          executionEnvironment: account.execution_environment || account.network || account.environment,
+          endpointProfile: account.endpoint_profile || "GLOBAL",
+          connectionId: account.id
+        });
+        const venueOrderDraft = {
+          ...req.body,
+          marketKind: req.body.marketKind || "perpetual",
+          limitPrice: req.body.limitPrice,
+          timeInForce: req.body.timeInForce || "gtc"
+        };
+        const [venueValidation, walletSnapshot] = await Promise.all([
+          adapter.validateOrderDraft(venueOrderDraft),
+          adapter.getWalletSnapshot()
+        ]);
+        timings.push(["venue_prepare", performance.now() - stageStartedAt]);
+        const leverage = Math.max(1, Number(req.body.leverage || 1));
+        const requiredMargin = req.body.marketKind === "spot" ? risk.notional : risk.notional / leverage;
+        const requiredCollateral = requiredMargin + estimatedFees;
+        if (!req.body.reduceOnly && requiredCollateral > walletSnapshot.accountMetrics.availableBalanceUsd) {
+          const balanceError = new Error(`Order requires approximately ${requiredCollateral.toFixed(2)} USD collateral, but the venue reports ${walletSnapshot.accountMetrics.availableBalanceUsd.toFixed(2)} USD available.`);
+          balanceError.statusCode = 403;
+          balanceError.code = "INSUFFICIENT_BALANCE";
+          throw balanceError;
+        }
+        const mainnetGate = adapter.validateProductionGate({
+          account,
+          order: req.body,
+          risk,
+          validation: venueValidation
+        });
+        mainnetValidationRecordId = await recordBybitValidationAttempt(supabase, user.id, account, req.body, {
+          status: mainnetGate.ok ? "started" : "blocked",
+          stage: "pre_order_gate",
+          risk,
+          maxNotionalUsd: mainnetGate.maxNotionalUsd,
+          failureReason: mainnetGate.ok ? null : mainnetGate.reasons.join(" "),
+          venueValidation
+        });
+        if (!mainnetGate.ok) {
+          const validationError = new Error(mainnetGate.reasons.join(" "));
+          validationError.statusCode = 403;
+          validationError.code = "EXECUTION_BLOCKED";
+          throw validationError;
+        }
+        const normalizedVenueOrder = {
+          ...venueOrderDraft,
+          quantity: venueValidation.normalized.quantity,
+          quantityMode: "quantity",
+          sizingMethod: "quantity",
+          marketKind: req.body.marketKind || "perpetual",
+          limitPrice: req.body.limitPrice,
+          timeInForce: req.body.timeInForce || "gtc",
+          source: req.body.source || "order-ticket",
+          destinations: req.body.destinations || ["personal-portfolio"],
+          clientOrderId: requestedClientOrderId,
+          internalOrderId: requestedClientOrderId
+        };
+        const strategyOrder = ["chase-limit", "twap", "iceberg", "pov"].includes(req.body.orderType);
+        stageStartedAt = performance.now();
+        const exchangeResult = strategyOrder
+          ? await adapter.placeStrategyOrder(normalizedVenueOrder, venueValidation)
+          : await adapter.placeOrder(normalizedVenueOrder, venueValidation);
+        timings.push(["venue_submit", performance.now() - stageStartedAt]);
+        status = "accepted";
+        rejectionReason = null;
+        exchangeOrderId = exchangeResult.exchangeOrderId || null;
+        clientOrderId = exchangeResult.clientOrderId || requestedClientOrderId;
+        await completeBybitValidationAttempt(supabase, mainnetValidationRecordId, {
+          status: "passed",
+          exchangeOrderId,
+          metadata: { exchangeResult }
+        });
+      } catch (exchangeError) {
+        const uncertain = ["NETWORK_TIMEOUT", "BROKER_UNAVAILABLE", "RATE_LIMITED"].includes(String(exchangeError?.code || "")) || Number(exchangeError?.statusCode) === 504;
+        let reconciled = null;
+        if (uncertain && requestedClientOrderId && credentials) {
+          try {
+            const adapter = createCloudExchangeAdapter(account.exchange, {
+              credentials,
+              network: account.network || account.environment,
+              executionEnvironment: account.execution_environment || account.network || account.environment,
+              endpointProfile: account.endpoint_profile || "GLOBAL",
+              connectionId: account.id
+            });
+            reconciled = await adapter.findOrderByClientOrderId({
+              marketKind: req.body.marketKind || "perpetual",
+              symbol: req.body.symbol,
+              clientOrderId: requestedClientOrderId
+            });
+          } catch {
+            // The response remains unknown and is deliberately not resubmitted.
+          }
+        }
+        if (reconciled) {
+          status = "accepted";
+          rejectionReason = null;
+          exchangeOrderId = reconciled.orderId || reconciled.venueOrderId || null;
+        } else {
+          status = uncertain ? "pending" : "rejected";
+          rejectionReason = uncertain
+            ? "[SUBMISSION_OUTCOME_UNKNOWN] Broker submission outcome is unknown. Automatic resubmission is blocked until order reconciliation completes."
+            : `[${exchangeError?.code || "ORDER_REJECTED"}] ${exchangeError instanceof Error ? exchangeError.message : String(exchangeError)}`;
+        }
+        await completeBybitValidationAttempt(supabase, mainnetValidationRecordId, {
+          status: uncertain ? "failed" : exchangeError?.statusCode === 403 ? "blocked" : "failed",
+          failureReason: rejectionReason
+        });
+      }
+    }
+
+    stageStartedAt = performance.now();
+    const { data: order, error: orderError } = await supabase
+      .from("execution_orders")
+      .update({
+        status,
+        exchange_order_id: exchangeOrderId,
+        client_order_id: clientOrderId,
+        rejection_reason: rejectionReason,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", reservedOrder.id)
+      .eq("user_id", user.id)
       .select("*")
       .single();
 

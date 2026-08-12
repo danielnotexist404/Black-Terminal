@@ -283,6 +283,7 @@ export class BlackCloudExecutionWorker {
           : sanitizeError(error?.message || "Execution command failed."),
         metadata: { code: classification.code, retryable: classification.retryable }
       });
+      if (command.command_type === "PLACE_ORDER") await this.notifyExecutionFailure(command, classification, error);
     }
   }
 
@@ -302,6 +303,10 @@ export class BlackCloudExecutionWorker {
 
     let queued = 0;
     for (const mandate of mandates || []) {
+      const { data: membership } = mandate.membership_id
+        ? await this.supabase.from("investment_group_members").select("membership_state,status").eq("id", mandate.membership_id).maybeSingle()
+        : { data: null };
+      if (!membership || membership.status !== "active" || membership.membership_state !== "ACTIVE") continue;
       const idempotencyKey = createExecutionIdempotencyKey({
         groupIntentId: intent.id,
         mandateId: mandate.id,
@@ -340,7 +345,7 @@ export class BlackCloudExecutionWorker {
       groupId: intent.group_id,
       groupIntentId: intent.id,
       commandId: command.id,
-      eventType: "FOLLOWER_PLANS_CREATED",
+      eventType: "FOLLOWER_EXECUTION_PLAN_CREATED",
       message: queued > 0 ? "Follower execution plans were created server-side." : "No active cloud mandates were eligible.",
       metadata: { eligibleMandates: queued }
     });
@@ -375,6 +380,7 @@ export class BlackCloudExecutionWorker {
     if (credentialEnvironment !== workerEnvironment) throw terminalError("WORKER_ENVIRONMENT_MISMATCH", "Credential environment does not match this worker's isolated venue environment.");
     if (normalizeBybitExecutionEnvironment(connection.execution_environment) !== credentialEnvironment) throw terminalError("CONNECTION_ENVIRONMENT_MISMATCH", "Connection and credential execution environments differ.");
     if (normalizeBybitExecutionEnvironment(automationMandate.execution_environment) !== credentialEnvironment) throw terminalError("MANDATE_ENVIRONMENT_MISMATCH", "Automation mandate cannot execute in a different broker environment.");
+    if (!["SPOT", "PERPETUAL"].includes(intent.market_type)) throw terminalError("MARKET_TYPE_UNSUPPORTED", `${intent.market_type} has no certified Black Cloud execution adapter.`);
     const marketKind = intent.market_type === "SPOT" ? "spot" : "perpetual";
     const category = marketKind === "spot" ? "spot" : "linear";
     const [wallet, metadataRows, ticker] = await Promise.all([
@@ -398,8 +404,10 @@ export class BlackCloudExecutionWorker {
       account: wallet.accountMetrics,
       instrument,
       referencePrice,
-      currentExposure
+      currentExposure,
+      emsRiskCap: automationMandate.max_leverage
     });
+    allocation.slippageLimitBps = Math.min(Number(intent.maximum_slippage_bps ?? Infinity), Number(mandate.slippage_limit_bps ?? Infinity));
     const risk = evaluateFollowerRisk({
       intent,
       mandate,
@@ -420,7 +428,15 @@ export class BlackCloudExecutionWorker {
       risk_result: risk.status,
       rejection_reason: risk.reasons.join(" ") || null,
       execution_status: risk.status === "PASSED" ? "QUEUED" : mapRiskStatus(risk.codes),
-      safe_result: { riskCodes: risk.codes, constrained: allocation.constrained }
+      safe_result: {
+        riskCodes: risk.codes,
+        constrained: allocation.constrained,
+        managerRequestedLeverage: allocation.requestedLeverage,
+        effectiveLeverage: allocation.leverage,
+        emsRiskCap: allocation.emsRiskCap,
+        exchangeInstrumentCap: allocation.exchangeInstrumentCap,
+        leverageCapped: allocation.leverageCapped
+      }
     }).eq("id", plan.id));
     if (risk.status !== "PASSED") throw terminalError(risk.codes[0] || "RISK_REJECTED", risk.reasons.join(" "));
 
@@ -455,6 +471,8 @@ export class BlackCloudExecutionWorker {
       marginMode: String(intent.margin_mode || "CROSS").toLowerCase(),
       timeInForce: String(intent.time_in_force || "GTC").toLowerCase(),
       reduceOnly: intent.reduce_only,
+      strategyParameters: intent.strategy_parameters || {},
+      slippageTolerancePercent: allocation.slippageLimitBps / 100,
       clientOrderId,
       source: "investment-group-cloud"
     };
@@ -465,6 +483,18 @@ export class BlackCloudExecutionWorker {
     try {
       if (automationMandate.max_order_notional && allocation.targetNotional > Number(automationMandate.max_order_notional)) {
         throw terminalError("AUTOMATION_MANDATE_RISK_REJECTED", "Order notional exceeds the broker automation mandate.");
+      }
+      const [freshMandate, freshMembership] = await Promise.all([
+        single(this.supabase.from("group_execution_mandates").select("status,mandate_version,accepted_at,revoked_at").eq("id", mandate.id)),
+        mandate.membership_id
+          ? single(this.supabase.from("investment_group_members").select("status,membership_state,state_version").eq("id", mandate.membership_id))
+          : Promise.reject(terminalError("MEMBERSHIP_REFERENCE_REQUIRED", "Group execution requires a canonical membership reference."))
+      ]);
+      if (freshMandate.status !== "ACTIVE" || freshMandate.revoked_at || !freshMandate.accepted_at) {
+        throw terminalError("MANDATE_REVOKED", "The member revoked or paused future-entry authority before broker submission.");
+      }
+      if (freshMembership.status !== "active" || freshMembership.membership_state !== "ACTIVE") {
+        throw terminalError("MEMBERSHIP_NOT_ACTIVE", "The member is not active for new Copy-Trading entries.");
       }
       await this.repository.assertFencingToken(connection.id, fencingToken);
       this.assertSubmissionClockSafe();
@@ -519,6 +549,9 @@ export class BlackCloudExecutionWorker {
         order_type: String(intent.order_type).toLowerCase().replaceAll("_", "-"),
         quantity: allocation.roundedQuantity,
         quantity_mode: "quantity",
+        reference_price: allocation.price,
+        slippage_limit_bps: allocation.slippageLimitBps,
+        effective_leverage: allocation.leverage,
         limit_price: intent.limit_price,
         stop_price: intent.stop_price,
         take_profit: intent.take_profit,
@@ -535,7 +568,7 @@ export class BlackCloudExecutionWorker {
         filled_quantity: 0,
         estimated_fees: allocation.targetNotional * 0.0006,
         estimated_margin: allocation.estimatedMargin,
-        estimated_slippage: 0,
+        estimated_slippage: null,
         risk_check_status: "approved",
         risk_check_reasons: []
       });
@@ -544,7 +577,17 @@ export class BlackCloudExecutionWorker {
     await updateOrThrow(this.supabase.from("follower_execution_plans").update({
       execution_order_id: orderId,
       execution_status: normalizePlanStatus(venueReport.status),
-      safe_result: { venueOrderId: venueReport.exchangeOrderId, clientOrderId: command.deterministic_client_order_id }
+      safe_result: {
+        venueOrderId: venueReport.exchangeOrderId,
+        clientOrderId: command.deterministic_client_order_id,
+        requestedLeverage: allocation.requestedLeverage,
+        effectiveLeverage: allocation.leverage,
+        emsRiskCap: allocation.emsRiskCap,
+        exchangeInstrumentCap: allocation.exchangeInstrumentCap,
+        constrained: allocation.constrained,
+        slippageBps: null,
+        divergence: false
+      }
     }).eq("id", plan.id));
     await this.repository.audit({
       userId: plan.follower_user_id,
@@ -556,8 +599,56 @@ export class BlackCloudExecutionWorker {
       message: "Investment Group order was acknowledged by Bybit while under Black Cloud control.",
       metadata: { venueOrderId: venueReport.exchangeOrderId, orderId }
     });
+    await this.emitNotification(plan.follower_user_id, "copy_order_submitted", "Copy Order Submitted", `${intent.symbol} was accepted by the certified broker adapter.`, {
+      groupId: intent.group_id, groupIntentId: intent.id, followerPlanId: plan.id, orderId, symbol: intent.symbol, status: normalizePlanStatus(venueReport.status)
+    });
+    await this.repository.audit({
+      userId: plan.follower_user_id,
+      connectionId: plan.broker_connection_id,
+      groupId: intent.group_id,
+      groupIntentId: intent.id,
+      followerPlanId: plan.id,
+      commandId: command.id,
+      eventType: "FOLLOWER_EXECUTION_SUCCEEDED",
+      message: "An independently validated follower order was accepted by the broker.",
+      metadata: { symbol: intent.symbol, orderId, venueOrderId: venueReport.exchangeOrderId }
+    });
     this.metricsCounters.ordersConfirmed += 1;
     return { venueOrderId: venueReport.exchangeOrderId, orderId, recovered: Boolean(venueReport.recoveredByReconciliation) };
+  }
+
+  async notifyExecutionFailure(command, classification, error) {
+    const eventType = /LIMIT|RISK|MARGIN|LEVERAGE|DRAWDOWN/.test(classification.code) ? "risk_limit_reached" : "copy_order_rejected";
+    await this.emitNotification(command.user_id, eventType, eventType === "risk_limit_reached" ? "Investment Group Risk Limit Reached" : "Copy Order Rejected", sanitizeError(error?.message || "Follower execution failed."), {
+      groupIntentId: command.group_intent_id, followerPlanId: command.follower_plan_id, code: classification.code
+    });
+    await this.repository.audit({
+      userId: command.user_id,
+      connectionId: command.connection_id,
+      groupIntentId: command.group_intent_id,
+      followerPlanId: command.follower_plan_id,
+      commandId: command.id,
+      eventType: "FOLLOWER_EXECUTION_FAILED",
+      severity: "ERROR",
+      purpose: "group_order_execution",
+      message: sanitizeError(error?.message || "Follower execution failed."),
+      metadata: { code: classification.code, retryable: classification.retryable }
+    }).catch(() => null);
+    if (!command.group_intent_id) return;
+    const { data: intent } = await this.supabase.from("group_trade_intents").select("group_id").eq("id", command.group_intent_id).maybeSingle();
+    if (!intent?.group_id) return;
+    const { data: group } = await this.supabase.from("investment_groups").select("owner_user_id").eq("id", intent.group_id).maybeSingle();
+    if (!group?.owner_user_id || group.owner_user_id === command.user_id) return;
+    await this.emitNotification(group.owner_user_id, "follower_execution_failure", "Follower Execution Failure", "A follower plan failed without stopping other group members.", {
+      groupId: intent.group_id, groupIntentId: command.group_intent_id, followerPlanId: command.follower_plan_id, code: classification.code
+    });
+  }
+
+  async emitNotification(userId, eventType, title, body, metadata) {
+    if (!userId) return;
+    await this.supabase.from("notification_events").insert({ user_id: userId, event_type: eventType, title, body, metadata }).then(({ error }) => {
+      if (error) this.logger?.warn?.("black-cloud-notification-write-failed", { eventType, code: error.code || "unknown" });
+    });
   }
 
   async syncAccount(command) {

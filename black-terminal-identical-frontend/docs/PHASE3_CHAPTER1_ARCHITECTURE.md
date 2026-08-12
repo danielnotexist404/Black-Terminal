@@ -28,3 +28,7 @@ Black Terminal now treats execution and capital management as separate systems:
 - Portfolio Manager no longer exposes an order ticket.
 - Portfolio Manager tabs are capability-driven, not hardcoded decorative controls.
 - Empty states are honest: no fake positions, balances, followers, groups, or allocation data.
+
+## Chapter IV extension
+
+Portfolio Manager now reads joined-group and owner summaries from the server-backed Black Capital Network. The full member-management cockpit remains under Investment Groups; connection creation remains under Positions. No browser or portfolio surface fans out broker orders.

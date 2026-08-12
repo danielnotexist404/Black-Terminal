@@ -10,8 +10,13 @@ export default async function handler(req, res) {
     requireFields(req.body, ["groupId", "clientIntentId", "symbol", "marketType", "side", "orderType", "quantityModel", "quantityValue", "expiresAt"]);
     if (process.env.INVESTMENT_GROUP_EXECUTION_ENABLED !== "true") throw forbidden("Investment Group execution is disabled by rollout policy.");
     await requireGroupTrader(supabase, user.id, req.body.groupId);
-    const intentId = crypto.randomUUID();
     const idempotencyKey = hashCanonicalPayload({ groupId: req.body.groupId, clientIntentId: req.body.clientIntentId });
+    const { data: existingIntent, error: existingError } = await supabase.from("group_trade_intents")
+      .select("id,group_id,symbol,market_type,side,order_type,status,expires_at,intent_version")
+      .eq("group_id", req.body.groupId).eq("client_intent_id", String(req.body.clientIntentId)).maybeSingle();
+    if (existingError) throw existingError;
+    if (existingIntent) return res.status(202).json({ ...intentResponse(existingIntent), idempotent: true });
+    const intentId = crypto.randomUUID();
     const validFrom = new Date(req.body.validFrom || Date.now()).toISOString();
     const expiresAt = new Date(req.body.expiresAt).toISOString();
     if (Date.parse(expiresAt) <= Date.parse(validFrom)) throw badRequest("Intent expiration must be after its activation time.");
@@ -38,6 +43,8 @@ export default async function handler(req, res) {
       take_profit: nullablePositive(req.body.takeProfit),
       stop_loss: nullablePositive(req.body.stopLoss),
       trailing_stop: req.body.trailingStop || null,
+      strategy_parameters: req.body.strategyParameters || {},
+      maximum_slippage_bps: req.body.maximumSlippageBps ?? null,
       valid_from: validFrom,
       expires_at: expiresAt,
       status: "QUEUED",
@@ -70,40 +77,41 @@ export default async function handler(req, res) {
       priority: 20
     });
     if (commandError) throw commandError;
-    await supabase.from("execution_audit_events").insert({
+    const { error: auditError } = await supabase.from("execution_audit_events").insert({
       user_id: user.id,
       group_id: intent.group_id,
       group_intent_id: intent.id,
-      event_type: "GROUP_INTENT_CREATED",
+      event_type: "GROUP_TRADE_INTENT_CREATED",
       severity: "INFO",
       operation_purpose: "investment_group_execution",
       message: "A signed Investment Group intent was accepted by the control plane.",
       safe_metadata: { symbol: intent.symbol, marketType: intent.market_type, orderType: intent.order_type, expiresAt: intent.expires_at }
     });
-    return res.status(202).json({
-      intent: {
-        id: intent.id,
-        groupId: intent.group_id,
-        symbol: intent.symbol,
-        marketType: intent.market_type,
-        side: intent.side,
-        orderType: intent.order_type,
-        status: intent.status,
-        expiresAt: intent.expires_at,
-        intentVersion: intent.intent_version
-      },
-      delivery: "QUEUED_FOR_BLACK_CLOUD"
-    });
+    if (auditError) throw auditError;
+    return res.status(202).json({ ...intentResponse(intent), idempotent: false });
   } catch (error) {
     return sendError(res, error);
   }
 }
 
+function intentResponse(intent) {
+  return {
+    intent: {
+      id: intent.id, groupId: intent.group_id, symbol: intent.symbol, marketType: intent.market_type,
+      side: intent.side, orderType: intent.order_type, status: intent.status, expiresAt: intent.expires_at,
+      intentVersion: intent.intent_version
+    },
+    delivery: "QUEUED_FOR_BLACK_CLOUD"
+  };
+}
+
 async function requireGroupTrader(supabase, userId, groupId) {
-  const { data: group } = await supabase.from("investment_groups").select("owner_user_id").eq("id", groupId).single();
+  const { data: group } = await supabase.from("investment_groups").select("owner_user_id,status,emergency_stop").eq("id", groupId).single();
+  if (!group || group.status !== "active") throw forbidden("The Investment Group is not active.");
+  if (group.emergency_stop) throw forbidden("The Investment Group emergency stop blocks new trade intents.");
   if (group?.owner_user_id === userId) return;
-  const { data: member } = await supabase.from("investment_group_members").select("role,status").eq("group_id", groupId).eq("user_id", userId).maybeSingle();
-  if (member?.status === "active" && ["owner", "manager"].includes(member.role)) return;
+  const { data: member } = await supabase.from("investment_group_members").select("role,status,membership_state").eq("group_id", groupId).eq("user_id", userId).maybeSingle();
+  if (member?.status === "active" && member.membership_state === "ACTIVE" && ["owner", "manager"].includes(member.role)) return;
   throw forbidden("Only the Investment Group owner or an active manager may create trade intents.");
 }
 

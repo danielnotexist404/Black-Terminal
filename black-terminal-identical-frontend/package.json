@@ -100,6 +100,8 @@
     "test:persistent-connectivity": "node scripts/persistent-connectivity-tests.js",
     "test:black-cloud-production": "node scripts/black-cloud-production-deployment-tests.js",
     "test:phase5-chapter2": "npm run test:black-cloud && npm run test:broker-connectivity && npm run test:investor-execution && npm run test:mandates && npm run test:reconciliation && npm run test:persistent-connectivity && npm run test:black-cloud-production",
+    "test:investment-groups": "node scripts/investment-group-tests.js",
+    "benchmark:investment-groups": "node scripts/investment-group-performance.js",
     "certify:offline-execution": "node scripts/offline-execution-certification.js",
     "black-cloud:worker": "node scripts/black-cloud-execution-worker.js",
     "certify:bybit-mainnet": "node scripts/bybit-mainnet-certification-runner.js",

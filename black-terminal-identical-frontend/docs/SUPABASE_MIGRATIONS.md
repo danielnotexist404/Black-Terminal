@@ -2189,3 +2189,7 @@ Activation order is `202608050001` then `202608050002`. Both are intentionally u
 Migration: `supabase/migrations/202608100001_google_sso_profile_bootstrap.sql`.
 
 This migration replaces the existing `black_terminal_create_profile` trigger function with an OAuth-aware version. It keeps Supabase Auth as the identity authority, derives a collision-safe terminal handle, imports only standard Google name metadata, and leaves organization, billing, phone, purpose-of-use, referral, and newsletter fields optional for later completion in Profile. Provider and redirect configuration is documented in `docs/GOOGLE_SSO_PREVIEW.md`.
+
+## 202608120002 - Black Capital Network
+
+`supabase/migrations/202608120002_phase5_chapter4_black_capital_network.sql` is a forward-only extension of Investment Groups, group mandates and PositionManager. It adds versioned risk acceptance, join drafts, risk/visibility/history records, latest/coarse snapshots, exit/removal evidence, research-only Obsidian waitlist data, atomic service-role exit/removal/emergency functions and RLS. Apply it to preview before the corresponding server routes; do not rewrite earlier mandate migrations.

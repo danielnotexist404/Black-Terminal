@@ -118,3 +118,7 @@ Bybit Demo and Mainnet Live are the only active Black Cloud execution environmen
   a fallback instead of blanking the chart.
 - DOM/order book, trades tape, market stats, and funding panels are still using mock rows until the
   adapter streams are wired into those React panels.
+
+## Investment Group automation boundary
+
+Group managers create canonical trade intents; they do not call exchange adapters. The worker re-reads the member and mandate immediately before broker submission, applies the member's effective leverage/risk ceilings, and creates an independent follower plan and idempotency identity. Pause, leave, removal and emergency stop fence future entries while preserving broker-native protection. See `docs/investment-groups/COPY_TRADING_MANDATE.md`.

@@ -27,10 +27,10 @@ import { marketCatalog } from "../../../market-data/marketCatalog";
 import type { ExchangeId } from "../../../market-data/types";
 import { blackCorePositionManager } from "../../../positions/positionManager";
 import type { ManagedPosition, PortfolioPosition } from "../../../positions/types";
-import { canCreateInvestmentGroup, listInvestmentGroups } from "../../profile/professionalNetworkStore";
 import type { OrderUpdate } from "../../../execution/types";
 import { deduplicateCanonicalOrders } from "../../../orders/canonicalOrder";
 import { OrderManagementMenu } from "../../../orders/OrderManagementMenu";
+import { InvestmentGroupsPortfolioSection } from "./InvestmentGroupsPortfolioSection";
 
 type PortfolioManagerTab =
   | "Overview"
@@ -1584,13 +1584,11 @@ function buildPositionExecutionAccount(position: ManagedPosition): PortfolioAcco
   };
 }
 
-export default function PortfolioManagerPage({ onClose, currentUser, activeAccountIds = [] }: { onClose: () => void; currentUser?: CapabilityUser | null; activeAccountIds?: string[] }) {
+export default function PortfolioManagerPage({ onClose, onOpenInvestmentGroups, currentUser, activeAccountIds = [] }: { onClose: () => void; onOpenInvestmentGroups: () => void; currentUser?: CapabilityUser | null; activeAccountIds?: string[] }) {
   const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
   const [activeTab, setActiveTab] = useState<PortfolioManagerTab>("Overview");
   const capabilities = useMemo(() => getCapabilities(currentUser), [currentUser]);
   const productTier = resolveProductTier(currentUser);
-  const networkGroups = useMemo(() => listInvestmentGroups(currentUser), [currentUser]);
-  const canCreateGroup = canCreateInvestmentGroup(currentUser);
   const portfolioTabs = useMemo<PortfolioManagerTab[]>(() => {
     const tabs: PortfolioManagerTab[] = ["Overview", "Performance", "Risk", "Investment Groups"];
     if (capabilities.has("portfolio.enterpriseCapital")) {
@@ -1731,40 +1729,7 @@ export default function PortfolioManagerPage({ onClose, currentUser, activeAccou
 
       {activeTab === "Investment Groups" && (
         <section className="pm-workspace">
-          <div className="pm-panel">
-            <div className="pm-panel-title"><Layers3 size={15} /> Investment Group Discovery</div>
-            {networkGroups.myGroups.length === 0 && networkGroups.publicGroups.length === 0 ? (
-              <div className="pm-panel-empty">NO VERIFIED INVESTMENT GROUPS ARE PUBLISHED YET. DISCOVERY WILL SHOW HISTORICAL PERFORMANCE, DRAWDOWN, FOLLOWERS, RISK SCORE, AUM, AND SUPPORTED EXCHANGES.</div>
-            ) : (
-              <div className="pm-table">
-                <div className="pm-table-head">
-                  <span>GROUP</span>
-                  <span>ROLE</span>
-                  <span>VISIBILITY</span>
-                  <span>FOLLOWERS</span>
-                  <span>VERIFICATION</span>
-                </div>
-                {[...new Map([...networkGroups.myGroups, ...networkGroups.publicGroups].map((group) => [group.id, group])).values()].map((group) => (
-                  <div className="pm-table-row" key={group.id}>
-                    <span>{group.firmName}</span>
-                    <b>{group.ownerUsername === currentUser?.username ? "OWNER" : "DISCOVERY"}</b>
-                    <span>{group.visibility.toUpperCase()}</span>
-                    <span>{group.stats.followerCount}</span>
-                    <em>{group.stats.verified ? "VERIFIED" : "UNVERIFIED"}</em>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="pm-panel">
-            <div className="pm-panel-title"><ShieldCheck size={15} /> Role-Based Group Tools</div>
-            <div className="pm-risk-list">
-              <span>Account Tier <b>{productTier.toUpperCase()}</b></span>
-              <span>Create Groups <b>{canCreateGroup ? "ENABLED" : "ENTERPRISE / ADMIN ONLY"}</b></span>
-              <span>Capital Control <b>{capabilities.has("can_view_enterprise_portfolio_tools") ? "ENTERPRISE TOOLS" : "NOT AVAILABLE"}</b></span>
-              <span>Retail Mode <b>PERSONAL STATS AND JOINED GROUPS ONLY</b></span>
-            </div>
-          </div>
+          <InvestmentGroupsPortfolioSection onOpenInvestmentGroups={onOpenInvestmentGroups} />
         </section>
       )}
 

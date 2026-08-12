@@ -19,3 +19,5 @@ Browser execution still routes through the Vercel `/api/execution/order` endpoin
 ## Architecture Rule
 
 Future manual trading, AI execution, strategy automation, replay execution, paper trading, and capital allocation must integrate through this OMS / EMS pipeline. Do not create parallel execution paths.
+
+Investment Group Copy Trading follows this rule: manager ticket -> signed group intent -> OMS/EMS -> per-member validation -> follower plan -> Black Cloud. Effective leverage is the minimum of manager request, member cap, group cap, EMS cap and instrument cap. Close-now exits must also use an OMS/EMS reduce-only plan.

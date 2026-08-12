@@ -208,3 +208,7 @@ This keeps chart context, order book, tape, execution ticket, and Positions alig
 - Add execution-quality analytics from real fills.
 - Persist chart protection line moves to backend and exchange.
 - Add replay/journal surfaces that consume position timeline events.
+
+## Investment Group attribution
+
+Black Cloud fills may now attach `group_id`, `membership_id`, `mandate_id`, `origin`, fees and funding to the canonical position record. Group cockpit/analytics read this attribution rather than maintaining a parallel position book. Detach/removal preserves the position while immediately removing manager control; it does not force-close member positions.

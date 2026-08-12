@@ -171,6 +171,7 @@ const cloudSchemas = {
     limitPrice: positive.optional(), stopPrice: positive.optional(), quantityModel: shortText.min(1), quantityValue: positive,
     leverage: positive.max(1000).optional(), marginMode: shortText.optional(), timeInForce: shortText.optional(), reduceOnly: boolean.optional(),
     takeProfit: positive.optional(), stopLoss: positive.optional(), trailingStop: z.union([nonNegative, z.record(z.unknown())]).optional(),
+    strategyParameters: strategyParameters.optional(), maximumSlippageBps: nonNegative.max(10000).optional(),
     validFrom: z.union([z.string().datetime({ offset: true }), z.number().int().nonnegative()]).optional(),
     expiresAt: z.string().datetime({ offset: true }), mandatePolicyVersion: z.number().int().positive().optional(), supersedesIntentId: id.optional()
   }).strict(),

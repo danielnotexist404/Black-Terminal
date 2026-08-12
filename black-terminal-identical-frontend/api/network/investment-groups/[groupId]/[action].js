@@ -2,6 +2,7 @@ import joinRequest from "../../../../server/network/routes/investment-group-join
 import messages from "../../../../server/network/routes/investment-group-messages.js";
 import reviewRequest from "../../../../server/network/routes/investment-group-review-request.js";
 import moderation from "../../../../server/network/routes/investment-group-moderation.js";
+import capital from "../../../../server/network/routes/investment-group-capital.js";
 import { sendError } from "../../../../server/portfolio-api.js";
 import { requireApiSecurity } from "../../../../server/security/securityMiddleware.js";
 
@@ -9,7 +10,26 @@ const handlers = {
   "join-request": joinRequest,
   messages,
   "review-request": reviewRequest,
-  moderation
+  moderation,
+  detail: capital,
+  "risk-acknowledgements": capital,
+  "join-draft": capital,
+  join: capital,
+  membership: capital,
+  pause: capital,
+  resume: capital,
+  leave: capital,
+  cockpit: capital,
+  members: capital,
+  approve: capital,
+  reject: capital,
+  "risk-policy": capital,
+  "member-pause": capital,
+  "member-remove": capital,
+  positions: capital,
+  analytics: capital,
+  "emergency-stop": capital,
+  "obsidian-waitlist": capital
 };
 
 export default async function handler(req, res) {

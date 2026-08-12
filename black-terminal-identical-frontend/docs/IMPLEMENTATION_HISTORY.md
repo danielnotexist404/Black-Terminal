@@ -1444,6 +1444,13 @@ Remaining:
 
 - Replaced the default pre-colored RGBA stretch path with a one-pass WebGL scalar renderer using `R16F` exposure, independent `R8` confidence/validity/visibility/yellow channels, and a calibrated 256-entry `RGBA8` LUT.
 - Calibrated the Purple Plasma palette from the supplied visual reference with a reproducible offline script and immutable source hash; the source screenshot itself is not committed.
+## 2026-08-12 - Phase V Chapter IV
+
+- Rebuilt Investment Groups as a protected server-backed Discover/Joined/My Investment Group experience with versioned five-stage onboarding.
+- Extended canonical mandates, worker fencing, PositionManager attribution, consent-aware snapshots, analytics, audit/notifications and Portfolio Manager integration.
+- Added immediate user-controlled pause/leave and audited manager removal without forced position closure.
+- Kept Obsidian research-only and preserved the permanent no-withdrawal/no-transfer boundary.
+
 - Added high-DPI scalar projection, validity-aware edge-preserving smoothing, deterministic half-step dithering, strict normal blending, and a selectable Blood / White / Silver theme without changing cohort or exposure mathematics.
 - Added Reference, Verified, and Research presets plus Raw Exposure and Validity audit views. Raw shelves, nodes, labels, dashboards, provenance, and developer diagnostics are off by default.
 - Added renderer-only quantitative fixtures and dedicated 1080p, 1440p, and 4K goldens. Repeated pixels are deterministic (SSIM 1.0 / mean sampled perceptual delta 0), while the older 27-case V2 recertification remains pending.

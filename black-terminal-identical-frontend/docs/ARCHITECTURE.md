@@ -418,3 +418,7 @@ controller generation. Source intensity uses an expanding causal epoch; the
 default display adds at most 12% viewport contrast. The raw shelf renderer and
 export bypass presentation normalization, and historical browser OI-only
 context cannot receive yellow authority.
+
+## Phase V Chapter IV: Black Capital Network
+
+Investment Groups now extend the canonical Professional Network, Black Cloud, OMS/EMS and PositionManager boundaries. Membership, consent and manager views are server-backed; group execution is a signed intent that fans out into independently risk-checked follower plans. Broker credentials remain in Positions and never enter the group UI. Copy Trading is immediately revocable; Obsidian remains research-only. See `docs/investment-groups/BLACK_CAPITAL_NETWORK_OVERVIEW.md`.

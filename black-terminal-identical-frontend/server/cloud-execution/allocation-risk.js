@@ -1,10 +1,14 @@
 const CLOUD_HEALTHY = new Set(["CONNECTED_CLOUD", "CONNECTED_HYBRID"]);
 
-export function calculateFollowerAllocation({ intent, mandate, account, instrument, referencePrice, currentExposure = 0 }) {
+export function calculateFollowerAllocation({ intent, mandate, account, instrument, referencePrice, currentExposure = 0, emsRiskCap = Infinity }) {
   const equity = finite(account.equityUsd ?? account.totalEquityUsd);
   const availableMargin = finite(account.availableMarginUsd ?? account.availableBalanceUsd);
   const allocationValue = positive(mandate.allocation_value ?? mandate.allocationValue);
-  const leverage = Math.max(1, finite(intent.leverage, 1));
+  const requestedLeverage = Math.max(1, finite(intent.leverage, 1));
+  const mandateEffectiveLeverage = Math.max(1, finite(mandate.effective_leverage ?? mandate.effectiveLeverage ?? mandate.max_leverage ?? mandate.maxLeverage, requestedLeverage));
+  const exchangeInstrumentCap = positive(instrument.leverageLimits?.max ?? instrument.maximumLeverage ?? instrument.maxLeverage, Infinity);
+  const dynamicEmsRiskCap = positive(emsRiskCap, Infinity);
+  const leverage = Math.min(requestedLeverage, mandateEffectiveLeverage, dynamicEmsRiskCap, exchangeInstrumentCap);
   const price = positive(referencePrice);
 
   let requestedNotional;
@@ -42,6 +46,11 @@ export function calculateFollowerAllocation({ intent, mandate, account, instrume
     roundedQuantity,
     estimatedMargin,
     leverage,
+    requestedLeverage,
+    mandateEffectiveLeverage,
+    emsRiskCap: dynamicEmsRiskCap,
+    exchangeInstrumentCap,
+    leverageCapped: leverage + 1e-9 < requestedLeverage,
     price,
     minimumQuantity,
     minimumNotional,
@@ -79,7 +88,7 @@ export function evaluateFollowerRisk({ intent, mandate, connection, capabilities
   if (!allows(mandate.allowed_market_types, intent.market_type)) reject("MARKET_NOT_ALLOWED", `${intent.market_type} is outside the mandate.`);
   if (!allows(mandate.allowed_order_types, intent.order_type)) reject("ORDER_TYPE_NOT_ALLOWED", `${intent.order_type} is outside the mandate.`);
   if (!allows(capabilities.supported_order_types, intent.order_type)) reject("ORDER_TYPE_UNSUPPORTED", `${intent.order_type} is not supported by this cloud adapter.`);
-  if (finite(intent.leverage, 1) > finite(mandate.max_leverage, 1)) reject("LEVERAGE_LIMIT", "Requested leverage exceeds the mandate limit.");
+  if (allocation.leverage > finite(mandate.max_leverage, 1)) reject("LEVERAGE_LIMIT", "Effective leverage exceeds the member-signed mandate limit.");
   if (intent.reduce_only && !mandate.allow_reduce_only) reject("REDUCE_ONLY_NOT_ALLOWED", "Reduce-only actions are not permitted by this mandate.");
   if (allocation.belowMinimumQuantity) reject("MINIMUM_QUANTITY", "Calculated quantity is below the venue minimum.");
   if (allocation.belowMinimumNotional) reject("MINIMUM_NOTIONAL", "Calculated notional is below the venue minimum.");

@@ -1,5 +1,7 @@
 import { applyCors, requireFields, requireMethod, requireUser, sendError } from "../../portfolio-api.js";
 import { assertNetworkCapability, networkSlug } from "../permissions.js";
+import { listInvestmentGroupWorkspace } from "../../investment-groups/service.js";
+import crypto from "node:crypto";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -8,14 +10,7 @@ export default async function handler(req, res) {
     const { supabase, user } = await requireUser(req);
 
     if (req.method === "GET") {
-      const { data, error } = await supabase
-        .from("investment_groups")
-        .select("*, investment_group_stats(*)")
-        .eq("status", "active")
-        .eq("visibility", "public")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return res.status(200).json({ groups: data || [] });
+      return res.status(200).json(await listInvestmentGroupWorkspace(supabase, user));
     }
 
     requireMethod(req, "POST");
@@ -35,10 +30,18 @@ export default async function handler(req, res) {
         banner_url: req.body.bannerUrl || null,
         visibility: req.body.visibility || "public",
         access_mode: req.body.accessMode || "approval_required",
-        password_hash: req.body.passwordHash || null,
+        password_hash: req.body.password ? hashGroupPassword(req.body.password) : req.body.passwordHash || null,
         trading_style_tags: req.body.tradingStyleTags || [],
         accepted_exchanges: req.body.acceptedExchanges || [],
         accepted_wallets: req.body.acceptedWallets || [],
+        strategy_summary: req.body.strategySummary || "",
+        methodology_summary: req.body.methodologySummary || "",
+        supported_participation_methods: ["COPY_TRADING", "OBSIDIAN_VAULT"],
+        supported_providers: Array.isArray(req.body.supportedProviders) && req.body.supportedProviders.length ? req.body.supportedProviders : ["bybit"],
+        copy_trading_enabled: req.body.copyTradingEnabled !== false,
+        obsidian_research_enabled: true,
+        risk_classification: req.body.riskClassification || "UNCLASSIFIED",
+        group_max_leverage: Number(req.body.groupMaximumLeverage || 20),
         minimum_equity: req.body.minimumEquity ?? null,
         max_followers: req.body.maxFollowers ?? null,
         approval_required: req.body.approvalRequired !== false,
@@ -55,6 +58,7 @@ export default async function handler(req, res) {
       user_id: user.id,
       role: "owner",
       status: "active",
+      membership_state: "ACTIVE",
       joined_at: new Date().toISOString()
     });
 
@@ -71,4 +75,8 @@ export default async function handler(req, res) {
   } catch (error) {
     return sendError(res, error);
   }
+}
+
+function hashGroupPassword(value) {
+  return crypto.createHash("sha256").update(String(value)).digest("hex");
 }

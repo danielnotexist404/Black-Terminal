@@ -79,6 +79,8 @@ export function intentSigningPayload(intent) {
     takeProfit: nullableNumber(intent.take_profit ?? intent.takeProfit),
     stopLoss: nullableNumber(intent.stop_loss ?? intent.stopLoss),
     trailingStop: intent.trailing_stop ?? intent.trailingStop ?? null,
+    strategyParameters: intent.strategy_parameters ?? intent.strategyParameters ?? {},
+    maximumSlippageBps: nullableNumber(intent.maximum_slippage_bps ?? intent.maximumSlippageBps),
     validFrom: normalizeTimestamp(intent.valid_from ?? intent.validFrom),
     expiresAt: normalizeTimestamp(intent.expires_at ?? intent.expiresAt),
     intentVersion: Number(intent.intent_version ?? intent.intentVersion),

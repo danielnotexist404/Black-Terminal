@@ -2089,7 +2089,7 @@ export default function App() {
         </div>
       ) : activeNav === "PORTFOLIO MANAGER" ? (
         <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
-          <PortfolioManagerPage onClose={() => setActiveNav("CHART")} currentUser={currentUser} activeAccountIds={connectedPortfolioAccountIds} />
+          <PortfolioManagerPage onClose={() => setActiveNav("CHART")} onOpenInvestmentGroups={() => setActiveNav("INVESTMENT GROUPS")} currentUser={currentUser} activeAccountIds={connectedPortfolioAccountIds} />
         </div>
       ) : activeNav === "PROFILE" ? (
         <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
@@ -2119,6 +2119,7 @@ export default function App() {
           <InvestmentGroupsPage
             currentUser={currentUser}
             onClose={() => setActiveNav("CHART")}
+            onOpenPositions={() => setActiveNav("POSITIONS")}
             onOpenProfile={(username) => {
               setSelectedProfessionalUsername(username);
               setActiveNav("PROFILE");

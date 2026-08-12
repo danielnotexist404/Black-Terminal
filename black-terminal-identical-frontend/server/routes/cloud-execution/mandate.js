@@ -24,12 +24,26 @@ export default async function handler(req, res) {
 async function createMandate(supabase, userId, req, res) {
   requireFields(req.body, ["groupId", "connectionId", "allocationMethod", "allocationValue", "maxOrderNotional", "maxTotalExposure", "maxDailyLoss", "maxDrawdown", "maxLeverage"]);
   const connection = await ownedConnection(supabase, userId, req.body.connectionId);
+  if (!connection.account_id) throw forbidden("The broker connection is not linked to a canonical account.");
   if (connection.connection_mode !== "CLOUD_DELEGATED" && connection.connection_mode !== "HYBRID") throw forbidden("A cloud-delegated or hybrid connection is required.");
   if (connection.health_status !== "CONNECTED_CLOUD" && connection.health_status !== "CONNECTED_HYBRID") throw forbidden("The cloud connection must be healthy and reconciled first.");
   const membership = await activeMembership(supabase, userId, req.body.groupId);
-  if (!membership) throw forbidden("Active Investment Group membership is required.");
+  if (!membership || membership.role !== "member" || membership.participation_method !== "COPY_TRADING" || !["APPROVED", "ACTIVATING", "ACTIVE", "PAUSED_BY_USER", "PAUSED_BY_MANAGER"].includes(membership.membership_state)) {
+    throw forbidden("A versioned, approved Copy-Trading membership is required.");
+  }
+  const [capabilities, automation, acknowledgement, conflict] = await Promise.all([
+    ownedCapability(supabase, userId, connection.id),
+    activeAutomationMandate(supabase, userId, connection.id),
+    currentRiskAcknowledgement(supabase, userId, req.body.groupId),
+    conflictingGroupMandate(supabase, userId, connection.id, connection.account_id, req.body.groupId)
+  ]);
+  if (!acknowledgement) throw forbidden("The active Investment Group risk disclosure must be accepted first.");
+  if (capabilities.can_withdraw || capabilities.can_transfer) throw forbidden("Withdrawal- or transfer-capable broker authority is prohibited.");
+  if (!capabilities.can_copy_trade || !capabilities.can_receive_group_orders || !capabilities.can_execute_while_offline) throw forbidden("The broker connection lacks certified persistent Copy-Trading capability.");
+  if (!automation?.allow_copy_trading || !automation?.allow_investment_group_execution || automation.allow_withdrawals) throw forbidden("An active, withdrawal-prohibited broker automation mandate is required.");
+  if (conflict) throw forbidden("This broker account is already assigned to another active Investment Group mandate.");
 
-  const payload = normalizeMandate(req.body, userId);
+  const payload = normalizeMandate(req.body, userId, connection.account_id, membership.id);
   const { data, error } = await supabase.from("group_execution_mandates").upsert(payload, {
     onConflict: "group_id,follower_user_id,broker_connection_id"
   }).select("*").single();
@@ -42,6 +56,8 @@ async function acceptMandate(supabase, userId, req, res) {
   requireFields(req.body, ["mandateId", "confirmation"]);
   if (req.body.confirmation !== CONSENT) throw forbidden(`Explicit confirmation is required: ${CONSENT}`);
   const mandate = await ownedMandate(supabase, userId, req.body.mandateId);
+  const membership = await activeMembership(supabase, userId, mandate.group_id);
+  if (!membership || !["APPROVED", "ACTIVATING", "ACTIVE"].includes(membership.membership_state)) throw forbidden("Manager approval and an activatable membership are required before mandate activation.");
   const consentSnapshot = { ...mandate, status: "ACTIVE", acceptedAt: new Date().toISOString(), withdrawalPermission: "NONE" };
   const consentHash = hashCanonicalPayload(consentSnapshot);
   const { data, error } = await supabase.from("group_execution_mandates").update({
@@ -77,7 +93,7 @@ async function changeStatus(supabase, userId, req, res, status) {
   return res.status(200).json({ mandate: safeMandate(data), offlineExecution: "DISABLED" });
 }
 
-function normalizeMandate(body, userId) {
+function normalizeMandate(body, userId, brokerAccountId, membershipId) {
   const allowedSymbols = normalizeList(body.allowedSymbols);
   const allowedMarketTypes = normalizeList(body.allowedMarketTypes);
   const allowedOrderTypes = normalizeList(body.allowedOrderTypes);
@@ -86,6 +102,8 @@ function normalizeMandate(body, userId) {
     group_id: body.groupId,
     follower_user_id: userId,
     broker_connection_id: body.connectionId,
+    broker_account_id: brokerAccountId,
+    membership_id: membershipId,
     status: "PENDING_CONSENT",
     execution_mode: body.executionMode === "HYBRID" ? "HYBRID" : "CLOUD_DELEGATED",
     allocation_method: body.allocationMethod,
@@ -122,10 +140,39 @@ async function ownedConnection(supabase, userId, id) {
 }
 
 async function activeMembership(supabase, userId, groupId) {
-  const { data } = await supabase.from("investment_group_members").select("id").eq("group_id", groupId).eq("user_id", userId).eq("status", "active").maybeSingle();
-  if (data) return data;
-  const { data: group } = await supabase.from("investment_groups").select("id").eq("id", groupId).eq("owner_user_id", userId).maybeSingle();
-  return group;
+  const { data } = await supabase.from("investment_group_members").select("id,role,participation_method,membership_state,risk_acknowledgement_version").eq("group_id", groupId).eq("user_id", userId).maybeSingle();
+  return data;
+}
+
+async function ownedCapability(supabase, userId, connectionId) {
+  const { data, error } = await supabase.from("broker_connection_capabilities").select("*").eq("connection_id", connectionId).eq("user_id", userId).single();
+  if (error || !data) throw forbidden("Broker capability record was not found.");
+  return data;
+}
+
+async function activeAutomationMandate(supabase, userId, connectionId) {
+  const { data, error } = await supabase.from("broker_automation_mandates").select("allow_copy_trading,allow_investment_group_execution,allow_withdrawals").eq("connection_id", connectionId).eq("user_id", userId).eq("status", "ACTIVE").maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function currentRiskAcknowledgement(supabase, userId, groupId) {
+  const { data: document, error: documentError } = await supabase.from("group_risk_disclosure_documents").select("version,document_hash").eq("status", "ACTIVE").order("effective_at", { ascending: false }).limit(1).maybeSingle();
+  if (documentError) throw documentError;
+  if (!document) return null;
+  const { data, error } = await supabase.from("group_risk_acknowledgements").select("id").eq("user_id", userId).eq("group_id", groupId).eq("disclosure_version", document.version).eq("document_hash", document.document_hash).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function conflictingGroupMandate(supabase, userId, connectionId, brokerAccountId, groupId) {
+  const [accountResult, connectionResult] = await Promise.all([
+    supabase.from("group_execution_mandates").select("id").eq("follower_user_id", userId).eq("broker_account_id", brokerAccountId).neq("group_id", groupId).in("status", ["ACTIVE", "PAUSED", "EXIT_ONLY"]).limit(1).maybeSingle(),
+    supabase.from("group_execution_mandates").select("id").eq("follower_user_id", userId).eq("broker_connection_id", connectionId).neq("group_id", groupId).in("status", ["ACTIVE", "PAUSED", "EXIT_ONLY"]).limit(1).maybeSingle()
+  ]);
+  if (accountResult.error) throw accountResult.error;
+  if (connectionResult.error) throw connectionResult.error;
+  return accountResult.data || connectionResult.data;
 }
 
 async function ownedMandate(supabase, userId, id) {

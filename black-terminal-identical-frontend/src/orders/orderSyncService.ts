@@ -1,6 +1,6 @@
 import type { OrderUpdate } from "../execution/types";
 import type { PortfolioSnapshot } from "../portfolio/types";
-import { canonicalOrderKey, deduplicateCanonicalOrders, shouldReplaceCanonicalOrder } from "./canonicalOrder";
+import { canonicalOrderKey, reconcileCanonicalOrderSnapshot, shouldReplaceCanonicalOrder } from "./canonicalOrder";
 
 export type OrderBucket = "open" | "working" | "filled" | "cancelled" | "rejected" | "partial";
 
@@ -38,19 +38,23 @@ export class OrderSyncService {
     const accountIds = new Set([...Object.keys(health || {}), ...incomingByAccount.keys()]);
     for (const accountId of accountIds) {
       const accountHealth = health?.[accountId];
-      if (accountHealth && !accountHealth.verified && (incomingByAccount.get(accountId)?.length || 0) === 0) continue;
+      const currentAccountOrders = Array.from(this.orders.values()).filter((order) => order.accountId === accountId);
+      const reconciled = reconcileCanonicalOrderSnapshot(
+        currentAccountOrders,
+        incomingByAccount.get(accountId) || [],
+        !accountHealth || accountHealth.verified
+      );
       for (const [key, order] of this.orders) {
         if (order.accountId === accountId) this.orders.delete(key);
       }
-      const deduplicated = deduplicateCanonicalOrders(incomingByAccount.get(accountId) || []);
-      nextDiagnostics.rawRecords += deduplicated.diagnostics.rawRecords;
-      nextDiagnostics.uniqueOrders += deduplicated.diagnostics.uniqueOrders;
-      nextDiagnostics.duplicatesSuppressed += deduplicated.diagnostics.duplicatesSuppressed;
-      nextDiagnostics.staleUpdatesSuppressed += deduplicated.diagnostics.staleUpdatesSuppressed;
-      for (const order of deduplicated.orders) {
+      for (const order of reconciled.orders) {
         const key = canonicalOrderKey(order);
         this.orders.set(key, { ...order, canonicalKey: key });
       }
+      nextDiagnostics.rawRecords += reconciled.diagnostics.rawRecords;
+      nextDiagnostics.uniqueOrders += reconciled.diagnostics.uniqueOrders;
+      nextDiagnostics.duplicatesSuppressed += reconciled.diagnostics.duplicatesSuppressed;
+      nextDiagnostics.staleUpdatesSuppressed += reconciled.diagnostics.staleUpdatesSuppressed;
     }
     this.diagnostics = nextDiagnostics;
     this.emit();

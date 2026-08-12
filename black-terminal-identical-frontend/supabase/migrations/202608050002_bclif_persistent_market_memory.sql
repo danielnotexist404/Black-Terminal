@@ -374,7 +374,7 @@ alter table public.bclif_confirmed_liquidation_events
   add column if not exists event_checksum text;
 
 update public.bclif_confirmed_liquidation_events
-set event_checksum = 'sha256:' || encode(digest(
+set event_checksum = 'sha256:' || encode(extensions.digest(
   source_id::text || '|' || venue_event_id || '|' || event_time::text || '|' ||
   liquidated_position_side || '|' || bankruptcy_price::text || '|' || quantity::text,
   'sha256'

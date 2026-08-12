@@ -6,8 +6,6 @@ import { BYBIT_EXECUTION_ENVIRONMENTS, resolveBybitEndpointSet } from "./bybit-e
 import { getBrokerAdapterDefinition } from "./broker-adapter-registry.js";
 import { settleSupabaseQuery } from "../supabase-query.js";
 
-export const BYBIT_LIVE_CONNECTION_CONFIRMATION = "ENABLE LIVE BYBIT EXECUTION";
-
 export async function establishExchangeAccount({ supabase, user, input, authorization = null }) {
   const exchange = String(input.exchange || "").trim().toLowerCase();
   const definition = getBrokerAdapterDefinition(exchange);
@@ -16,14 +14,13 @@ export async function establishExchangeAccount({ supabase, user, input, authoriz
   }
   const accountName = String(input.accountName || "").trim();
   if (!accountName || !input.apiKey || !input.apiSecret) throw typedError("MISSING_BROKER_CREDENTIALS", "Account name, API key and API secret are required.", 400);
-  const endpointSet = resolveBybitEndpointSet({ executionEnvironment: input.executionEnvironment || input.network, endpointProfile: input.endpointProfile || "GLOBAL" });
+  // This production adapter is intentionally locked. Client-provided legacy
+  // environment/region fields are ignored so hidden controls cannot redirect
+  // credentials to another Bybit endpoint.
+  const endpointSet = resolveBybitEndpointSet({ executionEnvironment: BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE, endpointProfile: "GLOBAL" });
   const executionEnvironment = endpointSet.environment;
   const endpointProfile = endpointSet.region;
   const network = executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO ? "demo" : "mainnet";
-  if (executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE && input.liveConfirmation !== BYBIT_LIVE_CONNECTION_CONFIRMATION) {
-    throw typedError("LIVE_CONFIRMATION_REQUIRED", `Mainnet Live connection requires the exact confirmation: ${BYBIT_LIVE_CONNECTION_CONFIRMATION}`, 403);
-  }
-
   const rawCredentials = {
     exchange,
     apiKey: String(input.apiKey),

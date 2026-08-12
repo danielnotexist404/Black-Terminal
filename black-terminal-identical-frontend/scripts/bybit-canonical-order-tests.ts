@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { canonicalOrderKey, deduplicateCanonicalOrders, retainOrdersForAccounts, shouldReplaceCanonicalOrder } from "../src/orders/canonicalOrder.ts";
+import { canonicalOrderKey, deduplicateCanonicalOrders, reconcileCanonicalOrderSnapshot, retainOrdersForAccounts, shouldReplaceCanonicalOrder } from "../src/orders/canonicalOrder.ts";
 import { priceToScreenY } from "../src/chart-engine/priceTransform.ts";
 import type { OrderUpdate } from "../src/execution/types.ts";
 
@@ -43,6 +43,17 @@ assert.equal(deduplicateCanonicalOrders([canonicalVenueAccount, duplicateLocalAc
 
 assert.equal(retainOrdersForAccounts([base], [base.accountId]).length, 1);
 assert.equal(retainOrdersForAccounts([base], []).length, 0);
+const inverseOrder = { ...base, category: "inverse", orderId: "inverse-1", venueOrderId: "inverse-1" };
+const initialSnapshot = reconcileCanonicalOrderSnapshot([], [base, inverseOrder], true);
+const degradedSnapshot = reconcileCanonicalOrderSnapshot(
+  initialSnapshot.orders,
+  [{ ...base, filledQuantity: 0.005, venueUpdatedTime: 120, updatedTime: 120 }],
+  false
+);
+assert.equal(degradedSnapshot.orders.length, 2, "partial broker snapshots must not erase orders from failed categories");
+assert.equal(degradedSnapshot.orders.find((order) => order.category === "linear")?.filledQuantity, 0.005);
+const verifiedSnapshot = reconcileCanonicalOrderSnapshot(degradedSnapshot.orders, [base], true);
+assert.equal(verifiedSnapshot.orders.length, 1, "only a verified snapshot may remove a missing order");
 
 const transform = { plotTop: 38, plotBottom: 638, priceMin: 60_000, priceMax: 70_000, scaleMode: "linear" as const };
 const projected = priceToScreenY(67_579.4, transform);

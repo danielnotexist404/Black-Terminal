@@ -14,7 +14,6 @@ import { hashCanonicalPayload, signCanonicalPayload } from "../../cloud-executio
 import { BYBIT_EXECUTION_ENVIRONMENTS, normalizeBybitExecutionEnvironment, resolveBybitEndpointSet } from "../../exchanges/bybit-endpoints.js";
 
 const CONFIRMATION = "ENABLE OFFLINE CLOUD EXECUTION";
-const LIVE_CONFIRMATION = "ENABLE LIVE BYBIT EXECUTION";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -39,11 +38,8 @@ export default async function handler(req, res) {
       error.statusCode = 501;
       throw error;
     }
-    const executionEnvironment = normalizeBybitExecutionEnvironment(account.execution_environment || account.network);
-    const endpointSet = resolveBybitEndpointSet({ executionEnvironment, endpointProfile: account.endpoint_profile || "GLOBAL" });
-    if (executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE && req.body.liveConfirmation !== LIVE_CONFIRMATION) {
-      throw Object.assign(new Error(`Mainnet Live activation requires explicit confirmation: ${LIVE_CONFIRMATION}`), { statusCode: 400 });
-    }
+    const executionEnvironment = normalizeBybitExecutionEnvironment(BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE);
+    const endpointSet = resolveBybitEndpointSet({ executionEnvironment, endpointProfile: "GLOBAL" });
     const { data: legacyCredential, error: credentialError } = await supabase
       .from("exchange_credentials")
       .select("encrypted_payload")
@@ -163,10 +159,7 @@ export default async function handler(req, res) {
       withdrawalEnabled: false
     });
     const automationMandate = await createAutomationMandate(supabase, user.id, account, connection, {
-      ...(req.body.automation || {}),
-      executionEnvironment,
-      liveConfirmation: req.body.liveConfirmation
-    });
+      ...(req.body.automation || {}), executionEnvironment });
 
     const { error: auditError } = await supabase.from("execution_audit_events").insert({
       user_id: user.id, connection_id: connection.id, event_type: "CONNECTION_CREATED", severity: "INFO",
@@ -281,7 +274,6 @@ async function createAutomationMandate(supabase, userId, account, connection, re
   const serviceSignature = signCanonicalPayload(policy);
   const consentEvidence = {
     confirmation: CONFIRMATION,
-    liveConfirmation: requested.executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE ? requested.liveConfirmation : null,
     executionEnvironment: requested.executionEnvironment,
     acceptedAt,
     persistentAfterLogout: true

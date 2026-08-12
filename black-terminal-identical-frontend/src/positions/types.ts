@@ -28,6 +28,12 @@ export type PortfolioPosition = {
   accountId: string;
   exchange: ExchangeId;
   symbol: string;
+  network?: string;
+  category?: string;
+  marketKind?: string;
+  positionIdx?: number;
+  canonicalKey?: string;
+  updatedAt?: number;
   direction: PositionDirection;
   quantity: number;
   averagePrice: number;

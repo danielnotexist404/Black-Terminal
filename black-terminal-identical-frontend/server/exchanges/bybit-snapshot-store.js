@@ -1,3 +1,5 @@
+import { canonicalizeBybitPositions } from "./bybit-position-identity.js";
+
 export async function replaceBybitBalances(supabase, accountId, balances) {
   await deleteAccountRows(supabase, "account_balances", accountId);
   if (balances.length === 0) return;
@@ -16,31 +18,35 @@ export async function replaceBybitBalances(supabase, accountId, balances) {
   if (error) throw snapshotStorageError("insert account balances", error);
 }
 
-export async function replaceBybitPositions(supabase, accountId, positions) {
-  await deleteAccountRows(supabase, "account_positions", accountId);
-  if (positions.length === 0) return;
-
-  const { error } = await supabase.from("account_positions").insert(
-    positions.map((position) => ({
-      account_id: accountId,
-      exchange: "bybit",
-      symbol: position.symbol,
-      direction: position.direction,
-      quantity: position.quantity,
-      average_price: position.averagePrice,
-      current_price: position.currentPrice,
-      unrealized_pnl: position.unrealizedPnl,
-      realized_pnl: position.realizedPnl,
-      margin: position.margin,
-      leverage: position.leverage,
-      liquidation_price: position.liquidationPrice,
-      stop_loss: position.stopLoss,
-      take_profit: position.takeProfit,
-      opened_at: position.openedAt ? new Date(position.openedAt).toISOString() : null,
-      updated_at: new Date().toISOString()
-    }))
-  );
-  if (error) throw snapshotStorageError("insert account positions", error);
+export async function replaceBybitPositions(supabase, accountId, positions, snapshotStartedAt = Date.now()) {
+  const canonical = canonicalizeBybitPositions(positions, accountId);
+  const rows = canonical.map((position) => ({
+    category: position.category,
+    marketKind: position.marketKind,
+    positionIdx: position.positionIdx,
+    canonicalKey: position.canonicalKey,
+    symbol: position.symbol,
+    direction: position.direction,
+    quantity: position.quantity,
+    averagePrice: position.averagePrice,
+    currentPrice: position.currentPrice,
+    unrealizedPnl: position.unrealizedPnl,
+    realizedPnl: position.realizedPnl,
+    margin: position.margin,
+    leverage: position.leverage,
+    liquidationPrice: position.liquidationPrice,
+    stopLoss: position.stopLoss,
+    takeProfit: position.takeProfit,
+    openedAt: position.openedAt ? new Date(position.openedAt).toISOString() : null,
+    updatedAt: position.updatedAt ? new Date(position.updatedAt).toISOString() : new Date(snapshotStartedAt).toISOString()
+  }));
+  const { data, error } = await supabase.rpc("replace_bybit_positions_snapshot_v1", {
+    p_account_id: accountId,
+    p_snapshot_started_at: new Date(snapshotStartedAt).toISOString(),
+    p_rows: rows
+  });
+  if (error) throw snapshotStorageError("replace account position snapshot", error);
+  return Array.isArray(data) ? data[0] : data;
 }
 
 export function describeSupabaseError(error) {

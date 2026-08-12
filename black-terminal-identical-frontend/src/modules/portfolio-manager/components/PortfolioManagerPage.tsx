@@ -19,13 +19,14 @@ import type { ConnectionCapability, ConnectionDiagnostics } from "../../../conne
 import { getVenueCertification, type VenueCertificationRecord } from "../../../connectivity/venueRegistry";
 import { submitOrder } from "../../../execution/executionEngine";
 import { MAINNET_ORDER_CONFIRMATION, disableMainnetValidationMode, promptEnableMainnetValidationMode, readMainnetValidationMode, validateMainnetOrderReadiness } from "../../../execution/mainnetValidationMode";
-import { activateBlackCloudConnectionViaApi, beginBrokerAuthorizationViaApi, controlBlackCloudConnectionViaApi, fetchBlackCloudStatusViaApi, getBybitRuntimeStatusViaApi, listPersistedExchangeConnectionsViaApi, runExchangeAccountDiagnosticsViaApi, type BlackCloudControlAction, type BlackCloudStatusPayload, type BrokerAdapterDescriptor, type BybitRuntimeStatusPayload, type PortfolioOrderDraft } from "../../../portfolio/portfolioApiClient";
+import { beginBrokerAuthorizationViaApi, controlBlackCloudConnectionViaApi, fetchBlackCloudStatusViaApi, getBybitRuntimeStatusViaApi, listPersistedExchangeConnectionsViaApi, runExchangeAccountDiagnosticsViaApi, type BlackCloudControlAction, type BlackCloudStatusPayload, type BrokerAdapterDescriptor, type BybitRuntimeStatusPayload, type PortfolioOrderDraft } from "../../../portfolio/portfolioApiClient";
 import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } from "../../../portfolio/types";
 import { getPortfolioSnapshot } from "../../../portfolio/portfolioStore";
 import { defaultRiskControls } from "../../../risk/types";
 import { marketCatalog } from "../../../market-data/marketCatalog";
 import type { ExchangeId } from "../../../market-data/types";
 import { blackCorePositionManager } from "../../../positions/positionManager";
+import { requestUserText } from "../../../ui/requestUserText";
 import type { ManagedPosition, PortfolioPosition } from "../../../positions/types";
 import { canCreateInvestmentGroup, listInvestmentGroups } from "../../profile/professionalNetworkStore";
 import type { OrderUpdate } from "../../../execution/types";
@@ -174,7 +175,7 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
       }
 
       if (action === "note") {
-        const note = window.prompt(`Add note for ${position.symbol}`, "");
+        const note = await requestUserText({ title: "Position Note", message: `Add note for ${position.symbol}.` });
         if (note) {
           blackCorePositionManager.addNote(position.id, note);
           setPositionActionStatus(`NOTE ADDED TO ${position.symbol}`);
@@ -185,7 +186,7 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
       }
 
       if (action === "tags") {
-        const tags = window.prompt(`Tags for ${position.symbol}`, position.tags.join(", "));
+        const tags = await requestUserText({ title: "Position Tags", message: `Comma-separated tags for ${position.symbol}.`, defaultValue: position.tags.join(", ") });
         if (tags !== null) {
           blackCorePositionManager.setTags(position.id, tags.split(","));
           setPositionActionStatus(`TAGS UPDATED FOR ${position.symbol}`);
@@ -200,7 +201,7 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
       }
 
       if (action === "scaleIn" || action === "scaleOut") {
-        const amount = Number(window.prompt(`${action === "scaleIn" ? "Scale in" : "Scale out"} quantity for ${position.symbol}`, String(position.quantity / 2)));
+        const amount = Number(await requestUserText({ title: "Position Size", message: `${action === "scaleIn" ? "Scale in" : "Scale out"} quantity for ${position.symbol}.`, defaultValue: String(position.quantity / 2) }));
         if (!amount || amount <= 0) {
           setPositionActionStatus("SCALE ACTION CANCELLED");
           return;
@@ -250,10 +251,10 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
       }
 
       const takeProfit = action === "takeProfit" || action === "bracket"
-        ? Number(window.prompt(`Take profit price for ${position.symbol}`, position.takeProfit ? String(position.takeProfit) : ""))
+        ? Number(await requestUserText({ title: "Take Profit", message: `Take profit price for ${position.symbol}.`, defaultValue: position.takeProfit ? String(position.takeProfit) : "" }))
         : undefined;
       const stopLoss = action === "stopLoss" || action === "bracket"
-        ? Number(window.prompt(`Stop loss price for ${position.symbol}`, position.stopLoss ? String(position.stopLoss) : ""))
+        ? Number(await requestUserText({ title: "Stop Loss", message: `Stop loss price for ${position.symbol}.`, defaultValue: position.stopLoss ? String(position.stopLoss) : "" }))
         : undefined;
 
       if ((action === "takeProfit" || action === "bracket") && (!takeProfit || takeProfit <= 0)) {
@@ -400,15 +401,13 @@ export function PositionsWorkspace({
     accountName: "",
     apiKey: "",
     apiSecret: "",
-    passphrase: "",
-    network: "mainnet",
-    executionEnvironment: "MAINNET_LIVE",
-    endpointProfile: "GLOBAL"
+    passphrase: ""
   });
   const [hyperliquidNetwork, setHyperliquidNetwork] = useState<"testnet" | "mainnet">("testnet");
   const [hyperliquidAgentPrivateKey, setHyperliquidAgentPrivateKey] = useState("");
   const [hyperliquidMainnetConfirmed, setHyperliquidMainnetConfirmed] = useState(false);
   const [connectStatus, setConnectStatus] = useState("");
+  const [connectionInFlight, setConnectionInFlight] = useState(false);
   const [orderRefreshState, setOrderRefreshState] = useState<"idle" | "refreshing" | "failed">("idle");
   const [orderMenu, setOrderMenu] = useState<{ order: OrderUpdate; x: number; y: number } | null>(null);
   const [connectionDiagnostics, setConnectionDiagnostics] = useState<ConnectionDiagnostics[]>(() => blackCoreConnectionManager.listDiagnostics());
@@ -525,50 +524,6 @@ export function PositionsWorkspace({
     }
   }
 
-  async function activateCloudConnection() {
-    const accountId = activeExecutionVenue?.accountId;
-    if (!accountId) return;
-    const executionEnvironment = activeCloudConnection?.execution_environment || activeExecutionVenue?.executionEnvironment;
-    const confirmation = window.prompt([
-      "PERSISTENT BLACK CLOUD AUTHORIZATION",
-      "Broker: BYBIT / selected account",
-      "Scope: read, trade, cancel, modify, automated strategies, copy trading and Investment Groups",
-      "Risk controls: optional, owner-configurable and auditable",
-      "Withdrawals: FORBIDDEN",
-      "Duration: until revoked",
-      "Emergency default: preserve broker-native protective orders",
-      "This authorization continues after browser closure, logout, or device shutdown when an always-on Black Cloud worker is deployed.",
-      "Type: ENABLE OFFLINE CLOUD EXECUTION"
-    ].join("\n\n"));
-    if (confirmation !== "ENABLE OFFLINE CLOUD EXECUTION") { setCloudStatusMessage("OFFLINE EXECUTION CONSENT NOT PROVIDED"); return; }
-    let liveConfirmation: string | undefined;
-    if (executionEnvironment === "MAINNET_LIVE") {
-      liveConfirmation = window.prompt([
-        "LIVE BYBIT EXECUTION",
-        "This connection controls a real-money Bybit account.",
-        "Orders may be submitted while the browser is closed or you are logged out.",
-        "Environment: MAINNET LIVE",
-        "Funds: REAL",
-        "Withdrawal authority: PROHIBITED",
-        "Type: ENABLE LIVE BYBIT EXECUTION"
-      ].join("\n\n")) || undefined;
-      if (liveConfirmation !== "ENABLE LIVE BYBIT EXECUTION") { setCloudStatusMessage("MAINNET LIVE CONSENT NOT PROVIDED"); return; }
-    }
-    try {
-      const result = await activateBlackCloudConnectionViaApi(accountId, confirmation, {
-        allowStrategyExecution: true,
-        allowCopyTrading: true,
-        allowInvestmentGroupExecution: true,
-        preserveProtectiveOrders: true
-      }, liveConfirmation);
-      const next = await fetchBlackCloudStatusViaApi();
-      if (next) setCloudStatus(next);
-      setCloudStatusMessage(result?.readinessReason || "BLACK CLOUD CONNECTION VALIDATING");
-    } catch (error) {
-      setCloudStatusMessage(error instanceof Error ? error.message : String(error));
-    }
-  }
-
   useEffect(() => {
     setActiveExecutionVenueId(activeVenueId);
   }, [activeVenueId]);
@@ -616,6 +571,7 @@ export function PositionsWorkspace({
   }
 
   async function handleConnectCex() {
+    if (connectionInFlight) return;
     if (!selectedCexCertification?.authReady) {
       setConnectStatus((selectedCexCertification?.limitations[0] || `${selectedCex.toUpperCase()} credential validation is not certified yet.`).toUpperCase());
       return;
@@ -625,25 +581,8 @@ export function PositionsWorkspace({
       setConnectStatus("API KEY AND SECRET REQUIRED");
       return;
     }
-    const executionEnvironment = connection.executionEnvironment || "MAINNET_LIVE";
-    let liveConfirmation: string | undefined;
-    if (selectedCex === "bybit" && executionEnvironment === "MAINNET_LIVE") {
-      liveConfirmation = window.prompt([
-        "LIVE BYBIT EXECUTION",
-        "This connection controls a real-money Bybit account.",
-        "Environment: MAINNET LIVE",
-        "Funds: REAL",
-        "Execution: REAL",
-        "Withdrawal authority: PROHIBITED",
-        "Persistent automation remains disabled until separately authorized.",
-        "Type: ENABLE LIVE BYBIT EXECUTION"
-      ].join("\n\n")) || undefined;
-      if (liveConfirmation !== "ENABLE LIVE BYBIT EXECUTION") {
-        setConnectStatus("MAINNET LIVE CONSENT NOT PROVIDED");
-        return;
-      }
-    }
-
+    setConnectionInFlight(true);
+    setConnectStatus("CONNECTING");
     try {
       const nextConnection = await blackCoreConnectionManager.connect({
         adapterId: `cex:${selectedCex}`,
@@ -651,27 +590,22 @@ export function PositionsWorkspace({
         provider: selectedCex,
         label: accountName,
         credentials: {
-          ...connection,
           exchange: selectedCex,
           accountName,
-          network: executionEnvironment === "DEMO" ? "demo" : "mainnet",
-          executionEnvironment,
-          endpointProfile: executionEnvironment === "DEMO" ? "GLOBAL" : connection.endpointProfile || "GLOBAL",
-          liveConfirmation
+          apiKey: connection.apiKey,
+          apiSecret: connection.apiSecret,
+          ...(selectedCex === "bybit" || !connection.passphrase?.trim() ? {} : { passphrase: connection.passphrase })
         },
-        metadata: {
-          accountName,
-          network: executionEnvironment === "DEMO" ? "demo" : "mainnet",
-          executionEnvironment,
-          endpointProfile: executionEnvironment === "DEMO" ? "GLOBAL" : connection.endpointProfile || "GLOBAL"
-        }
+        metadata: { accountName, automationEnabled: false }
       });
       setActiveVenueId(nextConnection.id);
-      setConnection({ exchange: selectedCex, accountName: "", apiKey: "", apiSecret: "", passphrase: "", network: "mainnet", executionEnvironment: "MAINNET_LIVE", endpointProfile: "GLOBAL" });
+      setConnection({ exchange: selectedCex, accountName: "", apiKey: "", apiSecret: "", passphrase: "" });
       setConnectStatus("BROKER LINK STORED");
       setShowConnection(false);
     } catch (error) {
       setConnectStatus(error instanceof Error ? error.message.toUpperCase() : String(error));
+    } finally {
+      setConnectionInFlight(false);
     }
   }
 
@@ -683,7 +617,7 @@ export function PositionsWorkspace({
     const accountName = connection.accountName.trim() || "Bybit Main Account";
     try {
       setConnectStatus("OPENING BYBIT AUTHORIZATION");
-      const result = await beginBrokerAuthorizationViaApi({ provider: "bybit", accountName, endpointProfile: connection.endpointProfile || "GLOBAL", returnPath: "/" });
+      const result = await beginBrokerAuthorizationViaApi({ provider: "bybit", accountName, returnPath: "/" });
       if (!result?.authorizationUrl) throw new Error("Authenticated Black Terminal session is required.");
       window.location.assign(result.authorizationUrl);
     } catch (error) {
@@ -851,7 +785,7 @@ export function PositionsWorkspace({
             onSwitchVenue={handleSwitchExecutionVenue}
             onDisconnectVenue={() => void handleDisconnectExecutionVenue()}
           />
-          <BlackCloudConnectionPanel connection={activeCloudConnection} accountId={activeExecutionVenue.accountId} status={cloudStatus} message={cloudStatusMessage} onActivate={activateCloudConnection} onControl={controlCloudConnection} />
+          <BlackCloudConnectionPanel connection={activeCloudConnection} status={cloudStatus} message={cloudStatusMessage} onControl={controlCloudConnection} />
           </>
         ) : (
           <>
@@ -920,50 +854,7 @@ export function PositionsWorkspace({
             {venueKind === "cex" ? (
               <>
                 <ConnectionSupportCard certification={selectedCexCertification} />
-                {selectedCex === "bybit" && (
-                  <>
-                    <select
-                      aria-label="Bybit certification environment"
-                      value={connection.executionEnvironment || "MAINNET_LIVE"}
-                      onChange={(event) => {
-                        const executionEnvironment = event.target.value as "DEMO" | "MAINNET_LIVE";
-                        setConnection((current) => ({
-                          ...current,
-                          executionEnvironment,
-                          network: executionEnvironment === "DEMO" ? "demo" : "mainnet",
-                          endpointProfile: executionEnvironment === "DEMO" ? "GLOBAL" : current.endpointProfile || "GLOBAL"
-                        }));
-                      }}
-                    >
-                      <option value="DEMO">Bybit Demo — simulated funds</option>
-                      <option value="MAINNET_LIVE">Bybit Mainnet Live — real funds</option>
-                    </select>
-                    {connection.executionEnvironment === "MAINNET_LIVE" && (
-                      <select
-                        aria-label="Bybit endpoint profile"
-                        value={connection.endpointProfile || "GLOBAL"}
-                        onChange={(event) => setConnection((current) => ({ ...current, endpointProfile: event.target.value as ExchangeConnectionDraft["endpointProfile"] }))}
-                      >
-                        <option value="GLOBAL">Global account</option>
-                        <option value="NETHERLANDS">Netherlands</option>
-                        <option value="TURKEY">Turkey</option>
-                        <option value="KAZAKHSTAN">Kazakhstan</option>
-                        <option value="GEORGIA">Georgia</option>
-                        <option value="UAE">UAE</option>
-                        <option value="EEA">EEA</option>
-                        <option value="INDONESIA">Indonesia</option>
-                        <option value="JAPAN">Japan</option>
-                      </select>
-                    )}
-                    <div className="connection-support-card">
-                      {connection.executionEnvironment === "DEMO" ? (
-                        <><div><span>Environment</span><b>BYBIT DEMO</b></div><p>SIMULATED FUNDS · MAINNET PUBLIC MARKET DATA · SIMULATED EXECUTION</p></>
-                      ) : (
-                        <><div><span>Environment</span><b>BYBIT MAINNET LIVE</b></div><p>REAL FUNDS · REAL EXECUTION · explicit live confirmation required</p></>
-                      )}
-                    </div>
-                  </>
-                )}
+                {selectedCex === "bybit" && <div className="connection-support-card"><div><span>Connection</span><b>PRODUCTION LOCKED</b></div><p>REAL FUNDS · UNIFIED ACCOUNT · MANUAL EXECUTION · WITHDRAWALS PROHIBITED</p></div>}
                 <input placeholder="Account name" value={connection.accountName} onChange={(event) => setConnection((current) => ({ ...current, accountName: event.target.value }))} />
                 {selectedCex === "bybit" && selectedBrokerAdapter?.authorization.oauthAuthorization && (
                   <div className="broker-authorization-panel">
@@ -978,10 +869,10 @@ export function PositionsWorkspace({
                 <div className="broker-method-divider"><span>OR CONNECT USING API KEY</span><em>ADVANCED</em></div>
                 <input placeholder="API key" value={connection.apiKey} onChange={(event) => setConnection((current) => ({ ...current, apiKey: event.target.value }))} />
                 <input placeholder="API secret" type="password" value={connection.apiSecret} onChange={(event) => setConnection((current) => ({ ...current, apiSecret: event.target.value }))} />
-                <input placeholder="Passphrase, if required" type="password" value={connection.passphrase} onChange={(event) => setConnection((current) => ({ ...current, passphrase: event.target.value }))} />
+                {selectedCex !== "bybit" && <input placeholder="Passphrase, if required" type="password" value={connection.passphrase} onChange={(event) => setConnection((current) => ({ ...current, passphrase: event.target.value }))} />}
                 {connectStatus && <div className="positions-connect-status">{connectStatus}</div>}
-                <button className="primary" disabled={!selectedCexCertification?.authReady} onClick={handleConnectCex}>
-                  {selectedCexCertification?.authReady ? "Connect Account" : "Adapter Not Certified"}
+                <button className="primary" disabled={!selectedCexCertification?.authReady || connectionInFlight} onClick={handleConnectCex}>
+                  {connectionInFlight ? "Connecting" : selectedCexCertification?.authReady ? "Connect Account" : "Adapter Not Certified"}
                 </button>
               </>
             ) : (
@@ -1030,15 +921,13 @@ export function PositionsWorkspace({
   );
 }
 
-function BlackCloudConnectionPanel({ connection, accountId, status, message, onActivate, onControl }: {
+function BlackCloudConnectionPanel({ connection, status, message, onControl }: {
   connection: BlackCloudStatusPayload["connections"][number] | null;
-  accountId?: string;
   status: BlackCloudStatusPayload | null;
   message: string;
-  onActivate: () => Promise<void>;
   onControl: (action: BlackCloudControlAction, options?: { cancelProtectiveOrders?: boolean }) => Promise<void>;
 }) {
-  if (!connection) return <div className="black-cloud-panel unavailable"><b>BLACK CLOUD</b><span>NO CLOUD-DELEGATED CONNECTION</span>{accountId && <button onClick={() => void onActivate()}>Enable Offline Cloud</button>}{message && <em>{message}</em>}</div>;
+  if (!connection) return <div className="black-cloud-panel unavailable"><b>BLACK CLOUD</b><span>NO PERSISTENT CLOUD CONNECTION</span>{message && <em>{message}</em>}</div>;
   const mandates = status?.mandates.filter((item) => item.broker_connection_id === connection.id) ?? [];
   const automation = status?.automationMandates?.find((item) => item.connection_id === connection.id && item.status === "ACTIVE") ?? null;
   const strategies = status?.strategyDeployments?.filter((item) => item.connection_id === connection.id && !["STOPPED", "FAILED"].includes(item.status)) ?? [];
@@ -1399,7 +1288,7 @@ function ExecutionDock({
           {mainnetReadiness.mainnet && !isBybit && (
             <div className={mainnetValidation.enabled ? "mainnet-validation-panel active compact" : "mainnet-validation-panel compact"}>
               <div><span>Protocol Mainnet Validation</span><b>{mainnetValidation.enabled ? "ENABLED" : "OFF"}</b></div>
-              <button type="button" onClick={() => setMainnetValidation(mainnetValidation.enabled ? disableMainnetValidationMode() : promptEnableMainnetValidationMode())}>{mainnetValidation.enabled ? "Disable" : "Enable"}</button>
+              <button type="button" onClick={() => { if (mainnetValidation.enabled) setMainnetValidation(disableMainnetValidationMode()); else void promptEnableMainnetValidationMode().then(setMainnetValidation); }}>{mainnetValidation.enabled ? "Disable" : "Enable"}</button>
             </div>
           )}
         </details>

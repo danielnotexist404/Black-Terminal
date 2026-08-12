@@ -43,6 +43,7 @@ import { getMarketDataEngineAdapter } from "../market-data/engine/marketDataEngi
 import { ExchangeId, MarketDataAdapter, MarketDataSubscription, MarketSymbol, Timeframe } from "../market-data/types";
 import { UnifiedExecutionTicket, type UnifiedExecutionTicketPreset } from "../execution/components/UnifiedExecutionTicket";
 import type { ExecutionSource, OrderSide, OrderType } from "../execution/types";
+import { requestUserText } from "../ui/requestUserText";
 import type { OrderUpdate } from "../execution/types";
 import { blackCorePositionManager } from "../positions/positionManager";
 import type { ManagedPosition, PositionProtectionOrder, PositionProtectionType } from "../positions/types";
@@ -2422,7 +2423,7 @@ export function PixiBlackChart({
     });
   };
 
-  const recordPositionContextAction = (action: "add" | "scaleIn" | "scaleOut" | "partialClose" | "close" | "reverse" | "moveProtection" | "cancelTp" | "cancelSl" | "cancelTrailing" | "stats" | "notes" | "timeline") => {
+  const recordPositionContextAction = async (action: "add" | "scaleIn" | "scaleOut" | "partialClose" | "close" | "reverse" | "moveProtection" | "cancelTp" | "cancelSl" | "cancelTrailing" | "stats" | "notes" | "timeline") => {
     const position = activeChartPosition;
     if (!position) return;
     setChartContextMenu(null);
@@ -2472,7 +2473,7 @@ export function PixiBlackChart({
       return;
     }
     if (action === "notes") {
-      const note = window.prompt(`Trade note for ${position.symbol}`, "");
+      const note = await requestUserText({ title: "Trade Note", message: `Trade note for ${position.symbol}.` });
       if (note) blackCorePositionManager.addNote(position.id, note);
       return;
     }

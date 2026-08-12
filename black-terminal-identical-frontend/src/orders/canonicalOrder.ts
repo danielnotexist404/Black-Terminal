@@ -49,6 +49,32 @@ export function deduplicateCanonicalOrders(orders: OrderUpdate[]) {
   };
 }
 
+export function reconcileCanonicalOrderSnapshot(currentOrders: OrderUpdate[], incomingOrders: OrderUpdate[], authoritative: boolean) {
+  const deduplicated = deduplicateCanonicalOrders(incomingOrders);
+  const next = new Map<string, OrderUpdate>();
+  if (!authoritative) {
+    for (const current of currentOrders) next.set(canonicalOrderKey(current), current);
+  }
+  let duplicatesSuppressed = deduplicated.diagnostics.duplicatesSuppressed;
+  let staleUpdatesSuppressed = deduplicated.diagnostics.staleUpdatesSuppressed;
+  for (const order of deduplicated.orders) {
+    const key = canonicalOrderKey(order);
+    const current = next.get(key);
+    if (current) duplicatesSuppressed += 1;
+    if (shouldReplaceCanonicalOrder(current, order)) next.set(key, { ...order, canonicalKey: key });
+    else if (current) staleUpdatesSuppressed += 1;
+  }
+  return {
+    orders: Array.from(next.values()),
+    diagnostics: {
+      rawRecords: incomingOrders.length,
+      uniqueOrders: next.size,
+      duplicatesSuppressed,
+      staleUpdatesSuppressed
+    } satisfies CanonicalOrderDiagnostics
+  };
+}
+
 export function retainOrdersForAccounts(orders: OrderUpdate[], accountIds: string[]) {
   const activeAccounts = new Set(accountIds);
   return orders.filter((order) => activeAccounts.has(order.accountId));

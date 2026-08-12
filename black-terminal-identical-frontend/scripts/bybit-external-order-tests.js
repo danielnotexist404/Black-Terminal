@@ -53,7 +53,9 @@ const source = await import("node:fs").then(({ readFileSync }) => ({
   chart: readFileSync(new URL("../src/components/PixiBlackChart.tsx", import.meta.url), "utf8")
 }));
 assert.match(source.bybit, /nextPageCursor/);
-assert.match(source.bybit, /requestedCategories = options\.categories/);
+assert.match(source.bybit, /new Set\(options\.categories \|\| \["linear", "inverse", "spot", "option"\]\)/);
+assert.match(source.bybit, /category === "linear"[\s\S]*settleCoin: "USDT"[\s\S]*settleCoin: "USDC"/);
+assert.match(source.bybit, /successfulCategories = requestedCategories\.filter/);
 assert.match(source.worker, /\["order", "execution", "position", "wallet"\]/);
 assert.match(source.chart, /venue-order-line/);
 

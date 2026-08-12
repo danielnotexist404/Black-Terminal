@@ -217,7 +217,6 @@ begin
   if coalesce((p_policy->>'allowWithdrawals')::boolean,false) then raise exception 'withdrawal automation is forbidden' using errcode='42501'; end if;
   if coalesce((p_policy->>'allowTransfers')::boolean,false) then raise exception 'wallet transfer automation is forbidden' using errcode='42501'; end if;
   if coalesce(p_consent_evidence->>'executionEnvironment','')<>environment then raise exception 'consent environment mismatch' using errcode='42501'; end if;
-  if environment='MAINNET_LIVE' and coalesce(p_consent_evidence->>'liveConfirmation','')<>'ENABLE LIVE BYBIT EXECUTION' then raise exception 'mainnet live confirmation missing' using errcode='42501'; end if;
   perform pg_advisory_xact_lock(hashtextextended('mandate:'||p_connection_id::text,0));
   select coalesce(max(mandate_version),0)+1 into next_version from public.broker_automation_mandates where connection_id=p_connection_id;
   select coalesce(max(policy_version),0)+1 into next_risk_version from public.broker_risk_policy_versions where connection_id=p_connection_id;

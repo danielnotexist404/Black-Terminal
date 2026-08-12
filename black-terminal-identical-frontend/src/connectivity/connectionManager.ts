@@ -13,6 +13,8 @@ export class ConnectionManager {
   private subscriptions = new Map<string, ConnectionSubscription[]>();
   private heartbeatTimers = new Map<string, number>();
   private heartbeatReleases = new Map<string, () => void>();
+  private connectInFlight = new Map<string, Promise<ConnectionRecord>>();
+  private reconnectInFlight = new Map<string, Promise<ConnectionRecord | null>>();
   private heartbeatInFlight = new Set<string>();
   private listeners = new Set<ConnectionListener>();
 
@@ -31,6 +33,17 @@ export class ConnectionManager {
   }
 
   async connect(request: ConnectRequest) {
+    const key = `${request.adapterId}:${request.provider}:${request.label}`;
+    const active = this.connectInFlight.get(key);
+    if (active) return active;
+    const pending = this.performConnect(request).finally(() => {
+      if (this.connectInFlight.get(key) === pending) this.connectInFlight.delete(key);
+    });
+    this.connectInFlight.set(key, pending);
+    return pending;
+  }
+
+  private async performConnect(request: ConnectRequest) {
     const adapter = this.getAdapter(request.adapterId);
     const startedAt = Date.now();
     const connection = await adapter.connect(request);
@@ -137,6 +150,16 @@ export class ConnectionManager {
   }
 
   async reconnect(connectionId: string) {
+    const active = this.reconnectInFlight.get(connectionId);
+    if (active) return active;
+    const pending = this.performReconnect(connectionId).finally(() => {
+      if (this.reconnectInFlight.get(connectionId) === pending) this.reconnectInFlight.delete(connectionId);
+    });
+    this.reconnectInFlight.set(connectionId, pending);
+    return pending;
+  }
+
+  private async performReconnect(connectionId: string) {
     const connection = this.connections.get(connectionId);
     if (!connection) return null;
     const adapter = this.getAdapter(connection.adapterId);
@@ -159,35 +182,62 @@ export class ConnectionManager {
       health: reconnecting.health
     });
 
-    const restored = adapter.reconnect ? await adapter.reconnect(reconnecting) : await adapter.connect({
-      adapterId: reconnecting.adapterId,
-      category: reconnecting.category,
-      provider: reconnecting.provider,
-      label: reconnecting.label,
-      metadata: reconnecting.metadata
-    });
-    const next = this.patchConnection(connectionId, {
-      ...restored,
-      id: connectionId,
-      health: {
-        ...restored.health,
-        reconnectCount: reconnecting.health.reconnectCount,
-        lastSuccessfulHeartbeat: Date.now()
-      },
-      updatedAt: Date.now()
-    });
-    if (next) {
-      this.emit({
-        type: "connection.restored",
-        connectionId,
-        provider: next.provider,
-        category: next.category,
-        time: Date.now(),
-        health: next.health
+    try {
+      const restored = adapter.reconnect ? await adapter.reconnect(reconnecting) : await adapter.connect({
+        adapterId: reconnecting.adapterId,
+        category: reconnecting.category,
+        provider: reconnecting.provider,
+        label: reconnecting.label,
+        metadata: reconnecting.metadata
       });
+      const next = this.patchConnection(connectionId, {
+        ...restored,
+        id: connectionId,
+        health: {
+          ...restored.health,
+          reconnectCount: reconnecting.health.reconnectCount,
+          lastSuccessfulHeartbeat: Date.now()
+        },
+        updatedAt: Date.now()
+      });
+      if (next) {
+        this.emit({
+          type: "connection.restored",
+          connectionId,
+          provider: next.provider,
+          category: next.category,
+          time: Date.now(),
+          health: next.health
+        });
+        this.notify();
+      }
+      return next;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const authenticationFailure = /auth|credential|api[ -]?key|signature|permission/i.test(message);
+      const failed = this.patchConnection(connectionId, {
+        status: authenticationFailure ? "auth-failed" : "degraded",
+        metadata: { ...reconnecting.metadata, lifecycle: authenticationFailure ? "AUTHENTICATION_ERROR" : "DEGRADED" },
+        health: {
+          ...reconnecting.health,
+          status: authenticationFailure ? "auth-failed" : "degraded",
+          authentication: authenticationFailure ? "failed" : reconnecting.health.authentication,
+          heartbeat: "failed",
+          lastError: message
+        }
+      });
+      if (failed) this.emit({
+        type: authenticationFailure ? "connection.authenticationFailed" : "connection.lost",
+        connectionId,
+        provider: failed.provider,
+        category: failed.category,
+        time: Date.now(),
+        health: failed.health,
+        message
+      }, "error");
       this.notify();
+      throw error;
     }
-    return next;
   }
 
   async heartbeat(connectionId: string) {
@@ -244,7 +294,7 @@ export class ConnectionManager {
           health: failed.health,
           message
         }, "warning");
-        void this.reconnect(connectionId);
+        void this.reconnect(connectionId).catch(() => undefined);
       }
       this.notify();
       return failed;

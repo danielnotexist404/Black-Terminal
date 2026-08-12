@@ -1,5 +1,6 @@
 import { blackCoreEventBus } from "../core/blackCore";
 import { createId } from "../core/ids";
+import { canonicalPositionKey, deduplicateCanonicalPositions } from "./canonicalPosition";
 import type { ExecutionReport, ExecutionRequest } from "../execution/types";
 import type {
   ManagedPosition,
@@ -27,6 +28,7 @@ type ProtectionPatch = {
 
 export class PositionManager {
   private positions = new Map<string, ManagedPosition>();
+  private externalPositionSources = new Map<string, string>();
   private listeners = new Set<PositionListener>();
 
   subscribe(listener: PositionListener) {
@@ -59,19 +61,54 @@ export class PositionManager {
   }
 
   syncExternalPositions(positions: PortfolioPosition[], source = "portfolio-sync") {
-    for (const position of positions) {
-      const current = this.positions.get(position.id);
+    const incoming = deduplicateCanonicalPositions(positions).positions;
+    const incomingKeys = new Set(incoming.map(canonicalPositionKey));
+    const retainedIds = new Set<string>();
+
+    for (const position of incoming) {
+      const key = canonicalPositionKey(position);
+      const matching = this.listActivePositions().filter((candidate) => canonicalPositionKey(candidate) === key);
+      const current = matching.find((candidate) => this.externalPositionSources.get(candidate.id) === source) || matching[0];
+      for (const duplicate of matching) {
+        if (duplicate.id === current?.id) continue;
+        this.positions.delete(duplicate.id);
+        this.externalPositionSources.delete(duplicate.id);
+      }
       if (current) {
-        this.patchPosition(position.id, {
+        const next: ManagedPosition = {
+          ...current,
           ...position,
-          health: this.calculateHealth({ ...current, ...position }),
+          id: current.id,
+          canonicalKey: position.canonicalKey || key,
+          lifecycleState: current.protections.length > 0 ? "protected" : "open",
+          health: this.calculateHealth({ ...current, ...position, protections: current.protections }),
           updatedAt: Date.now()
-        }, "position-updated", `${position.symbol} synchronized from ${source}.`);
+        };
+        this.positions.set(current.id, next);
+        this.externalPositionSources.set(current.id, source);
+        retainedIds.add(current.id);
         continue;
       }
-      const managed = this.toManagedPosition(position, source);
+      const managed = this.toManagedPosition({ ...position, canonicalKey: position.canonicalKey || key }, source);
       this.positions.set(managed.id, managed);
+      this.externalPositionSources.set(managed.id, source);
+      retainedIds.add(managed.id);
       this.emitTimeline(managed, "position-opened", `${managed.symbol} synchronized as managed position.`, { source });
+    }
+
+    for (const [positionId, positionSource] of this.externalPositionSources) {
+      if (positionSource !== source || retainedIds.has(positionId)) continue;
+      const stale = this.positions.get(positionId);
+      if (stale && !incomingKeys.has(canonicalPositionKey(stale))) {
+        this.positions.set(positionId, {
+          ...stale,
+          quantity: 0,
+          lifecycleState: "closed",
+          closedAt: Date.now(),
+          updatedAt: Date.now()
+        });
+      }
+      this.externalPositionSources.delete(positionId);
     }
     this.notify();
   }

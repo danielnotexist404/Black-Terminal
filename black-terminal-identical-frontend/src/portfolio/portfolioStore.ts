@@ -17,6 +17,7 @@ let orders: OrderUpdate[] = [];
 let snapshotCache: { value: PortfolioSnapshot; loadedAt: number; scopeKey: string } | null = null;
 let snapshotRequest: { value: Promise<PortfolioSnapshot>; scopeKey: string } | null = null;
 const snapshotFreshMs = 2000;
+const lastVerifiedSnapshots = new Map<string, PortfolioSnapshot>();
 
 function buildCurves() {
   return {
@@ -37,7 +38,7 @@ export async function getPortfolioSnapshot(activeAccountIds?: string[]): Promise
   }
   if (snapshotRequest?.scopeKey === scopeKey) return snapshotRequest.value;
   const finish = blackCorePerformanceMonitor.startSpan("account.snapshot_ms");
-  const request = loadPortfolioSnapshot(scopedAccountIds)
+  const request = loadPortfolioSnapshot(scopedAccountIds, scopeKey)
     .then((value) => {
       snapshotCache = { value, loadedAt: Date.now(), scopeKey };
       return value;
@@ -54,13 +55,18 @@ export function invalidatePortfolioSnapshot() {
   snapshotCache = null;
 }
 
-async function loadPortfolioSnapshot(activeAccountIds?: string[]): Promise<PortfolioSnapshot> {
+async function loadPortfolioSnapshot(activeAccountIds: string[] | undefined, scopeKey: string): Promise<PortfolioSnapshot> {
   try {
     const remoteSnapshot = await fetchPortfolioSnapshotFromApi(activeAccountIds);
-    if (remoteSnapshot) return remoteSnapshot;
+    if (remoteSnapshot) {
+      lastVerifiedSnapshots.set(scopeKey, remoteSnapshot);
+      return remoteSnapshot;
+    }
   } catch (error) {
     console.error("Portfolio API snapshot failed; returning the last verified local state without fabricating broker data.", error);
   }
+  const lastVerified = lastVerifiedSnapshots.get(scopeKey);
+  if (lastVerified) return lastVerified;
 
   const scopedAccounts = activeAccountIds ? accounts.filter((account) => activeAccountIds.includes(account.id)) : accounts;
   const scopedAccountSet = new Set(scopedAccounts.map((account) => account.id));

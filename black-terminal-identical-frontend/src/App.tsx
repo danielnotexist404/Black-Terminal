@@ -69,6 +69,7 @@ import { ProfilePage } from "./modules/profile/components/ProfilePage";
 import { PublicProfessionalProfilePage } from "./modules/profile/components/PublicProfessionalProfilePage";
 import { InvestmentGroupsPage } from "./modules/investment-groups/components/InvestmentGroupsPage";
 import { emptyPortfolioSnapshot, getPortfolioSnapshot, invalidatePortfolioSnapshot } from "./portfolio/portfolioStore";
+import { deduplicateCanonicalPositions } from "./positions/canonicalPosition";
 import type { PortfolioPosition } from "./positions/types";
 import type { PortfolioSnapshot } from "./portfolio/types";
 import { blackCoreOrderSyncService } from "./orders/orderSyncService";
@@ -722,6 +723,7 @@ export default function App() {
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [lastPrice, setLastPrice] = useState(66678.1);
   const prevPriceRef = useRef(lastPrice);
+  const portfolioRequestSequenceRef = useRef(0);
   const [recentCandles, setRecentCandles] = useState<Array<{ time: number; open: number; high: number; low: number; close: number; volume: number }>>([]);
   const recentCandlesRef = useRef(recentCandles);
 
@@ -832,7 +834,7 @@ export default function App() {
   }, [lockedMarketExchange]);
 
   const applyPortfolioSnapshot = useCallback((snapshot: PortfolioSnapshot) => {
-    const positions = snapshot.positions.filter((position) => connectedPortfolioAccountSet.has(position.accountId));
+    const positions = deduplicateCanonicalPositions(snapshot.positions.filter((position) => connectedPortfolioAccountSet.has(position.accountId))).positions;
     const orders = snapshot.orders.filter((order) => connectedPortfolioAccountSet.has(order.accountId));
     const orderSync = Object.fromEntries(Object.entries(snapshot.orderSync || {}).filter(([accountId]) => connectedPortfolioAccountSet.has(accountId)));
     setPortfolioPositions(positions);
@@ -842,7 +844,9 @@ export default function App() {
 
   const refreshPortfolioState = useCallback(async (force = false) => {
     if (force) invalidatePortfolioSnapshot();
+    const requestSequence = ++portfolioRequestSequenceRef.current;
     const snapshot = await getPortfolioSnapshot(connectedPortfolioAccountIds);
+    if (requestSequence !== portfolioRequestSequenceRef.current) return snapshot;
     applyPortfolioSnapshot(snapshot);
     return snapshot;
   }, [applyPortfolioSnapshot, connectedPortfolioAccountIds]);
@@ -850,14 +854,16 @@ export default function App() {
   useEffect(() => {
     if (!connectedPortfolioAccountScope) {
       blackCoreOrderSyncService.clear();
+      portfolioRequestSequenceRef.current += 1;
       applyPortfolioSnapshot(emptyPortfolioSnapshot());
       invalidatePortfolioSnapshot();
       return;
     }
     let mounted = true;
     const load = async () => {
+      const requestSequence = ++portfolioRequestSequenceRef.current;
       const snapshot = await getPortfolioSnapshot(connectedPortfolioAccountIds);
-      if (!mounted) return;
+      if (!mounted || requestSequence !== portfolioRequestSequenceRef.current) return;
       applyPortfolioSnapshot(snapshot);
     };
     void load();

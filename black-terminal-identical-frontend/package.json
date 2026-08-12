@@ -73,6 +73,7 @@
     "test:kioseff-parity": "node --experimental-strip-types scripts/kioseff-parity-harness-tests.ts",
     "test:kioseff-render": "node --experimental-strip-types scripts/kioseff-render-model-tests.ts",
     "benchmark:kioseff": "node --experimental-strip-types scripts/kioseff-performance-benchmarks.ts",
+    "test:bybit-position-state": "node --experimental-strip-types scripts/bybit-position-state-tests.ts",
     "test:kioseff-edges": "node --experimental-strip-types scripts/kioseff-edge-contract-tests.ts",
     "test:kioseff-platform": "node --experimental-strip-types scripts/kioseff-platform-parity-tests.ts",
     "test:kioseff-operational": "node --experimental-strip-types scripts/kioseff-operational-regression-tests.ts",

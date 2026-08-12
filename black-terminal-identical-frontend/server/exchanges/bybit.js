@@ -257,32 +257,41 @@ export async function findBybitOrderByClientOrderId(credentials, { marketKind = 
 export async function getBybitOpenOrdersSnapshot(credentials, options = {}) {
   const startedAt = Date.now();
   const network = options.network || "mainnet";
-  const requestedCategories = options.categories || ["linear", "spot"];
-  const categoryResults = await Promise.all(requestedCategories.map(async (category) => {
+  const requestedCategories = [...new Set(options.categories || ["linear", "inverse", "spot", "option"])];
+  const scopes = options.scopes || requestedCategories.flatMap((category) => category === "linear"
+    ? [
+      { category, settleCoin: "USDT", scopeKey: "linear:USDT" },
+      { category, settleCoin: "USDC", scopeKey: "linear:USDC" }
+    ]
+    : [{ category, scopeKey: category }]);
+  const scopeResults = await Promise.all(scopes.map(async (scope) => {
     try {
       const result = await getBybitOpenOrders(credentials, {
-        category,
-        settleCoin: category === "linear" ? (options.settleCoin || "USDT") : undefined,
-        symbol: options.symbolByCategory?.[category]
+        category: scope.category,
+        settleCoin: scope.settleCoin,
+        baseCoin: scope.baseCoin,
+        symbol: scope.symbol || options.symbolByCategory?.[scope.category]
       });
-      return { category, status: "ok", orders: result.orders, diagnostics: result.diagnostics };
+      return { ...scope, status: "ok", orders: result.orders, diagnostics: result.diagnostics };
     } catch (error) {
       return {
-        category,
+        ...scope,
         status: "failed",
         orders: [],
         error: error instanceof Error ? error.message : String(error)
       };
     }
   }));
-  const successfulCategories = categoryResults.filter((result) => result.status === "ok").map((result) => result.category);
-  const failedCategories = categoryResults.filter((result) => result.status === "failed").map((result) => ({
-    category: result.category,
+  const failedCategories = scopeResults.filter((result) => result.status === "failed").map((result) => ({
+    category: result.scopeKey,
     error: result.error
   }));
+  const successfulCategories = requestedCategories.filter((category) =>
+    scopeResults.filter((result) => result.category === category).every((result) => result.status === "ok")
+  );
   const uniqueOrders = new Map();
   let duplicateRecordCount = 0;
-  for (const order of categoryResults.flatMap((result) => result.orders)) {
+  for (const order of scopeResults.flatMap((result) => result.orders)) {
     const key = `${network}:bybit:${order.category}:${order.venueOrderId}`;
     const current = uniqueOrders.get(key);
     if (current) duplicateRecordCount += 1;
@@ -291,7 +300,10 @@ export async function getBybitOpenOrdersSnapshot(credentials, options = {}) {
     }
   }
   const orders = Array.from(uniqueOrders.values());
-  const ordersPerCategory = Object.fromEntries(categoryResults.map((result) => [result.category, result.orders.length]));
+  const ordersPerCategory = Object.fromEntries(requestedCategories.map((category) => [
+    category,
+    scopeResults.filter((result) => result.category === category).reduce((total, result) => total + result.orders.length, 0)
+  ]));
   const syncedAt = Date.now();
 
   return {
@@ -303,8 +315,8 @@ export async function getBybitOpenOrdersSnapshot(credentials, options = {}) {
       successfulCategories,
       failedCategories,
       ordersPerCategory,
-      pagination: Object.fromEntries(categoryResults.map((result) => [result.category, result.diagnostics || null])),
-      duplicateRecordCount: duplicateRecordCount + categoryResults.reduce((total, result) => total + Number(result.diagnostics?.duplicateRecordCount || 0), 0),
+      pagination: Object.fromEntries(scopeResults.map((result) => [result.scopeKey, result.diagnostics || null])),
+      duplicateRecordCount: duplicateRecordCount + scopeResults.reduce((total, result) => total + Number(result.diagnostics?.duplicateRecordCount || 0), 0),
       activeOrderCount: orders.length,
       verified: failedCategories.length === 0,
       stale: failedCategories.length > 0,
@@ -542,11 +554,12 @@ export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = 
 }
 
 export async function syncBybitAccountToSupabase(supabase, account, credentials, snapshot = {}) {
+  const snapshotStartedAt = Date.now();
   const balances = Array.isArray(snapshot.balances) ? snapshot.balances : await getBybitBalances(credentials);
   const positions = Array.isArray(snapshot.positions) ? snapshot.positions : await getBybitPositions(credentials);
 
   await replaceBybitBalances(supabase, account.id, balances);
-  await replaceBybitPositions(supabase, account.id, positions);
+  await replaceBybitPositions(supabase, account.id, positions, snapshotStartedAt);
 
   const equityUsd = balances.reduce((sum, balance) => sum + balance.usdValue, 0);
   const marginUsed = positions.reduce((sum, position) => sum + position.margin, 0);
@@ -1190,40 +1203,81 @@ export async function getBybitBalances(credentials) {
 }
 
 export async function getBybitPositions(credentials, options = {}) {
-  const response = await bybitRequest(credentials, "GET", "/v5/position/list", {
-    category: "linear",
-    ...(options.symbol ? { symbol: String(options.symbol).toUpperCase() } : { settleCoin: "USDT" }),
-    limit: "200"
-  });
-  const rows = response?.list || [];
+  const maxPages = Math.max(1, Math.min(100, Number(options.maxPages || 20)));
+  const scopes = options.symbol
+    ? [{ category: options.category || "linear", symbol: String(options.symbol).toUpperCase() }]
+    : (options.scopes || [
+      { category: "linear", settleCoin: "USDT" },
+      { category: "linear", settleCoin: "USDC" },
+      { category: "inverse" },
+      { category: "option" }
+    ]);
+  const records = [];
 
-  return rows
-    .map((position) => {
-      const quantity = Number(position.size || 0);
-      const direction = position.side === "Sell" ? "short" : position.side === "Buy" ? "long" : "flat";
+  for (const scope of scopes) {
+    const seenCursors = new Set();
+    let cursor;
+    let pages = 0;
+    do {
+      const cursorKey = cursor || "__FIRST_PAGE__";
+      if (seenCursors.has(cursorKey)) {
+        throw Object.assign(new Error(`Bybit position pagination repeated a cursor for ${scope.category}.`), { code: "BROKER_PAGINATION_INVALID", statusCode: 502 });
+      }
+      seenCursors.add(cursorKey);
+      const response = await bybitRequest(credentials, "GET", "/v5/position/list", {
+        category: scope.category,
+        symbol: scope.symbol,
+        settleCoin: scope.settleCoin,
+        baseCoin: scope.baseCoin,
+        cursor,
+        limit: "200"
+      });
+      for (const raw of response?.list || []) records.push(normalizeBybitPosition(raw, scope.category));
+      cursor = response?.nextPageCursor || undefined;
+      pages += 1;
+      if (cursor && pages >= maxPages) {
+        throw Object.assign(new Error(`Bybit position pagination exceeded ${maxPages} pages for ${scope.category}.`), { code: "BROKER_PAGINATION_LIMIT", statusCode: 502 });
+      }
+    } while (cursor);
+  }
 
-      return {
-        symbol: position.symbol,
-        direction,
-        quantity,
-        averagePrice: Number(position.avgPrice || 0),
-        currentPrice: Number(position.markPrice || 0),
-        unrealizedPnl: Number(position.unrealisedPnl || 0),
-        realizedPnl: Number(position.cumRealisedPnl || 0),
-        margin: Number(position.positionIM || position.positionValue || 0),
-        leverage: Number(position.leverage || 1),
-        liquidationPrice: nullableNumber(position.liqPrice),
-        stopLoss: nullableNumber(position.stopLoss),
-        takeProfit: nullableNumber(position.takeProfit),
-        positionIdx: Number(position.positionIdx || 0),
-        positionMode: Number(position.positionIdx || 0) === 0 ? "one-way" : "hedge",
-        marginMode: Number(position.tradeMode || 0) === 1 ? "isolated" : "cross",
-        riskId: Number(position.riskId || 0),
-        positionValue: Number(position.positionValue || 0),
-        openedAt: Number(position.createdTime || position.updatedTime || Date.now())
-      };
-    })
-    .filter((position) => options.includeEmpty || (position.quantity > 0 && position.direction !== "flat"));
+  const unique = new Map();
+  for (const position of records) {
+    if (!options.includeEmpty && (position.quantity <= 0 || position.direction === "flat")) continue;
+    const key = `${position.category}:${position.symbol}:${position.positionIdx}:${position.direction}`;
+    const current = unique.get(key);
+    if (!current || position.updatedAt >= current.updatedAt) unique.set(key, position);
+  }
+  return Array.from(unique.values());
+}
+
+export function normalizeBybitPosition(position, category = "linear") {
+  const quantity = Number(position?.size || 0);
+  const direction = position?.side === "Sell" ? "short" : position?.side === "Buy" ? "long" : "flat";
+  const positionIdx = Number(position?.positionIdx || 0);
+  return {
+    category,
+    marketKind: category === "option" ? "option" : "perpetual",
+    symbol: String(position?.symbol || "").toUpperCase(),
+    direction,
+    quantity,
+    averagePrice: Number(position?.avgPrice || 0),
+    currentPrice: Number(position?.markPrice || 0),
+    unrealizedPnl: Number(position?.unrealisedPnl || 0),
+    realizedPnl: Number(position?.cumRealisedPnl || 0),
+    margin: Number(position?.positionIM || position?.positionValue || 0),
+    leverage: Number(position?.leverage || 1),
+    liquidationPrice: nullableNumber(position?.liqPrice),
+    stopLoss: nullableNumber(position?.stopLoss),
+    takeProfit: nullableNumber(position?.takeProfit),
+    positionIdx,
+    positionMode: positionIdx === 0 ? "one-way" : "hedge",
+    marginMode: Number(position?.tradeMode || 0) === 1 ? "isolated" : "cross",
+    riskId: Number(position?.riskId || 0),
+    positionValue: Number(position?.positionValue || 0),
+    openedAt: Number(position?.createdTime || position?.updatedTime || Date.now()),
+    updatedAt: Number(position?.updatedTime || position?.createdTime || Date.now())
+  };
 }
 
 async function bybitRequest(credentials, method, path, query = {}, body) {

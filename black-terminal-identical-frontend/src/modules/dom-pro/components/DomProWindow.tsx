@@ -17,6 +17,7 @@ import type { PortfolioAccount } from "../../../portfolio/types";
 import { getPortfolioApiToken, syncExchangeAccountViaApi, type ExchangeAccountSyncPayload } from "../../../portfolio/portfolioApiClient";
 import { defaultRiskControls } from "../../../risk/types";
 import { buildVenueExecutionSchema, calculateVenueOrderPreview, sizeFromEquityPercent, validateVenueOrderDraft } from "../../../execution/venueExecutionSchema";
+import { requestUserText } from "../../../ui/requestUserText";
 import { DomAggregationEngine } from "../domAggregationEngine";
 import { aggregateDomSnapshot } from "../domAggregationClient";
 import { DomAdaptiveQualityController, type DomVisualQuality } from "../domAdaptiveQuality";
@@ -783,8 +784,8 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     setSettingsTransferStatus("Panel settings copied");
   }
 
-  function importPanelSettings() {
-    const raw = window.prompt("Paste DOM Pro panel settings JSON");
+  async function importPanelSettings() {
+    const raw = await requestUserText({ title: "Import DOM Pro Settings", message: "Paste DOM Pro panel settings JSON.", multiline: true, confirmLabel: "Import" });
     if (!raw) return;
     try {
       setPanelRegistry(importDomPanelSettings(raw, workspaceId, symbolKey));
@@ -1754,12 +1755,12 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             {customLayoutPresets.length > 0 && <label className="dom-pro-layout-preset-field"><span>Custom Preset</span><select defaultValue="" onChange={(event) => { const next = readDomProLayoutPreset(workspaceId, event.target.value); if (next) setLayout(next); event.currentTarget.value = ""; }}><option value="" disabled>Load preset</option>{customLayoutPresets.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>}
             <Toggle label="Auto-Save Layout" checked={layout.autoSave} onChange={(value) => setLayout((current) => ({ ...current, autoSave: value, updatedAt: Date.now() }))} />
             <button type="button" className="dom-pro-global-reset" onClick={() => { writeDomProLayout(layout, windowMode); setSettingsTransferStatus("Workspace layout saved"); }}>Save Layout</button>
-            <button type="button" className="dom-pro-global-reset" onClick={() => { const name = window.prompt("Preset name"); if (name) { saveDomProLayoutPreset(layout, name); setCustomLayoutPresets(listDomProLayoutPresets(workspaceId)); setSettingsTransferStatus(`Saved layout preset: ${name.trim()}`); } }}>Save as New Preset</button>
+            <button type="button" className="dom-pro-global-reset" onClick={() => { void requestUserText({ title: "Save DOM Pro Preset", message: "Preset name." }).then((name) => { if (name) { saveDomProLayoutPreset(layout, name); setCustomLayoutPresets(listDomProLayoutPresets(workspaceId)); setSettingsTransferStatus(`Saved layout preset: ${name.trim()}`); } }); }}>Save as New Preset</button>
             <button type="button" className="dom-pro-global-reset" onClick={() => setLayout((current) => { const target = createDomProLayout(workspaceId, current.preset).rootSplit.ratio; return resizeDomSplit(current, "root", "workspace-upper-bottom", target - current.rootSplit.ratio); })}>Reset Bottom Row</button>
             <button type="button" className="dom-pro-global-reset" onClick={() => { if (window.confirm("Reset the complete DOM Pro layout to its factory preset?")) setLayout(createDomProLayout(workspaceId, layout.preset)); }}>Restore Factory Layout</button>
             <button type="button" className="dom-pro-global-reset" onClick={() => setPanelRegistry((current) => resetAllDomPanels(current))}>Reset All Panels</button>
             <button type="button" className="dom-pro-global-reset" onClick={() => void exportPanelSettings()}>Export Settings</button>
-            <button type="button" className="dom-pro-global-reset" onClick={importPanelSettings}>Import Settings</button>
+            <button type="button" className="dom-pro-global-reset" onClick={() => void importPanelSettings()}>Import Settings</button>
             {settingsTransferStatus && <span className="dom-pro-settings-status">{settingsTransferStatus}</span>}
             {settings.bucketMultiplier === "custom" && <Field label="Custom Bucket" value={settings.customBucketSize} min={0.01} max={10000} step={0.01} onChange={(value) => patchSettings({ customBucketSize: value })} />}
           </section>

@@ -88,8 +88,4 @@ export type ExchangeConnectionDraft = {
   apiKey: string;
   apiSecret: string;
   passphrase?: string;
-  network?: "mainnet" | "demo";
-  executionEnvironment?: "DEMO" | "MAINNET_LIVE";
-  endpointProfile?: "GLOBAL" | "NETHERLANDS" | "TURKEY" | "KAZAKHSTAN" | "GEORGIA" | "UAE" | "EEA" | "INDONESIA" | "JAPAN";
-  liveConfirmation?: string;
 };

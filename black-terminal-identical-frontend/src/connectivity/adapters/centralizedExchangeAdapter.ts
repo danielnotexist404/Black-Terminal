@@ -54,6 +54,7 @@ export function createCentralizedExchangeConnectionAdapter(exchange: ExchangeId,
           })
         }),
         metadata: {
+          ...(request.metadata ?? {}),
           accountName: account.accountName,
           exchange,
           apiHealth: account.apiHealth,
@@ -66,8 +67,7 @@ export function createCentralizedExchangeConnectionAdapter(exchange: ExchangeId,
           mainnetValidated: certification.mainnetValidated,
           supportedProducts: certification.supportedProducts,
           supportedOrderTypes: certification.supportedOrderTypes,
-          limitations: certification.limitations,
-          ...(request.metadata ?? {})
+          limitations: certification.limitations
         },
         createdAt: Date.now(),
         updatedAt: Date.now()

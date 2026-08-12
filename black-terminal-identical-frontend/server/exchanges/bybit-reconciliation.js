@@ -12,6 +12,7 @@ import {
   normalizeBybitPermissionReport,
   resolveBybitExecutionPolicy
 } from "./bybit.js";
+import { bybitPositionKey, canonicalizeBybitPositions } from "./bybit-position-identity.js";
 import { replaceBybitBalances, replaceBybitPositions } from "./bybit-snapshot-store.js";
 import { settleSupabaseQuery } from "../supabase-query.js";
 
@@ -25,9 +26,9 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
   const endpointProfile = options.endpointProfile || credentials.endpointProfile || account.endpoint_profile || "GLOBAL";
   const [walletSnapshot, positionRows, openOrderSnapshot, strategies, metadata, accountState, riskLimits, priceLimit, apiKeyInfo] = await Promise.all([
     getBybitWalletSnapshot(credentials),
-    getBybitPositions(credentials, { symbol, includeEmpty: true }),
+    getBybitPositions(credentials),
     getBybitOpenOrdersSnapshot(credentials, {
-      categories: options.orderCategories || ["linear", "spot"],
+      categories: options.orderCategories || ["linear", "inverse", "spot", "option"],
       settleCoin: options.settleCoin || "USDT",
       network: options.network || "mainnet"
     }),
@@ -46,7 +47,7 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     venueUpdatedTime: Number(order.updatedTime || order.createdTime || Date.now()),
     lastSource: "rest-snapshot"
   }));
-  const positions = positionRows.filter((position) => position.quantity > 0 && position.direction !== "flat");
+  const positions = canonicalizeBybitPositions(positionRows, account.id);
   const balances = walletSnapshot.balances;
   const permissionReport = normalizeBybitPermissionReport(apiKeyInfo);
   const apiKeyFingerprint = crypto.createHash("sha256").update(String(credentials.apiKey || account.id)).digest("hex").slice(0, 24);
@@ -91,31 +92,14 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
   const changes = [];
 
   await upsertBalances(supabase, account.id, balances);
-  await upsertPositions(supabase, account.id, positions);
+  await upsertPositions(supabase, account.id, positions, startedAt);
   await updateKnownOrders(supabase, userId, account.id, openOrders);
 
   changes.push(...diffBalances(localBalances, balances));
   changes.push(...diffPositions(localPositions, positions));
   changes.push(...diffOrders(localOrders, openOrders));
 
-  const stalePositions = findStalePositions(localPositions, positions);
-  if (stalePositions.length > 0) {
-    await Promise.all(stalePositions.map((position) =>
-      supabase
-        .from("account_positions")
-        .update({
-          quantity: 0,
-          unrealized_pnl: 0,
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", position.id)
-    ));
-    changes.push(...stalePositions.map((position) => ({
-      type: "position_missing_on_venue",
-      symbol: position.symbol,
-      direction: position.direction
-    })));
-  }
+  changes.push(...findStalePositions(localPositions, positions).map((position) => ({ type: "position_missing_on_venue", symbol: position.symbol, direction: position.direction })));
 
   const externalStateChanged = changes.length > 0;
   const accountPatch = {
@@ -207,24 +191,28 @@ async function upsertBalances(supabase, accountId, balances) {
   await replaceBybitBalances(supabase, accountId, balances);
 }
 
-async function upsertPositions(supabase, accountId, positions) {
-  await replaceBybitPositions(supabase, accountId, positions);
+async function upsertPositions(supabase, accountId, positions, snapshotStartedAt) {
+  await replaceBybitPositions(supabase, accountId, positions, snapshotStartedAt);
 }
 
 async function updateKnownOrders(supabase, userId, accountId, openOrders) {
-  await Promise.all(openOrders.filter((order) => order.orderId).map((order) =>
+  const results = await Promise.all(openOrders.filter((order) => order.orderId).map((order) =>
     supabase
       .from("execution_orders")
       .update({
         status: order.status,
         filled_quantity: order.filledQuantity,
         average_fill_price: order.averageFillPrice,
-        client_order_id: order.clientOrderId || null
+        client_order_id: order.clientOrderId || null,
+        venue_updated_at: order.venueUpdatedTime
       })
       .eq("user_id", userId)
       .eq("account_id", accountId)
       .eq("exchange_order_id", order.orderId)
+      .lte("venue_updated_at", order.venueUpdatedTime)
   ));
+  const failed = results.find((result) => result?.error);
+  if (failed?.error) throw failed.error;
 }
 
 export function diffBalances(localRows, venueRows) {
@@ -263,5 +251,5 @@ export function findStalePositions(localRows, venueRows) {
 }
 
 function positionKey(row) {
-  return `${String(row.symbol || "").toUpperCase()}:${String(row.direction || "").toLowerCase()}`;
+  return String(row.canonical_key || row.canonicalKey || bybitPositionKey(row));
 }

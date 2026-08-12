@@ -30,7 +30,7 @@ const validCases = [
   ["execution", "protection", { accountId, symbol: "BTCUSDT", stopLoss: 60000 }],
   ["execution", "account-mode", { accountId, action: "set-leverage", symbol: "BTCUSDT", leverage: 2 }],
   ["execution", "strategy", { accountId, strategyId: "strategy-123", symbol: "BTCUSDT" }],
-  ["exchange", "connect", { exchange: "bybit", accountName: "Demo", apiKey: "key-12345", apiSecret: "secret-12345", network: "demo", executionEnvironment: "DEMO", endpointProfile: "GLOBAL" }],
+  ["exchange", "connect", { exchange: "bybit", accountName: "Demo", apiKey: "key-12345", apiSecret: "secret-12345" }],
   ["exchange", "diagnostics", { accountId, symbol: "BTCUSDT" }],
   ["exchange", "sync", { accountId, symbol: "BTCUSDT", marketKind: "perpetual" }],
   ["exchange", "mainnet-validation", { accountId, action: "enable", confirmation: "ENABLE BYBIT MAINNET" }],
@@ -94,10 +94,21 @@ assert.equal(tradingSchemasForTests.cloud.mandate.safeParse({ action: "accept", 
 
 const emptyPassphraseRequest = {
   method: "POST",
-  body: { exchange: "bybit", accountName: "Demo", apiKey: "key-12345", apiSecret: "secret-12345", passphrase: "", network: "demo", executionEnvironment: "DEMO", endpointProfile: "GLOBAL" }
+  body: { exchange: "bybit", accountName: "Demo", apiKey: "key-12345", apiSecret: "secret-12345", passphrase: "" }
 };
 validateTradingRequest(emptyPassphraseRequest, "exchange", "connect");
 assert.equal(emptyPassphraseRequest.body.passphrase, undefined, "Bybit connect must normalize an empty optional passphrase");
+assert.equal(
+  tradingSchemasForTests.exchange.connect.safeParse({
+    exchange: "bybit",
+    accountName: "Demo",
+    apiKey: "key-12345",
+    apiSecret: "secret-12345",
+    executionEnvironment: "DEMO"
+  }).success,
+  false,
+  "Bybit connect must reject legacy environment and region controls"
+);
 
 enforcePayloadLimit({ headers: {}, body: { safe: true } }, 1024);
 assert.throws(() => enforcePayloadLimit({ headers: { "content-length": "2048" }, body: {} }, 1024), /too large/i);

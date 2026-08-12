@@ -12,7 +12,7 @@ Certification states:
 6. `RESTART_RECOVERY_VERIFIED`
 7. `FULLY_ACTIVATED`
 
-`BLACK_CLOUD_MAINNET_ENABLED=true` only identifies the isolated live worker environment; it is not order consent. The frontend still requires `ENABLE LIVE BYBIT EXECUTION`, an environment-bound trade/read credential, matching Bybit UID, no withdrawal/transfer authority, and an active signed mandate. The first real order requires immediate explicit user confirmation.
+`BLACK_CLOUD_MAINNET_ENABLED=true` only identifies the isolated live worker environment; it is not manual-order authorization. Manual trading requires an authenticated, user-owned environment-bound trade/read credential, matching Bybit UID, verified trading permission, no withdrawal/transfer authority, active risk controls and server readiness. Connecting the manual account never creates an automation mandate; Black Cloud remains separately gated and explicitly authorized.
 
 Manual certification must use the real Black Terminal workflow: place and cancel a valid limit order, submit a user-approved market/marketable order, observe private order and execution events, synchronize the position, install and verify broker-native SL/TP, then reduce/close and reconcile final state.
 

@@ -105,10 +105,15 @@ export default async function handler(req, res) {
         usdValue: row.usd_value === null ? null : num(row.usd_value),
         updatedAt: row.updated_at
       })),
-      positions: positions.map((row) => ({
+      positions: positions.filter((row) => num(row.quantity) > 0).map((row) => ({
         id: row.id,
         accountId: row.account_id,
         exchange: row.exchange,
+        network: row.network || "mainnet",
+        category: row.category || "linear",
+        marketKind: row.market_kind || "perpetual",
+        positionIdx: Number(row.position_idx || 0),
+        canonicalKey: row.canonical_key || undefined,
         symbol: row.symbol,
         direction: row.direction,
         quantity: num(row.quantity),
@@ -122,7 +127,7 @@ export default async function handler(req, res) {
         stopLoss: row.stop_loss === null ? null : num(row.stop_loss),
         takeProfit: row.take_profit === null ? null : num(row.take_profit),
         openedAt: row.opened_at,
-        updatedAt: row.updated_at
+        updatedAt: Date.parse(row.updated_at) || 0
       })),
       orders,
       orderSync: Object.fromEntries([...liveSyncByAccount.entries()].map(([accountId, sync]) => [accountId, sync.orderSync]))

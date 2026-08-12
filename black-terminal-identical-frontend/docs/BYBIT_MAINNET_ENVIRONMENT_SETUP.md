@@ -64,19 +64,14 @@ the validated account jurisdiction in `BYBIT_ENDPOINT_PROFILE`, set
 Verify `/health/live`, `/health/ready` and `/metrics` before enabling the
 Vercel control plane.
 
-## Explicit confirmations
+## Authorization model
 
-Initial Mainnet connection and Black Cloud activation require:
-
-```text
-ENABLE LIVE BYBIT EXECUTION
-```
-
-Each live order continues to require the existing per-order confirmation:
-
-```text
-LIVE
-```
+Bybit connection is locked to Mainnet, the global endpoint, real funds and the
+Unified account model. Manual execution readiness is established from the
+authenticated server session, account ownership, broker trading permissions,
+risk policy and withdrawal/transfer prohibition. There is no browser phrase
+prompt. Persistent Black Cloud automation remains a separate, explicitly
+gated capability and is never enabled by connecting the manual account.
 
 Demo does not require a real-money confirmation, but its UI must state simulated
 funds and simulated execution.

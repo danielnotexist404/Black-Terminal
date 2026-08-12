@@ -12,11 +12,11 @@ export default async function handler(req, res) {
     const { error } = await supabase.from("broker_oauth_states").insert({
       user_id: user.id, provider: "bybit", state_hash: authorization.stateHash,
       account_name: String(req.body.accountName).trim(), execution_environment: "MAINNET_LIVE",
-      endpoint_profile: String(req.body.endpointProfile || "GLOBAL"), return_path: safeOAuthReturnPath(req.body.returnPath),
+      endpoint_profile: "GLOBAL", return_path: safeOAuthReturnPath(req.body.returnPath),
       expires_at: new Date(Date.now() + 10 * 60_000).toISOString()
     });
     if (error) throw error;
-    await supabase.from("execution_audit_logs").insert({ user_id: user.id, account_id: null, event_type: "broker_authorization_started", severity: "info", message: "Bybit OAuth authorization started.", metadata: { provider: "bybit", endpointProfile: req.body.endpointProfile || "GLOBAL" } });
+    await supabase.from("execution_audit_logs").insert({ user_id: user.id, account_id: null, event_type: "broker_authorization_started", severity: "info", message: "Bybit OAuth authorization started.", metadata: { provider: "bybit", endpointProfile: "GLOBAL" } });
     return res.status(200).json({ authorizationUrl: authorization.authorizationUrl, expiresInSeconds: 600 });
   } catch (error) {
     return sendError(res, error);

@@ -1,6 +1,6 @@
 import { getSupabaseAdmin, sendError } from "../../portfolio-api.js";
 import { exchangeBybitAuthorizationCode, hashOAuthState, publicAppUrl } from "../../exchanges/bybit-oauth.js";
-import { BYBIT_LIVE_CONNECTION_CONFIRMATION, establishExchangeAccount } from "../../exchanges/exchange-account-service.js";
+import { establishExchangeAccount } from "../../exchanges/exchange-account-service.js";
 
 export default async function handler(req, res) {
   try {
@@ -17,7 +17,7 @@ export default async function handler(req, res) {
     const authorization = await exchangeBybitAuthorizationCode(code);
     const result = await establishExchangeAccount({
       supabase, user: { id: oauthState.user_id }, authorization,
-      input: { exchange: "bybit", accountName: oauthState.account_name, apiKey: authorization.apiKey, apiSecret: authorization.apiSecret, executionEnvironment: "MAINNET_LIVE", endpointProfile: oauthState.endpoint_profile, liveConfirmation: BYBIT_LIVE_CONNECTION_CONFIRMATION }
+      input: { exchange: "bybit", accountName: oauthState.account_name, apiKey: authorization.apiKey, apiSecret: authorization.apiSecret }
     });
     const destination = publicAppUrl(oauthState.return_path);
     destination.searchParams.set("brokerOAuth", "success");

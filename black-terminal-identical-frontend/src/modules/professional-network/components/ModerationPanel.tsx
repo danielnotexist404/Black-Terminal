@@ -1,6 +1,7 @@
 import { Flag, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { professionalNetworkApi } from "../networkApi";
+import { requestUserText } from "../../../ui/requestUserText";
 
 type ReportRow = Record<string, unknown> & { id: string; target_type: string; reason: string; details?: string; status: string; created_at: string };
 
@@ -15,16 +16,16 @@ export function ModerationPanel() {
   }, [statusFilter]);
   useEffect(() => { void load(); }, [load]);
   const resolve = async (report: ReportRow, action: string) => {
-    const reason = window.prompt("Record an internal moderation reason. This is written to the immutable audit trail.");
+    const reason = await requestUserText({ title: "Moderation Audit", message: "Record an internal moderation reason. This is written to the immutable audit trail." });
     if (!reason?.trim()) return;
     const options: { scope?: string; durationDays?: number } = {};
     if (action === "restrict") {
-      const scope = window.prompt("Restriction scope: all, posting, comments, engagement, messaging, or media", "all")?.trim().toLowerCase();
+      const scope = (await requestUserText({ title: "Restriction Scope", message: "Choose: all, posting, comments, engagement, messaging, or media.", defaultValue: "all" }))?.trim().toLowerCase();
       if (!scope || !["all", "posting", "comments", "engagement", "messaging", "media"].includes(scope)) { setStatus("Choose a valid restriction scope."); return; }
       options.scope = scope;
     }
     if (action === "restrict" || action === "suspend") {
-      const duration = Number(window.prompt("Duration in days (1-365)", action === "suspend" ? "30" : "7"));
+      const duration = Number(await requestUserText({ title: "Restriction Duration", message: "Duration in days (1-365).", defaultValue: action === "suspend" ? "30" : "7" }));
       if (!Number.isInteger(duration) || duration < 1 || duration > 365) { setStatus("Choose a duration from 1 to 365 days."); return; }
       options.durationDays = duration;
     }

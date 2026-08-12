@@ -5,6 +5,7 @@ import type { ExchangeId, MarketKind } from "../market-data/types";
 import type { PortfolioPosition } from "../positions/types";
 import { defaultRiskControls } from "../risk/types";
 import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } from "./types";
+import { deduplicateCanonicalPositions } from "../positions/canonicalPosition";
 import { blackCorePerformanceMonitor } from "../performance/performanceMonitor";
 
 type ApiAccount = {
@@ -415,13 +416,13 @@ export async function activateBlackCloudConnectionViaApi(accountId: string, conf
   allowStrategyExecution?: boolean; allowCopyTrading?: boolean; allowInvestmentGroupExecution?: boolean;
   maxOrderNotional?: number; maxPositionNotional?: number; maxLeverage?: number; maxDailyLoss?: number;
   allowedStrategies?: string[]; allowedSymbols?: string[]; expiresAt?: string; preserveProtectiveOrders?: boolean;
-} = {}, liveConfirmation?: string) {
+} = {}) {
   const token = await getPortfolioApiToken();
   if (!token) return null;
   const response = await fetch("/api/cloud-execution/connection", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ accountId, confirmation, automation, liveConfirmation })
+    body: JSON.stringify({ accountId, confirmation, automation })
   });
   if (!response.ok) throw new Error(await readApiError(response));
   return response.json() as Promise<{ connection: { id: string; provider: string; healthStatus: string }; offlineExecution: string; readinessReason: string }>;
@@ -449,9 +450,14 @@ export async function connectExchangeAccountViaApi(draft: ExchangeConnectionDraf
   const token = await getPortfolioApiToken();
   if (!token) return null;
 
+  // Keep the production request surface minimal: environment, region and
+  // execution capabilities are server-owned policy, never browser inputs.
   const payload = {
-    ...draft,
-    passphrase: draft.passphrase?.trim() ? draft.passphrase : undefined
+    exchange: draft.exchange,
+    accountName: draft.accountName,
+    apiKey: draft.apiKey,
+    apiSecret: draft.apiSecret,
+    ...(draft.passphrase?.trim() ? { passphrase: draft.passphrase } : {})
   };
 
   const response = await fetch("/api/exchange-accounts/connect", {
@@ -492,13 +498,17 @@ export async function probeExchangeAccountHealthViaApi(accountId: string): Promi
   return response.json();
 }
 
-export async function beginBrokerAuthorizationViaApi(input: { provider: "bybit"; accountName: string; endpointProfile?: string; returnPath?: string }): Promise<{ authorizationUrl: string; expiresInSeconds: number } | null> {
+export async function beginBrokerAuthorizationViaApi(input: { provider: "bybit"; accountName: string; returnPath?: string }): Promise<{ authorizationUrl: string; expiresInSeconds: number } | null> {
   const token = await getPortfolioApiToken();
   if (!token) return null;
   const response = await fetch("/api/exchange-accounts/oauth-start", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify(input)
+    body: JSON.stringify({
+      provider: "bybit",
+      accountName: input.accountName,
+      ...(input.returnPath ? { returnPath: input.returnPath } : {})
+    })
   });
   if (!response.ok) throw new Error(await readApiError(response));
   return response.json();
@@ -822,10 +832,10 @@ function mapSnapshot(data: ApiSnapshot): PortfolioSnapshot {
       total: balance.total,
       usdValue: balance.usdValue ?? undefined
     })),
-    positions: data.positions.map((position) => ({
+    positions: deduplicateCanonicalPositions(data.positions.map((position) => ({
       ...position,
       openedAt: toMillis(position.openedAt)
-    })),
+    }))).positions,
     orders: data.orders.map(mapOrder),
     orderSync: data.orderSync,
     curves: buildCurves(data.summary)

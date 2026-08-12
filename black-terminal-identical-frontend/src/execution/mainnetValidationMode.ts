@@ -1,4 +1,5 @@
 const STORAGE_KEY = "black-terminal:mainnet-validation-mode:v1";
+import { requestUserText } from "../ui/requestUserText";
 
 export const MAINNET_VALIDATION_CONFIRMATION = "ENABLE LIVE MAINNET VALIDATION";
 export const MAINNET_ORDER_CONFIRMATION = "LIVE";
@@ -75,17 +76,17 @@ export function disableMainnetValidationMode(): MainnetValidationStatus {
   return setMainnetValidationMode(false);
 }
 
-export function promptEnableMainnetValidationMode(): MainnetValidationStatus {
+export async function promptEnableMainnetValidationMode(): Promise<MainnetValidationStatus> {
   if (typeof window === "undefined") {
     return { enabled: false, reason: "Mainnet validation mode requires an interactive browser session." };
   }
 
-  const response = window.prompt([
+  const response = await requestUserText({ title: "Live Mainnet Trading Warning", message: [
     "LIVE MAINNET TRADING WARNING",
     "This enables developer validation for real supported mainnet orders in this browser session only.",
     "Risk checks, venue readiness, wallet/API authorization, trading permissions, allowlists, and OMS/EMS routing still apply.",
     `Type ${MAINNET_VALIDATION_CONFIRMATION} to enable.`
-  ].join("\n\n"));
+  ].join("\n\n"), confirmLabel: "Enable" });
 
   if (response !== MAINNET_VALIDATION_CONFIRMATION) {
     return { enabled: false, reason: "Mainnet validation confirmation phrase did not match." };

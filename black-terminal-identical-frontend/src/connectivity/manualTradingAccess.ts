@@ -9,16 +9,8 @@ type ManualTradingAccount = {
   } | null;
 };
 
-const MANUAL_TRADING_LIFECYCLES = new Set<ConnectionLifecycleState>([
-  "CONNECTED_TRADING",
-  // This state can mean that Black Cloud/private-stream execution is unavailable.
-  // Authenticated manual REST orders remain independently protected by server risk checks.
-  "EXECUTION_BLOCKED"
-]);
-
-export function allowsManualExchangeTrading(account: ManualTradingAccount, lifecycle: ConnectionLifecycleState): boolean {
+export function allowsManualExchangeTrading(account: ManualTradingAccount): boolean {
   if (!account.permissions.includes("place-orders")) return false;
-  if (!MANUAL_TRADING_LIFECYCLES.has(lifecycle)) return false;
 
   const controls = account.riskControls;
   if (!controls) return true;

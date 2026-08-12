@@ -134,7 +134,7 @@ export async function restoreCentralizedExchangeConnections(): Promise<Connectio
     const account = item.account;
     const certification = getVenueCertification(account.exchange);
     const descriptor = payload.adapters.find((adapter) => adapter.id === account.exchange);
-    const manualTradingEnabled = allowsManualExchangeTrading(account, item.lifecycle);
+    const manualTradingEnabled = allowsManualExchangeTrading(account);
     const cloudExecutionReady = isCloudExecutionReady(item.lifecycle);
     const status = lifecycleToStatus(item.lifecycle);
     const capturedAt = item.health?.capturedAt ? Date.parse(item.health.capturedAt) : 0;

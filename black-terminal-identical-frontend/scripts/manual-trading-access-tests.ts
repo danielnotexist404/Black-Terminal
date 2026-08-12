@@ -6,13 +6,13 @@ const tradableAccount = {
   riskControls: { tradingEnabled: true, readOnlyMode: false, emergencyStop: false }
 };
 
-assert.equal(allowsManualExchangeTrading(tradableAccount, "CONNECTED_TRADING"), true);
-assert.equal(allowsManualExchangeTrading(tradableAccount, "EXECUTION_BLOCKED"), true, "Black Cloud/private-stream readiness must not disable authenticated manual REST trading");
+assert.equal(allowsManualExchangeTrading(tradableAccount), true);
+assert.equal(allowsManualExchangeTrading(tradableAccount), true, "Black Cloud/private-stream readiness must not disable authenticated manual REST trading");
 assert.equal(isCloudExecutionReady("EXECUTION_BLOCKED"), false, "offline cloud execution remains blocked independently");
-assert.equal(allowsManualExchangeTrading(tradableAccount, "CONNECTED_READ_ONLY"), false);
-assert.equal(allowsManualExchangeTrading(tradableAccount, "AUTHENTICATION_ERROR"), false);
-assert.equal(allowsManualExchangeTrading({ ...tradableAccount, permissions: ["read-account"] }, "EXECUTION_BLOCKED"), false);
-assert.equal(allowsManualExchangeTrading({ ...tradableAccount, riskControls: { tradingEnabled: false, readOnlyMode: true, emergencyStop: false } }, "EXECUTION_BLOCKED"), false);
-assert.equal(allowsManualExchangeTrading({ ...tradableAccount, riskControls: { tradingEnabled: true, readOnlyMode: false, emergencyStop: true } }, "EXECUTION_BLOCKED"), false);
+assert.equal(isCloudExecutionReady("DEGRADED"), false);
+assert.equal(allowsManualExchangeTrading(tradableAccount), true, "degraded cloud lifecycle must not override broker-granted manual permissions");
+assert.equal(allowsManualExchangeTrading({ ...tradableAccount, permissions: ["read-account"] }), false);
+assert.equal(allowsManualExchangeTrading({ ...tradableAccount, riskControls: { tradingEnabled: false, readOnlyMode: true, emergencyStop: false } }), false);
+assert.equal(allowsManualExchangeTrading({ ...tradableAccount, riskControls: { tradingEnabled: true, readOnlyMode: false, emergencyStop: true } }), false);
 
 console.log("Manual trading access tests passed: REST trading is independent from Black Cloud readiness.");

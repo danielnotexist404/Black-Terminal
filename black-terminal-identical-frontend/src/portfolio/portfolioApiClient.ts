@@ -3,6 +3,7 @@ import type { BrokerAuthorizationCapabilities, ConnectionLifecycleState, Connect
 import type { ExecutionDestination, ExecutionSource, MarginMode, OrderType, OrderUpdate, SizingMethod, TriggerSource, VenueStrategyParameters } from "../execution/types";
 import type { ExchangeId, MarketKind } from "../market-data/types";
 import type { PortfolioPosition } from "../positions/types";
+import type { BybitPositionProtectionDraft } from "../positions/positionPresentation";
 import { defaultRiskControls } from "../risk/types";
 import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } from "./types";
 import { deduplicateCanonicalPositions } from "../positions/canonicalPosition";
@@ -663,9 +664,9 @@ export async function cancelVenueOrderViaApi(order: OrderUpdate): Promise<OrderU
   return mapOrder(data.order);
 }
 
-export async function modifyVenueOrderViaApi(order: OrderUpdate, changes: { quantity?: number; limitPrice?: number }): Promise<OrderUpdate | null> {
+export async function modifyVenueOrderViaApi(order: OrderUpdate, changes: { quantity?: number; limitPrice?: number }): Promise<OrderUpdate> {
   const token = await getPortfolioApiToken();
-  if (!token) return null;
+  if (!token) throw new Error("Authenticated Black Terminal session is required.");
   const response = await fetch("/api/execution/modify", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -687,6 +688,18 @@ export async function modifyVenueOrderViaApi(order: OrderUpdate, changes: { quan
   if (!response.ok) throw new Error(await readApiError(response));
   const data = await response.json();
   return mapOrder(data.report);
+}
+
+export async function updateBybitPositionProtectionViaApi(draft: BybitPositionProtectionDraft): Promise<{ report: Record<string, unknown> }> {
+  const token = await getPortfolioApiToken();
+  if (!token) throw new Error("Authenticated Black Terminal session is required.");
+  const response = await fetch("/api/execution/protection", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(draft)
+  });
+  if (!response.ok) throw new Error(await readApiError(response));
+  return response.json();
 }
 
 export async function setBybitTradingEnabledViaApi(accountId: string, enabled: boolean, confirmation: string): Promise<{ status: "enabled" | "disabled"; accountId: string } | null> {

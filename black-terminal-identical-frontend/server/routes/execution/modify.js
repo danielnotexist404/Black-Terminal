@@ -44,6 +44,7 @@ export default async function handler(req, res) {
     }
     const report = await adapter.modifyOrder({
       marketKind: req.body.marketKind || existingOrder?.market_kind || "perpetual",
+      category: req.body.category || existingOrder?.category,
       symbol: String(req.body.symbol || existingOrder?.symbol).toUpperCase(),
       orderId: req.body.exchangeOrderId || req.body.orderId || existingOrder?.exchange_order_id,
       clientOrderId: req.body.clientOrderId || existingOrder?.client_order_id,

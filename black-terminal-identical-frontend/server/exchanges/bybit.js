@@ -804,7 +804,7 @@ export async function cancelAllBybitOrders(credentials, { marketKind = "perpetua
 
 export async function modifyBybitOrder(credentials, patch) {
   if (!patch.orderId && !patch.clientOrderId) throw new Error("Bybit modify requires orderId or clientOrderId.");
-  const category = patch.marketKind === "spot" ? "spot" : "linear";
+  const category = patch.category === "inverse" ? "inverse" : patch.marketKind === "spot" ? "spot" : "linear";
   const body = {
     category,
     symbol: patch.symbol,
@@ -878,19 +878,20 @@ export async function reverseBybitPosition(credentials, { marketKind = "perpetua
 }
 
 export async function setBybitPositionProtection(credentials, patch) {
-  const category = patch.marketKind === "spot" ? "spot" : "linear";
+  const category = patch.category === "inverse" ? "inverse" : patch.marketKind === "spot" ? "spot" : "linear";
   if (category === "spot") throw new Error("Bybit spot does not support native futures TP/SL protection.");
+  const triggerBy = (value) => value === "mark" ? "MarkPrice" : value === "index" ? "IndexPrice" : "LastPrice";
   const body = {
     category,
     symbol: patch.symbol,
-    tpslMode: patch.tpslMode || "Full",
+    tpslMode: patch.tpslMode === "partial" ? "Partial" : "Full",
     positionIdx: patch.positionIdx,
     takeProfit: patch.takeProfit !== undefined ? String(patch.takeProfit || 0) : undefined,
     stopLoss: patch.stopLoss !== undefined ? String(patch.stopLoss || 0) : undefined,
     trailingStop: patch.trailingStop !== undefined ? String(patch.trailingStop || 0) : undefined,
     activePrice: patch.trailingActivationPrice !== undefined ? String(patch.trailingActivationPrice || 0) : undefined,
-    tpTriggerBy: patch.tpTriggerBy || "LastPrice",
-    slTriggerBy: patch.slTriggerBy || "LastPrice"
+    tpTriggerBy: triggerBy(patch.tpTriggerBy),
+    slTriggerBy: triggerBy(patch.slTriggerBy)
   };
   const response = await bybitRequest(credentials, "POST", "/v5/position/trading-stop", {}, body);
   return {

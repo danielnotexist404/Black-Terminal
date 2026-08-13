@@ -27,7 +27,8 @@ import { marketCatalog } from "../../../market-data/marketCatalog";
 import type { ExchangeId } from "../../../market-data/types";
 import { blackCorePositionManager } from "../../../positions/positionManager";
 import { requestUserText } from "../../../ui/requestUserText";
-import type { ManagedPosition, PortfolioPosition } from "../../../positions/types";
+import type { ManagedPosition } from "../../../positions/types";
+import { formatPositionMoney } from "../../../positions/positionPresentation";
 import { canCreateInvestmentGroup, listInvestmentGroups } from "../../profile/professionalNetworkStore";
 import type { OrderUpdate } from "../../../execution/types";
 import { deduplicateCanonicalOrders } from "../../../orders/canonicalOrder";
@@ -96,16 +97,16 @@ const walletProviders: Array<{ id: WalletProviderId; label: string; chainHint: s
   { id: "phantom", label: "Phantom", chainHint: "Solana", defaultDex: "jupiter" }
 ];
 
-export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPosition[] }) {
+export function PortfolioPositionsPanel({
+  onPositionNavigate
+}: {
+  onPositionNavigate?: (position: ManagedPosition) => void;
+}) {
   const [managedPositions, setManagedPositions] = useState<ManagedPosition[]>(() => blackCorePositionManager.listActivePositions());
   const [positionMenu, setPositionMenu] = useState<{ x: number; y: number; position: ManagedPosition } | null>(null);
   const [positionActionStatus, setPositionActionStatus] = useState("");
 
   useEffect(() => blackCorePositionManager.subscribe(setManagedPositions), []);
-
-  useEffect(() => {
-    blackCorePositionManager.syncExternalPositions(positions, "portfolio-manager");
-  }, [positions]);
 
   useEffect(() => {
     const closeMenu = () => setPositionMenu(null);
@@ -165,7 +166,7 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
 
     try {
       if (action === "stats") {
-        setPositionActionStatus(`RR ${position.health.riskReward?.toFixed(2) ?? "-"} | RISK ${money.format(position.health.currentRisk)} | TIME ${Math.round(position.health.timeInTradeMs / 60000)}M`);
+        setPositionActionStatus(`RR ${position.health.riskReward?.toFixed(2) ?? "-"} | RISK ${formatPositionMoney(position.health.currentRisk)} | TIME ${Math.round(position.health.timeInTradeMs / 60000)}M`);
         return;
       }
 
@@ -329,19 +330,25 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
         <span>Exchange</span>
       </div>
       {managedPositions.map((position) => (
-        <div className="pm-table-row pm-positions-grid position-row-actionable" key={position.id} onContextMenu={(event) => openPositionMenu(event, position)}>
+        <div
+          className="pm-table-row pm-positions-grid position-row-actionable"
+          key={position.id}
+          onContextMenu={(event) => openPositionMenu(event, position)}
+          onDoubleClick={() => onPositionNavigate?.(position)}
+          title={`Double-click to open ${position.symbol} on the chart. Right-click to manage this position.`}
+        >
           <b>{position.symbol}</b>
           <span className={position.direction === "long" ? "green" : "red"}>{position.direction.toUpperCase()}</span>
           <span>{compact.format(position.quantity)}</span>
-          <span>{money.format(position.averagePrice)}</span>
-          <span>{money.format(position.currentPrice)}</span>
-          <span className={position.unrealizedPnl >= 0 ? "green" : "red"}>{money.format(position.unrealizedPnl)}</span>
-          <span>{money.format(position.realizedPnl)}</span>
-          <span>{money.format(position.margin)}</span>
+          <span>{formatPositionMoney(position.averagePrice)}</span>
+          <span>{formatPositionMoney(position.currentPrice)}</span>
+          <span className={position.unrealizedPnl >= 0 ? "green" : "red"}>{formatPositionMoney(position.unrealizedPnl)}</span>
+          <span>{formatPositionMoney(position.realizedPnl)}</span>
+          <span>{formatPositionMoney(position.margin)}</span>
           <span>{position.leverage}x</span>
-          <span>{position.liquidationPrice ? money.format(position.liquidationPrice) : "-"}</span>
-          <span>{position.stopLoss ? money.format(position.stopLoss) : "-"}</span>
-          <span>{position.takeProfit ? money.format(position.takeProfit) : "-"}</span>
+          <span>{position.liquidationPrice ? formatPositionMoney(position.liquidationPrice) : "-"}</span>
+          <span>{position.stopLoss ? formatPositionMoney(position.stopLoss) : "-"}</span>
+          <span>{position.takeProfit ? formatPositionMoney(position.takeProfit) : "-"}</span>
           <span>{Math.max(1, Math.round((Date.now() - position.openedAt) / 60000))}m</span>
           <span>{position.exchange.toUpperCase()}</span>
         </div>
@@ -381,15 +388,15 @@ export function PortfolioPositionsPanel({ positions }: { positions: PortfolioPos
 }
 
 export function PositionsWorkspace({
-  positions,
   orders = [],
   orderSync = {},
-  onRefreshOrders
+  onRefreshOrders,
+  onPositionNavigate
 }: {
-  positions: PortfolioPosition[];
   orders?: OrderUpdate[];
   orderSync?: PortfolioSnapshot["orderSync"];
   onRefreshOrders?: () => Promise<unknown>;
+  onPositionNavigate?: (position: ManagedPosition) => void;
 }) {
   const [showConnection, setShowConnection] = useState(false);
   const [venueKind, setVenueKind] = useState<VenueKind>("cex");
@@ -701,7 +708,7 @@ export function PositionsWorkspace({
   return (
     <div className="positions-workspace">
       <div className="positions-left-stack">
-        <PortfolioPositionsPanel positions={positions} />
+        <PortfolioPositionsPanel onPositionNavigate={onPositionNavigate} />
         <div className="positions-orders-panel">
           <div className="positions-orders-title">
             <span>Orders</span>

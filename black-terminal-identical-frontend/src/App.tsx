@@ -70,7 +70,8 @@ import { PublicProfessionalProfilePage } from "./modules/profile/components/Publ
 import { InvestmentGroupsPage } from "./modules/investment-groups/components/InvestmentGroupsPage";
 import { emptyPortfolioSnapshot, getPortfolioSnapshot, invalidatePortfolioSnapshot } from "./portfolio/portfolioStore";
 import { deduplicateCanonicalPositions } from "./positions/canonicalPosition";
-import type { PortfolioPosition } from "./positions/types";
+import { blackCorePositionManager } from "./positions/positionManager";
+import type { ManagedPosition, PortfolioPosition } from "./positions/types";
 import type { PortfolioSnapshot } from "./portfolio/types";
 import { blackCoreOrderSyncService } from "./orders/orderSyncService";
 import type { StrategyRuntimeKind } from "./modules/strategy-lab/types/strategy.types";
@@ -814,6 +815,10 @@ export default function App() {
   const visiblePortfolioOrderSync = useMemo(() => Object.fromEntries(Object.entries(portfolioOrderSync || {}).filter(([accountId]) => connectedPortfolioAccountSet.has(accountId))), [connectedPortfolioAccountSet, portfolioOrderSync]);
   const activeExecutionConnection = useMemo(() => activeRuntimeConnections.find((connection) => connection.id === activeExecutionVenueId) ?? null, [activeExecutionVenueId, activeRuntimeConnections]);
 
+  useEffect(() => {
+    blackCorePositionManager.syncExternalPositions(visiblePortfolioPositions, "portfolio-manager");
+  }, [visiblePortfolioPositions]);
+
   const lockedMarketExchange = useMemo(() => exchangeForConnection(activeExecutionConnection), [activeExecutionConnection]);
   const marketScopeLocked = Boolean(activeExecutionConnection && lockedMarketExchange);
   const exchangeMenuOptions = lockedMarketExchange ? [lockedMarketExchange] : marketCatalog;
@@ -1504,6 +1509,36 @@ export default function App() {
     setReplayStatus(defaultReplayStatus);
     setActiveNav("CHART");
   }, [lockedMarketExchange]);
+
+  const openPositionOnChart = useCallback((position: ManagedPosition) => {
+    const exchange = getExchangeOption(position.exchange);
+    if (lockedMarketExchange && exchange.id !== lockedMarketExchange.id) return;
+    const normalizedSymbol = position.symbol.replace(/[-_/\s]/g, "").toUpperCase();
+    const knownSymbols = availableSymbols.filter((candidate) => candidate.exchange === exchange.id);
+    const resolved = knownSymbols.find((candidate) => candidate.rawSymbol.replace(/[-_/\s]/g, "").toUpperCase() === normalizedSymbol)
+      ?? exchange.symbols.find((candidate) => candidate.rawSymbol.replace(/[-_/\s]/g, "").toUpperCase() === normalizedSymbol);
+    const quoteAsset = ["USDT", "USDC", "USD"].find((quote) => normalizedSymbol.endsWith(quote)) ?? "USDT";
+    const baseAsset = normalizedSymbol.slice(0, -quoteAsset.length) || normalizedSymbol;
+    const target: MarketSymbolOption = resolved ?? {
+      exchange: exchange.id,
+      rawSymbol: position.symbol.toUpperCase(),
+      label: normalizedSymbol,
+      token: baseAsset,
+      baseAsset,
+      quoteAsset,
+      marketKind: position.marketKind === "spot" ? "spot" : "perpetual"
+    };
+
+    setSelectedExchange(exchange);
+    setAvailableSymbols((current) => current.some((candidate) => candidate.exchange === target.exchange && candidate.rawSymbol === target.rawSymbol)
+      ? current
+      : [...exchange.symbols, target]);
+    setSymbol(target);
+    setSymbolQuery("");
+    setReplayControls(defaultReplayControls);
+    setReplayStatus(defaultReplayStatus);
+    setActiveNav("CHART");
+  }, [availableSymbols, lockedMarketExchange]);
 
   const createAlertFromScannerResult = useCallback((result: ScannerResult) => {
     if (!result.lastPrice) return;
@@ -2332,10 +2367,10 @@ export default function App() {
             />
           ) : activeNav === "POSITIONS" ? (
             <PositionsWorkspace
-              positions={visiblePortfolioPositions}
               orders={visiblePortfolioOrders}
               orderSync={visiblePortfolioOrderSync}
               onRefreshOrders={() => refreshPortfolioState(true)}
+              onPositionNavigate={openPositionOnChart}
             />
           ) : (
             <div className="bottom-blank" />

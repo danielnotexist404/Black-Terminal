@@ -104,7 +104,7 @@ const executionSchemas = {
     quantity: positive.optional(), marketKind: marketKind.optional(), clientOrderId: id.optional(), mainnetConfirmed: boolean.optional(), liveConfirmation: shortText.optional()
   }).strict(),
   protection: z.object({
-    accountId: id, symbol, marketKind: marketKind.optional(), positionIdx: z.number().int().min(0).max(2).optional(),
+    accountId: id, symbol, marketKind: marketKind.optional(), category: z.enum(["linear", "inverse"]).optional(), positionIdx: z.number().int().min(0).max(2).optional(),
     takeProfit: positive.optional(), stopLoss: positive.optional(), trailingStop: nonNegative.optional(), trailingActivationPrice: positive.optional(),
     cancelTakeProfit: boolean.optional(), cancelStopLoss: boolean.optional(), cancelTrailingStop: boolean.optional(),
     tpslMode: z.enum(["full", "partial"]).optional(), tpTriggerBy: triggerSource.optional(), slTriggerBy: triggerSource.optional(),

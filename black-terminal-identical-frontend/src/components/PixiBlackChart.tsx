@@ -47,6 +47,15 @@ import { requestUserText } from "../ui/requestUserText";
 import type { OrderUpdate } from "../execution/types";
 import { blackCorePositionManager } from "../positions/positionManager";
 import type { ManagedPosition, PositionProtectionOrder, PositionProtectionType } from "../positions/types";
+import {
+  buildBybitProtectionDraft,
+  formatSignedPositionMoney,
+  isEditableNativeProtection,
+  projectedLinearPositionPnl,
+  quantizeProtectionPrice,
+  type EditableProtectionType
+} from "../positions/positionPresentation";
+import { modifyVenueOrderViaApi, updateBybitPositionProtectionViaApi } from "../portfolio/portfolioApiClient";
 import { AifIndicatorOverlay } from "../modules/aif/components/AifIndicatorOverlay";
 import { canonicalOrderKey, deduplicateCanonicalOrders } from "../orders/canonicalOrder";
 import { OrderManagementMenu } from "../orders/OrderManagementMenu";
@@ -184,6 +193,26 @@ type ChartContextMenuState = {
 };
 
 type OrderContextMenuState = { x: number; y: number; order: OrderUpdate };
+
+type PendingProtectionChange = {
+  positionId: string;
+  protectionId: string;
+  type: EditableProtectionType;
+  symbol: string;
+  originalPrice: number;
+  proposedPrice: number;
+  phase: "dragging" | "confirming" | "submitting";
+  error?: string;
+};
+
+type PendingOrderPriceChange = {
+  order: OrderUpdate;
+  orderKey: string;
+  originalPrice: number;
+  proposedPrice: number;
+  phase: "dragging" | "confirming" | "submitting" | "synchronizing";
+  error?: string;
+};
 
 type AlertToast = {
   id: number;
@@ -340,6 +369,13 @@ function protectionLabel(type: PositionProtectionType) {
   return "OCO";
 }
 
+function isDraggableLimitOrder(order: OrderUpdate) {
+  const type = String(order.orderType || order.type || "").trim().toLowerCase();
+  return (type === "limit" || type === "post-only") &&
+    ["pending", "accepted", "working", "partially-filled"].includes(order.status) &&
+    Number.isFinite(order.price) && Number(order.price) > 0;
+}
+
 function formatReplayLabel(time?: number) {
   if (!time) return "Waiting";
   return new Date(time * 1000).toLocaleString(undefined, {
@@ -492,6 +528,9 @@ export function PixiBlackChart({
   const [orderContextMenu, setOrderContextMenu] = useState<OrderContextMenuState | null>(null);
   const [executionTicketPreset, setExecutionTicketPreset] = useState<UnifiedExecutionTicketPreset | null>(null);
   const [managedPositions, setManagedPositions] = useState<ManagedPosition[]>(() => blackCorePositionManager.listActivePositions());
+  const [pendingProtectionChange, setPendingProtectionChange] = useState<PendingProtectionChange | null>(null);
+  const [pendingOrderPriceChange, setPendingOrderPriceChange] = useState<PendingOrderPriceChange | null>(null);
+  const [confirmedOrderPrices, setConfirmedOrderPrices] = useState<Record<string, number>>({});
   const [positionOverlayTick, setPositionOverlayTick] = useState(0);
   const [alertToast, setAlertToast] = useState<AlertToast | null>(null);
   const [editingChartAlertId, setEditingChartAlertId] = useState<string | null>(null);
@@ -548,6 +587,7 @@ export function PixiBlackChart({
       price: number;
       tone: "entry" | "tp" | "sl" | "trail" | "liq";
       protection?: PositionProtectionOrder;
+      pnl?: number | null;
       y?: number | null;
     }> = [
       { id: "entry", label: "AVG ENTRY", price: activeChartPosition.averagePrice, tone: "entry" }
@@ -569,9 +609,19 @@ export function PixiBlackChart({
     }
 
     return lines
-      .map((line) => ({ ...line, y: engineRef.current?.getScreenYForPrice(line.price) ?? null }))
+      .map((line) => {
+        const previewPrice = line.protection && pendingProtectionChange?.positionId === activeChartPosition.id && pendingProtectionChange.protectionId === line.protection.id
+          ? pendingProtectionChange.proposedPrice
+          : line.price;
+        return {
+          ...line,
+          price: previewPrice,
+          pnl: line.tone === "entry" ? activeChartPosition.unrealizedPnl : projectedLinearPositionPnl(activeChartPosition, previewPrice),
+          y: engineRef.current?.getScreenYForPrice(previewPrice) ?? null
+        };
+      })
       .filter((line) => line.y !== null);
-  }, [activeChartPosition, positionOverlayTick]);
+  }, [activeChartPosition, pendingProtectionChange, positionOverlayTick]);
 
   const activeChartOrders = useMemo(() => {
     const chartSymbol = normalizeChartSymbol(displaySymbol || marketSymbol.rawSymbol);
@@ -583,10 +633,33 @@ export function PixiBlackChart({
   }, [activeOrders, displaySymbol, marketSymbol.exchange, marketSymbol.rawSymbol]);
 
   const chartOrderLines = useMemo(() => activeChartOrders
-    .map((order) => ({ order, y: engineRef.current?.getScreenYForPrice(Number(order.price)) ?? null }))
-    .filter((line) => line.y !== null), [activeChartOrders, positionOverlayTick]);
+    .map((order) => {
+      const orderKey = canonicalOrderKey(order);
+      const price = pendingOrderPriceChange?.orderKey === orderKey
+        ? pendingOrderPriceChange.proposedPrice
+        : confirmedOrderPrices[orderKey] ?? Number(order.price);
+      return { order, orderKey, price, y: engineRef.current?.getScreenYForPrice(price) ?? null };
+    })
+    .filter((line) => line.y !== null), [activeChartOrders, confirmedOrderPrices, pendingOrderPriceChange, positionOverlayTick]);
 
   useEffect(() => blackCorePositionManager.subscribe(setManagedPositions), []);
+
+  useEffect(() => {
+    setConfirmedOrderPrices((current) => {
+      const keys = Object.keys(current);
+      if (keys.length === 0) return current;
+      const next = { ...current };
+      let changed = false;
+      for (const key of keys) {
+        const order = activeChartOrders.find((candidate) => canonicalOrderKey(candidate) === key);
+        if (!order || Math.abs(Number(order.price) - current[key]) < 1e-9) {
+          delete next[key];
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [activeChartOrders]);
 
   useEffect(() => {
     if (!activeChartPosition && activeChartOrders.length === 0) return;
@@ -2484,19 +2557,173 @@ export function PixiBlackChart({
     showLocalAlertToast("Position Statistics", `PnL ${formatAlertPrice(position.health.currentPnl)} | RR ${position.health.riskReward?.toFixed(2) ?? "-"}`);
   };
 
+  const cancelPendingProtectionChange = () => {
+    if (pendingProtectionChange?.phase === "submitting") return;
+    setPendingProtectionChange(null);
+  };
+
+  const confirmPendingProtectionChange = async () => {
+    if (!pendingProtectionChange || pendingProtectionChange.phase === "submitting") return;
+    const position = blackCorePositionManager.getPosition(pendingProtectionChange.positionId);
+    if (!position) {
+      setPendingProtectionChange((current) => current ? { ...current, error: "Position is no longer open." } : current);
+      return;
+    }
+    try {
+      setPendingProtectionChange((current) => current ? { ...current, phase: "submitting", error: undefined } : current);
+      const draft = buildBybitProtectionDraft(position, pendingProtectionChange.type, pendingProtectionChange.proposedPrice);
+      await updateBybitPositionProtectionViaApi(draft);
+      blackCorePositionManager.moveProtection(position.id, pendingProtectionChange.protectionId, pendingProtectionChange.proposedPrice);
+      setPendingProtectionChange(null);
+      showLocalAlertToast(
+        pendingProtectionChange.type === "take-profit" ? "Take Profit Updated" : "Stop Loss Updated",
+        `${position.symbol} protection is confirmed by the Bybit API.`
+      );
+    } catch (error) {
+      setPendingProtectionChange((current) => current ? {
+        ...current,
+        phase: "confirming",
+        error: error instanceof Error ? error.message : String(error)
+      } : current);
+    }
+  };
+
   const dragProtectionLine = (protection: PositionProtectionOrder | undefined) => (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (!activeChartPosition || !protection) return;
+    if (event.button !== 0 || !activeChartPosition || !isEditableNativeProtection(protection) || pendingOrderPriceChange || pendingProtectionChange?.phase === "submitting") return;
     event.preventDefault();
     event.stopPropagation();
+    const originalPrice = Number(protection.price);
+    if (!Number.isFinite(originalPrice) || originalPrice <= 0) return;
+    const initial: PendingProtectionChange = {
+      positionId: activeChartPosition.id,
+      protectionId: protection.id,
+      type: protection.type,
+      symbol: activeChartPosition.symbol,
+      originalPrice,
+      proposedPrice: originalPrice,
+      phase: "dragging"
+    };
+    setPendingProtectionChange(initial);
+    let proposedPrice = originalPrice;
     const move = (moveEvent: MouseEvent) => {
       const price = engineRef.current?.getPriceFromClientY(moveEvent.clientY);
       if (price && Number.isFinite(price)) {
-        blackCorePositionManager.moveProtection(activeChartPosition.id, protection.id, Number(price.toFixed(2)));
+        proposedPrice = quantizeProtectionPrice(
+          price,
+          marketSymbol.metadata?.tickSize,
+          marketSymbol.metadata?.pricePrecision ?? marketSymbol.pricePrecision ?? 2
+        );
+        setPendingProtectionChange((current) => current && current.protectionId === protection.id
+          ? { ...current, proposedPrice, phase: "dragging", error: undefined }
+          : current);
       }
     };
     const up = () => {
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
+      if (proposedPrice === originalPrice) {
+        setPendingProtectionChange(null);
+        return;
+      }
+      setPendingProtectionChange((current) => current && current.protectionId === protection.id
+        ? { ...current, proposedPrice, phase: "confirming" }
+        : { ...initial, proposedPrice, phase: "confirming" });
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
+  const cancelPendingOrderPriceChange = () => {
+    if (pendingOrderPriceChange?.phase === "submitting" || pendingOrderPriceChange?.phase === "synchronizing") return;
+    setPendingOrderPriceChange(null);
+  };
+
+  const confirmPendingOrderPriceChange = async () => {
+    if (!pendingOrderPriceChange || pendingOrderPriceChange.phase !== "confirming") return;
+    const pending = pendingOrderPriceChange;
+    const currentOrder = activeChartOrders.find((candidate) => canonicalOrderKey(candidate) === pending.orderKey);
+    if (!currentOrder) {
+      setPendingOrderPriceChange((current) => current ? { ...current, error: "This order is no longer active." } : current);
+      return;
+    }
+    const currentPrice = confirmedOrderPrices[pending.orderKey] ?? Number(currentOrder.price);
+    if (!Number.isFinite(currentPrice) || Math.abs(currentPrice - pending.originalPrice) > 1e-9) {
+      setPendingOrderPriceChange((current) => current ? {
+        ...current,
+        originalPrice: currentPrice,
+        proposedPrice: currentPrice,
+        error: "The venue order changed while this confirmation was open. Drag the refreshed line again."
+      } : current);
+      return;
+    }
+
+    try {
+      setPendingOrderPriceChange((current) => current ? { ...current, phase: "submitting", error: undefined } : current);
+      await modifyVenueOrderViaApi(currentOrder, { limitPrice: pending.proposedPrice });
+    } catch (error) {
+      setPendingOrderPriceChange((current) => current ? {
+        ...current,
+        phase: "confirming",
+        error: error instanceof Error ? error.message : String(error)
+      } : current);
+      return;
+    }
+
+    setConfirmedOrderPrices((current) => ({ ...current, [pending.orderKey]: pending.proposedPrice }));
+    setPendingOrderPriceChange((current) => current ? { ...current, phase: "synchronizing" } : current);
+    let synchronizationWarning = "";
+    try {
+      await onRefreshOrders?.();
+    } catch (error) {
+      synchronizationWarning = error instanceof Error ? error.message : String(error);
+    }
+    setPendingOrderPriceChange(null);
+    showLocalAlertToast(
+      synchronizationWarning ? "Order Updated — Sync Pending" : "Limit Order Updated",
+      synchronizationWarning
+        ? `${pending.order.exchange.toUpperCase()} acknowledged the price; local refresh will retry automatically.`
+        : `${pending.order.exchange.toUpperCase()} acknowledged ${pending.order.symbol} at ${formatAlertPrice(pending.proposedPrice)}.`
+    );
+  };
+
+  const dragOrderLine = (order: OrderUpdate, displayedPrice: number) => (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !isDraggableLimitOrder(order) || pendingProtectionChange || pendingOrderPriceChange) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const originalPrice = displayedPrice;
+    const orderKey = canonicalOrderKey(order);
+    const initial: PendingOrderPriceChange = {
+      order,
+      orderKey,
+      originalPrice,
+      proposedPrice: originalPrice,
+      phase: "dragging"
+    };
+    setPendingOrderPriceChange(initial);
+    let proposedPrice = originalPrice;
+    const move = (moveEvent: MouseEvent) => {
+      const price = engineRef.current?.getPriceFromClientY(moveEvent.clientY);
+      if (price && Number.isFinite(price)) {
+        proposedPrice = quantizeProtectionPrice(
+          price,
+          marketSymbol.metadata?.tickSize,
+          marketSymbol.metadata?.pricePrecision ?? marketSymbol.pricePrecision ?? 2
+        );
+        setPendingOrderPriceChange((current) => current?.orderKey === orderKey
+          ? { ...current, proposedPrice, phase: "dragging", error: undefined }
+          : current);
+      }
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      if (proposedPrice === originalPrice) {
+        setPendingOrderPriceChange(null);
+        return;
+      }
+      setPendingOrderPriceChange((current) => current?.orderKey === orderKey
+        ? { ...current, proposedPrice, phase: "confirming" }
+        : { ...initial, proposedPrice, phase: "confirming" });
     };
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
@@ -5456,21 +5683,25 @@ export function PixiBlackChart({
           {activeChartPosition && positionLines.map((line) => (
             <div
               key={line.id}
-              className={`position-line ${line.tone}${line.protection ? " draggable" : ""}`}
+              className={`position-line ${line.tone}${isEditableNativeProtection(line.protection) ? " draggable" : ""}`}
               style={{ top: Number(line.y) }}
-              title={`${activeChartPosition.exchange.toUpperCase()} ${activeChartPosition.symbol} ${line.label} ${formatAlertPrice(line.price)} | PnL ${formatAlertPrice(activeChartPosition.health.currentPnl)} | RR ${activeChartPosition.health.riskReward?.toFixed(2) ?? "-"}`}
+              title={`${activeChartPosition.exchange.toUpperCase()} ${activeChartPosition.symbol} ${line.label} ${formatAlertPrice(line.price)}${line.pnl === null || line.pnl === undefined ? "" : ` | P/L ${formatSignedPositionMoney(line.pnl)} USDT`} | Current P/L ${formatSignedPositionMoney(activeChartPosition.health.currentPnl)}`}
               onMouseDown={dragProtectionLine(line.protection)}
             >
+              {line.pnl !== null && line.pnl !== undefined && (
+                <em className={`position-line-pnl ${line.pnl >= 0 ? "positive" : "negative"}`}>{formatSignedPositionMoney(line.pnl)} USDT</em>
+              )}
               <span>{line.label}</span>
               <b>{formatAlertPrice(line.price)}</b>
             </div>
           ))}
-          {chartOrderLines.map(({ order, y }) => (
+          {chartOrderLines.map(({ order, orderKey, price, y }) => (
             <div
-              key={canonicalOrderKey(order)}
-              className={`venue-order-line ${order.side === "sell" ? "sell" : "buy"}`}
+              key={orderKey}
+              className={`venue-order-line ${order.side === "sell" ? "sell" : "buy"}${isDraggableLimitOrder(order) ? " draggable" : ""}`}
               style={{ top: Number(y) }}
-              title={`${order.exchange.toUpperCase()} ${order.side?.toUpperCase()} ${String(order.type || order.orderType || "ORDER").toUpperCase()} | ${formatAlertPrice(Number(order.price))} | Remaining ${order.remainingQuantity ?? order.quantity ?? 0} | ${order.externallyCreated ? "EXTERNAL" : "BLACK TERMINAL"}`}
+              title={`${order.exchange.toUpperCase()} ${order.side?.toUpperCase()} ${String(order.type || order.orderType || "ORDER").toUpperCase()} | ${formatAlertPrice(price)} | Remaining ${order.remainingQuantity ?? order.quantity ?? 0} | ${isDraggableLimitOrder(order) ? "Drag to amend" : "View only"}`}
+              onMouseDown={dragOrderLine(order, price)}
               onContextMenu={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -5479,10 +5710,65 @@ export function PixiBlackChart({
               }}
             >
               <span>{order.exchange.toUpperCase()} {order.side?.toUpperCase()} {String(order.type || order.orderType || "ORDER").toUpperCase()}</span>
-              <b>{formatAlertPrice(Number(order.price))}</b>
+              <b>{formatAlertPrice(price)}</b>
               <em>{order.remainingQuantity ?? order.quantity ?? 0} {order.externallyCreated ? "EXTERNAL" : "BLACK TERMINAL"}</em>
             </div>
           ))}
+        </div>
+      )}
+
+      {pendingProtectionChange && pendingProtectionChange.phase !== "dragging" && (
+        <div className="protection-change-dialog" role="dialog" aria-modal="true" aria-label="Confirm position protection change">
+          <div className="protection-change-dialog-head">
+            <span>{pendingProtectionChange.type === "take-profit" ? "CHANGE TAKE PROFIT" : "CHANGE STOP LOSS"}</span>
+            <b>{pendingProtectionChange.symbol}</b>
+          </div>
+          <div className="protection-change-prices">
+            <span>Current <b>{formatAlertPrice(pendingProtectionChange.originalPrice)}</b></span>
+            <span>New <b>{formatAlertPrice(pendingProtectionChange.proposedPrice)}</b></span>
+          </div>
+          {activeChartPosition?.id === pendingProtectionChange.positionId && (() => {
+            const pnl = projectedLinearPositionPnl(activeChartPosition, pendingProtectionChange.proposedPrice);
+            return pnl === null ? null : (
+              <div className={`protection-change-pnl ${pnl >= 0 ? "positive" : "negative"}`}>
+                Projected P/L <b>{formatSignedPositionMoney(pnl)} USDT</b>
+              </div>
+            );
+          })()}
+          <p>This submits a real Bybit position-protection update. No order is sent until you confirm.</p>
+          {pendingProtectionChange.error && <div className="protection-change-error">{pendingProtectionChange.error}</div>}
+          <div className="protection-change-actions">
+            <button type="button" onClick={cancelPendingProtectionChange} disabled={pendingProtectionChange.phase === "submitting"}>Cancel</button>
+            <button type="button" className="confirm" onClick={() => void confirmPendingProtectionChange()} disabled={pendingProtectionChange.phase === "submitting"}>
+              {pendingProtectionChange.phase === "submitting" ? "Submitting…" : "Confirm"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {pendingOrderPriceChange && pendingOrderPriceChange.phase !== "dragging" && (
+        <div className="protection-change-dialog order-price-change-dialog" role="dialog" aria-modal="true" aria-label="Confirm limit order price change">
+          <div className="protection-change-dialog-head">
+            <span>CHANGE LIMIT ORDER</span>
+            <b>{pendingOrderPriceChange.order.symbol}</b>
+          </div>
+          <div className="order-change-summary">
+            <span>{pendingOrderPriceChange.order.exchange.toUpperCase()}</span>
+            <b className={pendingOrderPriceChange.order.side === "buy" ? "buy" : "sell"}>{pendingOrderPriceChange.order.side?.toUpperCase()}</b>
+            <em>{pendingOrderPriceChange.order.remainingQuantity ?? pendingOrderPriceChange.order.quantity ?? 0}</em>
+          </div>
+          <div className="protection-change-prices">
+            <span>Current <b>{formatAlertPrice(pendingOrderPriceChange.originalPrice)}</b></span>
+            <span>New <b>{formatAlertPrice(pendingOrderPriceChange.proposedPrice)}</b></span>
+          </div>
+          <p>This amends the real resting order at the connected venue. Nothing is submitted until you confirm.</p>
+          {pendingOrderPriceChange.error && <div className="protection-change-error">{pendingOrderPriceChange.error}</div>}
+          <div className="protection-change-actions">
+            <button type="button" onClick={cancelPendingOrderPriceChange} disabled={["submitting", "synchronizing"].includes(pendingOrderPriceChange.phase)}>Cancel</button>
+            <button type="button" className="confirm order-confirm" onClick={() => void confirmPendingOrderPriceChange()} disabled={pendingOrderPriceChange.phase !== "confirming"}>
+              {pendingOrderPriceChange.phase === "submitting" ? "Submitting…" : pendingOrderPriceChange.phase === "synchronizing" ? "Synchronizing…" : "Confirm"}
+            </button>
+          </div>
         </div>
       )}
 

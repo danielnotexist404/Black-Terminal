@@ -71,7 +71,8 @@ const orderSyncSource = readFileSync(new URL("../src/orders/orderSyncService.ts"
 assert.match(bybitSource, /processedCursors/);
 assert.match(bybitSource, /duplicateRecordCount/);
 assert.match(chartSource, /canonicalOrderKey\(order\)/);
-assert.match(chartSource, /getScreenYForPrice\(Number\(order\.price\)\)/);
+assert.match(chartSource, /getScreenYForPrice\(price\)/);
+assert.match(chartSource, /confirmedOrderPrices\[orderKey\]/);
 assert.match(cssSource, /\.position-protection-overlay\s*\{[\s\S]*?inset:\s*44px 0 0/);
 assert.match(menuSource, /Modify Order/);
 assert.match(menuSource, /Cancel Order/);

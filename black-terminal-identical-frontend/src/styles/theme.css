@@ -3639,6 +3639,24 @@ body.resizing-layout * {
   color: #9fa6b1;
 }
 
+.position-line .position-line-pnl {
+  min-width: 118px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-right: 0;
+  background: rgba(5, 6, 7, 0.94);
+  color: #d7dbe1;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.position-line .position-line-pnl.positive { color: #27c47b; }
+.position-line .position-line-pnl.negative { color: #ff374c; }
+
 .position-line b {
   min-width: 74px;
   justify-content: flex-end;
@@ -3680,6 +3698,121 @@ body.resizing-layout * {
   border-top-color: rgba(255, 255, 255, 0.52);
 }
 
+.protection-change-dialog {
+  position: absolute;
+  top: 108px;
+  right: 102px;
+  z-index: 95;
+  width: 286px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 32, 55, 0.58);
+  border-radius: 7px;
+  background: linear-gradient(145deg, rgba(13, 15, 18, 0.98), rgba(3, 4, 5, 0.985));
+  box-shadow: 0 18px 65px rgba(0, 0, 0, 0.74), 0 0 24px rgba(255, 0, 35, 0.1);
+  color: #dfe3e8;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.protection-change-dialog-head {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 11px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(127, 0, 18, 0.14);
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.protection-change-dialog-head span { color: #ff4057; }
+.protection-change-dialog-head b { color: #fff; }
+
+.protection-change-prices {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  padding: 10px 11px 7px;
+}
+
+.protection-change-prices span {
+  display: grid;
+  gap: 4px;
+  color: #7f8791;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.protection-change-prices b { color: #f5f7fa; font-size: 11px; }
+
+.protection-change-pnl {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 11px;
+  padding: 8px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 9px;
+}
+
+.protection-change-pnl.positive b { color: #27c47b; }
+.protection-change-pnl.negative b { color: #ff374c; }
+
+.protection-change-dialog p {
+  margin: 0;
+  padding: 7px 11px 10px;
+  color: #858c96;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.protection-change-error {
+  margin: 0 11px 9px;
+  padding: 7px;
+  border: 1px solid rgba(255, 55, 76, 0.3);
+  background: rgba(255, 0, 25, 0.08);
+  color: #ff697a;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.protection-change-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  padding: 0 11px 11px;
+}
+
+.protection-change-actions button {
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 3px;
+  background: #090b0d;
+  color: #c4cad2;
+  font: 800 9px "IBM Plex Mono", monospace;
+  cursor: pointer;
+}
+
+.protection-change-actions button.confirm { border-color: rgba(255, 32, 55, 0.72); color: #fff; background: rgba(126, 0, 18, 0.32); }
+.protection-change-actions button:disabled { opacity: 0.5; cursor: wait; }
+
+.order-change-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px 2px;
+  color: #9ca4ae;
+  font-size: 9px;
+}
+
+.order-change-summary b.buy { color: #9dff32; }
+.order-change-summary b.sell { color: #ffe836; }
+.order-change-summary em { margin-left: auto; color: #dce2e9; font-style: normal; }
+.protection-change-actions button.order-confirm {
+  border-color: rgba(192, 255, 47, 0.62);
+  background: rgba(105, 137, 12, 0.15);
+  color: #dfff71;
+}
+
 .venue-order-line {
   position: absolute;
   left: 0;
@@ -3694,8 +3827,14 @@ body.resizing-layout * {
   pointer-events: auto;
 }
 
-.venue-order-line.sell { border-top-color: rgba(255, 43, 63, 0.9); }
-.venue-order-line.buy { border-top-color: rgba(220, 225, 234, 0.84); }
+.venue-order-line.sell { border-top-color: rgba(255, 232, 54, 0.96); }
+.venue-order-line.buy { border-top-color: rgba(157, 255, 50, 0.96); }
+.venue-order-line.draggable { cursor: ns-resize; }
+.venue-order-line.draggable::before {
+  content: "";
+  position: absolute;
+  inset: -7px 0;
+}
 
 .venue-order-line span,
 .venue-order-line b,
@@ -3712,8 +3851,10 @@ body.resizing-layout * {
 .venue-order-line span { color: #c9ced6; }
 .venue-order-line b { min-width: 72px; justify-content: flex-end; color: #fff; }
 .venue-order-line em { color: #858c97; border-left: 0; }
+.venue-order-line.buy span,
+.venue-order-line.buy b { color: #9dff32; }
 .venue-order-line.sell span,
-.venue-order-line.sell b { color: #ff4a5d; }
+.venue-order-line.sell b { color: #ffe836; }
 
 .unified-ticket-overlay {
   position: absolute;
@@ -8406,7 +8547,7 @@ body.resizing-layout * {
 }
 
 .position-row-actionable {
-  cursor: context-menu;
+  cursor: pointer;
 }
 
 .position-row-actionable:hover {

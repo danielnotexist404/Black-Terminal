@@ -42,6 +42,7 @@ export default async function handler(req, res) {
     const credentials = decryptCredentialPayload(credential.encrypted_payload);
     const report = await setBybitPositionProtection(credentials, {
       marketKind: req.body.marketKind || "perpetual",
+      category: req.body.category,
       symbol: String(req.body.symbol).toUpperCase(),
       positionIdx: req.body.positionIdx,
       takeProfit: valueOrZero(req.body.takeProfit, req.body.cancelTakeProfit),

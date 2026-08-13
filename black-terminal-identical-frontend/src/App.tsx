@@ -65,6 +65,7 @@ import { ScannerPage } from "./modules/scanner/components/ScannerPage";
 import type { ScannerResult } from "./modules/scanner/types/scanner.types";
 import { StrategyLabPage } from "./modules/strategy-lab/components/StrategyLabPage";
 import PortfolioManagerPage, { PositionsWorkspace } from "./modules/portfolio-manager/components/PortfolioManagerPage";
+import { isAuthenticatedBrokerConnection } from "./modules/portfolio-manager/positionsWorkspaceLayout";
 import { ProfilePage } from "./modules/profile/components/ProfilePage";
 import { PublicProfessionalProfilePage } from "./modules/profile/components/PublicProfessionalProfilePage";
 import { InvestmentGroupsPage } from "./modules/investment-groups/components/InvestmentGroupsPage";
@@ -525,6 +526,7 @@ export default function App() {
     }
   }, [currentUser]);
   const [activeNav, setActiveNav] = useState(() => localStorage.getItem("bt_active_nav") || "CHART");
+  const brokerPositionsDefaultAppliedRef = useRef(false);
   const [selectedProfessionalUsername, setSelectedProfessionalUsername] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showRevokedPopup, setShowRevokedPopup] = useState(false);
@@ -807,6 +809,7 @@ export default function App() {
   }, [currentUser?.username, isLocalUiPreview]);
 
   const activeRuntimeConnections = useMemo(() => connectionDiagnostics.filter((connection) => !["disconnected", "offline", "unsupported"].includes(connection.status)), [connectionDiagnostics]);
+  const hasAuthenticatedBroker = useMemo(() => connectionDiagnostics.some(isAuthenticatedBrokerConnection), [connectionDiagnostics]);
   const connectedPortfolioAccountScope = useMemo(() => [...new Set(activeRuntimeConnections.map((connection) => connection.accountId).filter((accountId): accountId is string => Boolean(accountId)))].sort().join(","), [activeRuntimeConnections]);
   const connectedPortfolioAccountIds = useMemo(() => connectedPortfolioAccountScope ? connectedPortfolioAccountScope.split(",") : [], [connectedPortfolioAccountScope]);
   const connectedPortfolioAccountSet = useMemo(() => new Set(connectedPortfolioAccountIds), [connectedPortfolioAccountScope]);
@@ -814,6 +817,16 @@ export default function App() {
   const visiblePortfolioOrders = useMemo(() => portfolioOrders.filter((order) => connectedPortfolioAccountSet.has(order.accountId)), [connectedPortfolioAccountSet, portfolioOrders]);
   const visiblePortfolioOrderSync = useMemo(() => Object.fromEntries(Object.entries(portfolioOrderSync || {}).filter(([accountId]) => connectedPortfolioAccountSet.has(accountId))), [connectedPortfolioAccountSet, portfolioOrderSync]);
   const activeExecutionConnection = useMemo(() => activeRuntimeConnections.find((connection) => connection.id === activeExecutionVenueId) ?? null, [activeExecutionVenueId, activeRuntimeConnections]);
+
+  useEffect(() => {
+    if (!hasAuthenticatedBroker) {
+      brokerPositionsDefaultAppliedRef.current = false;
+      return;
+    }
+    if (brokerPositionsDefaultAppliedRef.current) return;
+    brokerPositionsDefaultAppliedRef.current = true;
+    setActiveNav("POSITIONS");
+  }, [hasAuthenticatedBroker]);
 
   useEffect(() => {
     blackCorePositionManager.syncExternalPositions(visiblePortfolioPositions, "portfolio-manager");
@@ -1290,8 +1303,9 @@ export default function App() {
           }
 
           if (target === "bottom") {
-            const maxBottom = Math.max(96, (gridRect?.height ?? window.innerHeight) - 260);
-            return { ...current, bottomPanelHeight: clamp(startLayout.bottomPanelHeight - dy, 64, maxBottom) };
+            const minimumBottom = activeNav === "POSITIONS" ? 128 : 64;
+            const maxBottom = Math.max(minimumBottom, (gridRect?.height ?? window.innerHeight) - 260);
+            return { ...current, bottomPanelHeight: clamp(startLayout.bottomPanelHeight - dy, minimumBottom, maxBottom) };
           }
 
           if (target === "rightTop") {
@@ -1315,7 +1329,7 @@ export default function App() {
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp, { once: true });
     },
-    [layout]
+    [activeNav, layout]
   );
 
   const selectExchange = (exchange: ExchangeOption) => {
@@ -2392,7 +2406,7 @@ export default function App() {
         {!battlefieldMode && showCompactDom && (
           <div className="layout-resizer resize-main-x" onPointerDown={(event) => startLayoutResize("right", event)} />
         )}
-        {!battlefieldMode && <div className="layout-resizer resize-main-y" onPointerDown={(event) => startLayoutResize("bottom", event)} />}
+        {!battlefieldMode && <div className={activeNav === "POSITIONS" ? "layout-resizer resize-main-y positions-resizer" : "layout-resizer resize-main-y"} onPointerDown={(event) => startLayoutResize("bottom", event)} />}
         
         {/* Watchlist Context Menu */}
         {contextMenu && (

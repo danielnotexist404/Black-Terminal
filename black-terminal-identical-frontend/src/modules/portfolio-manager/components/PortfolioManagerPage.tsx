@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import type { MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, MouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -33,6 +33,7 @@ import { canCreateInvestmentGroup, listInvestmentGroups } from "../../profile/pr
 import type { OrderUpdate } from "../../../execution/types";
 import { deduplicateCanonicalOrders } from "../../../orders/canonicalOrder";
 import { OrderManagementMenu } from "../../../orders/OrderManagementMenu";
+import { readOrdersPanelHeight, resizeOrdersPanelHeight } from "../positionsWorkspaceLayout";
 
 type PortfolioManagerTab =
   | "Overview"
@@ -425,8 +426,33 @@ export function PositionsWorkspace({
   const [cloudStatus, setCloudStatus] = useState<BlackCloudStatusPayload | null>(null);
   const [cloudStatusMessage, setCloudStatusMessage] = useState("");
   const [brokerAdapters, setBrokerAdapters] = useState<BrokerAdapterDescriptor[]>([]);
+  const [ordersPanelHeight, setOrdersPanelHeight] = useState(() => readOrdersPanelHeight(
+    typeof window === "undefined" ? null : window.localStorage.getItem("bt_positions_orders_panel_height")
+  ));
+  const ordersResizeCleanupRef = useRef<(() => void) | null>(null);
+  const positionsStackRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => blackCoreConnectionManager.subscribe(setConnectionDiagnostics), []);
+
+  useEffect(() => {
+    window.localStorage.setItem("bt_positions_orders_panel_height", String(ordersPanelHeight));
+  }, [ordersPanelHeight]);
+
+  useEffect(() => () => ordersResizeCleanupRef.current?.(), []);
+
+  useEffect(() => {
+    const stack = positionsStackRef.current;
+    if (!stack) return;
+    const keepOrdersPanelWithinWorkspace = () => {
+      const workspaceHeight = stack.getBoundingClientRect().height;
+      if (workspaceHeight <= 0) return;
+      setOrdersPanelHeight((current) => resizeOrdersPanelHeight(current, 0, workspaceHeight));
+    };
+    keepOrdersPanelWithinWorkspace();
+    const observer = new ResizeObserver(keepOrdersPanelWithinWorkspace);
+    observer.observe(stack);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!showConnection) return;
@@ -705,10 +731,65 @@ export function PositionsWorkspace({
     }
   }
 
+  function startOrdersPanelResize(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const stack = event.currentTarget.closest(".positions-left-stack") as HTMLElement | null;
+    if (!stack) return;
+    const startY = event.clientY;
+    const startHeight = ordersPanelHeight;
+    const workspaceHeight = stack.getBoundingClientRect().height;
+    let resizeFrame = 0;
+
+    ordersResizeCleanupRef.current?.();
+    document.body.classList.add("resizing-layout", "resizing-orders-panel");
+
+    const notifyResize = () => {
+      if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = 0;
+        window.dispatchEvent(new Event("black-terminal-layout-resize"));
+        window.dispatchEvent(new Event("resize"));
+      });
+    };
+    const onMove = (moveEvent: PointerEvent) => {
+      setOrdersPanelHeight(resizeOrdersPanelHeight(startHeight, moveEvent.clientY - startY, workspaceHeight));
+      notifyResize();
+    };
+    const cleanup = () => {
+      if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
+      document.body.classList.remove("resizing-layout", "resizing-orders-panel");
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", cleanup);
+      window.removeEventListener("pointercancel", cleanup);
+      ordersResizeCleanupRef.current = null;
+      window.dispatchEvent(new Event("black-terminal-layout-resize"));
+      window.dispatchEvent(new Event("resize"));
+    };
+
+    ordersResizeCleanupRef.current = cleanup;
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", cleanup, { once: true });
+    window.addEventListener("pointercancel", cleanup, { once: true });
+  }
+
   return (
     <div className="positions-workspace">
-      <div className="positions-left-stack">
+      <div
+        className="positions-left-stack"
+        ref={positionsStackRef}
+        style={{ "--positions-orders-height": `${ordersPanelHeight}px` } as CSSProperties}
+      >
         <PortfolioPositionsPanel onPositionNavigate={onPositionNavigate} />
+        <div
+          className="positions-stack-resizer"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize positions and orders panels"
+          aria-valuemin={64}
+          aria-valuenow={ordersPanelHeight}
+          onPointerDown={startOrdersPanelResize}
+        />
         <div className="positions-orders-panel">
           <div className="positions-orders-title">
             <span>Orders</span>

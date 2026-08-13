@@ -55,6 +55,7 @@ const ALL_INDICATORS_METADATA = [
   { key: "sma20", name: "SMA 20", desc: "Fast simple moving average" },
   { key: "sma50", name: "SMA 50", desc: "Medium simple moving average" },
   { key: "bollinger", name: "Bollinger Bands", desc: "Volatility deviation channels" },
+  { key: "ddaProOscillator", name: "DDA Pro — Drawdown Distribution Analysis", desc: "Worker-isolated drawdown, tail-risk, duration and recovery analytics" },
   { key: "openInterestOscillator", name: "Open Interest Oscillator", desc: "OI derivative pressure" },
   { key: "zScoreOscillator", name: "Z-Score Oscillator", desc: "Standard deviation distance" },
   { key: "waveTrendOscillator", name: "WaveTrend Oscillator", desc: "Momentum oscillator" },

@@ -21,6 +21,7 @@ export const DEFAULT_ALLOWED_INDICATORS = [
   "sma20",
   "sma50",
   "bollinger",
+  "ddaProOscillator",
   "openInterestOscillator",
   "zScoreOscillator",
   "waveTrendOscillator",

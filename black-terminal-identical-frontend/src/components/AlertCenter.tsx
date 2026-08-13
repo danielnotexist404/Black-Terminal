@@ -9,6 +9,7 @@ import type {
   IndicatorAlertDefinition
 } from "../automation/alerts";
 import type { Timeframe } from "../market-data/types";
+import type { DDAProEventType } from "../modules/dda-pro/core/types";
 
 type AlertEventLog = {
   timestamp: string;
@@ -32,8 +33,30 @@ const indicatorOptions: { value: AlertIndicatorTarget; label: string }[] = [
   { value: "vwap", label: "VWAP" },
   { value: "ema20", label: "EMA 20" },
   { value: "ema50", label: "EMA 50" },
-  { value: "ema200", label: "EMA 200" }
+  { value: "ema200", label: "EMA 200" },
+  { value: "ddaPro", label: "DDA Pro" }
 ];
+
+const ddaSignalOptions: { value: DDAProEventType; label: string }[] = [
+  { value: "DDA_RISK_SCORE_CROSSED_50", label: "Risk Score Crosses 50" },
+  { value: "DDA_RISK_SCORE_CROSSED_75", label: "Risk Score Crosses 75" },
+  { value: "DDA_RISK_SCORE_CROSSED_90", label: "Risk Score Crosses 90" },
+  { value: "DDA_RISK_STATE_CHANGED", label: "Risk State Changes" },
+  { value: "DDA_NEW_MAX_DRAWDOWN", label: "New Maximum Drawdown" },
+  { value: "DDA_P90_ENTERED", label: "Drawdown Enters P90" },
+  { value: "DDA_P95_ENTERED", label: "Drawdown Enters P95" },
+  { value: "DDA_P99_ENTERED", label: "Drawdown Enters P99" },
+  { value: "DDA_DURATION_P90_EXCEEDED", label: "Duration Exceeds P90" },
+  { value: "DDA_DURATION_P95_EXCEEDED", label: "Duration Exceeds P95" },
+  { value: "DDA_VADD_EXTREME", label: "VADD Extreme" },
+  { value: "DDA_CDAR_BREACHED", label: "CDaR Threshold Breached" },
+  { value: "DDA_DRAWDOWN_STARTED", label: "Drawdown Episode Begins" },
+  { value: "DDA_DRAWDOWN_RECOVERING", label: "Recovery Begins" },
+  { value: "DDA_DRAWDOWN_RECOVERED", label: "Full Recovery" },
+  { value: "DDA_RISK_DETERIORATION_ACCELERATED", label: "Risk Deterioration Accelerates" }
+];
+
+const ddaSignalLabels = Object.fromEntries(ddaSignalOptions.map((option) => [option.value, option.label])) as Record<DDAProEventType, string>;
 
 const levelOptions: { value: AlertLevelTarget; label: string }[] = [
   { value: "any", label: "Any Level" },
@@ -77,6 +100,7 @@ function createAlertDraft(symbol: string, exchange: string, timeframe: Timeframe
     timeframe,
     indicator: "price",
     levelTarget: "any",
+    ddaSignal: "DDA_RISK_SCORE_CROSSED_75",
     targetPrice: undefined,
     color: "#ffffff",
     condition: "crossingAbove",
@@ -119,6 +143,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
       exchange: draft.exchange || exchange,
       timeframe: draft.timeframe || timeframe,
       levelTarget: draft.indicator === "hdlxProfile" ? draft.levelTarget ?? "any" : undefined,
+      ddaSignal: draft.indicator === "ddaPro" ? draft.ddaSignal ?? "DDA_RISK_SCORE_CROSSED_75" : undefined,
       targetPrice: draft.indicator === "price" && Number.isFinite(draft.targetPrice) ? draft.targetPrice : undefined,
       color: draft.indicator === "price" ? draft.color || "#ffffff" : draft.color,
       cooldownSeconds: clampNumber(Math.round(draft.cooldownSeconds), 5, 86400),
@@ -190,7 +215,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
                     {alert.indicator === "hdlxProfile" && alert.levelTarget ? ` ${levelLabels[alert.levelTarget]}` : ""}
                     {alert.indicator === "price" && Number.isFinite(alert.targetPrice) ? ` ${alert.targetPrice?.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : ""}
                     {" / "}
-                    {conditionLabels[alert.condition]}
+                    {alert.indicator === "ddaPro" ? ddaSignalLabels[alert.ddaSignal ?? "DDA_RISK_SCORE_CROSSED_75"] : conditionLabels[alert.condition]}
                   </span>
                 </button>
                 <div className="alert-row-actions">
@@ -248,6 +273,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
                         ...current,
                         indicator,
                         levelTarget: indicator === "hdlxProfile" ? current.levelTarget ?? "any" : undefined,
+                        ddaSignal: indicator === "ddaPro" ? current.ddaSignal ?? "DDA_RISK_SCORE_CROSSED_75" : undefined,
                         targetPrice: indicator === "price" ? current.targetPrice : undefined
                       } : current);
                     }}
@@ -288,9 +314,19 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
                     onChange={(event) => updateDraft("color", event.target.value)}
                   />
                 </label>
+                {draft.indicator === "ddaPro" && (
+                  <label className="alert-field wide">
+                    DDA Pro Signal
+                    <select value={draft.ddaSignal ?? "DDA_RISK_SCORE_CROSSED_75"} onChange={(event) => updateDraft("ddaSignal", event.target.value as DDAProEventType)}>
+                      {ddaSignalOptions.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <label className="alert-field">
                   Condition
-                  <select value={draft.condition} onChange={(event) => updateDraft("condition", event.target.value as AlertCondition)}>
+                  <select value={draft.condition} disabled={draft.indicator === "ddaPro"} onChange={(event) => updateDraft("condition", event.target.value as AlertCondition)}>
                     {conditionOptions.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
                     ))}

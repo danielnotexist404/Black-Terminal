@@ -33,6 +33,10 @@ import {
   defaultWaveTrendOscillatorSettings,
   defaultZScoreOscillatorSettings
 } from "../chart-engine/profile/volumeProfileDefaults";
+import { DDAProWorkerClient } from "../modules/dda-pro/workers/DDAProWorkerClient";
+import { DEFAULT_DDA_PRO_SETTINGS, applyDDAProPreset, ddaProSettingsHash, migrateDDAProSettings } from "../modules/dda-pro/core/settings";
+import { calculationHash as ddaProCalculationHash } from "../modules/dda-pro/core/engineShared";
+import type { DDAProPreset, DDAProSettings, DDAProSnapshot } from "../modules/dda-pro/core/types";
 import { OSCILLATOR_KEYS, resolveOscillatorStack } from "../chart-engine/indicators/oscillatorLayout";
 import { createMockCandles } from "../data/mockMarket";
 import type { AlertCondition, AlertIndicatorTarget, IndicatorAlertDefinition } from "../automation/alerts";
@@ -293,7 +297,8 @@ const configuredAlertIndicatorLabels: Record<AlertIndicatorTarget, string> = {
   vwap: "VWAP",
   ema20: "EMA 20",
   ema50: "EMA 50",
-  ema200: "EMA 200"
+  ema200: "EMA 200",
+  ddaPro: "DDA Pro"
 };
 
 const configuredAlertConditionLabels: Record<AlertCondition, string> = {
@@ -440,6 +445,7 @@ export function PixiBlackChart({
   } | null>(null);
   const previousOscillatorVisibilityRef = useRef<Record<OscillatorIndicatorKey, boolean>>({
     openInterestOscillator: visibleIndicators.openInterestOscillator,
+    ddaProOscillator: visibleIndicators.ddaProOscillator,
     zScoreOscillator: visibleIndicators.zScoreOscillator,
     waveTrendOscillator: visibleIndicators.waveTrendOscillator
   });
@@ -450,6 +456,12 @@ export function PixiBlackChart({
   const [lastCandle, setLastCandle] = useState<Candle | null>(null);
   const [aifPriceTransform, setAifPriceTransform] = useState<ChartPriceTransformSnapshot | null>(null);
   const [kioseffSnapshot, setKioseffSnapshot] = useState<KioseffSnapshot | null>(null);
+  const [ddaProSnapshot, setDDAProSnapshot] = useState<DDAProSnapshot | null>(null);
+  const [ddaProStatus, setDDAProStatus] = useState<"IDLE" | "CALCULATING" | "READY" | "UNAVAILABLE">("IDLE");
+  const ddaProWorkerRef = useRef<DDAProWorkerClient | null>(null);
+  const ddaCalculationIdentityRef = useRef("");
+  const ddaDispatchedEventsRef = useRef(new Set<string>());
+  const ddaConfiguredEventsRef = useRef(new Set<string>());
   const [auctionProfileSnapshots, setAuctionProfileSnapshots] = useState<AuctionProfileSnapshot[]>([]);
   const auctionProfileSnapshotsRef = useRef<AuctionProfileSnapshot[]>([]);
   const auctionProfileSnapshot = auctionProfileSnapshots.at(-1) ?? null;
@@ -463,6 +475,7 @@ export function PixiBlackChart({
   const liquidationFieldControllerRef = useRef<LiquidationFieldController | null>(null);
   const liquidationFieldSnapshotStoreRef = useRef(new InMemoryBclifSnapshotStore());
   const [auctionProfileSourceRevision, setAuctionProfileSourceRevision] = useState(0);
+  const [ddaProSourceRevision, setDDAProSourceRevision] = useState(0);
   const [kioseffUnavailable, setKioseffUnavailable] = useState<KioseffUnavailableDiagnostic | null>(null);
   const [kioseffLoadState, setKioseffLoadState] = useState<KioseffLoadState>({ stage: "idle" });
   const [kioseffDiagnostics, setKioseffDiagnostics] = useState<KioseffRuntimeDiagnostics>(
@@ -717,6 +730,7 @@ export function PixiBlackChart({
     replaySourceRef.current = uniqueSortedCandles(candles).slice(-MAX_RETAINED_CHART_BARS);
     setKioseffSourceRevision((revision) => revision + 1);
     setAuctionProfileSourceRevision((revision) => revision + 1);
+    setDDAProSourceRevision((revision) => revision + 1);
     if (replayActiveRef.current) {
       if (replayControlsRef.current.selecting) {
         engineRef.current?.setCandles(replaySourceRef.current, {
@@ -977,6 +991,7 @@ export function PixiBlackChart({
           }
 
           engineRef.current?.prependCandles(olderCandles);
+          setDDAProSourceRevision((revision) => revision + 1);
           setDataStatus(`${historyLabel.toUpperCase()} LIVE - +${olderCandles.length} BARS`);
         })
         .catch((err: unknown) => {
@@ -1184,6 +1199,7 @@ export function PixiBlackChart({
       onAlertFired: (alertId, price) => onAlertFired?.(alertId, price),
       auctionProfileSettings: normalizedAuctionProfileSettings,
       auctionProfileSnapshots,
+      ddaProSnapshot,
       onAlertEditRequest: (alertId) => {
         setEditingChartAlertId(alertId);
         setChartContextMenu(null);
@@ -2071,6 +2087,78 @@ export function PixiBlackChart({
   }, [visibleIndicators, indicatorPeriods, indicatorVisualSettings, indicatorAdvancedSettings]);
 
   useEffect(() => {
+    return () => {
+      ddaProWorkerRef.current?.dispose();
+      ddaProWorkerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!visibleIndicators.ddaProOscillator || !engine) {
+      ddaCalculationIdentityRef.current = "";
+      setDDAProSnapshot(null);
+      setDDAProStatus("IDLE");
+      engine?.setDDAProState(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const settings = migrateDDAProSettings({
+        ...indicatorAdvancedSettings.ddaProOscillator,
+        lookback: indicatorPeriods.ddaProOscillator
+      });
+      const timeframeDuration = timeframeSeconds[timeframe];
+      const available = engine.getSourceCandles().slice(-20_000);
+      const latestIsDeveloping = Boolean(available.length && (available.at(-1)?.time ?? 0) + timeframeDuration > Date.now() / 1000);
+      const source = settings.realtimeMode === "confirmed-bars" && latestIsDeveloping ? available.slice(0, -1) : available;
+      if (source.length < 2) return;
+      const calculationIdentity = marketSymbol.exchange + ":" + marketSymbol.rawSymbol + ":" + timeframe + ":" + ddaProCalculationHash({ candles: source, settings, timeframeSeconds: timeframeDuration }, settings.engineMode);
+      if (ddaCalculationIdentityRef.current === calculationIdentity) return;
+      ddaCalculationIdentityRef.current = calculationIdentity;
+      const worker = ddaProWorkerRef.current ?? new DDAProWorkerClient();
+      ddaProWorkerRef.current = worker;
+      setDDAProStatus("CALCULATING");
+      void worker.calculate({
+        candles: source,
+        settings,
+        timeframeSeconds: timeframeSeconds[timeframe]
+      }).then((snapshot) => {
+        if (ddaCalculationIdentityRef.current !== calculationIdentity) return;
+        setDDAProSnapshot(snapshot);
+        setDDAProStatus("READY");
+        engineRef.current?.setDDAProState(snapshot);
+        const alertBarIsConfirmed = settings.realtimeMode === "confirmed-bars" || !latestIsDeveloping;
+        if (alertBarIsConfirmed) {
+          for (const event of snapshot.events.filter((candidate) => candidate.index === snapshot.inputSize - 1)) {
+            if (ddaDispatchedEventsRef.current.has(event.id)) continue;
+            ddaDispatchedEventsRef.current.add(event.id);
+            window.dispatchEvent(new CustomEvent("black-terminal:dda-pro-event", { detail: { ...event, confirmed: true } }));
+          }
+        }
+      }).catch((error: unknown) => {
+        if (ddaCalculationIdentityRef.current !== calculationIdentity || (error instanceof Error && error.message.includes("STALE_GENERATION"))) return;
+        console.error("DDA Pro calculation failed", error);
+        if (ddaCalculationIdentityRef.current === calculationIdentity) ddaCalculationIdentityRef.current = "";
+        setDDAProStatus("UNAVAILABLE");
+        engineRef.current?.setDDAProState(null);
+      });
+    }, 180);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [
+    visibleIndicators.ddaProOscillator,
+    indicatorPeriods.ddaProOscillator,
+    indicatorAdvancedSettings.ddaProOscillator,
+    marketSymbol.exchange,
+    marketSymbol.rawSymbol,
+    timeframe,
+    ddaProSourceRevision,
+    lastCandle?.time,
+    lastCandle?.close
+  ]);
+
+  useEffect(() => {
     liquidationFieldControllerRef.current?.updateSettings(liquidationFieldSettings);
     engineRef.current?.setLiquidationFieldState(
       visibleIndicators.liquidationHeatmap ? liquidationFieldSnapshot : null,
@@ -2083,6 +2171,11 @@ export function PixiBlackChart({
     setLiquidationFieldSnapshot(null);
     setLiquidationFieldRendererMetrics(null);
   }, [marketSymbol.rawSymbol, liquidationFieldCalculationKey]);
+
+  useEffect(() => {
+    ddaDispatchedEventsRef.current.clear();
+    ddaConfiguredEventsRef.current.clear();
+  }, [marketSymbol.exchange, marketSymbol.rawSymbol, timeframe]);
 
   useEffect(() => {
     liquidationFieldControllerRef.current?.dispose();
@@ -2237,12 +2330,14 @@ export function PixiBlackChart({
     });
     previousOscillatorVisibilityRef.current = {
       openInterestOscillator: visibleIndicators.openInterestOscillator,
+      ddaProOscillator: visibleIndicators.ddaProOscillator,
       zScoreOscillator: visibleIndicators.zScoreOscillator,
       waveTrendOscillator: visibleIndicators.waveTrendOscillator
     };
   }, [
     onIndicatorAdvancedSettingsChange,
     visibleIndicators.openInterestOscillator,
+    visibleIndicators.ddaProOscillator,
     visibleIndicators.zScoreOscillator,
     visibleIndicators.waveTrendOscillator
   ]);
@@ -2929,7 +3024,7 @@ export function PixiBlackChart({
       exchange: exchangeLabel,
       timeframe,
       indicator,
-      condition: configuredAlertConditionLabels[definition.condition],
+      condition: definition.indicator === "ddaPro" ? (definition.ddaSignal ?? "DDA Pro signal").replaceAll("_", " ") : configuredAlertConditionLabels[definition.condition],
       price: current.close.toFixed(2),
       level: level === undefined ? undefined : level.toFixed(2)
     };
@@ -2971,10 +3066,52 @@ export function PixiBlackChart({
   };
 
   useEffect(() => {
+    if (replayActiveRef.current || !ddaProSnapshot) return;
+    const definitions = alertDefinitions.filter((definition) =>
+      definition.enabled && definition.indicator === "ddaPro" && definition.symbol === displaySymbol &&
+      definition.exchange === exchangeLabel && definition.timeframe === timeframe
+    );
+    if (definitions.length === 0) return;
+    const settings = migrateDDAProSettings(indicatorAdvancedSettings.ddaProOscillator);
+    const sourceCandles = engineRef.current?.getSourceCandles() ?? [];
+    const latest = sourceCandles.at(-1);
+    const latestIsDeveloping = Boolean(latest && latest.time + timeframeSeconds[timeframe] > Date.now() / 1000);
+    if (settings.realtimeMode === "developing-preview" && latestIsDeveloping) return;
+    const events = ddaProSnapshot.events.filter((event) => event.index === ddaProSnapshot.inputSize - 1);
+    for (const event of events) {
+      let current: Candle | undefined;
+      for (let index = sourceCandles.length - 1; index >= 0; index--) {
+        if (sourceCandles[index]?.time === event.time) { current = sourceCandles[index]; break; }
+      }
+      if (!current) continue;
+      for (const definition of definitions) {
+        if ((definition.ddaSignal ?? "DDA_RISK_SCORE_CROSSED_75") !== event.type) continue;
+        const eventKey = `${definition.id}:${event.id}`;
+        if (ddaConfiguredEventsRef.current.has(eventKey)) continue;
+        ddaConfiguredEventsRef.current.add(eventKey);
+        dispatchConfiguredAlert(definition, current, {
+          indicator: "DDA Pro",
+          event: event.type,
+          level: event.value,
+          engineMode: event.engineMode,
+          sourceAuthority: event.sourceAuthority,
+          lookback: event.lookback,
+          riskScore: event.riskScore,
+          riskState: event.state,
+          drawdownPercent: event.drawdownPercent,
+          confidence: event.confidence,
+          confirmed: true
+        });
+      }
+    }
+  }, [ddaProSnapshot, alertDefinitions, displaySymbol, exchangeLabel, timeframe, indicatorAdvancedSettings.ddaProOscillator]);
+
+  useEffect(() => {
     if (replayActiveRef.current || alertDefinitions.length === 0) return;
 
     const scopedAlerts = alertDefinitions.filter((definition) =>
       definition.enabled &&
+      definition.indicator !== "ddaPro" &&
       definition.symbol === displaySymbol &&
       definition.exchange === exchangeLabel &&
       (definition.indicator === "price" || definition.timeframe === timeframe)
@@ -3052,6 +3189,7 @@ export function PixiBlackChart({
     { key: "sma20", label: "SMA", value: String(indicatorPeriods.sma20) },
     { key: "sma50", label: "SMA", value: String(indicatorPeriods.sma50) },
     { key: "bollinger", label: "Bollinger", value: String(indicatorPeriods.bollinger) },
+    { key: "ddaProOscillator", label: "DDA Pro", value: `${indicatorAdvancedSettings.ddaProOscillator.engineMode === "pine-compatibility" ? "PINE" : "NATIVE"} · ${ddaProStatus.toLowerCase()}` },
     { key: "openInterestOscillator", label: "OI Osc", value: String(indicatorPeriods.openInterestOscillator) },
     { key: "zScoreOscillator", label: "Z-Score", value: String(indicatorPeriods.zScoreOscillator) },
     { key: "waveTrendOscillator", label: "WaveTrend", value: String(indicatorPeriods.waveTrendOscillator) },
@@ -3075,14 +3213,21 @@ export function PixiBlackChart({
   };
 
   const updateIndicatorPeriod = (key: keyof IndicatorPeriods, value: number) => {
-    const max = key === "volumeProfile" ? 20000 : 500;
-    const nextValue = Math.max(2, Math.min(max, Number.isFinite(value) ? value : indicatorPeriods[key]));
+    const max = key === "volumeProfile" || key === "ddaProOscillator" ? 20000 : 500;
+    const min = key === "ddaProOscillator" ? 100 : 2;
+    const nextValue = Math.max(min, Math.min(max, Number.isFinite(value) ? value : indicatorPeriods[key]));
     onIndicatorPeriodsChange((current) => ({
       ...current,
       [key]: nextValue
     }));
     if (key === "volumeProfile") {
       updateVolumeProfileSetting("fixedRangeLength", nextValue);
+    }
+    if (key === "ddaProOscillator") {
+      onIndicatorAdvancedSettingsChange((current) => ({
+        ...current,
+        ddaProOscillator: migrateDDAProSettings({ ...current.ddaProOscillator, preset: "Custom", lookback: nextValue })
+      }));
     }
   };
 
@@ -3119,6 +3264,11 @@ export function PixiBlackChart({
     ...defaultVwapSettings,
     ...indicatorAdvancedSettings.vwap
   };
+  const ddaProSettings: DDAProSettings = migrateDDAProSettings({
+    ...DEFAULT_DDA_PRO_SETTINGS,
+    ...indicatorAdvancedSettings.ddaProOscillator,
+    lookback: indicatorPeriods.ddaProOscillator
+  });
   const oscillatorStack = resolveOscillatorStack(
     visibleIndicators,
     oscillatorPaneSettings,
@@ -3130,6 +3280,7 @@ export function PixiBlackChart({
   const oscillatorPaneVisible = oscillatorStack.panes.length > 0;
   const oscillatorSettingsOpen =
     activeIndicator === "openInterestOscillator" ||
+    activeIndicator === "ddaProOscillator" ||
     activeIndicator === "zScoreOscillator" ||
     activeIndicator === "waveTrendOscillator";
   const activeOscillatorKey = oscillatorSettingsOpen
@@ -3208,6 +3359,21 @@ export function PixiBlackChart({
         [key]: value
       }
     }));
+  };
+
+  const updateDDAProSetting = <Key extends keyof DDAProSettings>(
+    key: Key,
+    value: DDAProSettings[Key]
+  ) => {
+    const next = migrateDDAProSettings({ ...ddaProSettings, preset: key === "preset" ? value as DDAProPreset : "Custom", [key]: value });
+    onIndicatorAdvancedSettingsChange((current) => ({ ...current, ddaProOscillator: next }));
+    if (key === "lookback") onIndicatorPeriodsChange((current) => ({ ...current, ddaProOscillator: next.lookback }));
+  };
+
+  const selectDDAProPreset = (preset: DDAProPreset) => {
+    const next = applyDDAProPreset(ddaProSettings, preset);
+    onIndicatorAdvancedSettingsChange((current) => ({ ...current, ddaProOscillator: next }));
+    onIndicatorPeriodsChange((current) => ({ ...current, ddaProOscillator: next.lookback }));
   };
 
   const updateVwapSetting = <Key extends keyof VwapSettings>(
@@ -4613,8 +4779,8 @@ export function PixiBlackChart({
               Length
               <input
                 type="number"
-                min={2}
-                max={500}
+                min={activeIndicator === "ddaProOscillator" ? 100 : 2}
+                max={activeIndicator === "ddaProOscillator" ? 20000 : 500}
                 value={indicatorPeriods[activeIndicator as keyof IndicatorPeriods]}
                 onChange={(event) => updateIndicatorPeriod(activeIndicator as keyof IndicatorPeriods, Number(event.target.value))}
               />
@@ -5183,6 +5349,133 @@ export function PixiBlackChart({
                   <b>{oscillatorPaneSettings.zeroLineIntensity}</b>
                 </span>
               </label>
+            </>
+          )}
+          {activeIndicator === "ddaProOscillator" && (
+            <>
+              <div className="indicator-settings-section">DDA Pro Engine</div>
+              <label>
+                Preset
+                <select value={ddaProSettings.preset} onChange={(event) => selectDDAProPreset(event.target.value as DDAProPreset)}>
+                  {(["Custom", "DDA Pro — Original", "BC-DDA — Institutional", "BC-DDA — Macro Risk"] as DDAProPreset[]).map((preset) => <option key={preset} value={preset}>{preset}</option>)}
+                </select>
+              </label>
+              <label>
+                Calculation Engine
+                <select value={ddaProSettings.engineMode} onChange={(event) => updateDDAProSetting("engineMode", event.target.value as DDAProSettings["engineMode"])}>
+                  <option value="black-core-native">Black Core Native</option>
+                  <option value="pine-compatibility">Pine Compatibility</option>
+                </select>
+              </label>
+              <label>
+                Realtime Semantics
+                <select value={ddaProSettings.realtimeMode} onChange={(event) => updateDDAProSetting("realtimeMode", event.target.value as DDAProSettings["realtimeMode"])}>
+                  <option value="confirmed-bars">Confirmed Bars Only</option><option value="developing-preview">Developing Preview</option>
+                </select>
+              </label>
+              <div className="vwap-mode-note">
+                {ddaProSettings.engineMode === "pine-compatibility"
+                  ? "Reproduces the supplied Pine formula, including its original percentile direction and 252-period assumptions. Exact TradingView parity remains uncertified until golden exports are supplied."
+                  : "Corrected positive-depth drawdown, selectable peak reference, duration, tail risk, recovery, VADD and confidence analytics."}
+              </div>
+              <label>
+                Analysis Source
+                <select value={ddaProSettings.equitySource} onChange={(event) => updateDDAProSetting("equitySource", event.target.value as DDAProSettings["equitySource"])}>
+                  <option value="price">Market Price</option>
+                </select>
+              </label>
+              <label>
+                Price Source
+                <select value={ddaProSettings.source} disabled={ddaProSettings.equitySource !== "price"} onChange={(event) => updateDDAProSetting("source", event.target.value as DDAProSettings["source"])}>
+                  <option value="close">Close</option><option value="hlc3">HLC3</option><option value="ohlc4">OHLC4</option>
+                </select>
+              </label>
+              <label>
+                Lookback Bars
+                <select value={ddaProSettings.lookback} onChange={(event) => updateDDAProSetting("lookback", Number(event.target.value))}>
+                  {[250, 500, 1000, 2500, 5000, 10000, 20000].map((value) => <option key={value} value={value}>{value.toLocaleString()}</option>)}
+                  {!([250, 500, 1000, 2500, 5000, 10000, 20000] as number[]).includes(ddaProSettings.lookback) && <option value={ddaProSettings.lookback}>{ddaProSettings.lookback.toLocaleString()} (Custom)</option>}
+                </select>
+              </label>
+              <label>
+                Peak Reference
+                <select value={ddaProSettings.peakMode} onChange={(event) => updateDDAProSetting("peakMode", event.target.value as DDAProSettings["peakMode"])}>
+                  <option value="all-history">All Loaded History</option><option value="rolling">Rolling Lookback</option>
+                </select>
+              </label>
+              <label>
+                Smoothing
+                <select value={ddaProSettings.smoothingMethod} onChange={(event) => updateDDAProSetting("smoothingMethod", event.target.value as DDAProSettings["smoothingMethod"])}>
+                  <option value="none">None</option><option value="ema">EMA</option><option value="sma">SMA</option><option value="rma">RMA / Wilder</option>
+                </select>
+              </label>
+              <label>Smoothing Length<input type="number" min={1} max={500} value={ddaProSettings.smoothingLength} onChange={(event) => updateDDAProSetting("smoothingLength", Number(event.target.value))} /></label>
+              <label>
+                Quantiles
+                <select value={ddaProSettings.quantileMethod} onChange={(event) => updateDDAProSetting("quantileMethod", event.target.value as DDAProSettings["quantileMethod"])}>
+                  <option value="type7">Type 7 (Linear)</option><option value="nearest-rank">Nearest Rank</option>
+                </select>
+              </label>
+              <label>
+                Z-Score
+                <select value={ddaProSettings.zScoreMethod} onChange={(event) => updateDDAProSetting("zScoreMethod", event.target.value as DDAProSettings["zScoreMethod"])}>
+                  <option value="classical">Classical Mean / Sigma</option><option value="robust">Robust Median / MAD</option>
+                </select>
+              </label>
+              <label>Sigma Multiplier<input type="number" min={0.25} max={6} step={0.25} value={ddaProSettings.sigmaMultiplier} onChange={(event) => updateDDAProSetting("sigmaMultiplier", Number(event.target.value))} /></label>
+              <label>Downside-Only Sigma<input type="checkbox" checked={ddaProSettings.downsideOnlySigma} onChange={(event) => updateDDAProSetting("downsideOnlySigma", event.target.checked)} /></label>
+              <div className="indicator-settings-section">Annualization & Risk</div>
+              <label>
+                Annualization
+                <select value={ddaProSettings.annualizationMode} onChange={(event) => updateDDAProSetting("annualizationMode", event.target.value as DDAProSettings["annualizationMode"])}>
+                  <option value="auto">Auto / Crypto 365</option><option value="crypto-365">Crypto 365</option><option value="traditional-252">Traditional 252</option><option value="custom">Custom</option>
+                </select>
+              </label>
+              {ddaProSettings.annualizationMode === "custom" && <label>Periods / Year<input type="number" min={1} max={1000000} value={ddaProSettings.customPeriodsPerYear} onChange={(event) => updateDDAProSetting("customPeriodsPerYear", Number(event.target.value))} /></label>}
+              <label>Risk-Free Rate %<input type="number" min={-25} max={100} step={0.1} value={ddaProSettings.riskFreeRatePercent} onChange={(event) => updateDDAProSetting("riskFreeRatePercent", Number(event.target.value))} /></label>
+              <label>VADD Volatility Floor %<input type="number" min={0.001} max={100} step={0.01} value={ddaProSettings.vaddVolatilityFloorPercent} onChange={(event) => updateDDAProSetting("vaddVolatilityFloorPercent", Number(event.target.value))} /></label>
+              <label>Episode Threshold %<input type="number" min={0} max={50} step={0.1} value={ddaProSettings.drawdownEpisodeThresholdPercent} onChange={(event) => updateDDAProSetting("drawdownEpisodeThresholdPercent", Number(event.target.value))} /></label>
+              <label>Risk Hysteresis<input type="number" min={0} max={20} step={0.5} value={ddaProSettings.hysteresisPercent} onChange={(event) => updateDDAProSetting("hysteresisPercent", Number(event.target.value))} /></label>
+              <label>Moderate Threshold<input type="number" min={0} max={95} value={ddaProSettings.moderateThreshold} onChange={(event) => updateDDAProSetting("moderateThreshold", Number(event.target.value))} /></label>
+              <label>High Threshold<input type="number" min={0} max={99} value={ddaProSettings.highThreshold} onChange={(event) => updateDDAProSetting("highThreshold", Number(event.target.value))} /></label>
+              <label>Extreme Threshold<input type="number" min={0} max={100} value={ddaProSettings.extremeThreshold} onChange={(event) => updateDDAProSetting("extremeThreshold", Number(event.target.value))} /></label>
+              <div className="indicator-settings-section">Risk Score Weights</div>
+              <label>Depth<input type="number" min={0} max={1} step={0.05} value={ddaProSettings.depthWeight} onChange={(event) => updateDDAProSetting("depthWeight", Number(event.target.value))} /></label>
+              <label>Duration<input type="number" min={0} max={1} step={0.05} value={ddaProSettings.durationWeight} onChange={(event) => updateDDAProSetting("durationWeight", Number(event.target.value))} /></label>
+              <label>Worsening Velocity<input type="number" min={0} max={1} step={0.05} value={ddaProSettings.velocityWeight} onChange={(event) => updateDDAProSetting("velocityWeight", Number(event.target.value))} /></label>
+              <label>VADD<input type="number" min={0} max={1} step={0.05} value={ddaProSettings.volatilityWeight} onChange={(event) => updateDDAProSetting("volatilityWeight", Number(event.target.value))} /></label>
+              <label>Tail Severity<input type="number" min={0} max={1} step={0.05} value={ddaProSettings.tailWeight} onChange={(event) => updateDDAProSetting("tailWeight", Number(event.target.value))} /></label>
+              <div className="vwap-mode-note">Weights are normalized at calculation time. Defaults sum to 1.00.</div>
+              <div className="indicator-settings-section">Plots & Dashboard</div>
+              <label>Raw Drawdown<input type="checkbox" checked={ddaProSettings.showRawDrawdown} onChange={(event) => updateDDAProSetting("showRawDrawdown", event.target.checked)} /></label>
+              <label>Smoothed Drawdown<input type="checkbox" checked={ddaProSettings.showSmoothedDrawdown} onChange={(event) => updateDDAProSetting("showSmoothedDrawdown", event.target.checked)} /></label>
+              <label>Distribution Mean<input type="checkbox" checked={ddaProSettings.showMean} onChange={(event) => updateDDAProSetting("showMean", event.target.checked)} /></label>
+              <label>Sigma Bands<input type="checkbox" checked={ddaProSettings.showSigmaBands} onChange={(event) => updateDDAProSetting("showSigmaBands", event.target.checked)} /></label>
+              <label>Quantile Bands<input type="checkbox" checked={ddaProSettings.showQuantiles} onChange={(event) => updateDDAProSetting("showQuantiles", event.target.checked)} /></label>
+              <label>Risk Score Strip<input type="checkbox" checked={ddaProSettings.showRiskScore} onChange={(event) => updateDDAProSetting("showRiskScore", event.target.checked)} /></label>
+              <label>Compact Dashboard<input type="checkbox" checked={ddaProSettings.showDashboard} onChange={(event) => updateDDAProSetting("showDashboard", event.target.checked)} /></label>
+              <label>Expanded Metrics Table<input type="checkbox" checked={ddaProSettings.showExpandedDashboard} onChange={(event) => updateDDAProSetting("showExpandedDashboard", event.target.checked)} /></label>
+              <label>Episode Markers<input type="checkbox" checked={ddaProSettings.showEpisodeMarkers} onChange={(event) => updateDDAProSetting("showEpisodeMarkers", event.target.checked)} /></label>
+              <label>Velocity<input type="checkbox" checked={ddaProSettings.showVelocity} onChange={(event) => updateDDAProSetting("showVelocity", event.target.checked)} /></label>
+              <label>Scale<select value={ddaProSettings.scaleMode} onChange={(event) => updateDDAProSetting("scaleMode", event.target.value as DDAProSettings["scaleMode"])}><option value="dynamic-tail">Dynamic Tail</option><option value="auto">Auto</option><option value="fixed-10">0 to -10%</option><option value="fixed-20">0 to -20%</option><option value="fixed-50">0 to -50%</option><option value="custom">Custom</option></select></label>
+              {ddaProSettings.scaleMode === "custom" && <label>Custom Depth %<input type="number" min={1} max={100} value={ddaProSettings.customScaleDepthPercent} onChange={(event) => updateDDAProSetting("customScaleDepthPercent", Number(event.target.value))} /></label>}
+              <label>Dashboard Position<select value={ddaProSettings.dashboardPosition} onChange={(event) => updateDDAProSetting("dashboardPosition", event.target.value as DDAProSettings["dashboardPosition"])}><option value="top-right">Top Right</option><option value="top-left">Top Left</option><option value="bottom-right">Bottom Right</option><option value="bottom-left">Bottom Left</option></select></label>
+              <label>Theme<select value={ddaProSettings.theme} onChange={(event) => updateDDAProSetting("theme", event.target.value as DDAProSettings["theme"])}><option value="black-terminal">Black Terminal Institutional</option><option value="black-terminal-blood">Black Terminal Blood</option><option value="institutional-monochrome">Institutional Monochrome</option><option value="custom">Custom</option><option value="gold">Gold</option><option value="edge-tools">EdgeTools</option><option value="behavioral">Behavioral</option><option value="quant">Quant</option><option value="ocean">Ocean</option><option value="fire">Fire</option><option value="matrix">Matrix</option><option value="arctic">Arctic</option></select></label>
+              <label className="indicator-color-setting">Drawdown Line<input type="color" value={ddaProSettings.smoothedColor} onChange={(event) => updateDDAProSetting("smoothedColor", event.target.value)} /></label>
+              <label className="indicator-color-setting">Extreme Risk<input type="color" value={ddaProSettings.extremeColor} onChange={(event) => updateDDAProSetting("extremeColor", event.target.value)} /></label>
+              <label className="indicator-range-row">Line Intensity<span><input type="range" min={0} max={100} value={ddaProSettings.lineIntensity} onChange={(event) => updateDDAProSetting("lineIntensity", Number(event.target.value))} /><b>{ddaProSettings.lineIntensity}</b></span></label>
+              <label className="indicator-range-row">Risk Fill<span><input type="range" min={0} max={60} value={ddaProSettings.fillIntensity} onChange={(event) => updateDDAProSetting("fillIntensity", Number(event.target.value))} /><b>{ddaProSettings.fillIntensity}</b></span></label>
+              <div className="vwap-mode-note">{ddaProStatus} · {ddaProSnapshot ? `${ddaProSnapshot.inputSize.toLocaleString()} bars · confidence ${ddaProSnapshot.latest.confidence.toFixed(0)}% · ${ddaProSnapshot.sourceAuthority}` : "Awaiting deterministic worker result"}</div>
+              {ddaProSnapshot?.sourceWarning && <div className="vwap-mode-note">{ddaProSnapshot.sourceWarning}</div>}
+              <details className="indicator-advanced-details">
+                <summary>Advanced / Diagnostics</summary>
+                <div className="vwap-mode-note">Engine {ddaProSnapshot?.engineVersion ?? "--"} · Protocol v1 · {ddaProWorkerRef.current?.executionMode() ?? "NOT STARTED"}</div>
+                <div className="vwap-mode-note">Data Hash {ddaProSnapshot?.dataHash ?? "--"}</div>
+                <div className="vwap-mode-note">Settings Hash {ddaProSnapshot?.settingsHash ?? ddaProSettingsHash(ddaProSettings)}</div>
+                <div className="vwap-mode-note">Output Hash {ddaProSnapshot?.outputHash ?? "--"}</div>
+                <div className="vwap-mode-note">Valid Samples {ddaProSnapshot ? Math.max(0, ddaProSnapshot.inputSize - ddaProSnapshot.validFromIndex).toLocaleString() : "--"} · Bars / Year {ddaProSnapshot?.barsPerYear.toFixed(2) ?? "--"}</div>
+                <div className="vwap-mode-note">Worker Timing {ddaProWorkerRef.current?.lastCalculationTimeMs()?.toFixed(2) ?? "--"} ms · Parity {ddaProSettings.engineMode === "pine-compatibility" ? "TV GOLDEN UNVERIFIED" : "TS/PY CORE PARTIAL"}</div>
+              </details>
             </>
           )}
           {activeIndicator === "waveTrendOscillator" && (
@@ -5800,7 +6093,7 @@ export function PixiBlackChart({
           className="oscillator-pane-resizer"
           style={{ bottom: `min(${74 + pane.topOffset}px, calc(100% - 110px))` }}
           role="separator"
-          aria-label={`Resize ${pane.key === "zScoreOscillator" ? "Z-Score" : pane.key === "waveTrendOscillator" ? "WaveTrend" : "OI Osc"} pane`}
+          aria-label={`Resize ${pane.key === "ddaProOscillator" ? "DDA Pro" : pane.key === "zScoreOscillator" ? "Z-Score" : pane.key === "waveTrendOscillator" ? "WaveTrend" : "OI Osc"} pane`}
           aria-orientation="horizontal"
           onPointerDown={(event) => beginOscillatorResize(event, pane.key)}
           onPointerMove={resizeOscillatorPane}

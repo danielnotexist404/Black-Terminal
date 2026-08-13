@@ -423,3 +423,8 @@ Run `npm run test:dom-pro-panels`, `npm run test:dom-pro-visual`, `npm run certi
 Run the aggregate BCLIF model, adapter, order-book, checkpoint/recovery, tile-codec, no-lookahead, persistence-security, visual, benchmark, TypeScript, security, migration-source, and production-build gates documented in `docs/liquidation/BCLIF_DEPLOYMENT_RUNBOOK.md`. Build `Dockerfile.liquidation-intelligence` for linux/amd64 and linux/arm64 and deploy only with `docker-compose.liquidation-intelligence.yml` on `LIQUIDATION_INTELLIGENCE_NODE_01` or `IMM_NODE_01`.
 
 Use a separate root-owned environment file based on `.env.liquidation-intelligence.example`. Never reuse Black Cloud credentials or place this workload on `BLACK_CLOUD_NODE_01`. Apply `202608050001` followed by `202608050002` only after isolated migration/RLS/storage tests and an actual analytics host pass the activation gate. In the current State A package, both migrations remain unapplied and no persistent history is claimed.
+
+
+## DDA Pro validation
+
+Run `npm run test:dda-pro-all`, `npm run benchmark:dda-pro`, `npm run test:oscillator-layout`, `npm run typecheck`, and `npm run build`. TradingView parity additionally requires externally supplied golden exports; internal tests alone do not certify it.

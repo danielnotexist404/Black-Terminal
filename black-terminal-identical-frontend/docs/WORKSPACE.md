@@ -282,3 +282,11 @@ runtime diagnostic function and no raw field is written to localStorage or
 IndexedDB.
 Chapter III-C5 upgrades BCLIF renderer preferences to schema V7. Only BCLIF presentation fields migrate; unrelated workspace preferences are preserved. Browser Fallback may store up to three public snapshot checkpoints in black-terminal-bclif-public-v1 (24 h, 64 MiB each, 128 MiB total). This storage never includes authentication, broker or private-account state and is not persistent-collector authority.
 Renderer schema V8 repairs the incompatible V7 shelf-only state. Renderer schema V9 then adds the full-plot theme backdrop, high-DPI causal shelf presentation, Purple Plasma and Blood / White / Silver themes, and explicit plasma/clarity/residual controls. These remain presentation-only: legacy diagnostic shelves cannot suppress the GPU raster, older renderer checkpoints rebuild, and model/exposure authority does not change. See BCLIF_THERMAL_FIELD_RECOVERY.md and BCLIF_THERMAL_PRESENTATION_V9.md.
+
+
+## DDA Pro workspace paths
+
+- `src/modules/dda-pro/` — Native and Compatibility engines, settings, worker protocol.
+- `python/black_core_indicators/dda_pro/` — independent readable reference.
+- `reference/pine/dda-pro-edgetools-v6.pine` — retained MPL source.
+- `docs/indicators/DDA_PRO_*.md` — audit and operating contracts.

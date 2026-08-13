@@ -5,6 +5,7 @@ import type { KioseffSettingsV1 } from "../modules/kioseff-stop-loss-clustering/
 import type { AuctionProfileSettings, AuctionProfileSnapshot } from "../modules/auction-profile/core/types";
 import type { LiquidationFieldSettings } from "../modules/liquidation-field/core/types";
 import type { BclifRendererMetrics } from "../modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer";
+import type { DDAProSettings, DDAProSnapshot } from "../modules/dda-pro/core/types";
 
 
 export type Candle = {
@@ -111,6 +112,7 @@ export type ChartEngineOptions = {
   auctionProfileSnapshot?: AuctionProfileSnapshot | null;
   auctionProfileSnapshots?: AuctionProfileSnapshot[];
   auctionProfileSettings?: AuctionProfileSettings;
+  ddaProSnapshot?: DDAProSnapshot | null;
   alertDefinitions?: IndicatorAlertDefinition[];
   customPlots?: any[];
   onAlertFired?: (symbol: string, message: string) => void;
@@ -142,6 +144,7 @@ export type VisibleIndicators = {
   openInterestOscillator: boolean;
   zScoreOscillator: boolean;
   waveTrendOscillator: boolean;
+  ddaProOscillator: boolean;
   volume: boolean;
 };
 
@@ -157,6 +160,7 @@ export type IndicatorPeriods = {
   openInterestOscillator: number;
   zScoreOscillator: number;
   waveTrendOscillator: number;
+  ddaProOscillator: number;
 };
 
 export type IndicatorColorKey = "red" | "white" | "silver" | "gray" | "green" | "orange";
@@ -297,7 +301,8 @@ export type AdaptiveSwingStrategySettings = {
 export type OscillatorIndicatorKey =
   | "openInterestOscillator"
   | "zScoreOscillator"
-  | "waveTrendOscillator";
+  | "waveTrendOscillator"
+  | "ddaProOscillator";
 
 export type OscillatorPaneSettings = {
   height: number;
@@ -418,6 +423,7 @@ export type IndicatorAdvancedSettings = {
   oscillatorPane: OscillatorPaneSettings;
   zScoreOscillator: ZScoreOscillatorSettings;
   waveTrendOscillator: WaveTrendOscillatorSettings;
+  ddaProOscillator: DDAProSettings;
   vwap: VwapSettings;
 };
 

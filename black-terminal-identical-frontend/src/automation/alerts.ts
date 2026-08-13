@@ -1,6 +1,7 @@
 import type { Timeframe } from "../market-data/types";
+import type { DDAProEventType } from "../modules/dda-pro/core/types";
 
-export type AlertIndicatorTarget = "price" | "hdlxProfile" | "vwap" | "ema20" | "ema50" | "ema200";
+export type AlertIndicatorTarget = "price" | "hdlxProfile" | "vwap" | "ema20" | "ema50" | "ema200" | "ddaPro";
 export type AlertCondition = "testing" | "crossingAbove" | "crossingBelow";
 export type AlertRunMode = "once" | "perpetual";
 export type AlertLevelTarget = "any" | "poc" | "vah" | "val" | "lvn";
@@ -14,6 +15,7 @@ export type IndicatorAlertDefinition = {
   timeframe: Timeframe;
   indicator: AlertIndicatorTarget;
   levelTarget?: AlertLevelTarget;
+  ddaSignal?: DDAProEventType;
   targetPrice?: number;
   color?: string;
   condition: AlertCondition;

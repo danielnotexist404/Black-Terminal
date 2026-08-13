@@ -1448,3 +1448,8 @@ Remaining:
 - Added Reference, Verified, and Research presets plus Raw Exposure and Validity audit views. Raw shelves, nodes, labels, dashboards, provenance, and developer diagnostics are off by default.
 - Added renderer-only quantitative fixtures and dedicated 1080p, 1440p, and 4K goldens. Repeated pixels are deterministic (SSIM 1.0 / mean sampled perceptual delta 0), while the older 27-case V2 recertification remains pending.
 - Recorded the truthful source-resolution verdict: `RAW FIELD TOO SPARSE — SOURCE/MODEL RESOLUTION LIMIT`. Persistent collector deployment, migrations, and authenticated live acceptance remain unperformed.
+
+
+## 2026-08-13 — BC-DDA Pro conversion
+
+Retained the original EdgeTools Pine source and integrated a worker-isolated dual-engine Drawdown Distribution Analysis oscillator. Added causal raw-depth distributions, episodes, tail metrics, transparent risk scoring and confidence, a Pixi distribution fan and dashboard, versioned persistence, Python reference parity, no-lookahead tests, and measured synthetic benchmarks. Exact TradingView parity remains unverified without goldens.

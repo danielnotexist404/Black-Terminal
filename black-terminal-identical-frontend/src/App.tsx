@@ -84,6 +84,7 @@ import {
 import { migrateKioseffWorkspaceFields } from "./modules/kioseff-stop-loss-clustering/core/workspaceMigration";
 import { AUCTION_PROFILE_DEFAULT_SETTINGS, migrateAuctionProfileSettings } from "./modules/auction-profile/core/settings";
 import type { AuctionProfileSettings } from "./modules/auction-profile/core/types";
+import { migrateDDAProSettings } from "./modules/dda-pro/core/settings";
 import type {
   ChartDisplayType,
   DrawingToolId,
@@ -213,6 +214,7 @@ const defaultVisibleIndicators: VisibleIndicators = {
   openInterestOscillator: false,
   zScoreOscillator: false,
   waveTrendOscillator: false,
+  ddaProOscillator: false,
   volume: false
 };
 
@@ -242,7 +244,8 @@ const defaultIndicatorPeriods: IndicatorPeriods = {
   bollinger: 20,
   openInterestOscillator: 34,
   zScoreOscillator: 50,
-  waveTrendOscillator: 10
+  waveTrendOscillator: 10,
+  ddaProOscillator: 500
 };
 
 const defaultIndicatorVisualSettings: IndicatorVisualSettings = {
@@ -262,6 +265,7 @@ const defaultIndicatorVisualSettings: IndicatorVisualSettings = {
   openInterestOscillator: { color: "red", intensity: 82 },
   zScoreOscillator: { color: "white", intensity: 74 },
   waveTrendOscillator: { color: "silver", intensity: 78 },
+  ddaProOscillator: { color: "red", intensity: 92 },
   volume: { color: "red", intensity: 62 }
 };
 
@@ -447,6 +451,7 @@ function migrateIndicatorAdvancedSettings(value: Partial<IndicatorAdvancedSettin
       ...defaultIndicatorAdvancedSettings.waveTrendOscillator,
       ...(value?.waveTrendOscillator ?? {})
     },
+    ddaProOscillator: migrateDDAProSettings(value?.ddaProOscillator),
     vwap: {
       ...defaultIndicatorAdvancedSettings.vwap,
       ...(value?.vwap ?? {})

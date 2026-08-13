@@ -23,6 +23,7 @@ type IndicatorLibraryProps = {
 
 type BuiltInIndicator = {
   key: IndicatorKey;
+  stableId?: string;
   title: string;
   group: string;
   type: string;
@@ -103,6 +104,18 @@ const builtInIndicators: BuiltInIndicator[] = [
   { key: "sma20", title: "SMA 20", group: "Trend", type: "Overlay", signal: "Fast simple average", periodKey: "sma20", min: 2, max: 500 },
   { key: "sma50", title: "SMA 50", group: "Trend", type: "Overlay", signal: "Medium simple average", periodKey: "sma50", min: 2, max: 500 },
   { key: "bollinger", title: "Bollinger Bands", group: "Volatility", type: "Bands", signal: "2 sigma envelope", periodKey: "bollinger", min: 5, max: 300 },
+  {
+    key: "ddaProOscillator",
+    stableId: "black-core-dda-pro",
+    title: "DDA Pro — Drawdown Distribution Analysis",
+    group: "Black Core / Risk Analytics",
+    type: "Oscillator + Dashboard",
+    signal: "Distribution-aware drawdown depth, duration, tail risk and recovery intelligence",
+    runtime: "Worker",
+    periodKey: "ddaProOscillator",
+    min: 100,
+    max: 20000
+  },
   {
     key: "openInterestOscillator",
     title: "Open Interest Oscillator",

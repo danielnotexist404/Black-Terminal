@@ -44,6 +44,7 @@ import { migrateLiquidationFieldSettings } from "../modules/liquidation-field/co
 import { BlackCoreLiquidationFieldRenderer, type BclifRendererMetrics } from "../modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer";
 import { resolveBclifDisplayDomain } from "../modules/liquidation-field/rendering/displayProjection";
 import { bclifTimestampMsToChartSeconds } from "../modules/liquidation-field/rendering/timeProjection";
+import type { DDAProSnapshot } from "../modules/dda-pro/core/types";
 
 import {
   fromAxisValue,
@@ -167,6 +168,7 @@ export class BlackChartEngine {
   private auctionProfileRenderer = new AuctionProfileRenderer();
   private cvdFootprintRenderer = new CvdFootprintRenderer();
   private auctionProfileSnapshots: AuctionProfileSnapshot[] = [];
+  private ddaProSnapshot: DDAProSnapshot | null = null;
   private auctionProfileSettings: AuctionProfileSettings = structuredClone(AUCTION_PROFILE_DEFAULT_SETTINGS);
   private constrainedTouchRenderer = false;
   private volumeProfileModel = new VolumeProfileModel();
@@ -212,6 +214,7 @@ export class BlackChartEngine {
     openInterestOscillator: false,
     zScoreOscillator: false,
     waveTrendOscillator: false,
+    ddaProOscillator: false,
     volume: true
   };
   private indicatorPeriods: IndicatorPeriods = {
@@ -225,7 +228,8 @@ export class BlackChartEngine {
     bollinger: 20,
     openInterestOscillator: 34,
     zScoreOscillator: 50,
-    waveTrendOscillator: 10
+    waveTrendOscillator: 10,
+    ddaProOscillator: 500
   };
   private indicatorVisualSettings: IndicatorVisualSettings = {
     liquidationHeatmap: { color: "red", intensity: 78 },
@@ -244,6 +248,7 @@ export class BlackChartEngine {
     openInterestOscillator: { color: "red", intensity: 82 },
     zScoreOscillator: { color: "white", intensity: 74 },
     waveTrendOscillator: { color: "silver", intensity: 78 },
+    ddaProOscillator: { color: "red", intensity: 92 },
     volume: { color: "red", intensity: 62 }
   };
   private indicatorAdvancedSettings: IndicatorAdvancedSettings = defaultIndicatorAdvancedSettings;
@@ -343,6 +348,7 @@ export class BlackChartEngine {
     this.setHeatmapSource(options.candles);
     if (options.auctionProfileSnapshots !== undefined) this.auctionProfileSnapshots = options.auctionProfileSnapshots;
     else if (options.auctionProfileSnapshot !== undefined) this.auctionProfileSnapshots = options.auctionProfileSnapshot ? [options.auctionProfileSnapshot] : [];
+    if (options.ddaProSnapshot !== undefined) this.ddaProSnapshot = options.ddaProSnapshot;
     if (options.auctionProfileSettings) {
       this.auctionProfileSettings = migrateAuctionProfileSettings(options.auctionProfileSettings);
     }
@@ -744,6 +750,11 @@ export class BlackChartEngine {
     this.indicatorAdvancedSettings = indicatorAdvancedSettings;
     this.liquidationFieldSettings = migrateLiquidationFieldSettings(indicatorAdvancedSettings.liquidationField);
     this.setHeatmapSource(this.candles.all(), this.heatmapVisibleUntilIndex);
+    this.draw();
+  }
+
+  setDDAProState(snapshot: DDAProSnapshot | null) {
+    this.ddaProSnapshot = snapshot;
     this.draw();
   }
 
@@ -2084,6 +2095,164 @@ export class BlackChartEngine {
     }
   }
 
+  private drawDDAProPane(data: Candle[], paneTop: number, paneBottom: number, plotWidth: number) {
+    const snapshot = this.ddaProSnapshot;
+    const settings = this.indicatorAdvancedSettings.ddaProOscillator;
+    const g = this.indicatorLayer;
+    const paneHeight = paneBottom - paneTop;
+    const offset = Math.max(0, data.length - (snapshot?.inputSize ?? 0));
+    const aligned = (values: readonly number[] | undefined, index: number) => {
+      const sourceIndex = index - offset;
+      return sourceIndex >= 0 ? values?.[sourceIndex] : undefined;
+    };
+    const themePalette = (() => {
+      const palette = (background: string, primary: string, low: string, moderate: string, high: string, extreme: string, neutral: string, text = "#ffffff") => ({ background, primary, low, moderate, high, extreme, neutral, text });
+      switch (settings.theme) {
+        case "gold": return palette("#000000", "#ffd700", "#ffa500", "#c0c0c0", "#ff5252", "#ff5252", "#c0c0c0");
+        case "edge-tools": return palette("#0a0a0a", "#3b82f6", "#22c55e", "#737373", "#ef4444", "#ef4444", "#737373", "#fafafa");
+        case "behavioral": return palette("#000000", "#808080", "#00ff00", "#ffbf00", "#8b0000", "#8b0000", "#ffbf00");
+        case "quant": return palette("#000000", "#808080", "#ffa500", "#4682b4", "#8b0000", "#8b0000", "#4682b4");
+        case "ocean": return palette("#001f3f", "#20b2aa", "#00ced1", "#87ceeb", "#ff4500", "#ff4500", "#87ceeb", "#f0f8ff");
+        case "fire": return palette("#2f1b14", "#ff6347", "#ffd700", "#ffa500", "#8b0000", "#8b0000", "#ffa500", "#fffaf0");
+        case "matrix": return palette("#0d1b0d", "#00ff41", "#39ff14", "#00ffff", "#ff073a", "#ff073a", "#00ffff", "#c0ff8c");
+        case "arctic": return palette("#191970", "#87cefa", "#00bfff", "#b0e0e6", "#ff1493", "#ff1493", "#b0e0e6", "#f8f8ff");
+        case "black-terminal-blood": return palette("#020203", "#ff1838", "#d2d3d6", "#6f1118", "#b4001d", "#ff1838", "#777b83");
+        case "institutional-monochrome": return palette("#020203", "#f2f2f4", "#d2d3d6", "#666970", "#a0a2a7", "#ffffff", "#777b83");
+        case "custom": return palette("#020203", settings.smoothedColor, "#d2d3d6", settings.moderateColor, settings.highColor, settings.extremeColor, settings.meanColor);
+        default: return palette("#020203", settings.smoothedColor, "#d2d3d6", settings.moderateColor, settings.highColor, settings.extremeColor, settings.meanColor);
+      }
+    })();
+    const background = this.hexColor(themePalette.background, 0x020203);
+    g.rect(0, paneTop, plotWidth, paneHeight)
+      .fill({ color: background, alpha: 0.96 })
+      .stroke({ width: 1, color: 0xffffff, alpha: 0.07 });
+
+    if (!snapshot || snapshot.inputSize === 0) {
+      this.addProfileText("DDA PRO · CALCULATING DISTRIBUTION", 12, paneTop + 12, theme.muted, 9, "700");
+      return;
+    }
+
+    const visibleDrawdowns: number[] = [];
+    for (let index = this.view.firstIndex; index <= this.view.lastIndex; index++) {
+      const value = aligned(snapshot.series.rawDrawdown, index);
+      if (Number.isFinite(value)) visibleDrawdowns.push(Math.abs(value!));
+    }
+    const dynamicDepth = Math.max(1, Math.min(100, Math.max(...visibleDrawdowns, Math.abs(snapshot.latest.maxDrawdownPercent), Math.abs(snapshot.series.p99.at(-1) ?? 0), 1) * 1.12));
+    const maxDepth = settings.scaleMode === "fixed-10" ? 10 : settings.scaleMode === "fixed-20" ? 20 : settings.scaleMode === "fixed-50" ? 50 : settings.scaleMode === "custom" ? settings.customScaleDepthPercent : dynamicDepth;
+    const yForDrawdown = (value: number) => paneTop + 18 + Math.min(1, Math.abs(Math.min(0, value)) / maxDepth) * Math.max(1, paneHeight - 34);
+    const riskColor = snapshot.latest.riskState === "EXTREME" ? this.hexColor(themePalette.extreme, theme.redBright)
+      : snapshot.latest.riskState === "HIGH" ? this.hexColor(themePalette.high, theme.red)
+        : snapshot.latest.riskState === "MODERATE" ? this.hexColor(themePalette.moderate, theme.red)
+          : this.hexColor(themePalette.low, theme.silver);
+    const fillAlpha = Math.max(0, Math.min(0.5, settings.fillIntensity / 100));
+    if (snapshot.latest.riskState !== "LOW") {
+      g.rect(0, paneTop, plotWidth, paneHeight).fill({ color: riskColor, alpha: fillAlpha * 0.36 });
+    }
+    g.moveTo(0, yForDrawdown(0)).lineTo(plotWidth, yForDrawdown(0)).stroke({ width: 1, color: theme.silver, alpha: 0.22 });
+
+    const drawLine = (values: readonly number[], color: number, alpha: number, width: number) => {
+      let started = false;
+      for (let index = this.view.firstIndex; index <= this.view.lastIndex; index++) {
+        const value = aligned(values, index);
+        if (!Number.isFinite(value)) { started = false; continue; }
+        const x = this.xForIndex(index);
+        const y = yForDrawdown(value!);
+        if (!started) { g.moveTo(x, y); started = true; }
+        else g.lineTo(x, y);
+      }
+      if (started) g.stroke({ width, color, alpha });
+    };
+
+    const drawBand = (upperValues: readonly number[], lowerValues: readonly number[], color: number, alpha: number) => {
+      const upper: number[] = [];
+      const lower: number[] = [];
+      for (let index = this.view.firstIndex; index <= this.view.lastIndex; index++) {
+        const upperValue = aligned(upperValues, index);
+        const lowerValue = aligned(lowerValues, index);
+        if (!Number.isFinite(upperValue) || !Number.isFinite(lowerValue)) continue;
+        upper.push(this.xForIndex(index), yForDrawdown(upperValue!));
+        lower.unshift(yForDrawdown(lowerValue!));
+        lower.unshift(this.xForIndex(index));
+      }
+      if (upper.length >= 4 && lower.length >= 4) g.poly([...upper, ...lower]).fill({ color, alpha });
+    };
+    if (settings.showQuantiles) {
+      drawBand(snapshot.series.p50, snapshot.series.p75, this.hexColor(themePalette.neutral, theme.muted), fillAlpha * 0.28);
+      drawBand(snapshot.series.p75, snapshot.series.p90, this.hexColor(themePalette.moderate, theme.red), fillAlpha * 0.44);
+      drawBand(snapshot.series.p90, snapshot.series.p95, this.hexColor(themePalette.high, theme.red), fillAlpha * 0.62);
+      drawBand(snapshot.series.p95, snapshot.series.p99, this.hexColor(themePalette.extreme, theme.redBright), fillAlpha * 0.76);
+    }
+
+    if (settings.showSigmaBands) {
+      drawLine(snapshot.series.sigmaLower, this.hexColor(themePalette.high, theme.red), 0.34, 0.85);
+      if (!settings.downsideOnlySigma) drawLine(snapshot.series.sigmaUpper, this.hexColor(themePalette.neutral, theme.muted), 0.22, 0.7);
+    }
+    if (settings.showQuantiles) {
+      drawLine(snapshot.series.p95, this.hexColor(themePalette.extreme, theme.redBright), 0.58, 0.9);
+      drawLine(snapshot.series.p75, this.hexColor(themePalette.moderate, theme.red), 0.32, 0.7);
+      drawLine(snapshot.series.p50, this.hexColor(themePalette.neutral, theme.muted), 0.32, 0.7);
+    }
+    if (settings.showMean) drawLine(snapshot.series.mean, this.hexColor(themePalette.neutral, theme.muted), 0.54, 0.9);
+    if (settings.showRawDrawdown) drawLine(snapshot.series.rawDrawdown, this.hexColor(themePalette.neutral, theme.muted), 0.46, 0.8);
+    if (settings.showSmoothedDrawdown) {
+      drawLine(snapshot.series.smoothedDrawdown, this.hexColor(themePalette.primary, theme.silverBright), settings.lineIntensity / 100, settings.lineWidth);
+    }
+
+    if (settings.showRiskScore) {
+      const barWidth = Math.max(0.5, Math.min(this.timeStep() * 0.65, 4));
+      for (let index = this.view.firstIndex; index <= this.view.lastIndex; index++) {
+        const score = aligned(snapshot.series.riskScore, index);
+        if (!Number.isFinite(score)) continue;
+        const height = Math.max(1, paneHeight * 0.10 * (score! / 100));
+        g.rect(this.xForIndex(index) - barWidth / 2, paneBottom - height, barWidth, height)
+          .fill({ color: score! >= 90 ? this.hexColor(themePalette.extreme, theme.redBright) : score! >= 75 ? this.hexColor(themePalette.high, theme.red) : this.hexColor(themePalette.moderate, theme.silver), alpha: 0.34 });
+      }
+    }
+
+    if (settings.showVelocity) drawLine(snapshot.series.velocity.map((value) => -Math.max(0, value)), this.hexColor(themePalette.extreme, theme.redBright), 0.48, 0.75);
+    const latestChartIndex = offset + snapshot.inputSize - 1;
+    if (latestChartIndex >= this.view.firstIndex && latestChartIndex <= this.view.lastIndex) {
+      const current = snapshot.series.smoothedDrawdown.at(-1) ?? snapshot.latest.drawdownPercent;
+      g.circle(this.xForIndex(latestChartIndex), yForDrawdown(current), 3.4).fill({ color: riskColor, alpha: 0.98 }).stroke({ width: 1, color: theme.silverBright, alpha: 0.85 });
+    }
+    if (settings.showEpisodeMarkers) {
+      for (const episode of snapshot.episodes) {
+        const troughIndex = offset + episode.troughIndex;
+        if (troughIndex >= this.view.firstIndex && troughIndex <= this.view.lastIndex) {
+          g.circle(this.xForIndex(troughIndex), yForDrawdown(-(snapshot.series.depth[episode.troughIndex] ?? 0)), 2.8).fill({ color: this.hexColor(themePalette.extreme, theme.redBright), alpha: 0.9 });
+        }
+        if (episode.recoveryIndex !== null) {
+          const recoveryIndex = offset + episode.recoveryIndex;
+          if (recoveryIndex >= this.view.firstIndex && recoveryIndex <= this.view.lastIndex) {
+            g.circle(this.xForIndex(recoveryIndex), yForDrawdown(snapshot.series.rawDrawdown[episode.recoveryIndex] ?? 0), 2.8).fill({ color: this.hexColor(themePalette.low, theme.silverBright), alpha: 0.9 });
+          }
+        }
+      }
+    }
+
+    const dashboardOnLeft = settings.dashboardPosition.endsWith("left");
+    const dashboardOnBottom = settings.dashboardPosition.startsWith("bottom");
+    const dashboardX = dashboardOnLeft ? 12 : Math.max(230, plotWidth - 340);
+    const dashboardY = dashboardOnBottom
+      ? Math.max(paneTop + 24, paneBottom - (settings.showExpandedDashboard ? 112 : 40))
+      : dashboardOnLeft ? paneTop + 24 : paneTop + 7;
+    const dashboardTextColor = this.hexColor(themePalette.neutral, theme.muted);
+    this.addProfileText(`DDA PRO · ${snapshot.engineMode === "pine-compatibility" ? "PINE COMPAT" : "BLACK CORE NATIVE"}`, 12, paneTop + 7, this.hexColor(themePalette.text, theme.silverBright), 9, "700");
+    if (settings.showDashboard) this.addProfileText(`${snapshot.latest.riskState} ${snapshot.latest.riskScore.toFixed(1)} · DD ${snapshot.latest.drawdownPercent.toFixed(2)}% · MDD ${snapshot.latest.maxDrawdownPercent.toFixed(2)}%`, dashboardX, dashboardY, riskColor, 9, "700");
+    if (settings.showDashboard && paneHeight >= 145) {
+      this.addProfileText("PCTL " + snapshot.latest.percentileRank.toFixed(1) + "   Z " + snapshot.latest.zScore.toFixed(2) + "   TUW " + snapshot.latest.timeUnderWaterBars, dashboardX, dashboardY + 13, dashboardTextColor, 8, "500");
+      this.addProfileText("SH " + snapshot.latest.sharpe.toFixed(2) + "   SO " + snapshot.latest.sortino.toFixed(2) + "   CA " + snapshot.latest.calmar.toFixed(2) + "   CONF " + snapshot.latest.confidence.toFixed(0) + "%", dashboardX, dashboardY + 26, dashboardTextColor, 8, "500");
+      if (settings.showExpandedDashboard) {
+        const latestIndex = Math.max(0, snapshot.inputSize - 1);
+        this.addProfileText("P95 " + Math.abs(snapshot.series.p95[latestIndex] ?? 0).toFixed(2) + "%   P99 " + Math.abs(snapshot.series.p99[latestIndex] ?? 0).toFixed(2) + "%   VADD " + snapshot.latest.vadd.toFixed(2), dashboardX, dashboardY + 39, dashboardTextColor, 8, "500");
+        this.addProfileText("VaR95 " + snapshot.latest.returnVaR95Percent.toFixed(2) + "%   ES95 " + snapshot.latest.returnES95Percent.toFixed(2) + "%", dashboardX, dashboardY + 52, dashboardTextColor, 8, "500");
+        this.addProfileText("DaR95 " + snapshot.latest.drawdownAtRisk95Percent.toFixed(2) + "%   CDaR95 " + snapshot.latest.conditionalDrawdownAtRisk95Percent.toFixed(2) + "%", dashboardX, dashboardY + 65, dashboardTextColor, 8, "500");
+        this.addProfileText("ULCER " + snapshot.latest.ulcerIndex.toFixed(2) + "   PAIN " + snapshot.latest.painIndex.toFixed(2) + "   OMEGA " + snapshot.latest.omegaRatio.toFixed(2), dashboardX, dashboardY + 78, dashboardTextColor, 8, "500");
+        this.addProfileText("RECOVERY " + snapshot.latest.recoveryFactor.toFixed(2) + "   AUW " + (snapshot.episodes.at(-1)?.areaUnderWater.toFixed(2) ?? "0.00"), dashboardX, dashboardY + 91, dashboardTextColor, 8, "500");
+      }
+    }
+  }
+
   private drawOscillatorPanes(data: Candle[]) {
     const stack = this.oscillatorStackLayout();
     if (stack.panes.length === 0) return;
@@ -2114,6 +2283,10 @@ export class BlackChartEngine {
       const paneTop = paneBottom - pane.height;
       const paneMid = (paneTop + paneBottom) / 2;
       const paneHalf = Math.max(1, pane.height / 2);
+      if (pane.key === "ddaProOscillator") {
+        this.drawDDAProPane(data, paneTop, paneBottom, plotWidth);
+        continue;
+      }
       const isZScorePane = pane.key === "zScoreOscillator";
       const zeroLineColor = isZScorePane
         ? this.hexColor(zSettings?.midlineColor ?? "#8a8a90", theme.muted)
@@ -2129,7 +2302,7 @@ export class BlackChartEngine {
       });
 
       const series: Array<{
-        key: "openInterestOscillator" | "zScoreOscillator" | "waveTrendOscillator";
+        key: "openInterestOscillator" | "zScoreOscillator" | "waveTrendOscillator" | "ddaProOscillator";
         label: string;
         values: number[];
         fallbackColor: IndicatorColorKey;
@@ -4180,5 +4353,32 @@ export class BlackChartEngine {
     const timeLabel = this.timeLabelForX(this.pointer.x);
     g.rect(this.pointer.x - 54, plotHeight + 3, 108, 22).fill({ color: theme.red, alpha: 0.95 });
     this.addCrosshairText(timeLabel, this.pointer.x - 49, plotHeight + 7);
+
+    const ddaSnapshot = this.visibleIndicators.ddaProOscillator ? this.ddaProSnapshot : null;
+    const ddaPane = this.oscillatorStackLayout().panes.find((pane) => pane.key === "ddaProOscillator");
+    if (ddaSnapshot && ddaPane) {
+      const paneBottom = plotHeight - 16 - ddaPane.bottomOffset;
+      const paneTop = paneBottom - ddaPane.height;
+      if (this.pointer.y >= paneTop && this.pointer.y <= paneBottom) {
+        const chartIndex = this.indexForX(this.pointer.x);
+        const sourceIndex = chartIndex - Math.max(0, this.getDisplayCandles().length - ddaSnapshot.inputSize);
+        if (sourceIndex >= 0 && sourceIndex < ddaSnapshot.inputSize) {
+          const depth = ddaSnapshot.series.depth[sourceIndex] ?? 0;
+          const nearestTail = depth >= Math.abs(ddaSnapshot.series.p99[sourceIndex] ?? 0) ? "P99"
+            : depth >= Math.abs(ddaSnapshot.series.p95[sourceIndex] ?? 0) ? "P95"
+              : depth >= Math.abs(ddaSnapshot.series.p90[sourceIndex] ?? 0) ? "P90"
+                : depth >= Math.abs(ddaSnapshot.series.p75[sourceIndex] ?? 0) ? "P75" : "P50";
+          const tooltipX = Math.max(8, Math.min(plotWidth - 248, this.pointer.x + 14));
+          const tooltipY = Math.max(paneTop + 5, Math.min(paneBottom - 76, this.pointer.y + 12));
+          g.roundRect(tooltipX, tooltipY, 240, 72, 4)
+            .fill({ color: 0x030305, alpha: 0.96 })
+            .stroke({ width: 1, color: theme.red, alpha: 0.72 });
+          this.addCrosshairText("DDA " + (ddaSnapshot.series.riskState[sourceIndex] ?? "INSUFFICIENT") + " · RISK " + (ddaSnapshot.series.riskScore[sourceIndex] ?? 0).toFixed(1), tooltipX + 8, tooltipY + 6);
+          this.addCrosshairText("DRAWDOWN " + (ddaSnapshot.series.rawDrawdown[sourceIndex] ?? 0).toFixed(2) + "% · DEPTH RANK " + (ddaSnapshot.series.percentileRank[sourceIndex] ?? 0).toFixed(1) + "%", tooltipX + 8, tooltipY + 21);
+          this.addCrosshairText("DURATION " + (ddaSnapshot.series.duration[sourceIndex] ?? 0).toFixed(0) + " · VELOCITY " + (ddaSnapshot.series.velocity[sourceIndex] ?? 0).toFixed(3), tooltipX + 8, tooltipY + 36);
+          this.addCrosshairText("VADD " + (ddaSnapshot.series.vadd[sourceIndex] ?? 0).toFixed(3) + " · NEAREST TAIL " + nearestTail, tooltipX + 8, tooltipY + 51);
+        }
+      }
+    }
   }
 }

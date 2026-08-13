@@ -6,6 +6,7 @@ import type {
 } from "../types";
 
 export const OSCILLATOR_KEYS: readonly OscillatorIndicatorKey[] = [
+  "ddaProOscillator",
   "zScoreOscillator",
   "openInterestOscillator",
   "waveTrendOscillator"
@@ -60,7 +61,8 @@ export function resolveOscillatorStack(
 ): OscillatorStackLayout {
   const order = resolveOscillatorOrder(visibleIndicators, paneSettings);
   const firstPrimary = order.find(
-    (key): key is Exclude<OscillatorIndicatorKey, "waveTrendOscillator"> => key !== "waveTrendOscillator"
+    (key): key is "zScoreOscillator" | "openInterestOscillator" =>
+      key === "zScoreOscillator" || key === "openInterestOscillator"
   );
   const injectionTarget = visibleIndicators.waveTrendOscillator &&
     waveTrendSettings.injectIntoPrimary &&

@@ -210,3 +210,8 @@ The live-pipeline forensic set is under `docs/liquidation/`:
 `BCLIF_LIVE_CAPTURE_REPLAY.md`, and the III-C4 completion report.
 Chapter III-C5 cold-start documentation: BCLIF_COLD_START_RASTER_AUDIT.md, BCLIF_COLD_START_RASTER_RECOVERY.md, BCLIF_CONFIDENCE_GATE_CONTRACT.md, BCLIF_INITIAL_SNAPSHOT_REPLAY.md, BCLIF_BROWSER_CHECKPOINT.md, BCLIF_RENDERER_STATE_MACHINE.md, BCLIF_COMPACT_HUD.md and BCLIF_CHAPTER_IIIC5_COMPLETION_REPORT.md.
 The renderer V8 shelf-only recovery and V9 plasma/shelf presentation contract are documented in liquidation/BCLIF_THERMAL_FIELD_RECOVERY.md and liquidation/BCLIF_THERMAL_PRESENTATION_V9.md.
+
+
+## DDA Pro documentation
+
+Start with `indicators/BC_DDA_PRO_OVERVIEW.md`, then use `indicators/DDA_PRO_PINE_AUDIT.md`, `indicators/DDA_PRO_NATIVE_MATHEMATICS.md`, and `indicators/DDA_PRO_COMPLETION_REPORT.md` for audit and certification state.

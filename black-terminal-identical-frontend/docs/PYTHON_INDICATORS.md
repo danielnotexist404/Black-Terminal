@@ -94,3 +94,8 @@ Community indicators should run with:
 The optional `python/black_core_profiles` package covers historical composite rebuilds, exact trade aggregation, price-grid research, TPO, realized/Parkinson volatility, value area, CVD LVN/HVN experiments, compact float64 serialization, and golden fixture validation. It is deliberately not required by the live chart.
 
 Validation: `python3 scripts/auction-profile-python-tests.py`.
+
+
+## DDA Pro
+
+DDA Pro adds an auditable Python reference and a production browser TypeScript worker mirror. Run `npm run test:dda-pro-python-parity` to verify the core raw, smoothed, depth, and distribution outputs. The Python package is not claimed as a deployed sidecar.

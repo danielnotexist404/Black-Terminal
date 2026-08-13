@@ -7879,6 +7879,7 @@ body.resizing-layout * {
 }
 
 .resize-main-y.positions-resizer::after {
+  top: calc(50% - 4px);
   background: rgba(255, 0, 0, 0.28);
 }
 

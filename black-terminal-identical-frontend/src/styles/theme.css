@@ -7878,8 +7878,11 @@ body.resizing-layout * {
   transform: translateY(-50%);
 }
 
+.resize-main-y.positions-resizer {
+  top: calc(100% - var(--bottom-panel-height, 210px) - 16px);
+}
+
 .resize-main-y.positions-resizer::after {
-  top: calc(50% - 4px);
   background: rgba(255, 0, 0, 0.28);
 }
 

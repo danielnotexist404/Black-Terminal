@@ -3278,6 +3278,9 @@ export function PixiBlackChart({
     38
   );
   const oscillatorPaneVisible = oscillatorStack.panes.length > 0;
+  const activeIndicatorVisual = activeIndicator
+    ? indicatorVisualSettings[activeIndicator] ?? { color: "red" as IndicatorColorKey, intensity: 80 }
+    : null;
   const oscillatorSettingsOpen =
     activeIndicator === "openInterestOscillator" ||
     activeIndicator === "ddaProOscillator" ||
@@ -4789,7 +4792,7 @@ export function PixiBlackChart({
           <label>
             Color
             <select
-              value={indicatorVisualSettings[activeIndicator].color}
+              value={activeIndicatorVisual!.color}
               onChange={(event) => updateIndicatorVisual(activeIndicator, { color: event.target.value as IndicatorColorKey })}
             >
               {indicatorColorOptions.map((option) => (
@@ -4804,10 +4807,10 @@ export function PixiBlackChart({
                 type="range"
                 min={15}
                 max={100}
-                value={indicatorVisualSettings[activeIndicator].intensity}
+                value={activeIndicatorVisual!.intensity}
                 onChange={(event) => updateIndicatorVisual(activeIndicator, { intensity: Number(event.target.value) })}
               />
-              <b>{indicatorVisualSettings[activeIndicator].intensity}</b>
+              <b>{activeIndicatorVisual!.intensity}</b>
             </span>
           </label></>}
           {activeIndicator === "vwap" && (
@@ -5447,6 +5450,7 @@ export function PixiBlackChart({
               <label>Tail Severity<input type="number" min={0} max={1} step={0.05} value={ddaProSettings.tailWeight} onChange={(event) => updateDDAProSetting("tailWeight", Number(event.target.value))} /></label>
               <div className="vwap-mode-note">Weights are normalized at calculation time. Defaults sum to 1.00.</div>
               <div className="indicator-settings-section">Plots & Dashboard</div>
+              <div className="vwap-mode-note">Pane camera: drag anywhere inside DDA Pro to pan time and drawdown depth. Scroll over its right-hand scale to expand or contract the value range; double-click that scale to reset.</div>
               <label>Raw Drawdown<input type="checkbox" checked={ddaProSettings.showRawDrawdown} onChange={(event) => updateDDAProSetting("showRawDrawdown", event.target.checked)} /></label>
               <label>Smoothed Drawdown<input type="checkbox" checked={ddaProSettings.showSmoothedDrawdown} onChange={(event) => updateDDAProSetting("showSmoothedDrawdown", event.target.checked)} /></label>
               <label>Distribution Mean<input type="checkbox" checked={ddaProSettings.showMean} onChange={(event) => updateDDAProSetting("showMean", event.target.checked)} /></label>

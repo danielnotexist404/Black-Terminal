@@ -467,6 +467,26 @@ function migrateVisibleIndicators(value: Partial<VisibleIndicators> | null | und
   return migrated;
 }
 
+function migrateIndicatorPeriods(value: Partial<IndicatorPeriods> | null | undefined): IndicatorPeriods {
+  const migrated = { ...defaultIndicatorPeriods };
+  for (const key of Object.keys(migrated) as Array<keyof IndicatorPeriods>) {
+    const candidate = value?.[key];
+    if (typeof candidate === "number" && Number.isFinite(candidate)) migrated[key] = candidate;
+  }
+  migrated.ddaProOscillator = Math.max(100, Math.min(20_000, Math.round(migrated.ddaProOscillator)));
+  return migrated;
+}
+
+function migrateIndicatorVisualSettings(value: Partial<IndicatorVisualSettings> | null | undefined): IndicatorVisualSettings {
+  const migrated = { ...defaultIndicatorVisualSettings };
+  for (const key of Object.keys(migrated) as Array<keyof IndicatorVisualSettings>) {
+    const candidate = value?.[key];
+    if (!candidate || typeof candidate !== "object") continue;
+    migrated[key] = { ...migrated[key], ...candidate };
+  }
+  return migrated;
+}
+
 function migrateWorkspaceSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
   const kioseff = migrateKioseffWorkspaceFields({
     visibility: snapshot.visibleIndicators?.volatilityHeatmap,
@@ -480,6 +500,8 @@ function migrateWorkspaceSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapsho
     ...snapshot,
     schemaVersion: 4,
     visibleIndicators,
+    indicatorPeriods: migrateIndicatorPeriods(snapshot.indicatorPeriods),
+    indicatorVisualSettings: migrateIndicatorVisualSettings(snapshot.indicatorVisualSettings),
     indicatorAdvancedSettings: migrateIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings),
     kioseffSettings: kioseff.settings,
     auctionProfileSettings: migrateAuctionProfileSettings(snapshot.auctionProfileSettings)

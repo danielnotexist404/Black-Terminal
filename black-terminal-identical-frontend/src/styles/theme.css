@@ -6481,6 +6481,16 @@ body.resizing-layout * {
   cursor: ns-resize;
 }
 
+.pixi-chart-host.dda-pro-scale-hover,
+.pixi-chart-host.dda-pro-scale-hover canvas {
+  cursor: ns-resize;
+}
+
+.pixi-chart-host.dda-pro-dragging,
+.pixi-chart-host.dda-pro-dragging canvas {
+  cursor: grabbing;
+}
+
 .pixi-chart-host canvas {
   position: absolute;
   inset: 0;

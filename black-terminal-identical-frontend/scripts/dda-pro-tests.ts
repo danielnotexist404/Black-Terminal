@@ -4,6 +4,13 @@ import { calculateDDAProCompatibility } from "../src/modules/dda-pro/core/compat
 import { calculateDDAProNative } from "../src/modules/dda-pro/core/nativeEngine.ts";
 import { DEFAULT_DDA_PRO_SETTINGS } from "../src/modules/dda-pro/core/settings.ts";
 import { quantile } from "../src/modules/dda-pro/core/statistics.ts";
+import {
+  ddaProDomain,
+  ddaProValueToY,
+  panDDAProCamera,
+  resetDDAProCamera,
+  zoomDDAProCamera
+} from "../src/modules/dda-pro/rendering/camera.ts";
 import type { Candle } from "../src/chart-engine/types.ts";
 
 function candles(closes: number[]): Candle[] {
@@ -85,12 +92,32 @@ const nativeSettings = { ...DEFAULT_DDA_PRO_SETTINGS, lookback: 100, smoothingMe
 }
 
 {
+  const base = ddaProDomain(20, resetDDAProCamera());
+  assert.deepEqual(base, { min: -20, max: 0, range: 20, baseRange: 20 });
+  assert.equal(ddaProValueToY(0, 100, 300, base), 118);
+  assert.equal(ddaProValueToY(-20, 100, 300, base), 284);
+
+  const anchorRatio = 0.28;
+  const anchorBefore = base.max - base.range * anchorRatio;
+  const zoomedCamera = zoomDDAProCamera(resetDDAProCamera(), 20, -240, anchorRatio);
+  const zoomed = ddaProDomain(20, zoomedCamera);
+  const anchorAfter = zoomed.max - zoomed.range * anchorRatio;
+  assert.ok(zoomed.range < base.range, "wheel-up did not contract the DDA value range");
+  assert.ok(Math.abs(anchorBefore - anchorAfter) < 1e-9, "DDA wheel zoom did not preserve its mouse anchor");
+
+  const pannedCamera = panDDAProCamera(zoomedCamera, 20, 60, 200);
+  const panned = ddaProDomain(20, pannedCamera);
+  assert.ok(panned.max > zoomed.max, "downward DDA drag did not move the value camera independently");
+}
+
+{
   const source = readFileSync(new URL("../reference/pine/dda-pro-edgetools-v6.pine", import.meta.url), "utf8");
   assert.match(source, /Mozilla Public License 2\.0/);
   assert.match(source, /runningPeak := math\.max\(runningPeak, dataSource\)/);
   assert.match(source, /ta\.percentile_nearest_rank/);
   assert.match(source, /\* 252 \* 100/);
   assert.match(source, /showDistributionInfo/);
+  const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   const chartSource = readFileSync(new URL("../src/components/PixiBlackChart.tsx", import.meta.url), "utf8");
   const alertSource = readFileSync(new URL("../src/components/AlertCenter.tsx", import.meta.url), "utf8");
   const engineSource = readFileSync(new URL("../src/chart-engine/BlackChartEngine.ts", import.meta.url), "utf8");
@@ -98,6 +125,15 @@ const nativeSettings = { ...DEFAULT_DDA_PRO_SETTINGS, lookback: 100, smoothingMe
   assert.match(chartSource, /ddaProCalculationHash\(\{ candles: source/);
   assert.match(chartSource, /setDDAProSourceRevision/);
   assert.match(engineSource, /NEAREST TAIL/);
+  for (const band of ["p05", "p10", "p25", "p50", "p75", "p90", "p95", "p99"]) {
+    assert.match(engineSource, new RegExp("snapshot\\.series\\." + band), band + " is missing from the DDA renderer");
+  }
+  assert.match(engineSource, /sigmaLine\(3, -1\)/, "DDA renderer is missing the original 3-sigma lower band");
+  assert.match(engineSource, /sigmaLine\(3, 1\)/, "DDA renderer is missing the original 3-sigma upper band");
+  assert.match(engineSource, /ddaProDragging/, "DDA renderer is missing independent pane panning");
+  assert.match(engineSource, /zoomDDAProCamera/, "DDA renderer is missing independent value-axis zoom");
+  assert.match(appSource, /indicatorVisualSettings: migrateIndicatorVisualSettings/, "legacy workspace visuals are not migrated before DDA settings open");
+  assert.match(chartSource, /indicatorVisualSettings\[activeIndicator\] \?\?/, "DDA settings lack a defensive legacy visual fallback");
   assert.match(chartSource, /showExpandedDashboard/);
   assert.match(chartSource, /definition\.indicator === "ddaPro"/);
   assert.match(alertSource, /DDA_RISK_SCORE_CROSSED_90/);

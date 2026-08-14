@@ -45,6 +45,14 @@ import { BlackCoreLiquidationFieldRenderer, type BclifRendererMetrics } from "..
 import { resolveBclifDisplayDomain } from "../modules/liquidation-field/rendering/displayProjection";
 import { bclifTimestampMsToChartSeconds } from "../modules/liquidation-field/rendering/timeProjection";
 import type { DDAProSnapshot } from "../modules/dda-pro/core/types";
+import {
+  ddaProDomain,
+  ddaProValueToY,
+  panDDAProCamera,
+  resetDDAProCamera,
+  zoomDDAProCamera,
+  type DDAProCamera
+} from "../modules/dda-pro/rendering/camera";
 
 import {
   fromAxisValue,
@@ -298,6 +306,10 @@ export class BlackChartEngine {
 
   private pointer = { x: -1, y: -1, active: false };
   private dragging = false;
+  private ddaProDragging = false;
+  private ddaProCamera = resetDDAProCamera();
+  private ddaProDragStartCamera: DDAProCamera = resetDDAProCamera();
+  private ddaProDragStartBaseDepth = 1;
   private priceScaleDragging = false;
   private priceScaleHover = false;
   private dragStartX = 0;
@@ -414,10 +426,19 @@ export class BlackChartEngine {
 
     this.app.stage.on("pointermove", (e: FederatedPointerEvent) => {
       this.pointer = { x: e.global.x, y: e.global.y, active: true };
-      this.setPriceScaleHover(this.isInsidePriceAxis(e.global.x, e.global.y));
+      const ddaPaneBounds = this.ddaProPaneBounds();
+      const insideDdaAxis = Boolean(
+        ddaPaneBounds
+        && e.global.y >= ddaPaneBounds.top
+        && e.global.y <= ddaPaneBounds.bottom
+        && e.global.x >= ddaPaneBounds.plotWidth - 24
+      );
+      this.setPriceScaleHover(!insideDdaAxis && this.isInsidePriceAxis(e.global.x, e.global.y));
+      this.host.classList.toggle("dda-pro-scale-hover", insideDdaAxis);
       this.activePointers.set(e.pointerId, { x: e.global.x, y: e.global.y });
 
       if (this.activePointers.size === 2) {
+        this.ddaProDragging = false;
         const coords = Array.from(this.activePointers.values());
         const dx = coords[0].x - coords[1].x;
         const dy = coords[0].y - coords[1].y;
@@ -433,7 +454,21 @@ export class BlackChartEngine {
         return;
       }
 
-      if (this.handleDrawingPointerMove(e)) {
+      if (this.ddaProDragging) {
+        const dx = e.global.x - this.dragStartX;
+        const dy = e.global.y - this.dragStartY;
+        this.view.scrollX = this.clampHorizontalScroll(this.dragStartScroll + dx);
+        const pane = this.ddaProPaneBounds();
+        if (pane) {
+          this.ddaProCamera = panDDAProCamera(
+            this.ddaProDragStartCamera,
+            this.ddaProDragStartBaseDepth,
+            dy,
+            pane.height
+          );
+        }
+        this.queueDraw();
+      } else if (this.handleDrawingPointerMove(e)) {
         return;
       } else if (this.priceScaleDragging) {
         this.scalePriceAxis(e.global.y);
@@ -454,6 +489,7 @@ export class BlackChartEngine {
     this.app.stage.on("pointerdown", (e: FederatedPointerEvent) => {
       this.activePointers.set(e.pointerId, { x: e.global.x, y: e.global.y });
       if (this.activePointers.size === 2) {
+        this.ddaProDragging = false;
         this.dragging = false;
         const coords = Array.from(this.activePointers.values());
         const dx = coords[0].x - coords[1].x;
@@ -465,6 +501,24 @@ export class BlackChartEngine {
       if (e.button !== 0) return;
 
       if (this.handleReplaySelectionPointerDown(e)) return;
+
+      const ddaPaneBounds = this.ddaProPaneBounds();
+      if (
+        ddaPaneBounds
+        && e.global.x >= 0
+        && e.global.x <= this.view.width
+        && e.global.y >= ddaPaneBounds.top
+        && e.global.y <= ddaPaneBounds.bottom
+      ) {
+        this.ddaProDragging = true;
+        this.dragStartX = e.global.x;
+        this.dragStartY = e.global.y;
+        this.dragStartScroll = this.view.scrollX;
+        this.ddaProDragStartCamera = { ...this.ddaProCamera };
+        this.ddaProDragStartBaseDepth = this.ddaProBaseDepth();
+        this.host.classList.add("dda-pro-dragging");
+        return;
+      }
 
       if (this.isInsidePriceAxis(e.global.x, e.global.y)) {
         this.priceScaleDragging = true;
@@ -965,8 +1019,11 @@ export class BlackChartEngine {
 
   private stopDragging() {
     this.dragging = false;
+    this.ddaProDragging = false;
     this.priceScaleDragging = false;
     this.host.classList.remove("price-scale-dragging");
+    this.host.classList.remove("dda-pro-dragging");
+    if (!this.pointer.active) this.host.classList.remove("dda-pro-scale-hover");
   }
 
   private setPriceScaleHover(isHovering: boolean) {
@@ -1021,6 +1078,18 @@ export class BlackChartEngine {
     const bounds = this.host.getBoundingClientRect();
     const x = e.clientX - bounds.left;
     const y = e.clientY - bounds.top;
+    const ddaPaneBounds = this.ddaProPaneBounds();
+    if (
+      ddaPaneBounds
+      && y >= ddaPaneBounds.top
+      && y <= ddaPaneBounds.bottom
+      && x >= ddaPaneBounds.plotWidth - 24
+    ) {
+      e.preventDefault();
+      this.ddaProCamera = resetDDAProCamera();
+      this.queueDraw();
+      return;
+    }
     const alertHit = this.hitPriceAlertLine(x, y);
     if (alertHit) {
       e.preventDefault();
@@ -1064,6 +1133,19 @@ export class BlackChartEngine {
 
     const bounds = this.host.getBoundingClientRect();
     const x = e.clientX - bounds.left;
+    const y = e.clientY - bounds.top;
+    const ddaPaneBounds = this.ddaProPaneBounds();
+    if (
+      ddaPaneBounds
+      && y >= ddaPaneBounds.top
+      && y <= ddaPaneBounds.bottom
+      && x >= ddaPaneBounds.plotWidth - 24
+    ) {
+      const anchorRatio = (y - ddaPaneBounds.top) / Math.max(1, ddaPaneBounds.height);
+      this.ddaProCamera = zoomDDAProCamera(this.ddaProCamera, this.ddaProBaseDepth(), e.deltaY, anchorRatio);
+      this.queueDraw();
+      return;
+    }
     const mostlyHorizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY) * 0.7;
 
     if (e.shiftKey || (!e.ctrlKey && mostlyHorizontal)) {
@@ -1385,6 +1467,48 @@ export class BlackChartEngine {
       this.view.height,
       this.view.bottomAxisHeight,
       this.view.topPadding
+    );
+  }
+
+  private ddaProPaneBounds() {
+    if (!this.visibleIndicators.ddaProOscillator) return undefined;
+    const pane = this.oscillatorStackLayout().panes.find((candidate) => candidate.key === "ddaProOscillator");
+    if (!pane) return undefined;
+    const plotWidth = this.view.width - this.view.rightAxisWidth;
+    const plotHeight = this.view.height - this.view.bottomAxisHeight;
+    const bottom = plotHeight - 16 - pane.bottomOffset;
+    const top = bottom - pane.height;
+    return { top, bottom, height: pane.height, plotWidth };
+  }
+
+  private ddaProBaseDepth(data: Candle[] = this.getDisplayCandles()) {
+    const snapshot = this.ddaProSnapshot;
+    const settings = this.indicatorAdvancedSettings.ddaProOscillator;
+    if (!snapshot || snapshot.inputSize === 0) return 1;
+    if (settings.scaleMode === "fixed-10") return 10;
+    if (settings.scaleMode === "fixed-20") return 20;
+    if (settings.scaleMode === "fixed-50") return 50;
+    if (settings.scaleMode === "custom") return settings.customScaleDepthPercent;
+
+    const offset = Math.max(0, data.length - snapshot.inputSize);
+    const visibleDrawdowns: number[] = [];
+    for (let index = this.view.firstIndex; index <= this.view.lastIndex; index++) {
+      const sourceIndex = index - offset;
+      const value = sourceIndex >= 0 ? snapshot.series.rawDrawdown[sourceIndex] : undefined;
+      if (Number.isFinite(value)) visibleDrawdowns.push(Math.abs(value!));
+    }
+    return Math.max(
+      1,
+      Math.min(
+        100,
+        Math.max(
+          ...visibleDrawdowns,
+          Math.abs(snapshot.latest.maxDrawdownPercent),
+          Math.abs(snapshot.series.p05.at(-1) ?? 0),
+          Math.abs(snapshot.series.p99.at(-1) ?? 0),
+          1
+        ) * 1.12
+      )
     );
   }
 
@@ -2132,14 +2256,9 @@ export class BlackChartEngine {
       return;
     }
 
-    const visibleDrawdowns: number[] = [];
-    for (let index = this.view.firstIndex; index <= this.view.lastIndex; index++) {
-      const value = aligned(snapshot.series.rawDrawdown, index);
-      if (Number.isFinite(value)) visibleDrawdowns.push(Math.abs(value!));
-    }
-    const dynamicDepth = Math.max(1, Math.min(100, Math.max(...visibleDrawdowns, Math.abs(snapshot.latest.maxDrawdownPercent), Math.abs(snapshot.series.p99.at(-1) ?? 0), 1) * 1.12));
-    const maxDepth = settings.scaleMode === "fixed-10" ? 10 : settings.scaleMode === "fixed-20" ? 20 : settings.scaleMode === "fixed-50" ? 50 : settings.scaleMode === "custom" ? settings.customScaleDepthPercent : dynamicDepth;
-    const yForDrawdown = (value: number) => paneTop + 18 + Math.min(1, Math.abs(Math.min(0, value)) / maxDepth) * Math.max(1, paneHeight - 34);
+    const maxDepth = this.ddaProBaseDepth(data);
+    const displayDomain = ddaProDomain(maxDepth, this.ddaProCamera);
+    const yForDrawdown = (value: number) => ddaProValueToY(value, paneTop, paneBottom, displayDomain);
     const riskColor = snapshot.latest.riskState === "EXTREME" ? this.hexColor(themePalette.extreme, theme.redBright)
       : snapshot.latest.riskState === "HIGH" ? this.hexColor(themePalette.high, theme.red)
         : snapshot.latest.riskState === "MODERATE" ? this.hexColor(themePalette.moderate, theme.red)
@@ -2149,6 +2268,12 @@ export class BlackChartEngine {
       g.rect(0, paneTop, plotWidth, paneHeight).fill({ color: riskColor, alpha: fillAlpha * 0.36 });
     }
     g.moveTo(0, yForDrawdown(0)).lineTo(plotWidth, yForDrawdown(0)).stroke({ width: 1, color: theme.silver, alpha: 0.22 });
+    for (let tick = 0; tick <= 4; tick++) {
+      const value = displayDomain.max - displayDomain.range * (tick / 4);
+      const y = yForDrawdown(value);
+      g.moveTo(plotWidth - 5, y).lineTo(plotWidth, y).stroke({ width: 1, color: theme.silver, alpha: 0.32 });
+      this.addProfileText(value.toFixed(Math.abs(value) >= 10 ? 1 : 2) + "%", plotWidth + 7, y - 5, theme.muted, 8, "500");
+    }
 
     const drawLine = (values: readonly number[], color: number, alpha: number, width: number) => {
       let started = false;
@@ -2176,21 +2301,58 @@ export class BlackChartEngine {
       }
       if (upper.length >= 4 && lower.length >= 4) g.poly([...upper, ...lower]).fill({ color, alpha });
     };
+    const quantileBands = snapshot.engineMode === "pine-compatibility"
+      ? [snapshot.series.p99, snapshot.series.p95, snapshot.series.p90, snapshot.series.p75, snapshot.series.p50, snapshot.series.p25, snapshot.series.p10, snapshot.series.p05]
+      : [snapshot.series.p05, snapshot.series.p10, snapshot.series.p25, snapshot.series.p50, snapshot.series.p75, snapshot.series.p90, snapshot.series.p95, snapshot.series.p99];
+    const quantileColors = [
+      this.hexColor(themePalette.low, theme.silver),
+      this.hexColor(themePalette.low, theme.silver),
+      this.hexColor(themePalette.neutral, theme.muted),
+      this.hexColor(themePalette.neutral, theme.muted),
+      this.hexColor(themePalette.moderate, theme.red),
+      this.hexColor(themePalette.high, theme.red),
+      this.hexColor(themePalette.extreme, theme.redBright),
+      this.hexColor(themePalette.extreme, theme.redBright)
+    ];
     if (settings.showQuantiles) {
-      drawBand(snapshot.series.p50, snapshot.series.p75, this.hexColor(themePalette.neutral, theme.muted), fillAlpha * 0.28);
-      drawBand(snapshot.series.p75, snapshot.series.p90, this.hexColor(themePalette.moderate, theme.red), fillAlpha * 0.44);
-      drawBand(snapshot.series.p90, snapshot.series.p95, this.hexColor(themePalette.high, theme.red), fillAlpha * 0.62);
-      drawBand(snapshot.series.p95, snapshot.series.p99, this.hexColor(themePalette.extreme, theme.redBright), fillAlpha * 0.76);
+      for (let band = 0; band < quantileBands.length - 1; band++) {
+        drawBand(quantileBands[band]!, quantileBands[band + 1]!, quantileColors[band + 1]!, fillAlpha * (0.18 + band * 0.075));
+      }
+      for (let band = 0; band < quantileBands.length; band++) {
+        drawLine(quantileBands[band]!, quantileColors[band]!, 0.22 + band * 0.065, band === quantileBands.length - 1 ? 1.1 : 0.75);
+      }
     }
 
     if (settings.showSigmaBands) {
-      drawLine(snapshot.series.sigmaLower, this.hexColor(themePalette.high, theme.red), 0.34, 0.85);
-      if (!settings.downsideOnlySigma) drawLine(snapshot.series.sigmaUpper, this.hexColor(themePalette.neutral, theme.muted), 0.22, 0.7);
-    }
-    if (settings.showQuantiles) {
-      drawLine(snapshot.series.p95, this.hexColor(themePalette.extreme, theme.redBright), 0.58, 0.9);
-      drawLine(snapshot.series.p75, this.hexColor(themePalette.moderate, theme.red), 0.32, 0.7);
-      drawLine(snapshot.series.p50, this.hexColor(themePalette.neutral, theme.muted), 0.32, 0.7);
+      const encodedMultiplier = snapshot.engineMode === "pine-compatibility" ? 1 : Math.max(0.25, settings.sigmaMultiplier);
+      const sigmaUnit = snapshot.series.mean.map((mean, index) => {
+        const lower = snapshot.series.sigmaLower[index];
+        return Number.isFinite(mean) && Number.isFinite(lower) ? Math.abs(mean - lower!) / encodedMultiplier : Number.NaN;
+      });
+      const sigmaLine = (multiplier: number, direction: -1 | 1) => snapshot.series.mean.map((mean, index) => {
+        const unit = sigmaUnit[index];
+        if (!Number.isFinite(mean) || !Number.isFinite(unit)) return Number.NaN;
+        const value = mean + direction * unit! * multiplier;
+        return direction > 0 && settings.downsideOnlySigma ? Math.min(0, value) : value;
+      });
+      const lower1 = sigmaLine(1, -1);
+      const lower2 = sigmaLine(2, -1);
+      const lower3 = sigmaLine(3, -1);
+      const upper1 = sigmaLine(1, 1);
+      const upper2 = sigmaLine(2, 1);
+      const upper3 = sigmaLine(3, 1);
+      drawBand(lower1, lower2, this.hexColor(themePalette.primary, theme.silver), fillAlpha * 0.24);
+      drawBand(lower2, lower3, this.hexColor(themePalette.neutral, theme.muted), fillAlpha * 0.18);
+      drawLine(lower1, this.hexColor(themePalette.primary, theme.silverBright), 0.34, 0.72);
+      drawLine(lower2, this.hexColor(themePalette.neutral, theme.silver), 0.32, 0.76);
+      drawLine(lower3, this.hexColor(themePalette.extreme, theme.redBright), 0.42, 0.9);
+      if (!settings.downsideOnlySigma) {
+        drawBand(upper2, upper1, this.hexColor(themePalette.primary, theme.silver), fillAlpha * 0.24);
+        drawBand(upper3, upper2, this.hexColor(themePalette.neutral, theme.muted), fillAlpha * 0.18);
+        drawLine(upper1, this.hexColor(themePalette.primary, theme.silverBright), 0.30, 0.72);
+        drawLine(upper2, this.hexColor(themePalette.neutral, theme.silver), 0.28, 0.76);
+        drawLine(upper3, this.hexColor(themePalette.extreme, theme.redBright), 0.36, 0.9);
+      }
     }
     if (settings.showMean) drawLine(snapshot.series.mean, this.hexColor(themePalette.neutral, theme.muted), 0.54, 0.9);
     if (settings.showRawDrawdown) drawLine(snapshot.series.rawDrawdown, this.hexColor(themePalette.neutral, theme.muted), 0.46, 0.8);
@@ -4217,12 +4379,14 @@ export class BlackChartEngine {
 
     const plotWidth = this.view.width - this.view.rightAxisWidth;
     const plotHeight = this.view.height - this.view.bottomAxisHeight;
+    const pricePlotBottom = this.view.topPadding + this.getPricePlotHeight();
 
     // right price scale
     this.addText(this.hudTexts, "USDT", plotWidth + 18, 11, 11, theme.text, "600", "Inter");
 
     for (let i = 0; i <= 10; i++) {
       const y = this.view.topPadding + ((plotHeight - this.view.topPadding) / 10) * i;
+      if (y > pricePlotBottom) continue;
       const price = this.priceForY(y);
       this.addText(
         this.priceTexts,
@@ -4346,9 +4510,18 @@ export class BlackChartEngine {
 
     g.circle(this.pointer.x, this.pointer.y, 3).fill({ color: theme.redBright, alpha: 0.9 });
 
-    const price = this.priceForY(this.pointer.y);
+    const ddaBounds = this.ddaProPaneBounds();
+    const insideDdaPane = Boolean(ddaBounds && this.pointer.y >= ddaBounds.top && this.pointer.y <= ddaBounds.bottom);
     g.rect(plotWidth + 4, this.pointer.y - 11, 64, 22).fill({ color: theme.red, alpha: 0.95 });
-    this.addCrosshairText(price.toLocaleString(undefined, { maximumFractionDigits: 1 }), plotWidth + 8, this.pointer.y - 7);
+    if (insideDdaPane && ddaBounds) {
+      const domain = ddaProDomain(this.ddaProBaseDepth(), this.ddaProCamera);
+      const ratio = Math.max(0, Math.min(1, (this.pointer.y - (ddaBounds.top + 18)) / Math.max(1, ddaBounds.height - 34)));
+      const value = domain.max - ratio * domain.range;
+      this.addCrosshairText(value.toFixed(Math.abs(value) >= 10 ? 1 : 2) + "%", plotWidth + 8, this.pointer.y - 7);
+    } else {
+      const price = this.priceForY(this.pointer.y);
+      this.addCrosshairText(price.toLocaleString(undefined, { maximumFractionDigits: 1 }), plotWidth + 8, this.pointer.y - 7);
+    }
 
     const timeLabel = this.timeLabelForX(this.pointer.x);
     g.rect(this.pointer.x - 54, plotHeight + 3, 108, 22).fill({ color: theme.red, alpha: 0.95 });

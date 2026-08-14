@@ -3,7 +3,7 @@ import { DDA_PRO_SETTINGS_VERSION, type DDAProPreset, type DDAProSettings, type 
 export const DEFAULT_DDA_PRO_SETTINGS: DDAProSettings = {
   settingsVersion: DDA_PRO_SETTINGS_VERSION,
   engineMode: "black-core-native",
-  preset: "BC-DDA — Institutional",
+  preset: "BC-RDA — Institutional",
   source: "close",
   peakMode: "all-history",
   equitySource: "price",
@@ -57,17 +57,17 @@ export const DEFAULT_DDA_PRO_SETTINGS: DDAProSettings = {
 };
 
 const PRESETS: Record<Exclude<DDAProPreset, "Custom">, Partial<DDAProSettings>> = {
-  "DDA Pro — Original": {
+  "BC-RDA — Original Compatibility": {
     engineMode: "pine-compatibility", lookback: 500, peakMode: "all-history", smoothingMethod: "ema",
     smoothingLength: 14, quantileMethod: "nearest-rank", zScoreMethod: "classical",
     annualizationMode: "traditional-252", downsideOnlySigma: false, theme: "edge-tools"
   },
-  "BC-DDA — Institutional": {
+  "BC-RDA — Institutional": {
     engineMode: "black-core-native", lookback: 500, peakMode: "all-history", smoothingMethod: "ema",
     smoothingLength: 14, quantileMethod: "type7", zScoreMethod: "robust", downsideOnlySigma: true,
     sigmaMultiplier: 2, theme: "black-terminal"
   },
-  "BC-DDA — Macro Risk": {
+  "BC-RDA — Macro Risk": {
     engineMode: "black-core-native", lookback: 5_000, peakMode: "all-history", smoothingMethod: "ema",
     smoothingLength: 21, quantileMethod: "type7", zScoreMethod: "robust", sigmaMultiplier: 3,
     showRawDrawdown: true, showDuration: true, showVelocity: true, showEpisodeMarkers: true,
@@ -76,9 +76,12 @@ const PRESETS: Record<Exclude<DDAProPreset, "Custom">, Partial<DDAProSettings>> 
 };
 
 const PRESET_MIGRATIONS: Record<string, DDAProPreset> = {
-  "Pine Exact": "DDA Pro — Original",
-  Institutional: "BC-DDA — Institutional",
-  "Tail Risk": "BC-DDA — Macro Risk",
+  "Pine Exact": "BC-RDA — Original Compatibility",
+  Institutional: "BC-RDA — Institutional",
+  "Tail Risk": "BC-RDA — Macro Risk",
+  "DDA Pro — Original": "BC-RDA — Original Compatibility",
+  "BC-DDA — Institutional": "BC-RDA — Institutional",
+  "BC-DDA — Macro Risk": "BC-RDA — Macro Risk",
   "Fast Risk": "Custom"
 };
 

@@ -41,6 +41,6 @@ const report = {
   targetStatus: { cold20kP95: cold.p95 <= 500 ? "PASS" : "FAIL", boundedRebuildP95: incremental.p95 <= 10 ? "PASS" : "FAIL" }
 };
 assert.ok(Number.isFinite(cold.p99) && Number.isFinite(incremental.p99));
-assert.ok(cold.p95 <= report.targets.cold20kMs, "DDA Pro cold p95 target exceeded");
-assert.ok(incremental.p95 <= report.targets.incrementalP95Ms, "DDA Pro bounded rebuild p95 target exceeded");
+assert.ok(cold.p95 <= report.targets.cold20kMs, "BC-RDA cold p95 target exceeded");
+assert.ok(incremental.p95 <= report.targets.incrementalP95Ms, "BC-RDA bounded rebuild p95 target exceeded");
 console.log(JSON.stringify(report, null, 2));

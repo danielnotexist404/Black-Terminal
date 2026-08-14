@@ -298,7 +298,7 @@ const configuredAlertIndicatorLabels: Record<AlertIndicatorTarget, string> = {
   ema20: "EMA 20",
   ema50: "EMA 50",
   ema200: "EMA 200",
-  ddaPro: "DDA Pro"
+  ddaPro: "BC-RDA"
 };
 
 const configuredAlertConditionLabels: Record<AlertCondition, string> = {
@@ -2137,7 +2137,7 @@ export function PixiBlackChart({
         }
       }).catch((error: unknown) => {
         if (ddaCalculationIdentityRef.current !== calculationIdentity || (error instanceof Error && error.message.includes("STALE_GENERATION"))) return;
-        console.error("DDA Pro calculation failed", error);
+        console.error("BC-RDA calculation failed", error);
         if (ddaCalculationIdentityRef.current === calculationIdentity) ddaCalculationIdentityRef.current = "";
         setDDAProStatus("UNAVAILABLE");
         engineRef.current?.setDDAProState(null);
@@ -3024,7 +3024,7 @@ export function PixiBlackChart({
       exchange: exchangeLabel,
       timeframe,
       indicator,
-      condition: definition.indicator === "ddaPro" ? (definition.ddaSignal ?? "DDA Pro signal").replaceAll("_", " ") : configuredAlertConditionLabels[definition.condition],
+      condition: definition.indicator === "ddaPro" ? (definition.ddaSignal ?? "BC-RDA signal").replaceAll("_", " ") : configuredAlertConditionLabels[definition.condition],
       price: current.close.toFixed(2),
       level: level === undefined ? undefined : level.toFixed(2)
     };
@@ -3090,7 +3090,7 @@ export function PixiBlackChart({
         if (ddaConfiguredEventsRef.current.has(eventKey)) continue;
         ddaConfiguredEventsRef.current.add(eventKey);
         dispatchConfiguredAlert(definition, current, {
-          indicator: "DDA Pro",
+          indicator: "BC-RDA",
           event: event.type,
           level: event.value,
           engineMode: event.engineMode,
@@ -3189,7 +3189,7 @@ export function PixiBlackChart({
     { key: "sma20", label: "SMA", value: String(indicatorPeriods.sma20) },
     { key: "sma50", label: "SMA", value: String(indicatorPeriods.sma50) },
     { key: "bollinger", label: "Bollinger", value: String(indicatorPeriods.bollinger) },
-    { key: "ddaProOscillator", label: "DDA Pro", value: `${indicatorAdvancedSettings.ddaProOscillator.engineMode === "pine-compatibility" ? "PINE" : "NATIVE"} · ${ddaProStatus.toLowerCase()}` },
+    { key: "ddaProOscillator", label: "BC-RDA", value: `${indicatorAdvancedSettings.ddaProOscillator.engineMode === "pine-compatibility" ? "PINE" : "NATIVE"} · ${ddaProStatus.toLowerCase()}` },
     { key: "openInterestOscillator", label: "OI Osc", value: String(indicatorPeriods.openInterestOscillator) },
     { key: "zScoreOscillator", label: "Z-Score", value: String(indicatorPeriods.zScoreOscillator) },
     { key: "waveTrendOscillator", label: "WaveTrend", value: String(indicatorPeriods.waveTrendOscillator) },
@@ -5356,11 +5356,11 @@ export function PixiBlackChart({
           )}
           {activeIndicator === "ddaProOscillator" && (
             <>
-              <div className="indicator-settings-section">DDA Pro Engine</div>
+              <div className="indicator-settings-section">BC-RDA Engine</div>
               <label>
                 Preset
                 <select value={ddaProSettings.preset} onChange={(event) => selectDDAProPreset(event.target.value as DDAProPreset)}>
-                  {(["Custom", "DDA Pro — Original", "BC-DDA — Institutional", "BC-DDA — Macro Risk"] as DDAProPreset[]).map((preset) => <option key={preset} value={preset}>{preset}</option>)}
+                  {(["Custom", "BC-RDA — Original Compatibility", "BC-RDA — Institutional", "BC-RDA — Macro Risk"] as DDAProPreset[]).map((preset) => <option key={preset} value={preset}>{preset}</option>)}
                 </select>
               </label>
               <label>
@@ -5450,7 +5450,7 @@ export function PixiBlackChart({
               <label>Tail Severity<input type="number" min={0} max={1} step={0.05} value={ddaProSettings.tailWeight} onChange={(event) => updateDDAProSetting("tailWeight", Number(event.target.value))} /></label>
               <div className="vwap-mode-note">Weights are normalized at calculation time. Defaults sum to 1.00.</div>
               <div className="indicator-settings-section">Plots & Dashboard</div>
-              <div className="vwap-mode-note">Pane camera: drag anywhere inside DDA Pro to pan time and drawdown depth. Scroll over its right-hand scale to expand or contract the value range; double-click that scale to reset.</div>
+              <div className="vwap-mode-note">Pane camera: drag anywhere inside BC-RDA to pan time and risk depth. Scroll over its right-hand scale to expand or contract the value range; double-click that scale to reset.</div>
               <label>Raw Drawdown<input type="checkbox" checked={ddaProSettings.showRawDrawdown} onChange={(event) => updateDDAProSetting("showRawDrawdown", event.target.checked)} /></label>
               <label>Smoothed Drawdown<input type="checkbox" checked={ddaProSettings.showSmoothedDrawdown} onChange={(event) => updateDDAProSetting("showSmoothedDrawdown", event.target.checked)} /></label>
               <label>Distribution Mean<input type="checkbox" checked={ddaProSettings.showMean} onChange={(event) => updateDDAProSetting("showMean", event.target.checked)} /></label>
@@ -6097,7 +6097,7 @@ export function PixiBlackChart({
           className="oscillator-pane-resizer"
           style={{ bottom: `min(${74 + pane.topOffset}px, calc(100% - 110px))` }}
           role="separator"
-          aria-label={`Resize ${pane.key === "ddaProOscillator" ? "DDA Pro" : pane.key === "zScoreOscillator" ? "Z-Score" : pane.key === "waveTrendOscillator" ? "WaveTrend" : "OI Osc"} pane`}
+          aria-label={`Resize ${pane.key === "ddaProOscillator" ? "BC-RDA" : pane.key === "zScoreOscillator" ? "Z-Score" : pane.key === "waveTrendOscillator" ? "WaveTrend" : "OI Osc"} pane`}
           aria-orientation="horizontal"
           onPointerDown={(event) => beginOscillatorResize(event, pane.key)}
           onPointerMove={resizeOscillatorPane}

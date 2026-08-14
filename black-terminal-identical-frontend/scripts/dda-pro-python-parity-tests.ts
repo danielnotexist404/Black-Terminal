@@ -30,4 +30,4 @@ for (const [pythonKey, tsKey] of [
 }
 for (let index = 0; index < mirror.series.p95.length; index++) assert.ok(Math.abs(Math.abs(mirror.series.p95[index] ?? 0) - (reference.series.p95[index] ?? 0)) < 1e-8, `p95 parity failed at ${index}`);
 
-console.log("DDA Pro Python reference ↔ TypeScript mirror core parity: PASS");
+console.log("BC-RDA Python reference ↔ TypeScript mirror core parity: PASS");

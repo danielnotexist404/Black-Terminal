@@ -1,4 +1,4 @@
-"""Authoritative deterministic reference for Black Core DDA Pro.
+"""Authoritative deterministic reference for BC-RDA.
 
 This module contains no broker, order, portfolio, mandate, or execution code.
 It consumes an already-authorized positive value series and returns read-only

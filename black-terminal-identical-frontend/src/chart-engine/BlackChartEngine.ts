@@ -2252,7 +2252,7 @@ export class BlackChartEngine {
       .stroke({ width: 1, color: 0xffffff, alpha: 0.07 });
 
     if (!snapshot || snapshot.inputSize === 0) {
-      this.addProfileText("DDA PRO · CALCULATING DISTRIBUTION", 12, paneTop + 12, theme.muted, 9, "700");
+      this.addProfileText("BC-RDA · CALCULATING RISK DISTRIBUTION", 12, paneTop + 12, theme.muted, 9, "700");
       return;
     }
 
@@ -2399,7 +2399,7 @@ export class BlackChartEngine {
       ? Math.max(paneTop + 24, paneBottom - (settings.showExpandedDashboard ? 112 : 40))
       : dashboardOnLeft ? paneTop + 24 : paneTop + 7;
     const dashboardTextColor = this.hexColor(themePalette.neutral, theme.muted);
-    this.addProfileText(`DDA PRO · ${snapshot.engineMode === "pine-compatibility" ? "PINE COMPAT" : "BLACK CORE NATIVE"}`, 12, paneTop + 7, this.hexColor(themePalette.text, theme.silverBright), 9, "700");
+    this.addProfileText(`BC-RDA · ${snapshot.engineMode === "pine-compatibility" ? "PINE COMPAT" : "BLACK CORE NATIVE"}`, 12, paneTop + 7, this.hexColor(themePalette.text, theme.silverBright), 9, "700");
     if (settings.showDashboard) this.addProfileText(`${snapshot.latest.riskState} ${snapshot.latest.riskScore.toFixed(1)} · DD ${snapshot.latest.drawdownPercent.toFixed(2)}% · MDD ${snapshot.latest.maxDrawdownPercent.toFixed(2)}%`, dashboardX, dashboardY, riskColor, 9, "700");
     if (settings.showDashboard && paneHeight >= 145) {
       this.addProfileText("PCTL " + snapshot.latest.percentileRank.toFixed(1) + "   Z " + snapshot.latest.zScore.toFixed(2) + "   TUW " + snapshot.latest.timeUnderWaterBars, dashboardX, dashboardY + 13, dashboardTextColor, 8, "500");
@@ -4546,7 +4546,7 @@ export class BlackChartEngine {
           g.roundRect(tooltipX, tooltipY, 240, 72, 4)
             .fill({ color: 0x030305, alpha: 0.96 })
             .stroke({ width: 1, color: theme.red, alpha: 0.72 });
-          this.addCrosshairText("DDA " + (ddaSnapshot.series.riskState[sourceIndex] ?? "INSUFFICIENT") + " · RISK " + (ddaSnapshot.series.riskScore[sourceIndex] ?? 0).toFixed(1), tooltipX + 8, tooltipY + 6);
+          this.addCrosshairText("BC-RDA " + (ddaSnapshot.series.riskState[sourceIndex] ?? "INSUFFICIENT") + " · RISK " + (ddaSnapshot.series.riskScore[sourceIndex] ?? 0).toFixed(1), tooltipX + 8, tooltipY + 6);
           this.addCrosshairText("DRAWDOWN " + (ddaSnapshot.series.rawDrawdown[sourceIndex] ?? 0).toFixed(2) + "% · DEPTH RANK " + (ddaSnapshot.series.percentileRank[sourceIndex] ?? 0).toFixed(1) + "%", tooltipX + 8, tooltipY + 21);
           this.addCrosshairText("DURATION " + (ddaSnapshot.series.duration[sourceIndex] ?? 0).toFixed(0) + " · VELOCITY " + (ddaSnapshot.series.velocity[sourceIndex] ?? 0).toFixed(3), tooltipX + 8, tooltipY + 36);
           this.addCrosshairText("VADD " + (ddaSnapshot.series.vadd[sourceIndex] ?? 0).toFixed(3) + " · NEAREST TAIL " + nearestTail, tooltipX + 8, tooltipY + 51);

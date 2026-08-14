@@ -1,4 +1,4 @@
-# DDA Pro Black Core renderer
+# BC-RDA Black Core renderer
 
 The Pixi renderer uses the shared oscillator camera and batches the zero line, P50–P99 distribution fan, sigma lines, raw/smoothed wave, optional worsening-velocity wave, risk strip, current marker, episode trough/recovery markers, compact dashboard, optional expanded metric table, and historical DDA crosshair tooltip. It creates no per-bar DOM nodes.
 

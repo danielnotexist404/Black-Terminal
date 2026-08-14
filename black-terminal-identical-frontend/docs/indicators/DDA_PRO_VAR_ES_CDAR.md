@@ -1,4 +1,4 @@
-# DDA Pro VaR, ES, DaR, and CDaR
+# BC-RDA VaR, ES, DaR, and CDaR
 
 Native return VaR95 is the non-negative loss at the 5th percentile of log returns. Expected Shortfall95 is the non-negative mean loss of returns at or below that threshold. Drawdown-at-Risk95 is P95 of positive raw drawdown depth. Conditional Drawdown-at-Risk95 is the mean depth at or beyond DaR95.
 

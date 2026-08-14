@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { calculateDDAProCompatibility } from "../src/modules/dda-pro/core/compatibilityEngine.ts";
 import { calculateDDAProNative } from "../src/modules/dda-pro/core/nativeEngine.ts";
-import { DEFAULT_DDA_PRO_SETTINGS } from "../src/modules/dda-pro/core/settings.ts";
+import { DEFAULT_DDA_PRO_SETTINGS, migrateDDAProSettings } from "../src/modules/dda-pro/core/settings.ts";
 import { quantile } from "../src/modules/dda-pro/core/statistics.ts";
 import {
   ddaProDomain,
@@ -25,6 +25,12 @@ function candles(closes: number[]): Candle[] {
 }
 
 const nativeSettings = { ...DEFAULT_DDA_PRO_SETTINGS, lookback: 100, smoothingMethod: "ema" as const };
+
+{
+  assert.equal(DEFAULT_DDA_PRO_SETTINGS.preset, "BC-RDA — Institutional");
+  assert.equal(migrateDDAProSettings({ preset: "DDA Pro — Original" as never }).preset, "BC-RDA — Original Compatibility");
+  assert.equal(migrateDDAProSettings({ preset: "BC-DDA — Institutional" as never }).preset, "BC-RDA — Institutional");
+}
 
 {
   const result = calculateDDAProNative({ candles: candles(Array.from({ length: 240 }, (_, index) => 100 + index)), settings: nativeSettings, timeframeSeconds: 3_600 });
@@ -134,10 +140,12 @@ const nativeSettings = { ...DEFAULT_DDA_PRO_SETTINGS, lookback: 100, smoothingMe
   assert.match(engineSource, /zoomDDAProCamera/, "DDA renderer is missing independent value-axis zoom");
   assert.match(appSource, /indicatorVisualSettings: migrateIndicatorVisualSettings/, "legacy workspace visuals are not migrated before DDA settings open");
   assert.match(chartSource, /indicatorVisualSettings\[activeIndicator\] \?\?/, "DDA settings lack a defensive legacy visual fallback");
+  assert.match(chartSource, /BC-RDA Engine/);
+  assert.doesNotMatch(chartSource, />DDA Pro Engine</);
   assert.match(chartSource, /showExpandedDashboard/);
   assert.match(chartSource, /definition\.indicator === "ddaPro"/);
   assert.match(alertSource, /DDA_RISK_SCORE_CROSSED_90/);
   assert.doesNotMatch(chartSource, /placeOrder|submitOrder|cancelOrder/);
 }
 
-console.log("DDA Pro deterministic, statistics, compatibility, and no-lookahead tests: PASS");
+console.log("BC-RDA deterministic, statistics, compatibility, migration, and no-lookahead tests: PASS");

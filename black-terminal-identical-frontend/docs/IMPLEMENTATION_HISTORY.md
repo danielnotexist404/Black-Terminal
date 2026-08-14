@@ -1450,6 +1450,10 @@ Remaining:
 - Recorded the truthful source-resolution verdict: `RAW FIELD TOO SPARSE — SOURCE/MODEL RESOLUTION LIMIT`. Persistent collector deployment, migrations, and authenticated live acceptance remain unperformed.
 
 
-## 2026-08-13 — BC-DDA Pro conversion
+## 2026-08-13 — BC-RDA conversion
 
 Retained the original EdgeTools Pine source and integrated a worker-isolated dual-engine Drawdown Distribution Analysis oscillator. Added causal raw-depth distributions, episodes, tail metrics, transparent risk scoring and confidence, a Pixi distribution fan and dashboard, versioned persistence, Python reference parity, no-lookahead tests, and measured synthetic benchmarks. Exact TradingView parity remains unverified without goldens.
+
+## 2026-08-14 — BC-RDA product identity
+
+Renamed the public indicator to **BC-RDA — Risk Distribution Analysis** after the Black Core native engine, full distribution structure, deterministic event signals, and independent pane camera moved it beyond the original DDA Pro conversion. The stable indicator ID, workspace key, alert event codes, module paths, and original Pine reference remain unchanged for backward compatibility. Legacy preset names migrate to their BC-RDA equivalents on load.

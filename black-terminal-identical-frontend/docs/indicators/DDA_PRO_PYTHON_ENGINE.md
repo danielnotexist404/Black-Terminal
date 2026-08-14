@@ -1,4 +1,4 @@
-# DDA Pro Python engine
+# BC-RDA Python engine
 
 The auditable reference package is `python/black_core_indicators/dda_pro`. `engine.py` implements compatibility/native source kernels; `__main__.py` provides a JSON test interface. The production browser currently executes the deterministic TypeScript mirror in `src/modules/dda-pro/core` through a Web Worker; no server Python sidecar deployment is claimed.
 

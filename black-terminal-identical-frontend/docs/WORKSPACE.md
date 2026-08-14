@@ -284,7 +284,7 @@ Chapter III-C5 upgrades BCLIF renderer preferences to schema V7. Only BCLIF pres
 Renderer schema V8 repairs the incompatible V7 shelf-only state. Renderer schema V9 then adds the full-plot theme backdrop, high-DPI causal shelf presentation, Purple Plasma and Blood / White / Silver themes, and explicit plasma/clarity/residual controls. These remain presentation-only: legacy diagnostic shelves cannot suppress the GPU raster, older renderer checkpoints rebuild, and model/exposure authority does not change. See BCLIF_THERMAL_FIELD_RECOVERY.md and BCLIF_THERMAL_PRESENTATION_V9.md.
 
 
-## DDA Pro workspace paths
+## BC-RDA workspace paths
 
 - `src/modules/dda-pro/` — Native and Compatibility engines, settings, worker protocol.
 - `python/black_core_indicators/dda_pro/` — independent readable reference.

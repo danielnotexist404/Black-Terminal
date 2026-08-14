@@ -66,4 +66,4 @@ const candles: Candle[] = Array.from({ length: 800 }, (_, index) => {
   if (messages.at(-1)?.type === "ERROR") assert.match((messages.at(-1) as Extract<DDAProWorkerResponse, { type: "ERROR" }>).message, /HISTORY_INVALID/);
 }
 
-console.log("DDA Pro worker protocol, generation cancellation, stateful history, append/config rebuild, and deterministic calculation tests: PASS");
+console.log("BC-RDA worker protocol, generation cancellation, stateful history, append/config rebuild, and deterministic calculation tests: PASS");

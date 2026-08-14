@@ -425,6 +425,6 @@ Run the aggregate BCLIF model, adapter, order-book, checkpoint/recovery, tile-co
 Use a separate root-owned environment file based on `.env.liquidation-intelligence.example`. Never reuse Black Cloud credentials or place this workload on `BLACK_CLOUD_NODE_01`. Apply `202608050001` followed by `202608050002` only after isolated migration/RLS/storage tests and an actual analytics host pass the activation gate. In the current State A package, both migrations remain unapplied and no persistent history is claimed.
 
 
-## DDA Pro validation
+## BC-RDA validation
 
 Run `npm run test:dda-pro-all`, `npm run benchmark:dda-pro`, `npm run test:oscillator-layout`, `npm run typecheck`, and `npm run build`. TradingView parity additionally requires externally supplied golden exports; internal tests alone do not certify it.

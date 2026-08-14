@@ -96,6 +96,6 @@ The optional `python/black_core_profiles` package covers historical composite re
 Validation: `python3 scripts/auction-profile-python-tests.py`.
 
 
-## DDA Pro
+## BC-RDA
 
-DDA Pro adds an auditable Python reference and a production browser TypeScript worker mirror. Run `npm run test:dda-pro-python-parity` to verify the core raw, smoothed, depth, and distribution outputs. The Python package is not claimed as a deployed sidecar.
+BC-RDA adds an auditable Python reference and a production browser TypeScript worker mirror. Run `npm run test:dda-pro-python-parity` to verify the core raw, smoothed, depth, and distribution outputs. The Python package is not claimed as a deployed sidecar.

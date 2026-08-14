@@ -1,4 +1,4 @@
-# DDA Pro limitations
+# BC-RDA limitations
 
 - Exact TradingView parity is unverified without exported golden fixtures, US10Y history, and theme screenshots.
 - The Python engine is an auditable reference, not a deployed production sidecar.

@@ -1,4 +1,4 @@
-# DDA Pro Pine audit
+# BC-RDA Pine audit
 
 Source: `reference/pine/dda-pro-edgetools-v6.pine`, retained verbatim under MPL-2.0 with EdgeTools attribution.
 

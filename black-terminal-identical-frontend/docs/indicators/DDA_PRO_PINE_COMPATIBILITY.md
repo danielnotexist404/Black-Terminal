@@ -1,4 +1,4 @@
-# DDA Pro Pine Compatibility
+# BC-RDA Pine Compatibility
 
 Compatibility uses the all-history running peak, signed negative drawdown, EMA smoothing, nearest-rank percentiles, population deviation, 252 annualization, the Pine rank direction, and the original duration persistence. It is labeled **PINE COMPAT** in the pane.
 

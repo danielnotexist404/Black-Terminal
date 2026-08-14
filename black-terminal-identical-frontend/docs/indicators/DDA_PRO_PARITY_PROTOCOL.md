@@ -1,4 +1,4 @@
-# DDA Pro parity protocol
+# BC-RDA parity protocol
 
 Deterministic test order:
 

@@ -1,11 +1,11 @@
-# DDA Pro completion report
+# BC-RDA completion report
 
-Starting commit: `42d680c`. Final commit: this chapter's BC-DDA Pro commit in repository history. No database migration or production deployment is required by this indicator-only chapter.
+Starting commit: `42d680c`. Final commit: this chapter's BC-RDA commit in repository history. No database migration or production deployment is required by this indicator-only chapter.
 
 ## Implemented
 
 - Retained the complete MPL-2.0 Pine source under `reference/pine/dda-pro-edgetools-v6.pine` and documented its behavior before conversion.
-- Added the stable indicator identity `black-core-dda-pro` with the display name `BC-DDA Pro`.
+- Added the stable indicator identity `black-core-dda-pro` with the display name `BC-RDA — Risk Distribution Analysis`.
 - Added named `Black Core Native` and `Pine Compatibility` calculation modes.
 - Implemented all-history and rolling peaks, raw drawdown and positive depth, configurable quantiles, classical and robust MAD standardization, P05 through P99 distribution bands, duration/time-under-water/recovery/area episodes, velocity/acceleration/VADD, return VaR/ES, drawdown DaR/CDaR, Sharpe/Sortino/Calmar/Ulcer/Pain/Omega/recovery metrics, transparent weighted risk scoring, confidence, and hysteretic 50/75/90 states.
 - Added versioned settings, presets, eight retained Pine palettes plus Black Terminal themes, oscillator-pane persistence and resizing, a compact dashboard, markers, fan, wave, and risk strip.
@@ -31,7 +31,7 @@ The transparent native risk score normalizes five 0-100 components with configur
 - TypeScript calculation core: `src/modules/dda-pro/core`, including separate native and compatibility engines, versioned settings, full-input calculation identity, data/settings/output hashes, episodes, tail metrics, and deterministic events.
 - Worker: `src/modules/dda-pro/workers/ddaPro.worker.ts` and `DDAProWorkerClient.ts`, with protocol versioning, initialize, history load, append, config update, rebuild, calculate, cancellation, stale-generation rejection, and measured calculation time.
 - Renderer and UI: `src/chart-engine/BlackChartEngine.ts` and `src/components/PixiBlackChart.tsx`, with a dedicated resizable oscillator pane, distribution fan, sigma, wave, state strip, markers, compact dashboard, optional expanded table, and historical DDA crosshair metrics.
-- Settings: versioned workspace persistence, collapsed Advanced/Diagnostics, calculation and rendering controls, weights, themes, hashes, timing, and presets `DDA Pro - Original`, `BC-DDA - Institutional`, and `BC-DDA - Macro Risk`.
+- Settings: versioned workspace persistence, collapsed Advanced/Diagnostics, calculation and rendering controls, weights, themes, hashes, timing, and presets `BC-RDA - Original Compatibility`, `BC-RDA - Institutional`, and `BC-RDA - Macro Risk`.
 - Alerts: read-only confirmed-bar conditions for drawdown start, deepening, recovery, new maximum, state changes, P90/P95/P99 entries, duration extremes, CDaR and VADD extremes, confidence degradation, score crossings at 50/75/90, and accelerating deterioration. No alert calls execution.
 
 ## Verification

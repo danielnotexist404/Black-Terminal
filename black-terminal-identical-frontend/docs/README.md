@@ -212,6 +212,6 @@ Chapter III-C5 cold-start documentation: BCLIF_COLD_START_RASTER_AUDIT.md, BCLIF
 The renderer V8 shelf-only recovery and V9 plasma/shelf presentation contract are documented in liquidation/BCLIF_THERMAL_FIELD_RECOVERY.md and liquidation/BCLIF_THERMAL_PRESENTATION_V9.md.
 
 
-## DDA Pro documentation
+## BC-RDA documentation
 
 Start with `indicators/BC_DDA_PRO_OVERVIEW.md`, then use `indicators/DDA_PRO_PINE_AUDIT.md`, `indicators/DDA_PRO_NATIVE_MATHEMATICS.md`, and `indicators/DDA_PRO_COMPLETION_REPORT.md` for audit and certification state.

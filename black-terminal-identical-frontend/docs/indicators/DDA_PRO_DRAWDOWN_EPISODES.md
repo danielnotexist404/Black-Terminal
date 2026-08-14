@@ -1,4 +1,4 @@
-# DDA Pro drawdown episodes
+# BC-RDA drawdown episodes
 
 An episode begins when positive raw depth reaches the configured minimum. The engine records start, deepest trough, duration, recovery duration, area under water (sum of per-bar depth), and recovery. Recovery is confirmed when depth falls below 5% of the episode threshold. Completed episodes are immutable under future appends; active episodes remain developing.
 

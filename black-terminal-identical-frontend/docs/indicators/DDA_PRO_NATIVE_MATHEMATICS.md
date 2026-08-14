@@ -1,4 +1,4 @@
-# DDA Pro Native mathematics
+# BC-RDA Native mathematics
 
 For positive source value `V_t` and causal peak `P_t`, raw drawdown is `DD_t = min(0, (V_t/P_t - 1) × 100)` and positive depth is `D_t = -DD_t`. `P_t` is either the maximum of all loaded history through `t`, or the maximum of the selected rolling window. Only raw drawdown/depth feed professional risk metrics; smoothing is a visual wave.
 

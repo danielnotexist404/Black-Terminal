@@ -67,7 +67,7 @@ export class DDAProWorkerClient {
         pending.reject(new Error("DDA_PRO_UNEXPECTED_ACK"));
       }
     };
-    this.worker.onerror = (event) => this.fallback(new Error(event.message || "DDA Pro worker failed."));
+    this.worker.onerror = (event) => this.fallback(new Error(event.message || "BC-RDA worker failed."));
   }
 
   private fallback(error: Error) {
@@ -85,7 +85,7 @@ export class DDAProWorkerClient {
   }
 
   calculate(input: DDAProCalculationInput) {
-    if (this.disposed) return Promise.reject(new Error("DDA Pro worker client is disposed."));
+    if (this.disposed) return Promise.reject(new Error("BC-RDA worker client is disposed."));
     this.generation += 1;
     for (const pending of this.pending.values()) pending.reject(new Error("DDA_PRO_STALE_GENERATION"));
     this.pending.clear();
@@ -104,7 +104,7 @@ export class DDAProWorkerClient {
   dispose() {
     this.disposed = true;
     this.worker.terminate();
-    for (const pending of this.pending.values()) pending.reject(new Error("DDA Pro worker client disposed."));
+    for (const pending of this.pending.values()) pending.reject(new Error("BC-RDA worker client disposed."));
     this.pending.clear();
   }
 }

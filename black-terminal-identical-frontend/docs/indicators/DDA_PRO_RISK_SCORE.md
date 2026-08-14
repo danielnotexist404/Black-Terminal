@@ -1,4 +1,4 @@
-# DDA Pro risk score
+# BC-RDA risk score
 
 Native score components are independently normalized to 0–100:
 

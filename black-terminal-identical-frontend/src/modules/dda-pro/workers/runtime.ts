@@ -33,7 +33,7 @@ export class DDAProWorkerRuntime {
 
   handle(request: DDAProWorkerRequest) {
     if (request.protocolVersion !== 1) {
-      this.error(request, "INVALID_PROTOCOL", "Unsupported DDA Pro worker protocol version.");
+      this.error(request, "INVALID_PROTOCOL", "Unsupported BC-RDA worker protocol version.");
       return;
     }
     try {
@@ -95,7 +95,7 @@ export class DDAProWorkerRuntime {
         this.rebuild(request);
         return;
       }
-      this.error(request, "INVALID_PROTOCOL", "Unsupported DDA Pro worker request.");
+      this.error(request, "INVALID_PROTOCOL", "Unsupported BC-RDA worker request.");
     } catch (error) {
       this.error(request, "CALCULATION_FAILED", error instanceof Error ? error.message : String(error));
     }

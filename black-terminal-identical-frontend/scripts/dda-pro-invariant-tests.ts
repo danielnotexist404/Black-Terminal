@@ -102,4 +102,4 @@ assert.equal(
   assert.ok(Math.abs(result.latest.vadd - expectedVadd) < 1e-9, "VADD must normalize depth by annualized volatility percent");
 }
 
-console.log("DDA Pro conservation, episode, tail, hash-independence, and authority invariants: PASS");
+console.log("BC-RDA conservation, episode, tail, hash-independence, and authority invariants: PASS");

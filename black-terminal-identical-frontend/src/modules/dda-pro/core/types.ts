@@ -12,7 +12,7 @@ export type DDAProSmoothingMethod = "none" | "ema" | "sma" | "rma";
 export type DDAProTheme =
   | "black-terminal" | "black-terminal-blood" | "institutional-monochrome" | "custom"
   | "gold" | "edge-tools" | "behavioral" | "quant" | "ocean" | "fire" | "matrix" | "arctic";
-export type DDAProPreset = "Custom" | "DDA Pro — Original" | "BC-DDA — Institutional" | "BC-DDA — Macro Risk";
+export type DDAProPreset = "Custom" | "BC-RDA — Original Compatibility" | "BC-RDA — Institutional" | "BC-RDA — Macro Risk";
 export type DDAProRiskState = "LOW" | "MODERATE" | "HIGH" | "EXTREME" | "INSUFFICIENT";
 
 export type DDAProSettings = {

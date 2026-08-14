@@ -34,7 +34,7 @@ const indicatorOptions: { value: AlertIndicatorTarget; label: string }[] = [
   { value: "ema20", label: "EMA 20" },
   { value: "ema50", label: "EMA 50" },
   { value: "ema200", label: "EMA 200" },
-  { value: "ddaPro", label: "DDA Pro" }
+  { value: "ddaPro", label: "BC-RDA" }
 ];
 
 const ddaSignalOptions: { value: DDAProEventType; label: string }[] = [
@@ -316,7 +316,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
                 </label>
                 {draft.indicator === "ddaPro" && (
                   <label className="alert-field wide">
-                    DDA Pro Signal
+                    BC-RDA Signal
                     <select value={draft.ddaSignal ?? "DDA_RISK_SCORE_CROSSED_75"} onChange={(event) => updateDraft("ddaSignal", event.target.value as DDAProEventType)}>
                       {ddaSignalOptions.map((option) => (
                         <option key={option.value} value={option.value}>{option.label}</option>

@@ -420,6 +420,6 @@ export bypass presentation normalization, and historical browser OI-only
 context cannot receive yellow authority.
 
 
-## DDA Pro risk analytics
+## BC-RDA risk analytics
 
-DDA Pro is registered as `black-core-dda-pro`. Authorized candle data flows into a versioned deterministic TypeScript mirror in a dedicated worker, then into the shared Pixi oscillator renderer and read-only DDA event bus. The auditable Python reference lives under `python/black_core_indicators/dda_pro`. It has no dependency on execution authority.
+BC-RDA is registered as `black-core-dda-pro`. Authorized candle data flows into a versioned deterministic TypeScript mirror in a dedicated worker, then into the shared Pixi oscillator renderer and read-only DDA event bus. The auditable Python reference lives under `python/black_core_indicators/dda_pro`. It has no dependency on execution authority.

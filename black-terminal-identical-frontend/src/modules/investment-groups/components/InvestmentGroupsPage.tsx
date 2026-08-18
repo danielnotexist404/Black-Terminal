@@ -44,6 +44,7 @@ import type {
   InvestmentGroupVisibility,
   TradingRoomChannel
 } from "../../profile/types";
+import { investmentGroupsApi } from "../investmentGroupsApi";
 
 type InvestmentGroupsPageProps = {
   currentUser: CapabilityUser;
@@ -113,10 +114,15 @@ const defaultDraft = {
 export function InvestmentGroupsPage({ currentUser, onClose, onOpenProfile }: InvestmentGroupsPageProps) {
   const [revision, setRevision] = useState(0);
   const data = useMemo(() => listInvestmentGroups(currentUser), [currentUser, revision]);
+  const [serverGroups, setServerGroups] = useState<InvestmentGroup[] | null>(null);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(data.publicGroups[0]?.id ?? data.myGroups[0]?.id ?? null);
+  const allGroups = useMemo(() => {
+    const source = serverGroups ?? [...data.myGroups, ...data.publicGroups];
+    return [...new Map(source.map((group) => [group.id, group])).values()];
+  }, [data.myGroups, data.publicGroups, serverGroups]);
   const selectedGroup = useMemo(
-    () => data.state.groups.find((group) => group.id === selectedGroupId) ?? data.publicGroups[0] ?? data.myGroups[0],
-    [data, selectedGroupId]
+    () => allGroups.find((group) => group.id === selectedGroupId) ?? allGroups[0],
+    [allGroups, selectedGroupId]
   );
   const [activeTab, setActiveTab] = useState<GroupTab>("Overview");
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -141,6 +147,26 @@ export function InvestmentGroupsPage({ currentUser, onClose, onOpenProfile }: In
   useEffect(() => {
     if (!visibleTabs.includes(activeTab)) setActiveTab("Overview");
   }, [activeTab, visibleTabs]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const synchronize = async () => {
+      try {
+        const localOwned = data.myGroups.filter((group) => group.ownerUserId === userIdFromUsername(currentUser.username));
+        for (const group of localOwned) await investmentGroupsApi.importLocal(group);
+        const groups = await investmentGroupsApi.list();
+        if (!cancelled) {
+          setServerGroups(groups);
+          setSelectedGroupId((current) => groups.some((group) => group.id === current) ? current : groups[0]?.id ?? null);
+          setStatus("");
+        }
+      } catch (error) {
+        if (!cancelled) setStatus(error instanceof Error ? error.message : String(error));
+      }
+    };
+    void synchronize();
+    return () => { cancelled = true; };
+  }, [currentUser.username, revision]);
 
   const refresh = () => setRevision((value) => value + 1);
 
@@ -205,7 +231,7 @@ export function InvestmentGroupsPage({ currentUser, onClose, onOpenProfile }: In
     }
   };
 
-  const visibleGroups = [...new Map([...data.myGroups, ...data.publicGroups].map((group) => [group.id, group])).values()];
+  const visibleGroups = allGroups;
 
   return (
     <div className="network-page">

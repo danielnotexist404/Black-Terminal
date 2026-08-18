@@ -3,7 +3,11 @@ import { readFileSync } from "node:fs";
 import { buildBybitTradingStopBody, isBybitProtectionNoopError } from "../server/exchanges/bybit.js";
 import { preserveFullPositionPair, reconcileProtectionReport } from "../server/routes/execution/protection.js";
 import { resolveFixedLookbackWindow } from "../src/chart-engine/profile/VolumeProfileModel.ts";
-import { deriveDDAProSignals } from "../src/modules/dda-pro/core/engineShared.ts";
+import {
+  confirmedNewestDDAProSignals,
+  deriveDDAProSignals,
+  latestConfirmedDDAProCandleTime
+} from "../src/modules/dda-pro/core/engineShared.ts";
 import type { DDAProEvent } from "../src/modules/dda-pro/core/types.ts";
 
 const stopOnly = buildBybitTradingStopBody({ category: "linear", symbol: "BTCUSDT", positionIdx: 2, tpslMode: "full", stopLoss: 61_000 });
@@ -42,10 +46,20 @@ const event = (type: DDAProEvent["type"], index: number): DDAProEvent => ({
 });
 const signals = deriveDDAProSignals([event("DDA_DRAWDOWN_STARTED", 0), event("DDA_DRAWDOWN_DEEPENED", 1), event("DDA_DRAWDOWN_RECOVERED", 2)]);
 assert.deepEqual(signals.map(({ direction, markerTone }) => ({ direction, markerTone })), [
-  { direction: "short", markerTone: "blood-red" },
-  { direction: "long", markerTone: "silver-white" }
+  { direction: "long", markerTone: "silver-white" },
+  { direction: "short", markerTone: "blood-red" }
 ]);
+assert.deepEqual(signals.map((signal) => signal.sourceEventType), ["DDA_DRAWDOWN_DEEPENED", "DDA_DRAWDOWN_RECOVERED"],
+  "color correction must not move or recalculate the existing signal dots");
 assert.equal(new Set(signals.map((signal) => signal.id)).size, signals.length);
+
+const alertCandles = [{ time: 100 }, { time: 200 }, { time: 300 }];
+assert.equal(latestConfirmedDDAProCandleTime(alertCandles, 100, 350), 200);
+assert.deepEqual(confirmedNewestDDAProSignals(signals, 3, 100, 350, 200), [],
+  "developing and historical BC-RDA dots must never fire configured alerts");
+const latestConfirmedSignal = { ...signals[0]!, id: "bc-rda-long-300", index: 2, time: 300 };
+assert.deepEqual(confirmedNewestDDAProSignals([signals[0]!, latestConfirmedSignal], 3, 100, 401, 200).map((signal) => signal.id), ["bc-rda-long-300"],
+  "only a newly confirmed signal on the newest calculated bar may fire");
 
 const engineSource = readFileSync(new URL("../src/chart-engine/BlackChartEngine.ts", import.meta.url), "utf8");
 const chartSource = readFileSync(new URL("../src/components/PixiBlackChart.tsx", import.meta.url), "utf8");
@@ -54,10 +68,13 @@ const reconciliationSource = readFileSync(new URL("../server/exchanges/bybit-rec
 const migrationSource = readFileSync(new URL("../supabase/migrations/20260818221233_add_execution_order_average_fill_price.sql", import.meta.url), "utf8");
 assert.doesNotMatch(engineSource, /latestChartIndex[\s\S]{0,300}g\.circle/, "BC-RDA must not draw an unconditional latest-tip dot");
 assert.match(engineSource, /snapshot\.signals/);
+assert.match(engineSource, /signal\.markerTone === "blood-red"/);
 assert.match(engineSource, /volumeProfileRightGutter/);
 assert.match(chartSource, /Fixed Look-back/);
 assert.doesNotMatch(chartSource, /Lock Latest/);
 assert.match(chartSource, /BC_RDA_ANY_SIGNAL/);
+assert.match(chartSource, /latestConfirmedDDAProCandleTime/);
+assert.match(chartSource, /confirmedNewestDDAProSignals/);
 assert.match(chartSource, /supportZone/);
 assert.doesNotMatch(panelSource, /TP\/SL ORDERS SUBMITTED/);
 assert.match(panelSource, /updateBybitPositionProtectionViaApi/);

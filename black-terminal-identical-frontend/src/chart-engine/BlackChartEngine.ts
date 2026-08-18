@@ -2388,9 +2388,9 @@ export class BlackChartEngine {
       for (const signal of snapshot.signals) {
         const chartIndex = offset + signal.index;
         if (chartIndex < this.view.firstIndex || chartIndex > this.view.lastIndex) continue;
-        const color = signal.direction === "short"
-          ? this.hexColor(themePalette.extreme, theme.redBright)
-          : this.hexColor(themePalette.low, theme.silverBright);
+        const color = signal.markerTone === "blood-red"
+          ? this.hexColor("#ff1838", theme.redBright)
+          : this.hexColor("#f2f2f4", theme.silverBright);
         g.circle(this.xForIndex(chartIndex), yForDrawdown(snapshot.series.rawDrawdown[signal.index] ?? -signal.value), 2.8)
           .fill({ color, alpha: 0.9 });
       }

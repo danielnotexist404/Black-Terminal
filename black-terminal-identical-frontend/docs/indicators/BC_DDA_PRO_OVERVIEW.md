@@ -11,6 +11,6 @@ The browser runs a deterministic TypeScript mirror in a dedicated worker. The au
 
 ## Canonical directional signals
 
-BC-RDA direction markers and alerts share one calculation output. `DDA_DRAWDOWN_DEEPENED` produces a blood-red short signal at the episode trough; `DDA_DRAWDOWN_RECOVERED` produces a silver-white long signal at the recovered point. Stable signal IDs use the event timestamp, so rerenders and unchanged snapshots cannot refire the same configured alert.
+BC-RDA direction markers and alerts share one calculation output. Without changing signal locations or the underlying episode calculation, `DDA_DRAWDOWN_DEEPENED` produces a silver-white long signal at the episode trough and `DDA_DRAWDOWN_RECOVERED` produces a blood-red short signal at the recovered point. Stable signal IDs use the event timestamp, so rerenders and unchanged snapshots cannot refire the same configured alert.
 
-The renderer consumes this signal collection directly. It no longer creates an unconditional white dot at the latest sample. Developing-preview mode may expose a genuine current signal immediately, while confirmed-bars mode remains closed-bar only. Historical replay continues to suppress external alert dispatch.
+The renderer consumes this signal collection directly and uses fixed BC-RDA signal colors so a theme cannot invert their meaning. It no longer creates an unconditional white dot at the latest sample. Configured signal alerts arm at the latest confirmed candle and fire only for a newly confirmed signal on the newest calculated bar; historical, off-screen, and developing-bar signals are never replayed as fresh alerts. Historical replay continues to suppress external alert dispatch.

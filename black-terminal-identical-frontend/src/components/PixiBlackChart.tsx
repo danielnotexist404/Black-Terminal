@@ -35,7 +35,11 @@ import {
 } from "../chart-engine/profile/volumeProfileDefaults";
 import { DDAProWorkerClient } from "../modules/dda-pro/workers/DDAProWorkerClient";
 import { DEFAULT_DDA_PRO_SETTINGS, applyDDAProPreset, ddaProSettingsHash, migrateDDAProSettings } from "../modules/dda-pro/core/settings";
-import { calculationHash as ddaProCalculationHash } from "../modules/dda-pro/core/engineShared";
+import {
+  calculationHash as ddaProCalculationHash,
+  confirmedNewestDDAProSignals,
+  latestConfirmedDDAProCandleTime
+} from "../modules/dda-pro/core/engineShared";
 import type { DDAProPreset, DDAProSettings, DDAProSnapshot } from "../modules/dda-pro/core/types";
 import { OSCILLATOR_KEYS, resolveOscillatorStack } from "../chart-engine/indicators/oscillatorLayout";
 import { createMockCandles } from "../data/mockMarket";
@@ -463,6 +467,7 @@ export function PixiBlackChart({
   const ddaCalculationIdentityRef = useRef("");
   const ddaDispatchedEventsRef = useRef(new Set<string>());
   const ddaConfiguredEventsRef = useRef(new Set<string>());
+  const ddaSignalAlertArmedAtRef = useRef(new Map<string, number>());
   const [auctionProfileSnapshots, setAuctionProfileSnapshots] = useState<AuctionProfileSnapshot[]>([]);
   const auctionProfileSnapshotsRef = useRef<AuctionProfileSnapshot[]>([]);
   const auctionProfileSnapshot = auctionProfileSnapshots.at(-1) ?? null;
@@ -2176,6 +2181,7 @@ export function PixiBlackChart({
   useEffect(() => {
     ddaDispatchedEventsRef.current.clear();
     ddaConfiguredEventsRef.current.clear();
+    ddaSignalAlertArmedAtRef.current.clear();
   }, [marketSymbol.exchange, marketSymbol.rawSymbol, timeframe]);
 
   useEffect(() => {
@@ -3066,15 +3072,34 @@ export function PixiBlackChart({
     if (definitions.length === 0) return;
     const sourceCandles = engineRef.current?.getSourceCandles() ?? [];
     const signalDefinitions = definitions.filter((definition) => String(definition.ddaSignal ?? "").startsWith("BC_RDA_"));
-    for (const signal of ddaProSnapshot.signals) {
-      let current: Candle | undefined;
-      for (let index = sourceCandles.length - 1; index >= 0; index--) {
-        if (sourceCandles[index]?.time === signal.time) { current = sourceCandles[index]; break; }
+    const timeframeDuration = timeframeSeconds[timeframe];
+    const nowSeconds = Date.now() / 1000;
+    const latestConfirmedTime = latestConfirmedDDAProCandleTime(sourceCandles, timeframeDuration, nowSeconds);
+    const activeArmKeys = new Set(signalDefinitions.map((definition) => `${definition.id}:${definition.ddaSignal ?? "BC_RDA_ANY_SIGNAL"}`));
+    for (const key of ddaSignalAlertArmedAtRef.current.keys()) {
+      if (!activeArmKeys.has(key)) ddaSignalAlertArmedAtRef.current.delete(key);
+    }
+    for (const definition of signalDefinitions) {
+      const target = definition.ddaSignal ?? "BC_RDA_ANY_SIGNAL";
+      const armKey = `${definition.id}:${target}`;
+      const armedAfterTime = ddaSignalAlertArmedAtRef.current.get(armKey);
+      if (armedAfterTime === undefined) {
+        // Creating, enabling, or retargeting an alert arms it at the latest
+        // confirmed candle. Historical dots are never replayed as new alerts.
+        ddaSignalAlertArmedAtRef.current.set(armKey, latestConfirmedTime);
+        continue;
       }
-      if (!current) continue;
-      for (const definition of signalDefinitions) {
-        const target = definition.ddaSignal ?? "BC_RDA_ANY_SIGNAL";
+      const candidates = confirmedNewestDDAProSignals(
+        ddaProSnapshot.signals,
+        ddaProSnapshot.inputSize,
+        timeframeDuration,
+        nowSeconds,
+        armedAfterTime
+      );
+      for (const signal of candidates) {
         if (target !== "BC_RDA_ANY_SIGNAL" && target !== `BC_RDA_${signal.direction.toUpperCase()}_SIGNAL`) continue;
+        const current = sourceCandles.find((candle) => candle.time === signal.time);
+        if (!current) continue;
         const eventKey = `${definition.id}:${signal.id}`;
         if (ddaConfiguredEventsRef.current.has(eventKey)) continue;
         ddaConfiguredEventsRef.current.add(eventKey);

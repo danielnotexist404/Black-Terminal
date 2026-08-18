@@ -137,17 +137,47 @@ export function deriveDDAProSignals(events: readonly DDAProEvent[]): DDAProSigna
   const signals: DDAProSignalEvent[] = [];
   for (const event of events) {
     if (event.type === "DDA_DRAWDOWN_DEEPENED") signals.push({
-      id: `bc-rda-short-${event.time || event.index}`, indicatorId: DDA_PRO_INDICATOR_ID,
-      direction: "short" as const, index: event.index, time: event.time, value: event.value,
-      sourceEventType: event.type, markerTone: "blood-red" as const
-    });
-    if (event.type === "DDA_DRAWDOWN_RECOVERED") signals.push({
       id: `bc-rda-long-${event.time || event.index}`, indicatorId: DDA_PRO_INDICATOR_ID,
       direction: "long" as const, index: event.index, time: event.time, value: event.value,
       sourceEventType: event.type, markerTone: "silver-white" as const
     });
+    if (event.type === "DDA_DRAWDOWN_RECOVERED") signals.push({
+      id: `bc-rda-short-${event.time || event.index}`, indicatorId: DDA_PRO_INDICATOR_ID,
+      direction: "short" as const, index: event.index, time: event.time, value: event.value,
+      sourceEventType: event.type, markerTone: "blood-red" as const
+    });
   }
   return signals;
+}
+
+export function latestConfirmedDDAProCandleTime(
+  candles: readonly Pick<Candle, "time">[],
+  timeframeSeconds: number,
+  nowSeconds: number
+) {
+  const duration = Math.max(1, Number(timeframeSeconds) || 1);
+  let latest = 0;
+  for (const candle of candles) {
+    const time = Number(candle.time);
+    if (Number.isFinite(time) && time > latest && time + duration <= nowSeconds) latest = time;
+  }
+  return latest;
+}
+
+export function confirmedNewestDDAProSignals(
+  signals: readonly DDAProSignalEvent[],
+  inputSize: number,
+  timeframeSeconds: number,
+  nowSeconds: number,
+  armedAfterTime: number
+) {
+  const latestIndex = Math.max(0, inputSize - 1);
+  const duration = Math.max(1, Number(timeframeSeconds) || 1);
+  return signals.filter((signal) =>
+    signal.index === latestIndex &&
+    signal.time > armedAfterTime &&
+    signal.time + duration <= nowSeconds
+  );
 }
 
 export function performanceMetrics(

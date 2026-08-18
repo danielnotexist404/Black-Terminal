@@ -30,4 +30,6 @@ Position TP/SL/trailing-stop changes use Bybit V5 `POST /v5/position/trading-sto
 
 For full-position TP/SL, Black Terminal reads the exact `(category, symbol, positionIdx)` position first and carries the untouched paired side forward. An accepted REST response is provisional. The execution route immediately runs authoritative account reconciliation and reports `reconciled` only when the requested field matches the fresh venue position. Local chart and Position Manager state changes only after that report.
 
+Bybit `retCode 34040` is handled only as a reconcile-required idempotent no-op. Black Terminal never reports success unless the subsequent exact position snapshot confirms that the requested protection value is already authoritative.
+
 Open orders are read from `/v5/order/realtime` across linear USDT, linear USDC, inverse, spot, and option scopes with cursor pagination. A failed category makes the snapshot partial/stale: successful-category orders remain visible and prior rows from failed categories are retained until a later verified snapshot authoritatively removes them.

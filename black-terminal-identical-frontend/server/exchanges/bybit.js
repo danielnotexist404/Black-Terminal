@@ -881,10 +881,22 @@ export async function setBybitPositionProtection(credentials, patch) {
   const category = patch.category === "inverse" ? "inverse" : patch.marketKind === "spot" ? "spot" : "linear";
   if (category === "spot") throw new Error("Bybit spot does not support native futures TP/SL protection.");
   const body = buildBybitTradingStopBody({ ...patch, category });
-  const response = await bybitRequest(credentials, "POST", "/v5/position/trading-stop", {}, body);
+  let response;
+  let idempotentNoop = false;
+  try {
+    response = await bybitRequest(credentials, "POST", "/v5/position/trading-stop", {}, body);
+  } catch (error) {
+    if (!isBybitProtectionNoopError(error)) throw error;
+    // Bybit retCode 34040 means the requested TP/SL state is already present
+    // (or the request was incomplete). The caller must still reconcile the
+    // authoritative position before this can be reported as successful.
+    idempotentNoop = true;
+    response = null;
+  }
   return {
     status: "accepted",
     protectionMode: "native",
+    idempotentNoop,
     symbol: patch.symbol,
     positionIdx: patch.positionIdx,
     takeProfit: patch.takeProfit ?? null,
@@ -892,6 +904,10 @@ export async function setBybitPositionProtection(credentials, patch) {
     trailingStop: patch.trailingStop ?? null,
     raw: response
   };
+}
+
+export function isBybitProtectionNoopError(error) {
+  return Number(error?.bybit?.retCode) === 34040;
 }
 
 export function buildBybitTradingStopBody(patch) {

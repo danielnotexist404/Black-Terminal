@@ -23,3 +23,11 @@ An empty result is authoritative only when every requested category succeeds. A 
 Vercel functions cannot own durable WebSocket sessions. Private streams run in the existing long-running Bybit worker. The web client receives canonical state through authenticated snapshots at a five-second fallback cadence; stream events trigger server reconciliation immediately.
 
 Chart lines use `BlackChartEngine.getScreenYForPrice` and an overlay anchored to the Pixi host, so limit orders share the exact active linear/log price transform.
+
+## Native position protection and reconciliation
+
+Position TP/SL/trailing-stop changes use Bybit V5 `POST /v5/position/trading-stop`; they are not represented as generic reduce-only exit orders. Each field has three explicit states: omitted means preserve, a positive finite value means set, and explicit zero means cancel. `positionIdx` is mandatory so one-way and hedge-mode legs cannot be conflated.
+
+For full-position TP/SL, Black Terminal reads the exact `(category, symbol, positionIdx)` position first and carries the untouched paired side forward. An accepted REST response is provisional. The execution route immediately runs authoritative account reconciliation and reports `reconciled` only when the requested field matches the fresh venue position. Local chart and Position Manager state changes only after that report.
+
+Open orders are read from `/v5/order/realtime` across linear USDT, linear USDC, inverse, spot, and option scopes with cursor pagination. A failed category makes the snapshot partial/stale: successful-category orders remain visible and prior rows from failed categories are retained until a later verified snapshot authoritatively removes them.

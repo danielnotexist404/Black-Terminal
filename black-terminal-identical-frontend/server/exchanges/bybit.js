@@ -880,29 +880,45 @@ export async function reverseBybitPosition(credentials, { marketKind = "perpetua
 export async function setBybitPositionProtection(credentials, patch) {
   const category = patch.category === "inverse" ? "inverse" : patch.marketKind === "spot" ? "spot" : "linear";
   if (category === "spot") throw new Error("Bybit spot does not support native futures TP/SL protection.");
-  const triggerBy = (value) => value === "mark" ? "MarkPrice" : value === "index" ? "IndexPrice" : "LastPrice";
-  const body = {
-    category,
-    symbol: patch.symbol,
-    tpslMode: patch.tpslMode === "partial" ? "Partial" : "Full",
-    positionIdx: patch.positionIdx,
-    takeProfit: patch.takeProfit !== undefined ? String(patch.takeProfit || 0) : undefined,
-    stopLoss: patch.stopLoss !== undefined ? String(patch.stopLoss || 0) : undefined,
-    trailingStop: patch.trailingStop !== undefined ? String(patch.trailingStop || 0) : undefined,
-    activePrice: patch.trailingActivationPrice !== undefined ? String(patch.trailingActivationPrice || 0) : undefined,
-    tpTriggerBy: triggerBy(patch.tpTriggerBy),
-    slTriggerBy: triggerBy(patch.slTriggerBy)
-  };
+  const body = buildBybitTradingStopBody({ ...patch, category });
   const response = await bybitRequest(credentials, "POST", "/v5/position/trading-stop", {}, body);
   return {
     status: "accepted",
     protectionMode: "native",
     symbol: patch.symbol,
+    positionIdx: patch.positionIdx,
     takeProfit: patch.takeProfit ?? null,
     stopLoss: patch.stopLoss ?? null,
     trailingStop: patch.trailingStop ?? null,
     raw: response
   };
+}
+
+export function buildBybitTradingStopBody(patch) {
+  const category = patch.category === "inverse" ? "inverse" : patch.marketKind === "spot" ? "spot" : "linear";
+  if (category === "spot") throw new Error("Bybit spot does not support native futures TP/SL protection.");
+  const positionIdx = Number(patch.positionIdx);
+  if (!Number.isInteger(positionIdx) || ![0, 1, 2].includes(positionIdx)) throw new Error("Bybit native protection requires an explicit positionIdx (0, 1, or 2).");
+  const numericIntent = (name, value) => {
+    if (value === undefined) return undefined;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error(`Bybit ${name} must be a finite non-negative number.`);
+    return String(value);
+  };
+  const triggerBy = (value) => value === "mark" ? "MarkPrice" : value === "index" ? "IndexPrice" : "LastPrice";
+  const body = {
+    category,
+    symbol: patch.symbol,
+    tpslMode: patch.tpslMode === "partial" ? "Partial" : "Full",
+    positionIdx,
+    takeProfit: numericIntent("takeProfit", patch.takeProfit),
+    stopLoss: numericIntent("stopLoss", patch.stopLoss),
+    trailingStop: numericIntent("trailingStop", patch.trailingStop),
+    activePrice: numericIntent("trailingActivationPrice", patch.trailingActivationPrice),
+    ...(patch.takeProfit !== undefined ? { tpTriggerBy: triggerBy(patch.tpTriggerBy) } : {}),
+    ...(patch.stopLoss !== undefined ? { slTriggerBy: triggerBy(patch.slTriggerBy) } : {})
+  };
+  if (body.takeProfit === undefined && body.stopLoss === undefined && body.trailingStop === undefined) throw new Error("Bybit native protection requires an explicit set or cancel intent.");
+  return body;
 }
 
 export async function setBybitLeverage(credentials, { category = "linear", symbol, leverage, buyLeverage, sellLeverage }) {
@@ -1271,6 +1287,7 @@ export function normalizeBybitPosition(position, category = "linear") {
     liquidationPrice: nullableNumber(position?.liqPrice),
     stopLoss: nullableNumber(position?.stopLoss),
     takeProfit: nullableNumber(position?.takeProfit),
+    trailingStop: nullableNumber(position?.trailingStop),
     positionIdx,
     positionMode: positionIdx === 0 ? "one-way" : "hedge",
     marginMode: Number(position?.tradeMode || 0) === 1 ? "isolated" : "cross",

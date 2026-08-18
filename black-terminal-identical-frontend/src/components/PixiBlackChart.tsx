@@ -53,6 +53,7 @@ import { blackCorePositionManager } from "../positions/positionManager";
 import type { ManagedPosition, PositionProtectionOrder, PositionProtectionType } from "../positions/types";
 import {
   buildBybitProtectionDraft,
+  buildBybitProtectionCancelDraft,
   formatSignedPositionMoney,
   isEditableNativeProtection,
   projectedLinearPositionPnl,
@@ -2545,50 +2546,22 @@ export function PixiBlackChart({
     const point = chartContextMenu?.point;
     if (!position || !point) return;
     const price = Number(point.price.toFixed(2));
-    const exitSide: OrderSide = position.direction === "long" ? "sell" : "buy";
-
-    if (type === "take-profit") {
-      blackCorePositionManager.setProtection(position.id, "take-profit", { price, metadata: { source: "chart-context" } });
-      openExecutionTicketFromContext(exitSide, "limit", "positions", false, {
-        quantity: String(position.quantity),
-        reduceOnly: true,
-        takeProfit: String(price),
-        positionId: position.id,
-        protectionIntent: "take-profit"
-      });
+    if (type === "trailing-stop") {
+      showLocalAlertToast("Native Trailing Stop", "Use the native Bybit protection editor; a chart price is not a trailing-distance instruction.");
+      setChartContextMenu(null);
       return;
     }
-
-    if (type === "stop-loss") {
-      blackCorePositionManager.setProtection(position.id, "stop-loss", { price, metadata: { source: "chart-context" } });
-      openExecutionTicketFromContext(exitSide, "stop-market", "positions", false, {
-        quantity: String(position.quantity),
-        reduceOnly: true,
-        stopLoss: String(price),
-        stopPrice: String(price),
-        positionId: position.id,
-        protectionIntent: "stop-loss"
-      });
-      return;
-    }
-
-    blackCorePositionManager.enableTrailingStop(position.id, {
-      price,
-      trailBy: Math.max(1, Math.abs(price - position.currentPrice)),
-      trailMode: "usd",
-      activation: "immediate",
-      metadata: { source: "chart-context" }
-    });
-    openExecutionTicketFromContext(exitSide, "trailing-stop", "positions", false, {
-      quantity: String(position.quantity),
-      reduceOnly: true,
-      trailingStopEnabled: true,
-      trailingTrailBy: String(Math.max(1, Math.abs(price - position.currentPrice)).toFixed(2)),
-      trailingMode: "usd",
-      trailingActivation: "immediate",
+    const existing = position.protections.find((item) => item.type === type);
+    setPendingProtectionChange({
       positionId: position.id,
-      protectionIntent: "trailing-stop"
+      protectionId: existing?.id ?? `new-${type}`,
+      type,
+      symbol: position.symbol,
+      originalPrice: existing?.price ?? price,
+      proposedPrice: price,
+      phase: "confirming"
     });
+    setChartContextMenu(null);
   };
 
   const recordPositionContextAction = async (action: "add" | "scaleIn" | "scaleOut" | "partialClose" | "close" | "reverse" | "moveProtection" | "cancelTp" | "cancelSl" | "cancelTrailing" | "stats" | "notes" | "timeline") => {
@@ -2626,16 +2599,22 @@ export function PixiBlackChart({
       return;
     }
     if (action === "cancelTp") {
+      const { report } = await updateBybitPositionProtectionViaApi(buildBybitProtectionCancelDraft(position, "take-profit"));
+      if (report.status !== "reconciled") throw new Error("Bybit TP cancellation is not reconciled.");
       blackCorePositionManager.cancelProtection(position.id, "take-profit");
       showLocalAlertToast("TP Cancelled", position.symbol);
       return;
     }
     if (action === "cancelSl") {
+      const { report } = await updateBybitPositionProtectionViaApi(buildBybitProtectionCancelDraft(position, "stop-loss"));
+      if (report.status !== "reconciled") throw new Error("Bybit SL cancellation is not reconciled.");
       blackCorePositionManager.cancelProtection(position.id, "stop-loss");
       showLocalAlertToast("SL Cancelled", position.symbol);
       return;
     }
     if (action === "cancelTrailing") {
+      const { report } = await updateBybitPositionProtectionViaApi(buildBybitProtectionCancelDraft(position, "trailing-stop"));
+      if (report.status !== "reconciled") throw new Error("Bybit trailing-stop cancellation is not reconciled.");
       blackCorePositionManager.cancelProtection(position.id, "trailing-stop");
       showLocalAlertToast("Trailing Cancelled", position.symbol);
       return;
@@ -2667,8 +2646,11 @@ export function PixiBlackChart({
     try {
       setPendingProtectionChange((current) => current ? { ...current, phase: "submitting", error: undefined } : current);
       const draft = buildBybitProtectionDraft(position, pendingProtectionChange.type, pendingProtectionChange.proposedPrice);
-      await updateBybitPositionProtectionViaApi(draft);
-      blackCorePositionManager.moveProtection(position.id, pendingProtectionChange.protectionId, pendingProtectionChange.proposedPrice);
+      const { report } = await updateBybitPositionProtectionViaApi(draft);
+      if (report.status !== "reconciled") throw new Error("Bybit accepted the change but authoritative protection has not reconciled.");
+      const existing = position.protections.find((item) => item.id === pendingProtectionChange.protectionId);
+      if (existing) blackCorePositionManager.moveProtection(position.id, pendingProtectionChange.protectionId, pendingProtectionChange.proposedPrice);
+      else blackCorePositionManager.setProtection(position.id, pendingProtectionChange.type, { price: pendingProtectionChange.proposedPrice, metadata: { source: "bybit-reconciled" } });
       setPendingProtectionChange(null);
       showLocalAlertToast(
         pendingProtectionChange.type === "take-profit" ? "Take Profit Updated" : "Stop Loss Updated",
@@ -2924,18 +2906,26 @@ export function PixiBlackChart({
     previous: Candle
   ) => {
     const target = definition.levelTarget ?? "poc";
-    const matchingLevels = target === "any" ? levels : levels.filter((level) => level.kind === target);
+    const matchingLevels = target === "any" ? levels
+      : target === "srZone" ? levels.filter((level) => level.kind === "supportZone" || level.kind === "resistanceZone")
+      : levels.filter((level) => level.kind === target);
 
     for (const level of matchingLevels) {
-      const currentTouched = level.kind === "lvn"
+      const isBand = level.kind === "lvn" || level.kind === "supportZone" || level.kind === "resistanceZone";
+      const currentTouched = isBand
         ? priceTouchesBand(current, level.priceLow, level.priceHigh)
         : priceTouchesLevel(current, level.price);
-      const previousTouched = level.kind === "lvn"
+      const previousTouched = isBand
         ? priceTouchesBand(previous, level.priceLow, level.priceHigh)
         : priceTouchesLevel(previous, level.price);
-      const previousLevel = level.price;
-
-      if (!conditionMatches(definition.condition, current, previous, level.price, previousLevel, currentTouched, previousTouched)) {
+      const lower = level.priceLow ?? level.price;
+      const upper = level.priceHigh ?? level.price;
+      const matched = definition.condition === "testing"
+        ? currentTouched && !previousTouched
+        : definition.condition === "crossingAbove"
+          ? previous.close <= upper && current.close > upper
+          : previous.close >= lower && current.close < lower;
+      if (!matched) {
         continue;
       }
 
@@ -2946,7 +2936,9 @@ export function PixiBlackChart({
         level: level.price,
         priceLow: level.priceLow,
         priceHigh: level.priceHigh,
-        strength: level.strength
+        strength: level.strength,
+        classification: level.kind,
+        eventTimestamp: current.time
       };
     }
 
@@ -3048,7 +3040,7 @@ export function PixiBlackChart({
         symbol: displaySymbol,
         exchange: exchangeLabel,
         timeframe,
-        timestamp: new Date().toISOString(),
+        timestamp: new Date(Number(trigger.eventTimestamp ?? current.time) * 1000).toISOString(),
         price: current.close,
         message: formatConfiguredAlertMessage(definition, context),
         script: definition.script,
@@ -3072,11 +3064,27 @@ export function PixiBlackChart({
       definition.exchange === exchangeLabel && definition.timeframe === timeframe
     );
     if (definitions.length === 0) return;
-    const settings = migrateDDAProSettings(indicatorAdvancedSettings.ddaProOscillator);
     const sourceCandles = engineRef.current?.getSourceCandles() ?? [];
-    const latest = sourceCandles.at(-1);
-    const latestIsDeveloping = Boolean(latest && latest.time + timeframeSeconds[timeframe] > Date.now() / 1000);
-    if (settings.realtimeMode === "developing-preview" && latestIsDeveloping) return;
+    const signalDefinitions = definitions.filter((definition) => String(definition.ddaSignal ?? "").startsWith("BC_RDA_"));
+    for (const signal of ddaProSnapshot.signals) {
+      let current: Candle | undefined;
+      for (let index = sourceCandles.length - 1; index >= 0; index--) {
+        if (sourceCandles[index]?.time === signal.time) { current = sourceCandles[index]; break; }
+      }
+      if (!current) continue;
+      for (const definition of signalDefinitions) {
+        const target = definition.ddaSignal ?? "BC_RDA_ANY_SIGNAL";
+        if (target !== "BC_RDA_ANY_SIGNAL" && target !== `BC_RDA_${signal.direction.toUpperCase()}_SIGNAL`) continue;
+        const eventKey = `${definition.id}:${signal.id}`;
+        if (ddaConfiguredEventsRef.current.has(eventKey)) continue;
+        ddaConfiguredEventsRef.current.add(eventKey);
+        dispatchConfiguredAlert(definition, current, {
+          indicator: "BC-RDA", event: signal.direction.toUpperCase(), direction: signal.direction,
+          level: signal.value, signalId: signal.id, sourceEventType: signal.sourceEventType,
+          markerTone: signal.markerTone, eventTimestamp: signal.time
+        });
+      }
+    }
     const events = ddaProSnapshot.events.filter((event) => event.index === ddaProSnapshot.inputSize - 1);
     for (const event of events) {
       let current: Candle | undefined;
@@ -3085,6 +3093,7 @@ export function PixiBlackChart({
       }
       if (!current) continue;
       for (const definition of definitions) {
+        if (String(definition.ddaSignal ?? "").startsWith("BC_RDA_")) continue;
         if ((definition.ddaSignal ?? "DDA_RISK_SCORE_CROSSED_75") !== event.type) continue;
         const eventKey = `${definition.id}:${event.id}`;
         if (ddaConfiguredEventsRef.current.has(eventKey)) continue;
@@ -4140,7 +4149,7 @@ export function PixiBlackChart({
           value={volumeProfileSettings.rangeMode}
           onChange={(event) => updateVolumeProfileSetting("rangeMode", event.target.value as VolumeProfileSettings["rangeMode"])}
         >
-          <option value="fixed">Fixed Locked</option>
+          <option value="fixed">Fixed Look-back</option>
           <option value="visible">Visible Range</option>
         </select>
       </label>
@@ -4159,16 +4168,6 @@ export function PixiBlackChart({
           <option value={10000}>10,000 bars</option>
           <option value={20000}>20,000 bars</option>
         </select>
-      </label>
-      <label>
-        Locked Window
-        <button
-          type="button"
-          className="profile-inline-button"
-          onClick={() => updateVolumeProfileSetting("fixedRangeResetToken", volumeProfileSettings.fixedRangeResetToken + 1)}
-        >
-          Lock Latest
-        </button>
       </label>
       <label>
         Profile Stats

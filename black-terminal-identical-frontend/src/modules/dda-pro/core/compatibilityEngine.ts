@@ -6,6 +6,7 @@ import {
   calculationHash,
   ddaProDataHash,
   ddaProOutputHash,
+  deriveDDAProSignals,
   deriveEvents,
   latestFromSeries,
   performanceMetrics,
@@ -110,6 +111,7 @@ export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): 
   const latestState = riskStates[index] ?? "INSUFFICIENT";
   const events = deriveEvents(candles, riskStates, series.depth, episodes);
   for (const event of events) Object.assign(event, { engineMode: "pine-compatibility", sourceAuthority: source.authority, lookback, riskScore: series.riskScore[event.index] ?? 0, confidence, drawdownPercent: series.rawDrawdown[event.index] ?? 0 });
+  const signals = deriveDDAProSignals(events);
   const dataHash = ddaProDataHash(input);
   const settingsHash = ddaProSettingsHash(settings);
   const latest = latestFromSeries(series, latestState, confidence, metrics);
@@ -130,6 +132,7 @@ export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): 
     series,
     episodes,
     events,
+    signals,
     latest
   };
 }

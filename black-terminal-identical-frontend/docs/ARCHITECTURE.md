@@ -1,5 +1,13 @@
 # Architecture
 
+## 2026-08-19 — Native protection truth, HDLX rolling range, and BC-RDA signals
+
+- Bybit TP/SL uses one native protection path with explicit set/cancel/omit semantics, exact hedge-leg identity, paired-side preservation, and post-acceptance authoritative reconciliation.
+- Bybit order synchronization separates ancillary selected-symbol metadata failures from the authoritative account/order snapshot so active orders are not hidden by an unrelated market-data probe.
+- HDLX “Fixed Look-back” always resolves to the latest `N` candles and reserves a right-side chart gutter for its profile instead of freezing timestamps or covering the newest candles.
+- HDLX alerts include any S/R zone, support/demand, and resistance/supply with price-band crossing semantics.
+- BC-RDA signal dots and long/short alerts derive from the same episode events; the false unconditional latest-tip marker was removed.
+
 ## Phase V Chapter III-B — Black Core Liquidation Intelligence Field
 
 `src/modules/liquidation-field/` owns the BCLIF canonical frame, Bybit public adapter, stateful browser-session cohort/particle model, confidence engine, worker rasterizer and one-texture Pixi renderer. The browser collects live public trades, all-liquidation events and L2 depth only for its session; OI history and current venue risk tiers come from Bybit REST. Chapter III-C adds the separate persistent-collector package and successor schema described below, but both BCLIF migrations (`202608050001`, `202608050002`) and that service remain inactive in State A.

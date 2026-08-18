@@ -40,6 +40,12 @@ export type VolumeProfileResult = {
   hdlx: HdlxPoint[];
 };
 
+export function resolveFixedLookbackWindow(candleCount: number, requestedLength: number) {
+  const endIndex = Math.max(0, Math.floor(candleCount) - 1);
+  const rangeLength = Math.max(10, Math.min(20_000, Math.round(requestedLength)));
+  return { startIndex: Math.max(0, endIndex - rangeLength + 1), endIndex };
+}
+
 export class VolumeProfileModel {
   calculate(
     candles: Candle[],

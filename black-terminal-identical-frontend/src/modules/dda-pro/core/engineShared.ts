@@ -7,9 +7,11 @@ import type {
   DDAProEvent,
   DDAProLatestMetrics,
   DDAProRiskState,
+  DDAProSignalEvent,
   DDAProSeries,
   DDAProSettings
 } from "./types.ts";
+import { DDA_PRO_INDICATOR_ID } from "./types.ts";
 
 export function blankSeries(length: number): DDAProSeries {
   const series = () => new Array<number>(length).fill(0);
@@ -129,6 +131,23 @@ export function deriveEvents(
     events.push({ id: "dda-recovery-" + (candle?.time ?? episode.recoveryIndex), type: "DDA_DRAWDOWN_RECOVERED", index: episode.recoveryIndex, time: candle?.time ?? 0, state: "LOW", value: episode.depthPercent });
   }
   return events;
+}
+
+export function deriveDDAProSignals(events: readonly DDAProEvent[]): DDAProSignalEvent[] {
+  const signals: DDAProSignalEvent[] = [];
+  for (const event of events) {
+    if (event.type === "DDA_DRAWDOWN_DEEPENED") signals.push({
+      id: `bc-rda-short-${event.time || event.index}`, indicatorId: DDA_PRO_INDICATOR_ID,
+      direction: "short" as const, index: event.index, time: event.time, value: event.value,
+      sourceEventType: event.type, markerTone: "blood-red" as const
+    });
+    if (event.type === "DDA_DRAWDOWN_RECOVERED") signals.push({
+      id: `bc-rda-long-${event.time || event.index}`, indicatorId: DDA_PRO_INDICATOR_ID,
+      direction: "long" as const, index: event.index, time: event.time, value: event.value,
+      sourceEventType: event.type, markerTone: "silver-white" as const
+    });
+  }
+  return signals;
 }
 
 export function performanceMetrics(

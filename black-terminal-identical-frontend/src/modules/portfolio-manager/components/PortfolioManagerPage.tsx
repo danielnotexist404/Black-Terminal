@@ -19,7 +19,7 @@ import type { ConnectionCapability, ConnectionDiagnostics } from "../../../conne
 import { getVenueCertification, type VenueCertificationRecord } from "../../../connectivity/venueRegistry";
 import { submitOrder } from "../../../execution/executionEngine";
 import { MAINNET_ORDER_CONFIRMATION, disableMainnetValidationMode, promptEnableMainnetValidationMode, readMainnetValidationMode, validateMainnetOrderReadiness } from "../../../execution/mainnetValidationMode";
-import { beginBrokerAuthorizationViaApi, controlBlackCloudConnectionViaApi, fetchBlackCloudStatusViaApi, getBybitRuntimeStatusViaApi, listPersistedExchangeConnectionsViaApi, runExchangeAccountDiagnosticsViaApi, type BlackCloudControlAction, type BlackCloudStatusPayload, type BrokerAdapterDescriptor, type BybitRuntimeStatusPayload, type PortfolioOrderDraft } from "../../../portfolio/portfolioApiClient";
+import { beginBrokerAuthorizationViaApi, controlBlackCloudConnectionViaApi, fetchBlackCloudStatusViaApi, getBybitRuntimeStatusViaApi, listPersistedExchangeConnectionsViaApi, runExchangeAccountDiagnosticsViaApi, updateBybitPositionProtectionViaApi, type BlackCloudControlAction, type BlackCloudStatusPayload, type BrokerAdapterDescriptor, type BybitRuntimeStatusPayload, type PortfolioOrderDraft } from "../../../portfolio/portfolioApiClient";
 import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } from "../../../portfolio/types";
 import { getPortfolioSnapshot } from "../../../portfolio/portfolioStore";
 import { defaultRiskControls } from "../../../risk/types";
@@ -28,7 +28,7 @@ import type { ExchangeId } from "../../../market-data/types";
 import { blackCorePositionManager } from "../../../positions/positionManager";
 import { requestUserText } from "../../../ui/requestUserText";
 import type { ManagedPosition } from "../../../positions/types";
-import { formatPositionMoney } from "../../../positions/positionPresentation";
+import { buildBybitProtectionDraft, formatPositionMoney } from "../../../positions/positionPresentation";
 import { canCreateInvestmentGroup, listInvestmentGroups } from "../../profile/professionalNetworkStore";
 import type { OrderUpdate } from "../../../execution/types";
 import { deduplicateCanonicalOrders } from "../../../orders/canonicalOrder";
@@ -197,7 +197,10 @@ export function PortfolioPositionsPanel({
       }
 
       if (action === "breakEven") {
-        blackCorePositionManager.setProtection(position.id, "break-even", { price: position.averagePrice, metadata: { source: "positions-panel" } });
+        const draft = buildBybitProtectionDraft(position, "stop-loss", position.averagePrice);
+        const { report } = await updateBybitPositionProtectionViaApi(draft);
+        if (report.status !== "reconciled") throw new Error("BYBIT PROTECTION IS NOT AUTHORITATIVELY RECONCILED");
+        blackCorePositionManager.setProtection(position.id, "break-even", { price: position.averagePrice, metadata: { source: "bybit-reconciled" } });
         setPositionActionStatus(`BREAK EVEN SET FOR ${position.symbol}`);
         return;
       }
@@ -268,45 +271,12 @@ export function PortfolioPositionsPanel({
         return;
       }
 
-      if (takeProfit) {
-        blackCorePositionManager.setProtection(position.id, "take-profit", { price: takeProfit, metadata: { source: "positions-panel" } });
-        await submitPositionOrder({
-          accountId: position.accountId,
-          exchange: position.exchange,
-          symbol: position.symbol,
-          marketKind: "perpetual",
-          side: exitSide,
-          orderType: "limit",
-          quantity: position.quantity,
-          quantityMode: "quantity",
-          referencePrice,
-          limitPrice: takeProfit,
-          takeProfit,
-          reduceOnly: true,
-          timeInForce: "gtc"
-        });
-      }
-
-      if (stopLoss) {
-        blackCorePositionManager.setProtection(position.id, "stop-loss", { price: stopLoss, metadata: { source: "positions-panel" } });
-        await submitPositionOrder({
-          accountId: position.accountId,
-          exchange: position.exchange,
-          symbol: position.symbol,
-          marketKind: "perpetual",
-          side: exitSide,
-          orderType: "stop-market",
-          quantity: position.quantity,
-          quantityMode: "quantity",
-          referencePrice,
-          stopPrice: stopLoss,
-          stopLoss,
-          reduceOnly: true,
-          timeInForce: "gtc"
-        });
-      }
-
-      setPositionActionStatus(action === "bracket" ? `TP/SL ORDERS SUBMITTED FOR ${position.symbol}` : `POSITION PROTECTION UPDATED FOR ${position.symbol}`);
+      const seed = buildBybitProtectionDraft(position, takeProfit ? "take-profit" : "stop-loss", takeProfit ?? stopLoss!);
+      const { report } = await updateBybitPositionProtectionViaApi({ ...seed, takeProfit, stopLoss });
+      if (report.status !== "reconciled") throw new Error("BYBIT PROTECTION IS NOT AUTHORITATIVELY RECONCILED");
+      if (takeProfit) blackCorePositionManager.setProtection(position.id, "take-profit", { price: takeProfit, metadata: { source: "bybit-reconciled" } });
+      if (stopLoss) blackCorePositionManager.setProtection(position.id, "stop-loss", { price: stopLoss, metadata: { source: "bybit-reconciled" } });
+      setPositionActionStatus(action === "bracket" ? `TP/SL RECONCILED FOR ${position.symbol}` : `POSITION PROTECTION RECONCILED FOR ${position.symbol}`);
     } catch (error) {
       setPositionActionStatus(error instanceof Error ? error.message.toUpperCase() : String(error));
     }

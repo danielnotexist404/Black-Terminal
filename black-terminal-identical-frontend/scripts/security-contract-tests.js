@@ -27,7 +27,7 @@ const validCases = [
   ["execution", "modify", { orderId: "order-123", accountId, symbol: "BTCUSDT", quantity: 0.02 }],
   ["execution", "cancel-all", { accountId, symbol: "BTCUSDT" }],
   ["execution", "position-action", { accountId, symbol: "BTCUSDT", action: "close", quantity: 0.01 }],
-  ["execution", "protection", { accountId, symbol: "BTCUSDT", stopLoss: 60000 }],
+  ["execution", "protection", { accountId, symbol: "BTCUSDT", positionIdx: 0, stopLoss: 60000 }],
   ["execution", "account-mode", { accountId, action: "set-leverage", symbol: "BTCUSDT", leverage: 2 }],
   ["execution", "strategy", { accountId, strategyId: "strategy-123", symbol: "BTCUSDT" }],
   ["exchange", "connect", { exchange: "bybit", accountName: "Demo", apiKey: "key-12345", apiSecret: "secret-12345" }],
@@ -88,6 +88,8 @@ for (const [family, action, body] of validCases) {
 }
 
 assert.equal(tradingSchemasForTests.execution.order.safeParse({ ...order, side: "hold" }).success, false);
+assert.equal(tradingSchemasForTests.execution.protection.safeParse({ accountId, symbol: "BTCUSDT", stopLoss: 60000 }).success, false,
+  "native Bybit protection must fail closed without explicit hedge/one-way position identity");
 assert.equal(tradingSchemasForTests.execution.order.safeParse({ ...order, quantity: -1 }).success, false);
 assert.equal(tradingSchemasForTests.cloud.connection.safeParse({ accountId, confirmation: "yes" }).success, false);
 assert.equal(tradingSchemasForTests.cloud.mandate.safeParse({ action: "accept", mandateId: "mandate-123", confirmation: "yes" }).success, false);

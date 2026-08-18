@@ -6,10 +6,10 @@ import type {
   AlertIndicatorTarget,
   AlertLevelTarget,
   AlertRunMode,
+  DDAProAlertSignal,
   IndicatorAlertDefinition
 } from "../automation/alerts";
 import type { Timeframe } from "../market-data/types";
-import type { DDAProEventType } from "../modules/dda-pro/core/types";
 
 type AlertEventLog = {
   timestamp: string;
@@ -37,7 +37,10 @@ const indicatorOptions: { value: AlertIndicatorTarget; label: string }[] = [
   { value: "ddaPro", label: "BC-RDA" }
 ];
 
-const ddaSignalOptions: { value: DDAProEventType; label: string }[] = [
+const ddaSignalOptions: { value: DDAProAlertSignal; label: string }[] = [
+  { value: "BC_RDA_ANY_SIGNAL", label: "Any BC-RDA Signal Dot" },
+  { value: "BC_RDA_LONG_SIGNAL", label: "Long Signal (Silver/White Dot)" },
+  { value: "BC_RDA_SHORT_SIGNAL", label: "Short Signal (Blood-Red Dot)" },
   { value: "DDA_RISK_SCORE_CROSSED_50", label: "Risk Score Crosses 50" },
   { value: "DDA_RISK_SCORE_CROSSED_75", label: "Risk Score Crosses 75" },
   { value: "DDA_RISK_SCORE_CROSSED_90", label: "Risk Score Crosses 90" },
@@ -56,14 +59,17 @@ const ddaSignalOptions: { value: DDAProEventType; label: string }[] = [
   { value: "DDA_RISK_DETERIORATION_ACCELERATED", label: "Risk Deterioration Accelerates" }
 ];
 
-const ddaSignalLabels = Object.fromEntries(ddaSignalOptions.map((option) => [option.value, option.label])) as Record<DDAProEventType, string>;
+const ddaSignalLabels = Object.fromEntries(ddaSignalOptions.map((option) => [option.value, option.label])) as Record<DDAProAlertSignal, string>;
 
 const levelOptions: { value: AlertLevelTarget; label: string }[] = [
   { value: "any", label: "Any Level" },
   { value: "poc", label: "POC" },
   { value: "vah", label: "VAH" },
   { value: "val", label: "VAL" },
-  { value: "lvn", label: "LVN" }
+  { value: "lvn", label: "LVN" },
+  { value: "srZone", label: "Any S/R Zone" },
+  { value: "supportZone", label: "Support / Demand Zone" },
+  { value: "resistanceZone", label: "Resistance / Supply Zone" }
 ];
 
 const conditionOptions: { value: AlertCondition; label: string }[] = [
@@ -317,7 +323,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
                 {draft.indicator === "ddaPro" && (
                   <label className="alert-field wide">
                     BC-RDA Signal
-                    <select value={draft.ddaSignal ?? "DDA_RISK_SCORE_CROSSED_75"} onChange={(event) => updateDraft("ddaSignal", event.target.value as DDAProEventType)}>
+                    <select value={draft.ddaSignal ?? "DDA_RISK_SCORE_CROSSED_75"} onChange={(event) => updateDraft("ddaSignal", event.target.value as DDAProAlertSignal)}>
                       {ddaSignalOptions.map((option) => (
                         <option key={option.value} value={option.value}>{option.label}</option>
                       ))}

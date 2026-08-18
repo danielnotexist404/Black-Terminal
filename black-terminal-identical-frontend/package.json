@@ -96,6 +96,7 @@
     "test:bybit-external-orders": "node scripts/bybit-external-order-tests.js",
     "test:bybit-canonical-orders": "node --experimental-strip-types scripts/bybit-canonical-order-tests.ts",
     "test:position-interactions": "node --experimental-strip-types scripts/position-interaction-tests.ts",
+    "test:bybit-hdlx-bcrda-regressions": "node --experimental-strip-types scripts/bybit-hdlx-bcrda-regression-tests.ts",
     "certify:bybit-external-orders": "node scripts/bybit-external-order-certification.js",
     "test:venue-execution": "node --experimental-strip-types scripts/venue-execution-tests.js",
     "test:professional-network": "node --experimental-strip-types scripts/professional-network-tests.ts",

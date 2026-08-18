@@ -6,6 +6,7 @@ import {
   calculationHash,
   ddaProDataHash,
   ddaProOutputHash,
+  deriveDDAProSignals,
   deriveEvents,
   latestFromSeries,
   performanceMetrics,
@@ -220,6 +221,7 @@ export function calculateDDAProNative(rawInput: DDAProCalculationInput): DDAProS
   }
   if (confidence < 50 && length) events.push({ id: "dda-confidence-" + (candles[index]?.time ?? index), type: "DDA_CONFIDENCE_DEGRADED", index, time: candles[index]?.time ?? 0, state: latestState, value: confidence });
   for (const event of events) Object.assign(event, { engineMode: "black-core-native", sourceAuthority: source.authority, lookback, riskScore: series.riskScore[event.index] ?? 0, confidence, drawdownPercent: series.rawDrawdown[event.index] ?? 0 });
+  const signals = deriveDDAProSignals(events);
   const dataHash = ddaProDataHash(normalized);
   const settingsHash = ddaProSettingsHash(settings);
   const latest = latestFromSeries(series, latestState, confidence, metrics, Math.max(...tailDepth, 0));
@@ -241,6 +243,7 @@ export function calculateDDAProNative(rawInput: DDAProCalculationInput): DDAProS
     series,
     episodes,
     events,
+    signals,
     latest
   };
 }

@@ -108,6 +108,19 @@ export type DDAProEvent = {
   confirmed?: boolean;
 };
 
+export type DDAProSignalDirection = "long" | "short";
+
+export type DDAProSignalEvent = {
+  id: string;
+  indicatorId: typeof DDA_PRO_INDICATOR_ID;
+  direction: DDAProSignalDirection;
+  index: number;
+  time: number;
+  value: number;
+  sourceEventType: "DDA_DRAWDOWN_DEEPENED" | "DDA_DRAWDOWN_RECOVERED";
+  markerTone: "blood-red" | "silver-white";
+};
+
 export type DDAProSeries = {
   rawDrawdown: number[];
   smoothedDrawdown: number[];
@@ -182,6 +195,7 @@ export type DDAProSnapshot = {
   series: DDAProSeries;
   episodes: DDAProEpisode[];
   events: DDAProEvent[];
+  signals: DDAProSignalEvent[];
   latest: DDAProLatestMetrics;
 };
 

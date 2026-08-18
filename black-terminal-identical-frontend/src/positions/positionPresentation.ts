@@ -17,6 +17,10 @@ export type BybitPositionProtectionDraft = {
   positionIdx: number;
   takeProfit?: number;
   stopLoss?: number;
+  trailingStop?: number;
+  cancelTakeProfit?: boolean;
+  cancelStopLoss?: boolean;
+  cancelTrailingStop?: boolean;
   tpslMode: "full";
   tpTriggerBy: "last";
   slTriggerBy: "last";
@@ -26,6 +30,19 @@ export type BybitPositionProtectionDraft = {
 
 export function formatPositionMoney(value: number) {
   return positionMoneyFormatter.format(Number.isFinite(value) ? value : 0);
+}
+
+export function buildBybitProtectionCancelDraft(
+  position: Parameters<typeof buildBybitProtectionDraft>[0],
+  type: "take-profit" | "stop-loss" | "trailing-stop"
+): BybitPositionProtectionDraft {
+  const seed = buildBybitProtectionDraft(position, type === "take-profit" ? "take-profit" : "stop-loss", 1);
+  delete seed.takeProfit;
+  delete seed.stopLoss;
+  if (type === "take-profit") seed.cancelTakeProfit = true;
+  else if (type === "stop-loss") seed.cancelStopLoss = true;
+  else seed.cancelTrailingStop = true;
+  return seed;
 }
 
 export function formatSignedPositionMoney(value: number) {
@@ -71,7 +88,8 @@ export function buildBybitProtectionDraft(
   if (!Number.isFinite(price) || price <= 0) throw new Error("Protection price must be a positive number.");
   const category = String(position.category || "linear").toLowerCase();
   if (category !== "linear" && category !== "inverse") throw new Error(`Bybit ${category} position protection is not supported.`);
-  const positionIdx = Number(position.positionIdx ?? 0);
+  if (position.positionIdx === undefined || position.positionIdx === null) throw new Error("Bybit position index is required for native TP/SL protection.");
+  const positionIdx = Number(position.positionIdx);
   if (![0, 1, 2].includes(positionIdx)) throw new Error("Bybit position index is invalid.");
 
   return {

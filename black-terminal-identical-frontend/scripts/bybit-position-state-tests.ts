@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { canonicalizeBybitPositions, bybitPositionKey } from "../server/exchanges/bybit-position-identity.js";
 import { canonicalPositionKey, deduplicateCanonicalPositions, reconcileAuthoritativePositions } from "../src/positions/canonicalPosition.ts";
 import { replaceBybitPositions } from "../server/exchanges/bybit-snapshot-store.js";
@@ -68,7 +69,7 @@ function readProductionTree(relativeRoot: string): string {
       else if (/\.(?:ts|tsx|js)$/.test(entry)) files.push(readFileSync(target, "utf8"));
     }
   };
-  visit(root.pathname);
+  visit(fileURLToPath(root));
   return files.join("\n");
 }
 assert.equal(reconciled.positions[0].id, "venue-row-1", "updates must retain the stable UI record");

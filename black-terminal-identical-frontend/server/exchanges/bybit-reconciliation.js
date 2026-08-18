@@ -33,10 +33,10 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
       network: options.network || "mainnet"
     }),
     getBybitStrategies(credentials, { marketKind, symbol }).catch(() => []),
-    getBybitInstrumentMetadata({ category: marketKind === "spot" ? "spot" : "linear", symbol, executionEnvironment, endpointProfile }),
-    getBybitAccountInfo(credentials),
-    marketKind === "spot" ? Promise.resolve([]) : getBybitRiskLimits({ category: "linear", symbol, executionEnvironment, endpointProfile }),
-    getBybitOrderPriceLimit({ category: marketKind === "spot" ? "spot" : "linear", symbol, executionEnvironment, endpointProfile }),
+    getBybitInstrumentMetadata({ category: marketKind === "spot" ? "spot" : "linear", symbol, executionEnvironment, endpointProfile }).catch(() => []),
+    getBybitAccountInfo(credentials).catch(() => ({ marginMode: "unknown", accountGeneration: "unknown", unavailable: true })),
+    marketKind === "spot" ? Promise.resolve([]) : getBybitRiskLimits({ category: "linear", symbol, executionEnvironment, endpointProfile }).catch(() => []),
+    getBybitOrderPriceLimit({ category: marketKind === "spot" ? "spot" : "linear", symbol, executionEnvironment, endpointProfile }).catch(() => null),
     getBybitApiKeyInformation(credentials)
   ]);
   const openOrders = openOrderSnapshot.orders.map((order) => ({

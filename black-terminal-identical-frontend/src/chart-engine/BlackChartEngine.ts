@@ -6,7 +6,7 @@ import {
   Text
 } from "pixi.js";
 import { CandleBuffer } from "./data/CandleBuffer";
-import { VolumeProfileModel, VolumeProfileResult, VolumeProfileRow } from "./profile/VolumeProfileModel";
+import { resolveFixedLookbackWindow, VolumeProfileModel, VolumeProfileResult, VolumeProfileRow } from "./profile/VolumeProfileModel";
 import {
   defaultIndicatorAdvancedSettings,
   defaultOscillatorPaneSettings,
@@ -134,7 +134,7 @@ export type ChartPoint = {
 };
 
 export type IndicatorAlertLevel = {
-  kind: "poc" | "vah" | "val" | "lvn";
+  kind: "poc" | "vah" | "val" | "lvn" | "supportZone" | "resistanceZone";
   label: string;
   price: number;
   priceLow?: number;
@@ -185,11 +185,6 @@ export class BlackChartEngine {
   private volumeProfileCache?: { key: string; result: VolumeProfileResult | null };
   private adaptiveSwingCache?: { key: string; signals: StrategySignal[] };
   private volumeProfileDataVersion = 0;
-  private fixedVolumeProfileRange?: {
-    key: string;
-    startTime: number;
-    endTime: number;
-  };
   private heatmapVisibleUntilIndex?: number;
   private chartType: ChartDisplayType = "candlesticks";
   private snapToLatest = true;
@@ -784,6 +779,16 @@ export class BlackChartEngine {
               priceLow: row.priceLow,
               priceHigh: row.priceHigh,
               strength: 1 - row.totalVolume / maxVolume
+            })),
+          ...result.rows
+            .filter((row) => row.supplyDemand !== null)
+            .map((row) => ({
+              kind: row.supplyDemand === "demand" ? "supportZone" as const : "resistanceZone" as const,
+              label: row.supplyDemand === "demand" ? "Support / Demand" : "Resistance / Supply",
+              price: row.price,
+              priceLow: row.priceLow,
+              priceHigh: row.priceHigh,
+              strength: 1 - row.totalVolume / maxVolume
             }))
         ];
       }
@@ -1033,7 +1038,7 @@ export class BlackChartEngine {
   }
 
   private isInsidePriceAxis(x: number, y: number) {
-    const plotWidth = this.view.width - this.view.rightAxisWidth;
+    const plotWidth = this.view.width - this.view.rightAxisWidth - this.volumeProfileRightGutter();
     const plotHeight = this.view.height - this.view.bottomAxisHeight;
     return x >= plotWidth && x <= this.view.width && y >= this.view.topPadding && y <= plotHeight;
   }
@@ -1417,10 +1422,17 @@ export class BlackChartEngine {
   }
 
   private xForIndex(index: number) {
-    const plotWidth = this.view.width - this.view.rightAxisWidth;
+    const plotWidth = this.view.width - this.view.rightAxisWidth - this.volumeProfileRightGutter();
     const step = this.timeStep();
     const barsFromLatest = this.getDisplayCandles().length - 1 - index;
     return plotWidth - barsFromLatest * step - this.view.candleWidth / 2 - 12 + this.view.scrollX;
+  }
+
+  private volumeProfileRightGutter() {
+    const settings = this.indicatorAdvancedSettings.volumeProfile;
+    if (!this.visibleIndicators.volumeProfile || settings.rangeMode !== "fixed" || settings.placement !== "right" || !settings.showVolumeProfile) return 0;
+    const plotWidth = Math.max(0, this.view.width - this.view.rightAxisWidth);
+    return Math.min(plotWidth * 0.36, Math.max(110, 70 + Math.max(0, settings.widthPercent) * 3.2));
   }
 
   private xForTimestamp(time: number) {
@@ -2372,23 +2384,15 @@ export class BlackChartEngine {
     }
 
     if (settings.showVelocity) drawLine(snapshot.series.velocity.map((value) => -Math.max(0, value)), this.hexColor(themePalette.extreme, theme.redBright), 0.48, 0.75);
-    const latestChartIndex = offset + snapshot.inputSize - 1;
-    if (latestChartIndex >= this.view.firstIndex && latestChartIndex <= this.view.lastIndex) {
-      const current = snapshot.series.smoothedDrawdown.at(-1) ?? snapshot.latest.drawdownPercent;
-      g.circle(this.xForIndex(latestChartIndex), yForDrawdown(current), 3.4).fill({ color: riskColor, alpha: 0.98 }).stroke({ width: 1, color: theme.silverBright, alpha: 0.85 });
-    }
     if (settings.showEpisodeMarkers) {
-      for (const episode of snapshot.episodes) {
-        const troughIndex = offset + episode.troughIndex;
-        if (troughIndex >= this.view.firstIndex && troughIndex <= this.view.lastIndex) {
-          g.circle(this.xForIndex(troughIndex), yForDrawdown(-(snapshot.series.depth[episode.troughIndex] ?? 0)), 2.8).fill({ color: this.hexColor(themePalette.extreme, theme.redBright), alpha: 0.9 });
-        }
-        if (episode.recoveryIndex !== null) {
-          const recoveryIndex = offset + episode.recoveryIndex;
-          if (recoveryIndex >= this.view.firstIndex && recoveryIndex <= this.view.lastIndex) {
-            g.circle(this.xForIndex(recoveryIndex), yForDrawdown(snapshot.series.rawDrawdown[episode.recoveryIndex] ?? 0), 2.8).fill({ color: this.hexColor(themePalette.low, theme.silverBright), alpha: 0.9 });
-          }
-        }
+      for (const signal of snapshot.signals) {
+        const chartIndex = offset + signal.index;
+        if (chartIndex < this.view.firstIndex || chartIndex > this.view.lastIndex) continue;
+        const color = signal.direction === "short"
+          ? this.hexColor(themePalette.extreme, theme.redBright)
+          : this.hexColor(themePalette.low, theme.silverBright);
+        g.circle(this.xForIndex(chartIndex), yForDrawdown(snapshot.series.rawDrawdown[signal.index] ?? -signal.value), 2.8)
+          .fill({ color, alpha: 0.9 });
       }
     }
 
@@ -2626,7 +2630,9 @@ export class BlackChartEngine {
     );
     const offsetPx = Math.max(0, Math.min(50, settings.horizontalOffset)) * Math.max(1, Math.min(4, this.timeStep()));
     const rightPlacement = settings.placement === "right";
-    const baseX = rightPlacement
+    const baseX = rightPlacement && settings.rangeMode === "fixed"
+      ? plotWidth - 8
+      : rightPlacement
       ? Math.max(profileWidth + 10, Math.min(plotWidth - 8, rightX + offsetPx))
       : Math.min(plotWidth - profileWidth - 10, Math.max(8, leftX - offsetPx));
     const maxVolume = Math.max(...result.rows.map((row) => row.totalVolume), 1);
@@ -2709,45 +2715,7 @@ export class BlackChartEngine {
 
   private resolveVolumeProfileFixedWindow(data: Candle[], settings: VolumeProfileSettings) {
     if (settings.rangeMode !== "fixed" || data.length === 0) return undefined;
-
-    const rangeLength = Math.max(10, Math.min(20000, Math.round(settings.fixedRangeLength)));
-    const key = `${rangeLength}:${settings.fixedRangeResetToken}`;
-    if (!this.fixedVolumeProfileRange || this.fixedVolumeProfileRange.key !== key) {
-      const endIndex = data.length - 1;
-      const startIndex = Math.max(0, endIndex - rangeLength + 1);
-      this.fixedVolumeProfileRange = {
-        key,
-        startTime: data[startIndex]?.time ?? data[0]?.time ?? 0,
-        endTime: data[endIndex]?.time ?? data[data.length - 1]?.time ?? 0
-      };
-    }
-
-    const startIndex = this.indexForTimeInData(data, this.fixedVolumeProfileRange.startTime);
-    const endIndex = this.indexForTimeInData(data, this.fixedVolumeProfileRange.endTime);
-    return {
-      startIndex: Math.max(0, Math.min(startIndex, endIndex)),
-      endIndex: Math.max(0, Math.max(startIndex, endIndex))
-    };
-  }
-
-  private indexForTimeInData(data: Candle[], time: number) {
-    if (data.length === 0) return 0;
-    let low = 0;
-    let high = data.length - 1;
-
-    while (low <= high) {
-      const mid = Math.floor((low + high) / 2);
-      const candle = data[mid];
-      if (!candle) break;
-      if (candle.time < time) low = mid + 1;
-      else high = mid - 1;
-    }
-
-    const upper = Math.max(0, Math.min(data.length - 1, low));
-    const lower = Math.max(0, Math.min(data.length - 1, high));
-    const upperDistance = Math.abs((data[upper]?.time ?? time) - time);
-    const lowerDistance = Math.abs((data[lower]?.time ?? time) - time);
-    return upperDistance < lowerDistance ? upper : lower;
+    return resolveFixedLookbackWindow(data.length, settings.fixedRangeLength);
   }
 
   private volumeProfileCalculationKey(settings: VolumeProfileSettings) {

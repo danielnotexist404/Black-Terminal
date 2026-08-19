@@ -226,6 +226,7 @@ function calculationInput(source: Candle[], settings = filteredSettings): DDAPro
 {
   const renderer = readFileSync(new URL("../src/chart-engine/BlackChartEngine.ts", import.meta.url), "utf8");
   const chart = readFileSync(new URL("../src/components/PixiBlackChart.tsx", import.meta.url), "utf8");
+  const theme = readFileSync(new URL("../src/styles/theme.css", import.meta.url), "utf8");
   const worker = readFileSync(new URL("../src/modules/dda-pro/workers/DDAProWorkerClient.ts", import.meta.url), "utf8");
   const intelligence = readFileSync(new URL("../src/modules/dda-pro/core/signalIntelligence.ts", import.meta.url), "utf8");
   assert.match(renderer, /markerTone === "blood-red"[\s\S]*?#ff1838[\s\S]*?#f2f2f4/, "short/long signal colors are not blood-red and silver-white");
@@ -233,6 +234,8 @@ function calculationInput(source: Candle[], settings = filteredSettings): DDAPro
   assert.match(chart, /ddaProAlertSignalStream\(ddaProSnapshot, ddaProSettings\)/, "alerts independently recalculate the signal condition");
   assert.match(chart, /ddaSignalAlertArmedAtRef/, "mount/reconnect alert arming guard is missing");
   assert.match(chart, /ddaConfiguredEventsRef/, "canonical event idempotency guard is missing");
+  assert.match(chart, /indicator-settings profile-settings oscillator-settings dda-pro-settings/, "BC-RDA settings are not mounted in the bounded scroll shell");
+  assert.match(theme, /\.indicator-settings\.dda-pro-settings[\s\S]*?overflow-y:\s*auto[\s\S]*?scrollbar-gutter:\s*stable/, "BC-RDA advanced controls can be clipped below the chart without a visible scroll affordance");
   assert.match(worker, /DDA_PRO_STALE_GENERATION/, "stale worker generations are not rejected");
   assert.doesNotMatch(intelligence, /camera|viewport|visibleRange/i, "signal calculation depends on chart navigation state");
   assert.doesNotMatch(intelligence, /RADAP|HDLX|liquidation/i, "signal intelligence imported an unrelated indicator dependency");

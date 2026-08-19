@@ -5979,6 +5979,34 @@ body.resizing-layout * {
   width: 168px;
 }
 
+.indicator-settings.dda-pro-settings {
+  width: min(340px, calc(100% - 28px));
+  max-height: min(720px, calc(100% - 78px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-color: rgba(220, 223, 228, 0.34) rgba(255, 255, 255, 0.035);
+}
+
+.indicator-settings.dda-pro-settings::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.indicator-settings.dda-pro-settings::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(220, 223, 228, 0.34);
+}
+
+.indicator-settings.dda-pro-settings .indicator-settings-title {
+  position: sticky;
+  top: -10px;
+  z-index: 2;
+  margin: -10px -10px 9px;
+  padding: 10px;
+  border-bottom: 1px solid rgba(255, 24, 56, 0.2);
+  background: rgba(5, 6, 7, 0.985);
+}
+
 .indicator-settings-title {
   display: flex;
   align-items: center;

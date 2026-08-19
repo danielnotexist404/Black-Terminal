@@ -4793,6 +4793,8 @@ export function PixiBlackChart({
           className={
             activeIndicator === "zScoreOscillator"
               ? "indicator-settings profile-settings oscillator-settings"
+              : activeIndicator === "ddaProOscillator"
+                ? "indicator-settings profile-settings oscillator-settings dda-pro-settings"
               : activeIndicator === "vwap"
                 ? "indicator-settings profile-settings vwap-settings"
                 : activeIndicator === "liquidationHeatmap"

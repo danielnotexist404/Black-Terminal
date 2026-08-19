@@ -2385,14 +2385,32 @@ export class BlackChartEngine {
 
     if (settings.showVelocity) drawLine(snapshot.series.velocity.map((value) => -Math.max(0, value)), this.hexColor(themePalette.extreme, theme.redBright), 0.48, 0.75);
     if (settings.showEpisodeMarkers) {
-      for (const signal of snapshot.signals) {
+      const drawSignal = (signal: (typeof snapshot.signals)[number], radius: number, alpha: number, halo = false) => {
         const chartIndex = offset + signal.index;
-        if (chartIndex < this.view.firstIndex || chartIndex > this.view.lastIndex) continue;
+        if (chartIndex < this.view.firstIndex || chartIndex > this.view.lastIndex) return;
         const color = signal.markerTone === "blood-red"
           ? this.hexColor("#ff1838", theme.redBright)
           : this.hexColor("#f2f2f4", theme.silverBright);
-        g.circle(this.xForIndex(chartIndex), yForDrawdown(snapshot.series.rawDrawdown[signal.index] ?? -signal.value), 2.8)
-          .fill({ color, alpha: 0.9 });
+        const x = this.xForIndex(chartIndex);
+        const y = yForDrawdown(snapshot.series.rawDrawdown[signal.index] ?? -signal.value);
+        if (halo) g.circle(x, y, radius + 2.2).stroke({ width: 0.8, color, alpha: Math.min(0.62, alpha * 0.62) });
+        g.circle(x, y, radius).fill({ color, alpha });
+        if (settings.showSignalConfidence && Number.isFinite(signal.confidence)) {
+          this.addProfileText(`${Math.round(signal.confidence!)}%`, x + 5, y - 7, color, 7, "600");
+        }
+      };
+      if (settings.signalIntelligenceMode === "RAW") {
+        if (settings.showRawSignals) for (const signal of snapshot.rawSignals) drawSignal(signal, 2.8, 0.9);
+      } else {
+        const primaryKeys = new Set([
+          ...snapshot.signals.map((signal) => `${signal.index}:${signal.direction}`),
+          ...snapshot.signalIntelligence.provisionalSignals.map((signal) => `${signal.index}:${signal.direction}`)
+        ]);
+        if (settings.showRawSignals) for (const signal of snapshot.signalIntelligence.rawCandidateSignals) {
+          if (!primaryKeys.has(`${signal.index}:${signal.direction}`)) drawSignal(signal, 1.45, 0.24);
+        }
+        if (settings.showProvisionalSignals) for (const signal of snapshot.signalIntelligence.provisionalSignals) drawSignal(signal, 1.9, 0.42);
+        if (settings.showConfirmedSignals) for (const signal of snapshot.signals) drawSignal(signal, 2.8, 0.94, (signal.confidence ?? 0) >= 82);
       }
     }
 
@@ -2404,6 +2422,24 @@ export class BlackChartEngine {
       : dashboardOnLeft ? paneTop + 24 : paneTop + 7;
     const dashboardTextColor = this.hexColor(themePalette.neutral, theme.muted);
     this.addProfileText(`BC-RDA · ${snapshot.engineMode === "pine-compatibility" ? "PINE COMPAT" : "BLACK CORE NATIVE"}`, 12, paneTop + 7, this.hexColor(themePalette.text, theme.silverBright), 9, "700");
+    if (settings.showRegimeDiagnostics && settings.signalIntelligenceMode !== "RAW" && paneHeight >= 92) {
+      const intelligence = snapshot.signalIntelligence;
+      const latestIndex = Math.max(0, snapshot.inputSize - 1);
+      const regime = intelligence.regime[latestIndex] ?? "UNCLASSIFIED";
+      const diagnostics = `${regime} ${Math.round(intelligence.regimeConfidence[latestIndex] ?? 0)} · L ${Math.round(intelligence.longConfidence[latestIndex] ?? 0)} S ${Math.round(intelligence.shortConfidence[latestIndex] ?? 0)} · CHOP ${Math.round(intelligence.chopProbability[latestIndex] ?? 0)} · ${intelligence.longState[latestIndex] ?? "NEUTRAL"}/${intelligence.shortState[latestIndex] ?? "NEUTRAL"}`;
+      this.addProfileText(diagnostics, 12, paneTop + 19, this.hexColor(themePalette.neutral, theme.muted), 7, "500");
+      if (paneHeight >= 112) {
+        const featureLine = `COH ${Math.round(intelligence.coherence[latestIndex] ?? 0)} · V ${Number(intelligence.centroidVelocity[latestIndex] ?? 0).toFixed(3)} A ${Number(intelligence.centroidAcceleration[latestIndex] ?? 0).toFixed(3)} · EXP ${Math.round(intelligence.expansionScore[latestIndex] ?? 0)} · TAIL ${Math.round(intelligence.tailAsymmetry[latestIndex] ?? 0)}`;
+        this.addProfileText(featureLine, 12, paneTop + 30, this.hexColor(themePalette.neutral, theme.muted), 7, "500");
+      }
+      if (paneHeight >= 132) {
+        const latestSignal = snapshot.signals.at(-1);
+        const barsSince = latestSignal ? Math.max(0, latestIndex - latestSignal.index) : null;
+        const episode = latestSignal?.episodeId?.slice(-18) ?? "NONE";
+        const reasons = intelligence.latestReasonCodes.slice(0, 2).join("/") || "NO_ACTIVE_REJECTION";
+        this.addProfileText(`EP ${episode} · LAST ${barsSince ?? "--"} BARS · ${reasons}`, 12, paneTop + 41, this.hexColor(themePalette.neutral, theme.muted), 7, "500");
+      }
+    }
     if (settings.showDashboard) this.addProfileText(`${snapshot.latest.riskState} ${snapshot.latest.riskScore.toFixed(1)} · DD ${snapshot.latest.drawdownPercent.toFixed(2)}% · MDD ${snapshot.latest.maxDrawdownPercent.toFixed(2)}%`, dashboardX, dashboardY, riskColor, 9, "700");
     if (settings.showDashboard && paneHeight >= 145) {
       this.addProfileText("PCTL " + snapshot.latest.percentileRank.toFixed(1) + "   Z " + snapshot.latest.zScore.toFixed(2) + "   TUW " + snapshot.latest.timeUnderWaterBars, dashboardX, dashboardY + 13, dashboardTextColor, 8, "500");

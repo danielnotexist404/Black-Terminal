@@ -6,6 +6,7 @@ import {
   calculationHash,
   ddaProDataHash,
   ddaProOutputHash,
+  deriveCausalDDAProSignalCandidates,
   deriveDDAProSignals,
   deriveEvents,
   latestFromSeries,
@@ -13,6 +14,7 @@ import {
   sourceValues
 } from "./engineShared.ts";
 import type { DDAProCalculationInput, DDAProRiskState, DDAProSnapshot } from "./types.ts";
+import { applyDDAProSignalIntelligence } from "./signalIntelligence.ts";
 
 export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): DDAProSnapshot {
   const settings = migrateDDAProSettings({
@@ -111,7 +113,11 @@ export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): 
   const latestState = riskStates[index] ?? "INSUFFICIENT";
   const events = deriveEvents(candles, riskStates, series.depth, episodes);
   for (const event of events) Object.assign(event, { engineMode: "pine-compatibility", sourceAuthority: source.authority, lookback, riskScore: series.riskScore[event.index] ?? 0, confidence, drawdownPercent: series.rawDrawdown[event.index] ?? 0 });
-  const signals = deriveDDAProSignals(events);
+  const rawSignals = deriveDDAProSignals(events);
+  const intelligenceCandidates = settings.signalIntelligenceMode === "RAW"
+    ? rawSignals
+    : deriveCausalDDAProSignalCandidates(candles, series.depth, settings.drawdownEpisodeThresholdPercent);
+  const intelligenceResult = applyDDAProSignalIntelligence(input, series, intelligenceCandidates);
   const dataHash = ddaProDataHash(input);
   const settingsHash = ddaProSettingsHash(settings);
   const latest = latestFromSeries(series, latestState, confidence, metrics);
@@ -132,7 +138,9 @@ export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): 
     series,
     episodes,
     events,
-    signals,
+    rawSignals,
+    signals: intelligenceResult.signals,
+    signalIntelligence: intelligenceResult.intelligence,
     latest
   };
 }

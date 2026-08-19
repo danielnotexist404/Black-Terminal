@@ -9,7 +9,8 @@ import type {
   DDAProRiskState,
   DDAProSignalEvent,
   DDAProSeries,
-  DDAProSettings
+  DDAProSettings,
+  DDAProSnapshot
 } from "./types.ts";
 import { DDA_PRO_INDICATOR_ID } from "./types.ts";
 
@@ -150,6 +151,56 @@ export function deriveDDAProSignals(events: readonly DDAProEvent[]): DDAProSigna
   return signals;
 }
 
+/** Prefix-stable closed-bar candidates for the filtered intelligence layer. */
+export function deriveCausalDDAProSignalCandidates(
+  candles: readonly Candle[],
+  depth: readonly number[],
+  episodeThresholdPercent: number
+): DDAProSignalEvent[] {
+  const signals: DDAProSignalEvent[] = [];
+  const recoveryThreshold = Math.max(1e-9, episodeThresholdPercent * 0.05);
+  let active = false;
+  let episodeMaximum = 0;
+  for (let index = 0; index < depth.length; index++) {
+    const current = Math.max(0, Number(depth[index]) || 0);
+    const time = candles[index]?.time ?? 0;
+    if (!active && current >= episodeThresholdPercent && current > 0) {
+      active = true;
+      episodeMaximum = current;
+      continue;
+    }
+    if (!active) continue;
+    if (current > episodeMaximum + 1e-12) {
+      episodeMaximum = current;
+      signals.push({
+        id: `bc-rda-causal-long-${time || index}`,
+        indicatorId: DDA_PRO_INDICATOR_ID,
+        direction: "long",
+        index,
+        time,
+        value: current,
+        sourceEventType: "DDA_DRAWDOWN_DEEPENED",
+        markerTone: "silver-white"
+      });
+    }
+    if (current < recoveryThreshold) {
+      signals.push({
+        id: `bc-rda-causal-short-${time || index}`,
+        indicatorId: DDA_PRO_INDICATOR_ID,
+        direction: "short",
+        index,
+        time,
+        value: episodeMaximum,
+        sourceEventType: "DDA_DRAWDOWN_RECOVERED",
+        markerTone: "blood-red"
+      });
+      active = false;
+      episodeMaximum = 0;
+    }
+  }
+  return signals;
+}
+
 export function latestConfirmedDDAProCandleTime(
   candles: readonly Pick<Candle, "time">[],
   timeframeSeconds: number,
@@ -178,6 +229,17 @@ export function confirmedNewestDDAProSignals(
     signal.time > armedAfterTime &&
     signal.time + duration <= nowSeconds
   );
+}
+
+/**
+ * Selects the one immutable signal stream that is both visible and alertable.
+ * Filtered intelligence alerts never re-run quantitative conditions in React.
+ */
+export function ddaProAlertSignalStream(snapshot: DDAProSnapshot, settings: DDAProSettings) {
+  if (!settings.showEpisodeMarkers) return [];
+  if (settings.signalIntelligenceMode === "RAW") return settings.showRawSignals ? snapshot.rawSignals : [];
+  if (settings.confirmedAlertsOnly) return settings.showConfirmedSignals ? snapshot.signals : [];
+  return settings.showRawSignals ? snapshot.signalIntelligence.rawCandidateSignals : [];
 }
 
 export function performanceMetrics(

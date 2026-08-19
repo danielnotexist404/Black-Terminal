@@ -10,7 +10,7 @@ type WorkerEnvelope = {
 
 export type DDAProWorkerRequest =
   | (WorkerEnvelope & { type: "CALCULATE"; input: DDAProCalculationInput })
-  | (WorkerEnvelope & { type: "INITIALIZE"; config: DDAProSettings; timeframeSeconds?: number })
+  | (WorkerEnvelope & { type: "INITIALIZE"; config: DDAProSettings; timeframeSeconds?: number; signalContext?: DDAProCalculationInput["signalContext"] })
   | (WorkerEnvelope & { type: "LOAD_HISTORY"; values: Float64Array; timestamps: BigInt64Array })
   | (WorkerEnvelope & { type: "APPEND"; value: number; timestamp: number; confirmed: boolean })
   | (WorkerEnvelope & { type: "UPDATE_CONFIG"; config: Partial<DDAProSettings> })

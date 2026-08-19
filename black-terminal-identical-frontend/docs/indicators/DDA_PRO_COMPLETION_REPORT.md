@@ -1,5 +1,9 @@
 # BC-RDA completion report
 
+## 2026-08-19 — Advanced Distributional Regime Intelligence
+
+Added optional RAW/BALANCED/INSTITUTIONAL/CUSTOM signal arbitration without changing the legacy RAW calculation or signal sequence. Filtered modes use prefix-stable causal candidates, deterministic distribution features, independent long/short state machines, bounded episode clustering, reset hysteresis, optional orthogonal confirmation, fixed long/short colors, and one shared visible-dot/alert stream. `scripts/dda-pro-signal-intelligence-tests.ts` covers raw parity, no-lookahead prefixes, chop, directional confirmation, reset/re-arm, HTF closure, settings, state bounds and source contracts. `scripts/dda-pro-quant-validation.ts` reports deterministic 12-regime selectivity and walk-forward diagnostics without a profitability claim. No Supabase migration is required.
+
 Starting commit: `42d680c`. Final commit: this chapter's BC-RDA commit in repository history. No database migration or production deployment is required by this indicator-only chapter.
 
 ## Implemented

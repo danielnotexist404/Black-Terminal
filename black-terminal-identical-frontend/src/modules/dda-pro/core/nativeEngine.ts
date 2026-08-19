@@ -6,6 +6,7 @@ import {
   calculationHash,
   ddaProDataHash,
   ddaProOutputHash,
+  deriveCausalDDAProSignalCandidates,
   deriveDDAProSignals,
   deriveEvents,
   latestFromSeries,
@@ -13,6 +14,7 @@ import {
   sourceValues
 } from "./engineShared.ts";
 import type { DDAProCalculationInput, DDAProRiskState, DDAProSnapshot } from "./types.ts";
+import { applyDDAProSignalIntelligence } from "./signalIntelligence.ts";
 
 const clamp = (value: number, minimum = 0, maximum = 100) => Math.max(minimum, Math.min(maximum, value));
 
@@ -59,15 +61,23 @@ export function calculateDDAProNative(rawInput: DDAProCalculationInput): DDAProS
   const settings = migrateDDAProSettings({ ...rawInput.settings, engineMode: "black-core-native" });
   const input = { ...rawInput, settings };
   const suppliedCandles = input.candles.slice(-20_000);
-  const candles = suppliedCandles.filter((candle) =>
-    Number.isFinite(candle.time) && Number.isFinite(candle.open) && Number.isFinite(candle.high) &&
-    Number.isFinite(candle.low) && Number.isFinite(candle.close) && candle.close > 0
-  );
+  const suppliedCvdValues = input.cvdValues?.slice(-20_000);
+  const validSourceIndexes: number[] = [];
+  const candles = suppliedCandles.filter((candle, index) => {
+    const valid = Number.isFinite(candle.time) && Number.isFinite(candle.open) && Number.isFinite(candle.high) &&
+      Number.isFinite(candle.low) && Number.isFinite(candle.close) && candle.close > 0;
+    if (valid) validSourceIndexes.push(index);
+    return valid;
+  });
   for (let index = 1; index < candles.length; index++) {
     if ((candles[index]?.time ?? 0) <= (candles[index - 1]?.time ?? 0)) throw new Error("DDA_SOURCE_TIMESTAMPS_INVALID");
   }
   const sourceCompleteness = suppliedCandles.length ? candles.length / suppliedCandles.length : 0;
-  const normalized = { ...input, candles };
+  const normalized = {
+    ...input,
+    candles,
+    cvdValues: suppliedCvdValues ? validSourceIndexes.map((index) => suppliedCvdValues[index] ?? Number.NaN) : undefined
+  };
   const source = sourceValues(normalized);
   const values = source.values;
   const length = values.length;
@@ -221,7 +231,11 @@ export function calculateDDAProNative(rawInput: DDAProCalculationInput): DDAProS
   }
   if (confidence < 50 && length) events.push({ id: "dda-confidence-" + (candles[index]?.time ?? index), type: "DDA_CONFIDENCE_DEGRADED", index, time: candles[index]?.time ?? 0, state: latestState, value: confidence });
   for (const event of events) Object.assign(event, { engineMode: "black-core-native", sourceAuthority: source.authority, lookback, riskScore: series.riskScore[event.index] ?? 0, confidence, drawdownPercent: series.rawDrawdown[event.index] ?? 0 });
-  const signals = deriveDDAProSignals(events);
+  const rawSignals = deriveDDAProSignals(events);
+  const intelligenceCandidates = settings.signalIntelligenceMode === "RAW"
+    ? rawSignals
+    : deriveCausalDDAProSignalCandidates(candles, series.depth, settings.drawdownEpisodeThresholdPercent);
+  const intelligenceResult = applyDDAProSignalIntelligence(normalized, series, intelligenceCandidates);
   const dataHash = ddaProDataHash(normalized);
   const settingsHash = ddaProSettingsHash(settings);
   const latest = latestFromSeries(series, latestState, confidence, metrics, Math.max(...tailDepth, 0));
@@ -243,7 +257,9 @@ export function calculateDDAProNative(rawInput: DDAProCalculationInput): DDAProS
     series,
     episodes,
     events,
-    signals,
+    rawSignals,
+    signals: intelligenceResult.signals,
+    signalIntelligence: intelligenceResult.intelligence,
     latest
   };
 }

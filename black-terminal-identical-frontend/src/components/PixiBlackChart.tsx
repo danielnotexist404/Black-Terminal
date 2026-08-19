@@ -34,13 +34,14 @@ import {
   defaultZScoreOscillatorSettings
 } from "../chart-engine/profile/volumeProfileDefaults";
 import { DDAProWorkerClient } from "../modules/dda-pro/workers/DDAProWorkerClient";
-import { DEFAULT_DDA_PRO_SETTINGS, applyDDAProPreset, ddaProSettingsHash, migrateDDAProSettings } from "../modules/dda-pro/core/settings";
+import { DEFAULT_DDA_PRO_SETTINGS, applyDDAProPreset, applyDDAProSignalIntelligenceMode, migrateDDAProSettings, resetDDAProSignalIntelligence } from "../modules/dda-pro/core/settings";
 import {
   calculationHash as ddaProCalculationHash,
   confirmedNewestDDAProSignals,
+  ddaProAlertSignalStream,
   latestConfirmedDDAProCandleTime
 } from "../modules/dda-pro/core/engineShared";
-import type { DDAProPreset, DDAProSettings, DDAProSnapshot } from "../modules/dda-pro/core/types";
+import type { DDAProPreset, DDAProSettings, DDAProSignalIntelligenceMode, DDAProSnapshot } from "../modules/dda-pro/core/types";
 import { OSCILLATOR_KEYS, resolveOscillatorStack } from "../chart-engine/indicators/oscillatorLayout";
 import { createMockCandles } from "../data/mockMarket";
 import type { AlertCondition, AlertIndicatorTarget, IndicatorAlertDefinition } from "../automation/alerts";
@@ -2127,7 +2128,8 @@ export function PixiBlackChart({
       void worker.calculate({
         candles: source,
         settings,
-        timeframeSeconds: timeframeSeconds[timeframe]
+        timeframeSeconds: timeframeSeconds[timeframe],
+        signalContext: { exchange: marketSymbol.exchange, symbol: marketSymbol.rawSymbol, timeframe }
       }).then((snapshot) => {
         if (ddaCalculationIdentityRef.current !== calculationIdentity) return;
         setDDAProSnapshot(snapshot);
@@ -3090,7 +3092,7 @@ export function PixiBlackChart({
         continue;
       }
       const candidates = confirmedNewestDDAProSignals(
-        ddaProSnapshot.signals,
+        ddaProAlertSignalStream(ddaProSnapshot, ddaProSettings),
         ddaProSnapshot.inputSize,
         timeframeDuration,
         nowSeconds,
@@ -3106,7 +3108,11 @@ export function PixiBlackChart({
         dispatchConfiguredAlert(definition, current, {
           indicator: "BC-RDA", event: signal.direction.toUpperCase(), direction: signal.direction,
           level: signal.value, signalId: signal.id, sourceEventType: signal.sourceEventType,
-          markerTone: signal.markerTone, eventTimestamp: signal.time
+          markerTone: signal.markerTone, eventTimestamp: signal.time,
+          signalClass: ddaProSettings.signalIntelligenceMode === "RAW" || !ddaProSettings.confirmedAlertsOnly ? "RAW" : "CONFIRMED",
+          intelligenceMode: ddaProSettings.signalIntelligenceMode,
+          regime: signal.regime,
+          signalConfidence: signal.confidence
         });
       }
     }
@@ -3411,6 +3417,11 @@ export function PixiBlackChart({
     const next = applyDDAProPreset(ddaProSettings, preset);
     onIndicatorAdvancedSettingsChange((current) => ({ ...current, ddaProOscillator: next }));
     onIndicatorPeriodsChange((current) => ({ ...current, ddaProOscillator: next.lookback }));
+  };
+
+  const selectDDAProSignalMode = (mode: DDAProSignalIntelligenceMode) => {
+    const next = applyDDAProSignalIntelligenceMode(ddaProSettings, mode);
+    onIndicatorAdvancedSettingsChange((current) => ({ ...current, ddaProOscillator: next }));
   };
 
   const updateVwapSetting = <Key extends keyof VwapSettings>(
@@ -5405,6 +5416,61 @@ export function PixiBlackChart({
                   ? "Reproduces the supplied Pine formula, including its original percentile direction and 252-period assumptions. Exact TradingView parity remains uncertified until golden exports are supplied."
                   : "Corrected positive-depth drawdown, selectable peak reference, duration, tail risk, recovery, VADD and confidence analytics."}
               </div>
+              <div className="indicator-settings-section">Advanced Signal Intelligence</div>
+              <label>
+                Signal Intelligence Mode
+                <select value={ddaProSettings.signalIntelligenceMode} onChange={(event) => selectDDAProSignalMode(event.target.value as DDAProSignalIntelligenceMode)}>
+                  <option value="RAW">Raw · Original Signals</option>
+                  <option value="BALANCED">Balanced · Regime Adaptive</option>
+                  <option value="INSTITUTIONAL">Institutional · High Selectivity</option>
+                  <option value="CUSTOM">Custom</option>
+                </select>
+              </label>
+              <div className="vwap-mode-note">
+                RAW preserves the original BC-RDA dots exactly. Filtered modes use only causal closed-bar distribution coherence, centroid migration, tail asymmetry, expansion, entropy and episode-reset evidence.
+              </div>
+              <label>Show Raw Signals<input type="checkbox" checked={ddaProSettings.showRawSignals} onChange={(event) => updateDDAProSetting("showRawSignals", event.target.checked)} /></label>
+              <label>Show Confirmed Signals<input type="checkbox" checked={ddaProSettings.showConfirmedSignals} onChange={(event) => updateDDAProSetting("showConfirmedSignals", event.target.checked)} /></label>
+              <label>Show Provisional Signals<input type="checkbox" checked={ddaProSettings.showProvisionalSignals} onChange={(event) => updateDDAProSetting("showProvisionalSignals", event.target.checked)} /></label>
+              <label>Confirmed Alerts Only<input type="checkbox" checked={ddaProSettings.confirmedAlertsOnly} onChange={(event) => updateDDAProSetting("confirmedAlertsOnly", event.target.checked)} /></label>
+              <label>Show Signal Confidence<input type="checkbox" checked={ddaProSettings.showSignalConfidence} onChange={(event) => updateDDAProSetting("showSignalConfidence", event.target.checked)} /></label>
+              <label>Show Regime Diagnostics<input type="checkbox" checked={ddaProSettings.showRegimeDiagnostics} onChange={(event) => updateDDAProSetting("showRegimeDiagnostics", event.target.checked)} /></label>
+              <div className="vwap-mode-note">
+                Alerts use the same visible immutable stream: confirmed dots when Confirmed Alerts Only is enabled, otherwise visible raw dots. Provisional and hidden signals never alert.
+              </div>
+              <button type="button" className="dda-signal-reset" onClick={() => onIndicatorAdvancedSettingsChange((current) => ({ ...current, ddaProOscillator: resetDDAProSignalIntelligence(ddaProSettings) }))}>Reset Signal Intelligence Defaults</button>
+              {ddaProSettings.signalIntelligenceMode === "CUSTOM" && (
+                <details className="indicator-advanced-details" open>
+                  <summary>Advanced Signal Arbitration</summary>
+                  <label>Distribution Coherence Filter<input type="checkbox" checked={ddaProSettings.distributionCoherenceFilter} onChange={(event) => updateDDAProSetting("distributionCoherenceFilter", event.target.checked)} /></label>
+                  <label>Risk-Centroid Migration<input type="checkbox" checked={ddaProSettings.riskCentroidMigration} onChange={(event) => updateDDAProSetting("riskCentroidMigration", event.target.checked)} /></label>
+                  <label>Distribution Expansion<input type="checkbox" checked={ddaProSettings.distributionExpansionConfirmation} onChange={(event) => updateDDAProSetting("distributionExpansionConfirmation", event.target.checked)} /></label>
+                  <label>Tail-Asymmetry Confirmation<input type="checkbox" checked={ddaProSettings.tailAsymmetryConfirmation} onChange={(event) => updateDDAProSetting("tailAsymmetryConfirmation", event.target.checked)} /></label>
+                  <label>Entropy / Chop Suppression<input type="checkbox" checked={ddaProSettings.entropyChopSuppression} onChange={(event) => updateDDAProSetting("entropyChopSuppression", event.target.checked)} /></label>
+                  <label>Excursion Persistence<input type="checkbox" checked={ddaProSettings.excursionPersistence} onChange={(event) => updateDDAProSetting("excursionPersistence", event.target.checked)} /></label>
+                  <label>Signal Episode Clustering<input type="checkbox" checked={ddaProSettings.signalEpisodeClustering} onChange={(event) => updateDDAProSetting("signalEpisodeClustering", event.target.checked)} /></label>
+                  <label>Distributional Reset Requirement<input type="checkbox" checked={ddaProSettings.distributionalResetRequirement} onChange={(event) => updateDDAProSetting("distributionalResetRequirement", event.target.checked)} /></label>
+                  <label>Price-Structure Confirmation<input type="checkbox" checked={ddaProSettings.priceStructureConfirmation} onChange={(event) => updateDDAProSetting("priceStructureConfirmation", event.target.checked)} /></label>
+                  <label>Volume Confirmation<input type="checkbox" checked={ddaProSettings.volumeConfirmation} onChange={(event) => updateDDAProSetting("volumeConfirmation", event.target.checked)} /></label>
+                  <label>CVD Confirmation<input type="checkbox" checked={ddaProSettings.cvdConfirmation} onChange={(event) => updateDDAProSetting("cvdConfirmation", event.target.checked)} /></label>
+                  <label>Higher-Timeframe Confirmation<input type="checkbox" checked={ddaProSettings.higherTimeframeConfirmation} onChange={(event) => updateDDAProSetting("higherTimeframeConfirmation", event.target.checked)} /></label>
+                  <label>Minimum Coherence (0–100)<input type="number" min={0} max={100} value={ddaProSettings.minimumCoherence} onChange={(event) => updateDDAProSetting("minimumCoherence", Number(event.target.value))} /></label>
+                  <label>Centroid Displacement (distribution widths/bar)<input type="number" min={0} max={5} step={0.005} value={ddaProSettings.minimumCentroidDisplacement} onChange={(event) => updateDDAProSetting("minimumCentroidDisplacement", Number(event.target.value))} /></label>
+                  <label>Centroid Persistence (closed bars)<input type="number" min={1} max={20} value={ddaProSettings.minimumCentroidPersistence} onChange={(event) => updateDDAProSetting("minimumCentroidPersistence", Number(event.target.value))} /></label>
+                  <label>Minimum Expansion (0–100)<input type="number" min={0} max={100} value={ddaProSettings.minimumExpansionScore} onChange={(event) => updateDDAProSetting("minimumExpansionScore", Number(event.target.value))} /></label>
+                  <label>Minimum Tail Asymmetry (0–100)<input type="number" min={0} max={100} value={ddaProSettings.minimumTailAsymmetry} onChange={(event) => updateDDAProSetting("minimumTailAsymmetry", Number(event.target.value))} /></label>
+                  <label>Maximum Chop Probability (0–100)<input type="number" min={0} max={100} value={ddaProSettings.maximumChopProbability} onChange={(event) => updateDDAProSetting("maximumChopProbability", Number(event.target.value))} /></label>
+                  <label>Maximum Transition Entropy (0–100)<input type="number" min={0} max={100} value={ddaProSettings.maximumTransitionEntropy} onChange={(event) => updateDDAProSetting("maximumTransitionEntropy", Number(event.target.value))} /></label>
+                  <label>Minimum Excursion Bars<input type="number" min={1} max={20} value={ddaProSettings.minimumExcursionBars} onChange={(event) => updateDDAProSetting("minimumExcursionBars", Number(event.target.value))} /></label>
+                  <label>Minimum Confirmation Score<input type="number" min={0} max={100} value={ddaProSettings.minimumConfirmationScore} onChange={(event) => updateDDAProSetting("minimumConfirmationScore", Number(event.target.value))} /></label>
+                  <label>Reset Tail Sensitivity (0–100)<input type="number" min={0} max={100} value={ddaProSettings.resetSensitivity} onChange={(event) => updateDDAProSetting("resetSensitivity", Number(event.target.value))} /></label>
+                  <label>Episode Separation (distribution widths)<input type="number" min={0} max={5} step={0.05} value={ddaProSettings.episodeSeparationSensitivity} onChange={(event) => updateDDAProSetting("episodeSeparationSensitivity", Number(event.target.value))} /></label>
+                  <label>Safety Cooldown Floor (closed bars)<input type="number" min={0} max={100} value={ddaProSettings.safetyCooldownFloor} onChange={(event) => updateDDAProSetting("safetyCooldownFloor", Number(event.target.value))} /></label>
+                  <label>Structure Strength<input type="number" min={0} max={100} value={ddaProSettings.structureConfirmationStrength} onChange={(event) => updateDDAProSetting("structureConfirmationStrength", Number(event.target.value))} /></label>
+                  <label>Higher-Timeframe Multiple<select value={ddaProSettings.higherTimeframeMultiplier} onChange={(event) => updateDDAProSetting("higherTimeframeMultiplier", Number(event.target.value) as 4 | 12 | 24)}><option value={4}>4×</option><option value={12}>12×</option><option value={24}>24×</option></select></label>
+                  <div className="vwap-mode-note">CVD confirmation fails closed unless genuine CVD values are supplied. No synthetic CVD is manufactured.</div>
+                </details>
+              )}
               <label>
                 Analysis Source
                 <select value={ddaProSettings.equitySource} onChange={(event) => updateDDAProSetting("equitySource", event.target.value as DDAProSettings["equitySource"])}>
@@ -5498,9 +5564,6 @@ export function PixiBlackChart({
               <details className="indicator-advanced-details">
                 <summary>Advanced / Diagnostics</summary>
                 <div className="vwap-mode-note">Engine {ddaProSnapshot?.engineVersion ?? "--"} · Protocol v1 · {ddaProWorkerRef.current?.executionMode() ?? "NOT STARTED"}</div>
-                <div className="vwap-mode-note">Data Hash {ddaProSnapshot?.dataHash ?? "--"}</div>
-                <div className="vwap-mode-note">Settings Hash {ddaProSnapshot?.settingsHash ?? ddaProSettingsHash(ddaProSettings)}</div>
-                <div className="vwap-mode-note">Output Hash {ddaProSnapshot?.outputHash ?? "--"}</div>
                 <div className="vwap-mode-note">Valid Samples {ddaProSnapshot ? Math.max(0, ddaProSnapshot.inputSize - ddaProSnapshot.validFromIndex).toLocaleString() : "--"} · Bars / Year {ddaProSnapshot?.barsPerYear.toFixed(2) ?? "--"}</div>
                 <div className="vwap-mode-note">Worker Timing {ddaProWorkerRef.current?.lastCalculationTimeMs()?.toFixed(2) ?? "--"} ms · Parity {ddaProSettings.engineMode === "pine-compatibility" ? "TV GOLDEN UNVERIFIED" : "TS/PY CORE PARTIAL"}</div>
               </details>

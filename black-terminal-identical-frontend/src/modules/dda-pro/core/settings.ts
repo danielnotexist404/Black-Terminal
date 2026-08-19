@@ -1,4 +1,4 @@
-import { DDA_PRO_SETTINGS_VERSION, type DDAProPreset, type DDAProSettings, type DDAProTheme } from "./types.ts";
+import { DDA_PRO_SETTINGS_VERSION, type DDAProPreset, type DDAProSettings, type DDAProSignalIntelligenceMode, type DDAProTheme } from "./types.ts";
 
 export const DEFAULT_DDA_PRO_SETTINGS: DDAProSettings = {
   settingsVersion: DDA_PRO_SETTINGS_VERSION,
@@ -29,6 +29,39 @@ export const DEFAULT_DDA_PRO_SETTINGS: DDAProSettings = {
   velocityWeight: 0.15,
   volatilityWeight: 0.10,
   tailWeight: 0.10,
+  signalIntelligenceMode: "RAW",
+  showRawSignals: true,
+  showConfirmedSignals: true,
+  showProvisionalSignals: false,
+  confirmedAlertsOnly: true,
+  showSignalConfidence: false,
+  showRegimeDiagnostics: false,
+  distributionCoherenceFilter: true,
+  riskCentroidMigration: true,
+  distributionExpansionConfirmation: true,
+  tailAsymmetryConfirmation: true,
+  entropyChopSuppression: true,
+  excursionPersistence: true,
+  signalEpisodeClustering: true,
+  distributionalResetRequirement: true,
+  priceStructureConfirmation: false,
+  volumeConfirmation: false,
+  cvdConfirmation: false,
+  higherTimeframeConfirmation: false,
+  minimumCoherence: 54,
+  minimumCentroidDisplacement: 0.075,
+  minimumCentroidPersistence: 2,
+  minimumExpansionScore: 44,
+  minimumTailAsymmetry: 28,
+  maximumChopProbability: 62,
+  maximumTransitionEntropy: 68,
+  minimumExcursionBars: 2,
+  minimumConfirmationScore: 58,
+  resetSensitivity: 38,
+  episodeSeparationSensitivity: 0.65,
+  safetyCooldownFloor: 3,
+  higherTimeframeMultiplier: 4,
+  structureConfirmationStrength: 45,
   showRawDrawdown: false,
   showSmoothedDrawdown: true,
   showMean: true,
@@ -86,7 +119,9 @@ const PRESET_MIGRATIONS: Record<string, DDAProPreset> = {
 };
 
 const THEMES = new Set<DDAProTheme>(["black-terminal", "black-terminal-blood", "institutional-monochrome", "custom", "gold", "edge-tools", "behavioral", "quant", "ocean", "fire", "matrix", "arctic"]);
+const SIGNAL_MODES = new Set(["RAW", "BALANCED", "INSTITUTIONAL", "CUSTOM"]);
 const finite = (value: unknown, fallback: number) => typeof value === "number" && Number.isFinite(value) ? value : fallback;
+const boolean = (value: unknown, fallback: boolean) => typeof value === "boolean" ? value : fallback;
 
 export function migrateDDAProSettings(value?: Partial<DDAProSettings> | null): DDAProSettings {
   const legacyPreset = typeof value?.preset === "string" ? PRESET_MIGRATIONS[value.preset] : undefined;
@@ -112,6 +147,39 @@ export function migrateDDAProSettings(value?: Partial<DDAProSettings> | null): D
     velocityWeight: Math.max(0, Math.min(1, finite(merged.velocityWeight, 0.15))),
     volatilityWeight: Math.max(0, Math.min(1, finite(merged.volatilityWeight, 0.10))),
     tailWeight: Math.max(0, Math.min(1, finite(merged.tailWeight, 0.10))),
+    signalIntelligenceMode: SIGNAL_MODES.has(merged.signalIntelligenceMode) ? merged.signalIntelligenceMode : "RAW",
+    showRawSignals: boolean(merged.showRawSignals, true),
+    showConfirmedSignals: boolean(merged.showConfirmedSignals, true),
+    showProvisionalSignals: boolean(merged.showProvisionalSignals, false),
+    confirmedAlertsOnly: boolean(merged.confirmedAlertsOnly, true),
+    showSignalConfidence: boolean(merged.showSignalConfidence, false),
+    showRegimeDiagnostics: boolean(merged.showRegimeDiagnostics, false),
+    distributionCoherenceFilter: boolean(merged.distributionCoherenceFilter, true),
+    riskCentroidMigration: boolean(merged.riskCentroidMigration, true),
+    distributionExpansionConfirmation: boolean(merged.distributionExpansionConfirmation, true),
+    tailAsymmetryConfirmation: boolean(merged.tailAsymmetryConfirmation, true),
+    entropyChopSuppression: boolean(merged.entropyChopSuppression, true),
+    excursionPersistence: boolean(merged.excursionPersistence, true),
+    signalEpisodeClustering: boolean(merged.signalEpisodeClustering, true),
+    distributionalResetRequirement: boolean(merged.distributionalResetRequirement, true),
+    priceStructureConfirmation: boolean(merged.priceStructureConfirmation, false),
+    volumeConfirmation: boolean(merged.volumeConfirmation, false),
+    cvdConfirmation: boolean(merged.cvdConfirmation, false),
+    higherTimeframeConfirmation: boolean(merged.higherTimeframeConfirmation, false),
+    minimumCoherence: Math.max(0, Math.min(100, finite(merged.minimumCoherence, 54))),
+    minimumCentroidDisplacement: Math.max(0, Math.min(5, finite(merged.minimumCentroidDisplacement, 0.075))),
+    minimumCentroidPersistence: Math.max(1, Math.min(20, Math.round(finite(merged.minimumCentroidPersistence, 2)))),
+    minimumExpansionScore: Math.max(0, Math.min(100, finite(merged.minimumExpansionScore, 44))),
+    minimumTailAsymmetry: Math.max(0, Math.min(100, finite(merged.minimumTailAsymmetry, 28))),
+    maximumChopProbability: Math.max(0, Math.min(100, finite(merged.maximumChopProbability, 62))),
+    maximumTransitionEntropy: Math.max(0, Math.min(100, finite(merged.maximumTransitionEntropy, 68))),
+    minimumExcursionBars: Math.max(1, Math.min(20, Math.round(finite(merged.minimumExcursionBars, 2)))),
+    minimumConfirmationScore: Math.max(0, Math.min(100, finite(merged.minimumConfirmationScore, 58))),
+    resetSensitivity: Math.max(0, Math.min(100, finite(merged.resetSensitivity, 38))),
+    episodeSeparationSensitivity: Math.max(0, Math.min(5, finite(merged.episodeSeparationSensitivity, 0.65))),
+    safetyCooldownFloor: Math.max(0, Math.min(100, Math.round(finite(merged.safetyCooldownFloor, 3)))),
+    higherTimeframeMultiplier: ([4, 12, 24] as number[]).includes(merged.higherTimeframeMultiplier) ? merged.higherTimeframeMultiplier : 4,
+    structureConfirmationStrength: Math.max(0, Math.min(100, finite(merged.structureConfirmationStrength, 45))),
     customScaleDepthPercent: Math.max(1, Math.min(100, finite(merged.customScaleDepthPercent, 20))),
     lineIntensity: Math.max(0, Math.min(100, Math.round(finite(merged.lineIntensity, 92)))),
     fillIntensity: Math.max(0, Math.min(60, Math.round(finite(merged.fillIntensity, 16)))),
@@ -124,6 +192,87 @@ export function applyDDAProPreset(settings: DDAProSettings, preset: DDAProPreset
   return migrateDDAProSettings({ ...settings, ...PRESETS[preset], preset });
 }
 
+const SIGNAL_PRESETS: Record<Exclude<DDAProSignalIntelligenceMode, "CUSTOM">, Partial<DDAProSettings>> = {
+  RAW: {
+    signalIntelligenceMode: "RAW",
+    showRawSignals: true,
+    showConfirmedSignals: false,
+    showProvisionalSignals: false,
+    confirmedAlertsOnly: false
+  },
+  BALANCED: {
+    signalIntelligenceMode: "BALANCED",
+    showRawSignals: false, showConfirmedSignals: true, showProvisionalSignals: false, confirmedAlertsOnly: true,
+    distributionCoherenceFilter: true, riskCentroidMigration: true, distributionExpansionConfirmation: true,
+    tailAsymmetryConfirmation: true, entropyChopSuppression: true, excursionPersistence: true,
+    signalEpisodeClustering: true, distributionalResetRequirement: true,
+    priceStructureConfirmation: false, volumeConfirmation: false, cvdConfirmation: false, higherTimeframeConfirmation: false,
+    minimumCoherence: 54, minimumCentroidDisplacement: 0.075, minimumCentroidPersistence: 2,
+    minimumExpansionScore: 44, minimumTailAsymmetry: 28, maximumChopProbability: 62,
+    maximumTransitionEntropy: 68, minimumExcursionBars: 2, minimumConfirmationScore: 58,
+    resetSensitivity: 38, episodeSeparationSensitivity: 0.65, safetyCooldownFloor: 3
+  },
+  INSTITUTIONAL: {
+    signalIntelligenceMode: "INSTITUTIONAL",
+    realtimeMode: "confirmed-bars",
+    showRawSignals: false, showConfirmedSignals: true, showProvisionalSignals: false, confirmedAlertsOnly: true,
+    distributionCoherenceFilter: true, riskCentroidMigration: true, distributionExpansionConfirmation: true,
+    tailAsymmetryConfirmation: true, entropyChopSuppression: true, excursionPersistence: true,
+    signalEpisodeClustering: true, distributionalResetRequirement: true,
+    priceStructureConfirmation: false, volumeConfirmation: false, cvdConfirmation: false, higherTimeframeConfirmation: false,
+    minimumCoherence: 68, minimumCentroidDisplacement: 0.11, minimumCentroidPersistence: 3,
+    minimumExpansionScore: 57, minimumTailAsymmetry: 42, maximumChopProbability: 45,
+    maximumTransitionEntropy: 50, minimumExcursionBars: 3, minimumConfirmationScore: 70,
+    resetSensitivity: 28, episodeSeparationSensitivity: 0.9, safetyCooldownFloor: 5
+  }
+};
+
+export function applyDDAProSignalIntelligenceMode(settings: DDAProSettings, mode: DDAProSignalIntelligenceMode) {
+  if (mode === "CUSTOM") return migrateDDAProSettings({ ...settings, signalIntelligenceMode: mode });
+  return migrateDDAProSettings({ ...settings, ...SIGNAL_PRESETS[mode] });
+}
+
+export function resetDDAProSignalIntelligence(settings: DDAProSettings) {
+  const defaults = DEFAULT_DDA_PRO_SETTINGS;
+  const reset = migrateDDAProSettings({
+    ...settings,
+    signalIntelligenceMode: settings.signalIntelligenceMode,
+    showRawSignals: defaults.showRawSignals,
+    showConfirmedSignals: defaults.showConfirmedSignals,
+    showProvisionalSignals: defaults.showProvisionalSignals,
+    confirmedAlertsOnly: defaults.confirmedAlertsOnly,
+    showSignalConfidence: defaults.showSignalConfidence,
+    showRegimeDiagnostics: defaults.showRegimeDiagnostics,
+    distributionCoherenceFilter: defaults.distributionCoherenceFilter,
+    riskCentroidMigration: defaults.riskCentroidMigration,
+    distributionExpansionConfirmation: defaults.distributionExpansionConfirmation,
+    tailAsymmetryConfirmation: defaults.tailAsymmetryConfirmation,
+    entropyChopSuppression: defaults.entropyChopSuppression,
+    excursionPersistence: defaults.excursionPersistence,
+    signalEpisodeClustering: defaults.signalEpisodeClustering,
+    distributionalResetRequirement: defaults.distributionalResetRequirement,
+    priceStructureConfirmation: defaults.priceStructureConfirmation,
+    volumeConfirmation: defaults.volumeConfirmation,
+    cvdConfirmation: defaults.cvdConfirmation,
+    higherTimeframeConfirmation: defaults.higherTimeframeConfirmation,
+    minimumCoherence: defaults.minimumCoherence,
+    minimumCentroidDisplacement: defaults.minimumCentroidDisplacement,
+    minimumCentroidPersistence: defaults.minimumCentroidPersistence,
+    minimumExpansionScore: defaults.minimumExpansionScore,
+    minimumTailAsymmetry: defaults.minimumTailAsymmetry,
+    maximumChopProbability: defaults.maximumChopProbability,
+    maximumTransitionEntropy: defaults.maximumTransitionEntropy,
+    minimumExcursionBars: defaults.minimumExcursionBars,
+    minimumConfirmationScore: defaults.minimumConfirmationScore,
+    resetSensitivity: defaults.resetSensitivity,
+    episodeSeparationSensitivity: defaults.episodeSeparationSensitivity,
+    safetyCooldownFloor: defaults.safetyCooldownFloor,
+    higherTimeframeMultiplier: defaults.higherTimeframeMultiplier,
+    structureConfirmationStrength: defaults.structureConfirmationStrength
+  });
+  return settings.signalIntelligenceMode === "CUSTOM" ? reset : applyDDAProSignalIntelligenceMode(reset, settings.signalIntelligenceMode);
+}
+
 export function resolveDDAProBarsPerYear(settings: DDAProSettings, timeframeSeconds = 86_400) {
   if (settings.annualizationMode === "custom") return settings.customPeriodsPerYear;
   const days = settings.annualizationMode === "traditional-252" ? 252 : 365.25;
@@ -132,7 +281,7 @@ export function resolveDDAProBarsPerYear(settings: DDAProSettings, timeframeSeco
 
 export function ddaProCalculationSettingsHash(settings: DDAProSettings) {
   const value = { ...migrateDDAProSettings(settings) } as Record<string, unknown>;
-  for (const key of ["preset", "theme", "scaleMode", "customScaleDepthPercent", "dashboardPosition", "rawColor", "smoothedColor", "meanColor", "moderateColor", "highColor", "extremeColor", "lineIntensity", "fillIntensity", "lineWidth", "showRawDrawdown", "showSmoothedDrawdown", "showMean", "showSigmaBands", "showQuantiles", "showZScore", "showDuration", "showVelocity", "showRiskScore", "showDashboard", "showExpandedDashboard", "showEpisodeMarkers"]) delete value[key];
+  for (const key of ["preset", "theme", "scaleMode", "customScaleDepthPercent", "dashboardPosition", "rawColor", "smoothedColor", "meanColor", "moderateColor", "highColor", "extremeColor", "lineIntensity", "fillIntensity", "lineWidth", "showRawDrawdown", "showSmoothedDrawdown", "showMean", "showSigmaBands", "showQuantiles", "showZScore", "showDuration", "showVelocity", "showRiskScore", "showDashboard", "showExpandedDashboard", "showEpisodeMarkers", "showRawSignals", "showConfirmedSignals", "showProvisionalSignals", "confirmedAlertsOnly", "showSignalConfidence", "showRegimeDiagnostics"]) delete value[key];
   const json = JSON.stringify(value, Object.keys(value).sort());
   let hash = 0x811c9dc5;
   for (let index = 0; index < json.length; index++) { hash ^= json.charCodeAt(index); hash = Math.imul(hash, 0x01000193) >>> 0; }

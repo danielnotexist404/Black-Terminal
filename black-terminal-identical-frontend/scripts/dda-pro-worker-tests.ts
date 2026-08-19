@@ -26,6 +26,25 @@ const candles: Candle[] = Array.from({ length: 800 }, (_, index) => {
 {
   const messages: DDAProWorkerResponse[] = [];
   const runtime = new DDAProWorkerRuntime((message) => messages.push(message));
+  runtime.handle({ protocolVersion: 1, type: "INITIALIZE", requestId: "bounded-init", generation: 12, config: { ...DEFAULT_DDA_PRO_SETTINGS, lookback: 100 }, timeframeSeconds: 60 });
+  const count = 20_005;
+  runtime.handle({
+    protocolVersion: 1,
+    type: "LOAD_HISTORY",
+    requestId: "bounded-history",
+    generation: 12,
+    values: Float64Array.from({ length: count }, (_, index) => 100 + index * 0.001),
+    timestamps: BigInt64Array.from({ length: count }, (_, index) => BigInt(1_700_000_000 + index * 60))
+  });
+  runtime.handle({ protocolVersion: 1, type: "REBUILD", requestId: "bounded-rebuild", generation: 12 });
+  const result = messages.at(-1);
+  assert.equal(result?.type, "RESULT");
+  if (result?.type === "RESULT") assert.equal(result.snapshot.inputSize, 20_000, "stateful worker retained an unbounded candle history");
+}
+
+{
+  const messages: DDAProWorkerResponse[] = [];
+  const runtime = new DDAProWorkerRuntime((message) => messages.push(message));
   runtime.handle({ protocolVersion: 999 as 1, type: "CALCULATE", requestId: "invalid", generation: 1, input: { candles, settings: DEFAULT_DDA_PRO_SETTINGS } });
   assert.equal(messages[0]?.type, "ERROR");
   if (messages[0]?.type === "ERROR") assert.equal(messages[0].code, "INVALID_PROTOCOL");
@@ -34,7 +53,7 @@ const candles: Candle[] = Array.from({ length: 800 }, (_, index) => {
 {
   const messages: DDAProWorkerResponse[] = [];
   const runtime = new DDAProWorkerRuntime((message) => messages.push(message));
-  runtime.handle({ protocolVersion: 1, type: "INITIALIZE", requestId: "init", generation: 10, config: DEFAULT_DDA_PRO_SETTINGS, timeframeSeconds: 3_600 });
+  runtime.handle({ protocolVersion: 1, type: "INITIALIZE", requestId: "init", generation: 10, config: DEFAULT_DDA_PRO_SETTINGS, timeframeSeconds: 3_600, signalContext: { exchange: "BYBIT", symbol: "BTCUSDT", timeframe: "1h" } });
   assert.equal(messages.at(-1)?.type, "ACK");
   const values = Float64Array.from(candles.slice(0, 600).map((candle) => candle.close));
   const timestamps = BigInt64Array.from(candles.slice(0, 600).map((candle) => BigInt(candle.time)));

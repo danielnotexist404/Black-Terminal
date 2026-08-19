@@ -214,4 +214,6 @@ The renderer V8 shelf-only recovery and V9 plasma/shelf presentation contract ar
 
 ## BC-RDA documentation
 
+- [Advanced Distributional Regime Intelligence](./indicators/BC_RDA_SIGNAL_INTELLIGENCE.md)
+
 Start with `indicators/BC_DDA_PRO_OVERVIEW.md`, then use `indicators/DDA_PRO_PINE_AUDIT.md`, `indicators/DDA_PRO_NATIVE_MATHEMATICS.md`, and `indicators/DDA_PRO_COMPLETION_REPORT.md` for audit and certification state.

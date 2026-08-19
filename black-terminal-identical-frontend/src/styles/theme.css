@@ -13233,6 +13233,17 @@ body.dom-pro-resize-active {
   border-top-color: var(--bt-glass-border-soft);
 }
 
+.indicator-settings .dda-signal-reset {
+  min-height: 28px;
+  border: 1px solid rgba(220, 0, 38, 0.32);
+  border-radius: 7px;
+  background: rgba(80, 0, 14, 0.22);
+  color: #d8dbe0;
+  font: 650 9px "IBM Plex Mono", monospace;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
 :is(
   .indicator-settings,
   .dropdown-menu,

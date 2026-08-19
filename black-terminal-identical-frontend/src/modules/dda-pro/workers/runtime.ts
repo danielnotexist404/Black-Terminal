@@ -4,10 +4,13 @@ import type { DDAProCalculationInput, DDAProSettings } from "../core/types.ts";
 import type { Candle } from "../../../chart-engine/types.ts";
 import type { DDAProWorkerRequest, DDAProWorkerResponse } from "./protocol.ts";
 
+const DDA_PRO_MAX_WORKER_BARS = 20_000;
+
 export class DDAProWorkerRuntime {
   private readonly post: (message: DDAProWorkerResponse) => void;
   private config: DDAProSettings | null = null;
   private timeframeSeconds: number | undefined;
+  private signalContext: DDAProCalculationInput["signalContext"];
   private candles: Candle[] = [];
   private readonly cancelledGenerations = new Set<number>();
 
@@ -25,7 +28,7 @@ export class DDAProWorkerRuntime {
     if (!this.config) throw new Error("DDA_PRO_NOT_INITIALIZED");
     if (this.cancelledGenerations.has(request.generation)) return;
     const startedAt = performance.now();
-    const input: DDAProCalculationInput = { candles: this.candles, settings: this.config, timeframeSeconds: this.timeframeSeconds };
+    const input: DDAProCalculationInput = { candles: this.candles, settings: this.config, timeframeSeconds: this.timeframeSeconds, signalContext: this.signalContext };
     const snapshot = calculateDDAPro(input);
     if (this.cancelledGenerations.has(request.generation)) return;
     this.post({ protocolVersion: 1, type: "RESULT", requestId: request.requestId, generation: request.generation, snapshot, calculationMs: performance.now() - startedAt });
@@ -48,6 +51,7 @@ export class DDAProWorkerRuntime {
       if (request.type === "INITIALIZE") {
         this.config = migrateDDAProSettings(request.config);
         this.timeframeSeconds = request.timeframeSeconds;
+        this.signalContext = request.signalContext;
         this.candles = [];
         this.cancelledGenerations.delete(request.generation);
         this.ack(request, "INITIALIZE");
@@ -65,7 +69,7 @@ export class DDAProWorkerRuntime {
           next.push({ time, open: value, high: value, low: value, close: value, volume: 0 });
           priorTime = time;
         }
-        this.candles = next;
+        this.candles = next.slice(-DDA_PRO_MAX_WORKER_BARS);
         this.ack(request, "LOAD_HISTORY");
         return;
       }
@@ -77,6 +81,7 @@ export class DDAProWorkerRuntime {
         if (last?.time === request.timestamp) this.candles[this.candles.length - 1] = candle;
         else if (!last || request.timestamp > last.time) this.candles.push(candle);
         else throw new Error("DDA_PRO_APPEND_OUT_OF_ORDER");
+        if (this.candles.length > DDA_PRO_MAX_WORKER_BARS) this.candles.splice(0, this.candles.length - DDA_PRO_MAX_WORKER_BARS);
         this.ack(request, "APPEND");
         return;
       }

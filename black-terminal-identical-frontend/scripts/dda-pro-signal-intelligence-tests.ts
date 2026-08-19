@@ -230,6 +230,8 @@ function calculationInput(source: Candle[], settings = filteredSettings): DDAPro
   const worker = readFileSync(new URL("../src/modules/dda-pro/workers/DDAProWorkerClient.ts", import.meta.url), "utf8");
   const intelligence = readFileSync(new URL("../src/modules/dda-pro/core/signalIntelligence.ts", import.meta.url), "utf8");
   assert.match(renderer, /markerTone === "blood-red"[\s\S]*?#ff1838[\s\S]*?#f2f2f4/, "short/long signal colors are not blood-red and silver-white");
+  assert.match(renderer, /dashboardPanelWidth[\s\S]*?roundRect\(panelX, panelY[\s\S]*?alpha:\s*0\.9/, "BC-RDA dashboard has no high-contrast backing panel");
+  assert.match(renderer, /resolution:\s*Math\.min\(3, Math\.max\(2[\s\S]*?roundPixels:\s*true/, "BC-RDA diagnostic text is not rendered on a pixel-snapped high-resolution surface");
   assert.match(renderer, /signalIntelligence\.rawCandidateSignals/);
   assert.match(chart, /ddaProAlertSignalStream\(ddaProSnapshot, ddaProSettings\)/, "alerts independently recalculate the signal condition");
   assert.match(chart, /ddaSignalAlertArmedAtRef/, "mount/reconnect alert arming guard is missing");

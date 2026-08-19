@@ -2416,41 +2416,54 @@ export class BlackChartEngine {
 
     const dashboardOnLeft = settings.dashboardPosition.endsWith("left");
     const dashboardOnBottom = settings.dashboardPosition.startsWith("bottom");
-    const dashboardX = dashboardOnLeft ? 12 : Math.max(230, plotWidth - 340);
-    const dashboardY = dashboardOnBottom
-      ? Math.max(paneTop + 24, paneBottom - (settings.showExpandedDashboard ? 112 : 40))
-      : dashboardOnLeft ? paneTop + 24 : paneTop + 7;
-    const dashboardTextColor = this.hexColor(themePalette.neutral, theme.muted);
-    this.addProfileText(`BC-RDA · ${snapshot.engineMode === "pine-compatibility" ? "PINE COMPAT" : "BLACK CORE NATIVE"}`, 12, paneTop + 7, this.hexColor(themePalette.text, theme.silverBright), 9, "700");
+    const dashboardPanelWidth = Math.min(300, Math.max(228, plotWidth - 24));
+    const dashboardRows = paneHeight >= 145 ? (settings.showExpandedDashboard ? 8 : 3) : 1;
+    const dashboardPanelHeight = dashboardRows === 8 ? 113 : dashboardRows === 3 ? 43 : 23;
+    const dashboardX = Math.round(dashboardOnLeft ? 12 : Math.max(12, plotWidth - dashboardPanelWidth - 12));
+    const dashboardY = Math.round(dashboardOnBottom
+      ? Math.max(paneTop + 24, paneBottom - dashboardPanelHeight - 7)
+      : dashboardOnLeft ? paneTop + 24 : paneTop + 8);
+    const dashboardTextColor = this.hexColor(themePalette.low, theme.silverBright);
+    const addDashboardText = (text: string, y: number, color = dashboardTextColor, size = 9, weight: "500" | "600" | "700" = "600") =>
+      this.addProfileText(text, dashboardX, y, color, size, weight, true);
+    this.addProfileText(`BC-RDA · ${snapshot.engineMode === "pine-compatibility" ? "PINE COMPAT" : "BLACK CORE NATIVE"}`, 12, paneTop + 7, this.hexColor(themePalette.text, theme.silverBright), 10, "700", true);
     if (settings.showRegimeDiagnostics && settings.signalIntelligenceMode !== "RAW" && paneHeight >= 92) {
       const intelligence = snapshot.signalIntelligence;
       const latestIndex = Math.max(0, snapshot.inputSize - 1);
       const regime = intelligence.regime[latestIndex] ?? "UNCLASSIFIED";
       const diagnostics = `${regime} ${Math.round(intelligence.regimeConfidence[latestIndex] ?? 0)} · L ${Math.round(intelligence.longConfidence[latestIndex] ?? 0)} S ${Math.round(intelligence.shortConfidence[latestIndex] ?? 0)} · CHOP ${Math.round(intelligence.chopProbability[latestIndex] ?? 0)} · ${intelligence.longState[latestIndex] ?? "NEUTRAL"}/${intelligence.shortState[latestIndex] ?? "NEUTRAL"}`;
-      this.addProfileText(diagnostics, 12, paneTop + 19, this.hexColor(themePalette.neutral, theme.muted), 7, "500");
+      this.addProfileText(diagnostics, 12, paneTop + 20, this.hexColor(themePalette.low, theme.silver), 8, "600", true);
       if (paneHeight >= 112) {
         const featureLine = `COH ${Math.round(intelligence.coherence[latestIndex] ?? 0)} · V ${Number(intelligence.centroidVelocity[latestIndex] ?? 0).toFixed(3)} A ${Number(intelligence.centroidAcceleration[latestIndex] ?? 0).toFixed(3)} · EXP ${Math.round(intelligence.expansionScore[latestIndex] ?? 0)} · TAIL ${Math.round(intelligence.tailAsymmetry[latestIndex] ?? 0)}`;
-        this.addProfileText(featureLine, 12, paneTop + 30, this.hexColor(themePalette.neutral, theme.muted), 7, "500");
+        this.addProfileText(featureLine, 12, paneTop + 32, this.hexColor(themePalette.low, theme.silver), 8, "600", true);
       }
       if (paneHeight >= 132) {
         const latestSignal = snapshot.signals.at(-1);
         const barsSince = latestSignal ? Math.max(0, latestIndex - latestSignal.index) : null;
         const episode = latestSignal?.episodeId?.slice(-18) ?? "NONE";
         const reasons = intelligence.latestReasonCodes.slice(0, 2).join("/") || "NO_ACTIVE_REJECTION";
-        this.addProfileText(`EP ${episode} · LAST ${barsSince ?? "--"} BARS · ${reasons}`, 12, paneTop + 41, this.hexColor(themePalette.neutral, theme.muted), 7, "500");
+        this.addProfileText(`EP ${episode} · LAST ${barsSince ?? "--"} BARS · ${reasons}`, 12, paneTop + 44, this.hexColor(themePalette.low, theme.silver), 8, "600", true);
       }
     }
-    if (settings.showDashboard) this.addProfileText(`${snapshot.latest.riskState} ${snapshot.latest.riskScore.toFixed(1)} · DD ${snapshot.latest.drawdownPercent.toFixed(2)}% · MDD ${snapshot.latest.maxDrawdownPercent.toFixed(2)}%`, dashboardX, dashboardY, riskColor, 9, "700");
+    if (settings.showDashboard) {
+      const panelX = dashboardX - 7;
+      const panelY = dashboardY - 6;
+      g.roundRect(panelX, panelY, dashboardPanelWidth + 14, dashboardPanelHeight, 3)
+        .fill({ color: 0x030405, alpha: 0.9 })
+        .stroke({ width: 1, color: 0xd9dce2, alpha: 0.18 });
+      g.rect(panelX, panelY + 1, 2, dashboardPanelHeight - 2).fill({ color: riskColor, alpha: 0.9 });
+      addDashboardText(`${snapshot.latest.riskState} ${snapshot.latest.riskScore.toFixed(1)} · DD ${snapshot.latest.drawdownPercent.toFixed(2)}% · MDD ${snapshot.latest.maxDrawdownPercent.toFixed(2)}%`, dashboardY, riskColor, 10, "700");
+    }
     if (settings.showDashboard && paneHeight >= 145) {
-      this.addProfileText("PCTL " + snapshot.latest.percentileRank.toFixed(1) + "   Z " + snapshot.latest.zScore.toFixed(2) + "   TUW " + snapshot.latest.timeUnderWaterBars, dashboardX, dashboardY + 13, dashboardTextColor, 8, "500");
-      this.addProfileText("SH " + snapshot.latest.sharpe.toFixed(2) + "   SO " + snapshot.latest.sortino.toFixed(2) + "   CA " + snapshot.latest.calmar.toFixed(2) + "   CONF " + snapshot.latest.confidence.toFixed(0) + "%", dashboardX, dashboardY + 26, dashboardTextColor, 8, "500");
+      addDashboardText("PCTL " + snapshot.latest.percentileRank.toFixed(1) + "   Z " + snapshot.latest.zScore.toFixed(2) + "   TUW " + snapshot.latest.timeUnderWaterBars, dashboardY + 14);
+      addDashboardText("SH " + snapshot.latest.sharpe.toFixed(2) + "   SO " + snapshot.latest.sortino.toFixed(2) + "   CA " + snapshot.latest.calmar.toFixed(2) + "   CONF " + snapshot.latest.confidence.toFixed(0) + "%", dashboardY + 28);
       if (settings.showExpandedDashboard) {
         const latestIndex = Math.max(0, snapshot.inputSize - 1);
-        this.addProfileText("P95 " + Math.abs(snapshot.series.p95[latestIndex] ?? 0).toFixed(2) + "%   P99 " + Math.abs(snapshot.series.p99[latestIndex] ?? 0).toFixed(2) + "%   VADD " + snapshot.latest.vadd.toFixed(2), dashboardX, dashboardY + 39, dashboardTextColor, 8, "500");
-        this.addProfileText("VaR95 " + snapshot.latest.returnVaR95Percent.toFixed(2) + "%   ES95 " + snapshot.latest.returnES95Percent.toFixed(2) + "%", dashboardX, dashboardY + 52, dashboardTextColor, 8, "500");
-        this.addProfileText("DaR95 " + snapshot.latest.drawdownAtRisk95Percent.toFixed(2) + "%   CDaR95 " + snapshot.latest.conditionalDrawdownAtRisk95Percent.toFixed(2) + "%", dashboardX, dashboardY + 65, dashboardTextColor, 8, "500");
-        this.addProfileText("ULCER " + snapshot.latest.ulcerIndex.toFixed(2) + "   PAIN " + snapshot.latest.painIndex.toFixed(2) + "   OMEGA " + snapshot.latest.omegaRatio.toFixed(2), dashboardX, dashboardY + 78, dashboardTextColor, 8, "500");
-        this.addProfileText("RECOVERY " + snapshot.latest.recoveryFactor.toFixed(2) + "   AUW " + (snapshot.episodes.at(-1)?.areaUnderWater.toFixed(2) ?? "0.00"), dashboardX, dashboardY + 91, dashboardTextColor, 8, "500");
+        addDashboardText("P95 " + Math.abs(snapshot.series.p95[latestIndex] ?? 0).toFixed(2) + "%   P99 " + Math.abs(snapshot.series.p99[latestIndex] ?? 0).toFixed(2) + "%   VADD " + snapshot.latest.vadd.toFixed(2), dashboardY + 42);
+        addDashboardText("VaR95 " + snapshot.latest.returnVaR95Percent.toFixed(2) + "%   ES95 " + snapshot.latest.returnES95Percent.toFixed(2) + "%", dashboardY + 56);
+        addDashboardText("DaR95 " + snapshot.latest.drawdownAtRisk95Percent.toFixed(2) + "%   CDaR95 " + snapshot.latest.conditionalDrawdownAtRisk95Percent.toFixed(2) + "%", dashboardY + 70);
+        addDashboardText("ULCER " + snapshot.latest.ulcerIndex.toFixed(2) + "   PAIN " + snapshot.latest.painIndex.toFixed(2) + "   OMEGA " + snapshot.latest.omegaRatio.toFixed(2), dashboardY + 84);
+        addDashboardText("RECOVERY " + snapshot.latest.recoveryFactor.toFixed(2) + "   AUW " + (snapshot.episodes.at(-1)?.areaUnderWater.toFixed(2) ?? "0.00"), dashboardY + 98);
       }
     }
   }
@@ -4184,10 +4197,15 @@ export class BlackChartEngine {
     y: number,
     color: number,
     size = 10,
-    weight: "400" | "500" | "600" | "700" = "600"
+    weight: "400" | "500" | "600" | "700" = "600",
+    crisp = false
   ) {
     const item = new Text({
       text,
+      ...(crisp ? {
+        resolution: Math.min(3, Math.max(2, window.devicePixelRatio || 1)),
+        roundPixels: true
+      } : {}),
       style: {
         fontFamily: "IBM Plex Mono",
         fontSize: size,
@@ -4195,8 +4213,8 @@ export class BlackChartEngine {
         fontWeight: weight
       }
     });
-    item.x = x;
-    item.y = y;
+    item.x = crisp ? Math.round(x) : x;
+    item.y = crisp ? Math.round(y) : y;
     this.profileTexts.push(item);
     this.indicatorLayer.addChild(item);
     return item;

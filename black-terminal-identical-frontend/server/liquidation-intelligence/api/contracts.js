@@ -6,8 +6,8 @@ export const BCLIF_MAX_TILE_BYTES = 50 * 1024 * 1024;
 export const BCLIF_MAX_QUERY_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 export const BCLIF_LIVE_QUERY_DRIFT_MS = 5 * 60 * 1000;
 export const BCLIF_LIVE_HEARTBEAT_MS = 120_000;
-export const BCLIF_SUPPORTED_MODEL_VERSION = "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE";
-export const BCLIF_SUPPORTED_SOURCE_VERSION = "BYBIT_V5_PUBLIC_2026_08";
+export const BCLIF_SUPPORTED_MODEL_VERSION = "BCLIF_MODEL_V6_ABSOLUTE_SHELVES";
+export const BCLIF_SUPPORTED_SOURCE_VERSION = "BYBIT_V6_PUBLIC_2026_08";
 export const BCLIF_SUPPORTED_SCHEMA_VERSION = 2;
 export const BCLIF_SUPPORTED_TILE_VERSION = 1;
 export const BCLIF_SUPPORTED_COMPRESSION = "gzip-v1";
@@ -127,11 +127,12 @@ export function isDeferredBclifInfrastructureError(error) {
 }
 
 export function normalizeBclifRouteError(error) {
-  if (error?.statusCode) return error;
   const message = String(error?.message || "");
-  if (/Missing SUPABASE_URL\/VITE_SUPABASE_URL or SUPABASE_(?:SECRET_KEY\/)?SERVICE_ROLE_KEY|server authentication is not configured|supabase(?:Url| URL).*?(?:required|missing|invalid)|service.role.*?(?:required|missing)/i.test(message)) {
+  if (error?.code === "SERVER_AUTH_CONFIGURATION_MISSING"
+    || /Missing SUPABASE_URL\/VITE_SUPABASE_URL or SUPABASE_(?:SECRET_KEY\/)?SERVICE_ROLE_KEY|server authentication is not configured|supabase(?:Url| URL).*?(?:required|missing|invalid)|service.role.*?(?:required|missing)/i.test(message)) {
     return bclifHttpError(503, "BCLIF persistence control plane is unavailable.", "PERSISTENCE_CONTROL_PLANE_UNAVAILABLE", { retryable: true });
   }
+  if (error?.statusCode) return error;
   return error;
 }
 

@@ -1,0 +1,88 @@
+name: Black Cloud CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, infra/black-cloud-central-vps]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: black-cloud-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.1
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - run: npm run test:black-cloud-api-router
+      - run: npm run test:black-cloud-storage-transfer
+      - run: npm run test:black-cloud-infrastructure
+      - run: npm run test:market-depth-walls
+      - run: npm run test:event-alpha-all
+      - run: npm run test:dda-pro-all
+      - run: npm run test:bclif-api-security
+      - run: npm run test:bclif-live-pipeline
+      - run: npm run test:bclif-collector-contracts
+      - run: npm run test:bclif-migration-contracts
+      - run: npm run test:bclif-client-contracts
+      - run: npm run test:phase5-chapter2
+      - run: npm run test:broker-production
+      - run: npm run security:verify-migration-source
+      - name: Validate Black Cloud shell entrypoints
+        run: |
+          set -euo pipefail
+          for script in infra/black-cloud/scripts/*.sh; do
+            bash -n "$script"
+            test -x "$script"
+          done
+      - run: git diff --check
+
+  containers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - name: Build immutable frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/black-cloud/Dockerfile.platform
+          target: frontend
+          push: false
+          tags: black-terminal-frontend:${{ github.sha }}
+          build-args: |
+            VITE_SUPABASE_URL=http://127.0.0.1:18080
+            VITE_SUPABASE_ANON_KEY=ci-public-anon-placeholder
+      - name: Build immutable API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/black-cloud/Dockerfile.platform
+          target: api
+          push: false
+          tags: black-terminal-api:${{ github.sha }}
+      - name: Build immutable worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/black-cloud/Dockerfile.platform
+          target: worker
+          push: false
+          tags: black-terminal-runtime:${{ github.sha }}

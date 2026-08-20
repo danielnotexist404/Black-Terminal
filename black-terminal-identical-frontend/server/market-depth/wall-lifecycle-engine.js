@@ -108,27 +108,35 @@ export function detectWallLifecycle(sample, compressed, previousWalls = new Map(
 }
 
 function selectWallCandidates(sample, bucketSize) {
-  const bidMax = Math.max(...sample.bids.map((level) => level.quantity), 1);
-  const askMax = Math.max(...sample.asks.map((level) => level.quantity), 1);
   const sideCandidates = [
-    ...rankSide(sample.bids, "buy", bidMax, sample.midPrice, bucketSize),
-    ...rankSide(sample.asks, "sell", askMax, sample.midPrice, bucketSize)
+    ...rankSide(sample.bids, "buy", sample.midPrice, bucketSize),
+    ...rankSide(sample.asks, "sell", sample.midPrice, bucketSize)
   ];
   return sideCandidates.sort((a, b) => b.score - a.score).slice(0, 32);
 }
 
-function rankSide(levels, side, maxSize, midPrice, bucketSize) {
-  const average = levels.reduce((sum, level) => sum + level.quantity, 0) / Math.max(levels.length, 1);
+function rankSide(levels, side, midPrice, bucketSize) {
+  const grouped = new Map();
+  for (const level of levels) {
+    const priceBucket = Math.round(level.price / bucketSize) * bucketSize;
+    const key = priceBucket.toFixed(8);
+    const current = grouped.get(key) ?? { priceBucket, size: 0 };
+    current.size += level.quantity;
+    grouped.set(key, current);
+  }
+  const buckets = [...grouped.values()];
+  const maxSize = Math.max(...buckets.map((bucket) => bucket.size), 1);
+  const average = buckets.reduce((sum, bucket) => sum + bucket.size, 0) / Math.max(buckets.length, 1);
   const threshold = Math.max(average * 1.35, maxSize * 0.18);
-  return levels
-    .filter((level) => level.quantity >= threshold)
-    .map((level) => {
-      const distancePct = midPrice ? Math.abs(level.price - midPrice) / midPrice : 0;
-      const sizeScore = level.quantity / maxSize;
+  return buckets
+    .filter((bucket) => bucket.size >= threshold)
+    .map((bucket) => {
+      const distancePct = midPrice ? Math.abs(bucket.priceBucket - midPrice) / midPrice : 0;
+      const sizeScore = bucket.size / maxSize;
       return {
         side,
-        priceBucket: Math.round(level.price / bucketSize) * bucketSize,
-        size: level.quantity,
+        priceBucket: bucket.priceBucket,
+        size: bucket.size,
         distancePct,
         nearMarket: distancePct < 0.004,
         score: sizeScore / (1 + distancePct * 30)

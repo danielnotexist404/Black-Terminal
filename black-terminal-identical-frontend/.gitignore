@@ -38,6 +38,12 @@ desktop.ini
 .vscode/*.log
 .vercel
 
+# Black Cloud generated deployment state and secrets
+infra/black-cloud/.env
+infra/black-cloud/secrets/*.env
+infra/black-cloud/vendor/
+infra/black-cloud/artifacts/
+
 # Python analysis artifacts
 __pycache__/
 *.py[cod]

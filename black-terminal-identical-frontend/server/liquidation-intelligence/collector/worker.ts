@@ -223,6 +223,7 @@ export class BclifCollectorWorker {
   }
 
   private async cleanupFailedStart(error: unknown, leaseAcquired: boolean) {
+    const failedPhase = this.health.phase();
     this.stopping = true;
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = null;
@@ -233,7 +234,7 @@ export class BclifCollectorWorker {
       catch (releaseError) { this.logger.error("collector.startup_lease_release_failed", { error: message(releaseError) }); }
     }
     this.health.setPhase("FATAL");
-    this.logger.error("collector.startup_failed", { error: message(error) });
+    this.logger.error("collector.startup_failed", { failedPhase, error: message(error) });
     await new Promise<void>((resolve) => this.healthServer?.close(() => resolve()) ?? resolve());
     this.healthServer = null;
   }
@@ -1261,7 +1262,14 @@ function compareKnownEvents(left: BclifCanonicalEvent, right: BclifCanonicalEven
     || left.exchangeTimestamp - right.exchangeTimestamp
     || left.eventId.localeCompare(right.eventId);
 }
-function message(error: unknown) { return error instanceof Error ? error.message : String(error); }
+function message(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (!error || typeof error !== "object") return String(error);
+  const record = error as Record<string, unknown>;
+  return [record.code, record.message, record.details, record.hint]
+    .filter((value) => typeof value === "string" && value.trim())
+    .join(": ") || "Non-Error object";
+}
 function metricToken(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "unknown"; }
 function aggregateFreshness(values: readonly BclifSourceFreshness[]): BclifSourceFreshness {
   const keys = ["tradesAgeMs", "liquidationsAgeMs", "orderbookAgeMs", "openInterestAgeMs", "fundingAgeMs", "markPriceAgeMs", "riskTierAgeMs"] as const;

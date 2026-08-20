@@ -6,6 +6,7 @@ import { deriveMeaningfulClusterPredictions } from "../server/liquidation-intell
 import { buildCanonicalFrame, consumeOpenInterestObservation } from "../server/liquidation-intelligence/normalization/canonicalFrame.ts";
 import { BclifCalibrationRepository } from "../server/liquidation-intelligence/state/calibrationRepository.ts";
 import { assertBclifCoverageCutoffCoherent, BCLIF_MAX_COVERAGE_INTERVALS_PER_SOURCE, BclifCoverageTracker } from "../server/liquidation-intelligence/state/coverageRepository.ts";
+import { BCLIF_MAX_DEDUP_KEYS_PER_QUERY, BclifEventDeduplicator } from "../server/liquidation-intelligence/state/eventDeduplication.ts";
 import { BclifSourceRepository } from "../server/liquidation-intelligence/state/sourceRepository.ts";
 import { makeModelColumn, makeOpenInterest, TEST_SOURCE_VERSION } from "./bclif-test-fixtures.ts";
 
@@ -247,7 +248,7 @@ const adoptionNode = {
   region: "local",
   deploymentCommit: "test-commit",
   imageDigest: "sha256:test",
-  modelVersion: "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE",
+  modelVersion: "BCLIF_MODEL_V6_ABSOLUTE_SHELVES",
   startedAt: 1_000,
   lastHeartbeatAt: 1_000,
   status: "STARTING" as const,
@@ -261,8 +262,36 @@ assert.ok(adoptionPredicates.some(([column, value]) => column === "current_insta
 assert.ok(adoptionPredicates.some(([column, value]) => column === "fencing_epoch" && value === 7));
 assert.throws(() => sourceRepository.fence(), /not acquired/, "a failed adoption must clear its in-memory fence");
 
+const dedupQuerySizes: number[] = [];
+class DedupLookupQuery {
+  select() { return this; }
+  eq() { return this; }
+  in(_column: string, keys: string[]) { dedupQuerySizes.push(keys.length); return this; }
+  then(resolve: (value: any) => unknown, reject?: (reason: unknown) => unknown) {
+    return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+  }
+}
+const deduplicator = new BclifEventDeduplicator({
+  from(table: string) {
+    assert.equal(table, "bclif_event_deduplication");
+    return new DedupLookupQuery();
+  }
+}, "00000000-0000-8000-8000-000000000001", 60_000, {
+  nodeId: "LIQUIDATION_INTELLIGENCE_NODE_01",
+  instanceId: "instance-dedup-test",
+  fencingEpoch: 1
+});
+const historicalDedupBatch = Array.from({ length: BCLIF_MAX_DEDUP_KEYS_PER_QUERY * 2 + 21 }, (_, index) => ({
+  ...makeOpenInterest(10_000 + index, 1_000 + index),
+  dedupKey: `sha256:${index.toString(16).padStart(64, "0")}`
+}));
+assert.equal((await deduplicator.filterNew(historicalDedupBatch, 100_000, false)).length, historicalDedupBatch.length);
+assert.deepEqual(dedupQuerySizes, [BCLIF_MAX_DEDUP_KEYS_PER_QUERY, BCLIF_MAX_DEDUP_KEYS_PER_QUERY, 21]);
+assert.ok(dedupQuerySizes.every((size) => size <= 50), "durable dedup lookups must remain below the gateway URI limit");
+
 const workerSource = readFileSync(new URL("../server/liquidation-intelligence/collector/worker.ts", import.meta.url), "utf8");
 assert.match(workerSource, /for \(const collector of this\.symbols\) await collector\.startLive\(\)/, "collector startup must await every source-authority transition");
+assert.match(workerSource, /collector\.startup_failed", \{ failedPhase, error:/, "startup failures must report the exact initialization phase");
 assert.ok(
   (workerSource.match(/archived\.has\(bclifArchivedEventIdentity\(event\)\)/g) || []).length >= 3,
   "historical accept and spool recovery must compare composite event identities"
@@ -284,7 +313,7 @@ console.log(JSON.stringify({ decision: "PASS", oiDeltaAppliedOnce: true, quietSt
 function predictionRow(id: string, offset: number) {
   return {
     id,
-    model_version: "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE",
+    model_version: "BCLIF_MODEL_V6_ABSOLUTE_SHELVES",
     source_cutoff_at: new Date(1_000 + offset).toISOString(),
     created_at: new Date(2_000 + offset).toISOString(),
     price_min: 60_000,

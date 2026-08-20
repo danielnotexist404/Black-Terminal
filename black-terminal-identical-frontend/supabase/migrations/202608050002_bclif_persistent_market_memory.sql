@@ -233,7 +233,7 @@ create table if not exists public.bclif_canonical_event_chunks (
   ),
   constraint bclif_canonical_event_chunks_checksum_check check (checksum ~ '^sha256:[a-f0-9]{64}$'),
   constraint bclif_canonical_event_chunks_path_check check (
-    object_path ~ '^events/v[1-9][0-9]*/BYBIT/linear_perpetual/[A-Z0-9_-]{2,40}/(TRADE|LIQUIDATION|OPEN_INTEREST|BOOK_FRAME|FUNDING|MARK_INDEX|POSITION_RATIO|RISK_TIER|INSTRUMENT_INFO)/[0-9]{10,16}/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9a-f]{64}\\.events\\.gz$'
+    object_path ~ '^events/v[1-9][0-9]*/BYBIT/linear_perpetual/[A-Z0-9_-]{2,40}/(TRADE|LIQUIDATION|OPEN_INTEREST|BOOK_FRAME|FUNDING|MARK_INDEX|POSITION_RATIO|RISK_TIER|INSTRUMENT_INFO)/[0-9]{10,16}/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9a-f]{64}\.events\.gz$'
   ),
   unique (source_id, event_kind, schema_version, chunk_start, chunk_end, checksum)
 );
@@ -263,7 +263,7 @@ create table if not exists public.bclif_cohort_checkpoints (
   constraint bclif_cohort_checkpoints_time_check check (source_cutoff_at <= checkpoint_at),
   constraint bclif_cohort_checkpoints_checksum_check check (checksum ~ '^sha256:[a-f0-9]{64}$'),
   constraint bclif_cohort_checkpoints_path_check check (
-    object_path ~ '^checkpoints/v[1-9][0-9]*/BYBIT/linear_perpetual/[A-Z0-9_-]{2,40}/[0-9]{10,16}/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9a-f]{64}\\.checkpoint\\.gz$'
+    object_path ~ '^checkpoints/v[1-9][0-9]*/BYBIT/linear_perpetual/[A-Z0-9_-]{2,40}/[0-9]{10,16}/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9a-f]{64}\.checkpoint\.gz$'
   )
 );
 
@@ -446,7 +446,7 @@ alter table public.bclif_field_chunks drop constraint if exists bclif_field_chun
 alter table public.bclif_field_chunks add constraint bclif_field_chunks_checksum_check check (checksum ~ '^sha256:[a-f0-9]{64}$');
 alter table public.bclif_field_chunks drop constraint if exists bclif_field_chunks_path_check;
 alter table public.bclif_field_chunks add constraint bclif_field_chunks_path_check check (
-  object_path ~ '^v[1-9][0-9]*/BYBIT/linear_perpetual/[A-Z0-9_-]{2,40}/(6H|12H|1D|3D|1W|3W|1M|CUSTOM)/[0-9]{10,16}/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9a-f]{64}\\.bclif$'
+  object_path ~ '^v[1-9][0-9]*/BYBIT/linear_perpetual/[A-Z0-9_-]{2,40}/(6H|12H|1D|3D|1W|3W|1M|CUSTOM)/[0-9]{10,16}/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9a-f]{64}\.bclif$'
 );
 alter table public.bclif_field_chunks drop constraint if exists bclif_field_chunks_quality_check;
 alter table public.bclif_field_chunks add constraint bclif_field_chunks_quality_check check (
@@ -773,16 +773,17 @@ begin
     next_epoch := locked_node.fencing_epoch + 1;
   end if;
   next_expiry := clock_timestamp() + make_interval(secs => p_lease_ttl_ms::double precision / 1000.0);
-  update public.bclif_collector_nodes
+  update public.bclif_collector_nodes as collector_node
   set current_instance_id = p_instance_id,
       fencing_epoch = next_epoch,
       lease_expires_at = next_expiry,
       last_heartbeat_at = clock_timestamp()
-  where node_id = p_node_id;
-  update public.bclif_collector_instances
+  where collector_node.node_id = p_node_id;
+  update public.bclif_collector_instances as collector_instance
   set fencing_epoch = next_epoch,
       last_heartbeat_at = clock_timestamp()
-  where instance_id = p_instance_id and node_id = p_node_id;
+  where collector_instance.instance_id = p_instance_id
+    and collector_instance.node_id = p_node_id;
   return query select next_epoch, next_expiry;
 end;
 $$;
@@ -805,21 +806,21 @@ begin
     raise exception 'BCLIF lease TTL is outside the safe bound' using errcode = '22023';
   end if;
   next_expiry := clock_timestamp() + make_interval(secs => p_lease_ttl_ms::double precision / 1000.0);
-  update public.bclif_collector_nodes
+  update public.bclif_collector_nodes as collector_node
   set lease_expires_at = next_expiry,
       last_heartbeat_at = clock_timestamp()
-  where node_id = p_node_id
-    and current_instance_id = p_instance_id
-    and fencing_epoch = p_fencing_epoch
-    and lease_expires_at > clock_timestamp();
+  where collector_node.node_id = p_node_id
+    and collector_node.current_instance_id = p_instance_id
+    and collector_node.fencing_epoch = p_fencing_epoch
+    and collector_node.lease_expires_at > clock_timestamp();
   if not found then
     raise exception 'BCLIF collector lease is stale or expired' using errcode = '55000';
   end if;
-  update public.bclif_collector_instances
+  update public.bclif_collector_instances as collector_instance
   set last_heartbeat_at = clock_timestamp()
-  where instance_id = p_instance_id
-    and node_id = p_node_id
-    and fencing_epoch = p_fencing_epoch;
+  where collector_instance.instance_id = p_instance_id
+    and collector_instance.node_id = p_node_id
+    and collector_instance.fencing_epoch = p_fencing_epoch;
   return query select next_expiry;
 end;
 $$;
@@ -1163,7 +1164,7 @@ immutable
 strict
 set search_path = public
 as $$
-  select candidate ~ '^(v[1-9][0-9]*/BYBIT/linear_perpetual/[A-Z0-9_-]{2,40}/(6H|12H|1D|3D|1W|3W|1M|CUSTOM)/[0-9]{10,16}/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9a-f]{64}\\.bclif|events/v[1-9][0-9]*/BYBIT/linear_perpetual/[A-Z0-9_-]{2,40}/(TRADE|LIQUIDATION|OPEN_INTEREST|BOOK_FRAME|FUNDING|MARK_INDEX|POSITION_RATIO|RISK_TIER|INSTRUMENT_INFO)/[0-9]{10,16}/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9a-f]{64}\\.events\\.gz|checkpoints/v[1-9][0-9]*/BYBIT/linear_perpetual/[A-Z0-9_-]{2,40}/[0-9]{10,16}/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9a-f]{64}\\.checkpoint\\.gz)$';
+  select candidate ~ '^(v[1-9][0-9]*/BYBIT/linear_perpetual/[A-Z0-9_-]{2,40}/(6H|12H|1D|3D|1W|3W|1M|CUSTOM)/[0-9]{10,16}/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9a-f]{64}\.bclif|events/v[1-9][0-9]*/BYBIT/linear_perpetual/[A-Z0-9_-]{2,40}/(TRADE|LIQUIDATION|OPEN_INTEREST|BOOK_FRAME|FUNDING|MARK_INDEX|POSITION_RATIO|RISK_TIER|INSTRUMENT_INFO)/[0-9]{10,16}/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9a-f]{64}\.events\.gz|checkpoints/v[1-9][0-9]*/BYBIT/linear_perpetual/[A-Z0-9_-]{2,40}/[0-9]{10,16}/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[0-9a-f]{64}\.checkpoint\.gz)$';
 $$;
 revoke all on function public.bclif_storage_object_path_valid(text) from public, anon, authenticated;
 grant execute on function public.bclif_storage_object_path_valid(text) to service_role;

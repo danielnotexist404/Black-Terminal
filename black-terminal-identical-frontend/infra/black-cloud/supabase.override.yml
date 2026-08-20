@@ -1,0 +1,39 @@
+services:
+  kong:
+    networks:
+      default:
+      black-cloud-backplane:
+        aliases:
+          - supabase-kong
+
+  db:
+    volumes:
+      - ${BLACK_CLOUD_SUPABASE_STATE_ROOT:-/var/lib/black-cloud/supabase}/postgres:/var/lib/postgresql/data:Z
+    networks:
+      default:
+      black-cloud-data:
+        aliases:
+          - supabase-db
+
+  storage:
+    volumes:
+      - ${BLACK_CLOUD_SUPABASE_STATE_ROOT:-/var/lib/black-cloud/supabase}/storage:/var/lib/storage:z
+
+  imgproxy:
+    volumes:
+      - ${BLACK_CLOUD_SUPABASE_STATE_ROOT:-/var/lib/black-cloud/supabase}/storage:/var/lib/storage:z
+
+  auth:
+    environment:
+      GOTRUE_EXTERNAL_GOOGLE_ENABLED: ${GOOGLE_ENABLED:-false}
+      GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOOGLE_SECRET:-}
+      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${API_EXTERNAL_URL}/callback
+
+networks:
+  black-cloud-backplane:
+    external: true
+    name: black-cloud-backplane
+  black-cloud-data:
+    external: true
+    name: black-cloud-data

@@ -1,0 +1,49 @@
+{
+  auto_https off
+  admin off
+}
+
+(black_terminal_routes) {
+  handle /healthz {
+    rewrite * /health/ready
+    reverse_proxy api:3000
+  }
+  handle /api/* {
+    reverse_proxy api:3000
+  }
+  handle /auth/v1/* {
+    reverse_proxy supabase-kong:8000
+  }
+  handle /rest/v1/* {
+    reverse_proxy supabase-kong:8000
+  }
+  handle /realtime/v1/* {
+    reverse_proxy supabase-kong:8000
+  }
+  handle /storage/v1/* {
+    reverse_proxy supabase-kong:8000
+  }
+  handle /functions/v1/* {
+    reverse_proxy supabase-kong:8000
+  }
+  handle {
+    reverse_proxy frontend:8080
+  }
+}
+
+(black_terminal_security_headers) {
+  header {
+    -Server
+    X-Content-Type-Options nosniff
+    X-Frame-Options DENY
+    Referrer-Policy strict-origin-when-cross-origin
+    Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()"
+    Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https://flagcdn.com; connect-src 'self' https://ipapi.co https://api.binance.com https://fapi.binance.com https://api.bybit.com https://www.okx.com wss://stream.binance.com:9443 wss://fstream.binance.com wss://stream.bybit.com wss://ws.okx.com:8443 wss://ws.kraken.com wss://api.hyperliquid.xyz wss://api-pub.bitfinex.com wss://ws-feed.exchange.coinbase.com; worker-src 'self' blob:; manifest-src 'self'"
+  }
+}
+
+:8080 {
+  encode zstd gzip
+  import black_terminal_security_headers
+  import black_terminal_routes
+}

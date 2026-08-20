@@ -3,12 +3,24 @@ import fs from "node:fs";
 
 const foundationPath = "supabase/migrations/202608050001_bclif_liquidation_intelligence_foundation.sql";
 const successorPath = "supabase/migrations/202608050002_bclif_persistent_market_memory.sql";
+const leaseFixPath = "supabase/migrations/20260820153000_bclif_lease_column_qualification.sql";
+const pathFixPath = "supabase/migrations/20260820153100_bclif_storage_path_regex_correction.sql";
 const foundation = fs.readFileSync(foundationPath, "utf8");
 const sql = fs.readFileSync(successorPath, "utf8");
+const leaseFix = fs.readFileSync(leaseFixPath, "utf8");
+const pathFix = fs.readFileSync(pathFixPath, "utf8");
 const security = fs.readFileSync("server/security/securityMiddleware.js", "utf8");
 const api = fs.readFileSync("server/liquidation-intelligence/api/vercelHandler.js", "utf8");
 const consolidatedApi = fs.readFileSync("api/market-depth/[action].js", "utf8");
 const apiService = fs.readFileSync("server/liquidation-intelligence/api/service.js", "utf8");
+const apiContracts = fs.readFileSync("server/liquidation-intelligence/api/contracts.js", "utf8");
+const clientTypes = fs.readFileSync("src/modules/liquidation-field/core/types.ts", "utf8");
+const collectorPreflight = fs.readFileSync("scripts/bclif-collector-preflight.sh", "utf8");
+const deploymentCompose = fs.readFileSync("infra/black-cloud/docker-compose.yml", "utf8");
+const environmentExample = fs.readFileSync(".env.liquidation-intelligence.example", "utf8");
+
+const productionModelVersion = "BCLIF_MODEL_V6_ABSOLUTE_SHELVES";
+const productionSourceVersion = "BYBIT_V6_PUBLIC_2026_08";
 
 for (const table of ["bclif_sources", "bclif_coverage", "bclif_confirmed_liquidation_events", "bclif_field_chunks", "bclif_model_evaluations"]) {
   assert.match(foundation, new RegExp(`create\\s+table\\s+if\\s+not\\s+exists\\s+public\\.${table}\\b`, "i"), `${table} must remain rooted in the foundation migration`);
@@ -82,8 +94,22 @@ assert.match(sql, /lease_expires_at timestamptz/i);
 assert.match(sql, /create or replace function public\.bclif_acquire_collector_lease/i);
 assert.match(sql, /for update;[\s\S]*collector authority lease is already held/i);
 assert.match(sql, /create or replace function public\.bclif_renew_collector_lease/i);
-assert.match(sql, /current_instance_id = p_instance_id[\s\S]*fencing_epoch = p_fencing_epoch[\s\S]*lease_expires_at > clock_timestamp\(\)/i);
+assert.match(sql, /collector_node\.current_instance_id = p_instance_id[\s\S]*collector_node\.fencing_epoch = p_fencing_epoch[\s\S]*collector_node\.lease_expires_at > clock_timestamp\(\)/i);
 assert.match(sql, /grant execute on function public\.bclif_acquire_collector_lease\(text,text,integer\) to service_role/i);
+assert.match(leaseFix, /^begin;[\s\S]*commit;\s*$/i);
+assert.match(leaseFix, /update public\.bclif_collector_nodes as collector_node[\s\S]*collector_node\.lease_expires_at > clock_timestamp\(\)/i);
+assert.match(leaseFix, /update public\.bclif_collector_instances as collector_instance/i);
+assert.doesNotMatch(leaseFix, /\band lease_expires_at > clock_timestamp\(\)/i);
+assert.match(leaseFix, /revoke all on function public\.bclif_acquire_collector_lease\(text,text,integer\) from public, anon, authenticated/i);
+assert.match(leaseFix, /grant execute on function public\.bclif_renew_collector_lease\(text,text,bigint,integer\) to service_role/i);
+assert.match(pathFix, /^begin;[\s\S]*commit;\s*$/i);
+for (const extension of [String.raw`\.bclif`, String.raw`\.events\.gz`, String.raw`\.checkpoint\.gz`]) {
+  assert.ok(pathFix.includes(extension), `corrected storage regex must include ${extension}`);
+}
+for (const invalid of [String.raw`\\.bclif`, String.raw`\\.events`, String.raw`\\.checkpoint`]) {
+  assert.equal(pathFix.includes(invalid), false, `storage regex must not retain double escaping: ${invalid}`);
+}
+assert.match(pathFix, /revoke all on function public\.bclif_storage_object_path_valid\(text\) from public, anon, authenticated/i);
 assert.match(sql, /create or replace function public\.bclif_assert_source_writer_fence/i);
 assert.match(sql, /create or replace function public\.bclif_assert_row_writer_fence/i);
 assert.match(sql, /trg_bclif_sources_writer_fence/i);
@@ -116,5 +142,12 @@ assert.match(apiService, /lte\("chunk_end", replayCutoff\)/);
 assert.match(apiService, /lte\("source_cutoff_at", replayCutoff\)/);
 assert.match(apiService, /query = query\.gte\("chunk_end", new Date\(scope\.from\)\.toISOString\(\)\)/);
 assert.doesNotMatch(apiService, /lte\("chunk_start", new Date\(scope\.to\)/);
+
+for (const [name, source] of Object.entries({ apiContracts, clientTypes, collectorPreflight, deploymentCompose, environmentExample })) {
+  assert.ok(source.includes(productionModelVersion), `${name} must use the canonical BCLIF production model version`);
+  assert.ok(source.includes(productionSourceVersion), `${name} must use the canonical BCLIF production source version`);
+}
+assert.doesNotMatch(deploymentCompose, /BCLIF_MODEL_VERSION:\s*BCLIF_MODEL_V[1-5]_/, "Docker deployment may not pin a legacy BCLIF model");
+assert.doesNotMatch(environmentExample, /^BCLIF_(?:MODEL|SOURCE)_VERSION=.*(?:LEGACY|TEST)/m, "production examples may not advertise fixture or legacy versions");
 
 console.log(`BCLIF migration contracts passed: ${newTables.length} new service-only tables, private storage policies, immutable metadata, and entitlement-protected API source.`);

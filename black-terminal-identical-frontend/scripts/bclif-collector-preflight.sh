@@ -88,8 +88,8 @@ if [[ "$preflight_mode" == "host" ]]; then
   esac
   [[ "$(read_env_value BCLIF_ENVIRONMENT)" == "PRODUCTION" ]] || fail "production host requires BCLIF_ENVIRONMENT=PRODUCTION"
   [[ "$(read_env_value BCLIF_HEALTH_PORT)" == "8091" ]] || fail "container BCLIF_HEALTH_PORT must be 8091"
-  [[ "$(read_env_value BCLIF_MODEL_VERSION)" == "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE" ]] || fail "unsupported model version"
-  [[ "$(read_env_value BCLIF_SOURCE_VERSION)" == "BYBIT_V5_PUBLIC_2026_08" ]] || fail "unsupported source version"
+  [[ "$(read_env_value BCLIF_MODEL_VERSION)" == "BCLIF_MODEL_V6_ABSOLUTE_SHELVES" ]] || fail "unsupported model version"
+  [[ "$(read_env_value BCLIF_SOURCE_VERSION)" == "BYBIT_V6_PUBLIC_2026_08" ]] || fail "unsupported source version"
   [[ "$(read_env_value BCLIF_OBJECT_BUCKET)" == "bclif-field-chunks" ]] || fail "unexpected private object bucket"
   [[ "$(read_env_value BCLIF_DEPLOYMENT_COMMIT)" =~ ^[a-fA-F0-9]{40}$ ]] || fail "BCLIF_DEPLOYMENT_COMMIT must be a full 40-character Git commit"
   [[ "$(read_env_value BCLIF_IMAGE_DIGEST)" =~ ^sha256:[a-fA-F0-9]{64}$ ]] || fail "BCLIF_IMAGE_DIGEST must be an immutable sha256 digest"

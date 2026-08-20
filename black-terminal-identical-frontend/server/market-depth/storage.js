@@ -105,7 +105,13 @@ async function insertRows(supabase, table, rows) {
 async function upsertRows(supabase, table, rows, onConflict) {
   if (!rows.length) return;
   const { error } = await supabase.from(table).upsert(rows, { onConflict });
-  if (error) throw error;
+  if (error) {
+    throw Object.assign(new Error(`${table} upsert failed: ${error.message || "unknown persistence failure"}`), {
+      code: error.code || "MARKET_DEPTH_UPSERT_FAILED",
+      details: error.details,
+      hint: error.hint
+    });
+  }
 }
 
 function shouldPersistSnapshot(lastSnapshotAt, key, timestamp, throttleMs) {

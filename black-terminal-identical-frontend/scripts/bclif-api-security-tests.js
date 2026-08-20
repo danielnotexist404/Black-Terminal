@@ -72,6 +72,10 @@ assert.equal(isDeferredBclifInfrastructureError({ code: "PGRST205" }), true);
 assert.equal(isDeferredBclifInfrastructureError({ code: "42P01" }), true);
 assert.equal(isDeferredBclifInfrastructureError({ code: "XX000", message: "unrelated" }), false);
 assert.equal(normalizeBclifRouteError(new Error("Missing SUPABASE_URL/VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.")).code, "PERSISTENCE_CONTROL_PLANE_UNAVAILABLE");
+assert.equal(normalizeBclifRouteError(Object.assign(new Error("Professional Network server authentication is not configured."), {
+  statusCode: 503,
+  code: "SERVER_AUTH_CONFIGURATION_MISSING"
+})).code, "PERSISTENCE_CONTROL_PLANE_UNAVAILABLE");
 assert.equal(normalizeBclifRouteError(Object.assign(new Error("forbidden"), { statusCode: 403, code: "FORBIDDEN" })).code, "FORBIDDEN");
 
 const unavailable = bclifDeferredPayload(scope);
@@ -297,7 +301,7 @@ await assert.rejects(
   "an unavailable supersession ledger must fail closed"
 );
 for (const expected of [
-  ["model_version", "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE"],
+  ["model_version", "BCLIF_MODEL_V6_ABSOLUTE_SHELVES"],
   ["schema_version", 2],
   ["tile_version", 1],
   ["compression", "gzip-v1"],
@@ -314,7 +318,7 @@ const missingBucketStatus = await readBclifStatus(makeSupabase({
     environment: "PRODUCTION",
     region: "eu",
     deployment_commit: "921c7a2",
-    model_version: "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE",
+    model_version: "BCLIF_MODEL_V6_ABSOLUTE_SHELVES",
     fencing_epoch: 7,
     lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
     status: "LIVE",
@@ -334,7 +338,7 @@ const degradedStatus = await readBclifStatus(makeSupabase({
     environment: "PRODUCTION",
     region: "eu",
     deployment_commit: "921c7a2",
-    model_version: "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE",
+    model_version: "BCLIF_MODEL_V6_ABSOLUTE_SHELVES",
     fencing_epoch: 7,
     lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
     status: "DEGRADED",
@@ -358,7 +362,7 @@ const expiredLeaseStatus = await readBclifStatus(makeSupabase({
     environment: "PRODUCTION",
     region: "eu",
     deployment_commit: "921c7a2",
-    model_version: "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE",
+    model_version: "BCLIF_MODEL_V6_ABSOLUTE_SHELVES",
     status: "LIVE",
     lifecycle_state: "LIVE",
     started_at: new Date().toISOString(),
@@ -379,7 +383,7 @@ const authorityNode = (instanceId, epoch) => ({
   environment: "PRODUCTION",
   region: "eu",
   deployment_commit: "921c7a2",
-  model_version: "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE",
+  model_version: "BCLIF_MODEL_V6_ABSOLUTE_SHELVES",
   status: "LIVE",
   lifecycle_state: "LIVE",
   started_at: new Date().toISOString(),
@@ -436,7 +440,7 @@ await assert.rejects(
 );
 assert.equal(replayLiveTileSupabase.downloadedPath, null);
 for (const expected of [
-  ["model_version", "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE"],
+  ["model_version", "BCLIF_MODEL_V6_ABSOLUTE_SHELVES"],
   ["schema_version", 2],
   ["tile_version", 1],
   ["compression", "gzip-v1"],
@@ -504,10 +508,11 @@ const corruptTileSupabase = makeSupabase({
 });
 await assert.rejects(() => loadVerifiedBclifTile(corruptTileSupabase, boundedScope, tileId, checksum), (error) => ["TILE_LENGTH_MISMATCH", "TILE_CHECKSUM_MISMATCH"].includes(error.code));
 
-const savedEnvironment = Object.fromEntries(["SUPABASE_URL", "VITE_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].map((key) => [key, process.env[key]]));
+const savedEnvironment = Object.fromEntries(["SUPABASE_URL", "VITE_SUPABASE_URL", "SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY"].map((key) => [key, process.env[key]]));
 try {
   delete process.env.SUPABASE_URL;
   delete process.env.VITE_SUPABASE_URL;
+  delete process.env.SUPABASE_SECRET_KEY;
   delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   const unauthenticated = responseRecorder();
   await bclifApiHandler({ method: "GET", query: { action: "status" }, headers: {} }, unauthenticated);
@@ -535,7 +540,7 @@ function tileRow() {
   return {
     id: tileId,
     source_id: "source-1",
-    model_version: "BCLIF_MODEL_V5_AUTHENTIC_EXPOSURE",
+    model_version: "BCLIF_MODEL_V6_ABSOLUTE_SHELVES",
     horizon: "1D",
     chunk_start: new Date(startMs).toISOString(),
     chunk_end: new Date(startMs + 60000).toISOString(),

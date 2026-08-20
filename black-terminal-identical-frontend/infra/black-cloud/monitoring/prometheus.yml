@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: black-cloud-api
+    static_configs:
+      - targets: [api:3000]
+  - job_name: node
+    static_configs:
+      - targets: [node-exporter:9100]
+  - job_name: containers
+    static_configs:
+      - targets: [cadvisor:8080]
+  - job_name: postgres
+    static_configs:
+      - targets: [postgres-exporter:9187]

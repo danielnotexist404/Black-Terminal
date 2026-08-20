@@ -26,7 +26,12 @@ async function main() {
 }
 
 function safeMessage(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
+  const record = error && typeof error === "object" ? error as Record<string, unknown> : null;
+  const message = error instanceof Error
+    ? error.message
+    : record
+      ? [record.code, record.message, record.details, record.hint].filter((value) => typeof value === "string" && value.trim()).join(": ") || "Non-Error object"
+      : String(error);
   return message.replace(/(service.?role|token|secret|password|authorization|api.?key)[^\s,]*/gi, "$1=[REDACTED]");
 }
 

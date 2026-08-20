@@ -1,6 +1,11 @@
 import type { BclifCanonicalEvent, BclifWriterFence } from "../contracts.ts";
 import { validateWriterFence, writerFenceColumns } from "./writerFence.ts";
 
+// SHA-256 dedup keys are URL encoded into PostgREST's `in` filter. Keeping
+// each batch at 50 bounds the request line well below Kong's URI limit even
+// after the remaining filters and percent encoding are included.
+export const BCLIF_MAX_DEDUP_KEYS_PER_QUERY = 50;
+
 export class BclifEventDeduplicator {
   private readonly hot = new Map<string, number>();
   private readonly supabase: any;
@@ -32,12 +37,12 @@ export class BclifEventDeduplicator {
     const existing = new Set<string>();
     for (const kind of [...new Set(candidates.map((event) => event.kind))]) {
       const keys = candidates.filter((event) => event.kind === kind).map((event) => event.dedupKey);
-      for (let offset = 0; offset < keys.length; offset += 500) {
+      for (let offset = 0; offset < keys.length; offset += BCLIF_MAX_DEDUP_KEYS_PER_QUERY) {
         const result = await this.supabase.from("bclif_event_deduplication")
           .select("event_kind,dedup_key")
           .eq("source_id", this.sourceId)
           .eq("event_kind", kind)
-          .in("dedup_key", keys.slice(offset, offset + 500));
+          .in("dedup_key", keys.slice(offset, offset + BCLIF_MAX_DEDUP_KEYS_PER_QUERY));
         if (result.error) throw result.error;
         for (const row of result.data || []) existing.add(`${row.event_kind}:${row.dedup_key}`);
       }

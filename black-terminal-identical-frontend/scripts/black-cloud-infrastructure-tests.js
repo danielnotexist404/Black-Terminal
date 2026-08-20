@@ -54,6 +54,7 @@ assert.match(backupVerify, /user\\\.supabase\\\.\(cache-control\|content-type\)/
 assert.match(releaseSync, /\[\[ "\$RELEASE_ROOT" == \/opt\/black-cloud\/releases \]\]/, "release sync must reject broad or unexpected destinations");
 assert.match(releaseSync, /test ! -e "\$FINAL_PATH"/, "release sync must not overwrite an immutable release");
 assert.match(releaseSync, /--exclude '\/infra\/black-cloud\/vendor\/'/);
+assert.match(releaseSync, /--exclude '\/src-tauri\/target\/'/, "release sync must exclude local Rust build output");
 assert.match(releaseSync, /--exclude '\/infra\/black-cloud\/secrets\/'/);
 assert.match(releaseSync, /--exclude '\/infra\/black-cloud\/artifacts\/'/);
 assert.match(releaseSync, /--exclude '\/infra\/black-cloud\/\.env'/, "release sync must never transfer a private infrastructure environment file");

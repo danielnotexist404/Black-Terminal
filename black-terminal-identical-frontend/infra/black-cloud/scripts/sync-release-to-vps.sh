@@ -49,6 +49,7 @@ rsync -a --checksum --human-readable \
   --exclude '/.vercel/' \
   --exclude '/node_modules/' \
   --exclude '/dist/' \
+  --exclude '/src-tauri/target/' \
   --exclude '/infra/black-cloud/vendor/' \
   --exclude '/infra/black-cloud/secrets/' \
   --exclude '/infra/black-cloud/artifacts/' \

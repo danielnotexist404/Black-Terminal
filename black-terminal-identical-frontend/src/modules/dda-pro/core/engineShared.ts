@@ -22,7 +22,9 @@ export function blankSeries(length: number): DDAProSeries {
     p50: series(), p75: series(), p90: series(), p95: series(), p99: series(), percentileRank: series(),
     zScore: series(), duration: series(), timeUnderWater: series(), recoveryProgress: series(),
     velocity: series(), acceleration: series(), vadd: series(), riskScore: series(),
-    riskState: new Array(length).fill("INSUFFICIENT")
+    riskState: new Array(length).fill("INSUFFICIENT"),
+    flowImbalance: series(), flowCvdMomentum: series(), flowPressure: series(),
+    flowCoveragePercent: series(), flowState: new Array(length).fill("UNAVAILABLE")
   };
 }
 
@@ -342,6 +344,28 @@ export function ddaProDataHash(input: DDAProCalculationInput) {
     hasher.updateNumber(input.equityValues.length);
     for (const value of input.equityValues) hasher.updateNumber(value);
   }
+  if (input.cvdValues) {
+    hasher.updateString("cvd|");
+    hasher.updateNumber(input.cvdValues.length);
+    for (const value of input.cvdValues) hasher.updateNumber(value);
+  }
+  if (input.flowBars) {
+    hasher.updateString("flow|");
+    hasher.updateNumber(input.flowBars.length);
+    for (const bar of input.flowBars) {
+      hasher.updateNumber(bar.time);
+      hasher.updateNumber(bar.buyVolume);
+      hasher.updateNumber(bar.sellVolume);
+      hasher.updateNumber(bar.unknownVolume);
+      hasher.updateNumber(bar.buyNotional);
+      hasher.updateNumber(bar.sellNotional);
+      hasher.updateNumber(bar.unknownNotional);
+      hasher.updateNumber(bar.exactTradeCount);
+      hasher.updateNumber(bar.totalTradeCount);
+      hasher.updateNumber(bar.deliveryComplete ? 1 : 0);
+    }
+  }
+  hasher.updateString(input.flowAuthority ?? "UNAVAILABLE");
   return hasher.digest();
 }
 
@@ -390,6 +414,9 @@ export function latestFromSeries(
     velocity: finiteMetric(series.velocity[index] ?? 0),
     acceleration: finiteMetric(series.acceleration[index] ?? 0),
     ...metrics,
-    vadd: finiteMetric(series.vadd[index] ?? 0)
+    vadd: finiteMetric(series.vadd[index] ?? 0),
+    flowPressure: finiteMetric(series.flowPressure[index] ?? 0),
+    flowCoveragePercent: finiteMetric(series.flowCoveragePercent[index] ?? 0),
+    flowState: series.flowState[index] ?? "UNAVAILABLE"
   };
 }

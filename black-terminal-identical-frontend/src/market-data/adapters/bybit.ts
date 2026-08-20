@@ -133,6 +133,20 @@ type BybitOrderBookWs = {
   };
 };
 
+type BybitPublicTradeWs = {
+  topic: string;
+  type: "snapshot";
+  ts: number;
+  data: Array<{
+    T: number;
+    s: string;
+    S: "Buy" | "Sell";
+    v: string;
+    p: string;
+    i: string;
+  }>;
+};
+
 const BYBIT_REST = "https://api.bybit.com";
 const BYBIT_WS_LINEAR = "wss://stream.bybit.com/v5/public/linear";
 const BYBIT_WS_SPOT = "wss://stream.bybit.com/v5/public/spot";
@@ -201,7 +215,73 @@ function mapTrade(symbol: MarketSymbol, trade: BybitTradeResult["list"][number])
     time: Math.floor(parseNumber(trade.time) / 1000),
     price: parseNumber(trade.price),
     quantity: parseNumber(trade.size),
-    side: trade.side === "Sell" ? "sell" : "buy"
+    side: trade.side === "Sell" ? "sell" : "buy",
+    aggressorSource: "EXCHANGE_AGGRESSOR_FLAG",
+    receivedAt: Date.now() / 1000
+  };
+}
+
+function createBybitTradeSubscription(
+  symbol: MarketSymbol,
+  onTrade: (trade: TradeTick) => void
+): MarketDataSubscription<TradeTick> {
+  const messageHandlers = new Set<(message: TradeTick) => void>([onTrade]);
+  const errorHandlers = new Set<(error: Error) => void>();
+  const normalizedSymbol = normalizeBybitSymbol(symbol.rawSymbol);
+  const topic = `publicTrade.${normalizedSymbol}`;
+  const ws = new WebSocket(categoryFor(symbol.marketKind) === "spot" ? BYBIT_WS_SPOT : BYBIT_WS_LINEAR);
+  let pingTimer: ReturnType<typeof setInterval> | undefined;
+  let closedByClient = false;
+
+  const reportError = (error: unknown) => {
+    const normalized = error instanceof Error ? error : new Error(String(error));
+    errorHandlers.forEach((handler) => handler(normalized));
+  };
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ op: "subscribe", args: [topic] }));
+    pingTimer = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ op: "ping" }));
+    }, 20_000);
+  };
+  ws.onmessage = (event: MessageEvent<string>) => {
+    try {
+      const payload = JSON.parse(event.data) as Partial<BybitPublicTradeWs> & { success?: boolean; ret_msg?: string };
+      if (payload.success === false) throw new Error(`Bybit trade subscription failed: ${payload.ret_msg ?? topic}`);
+      if (payload.topic !== topic || !Array.isArray(payload.data)) return;
+      const receivedAt = Date.now() / 1000;
+      for (const trade of payload.data) {
+        const tick: TradeTick = {
+          exchange: "bybit",
+          symbol: symbol.rawSymbol,
+          tradeId: String(trade.i),
+          time: Math.floor(parseNumber(trade.T) / 1000),
+          price: parseNumber(trade.p),
+          quantity: parseNumber(trade.v),
+          side: trade.S === "Sell" ? "sell" : "buy",
+          aggressorSource: "EXCHANGE_AGGRESSOR_FLAG",
+          receivedAt
+        };
+        messageHandlers.forEach((handler) => handler(tick));
+      }
+    } catch (error) {
+      reportError(error);
+    }
+  };
+  ws.onerror = () => reportError(new Error(`Bybit trade WebSocket failed: ${topic}`));
+  ws.onclose = () => {
+    if (pingTimer) clearInterval(pingTimer);
+    if (!closedByClient) reportError(new Error(`Bybit trade WebSocket closed unexpectedly: ${topic}`));
+  };
+
+  return {
+    unsubscribe: () => {
+      closedByClient = true;
+      if (pingTimer) clearInterval(pingTimer);
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close(1000, "Black-Terminal trade stream closed");
+    },
+    onMessage: (handler) => messageHandlers.add(handler),
+    onError: (handler) => errorHandlers.add(handler)
   };
 }
 
@@ -393,5 +473,6 @@ export const bybitMarketDataAdapter: MarketDataAdapter = {
     }
     return mapTicker(symbol, ticker);
   },
+  subscribeTrades: (symbol, onTrade) => createBybitTradeSubscription(symbol, onTrade),
   subscribeOrderBook: (symbol, onBook) => createBybitOrderBookSubscription(symbol, onBook)
 };

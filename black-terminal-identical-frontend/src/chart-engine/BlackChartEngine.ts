@@ -43,6 +43,7 @@ import type { LiquidationFieldSettings, LiquidationFieldSnapshot } from "../modu
 import { migrateLiquidationFieldSettings } from "../modules/liquidation-field/core/settings";
 import { BlackCoreLiquidationFieldRenderer, type BclifRendererMetrics } from "../modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer";
 import { resolveBclifDisplayDomain } from "../modules/liquidation-field/rendering/displayProjection";
+import { ddaProSigmaUnit, nearestDDAProTailLabel } from "../modules/dda-pro/rendering/diagnostics";
 import { bclifTimestampMsToChartSeconds } from "../modules/liquidation-field/rendering/timeProjection";
 import type { DDAProSnapshot } from "../modules/dda-pro/core/types";
 import {
@@ -2237,7 +2238,7 @@ export class BlackChartEngine {
     const g = this.indicatorLayer;
     const paneHeight = paneBottom - paneTop;
     const offset = Math.max(0, data.length - (snapshot?.inputSize ?? 0));
-    const aligned = (values: readonly number[] | undefined, index: number) => {
+    const aligned = <T,>(values: readonly T[] | undefined, index: number): T | undefined => {
       const sourceIndex = index - offset;
       return sourceIndex >= 0 ? values?.[sourceIndex] : undefined;
     };
@@ -2339,7 +2340,8 @@ export class BlackChartEngine {
       const encodedMultiplier = snapshot.engineMode === "pine-compatibility" ? 1 : Math.max(0.25, settings.sigmaMultiplier);
       const sigmaUnit = snapshot.series.mean.map((mean, index) => {
         const lower = snapshot.series.sigmaLower[index];
-        return Number.isFinite(mean) && Number.isFinite(lower) ? Math.abs(mean - lower!) / encodedMultiplier : Number.NaN;
+        const upper = snapshot.series.sigmaUpper[index];
+        return ddaProSigmaUnit(mean, lower!, upper!, encodedMultiplier, settings.downsideOnlySigma);
       });
       const sigmaLine = (multiplier: number, direction: -1 | 1) => snapshot.series.mean.map((mean, index) => {
         const unit = sigmaUnit[index];
@@ -2370,6 +2372,30 @@ export class BlackChartEngine {
     if (settings.showRawDrawdown) drawLine(snapshot.series.rawDrawdown, this.hexColor(themePalette.neutral, theme.muted), 0.46, 0.8);
     if (settings.showSmoothedDrawdown) {
       drawLine(snapshot.series.smoothedDrawdown, this.hexColor(themePalette.primary, theme.silverBright), settings.lineIntensity / 100, settings.lineWidth);
+    }
+    if (settings.showFlowPressure) {
+      const bullish = this.hexColor(settings.flowBullishColor, theme.silverBright);
+      const bearish = this.hexColor(settings.flowBearishColor, theme.redBright);
+      const neutral = this.hexColor(settings.flowNeutralColor, theme.muted);
+      const baseAlpha = Math.max(0, Math.min(1, settings.flowLineIntensity / 100));
+      for (let index = Math.max(this.view.firstIndex + 1, 1); index <= this.view.lastIndex; index++) {
+        const priorState = aligned(snapshot.series.flowState, index - 1);
+        const state = aligned(snapshot.series.flowState, index);
+        const priorAnchor = aligned(snapshot.series.smoothedDrawdown, index - 1);
+        const anchor = aligned(snapshot.series.smoothedDrawdown, index);
+        const pressure = aligned(snapshot.series.flowPressure, index);
+        if (state === "UNAVAILABLE" || priorState === "UNAVAILABLE" || !Number.isFinite(priorAnchor) || !Number.isFinite(anchor) || !Number.isFinite(pressure)) continue;
+        const color = state === "BULLISH" ? bullish : state === "BEARISH" ? bearish : neutral;
+        const magnitude = Math.min(1, Math.abs(pressure!) / 100);
+        const width = settings.flowLineWidth * (0.9 + magnitude * 0.65);
+        const alpha = baseAlpha * (0.55 + magnitude * 0.45);
+        const x1 = this.xForIndex(index - 1);
+        const x2 = this.xForIndex(index);
+        const y1 = yForDrawdown(priorAnchor!);
+        const y2 = yForDrawdown(anchor!);
+        g.moveTo(x1, y1).lineTo(x2, y2).stroke({ width: width + 1.4, color: 0x020203, alpha: Math.min(0.78, alpha) });
+        g.moveTo(x1, y1).lineTo(x2, y2).stroke({ width, color, alpha });
+      }
     }
 
     if (settings.showRiskScore) {
@@ -2417,8 +2443,9 @@ export class BlackChartEngine {
     const dashboardOnLeft = settings.dashboardPosition.endsWith("left");
     const dashboardOnBottom = settings.dashboardPosition.startsWith("bottom");
     const dashboardPanelWidth = Math.min(300, Math.max(228, plotWidth - 24));
-    const dashboardRows = paneHeight >= 145 ? (settings.showExpandedDashboard ? 8 : 3) : 1;
-    const dashboardPanelHeight = dashboardRows === 8 ? 113 : dashboardRows === 3 ? 43 : 23;
+    const flowDashboardRow = settings.showFlowPressure ? 1 : 0;
+    const dashboardRows = paneHeight >= 145 ? (settings.showExpandedDashboard ? 8 + flowDashboardRow : 3 + flowDashboardRow) : 1;
+    const dashboardPanelHeight = dashboardRows === 9 ? 127 : dashboardRows === 8 ? 113 : dashboardRows === 4 ? 57 : dashboardRows === 3 ? 43 : 23;
     const dashboardX = Math.round(dashboardOnLeft ? 12 : Math.max(12, plotWidth - dashboardPanelWidth - 12));
     const dashboardY = Math.round(dashboardOnBottom
       ? Math.max(paneTop + 24, paneBottom - dashboardPanelHeight - 7)
@@ -2455,15 +2482,25 @@ export class BlackChartEngine {
       addDashboardText(`${snapshot.latest.riskState} ${snapshot.latest.riskScore.toFixed(1)} · DD ${snapshot.latest.drawdownPercent.toFixed(2)}% · MDD ${snapshot.latest.maxDrawdownPercent.toFixed(2)}%`, dashboardY, riskColor, 10, "700");
     }
     if (settings.showDashboard && paneHeight >= 145) {
-      addDashboardText("PCTL " + snapshot.latest.percentileRank.toFixed(1) + "   Z " + snapshot.latest.zScore.toFixed(2) + "   TUW " + snapshot.latest.timeUnderWaterBars, dashboardY + 14);
-      addDashboardText("SH " + snapshot.latest.sharpe.toFixed(2) + "   SO " + snapshot.latest.sortino.toFixed(2) + "   CA " + snapshot.latest.calmar.toFixed(2) + "   CONF " + snapshot.latest.confidence.toFixed(0) + "%", dashboardY + 28);
+      const rowOffset = settings.showFlowPressure ? 14 : 0;
+      if (settings.showFlowPressure) {
+        const flowColor = snapshot.latest.flowState === "BULLISH"
+          ? this.hexColor(settings.flowBullishColor, theme.silverBright)
+          : snapshot.latest.flowState === "BEARISH"
+            ? this.hexColor(settings.flowBearishColor, theme.redBright)
+            : this.hexColor(settings.flowNeutralColor, theme.muted);
+        const flowValue = snapshot.latest.flowState === "UNAVAILABLE" ? "--" : `${snapshot.latest.flowPressure >= 0 ? "+" : ""}${snapshot.latest.flowPressure.toFixed(1)}`;
+        addDashboardText(`FLOW ${flowValue} ${snapshot.latest.flowState} · COV ${snapshot.latest.flowCoveragePercent.toFixed(0)}%`, dashboardY + 14, flowColor);
+      }
+      addDashboardText("PCTL " + snapshot.latest.percentileRank.toFixed(1) + "   Z " + snapshot.latest.zScore.toFixed(2) + "   TUW " + snapshot.latest.timeUnderWaterBars, dashboardY + 14 + rowOffset);
+      addDashboardText("SH " + snapshot.latest.sharpe.toFixed(2) + "   SO " + snapshot.latest.sortino.toFixed(2) + "   CA " + snapshot.latest.calmar.toFixed(2) + "   CONF " + snapshot.latest.confidence.toFixed(0) + "%", dashboardY + 28 + rowOffset);
       if (settings.showExpandedDashboard) {
         const latestIndex = Math.max(0, snapshot.inputSize - 1);
-        addDashboardText("P95 " + Math.abs(snapshot.series.p95[latestIndex] ?? 0).toFixed(2) + "%   P99 " + Math.abs(snapshot.series.p99[latestIndex] ?? 0).toFixed(2) + "%   VADD " + snapshot.latest.vadd.toFixed(2), dashboardY + 42);
-        addDashboardText("VaR95 " + snapshot.latest.returnVaR95Percent.toFixed(2) + "%   ES95 " + snapshot.latest.returnES95Percent.toFixed(2) + "%", dashboardY + 56);
-        addDashboardText("DaR95 " + snapshot.latest.drawdownAtRisk95Percent.toFixed(2) + "%   CDaR95 " + snapshot.latest.conditionalDrawdownAtRisk95Percent.toFixed(2) + "%", dashboardY + 70);
-        addDashboardText("ULCER " + snapshot.latest.ulcerIndex.toFixed(2) + "   PAIN " + snapshot.latest.painIndex.toFixed(2) + "   OMEGA " + snapshot.latest.omegaRatio.toFixed(2), dashboardY + 84);
-        addDashboardText("RECOVERY " + snapshot.latest.recoveryFactor.toFixed(2) + "   AUW " + (snapshot.episodes.at(-1)?.areaUnderWater.toFixed(2) ?? "0.00"), dashboardY + 98);
+        addDashboardText("P95 " + Math.abs(snapshot.series.p95[latestIndex] ?? 0).toFixed(2) + "%   P99 " + Math.abs(snapshot.series.p99[latestIndex] ?? 0).toFixed(2) + "%   VADD " + snapshot.latest.vadd.toFixed(2), dashboardY + 42 + rowOffset);
+        addDashboardText("VaR95 " + snapshot.latest.returnVaR95Percent.toFixed(2) + "%   ES95 " + snapshot.latest.returnES95Percent.toFixed(2) + "%", dashboardY + 56 + rowOffset);
+        addDashboardText("DaR95 " + snapshot.latest.drawdownAtRisk95Percent.toFixed(2) + "%   CDaR95 " + snapshot.latest.conditionalDrawdownAtRisk95Percent.toFixed(2) + "%", dashboardY + 70 + rowOffset);
+        addDashboardText("ULCER " + snapshot.latest.ulcerIndex.toFixed(2) + "   PAIN " + snapshot.latest.painIndex.toFixed(2) + "   OMEGA " + snapshot.latest.omegaRatio.toFixed(2), dashboardY + 84 + rowOffset);
+        addDashboardText("RECOVERY " + snapshot.latest.recoveryFactor.toFixed(2) + "   AUW " + (snapshot.episodes.at(-1)?.areaUnderWater.toFixed(2) ?? "0.00"), dashboardY + 98 + rowOffset);
       }
     }
   }
@@ -4559,19 +4596,20 @@ export class BlackChartEngine {
         const sourceIndex = chartIndex - Math.max(0, this.getDisplayCandles().length - ddaSnapshot.inputSize);
         if (sourceIndex >= 0 && sourceIndex < ddaSnapshot.inputSize) {
           const depth = ddaSnapshot.series.depth[sourceIndex] ?? 0;
-          const nearestTail = depth >= Math.abs(ddaSnapshot.series.p99[sourceIndex] ?? 0) ? "P99"
-            : depth >= Math.abs(ddaSnapshot.series.p95[sourceIndex] ?? 0) ? "P95"
-              : depth >= Math.abs(ddaSnapshot.series.p90[sourceIndex] ?? 0) ? "P90"
-                : depth >= Math.abs(ddaSnapshot.series.p75[sourceIndex] ?? 0) ? "P75" : "P50";
+          const nearestTail = nearestDDAProTailLabel(ddaSnapshot.engineMode, ddaSnapshot.series, sourceIndex, depth);
           const tooltipX = Math.max(8, Math.min(plotWidth - 248, this.pointer.x + 14));
-          const tooltipY = Math.max(paneTop + 5, Math.min(paneBottom - 76, this.pointer.y + 12));
-          g.roundRect(tooltipX, tooltipY, 240, 72, 4)
+          const tooltipY = Math.max(paneTop + 5, Math.min(paneBottom - 91, this.pointer.y + 12));
+          g.roundRect(tooltipX, tooltipY, 240, 87, 4)
             .fill({ color: 0x030305, alpha: 0.96 })
             .stroke({ width: 1, color: theme.red, alpha: 0.72 });
           this.addCrosshairText("BC-RDA " + (ddaSnapshot.series.riskState[sourceIndex] ?? "INSUFFICIENT") + " · RISK " + (ddaSnapshot.series.riskScore[sourceIndex] ?? 0).toFixed(1), tooltipX + 8, tooltipY + 6);
           this.addCrosshairText("DRAWDOWN " + (ddaSnapshot.series.rawDrawdown[sourceIndex] ?? 0).toFixed(2) + "% · DEPTH RANK " + (ddaSnapshot.series.percentileRank[sourceIndex] ?? 0).toFixed(1) + "%", tooltipX + 8, tooltipY + 21);
           this.addCrosshairText("DURATION " + (ddaSnapshot.series.duration[sourceIndex] ?? 0).toFixed(0) + " · VELOCITY " + (ddaSnapshot.series.velocity[sourceIndex] ?? 0).toFixed(3), tooltipX + 8, tooltipY + 36);
           this.addCrosshairText("VADD " + (ddaSnapshot.series.vadd[sourceIndex] ?? 0).toFixed(3) + " · NEAREST TAIL " + nearestTail, tooltipX + 8, tooltipY + 51);
+          const flowState = ddaSnapshot.series.flowState[sourceIndex] ?? "UNAVAILABLE";
+          const flowPressure = ddaSnapshot.series.flowPressure[sourceIndex];
+          const flowCoverage = ddaSnapshot.series.flowCoveragePercent[sourceIndex] ?? 0;
+          this.addCrosshairText("FLOW " + (flowState !== "UNAVAILABLE" && Number.isFinite(flowPressure) ? `${flowPressure! >= 0 ? "+" : ""}${flowPressure!.toFixed(1)}` : "--") + " " + flowState + " · COVERAGE " + flowCoverage.toFixed(0) + "%", tooltipX + 8, tooltipY + 66);
         }
       }
     }

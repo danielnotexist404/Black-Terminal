@@ -1,5 +1,9 @@
 # Architecture
 
+## Event Alpha research authority
+
+The Event Alpha subsystem is a service-role-only, point-in-time research and paper-execution pipeline. Authenticated clients receive bounded projections from `/api/event-alpha`; they never ingest source evidence directly into Supabase or fan out to brokers. Economic theses and BC-RDA tactical confirmations remain separate. Full design, model, security and runbook material lives in `docs/event-alpha/`.
+
 ## 2026-08-19 — Native protection truth, HDLX rolling range, and BC-RDA signals
 
 - Bybit TP/SL uses one native protection path with explicit set/cancel/omit semantics, exact hedge-leg identity, paired-side preservation, and post-acceptance authoritative reconciliation.

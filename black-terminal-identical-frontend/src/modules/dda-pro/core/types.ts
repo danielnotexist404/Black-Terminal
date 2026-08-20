@@ -1,7 +1,7 @@
 import type { Candle } from "../../../chart-engine/types.ts";
 
 export const DDA_PRO_SCHEMA_VERSION = 1 as const;
-export const DDA_PRO_SETTINGS_VERSION = 2 as const;
+export const DDA_PRO_SETTINGS_VERSION = 3 as const;
 export const DDA_PRO_INDICATOR_ID = "black-core-dda-pro" as const;
 
 export type DDAProEngineMode = "pine-compatibility" | "black-core-native";
@@ -14,6 +14,8 @@ export type DDAProTheme =
   | "gold" | "edge-tools" | "behavioral" | "quant" | "ocean" | "fire" | "matrix" | "arctic";
 export type DDAProPreset = "Custom" | "BC-RDA — Original Compatibility" | "BC-RDA — Institutional" | "BC-RDA — Macro Risk";
 export type DDAProRiskState = "LOW" | "MODERATE" | "HIGH" | "EXTREME" | "INSUFFICIENT";
+export type DDAProFlowState = "BULLISH" | "NEUTRAL" | "BEARISH" | "UNAVAILABLE";
+export type DDAProFlowAuthority = "EXACT_AGGRESSOR_TRADES" | "UNAVAILABLE";
 export type DDAProSignalIntelligenceMode = "RAW" | "BALANCED" | "INSTITUTIONAL" | "CUSTOM";
 export type DDAProDistributionRegime = "COMPRESSION" | "CHOP" | "TRANSITION" | "DIRECTIONAL_EXPANSION" | "EXHAUSTION" | "REDISTRIBUTION" | "UNCLASSIFIED";
 export type DDAProSignalState = "NEUTRAL" | "WATCHING" | "ARMED" | "CONFIRMED" | "COOLDOWN" | "RESET";
@@ -55,6 +57,18 @@ export type DDAProSettings = {
   velocityWeight: number;
   volatilityWeight: number;
   tailWeight: number;
+  showFlowPressure: boolean;
+  flowPressureSmoothingLength: number;
+  flowPressureNormalizationLookback: number;
+  flowPressureNeutralThreshold: number;
+  flowPressureMinimumCoveragePercent: number;
+  flowAggressorWeight: number;
+  flowCvdWeight: number;
+  flowBullishColor: string;
+  flowBearishColor: string;
+  flowNeutralColor: string;
+  flowLineIntensity: number;
+  flowLineWidth: number;
   signalIntelligenceMode: DDAProSignalIntelligenceMode;
   showRawSignals: boolean;
   showConfirmedSignals: boolean;
@@ -229,6 +243,11 @@ export type DDAProSeries = {
   vadd: number[];
   riskScore: number[];
   riskState: DDAProRiskState[];
+  flowImbalance: number[];
+  flowCvdMomentum: number[];
+  flowPressure: number[];
+  flowCoveragePercent: number[];
+  flowState: DDAProFlowState[];
 };
 
 export type DDAProLatestMetrics = {
@@ -259,6 +278,9 @@ export type DDAProLatestMetrics = {
   recoveryFactor: number;
   omegaRatio: number;
   vadd: number;
+  flowPressure: number;
+  flowCoveragePercent: number;
+  flowState: DDAProFlowState;
 };
 
 export type DDAProSnapshot = {
@@ -275,6 +297,8 @@ export type DDAProSnapshot = {
   barsPerYear: number;
   sourceAuthority: "MARKET_PRICE" | "ACCOUNT_EQUITY" | "STRATEGY_EQUITY" | "UNAVAILABLE";
   sourceWarning: string | null;
+  flowAuthority: DDAProFlowAuthority;
+  flowWarning: string | null;
   series: DDAProSeries;
   episodes: DDAProEpisode[];
   events: DDAProEvent[];
@@ -284,11 +308,27 @@ export type DDAProSnapshot = {
   latest: DDAProLatestMetrics;
 };
 
+export type DDAProFlowBarInput = {
+  time: number;
+  buyVolume: number;
+  sellVolume: number;
+  unknownVolume: number;
+  buyNotional: number;
+  sellNotional: number;
+  unknownNotional: number;
+  exactTradeCount: number;
+  totalTradeCount: number;
+  deliveryComplete: boolean;
+};
+
 export type DDAProCalculationInput = {
   candles: Candle[];
   settings: DDAProSettings;
   timeframeSeconds?: number;
   equityValues?: number[];
   cvdValues?: number[];
+  flowBars?: DDAProFlowBarInput[];
+  flowAuthority?: DDAProFlowAuthority;
+  flowWarning?: string | null;
   signalContext?: { exchange: string; symbol: string; timeframe: string };
 };

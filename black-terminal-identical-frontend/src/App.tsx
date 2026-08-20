@@ -126,12 +126,16 @@ const DomProWindow = lazy(() =>
 const MarketBattlefield = lazy(() =>
   import("./components/MarketBattlefield").then((module) => ({ default: module.MarketBattlefield }))
 );
+const EventAlphaWorkspace = lazy(() =>
+  import("./modules/event-alpha/EventAlphaWorkspace").then((module) => ({ default: module.EventAlphaWorkspace }))
+);
 
 const nav = [
   { label: "WATCHLIST", icon: BookOpen },
   { label: "CHART", icon: ChartCandlestick },
   { label: "INDICATORS", icon: Activity },
   { label: "SCANNER", icon: Radar },
+  { label: "EVENT ALPHA", icon: Activity },
   { label: "ALERTS", icon: Bell },
   { label: "SCRIPT EDITOR", icon: Code2 },
   { label: "STRATEGY LAB", icon: StrategyLabIcon },
@@ -674,6 +678,7 @@ export default function App() {
       { label: "BlackGPT", icon: Bot },
       { label: "INDICATORS", icon: Activity },
       { label: "SCANNER", icon: Radar },
+      { label: "EVENT ALPHA", icon: Activity },
       { label: "POSITIONS", icon: LineChart },
       { label: "PORTFOLIO MANAGER", icon: LayoutDashboard },
       { label: "INVESTMENT GROUPS", icon: Building2 },
@@ -2206,6 +2211,12 @@ export default function App() {
               setActiveNav("PROFILE");
             }}
           />
+        </div>
+      ) : activeNav === "EVENT ALPHA" ? (
+        <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden", position: "relative" }}>
+          <Suspense fallback={<div className="module-focus"><span>EVENT ALPHA</span><b>LOADING SERVER EVIDENCE</b></div>}>
+            <EventAlphaWorkspace onClose={() => setActiveNav("CHART")} />
+          </Suspense>
         </div>
       ) : (
         <main className={battlefieldMode ? "terminal-grid battlefield-grid" : showCompactDom ? "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>

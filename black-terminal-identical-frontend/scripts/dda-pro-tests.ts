@@ -128,7 +128,8 @@ const nativeSettings = { ...DEFAULT_DDA_PRO_SETTINGS, lookback: 100, smoothingMe
   const alertSource = readFileSync(new URL("../src/components/AlertCenter.tsx", import.meta.url), "utf8");
   const engineSource = readFileSync(new URL("../src/chart-engine/BlackChartEngine.ts", import.meta.url), "utf8");
   assert.match(chartSource, /alertBarIsConfirmed/);
-  assert.match(chartSource, /ddaProCalculationHash\(\{ candles: source/);
+  assert.match(chartSource, /const calculationInput = \{/);
+  assert.match(chartSource, /ddaProCalculationHash\(calculationInput/);
   assert.match(chartSource, /setDDAProSourceRevision/);
   assert.match(engineSource, /NEAREST TAIL/);
   for (const band of ["p05", "p10", "p25", "p50", "p75", "p90", "p95", "p99"]) {

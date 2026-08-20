@@ -180,7 +180,9 @@ function mapTrade(symbol: MarketSymbol, trade: OkxTrade): TradeTick {
     time: Math.floor(parseNumber(trade.ts) / 1000),
     price: parseNumber(trade.px),
     quantity: parseNumber(trade.sz),
-    side: trade.side
+    side: trade.side,
+    aggressorSource: "EXCHANGE_AGGRESSOR_FLAG",
+    receivedAt: Date.now() / 1000
   };
 }
 
@@ -333,7 +335,9 @@ function createOkxTradeSubscription(
           time: Math.floor(parseNumber(t.ts) / 1000),
           price: parseNumber(t.px),
           quantity: parseNumber(t.sz),
-          side: t.side === "buy" ? "buy" : "sell"
+          side: t.side === "buy" ? "buy" : "sell",
+          aggressorSource: "EXCHANGE_AGGRESSOR_FLAG",
+          receivedAt: Date.now() / 1000
         };
         messageHandlers.forEach((handler) => handler(trade));
       }

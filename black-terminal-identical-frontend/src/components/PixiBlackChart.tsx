@@ -105,6 +105,7 @@ import { auctionProfileCalculationSettingsHash, migrateAuctionProfileSettings } 
 import type { AuctionProfileSettings, AuctionProfileSnapshot, CanonicalTrade } from "../modules/auction-profile/core/types";
 import { retainCertifiedRadapSnapshots } from "../modules/auction-profile/core/stability";
 import { canonicalCvdService, normalizeCanonicalTrade } from "../modules/auction-profile/data/tradeSource";
+import { buildDDAProFlowInput } from "../modules/dda-pro/data/flowPressureSource";
 import { AuctionProfileWorkerClient } from "../modules/auction-profile/worker/AuctionProfileWorkerClient";
 import { resolveAuctionVisualizationLayers } from "../modules/auction-profile/rendering/visualization";
 import type { TradeTick } from "../market-data/types";
@@ -203,6 +204,13 @@ type ChartContextMenuState = {
 };
 
 type OrderContextMenuState = { x: number; y: number; order: OrderUpdate };
+
+type DDAProFlowCaptureState = {
+  venue: string;
+  symbol: string;
+  captureStartedAt: number | null;
+  streamHealthy: boolean;
+};
 
 type PendingProtectionChange = {
   positionId: string;
@@ -570,6 +578,13 @@ export function PixiBlackChart({
   const auctionTradeHistoryRef = useRef<CanonicalTrade[]>([]);
   const auctionTradeBufferRef = useRef<CanonicalTrade[]>([]);
   const auctionTradeFlushTimerRef = useRef<number | undefined>(undefined);
+  const ddaFlowRefreshTimerRef = useRef<number | undefined>(undefined);
+  const ddaFlowCaptureRef = useRef<DDAProFlowCaptureState>({
+    venue: marketSymbol.exchange,
+    symbol: marketSymbol.rawSymbol,
+    captureStartedAt: null,
+    streamHealthy: false
+  });
   const replayAppliedRef = useRef(false);
   const alertSettingsRef = useRef(alertSettings);
   const lastAlertSentAtRef = useRef(new Map<string, number>());
@@ -838,6 +853,7 @@ export function PixiBlackChart({
     let tradePollTimer: number | undefined;
     let tickerHeartbeatTimer: number | undefined;
     let tradePollingStarted = false;
+    let tradeStreamActive = false;
     let synthesizeCandlesFromTrades = false;
     let mockSeedPrice = lastPrice;
     let lastLiveCandleAt = 0;
@@ -855,6 +871,12 @@ export function PixiBlackChart({
     const allowSimulatedFallback =
       bclifVisualFixture || marketSymbol.exchange === "mock" || import.meta.env.VITE_ALLOW_SIMULATED_MARKET_FALLBACK === "true";
     replaySourceRef.current = [];
+    ddaFlowCaptureRef.current = {
+      venue: marketSymbol.exchange,
+      symbol: marketSymbol.rawSymbol,
+      captureStartedAt: null,
+      streamHealthy: false
+    };
     replayCursorRef.current = 0;
     replayAppliedRef.current = false;
     emitReplayStatus(replayActiveRef.current, false);
@@ -1013,10 +1035,41 @@ export function PixiBlackChart({
 
     const candleStreamIsStale = () => !lastLiveCandleAt || Date.now() - lastLiveCandleAt > liveCandleStaleMs;
 
+    const scheduleDDAFlowRefresh = () => {
+      if (ddaFlowRefreshTimerRef.current) return;
+      ddaFlowRefreshTimerRef.current = window.setTimeout(() => {
+        ddaFlowRefreshTimerRef.current = undefined;
+        setDDAProSourceRevision((revision) => revision + 1);
+      }, 250);
+    };
+
+    const setDDAFlowStreamHealth = (streamHealthy: boolean) => {
+      ddaFlowCaptureRef.current = {
+        venue: marketSymbol.exchange,
+        symbol: marketSymbol.rawSymbol,
+        captureStartedAt: streamHealthy ? Date.now() / 1000 : null,
+        streamHealthy
+      };
+      scheduleDDAFlowRefresh();
+    };
+
     const ingestTrades = (trades: TradeTick[]) => {
       const newTrades = trades.filter((trade) => !seenTrades.has(trade.tradeId));
+      if (tradeStreamActive && newTrades.length > 0 && !ddaFlowCaptureRef.current.streamHealthy) {
+        const firstReceivedAt = Math.min(...newTrades.map((trade) =>
+          Number.isFinite(trade.receivedAt) ? Number(trade.receivedAt) : Date.now() / 1000
+        ));
+        ddaFlowCaptureRef.current = {
+          venue: marketSymbol.exchange,
+          symbol: marketSymbol.rawSymbol,
+          captureStartedAt: firstReceivedAt,
+          streamHealthy: true
+        };
+        scheduleDDAFlowRefresh();
+      }
       const canonicalTrades = newTrades.map(normalizeCanonicalTrade);
-      canonicalCvdService.ingest(canonicalTrades);
+      const acceptedCanonicalTrades = canonicalCvdService.ingest(canonicalTrades);
+      if (acceptedCanonicalTrades > 0) scheduleDDAFlowRefresh();
       auctionTradeHistoryRef.current = [...auctionTradeHistoryRef.current, ...canonicalTrades].slice(-250_000);
       if (auctionDataRequired && !normalizedAuctionProfileSettings.compositeLocked && auctionWorkerRef.current && canonicalTrades.length) {
         auctionTradeBufferRef.current.push(...canonicalTrades);
@@ -1138,9 +1191,12 @@ export function PixiBlackChart({
           }
           ingestTrades([trade]);
         });
+        tradeStreamActive = Boolean(liveTrades);
 
         liveTrades.onError((err) => {
           console.error(`${adapter.label} fallback trade stream failed`, err);
+          tradeStreamActive = false;
+          setDDAFlowStreamHealth(false);
           startTradePolling();
         });
       } else {
@@ -1165,7 +1221,11 @@ export function PixiBlackChart({
       });
 
       if (!liveTrades) {
+        tradeStreamActive = false;
+        setDDAFlowStreamHealth(false);
         startTradePolling();
+      } else {
+        tradeStreamActive = true;
       }
 
       startTickerHeartbeat();
@@ -1181,6 +1241,8 @@ export function PixiBlackChart({
 
       liveTrades?.onError((err) => {
         console.error(`${adapter.label} live trade stream failed`, err);
+        tradeStreamActive = false;
+        setDDAFlowStreamHealth(false);
         liveTrades?.unsubscribe();
         liveTrades = undefined;
         startTradePolling();
@@ -1361,6 +1423,14 @@ export function PixiBlackChart({
       if (auctionTradeFlushTimerRef.current) {
         window.clearTimeout(auctionTradeFlushTimerRef.current);
         auctionTradeFlushTimerRef.current = undefined;
+      }
+      if (ddaFlowRefreshTimerRef.current) {
+        window.clearTimeout(ddaFlowRefreshTimerRef.current);
+        ddaFlowRefreshTimerRef.current = undefined;
+      }
+      const capture = ddaFlowCaptureRef.current;
+      if (capture.venue === marketSymbol.exchange && capture.symbol === marketSymbol.rawSymbol) {
+        ddaFlowCaptureRef.current = { ...capture, captureStartedAt: null, streamHealthy: false };
       }
       engineRef.current = null;
       setAifPriceTransform(null);
@@ -2119,18 +2189,45 @@ export function PixiBlackChart({
       const latestIsDeveloping = Boolean(available.length && (available.at(-1)?.time ?? 0) + timeframeDuration > Date.now() / 1000);
       const source = settings.realtimeMode === "confirmed-bars" && latestIsDeveloping ? available.slice(0, -1) : available;
       if (source.length < 2) return;
-      const calculationIdentity = marketSymbol.exchange + ":" + marketSymbol.rawSymbol + ":" + timeframe + ":" + ddaProCalculationHash({ candles: source, settings, timeframeSeconds: timeframeDuration }, settings.engineMode);
+      const capture = ddaFlowCaptureRef.current;
+      const wantsFlowData = settings.showFlowPressure || settings.cvdConfirmation;
+      const flowInput = wantsFlowData && capture.streamHealthy && capture.venue === marketSymbol.exchange && capture.symbol === marketSymbol.rawSymbol && chartSourceVenueRef.current === marketSymbol.exchange
+        ? buildDDAProFlowInput({
+            candles: source,
+            trades: canonicalCvdService.getTrades({
+              venue: marketSymbol.exchange,
+              symbol: marketSymbol.rawSymbol,
+              start: source[0]?.time ?? 0,
+              end: (source.at(-1)?.time ?? 0) + timeframeDuration
+            }),
+            timeframeSeconds: timeframeDuration,
+            captureStartedAt: capture.captureStartedAt,
+            streamHealthy: true
+          })
+        : {
+            flowBars: undefined,
+            cvdValues: undefined,
+            flowAuthority: "UNAVAILABLE" as const,
+            flowWarning: wantsFlowData
+              ? chartSourceVenueRef.current !== marketSymbol.exchange
+                ? "BC-RDA Flow Pressure is unavailable because chart candles and the live aggressor stream are from different venues."
+                : "BC-RDA Flow Pressure is unavailable until a continuous genuine aggressor-trade stream is healthy."
+              : "BC-RDA Flow Pressure is disabled."
+          };
+      const calculationInput = {
+        candles: source,
+        settings,
+        timeframeSeconds: timeframeDuration,
+        signalContext: { exchange: marketSymbol.exchange, symbol: marketSymbol.rawSymbol, timeframe },
+        ...flowInput
+      };
+      const calculationIdentity = marketSymbol.exchange + ":" + marketSymbol.rawSymbol + ":" + timeframe + ":" + ddaProCalculationHash(calculationInput, settings.engineMode);
       if (ddaCalculationIdentityRef.current === calculationIdentity) return;
       ddaCalculationIdentityRef.current = calculationIdentity;
       const worker = ddaProWorkerRef.current ?? new DDAProWorkerClient();
       ddaProWorkerRef.current = worker;
       setDDAProStatus("CALCULATING");
-      void worker.calculate({
-        candles: source,
-        settings,
-        timeframeSeconds: timeframeSeconds[timeframe],
-        signalContext: { exchange: marketSymbol.exchange, symbol: marketSymbol.rawSymbol, timeframe }
-      }).then((snapshot) => {
+      void worker.calculate(calculationInput).then((snapshot) => {
         if (ddaCalculationIdentityRef.current !== calculationIdentity) return;
         setDDAProSnapshot(snapshot);
         setDDAProStatus("READY");
@@ -5473,6 +5570,8 @@ export function PixiBlackChart({
                   <div className="vwap-mode-note">CVD confirmation fails closed unless genuine CVD values are supplied. No synthetic CVD is manufactured.</div>
                 </details>
               )}
+              <div className="indicator-settings-section">BC-RDA Drawdown Risk Fan</div>
+              <div className="vwap-mode-note">The fan remains a one-sided drawdown-distribution and downside-tail-risk visualization. Its white, gray, and red tiers indicate risk severity—not buying or selling activity.</div>
               <label>
                 Analysis Source
                 <select value={ddaProSettings.equitySource} onChange={(event) => updateDDAProSetting("equitySource", event.target.value as DDAProSettings["equitySource"])}>
@@ -5541,6 +5640,24 @@ export function PixiBlackChart({
               <label>VADD<input type="number" min={0} max={1} step={0.05} value={ddaProSettings.volatilityWeight} onChange={(event) => updateDDAProSetting("volatilityWeight", Number(event.target.value))} /></label>
               <label>Tail Severity<input type="number" min={0} max={1} step={0.05} value={ddaProSettings.tailWeight} onChange={(event) => updateDDAProSetting("tailWeight", Number(event.target.value))} /></label>
               <div className="vwap-mode-note">Weights are normalized at calculation time. Defaults sum to 1.00.</div>
+              <details className="indicator-advanced-details">
+                <summary>BC-RDA Flow Pressure · Independent Layer</summary>
+                <label>Show Flow Pressure Outline<input type="checkbox" checked={ddaProSettings.showFlowPressure} onChange={(event) => updateDDAProSetting("showFlowPressure", event.target.checked)} /></label>
+                <div className="vwap-mode-note">Uses only genuine classified aggressor trades. White means buying pressure, blood red means selling pressure, gray means neutral. It never recolors or changes the Drawdown Risk Fan.</div>
+                <label>Pressure Smoothing<input type="number" min={1} max={100} value={ddaProSettings.flowPressureSmoothingLength} onChange={(event) => updateDDAProSetting("flowPressureSmoothingLength", Number(event.target.value))} /></label>
+                <label>Robust Normalization Lookback<input type="number" min={20} max={2000} value={ddaProSettings.flowPressureNormalizationLookback} onChange={(event) => updateDDAProSetting("flowPressureNormalizationLookback", Number(event.target.value))} /></label>
+                <label>Neutral Zone ±<input type="number" min={0} max={50} step={1} value={ddaProSettings.flowPressureNeutralThreshold} onChange={(event) => updateDDAProSetting("flowPressureNeutralThreshold", Number(event.target.value))} /></label>
+                <label>Minimum Classified Coverage %<input type="number" min={50} max={100} step={1} value={ddaProSettings.flowPressureMinimumCoveragePercent} onChange={(event) => updateDDAProSetting("flowPressureMinimumCoveragePercent", Number(event.target.value))} /></label>
+                <label>Aggressor Imbalance Weight<input type="number" min={0} max={1} step={0.05} value={ddaProSettings.flowAggressorWeight} onChange={(event) => updateDDAProSetting("flowAggressorWeight", Number(event.target.value))} /></label>
+                <label>CVD Momentum Weight<input type="number" min={0} max={1} step={0.05} value={ddaProSettings.flowCvdWeight} onChange={(event) => updateDDAProSetting("flowCvdWeight", Number(event.target.value))} /></label>
+                <label className="indicator-color-setting">Bullish Pressure<input type="color" value={ddaProSettings.flowBullishColor} onChange={(event) => updateDDAProSetting("flowBullishColor", event.target.value)} /></label>
+                <label className="indicator-color-setting">Bearish Pressure<input type="color" value={ddaProSettings.flowBearishColor} onChange={(event) => updateDDAProSetting("flowBearishColor", event.target.value)} /></label>
+                <label className="indicator-color-setting">Neutral Pressure<input type="color" value={ddaProSettings.flowNeutralColor} onChange={(event) => updateDDAProSetting("flowNeutralColor", event.target.value)} /></label>
+                <label className="indicator-range-row">Flow Intensity<span><input type="range" min={0} max={100} value={ddaProSettings.flowLineIntensity} onChange={(event) => updateDDAProSetting("flowLineIntensity", Number(event.target.value))} /><b>{ddaProSettings.flowLineIntensity}</b></span></label>
+                <label>Flow Line Width<input type="number" min={0.5} max={5} step={0.1} value={ddaProSettings.flowLineWidth} onChange={(event) => updateDDAProSetting("flowLineWidth", Number(event.target.value))} /></label>
+                <div className="vwap-mode-note">{ddaProSnapshot ? `${ddaProSnapshot.flowAuthority} · ${ddaProSnapshot.latest.flowState} ${ddaProSnapshot.latest.flowState === "UNAVAILABLE" ? "--" : ddaProSnapshot.latest.flowPressure.toFixed(1)} · coverage ${ddaProSnapshot.latest.flowCoveragePercent.toFixed(0)}%` : "Awaiting live aggressor-flow evidence"}</div>
+                {ddaProSnapshot?.flowWarning && <div className="vwap-mode-note">{ddaProSnapshot.flowWarning}</div>}
+              </details>
               <div className="indicator-settings-section">Plots & Dashboard</div>
               <div className="vwap-mode-note">Pane camera: drag anywhere inside BC-RDA to pan time and risk depth. Scroll over its right-hand scale to expand or contract the value range; double-click that scale to reset.</div>
               <label>Raw Drawdown<input type="checkbox" checked={ddaProSettings.showRawDrawdown} onChange={(event) => updateDDAProSetting("showRawDrawdown", event.target.checked)} /></label>

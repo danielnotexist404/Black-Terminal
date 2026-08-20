@@ -325,9 +325,12 @@ export function applyDDAProSignalIntelligence(
       if (settings.priceStructureConfirmation && !priceStructureConfirmed(input.candles, index, direction, settings.structureConfirmationStrength)) { accepted = false; reasons.push("STRUCTURE_NOT_CONFIRMED"); }
       if (settings.volumeConfirmation && !volumeConfirmed(input.candles, index)) { accepted = false; reasons.push("VOLUME_NOT_CONFIRMED"); }
       if (settings.cvdConfirmation) {
-        const current = input.cvdValues?.[index];
-        const prior = input.cvdValues?.[Math.max(0, index - settings.minimumExcursionBars)];
-        if (!Number.isFinite(current) || !Number.isFinite(prior) || (direction === "long" ? current! <= prior! : current! >= prior!)) { accepted = false; reasons.push("CVD_UNAVAILABLE"); }
+        const priorIndex = Math.max(0, index - settings.minimumExcursionBars);
+        const cvdWindow = input.cvdValues?.slice(priorIndex, index + 1);
+        const current = cvdWindow?.at(-1);
+        const prior = cvdWindow?.[0];
+        const exactContinuousWindow = cvdWindow?.length === index - priorIndex + 1 && cvdWindow.every(Number.isFinite);
+        if (!exactContinuousWindow || (direction === "long" ? current! <= prior! : current! >= prior!)) { accepted = false; reasons.push("CVD_UNAVAILABLE"); }
       }
       if (settings.higherTimeframeConfirmation) {
         const higherDirection = higherTimeframeDirections?.[index] ?? 0;

@@ -31,6 +31,8 @@ assert.equal(
     assert.equal(series.length, values.length, key + " length");
     if (key === "riskState") {
       assert.ok(series.every((value) => ["LOW", "MODERATE", "HIGH", "EXTREME", "INSUFFICIENT"].includes(String(value))), "riskState contains invalid output");
+    } else if (key === "flowState") {
+      assert.ok(series.every((value) => ["BULLISH", "NEUTRAL", "BEARISH", "UNAVAILABLE"].includes(String(value))), "flowState contains invalid output");
     } else {
       assert.ok(series.every((value) => Number.isFinite(value as number)), key + " contains non-finite output");
     }

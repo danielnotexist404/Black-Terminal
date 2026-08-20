@@ -269,7 +269,9 @@ function mapRecentTrade(symbol: MarketSymbol, payload: BinanceRecentTradeRest): 
     time: Math.floor(payload.time / 1000),
     price: parseNumber(payload.price),
     quantity: parseNumber(payload.qty),
-    side: payload.isBuyerMaker ? "sell" : "buy"
+    side: payload.isBuyerMaker ? "sell" : "buy",
+    aggressorSource: "MAKER_SIDE_INVERSION",
+    receivedAt: Date.now() / 1000
   };
 }
 
@@ -580,7 +582,9 @@ export const binanceMarketDataAdapter: MarketDataAdapter = {
           time: Math.floor(payload.T / 1000),
           price: parseNumber(payload.p),
           quantity: parseNumber(payload.q),
-          side: payload.m ? "sell" : "buy"
+          side: payload.m ? "sell" : "buy",
+          aggressorSource: "MAKER_SIDE_INVERSION",
+          receivedAt: Date.now() / 1000
         };
       },
       onTrade

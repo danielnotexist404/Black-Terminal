@@ -15,6 +15,7 @@ import {
 } from "./engineShared.ts";
 import type { DDAProCalculationInput, DDAProRiskState, DDAProSnapshot } from "./types.ts";
 import { applyDDAProSignalIntelligence } from "./signalIntelligence.ts";
+import { calculateDDAProFlowPressure } from "./flowPressure.ts";
 
 const clamp = (value: number, minimum = 0, maximum = 100) => Math.max(minimum, Math.min(maximum, value));
 
@@ -76,7 +77,8 @@ export function calculateDDAProNative(rawInput: DDAProCalculationInput): DDAProS
   const normalized = {
     ...input,
     candles,
-    cvdValues: suppliedCvdValues ? validSourceIndexes.map((index) => suppliedCvdValues[index] ?? Number.NaN) : undefined
+    cvdValues: suppliedCvdValues ? validSourceIndexes.map((index) => suppliedCvdValues[index] ?? Number.NaN) : undefined,
+    flowBars: input.flowBars ? validSourceIndexes.map((index) => input.flowBars?.[index]!).filter(Boolean) : undefined
   };
   const source = sourceValues(normalized);
   const values = source.values;
@@ -201,6 +203,7 @@ export function calculateDDAProNative(rawInput: DDAProCalculationInput): DDAProS
   const authorityConfidence = source.authority === "UNAVAILABLE" ? 0 : 1;
   const confidence = clamp((sampleConfidence * 0.55 + returnConfidence * 0.25 + episodeConfidence * 0.10 + authorityConfidence * 0.10) * sourceCompleteness * 100);
   series.riskState = riskStates;
+  const flow = calculateDDAProFlowPressure(normalized, series);
   const latestState = riskStates[index] ?? "INSUFFICIENT";
   const events = deriveEvents(candles, riskStates, series.depth, episodes);
   for (let eventIndex = 1; eventIndex < length; eventIndex++) {
@@ -254,6 +257,8 @@ export function calculateDDAProNative(rawInput: DDAProCalculationInput): DDAProS
     barsPerYear: metrics.barsPerYear,
     sourceAuthority: source.authority,
     sourceWarning: [source.warning, suppliedCandles.length !== candles.length ? (suppliedCandles.length - candles.length) + " malformed source bar(s) were excluded; confidence was reduced." : null].filter(Boolean).join(" ") || null,
+    flowAuthority: flow.authority,
+    flowWarning: flow.warning,
     series,
     episodes,
     events,

@@ -29,6 +29,18 @@ export const DEFAULT_DDA_PRO_SETTINGS: DDAProSettings = {
   velocityWeight: 0.15,
   volatilityWeight: 0.10,
   tailWeight: 0.10,
+  showFlowPressure: true,
+  flowPressureSmoothingLength: 5,
+  flowPressureNormalizationLookback: 100,
+  flowPressureNeutralThreshold: 12,
+  flowPressureMinimumCoveragePercent: 95,
+  flowAggressorWeight: 0.65,
+  flowCvdWeight: 0.35,
+  flowBullishColor: "#f2f2f4",
+  flowBearishColor: "#ff1838",
+  flowNeutralColor: "#777b83",
+  flowLineIntensity: 92,
+  flowLineWidth: 1.8,
   signalIntelligenceMode: "RAW",
   showRawSignals: true,
   showConfirmedSignals: true,
@@ -147,6 +159,18 @@ export function migrateDDAProSettings(value?: Partial<DDAProSettings> | null): D
     velocityWeight: Math.max(0, Math.min(1, finite(merged.velocityWeight, 0.15))),
     volatilityWeight: Math.max(0, Math.min(1, finite(merged.volatilityWeight, 0.10))),
     tailWeight: Math.max(0, Math.min(1, finite(merged.tailWeight, 0.10))),
+    showFlowPressure: boolean(merged.showFlowPressure, true),
+    flowPressureSmoothingLength: Math.max(1, Math.min(100, Math.round(finite(merged.flowPressureSmoothingLength, 5)))),
+    flowPressureNormalizationLookback: Math.max(20, Math.min(2_000, Math.round(finite(merged.flowPressureNormalizationLookback, 100)))),
+    flowPressureNeutralThreshold: Math.max(0, Math.min(50, finite(merged.flowPressureNeutralThreshold, 12))),
+    flowPressureMinimumCoveragePercent: Math.max(50, Math.min(100, finite(merged.flowPressureMinimumCoveragePercent, 95))),
+    flowAggressorWeight: Math.max(0, Math.min(1, finite(merged.flowAggressorWeight, 0.65))),
+    flowCvdWeight: Math.max(0, Math.min(1, finite(merged.flowCvdWeight, 0.35))),
+    flowBullishColor: typeof merged.flowBullishColor === "string" ? merged.flowBullishColor : "#f2f2f4",
+    flowBearishColor: typeof merged.flowBearishColor === "string" ? merged.flowBearishColor : "#ff1838",
+    flowNeutralColor: typeof merged.flowNeutralColor === "string" ? merged.flowNeutralColor : "#777b83",
+    flowLineIntensity: Math.max(0, Math.min(100, Math.round(finite(merged.flowLineIntensity, 92)))),
+    flowLineWidth: Math.max(0.5, Math.min(5, finite(merged.flowLineWidth, 1.8))),
     signalIntelligenceMode: SIGNAL_MODES.has(merged.signalIntelligenceMode) ? merged.signalIntelligenceMode : "RAW",
     showRawSignals: boolean(merged.showRawSignals, true),
     showConfirmedSignals: boolean(merged.showConfirmedSignals, true),
@@ -281,7 +305,7 @@ export function resolveDDAProBarsPerYear(settings: DDAProSettings, timeframeSeco
 
 export function ddaProCalculationSettingsHash(settings: DDAProSettings) {
   const value = { ...migrateDDAProSettings(settings) } as Record<string, unknown>;
-  for (const key of ["preset", "theme", "scaleMode", "customScaleDepthPercent", "dashboardPosition", "rawColor", "smoothedColor", "meanColor", "moderateColor", "highColor", "extremeColor", "lineIntensity", "fillIntensity", "lineWidth", "showRawDrawdown", "showSmoothedDrawdown", "showMean", "showSigmaBands", "showQuantiles", "showZScore", "showDuration", "showVelocity", "showRiskScore", "showDashboard", "showExpandedDashboard", "showEpisodeMarkers", "showRawSignals", "showConfirmedSignals", "showProvisionalSignals", "confirmedAlertsOnly", "showSignalConfidence", "showRegimeDiagnostics"]) delete value[key];
+  for (const key of ["preset", "theme", "scaleMode", "customScaleDepthPercent", "dashboardPosition", "rawColor", "smoothedColor", "meanColor", "moderateColor", "highColor", "extremeColor", "lineIntensity", "fillIntensity", "lineWidth", "showFlowPressure", "flowBullishColor", "flowBearishColor", "flowNeutralColor", "flowLineIntensity", "flowLineWidth", "showRawDrawdown", "showSmoothedDrawdown", "showMean", "showSigmaBands", "showQuantiles", "showZScore", "showDuration", "showVelocity", "showRiskScore", "showDashboard", "showExpandedDashboard", "showEpisodeMarkers", "showRawSignals", "showConfirmedSignals", "showProvisionalSignals", "confirmedAlertsOnly", "showSignalConfidence", "showRegimeDiagnostics"]) delete value[key];
   const json = JSON.stringify(value, Object.keys(value).sort());
   let hash = 0x811c9dc5;
   for (let index = 0; index < json.length; index++) { hash ^= json.charCodeAt(index); hash = Math.imul(hash, 0x01000193) >>> 0; }

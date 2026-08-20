@@ -15,6 +15,7 @@ import {
 } from "./engineShared.ts";
 import type { DDAProCalculationInput, DDAProRiskState, DDAProSnapshot } from "./types.ts";
 import { applyDDAProSignalIntelligence } from "./signalIntelligence.ts";
+import { calculateDDAProFlowPressure } from "./flowPressure.ts";
 
 export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): DDAProSnapshot {
   const settings = migrateDDAProSettings({
@@ -110,6 +111,7 @@ export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): 
   const metrics = performanceMetrics(values.slice(tailStart), series.depth.slice(tailStart), settings, rawInput.timeframeSeconds ?? 86_400, dar95, cdar95);
   const confidence = Math.max(0, Math.min(100, length / settings.lookback * 100));
   series.riskState = riskStates;
+  const flow = calculateDDAProFlowPressure(input, series);
   const latestState = riskStates[index] ?? "INSUFFICIENT";
   const events = deriveEvents(candles, riskStates, series.depth, episodes);
   for (const event of events) Object.assign(event, { engineMode: "pine-compatibility", sourceAuthority: source.authority, lookback, riskScore: series.riskScore[event.index] ?? 0, confidence, drawdownPercent: series.rawDrawdown[event.index] ?? 0 });
@@ -135,6 +137,8 @@ export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): 
     barsPerYear: 252,
     sourceAuthority: source.authority,
     sourceWarning: source.warning,
+    flowAuthority: flow.authority,
+    flowWarning: flow.warning,
     series,
     episodes,
     events,

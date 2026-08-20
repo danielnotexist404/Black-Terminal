@@ -89,6 +89,7 @@ export type TradeTick = {
   price: number;
   quantity: number;
   side: "buy" | "sell" | "unknown";
+  receivedAt?: number;
   aggressorSource?:
     | "EXCHANGE_AGGRESSOR_FLAG"
     | "MAKER_SIDE_INVERSION"

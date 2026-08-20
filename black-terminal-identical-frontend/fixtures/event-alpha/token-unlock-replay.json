@@ -1,0 +1,46 @@
+{
+  "configuration": {
+    "cutoffAt": "2026-08-10T00:00:00Z",
+    "latencyMs": 500,
+    "codeCommit": "SYNTHETIC_TEST_COMMIT",
+    "dataSnapshotIdentifiers": ["synthetic-fixture-v1"],
+    "tradableUniverseDefinition": "synthetic perpetual fixture",
+    "randomSeed": 7,
+    "modelVersions": { "expectation": "test-v1", "surprise": "EVENT_SURPRISE_V1", "forecast": "REMAINING_EVENT_ALPHA_V1" },
+    "featureVersions": { "tokenSupply": "TOKEN_UNLOCK_V1" },
+    "costs": { "spreadBps": 2, "slippageBps": 3, "feesBps": 5, "fundingBps": 0 }
+  },
+  "rawEvents": [{
+    "sourceKey": "SYNTHETIC_REPLAY_ONLY",
+    "sourceEventId": "unlock-demo-1",
+    "eventFamily": "TOKEN_SUPPLY",
+    "observedAt": "2026-08-01T12:00:00Z",
+    "firstActionableAt": "2026-08-01T12:00:00Z",
+    "sourcePublishedAt": "2026-08-01T11:59:00Z",
+    "payload": {
+      "assetId": "DEMO", "symbol": "DEMOUSDT", "eventTime": "2026-08-05T12:00:00Z",
+      "unlockTokens": 120, "circulatingSupply": 1000, "beneficiaryClass": "TEAM",
+      "liquidImmediatelyPct": 1, "sourceConfidence": 0.95
+    }
+  }],
+  "expectations": [{
+    "canonicalEventKey": "TOKEN_SUPPLY:DEMO:2026-08-05T12:00:00.000Z:TEAM",
+    "asOf": "2026-07-31T12:00:00Z", "modelKey": "SYNTHETIC_CONSENSUS", "modelVersion": "1",
+    "expectedValue": 80, "expectedTime": "2026-08-05T12:00:00Z", "expectedProbability": null,
+    "dispersion": 5, "confidence": 0.9, "contributors": [], "featureManifest": { "fixture": true }
+  }],
+  "assetProfiles": [{
+    "canonicalEventKey": "TOKEN_SUPPLY:DEMO:2026-08-05T12:00:00.000Z:TEAM",
+    "knownAt": "2026-07-31T12:00:00Z", "circulatingSupply": 1000,
+    "averageDailyDollarVolume": 100, "liquidSupplyRatio": 1, "valueCaptureScore": 0.2
+  }],
+  "tradableUniverse": [{
+    "symbol": "DEMOUSDT", "knownAt": "2026-07-01T00:00:00Z", "listedAt": "2025-01-01T00:00:00Z",
+    "delistedAt": null, "venueAvailable": true, "marketKind": "PERPETUAL"
+  }],
+  "marketObservations": [{
+    "canonicalEventKey": "TOKEN_SUPPLY:DEMO:2026-08-05T12:00:00.000Z:TEAM",
+    "cutoffAt": "2026-08-01T12:00:00.500Z", "assetReturnBps": -50, "benchmarkReturnBps": 0,
+    "horizonSeconds": 3600, "expiresAt": "2026-08-03T00:00:00Z"
+  }]
+}

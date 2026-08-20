@@ -203,6 +203,7 @@ export interface CanonicalTrade {
   notional: number;
   aggressorSide: CanonicalAggressorSide;
   source: CanonicalAggressorSource;
+  receivedAt?: number;
 }
 
 export interface ProfileDataQuality {
@@ -615,6 +616,7 @@ export function canonicalTradeFromTick(
     notional: price * quantity,
 
     aggressorSide: tick.side === "buy" ? "BUY" : tick.side === "sell" ? "SELL" : "UNKNOWN",
-    source
+    source,
+    receivedAt: Number.isFinite(tick.receivedAt) ? tick.receivedAt : Date.now() / 1000
   };
 }

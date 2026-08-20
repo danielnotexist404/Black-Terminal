@@ -54,8 +54,11 @@ for (const operation of ["start", "send", "review_request", "read", "archive", "
 assert.match(messaging, /clientMessageId/, "message idempotency key is not enforced");
 assert.match(messaging, /social_start_direct_conversation/, "messaging route bypasses the atomic conversation RPC");
 
-const routeMap = read("api/network/[resource].js");
+const routeMap = read("api/network/[...path].js");
 for (const route of ["professional-center", "social-posts", "social-engagement", "social-relationships", "social-messaging", "social-notifications", "social-media", "social-search", "social-assets", "social-moderation"]) assert.match(routeMap, new RegExp(`\\"${route}\\"`));
+for (const action of ["join-request", "messages", "review-request", "moderation"]) assert.match(routeMap, new RegExp(`\\"${action}\\"`));
+assert.match(routeMap, /path\.length === 3 && path\[0\] === "investment-groups"/, "nested investment-group routes are not dispatched");
+assert.match(routeMap, /req\.query\.groupId = groupId/, "nested investment-group route does not preserve groupId");
 
 const page = read("src/modules/professional-network/ProfessionalCenterPage.tsx");
 for (const component of ["FeedComposer", "ProfileHeader", "ProfileWorkspace", "MessagingPanel", "NotificationsPanel", "DiscoveryPanel", "ModerationPanel"]) assert.match(page, new RegExp(`<${component}`));

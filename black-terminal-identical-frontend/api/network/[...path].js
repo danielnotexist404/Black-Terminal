@@ -12,10 +12,14 @@ import socialMedia from "../../server/network/routes/social-media.js";
 import socialSearch from "../../server/network/routes/social-search.js";
 import socialAssets from "../../server/network/routes/social-assets.js";
 import socialModeration from "../../server/network/routes/social-moderation.js";
+import joinRequest from "../../server/network/routes/investment-group-join-request.js";
+import messages from "../../server/network/routes/investment-group-messages.js";
+import reviewRequest from "../../server/network/routes/investment-group-review-request.js";
+import moderation from "../../server/network/routes/investment-group-moderation.js";
 import { sendError } from "../../server/portfolio-api.js";
 import { requireApiSecurity } from "../../server/security/securityMiddleware.js";
 
-const handlers = {
+const resourceHandlers = {
   follow,
   "investment-groups": investmentGroups,
   posts,
@@ -32,10 +36,35 @@ const handlers = {
   "social-moderation": socialModeration
 };
 
+const investmentGroupHandlers = {
+  "join-request": joinRequest,
+  "messages": messages,
+  "review-request": reviewRequest,
+  "moderation": moderation
+};
+
+const cleanSegment = (value) => String(value || "").replace(/\.js$/, "");
+
 export default async function handler(req, res) {
   try {
-    const resource = String(req.query?.resource || "").replace(/\.js$/, "");
-    const routeHandler = handlers[resource];
+    const path = Array.isArray(req.query?.path)
+      ? req.query.path.map(cleanSegment)
+      : String(req.query?.path || "").split("/").filter(Boolean).map(cleanSegment);
+
+    if (path.length === 3 && path[0] === "investment-groups") {
+      const [, groupId, action] = path;
+      const routeHandler = investmentGroupHandlers[action];
+      if (!routeHandler) return res.status(404).json({ error: "Unknown investment group route." });
+      const security = await requireApiSecurity(req, res, { endpoint: `network.investment-group.${action}`, maxBytes: 128 * 1024, rateLimit: { perMinute: 60, perDay: 10000 } });
+      if (security.handled) return;
+      req.query.groupId = groupId;
+      req.query.action = action;
+      return routeHandler(req, res);
+    }
+
+    if (path.length !== 1) return res.status(404).json({ error: "Unknown professional network route." });
+    const resource = path[0];
+    const routeHandler = resourceHandlers[resource];
     if (!routeHandler) return res.status(404).json({ error: "Unknown professional network route." });
     const security = await requireApiSecurity(req, res, { endpoint: `network.${resource}`, maxBytes: 512 * 1024, rateLimit: { perMinute: 60, perDay: 10000 } });
     if (security.handled) return;

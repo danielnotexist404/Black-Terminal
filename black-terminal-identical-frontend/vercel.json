@@ -3,6 +3,10 @@
   "regions": ["fra1"],
   "rewrites": [
     {
+      "source": "/api/network/investment-groups/:groupId/:action",
+      "destination": "/api/network/investment-groups?groupId=:groupId&action=:action"
+    },
+    {
       "source": "/api/liquidation-intelligence/:action",
       "destination": "/api/market-depth/bclif?bclifAction=:action"
     }

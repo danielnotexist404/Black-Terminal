@@ -47,12 +47,17 @@ const cleanSegment = (value) => String(value || "").replace(/\.js$/, "");
 
 export default async function handler(req, res) {
   try {
-    const path = Array.isArray(req.query?.path)
-      ? req.query.path.map(cleanSegment)
-      : String(req.query?.path || "").split("/").filter(Boolean).map(cleanSegment);
+    const path = normalizeNetworkPath(req.query?.path, req);
+    const rewrittenGroupId = cleanSegment(req.query?.groupId);
+    const rewrittenAction = cleanSegment(req.query?.action);
+    const investmentGroupPath = path.length === 3 && path[0] === "investment-groups"
+      ? path
+      : path.length === 1 && path[0] === "investment-groups" && rewrittenGroupId && rewrittenAction
+        ? [path[0], rewrittenGroupId, rewrittenAction]
+        : null;
 
-    if (path.length === 3 && path[0] === "investment-groups") {
-      const [, groupId, action] = path;
+    if (investmentGroupPath) {
+      const [, groupId, action] = investmentGroupPath;
       const routeHandler = investmentGroupHandlers[action];
       if (!routeHandler) return res.status(404).json({ error: "Unknown investment group route." });
       const security = await requireApiSecurity(req, res, { endpoint: `network.investment-group.${action}`, maxBytes: 128 * 1024, rateLimit: { perMinute: 60, perDay: 10000 } });
@@ -71,5 +76,22 @@ export default async function handler(req, res) {
     return routeHandler(req, res);
   } catch (error) {
     return sendError(res, error);
+  }
+}
+
+export function normalizeNetworkPath(value, req) {
+  if (Array.isArray(value)) return value.map(cleanSegment).filter(Boolean);
+  if (value) return String(value).split("/").map(cleanSegment).filter(Boolean);
+  try {
+    const pathname = new URL(req.url || "", "https://black-terminal.local").pathname;
+    const marker = "/api/network/";
+    const index = pathname.indexOf(marker);
+    return (index >= 0 ? pathname.slice(index + marker.length) : "")
+      .split("/")
+      .map(decodeURIComponent)
+      .map(cleanSegment)
+      .filter(Boolean);
+  } catch {
+    return [];
   }
 }

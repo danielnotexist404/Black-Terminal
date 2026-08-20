@@ -59,6 +59,9 @@ for (const route of ["professional-center", "social-posts", "social-engagement",
 for (const action of ["join-request", "messages", "review-request", "moderation"]) assert.match(routeMap, new RegExp(`\\"${action}\\"`));
 assert.match(routeMap, /path\.length === 3 && path\[0\] === "investment-groups"/, "nested investment-group routes are not dispatched");
 assert.match(routeMap, /req\.query\.groupId = groupId/, "nested investment-group route does not preserve groupId");
+assert.match(routeMap, /pathname\.indexOf\(marker\)/, "network route does not recover paths from Vercel request URLs");
+const vercelConfig = read("vercel.json");
+assert.match(vercelConfig, /\/api\/network\/investment-groups\/:groupId\/:action/, "legacy nested investment-group URL rewrite is missing");
 
 const page = read("src/modules/professional-network/ProfessionalCenterPage.tsx");
 for (const component of ["FeedComposer", "ProfileHeader", "ProfileWorkspace", "MessagingPanel", "NotificationsPanel", "DiscoveryPanel", "ModerationPanel"]) assert.match(page, new RegExp(`<${component}`));

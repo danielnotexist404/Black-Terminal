@@ -2,6 +2,7 @@ import type { Candle } from "../../../chart-engine/types.ts";
 import { ddaProCalculationSettingsHash, resolveDDAProBarsPerYear } from "./settings.ts";
 import { mean, populationDeviation, quantile } from "./statistics.ts";
 import type {
+  BCRDATopSeries,
   DDAProCalculationInput,
   DDAProEpisode,
   DDAProEvent,
@@ -144,11 +145,6 @@ export function deriveDDAProSignals(events: readonly DDAProEvent[]): DDAProSigna
       direction: "long" as const, index: event.index, time: event.time, value: event.value,
       sourceEventType: event.type, markerTone: "silver-white" as const
     });
-    if (event.type === "DDA_DRAWDOWN_RECOVERED") signals.push({
-      id: `bc-rda-short-${event.time || event.index}`, indicatorId: DDA_PRO_INDICATOR_ID,
-      direction: "short" as const, index: event.index, time: event.time, value: event.value,
-      sourceEventType: event.type, markerTone: "blood-red" as const
-    });
   }
   return signals;
 }
@@ -186,16 +182,6 @@ export function deriveCausalDDAProSignalCandidates(
       });
     }
     if (current < recoveryThreshold) {
-      signals.push({
-        id: `bc-rda-causal-short-${time || index}`,
-        indicatorId: DDA_PRO_INDICATOR_ID,
-        direction: "short",
-        index,
-        time,
-        value: episodeMaximum,
-        sourceEventType: "DDA_DRAWDOWN_RECOVERED",
-        markerTone: "blood-red"
-      });
       active = false;
       episodeMaximum = 0;
     }
@@ -239,9 +225,14 @@ export function confirmedNewestDDAProSignals(
  */
 export function ddaProAlertSignalStream(snapshot: DDAProSnapshot, settings: DDAProSettings) {
   if (!settings.showEpisodeMarkers) return [];
-  if (settings.signalIntelligenceMode === "RAW") return settings.showRawSignals ? snapshot.rawSignals : [];
-  if (settings.confirmedAlertsOnly) return settings.showConfirmedSignals ? snapshot.signals : [];
-  return settings.showRawSignals ? snapshot.signalIntelligence.rawCandidateSignals : [];
+  const selected = settings.signalIntelligenceMode === "RAW"
+    ? settings.showRawSignals ? snapshot.rawSignals : []
+    : settings.confirmedAlertsOnly
+      ? settings.showConfirmedSignals ? snapshot.signals : []
+      : settings.showRawSignals ? snapshot.signalIntelligence.rawCandidateSignals : [];
+  return selected.filter((signal) =>
+    signal.direction !== "short" || signal.sourceEventType === "BC_RDA_TOP_CONFIRMED"
+  );
 }
 
 export function performanceMetrics(
@@ -369,8 +360,13 @@ export function ddaProDataHash(input: DDAProCalculationInput) {
   return hasher.digest();
 }
 
-export function ddaProOutputHash(series: DDAProSeries, latest: DDAProLatestMetrics) {
-  const hasher = fnv1aHasher("dda-output-v2|");
+export function ddaProOutputHash(
+  series: DDAProSeries,
+  latest: DDAProLatestMetrics,
+  topSeries?: BCRDATopSeries,
+  signals: readonly DDAProSignalEvent[] = []
+) {
+  const hasher = fnv1aHasher("dda-output-v3|");
   for (const key of Object.keys(series).sort() as Array<keyof DDAProSeries>) {
     hasher.updateString(key + "|");
     for (const value of series[key]) {
@@ -383,6 +379,20 @@ export function ddaProOutputHash(series: DDAProSeries, latest: DDAProLatestMetri
     const value = latest[key];
     if (typeof value === "number") hasher.updateNumber(value);
     else hasher.updateString(value);
+  }
+  if (topSeries) {
+    for (const key of Object.keys(topSeries).sort() as Array<keyof BCRDATopSeries>) {
+      hasher.updateString("top:" + key + "|");
+      for (const value of topSeries[key]) {
+        if (typeof value === "number") hasher.updateNumber(value);
+        else hasher.updateString(String(value) + "|");
+      }
+    }
+  }
+  for (const signal of signals) {
+    hasher.updateString("signal:" + signal.id + "|");
+    hasher.updateNumber(signal.index);
+    hasher.updateString(signal.direction + "|" + signal.sourceEventType + "|");
   }
   return hasher.digest();
 }

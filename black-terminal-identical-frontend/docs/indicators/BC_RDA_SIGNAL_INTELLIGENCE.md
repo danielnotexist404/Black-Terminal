@@ -4,7 +4,7 @@
 
 BC-RDA remains a read-only indicator. The stable indicator ID is `black-core-dda-pro`; no execution, broker, account, RADAP, HDLX, Market Maker Heatmap, or database authority is introduced by this layer.
 
-`RAW` is the compatibility boundary. It returns the pre-chapter `deriveDDAProSignals(events)` sequence and IDs unchanged. The legacy final-trough marker can follow its pre-existing open-episode semantics. Filtered modes do not confirm from that moving final-trough projection: they consume a separate prefix-stable closed-bar candidate stream so a confirmed event cannot move when later candles arrive.
+`RAW` is the protected bottom compatibility boundary. It retains the existing `DDA_DRAWDOWN_DEEPENED` long sequence and IDs. The legacy final-trough marker can follow its pre-existing open-episode semantics. `DDA_DRAWDOWN_RECOVERED` is intentionally non-directional. Filtered modes do not confirm from a moving final-trough projection: they consume a separate prefix-stable closed-bar bottom-candidate stream so a confirmed event cannot move when later candles arrive. Confirmed shorts are owned exclusively by the mirrored causal top engine described below.
 
 ## Causal feature definitions
 
@@ -43,9 +43,28 @@ Regime confidence uses the corresponding causal chop, compression, coherence/exp
 The filtered candidate stream emits:
 
 - a silver/white long candidate whenever a closed bar establishes a strictly deeper maximum within an active drawdown episode;
-- a blood-red short candidate when that episode reaches the existing recovery boundary.
 
 This candidate history is prefix-stable. One direction cannot mutate the other direction's state. Episodes are keyed by exchange, symbol, timeframe, episode-start bar close, direction, intelligence mode, and engine version. At most 512 episode records and 2,048 provisional records are retained; the worker retains at most 20,000 bars.
+
+## Mirrored causal top engine
+
+The top path does not reverse the sign of downside arrays. While neutral it tracks a candidate causal trough. An episode opens when price advances through a threshold frozen from prior confirmed bars:
+
+`entry = clamp(max(configuredMinimum, causalATR% * atrMultiplier, causalQuantile(absReturn%) * quantileMultiplier), configuredMinimum, configuredMaximum)`
+
+The trough is frozen for the episode. Independent arrays record raw/smoothed drawup, duration, velocity, acceleration, robust quantiles and z-score, distribution width, tail severity, volatility-adjusted drawup, top risk, market regime, barrier, and reversal evidence. The dynamic barrier is a causal elevated drawup quantile plus configured robust dispersion, with one-way hysteresis before the top starts building.
+
+State advances through `NEUTRAL → EXPANDING → TOP_WATCH → TOP_BUILDING → TOP_ARMED → TOP_CONFIRMED → COOLDOWN → RESET`. A barrier touch only enters `TOP_WATCH`. Confirmation requires:
+
+- minimum episode maturity and persistent terminal-tail evidence;
+- weakening price progress and a retreat below the active barrier;
+- `(episodeMaximumPrice - price) / episodeMaximumPrice * 100` at least `max(minimumReversal, causalATR% * reversalMultiplier, returnQuantile * quantileMultiplier)`;
+- a causal bearish change point;
+- the configured bearish structure break;
+- stronger reversal evidence when the prior market regime is `STRONG_BULL`;
+- exact bearish aggressor flow when that optional fail-closed gate is enabled.
+
+Only one confirmed short is allowed per unresolved episode. Reset requires both the cooldown and a meaningful decline/reorganization. Episode IDs bind exchange, symbol, timeframe, frozen trough time, and top-engine version; confirmed signal IDs additionally bind the causal confirmation time.
 
 ## State machine
 
@@ -90,9 +109,9 @@ Both filtered presets enable native coherence, centroid/tail, expansion, entropy
 
 ## Display and alerts
 
-- RAW dots: legacy size and sequence when `Show Raw Signals` is enabled.
+- RAW bottom dots: protected size, long sequence, and identity when `Show Raw Signals` is enabled.
 - Filtered raw candidates: small/faded diagnostics only.
-- Provisional: small/faded and never alertable.
+- Provisional top extremity: small, hollow, dim red, optional, movable with the active episode maximum, and never alertable.
 - Confirmed long: silver/white. Confirmed short: blood red. Confidence at or above 82 receives a subtle halo.
 
 The renderer and alert effect consume the same immutable snapshot event. `Confirmed Alerts Only` selects `snapshot.signals`; disabling it selects the visible causal raw-candidate stream and explicitly labels the alert `RAW`. A hidden stream is not alertable. Canonical confirmed identity is:
@@ -101,11 +120,16 @@ The renderer and alert effect consume the same immutable snapshot event. `Confir
 
 Configured alert IDs are combined with that identity for local idempotency. Alerts arm after the latest confirmed candle, so history, reconnects, rerenders and repeated mounts cannot replay old signals. Developing/provisional signals never enter the confirmed stream.
 
+Mirrored-top confirmed identity uses:
+
+`bc-rda-top-signal-v1:exchange:symbol:timeframe:episodeTroughTime:engineVersion:confirmationTime`
+
 ## Validation and limitations
 
 Run:
 
 - `npm run test:dda-pro-all`
+- `npm run test:dda-pro-top-engine`
 - `npm run validate:dda-pro-signal-intelligence`
 - `npm run benchmark:dda-pro`
 

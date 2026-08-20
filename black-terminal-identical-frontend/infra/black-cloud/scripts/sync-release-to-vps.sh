@@ -68,7 +68,7 @@ rsync -a --checksum --human-readable \
 "${SSH[@]}" test ! -e "$INCOMING_PATH/infra/black-cloud/secrets/runtime.env"
 "${SSH[@]}" test ! -e "$INCOMING_PATH/infra/black-cloud/artifacts/source-db-export/data.sql.gz.enc"
 
-"${SSH[@]}" sh -eu -c 'printf "%s\n" "$1" > "$2/.black-cloud-source-sha"' sh "$SOURCE_SHA" "$INCOMING_PATH"
+"${SSH[@]}" "printf '%s\\n' '$SOURCE_SHA' > '$INCOMING_PATH/.black-cloud-source-sha'"
 "${SSH[@]}" mv -- "$INCOMING_PATH" "$FINAL_PATH"
 INCOMING_PATH=
 

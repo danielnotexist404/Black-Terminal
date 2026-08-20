@@ -34,6 +34,11 @@ export type PortfolioPosition = {
   positionIdx?: number;
   canonicalKey?: string;
   updatedAt?: number;
+  observationVersion?: number;
+  priceSource?: "broker-authoritative" | "public-projected";
+  authoritativePrice?: number;
+  authoritativeUnrealizedPnl?: number;
+  publicMarkObservedAt?: number;
   direction: PositionDirection;
   quantity: number;
   averagePrice: number;

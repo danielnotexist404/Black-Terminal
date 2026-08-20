@@ -3,6 +3,7 @@ import { DDAProWorkerRuntime } from "../src/modules/dda-pro/workers/runtime.ts";
 import { DEFAULT_DDA_PRO_SETTINGS } from "../src/modules/dda-pro/core/settings.ts";
 import type { Candle } from "../src/chart-engine/types.ts";
 import type { DDAProWorkerResponse } from "../src/modules/dda-pro/workers/protocol.ts";
+import { DDAProWorkerClient } from "../src/modules/dda-pro/workers/DDAProWorkerClient.ts";
 
 const candles: Candle[] = Array.from({ length: 800 }, (_, index) => {
   const close = 100 + index * 0.03 + Math.sin(index / 19) * 7;
@@ -21,6 +22,40 @@ const candles: Candle[] = Array.from({ length: 800 }, (_, index) => {
     assert.equal(messages[0].snapshot.inputSize, candles.length);
     assert.ok(messages[0].calculationMs >= 0);
   }
+}
+
+// Production worker startup failure is explicit and never runs the full engine on the UI thread.
+{
+  const client = new DDAProWorkerClient(() => { throw new Error("worker blocked"); });
+  assert.equal(client.executionMode(), "UNAVAILABLE");
+  assert.equal(client.failureCode(), "DDA_PRO_WORKER_UNAVAILABLE");
+  await assert.rejects(
+    client.calculate({ candles, settings: DEFAULT_DDA_PRO_SETTINGS, timeframeSeconds: 3_600 }),
+    /DDA_PRO_WORKER_UNAVAILABLE/
+  );
+  client.dispose();
+}
+
+// The only inline path is explicit, development-only, and hard bounded.
+{
+  const client = new DDAProWorkerClient(
+    () => { throw new Error("worker blocked"); },
+    { allowDevelopmentInlineFallback: true, developmentInlineBarLimit: 100 }
+  );
+  const snapshot = await client.calculate({ candles: candles.slice(0, 80), settings: DEFAULT_DDA_PRO_SETTINGS, timeframeSeconds: 3_600 });
+  assert.equal(snapshot.inputSize, 80);
+  assert.equal(client.executionMode(), "INLINE");
+  client.dispose();
+
+  const oversized = new DDAProWorkerClient(
+    () => { throw new Error("worker blocked"); },
+    { allowDevelopmentInlineFallback: true, developmentInlineBarLimit: 100 }
+  );
+  await assert.rejects(
+    oversized.calculate({ candles: candles.slice(0, 101), settings: DEFAULT_DDA_PRO_SETTINGS, timeframeSeconds: 3_600 }),
+    /DDA_PRO_WORKER_UNAVAILABLE/
+  );
+  oversized.dispose();
 }
 
 {
@@ -85,4 +120,4 @@ const candles: Candle[] = Array.from({ length: 800 }, (_, index) => {
   if (messages.at(-1)?.type === "ERROR") assert.match((messages.at(-1) as Extract<DDAProWorkerResponse, { type: "ERROR" }>).message, /HISTORY_INVALID/);
 }
 
-console.log("BC-RDA worker protocol, generation cancellation, stateful history, append/config rebuild, and deterministic calculation tests: PASS");
+console.log("BC-RDA worker protocol, production fail-closed behavior, bounded development fallback, generation cancellation, stateful history, append/config rebuild, and deterministic calculation tests: PASS");

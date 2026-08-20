@@ -9,6 +9,7 @@ import { connectExchangeAccountViaApi, fetchPortfolioSnapshotFromApi } from "./p
 import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } from "./types";
 import { blackCoreEventBus } from "../core/blackCore";
 import { blackCorePerformanceMonitor } from "../performance/performanceMonitor";
+import { markPortfolioSnapshotFallback, unavailablePortfolioFreshness, withCurrentFreshnessAge } from "./portfolioFreshness";
 
 const credentialStore = new TauriSecureCredentialStore();
 
@@ -34,7 +35,7 @@ export async function getPortfolioSnapshot(activeAccountIds?: string[]): Promise
   if (scopedAccountIds?.length === 0) return emptyPortfolioSnapshot();
   if (snapshotCache?.scopeKey === scopeKey && Date.now() - snapshotCache.loadedAt < snapshotFreshMs) {
     blackCorePerformanceMonitor.recordMetric("account.freshness_ms", Date.now() - snapshotCache.loadedAt, "ms");
-    return snapshotCache.value;
+    return withCurrentFreshnessAge(snapshotCache.value);
   }
   if (snapshotRequest?.scopeKey === scopeKey) return snapshotRequest.value;
   const finish = blackCorePerformanceMonitor.startSpan("account.snapshot_ms");
@@ -63,10 +64,12 @@ async function loadPortfolioSnapshot(activeAccountIds: string[] | undefined, sco
       return remoteSnapshot;
     }
   } catch (error) {
-    console.error("Portfolio API snapshot failed; returning the last verified local state without fabricating broker data.", error);
+    console.error("Portfolio API snapshot failed; exposing the last verified state as degraded or stale.", error);
+    const lastVerified = lastVerifiedSnapshots.get(scopeKey);
+    if (lastVerified) return markPortfolioSnapshotFallback(lastVerified, error);
   }
   const lastVerified = lastVerifiedSnapshots.get(scopeKey);
-  if (lastVerified) return lastVerified;
+  if (lastVerified) return markPortfolioSnapshotFallback(lastVerified, "Portfolio API returned no authoritative snapshot.");
 
   const scopedAccounts = activeAccountIds ? accounts.filter((account) => activeAccountIds.includes(account.id)) : accounts;
   const scopedAccountSet = new Set(scopedAccounts.map((account) => account.id));
@@ -84,6 +87,7 @@ async function loadPortfolioSnapshot(activeAccountIds: string[] | undefined, sco
   const monthlyPnl = scopedAccounts.reduce((sum, account) => sum + account.monthlyPnl, 0);
 
   return {
+    freshness: unavailablePortfolioFreshness("No authoritative broker snapshot is available."),
     summary: {
       totalEquity,
       totalBalance,
@@ -109,6 +113,7 @@ async function loadPortfolioSnapshot(activeAccountIds: string[] | undefined, sco
 
 export function emptyPortfolioSnapshot(): PortfolioSnapshot {
   return {
+    freshness: unavailablePortfolioFreshness("No connected broker account."),
     summary: {
       totalEquity: 0,
       totalBalance: 0,

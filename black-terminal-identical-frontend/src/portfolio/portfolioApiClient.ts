@@ -77,6 +77,15 @@ export type AuthenticatedConnectionHealth = {
 };
 
 type ApiSnapshot = {
+  freshness?: {
+    status?: PortfolioSnapshot["freshness"]["status"];
+    source?: PortfolioSnapshot["freshness"]["source"];
+    fetchedAt?: number | string;
+    brokerSyncedAt?: number | string | null;
+    ageMs?: number;
+    staleAfterMs?: number;
+    message?: string;
+  };
   summary: PortfolioSnapshot["summary"];
   accounts: ApiAccount[];
   balances: Array<{
@@ -832,8 +841,21 @@ async function readApiError(response: Response) {
 
 function mapSnapshot(data: ApiSnapshot): PortfolioSnapshot {
   const accountById = new Map(data.accounts.map((account) => [account.id, account]));
+  const fetchedAt = toMillis(data.freshness?.fetchedAt) || Date.now();
+  const brokerSyncedAt = data.freshness?.brokerSyncedAt === null || data.freshness?.brokerSyncedAt === undefined
+    ? null
+    : toMillis(data.freshness.brokerSyncedAt);
 
   return {
+    freshness: {
+      status: data.freshness?.status ?? "degraded",
+      source: data.freshness?.source ?? "broker-rest",
+      fetchedAt,
+      brokerSyncedAt,
+      ageMs: Math.max(0, data.freshness?.ageMs ?? (brokerSyncedAt ? fetchedAt - brokerSyncedAt : 0)),
+      staleAfterMs: Math.max(5_000, data.freshness?.staleAfterMs ?? 30_000),
+      message: data.freshness?.message ?? "Broker snapshot freshness metadata was not supplied by the API."
+    },
     summary: data.summary,
     accounts: data.accounts.map(mapAccount),
     balances: data.balances.map((balance) => ({

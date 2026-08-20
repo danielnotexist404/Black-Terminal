@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { Dispatch, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, SetStateAction } from "react";
+import { Component, useEffect, useMemo, useRef, useState } from "react";
+import type { Dispatch, ErrorInfo, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from "react";
 import { Bell, Brush, Columns3, Copy, Eye, EyeOff, Minus, Play, Plus, SlidersHorizontal, Square, TrendingUp, Type, X } from "lucide-react";
 import { BlackChartEngine } from "../chart-engine/BlackChartEngine";
 import type { ChartPoint, IndicatorAlertLevel, IndicatorAlertLine } from "../chart-engine/BlackChartEngine";
@@ -33,8 +33,40 @@ import {
   defaultWaveTrendOscillatorSettings,
   defaultZScoreOscillatorSettings
 } from "../chart-engine/profile/volumeProfileDefaults";
+
+type DDAProSettingsSection = "engine" | "top" | "signals" | "flow" | "statistics" | "visuals" | "diagnostics";
+
+const ddaProSettingsSections: Array<{ id: DDAProSettingsSection; label: string }> = [
+  { id: "engine", label: "Engine" },
+  { id: "top", label: "Top Engine" },
+  { id: "signals", label: "Signal Intelligence" },
+  { id: "flow", label: "Flow" },
+  { id: "statistics", label: "Statistics" },
+  { id: "visuals", label: "Visuals" },
+  { id: "diagnostics", label: "Diagnostics" }
+];
+
+class DDAProSettingsErrorBoundary extends Component<{ children: ReactNode; onClose: () => void }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(_error: Error, _info: ErrorInfo) {
+    console.error("BC-RDA settings surface failed with diagnostic code DDA_PRO_SETTINGS_UNAVAILABLE.");
+  }
+  render() {
+    if (this.state.failed) {
+      return (
+        <div className="dda-settings-error" role="alert">
+          <b>BC-RDA SETTINGS UNAVAILABLE</b>
+          <span>The indicator and broker synchronization remain active.</span>
+          <button type="button" onClick={this.props.onClose}>Close Settings</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 import { DDAProWorkerClient } from "../modules/dda-pro/workers/DDAProWorkerClient";
-import { DEFAULT_DDA_PRO_SETTINGS, applyDDAProPreset, applyDDAProSignalIntelligenceMode, migrateDDAProSettings, resetDDAProSignalIntelligence } from "../modules/dda-pro/core/settings";
+import { DEFAULT_DDA_PRO_SETTINGS, applyDDAProPreset, applyDDAProSignalIntelligenceMode, ddaProCalculationSettingsHash, migrateDDAProSettings, resetDDAProSignalIntelligence } from "../modules/dda-pro/core/settings";
 import {
   calculationHash as ddaProCalculationHash,
   confirmedNewestDDAProSignals,
@@ -536,6 +568,7 @@ export function PixiBlackChart({
     "loading" | "ready" | "unavailable"
   >("loading");
   const [activeIndicator, setActiveIndicator] = useState<IndicatorKey | null>(null);
+  const [ddaProSettingsSection, setDDAProSettingsSection] = useState<DDAProSettingsSection>("engine");
   const [volumeProfileSettingsTab, setVolumeProfileSettingsTab] = useState<VolumeProfileSettingsTab>("inputs");
   const [adaptiveSwingSettingsTab, setAdaptiveSwingSettingsTab] = useState<AdaptiveSwingSettingsTab>("signals");
   const [historyDepth, setHistoryDepth] = useState<HistoryDepth>(() => {
@@ -2170,6 +2203,15 @@ export function PixiBlackChart({
     };
   }, []);
 
+  const ddaCalculationSettings = useMemo(() => migrateDDAProSettings({
+    ...indicatorAdvancedSettings.ddaProOscillator,
+    lookback: indicatorPeriods.ddaProOscillator
+  }), [indicatorAdvancedSettings.ddaProOscillator, indicatorPeriods.ddaProOscillator]);
+  const ddaCalculationSettingsKey = useMemo(
+    () => ddaProCalculationSettingsHash(ddaCalculationSettings),
+    [ddaCalculationSettings]
+  );
+
   useEffect(() => {
     const engine = engineRef.current;
     if (!visibleIndicators.ddaProOscillator || !engine) {
@@ -2180,10 +2222,7 @@ export function PixiBlackChart({
       return;
     }
     const timer = window.setTimeout(() => {
-      const settings = migrateDDAProSettings({
-        ...indicatorAdvancedSettings.ddaProOscillator,
-        lookback: indicatorPeriods.ddaProOscillator
-      });
+      const settings = ddaCalculationSettings;
       const timeframeDuration = timeframeSeconds[timeframe];
       const available = engine.getSourceCandles().slice(-20_000);
       const latestIsDeveloping = Boolean(available.length && (available.at(-1)?.time ?? 0) + timeframeDuration > Date.now() / 1000);
@@ -2254,7 +2293,7 @@ export function PixiBlackChart({
   }, [
     visibleIndicators.ddaProOscillator,
     indicatorPeriods.ddaProOscillator,
-    indicatorAdvancedSettings.ddaProOscillator,
+    ddaCalculationSettingsKey,
     marketSymbol.exchange,
     marketSymbol.rawSymbol,
     timeframe,
@@ -3328,7 +3367,7 @@ export function PixiBlackChart({
     { key: "sma20", label: "SMA", value: String(indicatorPeriods.sma20) },
     { key: "sma50", label: "SMA", value: String(indicatorPeriods.sma50) },
     { key: "bollinger", label: "Bollinger", value: String(indicatorPeriods.bollinger) },
-    { key: "ddaProOscillator", label: "BC-RDA", value: `${indicatorAdvancedSettings.ddaProOscillator.engineMode === "pine-compatibility" ? "PINE" : "NATIVE"} · ${ddaProStatus.toLowerCase()}` },
+    { key: "ddaProOscillator", label: "BC-RDA", value: ddaProStatus === "UNAVAILABLE" ? "BC-RDA WORKER UNAVAILABLE" : `${indicatorAdvancedSettings.ddaProOscillator.engineMode === "pine-compatibility" ? "PINE" : "NATIVE"} · ${ddaProStatus.toLowerCase()}` },
     { key: "openInterestOscillator", label: "OI Osc", value: String(indicatorPeriods.openInterestOscillator) },
     { key: "zScoreOscillator", label: "Z-Score", value: String(indicatorPeriods.zScoreOscillator) },
     { key: "waveTrendOscillator", label: "WaveTrend", value: String(indicatorPeriods.waveTrendOscillator) },
@@ -5491,7 +5530,22 @@ export function PixiBlackChart({
             </>
           )}
           {activeIndicator === "ddaProOscillator" && (
-            <>
+            <DDAProSettingsErrorBoundary onClose={() => setActiveIndicator(null)}>
+              <div className="dda-settings-tabs" role="tablist" aria-label="BC-RDA settings sections">
+                {ddaProSettingsSections.map((section) => (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={ddaProSettingsSection === section.id}
+                    className={ddaProSettingsSection === section.id ? "active" : ""}
+                    key={section.id}
+                    onClick={() => setDDAProSettingsSection(section.id)}
+                  >
+                    {section.label}
+                  </button>
+                ))}
+              </div>
+              {ddaProSettingsSection === "engine" && <>
               <div className="indicator-settings-section">BC-RDA Engine</div>
               <label>
                 Preset
@@ -5499,6 +5553,18 @@ export function PixiBlackChart({
                   {(["Custom", "BC-RDA — Original Compatibility", "BC-RDA — Institutional", "BC-RDA — Macro Risk"] as DDAProPreset[]).map((preset) => <option key={preset} value={preset}>{preset}</option>)}
                 </select>
               </label>
+              <label>
+                BC-RDA Model
+                <select value={ddaProSettings.modelVersion} onChange={(event) => updateDDAProSetting("modelVersion", event.target.value as DDAProSettings["modelVersion"])}>
+                  <option value="v2-causal">V2 Causal Top · Recommended</option>
+                  <option value="legacy-pre-532">Pre-532 Legacy · Recovery Shorts</option>
+                </select>
+              </label>
+              <div className="vwap-mode-note">
+                {ddaProSettings.modelVersion === "legacy-pre-532"
+                  ? "Isolated preservation mode: restores the exact pre-532 recovery-to-short model. V2 top episodes and V2 short alerts are disabled while selected."
+                  : "Bounded, causal and re-armable V2 model. Drawdown recovery remains neutral; shorts require confirmed structural reversal."}
+              </div>
               <label>
                 Calculation Engine
                 <select value={ddaProSettings.engineMode} onChange={(event) => updateDDAProSetting("engineMode", event.target.value as DDAProSettings["engineMode"])}>
@@ -5517,11 +5583,14 @@ export function PixiBlackChart({
                   ? "Reproduces the supplied Pine formula, including its original percentile direction and 252-period assumptions. Exact TradingView parity remains uncertified until golden exports are supplied."
                   : "Corrected positive-depth drawdown, selectable peak reference, duration, tail risk, recovery, VADD and confidence analytics."}
               </div>
-              <div className="indicator-settings-section">Mirrored Causal Top Engine</div>
+              </>}
+              {ddaProSettingsSection === "top" && <fieldset className="dda-settings-section-fields" disabled={ddaProSettings.modelVersion === "legacy-pre-532"}>
+              <div className="indicator-settings-section">Causal Top Engine V2</div>
+              {ddaProSettings.modelVersion === "legacy-pre-532" && <div className="vwap-mode-note">V2 controls are disabled while the isolated pre-532 legacy model is selected.</div>}
               <label>
                 Top Engine Mode
                 <select value={ddaProSettings.topEngineMode} onChange={(event) => updateDDAProSetting("topEngineMode", event.target.value as DDAProSettings["topEngineMode"])}>
-                  <option value="mirrored-causal">Mirrored Causal</option>
+                  <option value="mirrored-causal">Causal V2</option>
                   <option value="disabled">Disabled</option>
                 </select>
               </label>
@@ -5545,14 +5614,21 @@ export function PixiBlackChart({
               <label>Top Reversal ATR Multiplier<input type="number" min={0.1} max={10} step={0.1} value={ddaProSettings.topReversalAtrMultiplier} onChange={(event) => updateDDAProSetting("topReversalAtrMultiplier", Number(event.target.value))} /></label>
               <label>Top Minimum Reversal %<input type="number" min={0.05} max={25} step={0.05} value={ddaProSettings.topMinimumReversalPercent} onChange={(event) => updateDDAProSetting("topMinimumReversalPercent", Number(event.target.value))} /></label>
               <label>Top Change-Point Sensitivity<input type="number" min={0} max={100} step={1} value={ddaProSettings.topChangePointSensitivity} onChange={(event) => updateDDAProSetting("topChangePointSensitivity", Number(event.target.value))} /></label>
-              <label>Top Structure Confirmation<input type="checkbox" checked={ddaProSettings.topStructureConfirmation} onChange={(event) => updateDDAProSetting("topStructureConfirmation", event.target.checked)} /></label>
+              <label title="Required by the V2 confirmation contract">Top Structure Confirmation<input type="checkbox" checked disabled /></label>
               <label>Strong-Bull Protection<input type="checkbox" checked={ddaProSettings.strongBullProtection} onChange={(event) => updateDDAProSetting("strongBullProtection", event.target.checked)} /></label>
               <label>One Short per Top Episode<input type="checkbox" checked={ddaProSettings.oneShortPerTopEpisode} onChange={(event) => updateDDAProSetting("oneShortPerTopEpisode", event.target.checked)} /></label>
               <label>Top Cooldown Bars<input type="number" min={1} max={1000} step={1} value={ddaProSettings.topCooldownBars} onChange={(event) => updateDDAProSetting("topCooldownBars", Number(event.target.value))} /></label>
               <label>Require Exact Bearish Flow<input type="checkbox" checked={ddaProSettings.topRequireExactBearishFlow} onChange={(event) => updateDDAProSetting("topRequireExactBearishFlow", event.target.checked)} /></label>
+              <label>Local Swing Horizon<input type="number" min={8} max={250} step={1} value={ddaProSettings.topLocalSwingHorizon} onChange={(event) => updateDDAProSetting("topLocalSwingHorizon", Number(event.target.value))} /></label>
+              <label>Structural Horizon<input type="number" min={24} max={2000} step={1} value={ddaProSettings.topStructuralHorizon} onChange={(event) => updateDDAProSetting("topStructuralHorizon", Number(event.target.value))} /></label>
+              <label>Regime Horizon<input type="number" min={50} max={5000} step={1} value={ddaProSettings.topRegimeHorizon} onChange={(event) => updateDDAProSetting("topRegimeHorizon", Number(event.target.value))} /></label>
+              <label>Bull Persistence Bars<input type="number" min={2} max={50} step={1} value={ddaProSettings.topBullPersistenceBars} onChange={(event) => updateDDAProSetting("topBullPersistenceBars", Number(event.target.value))} /></label>
+              <label>Reacceleration Bars<input type="number" min={1} max={20} step={1} value={ddaProSettings.topReaccelerationBars} onChange={(event) => updateDDAProSetting("topReaccelerationBars", Number(event.target.value))} /></label>
               <label>Show Top Candidates<input type="checkbox" checked={ddaProSettings.showTopCandidates} onChange={(event) => updateDDAProSetting("showTopCandidates", event.target.checked)} /></label>
               <label>Show Dynamic Top Barrier<input type="checkbox" checked={ddaProSettings.showDynamicTopBarrier} onChange={(event) => updateDDAProSetting("showDynamicTopBarrier", event.target.checked)} /></label>
               <label>Show Top Diagnostics<input type="checkbox" checked={ddaProSettings.showTopDiagnostics} onChange={(event) => updateDDAProSetting("showTopDiagnostics", event.target.checked)} /></label>
+              </fieldset>}
+              {ddaProSettingsSection === "signals" && <>
               <div className="indicator-settings-section">Advanced Signal Intelligence</div>
               <label>
                 Signal Intelligence Mode
@@ -5564,7 +5640,7 @@ export function PixiBlackChart({
                 </select>
               </label>
               <div className="vwap-mode-note">
-                RAW preserves the protected drawdown-bottom sequence. Recovery remains a neutral risk event; shorts come only from the causal mirrored-top confirmation. Filtered modes arbitrate bottom candidates without weakening top confirmation.
+                RAW preserves the protected drawdown-bottom sequence. Recovery remains neutral in V2; shorts require causal top confirmation. BALANCED, INSTITUTIONAL and CUSTOM independently arbitrate both long and short candidates.
               </div>
               <label>Show Raw Signals<input type="checkbox" checked={ddaProSettings.showRawSignals} onChange={(event) => updateDDAProSetting("showRawSignals", event.target.checked)} /></label>
               <label>Show Confirmed Signals<input type="checkbox" checked={ddaProSettings.showConfirmedSignals} onChange={(event) => updateDDAProSetting("showConfirmedSignals", event.target.checked)} /></label>
@@ -5608,6 +5684,8 @@ export function PixiBlackChart({
                   <div className="vwap-mode-note">CVD confirmation fails closed unless genuine CVD values are supplied. No synthetic CVD is manufactured.</div>
                 </details>
               )}
+              </>}
+              {ddaProSettingsSection === "statistics" && <>
               <div className="indicator-settings-section">BC-RDA Drawdown Risk Fan</div>
               <div className="vwap-mode-note">The fan remains a one-sided drawdown-distribution and downside-tail-risk visualization. Its white, gray, and red tiers indicate risk severity—not buying or selling activity.</div>
               <label>
@@ -5678,8 +5756,9 @@ export function PixiBlackChart({
               <label>VADD<input type="number" min={0} max={1} step={0.05} value={ddaProSettings.volatilityWeight} onChange={(event) => updateDDAProSetting("volatilityWeight", Number(event.target.value))} /></label>
               <label>Tail Severity<input type="number" min={0} max={1} step={0.05} value={ddaProSettings.tailWeight} onChange={(event) => updateDDAProSetting("tailWeight", Number(event.target.value))} /></label>
               <div className="vwap-mode-note">Weights are normalized at calculation time. Defaults sum to 1.00.</div>
-              <details className="indicator-advanced-details">
-                <summary>BC-RDA Flow Pressure · Independent Layer</summary>
+              </>}
+              {ddaProSettingsSection === "flow" && <>
+                <div className="indicator-settings-section">BC-RDA Flow Pressure · Independent Layer</div>
                 <label>Show Flow Pressure Outline<input type="checkbox" checked={ddaProSettings.showFlowPressure} onChange={(event) => updateDDAProSetting("showFlowPressure", event.target.checked)} /></label>
                 <div className="vwap-mode-note">Uses only genuine classified aggressor trades. White means buying pressure, blood red means selling pressure, gray means neutral. It never recolors or changes the Drawdown Risk Fan.</div>
                 <label>Pressure Smoothing<input type="number" min={1} max={100} value={ddaProSettings.flowPressureSmoothingLength} onChange={(event) => updateDDAProSetting("flowPressureSmoothingLength", Number(event.target.value))} /></label>
@@ -5695,7 +5774,8 @@ export function PixiBlackChart({
                 <label>Flow Line Width<input type="number" min={0.5} max={5} step={0.1} value={ddaProSettings.flowLineWidth} onChange={(event) => updateDDAProSetting("flowLineWidth", Number(event.target.value))} /></label>
                 <div className="vwap-mode-note">{ddaProSnapshot ? `${ddaProSnapshot.flowAuthority} · ${ddaProSnapshot.latest.flowState} ${ddaProSnapshot.latest.flowState === "UNAVAILABLE" ? "--" : ddaProSnapshot.latest.flowPressure.toFixed(1)} · coverage ${ddaProSnapshot.latest.flowCoveragePercent.toFixed(0)}%` : "Awaiting live aggressor-flow evidence"}</div>
                 {ddaProSnapshot?.flowWarning && <div className="vwap-mode-note">{ddaProSnapshot.flowWarning}</div>}
-              </details>
+              </>}
+              {ddaProSettingsSection === "visuals" && <>
               <div className="indicator-settings-section">Plots & Dashboard</div>
               <div className="vwap-mode-note">Pane camera: drag anywhere inside BC-RDA to pan time and risk depth. Scroll over its right-hand scale to expand or contract the value range; double-click that scale to reset.</div>
               <label>Raw Drawdown<input type="checkbox" checked={ddaProSettings.showRawDrawdown} onChange={(event) => updateDDAProSetting("showRawDrawdown", event.target.checked)} /></label>
@@ -5716,15 +5796,16 @@ export function PixiBlackChart({
               <label className="indicator-color-setting">Extreme Risk<input type="color" value={ddaProSettings.extremeColor} onChange={(event) => updateDDAProSetting("extremeColor", event.target.value)} /></label>
               <label className="indicator-range-row">Line Intensity<span><input type="range" min={0} max={100} value={ddaProSettings.lineIntensity} onChange={(event) => updateDDAProSetting("lineIntensity", Number(event.target.value))} /><b>{ddaProSettings.lineIntensity}</b></span></label>
               <label className="indicator-range-row">Risk Fill<span><input type="range" min={0} max={60} value={ddaProSettings.fillIntensity} onChange={(event) => updateDDAProSetting("fillIntensity", Number(event.target.value))} /><b>{ddaProSettings.fillIntensity}</b></span></label>
-              <div className="vwap-mode-note">{ddaProStatus} · {ddaProSnapshot ? `${ddaProSnapshot.inputSize.toLocaleString()} bars · confidence ${ddaProSnapshot.latest.confidence.toFixed(0)}% · ${ddaProSnapshot.sourceAuthority}` : "Awaiting deterministic worker result"}</div>
+              <div className="vwap-mode-note">{ddaProStatus === "UNAVAILABLE" ? "BC-RDA WORKER UNAVAILABLE" : ddaProStatus} · {ddaProSnapshot ? `${ddaProSnapshot.inputSize.toLocaleString()} bars · confidence ${ddaProSnapshot.latest.confidence.toFixed(0)}% · ${ddaProSnapshot.sourceAuthority}` : "Awaiting deterministic worker result"}</div>
               {ddaProSnapshot?.sourceWarning && <div className="vwap-mode-note">{ddaProSnapshot.sourceWarning}</div>}
-              <details className="indicator-advanced-details">
-                <summary>Advanced / Diagnostics</summary>
+              </>}
+              {ddaProSettingsSection === "diagnostics" && <>
+                <div className="indicator-settings-section">Advanced / Diagnostics</div>
                 <div className="vwap-mode-note">Engine {ddaProSnapshot?.engineVersion ?? "--"} · Protocol v1 · {ddaProWorkerRef.current?.executionMode() ?? "NOT STARTED"}</div>
                 <div className="vwap-mode-note">Valid Samples {ddaProSnapshot ? Math.max(0, ddaProSnapshot.inputSize - ddaProSnapshot.validFromIndex).toLocaleString() : "--"} · Bars / Year {ddaProSnapshot?.barsPerYear.toFixed(2) ?? "--"}</div>
                 <div className="vwap-mode-note">Worker Timing {ddaProWorkerRef.current?.lastCalculationTimeMs()?.toFixed(2) ?? "--"} ms · Parity {ddaProSettings.engineMode === "pine-compatibility" ? "TV GOLDEN UNVERIFIED" : "TS/PY CORE PARTIAL"}</div>
-              </details>
-            </>
+              </>}
+            </DDAProSettingsErrorBoundary>
           )}
           {activeIndicator === "waveTrendOscillator" && (
             <>

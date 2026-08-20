@@ -2410,29 +2410,20 @@ export class BlackChartEngine {
     }
 
     if (settings.showDynamicTopBarrier && settings.enableMirroredTopEngine) {
-      const topBarrierColor = this.hexColor("#8f1528", theme.red);
-      let started = false;
-      let priorState = snapshot.topSeries.state[0] ?? "NEUTRAL";
-      for (let index = this.view.firstIndex; index <= this.view.lastIndex; index++) {
-        const barrier = aligned(snapshot.topSeries.dynamicTopBarrier, index);
-        const state = aligned(snapshot.topSeries.state, index) ?? "NEUTRAL";
-        if (!Number.isFinite(barrier) || barrier! <= 0) { started = false; continue; }
-        const x = this.xForIndex(index);
-        const y = yForDrawdown(-barrier!);
-        if (!started || state !== priorState) {
-          g.moveTo(x, y);
-          started = true;
-        } else {
-          const bright = state === "TOP_BUILDING" || state === "TOP_ARMED";
-          g.lineTo(x, y).stroke({
-            width: bright ? 1.3 : 0.85,
-            color: bright ? this.hexColor("#c50020", theme.redBright) : topBarrierColor,
-            alpha: bright ? 0.72 : 0.34
-          });
-          g.moveTo(x, y);
+      const drawBoundary = (values: readonly number[], color: number, baseAlpha: number, width: number) => {
+        let started = false;
+        for (let index = this.view.firstIndex; index <= this.view.lastIndex; index++) {
+          const boundary = aligned(values, index);
+          if (!Number.isFinite(boundary) || boundary! <= 0) { started = false; continue; }
+          const x = this.xForIndex(index);
+          const y = yForDrawdown(-boundary!);
+          if (!started) { g.moveTo(x, y); started = true; }
+          else { g.lineTo(x, y).stroke({ width, color, alpha: baseAlpha }); g.moveTo(x, y); }
         }
-        priorState = state;
-      }
+      };
+      drawBoundary(snapshot.topSeries.exhaustionEntryBoundary, this.hexColor("#8f1528", theme.red), 0.48, 0.9);
+      drawBoundary(snapshot.topSeries.reversalConfirmationBoundary, this.hexColor("#ff1838", theme.redBright), 0.62, 1.15);
+      drawBoundary(snapshot.topSeries.candidateInvalidationBoundary, this.hexColor("#aeb2bb", theme.silver), 0.26, 0.7);
     }
     if (settings.showVelocity) {
       drawLine(snapshot.series.velocity.map((value) => -Math.max(0, value)), this.hexColor(themePalette.extreme, theme.redBright), 0.48, 0.75);
@@ -2446,7 +2437,8 @@ export class BlackChartEngine {
           ? this.hexColor("#ff1838", theme.redBright)
           : this.hexColor("#f2f2f4", theme.silverBright);
         const x = this.xForIndex(chartIndex);
-        const topSignal = signal.sourceEventType === "BC_RDA_TOP_CANDIDATE" || signal.sourceEventType === "BC_RDA_TOP_CONFIRMED";
+        const topSignal = signal.sourceEventType === "TOP_EXHAUSTION_CANDIDATE" || signal.sourceEventType === "TOP_REVERSAL_CONFIRMED" ||
+          signal.sourceEventType === "BC_RDA_TOP_CANDIDATE" || signal.sourceEventType === "BC_RDA_TOP_CONFIRMED";
         const y = yForDrawdown(topSignal
           ? -(snapshot.topSeries.dynamicTopBarrier[signal.index] || signal.value)
           : (snapshot.series.rawDrawdown[signal.index] ?? -signal.value));

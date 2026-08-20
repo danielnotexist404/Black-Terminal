@@ -135,7 +135,7 @@ function shorts(result: ReturnType<typeof snapshot>) {
     ...Array.from({ length: 40 }, (_, index) => index % 10 === 9 ? -0.35 : 0.18)
   ]);
   const result = snapshot(values, 14_400);
-  assert.ok(result.topSeries.state.some((state) => state === "TOP_WATCH" || state === "TOP_BUILDING"));
+  assert.ok(result.topSeries.state.some((state) => state === "BULL_ADVANCE"));
   assert.equal(shorts(result).length, 0, "strong bull continuation created a countertrend short");
 }
 
@@ -144,7 +144,7 @@ const fourHour = snapshot(fourHourValues, 14_400);
 assert.equal(shorts(fourHour).length, 1, "genuine 4H terminal top did not create exactly one confirmed short");
 assert.equal(fourHour.topEpisodes.length, 1, "one 4H terminal cycle created multiple top episodes");
 assert.equal(shorts(fourHour)[0]?.classification, "confirmed");
-assert.equal(shorts(fourHour)[0]?.sourceEventType, "BC_RDA_TOP_CONFIRMED");
+assert.equal(shorts(fourHour)[0]?.sourceEventType, "TOP_REVERSAL_CONFIRMED");
 
 {
   const result = snapshot(grow(100, repeatedTouchChanges()), 14_400);
@@ -219,14 +219,12 @@ assert.equal(shorts(fourHour)[0]?.sourceEventType, "BC_RDA_TOP_CONFIRMED");
   assert.equal(scaled.topEpisodes.length, base.topEpisodes.length);
 }
 
-// A bottom lookback change cannot expire or relocate the frozen top anchor.
+// The top anchor is explicitly bound to the declared analytical horizon.
 {
   const shortLookback = snapshot(fourHourValues, 14_400, { lookback: 100 });
   const longLookback = snapshot(fourHourValues, 14_400, { lookback: 200 });
-  assert.deepEqual(
-    shortLookback.topEpisodes.map(({ troughIndex, startIndex, maximumIndex, confirmedIndex }) => ({ troughIndex, startIndex, maximumIndex, confirmedIndex })),
-    longLookback.topEpisodes.map(({ troughIndex, startIndex, maximumIndex, confirmedIndex }) => ({ troughIndex, startIndex, maximumIndex, confirmedIndex }))
-  );
+  assert.equal(shortLookback.topEpisodes[0]?.analyticalHorizon, 100);
+  assert.equal(longLookback.topEpisodes[0]?.analyticalHorizon, 200);
 }
 
 // Optional flow absence lowers confidence; required exact flow fails closed.
@@ -258,13 +256,87 @@ assert.equal(shorts(fourHour)[0]?.sourceEventType, "BC_RDA_TOP_CONFIRMED");
 }
 
 {
-  const migrated = migrateDDAProSettings({ settingsVersion: 3 as never });
+  const migrated = migrateDDAProSettings({ settingsVersion: 4 as never });
   assert.equal(migrated.settingsVersion, DDA_PRO_SETTINGS_VERSION);
   assert.equal(migrated.enableMirroredTopEngine, true);
   assert.equal(migrated.topEngineMode, "mirrored-causal");
   assert.equal(migrated.topAnchorMethod, "causal-episode-trough");
+  assert.equal(migrated.modelVersion, "v2-causal");
+}
+
+// Exact adversarial correction: no early short, later structural top remains eligible.
+{
+  const adversarial = grow(100, [
+    ...new Array(80).fill(0.34), ...new Array(5).fill(-1.10), ...new Array(100).fill(0.34),
+    0.20, 0.14, 0.08, -0.12, 0.08, -0.18, ...new Array(16).fill(-1.15)
+  ]);
+  for (const mode of ["RAW", "BALANCED", "INSTITUTIONAL"] as const) {
+    const result = snapshot(adversarial, 14_400, applyDDAProSignalIntelligenceMode(settings, mode));
+    assert.ok(!result.rawSignals.some((signal) => signal.direction === "short" && signal.index <= 84), `${mode} confirmed the ordinary correction`);
+    assert.ok(result.rawSignals.some((signal) => signal.direction === "short" && signal.index > 184), `${mode} never evaluated the later final top`);
+  }
+  const rawDecision = snapshot(adversarial, 14_400, applyDDAProSignalIntelligenceMode(settings, "RAW"));
+  const balancedDecision = snapshot(adversarial, 14_400, applyDDAProSignalIntelligenceMode(settings, "BALANCED"));
+  const institutionalDecision = snapshot(adversarial, 14_400, applyDDAProSignalIntelligenceMode(settings, "INSTITUTIONAL"));
+  assert.equal(shorts(rawDecision).length, 1, "RAW did not pass through the confirmed V2 top");
+  assert.equal(shorts(balancedDecision).length, 0, "BALANCED did not independently arbitrate the top candidate");
+  assert.equal(shorts(institutionalDecision).length, 0, "INSTITUTIONAL did not independently arbitrate the top candidate");
+  assert.ok((balancedDecision.signalIntelligence.suppressedRawSignalCount ?? 0) > 0);
+  assert.ok((institutionalDecision.signalIntelligence.suppressedRawSignalCount ?? 0) > 0);
+  const result = snapshot(adversarial, 14_400);
+  assert.notEqual(result.topSeries.dynamicTopBarrier[84], result.topSeries.dynamicTopBarrier[184], "the V2 barrier froze through the continuing advance");
+}
+
+// History outside every declared horizon cannot alter the in-window top path.
+{
+  const tail = grow(100, terminalTopChanges());
+  const historyA = [...new Array(120).fill(100), ...tail.slice(1)];
+  const historyB = [
+    ...Array.from({ length: 119 }, (_, index) => 100 + Math.sin(index / 3) * 4),
+    100,
+    ...tail.slice(1)
+  ];
+  const overrides = { lookback: 100, topRegimeHorizon: 100, topStructuralHorizon: 80, topReturnQuantileLookback: 80 };
+  const resultA = snapshot(historyA, 14_400, overrides);
+  const resultB = snapshot(historyB, 14_400, overrides);
+  const compareFrom = 220;
+  assert.deepEqual(resultB.topSeries.state.slice(compareFrom), resultA.topSeries.state.slice(compareFrom));
+  assert.deepEqual(
+    shorts(resultB).filter((signal) => signal.index >= compareFrom).map((signal) => signal.index),
+    shorts(resultA).filter((signal) => signal.index >= compareFrom).map((signal) => signal.index),
+    "out-of-horizon candles changed in-window V2 confirmations"
+  );
+}
+
+// Explicit preservation mode restores the exact pre-532 recovery short and isolates V2.
+{
+  const values = grow(100, [...new Array(50).fill(0.20), ...new Array(10).fill(-1), ...new Array(20).fill(0.80)]);
+  const legacy = snapshot(values, 14_400, { modelVersion: "legacy-pre-532" });
+  assert.ok(legacy.rawSignals.some((signal) => signal.direction === "short" && signal.sourceEventType === "DDA_DRAWDOWN_RECOVERED"));
+  assert.equal(legacy.topEpisodes.length, 0);
+  assert.match(legacy.engineVersion, /PRE_532_LEGACY/);
+}
+
+// Byte-for-byte pre-532 RAW golden master behind the explicit legacy selector.
+{
+  const values = [
+    ...Array.from({ length: 100 }, (_, index) => 100 + index * 0.2),
+    ...Array.from({ length: 35 }, (_, index) => 120 - index * 0.45),
+    ...Array.from({ length: 35 }, (_, index) => 104.7 + index * 0.5)
+  ];
+  const legacy = snapshot(values, 300, {
+    ...applyDDAProSignalIntelligenceMode(settings, "RAW"),
+    modelVersion: "legacy-pre-532"
+  });
+  assert.deepEqual(
+    legacy.rawSignals.map(({ id, direction, index, time, sourceEventType, markerTone }) => ({ id, direction, index, time, sourceEventType, markerTone })),
+    [
+      { id: "bc-rda-long-1700040200", direction: "long", index: 134, time: 1_700_040_200, sourceEventType: "DDA_DRAWDOWN_DEEPENED", markerTone: "silver-white" },
+      { id: "bc-rda-short-1700049800", direction: "short", index: 166, time: 1_700_049_800, sourceEventType: "DDA_DRAWDOWN_RECOVERED", markerTone: "blood-red" }
+    ]
+  );
 }
 
 console.log(
-  `BC-RDA mirrored-top causality, recovery neutrality, long parity, prefix stability, 4H/1D, alert/dot, flow, scale, and reset tests: PASS (4H shorts=${shorts(fourHour).length})`
+  `BC-RDA V2/legacy selection, causality, recovery neutrality, adversarial re-arm, long parity, prefix stability, 4H/1D, alert/dot, flow, scale, and reset tests: PASS (4H shorts=${shorts(fourHour).length})`
 );

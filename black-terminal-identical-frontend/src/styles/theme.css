@@ -5988,51 +5988,6 @@ body.resizing-layout * {
   scrollbar-color: rgba(220, 223, 228, 0.34) rgba(255, 255, 255, 0.035);
 }
 
-.dda-settings-tabs {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px;
-  margin-bottom: 8px;
-}
-
-.dda-settings-tabs button,
-.dda-settings-error button {
-  min-height: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
-  background: rgba(8, 10, 12, 0.96);
-  color: #8e959f;
-  font: 800 9px "IBM Plex Mono", monospace;
-  text-transform: uppercase;
-}
-
-.dda-settings-tabs button.active {
-  border-color: rgba(255, 24, 56, 0.55);
-  color: #f2f2f4;
-  background: rgba(255, 24, 56, 0.12);
-}
-
-.dda-settings-section-fields {
-  display: contents;
-  border: 0;
-  padding: 0;
-  margin: 0;
-}
-
-.dda-settings-section-fields:disabled { opacity: 0.55; }
-
-.dda-settings-error {
-  display: grid;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid rgba(255, 24, 56, 0.35);
-  background: rgba(22, 3, 6, 0.94);
-  color: #aeb4bd;
-  font: 800 10px "IBM Plex Mono", monospace;
-}
-
-.dda-settings-error b { color: #ff3850; }
-
 .indicator-settings.dda-pro-settings::-webkit-scrollbar-track {
   background: rgba(255, 255, 255, 0.035);
 }
@@ -8538,30 +8493,6 @@ body.resizing-layout * {
   overflow: auto;
   padding: 0;
 }
-
-.positions-freshness-bar {
-  position: sticky;
-  top: 0;
-  z-index: 4;
-  min-width: 1060px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 0 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(5, 7, 8, 0.98);
-  color: #8e959f;
-  font: 800 9px "IBM Plex Mono", monospace;
-  letter-spacing: 0.04em;
-}
-
-.positions-freshness-bar b { color: #45d483; }
-.positions-freshness-bar.degraded b { color: #f1b643; }
-.positions-freshness-bar.stale b,
-.positions-freshness-bar.reconnecting b,
-.positions-freshness-bar.disconnected b { color: #ff4a5f; }
-.portfolio-positions-panel > .pm-table-head { top: 28px; }
 
 .positions-empty-state {
   min-width: 1060px;

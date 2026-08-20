@@ -74,7 +74,6 @@ import { deduplicateCanonicalPositions } from "./positions/canonicalPosition";
 import { blackCorePositionManager } from "./positions/positionManager";
 import type { ManagedPosition, PortfolioPosition } from "./positions/types";
 import type { PortfolioSnapshot } from "./portfolio/types";
-import { subscribePortfolioRealtime, type PortfolioRealtimeState } from "./portfolio/portfolioRealtime";
 import { blackCoreOrderSyncService } from "./orders/orderSyncService";
 import type { StrategyRuntimeKind } from "./modules/strategy-lab/types/strategy.types";
 import {
@@ -817,8 +816,6 @@ export default function App() {
   const [portfolioPositions, setPortfolioPositions] = useState<PortfolioPosition[]>([]);
   const [portfolioOrders, setPortfolioOrders] = useState<PortfolioSnapshot["orders"]>([]);
   const [portfolioOrderSync, setPortfolioOrderSync] = useState<PortfolioSnapshot["orderSync"]>({});
-  const [portfolioFreshness, setPortfolioFreshness] = useState<PortfolioSnapshot["freshness"]>(() => emptyPortfolioSnapshot().freshness);
-  const [portfolioRealtimeState, setPortfolioRealtimeState] = useState<PortfolioRealtimeState>("disconnected");
   const [connectionDiagnostics, setConnectionDiagnostics] = useState<ConnectionDiagnostics[]>(() => blackCoreConnectionManager.listDiagnostics());
   const [activeExecutionVenueId, setActiveExecutionVenueIdState] = useState<string | null>(() => readActiveExecutionVenueId());
 
@@ -867,15 +864,6 @@ export default function App() {
     blackCorePositionManager.syncExternalPositions(visiblePortfolioPositions, "portfolio-manager");
   }, [visiblePortfolioPositions]);
 
-  useEffect(() => {
-    blackCorePositionManager.projectPublicMark({
-      exchange: selectedExchange.id,
-      symbol: symbol.rawSymbol,
-      price: lastPrice,
-      observedAt: Date.now()
-    });
-  }, [lastPrice, selectedExchange.id, symbol.rawSymbol]);
-
   const lockedMarketExchange = useMemo(() => exchangeForConnection(activeExecutionConnection), [activeExecutionConnection]);
   const marketScopeLocked = Boolean(activeExecutionConnection && lockedMarketExchange);
   const exchangeMenuOptions = lockedMarketExchange ? [lockedMarketExchange] : marketCatalog;
@@ -902,12 +890,10 @@ export default function App() {
     setPortfolioPositions(positions);
     setPortfolioOrders(blackCoreOrderSyncService.replaceAccountSnapshots(orders, orderSync, connectedPortfolioAccountIds));
     setPortfolioOrderSync(orderSync);
-    setPortfolioFreshness(snapshot.freshness);
   }, [connectedPortfolioAccountIds, connectedPortfolioAccountSet]);
 
   const refreshPortfolioState = useCallback(async (force = false) => {
     if (force) invalidatePortfolioSnapshot();
-    setPortfolioFreshness((current) => ({ ...current, status: "syncing", message: "Refreshing the authoritative broker snapshot." }));
     const requestSequence = ++portfolioRequestSequenceRef.current;
     const snapshot = await getPortfolioSnapshot(connectedPortfolioAccountIds);
     if (requestSequence !== portfolioRequestSequenceRef.current) return snapshot;
@@ -920,64 +906,19 @@ export default function App() {
       blackCoreOrderSyncService.clear();
       portfolioRequestSequenceRef.current += 1;
       applyPortfolioSnapshot(emptyPortfolioSnapshot());
-      setPortfolioRealtimeState("disconnected");
       invalidatePortfolioSnapshot();
       return;
     }
     let mounted = true;
-    let inFlight = false;
-    let queued = false;
-    let fallbackTimer = 0;
-    let invalidationTimer = 0;
-    const scheduleFallback = () => {
-      window.clearTimeout(fallbackTimer);
-      fallbackTimer = window.setTimeout(() => { void load(true); }, document.hidden ? 180_000 : 60_000);
-    };
-    const load = async (force = false) => {
-      if (inFlight) {
-        queued = queued || force;
-        return;
-      }
-      inFlight = true;
-      if (force) invalidatePortfolioSnapshot();
-      setPortfolioFreshness((current) => ({ ...current, status: "syncing", message: "Refreshing the authoritative broker snapshot." }));
+    const load = async () => {
       const requestSequence = ++portfolioRequestSequenceRef.current;
-      try {
-        const snapshot = await getPortfolioSnapshot(connectedPortfolioAccountIds);
-        if (mounted && requestSequence === portfolioRequestSequenceRef.current) applyPortfolioSnapshot(snapshot);
-      } finally {
-        inFlight = false;
-        if (!mounted) return;
-        if (queued) {
-          queued = false;
-          void load(true);
-        } else {
-          scheduleFallback();
-        }
-      }
+      const snapshot = await getPortfolioSnapshot(connectedPortfolioAccountIds);
+      if (!mounted || requestSequence !== portfolioRequestSequenceRef.current) return;
+      applyPortfolioSnapshot(snapshot);
     };
     void load();
-    const unsubscribe = subscribePortfolioRealtime({
-      accountIds: connectedPortfolioAccountIds,
-      onState: setPortfolioRealtimeState,
-      onInvalidate: () => {
-        window.clearTimeout(invalidationTimer);
-        invalidationTimer = window.setTimeout(() => { void load(true); }, 250);
-      }
-    });
-    const refreshWhenVisible = () => {
-      if (!document.hidden) void load(true);
-    };
-    document.addEventListener("visibilitychange", refreshWhenVisible);
-    window.addEventListener("focus", refreshWhenVisible);
-    return () => {
-      mounted = false;
-      window.clearTimeout(fallbackTimer);
-      window.clearTimeout(invalidationTimer);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
-      window.removeEventListener("focus", refreshWhenVisible);
-      unsubscribe();
-    };
+    const timer = window.setInterval(load, document.hidden ? 60_000 : 15_000);
+    return () => { mounted = false; window.clearInterval(timer); };
   }, [applyPortfolioSnapshot, connectedPortfolioAccountIds, connectedPortfolioAccountScope]);
 
   // Ping update loop
@@ -2480,8 +2421,6 @@ export default function App() {
             <PositionsWorkspace
               orders={visiblePortfolioOrders}
               orderSync={visiblePortfolioOrderSync}
-              freshness={portfolioFreshness}
-              realtimeState={portfolioRealtimeState}
               onRefreshOrders={() => refreshPortfolioState(true)}
               onPositionNavigate={openPositionOnChart}
             />

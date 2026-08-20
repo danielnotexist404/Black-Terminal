@@ -11,7 +11,6 @@ import type {
   DDAProSignalEvent,
   DDAProSeries,
   DDAProSettings,
-  DDAProSignalIntelligence,
   DDAProSnapshot
 } from "./types.ts";
 import { DDA_PRO_INDICATOR_ID } from "./types.ts";
@@ -231,80 +230,9 @@ export function ddaProAlertSignalStream(snapshot: DDAProSnapshot, settings: DDAP
     : settings.confirmedAlertsOnly
       ? settings.showConfirmedSignals ? snapshot.signals : []
       : settings.showRawSignals ? snapshot.signalIntelligence.rawCandidateSignals : [];
-  return selected.filter((signal) => signal.direction !== "short" ||
-    (settings.modelVersion === "legacy-pre-532"
-      ? signal.sourceEventType === "DDA_DRAWDOWN_RECOVERED"
-      : signal.sourceEventType === "TOP_REVERSAL_CONFIRMED"));
-}
-
-/** Maps independent upside distributions into a short-direction feature frame. */
-export function topSeriesAsDDAProSeries(top: BCRDATopSeries, bottom: DDAProSeries): DDAProSeries {
-  const p25 = top.drawupP50.map((value, index) => Math.min(value, top.drawupP75[index] ?? value));
-  return {
-    rawDrawdown: top.rawDrawup,
-    smoothedDrawdown: top.smoothedDrawup,
-    depth: top.drawupDepth,
-    mean: top.drawupMean,
-    sigmaUpper: top.drawupP95,
-    sigmaLower: p25,
-    p05: p25,
-    p10: p25,
-    p25,
-    p50: top.drawupP50,
-    p75: top.drawupP75,
-    p90: top.drawupP90,
-    p95: top.drawupP95,
-    p99: top.drawupP99,
-    percentileRank: top.drawupPercentileRank,
-    zScore: top.drawupZScore,
-    duration: top.drawupDuration,
-    timeUnderWater: top.timeAboveTrough,
-    recoveryProgress: top.reversalFromEpisodeHigh,
-    velocity: top.drawupVelocity,
-    acceleration: top.drawupAcceleration,
-    vadd: top.drawupVadd,
-    riskScore: top.topRiskScore,
-    riskState: top.topRiskState,
-    flowImbalance: bottom.flowImbalance,
-    flowCvdMomentum: bottom.flowCvdMomentum,
-    flowPressure: bottom.flowPressure,
-    flowCoveragePercent: bottom.flowCoveragePercent,
-    flowState: bottom.flowState
-  };
-}
-
-export function mergeDirectionalSignalIntelligence(
-  bottom: DDAProSignalIntelligence,
-  top: DDAProSignalIntelligence
-): DDAProSignalIntelligence {
-  const priority: Record<DDAProSignalIntelligence["state"][number], number> = {
-    NEUTRAL: 0, WATCHING: 1, ARMED: 2, RESET: 3, COOLDOWN: 4, CONFIRMED: 5
-  };
-  const state = bottom.state.map((value, index) =>
-    priority[top.shortState[index] ?? "NEUTRAL"] > priority[value] ? top.shortState[index]! : value);
-  const topActive = (index: number) => (top.shortState[index] ?? "NEUTRAL") !== "NEUTRAL";
-  const choose = <Value>(bottomValues: readonly Value[], topValues: readonly Value[]) =>
-    bottomValues.map((value, index) => topActive(index) ? topValues[index] ?? value : value);
-  return {
-    ...bottom,
-    regime: choose(bottom.regime, top.regime),
-    regimeConfidence: choose(bottom.regimeConfidence, top.regimeConfidence),
-    shortConfidence: top.shortConfidence,
-    chopProbability: choose(bottom.chopProbability, top.chopProbability),
-    transitionEntropy: choose(bottom.transitionEntropy, top.transitionEntropy),
-    coherence: choose(bottom.coherence, top.coherence),
-    centroidVelocity: choose(bottom.centroidVelocity, top.centroidVelocity),
-    centroidAcceleration: choose(bottom.centroidAcceleration, top.centroidAcceleration),
-    expansionScore: choose(bottom.expansionScore, top.expansionScore),
-    tailAsymmetry: choose(bottom.tailAsymmetry, top.tailAsymmetry),
-    state,
-    shortState: top.shortState,
-    rawCandidateSignals: [...bottom.rawCandidateSignals, ...top.rawCandidateSignals].sort((left, right) => left.index - right.index),
-    episodes: [...bottom.episodes, ...top.episodes].sort((left, right) => left.startIndex - right.startIndex),
-    provisionalSignals: [...bottom.provisionalSignals, ...top.provisionalSignals].sort((left, right) => left.index - right.index),
-    suppressedRawSignalCount: bottom.suppressedRawSignalCount + top.suppressedRawSignalCount,
-    latestReasonCodes: [...new Set([...bottom.latestReasonCodes, ...top.latestReasonCodes])]
-  };
+  return selected.filter((signal) =>
+    signal.direction !== "short" || signal.sourceEventType === "BC_RDA_TOP_CONFIRMED"
+  );
 }
 
 export function performanceMetrics(

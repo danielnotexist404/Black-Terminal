@@ -1,6 +1,6 @@
 import { blackCoreEventBus } from "../core/blackCore";
 import { createId } from "../core/ids";
-import { canonicalPositionKey, deduplicateCanonicalPositions, projectPublicPositionMark } from "./canonicalPosition";
+import { canonicalPositionKey, deduplicateCanonicalPositions } from "./canonicalPosition";
 import type { ExecutionReport, ExecutionRequest } from "../execution/types";
 import type {
   ManagedPosition,
@@ -75,22 +75,11 @@ export class PositionManager {
         this.externalPositionSources.delete(duplicate.id);
       }
       if (current) {
-        const incomingObservation = Number(position.observationVersion ?? position.updatedAt ?? 0);
-        const currentObservation = Number(current.observationVersion ?? 0);
-        if (incomingObservation > 0 && currentObservation > incomingObservation) {
-          retainedIds.add(current.id);
-          continue;
-        }
         const next: ManagedPosition = {
           ...current,
           ...position,
           id: current.id,
           canonicalKey: position.canonicalKey || key,
-          observationVersion: Math.max(currentObservation, incomingObservation),
-          priceSource: "broker-authoritative",
-          authoritativePrice: position.currentPrice,
-          authoritativeUnrealizedPnl: position.unrealizedPnl,
-          publicMarkObservedAt: undefined,
           lifecycleState: current.protections.length > 0 ? "protected" : "open",
           health: this.calculateHealth({ ...current, ...position, protections: current.protections }),
           updatedAt: Date.now()
@@ -122,26 +111,6 @@ export class PositionManager {
       this.externalPositionSources.delete(positionId);
     }
     this.notify();
-  }
-
-  projectPublicMark(input: { exchange: string; symbol: string; price: number; observedAt: number }) {
-    if (!Number.isFinite(input.price) || input.price <= 0 || !Number.isFinite(input.observedAt)) return;
-    let changed = false;
-    for (const [id, position] of this.positions) {
-      if (["closed", "archived"].includes(position.lifecycleState)) continue;
-      if (position.exchange !== input.exchange || normalizeSymbol(position.symbol) !== normalizeSymbol(input.symbol)) continue;
-      if ((position.publicMarkObservedAt ?? 0) >= input.observedAt) continue;
-      const projection = projectPublicPositionMark(position, input.price, input.observedAt);
-      if (projection === position) continue;
-      const next: ManagedPosition = {
-        ...position,
-        ...projection
-      };
-      next.health = this.calculateHealth(next);
-      this.positions.set(id, next);
-      changed = true;
-    }
-    if (changed) this.notify();
   }
 
   ingestExecutionReport(report: ExecutionReport, request: ExecutionRequest) {
@@ -382,10 +351,6 @@ export class PositionManager {
 
     const managed: ManagedPosition = {
       ...position,
-      observationVersion: position.observationVersion ?? position.updatedAt ?? now,
-      priceSource: position.priceSource ?? "broker-authoritative",
-      authoritativePrice: position.authoritativePrice ?? position.currentPrice,
-      authoritativeUnrealizedPnl: position.authoritativeUnrealizedPnl ?? position.unrealizedPnl,
       lifecycleState: protections.length > 0 ? "protected" : "open",
       protections,
       timeline: [],

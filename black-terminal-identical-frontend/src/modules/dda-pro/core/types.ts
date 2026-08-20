@@ -1,7 +1,7 @@
 import type { Candle } from "../../../chart-engine/types.ts";
 
 export const DDA_PRO_SCHEMA_VERSION = 1 as const;
-export const DDA_PRO_SETTINGS_VERSION = 5 as const;
+export const DDA_PRO_SETTINGS_VERSION = 4 as const;
 export const DDA_PRO_INDICATOR_ID = "black-core-dda-pro" as const;
 
 export type DDAProEngineMode = "pine-compatibility" | "black-core-native";
@@ -20,14 +20,13 @@ export type DDAProSignalIntelligenceMode = "RAW" | "BALANCED" | "INSTITUTIONAL" 
 export type DDAProDistributionRegime = "COMPRESSION" | "CHOP" | "TRANSITION" | "DIRECTIONAL_EXPANSION" | "EXHAUSTION" | "REDISTRIBUTION" | "UNCLASSIFIED";
 export type DDAProSignalState = "NEUTRAL" | "WATCHING" | "ARMED" | "CONFIRMED" | "COOLDOWN" | "RESET";
 export type BCRDATopEpisodeState =
-  | "NEUTRAL" | "BULL_ADVANCE" | "EXHAUSTION_WATCH" | "REVERSAL_CANDIDATE"
-  | "BULL_REACCELERATION" | "CONFIRMED_TOP" | "RESET";
+  | "NEUTRAL" | "EXPANDING" | "TOP_WATCH" | "TOP_BUILDING"
+  | "TOP_ARMED" | "TOP_CONFIRMED" | "COOLDOWN" | "RESET";
 export type BCRDAMarketRegime =
   | "STRONG_BULL" | "WEAK_BULL" | "RANGE" | "WEAK_BEAR"
   | "STRONG_BEAR" | "TRANSITION" | "INSUFFICIENT";
 export type BCRDATopEngineMode = "mirrored-causal" | "disabled";
 export type BCRDATopAnchorMethod = "causal-episode-trough";
-export type BCRDAModelVersion = "v2-causal" | "legacy-pre-532";
 export type DDAProSignalReason =
   | "LOW_COHERENCE" | "HIGH_TRANSITION_ENTROPY" | "CENTROID_STALLED"
   | "CENTROID_MIGRATING_UP" | "CENTROID_MIGRATING_DOWN" | "DISTRIBUTION_COMPRESSED"
@@ -57,7 +56,6 @@ export type DDAProSettings = {
   riskFreeRatePercent: number;
   vaddVolatilityFloorPercent: number;
   drawdownEpisodeThresholdPercent: number;
-  modelVersion: BCRDAModelVersion;
   topEngineMode: BCRDATopEngineMode;
   enableMirroredTopEngine: boolean;
   topAnchorMethod: BCRDATopAnchorMethod;
@@ -79,11 +77,6 @@ export type DDAProSettings = {
   oneShortPerTopEpisode: boolean;
   topCooldownBars: number;
   topRequireExactBearishFlow: boolean;
-  topLocalSwingHorizon: number;
-  topStructuralHorizon: number;
-  topRegimeHorizon: number;
-  topBullPersistenceBars: number;
-  topReaccelerationBars: number;
   showTopCandidates: boolean;
   showDynamicTopBarrier: boolean;
   showTopDiagnostics: boolean;
@@ -188,8 +181,7 @@ export type DDAProEventType =
   | "DDA_RISK_SCORE_CROSSED_90" | "DDA_P90_ENTERED" | "DDA_P95_ENTERED" | "DDA_P99_ENTERED"
   | "DDA_DURATION_P90_EXCEEDED" | "DDA_DURATION_P95_EXCEEDED" | "DDA_VADD_EXTREME"
   | "DDA_RISK_DETERIORATION_ACCELERATED"
-  | "BC_RDA_TOP_CANDIDATE" | "BC_RDA_TOP_CONFIRMED"
-  | "TOP_EXHAUSTION_CANDIDATE" | "TOP_REVERSAL_CONFIRMED";
+  | "BC_RDA_TOP_CANDIDATE" | "BC_RDA_TOP_CONFIRMED";
 
 export type DDAProEvent = {
   id: string;
@@ -216,9 +208,7 @@ export type DDAProSignalEvent = {
   index: number;
   time: number;
   value: number;
-  sourceEventType: "DDA_DRAWDOWN_DEEPENED" | "DDA_DRAWDOWN_RECOVERED"
-    | "BC_RDA_TOP_CANDIDATE" | "BC_RDA_TOP_CONFIRMED"
-    | "TOP_EXHAUSTION_CANDIDATE" | "TOP_REVERSAL_CONFIRMED";
+  sourceEventType: "DDA_DRAWDOWN_DEEPENED" | "BC_RDA_TOP_CANDIDATE" | "BC_RDA_TOP_CONFIRMED";
   markerTone: "blood-red" | "silver-white";
   classification?: "confirmed" | "provisional";
   confidence?: number;
@@ -236,12 +226,6 @@ export type BCRDATopEpisode = {
   troughPrice: number;
   startIndex: number;
   entryThresholdPercent: number;
-  analyticalHorizon: number;
-  settingsHash: string;
-  primaryAnchorIndex: number;
-  primaryAnchorTime: number;
-  swingAnchorIndex: number;
-  swingAnchorTime: number;
   maximumIndex: number;
   maximumTime: number;
   maximumPrice: number;
@@ -275,10 +259,6 @@ export type BCRDATopSeries = {
   topRiskState: DDAProRiskState[];
   adaptiveEntryThreshold: number[];
   dynamicTopBarrier: number[];
-  exhaustionEntryBoundary: number[];
-  reversalConfirmationBoundary: number[];
-  candidateInvalidationBoundary: number[];
-  bullPersistenceScore: number[];
   reversalFromEpisodeHigh: number[];
   requiredTopReversal: number[];
   state: BCRDATopEpisodeState[];

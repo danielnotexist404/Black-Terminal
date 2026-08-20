@@ -10,16 +10,13 @@ import {
   deriveDDAProSignals,
   deriveEvents,
   latestFromSeries,
-  mergeDirectionalSignalIntelligence,
   performanceMetrics,
-  sourceValues,
-  topSeriesAsDDAProSeries
+  sourceValues
 } from "./engineShared.ts";
 import type { DDAProCalculationInput, DDAProRiskState, DDAProSnapshot } from "./types.ts";
 import { applyDDAProSignalIntelligence } from "./signalIntelligence.ts";
 import { calculateDDAProFlowPressure } from "./flowPressure.ts";
 import { calculateBCRDATopEngine } from "./topEngine.ts";
-import { deriveLegacyCausalDDAProSignalCandidates, deriveLegacyDDAProSignals } from "./legacyEngine.ts";
 
 export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): DDAProSnapshot {
   const settings = migrateDDAProSettings({
@@ -121,29 +118,15 @@ export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): 
   const topResult = calculateBCRDATopEngine(input, values, metrics.barsPerYear);
   events.push(...topResult.events);
   for (const event of events) Object.assign(event, { engineMode: "pine-compatibility", sourceAuthority: source.authority, lookback, riskScore: series.riskScore[event.index] ?? 0, confidence, drawdownPercent: series.rawDrawdown[event.index] ?? 0 });
-  const legacy = settings.modelVersion === "legacy-pre-532";
-  const bottomSignals = legacy ? deriveLegacyDDAProSignals(events) : deriveDDAProSignals(events);
-  const rawSignals = legacy
-    ? bottomSignals
-    : [...bottomSignals, ...topResult.confirmedSignals].sort((left, right) => left.index - right.index || left.direction.localeCompare(right.direction));
-  const bottomCandidates = settings.signalIntelligenceMode === "RAW"
-    ? bottomSignals
-    : legacy
-      ? deriveLegacyCausalDDAProSignalCandidates(candles, series.depth, settings.drawdownEpisodeThresholdPercent)
-      : deriveCausalDDAProSignalCandidates(candles, series.depth, settings.drawdownEpisodeThresholdPercent);
-  const bottomIntelligence = applyDDAProSignalIntelligence(input, series, bottomCandidates);
-  const topIntelligence = legacy ? null : applyDDAProSignalIntelligence(
-    input,
-    topSeriesAsDDAProSeries(topResult.series, series),
-    topResult.confirmedSignals
-  );
-  const signals = legacy
-    ? bottomIntelligence.signals
-    : [...bottomIntelligence.signals, ...(topIntelligence?.signals ?? [])]
-      .sort((left, right) => left.index - right.index || left.direction.localeCompare(right.direction));
-  const signalIntelligence = topIntelligence
-    ? mergeDirectionalSignalIntelligence(bottomIntelligence.intelligence, topIntelligence.intelligence)
-    : bottomIntelligence.intelligence;
+  const bottomSignals = deriveDDAProSignals(events);
+  const rawSignals = [...bottomSignals, ...topResult.confirmedSignals].sort((left, right) => left.index - right.index || left.direction.localeCompare(right.direction));
+  const intelligenceCandidates = settings.signalIntelligenceMode === "RAW"
+    ? rawSignals
+    : deriveCausalDDAProSignalCandidates(candles, series.depth, settings.drawdownEpisodeThresholdPercent);
+  const intelligenceResult = applyDDAProSignalIntelligence(input, series, intelligenceCandidates);
+  const signals = settings.signalIntelligenceMode === "RAW"
+    ? intelligenceResult.signals
+    : [...intelligenceResult.signals, ...topResult.confirmedSignals].sort((left, right) => left.index - right.index || left.direction.localeCompare(right.direction));
   const dataHash = ddaProDataHash(input);
   const settingsHash = ddaProSettingsHash(settings);
   const latest = latestFromSeries(series, latestState, confidence, metrics);
@@ -151,7 +134,7 @@ export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): 
     schemaVersion: 1,
     engineMode: "pine-compatibility",
     calculationHash: calculationHash(input, "pine-compatibility", dataHash),
-    engineVersion: legacy ? "DDA_PINE_COMPAT_V1+BC_RDA_PRE_532_LEGACY_V1" : "DDA_PINE_COMPAT_V1+BC_RDA_CAUSAL_TOP_V2",
+    engineVersion: "DDA_PINE_COMPAT_V1+BC_RDA_MIRRORED_TOP_V1",
     dataHash,
     settingsHash,
     outputHash: ddaProOutputHash(series, latest, topResult.series, signals),
@@ -171,7 +154,7 @@ export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): 
     topCandidates: topResult.candidates,
     rawSignals,
     signals,
-    signalIntelligence,
+    signalIntelligence: intelligenceResult.intelligence,
     latest
   };
 }

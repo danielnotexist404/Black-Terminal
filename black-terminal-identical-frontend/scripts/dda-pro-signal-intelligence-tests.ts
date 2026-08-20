@@ -40,7 +40,7 @@ function rawSignal(index: number, direction: DDAProSignalDirection, source: read
     index,
     time: source[index]!.time,
     value: Math.abs(index),
-    sourceEventType: direction === "long" ? "DDA_DRAWDOWN_DEEPENED" : "TOP_REVERSAL_CONFIRMED",
+    sourceEventType: direction === "long" ? "DDA_DRAWDOWN_DEEPENED" : "BC_RDA_TOP_CONFIRMED",
     markerTone: direction === "long" ? "silver-white" : "blood-red"
   };
 }
@@ -112,7 +112,7 @@ function calculationInput(source: Candle[], settings = filteredSettings): DDAPro
   assert.ok(!raw.rawSignals.map((signal) => String(signal.sourceEventType)).includes("DDA_DRAWDOWN_RECOVERED"), "drawdown recovery remained directional");
   assert.deepEqual(raw.signals, raw.rawSignals, "RAW intelligence must be a byte-for-byte pass-through");
   assert.deepEqual(raw.rawSignals.map(({ id, direction, index, time, sourceEventType, markerTone }) => ({ id, direction, index, time, sourceEventType, markerTone })), [
-    { id: "bc-rda-top-signal-v2:market:unknown:300s:250:1700000000:bc_rda_causal_top_v2:fnv1a-7e64e5ae:1700032100", direction: "short", index: 107, time: 1_700_032_100, sourceEventType: "TOP_REVERSAL_CONFIRMED", markerTone: "blood-red" },
+    { id: "bc-rda-top-signal-v1:market:unknown:300s:1700000000:bc_rda_mirrored_top_v1:1700031200", direction: "short", index: 104, time: 1_700_031_200, sourceEventType: "BC_RDA_TOP_CONFIRMED", markerTone: "blood-red" },
     { id: "bc-rda-long-1700040200", direction: "long", index: 134, time: 1_700_040_200, sourceEventType: "DDA_DRAWDOWN_DEEPENED", markerTone: "silver-white" },
   ], "corrected RAW golden fixture changed");
 }
@@ -234,7 +234,6 @@ function calculationInput(source: Candle[], settings = filteredSettings): DDAPro
   const theme = readFileSync(new URL("../src/styles/theme.css", import.meta.url), "utf8");
   const worker = readFileSync(new URL("../src/modules/dda-pro/workers/DDAProWorkerClient.ts", import.meta.url), "utf8");
   const intelligence = readFileSync(new URL("../src/modules/dda-pro/core/signalIntelligence.ts", import.meta.url), "utf8");
-  const settingsSource = readFileSync(new URL("../src/modules/dda-pro/core/settings.ts", import.meta.url), "utf8");
   assert.match(renderer, /markerTone === "blood-red"[\s\S]*?#ff1838[\s\S]*?#f2f2f4/, "short/long signal colors are not blood-red and silver-white");
   assert.match(renderer, /dashboardPanelWidth[\s\S]*?roundRect\(panelX, panelY[\s\S]*?alpha:\s*0\.9/, "BC-RDA dashboard has no high-contrast backing panel");
   assert.match(renderer, /resolution:\s*Math\.min\(3, Math\.max\(2[\s\S]*?roundPixels:\s*true/, "BC-RDA diagnostic text is not rendered on a pixel-snapped high-resolution surface");
@@ -243,14 +242,6 @@ function calculationInput(source: Candle[], settings = filteredSettings): DDAPro
   assert.match(chart, /ddaSignalAlertArmedAtRef/, "mount/reconnect alert arming guard is missing");
   assert.match(chart, /ddaConfiguredEventsRef/, "canonical event idempotency guard is missing");
   assert.match(chart, /indicator-settings profile-settings oscillator-settings dda-pro-settings/, "BC-RDA settings are not mounted in the bounded scroll shell");
-  assert.match(chart, /DDAProSettingsErrorBoundary/, "BC-RDA settings lack a local failure boundary");
-  for (const section of ["engine", "top", "signals", "flow", "statistics", "visuals", "diagnostics"]) {
-    assert.match(chart, new RegExp(`ddaProSettingsSection === "${section}"`), `${section} settings are not lazy-mounted`);
-  }
-  const calculationSurface = chart.slice(chart.indexOf("const ddaCalculationSettings = useMemo"), chart.indexOf("liquidationFieldControllerRef.current?.updateSettings"));
-  assert.doesNotMatch(calculationSurface, /activeIndicator|ddaProSettingsSection/, "opening or switching settings can restart calculation");
-  assert.match(calculationSurface, /ddaCalculationSettingsKey/);
-  assert.match(settingsSource, /showTopCandidates["']?,\s*["']showDynamicTopBarrier["']?,\s*["']showTopDiagnostics/, "top visual controls still change the calculation hash");
   assert.match(theme, /\.indicator-settings\.dda-pro-settings[\s\S]*?overflow-y:\s*auto[\s\S]*?scrollbar-gutter:\s*stable/, "BC-RDA advanced controls can be clipped below the chart without a visible scroll affordance");
   assert.match(worker, /DDA_PRO_STALE_GENERATION/, "stale worker generations are not rejected");
   assert.doesNotMatch(intelligence, /camera|viewport|visibleRange/i, "signal calculation depends on chart navigation state");

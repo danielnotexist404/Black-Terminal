@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { canonicalizeBybitPositions, bybitPositionKey } from "../server/exchanges/bybit-position-identity.js";
-import { canonicalPositionKey, deduplicateCanonicalPositions, projectPublicPositionMark, reconcileAuthoritativePositions } from "../src/positions/canonicalPosition.ts";
+import { canonicalPositionKey, deduplicateCanonicalPositions, reconcileAuthoritativePositions } from "../src/positions/canonicalPosition.ts";
 import { replaceBybitPositions } from "../server/exchanges/bybit-snapshot-store.js";
 import type { PortfolioPosition } from "../src/positions/types.ts";
 
@@ -76,14 +76,6 @@ assert.equal(reconciled.positions[0].id, "venue-row-1", "updates must retain the
 assert.equal(reconciled.positions[0].quantity, 0.02);
 assert.equal(reconciled.positions[0].currentPrice, 66_000);
 
-const older = reconcileAuthoritativePositions([update], [position({ updatedAt: 150, currentPrice: 63_000 })]);
-assert.equal(older.positions[0].currentPrice, 66_000, "an older observation overwrote a newer canonical position");
-
-const projected = projectPublicPositionMark(position({ observationVersion: 200 }), 66_500, 300);
-assert.equal(projected.priceSource, "public-projected");
-assert.equal(projected.currentPrice, 66_500);
-assert.equal(projected.authoritativePrice, 65_000, "public projection destroyed the broker-authoritative mark");
-
 const closure = reconcileAuthoritativePositions([position(), eth], [eth]);
 assert.deepEqual(closure.positions.map(canonicalPositionKey), [canonicalPositionKey(eth)], "authoritative closure must remove only the missing identity");
 
@@ -101,11 +93,10 @@ const migrationSource = readFileSync(new URL("../supabase/migrations/20260812000
 const connectionManagerSource = readFileSync(new URL("../src/connectivity/connectionManager.ts", import.meta.url), "utf8");
 
 assert.match(portfolioStoreSource, /lastVerifiedSnapshots/);
-assert.match(portfolioStoreSource, /markPortfolioSnapshotFallback\(lastVerified/);
+assert.match(portfolioStoreSource, /if \(lastVerified\) return lastVerified/);
 assert.match(appSource, /portfolioRequestSequenceRef/);
 assert.match(appSource, /requestSequence !== portfolioRequestSequenceRef\.current/);
-assert.match(appSource, /subscribePortfolioRealtime/);
-assert.match(appSource, /window\.clearTimeout\(fallbackTimer\)/);
+assert.match(appSource, /window\.clearInterval\(timer\)/);
 assert.match(reconciliationSource, /getBybitPositions\(credentials\)/);
 assert.doesNotMatch(reconciliationSource, /getBybitPositions\(credentials,\s*\{[^}]*symbol/);
 assert.doesNotMatch(reconciliationSource, /createBybitOrder|amendBybitOrder|cancelBybitOrder/);

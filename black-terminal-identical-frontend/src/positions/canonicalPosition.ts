@@ -9,12 +9,11 @@ export function canonicalPositionKey(position: PortfolioPosition) {
   const network = normalize(position.network || "mainnet");
   const account = normalize(position.accountId);
   const exchange = normalize(position.exchange || "unknown");
-  const category = normalize(position.category || "linear");
-  const marketKind = normalize(position.marketKind || "perpetual");
+  const category = normalize(position.category || position.marketKind || "linear");
   const symbol = normalize(position.symbol);
   const positionIdx = Number.isInteger(position.positionIdx) ? position.positionIdx : 0;
   const direction = normalize(position.direction);
-  return `${network}:${account}:${exchange}:${category}:${marketKind}:${symbol}:${positionIdx}:${direction}`;
+  return `${network}:${account}:${exchange}:${category}:${symbol}:${positionIdx}:${direction}`;
 }
 
 export function positionVersion(position: PortfolioPosition) {
@@ -63,20 +62,6 @@ export function reconcileAuthoritativePositions(current: PortfolioPosition[], in
     return { ...existing, ...position, id: existing.id };
   });
   return { positions, diagnostics: deduplicated.diagnostics };
-}
-
-export function projectPublicPositionMark(position: PortfolioPosition, price: number, observedAt: number): PortfolioPosition {
-  if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(observedAt) || (position.publicMarkObservedAt ?? 0) >= observedAt) return position;
-  const direction = position.direction === "long" ? 1 : -1;
-  return {
-    ...position,
-    currentPrice: price,
-    unrealizedPnl: (price - position.averagePrice) * position.quantity * direction,
-    priceSource: "public-projected",
-    authoritativePrice: position.authoritativePrice ?? position.currentPrice,
-    authoritativeUnrealizedPnl: position.authoritativeUnrealizedPnl ?? position.unrealizedPnl,
-    publicMarkObservedAt: observedAt
-  };
 }
 
 function positionFingerprint(position: PortfolioPosition) {

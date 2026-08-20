@@ -6,8 +6,8 @@ export type AlertCondition = "testing" | "crossingAbove" | "crossingBelow";
 export type AlertRunMode = "once" | "perpetual";
 export type AlertLevelTarget = "any" | "poc" | "vah" | "val" | "lvn" | "srZone" | "supportZone" | "resistanceZone";
 export type DDAProAlertSignal = DDAProEventType | "BC_RDA_ANY_SIGNAL" | "BC_RDA_LONG_SIGNAL" | "BC_RDA_SHORT_SIGNAL";
-/** V2 shorts bind only to immutable reversal confirmation; legacy is selected explicitly in settings. */
-export const BC_RDA_SHORT_SIGNAL_SOURCE = "TOP_REVERSAL_CONFIRMED" as const;
+/** BC_RDA_SHORT_SIGNAL remains stable; its sole eligible source is the confirmed mirrored-top event. */
+export const BC_RDA_SHORT_SIGNAL_SOURCE = "BC_RDA_TOP_CONFIRMED" as const;
 
 export type IndicatorAlertDefinition = {
   id: string;

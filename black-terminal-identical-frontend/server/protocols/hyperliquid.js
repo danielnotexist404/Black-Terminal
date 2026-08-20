@@ -347,7 +347,7 @@ export async function syncHyperliquidAccount(supabase, account, credential) {
   ]);
 
   await upsertHyperliquidBalances(supabase, account.id, state);
-  await upsertHyperliquidPositions(supabase, account.id, state, network);
+  await upsertHyperliquidPositions(supabase, account.id, state);
   await supabase.from("hyperliquid_account_snapshots").insert({
     user_id: account.user_id,
     account_id: account.id,
@@ -689,19 +689,13 @@ async function upsertHyperliquidBalances(supabase, accountId, state) {
   }, { onConflict: "account_id,asset" });
 }
 
-async function upsertHyperliquidPositions(supabase, accountId, state, network) {
-  const observedAt = new Date().toISOString();
+async function upsertHyperliquidPositions(supabase, accountId, state) {
   const rows = state.assetPositions
     .map(mapHyperliquidPosition)
     .filter((position) => position.quantity > 0)
     .map((position) => ({
       account_id: accountId,
       exchange: "hyperliquid",
-      network,
-      category: "linear",
-      market_kind: "perpetual",
-      position_idx: 0,
-      canonical_key: `hyperliquid:${network}:linear:perpetual:${position.symbol}:0:${position.direction}`,
       symbol: position.symbol,
       direction: position.direction,
       quantity: position.quantity,
@@ -712,23 +706,14 @@ async function upsertHyperliquidPositions(supabase, accountId, state, network) {
       margin: position.margin,
       leverage: position.leverage,
       liquidation_price: position.liquidationPrice,
-      opened_at: observedAt,
-      updated_at: observedAt
+      opened_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
     }));
 
   if (rows.length) {
-    const { error } = await supabase
+    await supabase
       .from("account_positions")
-      .upsert(rows, { onConflict: "account_id,canonical_key" });
-    if (error) throw error;
-  }
-  const { data: stored, error: storedError } = await supabase.from("account_positions").select("id, canonical_key").eq("account_id", accountId);
-  if (storedError) throw storedError;
-  const activeKeys = new Set(rows.map((row) => row.canonical_key));
-  const staleIds = (stored || []).filter((row) => !activeKeys.has(row.canonical_key)).map((row) => row.id);
-  if (staleIds.length) {
-    const { error } = await supabase.from("account_positions").delete().eq("account_id", accountId).in("id", staleIds);
-    if (error) throw error;
+      .upsert(rows, { onConflict: "account_id,symbol,direction" });
   }
 }
 

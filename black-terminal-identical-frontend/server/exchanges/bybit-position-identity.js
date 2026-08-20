@@ -1,13 +1,11 @@
 const BYBIT_POSITION_INDEXES = new Set([0, 1, 2]);
 
 export function bybitPositionKey(position) {
-  const network = normalize(position?.network || "mainnet");
-  const category = normalize(position?.category || "linear");
-  const marketKind = normalize(position?.marketKind || position?.market_kind || "perpetual");
+  const category = normalize(position?.category || position?.marketKind || position?.market_kind || "linear");
   const symbol = normalizeSymbol(position?.symbol);
   const positionIdx = normalizePositionIdx(position?.positionIdx ?? position?.position_idx);
   const direction = normalizeDirection(position?.direction || position?.side, positionIdx);
-  return `bybit:${network}:${category}:${marketKind}:${symbol}:${positionIdx}:${direction}`;
+  return `bybit:${category}:${symbol}:${positionIdx}:${direction}`;
 }
 
 export function canonicalizeBybitPositions(positions, accountId) {

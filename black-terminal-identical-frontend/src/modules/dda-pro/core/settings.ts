@@ -20,7 +20,6 @@ export const DEFAULT_DDA_PRO_SETTINGS: DDAProSettings = {
   riskFreeRatePercent: 4,
   vaddVolatilityFloorPercent: 0.10,
   drawdownEpisodeThresholdPercent: 0.10,
-  modelVersion: "v2-causal",
   topEngineMode: "mirrored-causal",
   enableMirroredTopEngine: true,
   topAnchorMethod: "causal-episode-trough",
@@ -42,11 +41,6 @@ export const DEFAULT_DDA_PRO_SETTINGS: DDAProSettings = {
   oneShortPerTopEpisode: true,
   topCooldownBars: 12,
   topRequireExactBearishFlow: false,
-  topLocalSwingHorizon: 24,
-  topStructuralHorizon: 96,
-  topRegimeHorizon: 250,
-  topBullPersistenceBars: 8,
-  topReaccelerationBars: 3,
   showTopCandidates: false,
   showDynamicTopBarrier: true,
   showTopDiagnostics: false,
@@ -163,7 +157,6 @@ const PRESET_MIGRATIONS: Record<string, DDAProPreset> = {
 const THEMES = new Set<DDAProTheme>(["black-terminal", "black-terminal-blood", "institutional-monochrome", "custom", "gold", "edge-tools", "behavioral", "quant", "ocean", "fire", "matrix", "arctic"]);
 const SIGNAL_MODES = new Set(["RAW", "BALANCED", "INSTITUTIONAL", "CUSTOM"]);
 const TOP_ENGINE_MODES = new Set(["mirrored-causal", "disabled"]);
-const MODEL_VERSIONS = new Set(["v2-causal", "legacy-pre-532"]);
 const finite = (value: unknown, fallback: number) => typeof value === "number" && Number.isFinite(value) ? value : fallback;
 const boolean = (value: unknown, fallback: boolean) => typeof value === "boolean" ? value : fallback;
 
@@ -173,9 +166,6 @@ export function migrateDDAProSettings(value?: Partial<DDAProSettings> | null): D
   const moderateThreshold = Math.max(0, Math.min(95, finite(merged.moderateThreshold, 50)));
   const highThreshold = Math.max(moderateThreshold, Math.min(99, finite(merged.highThreshold, 75)));
   const extremeThreshold = Math.max(highThreshold, Math.min(100, finite(merged.extremeThreshold, 90)));
-  const topLocalSwingHorizon = Math.max(8, Math.min(250, Math.round(finite(merged.topLocalSwingHorizon, 24))));
-  const topStructuralHorizon = Math.max(topLocalSwingHorizon, Math.min(2_000, Math.round(finite(merged.topStructuralHorizon, 96))));
-  const topRegimeHorizon = Math.max(topStructuralHorizon, Math.min(5_000, Math.round(finite(merged.topRegimeHorizon, 250))));
   return {
     ...merged,
     settingsVersion: DDA_PRO_SETTINGS_VERSION,
@@ -187,7 +177,6 @@ export function migrateDDAProSettings(value?: Partial<DDAProSettings> | null): D
     riskFreeRatePercent: Math.max(-25, Math.min(100, finite(merged.riskFreeRatePercent, 4))),
     vaddVolatilityFloorPercent: Math.max(0.001, Math.min(100, finite(merged.vaddVolatilityFloorPercent, 0.10))),
     drawdownEpisodeThresholdPercent: Math.max(0, Math.min(50, finite(merged.drawdownEpisodeThresholdPercent, 0.10))),
-    modelVersion: MODEL_VERSIONS.has(merged.modelVersion) ? merged.modelVersion : "v2-causal",
     topEngineMode: TOP_ENGINE_MODES.has(merged.topEngineMode) ? merged.topEngineMode : "mirrored-causal",
     enableMirroredTopEngine: boolean(merged.enableMirroredTopEngine, true),
     topAnchorMethod: "causal-episode-trough",
@@ -204,16 +193,11 @@ export function migrateDDAProSettings(value?: Partial<DDAProSettings> | null): D
     topReversalAtrMultiplier: Math.max(0.1, Math.min(10, finite(merged.topReversalAtrMultiplier, 1.5))),
     topMinimumReversalPercent: Math.max(0.05, Math.min(25, finite(merged.topMinimumReversalPercent, 0.75))),
     topChangePointSensitivity: Math.max(0, Math.min(100, finite(merged.topChangePointSensitivity, 55))),
-    topStructureConfirmation: true,
+    topStructureConfirmation: boolean(merged.topStructureConfirmation, true),
     strongBullProtection: boolean(merged.strongBullProtection, true),
     oneShortPerTopEpisode: boolean(merged.oneShortPerTopEpisode, true),
     topCooldownBars: Math.max(1, Math.min(1_000, Math.round(finite(merged.topCooldownBars, 12)))),
     topRequireExactBearishFlow: boolean(merged.topRequireExactBearishFlow, false),
-    topLocalSwingHorizon,
-    topStructuralHorizon,
-    topRegimeHorizon,
-    topBullPersistenceBars: Math.max(2, Math.min(50, Math.round(finite(merged.topBullPersistenceBars, 8)))),
-    topReaccelerationBars: Math.max(1, Math.min(20, Math.round(finite(merged.topReaccelerationBars, 3)))),
     showTopCandidates: boolean(merged.showTopCandidates, false),
     showDynamicTopBarrier: boolean(merged.showDynamicTopBarrier, true),
     showTopDiagnostics: boolean(merged.showTopDiagnostics, false),

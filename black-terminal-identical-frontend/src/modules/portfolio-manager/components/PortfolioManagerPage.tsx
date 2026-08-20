@@ -21,7 +21,6 @@ import { submitOrder } from "../../../execution/executionEngine";
 import { MAINNET_ORDER_CONFIRMATION, disableMainnetValidationMode, promptEnableMainnetValidationMode, readMainnetValidationMode, validateMainnetOrderReadiness } from "../../../execution/mainnetValidationMode";
 import { beginBrokerAuthorizationViaApi, controlBlackCloudConnectionViaApi, fetchBlackCloudStatusViaApi, getBybitRuntimeStatusViaApi, listPersistedExchangeConnectionsViaApi, runExchangeAccountDiagnosticsViaApi, updateBybitPositionProtectionViaApi, type BlackCloudControlAction, type BlackCloudStatusPayload, type BrokerAdapterDescriptor, type BybitRuntimeStatusPayload, type PortfolioOrderDraft } from "../../../portfolio/portfolioApiClient";
 import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } from "../../../portfolio/types";
-import type { PortfolioRealtimeState } from "../../../portfolio/portfolioRealtime";
 import { getPortfolioSnapshot } from "../../../portfolio/portfolioStore";
 import { defaultRiskControls } from "../../../risk/types";
 import { marketCatalog } from "../../../market-data/marketCatalog";
@@ -100,13 +99,9 @@ const walletProviders: Array<{ id: WalletProviderId; label: string; chainHint: s
 ];
 
 export function PortfolioPositionsPanel({
-  onPositionNavigate,
-  freshness,
-  realtimeState = "disconnected"
+  onPositionNavigate
 }: {
   onPositionNavigate?: (position: ManagedPosition) => void;
-  freshness?: PortfolioSnapshot["freshness"];
-  realtimeState?: PortfolioRealtimeState;
 }) {
   const [managedPositions, setManagedPositions] = useState<ManagedPosition[]>(() => blackCorePositionManager.listActivePositions());
   const [positionMenu, setPositionMenu] = useState<{ x: number; y: number; position: ManagedPosition } | null>(null);
@@ -287,19 +282,8 @@ export function PortfolioPositionsPanel({
     }
   }
 
-  const brokerUpdateTime = freshness?.brokerSyncedAt ?? freshness?.fetchedAt ?? null;
-  const freshnessAgeMs = brokerUpdateTime === null ? null : Math.max(0, Date.now() - brokerUpdateTime);
-  const freshnessLabel = freshness?.status.toUpperCase() ?? "UNAVAILABLE";
-
   return (
     <div className="portfolio-positions-panel">
-      <div className={`positions-freshness-bar ${freshness?.status ?? "unavailable"}`} title={freshness?.message}>
-        <b>{freshnessLabel}</b>
-        <span>{freshnessAgeMs === null ? "NO VERIFIED UPDATE" : `BROKER AGE ${Math.round(freshnessAgeMs / 1000)}s`}</span>
-        <span>{brokerUpdateTime === null ? "LAST UPDATE —" : `LAST UPDATE ${new Date(brokerUpdateTime).toLocaleTimeString()}`}</span>
-        <span>SOURCE {(freshness?.source ?? "local-empty").replaceAll("-", " ").toUpperCase()}</span>
-        <span>REALTIME {realtimeState.toUpperCase()}</span>
-      </div>
       <div className="pm-table-head pm-positions-grid">
         <span>Symbol</span>
         <span>Dir</span>
@@ -328,12 +312,8 @@ export function PortfolioPositionsPanel({
           <span className={position.direction === "long" ? "green" : "red"}>{position.direction.toUpperCase()}</span>
           <span>{compact.format(position.quantity)}</span>
           <span>{formatPositionMoney(position.averagePrice)}</span>
-          <span title={position.priceSource === "public-projected" ? "Projected from the public market stream; broker-authoritative mark is retained separately." : "Broker-authoritative mark"}>
-            {position.priceSource === "public-projected" ? "≈" : ""}{formatPositionMoney(position.currentPrice)}
-          </span>
-          <span className={position.unrealizedPnl >= 0 ? "green" : "red"} title={position.priceSource === "public-projected" ? "Projected P/L from the public mark." : "Broker-authoritative unrealized P/L"}>
-            {position.priceSource === "public-projected" ? "≈" : ""}{formatPositionMoney(position.unrealizedPnl)}
-          </span>
+          <span>{formatPositionMoney(position.currentPrice)}</span>
+          <span className={position.unrealizedPnl >= 0 ? "green" : "red"}>{formatPositionMoney(position.unrealizedPnl)}</span>
           <span>{formatPositionMoney(position.realizedPnl)}</span>
           <span>{formatPositionMoney(position.margin)}</span>
           <span>{position.leverage}x</span>
@@ -381,15 +361,11 @@ export function PortfolioPositionsPanel({
 export function PositionsWorkspace({
   orders = [],
   orderSync = {},
-  freshness,
-  realtimeState = "disconnected",
   onRefreshOrders,
   onPositionNavigate
 }: {
   orders?: OrderUpdate[];
   orderSync?: PortfolioSnapshot["orderSync"];
-  freshness?: PortfolioSnapshot["freshness"];
-  realtimeState?: PortfolioRealtimeState;
   onRefreshOrders?: () => Promise<unknown>;
   onPositionNavigate?: (position: ManagedPosition) => void;
 }) {
@@ -774,7 +750,7 @@ export function PositionsWorkspace({
         ref={positionsStackRef}
         style={{ "--positions-orders-height": `${ordersPanelHeight}px` } as CSSProperties}
       >
-        <PortfolioPositionsPanel freshness={freshness} realtimeState={realtimeState} onPositionNavigate={onPositionNavigate} />
+        <PortfolioPositionsPanel onPositionNavigate={onPositionNavigate} />
         <div
           className="positions-stack-resizer"
           role="separator"

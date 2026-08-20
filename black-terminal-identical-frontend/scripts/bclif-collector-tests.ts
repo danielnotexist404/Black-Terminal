@@ -83,6 +83,80 @@ const predictions = deriveMeaningfulClusterPredictions(clusterColumn, 50_000, 25
 assert.ok(predictions.length > 0 && predictions.length <= 4);
 assert.ok(predictions.every((prediction) => prediction.sourceCutoffTimestamp === clusterColumn.timestamp && prediction.createdAt === clusterColumn.timestamp));
 
+const retryPrediction = predictions[0]!;
+class CalibrationRetryQuery {
+  private id = "";
+  select() { return this; }
+  eq(column: string, value: unknown) { if (column === "id") this.id = String(value); return this; }
+  limit() { return this; }
+  then(resolve: (value: any) => unknown, reject?: (reason: unknown) => unknown) {
+    return Promise.resolve({
+      data: [{
+        id: this.id,
+        source_id: "00000000-0000-8000-8000-000000000001",
+        model_version: retryPrediction.modelVersion,
+        source_cutoff_at: postgresTimestamp(retryPrediction.sourceCutoffTimestamp),
+        created_at: postgresTimestamp(retryPrediction.createdAt),
+        price_min: retryPrediction.priceMin,
+        price_max: retryPrediction.priceMax,
+        notional_min: retryPrediction.notionalMin,
+        notional_max: retryPrediction.notionalMax,
+        confidence: retryPrediction.confidence,
+        leverage_prior: retryPrediction.leveragePrior,
+        margin_mode_uncertainty: retryPrediction.marginModeUncertainty,
+        predicted_side: retryPrediction.predictedSide,
+        cascade_state: "SCAFFOLDED",
+        immutable_context: retryPrediction.immutableContext || {}
+      }],
+      error: null
+    }).then(resolve, reject);
+  }
+}
+const retryCalibration = new BclifCalibrationRepository({
+  from(table: string) { assert.equal(table, "bclif_cluster_predictions"); return new CalibrationRetryQuery(); }
+}, "00000000-0000-8000-8000-000000000001", {
+  nodeId: "LIQUIDATION_INTELLIGENCE_NODE_01",
+  instanceId: "instance-retry-test",
+  fencingEpoch: 1
+});
+assert.ok(await retryCalibration.recordPrediction(retryPrediction), "PostgreSQL and JavaScript UTC timestamp spellings must reconcile on deterministic retry");
+
+class OutcomeRetryQuery {
+  select() { return this; }
+  eq() { return this; }
+  limit() { return this; }
+  then(resolve: (value: any) => unknown, reject?: (reason: unknown) => unknown) {
+    return Promise.resolve({ data: [{
+      id: "00000000-0000-8000-8000-000000000099",
+      prediction_id: "00000000-0000-8000-8000-000000000098",
+      evaluated_at: postgresTimestamp(clusterColumn.timestamp),
+      confirmed_event_overlap: 0,
+      price_error: null,
+      timing_error_ms: null,
+      outcome: "FALSE_POSITIVE",
+      observed_sample_count: 0,
+      immutable_evidence: {}
+    }], error: null }).then(resolve, reject);
+  }
+}
+const outcomeRetryCalibration = new BclifCalibrationRepository({
+  from(table: string) { assert.equal(table, "bclif_cluster_outcomes"); return new OutcomeRetryQuery(); }
+}, "00000000-0000-8000-8000-000000000001", {
+  nodeId: "LIQUIDATION_INTELLIGENCE_NODE_01",
+  instanceId: "instance-outcome-retry-test",
+  fencingEpoch: 1
+});
+assert.equal(await outcomeRetryCalibration.recordOutcome({
+  predictionId: "00000000-0000-8000-8000-000000000098",
+  evaluatedAt: clusterColumn.timestamp,
+  confirmedEventOverlap: 0,
+  priceError: null,
+  timingErrorMs: null,
+  outcome: "FALSE_POSITIVE",
+  observedSampleCount: 0,
+  immutableEvidence: {}
+}), "00000000-0000-8000-8000-000000000099");
+
 class Query {
   private readonly response: any;
   constructor(response: any) { this.response = response; }
@@ -281,7 +355,7 @@ const deduplicator = new BclifEventDeduplicator({
   instanceId: "instance-dedup-test",
   fencingEpoch: 1
 });
-const historicalDedupBatch = Array.from({ length: BCLIF_MAX_DEDUP_KEYS_PER_QUERY * 2 + 21 }, (_, index) => ({
+const historicalDedupBatch: any[] = Array.from({ length: BCLIF_MAX_DEDUP_KEYS_PER_QUERY * 2 + 21 }, (_, index) => ({
   ...makeOpenInterest(10_000 + index, 1_000 + index),
   dedupKey: `sha256:${index.toString(16).padStart(64, "0")}`
 }));
@@ -324,4 +398,8 @@ function predictionRow(id: string, offset: number) {
     predicted_side: "LONG_LIQUIDATION",
     immutable_context: {}
   };
+}
+
+function postgresTimestamp(value: number) {
+  return new Date(value).toISOString().replace(/Z$/, "+00:00");
 }

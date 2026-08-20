@@ -185,6 +185,10 @@ export class BclifCalibrationRepository {
 
   private verifyPrediction(existing: any, expected: any) {
     for (const field of ["id", "source_id", "model_version", "source_cutoff_at", "created_at", "price_min", "price_max", "notional_min", "notional_max", "confidence", "leverage_prior", "margin_mode_uncertainty", "predicted_side", "cascade_state"] as const) {
+      if (timestampPredictionField(field)) {
+        if (!sameTimestamp(existing[field], expected[field])) throw new Error("BCLIF deterministic prediction retry conflicts with immutable content");
+        continue;
+      }
       const left = numericPredictionField(field) ? Number(existing[field]) : String(existing[field]);
       const right = numericPredictionField(field) ? Number(expected[field]) : String(expected[field]);
       if (left !== right) throw new Error("BCLIF deterministic prediction retry conflicts with immutable content");
@@ -342,8 +346,18 @@ function unit(value: number, label: string) { if (!Number.isFinite(value) || val
 function finiteOrNull(value: number | null) { if (value === null) return null; if (!Number.isFinite(value)) throw new Error("Invalid BCLIF outcome value"); return value; }
 function iso(value: number) { if (!Number.isFinite(value)) throw new Error("Invalid BCLIF timestamp"); return new Date(value).toISOString(); }
 function numericPredictionField(field: string) { return ["price_min", "price_max", "notional_min", "notional_max", "confidence", "margin_mode_uncertainty"].includes(field); }
+function timestampPredictionField(field: string) { return ["source_cutoff_at", "created_at"].includes(field); }
+function sameTimestamp(left: unknown, right: unknown) {
+  const leftTime = Date.parse(String(left));
+  const rightTime = Date.parse(String(right));
+  return Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime === rightTime;
+}
 function verifyOutcome(existing: any, expected: any) {
   for (const field of ["prediction_id", "evaluated_at", "outcome", "observed_sample_count"] as const) {
+    if (field === "evaluated_at") {
+      if (!sameTimestamp(existing[field], expected[field])) throw new Error("BCLIF immutable outcome retry conflicts");
+      continue;
+    }
     if (String(existing[field]) !== String(expected[field])) throw new Error("BCLIF immutable outcome retry conflicts");
   }
   for (const field of ["confirmed_event_overlap", "price_error", "timing_error_ms"] as const) {

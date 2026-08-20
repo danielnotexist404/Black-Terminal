@@ -52,6 +52,7 @@ rsync -a --checksum --human-readable \
   --exclude '/infra/black-cloud/vendor/' \
   --exclude '/infra/black-cloud/secrets/' \
   --exclude '/infra/black-cloud/artifacts/' \
+  --exclude '/infra/black-cloud/.env' \
   --exclude '/.env' \
   --exclude '/.env.local' \
   --exclude '/.env.production' \
@@ -62,6 +63,7 @@ rsync -a --checksum --human-readable \
 
 "${SSH[@]}" test -f "$INCOMING_PATH/package.json"
 "${SSH[@]}" test -f "$INCOMING_PATH/infra/black-cloud/docker-compose.yml"
+"${SSH[@]}" test ! -e "$INCOMING_PATH/infra/black-cloud/.env"
 "${SSH[@]}" test ! -e "$INCOMING_PATH/infra/black-cloud/secrets/runtime.env"
 "${SSH[@]}" test ! -e "$INCOMING_PATH/infra/black-cloud/artifacts/source-db-export/data.sql.gz.enc"
 

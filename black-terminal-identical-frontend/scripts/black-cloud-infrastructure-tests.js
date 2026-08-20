@@ -56,6 +56,8 @@ assert.match(releaseSync, /test ! -e "\$FINAL_PATH"/, "release sync must not ove
 assert.match(releaseSync, /--exclude '\/infra\/black-cloud\/vendor\/'/);
 assert.match(releaseSync, /--exclude '\/infra\/black-cloud\/secrets\/'/);
 assert.match(releaseSync, /--exclude '\/infra\/black-cloud\/artifacts\/'/);
+assert.match(releaseSync, /--exclude '\/infra\/black-cloud\/\.env'/, "release sync must never transfer a private infrastructure environment file");
+assert.match(releaseSync, /test ! -e "\$INCOMING_PATH\/infra\/black-cloud\/\.env"/, "release sync must verify private infrastructure configuration was excluded");
 assert.doesNotMatch(releaseSync, /--delete(?:-before|-during|-delay|-after)?\b/, "release sync must not delete remote release content");
 assert.doesNotMatch(releaseSync, /StrictHostKeyChecking=no/, "host identity verification must stay enabled");
 assert.match(monitoringSecretSync, /s\/\^POSTGRES_PASSWORD=\/\/p/);

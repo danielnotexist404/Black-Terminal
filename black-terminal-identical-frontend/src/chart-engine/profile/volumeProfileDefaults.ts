@@ -9,6 +9,7 @@ import type {
 } from "../types.ts";
 import { DEFAULT_LIQUIDATION_FIELD_SETTINGS } from "../../modules/liquidation-field/core/settings.ts";
 import { DEFAULT_DDA_PRO_SETTINGS } from "../../modules/dda-pro/core/settings.ts";
+import { DEFAULT_BC_TERA_SETTINGS } from "../../modules/bc-tera/core/settings.ts";
 
 export const defaultVolumeProfileSettings: VolumeProfileSettings = {
   showVolumeProfile: true,
@@ -138,7 +139,8 @@ export const defaultOscillatorPaneSettings: OscillatorPaneSettings = {
     openInterestOscillator: 128,
     zScoreOscillator: 128,
     waveTrendOscillator: 128,
-    ddaProOscillator: 176
+    ddaProOscillator: 176,
+    bcTeraOscillator: 194
   },
   order: [],
   backgroundColor: "#000000",
@@ -230,5 +232,6 @@ export const defaultIndicatorAdvancedSettings: IndicatorAdvancedSettings = {
   zScoreOscillator: defaultZScoreOscillatorSettings,
   waveTrendOscillator: defaultWaveTrendOscillatorSettings,
   ddaProOscillator: DEFAULT_DDA_PRO_SETTINGS,
+  bcTeraOscillator: DEFAULT_BC_TERA_SETTINGS,
   vwap: defaultVwapSettings
 };

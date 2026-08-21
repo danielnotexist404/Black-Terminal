@@ -6,6 +6,7 @@ import type {
   AlertIndicatorTarget,
   AlertLevelTarget,
   AlertRunMode,
+  BCTERAAlertSignal,
   DDAProAlertSignal,
   IndicatorAlertDefinition
 } from "../automation/alerts";
@@ -34,8 +35,22 @@ const indicatorOptions: { value: AlertIndicatorTarget; label: string }[] = [
   { value: "ema20", label: "EMA 20" },
   { value: "ema50", label: "EMA 50" },
   { value: "ema200", label: "EMA 200" },
-  { value: "ddaPro", label: "BC-RDA" }
+  { value: "ddaPro", label: "BC-RDA" },
+  { value: "bcTera", label: "BC-TERA" }
 ];
+
+const bcTeraSignalOptions: { value: BCTERAAlertSignal; label: string }[] = [
+  { value: "BC_TERA_ANY_EVENT", label: "Any Confirmed BC-TERA Event" },
+  { value: "TOP_EXTREMITY", label: "Top Extremity" },
+  { value: "TOP_EXHAUSTION", label: "Top Exhaustion" },
+  { value: "TOP_REVERSAL_CONFIRMED", label: "Top Reversal Confirmed" },
+  { value: "BOTTOM_EXTREMITY", label: "Bottom Extremity" },
+  { value: "BOTTOM_CAPITULATION", label: "Bottom Capitulation" },
+  { value: "BOTTOM_ABSORPTION", label: "Bottom Absorption" },
+  { value: "BOTTOM_REVERSAL_CONFIRMED", label: "Bottom Reversal Confirmed" },
+  { value: "DATA_DEGRADED", label: "Data Degraded" }
+];
+const bcTeraSignalLabels = Object.fromEntries(bcTeraSignalOptions.map((option) => [option.value, option.label])) as Record<BCTERAAlertSignal, string>;
 
 const ddaSignalOptions: { value: DDAProAlertSignal; label: string }[] = [
   { value: "BC_RDA_ANY_SIGNAL", label: "Any BC-RDA Signal Dot" },
@@ -150,6 +165,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
       timeframe: draft.timeframe || timeframe,
       levelTarget: draft.indicator === "hdlxProfile" ? draft.levelTarget ?? "any" : undefined,
       ddaSignal: draft.indicator === "ddaPro" ? draft.ddaSignal ?? "DDA_RISK_SCORE_CROSSED_75" : undefined,
+      bcTeraSignal: draft.indicator === "bcTera" ? draft.bcTeraSignal ?? "BC_TERA_ANY_EVENT" : undefined,
       targetPrice: draft.indicator === "price" && Number.isFinite(draft.targetPrice) ? draft.targetPrice : undefined,
       color: draft.indicator === "price" ? draft.color || "#ffffff" : draft.color,
       cooldownSeconds: clampNumber(Math.round(draft.cooldownSeconds), 5, 86400),
@@ -221,7 +237,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
                     {alert.indicator === "hdlxProfile" && alert.levelTarget ? ` ${levelLabels[alert.levelTarget]}` : ""}
                     {alert.indicator === "price" && Number.isFinite(alert.targetPrice) ? ` ${alert.targetPrice?.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : ""}
                     {" / "}
-                    {alert.indicator === "ddaPro" ? ddaSignalLabels[alert.ddaSignal ?? "DDA_RISK_SCORE_CROSSED_75"] : conditionLabels[alert.condition]}
+                    {alert.indicator === "ddaPro" ? ddaSignalLabels[alert.ddaSignal ?? "DDA_RISK_SCORE_CROSSED_75"] : alert.indicator === "bcTera" ? bcTeraSignalLabels[alert.bcTeraSignal ?? "BC_TERA_ANY_EVENT"] : conditionLabels[alert.condition]}
                   </span>
                 </button>
                 <div className="alert-row-actions">
@@ -280,6 +296,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
                         indicator,
                         levelTarget: indicator === "hdlxProfile" ? current.levelTarget ?? "any" : undefined,
                         ddaSignal: indicator === "ddaPro" ? current.ddaSignal ?? "DDA_RISK_SCORE_CROSSED_75" : undefined,
+                        bcTeraSignal: indicator === "bcTera" ? current.bcTeraSignal ?? "BC_TERA_ANY_EVENT" : undefined,
                         targetPrice: indicator === "price" ? current.targetPrice : undefined
                       } : current);
                     }}
@@ -330,9 +347,17 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
                     </select>
                   </label>
                 )}
+                {draft.indicator === "bcTera" && (
+                  <label className="alert-field wide">
+                    BC-TERA Event
+                    <select value={draft.bcTeraSignal ?? "BC_TERA_ANY_EVENT"} onChange={(event) => updateDraft("bcTeraSignal", event.target.value as BCTERAAlertSignal)}>
+                      {bcTeraSignalOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                )}
                 <label className="alert-field">
                   Condition
-                  <select value={draft.condition} disabled={draft.indicator === "ddaPro"} onChange={(event) => updateDraft("condition", event.target.value as AlertCondition)}>
+                  <select value={draft.condition} disabled={draft.indicator === "ddaPro" || draft.indicator === "bcTera"} onChange={(event) => updateDraft("condition", event.target.value as AlertCondition)}>
                     {conditionOptions.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
                     ))}

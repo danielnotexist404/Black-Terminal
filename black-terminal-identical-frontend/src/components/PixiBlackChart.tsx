@@ -42,6 +42,11 @@ import {
   latestConfirmedDDAProCandleTime
 } from "../modules/dda-pro/core/engineShared";
 import type { DDAProPreset, DDAProSettings, DDAProSignalIntelligenceMode, DDAProSnapshot } from "../modules/dda-pro/core/types";
+import { BCTERAWorkerClient } from "../modules/bc-tera/workers/BCTERAWorkerClient";
+import { buildChartFeatureBars } from "../modules/bc-tera/data/chartFeatureAdapter";
+import { migrateBCTERASettings } from "../modules/bc-tera/core/settings";
+import type { BCTERASettings, BCTERASnapshot } from "../modules/bc-tera/core/types";
+import { BCTERASettingsPanel } from "../modules/bc-tera/components/BCTERASettingsPanel";
 import { OSCILLATOR_KEYS, resolveOscillatorStack } from "../chart-engine/indicators/oscillatorLayout";
 import { createMockCandles } from "../data/mockMarket";
 import type { AlertCondition, AlertIndicatorTarget, IndicatorAlertDefinition } from "../automation/alerts";
@@ -312,7 +317,8 @@ const configuredAlertIndicatorLabels: Record<AlertIndicatorTarget, string> = {
   ema20: "EMA 20",
   ema50: "EMA 50",
   ema200: "EMA 200",
-  ddaPro: "BC-RDA"
+  ddaPro: "BC-RDA",
+  bcTera: "BC-TERA"
 };
 
 const configuredAlertConditionLabels: Record<AlertCondition, string> = {
@@ -460,6 +466,7 @@ export function PixiBlackChart({
   const previousOscillatorVisibilityRef = useRef<Record<OscillatorIndicatorKey, boolean>>({
     openInterestOscillator: visibleIndicators.openInterestOscillator,
     ddaProOscillator: visibleIndicators.ddaProOscillator,
+    bcTeraOscillator: visibleIndicators.bcTeraOscillator,
     zScoreOscillator: visibleIndicators.zScoreOscillator,
     waveTrendOscillator: visibleIndicators.waveTrendOscillator
   });
@@ -477,6 +484,13 @@ export function PixiBlackChart({
   const ddaDispatchedEventsRef = useRef(new Set<string>());
   const ddaConfiguredEventsRef = useRef(new Set<string>());
   const ddaSignalAlertArmedAtRef = useRef(new Map<string, number>());
+  const [bcTeraSnapshot, setBCTERASnapshot] = useState<BCTERASnapshot | null>(null);
+  const [bcTeraStatus, setBCTERAStatus] = useState<"IDLE" | "CALCULATING" | "READY" | "DATA_DEGRADED" | "UNAVAILABLE">("IDLE");
+  const bcTeraWorkerRef = useRef<BCTERAWorkerClient | null>(null);
+  const bcTeraCalculationIdentityRef = useRef("");
+  const bcTeraDispatchedEventsRef = useRef(new Set<string>());
+  const bcTeraConfiguredEventsRef = useRef(new Set<string>());
+  const bcTeraAlertArmedAtRef = useRef(new Map<string, number>());
   const [auctionProfileSnapshots, setAuctionProfileSnapshots] = useState<AuctionProfileSnapshot[]>([]);
   const auctionProfileSnapshotsRef = useRef<AuctionProfileSnapshot[]>([]);
   const auctionProfileSnapshot = auctionProfileSnapshots.at(-1) ?? null;
@@ -1269,6 +1283,7 @@ export function PixiBlackChart({
       auctionProfileSettings: normalizedAuctionProfileSettings,
       auctionProfileSnapshots,
       ddaProSnapshot,
+      bcTeraSnapshot,
       onAlertEditRequest: (alertId) => {
         setEditingChartAlertId(alertId);
         setChartContextMenu(null);
@@ -2167,8 +2182,81 @@ export function PixiBlackChart({
     return () => {
       ddaProWorkerRef.current?.dispose();
       ddaProWorkerRef.current = null;
+      bcTeraWorkerRef.current?.dispose();
+      bcTeraWorkerRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!visibleIndicators.bcTeraOscillator || !engine) {
+      bcTeraCalculationIdentityRef.current = "";
+      setBCTERASnapshot(null);
+      setBCTERAStatus("IDLE");
+      engine?.setBCTERAState(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const settings = migrateBCTERASettings(indicatorAdvancedSettings.bcTeraOscillator);
+      const source = engine.getSourceCandles().slice(-2_000);
+      const decisionSeconds = settings.timeHorizon.decisionTimeframe === "4H" ? 4 * 60 * 60
+        : settings.timeHorizon.decisionTimeframe === "12H" ? 12 * 60 * 60
+          : settings.timeHorizon.decisionTimeframe === "1D" ? 24 * 60 * 60
+            : settings.timeHorizon.decisionTimeframe === "3D" ? 3 * 24 * 60 * 60
+              : 7 * 24 * 60 * 60;
+      if (source.length < 2 || timeframeSeconds[timeframe] > decisionSeconds) {
+        setBCTERAStatus("UNAVAILABLE");
+        setBCTERASnapshot(null);
+        engine.setBCTERAState(null);
+        return;
+      }
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const bars = buildChartFeatureBars(source, {
+        symbol: marketSymbol.rawSymbol,
+        venue: marketSymbol.exchange,
+        profile: "SPOT_ONLY",
+        timeframe: settings.timeHorizon.decisionTimeframe,
+        confirmedCutoff: nowSeconds,
+        receivedTimestamp: nowSeconds,
+        revisionId: `${marketSymbol.exchange}:${marketSymbol.rawSymbol}:${lastCandle?.time ?? 0}:${lastCandle?.close ?? 0}`,
+        maximumBars: settings.timeHorizon.featureLookback
+      });
+      const identity = [marketSymbol.exchange, marketSymbol.rawSymbol, timeframe, JSON.stringify(settings), bars.at(-1)?.revisionId ?? "empty"].join(":");
+      if (bcTeraCalculationIdentityRef.current === identity) return;
+      bcTeraCalculationIdentityRef.current = identity;
+      const worker = bcTeraWorkerRef.current ?? new BCTERAWorkerClient();
+      bcTeraWorkerRef.current = worker;
+      setBCTERAStatus("CALCULATING");
+      void worker.calculate(bars, settings).then((snapshot) => {
+        if (bcTeraCalculationIdentityRef.current !== identity) return;
+        const degraded = snapshot.points.at(-1)?.state === "DATA_DEGRADED";
+        setBCTERASnapshot(snapshot);
+        setBCTERAStatus(degraded ? "DATA_DEGRADED" : "READY");
+        engineRef.current?.setBCTERAState(snapshot);
+        for (const event of snapshot.events) {
+          if (bcTeraDispatchedEventsRef.current.has(event.id)) continue;
+          bcTeraDispatchedEventsRef.current.add(event.id);
+          window.dispatchEvent(new CustomEvent("black-terminal:bc-tera-event", { detail: { ...event, confirmed: true } }));
+        }
+      }).catch((error: unknown) => {
+        if (bcTeraCalculationIdentityRef.current !== identity || (error instanceof Error && error.message.includes("STALE_GENERATION"))) return;
+        console.error("BC-TERA calculation failed", error);
+        bcTeraCalculationIdentityRef.current = "";
+        setBCTERAStatus("UNAVAILABLE");
+        engineRef.current?.setBCTERAState(null);
+      });
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [
+    visibleIndicators.bcTeraOscillator,
+    indicatorAdvancedSettings.bcTeraOscillator,
+    marketSymbol.exchange,
+    marketSymbol.rawSymbol,
+    timeframe,
+    ddaProSourceRevision,
+    lastCandle?.time,
+    lastCandle?.close
+  ]);
 
   useEffect(() => {
     const engine = engineRef.current;
@@ -2437,6 +2525,7 @@ export function PixiBlackChart({
     previousOscillatorVisibilityRef.current = {
       openInterestOscillator: visibleIndicators.openInterestOscillator,
       ddaProOscillator: visibleIndicators.ddaProOscillator,
+      bcTeraOscillator: visibleIndicators.bcTeraOscillator,
       zScoreOscillator: visibleIndicators.zScoreOscillator,
       waveTrendOscillator: visibleIndicators.waveTrendOscillator
     };
@@ -2444,6 +2533,7 @@ export function PixiBlackChart({
     onIndicatorAdvancedSettingsChange,
     visibleIndicators.openInterestOscillator,
     visibleIndicators.ddaProOscillator,
+    visibleIndicators.bcTeraOscillator,
     visibleIndicators.zScoreOscillator,
     visibleIndicators.waveTrendOscillator
   ]);
@@ -3121,7 +3211,11 @@ export function PixiBlackChart({
       exchange: exchangeLabel,
       timeframe,
       indicator,
-      condition: definition.indicator === "ddaPro" ? (definition.ddaSignal ?? "BC-RDA signal").replaceAll("_", " ") : configuredAlertConditionLabels[definition.condition],
+      condition: definition.indicator === "ddaPro"
+        ? (definition.ddaSignal ?? "BC-RDA signal").replaceAll("_", " ")
+        : definition.indicator === "bcTera"
+          ? (definition.bcTeraSignal ?? "BC-TERA event").replaceAll("_", " ")
+          : configuredAlertConditionLabels[definition.condition],
       price: current.close.toFixed(2),
       level: level === undefined ? undefined : level.toFixed(2)
     };
@@ -3246,11 +3340,61 @@ export function PixiBlackChart({
   }, [ddaProSnapshot, alertDefinitions, displaySymbol, exchangeLabel, timeframe, indicatorAdvancedSettings.ddaProOscillator]);
 
   useEffect(() => {
+    if (replayActiveRef.current || !bcTeraSnapshot) return;
+    const definitions = alertDefinitions.filter((definition) =>
+      definition.enabled && definition.indicator === "bcTera" && definition.symbol === displaySymbol &&
+      definition.exchange === exchangeLabel && definition.timeframe === timeframe
+    );
+    if (definitions.length === 0) return;
+    const sourceCandles = engineRef.current?.getSourceCandles() ?? [];
+    const latestEventTime = Math.max(0, ...bcTeraSnapshot.events.map((event) => event.confirmedCandleTimestamp));
+    const activeKeys = new Set(definitions.map((definition) => `${definition.id}:${definition.bcTeraSignal ?? "BC_TERA_ANY_EVENT"}`));
+    for (const key of bcTeraAlertArmedAtRef.current.keys()) {
+      if (!activeKeys.has(key)) bcTeraAlertArmedAtRef.current.delete(key);
+    }
+    for (const definition of definitions) {
+      const target = definition.bcTeraSignal ?? "BC_TERA_ANY_EVENT";
+      const armKey = `${definition.id}:${target}`;
+      const armedAfter = bcTeraAlertArmedAtRef.current.get(armKey);
+      if (armedAfter === undefined) {
+        bcTeraAlertArmedAtRef.current.set(armKey, latestEventTime);
+        continue;
+      }
+      for (const event of bcTeraSnapshot.events) {
+        if (event.confirmedCandleTimestamp <= armedAfter) continue;
+        if (target !== "BC_TERA_ANY_EVENT" && target !== event.eventType) continue;
+        const eventKey = `${definition.id}:${event.id}`;
+        if (bcTeraConfiguredEventsRef.current.has(eventKey)) continue;
+        const current = sourceCandles.find((candle) => candle.time >= event.confirmedCandleTimestamp) ?? sourceCandles.at(-1);
+        if (!current) continue;
+        bcTeraConfiguredEventsRef.current.add(eventKey);
+        dispatchConfiguredAlert(definition, current, {
+          indicator: "BC-TERA",
+          event: event.eventType,
+          eventId: event.id,
+          eventTimestamp: event.confirmedCandleTimestamp,
+          terminalEpisodeId: event.terminalEpisodeId,
+          modelVersion: event.modelVersion,
+          datasetProfile: event.datasetProfile,
+          decisionTimeframe: event.timeframe,
+          topHazard: event.topHazard,
+          bottomHazard: event.bottomHazard,
+          confidence: event.dataConfidence,
+          confirmed: true,
+          automationState: "RESEARCH_ONLY",
+          liveExecutionLocked: true
+        });
+      }
+    }
+  }, [bcTeraSnapshot, alertDefinitions, displaySymbol, exchangeLabel, timeframe]);
+
+  useEffect(() => {
     if (replayActiveRef.current || alertDefinitions.length === 0) return;
 
     const scopedAlerts = alertDefinitions.filter((definition) =>
       definition.enabled &&
       definition.indicator !== "ddaPro" &&
+      definition.indicator !== "bcTera" &&
       definition.symbol === displaySymbol &&
       definition.exchange === exchangeLabel &&
       (definition.indicator === "price" || definition.timeframe === timeframe)
@@ -3329,6 +3473,7 @@ export function PixiBlackChart({
     { key: "sma50", label: "SMA", value: String(indicatorPeriods.sma50) },
     { key: "bollinger", label: "Bollinger", value: String(indicatorPeriods.bollinger) },
     { key: "ddaProOscillator", label: "BC-RDA", value: `${indicatorAdvancedSettings.ddaProOscillator.engineMode === "pine-compatibility" ? "PINE" : "NATIVE"} · ${ddaProStatus.toLowerCase()}` },
+    { key: "bcTeraOscillator", label: "BC-TERA", value: `${indicatorAdvancedSettings.bcTeraOscillator.timeHorizon.decisionTimeframe} · ${bcTeraStatus.toLowerCase()}` },
     { key: "openInterestOscillator", label: "OI Osc", value: String(indicatorPeriods.openInterestOscillator) },
     { key: "zScoreOscillator", label: "Z-Score", value: String(indicatorPeriods.zScoreOscillator) },
     { key: "waveTrendOscillator", label: "WaveTrend", value: String(indicatorPeriods.waveTrendOscillator) },
@@ -3352,8 +3497,8 @@ export function PixiBlackChart({
   };
 
   const updateIndicatorPeriod = (key: keyof IndicatorPeriods, value: number) => {
-    const max = key === "volumeProfile" || key === "ddaProOscillator" ? 20000 : 500;
-    const min = key === "ddaProOscillator" ? 100 : 2;
+    const max = key === "volumeProfile" || key === "ddaProOscillator" ? 20000 : key === "bcTeraOscillator" ? 2000 : 500;
+    const min = key === "ddaProOscillator" ? 100 : key === "bcTeraOscillator" ? 30 : 2;
     const nextValue = Math.max(min, Math.min(max, Number.isFinite(value) ? value : indicatorPeriods[key]));
     onIndicatorPeriodsChange((current) => ({
       ...current,
@@ -3366,6 +3511,15 @@ export function PixiBlackChart({
       onIndicatorAdvancedSettingsChange((current) => ({
         ...current,
         ddaProOscillator: migrateDDAProSettings({ ...current.ddaProOscillator, preset: "Custom", lookback: nextValue })
+      }));
+    }
+    if (key === "bcTeraOscillator") {
+      onIndicatorAdvancedSettingsChange((current) => ({
+        ...current,
+        bcTeraOscillator: migrateBCTERASettings({
+          ...current.bcTeraOscillator,
+          timeHorizon: { ...current.bcTeraOscillator.timeHorizon, featureLookback: nextValue }
+        })
       }));
     }
   };
@@ -3408,6 +3562,7 @@ export function PixiBlackChart({
     ...indicatorAdvancedSettings.ddaProOscillator,
     lookback: indicatorPeriods.ddaProOscillator
   });
+  const bcTeraSettings: BCTERASettings = migrateBCTERASettings(indicatorAdvancedSettings.bcTeraOscillator);
   const oscillatorStack = resolveOscillatorStack(
     visibleIndicators,
     oscillatorPaneSettings,
@@ -3423,6 +3578,7 @@ export function PixiBlackChart({
   const oscillatorSettingsOpen =
     activeIndicator === "openInterestOscillator" ||
     activeIndicator === "ddaProOscillator" ||
+    activeIndicator === "bcTeraOscillator" ||
     activeIndicator === "zScoreOscillator" ||
     activeIndicator === "waveTrendOscillator";
   const activeOscillatorKey = oscillatorSettingsOpen
@@ -4892,7 +5048,7 @@ export function PixiBlackChart({
           className={
             activeIndicator === "zScoreOscillator"
               ? "indicator-settings profile-settings oscillator-settings"
-              : activeIndicator === "ddaProOscillator"
+              : activeIndicator === "ddaProOscillator" || activeIndicator === "bcTeraOscillator"
                 ? "indicator-settings profile-settings oscillator-settings dda-pro-settings"
               : activeIndicator === "vwap"
                 ? "indicator-settings profile-settings vwap-settings"
@@ -4918,8 +5074,8 @@ export function PixiBlackChart({
               Length
               <input
                 type="number"
-                min={activeIndicator === "ddaProOscillator" ? 100 : 2}
-                max={activeIndicator === "ddaProOscillator" ? 20000 : 500}
+                min={activeIndicator === "ddaProOscillator" ? 100 : activeIndicator === "bcTeraOscillator" ? 30 : 2}
+                max={activeIndicator === "ddaProOscillator" ? 20000 : activeIndicator === "bcTeraOscillator" ? 2000 : 500}
                 value={indicatorPeriods[activeIndicator as keyof IndicatorPeriods]}
                 onChange={(event) => updateIndicatorPeriod(activeIndicator as keyof IndicatorPeriods, Number(event.target.value))}
               />
@@ -5726,6 +5882,19 @@ export function PixiBlackChart({
               </details>
             </>
           )}
+          {activeIndicator === "bcTeraOscillator" && (
+            <BCTERASettingsPanel
+              settings={bcTeraSettings}
+              snapshot={bcTeraSnapshot}
+              status={bcTeraStatus}
+              workerMode={bcTeraWorkerRef.current?.executionMode() ?? "NOT_STARTED"}
+              calculationMs={bcTeraWorkerRef.current?.lastCalculationTimeMs() ?? null}
+              onChange={(next) => {
+                onIndicatorAdvancedSettingsChange((current) => ({ ...current, bcTeraOscillator: next }));
+                onIndicatorPeriodsChange((current) => ({ ...current, bcTeraOscillator: next.timeHorizon.featureLookback }));
+              }}
+            />
+          )}
           {activeIndicator === "waveTrendOscillator" && (
             <>
               <div className="indicator-settings-section">Wave Injection</div>
@@ -6341,7 +6510,7 @@ export function PixiBlackChart({
           className="oscillator-pane-resizer"
           style={{ bottom: `min(${74 + pane.topOffset}px, calc(100% - 110px))` }}
           role="separator"
-          aria-label={`Resize ${pane.key === "ddaProOscillator" ? "BC-RDA" : pane.key === "zScoreOscillator" ? "Z-Score" : pane.key === "waveTrendOscillator" ? "WaveTrend" : "OI Osc"} pane`}
+          aria-label={`Resize ${pane.key === "bcTeraOscillator" ? "BC-TERA" : pane.key === "ddaProOscillator" ? "BC-RDA" : pane.key === "zScoreOscillator" ? "Z-Score" : pane.key === "waveTrendOscillator" ? "WaveTrend" : "OI Osc"} pane`}
           aria-orientation="horizontal"
           onPointerDown={(event) => beginOscillatorResize(event, pane.key)}
           onPointerMove={resizeOscillatorPane}

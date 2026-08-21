@@ -6,6 +6,7 @@ import type {
 } from "../types";
 
 export const OSCILLATOR_KEYS: readonly OscillatorIndicatorKey[] = [
+  "bcTeraOscillator",
   "ddaProOscillator",
   "zScoreOscillator",
   "openInterestOscillator",
@@ -28,7 +29,7 @@ export type OscillatorPaneLayout = {
 
 export type OscillatorStackLayout = {
   panes: OscillatorPaneLayout[];
-  injectionTarget?: Exclude<OscillatorIndicatorKey, "waveTrendOscillator">;
+  injectionTarget?: Exclude<OscillatorIndicatorKey, "waveTrendOscillator" | "bcTeraOscillator" | "ddaProOscillator">;
   totalContentHeight: number;
   reservedHeight: number;
 };

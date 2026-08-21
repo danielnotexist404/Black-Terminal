@@ -46,6 +46,7 @@ import { resolveBclifDisplayDomain } from "../modules/liquidation-field/renderin
 import { ddaProSigmaUnit, nearestDDAProTailLabel } from "../modules/dda-pro/rendering/diagnostics";
 import { bclifTimestampMsToChartSeconds } from "../modules/liquidation-field/rendering/timeProjection";
 import type { DDAProSnapshot } from "../modules/dda-pro/core/types";
+import type { BCTERASnapshot } from "../modules/bc-tera/core/types";
 import {
   ddaProDomain,
   ddaProValueToY,
@@ -178,6 +179,7 @@ export class BlackChartEngine {
   private cvdFootprintRenderer = new CvdFootprintRenderer();
   private auctionProfileSnapshots: AuctionProfileSnapshot[] = [];
   private ddaProSnapshot: DDAProSnapshot | null = null;
+  private bcTeraSnapshot: BCTERASnapshot | null = null;
   private auctionProfileSettings: AuctionProfileSettings = structuredClone(AUCTION_PROFILE_DEFAULT_SETTINGS);
   private constrainedTouchRenderer = false;
   private volumeProfileModel = new VolumeProfileModel();
@@ -219,6 +221,7 @@ export class BlackChartEngine {
     zScoreOscillator: false,
     waveTrendOscillator: false,
     ddaProOscillator: false,
+    bcTeraOscillator: false,
     volume: true
   };
   private indicatorPeriods: IndicatorPeriods = {
@@ -233,7 +236,8 @@ export class BlackChartEngine {
     openInterestOscillator: 34,
     zScoreOscillator: 50,
     waveTrendOscillator: 10,
-    ddaProOscillator: 500
+    ddaProOscillator: 500,
+    bcTeraOscillator: 600
   };
   private indicatorVisualSettings: IndicatorVisualSettings = {
     liquidationHeatmap: { color: "red", intensity: 78 },
@@ -253,6 +257,7 @@ export class BlackChartEngine {
     zScoreOscillator: { color: "white", intensity: 74 },
     waveTrendOscillator: { color: "silver", intensity: 78 },
     ddaProOscillator: { color: "red", intensity: 92 },
+    bcTeraOscillator: { color: "red", intensity: 90 },
     volume: { color: "red", intensity: 62 }
   };
   private indicatorAdvancedSettings: IndicatorAdvancedSettings = defaultIndicatorAdvancedSettings;
@@ -357,6 +362,7 @@ export class BlackChartEngine {
     if (options.auctionProfileSnapshots !== undefined) this.auctionProfileSnapshots = options.auctionProfileSnapshots;
     else if (options.auctionProfileSnapshot !== undefined) this.auctionProfileSnapshots = options.auctionProfileSnapshot ? [options.auctionProfileSnapshot] : [];
     if (options.ddaProSnapshot !== undefined) this.ddaProSnapshot = options.ddaProSnapshot;
+    if (options.bcTeraSnapshot !== undefined) this.bcTeraSnapshot = options.bcTeraSnapshot;
     if (options.auctionProfileSettings) {
       this.auctionProfileSettings = migrateAuctionProfileSettings(options.auctionProfileSettings);
     }
@@ -815,6 +821,11 @@ export class BlackChartEngine {
 
   setDDAProState(snapshot: DDAProSnapshot | null) {
     this.ddaProSnapshot = snapshot;
+    this.draw();
+  }
+
+  setBCTERAState(snapshot: BCTERASnapshot | null) {
+    this.bcTeraSnapshot = snapshot;
     this.draw();
   }
 
@@ -2558,6 +2569,78 @@ export class BlackChartEngine {
     }
   }
 
+  private drawBCTERAPane(paneTop: number, paneBottom: number, plotWidth: number) {
+    const snapshot = this.bcTeraSnapshot;
+    const settings = this.indicatorAdvancedSettings.bcTeraOscillator;
+    const g = this.indicatorLayer;
+    const paneHeight = paneBottom - paneTop;
+    const yForScore = (value: number) => paneBottom - 8 - clampNumber(value, 0, 100) / 100 * Math.max(1, paneHeight - 24);
+    g.rect(0, paneTop, plotWidth, paneHeight)
+      .fill({ color: 0x020203, alpha: 0.98 })
+      .stroke({ width: 1, color: 0xffffff, alpha: 0.075 });
+
+    for (const [value, color, alpha] of [
+      [settings.display.developingThreshold, 0x4e5057, 0.2],
+      [settings.display.elevatedThreshold, 0x7b101c, 0.28],
+      [settings.display.terminalThreshold, 0xff1838, 0.34]
+    ] as const) {
+      const y = yForScore(value);
+      g.moveTo(0, y).lineTo(plotWidth, y).stroke({ width: 1, color, alpha });
+      this.addProfileText(String(value), plotWidth + 7, y - 5, theme.muted, 8, "500");
+    }
+
+    if (!snapshot || snapshot.points.length === 0) {
+      this.addProfileText("BC-TERA · AWAITING NORMALIZED HTF FEATURES", 12, paneTop + 12, theme.muted, 9, "700");
+      this.addProfileText("RESEARCH ONLY · LIVE EXECUTION LOCKED", 12, paneTop + 29, 0xb66a16, 8, "700");
+      return;
+    }
+
+    const drawLine = (select: (point: BCTERASnapshot["points"][number]) => number | null, color: number, alpha: number, width = 1.2) => {
+      let started = false;
+      for (const point of snapshot.points) {
+        const value = select(point);
+        const x = this.xForTimestamp(point.time);
+        if (value == null || !Number.isFinite(value) || x < -10 || x > plotWidth + 10) {
+          started = false;
+          continue;
+        }
+        const y = yForScore(value);
+        if (!started) { g.moveTo(x, y); started = true; }
+        else g.lineTo(x, y);
+      }
+      if (started) g.stroke({ width, color, alpha });
+    };
+
+    drawLine((point) => point.topHazard, 0xff1838, 0.96, 1.7);
+    drawLine((point) => point.bottomHazard, 0xeeeeef, 0.9, 1.7);
+    if (settings.display.showConfidence) drawLine((point) => point.dataConfidence, 0xb66a16, 0.68, 1);
+    if (settings.display.showLeverage) drawLine((point) => point.leverageFragility, 0x7a101d, 0.72, 1);
+    if (settings.display.showChangePoint) drawLine((point) => point.changePointProbability, 0xff9b21, 0.62, 1);
+
+    if (settings.display.showMarkers) {
+      for (const event of snapshot.events) {
+        const x = this.xForTimestamp(event.confirmedCandleTimestamp);
+        if (x < 0 || x > plotWidth) continue;
+        const bullish = event.eventType === "BOTTOM_REVERSAL_CONFIRMED";
+        const bearish = event.eventType === "TOP_REVERSAL_CONFIRMED";
+        const degraded = event.eventType === "DATA_DEGRADED";
+        const color = bullish ? 0xf4f4f5 : bearish ? 0xff1838 : degraded ? 0xb66a16 : 0x777b83;
+        const y = bullish ? yForScore(event.bottomHazard) : bearish ? yForScore(event.topHazard) : paneTop + 17;
+        g.moveTo(x, paneTop).lineTo(x, paneBottom).stroke({ width: bearish || bullish ? 1.25 : 0.7, color, alpha: bearish || bullish ? 0.68 : 0.25 });
+        g.circle(x, y, bearish || bullish ? 4 : 2.5).fill({ color, alpha: 0.95 });
+      }
+    }
+
+    const latest = snapshot.points.at(-1)!;
+    const stateColor = latest.state === "DATA_DEGRADED" ? 0xb66a16
+      : latest.state === "TOP_REVERSAL_CONFIRMED" ? 0xff1838
+        : latest.state === "BOTTOM_REVERSAL_CONFIRMED" ? 0xf4f4f5
+          : theme.muted;
+    this.addProfileText(`BC-TERA · ${snapshot.timeframe} · ${latest.state.replaceAll("_", " ")}`, 12, paneTop + 10, stateColor, 9, "700");
+    this.addProfileText(`TOP ${latest.topHazard.toFixed(0)}  BOTTOM ${latest.bottomHazard.toFixed(0)}  CONF ${latest.dataConfidence.toFixed(0)}  CP ${latest.changePointProbability.toFixed(0)}`, 12, paneTop + 27, theme.silver, 8, "600");
+    this.addProfileText(`${snapshot.profile} · ${snapshot.automationState} · ${snapshot.sourceStatus.filter((item) => item.quality === "UNAVAILABLE").length} UNAVAILABLE`, 12, paneTop + 42, theme.muted, 8, "500");
+  }
+
   private drawOscillatorPanes(data: Candle[]) {
     const stack = this.oscillatorStackLayout();
     if (stack.panes.length === 0) return;
@@ -2592,6 +2675,10 @@ export class BlackChartEngine {
         this.drawDDAProPane(data, paneTop, paneBottom, plotWidth);
         continue;
       }
+      if (pane.key === "bcTeraOscillator") {
+        this.drawBCTERAPane(paneTop, paneBottom, plotWidth);
+        continue;
+      }
       const isZScorePane = pane.key === "zScoreOscillator";
       const zeroLineColor = isZScorePane
         ? this.hexColor(zSettings?.midlineColor ?? "#8a8a90", theme.muted)
@@ -2607,7 +2694,7 @@ export class BlackChartEngine {
       });
 
       const series: Array<{
-        key: "openInterestOscillator" | "zScoreOscillator" | "waveTrendOscillator" | "ddaProOscillator";
+        key: "openInterestOscillator" | "zScoreOscillator" | "waveTrendOscillator" | "ddaProOscillator" | "bcTeraOscillator";
         label: string;
         values: number[];
         fallbackColor: IndicatorColorKey;

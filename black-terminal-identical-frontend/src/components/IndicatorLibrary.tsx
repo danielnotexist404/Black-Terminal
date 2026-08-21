@@ -105,6 +105,18 @@ const builtInIndicators: BuiltInIndicator[] = [
   { key: "sma50", title: "SMA 50", group: "Trend", type: "Overlay", signal: "Medium simple average", periodKey: "sma50", min: 2, max: 500 },
   { key: "bollinger", title: "Bollinger Bands", group: "Volatility", type: "Bands", signal: "2 sigma envelope", periodKey: "bollinger", min: 5, max: 300 },
   {
+    key: "bcTeraOscillator",
+    stableId: "black-core-bc-tera",
+    title: "BC-TERA — Terminal Exhaustion & Reversal Architecture",
+    group: "Black Core / Higher-Timeframe Research",
+    type: "Hazard Pane + Evidence Ledger",
+    signal: "Causal extremity, exhaustion, absorption, change-point and reversal research states",
+    runtime: "Worker",
+    periodKey: "bcTeraOscillator",
+    min: 30,
+    max: 2000
+  },
+  {
     key: "ddaProOscillator",
     stableId: "black-core-dda-pro",
     title: "BC-RDA — Risk Distribution Analysis",

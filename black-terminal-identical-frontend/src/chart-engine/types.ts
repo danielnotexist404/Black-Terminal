@@ -6,6 +6,7 @@ import type { AuctionProfileSettings, AuctionProfileSnapshot } from "../modules/
 import type { LiquidationFieldSettings } from "../modules/liquidation-field/core/types";
 import type { BclifRendererMetrics } from "../modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer";
 import type { DDAProSettings, DDAProSnapshot } from "../modules/dda-pro/core/types";
+import type { BCTERASettings, BCTERASnapshot } from "../modules/bc-tera/core/types";
 
 
 export type Candle = {
@@ -113,6 +114,7 @@ export type ChartEngineOptions = {
   auctionProfileSnapshots?: AuctionProfileSnapshot[];
   auctionProfileSettings?: AuctionProfileSettings;
   ddaProSnapshot?: DDAProSnapshot | null;
+  bcTeraSnapshot?: BCTERASnapshot | null;
   alertDefinitions?: IndicatorAlertDefinition[];
   customPlots?: any[];
   onAlertFired?: (symbol: string, message: string) => void;
@@ -145,6 +147,7 @@ export type VisibleIndicators = {
   zScoreOscillator: boolean;
   waveTrendOscillator: boolean;
   ddaProOscillator: boolean;
+  bcTeraOscillator: boolean;
   volume: boolean;
 };
 
@@ -161,6 +164,7 @@ export type IndicatorPeriods = {
   zScoreOscillator: number;
   waveTrendOscillator: number;
   ddaProOscillator: number;
+  bcTeraOscillator: number;
 };
 
 export type IndicatorColorKey = "red" | "white" | "silver" | "gray" | "green" | "orange";
@@ -302,7 +306,8 @@ export type OscillatorIndicatorKey =
   | "openInterestOscillator"
   | "zScoreOscillator"
   | "waveTrendOscillator"
-  | "ddaProOscillator";
+  | "ddaProOscillator"
+  | "bcTeraOscillator";
 
 export type OscillatorPaneSettings = {
   height: number;
@@ -424,6 +429,7 @@ export type IndicatorAdvancedSettings = {
   zScoreOscillator: ZScoreOscillatorSettings;
   waveTrendOscillator: WaveTrendOscillatorSettings;
   ddaProOscillator: DDAProSettings;
+  bcTeraOscillator: BCTERASettings;
   vwap: VwapSettings;
 };
 

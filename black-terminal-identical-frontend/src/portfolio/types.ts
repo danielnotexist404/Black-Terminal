@@ -47,7 +47,19 @@ export type PortfolioExposure = {
   value: number;
 };
 
+export type PortfolioFreshness = {
+  status: "live" | "syncing" | "stale" | "reconnecting" | "degraded" | "disconnected";
+  source: "broker-rest" | "supabase-realtime" | "last-verified" | "local-empty";
+  fetchedAt: number;
+  brokerSyncedAt: number | null;
+  blockerCode: "CREDENTIAL_DECRYPTION_FAILED" | "BROKER_SYNC_FAILED" | null;
+  ageMs: number;
+  staleAfterMs: number;
+  message: string;
+};
+
 export type PortfolioSnapshot = {
+  freshness: PortfolioFreshness;
   summary: PortfolioSummary;
   accounts: PortfolioAccount[];
   balances: Balance[];

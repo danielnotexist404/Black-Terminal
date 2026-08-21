@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, AlertTriangle, BookOpen, Database, FlaskConical, Gauge, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { eventAlphaApi, type EventAlphaAudit, type EventAlphaEvent, type EventAlphaHealth, type EventAlphaRuntimeConfig, type EventAlphaThesis } from "./eventAlphaApi";
+import { resolveEventAlphaReadiness } from "./readiness";
 import "./event-alpha.css";
 
 type Tab = "EVENT FEED" | "THESES" | "RESEARCH" | "HEALTH" | "AUDIT" | "CONTROLS";
@@ -38,7 +39,11 @@ export function EventAlphaWorkspace({ onClose }: Props) {
       setTheses(thesisResult.theses);
       setHealth(healthResult);
       setAudit(auditResult.records);
-      setMessage(configResult.config.engineEnabled ? "Server evidence synchronized." : "Engine rollout is disabled. Historical evidence remains readable.");
+      setMessage(resolveEventAlphaReadiness({
+        config: configResult.config,
+        eventCount: feedResult.events.length,
+        sources: healthResult.sources
+      }).message);
     } catch (error) {
       if (!signal?.aborted && requestGeneration === generation.current) setMessage(error instanceof Error ? error.message : "Event Alpha synchronization failed.");
     } finally {
@@ -72,15 +77,21 @@ export function EventAlphaWorkspace({ onClose }: Props) {
     events: events.length,
     activeTheses: theses.filter((row) => ["OBSERVING", "ARMED", "TRIGGERED", "PAPER_ACTIVE"].includes(row.state)).length,
     paperActive: theses.filter((row) => row.state === "PAPER_ACTIVE").length,
-    unhealthySources: health?.sources.filter((row) => !["HEALTHY", "DISABLED"].includes(row.health_status)).length || 0
+    registeredSources: health?.sources.length || 0
   }), [events, health, theses]);
+  const readiness = useMemo(() => resolveEventAlphaReadiness({
+    config,
+    eventCount: events.length,
+    sources: health?.sources || []
+  }), [config, events.length, health]);
+  const stateClass = readiness.state === "ACTIVE" ? "live" : readiness.warning ? "warning" : "";
 
   return (
     <section className="event-alpha-workspace" aria-label="Event Alpha workspace">
       <header className="event-alpha-header">
         <div><b>EVENT ALPHA ENGINE</b><span>Point-in-time event research · BC-RDA tactical confirmation · paper-only execution</span></div>
         <div className="event-alpha-header-actions">
-          <span className={config?.engineEnabled ? "event-alpha-state live" : "event-alpha-state"}>{config?.engineEnabled ? "ENGINE ACTIVE" : "ENGINE OFF"}</span>
+          <span className={`event-alpha-state ${stateClass}`}>{readiness.label}</span>
           <button type="button" onClick={() => void refresh()} disabled={refreshing} aria-label="Refresh Event Alpha"><RefreshCw size={14} className={refreshing ? "spin" : ""} /></button>
           <button type="button" onClick={onClose} aria-label="Close Event Alpha"><X size={16} /></button>
         </div>
@@ -93,12 +104,12 @@ export function EventAlphaWorkspace({ onClose }: Props) {
         <Metric label="CANONICAL EVENTS" value={metrics.events} icon={Database} />
         <Metric label="ACTIVE THESES" value={metrics.activeTheses} icon={Activity} />
         <Metric label="PAPER ACTIVE" value={metrics.paperActive} icon={FlaskConical} />
-        <Metric label="DEGRADED SOURCES" value={metrics.unhealthySources} icon={Gauge} warning={metrics.unhealthySources > 0} />
+        <Metric label="REGISTERED SOURCES" value={metrics.registeredSources} icon={Gauge} warning={metrics.registeredSources === 0} />
       </div>
       <nav className="event-alpha-tabs">
         {(["EVENT FEED", "THESES", "RESEARCH", "HEALTH", "AUDIT", "CONTROLS"] as Tab[]).map((item) => <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}
       </nav>
-      <div className="event-alpha-message">{message}</div>
+      <div className={readiness.warning ? "event-alpha-message warning" : "event-alpha-message"}>{message}</div>
       <div className="event-alpha-body">
         {tab === "EVENT FEED" && <EventFeed rows={events} selectedId={selectedEventId} onSelect={setSelectedEventId} detail={detail} />}
         {tab === "THESES" && <ThesisTable rows={theses} />}
@@ -144,7 +155,7 @@ function HealthPanel({ health }: { health: EventAlphaHealth | null }) {
   return <div className="event-alpha-health-grid">
     <article><h3>WORK QUEUE</h3><b>{health?.pendingJobs ?? "—"}</b><p>Queued or leased durable jobs</p></article>
     {(health?.sources || []).map((source) => <article key={source.source_key} className={source.health_status === "HEALTHY" ? "healthy" : "degraded"}><h3>{source.source_key}</h3><b>{source.health_status}</b><p>{source.safe_error_code || `Last success ${formatUtc(source.last_success_at)}`}</p></article>)}
-    {!health?.sources.length && <article><h3>TOKEN UNLOCK SOURCE</h3><b>NOT REGISTERED</b><p>No credentialed adapter has run.</p></article>}
+    {!health?.sources.length && <article className="degraded"><h3>TOKEN UNLOCK SOURCE</h3><b>NOT REGISTERED</b><p>No credentialed adapter or persistent worker has registered a source checkpoint.</p></article>}
   </div>;
 }
 
@@ -167,7 +178,7 @@ function ControlsPanel({ config }: { config: EventAlphaRuntimeConfig | null }) {
     ["Governance adapter", false, "extension point only"],
     ["Protocol economics adapter", false, "extension point only"]
   ] as const;
-  return <div className="event-alpha-controls"><div className="event-alpha-warning"><AlertTriangle size={17} /><div><b>FAIL-CLOSED ROLLOUT</b><p>Controls are server environment policy, not browser toggles. Live Event Alpha execution is structurally unavailable.</p></div></div>{controls.map(([label, enabled, note]) => <div key={label}><span>{label}</span><b className={enabled ? "on" : "off"}>{enabled ? "ENABLED" : "DISABLED"}</b><small>{note}</small></div>)}</div>;
+  return <div className="event-alpha-controls"><div className="event-alpha-warning"><AlertTriangle size={17} /><div><b>FAIL-CLOSED ROLLOUT</b><p>Controls are server environment policy, not browser toggles. Operational ingestion additionally requires a credentialed provider and a persistent worker. Live Event Alpha execution is structurally unavailable.</p></div></div>{controls.map(([label, enabled, note]) => <div key={label}><span>{label}</span><b className={enabled ? "on" : "off"}>{enabled ? "ENABLED" : "DISABLED"}</b><small>{note}</small></div>)}</div>;
 }
 
 function formatUtc(value?: string | null) { if (!value) return "—"; const time = Date.parse(value); return Number.isFinite(time) ? new Date(time).toISOString().replace("T", " ").slice(0, 19) + "Z" : "INVALID"; }

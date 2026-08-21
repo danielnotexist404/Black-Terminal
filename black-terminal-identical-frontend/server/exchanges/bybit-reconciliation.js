@@ -111,7 +111,9 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     permissions: executionState.permissions,
     broker_account_uid: venueAccountId,
     permission_snapshot: permissionReport.snapshot,
-    permission_verified_at: new Date(permissionReport.snapshot.verifiedAt).toISOString()
+    permission_verified_at: new Date(permissionReport.snapshot.verifiedAt).toISOString(),
+    last_synced_at: new Date().toISOString(),
+    last_sync_error: null
   };
   const riskPatch = {
     read_only_mode: executionState.readOnly,

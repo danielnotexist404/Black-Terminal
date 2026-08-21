@@ -36,6 +36,7 @@ export default async function handler(req, res) {
 
     if (accountIds.length === 0) {
       return res.status(200).json({
+        freshness: unavailableFreshness("No connected broker account."),
         summary: emptySummary(),
         accounts: [],
         balances: [],
@@ -70,6 +71,7 @@ export default async function handler(req, res) {
     const persistedOrders = (ordersResult.data || []).filter((order) => ["pending", "accepted", "working", "partially-filled"].includes(order.status));
     const liveOrders = [...liveSyncByAccount.values()].flatMap((sync) => sync.openOrders || []);
     const orders = mergeActiveOrders(persistedOrders, liveOrders, liveSyncByAccount);
+    const freshness = buildPortfolioFreshness(accounts, positions, liveSyncByAccount);
 
     const totalBalance = balances.reduce((sum, row) => sum + num(row.usd_value), 0);
     const unrealizedPnl = positions.reduce((sum, row) => sum + num(row.unrealized_pnl), 0);
@@ -79,6 +81,7 @@ export default async function handler(req, res) {
     const availableMargin = Math.max(0, totalEquity - marginUsed);
 
     return res.status(200).json({
+      freshness,
       summary: {
         totalEquity,
         totalBalance,
@@ -127,7 +130,9 @@ export default async function handler(req, res) {
         stopLoss: row.stop_loss === null ? null : num(row.stop_loss),
         takeProfit: row.take_profit === null ? null : num(row.take_profit),
         openedAt: row.opened_at,
-        updatedAt: Date.parse(row.updated_at) || 0
+        updatedAt: Date.parse(row.updated_at) || 0,
+        observationVersion: Date.parse(row.updated_at) || 0,
+        priceSource: "broker-authoritative"
       })),
       orders,
       orderSync: Object.fromEntries([...liveSyncByAccount.entries()].map(([accountId, sync]) => [accountId, sync.orderSync]))
@@ -196,13 +201,16 @@ async function syncLiveAccounts(supabase, userId, accounts) {
       liveSyncByAccount.set(account.id, sync);
     } catch (error) {
       console.error(`Bybit sync failed for account ${account.id}`, error);
+      const syncFailure = classifyBrokerSyncError(error);
       liveSyncByAccount.set(account.id, {
+        syncError: syncFailure.message,
+        syncErrorCode: syncFailure.code,
         openOrders: [],
         orderSync: {
           network: "mainnet",
           requestedCategories: ["linear", "spot"],
           successfulCategories: [],
-          failedCategories: [{ category: "account", error: error instanceof Error ? error.message : String(error) }],
+          failedCategories: [{ category: "account", error: syncFailure.message }],
           ordersPerCategory: {},
           activeOrderCount: 0,
           verified: false,
@@ -215,7 +223,8 @@ async function syncLiveAccounts(supabase, userId, accounts) {
         .from("exchange_accounts")
         .update({
           status: "degraded",
-          api_health: "warning"
+          api_health: "warning",
+          last_sync_error: syncFailure.message
         })
         .eq("id", account.id)
         .eq("user_id", userId);
@@ -224,24 +233,40 @@ async function syncLiveAccounts(supabase, userId, accounts) {
 
   const hyperliquidAccounts = accounts.filter((account) => account.exchange === "hyperliquid");
   for (const account of hyperliquidAccounts) {
+    const startedAt = Date.now();
     try {
       const credential = await loadHyperliquidCredential(supabase, userId, { accountId: account.id });
-      await syncHyperliquidAccount(supabase, account, credential);
+      const sync = await syncHyperliquidAccount(supabase, account, credential);
+      liveSyncByAccount.set(account.id, {
+        ...sync,
+        syncedAt: new Date().toISOString(),
+        latencyMs: Date.now() - startedAt
+      });
       await supabase
         .from("exchange_accounts")
         .update({
           status: "connected",
-          api_health: "healthy"
+          api_health: "healthy",
+          last_synced_at: new Date().toISOString(),
+          last_sync_error: null
         })
         .eq("id", account.id)
         .eq("user_id", userId);
     } catch (error) {
       console.error(`Hyperliquid sync failed for account ${account.id}`, error);
+      const syncFailure = classifyBrokerSyncError(error);
+      liveSyncByAccount.set(account.id, {
+        syncError: syncFailure.message,
+        syncErrorCode: syncFailure.code,
+        syncedAt: null,
+        latencyMs: Date.now() - startedAt
+      });
       await supabase
         .from("exchange_accounts")
         .update({
           status: "degraded",
-          api_health: "warning"
+          api_health: "warning",
+          last_sync_error: syncFailure.message
         })
         .eq("id", account.id)
         .eq("user_id", userId);
@@ -287,6 +312,75 @@ function emptySummary() {
     buyingPower: 0,
     leverage: 0,
     riskScore: 0
+  };
+}
+
+function unavailableFreshness(message) {
+  const fetchedAt = Date.now();
+  return {
+    status: "disconnected",
+    source: "local-empty",
+    fetchedAt,
+    brokerSyncedAt: null,
+    blockerCode: null,
+    ageMs: 0,
+    staleAfterMs: 30_000,
+    message
+  };
+}
+
+function buildPortfolioFreshness(accounts, positions, liveSyncByAccount) {
+  const fetchedAt = Date.now();
+  const successful = accounts.filter((account) => {
+    const sync = liveSyncByAccount.get(account.id);
+    return sync && !sync.syncError && sync.orderSync?.stale !== true;
+  });
+  const failed = accounts.filter((account) => liveSyncByAccount.get(account.id)?.syncError);
+  const credentialFailure = failed.find((account) => liveSyncByAccount.get(account.id)?.syncErrorCode === "CREDENTIAL_DECRYPTION_FAILED");
+  const syncTimes = successful
+    .map((account) => Date.parse(liveSyncByAccount.get(account.id)?.syncedAt || ""))
+    .filter(Number.isFinite);
+  const rowTimes = positions.map((position) => Date.parse(position.updated_at || "")).filter(Number.isFinite);
+  const brokerSyncedAt = syncTimes.length ? Math.min(...syncTimes) : rowTimes.length ? Math.max(...rowTimes) : null;
+  const ageMs = brokerSyncedAt === null ? 0 : Math.max(0, fetchedAt - brokerSyncedAt);
+  const status = successful.length === accounts.length && accounts.length > 0
+    ? "live"
+    : successful.length === 0 && brokerSyncedAt !== null && ageMs >= 30_000
+      ? "stale"
+      : successful.length > 0 || failed.length > 0
+        ? "degraded"
+        : "disconnected";
+  return {
+    status,
+    source: "broker-rest",
+    fetchedAt,
+    brokerSyncedAt,
+    blockerCode: credentialFailure ? "CREDENTIAL_DECRYPTION_FAILED" : failed.length ? "BROKER_SYNC_FAILED" : null,
+    ageMs,
+    staleAfterMs: 30_000,
+    message: credentialFailure
+      ? "Stored broker credentials cannot be decrypted. Restore the original master key or reconnect the same broker account."
+      : status === "live"
+      ? `Authoritative broker snapshot verified for ${successful.length} account${successful.length === 1 ? "" : "s"}.`
+      : status === "stale"
+        ? "No broker refresh completed; the stored broker snapshot is stale."
+        : failed.length
+        ? `Broker refresh degraded for ${failed.length} account${failed.length === 1 ? "" : "s"}; stale rows are explicitly marked.`
+        : "No authoritative broker refresh completed."
+  };
+}
+
+export function classifyBrokerSyncError(error) {
+  const raw = error instanceof Error ? error.message : String(error || "");
+  if (/unable to authenticate data|bad decrypt|decrypt|authentication tag|auth tag/i.test(raw)) {
+    return {
+      code: "CREDENTIAL_DECRYPTION_FAILED",
+      message: "Stored broker credentials cannot be decrypted. Restore the original master key or reconnect the same broker account."
+    };
+  }
+  return {
+    code: "BROKER_SYNC_FAILED",
+    message: "Authenticated broker refresh failed. The last verified broker snapshot is being retained."
   };
 }
 

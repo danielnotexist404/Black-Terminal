@@ -776,10 +776,13 @@ export function PixiBlackChart({
     if (last && candle.time < last.time) return;
     const historyAdvanced = shouldRefreshKioseffHistory(last?.time, candle.time);
 
-    replaySourceRef.current =
-      last?.time === candle.time
-        ? [...source.slice(0, -1), candle]
-        : [...source, candle].slice(-MAX_RETAINED_CHART_BARS);
+    if (last?.time === candle.time) {
+      source[source.length - 1] = candle;
+    } else {
+      source.push(candle);
+      const overflow = source.length - MAX_RETAINED_CHART_BARS;
+      if (overflow > 0) source.splice(0, overflow);
+    }
     if (
       historyAdvanced &&
       visibleIndicators.volatilityHeatmap &&
@@ -852,6 +855,9 @@ export function PixiBlackChart({
     let liveTrades: MarketDataSubscription<unknown> | undefined;
     let tradePollTimer: number | undefined;
     let tickerHeartbeatTimer: number | undefined;
+    let chartUiPublishTimer: number | undefined;
+    let pendingUiPrice: number | undefined;
+    let pendingUiCandle: Candle | undefined;
     let tradePollingStarted = false;
     let tradeStreamActive = false;
     let synthesizeCandlesFromTrades = false;
@@ -866,6 +872,26 @@ export function PixiBlackChart({
     const seenTradeOrder: string[] = [];
     const host = hostRef.current;
     if (!host) return;
+    const flushChartUiState = () => {
+      chartUiPublishTimer = undefined;
+      if (disposed) return;
+      if (pendingUiPrice !== undefined) {
+        const price = pendingUiPrice;
+        pendingUiPrice = undefined;
+        setLastPrice(price);
+        onPriceChange?.(price);
+      }
+      if (pendingUiCandle) {
+        const candle = pendingUiCandle;
+        pendingUiCandle = undefined;
+        setLastCandle(candle);
+        onCandleChange?.(candle);
+      }
+    };
+    const scheduleChartUiState = () => {
+      if (chartUiPublishTimer !== undefined) return;
+      chartUiPublishTimer = window.setTimeout(flushChartUiState, 50);
+    };
     const bclifVisualFixture = isBclifVisualFixtureEnabled();
     const adapter = bclifVisualFixture ? undefined : getMarketDataEngineAdapter(marketSymbol.exchange);
     const allowSimulatedFallback =
@@ -1070,7 +1096,15 @@ export function PixiBlackChart({
       const canonicalTrades = newTrades.map(normalizeCanonicalTrade);
       const acceptedCanonicalTrades = canonicalCvdService.ingest(canonicalTrades);
       if (acceptedCanonicalTrades > 0) scheduleDDAFlowRefresh();
-      auctionTradeHistoryRef.current = [...auctionTradeHistoryRef.current, ...canonicalTrades].slice(-250_000);
+      const auctionHistory = auctionTradeHistoryRef.current;
+      if (canonicalTrades.length >= 250_000) {
+        auctionHistory.length = 0;
+        auctionHistory.push(...canonicalTrades.slice(-250_000));
+      } else {
+        const overflow = auctionHistory.length + canonicalTrades.length - 250_000;
+        if (overflow > 0) auctionHistory.splice(0, Math.min(auctionHistory.length, Math.max(overflow, 4_096)));
+        auctionHistory.push(...canonicalTrades);
+      }
       if (auctionDataRequired && !normalizedAuctionProfileSettings.compositeLocked && auctionWorkerRef.current && canonicalTrades.length) {
         auctionTradeBufferRef.current.push(...canonicalTrades);
         if (!auctionTradeFlushTimerRef.current) {
@@ -1276,12 +1310,12 @@ export function PixiBlackChart({
       },
       onNeedMoreHistory: (oldestCandle) => loadOlderHistory(oldestCandle.time),
       onPriceChange: (price) => {
-        setLastPrice(price);
-        onPriceChange?.(price);
+        pendingUiPrice = price;
+        scheduleChartUiState();
       },
       onCandleChange: (candle) => {
-        setLastCandle(candle);
-        onCandleChange?.(candle);
+        pendingUiCandle = candle;
+        scheduleChartUiState();
       },
       onPriceTransformChange: (transform) => {
         if (aifActiveRef.current || liquidationFieldActiveRef.current) setAifPriceTransform(transform);
@@ -1408,6 +1442,7 @@ export function PixiBlackChart({
       liveTrades?.unsubscribe();
       if (tradePollTimer) window.clearInterval(tradePollTimer);
       if (tickerHeartbeatTimer) window.clearInterval(tickerHeartbeatTimer);
+      if (chartUiPublishTimer !== undefined) window.clearTimeout(chartUiPublishTimer);
       if (kioseffRefreshTimerRef.current) {
         window.clearTimeout(kioseffRefreshTimerRef.current);
         kioseffRefreshTimerRef.current = undefined;

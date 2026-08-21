@@ -7,6 +7,10 @@ import { blackCoreResourceTracker } from "../performance/resourceTracker";
 
 type ConnectionListener = (diagnostics: ConnectionDiagnostics[]) => void;
 
+function isAuthenticationFailure(message: string) {
+  return /auth|credential|api[ -]?key|signature|permission/i.test(message);
+}
+
 export class ConnectionManager {
   private adapters = new Map<string, ConnectionAdapter>();
   private connections = new Map<string, ConnectionRecord>();
@@ -214,7 +218,7 @@ export class ConnectionManager {
       return next;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const authenticationFailure = /auth|credential|api[ -]?key|signature|permission/i.test(message);
+      const authenticationFailure = isAuthenticationFailure(message);
       const failed = this.patchConnection(connectionId, {
         status: authenticationFailure ? "auth-failed" : "degraded",
         metadata: { ...reconnecting.metadata, lifecycle: authenticationFailure ? "AUTHENTICATION_ERROR" : "DEGRADED" },
@@ -274,13 +278,24 @@ export class ConnectionManager {
       return next;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const authenticationFailure = isAuthenticationFailure(message);
       const failed = this.patchConnection(connectionId, {
-        status: "degraded",
-        metadata: { ...connection.metadata, lifecycle: "DEGRADED" },
+        status: authenticationFailure ? "auth-failed" : "degraded",
+        metadata: {
+          ...connection.metadata,
+          lifecycle: authenticationFailure ? "AUTHENTICATION_ERROR" : "DEGRADED",
+          readiness: authenticationFailure ? "credential-reconnect-required" : "degraded",
+          executionReady: false
+        },
         health: {
           ...connection.health,
-          status: "degraded",
+          status: authenticationFailure ? "auth-failed" : "degraded",
+          authentication: authenticationFailure ? "failed" : connection.health.authentication,
+          synchronization: "stale",
           heartbeat: "failed",
+          permissions: authenticationFailure
+            ? { ...connection.health.permissions, trading: false }
+            : connection.health.permissions,
           lastError: message
         }
       });
@@ -294,7 +309,7 @@ export class ConnectionManager {
           health: failed.health,
           message
         }, "warning");
-        void this.reconnect(connectionId).catch(() => undefined);
+        if (!authenticationFailure) void this.reconnect(connectionId).catch(() => undefined);
       }
       this.notify();
       return failed;

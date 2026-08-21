@@ -157,15 +157,22 @@ export function decryptCredentialPayload(encryptedPayload) {
     throw new Error("EXCHANGE_CREDENTIAL_MASTER_KEY must be a base64-encoded 32-byte key.");
   }
 
-  const payload = JSON.parse(encryptedPayload);
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(payload.iv, "base64"));
-  decipher.setAuthTag(Buffer.from(payload.tag, "base64"));
-  const decrypted = Buffer.concat([
-    decipher.update(Buffer.from(payload.ciphertext, "base64")),
-    decipher.final()
-  ]);
+  try {
+    const payload = JSON.parse(encryptedPayload);
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(payload.iv, "base64"));
+    decipher.setAuthTag(Buffer.from(payload.tag, "base64"));
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(payload.ciphertext, "base64")),
+      decipher.final()
+    ]);
 
-  return JSON.parse(decrypted.toString("utf8"));
+    return JSON.parse(decrypted.toString("utf8"));
+  } catch {
+    const error = new Error("Stored broker credentials cannot be decrypted on this server. Reconnect the broker account to restore authoritative synchronization.");
+    error.statusCode = 409;
+    error.code = "BROKER_CREDENTIAL_RECONNECT_REQUIRED";
+    throw error;
+  }
 }
 
 export function toCamelAccount(row, riskControls) {

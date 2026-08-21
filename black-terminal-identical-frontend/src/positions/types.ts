@@ -34,6 +34,7 @@ export type PortfolioPosition = {
   positionIdx?: number;
   canonicalKey?: string;
   updatedAt?: number;
+  snapshotStatus?: "live" | "stale";
   direction: PositionDirection;
   quantity: number;
   averagePrice: number;

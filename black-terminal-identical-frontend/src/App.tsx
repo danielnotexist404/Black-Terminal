@@ -816,6 +816,7 @@ export default function App() {
   const [portfolioPositions, setPortfolioPositions] = useState<PortfolioPosition[]>([]);
   const [portfolioOrders, setPortfolioOrders] = useState<PortfolioSnapshot["orders"]>([]);
   const [portfolioOrderSync, setPortfolioOrderSync] = useState<PortfolioSnapshot["orderSync"]>({});
+  const [portfolioFreshness, setPortfolioFreshness] = useState<PortfolioSnapshot["freshness"]>(() => emptyPortfolioSnapshot().freshness);
   const [connectionDiagnostics, setConnectionDiagnostics] = useState<ConnectionDiagnostics[]>(() => blackCoreConnectionManager.listDiagnostics());
   const [activeExecutionVenueId, setActiveExecutionVenueIdState] = useState<string | null>(() => readActiveExecutionVenueId());
 
@@ -845,7 +846,7 @@ export default function App() {
   const connectedPortfolioAccountScope = useMemo(() => [...new Set(activeRuntimeConnections.map((connection) => connection.accountId).filter((accountId): accountId is string => Boolean(accountId)))].sort().join(","), [activeRuntimeConnections]);
   const connectedPortfolioAccountIds = useMemo(() => connectedPortfolioAccountScope ? connectedPortfolioAccountScope.split(",") : [], [connectedPortfolioAccountScope]);
   const connectedPortfolioAccountSet = useMemo(() => new Set(connectedPortfolioAccountIds), [connectedPortfolioAccountScope]);
-  const visiblePortfolioPositions = useMemo(() => portfolioPositions.filter((position) => connectedPortfolioAccountSet.has(position.accountId)), [connectedPortfolioAccountSet, portfolioPositions]);
+  const visiblePortfolioPositions = useMemo(() => portfolioPositions.filter((position) => connectedPortfolioAccountSet.has(position.accountId) && position.snapshotStatus === "live"), [connectedPortfolioAccountSet, portfolioPositions]);
   const visiblePortfolioOrders = useMemo(() => portfolioOrders.filter((order) => connectedPortfolioAccountSet.has(order.accountId)), [connectedPortfolioAccountSet, portfolioOrders]);
   const visiblePortfolioOrderSync = useMemo(() => Object.fromEntries(Object.entries(portfolioOrderSync || {}).filter(([accountId]) => connectedPortfolioAccountSet.has(accountId))), [connectedPortfolioAccountSet, portfolioOrderSync]);
   const activeExecutionConnection = useMemo(() => activeRuntimeConnections.find((connection) => connection.id === activeExecutionVenueId) ?? null, [activeExecutionVenueId, activeRuntimeConnections]);
@@ -890,6 +891,7 @@ export default function App() {
     setPortfolioPositions(positions);
     setPortfolioOrders(blackCoreOrderSyncService.replaceAccountSnapshots(orders, orderSync, connectedPortfolioAccountIds));
     setPortfolioOrderSync(orderSync);
+    setPortfolioFreshness(snapshot.freshness);
   }, [connectedPortfolioAccountIds, connectedPortfolioAccountSet]);
 
   const refreshPortfolioState = useCallback(async (force = false) => {
@@ -2421,6 +2423,7 @@ export default function App() {
             <PositionsWorkspace
               orders={visiblePortfolioOrders}
               orderSync={visiblePortfolioOrderSync}
+              freshness={portfolioFreshness}
               onRefreshOrders={() => refreshPortfolioState(true)}
               onPositionNavigate={openPositionOnChart}
             />

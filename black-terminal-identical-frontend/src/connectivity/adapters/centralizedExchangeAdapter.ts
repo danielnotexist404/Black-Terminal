@@ -134,7 +134,8 @@ export async function restoreCentralizedExchangeConnections(): Promise<Connectio
     const account = item.account;
     const certification = getVenueCertification(account.exchange);
     const descriptor = payload.adapters.find((adapter) => adapter.id === account.exchange);
-    const manualTradingEnabled = allowsManualExchangeTrading(account);
+    const credentialUsable = account.apiHealth !== "failed" && !["AUTHENTICATION_ERROR", "TOKEN_EXPIRED"].includes(item.lifecycle);
+    const manualTradingEnabled = credentialUsable && allowsManualExchangeTrading(account);
     const cloudExecutionReady = isCloudExecutionReady(item.lifecycle);
     const status = lifecycleToStatus(item.lifecycle);
     const capturedAt = item.health?.capturedAt ? Date.parse(item.health.capturedAt) : 0;
@@ -152,7 +153,7 @@ export async function restoreCentralizedExchangeConnections(): Promise<Connectio
         status,
         latencyMs: item.health?.latencyMs ?? account.latencyMs ?? 0,
         heartbeat: capturedAt && Date.now() - capturedAt < 120_000 ? "ok" : "unknown",
-        authentication: item.health?.authentication === "failed" ? "failed" : "authenticated",
+        authentication: !credentialUsable || item.health?.authentication === "failed" ? "failed" : "authenticated",
         synchronization: item.health?.synchronization === "stale" ? "stale" : account.lastSyncedAt ? "synced" : "unknown",
         privateStream: item.health?.privateStream === "connected" ? "connected" : item.health?.privateStream === "disconnected" ? "disconnected" : "unknown",
         publicStream: item.health?.publicStream === "disconnected" ? "disconnected" : "connected",

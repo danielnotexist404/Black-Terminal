@@ -4,7 +4,10 @@ import { fileURLToPath } from "node:url";
 import { canonicalizeBybitPositions, bybitPositionKey } from "../server/exchanges/bybit-position-identity.js";
 import { canonicalPositionKey, deduplicateCanonicalPositions, reconcileAuthoritativePositions } from "../src/positions/canonicalPosition.ts";
 import { replaceBybitPositions } from "../server/exchanges/bybit-snapshot-store.js";
+import { classifyBrokerSyncError } from "../api/portfolio/snapshot.js";
+import { markPortfolioSnapshotFallback, unavailablePortfolioFreshness } from "../src/portfolio/portfolioFreshness.ts";
 import type { PortfolioPosition } from "../src/positions/types.ts";
+import type { PortfolioSnapshot } from "../src/portfolio/types.ts";
 
 function position(patch: Partial<PortfolioPosition> = {}): PortfolioPosition {
   return {
@@ -79,6 +82,29 @@ assert.equal(reconciled.positions[0].currentPrice, 66_000);
 const closure = reconcileAuthoritativePositions([position(), eth], [eth]);
 assert.deepEqual(closure.positions.map(canonicalPositionKey), [canonicalPositionKey(eth)], "authoritative closure must remove only the missing identity");
 
+const verifiedSnapshot = {
+  freshness: {
+    ...unavailablePortfolioFreshness("verified"),
+    status: "live",
+    source: "broker-rest",
+    brokerSyncedAt: 1_000,
+    fetchedAt: 1_000
+  },
+  positions: [position({ snapshotStatus: "live" })]
+} as PortfolioSnapshot;
+const originalNow = Date.now;
+try {
+  Date.now = () => 41_001;
+  const fallback = markPortfolioSnapshotFallback(verifiedSnapshot, new Error("network unavailable"));
+  assert.equal(fallback.freshness.status, "stale");
+  assert.equal(fallback.freshness.quarantinedPositionCount, 1);
+  assert.equal(fallback.positions[0].snapshotStatus, "stale", "failed refresh must not present retained rows as live");
+} finally {
+  Date.now = originalNow;
+}
+assert.equal(classifyBrokerSyncError(Object.assign(new Error("credential envelope failed"), { code: "BROKER_CREDENTIAL_RECONNECT_REQUIRED" })).code, "CREDENTIAL_DECRYPTION_FAILED");
+assert.equal(classifyBrokerSyncError(new Error("request timeout")).code, "BROKER_SYNC_FAILED");
+
 
 const portfolioStoreSource = readFileSync(new URL("../src/portfolio/portfolioStore.ts", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
@@ -93,7 +119,8 @@ const migrationSource = readFileSync(new URL("../supabase/migrations/20260812000
 const connectionManagerSource = readFileSync(new URL("../src/connectivity/connectionManager.ts", import.meta.url), "utf8");
 
 assert.match(portfolioStoreSource, /lastVerifiedSnapshots/);
-assert.match(portfolioStoreSource, /if \(lastVerified\) return lastVerified/);
+assert.match(portfolioStoreSource, /if \(lastVerified\) return markPortfolioSnapshotFallback/);
+assert.match(appSource, /position\.snapshotStatus === "live"/, "stale position rows must be quarantined from active UI and chart overlays");
 assert.match(appSource, /portfolioRequestSequenceRef/);
 assert.match(appSource, /requestSequence !== portfolioRequestSequenceRef\.current/);
 assert.match(appSource, /window\.clearInterval\(timer\)/);
@@ -106,6 +133,7 @@ assert.match(positionManagerSource, /lifecycleState:\s*"closed"/);
 assert.match(connectionManagerSource, /connectInFlight/);
 assert.match(connectionManagerSource, /reconnectInFlight/);
 assert.match(connectionManagerSource, /if \(active\) return active/);
+assert.match(connectionManagerSource, /if \(!authenticationFailure\) void this\.reconnect/, "credential failures must not enter a reconnect loop");
 
 const connectStart = positionPageSource.indexOf("async function handleConnectCex");
 const connectEnd = positionPageSource.indexOf("async function handleBrokerAuthorization");

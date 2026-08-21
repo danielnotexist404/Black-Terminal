@@ -65,6 +65,12 @@ import {
   type ChartPriceTransformSnapshot
 } from "./priceTransform";
 import {
+  aggregateCandleRenderBuckets,
+  chartRenderIndices,
+  chartRenderStride,
+  visibleCandleDomain
+} from "./renderLod";
+import {
   AdaptiveSwingStrategySettings,
   Candle,
   ChartDisplayType,
@@ -166,6 +172,7 @@ export class BlackChartEngine {
   private destroyed = false;
   private candles: CandleBuffer;
   private displayedCandles: Candle[] = [];
+  private displayedCandlesCache?: { dataVersion: number; chartType: ChartDisplayType; candles: Candle[] };
   private liquidationFieldRenderer = new BlackCoreLiquidationFieldRenderer((metrics) => {
     this.queueDraw();
     this.onLiquidationRendererMetrics?.(metrics);
@@ -201,6 +208,11 @@ export class BlackChartEngine {
   private activePointers = new Map<number, { x: number; y: number }>();
   private lastPinchDistance: number | null = null;
   private lastCountdownTime = 0;
+  private countdownText?: Text;
+  private renderIndexCache?: { key: string; indices: number[] };
+  private emaRenderCache = new Map<string, number[]>();
+  private emaRenderCacheVersion = -1;
+  private volumeAverageCache?: { dataVersion: number; length: number; values: number[] };
   private customPlots: CompiledPlot[] = [];
   private alertDefinitions: IndicatorAlertDefinition[] = [];
   private visibleIndicators: VisibleIndicators = {
@@ -336,7 +348,9 @@ export class BlackChartEngine {
   private resizeObserver?: ResizeObserver;
   private resizeRaf?: number;
   private drawRaf?: number;
+  private renderRaf?: number;
   private mockTimer?: number;
+  private countdownTimer?: number;
   private frameCount = 0;
   private lastFpsTime = performance.now();
   private lastTickerFrameAt = performance.now();
@@ -393,7 +407,8 @@ export class BlackChartEngine {
       resolution: device.rendererResolution,
       resizeTo: this.host,
       preference: "webgl",
-      powerPreference: "high-performance"
+      powerPreference: "high-performance",
+      autoStart: false
     });
 
     this.app.canvas.addEventListener("webglcontextlost", this.onBclifContextLost);
@@ -485,6 +500,7 @@ export class BlackChartEngine {
         const visualization = this.auctionProfileSettings.rendering.visualizationType;
         if (this.visibleIndicators.auctionProfile && visualization !== "CVD_FOOTPRINT") this.auctionProfileRenderer.drawHover(e.global.x, e.global.y);
         if (this.chartType === "volumeFootprint" || (this.visibleIndicators.auctionProfile && visualization !== "AUCTION_PROFILE")) this.cvdFootprintRenderer.drawHover(e.global.x, e.global.y);
+        this.queueRender();
       }
     });
 
@@ -561,6 +577,7 @@ export class BlackChartEngine {
       this.finishBrushDrawing();
       this.stopDragging();
       this.drawCrosshair();
+      this.queueRender();
     });
 
     this.host.addEventListener("wheel", this.onWheel, { passive: false });
@@ -574,7 +591,7 @@ export class BlackChartEngine {
     window.addEventListener("visibilitychange", this.handleVisibilityChange);
     this.releaseVisibilityListener = blackCoreResourceTracker.acquire("listener", `${this.resourceOwner}:visibility`);
 
-    this.app.ticker.add(() => this.tickFps());
+    this.countdownTimer = window.setInterval(() => this.updateCountdown(), 1000);
     this.resize();
     this.draw();
   }
@@ -618,7 +635,7 @@ export class BlackChartEngine {
       this.setHeatmapSource(this.candles.all());
       this.onPriceChange?.(close);
       this.onCandleChange?.(emittedCandle);
-      this.draw();
+      this.queueDraw();
 
       if (Math.random() > 0.86) {
         onEvent?.({
@@ -669,7 +686,7 @@ export class BlackChartEngine {
     this.setHeatmapSource(this.candles.all());
     this.onPriceChange?.(candle.close);
     this.onCandleChange?.(candle);
-    this.draw();
+    this.queueDraw();
   }
 
   updateLastPrice(price: number) {
@@ -821,12 +838,12 @@ export class BlackChartEngine {
 
   setDDAProState(snapshot: DDAProSnapshot | null) {
     this.ddaProSnapshot = snapshot;
-    this.draw();
+    this.queueDraw();
   }
 
   setBCTERAState(snapshot: BCTERASnapshot | null) {
     this.bcTeraSnapshot = snapshot;
-    this.draw();
+    this.queueDraw();
   }
 
   setLiquidationFieldState(snapshot: LiquidationFieldSnapshot | null, settings = this.liquidationFieldSettings) {
@@ -966,7 +983,7 @@ export class BlackChartEngine {
     this.volumeProfileDataVersion += 1;
     this.setHeatmapSource(this.candles.all());
     this.onPriceChange?.(price);
-    this.draw();
+    this.queueDraw();
   }
 
   private setHeatmapSource(candles: Candle[], visibleUntilIndex = candles.length - 1) {
@@ -988,6 +1005,7 @@ export class BlackChartEngine {
     if (this.destroyed) return;
     this.destroyed = true;
     if (this.mockTimer) window.clearInterval(this.mockTimer);
+    if (this.countdownTimer) window.clearInterval(this.countdownTimer);
     this.host.removeEventListener("wheel", this.onWheel);
     this.host.removeEventListener("dblclick", this.onDoubleClick);
     this.host.removeEventListener("contextmenu", this.onContextMenu);
@@ -997,6 +1015,7 @@ export class BlackChartEngine {
     window.removeEventListener("visibilitychange", this.handleVisibilityChange);
     if (this.resizeRaf) window.cancelAnimationFrame(this.resizeRaf);
     if (this.drawRaf) window.cancelAnimationFrame(this.drawRaf);
+    if (this.renderRaf) window.cancelAnimationFrame(this.renderRaf);
     this.host.classList.remove("price-scale-dragging", "price-scale-hover", "drawing-eraser");
     this.setReplaySelectionMode(false);
     this.resizeObserver?.disconnect();
@@ -1129,15 +1148,27 @@ export class BlackChartEngine {
     });
   }
 
+  private queueRender() {
+    if (this.destroyed || this.renderRaf || document.visibilityState !== "visible") return;
+    this.renderRaf = window.requestAnimationFrame(() => {
+      this.renderRaf = undefined;
+      if (this.destroyed) return;
+      const startedAt = performance.now();
+      this.app.render();
+      blackCorePerformanceMonitor.recordMetric("chart.gpu_frame_ms", performance.now() - startedAt, "ms", { surface: "pixi-chart" });
+      this.tickFps();
+    });
+  }
+
   private handleVisibilityChange = () => {
     if (this.destroyed) return;
     if (document.visibilityState === "visible") {
-      this.app.ticker.start();
       this.queueDraw();
     } else {
-      this.app.ticker.stop();
       if (this.drawRaf) window.cancelAnimationFrame(this.drawRaf);
       this.drawRaf = undefined;
+      if (this.renderRaf) window.cancelAnimationFrame(this.renderRaf);
+      this.renderRaf = undefined;
     }
   };
 
@@ -1245,21 +1276,107 @@ export class BlackChartEngine {
       this.frameCount = 0;
       this.lastFpsTime = now;
     }
-    
-    // Redraw once per second to update the price countdown timer
+  }
+
+  private updateCountdown() {
+    if (this.destroyed || document.visibilityState !== "visible") return;
     const epochSec = Math.floor(Date.now() / 1000);
-    if (epochSec !== this.lastCountdownTime) {
-      this.lastCountdownTime = epochSec;
-      this.draw();
+    if (epochSec === this.lastCountdownTime) return;
+    this.lastCountdownTime = epochSec;
+    if (!this.countdownText) return;
+    const next = this.currentCandleCountdown();
+    if (this.countdownText.text === next) return;
+    this.countdownText.text = next;
+    this.queueRender();
+  }
+
+  private currentCandleCountdown() {
+    const data = this.getDisplayCandles();
+    const last = data.at(-1);
+    if (!last) return "00:00";
+    const timeframeSeconds = data.length >= 2
+      ? Math.max(1, data[data.length - 1]!.time - data[data.length - 2]!.time)
+      : 60;
+    const remaining = Math.max(0, last.time + timeframeSeconds - Math.floor(Date.now() / 1000));
+    if (remaining <= 0) return "00:00";
+    if (remaining >= 86400) {
+      const days = Math.floor(remaining / 86400);
+      const hours = Math.floor((remaining % 86400) / 3600);
+      return `${days}d ${hours}h`;
     }
+    const hours = Math.floor(remaining / 3600);
+    const minutes = Math.floor((remaining % 3600) / 60);
+    const seconds = remaining % 60;
+    return hours > 0
+      ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+      : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   }
 
   private getDisplayCandles() {
     return this.displayedCandles.length ? this.displayedCandles : this.candles.all();
   }
 
+  private refreshDisplayCandles() {
+    const cached = this.displayedCandlesCache;
+    if (cached?.dataVersion === this.volumeProfileDataVersion && cached.chartType === this.chartType) {
+      this.displayedCandles = cached.candles;
+      return;
+    }
+    const candles = this.createDisplayCandles(this.candles.all());
+    this.displayedCandlesCache = {
+      dataVersion: this.volumeProfileDataVersion,
+      chartType: this.chartType,
+      candles
+    };
+    this.displayedCandles = candles;
+  }
+
   private timeStep() {
     return Math.max(0.05, this.view.candleWidth + this.view.gap);
+  }
+
+  private renderStride(minimumPixelSpacing = 1) {
+    return chartRenderStride(this.timeStep(), minimumPixelSpacing);
+  }
+
+  private renderIndices(minimumPixelSpacing = 1) {
+    const stride = this.renderStride(minimumPixelSpacing);
+    const key = `${this.view.firstIndex}:${this.view.lastIndex}:${stride}`;
+    if (this.renderIndexCache?.key === key) return this.renderIndexCache.indices;
+    const indices = chartRenderIndices(this.view.firstIndex, this.view.lastIndex, stride);
+    this.renderIndexCache = { key, indices };
+    return indices;
+  }
+
+  private cachedEmaSeries(data: Candle[], period: number) {
+    if (this.emaRenderCacheVersion !== this.volumeProfileDataVersion) {
+      this.emaRenderCache.clear();
+      this.emaRenderCacheVersion = this.volumeProfileDataVersion;
+    }
+    const safePeriod = Math.max(1, Math.round(period));
+    const key = `${this.chartType}:${data.length}:${safePeriod}`;
+    const cached = this.emaRenderCache.get(key);
+    if (cached) return cached;
+    const result = this.emaSeries(data.map((candle) => candle.close), safePeriod);
+    this.emaRenderCache.set(key, result);
+    return result;
+  }
+
+  private cachedVolumeAverages(data: Candle[], length: number) {
+    const safeLength = Math.max(1, Math.min(500, Math.round(length)));
+    if (this.volumeAverageCache?.dataVersion === this.volumeProfileDataVersion && this.volumeAverageCache.length === safeLength) {
+      return this.volumeAverageCache.values;
+    }
+    const values = new Array<number>(data.length);
+    let sum = 0;
+    for (let index = 0; index < data.length; index++) {
+      sum += data[index]?.volume ?? 0;
+      const dropIndex = index - safeLength;
+      if (dropIndex >= 0) sum -= data[dropIndex]?.volume ?? 0;
+      values[index] = sum / Math.min(index + 1, safeLength);
+    }
+    this.volumeAverageCache = { dataVersion: this.volumeProfileDataVersion, length: safeLength, values };
+    return values;
   }
 
   private createDisplayCandles(source: Candle[]) {
@@ -1363,7 +1480,7 @@ export class BlackChartEngine {
   }
 
   private calculateView() {
-    this.displayedCandles = this.createDisplayCandles(this.candles.all());
+    this.refreshDisplayCandles();
     const data = this.getDisplayCandles();
     const plotWidth = this.view.width - this.view.rightAxisWidth;
     const step = this.timeStep();
@@ -1372,9 +1489,9 @@ export class BlackChartEngine {
     const lastIndex = Math.max(0, Math.min(data.length - 1, data.length - 1 - Math.floor(this.view.scrollX / step)));
     const firstIndex = Math.max(0, lastIndex - visibleCount);
 
-    const visible = data.slice(firstIndex, lastIndex + 1);
-    let min = Math.min(...visible.map(c => c.low));
-    let max = Math.max(...visible.map(c => c.high));
+    const domain = visibleCandleDomain(data, firstIndex, lastIndex);
+    let min = domain.minimum;
+    let max = domain.maximum;
     if (!Number.isFinite(min) || !Number.isFinite(max)) {
       min = 64000;
       max = 68000;
@@ -1392,8 +1509,8 @@ export class BlackChartEngine {
         this.kioseffSettings,
         min,
         max,
-        visible[0]?.time ?? null,
-        visible.at(-1)?.time ?? null
+        data[firstIndex]?.time ?? null,
+        data[lastIndex]?.time ?? null
       );
       min = indicatorDomain.minimum;
       max = indicatorDomain.maximum;
@@ -1515,18 +1632,18 @@ export class BlackChartEngine {
     if (settings.scaleMode === "custom") return settings.customScaleDepthPercent;
 
     const offset = Math.max(0, data.length - snapshot.inputSize);
-    const visibleDrawdowns: number[] = [];
+    let visibleMaximum = 0;
     for (let index = this.view.firstIndex; index <= this.view.lastIndex; index++) {
       const sourceIndex = index - offset;
       const value = sourceIndex >= 0 ? snapshot.series.rawDrawdown[sourceIndex] : undefined;
-      if (Number.isFinite(value)) visibleDrawdowns.push(Math.abs(value!));
+      if (Number.isFinite(value)) visibleMaximum = Math.max(visibleMaximum, Math.abs(value!));
     }
     return Math.max(
       1,
       Math.min(
         100,
         Math.max(
-          ...visibleDrawdowns,
+          visibleMaximum,
           Math.abs(snapshot.latest.maxDrawdownPercent),
           Math.abs(snapshot.series.p05.at(-1) ?? 0),
           Math.abs(snapshot.series.p99.at(-1) ?? 0),
@@ -1746,6 +1863,7 @@ export class BlackChartEngine {
 
   private draw() {
     if (this.destroyed) return;
+    const startedAt = performance.now();
     this.calculateView();
     this.drawGrid();
     this.drawWatermark();
@@ -1765,6 +1883,10 @@ export class BlackChartEngine {
         + this.crosshairTexts.length + this.drawingTexts.length + this.profileTexts.length
         + this.heatmapTexts.length + this.alertTexts.length
     );
+    blackCorePerformanceMonitor.recordMetric("chart.geometry_build_ms", performance.now() - startedAt, "ms", { surface: "pixi-chart" });
+    blackCorePerformanceMonitor.recordMetric("chart.visible_bars", this.view.lastIndex - this.view.firstIndex + 1, "count", { surface: "pixi-chart" });
+    blackCorePerformanceMonitor.recordMetric("chart.render_stride", this.renderStride(1), "count", { surface: "pixi-chart" });
+    this.queueRender();
   }
 
   private emitPriceTransformIfChanged() {
@@ -2193,7 +2315,7 @@ export class BlackChartEngine {
       const visual = this.visualFor(item.key, item.fallbackColor);
       if (item.histogram) {
         const barWidth = Math.max(0.5, Math.min(this.timeStep() * 0.76, 5));
-        for (let i = this.view.firstIndex; i <= this.view.lastIndex; i++) {
+        for (const i of this.renderIndices(1)) {
           const value = item.values[i];
           if (!Number.isFinite(value)) continue;
           const x = this.xForIndex(i) - barWidth / 2;
@@ -2205,7 +2327,7 @@ export class BlackChartEngine {
       }
 
       let started = false;
-      for (let i = this.view.firstIndex; i <= this.view.lastIndex; i++) {
+      for (const i of this.renderIndices(1)) {
         const value = item.values[i];
         if (!Number.isFinite(value)) continue;
         const x = this.xForIndex(i);
@@ -2301,7 +2423,7 @@ export class BlackChartEngine {
 
     const drawLine = (values: readonly number[], color: number, alpha: number, width: number) => {
       let started = false;
-      for (let index = this.view.firstIndex; index <= this.view.lastIndex; index++) {
+      for (const index of this.renderIndices(1.15)) {
         const value = aligned(values, index);
         if (!Number.isFinite(value)) { started = false; continue; }
         const x = this.xForIndex(index);
@@ -2314,16 +2436,21 @@ export class BlackChartEngine {
 
     const drawBand = (upperValues: readonly number[], lowerValues: readonly number[], color: number, alpha: number) => {
       const upper: number[] = [];
-      const lower: number[] = [];
-      for (let index = this.view.firstIndex; index <= this.view.lastIndex; index++) {
+      const lowerForward: number[] = [];
+      for (const index of this.renderIndices(1.15)) {
         const upperValue = aligned(upperValues, index);
         const lowerValue = aligned(lowerValues, index);
         if (!Number.isFinite(upperValue) || !Number.isFinite(lowerValue)) continue;
         upper.push(this.xForIndex(index), yForDrawdown(upperValue!));
-        lower.unshift(yForDrawdown(lowerValue!));
-        lower.unshift(this.xForIndex(index));
+        lowerForward.push(this.xForIndex(index), yForDrawdown(lowerValue!));
       }
-      if (upper.length >= 4 && lower.length >= 4) g.poly([...upper, ...lower]).fill({ color, alpha });
+      if (upper.length >= 4 && lowerForward.length >= 4) {
+        const polygon = [...upper];
+        for (let cursor = lowerForward.length - 2; cursor >= 0; cursor -= 2) {
+          polygon.push(lowerForward[cursor]!, lowerForward[cursor + 1]!);
+        }
+        g.poly(polygon).fill({ color, alpha });
+      }
     };
     const quantileBands = snapshot.engineMode === "pine-compatibility"
       ? [snapshot.series.p99, snapshot.series.p95, snapshot.series.p90, snapshot.series.p75, snapshot.series.p50, snapshot.series.p25, snapshot.series.p10, snapshot.series.p05]
@@ -2389,29 +2516,60 @@ export class BlackChartEngine {
       const bearish = this.hexColor(settings.flowBearishColor, theme.redBright);
       const neutral = this.hexColor(settings.flowNeutralColor, theme.muted);
       const baseAlpha = Math.max(0, Math.min(1, settings.flowLineIntensity / 100));
-      for (let index = Math.max(this.view.firstIndex + 1, 1); index <= this.view.lastIndex; index++) {
-        const priorState = aligned(snapshot.series.flowState, index - 1);
-        const state = aligned(snapshot.series.flowState, index);
-        const priorAnchor = aligned(snapshot.series.smoothedDrawdown, index - 1);
-        const anchor = aligned(snapshot.series.smoothedDrawdown, index);
-        const pressure = aligned(snapshot.series.flowPressure, index);
-        if (state === "UNAVAILABLE" || priorState === "UNAVAILABLE" || !Number.isFinite(priorAnchor) || !Number.isFinite(anchor) || !Number.isFinite(pressure)) continue;
-        const color = state === "BULLISH" ? bullish : state === "BEARISH" ? bearish : neutral;
-        const magnitude = Math.min(1, Math.abs(pressure!) / 100);
-        const width = settings.flowLineWidth * (0.9 + magnitude * 0.65);
-        const alpha = baseAlpha * (0.55 + magnitude * 0.45);
-        const x1 = this.xForIndex(index - 1);
-        const x2 = this.xForIndex(index);
-        const y1 = yForDrawdown(priorAnchor!);
-        const y2 = yForDrawdown(anchor!);
-        g.moveTo(x1, y1).lineTo(x2, y2).stroke({ width: width + 1.4, color: 0x020203, alpha: Math.min(0.78, alpha) });
-        g.moveTo(x1, y1).lineTo(x2, y2).stroke({ width, color, alpha });
+      const indices = this.renderIndices(1.15);
+      const denseFlow = this.renderStride(1.15) > 1;
+      if (denseFlow) {
+        const drawState = (target: "BULLISH" | "BEARISH" | "NEUTRAL", color: number, halo: boolean) => {
+          let drew = false;
+          for (let cursor = 1; cursor < indices.length; cursor++) {
+            const previousIndex = indices[cursor - 1]!;
+            const index = indices[cursor]!;
+            const priorState = aligned(snapshot.series.flowState, previousIndex);
+            const state = aligned(snapshot.series.flowState, index);
+            const priorAnchor = aligned(snapshot.series.smoothedDrawdown, previousIndex);
+            const anchor = aligned(snapshot.series.smoothedDrawdown, index);
+            if (state !== target || priorState === "UNAVAILABLE" || !Number.isFinite(priorAnchor) || !Number.isFinite(anchor)) continue;
+            g.moveTo(this.xForIndex(previousIndex), yForDrawdown(priorAnchor!));
+            g.lineTo(this.xForIndex(index), yForDrawdown(anchor!));
+            drew = true;
+          }
+          if (drew) g.stroke({
+            width: settings.flowLineWidth + (halo ? 1.4 : 0),
+            color: halo ? 0x020203 : color,
+            alpha: halo ? Math.min(0.72, baseAlpha) : baseAlpha * 0.82
+          });
+        };
+        for (const [state, color] of [["BULLISH", bullish], ["BEARISH", bearish], ["NEUTRAL", neutral]] as const) {
+          drawState(state, color, true);
+          drawState(state, color, false);
+        }
+      } else {
+        for (let cursor = 1; cursor < indices.length; cursor++) {
+          const previousIndex = indices[cursor - 1]!;
+          const index = indices[cursor]!;
+          const priorState = aligned(snapshot.series.flowState, previousIndex);
+          const state = aligned(snapshot.series.flowState, index);
+          const priorAnchor = aligned(snapshot.series.smoothedDrawdown, previousIndex);
+          const anchor = aligned(snapshot.series.smoothedDrawdown, index);
+          const pressure = aligned(snapshot.series.flowPressure, index);
+          if (state === "UNAVAILABLE" || priorState === "UNAVAILABLE" || !Number.isFinite(priorAnchor) || !Number.isFinite(anchor) || !Number.isFinite(pressure)) continue;
+          const color = state === "BULLISH" ? bullish : state === "BEARISH" ? bearish : neutral;
+          const magnitude = Math.min(1, Math.abs(pressure!) / 100);
+          const width = settings.flowLineWidth * (0.9 + magnitude * 0.65);
+          const alpha = baseAlpha * (0.55 + magnitude * 0.45);
+          const x1 = this.xForIndex(previousIndex);
+          const x2 = this.xForIndex(index);
+          const y1 = yForDrawdown(priorAnchor!);
+          const y2 = yForDrawdown(anchor!);
+          g.moveTo(x1, y1).lineTo(x2, y2).stroke({ width: width + 1.4, color: 0x020203, alpha: Math.min(0.78, alpha) });
+          g.moveTo(x1, y1).lineTo(x2, y2).stroke({ width, color, alpha });
+        }
       }
     }
 
     if (settings.showRiskScore) {
       const barWidth = Math.max(0.5, Math.min(this.timeStep() * 0.65, 4));
-      for (let index = this.view.firstIndex; index <= this.view.lastIndex; index++) {
+      for (const index of this.renderIndices(1)) {
         const score = aligned(snapshot.series.riskScore, index);
         if (!Number.isFinite(score)) continue;
         const height = Math.max(1, paneHeight * 0.10 * (score! / 100));
@@ -2690,13 +2848,14 @@ export class BlackChartEngine {
 
       const zUpper = Math.max(Number(zSettings?.upperBand ?? 2), Number(zSettings?.lowerBand ?? -2)) * 24;
       const zLower = Math.min(Number(zSettings?.upperBand ?? 2), Number(zSettings?.lowerBand ?? -2)) * 24;
-      const visibleValues = series.flatMap((item) =>
-        item.values.slice(this.view.firstIndex, this.view.lastIndex + 1).map((value) => Math.abs(value))
-      );
-      const scaleReferences = isZScorePane
-        ? [...visibleValues, Math.abs(zUpper), Math.abs(zLower), 1]
-        : [...visibleValues, 1];
-      const maxAbs = Math.max(60, Math.min(288, Math.max(...scaleReferences) * 1.16));
+      let observedMaxAbs = isZScorePane ? Math.max(Math.abs(zUpper), Math.abs(zLower), 1) : 1;
+      for (const item of series) {
+        for (let index = this.view.firstIndex; index <= this.view.lastIndex; index++) {
+          const value = item.values[index];
+          if (Number.isFinite(value)) observedMaxAbs = Math.max(observedMaxAbs, Math.abs(value!));
+        }
+      }
+      const maxAbs = Math.max(60, Math.min(288, observedMaxAbs * 1.16));
       const yForOsc = (value: number) =>
         paneMid - (Math.max(-maxAbs, Math.min(maxAbs, value)) / maxAbs) * paneHalf * 0.88;
 
@@ -2726,7 +2885,7 @@ export class BlackChartEngine {
         const itemAlpha = item.alphaOverride ?? visual.alpha;
         if (item.histogram) {
           const barWidth = Math.max(0.5, Math.min(this.timeStep() * 0.76, 5));
-          for (let i = this.view.firstIndex; i <= this.view.lastIndex; i++) {
+          for (const i of this.renderIndices(1)) {
             const value = item.values[i];
             if (!Number.isFinite(value)) continue;
             const x = this.xForIndex(i) - barWidth / 2;
@@ -2738,7 +2897,7 @@ export class BlackChartEngine {
         }
 
         let started = false;
-        for (let i = this.view.firstIndex; i <= this.view.lastIndex; i++) {
+        for (const i of this.renderIndices(1)) {
           const value = item.values[i];
           if (!Number.isFinite(value)) continue;
           const x = this.xForIndex(i);
@@ -3430,7 +3589,7 @@ export class BlackChartEngine {
       const closes = data.map((candle) => candle.close);
       const regime = this.emaSeries(closes, Math.max(34, Math.round(settings.regimeEmaLength)));
       let started = false;
-      for (let index = this.view.firstIndex; index <= this.view.lastIndex; index++) {
+      for (const index of this.renderIndices(1)) {
         const value = regime[index];
         if (!Number.isFinite(value)) continue;
         const x = this.xForIndex(index);
@@ -3449,7 +3608,7 @@ export class BlackChartEngine {
       const lookback = Math.max(8, Math.round(settings.swingLookback));
       let highStarted = false;
       let lowStarted = false;
-      for (let index = this.view.firstIndex; index <= this.view.lastIndex; index++) {
+      for (const index of this.renderIndices(1)) {
         if (index < lookback) continue;
         const high = this.highestInWindow(data, index - 1, lookback);
         const x = this.xForIndex(index);
@@ -3463,7 +3622,7 @@ export class BlackChartEngine {
       }
       if (highStarted) g.stroke({ width: 1, color: swingColor, alpha: visual.alpha * 0.22 });
 
-      for (let index = this.view.firstIndex; index <= this.view.lastIndex; index++) {
+      for (const index of this.renderIndices(1)) {
         if (index < lookback) continue;
         const low = this.lowestInWindow(data, index - 1, lookback);
         const x = this.xForIndex(index);
@@ -3550,6 +3709,7 @@ export class BlackChartEngine {
     const first = Math.max(0, this.view.firstIndex);
     const last = Math.min(points.length - 1, this.view.lastIndex);
     if (first > last) return;
+    const renderIndices = this.renderIndices(1).filter((index) => index >= first && index <= last);
 
     const visual = this.visualFor("vwap", "gray");
     const bandAlpha = clampNumber(settings.bandIntensity, 0, 100) / 100;
@@ -3573,7 +3733,7 @@ export class BlackChartEngine {
       let started = false;
       let drew = false;
       let lastValue = Number.NaN;
-      for (let index = first; index <= last; index += 1) {
+      for (const index of renderIndices) {
         const point = points[index];
         if (!isValid(point, field)) {
           started = false;
@@ -3616,7 +3776,7 @@ export class BlackChartEngine {
         segment = [];
       };
 
-      for (let index = first; index <= last; index += 1) {
+      for (const index of renderIndices) {
         const point = points[index];
         if (!isValid(point, "upper1") || !isValid(point, "lower1")) {
           fillSegment();
@@ -3661,18 +3821,24 @@ export class BlackChartEngine {
       ];
       for (const target of directionalColors) {
         let drew = false;
-        for (let index = Math.max(1, first); index <= last; index += 1) {
+        for (let cursor = 1; cursor < renderIndices.length; cursor++) {
+          const previousIndex = renderIndices[cursor - 1]!;
+          const index = renderIndices[cursor]!;
           const point = points[index];
-          const previous = points[index - 1];
+          const previous = points[previousIndex];
+          let crossesAnchor = false;
+          for (let scan = previousIndex + 1; scan <= index; scan++) {
+            if (points[scan]?.anchor) { crossesAnchor = true; break; }
+          }
           if (
             point.direction !== target.direction
-            || point.anchor
+            || crossesAnchor
             || !isValid(point, "value")
             || !isValid(previous, "value")
           ) {
             continue;
           }
-          g.moveTo(this.xForIndex(index - 1), this.yForPrice(previous.value));
+          g.moveTo(this.xForIndex(previousIndex), this.yForPrice(previous.value));
           g.lineTo(this.xForIndex(index), this.yForPrice(point.value));
           drew = true;
         }
@@ -3728,7 +3894,7 @@ export class BlackChartEngine {
 
     const smaLine = (period: number, color: number, alpha: number, width = 1) => {
       let started = false;
-      for (let i = this.view.firstIndex; i <= this.view.lastIndex; i++) {
+      for (const i of this.renderIndices(1)) {
         const avg = smaAt(i, period);
         const x = this.xForIndex(i);
         const y = this.yForPrice(avg);
@@ -3743,18 +3909,13 @@ export class BlackChartEngine {
     };
 
     const emaLine = (period: number, color: number, alpha: number, width = 1) => {
-      const smoothing = 2 / (period + 1);
-      let ema = data[0]?.close ?? 0;
+      const values = this.cachedEmaSeries(data, period);
       let started = false;
-
-      for (let i = 0; i <= this.view.lastIndex; i++) {
-        const candle = data[i];
-        if (!candle) continue;
-        ema = i === 0 ? candle.close : candle.close * smoothing + ema * (1 - smoothing);
-        if (i < this.view.firstIndex) continue;
-
+      for (const i of this.renderIndices(1)) {
+        const ema = values[i];
+        if (!Number.isFinite(ema)) continue;
         const x = this.xForIndex(i);
-        const y = this.yForPrice(ema);
+        const y = this.yForPrice(ema!);
         if (!started) {
           g.moveTo(x, y);
           started = true;
@@ -3768,12 +3929,12 @@ export class BlackChartEngine {
     const bollingerBands = (period: number) => {
       const visual = this.visualFor("bollinger", "silver");
       const upper: number[] = [];
-      const lower: number[] = [];
+      const lowerForward: number[] = [];
       let midStarted = false;
       let upperStarted = false;
       let lowerStarted = false;
 
-      for (let i = this.view.firstIndex; i <= this.view.lastIndex; i++) {
+      for (const i of this.renderIndices(1)) {
         const mean = smaAt(i, period);
         const deviation = standardDeviationAt(i, period, mean) * 2;
         const x = this.xForIndex(i);
@@ -3782,8 +3943,7 @@ export class BlackChartEngine {
         const lowerY = this.yForPrice(mean - deviation);
 
         upper.push(x, upperY);
-        lower.unshift(lowerY);
-        lower.unshift(x);
+        lowerForward.push(x, lowerY);
 
         if (!midStarted) {
           g.moveTo(x, midY);
@@ -3795,7 +3955,7 @@ export class BlackChartEngine {
 
       if (midStarted) g.stroke({ width: 1, color: visual.color, alpha: visual.alpha * 0.30 });
 
-      for (let i = this.view.firstIndex; i <= this.view.lastIndex; i++) {
+      for (const i of this.renderIndices(1)) {
         const mean = smaAt(i, period);
         const deviation = standardDeviationAt(i, period, mean) * 2;
         const x = this.xForIndex(i);
@@ -3811,7 +3971,7 @@ export class BlackChartEngine {
       }
       if (upperStarted) g.stroke({ width: 1, color: visual.color, alpha: visual.alpha * 0.48 });
 
-      for (let i = this.view.firstIndex; i <= this.view.lastIndex; i++) {
+      for (const i of this.renderIndices(1)) {
         const mean = smaAt(i, period);
         const deviation = standardDeviationAt(i, period, mean) * 2;
         const x = this.xForIndex(i);
@@ -3826,8 +3986,12 @@ export class BlackChartEngine {
       }
       if (lowerStarted) g.stroke({ width: 1, color: visual.color, alpha: visual.alpha * 0.48 });
 
-      if (upper.length > 4 && lower.length > 4) {
-        g.poly([...upper, ...lower]).fill({ color: visual.color, alpha: visual.alpha * 0.035 });
+      if (upper.length > 4 && lowerForward.length > 4) {
+        const polygon = [...upper];
+        for (let cursor = lowerForward.length - 2; cursor >= 0; cursor -= 2) {
+          polygon.push(lowerForward[cursor]!, lowerForward[cursor + 1]!);
+        }
+        g.poly(polygon).fill({ color: visual.color, alpha: visual.alpha * 0.035 });
       }
     };
 
@@ -3861,7 +4025,7 @@ export class BlackChartEngine {
     for (const plot of this.customPlots) {
       const color = this.hexColor(plot.color, 0x00ffcc);
       let started = false;
-      for (let i = this.view.firstIndex; i <= this.view.lastIndex; i++) {
+      for (const i of this.renderIndices(1)) {
         const val = plot.values[i];
         if (val === null || val === undefined || Number.isNaN(val)) {
           started = false;
@@ -3898,15 +4062,15 @@ export class BlackChartEngine {
     const plotHeight = this.view.height - this.view.bottomAxisHeight;
     const priceAreaBottom = plotHeight - oscHeight;
 
-    const visible = data.slice(this.view.firstIndex, this.view.lastIndex + 1);
-    const maxVol = Math.max(...visible.map(c => c.volume), 1);
+    const stride = this.renderStride(1);
+    const buckets = aggregateCandleRenderBuckets(data, this.view.firstIndex, this.view.lastIndex, stride);
+    const maxVol = buckets.reduce((maximum, bucket) => Math.max(maximum, bucket.candle.volume), 1);
     const visual = this.visualFor("volume", "red");
 
-    for (let i = this.view.firstIndex; i <= this.view.lastIndex; i++) {
-      const c = data[i];
-      if (!c) continue;
-      const barWidth = Math.max(0.35, Math.min(this.view.candleWidth, this.timeStep()));
-      const x = this.xForIndex(i) - barWidth / 2;
+    for (const bucket of buckets) {
+      const c = bucket.candle;
+      const barWidth = Math.max(0.55, Math.min(5, this.timeStep() * stride * 0.78));
+      const x = this.xForIndex(bucket.centerIndex) - barWidth / 2;
       const h = (c.volume / maxVol) * 96;
       const color = c.close >= c.open ? theme.silver : visual.color;
       const alpha = (this.view.candleWidth < 0.8 ? 0.16 : c.close >= c.open ? 0.20 : 0.32) * Math.max(0.35, visual.alpha);
@@ -3914,7 +4078,7 @@ export class BlackChartEngine {
     }
   }
 
-  private volumeProfileCandleOverride(candle: Candle, index: number, data: Candle[]) {
+  private volumeProfileCandleOverride(candle: Candle, index: number, data: Candle[], cachedAverageVolume?: number) {
     if (!this.visibleIndicators.volumeProfile) return undefined;
     const settings = this.indicatorAdvancedSettings.volumeProfile;
     if (settings.hdlxEnableBarColoring && this.lastVolumeProfileResult?.hdlx.length) {
@@ -3931,9 +4095,7 @@ export class BlackChartEngine {
 
     if (!settings.volumeWeightedBarColoring) return undefined;
     const length = Math.max(1, Math.min(500, Math.round(settings.volumeMaLength)));
-    const from = Math.max(0, index - length + 1);
-    const sample = data.slice(from, index + 1);
-    const averageVolume = sample.reduce((sum, item) => sum + item.volume, 0) / Math.max(1, sample.length);
+    const averageVolume = cachedAverageVolume ?? this.cachedVolumeAverages(data, length)[index] ?? candle.volume;
     const bullish = candle.close >= candle.open;
 
     if (candle.volume > averageVolume * settings.upperThreshold) {
@@ -3965,19 +4127,29 @@ export class BlackChartEngine {
       return;
     }
 
-    for (let i = this.view.firstIndex; i <= this.view.lastIndex; i++) {
-      const c = data[i];
-      if (!c) continue;
-      const x = this.xForIndex(i);
+    const stride = this.renderStride(1);
+    const buckets = aggregateCandleRenderBuckets(data, this.view.firstIndex, this.view.lastIndex, stride);
+    const settings = this.indicatorAdvancedSettings.volumeProfile;
+    const volumeAverages = stride === 1 && this.visibleIndicators.volumeProfile && settings.volumeWeightedBarColoring
+      ? this.cachedVolumeAverages(data, settings.volumeMaLength)
+      : undefined;
+    let previous = this.view.firstIndex > 0 ? data[this.view.firstIndex - 1] : undefined;
+    for (const bucket of buckets) {
+      const c = bucket.candle;
+      const x = this.xForIndex(bucket.centerIndex);
       if (this.chartType === "renko") {
         this.drawRenkoBrick(g, c, x);
       } else if (this.chartType === "hollow") {
-        this.drawHollowCandle(g, c, data[i - 1], x);
+        this.drawHollowCandle(g, c, previous, x);
       } else if (this.chartType === "volumeFootprint") {
         this.drawClassicCandle(g, c, x, { color: c.close >= c.open ? theme.silver : theme.red, alpha: 0.28 });
       } else {
-        this.drawClassicCandle(g, c, x, this.volumeProfileCandleOverride(c, i, data));
+        const override = stride === 1
+          ? this.volumeProfileCandleOverride(c, bucket.endIndex, data, volumeAverages?.[bucket.endIndex])
+          : undefined;
+        this.drawClassicCandle(g, c, x, override);
       }
+      previous = c;
     }
   }
 
@@ -4068,7 +4240,7 @@ export class BlackChartEngine {
     let started = false;
     let lastPoint: { x: number; y: number } | undefined;
 
-    for (let i = this.view.firstIndex; i <= this.view.lastIndex; i++) {
+    for (const i of this.renderIndices(1)) {
       const c = data[i];
       if (!c) continue;
       const x = this.xForIndex(i);
@@ -4345,6 +4517,7 @@ export class BlackChartEngine {
   }
 
   private clearTexts() {
+    this.countdownText = undefined;
     for (const t of [...this.priceTexts, ...this.timeTexts, ...this.labelTexts, ...this.hudTexts]) {
       t.removeFromParent();
       t.visible = false;
@@ -4562,39 +4735,15 @@ export class BlackChartEngine {
       }
       g.stroke({ width: 0.85, color: lineColor, alpha: lineAlpha });
 
-      // Calculate timeframe in seconds from candles
-      let timeframeSeconds = 60;
-      if (data.length >= 2) {
-        timeframeSeconds = data[data.length - 1].time - data[data.length - 2].time;
-      }
-      
-      const timeRemainingSeconds = Math.max(0, (last.time + timeframeSeconds) - Math.floor(Date.now() / 1000));
-      
-      const formatCountdown = (secs: number) => {
-        if (secs <= 0) return "00:00";
-        if (secs >= 86400) {
-          const d = Math.floor(secs / 86400);
-          const h = Math.floor((secs % 86400) / 3600);
-          return `${d}d ${h}h`;
-        }
-        const h = Math.floor(secs / 3600);
-        const m = Math.floor((secs % 3600) / 60);
-        const s = secs % 60;
-        if (h > 0) {
-          return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-        }
-        return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-      };
-
       const priceText = last.close.toLocaleString(undefined, { maximumFractionDigits: 1 });
-      const timerText = formatCountdown(timeRemainingSeconds);
+      const timerText = this.currentCandleCountdown();
 
       // Neon-glowing TradingView style box
       g.rect(plotWidth + 4, y - 18, 74, 36)
         .fill({ color: 0x07090b, alpha: 0.96 })
         .stroke({ width: 1.5, color: lineColor, alpha: 0.95 });
 
-      this.addText(
+      this.countdownText = this.addText(
         this.priceTexts,
         priceText,
         plotWidth + 9,
@@ -4645,7 +4794,10 @@ export class BlackChartEngine {
 
     const plotWidth = this.view.width - this.view.rightAxisWidth;
     const plotHeight = this.view.height - this.view.bottomAxisHeight;
-    if (!this.pointer.active || this.pointer.x < 0 || this.pointer.x > plotWidth || this.pointer.y < this.view.topPadding || this.pointer.y > plotHeight) return;
+    if (!this.pointer.active || this.pointer.x < 0 || this.pointer.x > plotWidth || this.pointer.y < this.view.topPadding || this.pointer.y > plotHeight) {
+      this.queueRender();
+      return;
+    }
 
     g.moveTo(this.pointer.x, this.view.topPadding)
       .lineTo(this.pointer.x, plotHeight)
@@ -4700,5 +4852,6 @@ export class BlackChartEngine {
         }
       }
     }
+    this.queueRender();
   }
 }

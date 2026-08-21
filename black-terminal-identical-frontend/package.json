@@ -26,6 +26,7 @@
     "perf:dom-pro-smoke": "node scripts/dom-pro-performance-harness.js --minutes=0.2",
     "perf:dom-pro-soak": "node scripts/dom-pro-performance-harness.js",
     "test:performance": "node --experimental-strip-types scripts/performance-regression-tests.js",
+    "test:chart-render-lod": "node --experimental-strip-types scripts/chart-render-lod-tests.ts",
     "test:chart-csp": "node scripts/chart-csp-regression.js",
     "test:liquidation-heatmap": "node --experimental-strip-types scripts/liquidation-heatmap-tests.ts",
     "test:bclif-operational-clarity": "node --experimental-strip-types scripts/bclif-operational-clarity-tests.ts",

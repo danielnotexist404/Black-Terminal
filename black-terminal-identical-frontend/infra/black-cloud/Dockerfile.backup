@@ -1,8 +1,9 @@
 FROM alpine:3.22.1
-RUN apk add --no-cache bash postgresql17-client restic tar coreutils tzdata
+RUN apk add --no-cache bash postgresql17-client restic rclone tar coreutils tzdata
 COPY infra/black-cloud/scripts/backup-once.sh /usr/local/bin/backup-once
 COPY infra/black-cloud/scripts/backup-loop.sh /usr/local/bin/backup-loop
 COPY infra/black-cloud/scripts/verify-backup.sh /usr/local/bin/verify-backup
-RUN chmod 0555 /usr/local/bin/backup-once /usr/local/bin/backup-loop /usr/local/bin/verify-backup
+COPY infra/black-cloud/scripts/restic-wrapper.sh /usr/local/bin/restic
+RUN chmod 0555 /usr/local/bin/backup-once /usr/local/bin/backup-loop /usr/local/bin/verify-backup /usr/local/bin/restic
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/usr/local/bin/backup-loop"]

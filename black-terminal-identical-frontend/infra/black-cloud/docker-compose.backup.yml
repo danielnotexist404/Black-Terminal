@@ -15,16 +15,18 @@ services:
       PGUSER: postgres
       PGDATABASE: postgres
       RESTIC_CACHE_DIR: /tmp/restic-cache
+      RCLONE_CONFIG: /run/secrets/rclone.conf
     volumes:
       - ${BLACK_CLOUD_SUPABASE_STATE_ROOT:-/var/lib/black-cloud/supabase}/storage:/source/storage:ro
       - ${BLACK_CLOUD_LOCAL_RESTIC_PATH:-/var/lib/black-cloud/restic}:/repository
+      - ${BLACK_CLOUD_RCLONE_CONFIG_FILE:-/opt/black-cloud/shared-secrets/rclone/rclone.conf}:/run/secrets/rclone.conf:rw
       - backup_staging:/staging
     read_only: true
     tmpfs:
       - /tmp:size=256m,mode=1777
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
-    networks: [data]
+    networks: [data, egress]
     logging:
       driver: json-file
       options: { max-size: 25m, max-file: "5" }
@@ -33,6 +35,9 @@ networks:
   data:
     external: true
     name: black-cloud-data
+  egress:
+    external: true
+    name: black-cloud-egress
 
 volumes:
   backup_staging:

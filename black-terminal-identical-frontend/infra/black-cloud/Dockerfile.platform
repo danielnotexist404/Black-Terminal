@@ -21,6 +21,9 @@ ENV VITE_RESEND_API_KEY=${VITE_RESEND_API_KEY}
 ENV VITE_RESEND_FROM=${VITE_RESEND_FROM}
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
+# Keep development dependencies for the compiler, but emit a production React
+# bundle from this point onward.
+ENV NODE_ENV=production
 COPY index.html tsconfig.json vite.config.ts ./
 COPY src ./src
 COPY api ./api
@@ -45,6 +48,7 @@ COPY --chown=blackterminal:blackterminal api ./api
 COPY --chown=blackterminal:blackterminal server ./server
 COPY --chown=blackterminal:blackterminal scripts ./scripts
 COPY --chown=blackterminal:blackterminal src ./src
+COPY --chown=blackterminal:blackterminal supabase/migrations ./supabase/migrations
 COPY --chown=blackterminal:blackterminal tsconfig.bclif-collector.json tsconfig.json ./
 USER 10001:10001
 STOPSIGNAL SIGTERM

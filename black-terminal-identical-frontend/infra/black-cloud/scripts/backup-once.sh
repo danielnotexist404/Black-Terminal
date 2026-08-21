@@ -16,11 +16,19 @@ pg_dumpall --roles-only --no-role-passwords --no-comments > "$snapshot_dir/roles
 mv "$snapshot_dir/roles.sql.partial" "$snapshot_dir/roles.sql"
 pg_dump --format=custom --compress=9 --file "$snapshot_dir/postgres.dump.partial"
 mv "$snapshot_dir/postgres.dump.partial" "$snapshot_dir/postgres.dump"
-tar --xattrs --xattrs-include='*' -C /source -czf "$snapshot_dir/storage.tar.gz.partial" storage
+# Supabase Storage is live while the backup runs. Files may be replaced or
+# appended between tar's directory scan and read. Preserve a crash-consistent
+# copy without failing the database backup because of those expected races.
+tar --xattrs --xattrs-include='*' \
+  --ignore-failed-read \
+  --warning=no-file-changed \
+  -C /source \
+  -czf "$snapshot_dir/storage.tar.gz.partial" \
+  storage
 mv "$snapshot_dir/storage.tar.gz.partial" "$snapshot_dir/storage.tar.gz"
 
 (cd "$snapshot_dir" && sha256sum roles.sql postgres.dump storage.tar.gz > SHA256SUMS)
-printf '{"format":"black-cloud-backup-v2","createdAt":"%s","database":"postgres","storage":"supabase-local","storageExtendedAttributes":true}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$snapshot_dir/manifest.json"
+printf '{"format":"black-cloud-backup-v2","createdAt":"%s","database":"postgres","storage":"supabase-local","storageConsistency":"crash-consistent","storageExtendedAttributes":true}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$snapshot_dir/manifest.json"
 
 if ! restic snapshots >/dev/null 2>&1; then restic init; fi
 restic backup --tag black-cloud --tag "$timestamp" "$snapshot_dir"

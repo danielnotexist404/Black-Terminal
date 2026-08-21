@@ -1,6 +1,8 @@
 services:
   gateway:
     ports:
-      - 80:80
-      - 443:443
-      - 443:443/udp
+      # The Docker daemon defaults every published port to loopback. Production
+      # explicitly exposes only the public web edge; all other services stay local.
+      - 0.0.0.0:80:80
+      - 0.0.0.0:443:443
+      - 0.0.0.0:443:443/udp

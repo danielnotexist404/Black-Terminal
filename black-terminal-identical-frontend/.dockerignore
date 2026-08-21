@@ -4,4 +4,6 @@ dist
 .env*
 src-tauri
 docs
-supabase
+supabase/*
+!supabase/migrations/
+!supabase/migrations/**

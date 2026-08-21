@@ -20,30 +20,6 @@ export const DEFAULT_DDA_PRO_SETTINGS: DDAProSettings = {
   riskFreeRatePercent: 4,
   vaddVolatilityFloorPercent: 0.10,
   drawdownEpisodeThresholdPercent: 0.10,
-  topEngineMode: "mirrored-causal",
-  enableMirroredTopEngine: true,
-  topAnchorMethod: "causal-episode-trough",
-  topEpisodeMinimumThresholdPercent: 0.60,
-  topEpisodeMaximumThresholdPercent: 8,
-  topAtrLookback: 14,
-  topAtrMultiplier: 1.5,
-  topReturnQuantileLookback: 100,
-  topReturnQuantile: 0.90,
-  topQuantileMultiplier: 2,
-  topExtremityPercentile: 0.95,
-  topBarrierDispersionMultiplier: 0.10,
-  topMinimumMaturityBars: 12,
-  topReversalAtrMultiplier: 1.5,
-  topMinimumReversalPercent: 0.75,
-  topChangePointSensitivity: 55,
-  topStructureConfirmation: true,
-  strongBullProtection: true,
-  oneShortPerTopEpisode: true,
-  topCooldownBars: 12,
-  topRequireExactBearishFlow: false,
-  showTopCandidates: false,
-  showDynamicTopBarrier: true,
-  showTopDiagnostics: false,
   hysteresisPercent: 2,
   moderateThreshold: 50,
   highThreshold: 75,
@@ -156,7 +132,6 @@ const PRESET_MIGRATIONS: Record<string, DDAProPreset> = {
 
 const THEMES = new Set<DDAProTheme>(["black-terminal", "black-terminal-blood", "institutional-monochrome", "custom", "gold", "edge-tools", "behavioral", "quant", "ocean", "fire", "matrix", "arctic"]);
 const SIGNAL_MODES = new Set(["RAW", "BALANCED", "INSTITUTIONAL", "CUSTOM"]);
-const TOP_ENGINE_MODES = new Set(["mirrored-causal", "disabled"]);
 const finite = (value: unknown, fallback: number) => typeof value === "number" && Number.isFinite(value) ? value : fallback;
 const boolean = (value: unknown, fallback: boolean) => typeof value === "boolean" ? value : fallback;
 
@@ -177,30 +152,6 @@ export function migrateDDAProSettings(value?: Partial<DDAProSettings> | null): D
     riskFreeRatePercent: Math.max(-25, Math.min(100, finite(merged.riskFreeRatePercent, 4))),
     vaddVolatilityFloorPercent: Math.max(0.001, Math.min(100, finite(merged.vaddVolatilityFloorPercent, 0.10))),
     drawdownEpisodeThresholdPercent: Math.max(0, Math.min(50, finite(merged.drawdownEpisodeThresholdPercent, 0.10))),
-    topEngineMode: TOP_ENGINE_MODES.has(merged.topEngineMode) ? merged.topEngineMode : "mirrored-causal",
-    enableMirroredTopEngine: boolean(merged.enableMirroredTopEngine, true),
-    topAnchorMethod: "causal-episode-trough",
-    topEpisodeMinimumThresholdPercent: Math.max(0.05, Math.min(25, finite(merged.topEpisodeMinimumThresholdPercent, 0.60))),
-    topEpisodeMaximumThresholdPercent: Math.max(0.10, Math.min(50, finite(merged.topEpisodeMaximumThresholdPercent, 8))),
-    topAtrLookback: Math.max(2, Math.min(500, Math.round(finite(merged.topAtrLookback, 14)))),
-    topAtrMultiplier: Math.max(0.1, Math.min(10, finite(merged.topAtrMultiplier, 1.5))),
-    topReturnQuantileLookback: Math.max(20, Math.min(2_000, Math.round(finite(merged.topReturnQuantileLookback, 100)))),
-    topReturnQuantile: Math.max(0.50, Math.min(0.999, finite(merged.topReturnQuantile, 0.90))),
-    topQuantileMultiplier: Math.max(0.1, Math.min(10, finite(merged.topQuantileMultiplier, 2))),
-    topExtremityPercentile: Math.max(0.75, Math.min(0.999, finite(merged.topExtremityPercentile, 0.95))),
-    topBarrierDispersionMultiplier: Math.max(0, Math.min(5, finite(merged.topBarrierDispersionMultiplier, 0.10))),
-    topMinimumMaturityBars: Math.max(3, Math.min(500, Math.round(finite(merged.topMinimumMaturityBars, 12)))),
-    topReversalAtrMultiplier: Math.max(0.1, Math.min(10, finite(merged.topReversalAtrMultiplier, 1.5))),
-    topMinimumReversalPercent: Math.max(0.05, Math.min(25, finite(merged.topMinimumReversalPercent, 0.75))),
-    topChangePointSensitivity: Math.max(0, Math.min(100, finite(merged.topChangePointSensitivity, 55))),
-    topStructureConfirmation: boolean(merged.topStructureConfirmation, true),
-    strongBullProtection: boolean(merged.strongBullProtection, true),
-    oneShortPerTopEpisode: boolean(merged.oneShortPerTopEpisode, true),
-    topCooldownBars: Math.max(1, Math.min(1_000, Math.round(finite(merged.topCooldownBars, 12)))),
-    topRequireExactBearishFlow: boolean(merged.topRequireExactBearishFlow, false),
-    showTopCandidates: boolean(merged.showTopCandidates, false),
-    showDynamicTopBarrier: boolean(merged.showDynamicTopBarrier, true),
-    showTopDiagnostics: boolean(merged.showTopDiagnostics, false),
     hysteresisPercent: Math.max(0, Math.min(20, finite(merged.hysteresisPercent, 2))),
     moderateThreshold, highThreshold, extremeThreshold,
     depthWeight: Math.max(0, Math.min(1, finite(merged.depthWeight, 0.45))),
@@ -354,7 +305,7 @@ export function resolveDDAProBarsPerYear(settings: DDAProSettings, timeframeSeco
 
 export function ddaProCalculationSettingsHash(settings: DDAProSettings) {
   const value = { ...migrateDDAProSettings(settings) } as Record<string, unknown>;
-  for (const key of ["preset", "theme", "scaleMode", "customScaleDepthPercent", "dashboardPosition", "rawColor", "smoothedColor", "meanColor", "moderateColor", "highColor", "extremeColor", "lineIntensity", "fillIntensity", "lineWidth", "showFlowPressure", "flowBullishColor", "flowBearishColor", "flowNeutralColor", "flowLineIntensity", "flowLineWidth", "showRawDrawdown", "showSmoothedDrawdown", "showMean", "showSigmaBands", "showQuantiles", "showZScore", "showDuration", "showVelocity", "showRiskScore", "showDashboard", "showExpandedDashboard", "showEpisodeMarkers", "showRawSignals", "showConfirmedSignals", "showProvisionalSignals", "confirmedAlertsOnly", "showSignalConfidence", "showRegimeDiagnostics", "showTopCandidates", "showDynamicTopBarrier", "showTopDiagnostics"]) delete value[key];
+  for (const key of ["preset", "theme", "scaleMode", "customScaleDepthPercent", "dashboardPosition", "rawColor", "smoothedColor", "meanColor", "moderateColor", "highColor", "extremeColor", "lineIntensity", "fillIntensity", "lineWidth", "showFlowPressure", "flowBullishColor", "flowBearishColor", "flowNeutralColor", "flowLineIntensity", "flowLineWidth", "showRawDrawdown", "showSmoothedDrawdown", "showMean", "showSigmaBands", "showQuantiles", "showZScore", "showDuration", "showVelocity", "showRiskScore", "showDashboard", "showExpandedDashboard", "showEpisodeMarkers", "showRawSignals", "showConfirmedSignals", "showProvisionalSignals", "confirmedAlertsOnly", "showSignalConfidence", "showRegimeDiagnostics"]) delete value[key];
   const json = JSON.stringify(value, Object.keys(value).sort());
   let hash = 0x811c9dc5;
   for (let index = 0; index < json.length; index++) { hash ^= json.charCodeAt(index); hash = Math.imul(hash, 0x01000193) >>> 0; }

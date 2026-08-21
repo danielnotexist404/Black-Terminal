@@ -2420,50 +2420,18 @@ export class BlackChartEngine {
       }
     }
 
-    if (settings.showDynamicTopBarrier && settings.enableMirroredTopEngine) {
-      const topBarrierColor = this.hexColor("#8f1528", theme.red);
-      let started = false;
-      let priorState = snapshot.topSeries.state[0] ?? "NEUTRAL";
-      for (let index = this.view.firstIndex; index <= this.view.lastIndex; index++) {
-        const barrier = aligned(snapshot.topSeries.dynamicTopBarrier, index);
-        const state = aligned(snapshot.topSeries.state, index) ?? "NEUTRAL";
-        if (!Number.isFinite(barrier) || barrier! <= 0) { started = false; continue; }
-        const x = this.xForIndex(index);
-        const y = yForDrawdown(-barrier!);
-        if (!started || state !== priorState) {
-          g.moveTo(x, y);
-          started = true;
-        } else {
-          const bright = state === "TOP_BUILDING" || state === "TOP_ARMED";
-          g.lineTo(x, y).stroke({
-            width: bright ? 1.3 : 0.85,
-            color: bright ? this.hexColor("#c50020", theme.redBright) : topBarrierColor,
-            alpha: bright ? 0.72 : 0.34
-          });
-          g.moveTo(x, y);
-        }
-        priorState = state;
-      }
-    }
-    if (settings.showVelocity) {
-      drawLine(snapshot.series.velocity.map((value) => -Math.max(0, value)), this.hexColor(themePalette.extreme, theme.redBright), 0.48, 0.75);
-      this.addProfileText("WORSENING DD VELOCITY", 12, paneBottom - 13, this.hexColor(themePalette.extreme, theme.red), 7, "600", true);
-    }
+    if (settings.showVelocity) drawLine(snapshot.series.velocity.map((value) => -Math.max(0, value)), this.hexColor(themePalette.extreme, theme.redBright), 0.48, 0.75);
     if (settings.showEpisodeMarkers) {
-      const drawSignal = (signal: (typeof snapshot.signals)[number], radius: number, alpha: number, halo = false, hollow = false) => {
+      const drawSignal = (signal: (typeof snapshot.signals)[number], radius: number, alpha: number, halo = false) => {
         const chartIndex = offset + signal.index;
         if (chartIndex < this.view.firstIndex || chartIndex > this.view.lastIndex) return;
         const color = signal.markerTone === "blood-red"
           ? this.hexColor("#ff1838", theme.redBright)
           : this.hexColor("#f2f2f4", theme.silverBright);
         const x = this.xForIndex(chartIndex);
-        const topSignal = signal.sourceEventType === "BC_RDA_TOP_CANDIDATE" || signal.sourceEventType === "BC_RDA_TOP_CONFIRMED";
-        const y = yForDrawdown(topSignal
-          ? -(snapshot.topSeries.dynamicTopBarrier[signal.index] || signal.value)
-          : (snapshot.series.rawDrawdown[signal.index] ?? -signal.value));
+        const y = yForDrawdown(snapshot.series.rawDrawdown[signal.index] ?? -signal.value);
         if (halo) g.circle(x, y, radius + 2.2).stroke({ width: 0.8, color, alpha: Math.min(0.62, alpha * 0.62) });
-        if (hollow) g.circle(x, y, radius).stroke({ width: 1, color, alpha });
-        else g.circle(x, y, radius).fill({ color, alpha });
+        g.circle(x, y, radius).fill({ color, alpha });
         if (settings.showSignalConfidence && Number.isFinite(signal.confidence)) {
           this.addProfileText(`${Math.round(signal.confidence!)}%`, x + 5, y - 7, color, 7, "600");
         }
@@ -2480,9 +2448,6 @@ export class BlackChartEngine {
         }
         if (settings.showProvisionalSignals) for (const signal of snapshot.signalIntelligence.provisionalSignals) drawSignal(signal, 1.9, 0.42);
         if (settings.showConfirmedSignals) for (const signal of snapshot.signals) drawSignal(signal, 2.8, 0.94, (signal.confidence ?? 0) >= 82);
-      }
-      if (settings.showTopCandidates) {
-        for (const signal of snapshot.topCandidates) drawSignal(signal, 2.25, 0.48, false, true);
       }
     }
 
@@ -2517,24 +2482,6 @@ export class BlackChartEngine {
         const reasons = intelligence.latestReasonCodes.slice(0, 2).join("/") || "NO_ACTIVE_REJECTION";
         this.addProfileText(`EP ${episode} · LAST ${barsSince ?? "--"} BARS · ${reasons}`, 12, paneTop + 44, this.hexColor(themePalette.low, theme.silver), 8, "600", true);
       }
-    }
-    if (settings.showTopDiagnostics && settings.enableMirroredTopEngine && paneHeight >= 92) {
-      const latestIndex = Math.max(0, snapshot.inputSize - 1);
-      const topState = snapshot.topSeries.state[latestIndex] ?? "NEUTRAL";
-      const topRegime = snapshot.topSeries.marketRegime[latestIndex] ?? "INSUFFICIENT";
-      const drawup = snapshot.topSeries.drawupDepth[latestIndex] ?? 0;
-      const barrier = snapshot.topSeries.dynamicTopBarrier[latestIndex] ?? 0;
-      const reversal = snapshot.topSeries.reversalFromEpisodeHigh[latestIndex] ?? 0;
-      const required = snapshot.topSeries.requiredTopReversal[latestIndex] ?? 0;
-      this.addProfileText(
-        `TOP ${topState} · ${topRegime} · DU ${drawup.toFixed(2)}% / B ${barrier.toFixed(2)}% · REV ${reversal.toFixed(2)}/${required.toFixed(2)}%`,
-        12,
-        paneBottom - 25,
-        this.hexColor("#b31a31", theme.red),
-        8,
-        "600",
-        true
-      );
     }
     if (settings.showDashboard) {
       const panelX = dashboardX - 7;

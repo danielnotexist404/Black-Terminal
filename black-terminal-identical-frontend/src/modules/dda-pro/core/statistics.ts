@@ -34,14 +34,9 @@ export function quantile(sortedValues: readonly number[], probability: number, m
 
 export function percentileRank(sortedValues: readonly number[], value: number) {
   if (!sortedValues.length) return 0;
-  let lower = 0;
-  let upper = sortedValues.length;
-  while (lower < upper) {
-    const middle = (lower + upper) >>> 1;
-    if ((sortedValues[middle] ?? 0) <= value) lower = middle + 1;
-    else upper = middle;
-  }
-  return lower / sortedValues.length * 100;
+  let upper = 0;
+  while (upper < sortedValues.length && (sortedValues[upper] ?? 0) <= value) upper += 1;
+  return upper / sortedValues.length * 100;
 }
 
 export function median(values: readonly number[]) {

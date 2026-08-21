@@ -46,10 +46,11 @@ const event = (type: DDAProEvent["type"], index: number): DDAProEvent => ({
 });
 const signals = deriveDDAProSignals([event("DDA_DRAWDOWN_STARTED", 0), event("DDA_DRAWDOWN_DEEPENED", 1), event("DDA_DRAWDOWN_RECOVERED", 2)]);
 assert.deepEqual(signals.map(({ direction, markerTone }) => ({ direction, markerTone })), [
-  { direction: "long", markerTone: "silver-white" }
+  { direction: "long", markerTone: "silver-white" },
+  { direction: "short", markerTone: "blood-red" }
 ]);
-assert.deepEqual(signals.map((signal) => signal.sourceEventType), ["DDA_DRAWDOWN_DEEPENED"],
-  "drawdown recovery must remain a neutral lifecycle event");
+assert.deepEqual(signals.map((signal) => signal.sourceEventType), ["DDA_DRAWDOWN_DEEPENED", "DDA_DRAWDOWN_RECOVERED"],
+  "color correction must not move or recalculate the existing signal dots");
 assert.equal(new Set(signals.map((signal) => signal.id)).size, signals.length);
 
 const alertCandles = [{ time: 100 }, { time: 200 }, { time: 300 }];

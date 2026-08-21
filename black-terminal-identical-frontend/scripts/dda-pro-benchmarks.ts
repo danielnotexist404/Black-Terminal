@@ -36,13 +36,11 @@ const report = {
   hostCapacityClaim: "NONE",
   cold20kLookback500Ms: cold,
   incremental501Lookback500Ms: incremental,
-  // V2 includes the full independent upside distribution/state machine in the
-  // same worker snapshot. These bounds are the measured dual-engine budget.
-  targets: { cold20kMs: 850, incrementalP95Ms: 25, mainThreadFrameMs: 16.7 },
+  targets: { cold20kMs: 500, incrementalP95Ms: 10, mainThreadFrameMs: 16.7 },
   workerIsolation: true,
-  targetStatus: { cold20kP95: cold.p95 <= 850 ? "PASS" : "FAIL", boundedRebuildP95: incremental.p95 <= 25 ? "PASS" : "FAIL" }
+  targetStatus: { cold20kP95: cold.p95 <= 500 ? "PASS" : "FAIL", boundedRebuildP95: incremental.p95 <= 10 ? "PASS" : "FAIL" }
 };
-console.log(JSON.stringify(report, null, 2));
 assert.ok(Number.isFinite(cold.p99) && Number.isFinite(incremental.p99));
 assert.ok(cold.p95 <= report.targets.cold20kMs, "BC-RDA cold p95 target exceeded");
 assert.ok(incremental.p95 <= report.targets.incrementalP95Ms, "BC-RDA bounded rebuild p95 target exceeded");
+console.log(JSON.stringify(report, null, 2));

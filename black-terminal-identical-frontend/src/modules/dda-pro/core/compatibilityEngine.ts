@@ -16,7 +16,6 @@ import {
 import type { DDAProCalculationInput, DDAProRiskState, DDAProSnapshot } from "./types.ts";
 import { applyDDAProSignalIntelligence } from "./signalIntelligence.ts";
 import { calculateDDAProFlowPressure } from "./flowPressure.ts";
-import { calculateBCRDATopEngine } from "./topEngine.ts";
 
 export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): DDAProSnapshot {
   const settings = migrateDDAProSettings({
@@ -115,18 +114,12 @@ export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): 
   const flow = calculateDDAProFlowPressure(input, series);
   const latestState = riskStates[index] ?? "INSUFFICIENT";
   const events = deriveEvents(candles, riskStates, series.depth, episodes);
-  const topResult = calculateBCRDATopEngine(input, values, metrics.barsPerYear);
-  events.push(...topResult.events);
   for (const event of events) Object.assign(event, { engineMode: "pine-compatibility", sourceAuthority: source.authority, lookback, riskScore: series.riskScore[event.index] ?? 0, confidence, drawdownPercent: series.rawDrawdown[event.index] ?? 0 });
-  const bottomSignals = deriveDDAProSignals(events);
-  const rawSignals = [...bottomSignals, ...topResult.confirmedSignals].sort((left, right) => left.index - right.index || left.direction.localeCompare(right.direction));
+  const rawSignals = deriveDDAProSignals(events);
   const intelligenceCandidates = settings.signalIntelligenceMode === "RAW"
     ? rawSignals
     : deriveCausalDDAProSignalCandidates(candles, series.depth, settings.drawdownEpisodeThresholdPercent);
   const intelligenceResult = applyDDAProSignalIntelligence(input, series, intelligenceCandidates);
-  const signals = settings.signalIntelligenceMode === "RAW"
-    ? intelligenceResult.signals
-    : [...intelligenceResult.signals, ...topResult.confirmedSignals].sort((left, right) => left.index - right.index || left.direction.localeCompare(right.direction));
   const dataHash = ddaProDataHash(input);
   const settingsHash = ddaProSettingsHash(settings);
   const latest = latestFromSeries(series, latestState, confidence, metrics);
@@ -134,10 +127,10 @@ export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): 
     schemaVersion: 1,
     engineMode: "pine-compatibility",
     calculationHash: calculationHash(input, "pine-compatibility", dataHash),
-    engineVersion: "DDA_PINE_COMPAT_V1+BC_RDA_MIRRORED_TOP_V1",
+    engineVersion: "DDA_PINE_COMPAT_V1",
     dataHash,
     settingsHash,
-    outputHash: ddaProOutputHash(series, latest, topResult.series, signals),
+    outputHash: ddaProOutputHash(series, latest),
     calculatedAt: Date.now(),
     inputSize: length,
     validFromIndex: Math.min(length, lookback),
@@ -147,13 +140,10 @@ export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): 
     flowAuthority: flow.authority,
     flowWarning: flow.warning,
     series,
-    topSeries: topResult.series,
     episodes,
-    topEpisodes: topResult.episodes,
     events,
-    topCandidates: topResult.candidates,
     rawSignals,
-    signals,
+    signals: intelligenceResult.signals,
     signalIntelligence: intelligenceResult.intelligence,
     latest
   };

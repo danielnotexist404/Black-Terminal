@@ -2278,7 +2278,7 @@ export function PixiBlackChart({
       const source = settings.realtimeMode === "confirmed-bars" && latestIsDeveloping ? available.slice(0, -1) : available;
       if (source.length < 2) return;
       const capture = ddaFlowCaptureRef.current;
-      const wantsFlowData = settings.showFlowPressure || settings.cvdConfirmation || settings.topRequireExactBearishFlow;
+      const wantsFlowData = settings.showFlowPressure || settings.cvdConfirmation;
       const flowInput = wantsFlowData && capture.streamHealthy && capture.venue === marketSymbol.exchange && capture.symbol === marketSymbol.rawSymbol && chartSourceVenueRef.current === marketSymbol.exchange
         ? buildDDAProFlowInput({
             candles: source,
@@ -3300,9 +3300,7 @@ export function PixiBlackChart({
           indicator: "BC-RDA", event: signal.direction.toUpperCase(), direction: signal.direction,
           level: signal.value, signalId: signal.id, sourceEventType: signal.sourceEventType,
           markerTone: signal.markerTone, eventTimestamp: signal.time,
-          signalClass: signal.classification === "confirmed"
-            ? "CONFIRMED"
-            : ddaProSettings.signalIntelligenceMode === "RAW" || !ddaProSettings.confirmedAlertsOnly ? "RAW" : "CONFIRMED",
+          signalClass: ddaProSettings.signalIntelligenceMode === "RAW" || !ddaProSettings.confirmedAlertsOnly ? "RAW" : "CONFIRMED",
           intelligenceMode: ddaProSettings.signalIntelligenceMode,
           regime: signal.regime,
           signalConfidence: signal.confidence
@@ -5673,42 +5671,6 @@ export function PixiBlackChart({
                   ? "Reproduces the supplied Pine formula, including its original percentile direction and 252-period assumptions. Exact TradingView parity remains uncertified until golden exports are supplied."
                   : "Corrected positive-depth drawdown, selectable peak reference, duration, tail risk, recovery, VADD and confidence analytics."}
               </div>
-              <div className="indicator-settings-section">Mirrored Causal Top Engine</div>
-              <label>
-                Top Engine Mode
-                <select value={ddaProSettings.topEngineMode} onChange={(event) => updateDDAProSetting("topEngineMode", event.target.value as DDAProSettings["topEngineMode"])}>
-                  <option value="mirrored-causal">Mirrored Causal</option>
-                  <option value="disabled">Disabled</option>
-                </select>
-              </label>
-              <label>Enable Mirrored Upside Engine<input type="checkbox" checked={ddaProSettings.enableMirroredTopEngine} onChange={(event) => updateDDAProSetting("enableMirroredTopEngine", event.target.checked)} /></label>
-              <label>
-                Top Anchor Method
-                <select value={ddaProSettings.topAnchorMethod} onChange={(event) => updateDDAProSetting("topAnchorMethod", event.target.value as DDAProSettings["topAnchorMethod"])}>
-                  <option value="causal-episode-trough">Causal Episode Trough</option>
-                </select>
-              </label>
-              <label>Top Minimum Entry %<input type="number" min={0.05} max={25} step={0.05} value={ddaProSettings.topEpisodeMinimumThresholdPercent} onChange={(event) => updateDDAProSetting("topEpisodeMinimumThresholdPercent", Number(event.target.value))} /></label>
-              <label>Top Maximum Entry %<input type="number" min={0.1} max={50} step={0.1} value={ddaProSettings.topEpisodeMaximumThresholdPercent} onChange={(event) => updateDDAProSetting("topEpisodeMaximumThresholdPercent", Number(event.target.value))} /></label>
-              <label>Top ATR Lookback<input type="number" min={2} max={500} step={1} value={ddaProSettings.topAtrLookback} onChange={(event) => updateDDAProSetting("topAtrLookback", Number(event.target.value))} /></label>
-              <label>Top ATR Multiplier<input type="number" min={0.1} max={10} step={0.1} value={ddaProSettings.topAtrMultiplier} onChange={(event) => updateDDAProSetting("topAtrMultiplier", Number(event.target.value))} /></label>
-              <label>Top Return Quantile Lookback<input type="number" min={20} max={2000} step={1} value={ddaProSettings.topReturnQuantileLookback} onChange={(event) => updateDDAProSetting("topReturnQuantileLookback", Number(event.target.value))} /></label>
-              <label>Top Return Quantile<input type="number" min={0.5} max={0.999} step={0.01} value={ddaProSettings.topReturnQuantile} onChange={(event) => updateDDAProSetting("topReturnQuantile", Number(event.target.value))} /></label>
-              <label>Top Quantile Multiplier<input type="number" min={0.1} max={10} step={0.1} value={ddaProSettings.topQuantileMultiplier} onChange={(event) => updateDDAProSetting("topQuantileMultiplier", Number(event.target.value))} /></label>
-              <label>Top Extremity Percentile<input type="number" min={0.75} max={0.999} step={0.01} value={ddaProSettings.topExtremityPercentile} onChange={(event) => updateDDAProSetting("topExtremityPercentile", Number(event.target.value))} /></label>
-              <label>Top Barrier Dispersion<input type="number" min={0} max={5} step={0.05} value={ddaProSettings.topBarrierDispersionMultiplier} onChange={(event) => updateDDAProSetting("topBarrierDispersionMultiplier", Number(event.target.value))} /></label>
-              <label>Top Minimum Maturity Bars<input type="number" min={3} max={500} step={1} value={ddaProSettings.topMinimumMaturityBars} onChange={(event) => updateDDAProSetting("topMinimumMaturityBars", Number(event.target.value))} /></label>
-              <label>Top Reversal ATR Multiplier<input type="number" min={0.1} max={10} step={0.1} value={ddaProSettings.topReversalAtrMultiplier} onChange={(event) => updateDDAProSetting("topReversalAtrMultiplier", Number(event.target.value))} /></label>
-              <label>Top Minimum Reversal %<input type="number" min={0.05} max={25} step={0.05} value={ddaProSettings.topMinimumReversalPercent} onChange={(event) => updateDDAProSetting("topMinimumReversalPercent", Number(event.target.value))} /></label>
-              <label>Top Change-Point Sensitivity<input type="number" min={0} max={100} step={1} value={ddaProSettings.topChangePointSensitivity} onChange={(event) => updateDDAProSetting("topChangePointSensitivity", Number(event.target.value))} /></label>
-              <label>Top Structure Confirmation<input type="checkbox" checked={ddaProSettings.topStructureConfirmation} onChange={(event) => updateDDAProSetting("topStructureConfirmation", event.target.checked)} /></label>
-              <label>Strong-Bull Protection<input type="checkbox" checked={ddaProSettings.strongBullProtection} onChange={(event) => updateDDAProSetting("strongBullProtection", event.target.checked)} /></label>
-              <label>One Short per Top Episode<input type="checkbox" checked={ddaProSettings.oneShortPerTopEpisode} onChange={(event) => updateDDAProSetting("oneShortPerTopEpisode", event.target.checked)} /></label>
-              <label>Top Cooldown Bars<input type="number" min={1} max={1000} step={1} value={ddaProSettings.topCooldownBars} onChange={(event) => updateDDAProSetting("topCooldownBars", Number(event.target.value))} /></label>
-              <label>Require Exact Bearish Flow<input type="checkbox" checked={ddaProSettings.topRequireExactBearishFlow} onChange={(event) => updateDDAProSetting("topRequireExactBearishFlow", event.target.checked)} /></label>
-              <label>Show Top Candidates<input type="checkbox" checked={ddaProSettings.showTopCandidates} onChange={(event) => updateDDAProSetting("showTopCandidates", event.target.checked)} /></label>
-              <label>Show Dynamic Top Barrier<input type="checkbox" checked={ddaProSettings.showDynamicTopBarrier} onChange={(event) => updateDDAProSetting("showDynamicTopBarrier", event.target.checked)} /></label>
-              <label>Show Top Diagnostics<input type="checkbox" checked={ddaProSettings.showTopDiagnostics} onChange={(event) => updateDDAProSetting("showTopDiagnostics", event.target.checked)} /></label>
               <div className="indicator-settings-section">Advanced Signal Intelligence</div>
               <label>
                 Signal Intelligence Mode
@@ -5720,7 +5682,7 @@ export function PixiBlackChart({
                 </select>
               </label>
               <div className="vwap-mode-note">
-                RAW preserves the protected drawdown-bottom sequence. Recovery remains a neutral risk event; shorts come only from the causal mirrored-top confirmation. Filtered modes arbitrate bottom candidates without weakening top confirmation.
+                RAW preserves the original BC-RDA dots exactly. Filtered modes use only causal closed-bar distribution coherence, centroid migration, tail asymmetry, expansion, entropy and episode-reset evidence.
               </div>
               <label>Show Raw Signals<input type="checkbox" checked={ddaProSettings.showRawSignals} onChange={(event) => updateDDAProSetting("showRawSignals", event.target.checked)} /></label>
               <label>Show Confirmed Signals<input type="checkbox" checked={ddaProSettings.showConfirmedSignals} onChange={(event) => updateDDAProSetting("showConfirmedSignals", event.target.checked)} /></label>

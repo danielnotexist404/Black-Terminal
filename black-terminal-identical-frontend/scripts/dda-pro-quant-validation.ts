@@ -56,10 +56,7 @@ for (const fixture of fixtures) {
   const common = { ...DEFAULT_DDA_PRO_SETTINGS, lookback: 100 };
   const raw = calculateDDAProNative({ candles: source, settings: applyDDAProSignalIntelligenceMode(common, "RAW"), timeframeSeconds: fixture.timeframeSeconds, signalContext: { exchange: "FIXTURE", symbol: fixture.name, timeframe: `${fixture.timeframeSeconds}s` } });
   const balanced = calculateDDAProNative({ candles: source, settings: applyDDAProSignalIntelligenceMode(common, "BALANCED"), timeframeSeconds: fixture.timeframeSeconds, signalContext: { exchange: "FIXTURE", symbol: fixture.name, timeframe: `${fixture.timeframeSeconds}s` } });
-  const confirmedBottomSignals = balanced.signals.filter((signal) => signal.direction === "long");
-  const confirmedTopSignals = balanced.signals.filter((signal) => signal.direction === "short");
-  assert.ok(confirmedBottomSignals.length <= balanced.signalIntelligence.rawCandidateSignals.length, `${fixture.name}: confirmed bottom count exceeds causal bottom candidates`);
-  assert.ok(confirmedTopSignals.length <= balanced.topEpisodes.length, `${fixture.name}: confirmed top count exceeds causal top episodes`);
+  assert.ok(balanced.signals.length <= balanced.signalIntelligence.rawCandidateSignals.length, `${fixture.name}: confirmed count exceeds causal candidates`);
   assert.ok(balanced.signalIntelligence.episodes.length <= 512, `${fixture.name}: episode bound exceeded`);
   for (const signal of balanced.signals) {
     assert.equal(signal.classification, "confirmed");
@@ -83,8 +80,6 @@ for (const fixture of fixtures) {
     rawSignalCount: raw.rawSignals.length,
     causalCandidateCount: balanced.signalIntelligence.rawCandidateSignals.length,
     confirmedSignalCount: balanced.signals.length,
-    confirmedBottomSignalCount: confirmedBottomSignals.length,
-    confirmedTopSignalCount: confirmedTopSignals.length,
     clusteredEpisodeCount: balanced.signalIntelligence.episodes.length,
     duplicateSuppressionCount: balanced.signalIntelligence.suppressedRawSignalCount,
     regimeDistribution: Object.fromEntries([...new Set(balanced.signalIntelligence.regime)].map((regime) => [regime, balanced.signalIntelligence.regime.filter((value) => value === regime).length])),
@@ -94,8 +89,8 @@ for (const fixture of fixtures) {
 }
 
 const chopRows = report.filter((row) => ["tight-consolidation", "volatile-two-sided-chop", "alternating-crossings"].includes(row.fixture));
-assert.ok(chopRows.every((row) => row.confirmedBottomSignalCount <= row.causalCandidateCount * 0.2), "chop fixtures did not materially suppress repetitive bottom candidates");
-assert.equal(report.find((row) => row.fixture === "clean-directional-expansion")?.confirmedBottomSignalCount, 1, "organized downside expansion did not retain one clustered confirmation");
+assert.ok(chopRows.every((row) => row.confirmedSignalCount <= row.causalCandidateCount * 0.2), "chop fixtures did not materially suppress repetitive candidates");
+assert.equal(report.find((row) => row.fixture === "clean-directional-expansion")?.confirmedSignalCount, 1, "organized expansion did not retain one clustered confirmation");
 assert.equal(report.find((row) => row.fixture === "alternating-crossings")?.confirmedSignalCount, 0, "alternating recross noise was not suppressed");
 const elapsedMs = performance.now() - started;
 console.log(JSON.stringify({ methodology: "DETERMINISTIC_FIXTURES_NOT_A_PROFITABILITY_BACKTEST", fixtures: report, elapsedMs }, null, 2));

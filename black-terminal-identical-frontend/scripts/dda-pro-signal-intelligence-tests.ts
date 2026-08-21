@@ -40,7 +40,7 @@ function rawSignal(index: number, direction: DDAProSignalDirection, source: read
     index,
     time: source[index]!.time,
     value: Math.abs(index),
-    sourceEventType: direction === "long" ? "DDA_DRAWDOWN_DEEPENED" : "BC_RDA_TOP_CONFIRMED",
+    sourceEventType: direction === "long" ? "DDA_DRAWDOWN_DEEPENED" : "DDA_DRAWDOWN_RECOVERED",
     markerTone: direction === "long" ? "silver-white" : "blood-red"
   };
 }
@@ -104,17 +104,12 @@ function calculationInput(source: Candle[], settings = filteredSettings): DDAPro
   ];
   const source = candles(values);
   const raw = calculateDDAProNative({ candles: source, settings: applyDDAProSignalIntelligenceMode(DEFAULT_DDA_PRO_SETTINGS, "RAW"), timeframeSeconds: 300 });
-  assert.deepEqual(
-    raw.rawSignals.filter((signal) => signal.direction === "long"),
-    deriveDDAProSignals(raw.events),
-    "protected RAW bottom sequence changed"
-  );
-  assert.ok(!raw.rawSignals.map((signal) => String(signal.sourceEventType)).includes("DDA_DRAWDOWN_RECOVERED"), "drawdown recovery remained directional");
+  assert.deepEqual(raw.rawSignals, deriveDDAProSignals(raw.events), "RAW signal sequence changed");
   assert.deepEqual(raw.signals, raw.rawSignals, "RAW intelligence must be a byte-for-byte pass-through");
   assert.deepEqual(raw.rawSignals.map(({ id, direction, index, time, sourceEventType, markerTone }) => ({ id, direction, index, time, sourceEventType, markerTone })), [
-    { id: "bc-rda-top-signal-v1:market:unknown:300s:1700000000:bc_rda_mirrored_top_v1:1700031200", direction: "short", index: 104, time: 1_700_031_200, sourceEventType: "BC_RDA_TOP_CONFIRMED", markerTone: "blood-red" },
     { id: "bc-rda-long-1700040200", direction: "long", index: 134, time: 1_700_040_200, sourceEventType: "DDA_DRAWDOWN_DEEPENED", markerTone: "silver-white" },
-  ], "corrected RAW golden fixture changed");
+    { id: "bc-rda-short-1700049800", direction: "short", index: 166, time: 1_700_049_800, sourceEventType: "DDA_DRAWDOWN_RECOVERED", markerTone: "blood-red" }
+  ], "RAW golden fixture changed");
 }
 
 {

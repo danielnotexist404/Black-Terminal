@@ -125,6 +125,16 @@ services:
       EVENT_ALPHA_LIVE_EXECUTION_ENABLED: "false"
     profiles: ["analytics"]
 
+  strategy-automation-worker:
+    <<: *runtime
+    command: ["node", "--experimental-strip-types", "scripts/strategy-automation-worker.ts"]
+    environment:
+      SUPABASE_URL: http://supabase-kong:8000
+      STRATEGY_AUTOMATION_PAPER_ENABLED: "true"
+      STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "false"
+      STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "false"
+    profiles: ["strategy-automation"]
+
   market-depth-worker:
     <<: *runtime
     command: ["node", "scripts/market-depth-supervisor.js"]

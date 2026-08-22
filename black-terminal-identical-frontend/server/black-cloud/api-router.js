@@ -11,12 +11,14 @@ import investmentGroupActionHandler from "../../api/network/investment-groups/[g
 import portfolioSnapshotHandler from "../../api/portfolio/snapshot.js";
 import hyperliquidHandler from "../../api/protocols/hyperliquid/[action].js";
 import securityHandler from "../../api/security/[action].js";
+import strategiesHandler from "../../api/strategies/[...path].js";
 
 const EXACT_ROUTES = new Map([
   ["/api/claude", claudeHandler],
   ["/api/email/send", emailHandler],
   ["/api/imm/status", immStatusHandler],
-  ["/api/portfolio/snapshot", portfolioSnapshotHandler]
+  ["/api/portfolio/snapshot", portfolioSnapshotHandler],
+  ["/api/strategies", strategiesHandler]
 ]);
 
 const DYNAMIC_ROUTES = [
@@ -28,7 +30,8 @@ const DYNAMIC_ROUTES = [
   route(/^\/api\/market-depth\/([^/]+)\/?$/, marketDepthHandler, ["action"]),
   route(/^\/api\/network\/([^/]+)\/?$/, networkHandler, ["resource"]),
   route(/^\/api\/protocols\/hyperliquid\/([^/]+)\/?$/, hyperliquidHandler, ["action"]),
-  route(/^\/api\/security\/([^/]+)\/?$/, securityHandler, ["action"])
+  route(/^\/api\/security\/([^/]+)\/?$/, securityHandler, ["action"]),
+  route(/^\/api\/strategies\/(.+)\/?$/, strategiesHandler, ["path"], true)
 ];
 
 export function resolveApiRoute(pathname) {
@@ -70,6 +73,7 @@ export function apiRouteManifest() {
       "/api/network/:resource",
       "/api/protocols/hyperliquid/:action",
       "/api/security/:action",
+      "/api/strategies/:path*",
       "/api/liquidation-intelligence/:action (compatibility rewrite)"
     ]
   });

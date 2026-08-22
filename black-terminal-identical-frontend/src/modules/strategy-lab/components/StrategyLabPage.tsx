@@ -10,6 +10,8 @@ import { runOptimization } from "../engine/optimizer";
 import { buildStrategyReviewInput } from "../engine/tradeAnalyzer";
 import { runWalkForward } from "../engine/walkForward";
 import { createDefaultBacktestConfig } from "../state/strategyLabStore";
+import { StrategyAutomationPanel } from "../automation/StrategyAutomationPanel";
+import type { StrategyAutomationDefinition } from "../automation/strategyAutomation.types";
 import type { AIStrategyReview, CodeSuggestion } from "../types/ai.types";
 import type { BacktestConfig, BacktestResult, BacktestRunState, TradeResult } from "../types/backtest.types";
 import type { OptimizationResult, OptimizationSpace, WalkForwardWindow } from "../types/optimization.types";
@@ -128,7 +130,7 @@ export function StrategyLabPage({
   onClose,
   onTradeSelect
 }: StrategyLabPageProps) {
-  const [activeTab, setActiveTab] = useState<StrategyLabTab>("overview");
+  const [activeTab, setActiveTab] = useState<StrategyLabTab>("myStrategy");
   const [config, setConfig] = useState<BacktestConfig>(() => createConfig(marketSymbol, displaySymbol, exchangeLabel, timeframe, selectedStrategyKind, adaptiveSwingSettings));
   const [candles, setCandles] = useState<Candle[]>([]);
   const [result, setResult] = useState<BacktestResult | undefined>();
@@ -216,8 +218,39 @@ export function StrategyLabPage({
   };
 
   const wfSummary = useMemo(() => summarizeWalkForward(walkForward), [walkForward]);
+  const automationDefinition = useMemo<StrategyAutomationDefinition>(
+    () => ({
+      runtimeKind: config.strategyKind,
+      symbol: config.symbol,
+      timeframe: config.timeframe,
+      marketType: config.marketKind === "spot" ? "SPOT" : "FUTURES",
+      exchange: config.exchange,
+      settings: config.strategySettings,
+      execution: {
+        feeRate: config.feeRate,
+        slippageTicks: config.slippageTicks,
+        tickSize: config.tickSize,
+        spreadBps: config.spreadBps,
+        useBidAskExecution: config.useBidAskExecution,
+        maxTradesPerDay: config.maxTradesPerDay,
+        maxDailyLoss: config.maxDailyLoss,
+        maxDrawdown: config.maxDrawdown,
+        maxOpenPositions: config.maxOpenPositions,
+        maxLeverage: config.maxLeverage,
+        cooldownAfterLosses: config.cooldownAfterLosses,
+        disableOnHighSpreadBps: config.disableOnHighSpreadBps,
+        disableOnLowLiquidity: config.disableOnLowLiquidity,
+        disableOnAbnormalVolatility: config.disableOnAbnormalVolatility,
+        fundingRatePerDay: config.fundingRatePerDay
+      }
+    }),
+    [config]
+  );
 
   const renderActiveTab = () => {
+    if (activeTab === "myStrategy") {
+      return <StrategyAutomationPanel definition={automationDefinition} />;
+    }
     if (activeTab === "backtest") {
       return <BacktestPanel config={config} runState={runState} error={error} onConfigChange={setConfig} onRun={() => run()} />;
     }

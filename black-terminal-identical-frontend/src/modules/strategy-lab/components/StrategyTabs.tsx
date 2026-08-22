@@ -1,7 +1,8 @@
 import type { LucideIcon } from "lucide-react";
-import { Activity, Bot, ChartSpline, Code2, FlaskConical, Gauge, Grid3X3, List, Play, TrendingDown } from "lucide-react";
+import { Activity, Bot, ChartSpline, CloudCog, Code2, FlaskConical, Gauge, Grid3X3, List, Play, TrendingDown } from "lucide-react";
 
 export type StrategyLabTab =
+  | "myStrategy"
   | "overview"
   | "backtest"
   | "trades"
@@ -14,6 +15,7 @@ export type StrategyLabTab =
   | "forwardTest";
 
 export const strategyLabTabs: { id: StrategyLabTab; label: string; icon: LucideIcon }[] = [
+  { id: "myStrategy", label: "My Strategy", icon: CloudCog },
   { id: "overview", label: "Overview", icon: Gauge },
   { id: "backtest", label: "Backtest", icon: FlaskConical },
   { id: "trades", label: "Trades", icon: List },

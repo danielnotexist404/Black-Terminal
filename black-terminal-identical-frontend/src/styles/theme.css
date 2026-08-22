@@ -8513,13 +8513,17 @@ body.resizing-layout * {
 }
 
 .positions-freshness-bar b { color: #45d483; }
+.positions-freshness-bar > b,
+.positions-freshness-meta {
+  flex: 0 0 auto;
+}
 .positions-freshness-bar.degraded b { color: #f1b643; }
 .positions-freshness-bar.stale b,
 .positions-freshness-bar.reconnecting b,
 .positions-freshness-bar.disconnected b { color: #ff4a5f; }
 .positions-freshness-message {
-  min-width: 360px;
-  max-width: 680px;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   color: #aeb4bd;
   text-overflow: ellipsis;

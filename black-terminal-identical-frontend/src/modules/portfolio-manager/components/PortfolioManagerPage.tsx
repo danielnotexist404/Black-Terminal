@@ -287,15 +287,29 @@ export function PortfolioPositionsPanel({
   const brokerUpdateTime = freshness?.brokerSyncedAt ?? freshness?.fetchedAt ?? null;
   const freshnessAgeMs = brokerUpdateTime === null ? null : Math.max(0, Date.now() - brokerUpdateTime);
   const freshnessLabel = freshness?.status.toUpperCase() ?? "UNAVAILABLE";
+  const hasVerifiedLiveSnapshot = freshness?.status === "live";
+  const openPositionLabel = `${managedPositions.length} OPEN POSITION${managedPositions.length === 1 ? "" : "S"}`;
+  const brokerUpdateLabel = brokerUpdateTime === null
+    ? "UPDATED —"
+    : `UPDATED ${new Date(brokerUpdateTime).toLocaleTimeString()}`;
 
   return (
     <div className="portfolio-positions-panel">
       <div className={`positions-freshness-bar ${freshness?.status ?? "unavailable"}`} title={freshness?.message}>
         <b>{freshnessLabel}</b>
-        {freshness?.message && <span className="positions-freshness-message">{freshness.message}</span>}
-        <span>{freshnessAgeMs === null ? "NO VERIFIED UPDATE" : `BROKER AGE ${Math.round(freshnessAgeMs / 1000)}s`}</span>
-        <span>{brokerUpdateTime === null ? "LAST UPDATE —" : `LAST UPDATE ${new Date(brokerUpdateTime).toLocaleTimeString()}`}</span>
-        {Boolean(freshness?.quarantinedPositionCount) && <span>{freshness?.quarantinedPositionCount} STALE ROW{freshness?.quarantinedPositionCount === 1 ? "" : "S"} QUARANTINED</span>}
+        {hasVerifiedLiveSnapshot ? (
+          <>
+            <span className="positions-freshness-meta">{openPositionLabel}</span>
+            <span className="positions-freshness-meta">{brokerUpdateLabel}</span>
+          </>
+        ) : (
+          <>
+            {freshness?.message && <span className="positions-freshness-message">{freshness.message}</span>}
+            <span className="positions-freshness-meta">{freshnessAgeMs === null ? "NO VERIFIED UPDATE" : `BROKER AGE ${Math.round(freshnessAgeMs / 1000)}s`}</span>
+            <span className="positions-freshness-meta">{brokerUpdateTime === null ? "LAST UPDATE —" : `LAST UPDATE ${new Date(brokerUpdateTime).toLocaleTimeString()}`}</span>
+            {Boolean(freshness?.quarantinedPositionCount) && <span className="positions-freshness-meta">{freshness?.quarantinedPositionCount} STALE ROW{freshness?.quarantinedPositionCount === 1 ? "" : "S"} QUARANTINED</span>}
+          </>
+        )}
       </div>
       <div className="pm-table-head pm-positions-grid">
         <span>Symbol</span>

@@ -287,6 +287,7 @@ export function PortfolioPositionsPanel({
   const brokerUpdateTime = freshness?.brokerSyncedAt ?? freshness?.fetchedAt ?? null;
   const freshnessAgeMs = brokerUpdateTime === null ? null : Math.max(0, Date.now() - brokerUpdateTime);
   const freshnessLabel = freshness?.status.toUpperCase() ?? "UNAVAILABLE";
+  const freshnessStatusClass = `positions-freshness--${freshness?.status ?? "unavailable"}`;
   const hasVerifiedLiveSnapshot = freshness?.status === "live";
   const openPositionLabel = `${managedPositions.length} OPEN POSITION${managedPositions.length === 1 ? "" : "S"}`;
   const brokerUpdateLabel = brokerUpdateTime === null
@@ -295,7 +296,7 @@ export function PortfolioPositionsPanel({
 
   return (
     <div className="portfolio-positions-panel">
-      <div className={`positions-freshness-bar ${freshness?.status ?? "unavailable"}`} title={freshness?.message}>
+      <div className={`positions-freshness-bar ${freshnessStatusClass}`} title={freshness?.message}>
         <b>{freshnessLabel}</b>
         {hasVerifiedLiveSnapshot ? (
           <>

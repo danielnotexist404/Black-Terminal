@@ -109,6 +109,7 @@ assert.equal(classifyBrokerSyncError(new Error("request timeout")).code, "BROKER
 const portfolioStoreSource = readFileSync(new URL("../src/portfolio/portfolioStore.ts", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const positionPageSource = readFileSync(new URL("../src/modules/portfolio-manager/components/PortfolioManagerPage.tsx", import.meta.url), "utf8");
+const themeSource = readFileSync(new URL("../src/styles/theme.css", import.meta.url), "utf8");
 const accountServiceSource = readFileSync(new URL("../server/exchanges/exchange-account-service.js", import.meta.url), "utf8");
 const reconciliationSource = readFileSync(new URL("../server/exchanges/bybit-reconciliation.js", import.meta.url), "utf8");
 const schemaSource = readFileSync(new URL("../server/security/trading-schemas.js", import.meta.url), "utf8");
@@ -134,6 +135,9 @@ assert.match(connectionManagerSource, /connectInFlight/);
 assert.match(connectionManagerSource, /reconnectInFlight/);
 assert.match(connectionManagerSource, /if \(active\) return active/);
 assert.match(connectionManagerSource, /if \(!authenticationFailure\) void this\.reconnect/, "credential failures must not enter a reconnect loop");
+assert.match(themeSource, /\.live span/, "global terminal live-status styling must remain covered by the collision regression");
+assert.match(positionPageSource, /positions-freshness--\$\{freshness\?\.status/, "portfolio freshness states must use a namespaced CSS class");
+assert.doesNotMatch(positionPageSource, /positions-freshness-bar \$\{freshness\?\.status/, "portfolio freshness must never emit the global raw live class");
 
 const connectStart = positionPageSource.indexOf("async function handleConnectCex");
 const connectEnd = positionPageSource.indexOf("async function handleBrokerAuthorization");

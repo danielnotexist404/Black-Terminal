@@ -311,5 +311,10 @@ export function createStrategySignals(
   if (strategyKind === "builtin-adaptive-swing") {
     return createAdaptiveSwingSignals(candles, symbol, settings);
   }
-  return createEmaCrossSignals(candles, symbol, settings);
+  if (strategyKind === "builtin-ema-cross") {
+    return createEmaCrossSignals(candles, symbol, settings);
+  }
+  throw new Error(
+    `${strategyKind} does not have a certified Strategy Lab signal adapter.`,
+  );
 }

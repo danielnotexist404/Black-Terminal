@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bot, Database, FlaskConical, X } from "lucide-react";
 import type { AdaptiveSwingStrategySettings, Candle } from "../../../chart-engine/types";
 import type { MarketSymbol, Timeframe } from "../../../market-data/types";
@@ -11,6 +11,10 @@ import { buildStrategyReviewInput } from "../engine/tradeAnalyzer";
 import { runWalkForward } from "../engine/walkForward";
 import { createDefaultBacktestConfig } from "../state/strategyLabStore";
 import { StrategyAutomationPanel } from "../automation/StrategyAutomationPanel";
+import {
+  applyAutomationDefinitionToConfig,
+  marketSymbolFromBacktestConfig,
+} from "../automation/strategyDefinitionModel";
 import type { StrategyAutomationDefinition } from "../automation/strategyAutomation.types";
 import type { AIStrategyReview, CodeSuggestion } from "../types/ai.types";
 import type { BacktestConfig, BacktestResult, BacktestRunState, TradeResult } from "../types/backtest.types";
@@ -169,7 +173,8 @@ export function StrategyLabPage({
     setError(undefined);
     setRunState("loading-data");
     try {
-      const history = await fetchStrategyLabCandles(marketSymbol, config.timeframe, config.startDate, config.endDate, 1800);
+      const configuredMarket = marketSymbolFromBacktestConfig(config);
+      const history = await fetchStrategyLabCandles(configuredMarket, config.timeframe, config.startDate, config.endDate, 1800);
       setCandles(history);
       setRunState("running");
       const signals = createStrategySignals(config.strategyKind, history, config.symbol, config.strategySettings);
@@ -224,7 +229,7 @@ export function StrategyLabPage({
       symbol: config.symbol,
       timeframe: config.timeframe,
       marketType: config.marketKind === "spot" ? "SPOT" : "FUTURES",
-      exchange: config.exchange,
+      exchange: "bybit",
       settings: config.strategySettings,
       execution: {
         feeRate: config.feeRate,
@@ -246,10 +251,31 @@ export function StrategyLabPage({
     }),
     [config]
   );
+  const updateAutomationDefinition = useCallback(
+    (definition: StrategyAutomationDefinition) => {
+      setConfig((current) =>
+        applyAutomationDefinitionToConfig(current, definition),
+      );
+      setCandles([]);
+      setResult(undefined);
+      setOptimizationResults([]);
+      setWalkForward([]);
+      setReview(undefined);
+      setCodeSuggestions([]);
+      setError(undefined);
+      setRunState("idle");
+    },
+    [],
+  );
 
   const renderActiveTab = () => {
     if (activeTab === "myStrategy") {
-      return <StrategyAutomationPanel definition={automationDefinition} />;
+      return (
+        <StrategyAutomationPanel
+          definition={automationDefinition}
+          onDefinitionChange={updateAutomationDefinition}
+        />
+      );
     }
     if (activeTab === "backtest") {
       return <BacktestPanel config={config} runState={runState} error={error} onConfigChange={setConfig} onRun={() => run()} />;
@@ -282,16 +308,16 @@ export function StrategyLabPage({
       return <CodeSuggestionsPanel suggestions={codeSuggestions} onChange={setCodeSuggestions} />;
     }
     if (activeTab === "forwardTest") {
-      return <ForwardTestPanel result={result} symbol={displaySymbol} />;
+      return <ForwardTestPanel result={result} symbol={config.symbol} />;
     }
     return (
       <div className="strategy-dashboard-grid">
         <OverviewPanel result={result} status={status} />
         <div className="strategy-panel strategy-side-summary">
-          <div className="strategy-panel-head"><span>RESEARCH STATE</span><b>{exchangeLabel.toUpperCase()}</b></div>
+          <div className="strategy-panel-head"><span>RESEARCH STATE</span><b>{config.exchangeLabel.toUpperCase()}</b></div>
           <div className="strategy-kv-grid">
-            <div><span>Symbol</span><strong>{displaySymbol}</strong></div>
-            <div><span>Timeframe</span><strong>{timeframe}</strong></div>
+            <div><span>Symbol</span><strong>{config.symbol}</strong></div>
+            <div><span>Timeframe</span><strong>{config.timeframe}</strong></div>
             <div><span>Candles</span><strong>{candles.length.toLocaleString()}</strong></div>
             <div><span>Trades</span><strong>{result?.metrics.totalTrades ?? 0}</strong></div>
             <div><span>Net</span><strong>{result ? formatCurrency(result.metrics.netProfit) : "-"}</strong></div>
@@ -324,7 +350,7 @@ export function StrategyLabPage({
       <div className="strategy-lab-head">
         <div>
           <strong>STRATEGY LAB</strong>
-          <span>{displaySymbol} / {exchangeLabel.toUpperCase()} / {timeframe}</span>
+          <span>{config.symbol} / {config.exchangeLabel.toUpperCase()} / {config.timeframe}</span>
         </div>
         <button type="button" aria-label="Close Strategy Lab" onClick={onClose}><X size={18} /></button>
       </div>

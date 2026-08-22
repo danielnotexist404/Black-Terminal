@@ -71,7 +71,7 @@
     "test:dda-pro-all": "npm run test:dda-pro && npm run test:dda-pro-invariants && npm run test:dda-pro-worker && npm run test:dda-pro-python-parity && npm run test:dda-pro-signal-intelligence && npm run test:dda-pro-flow-pressure",
     "event-alpha:worker": "node scripts/event-alpha-worker.js",
     "strategy-automation:worker": "node --experimental-strip-types scripts/strategy-automation-worker.ts",
-    "test:strategy-automation": "node scripts/strategy-automation-tests.js && node scripts/strategy-automation-postgres-tests.js",
+    "test:strategy-automation": "node --experimental-strip-types scripts/strategy-definition-builder-tests.ts && node scripts/strategy-automation-tests.js && node scripts/strategy-automation-postgres-tests.js",
     "benchmark:strategy-automation": "node scripts/strategy-automation-performance.js",
     "black-cloud:api": "node server/black-cloud/api-server.js",
     "test:black-cloud-api-router": "node scripts/black-cloud-api-router-tests.js",

@@ -22,6 +22,11 @@ import {
   X,
 } from "lucide-react";
 import { strategyAutomationApi } from "./strategyAutomationApi";
+import { StrategyDefinitionBuilder } from "./StrategyDefinitionBuilder";
+import {
+  definitionFingerprint,
+  validateAutomationDefinition,
+} from "./strategyDefinitionModel";
 import type {
   EligibleBrokerTarget,
   EligibleGroupTarget,
@@ -34,7 +39,10 @@ import type {
   StrategyWorkspace,
 } from "./strategyAutomation.types";
 
-type Props = { definition: StrategyAutomationDefinition };
+type Props = {
+  definition: StrategyAutomationDefinition;
+  onDefinitionChange: (definition: StrategyAutomationDefinition) => void;
+};
 type TargetResource =
   | "overview"
   | "members"
@@ -74,7 +82,10 @@ const groupTargetTabs: Array<{ id: TargetResource; label: string }> = [
   { id: "logs", label: "Logs" },
 ];
 
-export function StrategyAutomationPanel({ definition }: Props) {
+export function StrategyAutomationPanel({
+  definition,
+  onDefinitionChange,
+}: Props) {
   const [strategies, setStrategies] = useState<StrategySummary[]>([]);
   const [workspace, setWorkspace] = useState<StrategyWorkspace | null>(null);
   const [strategyName, setStrategyName] = useState("");
@@ -113,6 +124,7 @@ export function StrategyAutomationPanel({ definition }: Props) {
       if (current !== generation.current || signal?.aborted) return;
       setWorkspace(next);
       setStrategyName(next.strategy.name);
+      onDefinitionChange(next.strategy.definition);
       setSelectedBindingId((value) =>
         value && next.bindings.some((item) => item.id === value)
           ? value
@@ -122,7 +134,7 @@ export function StrategyAutomationPanel({ definition }: Props) {
         "Strategy definition, Paper Target and occupied live slots restored from Black Cloud.",
       );
     },
-    [],
+    [onDefinitionChange],
   );
 
   useEffect(() => {
@@ -238,6 +250,23 @@ export function StrategyAutomationPanel({ definition }: Props) {
   const saveStrategy = async () => {
     if (!strategyName.trim()) {
       setMessage("Name the strategy before saving it.");
+      return;
+    }
+    const issue = validateAutomationDefinition(definition);
+    if (issue) {
+      setMessage(issue);
+      return;
+    }
+    if (
+      workspace?.bindings.some(
+        (binding) => binding.status !== "DISCONNECTED",
+      ) &&
+      definitionFingerprint(definition) !==
+        definitionFingerprint(workspace.strategy.definition)
+    ) {
+      setMessage(
+        "Disconnect every live target before saving a new strategy definition version.",
+      );
       return;
     }
     setBusy(true);
@@ -489,6 +518,14 @@ export function StrategyAutomationPanel({ definition }: Props) {
   const selectedSnapshot = selectedBinding
     ? snapshotByBinding.get(selectedBinding.id)
     : undefined;
+  const definitionDirty = workspace
+    ? definitionFingerprint(definition) !==
+      definitionFingerprint(workspace.strategy.definition)
+    : true;
+  const definitionIssue = validateAutomationDefinition(definition);
+  const definitionLocked = Boolean(
+    workspace?.bindings.some((binding) => binding.status !== "DISCONNECTED"),
+  );
 
   if (loading)
     return (
@@ -552,7 +589,12 @@ export function StrategyAutomationPanel({ definition }: Props) {
           />
           <button
             type="button"
-            disabled={busy || !strategyName.trim()}
+            disabled={
+              busy ||
+              !strategyName.trim() ||
+              Boolean(definitionIssue) ||
+              (definitionLocked && definitionDirty)
+            }
             onClick={() => void saveStrategy()}
           >
             <Save size={14} /> {workspace ? "SAVE STRATEGY" : "CREATE STRATEGY"}
@@ -578,6 +620,13 @@ export function StrategyAutomationPanel({ definition }: Props) {
           </b>
         )}
       </div>
+
+      <StrategyDefinitionBuilder
+        definition={definition}
+        locked={definitionLocked}
+        dirty={definitionDirty}
+        onChange={onDefinitionChange}
+      />
 
       {!workspace ? (
         <NewStrategyState definition={definition} />

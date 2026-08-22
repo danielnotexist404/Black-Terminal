@@ -17,9 +17,7 @@ function updateNumber(value: string, fallback: number) {
 
 const strategyOptions: { value: StrategyRuntimeKind; label: string }[] = [
   { value: "builtin-adaptive-swing", label: "Adaptive Swing Reversal" },
-  { value: "builtin-ema-cross", label: "EMA Cross Baseline" },
-  { value: "python-script", label: "Python Script (adapter pending)" },
-  { value: "external-signals", label: "External Signals (adapter pending)" }
+  { value: "builtin-ema-cross", label: "EMA Cross Baseline" }
 ];
 
 export function BacktestPanel({ config, runState, error, onConfigChange, onRun }: BacktestPanelProps) {

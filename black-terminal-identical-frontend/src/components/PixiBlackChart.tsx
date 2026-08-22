@@ -51,6 +51,7 @@ import type { CompiledPlot } from "./ScriptCompiler";
 import { getMarketDataEngineAdapter } from "../market-data/engine/marketDataEngine";
 import { ExchangeId, MarketDataAdapter, MarketDataSubscription, MarketSymbol, Timeframe } from "../market-data/types";
 import { UnifiedExecutionTicket, type UnifiedExecutionTicketPreset } from "../execution/components/UnifiedExecutionTicket";
+import { InteractionShield } from "./InteractionShield";
 import type { ExecutionSource, OrderSide, OrderType } from "../execution/types";
 import { requestUserText } from "../ui/requestUserText";
 import type { OrderUpdate } from "../execution/types";
@@ -4775,8 +4776,17 @@ export function PixiBlackChart({
     </div>
   );
 
+  const chartInteractionIsolated = Boolean(
+    activeIndicator ||
+    chartContextMenu ||
+    orderContextMenu ||
+    editingChartAlert ||
+    (pendingProtectionChange && pendingProtectionChange.phase !== "dragging") ||
+    (pendingOrderPriceChange && pendingOrderPriceChange.phase !== "dragging")
+  );
+
   return (
-    <div className="chart-wrap">
+    <div className={chartInteractionIsolated ? "chart-wrap interaction-isolated" : "chart-wrap"}>
       <div className="chart-header">
         <div>
           <span className="pair">{displaySymbol} PERP - {timeframeLabel} - {exchangeLabel.toUpperCase()}</span>
@@ -4900,6 +4910,8 @@ export function PixiBlackChart({
           ))}
         </div>
       )}
+
+      {chartInteractionIsolated && <InteractionShield variant="dialog" testId="chart-dialog-interaction-shield" />}
 
       {activeIndicator === "volumeProfile" && renderVolumeProfileSettings()}
       {activeIndicator === "adaptiveSwingStrategy" && renderAdaptiveSwingSettings()}

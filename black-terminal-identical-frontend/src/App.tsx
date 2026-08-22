@@ -50,6 +50,7 @@ import { AlertCenter } from "./components/AlertCenter";
 import { IndicatorLibrary } from "./components/IndicatorLibrary";
 import { OrderBook } from "./components/OrderBook";
 import { PixiBlackChart } from "./components/PixiBlackChart";
+import { InteractionShield } from "./components/InteractionShield";
 import { ScriptEditor } from "./components/ScriptEditor";
 import { TradesTape } from "./components/TradesTape";
 import LandingPage from "./components/LandingPage";
@@ -1693,7 +1694,17 @@ export default function App() {
     setActiveNav("ALERTS");
   }, []);
 
-  const showModuleOverlay = activeNav !== "CHART" && activeNav !== "SCRIPT EDITOR" && activeNav !== "INDICATORS" && activeNav !== "ALERTS" && activeNav !== "STRATEGY LAB" && activeNav !== "SCANNER" && activeNav !== "POSITIONS" && activeNav !== "PORTFOLIO MANAGER" && activeNav !== "PROFILE" && activeNav !== "INVESTMENT GROUPS";
+  const showModuleOverlay = activeNav !== "CHART" && activeNav !== "SCRIPT EDITOR" && activeNav !== "INDICATORS" && activeNav !== "ALERTS" && activeNav !== "STRATEGY LAB" && activeNav !== "SCANNER" && activeNav !== "MARKET OVERVIEW" && activeNav !== "POSITIONS" && activeNav !== "PORTFOLIO MANAGER" && activeNav !== "PROFILE" && activeNav !== "INVESTMENT GROUPS";
+  const chartWorkspaceIsolated = activeNav === "INDICATORS" || activeNav === "STRATEGY LAB" || activeNav === "SCANNER" || activeNav === "MARKET OVERVIEW" || showModuleOverlay;
+  const chartUnderlayRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const underlay = chartUnderlayRef.current;
+    if (!underlay) return;
+    if (chartWorkspaceIsolated) underlay.setAttribute("inert", "");
+    else underlay.removeAttribute("inert");
+    return () => underlay.removeAttribute("inert");
+  }, [chartWorkspaceIsolated]);
 
   if (!currentUser) {
     return (
@@ -2301,7 +2312,8 @@ export default function App() {
         </div>
       ) : (
         <main className={battlefieldMode ? "terminal-grid battlefield-grid" : showCompactDom ? "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>
-        <section className={battlefieldMode ? "chart-panel battlefield-active" : drawingsEnabled ? "chart-panel drawing-tools-open" : "chart-panel"}>
+        <section className={["chart-panel", battlefieldMode ? "battlefield-active" : "", !battlefieldMode && drawingsEnabled ? "drawing-tools-open" : "", chartWorkspaceIsolated ? "foreground-workspace-open" : ""].filter(Boolean).join(" ")}>
+          <div ref={chartUnderlayRef} className="chart-underlay" aria-hidden={chartWorkspaceIsolated || undefined}>
           {battlefieldMode ? (
             <Suspense fallback={<div className="battlefield-loading"><Swords size={24} /><span>INITIALIZING 3D BATTLEFIELD</span></div>}>
               <MarketBattlefield
@@ -2407,6 +2419,8 @@ export default function App() {
               </button>
             </div>
           )}
+          </div>
+          {chartWorkspaceIsolated && <InteractionShield variant="workspace" testId="workspace-interaction-shield" />}
           {activeNav === "INDICATORS" && (
             <IndicatorLibrary
               visibleIndicators={visibleIndicators}

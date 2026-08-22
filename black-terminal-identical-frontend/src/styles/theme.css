@@ -1160,6 +1160,7 @@ body.resizing-layout * {
 
 .chart-panel {
   position: relative;
+  isolation: isolate;
   grid-column: 1 / 2;
   grid-row: 1 / 2;
   min-width: 0;
@@ -1167,6 +1168,58 @@ body.resizing-layout * {
   overflow: hidden;
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
+}
+
+.chart-underlay {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.interaction-shield {
+  position: absolute;
+  inset: 0;
+  z-index: 20000;
+  display: block;
+  overflow: hidden;
+  pointer-events: auto;
+  touch-action: none;
+  overscroll-behavior: contain;
+  user-select: none;
+}
+
+.interaction-shield--workspace {
+  background: #030405;
+}
+
+.interaction-shield--dialog {
+  background: rgba(0, 0, 0, 0.44);
+  backdrop-filter: blur(1.5px) brightness(0.5) saturate(0.55);
+}
+
+.chart-panel.foreground-workspace-open .position-protection-overlay,
+.chart-panel.foreground-workspace-open .chart-context-menu,
+.chart-panel.foreground-workspace-open .chart-alert-editor,
+.chart-panel.foreground-workspace-open .protection-change-dialog,
+.chart-panel.foreground-workspace-open .order-management-menu {
+  visibility: hidden;
+  pointer-events: none !important;
+}
+
+.indicator-library,
+.strategy-lab,
+.scanner-workspace,
+.market-overview-panel,
+.module-focus {
+  z-index: 20010 !important;
+  isolation: isolate;
+  pointer-events: auto;
+}
+
+.market-overview-panel {
+  position: absolute;
+  inset: 0;
 }
 
 .drawing-toolbar {
@@ -3170,9 +3223,30 @@ body.resizing-layout * {
 
 .chart-wrap {
   position: relative;
+  isolation: isolate;
   height: 100%;
   overflow: hidden;
   background: #050607;
+}
+
+.chart-wrap.interaction-isolated .position-protection-overlay {
+  visibility: hidden;
+  pointer-events: none !important;
+}
+
+.chart-wrap.interaction-isolated .indicator-settings,
+.chart-wrap.interaction-isolated .chart-context-menu,
+.chart-wrap.interaction-isolated .chart-alert-editor,
+.chart-wrap.interaction-isolated .protection-change-dialog,
+.chart-wrap.interaction-isolated .order-management-menu {
+  z-index: 20010 !important;
+  isolation: isolate;
+  pointer-events: auto;
+}
+
+.chart-wrap.interaction-isolated .indicator-settings {
+  background-color: #050607;
+  background-image: none;
 }
 
 .chart-wrap::after {

@@ -545,6 +545,7 @@ type AppUser = CapabilityUser & {
 export default function App() {
   const isLocalUiPreview = window.location.hostname === "127.0.0.1" && new URLSearchParams(window.location.search).get("uiPreview") === "1";
   const isBclifVisualFixture = isLocalUiPreview && new URLSearchParams(window.location.search).get("bclifVisualFixture") === "1";
+  const isStrategyLabVisualFixture = isLocalUiPreview && new URLSearchParams(window.location.search).has("strategyLabFixture");
   const isLocalAuthPreview = window.location.hostname === "127.0.0.1" && new URLSearchParams(window.location.search).has("authPreview");
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     if (isLocalAuthPreview) return null;
@@ -2314,7 +2315,9 @@ export default function App() {
         <main className={battlefieldMode ? "terminal-grid battlefield-grid" : showCompactDom ? "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>
         <section className={["chart-panel", battlefieldMode ? "battlefield-active" : "", !battlefieldMode && drawingsEnabled ? "drawing-tools-open" : "", chartWorkspaceIsolated ? "foreground-workspace-open" : ""].filter(Boolean).join(" ")}>
           <div ref={chartUnderlayRef} className="chart-underlay" aria-hidden={chartWorkspaceIsolated || undefined}>
-          {battlefieldMode ? (
+          {isStrategyLabVisualFixture ? (
+            <div className="strategy-visual-chart-placeholder" />
+          ) : battlefieldMode ? (
             <Suspense fallback={<div className="battlefield-loading"><Swords size={24} /><span>INITIALIZING 3D BATTLEFIELD</span></div>}>
               <MarketBattlefield
                 marketSymbol={symbol}
@@ -2443,6 +2446,10 @@ export default function App() {
               selectedStrategyKind={activeStrategyKind ?? "builtin-adaptive-swing"}
               strategySelectionRevision={strategySelectionRevision}
               adaptiveSwingSettings={indicatorAdvancedSettings.adaptiveSwingStrategy}
+              visibleIndicators={visibleIndicators}
+              indicatorPeriods={indicatorPeriods}
+              indicatorAdvancedSettings={indicatorAdvancedSettings}
+              indicatorAlerts={indicatorAlerts}
               onClose={() => setActiveNav("CHART")}
             />
           )}

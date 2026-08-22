@@ -56,7 +56,72 @@ export function normalizeStrategyDefinition(value = {}) {
     marketType,
     exchange: String(value.exchange || "bybit").trim().toLowerCase().slice(0, 40),
     settings,
-    execution
+    execution,
+    indicator: normalizeIndicatorBinding(value.indicator),
+    signals: plainObject(value.signals),
+    filters: plainObject(value.filters),
+    exits: plainObject(value.exits),
+    schedule: plainObject(value.schedule),
+    paper: plainObject(value.paper),
+    metadata: normalizeStrategyMetadata(value.metadata)
+  };
+}
+
+export function assertCertifiedStrategyDefinition(definition) {
+  if (!["builtin-ema-cross", "builtin-adaptive-swing"].includes(definition.runtimeKind)) {
+    throw strategyError(409, "STRATEGY_RUNTIME_NOT_CERTIFIED", "This indicator does not yet have a certified VPS strategy runtime.");
+  }
+  if (definition.indicator && definition.indicator.runtimeStatus !== "CERTIFIED") {
+    throw strategyError(409, "STRATEGY_INDICATOR_NOT_CERTIFIED", "The selected indicator is visible on the chart but is not certified for Black Cloud automation.");
+  }
+  const required = definition.marketType === "SPOT"
+    ? [definition.signals?.buyEntry, definition.signals?.sellExit]
+    : [definition.signals?.longEntry, definition.signals?.shortEntry];
+  if (definition.indicator && required.some((value) => !value)) {
+    throw strategyError(409, "STRATEGY_SIGNAL_MAPPING_INCOMPLETE", "Map every required entry action to a certified indicator alert before publishing.");
+  }
+  return definition;
+}
+
+function normalizeIndicatorBinding(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const alerts = Array.isArray(value.alerts)
+    ? value.alerts.slice(0, 100).map((alert) => ({
+        id: String(alert?.id || "").trim().slice(0, 160),
+        name: String(alert?.name || "").trim().slice(0, 120),
+        description: String(alert?.description || "").trim().slice(0, 500),
+        semantic: String(alert?.semantic || "NEUTRAL").trim().toUpperCase().slice(0, 40),
+        confirmedBar: alert?.confirmedBar !== false,
+        intrabar: alert?.intrabar === true
+      })).filter((alert) => alert.id && alert.name)
+    : [];
+  return {
+    indicatorId: String(value.indicatorId || "").trim().slice(0, 160),
+    instanceId: String(value.instanceId || "").trim().slice(0, 160),
+    name: String(value.name || "").trim().slice(0, 160),
+    instanceName: String(value.instanceName || "").trim().slice(0, 160),
+    version: String(value.version || "1").trim().slice(0, 40),
+    settingsHash: String(value.settingsHash || "").trim().slice(0, 128),
+    settingsSummary: String(value.settingsSummary || "").trim().slice(0, 500),
+    alertManifestVersion: String(value.alertManifestVersion || "1").trim().slice(0, 40),
+    runtimeVersion: String(value.runtimeVersion || "").trim().slice(0, 80),
+    warmupBars: Math.max(0, Math.min(100_000, Math.round(Number(value.warmupBars || 0)))),
+    runtimeStatus: ["CERTIFIED", "REQUIRES_CERTIFICATION", "BROWSER_ONLY"].includes(String(value.runtimeStatus).toUpperCase())
+      ? String(value.runtimeStatus).toUpperCase()
+      : "REQUIRES_CERTIFICATION",
+    useCurrentChartSettings: value.useCurrentChartSettings !== false,
+    alerts
+  };
+}
+
+function normalizeStrategyMetadata(value) {
+  const metadata = plainObject(value);
+  return {
+    description: String(metadata.description || "").trim().slice(0, 2_000),
+    tags: Array.isArray(metadata.tags)
+      ? [...new Set(metadata.tags.map((tag) => String(tag).trim().slice(0, 40)).filter(Boolean))].slice(0, 20)
+      : [],
+    templateId: String(metadata.templateId || "blank-indicator").trim().slice(0, 80)
   };
 }
 

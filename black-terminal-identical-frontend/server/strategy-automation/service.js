@@ -3,6 +3,7 @@ import {
   configurePaper,
   controlPaper,
   createStrategy,
+  createStrategyDraft,
   disconnectTarget,
   getBinding,
   getBindingData,
@@ -11,9 +12,12 @@ import {
   getStrategyWorkspace,
   listEligibleTargets,
   listStrategies,
+  publishStrategyDraft,
   renameStrategy,
   reorderTargets,
   setTargetState,
+  saveStrategyDraft,
+  startStrategyVersion,
   updateTargetPolicy
 } from "./repository.js";
 import { assertSlotIndex, normalizeMarketType, normalizeTargetType, strategyError } from "./domain.js";
@@ -22,11 +26,28 @@ import { parseStrategyBody, strategySchemas } from "./schemas.js";
 export async function handleStrategyAutomationRequest(req, res, security, path) {
   const clean = path.map((item) => String(item)).filter(Boolean);
   if (clean.length === 0) return root(req, res, security);
+  if (clean.length === 1 && clean[0] === "drafts" && req.method === "POST") {
+    const body = parseStrategyBody(strategySchemas.create, req.body);
+    return res.status(201).json(await createStrategyDraft(security.supabase, security.user.id, body, requireIdempotencyKey(req)));
+  }
   const strategyId = clean[0];
   if (!isUuid(strategyId)) throw strategyError(400, "STRATEGY_ID_INVALID", "Strategy identifier is invalid.");
   if (clean.length === 1) {
     if (req.method === "GET") return res.status(200).json(await getStrategyWorkspace(security.supabase, security.user.id, strategyId));
     if (req.method === "PATCH") return res.status(200).json(await renameStrategy(security.supabase, security.user.id, strategyId, parseStrategyBody(strategySchemas.save, req.body), requireIdempotencyKey(req)));
+  }
+  if (clean[1] === "draft" && clean.length === 2 && req.method === "PATCH") {
+    requireIdempotencyKey(req);
+    return res.status(200).json(await saveStrategyDraft(security.supabase, security.user.id, strategyId, parseStrategyBody(strategySchemas.draft, req.body)));
+  }
+  if (clean[1] === "publish" && clean.length === 2 && req.method === "POST") {
+    requireIdempotencyKey(req);
+    return res.status(200).json(await publishStrategyDraft(security.supabase, security.user.id, strategyId, parseStrategyBody(strategySchemas.publish, req.body)));
+  }
+  if (clean[1] === "versions" && clean.length === 4 && clean[3] === "start" && req.method === "POST") {
+    requireIdempotencyKey(req);
+    const version = Number(clean[2]);
+    return res.status(200).json(await startStrategyVersion(security.supabase, security.user.id, strategyId, parseStrategyBody(strategySchemas.startVersion, { version })));
   }
   if (clean[1] === "eligible-targets" && clean.length === 2 && req.method === "GET") {
     return res.status(200).json(await listEligibleTargets(security.supabase, security.user.id, strategyId));

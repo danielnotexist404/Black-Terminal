@@ -217,3 +217,6 @@ The renderer V8 shelf-only recovery and V9 plasma/shelf presentation contract ar
 - [Advanced Distributional Regime Intelligence](./indicators/BC_RDA_SIGNAL_INTELLIGENCE.md)
 
 Start with `indicators/BC_DDA_PRO_OVERVIEW.md`, then use `indicators/DDA_PRO_PINE_AUDIT.md`, `indicators/DDA_PRO_NATIVE_MATHEMATICS.md`, and `indicators/DDA_PRO_COMPLETION_REPORT.md` for audit and certification state.
+# Strategy automation
+
+The Strategy Lab My Strategy documentation is under `docs/strategy-automation/`. Start with `MY_STRATEGY_UX_RECONSTRUCTION.md` for the Library → Wizard → Cockpit workflow and `STRATEGY_VERSION_AND_DRAFT_MODEL.md` for the server authority boundary.

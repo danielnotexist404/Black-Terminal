@@ -30,12 +30,22 @@ const definition = z.object({
   marketType: z.enum(["SPOT", "FUTURES"]),
   exchange: z.string().trim().min(1).max(40).optional(),
   settings: z.record(z.unknown()).optional(),
-  execution: z.record(z.unknown()).optional()
+  execution: z.record(z.unknown()).optional(),
+  indicator: z.record(z.unknown()).optional(),
+  signals: z.record(z.unknown()).optional(),
+  filters: z.record(z.unknown()).optional(),
+  exits: z.record(z.unknown()).optional(),
+  schedule: z.record(z.unknown()).optional(),
+  paper: z.record(z.unknown()).optional(),
+  metadata: z.record(z.unknown()).optional()
 }).strict();
 
 export const strategySchemas = Object.freeze({
   create: z.object({ name: z.string().trim().min(1).max(80), definition, globalCapitalPolicy: capitalPolicy.optional() }).strict(),
   save: z.object({ name: z.string().trim().min(1).max(80).optional(), definition: definition.optional() }).strict(),
+  draft: z.object({ name: z.string().trim().min(1).max(80), definition, expectedRevision: z.number().int().nonnegative().optional() }).strict(),
+  publish: z.object({ expectedRevision: z.number().int().nonnegative() }).strict(),
+  startVersion: z.object({ version: z.number().int().positive() }).strict(),
   addTarget: z.object({ slotIndex: z.number().int().min(1).max(10), targetType: z.enum(["BROKER_ACCOUNT", "INVESTMENT_GROUP"]), targetId: uuid, marketType: z.enum(["SPOT", "FUTURES"]) }).strict(),
   reorderTargets: z.object({ assignments: z.array(z.object({ bindingId: uuid, slotIndex: z.number().int().min(1).max(10), expectedVersion: z.number().int().positive() }).strict()).min(1).max(10) }).strict().superRefine((value, context) => {
     if (new Set(value.assignments.map((item) => item.bindingId)).size !== value.assignments.length) context.addIssue({ code: z.ZodIssueCode.custom, path: ["assignments"], message: "Binding identifiers must be unique." });

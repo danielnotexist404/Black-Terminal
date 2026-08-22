@@ -1,0 +1,22 @@
+import { AlertTriangle, CheckCircle2, Play, Save } from "lucide-react";
+import type { StrategyWizardDraft } from "../state/strategyDraftStore";
+import { draftChanges, validateWizardStep } from "../state/strategyDraftStore";
+
+export function ReviewStep({ draft, publishedName, publishedDefinition, saving, onSaveDraft, onPublish, onStart }: { draft: StrategyWizardDraft; publishedName?: string; publishedDefinition?: StrategyWizardDraft["definition"] | null; saving: boolean; onSaveDraft: () => void; onPublish: () => void; onStart: () => void }) {
+  const issues = validateWizardStep(draft, 9);
+  const changes = draftChanges(draft, publishedName, publishedDefinition);
+  const published = draft.publishedVersion;
+  const running = draft.runningVersion;
+  return <div className="strategy-wizard-section"><header><span>10</span><div><h2>Review and publish</h2><p>Publishing creates an immutable version. Starting that version is always a separate action.</p></div></header>
+    <div className="version-state-grid"><Version label="CURRENT DRAFT" value={`V${published ? published + 1 : 1}`} detail={`${changes.length} draft change${changes.length === 1 ? "" : "s"}`} active /><Version label="PUBLISHED VERSION" value={published ? `V${published}` : "NOT PUBLISHED"} detail="Immutable after publishing" /><Version label="RUNNING VERSION" value={running ? `V${running}` : "NOT STARTED"} detail={running === published && running ? "Synced with published" : "Runtime remains unchanged"} /></div>
+    <div className="review-summary-grid"><Summary label="NAME" value={draft.name || "—"} /><Summary label="INDICATOR" value={draft.definition.indicator?.name || "—"} /><Summary label="SYMBOL" value={draft.definition.symbol} /><Summary label="TIMEFRAME" value={draft.definition.timeframe.toUpperCase()} /><Summary label="MARKET" value={draft.definition.marketType} /><Summary label="ENTRY MAPPINGS" value={mappingSummary(draft)} /><Summary label="ALLOCATION" value={`${draft.paperPolicy.strategyAllocationValue}${draft.paperPolicy.strategyAllocationMode === "FIXED_USDT" ? " USDT" : "%"}`} /><Summary label="PER TRADE" value={`${draft.paperPolicy.tradeAmountValue}${draft.paperPolicy.tradeAmountMode === "FIXED_USDT" ? " USDT" : "%"}`} /><Summary label="LEVERAGE" value={draft.definition.marketType === "FUTURES" ? `${draft.paperPolicy.requestedLeverage || 1}x` : "SPOT 1x"} /><Summary label="LIVE TARGETS" value="0–10 optional · unarmed" /></div>
+    <section className="version-diff"><h3>{changes.length} DRAFT CHANGES</h3>{changes.map((change) => <div key={change.label}><strong>{change.label}</strong><span>{display(change.before)}</span><b>→</b><span>{display(change.after)}</span></div>)}</section>
+    <section className="validation-summary"><h3>VALIDATION</h3>{issues.length ? issues.map((issue) => <div className="blocked" key={issue}><AlertTriangle size={13} /><span>{issue}</span></div>) : <div className="ready"><CheckCircle2 size={14} /><span>Indicator Runtime, Market Data, Signal Mapping, Risk Policy and Paper Runtime are ready.</span></div>}<div className="blocked"><AlertTriangle size={13} /><span>Target Readiness: Live Trading Not Yet Certified. Paper publishing remains available.</span></div></section>
+    <div className="review-actions"><button type="button" disabled={saving} onClick={onSaveDraft}><Save size={14} /> SAVE DRAFT</button><button type="button" className="primary" disabled={saving || issues.length > 0} onClick={onPublish}>PUBLISH {published ? `VERSION ${published + 1}` : "VERSION 1"}</button><button type="button" disabled={saving || !published || running === published} onClick={onStart}><Play size={14} /> START PUBLISHED VERSION</button></div>
+  </div>;
+}
+
+function Version({ label, value, detail, active }: { label: string; value: string; detail: string; active?: boolean }) { return <div className={active ? "active" : ""}><span>{label}</span><strong>{value}</strong><em>{detail}</em></div>; }
+function Summary({ label, value }: { label: string; value: string }) { return <div><span>{label}</span><strong>{value}</strong></div>; }
+function mappingSummary(draft: StrategyWizardDraft) { const signal = draft.definition.signals || {}; return draft.definition.marketType === "SPOT" ? `${signal.buyEntry || "—"} / ${signal.sellExit || "—"}` : `${signal.longEntry || "—"} / ${signal.shortEntry || "—"}`; }
+function display(value: string) { return value.length > 80 ? `${value.slice(0, 77)}…` : value; }

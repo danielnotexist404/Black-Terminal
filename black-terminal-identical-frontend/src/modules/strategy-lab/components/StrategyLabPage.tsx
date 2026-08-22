@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bot, Database, FlaskConical, X } from "lucide-react";
-import type { AdaptiveSwingStrategySettings, Candle } from "../../../chart-engine/types";
+import { Bot, Database, FlaskConical, LockKeyhole, X } from "lucide-react";
+import type { IndicatorAlertDefinition } from "../../../automation/alerts";
+import type { AdaptiveSwingStrategySettings, Candle, IndicatorAdvancedSettings, IndicatorPeriods, VisibleIndicators } from "../../../chart-engine/types";
 import type { MarketSymbol, Timeframe } from "../../../market-data/types";
 import { createAIStrategyReview } from "../ai/aiStrategyReview";
 import { fetchStrategyLabCandles } from "../adapters/marketDataAdapter";
@@ -10,7 +11,8 @@ import { runOptimization } from "../engine/optimizer";
 import { buildStrategyReviewInput } from "../engine/tradeAnalyzer";
 import { runWalkForward } from "../engine/walkForward";
 import { createDefaultBacktestConfig } from "../state/strategyLabStore";
-import { StrategyAutomationPanel } from "../automation/StrategyAutomationPanel";
+import { StrategyAutomationExperience } from "../my-strategy/StrategyAutomationExperience";
+import { buildActiveIndicatorInstances, ownedCustomIndicatorInstances, templateIndicatorInstances } from "../my-strategy/state/indicatorManifest";
 import {
   applyAutomationDefinitionToConfig,
   marketSymbolFromBacktestConfig,
@@ -40,6 +42,10 @@ type StrategyLabPageProps = {
   selectedStrategyKind: StrategyRuntimeKind;
   strategySelectionRevision: number;
   adaptiveSwingSettings?: AdaptiveSwingStrategySettings;
+  visibleIndicators: VisibleIndicators;
+  indicatorPeriods: IndicatorPeriods;
+  indicatorAdvancedSettings: IndicatorAdvancedSettings;
+  indicatorAlerts: IndicatorAlertDefinition[];
   onClose: () => void;
   onTradeSelect?: (trade: TradeResult) => void;
 };
@@ -50,6 +56,11 @@ const defaultOptimizationSpace: OptimizationSpace = {
   takeProfitRatio: { min: 1.2, max: 3.5, step: 0.4 },
   minTrendQuality: { min: 0.18, max: 0.46, step: 0.04 }
 };
+
+const researchTabs = [
+  ["overview", "Overview"], ["trades", "Trades"], ["equity", "Equity Curve"], ["drawdown", "Drawdown"],
+  ["optimization", "Optimization"], ["heatmap", "Heatmap"], ["aiReview", "AI Review"], ["codeSuggestions", "Code Suggestions"], ["forwardTest", "Forward Test"],
+] as const;
 
 function createOptimizationSpace(adaptiveSwingSettings?: AdaptiveSwingStrategySettings): OptimizationSpace {
   if (!adaptiveSwingSettings?.optimizationEnabled) return defaultOptimizationSpace;
@@ -131,10 +142,15 @@ export function StrategyLabPage({
   selectedStrategyKind,
   strategySelectionRevision,
   adaptiveSwingSettings,
+  visibleIndicators,
+  indicatorPeriods,
+  indicatorAdvancedSettings,
+  indicatorAlerts,
   onClose,
   onTradeSelect
 }: StrategyLabPageProps) {
   const [activeTab, setActiveTab] = useState<StrategyLabTab>("myStrategy");
+  const [researchView, setResearchView] = useState<"overview" | "trades" | "equity" | "drawdown" | "optimization" | "heatmap" | "aiReview" | "codeSuggestions" | "forwardTest">("overview");
   const [config, setConfig] = useState<BacktestConfig>(() => createConfig(marketSymbol, displaySymbol, exchangeLabel, timeframe, selectedStrategyKind, adaptiveSwingSettings));
   const [candles, setCandles] = useState<Candle[]>([]);
   const [result, setResult] = useState<BacktestResult | undefined>();
@@ -169,7 +185,7 @@ export function StrategyLabPage({
     ? `${result?.candlesTested.toLocaleString() ?? 0} BARS`
     : runState.toUpperCase().replace("-", " ");
 
-  const run = async (nextTab: StrategyLabTab = "overview") => {
+  const run = async (nextTab: StrategyLabTab = "analytics") => {
     setError(undefined);
     setRunState("loading-data");
     try {
@@ -192,11 +208,6 @@ export function StrategyLabPage({
     }
   };
 
-  useEffect(() => {
-    if (activeTab !== "trades" || result || runState !== "idle") return;
-    void run("trades");
-  }, [activeTab, result, runState]);
-
   const runOptimizer = () => {
     if (candles.length === 0 || !result) {
       setError("Run a backtest before optimization so Strategy Lab has a historical candle set.");
@@ -213,7 +224,8 @@ export function StrategyLabPage({
         const nextReview = createAIStrategyReview(buildStrategyReviewInput(result, next));
         setReview(nextReview);
         setCodeSuggestions(nextReview.codeSuggestions);
-        setActiveTab("optimization");
+        setResearchView("optimization");
+        setActiveTab("research");
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -267,82 +279,56 @@ export function StrategyLabPage({
     },
     [],
   );
+  const activeIndicatorInstances = useMemo(() => [...buildActiveIndicatorInstances({
+    visible: visibleIndicators,
+    periods: indicatorPeriods,
+    advanced: indicatorAdvancedSettings,
+    configuredAlerts: indicatorAlerts,
+  }), ...ownedCustomIndicatorInstances()], [visibleIndicators, indicatorPeriods, indicatorAdvancedSettings, indicatorAlerts]);
+  const strategyTemplates = useMemo(() => templateIndicatorInstances(), []);
+
+  const openStrategyBacktest = useCallback((strategy: { symbol: string; timeframe: string; marketType: "SPOT" | "FUTURES" }) => {
+    setConfig((current) => ({ ...current, symbol: strategy.symbol, rawSymbol: strategy.symbol, timeframe: strategy.timeframe as Timeframe, marketKind: strategy.marketType === "SPOT" ? "spot" : "perpetual" }));
+    setActiveTab("backtest");
+  }, []);
+
+  const renderAnalyticsDashboard = () => <div className="strategy-dashboard-grid">
+    <OverviewPanel result={result} status={status} />
+    <div className="strategy-panel strategy-side-summary">
+      <div className="strategy-panel-head"><span>ANALYTICS STATE</span><b>{config.exchangeLabel.toUpperCase()}</b></div>
+      <div className="strategy-kv-grid"><div><span>Symbol</span><strong>{config.symbol}</strong></div><div><span>Timeframe</span><strong>{config.timeframe}</strong></div><div><span>Candles</span><strong>{candles.length.toLocaleString()}</strong></div><div><span>Trades</span><strong>{result?.metrics.totalTrades ?? 0}</strong></div><div><span>Net</span><strong>{result ? formatCurrency(result.metrics.netProfit) : "-"}</strong></div><div><span>Return</span><strong>{result ? formatPercent(result.metrics.returnOnCapital) : "-"}</strong></div><div><span>Robust Avg</span><strong>{formatNumber(optimizationResults.reduce((sum, item) => sum + item.robustnessScore, 0) / Math.max(1, optimizationResults.length), 1)}</strong></div><div><span>WF Stability</span><strong>{formatPercent(wfSummary.stability)}</strong></div></div>
+      <button type="button" className="strategy-primary-button wide" onClick={() => run()}><FlaskConical size={14} /> RUN CURRENT MODEL</button>
+      <button type="button" className="strategy-secondary-button wide" disabled={!result || optimizationBusy} onClick={runOptimizer}><Database size={14} /> RUN OPTIMIZATION</button>
+      <button type="button" className="strategy-secondary-button wide" disabled={!result} onClick={() => { setResearchView("aiReview"); setActiveTab("research"); }}><Bot size={14} /> OPEN AI REVIEW</button>
+      {error ? <div className="strategy-error">{error}</div> : null}
+    </div>
+    <EquityCurvePanel points={result?.equityCurve ?? []} /><DrawdownCurvePanel points={result?.drawdownCurve ?? []} />
+  </div>;
+
+  const renderResearch = () => <div className="strategy-research"><nav>{researchTabs.map(([id, label]) => <button type="button" key={id} className={researchView === id ? "active" : ""} onClick={() => setResearchView(id)}>{label}</button>)}</nav><div>
+    {researchView === "overview" ? renderAnalyticsDashboard() : null}
+    {researchView === "trades" ? <TradesTable trades={result?.trades ?? []} onTradeSelect={onTradeSelect} /> : null}
+    {researchView === "equity" ? <div className="strategy-split-grid"><EquityCurvePanel points={result?.equityCurve ?? []} /><PeriodPerformancePanel title="DAILY PNL" rows={result?.metrics.dailyBreakdown ?? []} /><PeriodPerformancePanel title="MONTHLY PERFORMANCE" rows={result?.metrics.monthlyBreakdown ?? []} /></div> : null}
+    {researchView === "drawdown" ? <DrawdownCurvePanel points={result?.drawdownCurve ?? []} /> : null}
+    {researchView === "optimization" ? <OptimizationPanel space={optimizationSpace} results={optimizationResults} busy={optimizationBusy} onSpaceChange={setOptimizationSpace} onRun={runOptimizer} /> : null}
+    {researchView === "heatmap" ? <HeatmapPanel results={optimizationResults} /> : null}
+    {researchView === "aiReview" ? <AIReviewPanel review={review} /> : null}
+    {researchView === "codeSuggestions" ? <CodeSuggestionsPanel suggestions={codeSuggestions} onChange={setCodeSuggestions} /> : null}
+    {researchView === "forwardTest" ? <ForwardTestPanel result={result} symbol={config.symbol} /> : null}
+  </div></div>;
 
   const renderActiveTab = () => {
     if (activeTab === "myStrategy") {
-      return (
-        <StrategyAutomationPanel
-          definition={automationDefinition}
-          onDefinitionChange={updateAutomationDefinition}
-        />
-      );
+      return <StrategyAutomationExperience definition={automationDefinition} chartTimeframe={timeframe} indicators={activeIndicatorInstances} templates={strategyTemplates} onDefinitionChange={updateAutomationDefinition} onOpenBacktest={openStrategyBacktest} />;
     }
     if (activeTab === "backtest") {
       return <BacktestPanel config={config} runState={runState} error={error} onConfigChange={setConfig} onRun={() => run()} />;
     }
-    if (activeTab === "trades") {
-      return <TradesTable trades={result?.trades ?? []} onTradeSelect={onTradeSelect} />;
-    }
-    if (activeTab === "equity") {
-      return (
-        <div className="strategy-split-grid">
-          <EquityCurvePanel points={result?.equityCurve ?? []} />
-          <PeriodPerformancePanel title="DAILY PNL" rows={result?.metrics.dailyBreakdown ?? []} />
-          <PeriodPerformancePanel title="MONTHLY PERFORMANCE" rows={result?.metrics.monthlyBreakdown ?? []} />
-        </div>
-      );
-    }
-    if (activeTab === "drawdown") {
-      return <DrawdownCurvePanel points={result?.drawdownCurve ?? []} />;
-    }
-    if (activeTab === "optimization") {
-      return <OptimizationPanel space={optimizationSpace} results={optimizationResults} busy={optimizationBusy} onSpaceChange={setOptimizationSpace} onRun={runOptimizer} />;
-    }
-    if (activeTab === "heatmap") {
-      return <HeatmapPanel results={optimizationResults} />;
-    }
-    if (activeTab === "aiReview") {
-      return <AIReviewPanel review={review} />;
-    }
-    if (activeTab === "codeSuggestions") {
-      return <CodeSuggestionsPanel suggestions={codeSuggestions} onChange={setCodeSuggestions} />;
-    }
-    if (activeTab === "forwardTest") {
-      return <ForwardTestPanel result={result} symbol={config.symbol} />;
-    }
-    return (
-      <div className="strategy-dashboard-grid">
-        <OverviewPanel result={result} status={status} />
-        <div className="strategy-panel strategy-side-summary">
-          <div className="strategy-panel-head"><span>RESEARCH STATE</span><b>{config.exchangeLabel.toUpperCase()}</b></div>
-          <div className="strategy-kv-grid">
-            <div><span>Symbol</span><strong>{config.symbol}</strong></div>
-            <div><span>Timeframe</span><strong>{config.timeframe}</strong></div>
-            <div><span>Candles</span><strong>{candles.length.toLocaleString()}</strong></div>
-            <div><span>Trades</span><strong>{result?.metrics.totalTrades ?? 0}</strong></div>
-            <div><span>Net</span><strong>{result ? formatCurrency(result.metrics.netProfit) : "-"}</strong></div>
-            <div><span>Return</span><strong>{result ? formatPercent(result.metrics.returnOnCapital) : "-"}</strong></div>
-            <div><span>Robust Avg</span><strong>{formatNumber(optimizationResults.reduce((sum, item) => sum + item.robustnessScore, 0) / Math.max(1, optimizationResults.length), 1)}</strong></div>
-            <div><span>WF Stability</span><strong>{formatPercent(wfSummary.stability)}</strong></div>
-          </div>
-          <button type="button" className="strategy-primary-button wide" onClick={() => run()}>
-            <FlaskConical size={14} />
-            RUN CURRENT MODEL
-          </button>
-          <button type="button" className="strategy-secondary-button wide" disabled={!result || optimizationBusy} onClick={runOptimizer}>
-            <Database size={14} />
-            RUN OPTIMIZATION
-          </button>
-          <button type="button" className="strategy-secondary-button wide" disabled={!result} onClick={() => setActiveTab("aiReview")}>
-            <Bot size={14} />
-            OPEN AI REVIEW
-          </button>
-          {error ? <div className="strategy-error">{error}</div> : null}
-        </div>
-        <EquityCurvePanel points={result?.equityCurve ?? []} />
-        <DrawdownCurvePanel points={result?.drawdownCurve ?? []} />
-      </div>
-    );
+    if (activeTab === "analytics") return renderAnalyticsDashboard();
+    if (activeTab === "research") return renderResearch();
+    if (activeTab === "paperTrading") return <div className="strategy-primary-empty"><FlaskConical size={25} /><strong>Paper Trading lives inside each strategy cockpit</strong><span>Open a saved strategy to view its Paper equity, positions, trades, controls and runtime health.</span><button type="button" onClick={() => setActiveTab("myStrategy")}>OPEN MY STRATEGY</button></div>;
+    if (activeTab === "liveAutomation") return <div className="strategy-primary-empty locked"><LockKeyhole size={25} /><strong>Live Trading Not Yet Certified</strong><span>Paper automation is enabled. Broker and Investment Group execution remain disabled for this preview chapter.</span></div>;
+    return <div className="strategy-primary-empty"><Database size={25} /><strong>Strategy logs are scoped to each runtime</strong><span>Open a strategy and select LOGS to inspect readable signals, fills, risk decisions and worker recovery events.</span><button type="button" onClick={() => setActiveTab("myStrategy")}>OPEN MY STRATEGY</button></div>;
   };
 
   return (

@@ -31,6 +31,56 @@ export type StrategyAutomationDefinition = {
   exchange: string;
   settings: StrategySettings;
   execution: Record<string, unknown>;
+  indicator?: StrategyIndicatorBinding;
+  signals?: StrategySignalMappings;
+  filters?: Record<string, unknown>;
+  exits?: Record<string, unknown>;
+  schedule?: Record<string, unknown>;
+  paper?: Record<string, unknown>;
+  metadata?: {
+    description?: string;
+    tags?: string[];
+    templateId?: string;
+  };
+};
+
+export type StrategyRuntimeCertification =
+  | "CERTIFIED"
+  | "REQUIRES_CERTIFICATION"
+  | "BROWSER_ONLY";
+
+export type StrategyIndicatorAlert = {
+  id: string;
+  name: string;
+  description: string;
+  semantic: "LONG_ENTRY" | "SHORT_ENTRY" | "LONG_EXIT" | "SHORT_EXIT" | "BUY" | "SELL" | "NEUTRAL";
+  confirmedBar: boolean;
+  intrabar: boolean;
+};
+
+export type StrategyIndicatorBinding = {
+  indicatorId: string;
+  instanceId: string;
+  name: string;
+  instanceName: string;
+  version: string;
+  settingsHash: string;
+  settingsSummary: string;
+  alertManifestVersion: string;
+  runtimeVersion: string;
+  warmupBars: number;
+  runtimeStatus: StrategyRuntimeCertification;
+  useCurrentChartSettings: boolean;
+  alerts: StrategyIndicatorAlert[];
+};
+
+export type StrategySignalMappings = {
+  longEntry?: string;
+  shortEntry?: string;
+  longExit?: string;
+  shortExit?: string;
+  buyEntry?: string;
+  sellExit?: string;
 };
 
 export type StrategyCapitalPolicy = {
@@ -60,7 +110,21 @@ export type StrategySummary = {
   marketType: StrategyMarketType;
   exchange: string;
   currentVersion: number;
+  publishedVersion?: number | null;
+  runningVersion?: number | null;
+  draftRevision?: number;
+  draftUpdatedAt?: string | null;
+  hasDraftChanges?: boolean;
   status: string;
+  indicatorName?: string;
+  paperEquity?: number;
+  paperPnl?: number;
+  paperDrawdown?: number;
+  paperTrades?: number;
+  connectedTargets?: number;
+  runtimeState?: string;
+  lastSignalAt?: string;
+  lastHeartbeatAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -164,8 +228,18 @@ export type StrategyTargetSnapshot = {
 export type StrategyWorkspace = {
   strategy: StrategySummary & {
     definition: StrategyAutomationDefinition;
+    draftDefinition?: StrategyAutomationDefinition | null;
+    draftName?: string | null;
+    draftBaseVersion?: number | null;
     globalCapitalPolicy: StrategyCapitalPolicy;
   };
+  versions?: Array<{
+    version: number;
+    name: string;
+    definition: StrategyAutomationDefinition;
+    status: string;
+    createdAt: string;
+  }>;
   paper: StrategyPaperAccount | null;
   bindings: StrategyTargetBinding[];
   snapshots: StrategyTargetSnapshot[];

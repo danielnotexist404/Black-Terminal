@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import {
   calculateCapitalPreview,
   calculateEffectiveLeverage,
+  assertCertifiedStrategyDefinition,
   canonicalRequestHash,
   defaultLiveCapitalPolicy,
   defaultPaperCapitalPolicy,
@@ -17,19 +18,47 @@ const ACTIVE_ORDER_STATUSES = ["created", "pending", "open", "working", "partial
 
 export async function listStrategies(supabase, userId) {
   const { data, error } = await supabase.from("strategy_automation_strategies")
-    .select("id,name,runtime_kind,symbol,timeframe,market_type,exchange,current_version,status,created_at,updated_at")
+    .select("id,name,runtime_kind,symbol,timeframe,market_type,exchange,current_version,published_version,running_version,draft_revision,draft_base_version,draft_updated_at,draft_definition,definition,status,created_at,updated_at")
     .eq("owner_user_id", userId).is("archived_at", null).order("updated_at", { ascending: false });
   if (error) throw persistenceError(error);
-  return (data || []).map(safeStrategySummary);
+  const rows = data || [];
+  if (!rows.length) return [];
+  const ids = rows.map((row) => row.id);
+  const [papers, bindings, runtimes, trades] = await Promise.all([
+    many(supabase.from("strategy_paper_accounts").select("strategy_id,strategy_version,demo_equity,realized_pnl,unrealized_pnl,maximum_drawdown_percent,status").in("strategy_id", ids)),
+    many(supabase.from("strategy_target_bindings").select("strategy_id,strategy_version,status").in("strategy_id", ids).neq("status", "DISCONNECTED")),
+    many(supabase.from("strategy_automation_runtime_state").select("strategy_id,runtime_state,last_signal_at,last_heartbeat_at,running_version").in("strategy_id", ids)),
+    many(supabase.from("strategy_automation_trades").select("strategy_id,strategy_version").in("strategy_id", ids).eq("mode", "PAPER").limit(25_000))
+  ]);
+  return rows.map((row) => {
+    const version = row.running_version ?? row.published_version;
+    const paper = papers.find((item) => item.strategy_id === row.id && item.strategy_version === version);
+    const runtime = runtimes.find((item) => item.strategy_id === row.id);
+    const definition = row.draft_definition || row.definition || {};
+    return {
+      ...safeStrategySummary(row),
+      indicatorName: definition.indicator?.name || runtimeLabel(definition.runtimeKind || row.runtime_kind),
+      paperEquity: paper ? Number(paper.demo_equity || 0) + Number(paper.realized_pnl || 0) + Number(paper.unrealized_pnl || 0) : 0,
+      paperPnl: paper ? Number(paper.realized_pnl || 0) + Number(paper.unrealized_pnl || 0) : 0,
+      paperDrawdown: Number(paper?.maximum_drawdown_percent || 0),
+      paperTrades: trades.filter((item) => item.strategy_id === row.id && item.strategy_version === version).length,
+      connectedTargets: bindings.filter((item) => item.strategy_id === row.id && item.strategy_version === version).length,
+      runtimeState: runtime?.runtime_state || (row.running_version ? "RECOVERING" : "NOT STARTED"),
+      lastSignalAt: runtime?.last_signal_at || null,
+      lastHeartbeatAt: runtime?.last_heartbeat_at || null
+    };
+  });
 }
 
 export async function getStrategyWorkspace(supabase, userId, strategyId) {
   const strategy = await ownedStrategy(supabase, userId, strategyId);
-  const [paper, bindings, runtime, audit] = await Promise.all([
-    oneOrNone(supabase.from("strategy_paper_accounts").select("*").eq("strategy_id", strategyId).eq("strategy_version", strategy.current_version).eq("owner_user_id", userId).maybeSingle()),
-    many(supabase.from("strategy_target_bindings").select("*").eq("strategy_id", strategyId).eq("strategy_version", strategy.current_version).eq("owner_user_id", userId).neq("status", "DISCONNECTED").order("slot_index")),
+  const operationalVersion = strategy.running_version ?? strategy.published_version ?? strategy.current_version;
+  const [paper, bindings, runtime, audit, versions] = await Promise.all([
+    oneOrNone(supabase.from("strategy_paper_accounts").select("*").eq("strategy_id", strategyId).eq("strategy_version", operationalVersion).eq("owner_user_id", userId).maybeSingle()),
+    many(supabase.from("strategy_target_bindings").select("*").eq("strategy_id", strategyId).eq("strategy_version", operationalVersion).eq("owner_user_id", userId).neq("status", "DISCONNECTED").order("slot_index")),
     oneOrNone(supabase.from("strategy_automation_runtime_state").select("*").eq("strategy_id", strategyId).eq("owner_user_id", userId).maybeSingle()),
-    many(supabase.from("strategy_automation_audit_events").select("id,event_type,severity,message,safe_metadata,created_at,binding_id").eq("strategy_id", strategyId).eq("owner_user_id", userId).order("created_at", { ascending: false }).limit(100))
+    many(supabase.from("strategy_automation_audit_events").select("id,event_type,severity,message,safe_metadata,created_at,binding_id").eq("strategy_id", strategyId).eq("owner_user_id", userId).order("created_at", { ascending: false }).limit(100)),
+    many(supabase.from("strategy_automation_versions").select("version,name,definition,status,created_at").eq("strategy_id", strategyId).eq("owner_user_id", userId).order("version", { ascending: false }))
   ]);
   const snapshots = await buildStrategySnapshots(supabase, userId, strategy, bindings);
   return {
@@ -38,15 +67,17 @@ export async function getStrategyWorkspace(supabase, userId, strategyId) {
     bindings: bindings.map(safeBinding),
     snapshots,
     runtime: runtime ? safeRuntime(runtime) : null,
-    audit
+    audit,
+    versions: versions.map((item) => ({ version: item.version, name: item.name, definition: item.definition, status: item.status, createdAt: item.created_at }))
   };
 }
 
 export async function getStrategySnapshot(supabase, userId, strategyId) {
   const strategy = await ownedStrategy(supabase, userId, strategyId);
+  const operationalVersion = strategy.running_version ?? strategy.published_version ?? strategy.current_version;
   const [paper, bindings, runtime] = await Promise.all([
-    oneOrNone(supabase.from("strategy_paper_accounts").select("*").eq("strategy_id", strategyId).eq("strategy_version", strategy.current_version).eq("owner_user_id", userId).maybeSingle()),
-    many(supabase.from("strategy_target_bindings").select("*").eq("strategy_id", strategyId).eq("strategy_version", strategy.current_version).eq("owner_user_id", userId).neq("status", "DISCONNECTED").order("slot_index")),
+    oneOrNone(supabase.from("strategy_paper_accounts").select("*").eq("strategy_id", strategyId).eq("strategy_version", operationalVersion).eq("owner_user_id", userId).maybeSingle()),
+    many(supabase.from("strategy_target_bindings").select("*").eq("strategy_id", strategyId).eq("strategy_version", operationalVersion).eq("owner_user_id", userId).neq("status", "DISCONNECTED").order("slot_index")),
     oneOrNone(supabase.from("strategy_automation_runtime_state").select("*").eq("strategy_id", strategyId).eq("owner_user_id", userId).maybeSingle())
   ]);
   return {
@@ -56,6 +87,81 @@ export async function getStrategySnapshot(supabase, userId, strategyId) {
     targets: await buildStrategySnapshots(supabase, userId, strategy, bindings),
     runtime: runtime ? safeRuntime(runtime) : null
   };
+}
+
+export async function createStrategyDraft(supabase, userId, body, idempotencyKey) {
+  const name = normalizeStrategyName(body.name);
+  const definition = normalizeStrategyDefinition(body.definition);
+  const globalPolicy = normalizeGlobalPolicy(body.globalCapitalPolicy, definition.marketType);
+  const canonicalHash = canonicalRequestHash({ name, definition, globalPolicy, state: "DRAFT" });
+  const { data, error } = await supabase.rpc("black_core_create_strategy_draft", {
+    p_owner_user_id: userId,
+    p_name: name,
+    p_definition: definition,
+    p_global_policy: globalPolicy,
+    p_canonical_hash: canonicalHash,
+    p_idempotency_key: idempotencyKey
+  });
+  if (error) {
+    if (error.code === "23505") throw strategyError(409, "STRATEGY_NAME_CONFLICT", "A strategy with this name already exists.");
+    throw persistenceError(error);
+  }
+  return getStrategyWorkspace(supabase, userId, data.strategyId);
+}
+
+export async function saveStrategyDraft(supabase, userId, strategyId, body) {
+  const name = normalizeStrategyName(body.name);
+  const definition = normalizeStrategyDefinition(body.definition);
+  const { error } = await supabase.rpc("black_core_save_strategy_draft", {
+    p_owner_user_id: userId,
+    p_strategy_id: strategyId,
+    p_name: name,
+    p_definition: definition,
+    p_expected_revision: body.expectedRevision ?? null
+  });
+  if (error) {
+    if (error.code === "23505") throw strategyError(409, "STRATEGY_NAME_CONFLICT", "A strategy with this name already exists.");
+    if (error.code === "40001") throw strategyError(409, "STRATEGY_DRAFT_CONFLICT", "This draft changed in another session. Reload it before saving again.");
+    throw persistenceError(error);
+  }
+  return getStrategyWorkspace(supabase, userId, strategyId);
+}
+
+export async function publishStrategyDraft(supabase, userId, strategyId, body) {
+  const strategy = await ownedStrategy(supabase, userId, strategyId);
+  const definition = assertCertifiedStrategyDefinition(normalizeStrategyDefinition(strategy.draft_definition || strategy.definition));
+  const name = normalizeStrategyName(strategy.draft_name || strategy.name);
+  const globalPolicy = normalizeGlobalPolicy(strategy.global_capital_policy, definition.marketType);
+  const paperPolicy = definition.paper?.capitalPolicy
+    ? normalizeCapitalPolicy(definition.paper.capitalPolicy, definition.marketType, { allowZeroAllocation: false })
+    : defaultPaperCapitalPolicy(definition.marketType);
+  const canonicalHash = canonicalRequestHash({ name, definition, globalPolicy, paperPolicy });
+  const { error } = await supabase.rpc("black_core_publish_strategy_draft", {
+    p_owner_user_id: userId,
+    p_strategy_id: strategyId,
+    p_expected_revision: body.expectedRevision,
+    p_global_policy: globalPolicy,
+    p_paper_policy: paperPolicy,
+    p_canonical_hash: canonicalHash
+  });
+  if (error) {
+    if (error.code === "40001") throw strategyError(409, "STRATEGY_DRAFT_CONFLICT", "This draft changed in another session. Reload it before publishing.");
+    throw persistenceError(error);
+  }
+  return getStrategyWorkspace(supabase, userId, strategyId);
+}
+
+export async function startStrategyVersion(supabase, userId, strategyId, body) {
+  const { error } = await supabase.rpc("black_core_start_strategy_version", {
+    p_owner_user_id: userId,
+    p_strategy_id: strategyId,
+    p_version: body.version
+  });
+  if (error) {
+    if (error.code === "55000") throw strategyError(409, "STRATEGY_RUNTIME_POSITION_OPEN", "Close the current Paper position before switching the running version.");
+    throw persistenceError(error);
+  }
+  return getStrategyWorkspace(supabase, userId, strategyId);
 }
 
 export async function createStrategy(supabase, userId, body, idempotencyKey) {
@@ -130,7 +236,7 @@ export async function listEligibleTargets(supabase, userId, strategyId, environm
   const capabilityMap = new Map(capabilities.map((item) => [item.connection_id, item]));
   const riskMap = new Map(risks.map((item) => [item.account_id, item]));
   const balanceMap = groupBy(balances, "account_id");
-  let existingQuery = supabase.from("strategy_target_bindings").select("id,target_type,target_id,status").eq("strategy_id", strategyId).eq("strategy_version", strategy.current_version).neq("status", "DISCONNECTED");
+  let existingQuery = supabase.from("strategy_target_bindings").select("id,target_type,target_id,status").eq("strategy_id", strategyId).eq("strategy_version", operationalVersion(strategy)).neq("status", "DISCONNECTED");
   if (excludeBindingId) existingQuery = existingQuery.neq("id", excludeBindingId);
   const existing = await many(existingQuery);
   const conflicts = new Set(existing.map((item) => `${item.target_type}:${item.target_id}`));
@@ -189,13 +295,14 @@ export async function addTarget(supabase, userId, strategyId, body, idempotencyK
   const marketType = normalizeMarketType(body.marketType || strategy.market_type);
   const policy = defaultLiveCapitalPolicy(marketType);
   const canonicalHash = canonicalRequestHash(policy);
-  const requestHash = canonicalRequestHash({ strategyId, strategyVersion: strategy.current_version, slotIndex: Number(body.slotIndex), targetType: body.targetType, targetId: body.targetId, marketType, policy });
+  const version = operationalVersion(strategy);
+  const requestHash = canonicalRequestHash({ strategyId, strategyVersion: version, slotIndex: Number(body.slotIndex), targetType: body.targetType, targetId: body.targetId, marketType, policy });
   const isBroker = body.targetType === "BROKER_ACCOUNT";
   const connection = isBroker ? await oneOrNone(supabase.from("connectivity_connections").select("id,account_id").eq("id", body.targetId).eq("user_id", userId).maybeSingle()) : null;
   const { data, error } = await supabase.rpc("black_core_add_strategy_target", {
     p_owner_user_id: userId,
     p_strategy_id: strategyId,
-    p_strategy_version: strategy.current_version,
+    p_strategy_version: version,
     p_slot_index: Number(body.slotIndex),
     p_target_type: body.targetType,
     p_target_id: body.targetId,
@@ -221,11 +328,12 @@ export async function addTarget(supabase, userId, strategyId, body, idempotencyK
 export async function reorderTargets(supabase, userId, strategyId, body, idempotencyKey) {
   const strategy = await ownedStrategy(supabase, userId, strategyId);
   const assignments = body.assignments.map((item) => ({ bindingId: item.bindingId, slotIndex: Number(item.slotIndex), expectedVersion: Number(item.expectedVersion) }));
-  const requestHash = canonicalRequestHash({ strategyId, strategyVersion: strategy.current_version, assignments });
+  const version = operationalVersion(strategy);
+  const requestHash = canonicalRequestHash({ strategyId, strategyVersion: version, assignments });
   const { error } = await supabase.rpc("black_core_reorder_strategy_targets", {
     p_owner_user_id: userId,
     p_strategy_id: strategyId,
-    p_strategy_version: strategy.current_version,
+    p_strategy_version: version,
     p_assignments: assignments,
     p_request_hash: requestHash,
     p_idempotency_key: idempotencyKey
@@ -300,7 +408,7 @@ export async function disconnectTarget(supabase, userId, strategyId, bindingId, 
 
 export async function configurePaper(supabase, userId, strategyId, body, idempotencyKey) {
   const strategy = await ownedStrategy(supabase, userId, strategyId);
-  const paper = await oneOrNone(supabase.from("strategy_paper_accounts").select("*").eq("strategy_id", strategyId).eq("strategy_version", strategy.current_version).eq("owner_user_id", userId).maybeSingle());
+  const paper = await oneOrNone(supabase.from("strategy_paper_accounts").select("*").eq("strategy_id", strategyId).eq("strategy_version", operationalVersion(strategy)).eq("owner_user_id", userId).maybeSingle());
   if (!paper) throw strategyError(404, "STRATEGY_PAPER_NOT_FOUND", "The paper target is unavailable.");
   const policy = normalizeCapitalPolicy(body.capitalPolicy, paper.market_type, { allowZeroAllocation: false });
   const requestHash = canonicalRequestHash({ action: "CONFIGURE", expectedVersion: body.expectedVersion, policy });
@@ -320,7 +428,7 @@ export async function configurePaper(supabase, userId, strategyId, body, idempot
 
 export async function controlPaper(supabase, userId, strategyId, action, body = {}, idempotencyKey) {
   const strategy = await ownedStrategy(supabase, userId, strategyId);
-  const paper = await oneOrNone(supabase.from("strategy_paper_accounts").select("*").eq("strategy_id", strategyId).eq("strategy_version", strategy.current_version).eq("owner_user_id", userId).maybeSingle());
+  const paper = await oneOrNone(supabase.from("strategy_paper_accounts").select("*").eq("strategy_id", strategyId).eq("strategy_version", operationalVersion(strategy)).eq("owner_user_id", userId).maybeSingle());
   if (!paper) throw strategyError(404, "STRATEGY_PAPER_NOT_FOUND", "The paper target is unavailable.");
   if (!["start", "pause", "top-up", "reset"].includes(action)) throw strategyError(400, "PAPER_ACTION_INVALID", "Unsupported paper target action.");
   const amount = action === "top-up" ? Number(body.amount) : action === "reset" ? Number(body.demoEquity || 10_000) : null;
@@ -382,7 +490,7 @@ export async function getBindingData(supabase, userId, strategyId, bindingId, re
 
 export async function getPaperData(supabase, userId, strategyId) {
   const strategy = await ownedStrategy(supabase, userId, strategyId);
-  const paper = await oneOrNone(supabase.from("strategy_paper_accounts").select("*").eq("strategy_id", strategyId).eq("strategy_version", strategy.current_version).eq("owner_user_id", userId).maybeSingle());
+  const paper = await oneOrNone(supabase.from("strategy_paper_accounts").select("*").eq("strategy_id", strategyId).eq("strategy_version", operationalVersion(strategy)).eq("owner_user_id", userId).maybeSingle());
   if (!paper) throw strategyError(404, "STRATEGY_PAPER_NOT_FOUND", "The paper target is unavailable.");
   const [positions, orders, executions, trades] = await Promise.all([
     many(supabase.from("strategy_paper_positions").select("*").eq("paper_account_id", paper.id).is("closed_at", null).order("updated_at", { ascending: false })),
@@ -673,11 +781,54 @@ async function ownedBindingAny(supabase, userId, strategyId, bindingId) {
 }
 
 function safeStrategySummary(row) {
-  return { id: row.id, name: row.name, runtimeKind: row.runtime_kind, symbol: row.symbol, timeframe: row.timeframe, marketType: row.market_type, exchange: row.exchange, currentVersion: row.current_version, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at };
+  const publishedVersion = row.published_version ?? (row.status === "DRAFT" ? null : row.current_version ?? null);
+  const runningVersion = row.running_version ?? (row.status === "DRAFT" ? null : row.current_version ?? null);
+  return {
+    id: row.id,
+    name: row.name,
+    runtimeKind: row.runtime_kind,
+    symbol: row.symbol,
+    timeframe: row.timeframe,
+    marketType: row.market_type,
+    exchange: row.exchange,
+    currentVersion: row.current_version,
+    publishedVersion,
+    runningVersion,
+    draftRevision: Number(row.draft_revision || 0),
+    draftUpdatedAt: row.draft_updated_at || null,
+    hasDraftChanges: row.draft_definition
+      ? canonicalRequestHash({ name: row.draft_name || row.name, definition: row.draft_definition }) !== canonicalRequestHash({ name: row.name, definition: row.definition })
+      : false,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
 }
 
 function safeStrategy(row) {
-  return { ...safeStrategySummary(row), definition: row.definition, globalCapitalPolicy: row.global_capital_policy };
+  return {
+    ...safeStrategySummary(row),
+    definition: row.definition,
+    draftDefinition: row.draft_definition || row.definition,
+    draftName: row.draft_name || row.name,
+    draftBaseVersion: row.draft_base_version ?? row.published_version ?? null,
+    globalCapitalPolicy: row.global_capital_policy
+  };
+}
+
+function runtimeLabel(kind) {
+  if (kind === "builtin-ema-cross") return "EMA Cross Baseline";
+  if (kind === "builtin-adaptive-swing") return "Hidden Distribution Swing";
+  if (kind === "python-script") return "Python Indicator";
+  return "External Indicator";
+}
+
+function operationalVersion(strategy) {
+  const version = strategy.running_version ?? strategy.published_version ?? strategy.current_version;
+  if (!Number.isInteger(Number(version)) || Number(version) < 1) {
+    throw strategyError(409, "STRATEGY_VERSION_NOT_PUBLISHED", "Publish a strategy version before configuring Paper or live targets.");
+  }
+  return Number(version);
 }
 
 function safeBinding(row) {

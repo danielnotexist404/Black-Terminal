@@ -8,6 +8,7 @@ import { PGlite } from "@electric-sql/pglite";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const migration = fs.readFileSync(path.join(root, "supabase/migrations/202608220001_black_core_strategy_automation.sql"), "utf8")
   .replace("create extension if not exists pgcrypto;", "-- pgcrypto is preinstalled in production; PGlite exposes gen_random_uuid in core");
+const draftMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608230001_my_strategy_draft_version_model.sql"), "utf8");
 const db = new PGlite();
 
 await db.exec(`
@@ -26,6 +27,7 @@ await db.exec(`
   create table public.group_trade_intents(id uuid primary key default gen_random_uuid(), created_at timestamptz not null default now());
 `);
 await db.exec(migration);
+await db.exec(draftMigration);
 await db.exec("set request.jwt.claim.role='service_role'");
 
 const ownerId = crypto.randomUUID();
@@ -135,12 +137,55 @@ assert.equal(await scalar("select count(*)::int as value from public.strategy_ta
 assert.equal(await scalar("select count(*)::int as value from public.strategy_paper_accounts where strategy_id=$1", [strategyId]), 2, "paper history stays version-separated");
 
 await assert.rejects(() => db.query("update public.strategy_automation_versions set name='tampered' where strategy_id=$1 and version=1", [strategyId]), /immutable/i);
+
+const guidedDefinition = {
+  ...definition,
+  indicator: { indicatorId: "adaptiveSwingStrategy", instanceId: "chart:adaptiveSwingStrategy", name: "Adaptive Swing Reversal", instanceName: "Main Instance", version: "1", settingsHash: "settings-v1", settingsSummary: "Current chart settings", alertManifestVersion: "1", runtimeVersion: "black-cloud-paper-v1", warmupBars: 240, runtimeStatus: "CERTIFIED", useCurrentChartSettings: true, alerts: [] },
+  signals: { longEntry: "long-entry", shortEntry: "short-entry" },
+  paper: { capitalPolicy: paperPolicy }
+};
+const draftHash = sha({ name: "Guided Strategy", definition: guidedDefinition, globalPolicy, state: "DRAFT" });
+const guided = await call("select public.black_core_create_strategy_draft($1,$2,$3::jsonb,$4::jsonb,$5,$6) as result", [ownerId, "Guided Strategy", json(guidedDefinition), json(globalPolicy), draftHash, "guided-draft-create-1"]);
+const guidedId = guided.result.strategyId;
+assert.equal(await scalar("select published_version is null as value from public.strategy_automation_strategies where id=$1", [guidedId]), true, "draft creation does not publish");
+assert.equal(await scalar("select running_version is null as value from public.strategy_automation_strategies where id=$1", [guidedId]), true, "draft creation does not start a runtime");
+assert.equal(await scalar("select count(*)::int as value from public.strategy_paper_accounts where strategy_id=$1", [guidedId]), 0, "draft creation does not create a Paper runtime");
+
+const guidedOneHour = { ...guidedDefinition, timeframe: "1h" };
+await call("select public.black_core_save_strategy_draft($1,$2,$3,$4::jsonb,1) as result", [ownerId, guidedId, "Guided Strategy", json(guidedOneHour)]);
+assert.equal(await scalar("select draft_revision::int as value from public.strategy_automation_strategies where id=$1", [guidedId]), 2);
+assert.equal(await scalar("select running_version is null as value from public.strategy_automation_strategies where id=$1", [guidedId]), true, "saving a draft cannot start or restart Paper");
+
+await call("select public.black_core_publish_strategy_draft($1,$2,2,$3::jsonb,$4::jsonb,$5) as result", [ownerId, guidedId, json(globalPolicy), json(paperPolicy), sha({ publish: 1 })]);
+assert.equal(Number(await scalar("select published_version::int as value from public.strategy_automation_strategies where id=$1", [guidedId])), 1);
+assert.equal(await scalar("select running_version is null as value from public.strategy_automation_strategies where id=$1", [guidedId]), true, "publishing cannot silently start Paper");
+assert.equal(await scalar("select status as value from public.strategy_paper_accounts where strategy_id=$1 and strategy_version=1", [guidedId]), "PAUSED");
+
+await call("select public.black_core_start_strategy_version($1,$2,1) as result", [ownerId, guidedId]);
+assert.equal(Number(await scalar("select running_version::int as value from public.strategy_automation_strategies where id=$1", [guidedId])), 1);
+assert.equal(await scalar("select status as value from public.strategy_paper_accounts where strategy_id=$1 and strategy_version=1", [guidedId]), "ACTIVE");
+
+const guidedFourHour = { ...guidedDefinition, timeframe: "4h", settings: { revision: 2 } };
+await call("select public.black_core_save_strategy_draft($1,$2,$3,$4::jsonb,2) as result", [ownerId, guidedId, "Guided Strategy V2", json(guidedFourHour)]);
+assert.equal(Number(await scalar("select running_version::int as value from public.strategy_automation_strategies where id=$1", [guidedId])), 1, "draft edits cannot mutate the running version");
+assert.equal(await scalar("select status as value from public.strategy_paper_accounts where strategy_id=$1 and strategy_version=1", [guidedId]), "ACTIVE", "draft edits cannot restart or pause the active Paper account");
+
+await call("select public.black_core_publish_strategy_draft($1,$2,3,$3::jsonb,$4::jsonb,$5) as result", [ownerId, guidedId, json(globalPolicy), json(paperPolicy), sha({ publish: 2 })]);
+assert.equal(Number(await scalar("select published_version::int as value from public.strategy_automation_strategies where id=$1", [guidedId])), 2);
+assert.equal(Number(await scalar("select running_version::int as value from public.strategy_automation_strategies where id=$1", [guidedId])), 1, "a newer publication leaves the old running version untouched");
+assert.equal(await scalar("select status as value from public.strategy_paper_accounts where strategy_id=$1 and strategy_version=2", [guidedId]), "PAUSED");
+
+await call("select public.black_core_start_strategy_version($1,$2,2) as result", [ownerId, guidedId]);
+assert.equal(Number(await scalar("select running_version::int as value from public.strategy_automation_strategies where id=$1", [guidedId])), 2, "explicit start performs the version transition");
+assert.equal(await scalar("select status as value from public.strategy_paper_accounts where strategy_id=$1 and strategy_version=1", [guidedId]), "PAUSED");
+assert.equal(await scalar("select status as value from public.strategy_paper_accounts where strategy_id=$1 and strategy_version=2", [guidedId]), "ACTIVE");
+
 await db.exec("set role anon");
 await assert.rejects(() => db.query("select * from public.strategy_automation_strategies"), /permission denied/i);
 await db.exec("reset role");
 
 await db.close();
-console.log("Strategy automation PostgreSQL tests PASS — naming, immutable versions, Paper separation, 10-slot capacity, slot reuse, policy/lifecycle optimistic versioning, persistent idempotency, RLS and audit immutability verified.");
+console.log("Strategy automation PostgreSQL tests PASS — naming, immutable versions, draft/published/running isolation, explicit Paper transitions, 10-slot capacity, slot reuse, optimistic versioning, idempotency, RLS and audit immutability verified.");
 
 async function call(statement, values = []) {
   const result = await db.query(statement, values);

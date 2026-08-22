@@ -1,0 +1,20 @@
+import { Plus, Trash2 } from "lucide-react";
+import type { StrategyWizardDraft } from "../state/strategyDraftStore";
+import { NumberField } from "./ExecutionStep";
+
+type Target = { id: string; alertId?: string; closePercent: number; orderType: string };
+export function ExitsStep({ draft, onChange }: { draft: StrategyWizardDraft; onChange: (draft: StrategyWizardDraft) => void }) {
+  const exits = draft.definition.exits || {};
+  const targets = Array.isArray(exits.takeProfits) ? exits.takeProfits as Target[] : [];
+  const alerts = draft.definition.indicator?.alerts || [];
+  const patch = (value: Record<string, unknown>) => onChange({ ...draft, definition: { ...draft.definition, exits: { ...exits, ...value } } });
+  const updateTarget = (id: string, value: Partial<Target>) => patch({ takeProfits: targets.map((target) => target.id === id ? { ...target, ...value } : target) });
+  const total = targets.reduce((sum, target) => sum + Number(target.closePercent || 0), 0);
+  return <div className="strategy-wizard-section"><header><span>07</span><div><h2>Take profits and exits</h2><p>Add only the exits you need. Disabled targets create no runtime behavior.</p></div></header>
+    <div className="take-profit-list">{targets.map((target, index) => <div key={target.id} className="take-profit-row"><strong>{index === targets.length - 1 ? `TP${index + 1}` : `TP${index + 1}`}</strong><label>INDICATOR ALERT<select value={target.alertId || ""} onChange={(event) => updateTarget(target.id, { alertId: event.target.value })}><option value="">Price / R multiple</option>{alerts.map((alert) => <option key={alert.id} value={alert.id}>{alert.name}</option>)}</select></label><NumberField label="CLOSE" value={target.closePercent} suffix="%" min={1} max={100} onChange={(value) => updateTarget(target.id, { closePercent: value })} /><label>ORDER TYPE<select value={target.orderType} onChange={(event) => updateTarget(target.id, { orderType: event.target.value })}><option value="MARKET">Market</option><option value="LIMIT">Limit</option></select></label><button type="button" aria-label={`Remove TP${index + 1}`} onClick={() => patch({ takeProfits: targets.filter((row) => row.id !== target.id) })}><Trash2 size={14} /></button></div>)}</div>
+    {total > 100 ? <div className="inline-validation error">TP percentages total {total}%. Reduce the target allocations.</div> : <div className="inline-validation">Allocated exits: {total}% · Remaining position: {Math.max(0, 100 - total)}%</div>}
+    {targets.length < 7 ? <button type="button" className="add-tp-button" onClick={() => patch({ takeProfits: [...targets, { id: crypto.randomUUID(), closePercent: targets.length === 0 ? 50 : 25, orderType: "MARKET" }] })}><Plus size={14} /> ADD TAKE-PROFIT TARGET</button> : null}
+    <div className="strategy-toggle-list"><Toggle label="Trailing Stop" checked={exits.trailingStop === true} onChange={(value) => patch({ trailingStop: value })} /><Toggle label="Break-Even Protection" checked={exits.breakEven === true} onChange={(value) => patch({ breakEven: value })} /><Toggle label="Maximum Holding Time" checked={exits.maximumHoldingEnabled === true} onChange={(value) => patch({ maximumHoldingEnabled: value })} /></div>
+  </div>;
+}
+function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) { return <label className="wizard-toggle"><span><strong>{label}</strong><em>Optional exit behavior</em></span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /></label>; }

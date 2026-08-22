@@ -57,6 +57,28 @@ export const strategyAutomationApi = {
     request<StrategyWorkspace>(encodeURIComponent(strategyId), {}, signal),
   create: (name: string, definition: StrategyAutomationDefinition) =>
     request<StrategyWorkspace>("", mutation({ name, definition })),
+  createDraft: (name: string, definition: StrategyAutomationDefinition) =>
+    request<StrategyWorkspace>("drafts", mutation({ name, definition })),
+  saveDraft: (
+    strategyId: string,
+    name: string,
+    definition: StrategyAutomationDefinition,
+    expectedRevision?: number,
+  ) =>
+    request<StrategyWorkspace>(
+      `${encodeURIComponent(strategyId)}/draft`,
+      mutation({ name, definition, expectedRevision }, "PATCH"),
+    ),
+  publishDraft: (strategyId: string, expectedRevision: number) =>
+    request<StrategyWorkspace>(
+      `${encodeURIComponent(strategyId)}/publish`,
+      mutation({ expectedRevision }),
+    ),
+  startVersion: (strategyId: string, version: number) =>
+    request<StrategyWorkspace>(
+      `${encodeURIComponent(strategyId)}/versions/${version}/start`,
+      mutation({}),
+    ),
   save: (
     strategyId: string,
     name: string,

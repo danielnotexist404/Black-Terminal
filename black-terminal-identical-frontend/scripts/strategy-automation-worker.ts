@@ -124,6 +124,32 @@ async function tick() {
 }
 
 async function processStrategy(strategy: JsonRow) {
+  const runningVersion = Number(
+    strategy.running_version ?? strategy.current_version ?? 0,
+  );
+  if (!Number.isInteger(runningVersion) || runningVersion < 1)
+    return heartbeat(strategy, "PAUSED", "NO_RUNNING_VERSION");
+  const { data: version, error: versionError } = await supabase
+    .from("strategy_automation_versions")
+    .select("version,definition")
+    .eq("strategy_id", strategy.id)
+    .eq("owner_user_id", strategy.owner_user_id)
+    .eq("version", runningVersion)
+    .maybeSingle();
+  if (versionError) throw versionError;
+  if (!version?.definition)
+    return heartbeat(strategy, "DEGRADED", "RUNNING_VERSION_UNAVAILABLE");
+  const runningDefinition = version.definition;
+  strategy = {
+    ...strategy,
+    current_version: runningVersion,
+    runtime_kind: runningDefinition.runtimeKind,
+    symbol: runningDefinition.symbol,
+    timeframe: runningDefinition.timeframe,
+    market_type: runningDefinition.marketType,
+    exchange: runningDefinition.exchange || "bybit",
+    definition: runningDefinition,
+  };
   const { data: paper, error: paperError } = await supabase
     .from("strategy_paper_accounts")
     .select("*")
@@ -221,6 +247,7 @@ async function processStrategy(strategy: JsonRow) {
         strategy_id: strategy.id,
         owner_user_id: strategy.owner_user_id,
         runtime_state: "LIVE",
+        running_version: strategy.current_version,
         state_version: Number(runtime?.state_version || 0) + 1,
         last_closed_candle_at: candleAt,
         last_signal_key: signalKey || runtime?.last_signal_key || null,
@@ -505,6 +532,7 @@ async function heartbeat(
         strategy_id: strategy.id,
         owner_user_id: strategy.owner_user_id,
         runtime_state: state,
+        running_version: strategy.current_version,
         state_version: Number(current?.state_version || 0) + 1,
         last_heartbeat_at: new Date().toISOString(),
         worker_id: workerId,

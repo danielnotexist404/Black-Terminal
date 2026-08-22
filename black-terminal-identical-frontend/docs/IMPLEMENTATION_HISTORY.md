@@ -1457,3 +1457,7 @@ Retained the original EdgeTools Pine source and integrated a worker-isolated dua
 ## 2026-08-14 — BC-RDA product identity
 
 Renamed the public indicator to **BC-RDA — Risk Distribution Analysis** after the Black Core native engine, full distribution structure, deterministic event signals, and independent pane camera moved it beyond the original DDA Pro conversion. The stable indicator ID, workspace key, alert event codes, module paths, and original Pine reference remain unchanged for backward compatibility. Legacy preset names migrate to their BC-RDA equivalents on load.
+
+## 2026-08-23 — My Strategy UX reconstruction
+
+Replaced the rendered engineering form with a strategy library, a ten-step guided workflow and a separate operating cockpit. Added active chart indicator manifests, server-separated draft/published/running versions, explicit Paper version transitions, compact dynamic live-target slots, windowed Paper tables, nested research navigation, 39 visual baselines and PostgreSQL state-safety tests. Paper behavior remains server-authoritative and live execution remains disabled.

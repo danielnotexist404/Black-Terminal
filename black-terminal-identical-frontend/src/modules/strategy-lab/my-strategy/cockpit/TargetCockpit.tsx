@@ -1,0 +1,15 @@
+import { Link2Off, LockKeyhole, Pause, Play } from "lucide-react";
+import type { StrategyTargetBinding, StrategyTargetSnapshot } from "../../automation/strategyAutomation.types";
+
+export function TargetCockpit({ binding, snapshot, busy, onAction, onDisconnect }: { binding: StrategyTargetBinding; snapshot?: StrategyTargetSnapshot; busy: boolean; onAction: (action: "pause" | "resume") => void; onDisconnect: () => void }) {
+  return <section className="target-cockpit">
+    <header><div><span>TARGET {String(binding.slotIndex).padStart(2, "0")}</span><h2>{binding.targetLabel || binding.targetProvider || binding.targetType}</h2><p>{binding.targetType.replaceAll("_", " ")} · {binding.marketType} · {binding.status}</p></div><div className="target-cockpit-actions"><button type="button" disabled={busy || !["READY", "PAUSED", "DEGRADED"].includes(binding.status)} onClick={() => onAction(binding.status === "PAUSED" ? "resume" : "pause")}>{binding.status === "PAUSED" ? <Play size={12} /> : <Pause size={12} />}{binding.status === "PAUSED" ? "REVALIDATE" : "PAUSE"}</button><button type="button" disabled={busy} onClick={onDisconnect}><Link2Off size={12} /> DISCONNECT</button></div></header>
+    <div className="cockpit-metric-grid target-metrics"><Metric label="FRESHNESS" value={snapshot?.freshness || "UNAVAILABLE"} /><Metric label="EQUITY" value={money(snapshot?.equity || 0)} /><Metric label="ALLOCATED" value={money(snapshot?.allocatedStrategyCapital || 0)} /><Metric label="USED" value={money(snapshot?.usedStrategyCapital || 0)} /><Metric label="OPEN POSITIONS" value={String(snapshot?.openPositions || 0)} /><Metric label="OPEN ORDERS" value={String(snapshot?.openOrders || 0)} /><Metric label="NET PNL" value={signedMoney(snapshot?.netPnl || 0)} /><Metric label="DRAWDOWN" value={`${(snapshot?.currentDrawdownPercent || 0).toFixed(2)}%`} /></div>
+    <div className="target-policy-grid"><div><span>Strategy allocation</span><strong>{binding.capitalPolicy.strategyAllocationValue}{binding.capitalPolicy.strategyAllocationMode === "FIXED_USDT" ? " USDT" : "%"}</strong></div><div><span>Per-trade amount</span><strong>{binding.capitalPolicy.tradeAmountValue}{binding.capitalPolicy.tradeAmountMode === "FIXED_USDT" ? " USDT" : "%"}</strong></div><div><span>Connection</span><strong>{snapshot?.connectionHealth || "Unavailable"}</strong></div><div><span>Protection</span><strong>{snapshot?.protectionHealth || "Not armed"}</strong></div></div>
+    <div className="live-certification-banner"><LockKeyhole size={14} /><div><strong>LIVE EXECUTION NOT CERTIFIED</strong><span>This target remains unarmed. Preparing or selecting it cannot submit an order.</span></div></div>
+  </section>;
+}
+
+function Metric({ label, value }: { label: string; value: string }) { return <div><span>{label}</span><strong>{value}</strong></div>; }
+function money(value: number) { return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+function signedMoney(value: number) { return `${value >= 0 ? "+" : "-"}$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }

@@ -428,3 +428,15 @@ Use a separate root-owned environment file based on `.env.liquidation-intelligen
 ## BC-RDA validation
 
 Run `npm run test:dda-pro-all`, `npm run benchmark:dda-pro`, `npm run test:oscillator-layout`, `npm run typecheck`, and `npm run build`. TradingView parity additionally requires externally supplied golden exports; internal tests alone do not certify it.
+## Strategy Lab verification
+
+Before a preview deployment that changes My Strategy, run:
+
+```bash
+npm run typecheck
+npm run test:strategy-automation
+npm run benchmark:strategy-automation
+npm run build
+```
+
+For local visual evidence, start Vite on `127.0.0.1:4178` and run `npm run test:my-strategy-visual`. Visual fixtures are accepted only on localhost with `uiPreview=1`; they are not production data paths.

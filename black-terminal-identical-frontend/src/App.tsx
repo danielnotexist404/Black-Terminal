@@ -110,6 +110,7 @@ import { getCapabilities, type CapabilityUser, type ProductTier, type TerminalCa
 import { blackCoreWindowDockManager } from "./core/windows/windowDockManager";
 import type { BlackCoreModuleMode } from "./core/modules/moduleRegistry";
 import { PerformanceHud } from "./performance/PerformanceHud";
+import { mergeNewestWorkspaceSnapshots } from "./indicators/indicatorSettingsPersistence";
 import blackCoreEngine from "./assets/black-core-engine-sidebar.png";
 import {
   ADMIN_ALLOWED_INDICATORS,
@@ -194,6 +195,7 @@ const HDLX_PROFILE_CAPABILITY: TerminalCapability = "proprietary.hdlxProfile";
 const defaultWorkspaces = ["Quant Desk", "Scalp Layout", "Strategy Lab"] as const;
 const workspaceStorageKey = "bt_workspaces_v1";
 const workspaceNamesStorageKey = "bt_workspace_names_v1";
+const activeWorkspaceStorageKey = "bt_active_workspace_v1";
 const visibleIndicatorsStorageKey = "bt_visible_indicators_v1";
 
 function resolveWelcomeName(displayName?: string, username?: string) {
@@ -420,6 +422,20 @@ function loadWorkspaceSnapshots(): Record<string, WorkspaceSnapshot> {
   } catch {
     return {};
   }
+}
+
+function loadActiveWorkspaceName() {
+  if (typeof window === "undefined") return defaultWorkspaces[0];
+  const stored = localStorage.getItem(activeWorkspaceStorageKey)?.trim();
+  return stored || defaultWorkspaces[0];
+}
+
+function migrateWorkspaceSnapshotRecord(value: unknown): Record<string, WorkspaceSnapshot> {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(Object.entries(value).flatMap(([name, snapshot]) => {
+    if (!snapshot || typeof snapshot !== "object") return [];
+    return [[name, migrateWorkspaceSnapshot(snapshot as WorkspaceSnapshot)]];
+  }));
 }
 
 function migrateIndicatorAdvancedSettings(value: Partial<IndicatorAdvancedSettings> | null | undefined): IndicatorAdvancedSettings {
@@ -726,6 +742,10 @@ export default function App() {
   const [availableSymbols, setAvailableSymbols] = useState<MarketSymbolOption[]>(initialExchange.symbols);
   const [timeframe, setTimeframe] = useState<Timeframe>(() => (localStorage.getItem("bt_last_timeframe") as Timeframe) || "15m");
   const [chartType, setChartType] = useState<ChartDisplayType>(() => (localStorage.getItem("bt_last_chart_type") as ChartDisplayType) || "candlesticks");
+  const initialWorkspaceState = useMemo(() => {
+    const name = loadActiveWorkspaceName();
+    return { name, snapshot: loadWorkspaceSnapshots()[name] ?? null };
+  }, []);
 
   useEffect(() => {
     localStorage.setItem("bt_last_symbol", JSON.stringify(symbol));
@@ -741,20 +761,26 @@ export default function App() {
 
   const [visibleIndicators, setVisibleIndicators] = useState<VisibleIndicators>(loadStoredVisibleIndicators);
   const [indicatorPreferencesUser, setIndicatorPreferencesUser] = useState<string | null>(null);
-  const [indicatorPeriods, setIndicatorPeriods] = useState<IndicatorPeriods>(defaultIndicatorPeriods);
-  const [indicatorVisualSettings, setIndicatorVisualSettings] = useState<IndicatorVisualSettings>(defaultIndicatorVisualSettings);
-  const [indicatorAdvancedSettings, setIndicatorAdvancedSettings] = useState<IndicatorAdvancedSettings>(defaultIndicatorAdvancedSettings);
+  const [indicatorPeriods, setIndicatorPeriods] = useState<IndicatorPeriods>(() =>
+    migrateIndicatorPeriods(initialWorkspaceState.snapshot?.indicatorPeriods)
+  );
+  const [indicatorVisualSettings, setIndicatorVisualSettings] = useState<IndicatorVisualSettings>(() =>
+    migrateIndicatorVisualSettings(initialWorkspaceState.snapshot?.indicatorVisualSettings)
+  );
+  const [indicatorAdvancedSettings, setIndicatorAdvancedSettings] = useState<IndicatorAdvancedSettings>(() =>
+    migrateIndicatorAdvancedSettings(initialWorkspaceState.snapshot?.indicatorAdvancedSettings)
+  );
   const [kioseffSettings, setKioseffSettings] = useState<KioseffSettingsV1>(() =>
-    structuredClone(KIOSEFF_DEFAULT_SETTINGS)
+    migrateKioseffSettings(initialWorkspaceState.snapshot?.kioseffSettings ?? structuredClone(KIOSEFF_DEFAULT_SETTINGS))
   );
   const [indicatorAlerts, setIndicatorAlerts] = useState<IndicatorAlertDefinition[]>(loadStoredAlerts);
   const [auctionProfileSettings, setAuctionProfileSettings] = useState<AuctionProfileSettings>(() =>
-    migrateAuctionProfileSettings(structuredClone(AUCTION_PROFILE_DEFAULT_SETTINGS))
+    migrateAuctionProfileSettings(initialWorkspaceState.snapshot?.auctionProfileSettings ?? structuredClone(AUCTION_PROFILE_DEFAULT_SETTINGS))
   );
   const [activeStrategyKind, setActiveStrategyKind] = useState<StrategyRuntimeKind | undefined>();
   const [strategySelectionRevision, setStrategySelectionRevision] = useState(0);
   const [workspaces, setWorkspaces] = useState<string[]>(loadWorkspaceNames);
-  const [workspace, setWorkspace] = useState<string>("Quant Desk");
+  const [workspace, setWorkspace] = useState<string>(initialWorkspaceState.name);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [lastPrice, setLastPrice] = useState(66678.1);
   const prevPriceRef = useRef(lastPrice);
@@ -1135,31 +1161,42 @@ export default function App() {
           });
           setVisibleIndicators(nextVisible);
 
-          if (record.workspaces && record.workspaces.length > 0) {
-            setWorkspaces(record.workspaces);
-            setWorkspace(record.activeWorkspace || "Quant Desk");
-            localStorage.setItem(workspaceNamesStorageKey, JSON.stringify(record.workspaces.filter(w => !defaultWorkspaces.includes(w as any))));
-            localStorage.setItem(workspaceStorageKey, JSON.stringify(record.workspaceSnapshots || {}));
-            
-            const activeName = record.activeWorkspace || "Quant Desk";
-            const rawSnapshot = (record.workspaceSnapshots || {})[activeName];
-            if (rawSnapshot) {
-              const snapshot = migrateWorkspaceSnapshot(rawSnapshot);
-              const exchange = marketCatalog.find((item) => item.id === snapshot.selectedExchangeId);
-              const nextSymbol = exchange?.symbols.find((item) => item.rawSymbol === snapshot.symbolRaw);
-              if (exchange) setSelectedExchange(exchange);
-              if (nextSymbol) setSymbol(nextSymbol);
-              setTimeframe(snapshot.timeframe);
-              setChartType(snapshot.chartType);
-              
-              setIndicatorPeriods(snapshot.indicatorPeriods);
-              setIndicatorVisualSettings(snapshot.indicatorVisualSettings);
-              setIndicatorAdvancedSettings(migrateIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings));
-              setKioseffSettings(migrateKioseffSettings(snapshot.kioseffSettings));
-              setLayout(snapshot.layout);
-              setAuctionProfileSettings(migrateAuctionProfileSettings(snapshot.auctionProfileSettings));
-              setActiveStrategyKind(snapshot.activeStrategyKind);
-            }
+          const localSnapshots = loadWorkspaceSnapshots();
+          const remoteSnapshots = migrateWorkspaceSnapshotRecord(record.workspaceSnapshots || {});
+          const mergedSnapshots = mergeNewestWorkspaceSnapshots(localSnapshots, remoteSnapshots);
+          const configuredWorkspaceNames = Array.isArray(record.workspaces)
+            ? record.workspaces.filter((name): name is string => typeof name === "string" && name.trim().length > 0)
+            : [];
+          const mergedWorkspaceNames = [...new Set([
+            ...defaultWorkspaces,
+            ...loadWorkspaceNames(),
+            ...configuredWorkspaceNames,
+            ...Object.keys(mergedSnapshots)
+          ])];
+          const activeName = record.activeWorkspace || loadActiveWorkspaceName();
+
+          setWorkspaces(mergedWorkspaceNames);
+          setWorkspace(activeName);
+          localStorage.setItem(activeWorkspaceStorageKey, activeName);
+          localStorage.setItem(workspaceNamesStorageKey, JSON.stringify(mergedWorkspaceNames.filter((name) => !defaultWorkspaces.includes(name as any))));
+          localStorage.setItem(workspaceStorageKey, JSON.stringify(mergedSnapshots));
+
+          const snapshot = mergedSnapshots[activeName];
+          if (snapshot) {
+            const exchange = marketCatalog.find((item) => item.id === snapshot.selectedExchangeId);
+            const nextSymbol = exchange?.symbols.find((item) => item.rawSymbol === snapshot.symbolRaw);
+            if (exchange) setSelectedExchange(exchange);
+            if (nextSymbol) setSymbol(nextSymbol);
+            setTimeframe(snapshot.timeframe);
+            setChartType(snapshot.chartType);
+
+            setIndicatorPeriods(snapshot.indicatorPeriods);
+            setIndicatorVisualSettings(snapshot.indicatorVisualSettings);
+            setIndicatorAdvancedSettings(migrateIndicatorAdvancedSettings(snapshot.indicatorAdvancedSettings));
+            setKioseffSettings(migrateKioseffSettings(snapshot.kioseffSettings));
+            setLayout(snapshot.layout);
+            setAuctionProfileSettings(migrateAuctionProfileSettings(snapshot.auctionProfileSettings));
+            setActiveStrategyKind(snapshot.activeStrategyKind);
           }
           if (record.alerts) {
             setIndicatorAlerts(record.alerts);
@@ -1394,6 +1431,45 @@ export default function App() {
     updatedAt: Date.now()
   });
 
+  useEffect(() => {
+    if (!isLocalUiPreview && (!currentUser || indicatorPreferencesUser !== currentUser.username)) return;
+
+    const snapshots = loadWorkspaceSnapshots();
+    snapshots[workspace] = captureWorkspaceSnapshot();
+    try {
+      localStorage.setItem(workspaceStorageKey, JSON.stringify(snapshots));
+      localStorage.setItem(activeWorkspaceStorageKey, workspace);
+    } catch (error) {
+      console.error("Failed to persist indicator settings locally:", error);
+    }
+
+    if (!currentUser || isLocalUiPreview) return;
+    const names = [...new Set([...workspaces, workspace])];
+    const timer = window.setTimeout(() => {
+      void dbUpdateUser(currentUser.username, {
+        workspaces: names,
+        workspaceSnapshots: snapshots,
+        activeWorkspace: workspace
+      }).catch((error) => {
+        console.error("Failed to persist indicator settings:", error);
+      });
+    }, 750);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    visibleIndicators,
+    indicatorPeriods,
+    indicatorVisualSettings,
+    indicatorAdvancedSettings,
+    kioseffSettings,
+    auctionProfileSettings,
+    workspace,
+    workspaces,
+    currentUser?.username,
+    indicatorPreferencesUser,
+    isLocalUiPreview
+  ]);
+
   const saveWorkspace = async (name = workspace) => {
     const safeName = name.trim();
     if (!safeName) return;
@@ -1404,6 +1480,7 @@ export default function App() {
     setWorkspaces(names);
     localStorage.setItem(workspaceNamesStorageKey, JSON.stringify(names.filter((item) => !defaultWorkspaces.includes(item as (typeof defaultWorkspaces)[number]))));
     setWorkspace(safeName);
+    localStorage.setItem(activeWorkspaceStorageKey, safeName);
 
     // Backend sync
     if (currentUser) {
@@ -1437,6 +1514,7 @@ export default function App() {
     setWorkspaces(nextWatchlist => nextWorkspaces);
 
     const fallback = defaultWorkspaces[0];
+    localStorage.setItem(activeWorkspaceStorageKey, fallback);
     openWorkspace(fallback);
 
     // Backend sync
@@ -1463,6 +1541,7 @@ export default function App() {
 
   const openWorkspace = (name: string) => {
     setWorkspace(name);
+    localStorage.setItem(activeWorkspaceStorageKey, name);
     const snapshot = loadWorkspaceSnapshots()[name];
     if (snapshot) {
       const exchange = marketCatalog.find((item) => item.id === snapshot.selectedExchangeId);

@@ -3,7 +3,7 @@ import type { ProfessionalDomLadderModel, ProfessionalDomSide } from "./domProfe
 import type { WallDetection } from "./types";
 
 export type ChartDockedDepthCoverage = "live" | "unavailable";
-export type ChartDockedDepthScaleMode = "follow" | "locked";
+export type ChartDockedDepthScaleMode = "follow" | "book" | "locked";
 
 export type ChartDockedDepthRow = {
   key: string;
@@ -35,6 +35,10 @@ export type ChartDockedDepthLadderModel = {
   plotBottom: number;
   rowHeight: number;
   currentPrice: number | null;
+  currentPriceY: number | null;
+  priceMin: number;
+  priceMax: number;
+  priceSpan: number;
   coverageMin: number | null;
   coverageMax: number | null;
   subscribedDepth: number | null;
@@ -59,11 +63,12 @@ type ChartDockedDepthLadderInput = {
 type MutableRow = ChartDockedDepthRow;
 
 const EPSILON = 1e-12;
+export const CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD = 26_000;
 
 export function buildChartDockedDepthLadder(input: ChartDockedDepthLadderInput): ChartDockedDepthLadderModel {
   const { depth } = input;
   const scaleMode = input.scaleMode ?? "follow";
-  const viewport = input.viewport;
+  const viewport = scaleMode === "book" ? fitViewportToDeliveredBook(input.viewport, depth) : input.viewport;
   const plotHeight = Math.max(0, viewport.plotBottom - viewport.plotTop);
   const preferredRowHeight = clamp(input.preferredRowHeight ?? 13, 9, 24);
   const rowCount = plotHeight > 0
@@ -174,6 +179,10 @@ export function buildChartDockedDepthLadder(input: ChartDockedDepthLadderInput):
     plotBottom: viewport.plotBottom,
     rowHeight,
     currentPrice: depth.currentPrice,
+    currentPriceY: currentY !== null && currentY >= viewport.plotTop && currentY <= viewport.plotBottom ? currentY : null,
+    priceMin: viewport.priceMin,
+    priceMax: viewport.priceMax,
+    priceSpan: viewport.priceMax - viewport.priceMin,
     coverageMin: depth.coverageMin,
     coverageMax: depth.coverageMax,
     subscribedDepth: depth.subscribedDepth,
@@ -186,6 +195,69 @@ export function buildChartDockedDepthLadder(input: ChartDockedDepthLadderInput):
     hiddenBelowCount,
     scaleMode
   };
+}
+
+/**
+ * Builds the moving full-range ladder scale while preserving the live price's
+ * exact vertical chart coordinate. The chart can pan or rescale independently;
+ * the ladder still exposes a stable dollar span and remains visually registered
+ * to the chart's current-price marker.
+ */
+export function buildPriceFollowingViewport(
+  chartViewport: ChartPriceTransformSnapshot,
+  referencePrice: number,
+  priceSpan = CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD
+): ChartPriceTransformSnapshot {
+  if (!Number.isFinite(referencePrice) || referencePrice <= 0 || !Number.isFinite(priceSpan) || priceSpan <= EPSILON) {
+    return chartViewport;
+  }
+  const chartY = priceToScreenY(referencePrice, chartViewport);
+  const plotHeight = chartViewport.plotBottom - chartViewport.plotTop;
+  if (chartY === null || !Number.isFinite(plotHeight) || plotHeight <= EPSILON) return chartViewport;
+
+  const topRatio = clamp((chartY - chartViewport.plotTop) / plotHeight, 0, 1);
+  const priceMin = chartViewport.scaleMode === "logarithmic"
+    ? solveLogarithmicMinimum(referencePrice, priceSpan, 1 - topRatio)
+    : referencePrice - (1 - topRatio) * priceSpan;
+  const safeMinimum = Math.max(Math.min(referencePrice, priceMin), Math.max(EPSILON, referencePrice * 1e-12));
+  return {
+    ...chartViewport,
+    priceMin: safeMinimum,
+    priceMax: safeMinimum + priceSpan
+  };
+}
+
+export function fitViewportToDeliveredBook(
+  viewport: ChartPriceTransformSnapshot,
+  depth: ProfessionalDomLadderModel
+): ChartPriceTransformSnapshot {
+  const coverageMin = depth.coverageMin;
+  const coverageMax = depth.coverageMax;
+  if (coverageMin === null || coverageMax === null || !Number.isFinite(coverageMin) || !Number.isFinite(coverageMax)) return viewport;
+
+  const span = coverageMax - coverageMin;
+  if (span > EPSILON) return { ...viewport, priceMin: coverageMin, priceMax: coverageMax };
+
+  const halfStep = Math.max(depth.priceStep / 2, Math.abs(coverageMin) * 1e-8, EPSILON);
+  return { ...viewport, priceMin: Math.max(EPSILON, coverageMin - halfStep), priceMax: coverageMax + halfStep };
+}
+
+function solveLogarithmicMinimum(referencePrice: number, priceSpan: number, fractionBelow: number) {
+  if (fractionBelow <= EPSILON) return referencePrice;
+  if (fractionBelow >= 1 - EPSILON) return Math.max(EPSILON, referencePrice - priceSpan);
+
+  let low = Math.max(EPSILON, referencePrice - priceSpan);
+  let high = referencePrice;
+  for (let iteration = 0; iteration < 64; iteration += 1) {
+    const middle = (low + high) / 2;
+    const denominator = Math.log(middle + priceSpan) - Math.log(middle);
+    const actualFraction = denominator > EPSILON
+      ? (Math.log(referencePrice) - Math.log(middle)) / denominator
+      : 0;
+    if (actualFraction > fractionBelow) low = middle;
+    else high = middle;
+  }
+  return (low + high) / 2;
 }
 
 function classifySide(bidSize: number, askSize: number): ProfessionalDomSide {

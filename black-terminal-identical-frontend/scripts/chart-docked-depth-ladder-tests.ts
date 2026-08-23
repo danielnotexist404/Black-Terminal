@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { buildChartDockedDepthLadder } from "../src/modules/dom-pro/chartDockedDepthLadderModel.ts";
+import {
+  CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD,
+  buildChartDockedDepthLadder,
+  buildPriceFollowingViewport
+} from "../src/modules/dom-pro/chartDockedDepthLadderModel.ts";
 import { ChartPriceViewportStore } from "../src/modules/dom-pro/chartPriceViewportStore.ts";
-import type { ChartPriceTransformSnapshot } from "../src/chart-engine/priceTransform.ts";
+import { priceToScreenY, type ChartPriceTransformSnapshot } from "../src/chart-engine/priceTransform.ts";
 import type { ProfessionalDomLadderModel, ProfessionalDomRow } from "../src/modules/dom-pro/domProfessionalLadder.ts";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
@@ -93,6 +97,22 @@ function depth(rows: ProfessionalDomRow[]): ProfessionalDomLadderModel {
 }
 
 {
+  const chartViewport = viewport(61, 77_200, 77_500);
+  const referencePrice = 77_307.5;
+  const fullRangeViewport = buildPriceFollowingViewport(chartViewport, referencePrice);
+  assert.equal(fullRangeViewport.priceMax - fullRangeViewport.priceMin, CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD, "default follow mode must expose the promised 26,000 USD range");
+  assert.ok(Math.abs((priceToScreenY(referencePrice, fullRangeViewport) ?? 0) - (priceToScreenY(referencePrice, chartViewport) ?? 1)) < 1e-8, "the full-range ladder live-price line must remain exactly aligned with the chart label");
+}
+
+{
+  const chartViewport = viewport(62, 64_000, 82_000, "logarithmic");
+  const referencePrice = 77_307.5;
+  const fullRangeViewport = buildPriceFollowingViewport(chartViewport, referencePrice);
+  assert.equal(fullRangeViewport.priceMax - fullRangeViewport.priceMin, CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD, "logarithmic follow mode must retain the exact dollar span");
+  assert.ok(Math.abs((priceToScreenY(referencePrice, fullRangeViewport) ?? 0) - (priceToScreenY(referencePrice, chartViewport) ?? 1)) < 1e-6, "logarithmic charts must retain exact live-price registration");
+}
+
+{
   const rows = Array.from({ length: 2_000 }, (_, index) => {
     const price = 1_000 + index;
     return index < 1_000 ? sourceRow(price, 1, 0, 0.5) : sourceRow(price, 0, 2, -0.75);
@@ -106,6 +126,13 @@ function depth(rows: ProfessionalDomRow[]): ProfessionalDomLadderModel {
   assert.equal(locked.visibleBidSize, following.visibleBidSize, "locking must freeze the selected chart range rather than detach into book-fit mode");
   assert.equal(locked.visibleAskSize, following.visibleAskSize, "locked and following modes use the same explicit price transform");
   assert.equal(locked.scaleMode, "locked");
+
+  const bookFit = buildChartDockedDepthLadder({ depth: source, viewport: viewport(9, 1_900, 2_100), preferredRowHeight: 10, scaleMode: "book" });
+  assert.equal(bookFit.visibleBidSize, source.totalBidSize, "optional book fit must conserve every delivered bid quantity");
+  assert.equal(bookFit.visibleAskSize, source.totalAskSize, "optional book fit must conserve every delivered ask quantity");
+  assert.equal(bookFit.hiddenAboveCount, 0, "optional book fit must not hide delivered asks");
+  assert.equal(bookFit.hiddenBelowCount, 0, "optional book fit must not hide delivered bids");
+  assert.equal(bookFit.scaleMode, "book");
 }
 
 const componentSource = readFileSync(resolve(projectRoot, "src/modules/dom-pro/components/ChartDockedDepthLadder.tsx"), "utf8");
@@ -122,8 +149,12 @@ assert.doesNotMatch(consolidatedClientSource, /input\.exchange|exchangeLabel|sel
 assert.match(componentSource, /requestAnimationFrame\(animate\)/, "depth transitions must be synchronized to display frames");
 assert.doesNotMatch(componentSource, /setInterval\(/, "the dock renderer must not introduce a fixed-FPS interval");
 assert.match(componentSource, /HIDDEN\/RPI EXCLUDED/, "coverage limits must be disclosed in the UI");
-assert.doesNotMatch(componentSource, /BOOK FIT/, "the ladder must never detach itself into a venue-book scale");
-assert.match(componentSource, /"FOLLOW" : "LOCKED"/, "chart-follow must be the visible default and scale-lock the explicit alternate");
+assert.match(componentSource, /26K FOLLOW/, "the moving 26,000 USD range must be the visible default");
+assert.match(componentSource, /BOOK FIT/, "the previous delivered-book fitting behavior must remain an explicit optional mode");
+assert.match(componentSource, /buildPriceFollowingViewport/, "the ladder must derive its moving full-range scale from the chart transform");
+assert.match(componentSource, /buildBufferedRequestViewport/, "high-frequency live-price updates must use a buffered request viewport instead of restarting the depth request per tick");
+assert.match(componentSource, /CONSOLIDATED_QUERY_BUCKET_USD/, "the consolidated request range must be stable inside an explicit price bucket");
+assert.match(componentSource, /model\.currentPriceY/, "the live-price line must use the exact transformed price coordinate rather than a row midpoint");
 assert.match(componentSource, /setLockedViewport\(null\)/, "a symbol or chart identity change must safely restore chart-follow mode");
 assert.match(componentSource, /drawCumulativeDepthBand/, "the ladder must render the DOM Pro cumulative V-shaped depth bands");
 assert.match(appSource, /<Settings size=\{17\} \/>[\s\S]{0,900}<Rows3 size=\{17\} \/>/, "the dock toggle must sit immediately after Settings");

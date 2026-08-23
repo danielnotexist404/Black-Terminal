@@ -27,7 +27,7 @@
 .chart-docked-depth-toolbar {
   top: 0;
   height: 21px;
-  grid-template-columns: auto auto auto minmax(0, 1fr) 20px;
+  grid-template-columns: auto auto auto auto minmax(0, 1fr) 20px;
   gap: 4px;
   padding: 0 4px;
   border-bottom: 1px solid #272a2f;
@@ -41,7 +41,8 @@
 }
 
 .chart-docked-depth-toolbar label,
-.chart-docked-depth-scale {
+.chart-docked-depth-scale,
+.chart-docked-depth-book-fit {
   height: 15px;
   display: inline-flex;
   align-items: center;
@@ -55,11 +56,29 @@
 
 .chart-docked-depth-scale {
   width: auto !important;
-  min-width: 56px;
+  min-width: 68px;
   font: 800 6px "IBM Plex Mono", monospace;
 }
 
-.chart-docked-depth-scale svg { color: #ff1834; }
+.chart-docked-depth-scale svg,
+.chart-docked-depth-book-fit svg { color: #ff1834; }
+
+.chart-docked-depth-toolbar .chart-docked-depth-book-fit {
+  width: auto;
+  min-width: 50px;
+  display: inline-flex;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 3px;
+  font: 800 6px "IBM Plex Mono", monospace;
+}
+
+.chart-docked-depth-toolbar .chart-docked-depth-book-fit.is-active {
+  border-color: #b1001c;
+  color: #fff;
+  background: rgba(109, 0, 18, .38);
+  box-shadow: inset 0 0 8px rgba(255, 0, 37, .18);
+}
 
 .chart-docked-depth-toolbar select {
   width: 35px;
@@ -208,6 +227,7 @@
 .chart-docked-depth-tooltip .bid { color: #f4f6f8; }
 
 @media (max-width: 1100px) {
-  .chart-docked-depth-scale { display: none; }
+  .chart-docked-depth-scale,
+  .chart-docked-depth-book-fit { display: none !important; }
   .chart-docked-depth-toolbar { grid-template-columns: auto auto minmax(0, 1fr) 20px; }
 }

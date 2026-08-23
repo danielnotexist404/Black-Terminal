@@ -7,10 +7,12 @@ const files = [
   "server/qalc/service.js", "src/modules/strategy-lab/qalc/QalcExperience.tsx",
 ];
 const source = (await Promise.all(files.map((path) => readFile(new URL(`../${path}`, import.meta.url), "utf8")))).join("\n");
+const compose = await readFile(new URL("../infra/black-cloud/docker-compose.yml", import.meta.url), "utf8");
 assert.doesNotMatch(source, /createCloudExchangeAdapter|bybitRequest\([^)]*(create|amend|cancel)|\/v5\/order\/(create|amend|cancel)/i, "QALC must have no broker mutation path");
 assert.doesNotMatch(source, /\/withdraw|withdraw\s*\(|withdrawalCapability:\s*true/i, "QALC implementation must not introduce withdrawal capability");
 assert.match(source, /liveExecutionEnabled:\s*false/);
 assert.match(source, /groupFanoutEnabled:\s*false/);
+assert.match(compose, /qalc-worker:[\s\S]*?env_file:\s*\[\]/, "QALC Research worker must not inherit the privileged runtime env file");
 
 const response = mockResponse();
 await assert.rejects(

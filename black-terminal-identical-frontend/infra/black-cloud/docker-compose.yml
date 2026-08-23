@@ -160,6 +160,9 @@ services:
 
   qalc-worker:
     <<: *runtime
+    # Public-data Research capture must not inherit Black Cloud, broker,
+    # Supabase, email, or AI credentials from the general runtime anchor.
+    env_file: []
     command: ["node", "--experimental-strip-types", "scripts/qalc-worker.ts"]
     environment:
       QALC_SYMBOL: BTCUSDT

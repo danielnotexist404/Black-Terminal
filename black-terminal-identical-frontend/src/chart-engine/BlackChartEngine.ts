@@ -214,6 +214,7 @@ export class BlackChartEngine {
   private customPlots: CompiledPlot[] = [];
   private alertDefinitions: IndicatorAlertDefinition[] = [];
   private visibleIndicators: VisibleIndicators = {
+    qalc: false,
     liquidationHeatmap: false,
     auctionProfile: false,
     volatilityHeatmap: false,
@@ -248,6 +249,7 @@ export class BlackChartEngine {
     ddaProOscillator: 500
   };
   private indicatorVisualSettings: IndicatorVisualSettings = {
+    qalc: { color: "white", intensity: 92 },
     liquidationHeatmap: { color: "red", intensity: 78 },
     auctionProfile: { color: "red", intensity: 82 },
     volatilityHeatmap: { color: "green", intensity: 86 },
@@ -712,6 +714,17 @@ export class BlackChartEngine {
 
   getScreenYForPrice(price: number) {
     return this.priceToScreenY(price);
+  }
+
+  getScreenXForTimestamp(timeSeconds: number) {
+    return this.xForTimestamp(timeSeconds);
+  }
+
+  getVisibleTimeRange() {
+    const candles = this.getDisplayCandles();
+    const first = candles[this.view.firstIndex];
+    const last = candles[this.view.lastIndex];
+    return first && last ? { from: first.time, to: last.time } : undefined;
   }
 
   screenYToPrice(localY: number) {

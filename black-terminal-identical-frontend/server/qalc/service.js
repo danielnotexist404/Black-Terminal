@@ -1,12 +1,14 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { httpError, writeSecurityAudit } from "../security/securityMiddleware.js";
 
 const allowedSymbols = new Set(["BTCUSDT", "ETHUSDT"]);
 const allowedHorizons = new Set([250, 500, 1000, 3000, 5000, 10000]);
+let timelineCache = { path: "", modifiedAt: -1, document: null };
 
 export async function handleQalcRequest(req, res, security, path) {
   const [resource, id, action] = path;
   if (req.method === "GET" && resource === "status") return res.status(200).json(await runtimeStatus());
+  if (req.method === "GET" && resource === "timeline") return res.status(200).json(await runtimeTimeline(req));
   if (resource !== "strategies") throw httpError(404, "BC-QALC route not found.", "QALC_ROUTE_NOT_FOUND");
   if (req.method === "GET" && !id) return listStrategies(res, security);
   if (req.method === "POST" && !id) return createStrategy(req, res, security);
@@ -14,6 +16,47 @@ export async function handleQalcRequest(req, res, security, path) {
   if (req.method === "PATCH" && id && !action) return updateStrategy(req, res, security, id);
   if (req.method === "POST" && id && action === "state") return changeState(req, res, security, id);
   throw httpError(405, "BC-QALC method not allowed.", "QALC_METHOD_NOT_ALLOWED");
+}
+
+async function runtimeTimeline(req) {
+  const path = process.env.QALC_TIMELINE_PATH || "/var/lib/black-terminal/qalc/state/timeline.json";
+  const symbol = String(queryValue(req.query?.symbol) || "BTCUSDT").toUpperCase();
+  if (!allowedSymbols.has(symbol)) throw httpError(400, "BC-QALC timeline symbol is not allowed.", "QALC_SYMBOL_INVALID");
+  const from = finiteQuery(req.query?.from, 0);
+  const to = finiteQuery(req.query?.to, Number.MAX_SAFE_INTEGER);
+  const runId = String(queryValue(req.query?.runId) || "").slice(0, 160);
+  const limit = Math.round(bounded(queryValue(req.query?.limit), 1, 2_000, 1_000));
+  const cursor = parseCursor(queryValue(req.query?.cursor));
+  try {
+    const document = await readTimelineDocument(path);
+    const source = Array.isArray(document?.events) ? document.events : [];
+    const filtered = source
+      .filter((event) => event?.symbol === symbol && Number(event.eventTime) >= from && Number(event.eventTime) <= to)
+      .filter((event) => !runId || event.runId === runId)
+      .filter((event) => !cursor || Number(event.eventTime) > cursor.time || (Number(event.eventTime) === cursor.time && String(event.id) > cursor.id))
+      .sort((left, right) => Number(left.eventTime) - Number(right.eventTime) || String(left.id).localeCompare(String(right.id)));
+    const events = filtered.slice(0, limit);
+    const last = events.at(-1);
+    return {
+      available: true,
+      source: "VPS_CANONICAL_QALC_TIMELINE",
+      coverage: document.coverage || { complete: false, source: "RECORDED_QALC_EVENT_TIME" },
+      updatedAt: document.updatedAt || 0,
+      events,
+      nextCursor: filtered.length > events.length && last ? `${last.eventTime}:${last.id}` : undefined,
+    };
+  } catch (error) {
+    if (error?.code !== "ENOENT") console.error(JSON.stringify({ level: "error", event: "qalc_timeline_read_failed", code: error?.code || "READ_FAILED" }));
+    return { available: false, source: "NO_FALLBACK", coverage: { complete: false, source: "RECORDED_QALC_EVENT_TIME" }, updatedAt: 0, events: [], reason: "QALC_TIMELINE_UNAVAILABLE" };
+  }
+}
+
+async function readTimelineDocument(path) {
+  const metadata = await stat(path);
+  if (timelineCache.path === path && timelineCache.modifiedAt === metadata.mtimeMs && timelineCache.document) return timelineCache.document;
+  const document = JSON.parse(await readFile(path, "utf8"));
+  timelineCache = { path, modifiedAt: metadata.mtimeMs, document };
+  return document;
 }
 
 async function runtimeStatus() {
@@ -104,6 +147,12 @@ function normalizeConfig(body) {
       maximumDailyLossPercent: bounded(config.maximumDailyLossPercent, 0.05, 5, 0.5),
       hardStopTicks: bounded(config.hardStopTicks, 1, 100, 8),
       maximumConsecutiveLosses: bounded(config.maximumConsecutiveLosses, 1, 20, 4),
+      indicatorConfigHash: safeIdentifier(config.indicatorConfigHash, 80),
+      indicatorConfigVersion: Math.round(bounded(config.indicatorConfigVersion, 1, 100, 1)),
+      chartDisplayMode: ["LIVE", "REPLAY", "COMBINED"].includes(String(config.chartDisplayMode || "")) ? String(config.chartDisplayMode) : "COMBINED",
+      chartMarkerSize: bounded(config.chartMarkerSize, 4, 18, 7),
+      chartPaneHeight: bounded(config.chartPaneHeight, 48, 220, 78),
+      sourceRunId: safeIdentifier(config.sourceRunId, 160),
       latencyProfile: "MEASURED_CONSERVATIVE",
       quoteSide: "ONE_SIDED_AUTOMATIC", orderType: "POST_ONLY", quotePlacement: "QUEUE_OPTIMIZED",
       liveExecutionEnabled: false, groupFanoutEnabled: false, withdrawalCapability: false,
@@ -112,4 +161,16 @@ function normalizeConfig(body) {
 }
 
 function bounded(value, minimum, maximum, fallback) { const number = Number(value); return Number.isFinite(number) ? Math.min(maximum, Math.max(minimum, number)) : fallback; }
+function queryValue(value) { return Array.isArray(value) ? value[0] : value; }
+function finiteQuery(value, fallback) { const number = Number(queryValue(value)); return Number.isFinite(number) ? number : fallback; }
+function parseCursor(value) {
+  if (!value) return undefined;
+  const separator = String(value).indexOf(":");
+  if (separator <= 0) throw httpError(400, "BC-QALC timeline cursor is invalid.", "QALC_CURSOR_INVALID");
+  const time = Number(String(value).slice(0, separator));
+  const id = String(value).slice(separator + 1);
+  if (!Number.isFinite(time) || !id) throw httpError(400, "BC-QALC timeline cursor is invalid.", "QALC_CURSOR_INVALID");
+  return { time, id };
+}
+function safeIdentifier(value, maximum) { return String(value || "").replace(/[^a-zA-Z0-9_.:-]/g, "").slice(0, maximum); }
 function databaseError(error) { const result = httpError(503, "BC-QALC persistence is unavailable.", "QALC_PERSISTENCE_UNAVAILABLE"); result.cause = error?.code; return result; }

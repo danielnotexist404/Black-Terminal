@@ -205,6 +205,7 @@ function resolveWelcomeName(displayName?: string, username?: string) {
 }
 
 const defaultVisibleIndicators: VisibleIndicators = {
+  qalc: false,
   liquidationHeatmap: false,
   auctionProfile: false,
   volatilityHeatmap: false,
@@ -256,6 +257,7 @@ const defaultIndicatorPeriods: IndicatorPeriods = {
 };
 
 const defaultIndicatorVisualSettings: IndicatorVisualSettings = {
+  qalc: { color: "white", intensity: 92 },
   liquidationHeatmap: { color: "red", intensity: 78 },
   auctionProfile: { color: "red", intensity: 82 },
   volatilityHeatmap: { color: "green", intensity: 86 },
@@ -441,6 +443,10 @@ function migrateWorkspaceSnapshotRecord(value: unknown): Record<string, Workspac
 
 function migrateIndicatorAdvancedSettings(value: Partial<IndicatorAdvancedSettings> | null | undefined): IndicatorAdvancedSettings {
   return {
+    qalc: {
+      ...defaultIndicatorAdvancedSettings.qalc,
+      ...(value?.qalc ?? {})
+    },
     liquidationField: {
       ...defaultIndicatorAdvancedSettings.liquidationField,
       ...(value?.liquidationField ?? {})

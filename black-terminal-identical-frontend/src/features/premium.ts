@@ -11,6 +11,7 @@ export const MARKET_MAKER_HEATMAP_KEY: PremiumFeatureKey = "volatilityHeatmap";
 export const BCLIF_INDICATOR_KEY = "liquidationHeatmap" as const;
 
 export const DEFAULT_ALLOWED_INDICATORS = [
+  "qalc",
   "liquidationHeatmap",
   "auctionProfile",
   "adaptiveSwingStrategy",

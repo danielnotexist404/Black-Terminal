@@ -48,6 +48,15 @@ type CommunityScript = {
 
 const builtInIndicators: BuiltInIndicator[] = [
   {
+    key: "qalc",
+    stableId: "black-core-qalc",
+    title: "BC-QALC — Queue-Aware Liquidity Capture",
+    group: "Black Core / Microstructure",
+    type: "Overlay + Microstructure Pane",
+    signal: "Event-time candidates, passive quotes, conservative Paper fills, entries and exits",
+    runtime: "Worker"
+  },
+  {
     key: "aif",
     title: "A.I.F. Auction Intelligence Framework",
     group: "Proprietary / Auction Intelligence",

@@ -103,6 +103,22 @@ test("Paper quote is PostOnly, price touch never fills, and actual taker flow co
   assert.equal(broker.executionHistory().length, 2);
 });
 
+test("Paper order and fill identities are deterministic under exact event replay", () => {
+  const make = () => {
+    const config = defaultQalcConfig({ mode: "PAPER", paperEnabled: true, runId: "deterministic-run", quoteLifetimeMs: 5_000 });
+    const broker = new QalcPaperBroker(config, () => ({ makerRate: 0.0002, takerRate: 0.0006, source: "PAPER_CONSERVATIVE", version: "test" }));
+    const book = new QalcOrderBook("BTCUSDT");
+    book.apply(bookEvent("BOOK_SNAPSHOT", 1, [[100, 0.1]], [[101, 1]], 1_000));
+    const submitted = broker.submit({ side: "BUY", price: 100, quantity: 1, now: 1_000, book: book.view(1_000) });
+    assert.equal(submitted.accepted, true);
+    broker.onTime(1_100);
+    const fill = broker.onTrade(tradeEvent("deterministic-trade", "SELL", 100, 2, 1_101));
+    assert.ok(fill);
+    return { orderId: submitted.order.id, fillId: fill.id };
+  };
+  assert.deepEqual(make(), make());
+});
+
 test("Research, Replay and Shadow cannot create Paper orders, and live flags fail construction", () => {
   for (const mode of ["RESEARCH", "REPLAY", "SHADOW"] as const) {
     const config = defaultQalcConfig({ mode, paperEnabled: false });

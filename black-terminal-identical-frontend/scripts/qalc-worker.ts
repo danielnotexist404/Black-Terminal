@@ -4,12 +4,14 @@ import { QalcBybitGateway, type QalcGatewayStatus } from "../server/qalc/bybit-g
 import type { QalcConfig, QalcMarketEvent, QalcSymbol } from "../server/qalc/contracts.ts";
 import { QalcEngine } from "../server/qalc/engine.ts";
 import { QalcStateStore } from "../server/qalc/state-store.ts";
+import { QalcTimelineProjector, QalcTimelineStore } from "../server/qalc/timeline.ts";
 
 const symbol = requiredSymbol(process.env.QALC_SYMBOL || "BTCUSDT");
 const mode = modeValue(process.env.QALC_MODE || "RESEARCH");
 const paperEnabled = process.env.QALC_PAPER_ENABLED === "true";
 const archiveRoot = process.env.QALC_ARCHIVE_ROOT || "/var/lib/black-terminal/qalc/events";
 const statePath = process.env.QALC_STATE_PATH || "/var/lib/black-terminal/qalc/state/current.json";
+const timelinePath = process.env.QALC_TIMELINE_PATH || "/var/lib/black-terminal/qalc/state/timeline.json";
 const runId = process.env.QALC_RUN_ID || randomUUID();
 
 if (process.env.QALC_LIVE_EXECUTION_ENABLED === "true" || process.env.QALC_GROUP_FANOUT_ENABLED === "true") {
@@ -29,6 +31,16 @@ const config: Partial<QalcConfig> = {
 let engine = new QalcEngine(config, instrument);
 const archive = new QalcEventArchive(archiveRoot, symbol, runId);
 const stateStore = new QalcStateStore(statePath);
+const timelineStore = new QalcTimelineStore(timelinePath);
+const existingTimeline = await timelineStore.load();
+const timelineProjector = new QalcTimelineProjector({
+  strategyId: String(config.strategyId),
+  runId,
+  modelVersion: "BC-QALC-BASELINE-1",
+  symbol,
+  origin: mode,
+}, existingTimeline.events);
+configureResearchFees(engine);
 const gateway = new QalcBybitGateway({
   symbol,
   onState: (status) => {
@@ -39,6 +51,7 @@ const gateway = new QalcBybitGateway({
   onEvent: async (event) => {
     await archive.append(event);
     const telemetry = engine.process(event);
+    timelineProjector.observe(event, telemetry);
     if (telemetry.runtimeState === "BOOK_GAP") gateway.resynchronize("QALC_BOOK_GAP");
   },
 });
@@ -47,6 +60,7 @@ try {
   const discovered = await gateway.fetchInstrument();
   instrument = { tickSize: discovered.tickSize, quantityStep: discovered.quantityStep };
   engine = new QalcEngine(config, instrument);
+  configureResearchFees(engine);
   await ingestInstrument(discovered);
 } catch (error) {
   log("warn", "qalc_instrument_discovery_failed", { message: safeError(error) });
@@ -80,7 +94,8 @@ async function ingestInstrument(payload: QalcMarketEvent["payload"]) {
   const now = Date.now();
   const event: QalcMarketEvent = { id: `bybit:${symbol}:instrument:${(payload as { version?: string }).version || now}`, venue: "BYBIT", category: "linear", symbol, eventType: "INSTRUMENT", exchangeTimestamp: now, receiveTimestamp: now, processTimestamp: now, payloadVersion: 1, payload };
   await archive.append(event);
-  engine.process(event);
+  const telemetry = engine.process(event);
+  timelineProjector.observe(event, telemetry);
 }
 
 async function flushState() {
@@ -90,7 +105,9 @@ async function flushState() {
     const telemetry = engine.telemetry();
     telemetry.counters.gateway_reconnects = gatewayStatus?.reconnects || 0;
     telemetry.counters.gateway_live = gatewayStatus?.state === "LIVE" ? 1 : 0;
-    await stateStore.write(telemetry);
+    const timelineEvents = timelineProjector.pendingEvents();
+    await Promise.all([stateStore.write(telemetry), timelineStore.append(timelineEvents)]);
+    timelineProjector.acknowledge(timelineEvents.map((event) => event.id));
   } catch (error) { log("error", "qalc_state_flush_failed", { message: safeError(error) }); }
   finally { flushInFlight = false; }
 }
@@ -102,7 +119,12 @@ async function shutdown(signal: string, exitCode = 0) {
   clearInterval(instrumentTimer);
   clearInterval(stateTimer);
   gateway.stop();
-  try { await stateStore.write(engine.telemetry()); await archive.close(); }
+  try {
+    const timelineEvents = timelineProjector.pendingEvents();
+    await Promise.all([stateStore.write(engine.telemetry()), timelineStore.append(timelineEvents)]);
+    timelineProjector.acknowledge(timelineEvents.map((event) => event.id));
+    await archive.close();
+  }
   catch (error) { log("error", "qalc_shutdown_flush_failed", { message: safeError(error) }); exitCode = 1; }
   log("info", "qalc_worker_stopped", { signal });
   process.exit(exitCode);
@@ -113,3 +135,7 @@ function modeValue(value: string): QalcConfig["mode"] { const clean = value.toUp
 function safeError(error: unknown) { return String(error instanceof Error ? error.message : error || "QALC_ERROR").replace(/(authorization|password|secret|token|api.?key)\s*[:=]\s*\S+/gi, "$1=[REDACTED]").slice(0, 240); }
 function rounded(value: number) { return Number.isFinite(value) ? Number(value.toFixed(3)) : null; }
 function log(level: string, event: string, fields: Record<string, unknown> = {}) { console.log(JSON.stringify({ level, event, service: "black-core-qalc", time: new Date().toISOString(), ...fields })); }
+function configureResearchFees(target: QalcEngine) {
+  if (mode === "PAPER") return;
+  target.setFeeSchedule({ makerRate: 0.0002, takerRate: 0.00055, source: "PAPER_CONSERVATIVE", version: "research-conservative-v1" });
+}

@@ -102,6 +102,7 @@ services:
       SUPABASE_URL: http://supabase-kong:8000
       IMM_ENABLED: ${IMM_ENABLED:-false}
       QALC_STATE_PATH: /var/lib/black-terminal/qalc/state/current.json
+      QALC_TIMELINE_PATH: /var/lib/black-terminal/qalc/state/timeline.json
     volumes:
       - ${QALC_DATA_ROOT:-/var/lib/black-cloud/qalc}/state:/var/lib/black-terminal/qalc/state:ro
     restart: unless-stopped
@@ -172,6 +173,7 @@ services:
       QALC_GROUP_FANOUT_ENABLED: "false"
       QALC_ARCHIVE_ROOT: /var/lib/black-terminal/qalc/events
       QALC_STATE_PATH: /var/lib/black-terminal/qalc/state/current.json
+      QALC_TIMELINE_PATH: /var/lib/black-terminal/qalc/state/timeline.json
     volumes:
       - ${QALC_DATA_ROOT:-/var/lib/black-cloud/qalc}:/var/lib/black-terminal/qalc
     depends_on:

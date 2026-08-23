@@ -33,7 +33,17 @@ const longShortAlerts: StrategyIndicatorAlert[] = [
   { id: "short-exit", name: "Short Exit", description: "Optional confirmed short-position exit.", semantic: "SHORT_EXIT", confirmedBar: true, intrabar: false },
 ];
 
+const qalcAlerts: StrategyIndicatorAlert[] = [
+  { id: "qalc:candidate-long", name: "Candidate Long", description: "Canonical event-time BC-QALC passive-bid candidate.", semantic: "LONG_ENTRY", confirmedBar: false, intrabar: true },
+  { id: "qalc:candidate-short", name: "Candidate Short", description: "Canonical event-time BC-QALC passive-ask candidate.", semantic: "SHORT_ENTRY", confirmedBar: false, intrabar: true },
+  { id: "qalc:entry-long", name: "Paper Entry Long", description: "Canonical simulated queue fill opened long inventory.", semantic: "LONG_ENTRY", confirmedBar: false, intrabar: true },
+  { id: "qalc:entry-short", name: "Paper Entry Short", description: "Canonical simulated queue fill opened short inventory.", semantic: "SHORT_ENTRY", confirmedBar: false, intrabar: true },
+  { id: "qalc:exit-long", name: "Paper Exit Long", description: "Canonical BC-QALC long inventory exit.", semantic: "LONG_EXIT", confirmedBar: false, intrabar: true },
+  { id: "qalc:exit-short", name: "Paper Exit Short", description: "Canonical BC-QALC short inventory exit.", semantic: "SHORT_EXIT", confirmedBar: false, intrabar: true },
+];
+
 const manifests: ManifestRow[] = [
+  { key: "qalc", name: "BC-QALC — Queue-Aware Liquidity Capture", version: "1", runtimeKind: "external-signals", runtimeStatus: "REQUIRES_CERTIFICATION", warmup: 1_000, alerts: qalcAlerts },
   { key: "adaptiveSwingStrategy", name: "Adaptive Swing Reversal", version: "1", runtimeKind: "builtin-adaptive-swing", runtimeStatus: "CERTIFIED", warmup: 240, alerts: longShortAlerts },
   // BC-RDA is intentionally absent while BC_RDA_LEGACY_REPAINTING is under
   // forensic containment and BC_RDA_CAUSAL_V2 lacks a certified headless VPS
@@ -156,6 +166,7 @@ function template(runtimeKind: StrategyRuntimeKind, name: string, id: string, al
 }
 
 function settingsFor(key: keyof VisibleIndicators, periods: IndicatorPeriods, advanced: IndicatorAdvancedSettings) {
+  if (key === "qalc") return structuredClone(advanced.qalc) as unknown as Record<string, unknown>;
   if (key === "adaptiveSwingStrategy") return structuredClone(advanced.adaptiveSwingStrategy) as unknown as Record<string, unknown>;
   if (key === "ddaProOscillator") return structuredClone(advanced.ddaProOscillator) as unknown as Record<string, unknown>;
   if (key === "vwap") return structuredClone(advanced.vwap) as unknown as Record<string, unknown>;

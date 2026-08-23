@@ -43,6 +43,7 @@ interface AuditLog {
 }
 
 const ALL_INDICATORS_METADATA = [
+  { key: "qalc", name: "BC-QALC — Queue-Aware Liquidity Capture", desc: "Native event-time microstructure decisions, Paper quotes, fills, entries and exits" },
   { key: "aif", name: "A.I.F. Auction Intelligence", desc: "Native proprietary long-horizon auction framework" },
   { key: "volumeProfile", name: "HDLX Profile (hdlx)", desc: "Fixed locked/visible volume profile" },
   { key: "liquidationHeatmap", name: "Liquidation Intelligence", desc: "Black Core persistent exposure and confirmed-event engine" },

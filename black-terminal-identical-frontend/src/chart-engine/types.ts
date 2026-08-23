@@ -128,6 +128,7 @@ export type ChartEngineOptions = {
 };
 
 export type VisibleIndicators = {
+  qalc: boolean;
   liquidationHeatmap: boolean;
   auctionProfile: boolean;
   volatilityHeatmap: boolean;
@@ -172,6 +173,34 @@ export type IndicatorVisualSetting = {
 
 export type IndicatorVisualSettings = {
   [Key in keyof VisibleIndicators]: IndicatorVisualSetting;
+};
+
+export type QalcIndicatorSettings = {
+  schemaVersion: 1;
+  modelVersion: "BC-QALC-BASELINE-1";
+  displayMode: "LIVE" | "REPLAY" | "COMBINED";
+  predictionHorizonMs: 250 | 500 | 1000 | 3000 | 5000 | 10000;
+  minimumNetEdgeMultiplier: number;
+  minimumFillProbability: number;
+  maximumToxicity: number;
+  quoteLifetimeMs: number;
+  showCandidates: boolean;
+  showRejected: boolean;
+  showQuotes: boolean;
+  showCancellations: boolean;
+  showPartialFills: boolean;
+  showEntries: boolean;
+  showExits: boolean;
+  showMicrostructurePane: boolean;
+  markerSize: number;
+  paneHeight: number;
+  paneScale: number;
+  paneOffset: number;
+  longColor: string;
+  shortColor: string;
+  neutralColor: string;
+  tooltipDetail: "COMPACT" | "FULL";
+  selectedRunId: string;
 };
 
 export type VolumeProfileSettings = {
@@ -417,6 +446,7 @@ export type VwapSettings = {
 };
 
 export type IndicatorAdvancedSettings = {
+  qalc: QalcIndicatorSettings;
   liquidationField: LiquidationFieldSettings;
   volumeProfile: VolumeProfileSettings;
   adaptiveSwingStrategy: AdaptiveSwingStrategySettings;

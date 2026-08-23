@@ -1,17 +1,19 @@
 import { Activity, AlertTriangle, ArrowLeft, Check, Database, LockKeyhole, Pause, Play, Radio, Save, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { defaultQalcDraft, qalcApi, type QalcDraft, type QalcRuntimeStatus, type QalcSavedStrategy } from "./qalcApi";
+import { loadQalcStrategyHandoff, qalcDraftFromHandoff } from "../../qalc-indicator/config";
 
 const steps = ["Market", "Data Quality", "Feature Model", "Quote Policy", "Inventory Exit", "Risk", "Paper Latency", "Review"];
 
 export function QalcExperience({ onBack }: { onBack: () => void }) {
   const [step, setStep] = useState(0);
-  const [draft, setDraft] = useState<QalcDraft>(defaultQalcDraft);
+  const [handoff] = useState(loadQalcStrategyHandoff);
+  const [draft, setDraft] = useState<QalcDraft>(() => defaultQalcDraft(qalcDraftFromHandoff(handoff)));
   const [saved, setSaved] = useState<QalcSavedStrategy>();
   const [status, setStatus] = useState<QalcRuntimeStatus>({ available: false, source: "NO_FALLBACK", certificationState: "RESEARCH", runtimeState: "STOPPED" });
   const [history, setHistory] = useState<Record<string, number[]>>({ imbalance: [], microprice: [], ofi: [], cvd: [], replenishment: [], toxicity: [] });
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string>();
+  const [message, setMessage] = useState<string | undefined>(handoff ? `Loaded the exact chart configuration ${handoff.configurationHash} from BC-QALC.` : undefined);
   const [cockpit, setCockpit] = useState(false);
 
   useEffect(() => {
@@ -77,7 +79,7 @@ function renderStep(step: number, draft: QalcDraft, setDraft: React.Dispatch<Rea
   if (step === 4) return <div className="strategy-form-grid"><NumberField title="Maximum inventory time (ms)" value={draft.config.maximumInventoryDurationMs} onChange={(value) => field("maximumInventoryDurationMs", value)} /><Label title="Normal exit"><input disabled value="Time / edge invalidation" /></Label><Label title="Emergency exit"><input disabled value="Toxicity / hard stop" /></Label><Label title="Inventory policy"><input disabled value="Single position · no averaging" /></Label></div>;
   if (step === 5) return <div className="strategy-form-grid"><NumberField title="Risk per trade %" value={draft.config.riskPerTradePercent} step={0.001} onChange={(value) => field("riskPerTradePercent", value)} /><NumberField title="Daily loss %" value={draft.config.maximumDailyLossPercent} step={0.05} onChange={(value) => field("maximumDailyLossPercent", value)} /><NumberField title="Hard stop (ticks)" value={draft.config.hardStopTicks} onChange={(value) => field("hardStopTicks", value)} /><NumberField title="Consecutive loss limit" value={draft.config.maximumConsecutiveLosses} onChange={(value) => field("maximumConsecutiveLosses", value)} /><Label title="Leverage"><input disabled value="1x maximum" /></Label><Label title="Adverse-selection kill switch"><input disabled value="Always enabled" /></Label></div>;
   if (step === 6) return <div className="qalc-latency-stack">{[["Market data",30],["Processing",3],["Submission",35],["Acknowledgement",35],["Cancel",50],["Execution notification",35]].map(([label,value]) => <div key={label}><span>{label}</span><strong>{value} ms</strong><em>Conservative baseline</em></div>)}<p>Zero-latency fills are prohibited. These values are applied in Paper replay and replaced by measured distributions during certification.</p></div>;
-  return <div className="qalc-review"><h3>BC-QALC Paper candidate boundary</h3><div>{[["Engine","black-core-qalc"],["Market",`${draft.symbol} / Bybit linear`],["Book","L200 canonical → L50 features"],["Direction / fill / toxicity","Separate interpretable models"],["Cost gate","Fees + exit + slippage + adverse selection + buffer"],["Fill simulation","Observed taker flow after conservative queue-ahead"],["Live order submission","NOT IMPLEMENTED"],["Investment Group fanout","NOT IMPLEMENTED"]].map(([key,value]) => <p key={key}><span>{key}</span><strong>{value}</strong></p>)}</div><div className="qalc-boundary-note"><LockKeyhole size={15} /><span>Saving creates a private research/Paper configuration. It does not publish it, connect a broker, or place an order.</span></div></div>;
+  return <div className="qalc-review"><h3>BC-QALC Paper candidate boundary</h3><div>{[["Engine","black-core-qalc"],["Market",`${draft.symbol} / Bybit linear`],["Chart configuration",draft.config.indicatorConfigHash || "Strategy Lab defaults"],["Configuration schema",String(draft.config.indicatorConfigVersion || 1)],["Book","L200 canonical → L50 features"],["Direction / fill / toxicity","Separate interpretable models"],["Cost gate","Fees + exit + slippage + adverse selection + buffer"],["Fill simulation","Observed taker flow after conservative queue-ahead"],["Live order submission","NOT IMPLEMENTED"],["Investment Group fanout","NOT IMPLEMENTED"]].map(([key,value]) => <p key={key}><span>{key}</span><strong>{value}</strong></p>)}</div><div className="qalc-boundary-note"><LockKeyhole size={15} /><span>Saving creates a private research/Paper configuration linked to this exact indicator hash. It does not publish it, connect a broker, or place an order.</span></div></div>;
 }
 
 function QalcCockpit({ strategy, status, history, busy, message, onBack, onAction }: { strategy?: QalcSavedStrategy; status: QalcRuntimeStatus; history: Record<string, number[]>; busy: boolean; message?: string; onBack: () => void; onAction: (state: "ACTIVE" | "PAUSED" | "STOPPED") => void }) {

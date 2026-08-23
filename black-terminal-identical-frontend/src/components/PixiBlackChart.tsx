@@ -13,6 +13,7 @@ import {
   IndicatorAdvancedSettings,
   IndicatorColorKey,
   IndicatorPeriods,
+  QalcIndicatorSettings,
   OscillatorIndicatorKey,
   OscillatorPaneSettings,
   IndicatorVisualSettings,
@@ -28,6 +29,7 @@ import {
 import {
   defaultAdaptiveSwingStrategySettings,
   defaultOscillatorPaneSettings,
+  defaultQalcIndicatorSettings,
   defaultVolumeProfileSettings,
   defaultVwapSettings,
   defaultWaveTrendOscillatorSettings,
@@ -69,6 +71,8 @@ import {
 } from "../positions/positionPresentation";
 import { modifyVenueOrderViaApi, updateBybitPositionProtectionViaApi } from "../portfolio/portfolioApiClient";
 import { AifIndicatorOverlay } from "../modules/aif/components/AifIndicatorOverlay";
+import { QalcIndicatorOverlay } from "../modules/qalc-indicator/QalcIndicatorOverlay";
+import { saveQalcStrategyHandoff } from "../modules/qalc-indicator/config";
 import { canonicalOrderKey, deduplicateCanonicalOrders } from "../orders/canonicalOrder";
 import { OrderManagementMenu } from "../orders/OrderManagementMenu";
 import {
@@ -466,6 +470,7 @@ export function PixiBlackChart({
     waveTrendOscillator: visibleIndicators.waveTrendOscillator
   });
   const aifActiveRef = useRef(visibleIndicators.aif);
+  const qalcActiveRef = useRef(visibleIndicators.qalc);
   const liquidationFieldActiveRef = useRef(visibleIndicators.liquidationHeatmap);
   const [oscillatorHostHeight, setOscillatorHostHeight] = useState(600);
   const [lastPrice, setLastPrice] = useState(66678.1);
@@ -593,6 +598,7 @@ export function PixiBlackChart({
   const configuredAlertRuntimeRef = useRef(new Map<string, { lastFiredAt: number; fired: boolean }>());
   const alertToastTimerRef = useRef<number | undefined>(undefined);
   aifActiveRef.current = visibleIndicators.aif;
+  qalcActiveRef.current = visibleIndicators.qalc;
   liquidationFieldActiveRef.current = visibleIndicators.liquidationHeatmap;
 
   const scopedChartAlerts = useMemo(() => {
@@ -1320,7 +1326,7 @@ export function PixiBlackChart({
         scheduleChartUiState();
       },
       onPriceTransformChange: (transform) => {
-        if (aifActiveRef.current || liquidationFieldActiveRef.current) setAifPriceTransform(transform);
+        if (aifActiveRef.current || qalcActiveRef.current || liquidationFieldActiveRef.current) setAifPriceTransform(transform);
       },
       onLiquidationRendererMetrics: setLiquidationFieldRendererMetrics,
       priceLineColor,
@@ -2402,13 +2408,13 @@ export function PixiBlackChart({
   ]);
 
   useEffect(() => {
-    if (!visibleIndicators.aif && !visibleIndicators.liquidationHeatmap) {
+    if (!visibleIndicators.aif && !visibleIndicators.qalc && !visibleIndicators.liquidationHeatmap) {
       setAifPriceTransform(null);
       return;
     }
     const engine = engineRef.current;
     if (engine) setAifPriceTransform(engine.getPriceTransformSnapshot());
-  }, [visibleIndicators.aif, visibleIndicators.liquidationHeatmap]);
+  }, [visibleIndicators.aif, visibleIndicators.qalc, visibleIndicators.liquidationHeatmap]);
 
   useEffect(() => {
     engineRef.current?.setPriceLineSettings(priceLineColor ?? "", priceLineIntensity ?? 75);
@@ -3334,6 +3340,7 @@ export function PixiBlackChart({
   const change = displayCandle.close - displayCandle.open;
   const changePercent = displayCandle.open ? (change / displayCandle.open) * 100 : 0;
   const indicatorRows: { key: IndicatorKey; label: string; value: string }[] = [
+    { key: "qalc", label: "BC-QALC", value: `${indicatorAdvancedSettings.qalc.displayMode} · ${indicatorAdvancedSettings.qalc.predictionHorizonMs}ms` },
     { key: "aif", label: "A.I.F.", value: "auction intelligence" },
     {
       key: "auctionProfile",
@@ -3420,6 +3427,21 @@ export function PixiBlackChart({
   };
 
   const volumeProfileSettings = indicatorAdvancedSettings.volumeProfile ?? defaultVolumeProfileSettings;
+  const qalcSettings: QalcIndicatorSettings = {
+    ...defaultQalcIndicatorSettings,
+    ...indicatorAdvancedSettings.qalc
+  };
+  const updateQalcSetting = <Key extends keyof QalcIndicatorSettings>(key: Key, value: QalcIndicatorSettings[Key]) => {
+    onIndicatorAdvancedSettingsChange((current) => ({
+      ...current,
+      qalc: { ...defaultQalcIndicatorSettings, ...current.qalc, [key]: value }
+    }));
+  };
+  const openQalcStrategyLab = () => {
+    saveQalcStrategyHandoff(displaySymbol, qalcSettings);
+    setActiveIndicator(null);
+    onOpenStrategyLab?.();
+  };
   const adaptiveSwingSettings = indicatorAdvancedSettings.adaptiveSwingStrategy ?? defaultAdaptiveSwingStrategySettings;
   const oscillatorPaneSettings: OscillatorPaneSettings = {
     ...defaultOscillatorPaneSettings,
@@ -4936,8 +4958,42 @@ export function PixiBlackChart({
         />
       )}
 
+      {activeIndicator === "qalc" && (
+        <div className="indicator-settings profile-settings qalc-indicator-settings" role="dialog" aria-label="BC-QALC indicator settings">
+          <div className="indicator-settings-title"><span>BC-QALC — QUEUE-AWARE LIQUIDITY CAPTURE</span><button type="button" onClick={() => setActiveIndicator(null)}>DONE</button></div>
+          <div className="indicator-settings-section">Canonical Display</div>
+          <label>Visible<input type="checkbox" checked={visibleIndicators.qalc} onChange={() => toggleIndicator("qalc")} /></label>
+          <label>Event Surface<select value={qalcSettings.displayMode} onChange={(event) => updateQalcSetting("displayMode", event.target.value as QalcIndicatorSettings["displayMode"])}><option value="LIVE">Live / Recorded</option><option value="REPLAY">Replay only</option><option value="COMBINED">Combined</option></select></label>
+          <label>Prediction Horizon<select value={qalcSettings.predictionHorizonMs} onChange={(event) => updateQalcSetting("predictionHorizonMs", Number(event.target.value) as QalcIndicatorSettings["predictionHorizonMs"])}>{[250,500,1000,3000,5000,10000].map((value) => <option value={value} key={value}>{value >= 1000 ? `${value / 1000}s` : `${value}ms`}</option>)}</select></label>
+          <label>Run Filter<input value={qalcSettings.selectedRunId} placeholder="All recorded runs" onChange={(event) => updateQalcSetting("selectedRunId", event.target.value.slice(0, 160))} /></label>
+          <div className="indicator-settings-section">Strategy Configuration</div>
+          <label>Minimum Net Edge ×<input type="number" min={1} max={10} step={0.1} value={qalcSettings.minimumNetEdgeMultiplier} onChange={(event) => updateQalcSetting("minimumNetEdgeMultiplier", clampNumber(Number(event.target.value), 1, 10))} /></label>
+          <label>Minimum P(fill)<input type="number" min={0.01} max={0.99} step={0.01} value={qalcSettings.minimumFillProbability} onChange={(event) => updateQalcSetting("minimumFillProbability", clampNumber(Number(event.target.value), .01, .99))} /></label>
+          <label>Maximum Toxicity<input type="number" min={1} max={100} value={qalcSettings.maximumToxicity} onChange={(event) => updateQalcSetting("maximumToxicity", clampNumber(Number(event.target.value), 1, 100))} /></label>
+          <label>Quote Lifetime ms<input type="number" min={100} max={5000} step={50} value={qalcSettings.quoteLifetimeMs} onChange={(event) => updateQalcSetting("quoteLifetimeMs", clampNumber(Number(event.target.value), 100, 5000))} /></label>
+          <div className="indicator-settings-section">Marker Semantics</div>
+          <label>Candidate Decisions<input type="checkbox" checked={qalcSettings.showCandidates} onChange={(event) => updateQalcSetting("showCandidates", event.target.checked)} /></label>
+          <label>Rejected Decisions<input type="checkbox" checked={qalcSettings.showRejected} onChange={(event) => updateQalcSetting("showRejected", event.target.checked)} /></label>
+          <label>Working Quotes<input type="checkbox" checked={qalcSettings.showQuotes} onChange={(event) => updateQalcSetting("showQuotes", event.target.checked)} /></label>
+          <label>Cancels / Expiry<input type="checkbox" checked={qalcSettings.showCancellations} onChange={(event) => updateQalcSetting("showCancellations", event.target.checked)} /></label>
+          <label>Partial Fills<input type="checkbox" checked={qalcSettings.showPartialFills} onChange={(event) => updateQalcSetting("showPartialFills", event.target.checked)} /></label>
+          <label>Actual Entries<input type="checkbox" checked={qalcSettings.showEntries} onChange={(event) => updateQalcSetting("showEntries", event.target.checked)} /></label>
+          <label>Actual Exits<input type="checkbox" checked={qalcSettings.showExits} onChange={(event) => updateQalcSetting("showExits", event.target.checked)} /></label>
+          <label>Microstructure Pane<input type="checkbox" checked={qalcSettings.showMicrostructurePane} onChange={(event) => updateQalcSetting("showMicrostructurePane", event.target.checked)} /></label>
+          <label>Marker Size<input type="range" min={4} max={18} value={qalcSettings.markerSize} onChange={(event) => updateQalcSetting("markerSize", Number(event.target.value))} /></label>
+          <label>Pane Height<input type="range" min={48} max={220} value={qalcSettings.paneHeight} onChange={(event) => updateQalcSetting("paneHeight", Number(event.target.value))} /></label>
+          <label>Long Color<input type="color" value={qalcSettings.longColor} onChange={(event) => updateQalcSetting("longColor", event.target.value)} /></label>
+          <label>Short Color<input type="color" value={qalcSettings.shortColor} onChange={(event) => updateQalcSetting("shortColor", event.target.value)} /></label>
+          <label>Neutral Color<input type="color" value={qalcSettings.neutralColor} onChange={(event) => updateQalcSetting("neutralColor", event.target.value)} /></label>
+          <label>Tooltip<select value={qalcSettings.tooltipDetail} onChange={(event) => updateQalcSetting("tooltipDetail", event.target.value as QalcIndicatorSettings["tooltipDetail"])}><option value="COMPACT">Compact</option><option value="FULL">Full Engine Evidence</option></select></label>
+          <div className="qalc-settings-truth">Markers show the configuration recorded by the VPS event itself; these controls define the exact Strategy Lab handoff. The chart never rewrites history or infers BC-QALC entries from candle direction.</div>
+          <button type="button" className="profile-inline-button strategy-lab-jump" onClick={openQalcStrategyLab}>OPEN THIS CONFIGURATION IN STRATEGY LAB</button>
+          <button type="button" className="tv-defaults" onClick={() => onIndicatorAdvancedSettingsChange((current) => ({ ...current, qalc: defaultQalcIndicatorSettings }))}>Defaults</button>
+        </div>
+      )}
 
-      {activeIndicator && activeIndicator !== "aif" && activeIndicator !== "auctionProfile" && activeIndicator !== "volumeProfile" && activeIndicator !== "adaptiveSwingStrategy" && activeIndicator !== "volatilityHeatmap" && (
+
+      {activeIndicator && activeIndicator !== "qalc" && activeIndicator !== "aif" && activeIndicator !== "auctionProfile" && activeIndicator !== "volumeProfile" && activeIndicator !== "adaptiveSwingStrategy" && activeIndicator !== "volatilityHeatmap" && (
         <div
           className={
             activeIndicator === "zScoreOscillator"
@@ -6361,6 +6417,15 @@ export function PixiBlackChart({
         {indicatorsCollapsed ? "v" : "^"}
       </button>
       <div ref={hostRef} className="pixi-chart-host" onContextMenu={handleChartContextMenu} onClick={() => setChartContextMenu(null)} />
+      <QalcIndicatorOverlay
+        active={visibleIndicators.qalc}
+        symbol={displaySymbol}
+        exchange={marketSymbol.exchange}
+        settings={qalcSettings}
+        chartEngine={engineRef.current}
+        priceTransform={aifPriceTransform}
+        onOpenSettings={() => setActiveIndicator("qalc")}
+      />
       {oscillatorPaneVisible && oscillatorStack.panes.map((pane) => (
         <div
           key={pane.key}

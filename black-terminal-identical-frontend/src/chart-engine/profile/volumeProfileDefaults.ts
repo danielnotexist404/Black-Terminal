@@ -2,6 +2,7 @@ import type {
   AdaptiveSwingStrategySettings,
   IndicatorAdvancedSettings,
   OscillatorPaneSettings,
+  QalcIndicatorSettings,
   VolumeProfileSettings,
   VwapSettings,
   WaveTrendOscillatorSettings,
@@ -222,7 +223,36 @@ export const defaultVwapSettings: VwapSettings = {
   previousVwapIntensity: 28
 };
 
+export const defaultQalcIndicatorSettings: QalcIndicatorSettings = {
+  schemaVersion: 1,
+  modelVersion: "BC-QALC-BASELINE-1",
+  displayMode: "COMBINED",
+  predictionHorizonMs: 1000,
+  minimumNetEdgeMultiplier: 2,
+  minimumFillProbability: 0.35,
+  maximumToxicity: 44,
+  quoteLifetimeMs: 500,
+  showCandidates: true,
+  showRejected: false,
+  showQuotes: true,
+  showCancellations: true,
+  showPartialFills: true,
+  showEntries: true,
+  showExits: true,
+  showMicrostructurePane: true,
+  markerSize: 7,
+  paneHeight: 78,
+  paneScale: 1,
+  paneOffset: 0,
+  longColor: "#f2f2f4",
+  shortColor: "#d00024",
+  neutralColor: "#7f838a",
+  tooltipDetail: "FULL",
+  selectedRunId: ""
+};
+
 export const defaultIndicatorAdvancedSettings: IndicatorAdvancedSettings = {
+  qalc: defaultQalcIndicatorSettings,
   liquidationField: DEFAULT_LIQUIDATION_FIELD_SETTINGS,
   volumeProfile: defaultVolumeProfileSettings,
   adaptiveSwingStrategy: defaultAdaptiveSwingStrategySettings,

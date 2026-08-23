@@ -73,7 +73,7 @@
     "event-alpha:worker": "node scripts/event-alpha-worker.js",
     "strategy-automation:worker": "node --experimental-strip-types scripts/strategy-automation-worker.ts",
     "qalc:worker": "node --experimental-strip-types scripts/qalc-worker.ts",
-    "test:qalc": "node --experimental-strip-types scripts/qalc-tests.ts && node scripts/qalc-security-tests.js",
+    "test:qalc": "node --experimental-strip-types scripts/qalc-tests.ts && node --experimental-strip-types scripts/qalc-chart-integration-tests.ts && node scripts/qalc-security-tests.js",
     "benchmark:qalc": "node --experimental-strip-types scripts/qalc-benchmark.ts",
     "test:strategy-automation": "node --experimental-strip-types scripts/strategy-definition-builder-tests.ts && node scripts/strategy-automation-tests.js && node scripts/strategy-automation-postgres-tests.js && node --experimental-strip-types scripts/my-strategy-ux-tests.ts",
     "test:bybit-demo-strategy": "node scripts/bybit-demo-strategy-execution-tests.js",

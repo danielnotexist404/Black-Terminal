@@ -7,6 +7,7 @@ import {
 import type { VisibleIndicators } from "../src/chart-engine/types.ts";
 
 const hidden: VisibleIndicators = {
+  qalc: false,
   liquidationHeatmap: false,
   auctionProfile: false,
   volatilityHeatmap: false,

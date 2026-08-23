@@ -16,6 +16,7 @@ import { StrategyLibraryPage } from "./pages/StrategyLibraryPage";
 import { StrategyWizardPage } from "./pages/StrategyWizardPage";
 import { activateBlackCloudConnectionViaApi, connectBybitDemoAccountViaApi, fetchBlackCloudStatusViaApi } from "../../../portfolio/portfolioApiClient";
 import { QalcExperience } from "../qalc/QalcExperience";
+import { consumeQalcStrategyHandoffIntent } from "../../qalc-indicator/config";
 
 type View = "library" | "wizard" | "cockpit" | "qalc";
 type Props = {
@@ -31,7 +32,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
   const fixtureMode = typeof window !== "undefined" && window.location.hostname === "127.0.0.1" && new URLSearchParams(window.location.search).get("uiPreview") === "1"
     ? new URLSearchParams(window.location.search).get("strategyLabFixture")
     : null;
-  const [view, setView] = useState<View>("library");
+  const [view, setView] = useState<View>(() => consumeQalcStrategyHandoffIntent() ? "qalc" : "library");
   const [strategies, setStrategies] = useState<StrategySummary[]>([]);
   const [workspace, setWorkspace] = useState<StrategyWorkspace | null>(null);
   const [draft, setDraft] = useState<StrategyWizardDraft | null>(null);
@@ -42,6 +43,11 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
   const [message, setMessage] = useState<string>();
   const [addSlot, setAddSlot] = useState<number | null>(null);
   const [eligible, setEligible] = useState<{ brokerAccounts: EligibleBrokerTarget[]; groups: EligibleGroupTarget[] } | null>(null);
+  useEffect(() => {
+    const openQalc = () => { consumeQalcStrategyHandoffIntent(); setView("qalc"); };
+    window.addEventListener("bt:qalc-open-strategy-lab", openQalc);
+    return () => window.removeEventListener("bt:qalc-open-strategy-lab", openQalc);
+  }, []);
   const [demoConnection, setDemoConnection] = useState<{ id: string; label: string; state: string } | null>(null);
   const generation = useRef(0);
 

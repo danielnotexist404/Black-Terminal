@@ -7,7 +7,8 @@ export default async function consolidatedLiquidityRoute(req, res) {
     baseAsset: req.query?.baseAsset,
     minimumPrice: req.query?.minimumPrice,
     maximumPrice: req.query?.maximumPrice,
-    rowCount: req.query?.rowCount
+    rowCount: req.query?.rowCount,
+    priceStep: req.query?.priceStep
   });
   res.setHeader("Cache-Control", "private, no-store, max-age=0");
   res.setHeader("X-Black-Core-Data-Source", "consolidated-liquidity-fabric");

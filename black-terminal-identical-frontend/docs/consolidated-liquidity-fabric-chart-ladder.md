@@ -29,9 +29,11 @@ Official protocol references:
 
 `26K` remains an optional moving USD 26,000 scale and `BOOK FIT` remains an optional fit to the currently delivered consolidated coverage. `LOCKED` freezes whichever scale is selected while genuine depth updates continue. Changing symbol or chart identity clears the lock. New workspaces start in `CHART SYNC`; the selection then persists per workspace.
 
+The data projection uses a canonical zero-anchored price grid with a stable nice-number step. A chart pan can reveal different canonical prices at the top or bottom, but it cannot redefine an existing bucket's price bounds, merge the same resting order into a different arbitrary screen row, or renormalize a node from only the visible subset. A zoom or explicit aggregation change may select a different canonical step because the requested analytical resolution has genuinely changed.
+
 ## Rendering and update cadence
 
-The API projects genuine venue levels into 8–240 chart bins. The browser requests a new viewport frame at a bounded cadence and animates genuine snapshot changes with `requestAnimationFrame`. Network polling is not performed at 60 requests per second. The display can render at the monitor refresh rate while the authoritative network cadence stays bounded.
+The API projects genuine venue levels into at most 240 globally anchored price bins. Reconciliation matches prior rows by canonical price rather than transient array position. The browser requests a new viewport frame at a bounded cadence and animates genuine snapshot changes with `requestAnimationFrame`. Network polling is not performed at 60 requests per second. The display can render at the monitor refresh rate while the authoritative network cadence stays bounded.
 
 The canvas renders:
 

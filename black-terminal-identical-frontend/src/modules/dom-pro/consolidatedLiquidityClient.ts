@@ -68,6 +68,7 @@ type FeedInput = {
   minimumPrice: number;
   maximumPrice: number;
   rowCount: number;
+  priceStep: number;
   enabled?: boolean;
 };
 
@@ -80,8 +81,9 @@ export function useConsolidatedLiquidityFeed(input: FeedInput): ConsolidatedLiqu
     input.baseAsset.toUpperCase(),
     roundedKey(input.minimumPrice),
     roundedKey(input.maximumPrice),
-    Math.round(input.rowCount)
-  ].join(":"), [input.baseAsset, input.maximumPrice, input.minimumPrice, input.rowCount]);
+    Math.round(input.rowCount),
+    roundedKey(input.priceStep)
+  ].join(":"), [input.baseAsset, input.maximumPrice, input.minimumPrice, input.priceStep, input.rowCount]);
   const [feed, setFeed] = useState<ConsolidatedLiquidityFeed>({ snapshot: null, book: null, status: "loading", error: null, lastSuccessfulAt: null });
   const latestSuccessfulRef = useRef<ConsolidatedLiquidityFeed | null>(null);
   const latestAssetRef = useRef(input.baseAsset.toUpperCase());
@@ -148,7 +150,8 @@ async function fetchConsolidatedLiquidity(input: FeedInput, signal: AbortSignal)
     baseAsset: input.baseAsset.toUpperCase(),
     minimumPrice: String(input.minimumPrice),
     maximumPrice: String(input.maximumPrice),
-    rowCount: String(Math.max(8, Math.min(240, Math.round(input.rowCount))))
+    rowCount: String(Math.max(8, Math.min(240, Math.round(input.rowCount)))),
+    priceStep: String(input.priceStep)
   });
   const response = await fetch(`/api/market-depth/consolidated?${parameters.toString()}`, {
     signal,
@@ -167,6 +170,7 @@ function toOrderBook(snapshot: ConsolidatedLiquiditySnapshot): OrderBookSnapshot
     time: snapshot.generatedAt,
     bids: snapshot.rows.filter((row) => row.bidBase > 0).map((row) => ({ price: row.price, quantity: row.bidBase })),
     asks: snapshot.rows.filter((row) => row.askBase > 0).map((row) => ({ price: row.price, quantity: row.askBase })),
+    priceStep: snapshot.viewport.step,
     subscribedDepth: snapshot.sourceLevels,
     sequence: snapshot.generatedAt
   };
@@ -185,7 +189,9 @@ function validViewport(input: FeedInput) {
     && Number.isFinite(input.minimumPrice)
     && Number.isFinite(input.maximumPrice)
     && input.minimumPrice > 0
-    && input.maximumPrice > input.minimumPrice;
+    && input.maximumPrice > input.minimumPrice
+    && Number.isFinite(input.priceStep)
+    && input.priceStep > 0;
 }
 
 function roundedKey(value: number) {

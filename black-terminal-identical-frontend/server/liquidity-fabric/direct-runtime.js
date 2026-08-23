@@ -444,7 +444,13 @@ function normalizeBaseAsset(value) {
 }
 
 function viewportKey(input) {
-  return [Number(input.minimumPrice).toPrecision(8), Number(input.maximumPrice).toPrecision(8), Math.floor(Number(input.rowCount) || 80)].join(":");
+  const priceStep = Number(input.priceStep);
+  if (Number.isFinite(priceStep) && priceStep > 0) return `canonical:${priceStep.toPrecision(8)}`;
+  return [
+    Number(input.minimumPrice).toPrecision(8),
+    Number(input.maximumPrice).toPrecision(8),
+    Math.floor(Number(input.rowCount) || 80)
+  ].join(":");
 }
 
 function pause(milliseconds) {

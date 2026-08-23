@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import {
   CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD,
+  buildStableLiquidityProjection,
   buildChartSynchronizedViewport,
   buildChartDockedDepthLadder,
   buildPriceFollowingViewport,
@@ -96,6 +97,31 @@ function depth(rows: ProfessionalDomRow[]): ProfessionalDomLadderModel {
   const ask = model.rows.find((row) => row.askSize === 4);
   const bid = model.rows.find((row) => row.bidSize === 8);
   assert.ok(ask && bid && ask.top < bid.top, "logarithmic chart transforms must preserve price ordering");
+}
+
+{
+  const first = buildStableLiquidityProjection(viewport(60, 70_000, 80_000), 80);
+  const subBucketPan = buildStableLiquidityProjection(viewport(61, 70_050, 80_050), 80);
+  assert.equal(first.priceStep, 200, "projection must select a canonical nice-number price step");
+  assert.deepEqual(subBucketPan, first, "panning inside the same canonical edge buckets must not restart or redefine the liquidity projection");
+}
+
+{
+  const source = depth([
+    sourceRow(108, 0, 100, -5),
+    sourceRow(100, 0, 8, -1),
+    sourceRow(96, 6, 0, 2),
+    sourceRow(92, 2, 0, 0.5)
+  ]);
+  const before = buildChartDockedDepthLadder({ depth: source, viewport: viewport(62, 90, 110), preferredRowHeight: 10 });
+  const after = buildChartDockedDepthLadder({ depth: source, viewport: viewport(63, 91, 111), preferredRowHeight: 10 });
+  const beforeNode = before.rows.find((row) => row.price === 100);
+  const afterNode = after.rows.find((row) => row.price === 100);
+  assert.ok(beforeNode && afterNode, "the same canonical price node must remain addressable after a pan");
+  assert.equal(afterNode.key, beforeNode.key, "panning must preserve canonical node identity");
+  assert.equal(afterNode.askSize, beforeNode.askSize, "panning alone must not change a resting node amount");
+  assert.equal(afterNode.depthRatio, beforeNode.depthRatio, "panning alone must not renormalize node intensity");
+  assert.ok(Math.abs(afterNode.height - beforeNode.height) < 1e-9, "panning at an unchanged scale must preserve canonical node height");
 }
 
 {
@@ -238,8 +264,8 @@ assert.match(componentSource, /return stored === "range" \|\| stored === "book" 
 assert.match(componentSource, /buildPriceFollowingViewport/, "the ladder must derive its moving full-range scale from the chart transform");
 assert.match(componentSource, /size\.height - LADDER_FOOTER_HEIGHT_PX/, "the ladder must use its complete dock height instead of stopping at the chart pane boundary");
 assert.match(componentSource, /chartHost\.getBoundingClientRect\(\)\.top - bounds\.top/, "the ladder must measure and correct the chart host's independent vertical coordinate origin");
-assert.match(componentSource, /buildBufferedRequestViewport/, "high-frequency live-price updates must use a buffered request viewport instead of restarting the depth request per tick");
-assert.match(componentSource, /CONSOLIDATED_QUERY_BUCKET_USD/, "the consolidated request range must be stable inside an explicit price bucket");
+assert.match(componentSource, /buildStableLiquidityProjection/, "high-frequency chart movement must use an anchored request projection instead of redefining depth bins per frame");
+assert.match(consolidatedClientSource, /priceStep: String\(input\.priceStep\)/, "the client must send the canonical price step to the server compositor");
 assert.match(componentSource, /model\.currentPriceY/, "the live-price line must use the exact transformed price coordinate rather than a row midpoint");
 assert.match(componentSource, /setLockedViewport\(null\)/, "a symbol or chart identity change must safely restore chart-follow mode");
 assert.match(componentSource, /drawCumulativeDepthBand/, "the ladder must render the DOM Pro cumulative V-shaped depth bands");

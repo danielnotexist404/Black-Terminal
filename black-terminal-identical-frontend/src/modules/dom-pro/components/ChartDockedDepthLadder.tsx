@@ -5,6 +5,7 @@ import type { MarketSymbol } from "../../../market-data/types";
 import { blackCorePerformanceMonitor } from "../../../performance/performanceMonitor";
 import {
   CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD,
+  buildStableLiquidityProjection,
   buildChartSynchronizedViewport,
   buildChartDockedDepthLadder,
   buildPriceFollowingViewport,
@@ -34,8 +35,6 @@ type DepthViewMode = "chart" | "range" | "book";
 
 const AGGREGATION_OPTIONS = [1, 5, 10, 20, 50, 100];
 const SMOOTHING_TAU_MS = 82;
-const CONSOLIDATED_QUERY_BUCKET_USD = 1_000;
-const CONSOLIDATED_QUERY_BUFFER_USD = 2_000;
 const LADDER_DATA_TOP_PX = 38;
 const LADDER_FOOTER_HEIGHT_PX = 26;
 
@@ -76,19 +75,20 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, viewportKey, w
     ? buildChartSynchronizedViewport(dockAlignedChartViewport, ladderRenderViewport)
     : null, [dockAlignedChartViewport, ladderRenderViewport]);
   const selectedLiveViewport = viewMode === "chart" ? chartSynchronizedViewport : followingViewport;
-  const bufferedLiveViewport = useMemo(() => selectedLiveViewport
-    ? buildBufferedRequestViewport(selectedLiveViewport)
-    : null, [selectedLiveViewport]);
-  const requestViewport = lockedViewport ?? bufferedLiveViewport;
+  const requestViewport = lockedViewport ?? selectedLiveViewport;
   const requestedRows = requestViewport
     ? clampInteger(Math.round(((requestViewport.plotBottom - requestViewport.plotTop) / 13) * (20 / aggregationTicks)), 80, 180)
     : 80;
+  const requestProjection = useMemo(() => requestViewport
+    ? buildStableLiquidityProjection(requestViewport, requestedRows)
+    : null, [requestViewport, requestedRows]);
   const consolidated = useConsolidatedLiquidityFeed({
     baseAsset: marketSymbol.baseAsset,
-    minimumPrice: requestViewport?.priceMin ?? 0,
-    maximumPrice: requestViewport?.priceMax ?? 0,
-    rowCount: requestedRows,
-    enabled: Boolean(requestViewport)
+    minimumPrice: requestProjection?.minimumPrice ?? 0,
+    maximumPrice: requestProjection?.maximumPrice ?? 0,
+    rowCount: requestProjection?.rowCount ?? requestedRows,
+    priceStep: requestProjection?.priceStep ?? 0,
+    enabled: Boolean(requestProjection)
   });
 
   useLayoutEffect(() => {
@@ -219,8 +219,7 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, viewportKey, w
     const bounds = event.currentTarget.getBoundingClientRect();
     const y = event.clientY - bounds.top;
     if (y < model.plotTop || y > model.plotBottom) return setHover(null);
-    const index = Math.floor((y - model.plotTop) / Math.max(model.rowHeight, 1));
-    const row = model.rows[index];
+    const row = model.rows.find((candidate) => y >= candidate.top && y <= candidate.top + candidate.height);
     if (!row) return setHover(null);
     setHover({ row, x: Math.min(bounds.width - 150, Math.max(8, event.clientX - bounds.left + 10)), y: Math.min(bounds.height - 88, Math.max(42, y + 8)) });
   }
@@ -326,7 +325,6 @@ function drawLadder(canvas: HTMLCanvasElement, size: CanvasSize, model: ChartDoc
   context.fillRect(0, 0, size.width, size.height);
 
   const columns = [0, size.width * 0.16, size.width * 0.34, size.width * 0.52, size.width * 0.75, size.width];
-  const maxVisualDepth = Math.max(1e-12, ...visualRows.map((row) => Math.max(row.bid, row.ask)));
   const profileLeft = columns[4];
   const profileRight = size.width - 7;
   const askGradient = context.createLinearGradient(profileLeft, 0, profileRight, 0);
@@ -361,8 +359,8 @@ function drawLadder(canvas: HTMLCanvasElement, size: CanvasSize, model: ChartDoc
     context.stroke();
 
     const profileWidth = Math.max(0, size.width - profileLeft - 7);
-    const askRatio = visual.ask / maxVisualDepth;
-    const bidRatio = visual.bid / maxVisualDepth;
+    const askRatio = visual.ask > 0 ? Math.min(1, Math.sqrt(visual.ask / Math.max(model.depthReference, 1e-12))) : 0;
+    const bidRatio = visual.bid > 0 ? Math.min(1, Math.sqrt(visual.bid / Math.max(model.depthReference, 1e-12))) : 0;
     if (askRatio > 0) {
       const width = Math.max(1, profileWidth * Math.min(1, askRatio));
       context.save();
@@ -455,7 +453,8 @@ function drawCumulativeDepthBand(
     cumulative += side === "ask" ? (visualRows[index]?.ask ?? 0) : (visualRows[index]?.bid ?? 0);
     return { index, cumulative };
   });
-  const maximum = points.at(-1)?.cumulative ?? 0;
+  const deliveredTotal = side === "ask" ? model.sourceAskSize : model.sourceBidSize;
+  const maximum = Math.max(deliveredTotal, points.at(-1)?.cumulative ?? 0);
   if (maximum <= 1e-12) return;
   const width = Math.max(1, profileRight - profileLeft);
   const coordinates = points.map((point) => ({
@@ -541,15 +540,6 @@ function readAggregation(workspaceId: string) {
 function readViewMode(workspaceId: string): DepthViewMode {
   const stored = localStorage.getItem(viewModeStorageKey(workspaceId));
   return stored === "range" || stored === "book" ? stored : "chart";
-}
-
-function buildBufferedRequestViewport(viewport: ChartPriceTransformSnapshot): ChartPriceTransformSnapshot {
-  const minimumPrice = Math.max(1e-9, Math.floor(viewport.priceMin / CONSOLIDATED_QUERY_BUCKET_USD) * CONSOLIDATED_QUERY_BUCKET_USD);
-  return {
-    ...viewport,
-    priceMin: minimumPrice,
-    priceMax: minimumPrice + (viewport.priceMax - viewport.priceMin) + CONSOLIDATED_QUERY_BUFFER_USD
-  };
 }
 
 function formatPrice(value: number | null, decimals: number) {

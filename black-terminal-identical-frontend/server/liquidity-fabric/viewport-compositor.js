@@ -5,17 +5,24 @@ export function projectLiquidityViewport(input = {}) {
   const minimumPrice = finitePositive(input.minimumPrice, "minimumPrice");
   const maximumPrice = finitePositive(input.maximumPrice, "maximumPrice");
   if (maximumPrice <= minimumPrice) throw inputError("maximumPrice must exceed minimumPrice");
-  const rowCount = clampInteger(input.rowCount ?? 80, 8, 240);
+  const requestedRowCount = clampInteger(input.rowCount ?? 80, 8, 240);
   const baseAsset = token(input.baseAsset).toUpperCase();
   if (!/^[A-Z0-9]{2,15}$/.test(baseAsset)) throw inputError("baseAsset is invalid");
   const maximumAgeMs = clampInteger(input.maximumAgeMs ?? 15_000, 500, 60_000);
   const span = maximumPrice - minimumPrice;
-  const step = span / rowCount;
+  const requestedPriceStep = optionalFinitePositive(input.priceStep, "priceStep");
+  const step = requestedPriceStep ?? span / requestedRowCount;
+  const anchoredMinimumIndex = requestedPriceStep === null ? null : Math.ceil(minimumPrice / step - 0.5);
+  const anchoredMaximumIndex = requestedPriceStep === null ? null : Math.floor(maximumPrice / step + 0.5);
+  const rowCount = requestedPriceStep === null
+    ? requestedRowCount
+    : Math.max(0, Number(anchoredMaximumIndex) - Number(anchoredMinimumIndex) + 1);
+  if (rowCount < 1 || rowCount > 240) throw inputError("priceStep must produce between 1 and 240 canonical rows");
   const rows = Array.from({ length: rowCount }, (_, index) => ({
     index,
-    priceHigh: maximumPrice - index * step,
-    priceLow: maximumPrice - (index + 1) * step,
-    price: maximumPrice - (index + 0.5) * step,
+    priceHigh: anchoredMaximumIndex === null ? maximumPrice - index * step : (anchoredMaximumIndex - index + 0.5) * step,
+    priceLow: anchoredMaximumIndex === null ? maximumPrice - (index + 1) * step : (anchoredMaximumIndex - index - 0.5) * step,
+    price: anchoredMaximumIndex === null ? maximumPrice - (index + 0.5) * step : (anchoredMaximumIndex - index) * step,
     bidBase: 0,
     askBase: 0,
     bidNotionalUsd: 0,
@@ -56,14 +63,16 @@ export function projectLiquidityViewport(input = {}) {
         if (row.priceHigh >= coverageMin && row.priceLow <= coverageMax) row.coverageVenues.add(venue);
       }
     }
-    accumulateLevels(rows, book.bids, "bid", venue, minimumPrice, maximumPrice, step);
-    accumulateLevels(rows, book.asks, "ask", venue, minimumPrice, maximumPrice, step);
+    accumulateLevels(rows, book.bids, "bid", venue, minimumPrice, maximumPrice, step, anchoredMaximumIndex);
+    accumulateLevels(rows, book.asks, "ask", venue, minimumPrice, maximumPrice, step, anchoredMaximumIndex);
   }
 
   const referencePrice = median(included.map((summary) => summary.midPrice).filter(Number.isFinite));
   const currentIndex = referencePrice === null
     ? Math.floor(rowCount / 2)
-    : clampInteger(Math.floor((maximumPrice - referencePrice) / step), 0, rowCount - 1);
+    : anchoredMaximumIndex === null
+      ? clampInteger(Math.floor((maximumPrice - referencePrice) / step), 0, rowCount - 1)
+      : clampInteger(anchoredMaximumIndex - Math.round(referencePrice / step), 0, rowCount - 1);
 
   let askCumulative = 0;
   for (let index = currentIndex; index >= 0; index -= 1) {
@@ -77,8 +86,9 @@ export function projectLiquidityViewport(input = {}) {
   }
 
   const previous = Array.isArray(input.previousRows) ? input.previousRows : [];
+  const previousByPrice = new Map(previous.map((row) => [stablePriceKey(row?.price), row]));
   const finalizedRows = rows.map((row, index) => {
-    const prior = previous[index];
+    const prior = previousByPrice.get(stablePriceKey(row.price));
     const deltaNotionalUsd = prior
       ? (row.bidNotionalUsd - Number(prior.bidNotionalUsd || 0)) - (row.askNotionalUsd - Number(prior.askNotionalUsd || 0))
       : 0;
@@ -131,7 +141,7 @@ export function projectLiquidityViewport(input = {}) {
   });
 }
 
-function accumulateLevels(rows, levels, side, venue, minimumPrice, maximumPrice, step) {
+function accumulateLevels(rows, levels, side, venue, minimumPrice, maximumPrice, step, anchoredMaximumIndex) {
   for (const level of levels) {
     const price = Number(level?.price);
     const quantity = Number(level?.quantity);
@@ -139,7 +149,9 @@ function accumulateLevels(rows, levels, side, venue, minimumPrice, maximumPrice,
     if (side === "bid" && price < minimumPrice) break;
     if (side === "ask" && price > maximumPrice) break;
     if (price < minimumPrice || price > maximumPrice) continue;
-    const index = clampInteger(Math.floor((maximumPrice - price) / step), 0, rows.length - 1);
+    const index = anchoredMaximumIndex === null
+      ? clampInteger(Math.floor((maximumPrice - price) / step), 0, rows.length - 1)
+      : clampInteger(anchoredMaximumIndex - Math.round(price / step), 0, rows.length - 1);
     const row = rows[index];
     const notional = price * quantity;
     if (side === "bid") {
@@ -192,6 +204,16 @@ function finitePositive(value, label) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) throw inputError(`${label} is invalid`);
   return numeric;
+}
+
+function optionalFinitePositive(value, label) {
+  if (value === undefined || value === null || value === "") return null;
+  return finitePositive(value, label);
+}
+
+function stablePriceKey(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric.toPrecision(12) : "invalid";
 }
 
 function inputError(message) {

@@ -39,6 +39,10 @@ export type ChartDockedDepthLadderModel = {
   priceMin: number;
   priceMax: number;
   priceSpan: number;
+  priceStep: number;
+  depthReference: number;
+  sourceBidSize: number;
+  sourceAskSize: number;
   coverageMin: number | null;
   coverageMax: number | null;
   subscribedDepth: number | null;
@@ -62,8 +66,38 @@ type ChartDockedDepthLadderInput = {
 
 type MutableRow = ChartDockedDepthRow;
 
+export type StableLiquidityProjection = {
+  minimumPrice: number;
+  maximumPrice: number;
+  rowCount: number;
+  priceStep: number;
+};
+
 const EPSILON = 1e-12;
 export const CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD = 26_000;
+
+/**
+ * Chooses a globally anchored price grid for a chart viewport. Moving the chart
+ * without changing its scale can add/remove canonical buckets at the edges, but
+ * can never redefine the price bounds or identity of an existing bucket.
+ */
+export function buildStableLiquidityProjection(
+  viewport: ChartPriceTransformSnapshot,
+  targetRows: number,
+  bufferRows = 4
+): StableLiquidityProjection {
+  const safeTargetRows = clampInteger(targetRows, 8, 220);
+  const priceStep = niceStepAtLeast((viewport.priceMax - viewport.priceMin) / safeTargetRows);
+  const padding = clampInteger(bufferRows, 0, 10);
+  const minimumIndex = Math.max(1, Math.ceil(viewport.priceMin / priceStep - 0.5) - padding);
+  const maximumIndex = Math.max(minimumIndex, Math.floor(viewport.priceMax / priceStep + 0.5) + padding);
+  return {
+    minimumPrice: Math.max(EPSILON, (minimumIndex - 0.5) * priceStep),
+    maximumPrice: (maximumIndex + 0.5) * priceStep,
+    rowCount: maximumIndex - minimumIndex + 1,
+    priceStep
+  };
+}
 
 export function translateChartViewportToDock(
   chartViewport: ChartPriceTransformSnapshot,
@@ -106,25 +140,34 @@ export function buildChartDockedDepthLadder(input: ChartDockedDepthLadderInput):
   const viewport = scaleMode === "book" ? fitViewportToDeliveredBook(input.viewport, depth) : input.viewport;
   const plotHeight = Math.max(0, viewport.plotBottom - viewport.plotTop);
   const preferredRowHeight = clamp(input.preferredRowHeight ?? 13, 9, 24);
-  const rowCount = plotHeight > 0
-    ? clampInteger(Math.floor(plotHeight / preferredRowHeight), 8, input.maximumRows ?? 180)
-    : 0;
-  const rowHeight = rowCount > 0 ? plotHeight / rowCount : preferredRowHeight;
+  const maximumRows = clampInteger(input.maximumRows ?? 180, 8, 2_000);
+  const sourceStep = Math.max(EPSILON, depth.priceStep);
+  const sourceMinimumIndex = Math.ceil(viewport.priceMin / sourceStep - 0.5);
+  const sourceMaximumIndex = Math.floor(viewport.priceMax / sourceStep + 0.5);
+  const sourceRowCount = Math.max(0, sourceMaximumIndex - sourceMinimumIndex + 1);
+  const compression = Math.max(1, Math.ceil(sourceRowCount / maximumRows));
+  const priceStep = sourceStep * compression;
+  const minimumIndex = Math.ceil(viewport.priceMin / priceStep - 0.5);
+  const maximumIndex = Math.floor(viewport.priceMax / priceStep + 0.5);
   const rows: MutableRow[] = [];
 
-  for (let index = 0; index < rowCount; index += 1) {
-    const top = viewport.plotTop + index * rowHeight;
-    const bottom = index === rowCount - 1 ? viewport.plotBottom : top + rowHeight;
-    const priceHigh = finitePrice(screenYToPrice(top, viewport));
-    const priceLow = finitePrice(screenYToPrice(bottom, viewport));
-    const price = finitePrice(screenYToPrice((top + bottom) / 2, viewport));
+  for (let priceIndex = maximumIndex; priceIndex >= minimumIndex; priceIndex -= 1) {
+    const price = priceIndex * priceStep;
+    const priceHigh = price + priceStep / 2;
+    const priceLow = Math.max(EPSILON, price - priceStep / 2);
+    const highY = priceToScreenY(priceHigh, viewport);
+    const lowY = priceToScreenY(priceLow, viewport);
+    if (highY === null || lowY === null) continue;
+    const top = Math.max(viewport.plotTop, Math.min(highY, lowY));
+    const bottom = Math.min(viewport.plotBottom, Math.max(highY, lowY));
+    if (bottom - top <= EPSILON) continue;
     const coverage = depth.coverageMin !== null && depth.coverageMax !== null
       && priceHigh >= depth.coverageMin && priceLow <= depth.coverageMax
       ? "live"
       : "unavailable";
     rows.push({
-      key: `${viewport.revision}:${index}`,
-      index,
+      key: `${depth.streamKey}:${stableNumber(priceStep)}:${priceIndex}`,
+      index: rows.length,
       top,
       height: bottom - top,
       price,
@@ -146,6 +189,9 @@ export function buildChartDockedDepthLadder(input: ChartDockedDepthLadderInput):
     });
   }
 
+  const rowHeight = rows.length > 0 ? plotHeight / rows.length : preferredRowHeight;
+  const rowsByPriceIndex = new Map(rows.map((row) => [Math.round(row.price / priceStep), row]));
+
   let hiddenAboveCount = 0;
   let hiddenBelowCount = 0;
   for (const source of depth.rows) {
@@ -159,8 +205,7 @@ export function buildChartDockedDepthLadder(input: ChartDockedDepthLadderInput):
       if (source.totalSize > EPSILON) hiddenBelowCount += 1;
       continue;
     }
-    const index = clampInteger(Math.floor((y - viewport.plotTop) / Math.max(rowHeight, EPSILON)), 0, Math.max(0, rows.length - 1));
-    const target = rows[index];
+    const target = rowsByPriceIndex.get(Math.round(source.price / priceStep));
     if (!target) continue;
     target.bidSize += source.bidSize;
     target.askSize += source.askSize;
@@ -170,17 +215,25 @@ export function buildChartDockedDepthLadder(input: ChartDockedDepthLadderInput):
   }
 
   const currentY = depth.currentPrice === null ? null : priceToScreenY(depth.currentPrice, viewport);
-  const currentIndex = currentY === null || rows.length === 0
+  const currentIndex = depth.currentPrice === null
     ? -1
-    : clampInteger(Math.floor((currentY - viewport.plotTop) / Math.max(rowHeight, EPSILON)), 0, rows.length - 1);
+    : rows.findIndex((row) => depth.currentPrice! >= row.priceLow && depth.currentPrice! <= row.priceHigh);
   if (currentY !== null && currentY >= viewport.plotTop && currentY <= viewport.plotBottom && currentIndex >= 0) {
     rows[currentIndex].isCurrentPrice = true;
   }
 
-  const nonZeroDepth = rows
-    .map((row) => Math.max(row.bidSize, row.askSize))
-    .filter((value) => value > EPSILON);
-  const depthReference = percentile(nonZeroDepth, 0.95);
+  const sourceDepthByIndex = new Map<number, { bidSize: number; askSize: number }>();
+  for (const source of depth.rows) {
+    const index = Math.round(source.price / priceStep);
+    const target = sourceDepthByIndex.get(index) ?? { bidSize: 0, askSize: 0 };
+    target.bidSize += source.bidSize;
+    target.askSize += source.askSize;
+    sourceDepthByIndex.set(index, target);
+  }
+  const depthReference = percentile(
+    [...sourceDepthByIndex.values()].map((row) => Math.max(row.bidSize, row.askSize)).filter((value) => value > EPSILON),
+    0.95
+  );
   rows.forEach((row) => {
     row.totalSize = row.bidSize + row.askSize;
     row.signedSize = row.bidSize - row.askSize;
@@ -194,18 +247,29 @@ export function buildChartDockedDepthLadder(input: ChartDockedDepthLadderInput):
     row.activityRatio = clamp(Math.sqrt(relativeDelta), 0, 1);
   });
 
+  const sourceIndices = [...sourceDepthByIndex.keys()].sort((left, right) => left - right);
+  const referenceIndex = depth.currentPrice === null
+    ? Math.round(((depth.bestBid ?? depth.bestAsk ?? 0) / priceStep))
+    : Math.round(depth.currentPrice / priceStep);
+  const minimumSourceIndex = sourceIndices[0] ?? referenceIndex;
+  const maximumSourceIndex = sourceIndices.at(-1) ?? referenceIndex;
   let askCumulative = 0;
-  const askStart = currentIndex >= 0 ? currentIndex : rows.length - 1;
-  for (let index = askStart; index >= 0; index -= 1) {
-    askCumulative += rows[index].askSize;
-    rows[index].askCumulative = askCumulative;
+  const askCumulativeByIndex = new Map<number, number>();
+  for (let index = Math.max(minimumSourceIndex, referenceIndex); index <= maximumSourceIndex; index += 1) {
+    askCumulative += sourceDepthByIndex.get(index)?.askSize ?? 0;
+    askCumulativeByIndex.set(index, askCumulative);
   }
   let bidCumulative = 0;
-  const bidStart = currentIndex >= 0 ? currentIndex : 0;
-  for (let index = bidStart; index < rows.length; index += 1) {
-    bidCumulative += rows[index].bidSize;
-    rows[index].bidCumulative = bidCumulative;
+  const bidCumulativeByIndex = new Map<number, number>();
+  for (let index = Math.min(maximumSourceIndex, referenceIndex); index >= minimumSourceIndex; index -= 1) {
+    bidCumulative += sourceDepthByIndex.get(index)?.bidSize ?? 0;
+    bidCumulativeByIndex.set(index, bidCumulative);
   }
+  rows.forEach((row) => {
+    const index = Math.round(row.price / priceStep);
+    row.askCumulative = askCumulativeByIndex.get(index) ?? 0;
+    row.bidCumulative = bidCumulativeByIndex.get(index) ?? 0;
+  });
 
   return {
     viewportRevision: viewport.revision,
@@ -218,6 +282,10 @@ export function buildChartDockedDepthLadder(input: ChartDockedDepthLadderInput):
     priceMin: viewport.priceMin,
     priceMax: viewport.priceMax,
     priceSpan: viewport.priceMax - viewport.priceMin,
+    priceStep,
+    depthReference,
+    sourceBidSize: depth.totalBidSize,
+    sourceAskSize: depth.totalAskSize,
     coverageMin: depth.coverageMin,
     coverageMax: depth.coverageMax,
     subscribedDepth: depth.subscribedDepth,
@@ -309,8 +377,17 @@ function percentile(values: number[], fraction: number) {
   return Math.max(sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction))], EPSILON);
 }
 
-function finitePrice(value: number | null) {
-  return value !== null && Number.isFinite(value) ? value : 0;
+function niceStepAtLeast(value: number) {
+  if (!Number.isFinite(value) || value <= EPSILON) return 1;
+  const exponent = Math.floor(Math.log10(value));
+  const magnitude = 10 ** exponent;
+  const normalized = value / magnitude;
+  const factor = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10;
+  return Math.max(EPSILON, factor * magnitude);
+}
+
+function stableNumber(value: number) {
+  return Number(value.toPrecision(12)).toString();
 }
 
 function clampInteger(value: number, min: number, max: number) {

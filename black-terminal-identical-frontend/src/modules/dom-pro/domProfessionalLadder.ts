@@ -180,7 +180,7 @@ export function resolveProfessionalDomNodeMotion(
 function aggregateBook(book: OrderBookSnapshot, currentPrice: number | null, aggregationTicks = DEFAULT_AGGREGATION_TICKS, maximumRows = DEFAULT_MAXIMUM_ROWS): AggregatedBook {
   const bids = normalizeLevels(book.bids, "bid");
   const asks = normalizeLevels(book.asks, "ask");
-  const tickSize = inferTickSize([...bids, ...asks]);
+  const tickSize = finitePositive(book.priceStep) ?? inferTickSize([...bids, ...asks]);
   const requestedAggregationTicks = clampInteger(aggregationTicks, 1, 10_000);
   const requestedStep = tickSize * requestedAggregationTicks;
   const sourcePrices = [...bids.map((level) => level.price), ...asks.map((level) => level.price)];

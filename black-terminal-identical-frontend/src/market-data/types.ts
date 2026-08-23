@@ -110,6 +110,8 @@ export type OrderBookSnapshot = {
   time: number;
   bids: OrderBookLevel[];
   asks: OrderBookLevel[];
+  /** Authoritative canonical price interval when the source is already projected. */
+  priceStep?: number;
   subscribedDepth?: number;
   updateId?: number;
   sequence?: number;

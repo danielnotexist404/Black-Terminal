@@ -99,6 +99,33 @@ function snapshot(reconstructor, venue, sequence = 100, overrides = {}) {
   assert.ok(combinedBid, "same-price liquidity from multiple direct venues must be aggregated with provenance intact");
   assert.deepEqual(combinedBid.contributions.map((item) => item.venue).sort(), ["bybit", "coinbase"]);
 
+  const anchored = projectLiquidityViewport({
+    books: [coinbase, bybit],
+    now: NOW,
+    baseAsset: "BTC",
+    minimumPrice: 62_000,
+    maximumPrice: 88_000,
+    rowCount: 80,
+    priceStep: 500
+  });
+  const panned = projectLiquidityViewport({
+    books: [coinbase, bybit],
+    now: NOW,
+    baseAsset: "BTC",
+    minimumPrice: 62_500,
+    maximumPrice: 88_500,
+    rowCount: 80,
+    priceStep: 500,
+    previousRows: anchored.rows
+  });
+  const anchoredBid = anchored.rows.find((row) => row.price === 72_000);
+  const pannedBid = panned.rows.find((row) => row.price === 72_000);
+  assert.ok(anchoredBid && pannedBid, "overlapping canonical levels must remain present after a viewport pan");
+  assert.equal(pannedBid.priceLow, anchoredBid.priceLow, "a pan must not redefine a canonical bucket's lower price bound");
+  assert.equal(pannedBid.priceHigh, anchoredBid.priceHigh, "a pan must not redefine a canonical bucket's upper price bound");
+  assert.equal(pannedBid.bidBase, anchoredBid.bidBase, "a pan must not change the quantity assigned to an unchanged price bucket");
+  assert.equal(pannedBid.deltaNotionalUsd, 0, "price-keyed reconciliation must not report false order flow when rows move on screen");
+
   const staleOnly = projectLiquidityViewport({
     books: [venueBook("coinbase", [[72_000, 1]], [[72_010, 1]], NOW - 20_000)],
     now: NOW,
@@ -318,6 +345,7 @@ function snapshot(reconstructor, venue, sequence = 100, overrides = {}) {
   assert.doesNotMatch(`${route}\n${runtime}`, /\/api\/(execution|order\/create)|placeOrder|cancelOrder|amendOrder/, "liquidity synchronization must not contain an order-mutation path");
   assert.match(runtime, /orderbook\.full\./, "Bybit must use the official full-depth delta stream rather than the legacy narrow ladder feed");
   assert.match(runtime, /full_orderbook\?category=linear/, "Bybit full-depth reconstruction must be initialized by its official REST snapshot");
+  assert.match(runtime, /canonical:\$\{priceStep\.toPrecision\(8\)\}/, "canonical price grids must reconcile overlapping rows across viewport pans");
 }
 
 console.log("Consolidated Liquidity Fabric tests passed: provenance, reconstruction, full-range projection, cache discipline and read-only source contracts.");

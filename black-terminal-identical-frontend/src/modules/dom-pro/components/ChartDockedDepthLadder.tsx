@@ -10,6 +10,8 @@ import {
   buildChartDockedDepthLadder,
   buildPriceFollowingViewport,
   fitViewportToDeliveredBook,
+  resolveChartDockedProjectionRowCount,
+  resolveLiquiditySignificance,
   translateChartViewportToDock,
   type ChartDockedDepthLadderModel,
   type ChartDockedDepthRow,
@@ -77,7 +79,7 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, viewportKey, w
   const selectedLiveViewport = viewMode === "chart" ? chartSynchronizedViewport : followingViewport;
   const requestViewport = lockedViewport ?? selectedLiveViewport;
   const requestedRows = requestViewport
-    ? clampInteger(Math.round(((requestViewport.plotBottom - requestViewport.plotTop) / 13) * (20 / aggregationTicks)), 80, 180)
+    ? resolveChartDockedProjectionRowCount(requestViewport.plotBottom - requestViewport.plotTop, aggregationTicks)
     : 80;
   const requestProjection = useMemo(() => requestViewport
     ? buildStableLiquidityProjection(requestViewport, requestedRows)
@@ -246,12 +248,12 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, viewportKey, w
           title={scaleMode === "locked"
             ? "Price scale is frozen. Click to resume the selected live range mode."
             : "Freeze the ladder's current price range while keeping live depth updates active."}
-          aria-label={`Depth scale: ${scaleMode === "locked" ? "scale locked" : viewMode === "book" ? "book fit live" : viewMode === "chart" ? "chart synchronized" : "26 thousand dollar follow"}`}
+          aria-label={`Depth scale: ${scaleMode === "locked" ? "scale locked" : viewMode === "book" ? "book fit live" : viewMode === "chart" ? "chart synchronized" : "26 thousand dollar independent overview"}`}
         >
           {scaleMode === "locked" ? <Lock size={10} /> : <Crosshair size={10} />}
-          {scaleMode === "locked" ? "LOCKED" : viewMode === "book" ? "BOOK LIVE" : viewMode === "chart" ? "CHART SYNC" : "26K FOLLOW"}
+          {scaleMode === "locked" ? "LOCKED" : viewMode === "book" ? "BOOK LIVE" : viewMode === "chart" ? "CHART SYNC" : "26K OVERVIEW"}
         </button>
-        <label className="chart-docked-depth-view" title="Choose exact chart confluence, a moving 26,000 USD range, or all currently delivered depth">
+        <label className="chart-docked-depth-view" title="CHART preserves exact confluence. 26K OVERVIEW is an intentionally independent fixed-range overview. BOOK FIT shows all delivered depth.">
           VIEW:
           <select
             aria-label="Ladder price scale mode"
@@ -262,11 +264,11 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, viewportKey, w
             }}
           >
             <option value="chart">CHART</option>
-            <option value="range">26K</option>
+            <option value="range">26K OVERVIEW</option>
             <option value="book">BOOK FIT</option>
           </select>
         </label>
-        <label title="Aggregate this many native venue ticks before projecting depth onto the chart scale">
+        <label title="Control consolidated canonical price-bin density. Higher aggregation suppresses ordinary book noise and emphasizes larger structural levels.">
           AGG:
           <select value={aggregationTicks} onChange={(event) => setAggregationTicks(Number(event.target.value))}>
             {AGGREGATION_OPTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
@@ -359,8 +361,8 @@ function drawLadder(canvas: HTMLCanvasElement, size: CanvasSize, model: ChartDoc
     context.stroke();
 
     const profileWidth = Math.max(0, size.width - profileLeft - 7);
-    const askRatio = visual.ask > 0 ? Math.min(1, Math.sqrt(visual.ask / Math.max(model.depthReference, 1e-12))) : 0;
-    const bidRatio = visual.bid > 0 ? Math.min(1, Math.sqrt(visual.bid / Math.max(model.depthReference, 1e-12))) : 0;
+    const askRatio = resolveLiquiditySignificance(visual.ask, model.askNoiseFloor, model.askDepthReference);
+    const bidRatio = resolveLiquiditySignificance(visual.bid, model.bidNoiseFloor, model.bidDepthReference);
     if (askRatio > 0) {
       const width = Math.max(1, profileWidth * Math.min(1, askRatio));
       context.save();
@@ -385,12 +387,12 @@ function drawLadder(canvas: HTMLCanvasElement, size: CanvasSize, model: ChartDoc
     drawRightText(context, formatPrice(row.price, model.priceDecimals), columns[4] - 5, y + height / 2, row.isCurrentPrice ? "#ffffff" : "#d7dbe1");
 
     if (row.totalSize > 0) {
-      const nodeAlpha = Math.min(1, 0.18 + visual.depth * 0.55 + visual.activity * 0.35);
+      const nodeAlpha = Math.min(1, 0.07 + visual.depth * 0.72 + visual.activity * 0.21);
       context.save();
       context.shadowBlur = 3 + visual.depth * 4 + visual.activity * 9;
       context.shadowColor = row.side === "ask" ? "rgba(255,0,32,0.9)" : "rgba(255,255,255,0.82)";
       context.fillStyle = row.side === "ask" ? `rgba(255,24,52,${nodeAlpha})` : `rgba(245,247,250,${nodeAlpha})`;
-      const nodeHeight = Math.max(2, (height - 3) * (0.58 + visual.depth * 0.42));
+      const nodeHeight = Math.max(1, (height - 2) * (0.18 + visual.depth * 0.82));
       context.fillRect(size.width - 7, y + (height - nodeHeight) / 2, 5, nodeHeight);
       context.fillStyle = row.side === "ask" ? `rgba(255,130,145,${nodeAlpha * 0.82})` : `rgba(255,255,255,${nodeAlpha * 0.88})`;
       context.fillRect(size.width - 5, y + (height - nodeHeight) / 2, 1, nodeHeight);
@@ -431,7 +433,7 @@ function drawLadder(canvas: HTMLCanvasElement, size: CanvasSize, model: ChartDoc
   context.fillStyle = "rgba(116,123,134,0.52)";
   context.font = '600 6px "IBM Plex Mono", monospace';
   context.textAlign = "left";
-  const scaleLabel = model.scaleMode === "chart" ? "CLF CHART-SYNC" : model.scaleMode === "follow" ? "CLF 26K-FOLLOW" : model.scaleMode === "book" ? "CLF BOOK-FIT" : "CLF SCALE-LOCKED";
+  const scaleLabel = model.scaleMode === "chart" ? "CLF CHART-SYNC" : model.scaleMode === "follow" ? "CLF 26K-OVERVIEW" : model.scaleMode === "book" ? "CLF BOOK-FIT" : "CLF SCALE-LOCKED";
   context.fillText(`${quoteAsset} · ${scaleLabel}`, 5, Math.min(size.height - 8, model.plotBottom + 13));
 }
 
@@ -529,7 +531,7 @@ function aggregationStorageKey(workspaceId: string) {
 }
 
 function viewModeStorageKey(workspaceId: string) {
-  return `bt:chart-docked-depth-ladder:view:v2:${workspaceId}`;
+  return `bt:chart-docked-depth-ladder:view:v3:${workspaceId}`;
 }
 
 function readAggregation(workspaceId: string) {
@@ -565,8 +567,4 @@ function formatSignedCompact(value: number) {
 
 function trim(value: number) {
   return Math.abs(value).toFixed(Math.abs(value) >= 100 ? 0 : Math.abs(value) >= 10 ? 1 : 2).replace(/\.0+$|(?<=\.[0-9])0+$/, "");
-}
-
-function clampInteger(value: number, minimum: number, maximum: number) {
-  return Math.max(minimum, Math.min(maximum, Math.round(value)));
 }

@@ -41,6 +41,10 @@ export type ChartDockedDepthLadderModel = {
   priceSpan: number;
   priceStep: number;
   depthReference: number;
+  bidNoiseFloor: number;
+  askNoiseFloor: number;
+  bidDepthReference: number;
+  askDepthReference: number;
   sourceBidSize: number;
   sourceAskSize: number;
   coverageMin: number | null;
@@ -75,6 +79,35 @@ export type StableLiquidityProjection = {
 
 const EPSILON = 1e-12;
 export const CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD = 26_000;
+
+/**
+ * Converts the ladder's aggregation control into a useful number of canonical
+ * projection rows. The previous hard floor of 80 made 20x, 50x and 100x nearly
+ * indistinguishable on a normal dock. Square-root scaling keeps the low-detail
+ * presets responsive without letting the raw preset exceed the API contract.
+ */
+export function resolveChartDockedProjectionRowCount(plotHeight: number, aggregationTicks: number) {
+  const nativeRows = Math.max(1, plotHeight / 13);
+  const aggregation = clamp(Number.isFinite(aggregationTicks) ? aggregationTicks : 20, 1, 100);
+  return clampInteger(nativeRows * Math.sqrt(20 / aggregation), 24, 220);
+}
+
+/**
+ * Maps genuine resting size into visual prominence without allowing the dense
+ * background book to masquerade as a wall. Values below the adaptive noise
+ * floor retain a faint audit trace; only statistical outliers receive long,
+ * bright shelves. Raw quantities and cumulative totals remain unchanged.
+ */
+export function resolveLiquiditySignificance(value: number, noiseFloor: number, depthReference: number) {
+  if (!Number.isFinite(value) || value <= EPSILON) return 0;
+  const floor = Number.isFinite(noiseFloor) ? Math.max(0, noiseFloor) : 0;
+  const reference = Number.isFinite(depthReference) ? Math.max(floor + EPSILON, depthReference) : floor + EPSILON;
+  if (floor > EPSILON && value < floor) {
+    return clamp(0.035 * (value / floor) ** 1.5, 0.002, 0.035);
+  }
+  const normalized = clamp((value - floor) / Math.max(reference - floor, EPSILON), 0, 1);
+  return clamp(0.08 + 0.92 * normalized ** 0.72, 0.08, 1);
+}
 
 /**
  * Chooses a globally anchored price grid for a chart viewport. Moving the chart
@@ -230,17 +263,21 @@ export function buildChartDockedDepthLadder(input: ChartDockedDepthLadderInput):
     target.askSize += source.askSize;
     sourceDepthByIndex.set(index, target);
   }
-  const depthReference = percentile(
-    [...sourceDepthByIndex.values()].map((row) => Math.max(row.bidSize, row.askSize)).filter((value) => value > EPSILON),
-    0.95
+  const bidDistribution = distributionThresholds(
+    [...sourceDepthByIndex.values()].map((row) => row.bidSize).filter((value) => value > EPSILON)
   );
+  const askDistribution = distributionThresholds(
+    [...sourceDepthByIndex.values()].map((row) => row.askSize).filter((value) => value > EPSILON)
+  );
+  const depthReference = Math.max(bidDistribution.reference, askDistribution.reference, EPSILON);
   rows.forEach((row) => {
     row.totalSize = row.bidSize + row.askSize;
     row.signedSize = row.bidSize - row.askSize;
     row.side = classifySide(row.bidSize, row.askSize);
-    row.depthRatio = row.totalSize > EPSILON
-      ? clamp(Math.sqrt(Math.max(row.bidSize, row.askSize) / Math.max(depthReference, EPSILON)), 0.025, 1)
-      : 0;
+    row.depthRatio = Math.max(
+      resolveLiquiditySignificance(row.bidSize, bidDistribution.noiseFloor, bidDistribution.reference),
+      resolveLiquiditySignificance(row.askSize, askDistribution.noiseFloor, askDistribution.reference)
+    );
     const relativeDelta = row.totalSize > EPSILON
       ? Math.abs(row.delta) / Math.max(row.totalSize, Math.abs(row.delta), EPSILON)
       : 0;
@@ -284,6 +321,10 @@ export function buildChartDockedDepthLadder(input: ChartDockedDepthLadderInput):
     priceSpan: viewport.priceMax - viewport.priceMin,
     priceStep,
     depthReference,
+    bidNoiseFloor: bidDistribution.noiseFloor,
+    askNoiseFloor: askDistribution.noiseFloor,
+    bidDepthReference: bidDistribution.reference,
+    askDepthReference: askDistribution.reference,
     sourceBidSize: depth.totalBidSize,
     sourceAskSize: depth.totalAskSize,
     coverageMin: depth.coverageMin,
@@ -375,6 +416,15 @@ function percentile(values: number[], fraction: number) {
   if (values.length === 0) return 1;
   const sorted = values.slice().sort((left, right) => left - right);
   return Math.max(sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction))], EPSILON);
+}
+
+function distributionThresholds(values: number[]) {
+  if (values.length === 0) return { noiseFloor: 0, reference: 1 };
+  const maximum = Math.max(...values);
+  if (values.length <= 4) return { noiseFloor: 0, reference: Math.max(maximum, EPSILON) };
+  const noiseFloor = percentile(values, 0.85);
+  const reference = Math.max(percentile(values, 0.99), noiseFloor * 1.35, EPSILON);
+  return { noiseFloor, reference };
 }
 
 function niceStepAtLeast(value: number) {

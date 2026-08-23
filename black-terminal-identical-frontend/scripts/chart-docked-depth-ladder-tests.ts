@@ -8,6 +8,8 @@ import {
   buildChartSynchronizedViewport,
   buildChartDockedDepthLadder,
   buildPriceFollowingViewport,
+  resolveChartDockedProjectionRowCount,
+  resolveLiquiditySignificance,
   translateChartViewportToDock
 } from "../src/modules/dom-pro/chartDockedDepthLadderModel.ts";
 import { ChartPriceViewportStore } from "../src/modules/dom-pro/chartPriceViewportStore.ts";
@@ -107,6 +109,28 @@ function depth(rows: ProfessionalDomRow[]): ProfessionalDomLadderModel {
 }
 
 {
+  const plotHeight = 780;
+  const rawRows = resolveChartDockedProjectionRowCount(plotHeight, 1);
+  const balancedRows = resolveChartDockedProjectionRowCount(plotHeight, 20);
+  const structuralRows = resolveChartDockedProjectionRowCount(plotHeight, 100);
+  assert.ok(rawRows > balancedRows && balancedRows > structuralRows, "every aggregation preset must materially change canonical price-bin density");
+  assert.ok(structuralRows < 80, "high aggregation must no longer collapse into the former 80-row hard floor");
+  assert.ok(rawRows <= 220 && structuralRows >= 24, "projection density must remain inside the authenticated API/render contract");
+}
+
+{
+  const noiseFloor = 10;
+  const reference = 100;
+  const ordinary = resolveLiquiditySignificance(5, noiseFloor, reference);
+  const threshold = resolveLiquiditySignificance(10, noiseFloor, reference);
+  const meaningful = resolveLiquiditySignificance(55, noiseFloor, reference);
+  const extreme = resolveLiquiditySignificance(100, noiseFloor, reference);
+  assert.ok(ordinary <= 0.035, "ordinary resting depth must remain a faint audit trace");
+  assert.ok(threshold >= 0.08 && meaningful > threshold, "depth above the adaptive floor must gain monotonic visual prominence");
+  assert.equal(extreme, 1, "the structural reference must retain full neon prominence");
+}
+
+{
   const source = depth([
     sourceRow(108, 0, 100, -5),
     sourceRow(100, 0, 8, -1),
@@ -195,6 +219,29 @@ function depth(rows: ProfessionalDomRow[]): ProfessionalDomLadderModel {
 }
 
 {
+  const renderViewport: ChartPriceTransformSnapshot = {
+    ...viewport(615, 57_187, 110_815),
+    width: 320,
+    height: 900,
+    plotTop: 38,
+    plotBottom: 874
+  };
+  for (const chartViewport of [
+    viewport(616, 57_187, 110_815),
+    viewport(617, 25_271, 145_040)
+  ]) {
+    const dockAligned = translateChartViewportToDock(chartViewport, 44);
+    const synchronized = buildChartSynchronizedViewport(dockAligned, renderViewport);
+    for (const price of [57_187, 77_500, 100_000]) {
+      assert.ok(
+        Math.abs((priceToScreenY(price, synchronized) ?? 0) - (priceToScreenY(price, dockAligned) ?? 1)) < 1e-8,
+        `active structural scaling must keep ${price} registered to the chart on revision ${chartViewport.revision}`
+      );
+    }
+  }
+}
+
+{
   const chartViewport = viewport(614, 57_187, 110_815, "logarithmic");
   const dockAlignedChartViewport = translateChartViewportToDock(chartViewport, 44);
   const fullDockViewport: ChartPriceTransformSnapshot = {
@@ -255,12 +302,16 @@ assert.doesNotMatch(consolidatedClientSource, /input\.exchange|exchangeLabel|sel
 assert.match(componentSource, /requestAnimationFrame\(animate\)/, "depth transitions must be synchronized to display frames");
 assert.doesNotMatch(componentSource, /setInterval\(/, "the dock renderer must not introduce a fixed-FPS interval");
 assert.match(componentSource, /HIDDEN\/RPI EXCLUDED/, "coverage limits must be disclosed in the UI");
-assert.match(componentSource, /26K FOLLOW/, "the moving 26,000 USD range must remain an explicit optional scale");
+assert.match(componentSource, /26K OVERVIEW/, "the independent 26,000 USD overview must remain an explicit optional scale");
 assert.match(componentSource, /BOOK FIT/, "the previous delivered-book fitting behavior must remain an explicit optional mode");
 assert.match(componentSource, /CHART SYNC/, "exact chart-scale confluence must be the default ladder mode");
-assert.match(componentSource, /<option value="range">26K<\/option>/, "the 26,000 USD full-range view must remain available as an optional mode");
+assert.match(componentSource, /<option value="range">26K OVERVIEW<\/option>/, "the 26,000 USD full-range overview must remain available as an explicit optional mode");
 assert.match(componentSource, /<option value="book">BOOK FIT<\/option>/, "complete delivered-book fitting must remain available as an optional mode");
 assert.match(componentSource, /return stored === "range" \|\| stored === "book" \? stored : "chart"/, "new workspaces must default to exact chart synchronization");
+assert.match(componentSource, /view:v3:/, "existing persisted independent-scale choices must be retired so upgraded workspaces reopen in chart synchronization");
+assert.match(componentSource, /resolveChartDockedProjectionRowCount/, "the aggregation selector must control canonical projection density rather than collapse into a fixed lower clamp");
+assert.match(componentSource, /resolveLiquiditySignificance\(visual\.ask/, "ask shelves must use adaptive significance instead of raw square-root exaggeration");
+assert.match(componentSource, /resolveLiquiditySignificance\(visual\.bid/, "bid shelves must use adaptive significance instead of raw square-root exaggeration");
 assert.match(componentSource, /buildPriceFollowingViewport/, "the ladder must derive its moving full-range scale from the chart transform");
 assert.match(componentSource, /size\.height - LADDER_FOOTER_HEIGHT_PX/, "the ladder must use its complete dock height instead of stopping at the chart pane boundary");
 assert.match(componentSource, /chartHost\.getBoundingClientRect\(\)\.top - bounds\.top/, "the ladder must measure and correct the chart host's independent vertical coordinate origin");

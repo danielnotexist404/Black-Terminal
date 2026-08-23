@@ -41,7 +41,8 @@ import {
   ddaProAlertSignalStream,
   latestConfirmedDDAProCandleTime
 } from "../modules/dda-pro/core/engineShared";
-import type { DDAProPreset, DDAProSettings, DDAProSignalIntelligenceMode, DDAProSnapshot } from "../modules/dda-pro/core/types";
+import { BC_RDA_CAUSAL_V2, BC_RDA_LEGACY_REPAINTING, type DDAProPreset, type DDAProSettings, type DDAProSignalIntelligenceMode, type DDAProSnapshot } from "../modules/dda-pro/core/types";
+import { BC_RDA_ALERTS_ELIGIBLE } from "../modules/dda-pro/core/certification";
 import { OSCILLATOR_KEYS, resolveOscillatorStack } from "../chart-engine/indicators/oscillatorLayout";
 import { createMockCandles } from "../data/mockMarket";
 import type { AlertCondition, AlertIndicatorTarget, IndicatorAlertDefinition } from "../automation/alerts";
@@ -2254,6 +2255,7 @@ export function PixiBlackChart({
         candles: source,
         settings,
         timeframeSeconds: timeframeDuration,
+        lastBarConfirmed: settings.realtimeMode === "confirmed-bars" || !latestIsDeveloping,
         signalContext: { exchange: marketSymbol.exchange, symbol: marketSymbol.rawSymbol, timeframe },
         ...flowInput
       };
@@ -3199,6 +3201,9 @@ export function PixiBlackChart({
   };
 
   useEffect(() => {
+    // Emergency integrity containment: neither legacy nor causal-v2 browser
+    // results may dispatch alerts until headless runtime parity is certified.
+    if (!BC_RDA_ALERTS_ELIGIBLE) return;
     if (replayActiveRef.current || !ddaProSnapshot) return;
     const definitions = alertDefinitions.filter((definition) =>
       definition.enabled && definition.indicator === "ddaPro" && definition.symbol === displaySymbol &&
@@ -5538,6 +5543,17 @@ export function PixiBlackChart({
           {activeIndicator === "ddaProOscillator" && (
             <>
               <div className="indicator-settings-section">BC-RDA Engine</div>
+              <div className="bcrda-integrity-warning">
+                <strong>{ddaProSettings.signalModelVersion === BC_RDA_LEGACY_REPAINTING ? "REPAINTING RESEARCH VERSION" : "CAUSAL V2 — EXECUTION CONTAINMENT ACTIVE"}</strong>
+                <span>{ddaProSettings.signalModelVersion === BC_RDA_LEGACY_REPAINTING ? "Historical signals may move as future data arrives. Alerts, statistics, backtests and automation are invalid and disabled." : "Final signals use confirmation-bar timestamps. Alerts and Strategy Lab remain blocked until the separate headless VPS runtime is certified."}</span>
+              </div>
+              <label>
+                Signal Model
+                <select value={ddaProSettings.signalModelVersion} onChange={(event) => updateDDAProSetting("signalModelVersion", event.target.value as DDAProSettings["signalModelVersion"])}>
+                  <option value={BC_RDA_CAUSAL_V2}>BC-RDA Causal V2</option>
+                  <option value={BC_RDA_LEGACY_REPAINTING}>Legacy Repainting · Research Only</option>
+                </select>
+              </label>
               <label>
                 Preset
                 <select value={ddaProSettings.preset} onChange={(event) => selectDDAProPreset(event.target.value as DDAProPreset)}>
@@ -5582,7 +5598,7 @@ export function PixiBlackChart({
               <label>Show Signal Confidence<input type="checkbox" checked={ddaProSettings.showSignalConfidence} onChange={(event) => updateDDAProSetting("showSignalConfidence", event.target.checked)} /></label>
               <label>Show Regime Diagnostics<input type="checkbox" checked={ddaProSettings.showRegimeDiagnostics} onChange={(event) => updateDDAProSetting("showRegimeDiagnostics", event.target.checked)} /></label>
               <div className="vwap-mode-note">
-                Alerts use the same visible immutable stream: confirmed dots when Confirmed Alerts Only is enabled, otherwise visible raw dots. Provisional and hidden signals never alert.
+                BC-RDA alerts are disabled during causal reconstruction. No visible, raw, provisional or confirmed marker can dispatch an alert.
               </div>
               <button type="button" className="dda-signal-reset" onClick={() => onIndicatorAdvancedSettingsChange((current) => ({ ...current, ddaProOscillator: resetDDAProSignalIntelligence(ddaProSettings) }))}>Reset Signal Intelligence Defaults</button>
               {ddaProSettings.signalIntelligenceMode === "CUSTOM" && (
@@ -5598,7 +5614,7 @@ export function PixiBlackChart({
                   <label>Distributional Reset Requirement<input type="checkbox" checked={ddaProSettings.distributionalResetRequirement} onChange={(event) => updateDDAProSetting("distributionalResetRequirement", event.target.checked)} /></label>
                   <label>Price-Structure Confirmation<input type="checkbox" checked={ddaProSettings.priceStructureConfirmation} onChange={(event) => updateDDAProSetting("priceStructureConfirmation", event.target.checked)} /></label>
                   <label>Volume Confirmation<input type="checkbox" checked={ddaProSettings.volumeConfirmation} onChange={(event) => updateDDAProSetting("volumeConfirmation", event.target.checked)} /></label>
-                  <label>CVD Confirmation<input type="checkbox" checked={ddaProSettings.cvdConfirmation} onChange={(event) => updateDDAProSetting("cvdConfirmation", event.target.checked)} /></label>
+                  <label>CVD Confirmation · Deferred<input type="checkbox" checked={false} disabled /></label>
                   <label>Higher-Timeframe Confirmation<input type="checkbox" checked={ddaProSettings.higherTimeframeConfirmation} onChange={(event) => updateDDAProSetting("higherTimeframeConfirmation", event.target.checked)} /></label>
                   <label>Minimum Coherence (0–100)<input type="number" min={0} max={100} value={ddaProSettings.minimumCoherence} onChange={(event) => updateDDAProSetting("minimumCoherence", Number(event.target.value))} /></label>
                   <label>Centroid Displacement (distribution widths/bar)<input type="number" min={0} max={5} step={0.005} value={ddaProSettings.minimumCentroidDisplacement} onChange={(event) => updateDDAProSetting("minimumCentroidDisplacement", Number(event.target.value))} /></label>
@@ -5614,7 +5630,7 @@ export function PixiBlackChart({
                   <label>Safety Cooldown Floor (closed bars)<input type="number" min={0} max={100} value={ddaProSettings.safetyCooldownFloor} onChange={(event) => updateDDAProSetting("safetyCooldownFloor", Number(event.target.value))} /></label>
                   <label>Structure Strength<input type="number" min={0} max={100} value={ddaProSettings.structureConfirmationStrength} onChange={(event) => updateDDAProSetting("structureConfirmationStrength", Number(event.target.value))} /></label>
                   <label>Higher-Timeframe Multiple<select value={ddaProSettings.higherTimeframeMultiplier} onChange={(event) => updateDDAProSetting("higherTimeframeMultiplier", Number(event.target.value) as 4 | 12 | 24)}><option value={4}>4×</option><option value={12}>12×</option><option value={24}>24×</option></select></label>
-                  <div className="vwap-mode-note">CVD confirmation fails closed unless genuine CVD values are supplied. No synthetic CVD is manufactured.</div>
+                  <div className="vwap-mode-note">CVD filtering is paused until the causal base model and its headless runtime pass independent certification.</div>
                 </details>
               )}
               <div className="indicator-settings-section">BC-RDA Drawdown Risk Fan</div>
@@ -5726,6 +5742,7 @@ export function PixiBlackChart({
               <label className="indicator-range-row">Line Intensity<span><input type="range" min={0} max={100} value={ddaProSettings.lineIntensity} onChange={(event) => updateDDAProSetting("lineIntensity", Number(event.target.value))} /><b>{ddaProSettings.lineIntensity}</b></span></label>
               <label className="indicator-range-row">Risk Fill<span><input type="range" min={0} max={60} value={ddaProSettings.fillIntensity} onChange={(event) => updateDDAProSetting("fillIntensity", Number(event.target.value))} /><b>{ddaProSettings.fillIntensity}</b></span></label>
               <div className="vwap-mode-note">{ddaProStatus} · {ddaProSnapshot ? `${ddaProSnapshot.inputSize.toLocaleString()} bars · confidence ${ddaProSnapshot.latest.confidence.toFixed(0)}% · ${ddaProSnapshot.sourceAuthority}` : "Awaiting deterministic worker result"}</div>
+              {ddaProSnapshot ? <div className="bcrda-integrity-panel"><strong>BC-RDA SIGNAL INTEGRITY</strong><span>Model {ddaProSnapshot.signalIntegrity.model}</span><span>Current bar {ddaProSnapshot.signalIntegrity.currentBar}</span><span>Finalized signal drift {ddaProSnapshot.signalIntegrity.finalizedSignalDrift}</span><span>Prefix {ddaProSnapshot.signalIntegrity.lastPrefixTest} · Stream/Batch {ddaProSnapshot.signalIntegrity.streamingBatchParity}</span><span>Alerts {ddaProSnapshot.signalIntegrity.alertEligibility} · Strategy {ddaProSnapshot.signalIntegrity.strategyEligibility}</span></div> : null}
               {ddaProSnapshot?.sourceWarning && <div className="vwap-mode-note">{ddaProSnapshot.sourceWarning}</div>}
               <details className="indicator-advanced-details">
                 <summary>Advanced / Diagnostics</summary>

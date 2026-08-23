@@ -182,7 +182,11 @@ export function buildEventAlphaThesis({ canonicalEvent, forecast, validFrom, exp
 }
 
 export function evaluateBcrdaTacticalGate({ thesis, tacticalSetup, now, cooldownSeconds = 900 }) {
-  const reasonCodes = [];
+  // The legacy browser signal can repaint and Causal V2 has not yet completed
+  // independent headless-runtime certification. Keep every Event Alpha paper
+  // or execution consumer fail-closed even when a client submits a plausible
+  // looking setup object.
+  const reasonCodes = [EVENT_ALPHA_REASON_CODES.BC_RDA_SIGNAL_INTEGRITY_BLOCKED];
   const nowMs = new Date(now).getTime();
   if (!Number.isFinite(nowMs) || nowMs >= Date.parse(thesis.expiresAt)) reasonCodes.push(EVENT_ALPHA_REASON_CODES.THESIS_EXPIRED);
   const confirmedAtMs = Date.parse(tacticalSetup?.confirmedAt);

@@ -2189,3 +2189,9 @@ Activation order is `202608050001` then `202608050002`. Both are intentionally u
 Migration: `supabase/migrations/202608100001_google_sso_profile_bootstrap.sql`.
 
 This migration replaces the existing `black_terminal_create_profile` trigger function with an OAuth-aware version. It keeps Supabase Auth as the identity authority, derives a collision-safe terminal handle, imports only standard Google name metadata, and leaves organization, billing, phone, purpose-of-use, referral, and newsletter fields optional for later completion in Profile. Provider and redirect configuration is documented in `docs/GOOGLE_SSO_PREVIEW.md`.
+
+# 2026-08-23 - BC-RDA signal-integrity containment
+
+Migration: `supabase/migrations/202608230003_bcrda_signal_integrity_containment.sql`.
+
+This unapplied migration identifies persisted BC-RDA definitions, pauses active Paper/target/runtime state without mutating broker orders, records one critical audit event, labels signal/statistics integrity, and installs database triggers that reject later Paper, Demo or live activation. It preserves strategy definitions and trade history for audit. Apply only through the approved migration workflow after reviewing affected strategy IDs; this chapter did not deploy it.

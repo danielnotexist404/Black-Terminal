@@ -107,10 +107,10 @@ const builtInIndicators: BuiltInIndicator[] = [
   {
     key: "ddaProOscillator",
     stableId: "black-core-dda-pro",
-    title: "BC-RDA — Risk Distribution Analysis",
+    title: "BC-RDA — Causal V2 / Legacy Research",
     group: "Black Core / Risk Analytics",
     type: "Oscillator + Dashboard",
-    signal: "Distribution-aware drawdown depth, duration, tail risk and recovery intelligence",
+    signal: "Causal drawdown-risk research; alerts and automation blocked pending VPS certification",
     runtime: "Worker",
     periodKey: "ddaProOscillator",
     min: 100,

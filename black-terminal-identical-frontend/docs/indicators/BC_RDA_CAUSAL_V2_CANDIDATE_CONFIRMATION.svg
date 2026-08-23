@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="620" viewBox="0 0 1280 620" role="img" aria-labelledby="title desc">
+  <title id="title">BC-RDA Causal V2 candidate and confirmation evidence</title>
+  <desc id="desc">A deterministic seven-bar certification fixture showing hollow analytical candidates at a trough and upper extreme, with filled Long and Short trading markers delayed to their closed-bar confirmations.</desc>
+  <defs>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#07080a"/><stop offset="1" stop-color="#020203"/></linearGradient>
+    <filter id="redGlow"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="whiteGlow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <style>
+      text{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.muted{fill:#737780}.white{fill:#f2f2f4}.red{fill:#ff1838}.small{font-size:13px}.tiny{font-size:11px}.label{font-size:15px;font-weight:700;letter-spacing:1.4px}.grid{stroke:#25282e;stroke-width:1}.dash{stroke-dasharray:7 7}.price{fill:none;stroke:#c8cbd1;stroke-width:2.5}.depth{fill:none;stroke:#9b1025;stroke-width:2.2}
+    </style>
+  </defs>
+  <rect width="1280" height="620" fill="#000"/>
+  <rect x="22" y="20" width="1236" height="580" rx="8" fill="url(#panel)" stroke="#351019"/>
+  <text x="48" y="55" class="white label">BC-RDA SIGNAL INTEGRITY · CAUSAL V2 CERTIFICATION FIXTURE</text>
+  <text x="48" y="80" class="muted small">Hollow = developing analytical anchor · Filled = immutable confirmation-bar marker · execution occurs no earlier than the next bar close</text>
+  <g>
+    <line x1="62" y1="140" x2="1218" y2="140" class="grid"/><line x1="62" y1="220" x2="1218" y2="220" class="grid"/><line x1="62" y1="300" x2="1218" y2="300" class="grid"/>
+    <line x1="62" y1="372" x2="1218" y2="372" class="grid"/><line x1="62" y1="444" x2="1218" y2="444" class="grid"/><line x1="62" y1="516" x2="1218" y2="516" class="grid"/>
+    <g class="grid"><line x1="120" y1="112" x2="120" y2="540"/><line x1="285" y1="112" x2="285" y2="540"/><line x1="450" y1="112" x2="450" y2="540"/><line x1="615" y1="112" x2="615" y2="540"/><line x1="780" y1="112" x2="780" y2="540"/><line x1="945" y1="112" x2="945" y2="540"/><line x1="1110" y1="112" x2="1110" y2="540"/></g>
+  </g>
+  <text x="66" y="130" class="muted tiny">PRICE / UPPER EXTREME</text>
+  <path class="price" d="M120 160 L285 278 L450 235 L615 160 L780 125 L945 176 L1110 218"/>
+  <text x="66" y="362" class="muted tiny">DRAWDOWN DEPTH / CONFIRMATION STATE</text>
+  <path class="depth" d="M120 390 L285 510 L450 470 L615 390 L780 390 L945 402 L1110 414"/>
+  <line x1="285" y1="278" x2="285" y2="510" stroke="#f2f2f4" opacity=".32" class="dash"/>
+  <circle cx="285" cy="510" r="9" fill="#020203" stroke="#f2f2f4" stroke-width="3" filter="url(#whiteGlow)"/>
+  <text x="305" y="494" class="white small">LONG CANDIDATE / TROUGH ANCHOR</text>
+  <text x="305" y="514" class="muted tiny">bar 1 · developing · execution ineligible</text>
+  <line x1="615" y1="390" x2="615" y2="330" stroke="#f2f2f4" opacity=".55" class="dash"/>
+  <circle cx="615" cy="390" r="9" fill="#f2f2f4" filter="url(#whiteGlow)"/>
+  <text x="635" y="326" class="white small">FINAL LONG · RECOVERY CONFIRMED</text>
+  <text x="635" y="346" class="muted tiny">bar 3 · marker time = confirmation time · eligible at bar 4 close</text>
+  <circle cx="780" cy="125" r="9" fill="#020203" stroke="#ff1838" stroke-width="3" filter="url(#redGlow)"/>
+  <text x="800" y="116" class="red small">SHORT UPPER-EXTREME ANCHOR</text>
+  <text x="800" y="136" class="muted tiny">bar 4 · developing · no red execution marker yet</text>
+  <line x1="780" y1="125" x2="1110" y2="414" stroke="#ff1838" opacity=".38" class="dash"/>
+  <circle cx="1110" cy="414" r="9" fill="#ff1838" filter="url(#redGlow)"/>
+  <text x="844" y="446" class="red small">FINAL SHORT · ROLLOVER CONFIRMED</text>
+  <text x="844" y="466" class="muted tiny">bar 6 · two worsening closed bars · eligible at bar 7 close</text>
+  <g class="tiny muted" text-anchor="middle"><text x="120" y="566">BAR 0</text><text x="285" y="566">BAR 1</text><text x="450" y="566">BAR 2</text><text x="615" y="566">BAR 3</text><text x="780" y="566">BAR 4</text><text x="945" y="566">BAR 5</text><text x="1110" y="566">BAR 6</text></g>
+  <g transform="translate(48 584)"><circle cx="6" cy="0" r="5" fill="#19f58a"/><text x="20" y="4" class="tiny white">PREFIX PASS</text><text x="150" y="4" class="tiny white">FINAL DRIFT 0</text><text x="300" y="4" class="tiny white">TIMESTAMP DRIFT 0</text><text x="480" y="4" class="tiny white">BACKPAINTED EXECUTIONS 0</text><text x="720" y="4" class="tiny red">ALERTS / STRATEGY BLOCKED</text></g>
+</svg>

@@ -27,14 +27,14 @@ type AlertCenterProps = {
   onClearEventLogs: () => void;
 };
 
-const indicatorOptions: { value: AlertIndicatorTarget; label: string }[] = [
+const indicatorOptions: { value: AlertIndicatorTarget; label: string; disabled?: boolean }[] = [
   { value: "price", label: "Price" },
   { value: "hdlxProfile", label: "HDLX Profile" },
   { value: "vwap", label: "VWAP" },
   { value: "ema20", label: "EMA 20" },
   { value: "ema50", label: "EMA 50" },
   { value: "ema200", label: "EMA 200" },
-  { value: "ddaPro", label: "BC-RDA" }
+  { value: "ddaPro", label: "BC-RDA — BLOCKED: REPAINT AUDIT", disabled: true }
 ];
 
 const ddaSignalOptions: { value: DDAProAlertSignal; label: string }[] = [
@@ -134,7 +134,19 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
     });
   }, [alerts, exchange, symbol]);
 
-  const activeCount = alerts.filter((alert) => alert.enabled && !alert.fired).length;
+  const activeCount = alerts.filter((alert) => alert.indicator !== "ddaPro" && alert.enabled && !alert.fired).length;
+
+  useEffect(() => {
+    onAlertsChange((current) => {
+      let changed = false;
+      const next = current.map((alert) => {
+        if (alert.indicator !== "ddaPro" || !alert.enabled) return alert;
+        changed = true;
+        return { ...alert, enabled: false };
+      });
+      return changed ? next : current;
+    });
+  }, [onAlertsChange]);
 
   const beginNewAlert = () => {
     setDraft(createAlertDraft(symbol, exchange, timeframe));
@@ -142,6 +154,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
 
   const saveDraft = () => {
     if (!draft) return;
+    if (draft.indicator === "ddaPro") return;
     const nextAlert: IndicatorAlertDefinition = {
       ...draft,
       name: draft.name.trim() || `${indicatorLabels[draft.indicator]} alert`,
@@ -149,7 +162,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
       exchange: draft.exchange || exchange,
       timeframe: draft.timeframe || timeframe,
       levelTarget: draft.indicator === "hdlxProfile" ? draft.levelTarget ?? "any" : undefined,
-      ddaSignal: draft.indicator === "ddaPro" ? draft.ddaSignal ?? "DDA_RISK_SCORE_CROSSED_75" : undefined,
+      ddaSignal: undefined,
       targetPrice: draft.indicator === "price" && Number.isFinite(draft.targetPrice) ? draft.targetPrice : undefined,
       color: draft.indicator === "price" ? draft.color || "#ffffff" : draft.color,
       cooldownSeconds: clampNumber(Math.round(draft.cooldownSeconds), 5, 86400),
@@ -174,11 +187,11 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
 
   const toggleAlert = (alertId: string) => {
     onAlertsChange((current) =>
-      current.map((alert) =>
-        alert.id === alertId
-          ? { ...alert, enabled: !alert.enabled, fired: alert.enabled ? alert.fired : false }
-          : alert
-      )
+      current.map((alert) => alert.id !== alertId
+        ? alert
+        : alert.indicator === "ddaPro"
+          ? { ...alert, enabled: false }
+          : { ...alert, enabled: !alert.enabled, fired: alert.enabled ? alert.fired : false })
     );
   };
 
@@ -200,6 +213,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
           </button>
         </div>
         <div className="alerts-list">
+          <div className="alerts-empty">BC-RDA ALERTS BLOCKED — HEADLESS DELIVERY RUNTIME NOT CERTIFIED</div>
           {sortedAlerts.length === 0 ? (
             <div className="alerts-empty">NO ALERTS CONFIGURED</div>
           ) : (
@@ -250,6 +264,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
                 saveDraft();
               }}
             >
+              {draft.indicator === "ddaPro" ? <div className="alerts-empty">REPAINTING RESEARCH SOURCE — THIS ALERT IS PERMANENTLY DISABLED</div> : null}
               <div className="alert-editor-head">
                 <div>
                   <span>{draft.symbol}</span>
@@ -267,7 +282,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
                 </label>
                 <label className="alert-field toggle-field">
                   Enabled
-                  <input type="checkbox" checked={draft.enabled} onChange={(event) => updateDraft("enabled", event.target.checked)} />
+                  <input type="checkbox" checked={draft.indicator === "ddaPro" ? false : draft.enabled} disabled={draft.indicator === "ddaPro"} onChange={(event) => updateDraft("enabled", event.target.checked)} />
                 </label>
                 <label className="alert-field">
                   Indicator
@@ -285,7 +300,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
                     }}
                   >
                     {indicatorOptions.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
+                      <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>
                     ))}
                   </select>
                 </label>
@@ -397,7 +412,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
                 </button>
                 <span />
                 <button type="button" className="ghost" onClick={() => setDraft(null)}>Cancel</button>
-                <button type="submit" className="primary">
+                <button type="submit" className="primary" disabled={draft.indicator === "ddaPro"}>
                   <Save size={14} />
                   Save Alert
                 </button>

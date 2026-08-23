@@ -291,6 +291,11 @@ Strategy definitions are not workspace-local preferences. The VPS stores mutable
 ## BC-RDA workspace paths
 
 - `src/modules/dda-pro/` — Native and Compatibility engines, settings, worker protocol.
+- `src/modules/dda-pro/core/causalSignalEngine.ts` — versioned closed-bar candidate/final state machine and checkpoint contract.
+- `src/modules/dda-pro/core/certification.ts` — source-certification evidence and fail-closed alert/strategy eligibility.
+- `scripts/dda-pro-no-repaint-certification.ts` — prefix, append, worker, reload, checkpoint and open-bar harness.
 - `python/black_core_indicators/dda_pro/` — independent readable reference.
 - `reference/pine/dda-pro-edgetools-v6.pine` — retained MPL source.
-- `docs/indicators/DDA_PRO_*.md` — audit and operating contracts.
+- `docs/indicators/BC_RDA_*.md` and `docs/indicators/DDA_PRO_*.md` — current integrity contracts and earlier mathematical/history references.
+
+Run `npm run test:dda-pro-all` for the complete indicator suite. `BC_RDA_LEGACY_REPAINTING` is never alert/backtest/automation eligible; Causal V2 remains chart-research-only until independent VPS runtime certification.

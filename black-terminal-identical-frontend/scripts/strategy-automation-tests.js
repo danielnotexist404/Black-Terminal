@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   assertCanArmLiveTarget,
   assertCanArmStrategyTarget,
+  assertCertifiedStrategyDefinition,
   buildTargetSlots,
   calculateCapitalPreview,
   calculateEffectiveLeverage,
@@ -22,6 +23,7 @@ import { normalizeStrategyPath } from "../api/strategies/[...path].js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const migration = read("supabase/migrations/202608220001_black_core_strategy_automation.sql");
+const containmentMigration = read("supabase/migrations/202608230003_bcrda_signal_integrity_containment.sql");
 const panel = read("src/modules/strategy-lab/automation/StrategyAutomationPanel.tsx");
 const apiClient = read("src/modules/strategy-lab/automation/strategyAutomationApi.ts");
 const worker = read("scripts/strategy-automation-worker.ts");
@@ -34,6 +36,7 @@ assert.throws(() => normalizeStrategyName("x".repeat(81)), /80/);
 const definition = normalizeStrategyDefinition({ runtimeKind: "builtin-adaptive-swing", symbol: "btcusdt", timeframe: "4H", marketType: "futures", exchange: "BYBIT", settings: {}, execution: {} });
 assert.deepEqual({ symbol: definition.symbol, timeframe: definition.timeframe, marketType: definition.marketType, exchange: definition.exchange }, { symbol: "BTCUSDT", timeframe: "4h", marketType: "FUTURES", exchange: "bybit" });
 for (const timeframe of ["1s", "10s", "30s", "8h", "10t", "100t"]) assert.throws(() => normalizeStrategyDefinition({ ...definition, timeframe }), /closed-candle timeframe/i);
+assert.throws(() => assertCertifiedStrategyDefinition(normalizeStrategyDefinition({ ...definition, indicator: { indicatorId: "black-core-dda-pro", name: "BC-RDA", runtimeStatus: "CERTIFIED" } })), /BC-RDA is blocked/i, "a forged runtime label cannot enable BC-RDA");
 
 const emptySlots = buildTargetSlots([]);
 assert.equal(emptySlots.length, 10);
@@ -97,6 +100,8 @@ assert.match(migration, /strategy_paper_mutation_requests/);
 assert.match(migration, /strategy_target_mutation_requests/);
 assert.match(migration, /strategy_target_reorder_requests/);
 assert.match(migration, /black_core_control_strategy_target/);
+assert.match(containmentMigration, /BC_RDA_SIGNAL_INTEGRITY_BLOCKED/);
+assert.match(containmentMigration, /trg_guard_bcrda_strategy_activation/);
 assert.match(migration, /black_core_reorder_strategy_targets/);
 assert.doesNotMatch(`${panel}\n${apiClient}`, /credential_ref|vault_secret/i, "Strategy Lab never requests or renders vault internals");
 assert.doesNotMatch(panel, /percentile/i, "capital UI uses Percentage terminology only");
@@ -108,6 +113,7 @@ assert.match(panel, /Move target one slot left/);
 assert.match(worker, /STRATEGY_AUTOMATION_REAL_FUNDS_FORBIDDEN/);
 assert.match(worker, /strategy_target_binding_id/);
 assert.match(worker, /execution_commands/);
+assert.match(worker, /isBcrdaDefinition[\s\S]*BC_RDA_SIGNAL_INTEGRITY_BLOCKED/);
 assert.doesNotMatch(worker, /placeOrder|cancelOrder|modifyOrder|execution_orders.*insert/i, "paper worker contains no broker order mutation path");
 assert.match(worker, /candleClosedAt <= Date\.parse\(position\.opened_at\)/, "same-candle look-ahead exit is rejected");
 assert.match(worker, /averageTrueRange\(candles, 14\)/, "volatility-target sizing is based on closed-candle ATR");

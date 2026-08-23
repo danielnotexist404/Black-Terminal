@@ -1,4 +1,4 @@
-import { DDA_PRO_SETTINGS_VERSION, type DDAProPreset, type DDAProSettings, type DDAProSignalIntelligenceMode, type DDAProTheme } from "./types.ts";
+import { BC_RDA_CAUSAL_V2, BC_RDA_LEGACY_REPAINTING, DDA_PRO_SETTINGS_VERSION, type DDAProPreset, type DDAProSettings, type DDAProSignalIntelligenceMode, type DDAProTheme } from "./types.ts";
 
 export const DEFAULT_DDA_PRO_SETTINGS: DDAProSettings = {
   settingsVersion: DDA_PRO_SETTINGS_VERSION,
@@ -8,6 +8,7 @@ export const DEFAULT_DDA_PRO_SETTINGS: DDAProSettings = {
   peakMode: "all-history",
   equitySource: "price",
   realtimeMode: "confirmed-bars",
+  signalModelVersion: BC_RDA_CAUSAL_V2,
   lookback: 500,
   smoothingMethod: "ema",
   smoothingLength: 14,
@@ -132,6 +133,7 @@ const PRESET_MIGRATIONS: Record<string, DDAProPreset> = {
 
 const THEMES = new Set<DDAProTheme>(["black-terminal", "black-terminal-blood", "institutional-monochrome", "custom", "gold", "edge-tools", "behavioral", "quant", "ocean", "fire", "matrix", "arctic"]);
 const SIGNAL_MODES = new Set(["RAW", "BALANCED", "INSTITUTIONAL", "CUSTOM"]);
+const SIGNAL_MODELS = new Set([BC_RDA_CAUSAL_V2, BC_RDA_LEGACY_REPAINTING]);
 const finite = (value: unknown, fallback: number) => typeof value === "number" && Number.isFinite(value) ? value : fallback;
 const boolean = (value: unknown, fallback: boolean) => typeof value === "boolean" ? value : fallback;
 
@@ -143,6 +145,7 @@ export function migrateDDAProSettings(value?: Partial<DDAProSettings> | null): D
   const extremeThreshold = Math.max(highThreshold, Math.min(100, finite(merged.extremeThreshold, 90)));
   return {
     ...merged,
+    signalModelVersion: SIGNAL_MODELS.has(merged.signalModelVersion) ? merged.signalModelVersion : BC_RDA_CAUSAL_V2,
     settingsVersion: DDA_PRO_SETTINGS_VERSION,
     theme: THEMES.has(merged.theme) ? merged.theme : "black-terminal",
     lookback: Math.max(100, Math.min(20_000, Math.round(finite(merged.lookback, 500)))),
@@ -188,7 +191,9 @@ export function migrateDDAProSettings(value?: Partial<DDAProSettings> | null): D
     distributionalResetRequirement: boolean(merged.distributionalResetRequirement, true),
     priceStructureConfirmation: boolean(merged.priceStructureConfirmation, false),
     volumeConfirmation: boolean(merged.volumeConfirmation, false),
-    cvdConfirmation: boolean(merged.cvdConfirmation, false),
+    // CVD confirmation remains deliberately unavailable until the causal base
+    // model receives independent server/replay certification.
+    cvdConfirmation: false,
     higherTimeframeConfirmation: boolean(merged.higherTimeframeConfirmation, false),
     minimumCoherence: Math.max(0, Math.min(100, finite(merged.minimumCoherence, 54))),
     minimumCentroidDisplacement: Math.max(0, Math.min(5, finite(merged.minimumCentroidDisplacement, 0.075))),

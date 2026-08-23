@@ -68,6 +68,11 @@ export function normalizeStrategyDefinition(value = {}) {
 }
 
 export function assertCertifiedStrategyDefinition(definition) {
+  const indicatorId = String(definition.indicator?.indicatorId || "").toLowerCase();
+  const indicatorName = String(definition.indicator?.name || "").toLowerCase();
+  if (indicatorId === "black-core-dda-pro" || indicatorId.includes("ddapro") || indicatorName.includes("bc-rda") || indicatorName.includes("risk distribution analysis")) {
+    throw strategyError(409, "BC_RDA_SIGNAL_INTEGRITY_BLOCKED", "BC-RDA is blocked from Strategy Lab while causal replay and headless runtime certification are incomplete.");
+  }
   if (!["builtin-ema-cross", "builtin-adaptive-swing"].includes(definition.runtimeKind)) {
     throw strategyError(409, "STRATEGY_RUNTIME_NOT_CERTIFIED", "This indicator does not yet have a certified VPS strategy runtime.");
   }

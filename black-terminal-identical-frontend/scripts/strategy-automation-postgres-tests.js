@@ -10,6 +10,7 @@ const migration = fs.readFileSync(path.join(root, "supabase/migrations/202608220
   .replace("create extension if not exists pgcrypto;", "-- pgcrypto is preinstalled in production; PGlite exposes gen_random_uuid in core");
 const draftMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608230001_my_strategy_draft_version_model.sql"), "utf8");
 const demoExecutionMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608230002_bybit_demo_strategy_execution.sql"), "utf8");
+const bcrdaContainmentMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608230003_bcrda_signal_integrity_containment.sql"), "utf8");
 const db = new PGlite();
 
 await db.exec(`
@@ -74,10 +75,21 @@ await db.exec(`
   );
 `);
 await db.exec(demoExecutionMigration);
+await db.exec(bcrdaContainmentMigration);
 await db.exec("set request.jwt.claim.role='service_role'");
 
 const ownerId = crypto.randomUUID();
 await db.query("insert into auth.users(id) values($1)", [ownerId]);
+const blockedBcrdaDefinition = { runtimeKind: "external-signals", symbol: "BTCUSDT", timeframe: "4h", marketType: "FUTURES", exchange: "bybit", indicator: { indicatorId: "black-core-dda-pro", name: "BC-RDA", runtimeStatus: "CERTIFIED" }, settings: { signalModelVersion: "BC_RDA_CAUSAL_V2" } };
+await assert.rejects(
+  () => db.query("insert into public.strategy_automation_strategies(owner_user_id,name,runtime_kind,symbol,timeframe,market_type,definition,status,request_hash) values($1,'Blocked BC-RDA','external-signals','BTCUSDT','4h','FUTURES',$2::jsonb,'PAPER_ACTIVE',$3)", [ownerId, json(blockedBcrdaDefinition), sha(blockedBcrdaDefinition)]),
+  /BC_RDA_SIGNAL_INTEGRITY_BLOCKED/i,
+  "database activation guard rejects a client-forged BC-RDA certification"
+);
+const containedDraft = await call("insert into public.strategy_automation_strategies(owner_user_id,name,runtime_kind,symbol,timeframe,market_type,definition,draft_definition,status,request_hash) values($1,'Contained BC-RDA','external-signals','BTCUSDT','4h','FUTURES',$2::jsonb,$2::jsonb,'DRAFT',$3) returning id,signal_integrity_status,performance_statistics_status", [ownerId, json(blockedBcrdaDefinition), sha({ draft: blockedBcrdaDefinition })]);
+assert.equal(containedDraft.signal_integrity_status, "SOURCE_CERTIFIED_AUTOMATION_BLOCKED");
+assert.equal(containedDraft.performance_statistics_status, "CAUSAL_MODEL_ONLY");
+await assert.rejects(() => db.query("update public.strategy_automation_strategies set status='PAPER_ACTIVE' where id=$1", [containedDraft.id]), /BC_RDA_SIGNAL_INTEGRITY_BLOCKED/i);
 const demoMandateConnectionId = crypto.randomUUID();
 await db.query("insert into public.connectivity_connections(id,user_id,provider,execution_environment,endpoint_profile) values($1,$2,'bybit','DEMO','GLOBAL')", [demoMandateConnectionId, ownerId]);
 await db.query("insert into public.broker_connection_capabilities(connection_id,can_place_market_orders,can_execute_while_offline,can_withdraw,can_transfer) values($1,true,true,false,false)", [demoMandateConnectionId]);

@@ -35,7 +35,9 @@ const longShortAlerts: StrategyIndicatorAlert[] = [
 
 const manifests: ManifestRow[] = [
   { key: "adaptiveSwingStrategy", name: "Adaptive Swing Reversal", version: "1", runtimeKind: "builtin-adaptive-swing", runtimeStatus: "CERTIFIED", warmup: 240, alerts: longShortAlerts },
-  { key: "ddaProOscillator", name: "BC-RDA — Risk Distribution Analysis", version: "1", runtimeKind: "external-signals", runtimeStatus: "REQUIRES_CERTIFICATION", warmup: 500, alerts: longShortAlerts },
+  // BC-RDA is intentionally absent while BC_RDA_LEGACY_REPAINTING is under
+  // forensic containment and BC_RDA_CAUSAL_V2 lacks a certified headless VPS
+  // runtime. The chart indicator remains available as research visualization.
   { key: "vwap", name: "Institutional VWAP", version: "2", runtimeKind: "external-signals", runtimeStatus: "BROWSER_ONLY", warmup: 300, alerts: crossingAlerts("vwap") },
   { key: "ema20", name: "EMA 20", version: "1", runtimeKind: "external-signals", runtimeStatus: "BROWSER_ONLY", warmup: 20, alerts: crossingAlerts("ema20") },
   { key: "ema50", name: "EMA 50", version: "1", runtimeKind: "external-signals", runtimeStatus: "BROWSER_ONLY", warmup: 50, alerts: crossingAlerts("ema50") },

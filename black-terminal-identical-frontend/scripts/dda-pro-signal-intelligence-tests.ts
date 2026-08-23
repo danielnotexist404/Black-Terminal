@@ -19,7 +19,7 @@ import {
   completedHigherTimeframeDirection,
   DDA_PRO_MAX_SIGNAL_EPISODES
 } from "../src/modules/dda-pro/core/signalIntelligence.ts";
-import { DDA_PRO_INDICATOR_ID, type DDAProCalculationInput, type DDAProSeries, type DDAProSignalDirection, type DDAProSignalEvent } from "../src/modules/dda-pro/core/types.ts";
+import { BC_RDA_LEGACY_REPAINTING, DDA_PRO_INDICATOR_ID, type DDAProCalculationInput, type DDAProSeries, type DDAProSignalDirection, type DDAProSignalEvent } from "../src/modules/dda-pro/core/types.ts";
 
 function candles(values: readonly number[], timeframeSeconds = 300, start = 1_700_000_000): Candle[] {
   return values.map((close, index) => ({
@@ -103,7 +103,7 @@ function calculationInput(source: Candle[], settings = filteredSettings): DDAPro
     ...Array.from({ length: 35 }, (_, index) => 104.7 + index * 0.5)
   ];
   const source = candles(values);
-  const raw = calculateDDAProNative({ candles: source, settings: applyDDAProSignalIntelligenceMode(DEFAULT_DDA_PRO_SETTINGS, "RAW"), timeframeSeconds: 300 });
+  const raw = calculateDDAProNative({ candles: source, settings: { ...applyDDAProSignalIntelligenceMode(DEFAULT_DDA_PRO_SETTINGS, "RAW"), signalModelVersion: BC_RDA_LEGACY_REPAINTING }, timeframeSeconds: 300 });
   assert.deepEqual(raw.rawSignals, deriveDDAProSignals(raw.events), "RAW signal sequence changed");
   assert.deepEqual(raw.signals, raw.rawSignals, "RAW intelligence must be a byte-for-byte pass-through");
   assert.deepEqual(raw.rawSignals.map(({ id, direction, index, time, sourceEventType, markerTone }) => ({ id, direction, index, time, sourceEventType, markerTone })), [
@@ -214,12 +214,12 @@ function calculationInput(source: Candle[], settings = filteredSettings): DDAPro
   const source = candles([100, 110, 90, 110]);
   const rawSettings = applyDDAProSignalIntelligenceMode(DEFAULT_DDA_PRO_SETTINGS, "RAW");
   const snapshot = calculateDDAProNative({ candles: source, settings: rawSettings, timeframeSeconds: 300 });
-  assert.deepEqual(ddaProAlertSignalStream(snapshot, rawSettings), snapshot.rawSignals);
+  assert.deepEqual(ddaProAlertSignalStream(snapshot, rawSettings), [], "BC-RDA alert containment was bypassed by RAW mode");
   const filtered = { ...snapshot, signals: snapshot.rawSignals.slice(0, 1), signalIntelligence: { ...snapshot.signalIntelligence, mode: "BALANCED" as const, rawCandidateSignals: snapshot.rawSignals } };
   const confirmedSettings = { ...applyDDAProSignalIntelligenceMode(DEFAULT_DDA_PRO_SETTINGS, "BALANCED"), showConfirmedSignals: true };
-  assert.deepEqual(ddaProAlertSignalStream(filtered, confirmedSettings), filtered.signals, "confirmed alerts did not consume the rendered confirmed stream");
+  assert.deepEqual(ddaProAlertSignalStream(filtered, confirmedSettings), [], "BC-RDA confirmed signals escaped emergency alert containment");
   assert.deepEqual(ddaProAlertSignalStream(filtered, { ...confirmedSettings, showConfirmedSignals: false }), [], "a hidden confirmed dot remained alertable");
-  assert.deepEqual(ddaProAlertSignalStream(filtered, { ...confirmedSettings, confirmedAlertsOnly: false, showRawSignals: true }), filtered.signalIntelligence.rawCandidateSignals, "explicit raw alerts did not consume visible raw candidates");
+  assert.deepEqual(ddaProAlertSignalStream(filtered, { ...confirmedSettings, confirmedAlertsOnly: false, showRawSignals: true }), [], "explicit raw alerts escaped emergency containment");
   assert.ok(!ddaProAlertSignalStream(filtered, confirmedSettings).some((signal) => signal.classification === "provisional"), "provisional signal entered the confirmed alert stream");
 }
 

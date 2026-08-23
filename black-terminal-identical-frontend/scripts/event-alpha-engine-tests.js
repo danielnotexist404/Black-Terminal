@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   bindExpectationToEvent,
+  EVENT_ALPHA_REASON_CODES,
   normalizeRawEventEnvelope,
   normalizeTokenUnlock,
   sanitizeExternalPayload
@@ -155,7 +156,8 @@ assert.equal({}.polluted, undefined);
 const armed = { ...shortThesis, state: "ARMED", lastTriggeredAt: null };
 const setup = { setupKey: "bcrda-dot-1", confirmed: true, confirmedAt: "2026-08-01T12:01:00Z", maxAgeMs: 300_000, direction: "SHORT" };
 const gate = evaluateBcrdaTacticalGate({ thesis: armed, tacticalSetup: setup, now: "2026-08-01T12:02:00Z" });
-assert.equal(gate.allowed, true);
+assert.equal(gate.allowed, false, "BC-RDA tactical automation must fail closed during signal-integrity containment");
+assert.ok(gate.reasonCodes.includes(EVENT_ALPHA_REASON_CODES.BC_RDA_SIGNAL_INTEGRITY_BLOCKED));
 assert.equal(evaluateBcrdaTacticalGate({ thesis: { ...armed, lastTriggeredAt: "2026-08-01T12:01:30Z" }, tacticalSetup: setup, now: "2026-08-01T12:02:00Z" }).allowed, false, "cooldown blocks repeat trigger");
 assert.equal(evaluateBcrdaTacticalGate({ thesis: armed, tacticalSetup: { ...setup, direction: "LONG" }, now: "2026-08-01T12:02:00Z" }).allowed, false, "direction conflict blocks trigger");
 assert.equal(evaluateBcrdaTacticalGate({ thesis: armed, tacticalSetup: { ...setup, maxAgeMs: undefined }, now: "2026-08-01T12:02:00Z" }).allowed, false, "missing freshness bound blocks trigger");

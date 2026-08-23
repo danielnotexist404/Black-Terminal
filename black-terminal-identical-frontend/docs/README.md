@@ -215,8 +215,16 @@ The renderer V8 shelf-only recovery and V9 plasma/shelf presentation contract ar
 ## BC-RDA documentation
 
 - [Advanced Distributional Regime Intelligence](./indicators/BC_RDA_SIGNAL_INTELLIGENCE.md)
+- [Repaint Forensic Audit](./indicators/BC_RDA_REPAINT_FORENSIC_AUDIT.md)
+- [Causal V2 Model](./indicators/BC_RDA_CAUSAL_MODEL.md)
+- [Signal Timestamp Contract](./indicators/BC_RDA_SIGNAL_TIMESTAMP_CONTRACT.md)
+- [Prefix Invariance](./indicators/BC_RDA_PREFIX_INVARIANCE.md)
+- [Replay and Runtime Parity](./indicators/BC_RDA_REPLAY_PARITY.md)
+- [Legacy Repainting Limitations](./indicators/BC_RDA_LEGACY_REPAINTING_LIMITATIONS.md)
+- [No-Repaint Certification](./indicators/BC_RDA_NO_REPAINT_CERTIFICATION.md)
+- [Causal Reconstruction Completion Report](./indicators/BC_RDA_CAUSAL_RECONSTRUCTION_COMPLETION_REPORT.md)
 
-Start with `indicators/BC_DDA_PRO_OVERVIEW.md`, then use `indicators/DDA_PRO_PINE_AUDIT.md`, `indicators/DDA_PRO_NATIVE_MATHEMATICS.md`, and `indicators/DDA_PRO_COMPLETION_REPORT.md` for audit and certification state.
+The former marker model is explicitly classified as repainting and research-only. Start with the forensic audit, then the causal model and certification report. The earlier DDA documents remain mathematical/history references, not signal-integrity certification.
 # Strategy automation
 
 The Strategy Lab My Strategy documentation is under `docs/strategy-automation/`. Start with `MY_STRATEGY_UX_RECONSTRUCTION.md` for the Library → Wizard → Cockpit workflow and `STRATEGY_VERSION_AND_DRAFT_MODEL.md` for the server authority boundary.

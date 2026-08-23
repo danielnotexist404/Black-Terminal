@@ -6,16 +6,18 @@ import {
   calculationHash,
   ddaProDataHash,
   ddaProOutputHash,
-  deriveCausalDDAProSignalCandidates,
+  deriveCausalEvents,
   deriveDDAProSignals,
-  deriveEvents,
+  deriveLegacyEvents,
   latestFromSeries,
   performanceMetrics,
   sourceValues
 } from "./engineShared.ts";
-import type { DDAProCalculationInput, DDAProRiskState, DDAProSnapshot } from "./types.ts";
+import { BC_RDA_CAUSAL_V2, type DDAProCalculationInput, type DDAProRiskState, type DDAProSnapshot } from "./types.ts";
 import { applyDDAProSignalIntelligence } from "./signalIntelligence.ts";
 import { calculateDDAProFlowPressure } from "./flowPressure.ts";
+import { deriveCausalRdaSignals } from "./causalSignalEngine.ts";
+import { ddaProSignalIntegrity } from "./certification.ts";
 
 const clamp = (value: number, minimum = 0, maximum = 100) => Math.max(minimum, Math.min(maximum, value));
 
@@ -83,7 +85,7 @@ export function calculateDDAProNative(rawInput: DDAProCalculationInput): DDAProS
   const source = sourceValues(normalized);
   const values = source.values;
   const length = values.length;
-  const lookback = Math.max(2, Math.min(settings.lookback, length || settings.lookback));
+  const lookback = Math.max(2, settings.lookback);
   const series = blankSeries(length);
   const resolvedBarsPerYear = resolveDDAProBarsPerYear(settings, input.timeframeSeconds ?? 86_400);
   const peak = settings.peakMode === "rolling" ? rollingMaximum(values, lookback) : allHistoryMaximum(values);
@@ -182,7 +184,7 @@ export function calculateDDAProNative(rawInput: DDAProCalculationInput): DDAProS
       tailComponent * settings.tailWeight
     ) / weightTotal);
     const validCount = Math.min(index + 1, lookback);
-    if (validCount >= Math.min(100, lookback)) {
+    if (validCount >= Math.min(100, settings.lookback)) {
       state = stateForScore(series.riskScore[index]!, state, settings.hysteresisPercent, settings.moderateThreshold, settings.highThreshold, settings.extremeThreshold);
       riskStates[index] = state;
     }
@@ -205,7 +207,10 @@ export function calculateDDAProNative(rawInput: DDAProCalculationInput): DDAProS
   series.riskState = riskStates;
   const flow = calculateDDAProFlowPressure(normalized, series);
   const latestState = riskStates[index] ?? "INSUFFICIENT";
-  const events = deriveEvents(candles, riskStates, series.depth, episodes);
+  const causalModel = settings.signalModelVersion === BC_RDA_CAUSAL_V2;
+  const events = causalModel
+    ? deriveCausalEvents(candles, riskStates, series.depth, settings.drawdownEpisodeThresholdPercent)
+    : deriveLegacyEvents(candles, riskStates, series.depth, episodes);
   for (let eventIndex = 1; eventIndex < length; eventIndex++) {
     const depth = series.depth[eventIndex] ?? 0;
     const priorDepth = series.depth[eventIndex - 1] ?? 0;
@@ -232,28 +237,47 @@ export function calculateDDAProNative(rawInput: DDAProCalculationInput): DDAProS
     if ((durationDistribution[eventIndex]?.rank ?? 0) >= 90 && (durationDistribution[eventIndex - 1]?.rank ?? 0) < 90) events.push({ id: "dda-duration-" + (candles[eventIndex]?.time ?? eventIndex), type: "DDA_DURATION_EXTREME", index: eventIndex, time: candles[eventIndex]?.time ?? 0, state: riskStates[eventIndex] ?? "INSUFFICIENT", value: series.duration[eventIndex] ?? 0 });
     if (depth > (cdarSeries[eventIndex] ?? Number.POSITIVE_INFINITY) && priorDepth <= (cdarSeries[eventIndex - 1] ?? Number.POSITIVE_INFINITY)) events.push({ id: "dda-cdar-" + (candles[eventIndex]?.time ?? eventIndex), type: "DDA_CDAR_BREACHED", index: eventIndex, time: candles[eventIndex]?.time ?? 0, state: riskStates[eventIndex] ?? "INSUFFICIENT", value: depth });
   }
-  if (confidence < 50 && length) events.push({ id: "dda-confidence-" + (candles[index]?.time ?? index), type: "DDA_CONFIDENCE_DEGRADED", index, time: candles[index]?.time ?? 0, state: latestState, value: confidence });
-  for (const event of events) Object.assign(event, { engineMode: "black-core-native", sourceAuthority: source.authority, lookback, riskScore: series.riskScore[event.index] ?? 0, confidence, drawdownPercent: series.rawDrawdown[event.index] ?? 0 });
-  const rawSignals = deriveDDAProSignals(events);
-  const intelligenceCandidates = settings.signalIntelligenceMode === "RAW"
-    ? rawSignals
-    : deriveCausalDDAProSignalCandidates(candles, series.depth, settings.drawdownEpisodeThresholdPercent);
-  const intelligenceResult = applyDDAProSignalIntelligence(normalized, series, intelligenceCandidates);
+  if (!causalModel && confidence < 50 && length) events.push({ id: "dda-confidence-" + (candles[index]?.time ?? index), type: "DDA_CONFIDENCE_DEGRADED", index, time: candles[index]?.time ?? 0, state: latestState, value: confidence });
   const dataHash = ddaProDataHash(normalized);
   const settingsHash = ddaProSettingsHash(settings);
+  for (const event of events) {
+    const eventSampleConfidence = Math.min(1, (event.index + 1) / Math.max(100, settings.lookback));
+    const eventReturnConfidence = Math.min(1, Math.max(0, event.index) / 250);
+    const eventConfidence = clamp((eventSampleConfidence * 0.70 + eventReturnConfidence * 0.20 + authorityConfidence * 0.10) * sourceCompleteness * 100);
+    Object.assign(event, { engineMode: "black-core-native", sourceAuthority: source.authority, lookback: settings.lookback, riskScore: series.riskScore[event.index] ?? 0, confidence: eventConfidence, drawdownPercent: series.rawDrawdown[event.index] ?? 0, confirmed: causalModel });
+  }
+  const finalizedLength = input.lastBarConfirmed === false ? Math.max(0, length - 1) : length;
+  const causalSignals = causalModel ? deriveCausalRdaSignals({
+    candles,
+    depth: series.depth,
+    velocity: series.velocity,
+    riskState: series.riskState,
+    percentileRank: series.percentileRank,
+    p50: series.p50,
+    p95: series.p95,
+    p99: series.p99,
+    settings,
+    settingsHash,
+    timeframeSeconds,
+    finalizedLength,
+    signalContext: input.signalContext
+  }) : null;
+  const rawSignals = causalSignals?.signals ?? deriveDDAProSignals(events);
+  const intelligenceResult = applyDDAProSignalIntelligence(normalized, series, rawSignals);
+  if (causalSignals) intelligenceResult.intelligence.provisionalSignals = causalSignals.developingSignals;
   const latest = latestFromSeries(series, latestState, confidence, metrics, Math.max(...tailDepth, 0));
 
   return {
     schemaVersion: 1,
     engineMode: "black-core-native",
     calculationHash: calculationHash(normalized, "black-core-native", dataHash),
-    engineVersion: "BC_DDA_NATIVE_V1",
+    engineVersion: causalModel ? BC_RDA_CAUSAL_V2 : "BC_DDA_NATIVE_V1",
     dataHash,
     settingsHash,
-    outputHash: ddaProOutputHash(series, latest),
+    outputHash: ddaProOutputHash(series, latest, rawSignals),
     calculatedAt: Date.now(),
     inputSize: length,
-    validFromIndex: Math.min(length, Math.min(100, lookback) - 1),
+    validFromIndex: Math.min(length, Math.min(100, settings.lookback) - 1),
     barsPerYear: metrics.barsPerYear,
     sourceAuthority: source.authority,
     sourceWarning: [source.warning, suppliedCandles.length !== candles.length ? (suppliedCandles.length - candles.length) + " malformed source bar(s) were excluded; confidence was reduced." : null].filter(Boolean).join(" ") || null,
@@ -265,6 +289,7 @@ export function calculateDDAProNative(rawInput: DDAProCalculationInput): DDAProS
     rawSignals,
     signals: intelligenceResult.signals,
     signalIntelligence: intelligenceResult.intelligence,
+    signalIntegrity: ddaProSignalIntegrity(settings.signalModelVersion, input.lastBarConfirmed !== false),
     latest
   };
 }

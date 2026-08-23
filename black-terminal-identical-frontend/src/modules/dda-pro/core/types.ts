@@ -1,8 +1,10 @@
 import type { Candle } from "../../../chart-engine/types.ts";
 
 export const DDA_PRO_SCHEMA_VERSION = 1 as const;
-export const DDA_PRO_SETTINGS_VERSION = 3 as const;
+export const DDA_PRO_SETTINGS_VERSION = 4 as const;
 export const DDA_PRO_INDICATOR_ID = "black-core-dda-pro" as const;
+export const BC_RDA_LEGACY_REPAINTING = "BC_RDA_LEGACY_REPAINTING" as const;
+export const BC_RDA_CAUSAL_V2 = "BC_RDA_CAUSAL_V2" as const;
 
 export type DDAProEngineMode = "pine-compatibility" | "black-core-native";
 export type DDAProPriceSource = "close" | "hlc3" | "ohlc4";
@@ -17,6 +19,8 @@ export type DDAProRiskState = "LOW" | "MODERATE" | "HIGH" | "EXTREME" | "INSUFFI
 export type DDAProFlowState = "BULLISH" | "NEUTRAL" | "BEARISH" | "UNAVAILABLE";
 export type DDAProFlowAuthority = "EXACT_AGGRESSOR_TRADES" | "UNAVAILABLE";
 export type DDAProSignalIntelligenceMode = "RAW" | "BALANCED" | "INSTITUTIONAL" | "CUSTOM";
+export type DDAProSignalModelVersion = typeof BC_RDA_LEGACY_REPAINTING | typeof BC_RDA_CAUSAL_V2;
+export type DDAProSignalLifecycle = "NONE" | "RAW_CANDIDATE" | "DEVELOPING" | "CONFIRMED" | "REJECTED" | "FINAL";
 export type DDAProDistributionRegime = "COMPRESSION" | "CHOP" | "TRANSITION" | "DIRECTIONAL_EXPANSION" | "EXHAUSTION" | "REDISTRIBUTION" | "UNCLASSIFIED";
 export type DDAProSignalState = "NEUTRAL" | "WATCHING" | "ARMED" | "CONFIRMED" | "COOLDOWN" | "RESET";
 export type DDAProSignalReason =
@@ -26,7 +30,8 @@ export type DDAProSignalReason =
   | "EXCURSION_NOT_PERSISTENT" | "EPISODE_ALREADY_SIGNALLED" | "RESET_NOT_CONFIRMED"
   | "STRUCTURE_NOT_CONFIRMED" | "VOLUME_NOT_CONFIRMED" | "CVD_UNAVAILABLE"
   | "HIGHER_TIMEFRAME_CONFLICT" | "HIGH_CHOP_PROBABILITY" | "TAIL_ASYMMETRY_WEAK"
-  | "CONFIDENCE_BELOW_MINIMUM" | "SIGNAL_CONFIRMED";
+  | "CONFIDENCE_BELOW_MINIMUM" | "CAUSAL_RECOVERY_CONFIRMED" | "CAUSAL_ROLLOVER_CONFIRMED"
+  | "SIGNAL_CONFIRMED";
 
 export type DDAProSettings = {
   settingsVersion: typeof DDA_PRO_SETTINGS_VERSION;
@@ -36,6 +41,7 @@ export type DDAProSettings = {
   peakMode: "all-history" | "rolling";
   equitySource: "price" | "connected-account" | "strategy-equity";
   realtimeMode: "confirmed-bars" | "developing-preview";
+  signalModelVersion: DDAProSignalModelVersion;
   lookback: number;
   smoothingMethod: DDAProSmoothingMethod;
   smoothingLength: number;
@@ -182,6 +188,55 @@ export type DDAProSignalEvent = {
   regime?: DDAProDistributionRegime;
   episodeId?: string;
   reasonCodes?: DDAProSignalReason[];
+  lifecycle?: DDAProSignalLifecycle;
+  candidateIndex?: number;
+  confirmationIndex?: number;
+  displayAnchorIndex?: number;
+  candidateTimestamp?: number;
+  confirmationTimestamp?: number;
+  displayAnchorTimestamp?: number;
+  candidatePrice?: number;
+  confirmationPrice?: number;
+  displayAnchorPrice?: number;
+  executionEligibleTimestamp?: number | null;
+  confirmationDelayBars?: number;
+  finalized?: boolean;
+  modelVersion?: DDAProSignalModelVersion;
+  settingsHash?: string;
+  dataHash?: string;
+  causalAudit?: {
+    confirmationDepth: number;
+    confirmationVelocity: number;
+    anchorDepth: number;
+    percentileRank: number;
+    p50: number;
+    p95: number;
+    p99: number;
+    riskState: DDAProRiskState;
+    cloudState: "DEEPENING" | "RECOVERY_CANDIDATE" | "RECOVERY_CONFIRMED" | "UPPER_EXTREME" | "ROLLOVER_CANDIDATE" | "ROLLOVER_CONFIRMED";
+    episodeThresholdPercent: number;
+    recoveryThresholdPercent: number;
+    minimumImprovementPercent: number;
+    requiredRecoveryBars: number;
+    observedRecoveryBars: number;
+  };
+};
+
+export type DDAProSignalIntegrity = {
+  model: DDAProSignalModelVersion;
+  currentBar: "DEVELOPING" | "FINAL";
+  legacyResearchOnly: boolean;
+  finalizedSignalDrift: number;
+  finalizedValueDrift: number;
+  signalTimestampDrift: number;
+  backpaintedExecutionCount: number;
+  lastPrefixTest: "PASS" | "FAIL" | "NOT_RUN";
+  streamingBatchParity: "PASS" | "FAIL" | "NOT_RUN";
+  reloadParity: "PASS" | "FAIL" | "NOT_RUN";
+  checkpointParity: "PASS" | "FAIL" | "NOT_RUN";
+  alertEligibility: "BLOCKED" | "CERTIFIED";
+  strategyEligibility: "BLOCKED" | "CERTIFIED";
+  statisticsStatus: "INVALIDATED_REPAINTING_SOURCE" | "CAUSAL_MODEL_ONLY";
 };
 
 export type DDAProSignalEpisode = {
@@ -305,6 +360,7 @@ export type DDAProSnapshot = {
   rawSignals: DDAProSignalEvent[];
   signals: DDAProSignalEvent[];
   signalIntelligence: DDAProSignalIntelligence;
+  signalIntegrity: DDAProSignalIntegrity;
   latest: DDAProLatestMetrics;
 };
 
@@ -331,4 +387,5 @@ export type DDAProCalculationInput = {
   flowAuthority?: DDAProFlowAuthority;
   flowWarning?: string | null;
   signalContext?: { exchange: string; symbol: string; timeframe: string };
+  lastBarConfirmed?: boolean;
 };

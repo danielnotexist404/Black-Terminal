@@ -6,16 +6,18 @@ import {
   calculationHash,
   ddaProDataHash,
   ddaProOutputHash,
-  deriveCausalDDAProSignalCandidates,
+  deriveCausalEvents,
   deriveDDAProSignals,
-  deriveEvents,
+  deriveLegacyEvents,
   latestFromSeries,
   performanceMetrics,
   sourceValues
 } from "./engineShared.ts";
-import type { DDAProCalculationInput, DDAProRiskState, DDAProSnapshot } from "./types.ts";
+import { BC_RDA_CAUSAL_V2, type DDAProCalculationInput, type DDAProRiskState, type DDAProSnapshot } from "./types.ts";
 import { applyDDAProSignalIntelligence } from "./signalIntelligence.ts";
 import { calculateDDAProFlowPressure } from "./flowPressure.ts";
+import { deriveCausalRdaSignals } from "./causalSignalEngine.ts";
+import { ddaProSignalIntegrity } from "./certification.ts";
 
 export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): DDAProSnapshot {
   const settings = migrateDDAProSettings({
@@ -30,7 +32,7 @@ export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): 
   const source = sourceValues(input);
   const values = source.values;
   const length = values.length;
-  const lookback = Math.max(2, Math.min(settings.lookback, Math.max(2, length)));
+  const lookback = Math.max(2, settings.lookback);
   const series = blankSeries(length);
   let runningPeak = 0;
   for (let index = 0; index < length; index++) {
@@ -113,27 +115,48 @@ export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): 
   series.riskState = riskStates;
   const flow = calculateDDAProFlowPressure(input, series);
   const latestState = riskStates[index] ?? "INSUFFICIENT";
-  const events = deriveEvents(candles, riskStates, series.depth, episodes);
-  for (const event of events) Object.assign(event, { engineMode: "pine-compatibility", sourceAuthority: source.authority, lookback, riskScore: series.riskScore[event.index] ?? 0, confidence, drawdownPercent: series.rawDrawdown[event.index] ?? 0 });
-  const rawSignals = deriveDDAProSignals(events);
-  const intelligenceCandidates = settings.signalIntelligenceMode === "RAW"
-    ? rawSignals
-    : deriveCausalDDAProSignalCandidates(candles, series.depth, settings.drawdownEpisodeThresholdPercent);
-  const intelligenceResult = applyDDAProSignalIntelligence(input, series, intelligenceCandidates);
+  const causalModel = settings.signalModelVersion === BC_RDA_CAUSAL_V2;
+  const events = causalModel
+    ? deriveCausalEvents(candles, riskStates, series.depth, settings.drawdownEpisodeThresholdPercent)
+    : deriveLegacyEvents(candles, riskStates, series.depth, episodes);
   const dataHash = ddaProDataHash(input);
   const settingsHash = ddaProSettingsHash(settings);
+  for (const event of events) {
+    const eventConfidence = Math.max(0, Math.min(100, (event.index + 1) / Math.max(100, settings.lookback) * 100));
+    Object.assign(event, { engineMode: "pine-compatibility", sourceAuthority: source.authority, lookback: settings.lookback, riskScore: series.riskScore[event.index] ?? 0, confidence: eventConfidence, drawdownPercent: series.rawDrawdown[event.index] ?? 0, confirmed: causalModel });
+  }
+  const timeframeSeconds = rawInput.timeframeSeconds ?? 86_400;
+  const finalizedLength = input.lastBarConfirmed === false ? Math.max(0, length - 1) : length;
+  const causalSignals = causalModel ? deriveCausalRdaSignals({
+    candles,
+    depth: series.depth,
+    velocity: series.velocity,
+    riskState: series.riskState,
+    percentileRank: series.percentileRank,
+    p50: series.p50,
+    p95: series.p95,
+    p99: series.p99,
+    settings,
+    settingsHash,
+    timeframeSeconds,
+    finalizedLength,
+    signalContext: input.signalContext
+  }) : null;
+  const rawSignals = causalSignals?.signals ?? deriveDDAProSignals(events);
+  const intelligenceResult = applyDDAProSignalIntelligence(input, series, rawSignals);
+  if (causalSignals) intelligenceResult.intelligence.provisionalSignals = causalSignals.developingSignals;
   const latest = latestFromSeries(series, latestState, confidence, metrics);
   return {
     schemaVersion: 1,
     engineMode: "pine-compatibility",
     calculationHash: calculationHash(input, "pine-compatibility", dataHash),
-    engineVersion: "DDA_PINE_COMPAT_V1",
+    engineVersion: causalModel ? BC_RDA_CAUSAL_V2 : "DDA_PINE_COMPAT_V1",
     dataHash,
     settingsHash,
-    outputHash: ddaProOutputHash(series, latest),
+    outputHash: ddaProOutputHash(series, latest, rawSignals),
     calculatedAt: Date.now(),
     inputSize: length,
-    validFromIndex: Math.min(length, lookback),
+    validFromIndex: Math.min(length, settings.lookback),
     barsPerYear: 252,
     sourceAuthority: source.authority,
     sourceWarning: source.warning,
@@ -145,6 +168,7 @@ export function calculateDDAProCompatibility(rawInput: DDAProCalculationInput): 
     rawSignals,
     signals: intelligenceResult.signals,
     signalIntelligence: intelligenceResult.intelligence,
+    signalIntegrity: ddaProSignalIntegrity(settings.signalModelVersion, input.lastBarConfirmed !== false),
     latest
   };
 }

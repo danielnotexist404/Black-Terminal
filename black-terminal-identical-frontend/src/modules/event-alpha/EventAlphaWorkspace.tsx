@@ -78,7 +78,7 @@ export function EventAlphaWorkspace({ onClose }: Props) {
   return (
     <section className="event-alpha-workspace" aria-label="Event Alpha workspace">
       <header className="event-alpha-header">
-        <div><b>EVENT ALPHA ENGINE</b><span>Point-in-time event research · BC-RDA tactical confirmation · paper-only execution</span></div>
+        <div><b>EVENT ALPHA ENGINE</b><span>Point-in-time event research · BC-RDA tactical gate blocked · paper-only execution</span></div>
         <div className="event-alpha-header-actions">
           <span className={config?.engineEnabled ? "event-alpha-state live" : "event-alpha-state"}>{config?.engineEnabled ? "ENGINE ACTIVE" : "ENGINE OFF"}</span>
           <button type="button" onClick={() => void refresh()} disabled={refreshing} aria-label="Refresh Event Alpha"><RefreshCw size={14} className={refreshing ? "spin" : ""} /></button>
@@ -135,7 +135,7 @@ function ThesisTable({ rows }: { rows: EventAlphaThesis[] }) {
 function ResearchPanel() {
   return <div className="event-alpha-cards">
     <article><BookOpen size={18} /><h3>EVENT THESIS</h3><p>Event Alpha estimates a point-in-time expectation, scores the surprise, applies asset economics, subtracts abnormal price response and costs, then classifies remaining alpha.</p></article>
-    <article><Activity size={18} /><h3>TACTICAL SEPARATION</h3><p>BC-RDA may confirm timing only after an Event Alpha thesis is ARMED. A BC-RDA dot cannot create the economic thesis, reverse its sign, or bypass expiry.</p></article>
+    <article><Activity size={18} /><h3>TACTICAL SEPARATION</h3><p>BC-RDA tactical confirmation is blocked during signal-integrity containment. Event Alpha cannot consume legacy or Causal V2 dots until a separately certified runtime is approved.</p></article>
     <article><ShieldCheck size={18} /><h3>CAUSALITY</h3><p>Expectation snapshots must predate first actionable evidence. Revisions are append-only, replay is point-in-time, and absent evidence becomes NO_TRADE—not a synthetic fallback.</p></article>
   </div>;
 }

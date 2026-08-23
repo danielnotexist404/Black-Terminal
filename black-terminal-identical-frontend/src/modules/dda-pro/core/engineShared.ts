@@ -12,7 +12,8 @@ import type {
   DDAProSettings,
   DDAProSnapshot
 } from "./types.ts";
-import { DDA_PRO_INDICATOR_ID } from "./types.ts";
+import { BC_RDA_LEGACY_REPAINTING, DDA_PRO_INDICATOR_ID } from "./types.ts";
+import { BC_RDA_ALERTS_ELIGIBLE } from "./certification.ts";
 
 export function blankSeries(length: number): DDAProSeries {
   const series = () => new Array<number>(length).fill(0);
@@ -99,7 +100,7 @@ export function buildEpisodes(candles: readonly Candle[], depth: readonly number
   return episodes;
 }
 
-export function deriveEvents(
+export function deriveLegacyEvents(
   candles: readonly Candle[],
   riskStates: readonly DDAProRiskState[],
   depth: readonly number[],
@@ -136,18 +137,82 @@ export function deriveEvents(
   return events;
 }
 
+/**
+ * Point-in-time event history. Unlike the preserved legacy episode projection,
+ * every event is emitted on the bar where it first became knowable and is never
+ * rewritten to a later trough.
+ */
+export function deriveCausalEvents(
+  candles: readonly Candle[],
+  riskStates: readonly DDAProRiskState[],
+  depth: readonly number[],
+  episodeThresholdPercent: number
+) {
+  const events: DDAProEvent[] = [];
+  const threshold = Math.max(1e-9, episodeThresholdPercent);
+  const recoveryThreshold = Math.max(1e-9, threshold * 0.05);
+  let priorState: DDAProRiskState = "INSUFFICIENT";
+  let allHistoryMaximum = 0;
+  let active = false;
+  let episodeMaximum = 0;
+  let recovering = false;
+  for (let index = 0; index < candles.length; index++) {
+    const candle = candles[index];
+    const time = candle?.time ?? 0;
+    const value = Math.max(0, Number(depth[index]) || 0);
+    const state = riskStates[index] ?? "INSUFFICIENT";
+    if (state !== priorState && state !== "INSUFFICIENT") {
+      events.push({ id: `dda-causal-state-${time || index}`, type: "DDA_RISK_STATE_CHANGED", index, time, state, value });
+    }
+    priorState = state;
+    if (value > allHistoryMaximum + 1e-12) {
+      allHistoryMaximum = value;
+      events.push({ id: `dda-causal-extreme-${time || index}`, type: "DDA_NEW_MAX_DRAWDOWN", index, time, state, value });
+    }
+    if (!active && value >= threshold) {
+      active = true;
+      recovering = false;
+      episodeMaximum = value;
+      events.push({ id: `dda-causal-start-${time || index}`, type: "DDA_DRAWDOWN_STARTED", index, time, state, value });
+      continue;
+    }
+    if (!active) continue;
+    if (value > episodeMaximum + 1e-12) {
+      episodeMaximum = value;
+      recovering = false;
+      events.push({ id: `dda-causal-deepened-${time || index}`, type: "DDA_DRAWDOWN_DEEPENED", index, time, state, value });
+    } else if (!recovering && value < episodeMaximum - 1e-12) {
+      recovering = true;
+      events.push({ id: `dda-causal-recovering-${time || index}`, type: "DDA_DRAWDOWN_RECOVERING", index, time, state, value });
+    }
+    if (value < recoveryThreshold) {
+      events.push({ id: `dda-causal-recovery-${time || index}`, type: "DDA_DRAWDOWN_RECOVERED", index, time, state: "LOW", value: episodeMaximum });
+      active = false;
+      recovering = false;
+      episodeMaximum = 0;
+    }
+  }
+  return events;
+}
+
 export function deriveDDAProSignals(events: readonly DDAProEvent[]): DDAProSignalEvent[] {
   const signals: DDAProSignalEvent[] = [];
   for (const event of events) {
     if (event.type === "DDA_DRAWDOWN_DEEPENED") signals.push({
       id: `bc-rda-long-${event.time || event.index}`, indicatorId: DDA_PRO_INDICATOR_ID,
       direction: "long" as const, index: event.index, time: event.time, value: event.value,
-      sourceEventType: event.type, markerTone: "silver-white" as const
+      sourceEventType: event.type, markerTone: "silver-white" as const,
+      lifecycle: "DEVELOPING", candidateIndex: event.index, displayAnchorIndex: event.index,
+      candidateTimestamp: event.time, displayAnchorTimestamp: event.time, executionEligibleTimestamp: null,
+      confirmationDelayBars: 0, finalized: false, modelVersion: BC_RDA_LEGACY_REPAINTING
     });
     if (event.type === "DDA_DRAWDOWN_RECOVERED") signals.push({
       id: `bc-rda-short-${event.time || event.index}`, indicatorId: DDA_PRO_INDICATOR_ID,
       direction: "short" as const, index: event.index, time: event.time, value: event.value,
-      sourceEventType: event.type, markerTone: "blood-red" as const
+      sourceEventType: event.type, markerTone: "blood-red" as const,
+      lifecycle: "DEVELOPING", candidateIndex: event.index, displayAnchorIndex: event.index,
+      candidateTimestamp: event.time, displayAnchorTimestamp: event.time, executionEligibleTimestamp: null,
+      confirmationDelayBars: 0, finalized: false, modelVersion: BC_RDA_LEGACY_REPAINTING
     });
   }
   return signals;
@@ -227,9 +292,15 @@ export function confirmedNewestDDAProSignals(
   const latestIndex = Math.max(0, inputSize - 1);
   const duration = Math.max(1, Number(timeframeSeconds) || 1);
   return signals.filter((signal) =>
+    signal.modelVersion !== BC_RDA_LEGACY_REPAINTING &&
+    signal.lifecycle === "FINAL" &&
+    signal.finalized === true &&
+    Number.isFinite(signal.confirmationTimestamp) &&
+    Number.isFinite(signal.executionEligibleTimestamp) &&
     signal.index === latestIndex &&
     signal.time > armedAfterTime &&
-    signal.time + duration <= nowSeconds
+    signal.time + duration <= nowSeconds &&
+    signal.executionEligibleTimestamp! <= nowSeconds
   );
 }
 
@@ -238,6 +309,9 @@ export function confirmedNewestDDAProSignals(
  * Filtered intelligence alerts never re-run quantitative conditions in React.
  */
 export function ddaProAlertSignalStream(snapshot: DDAProSnapshot, settings: DDAProSettings) {
+  // Emergency fail-closed containment: neither the preserved repainting model
+  // nor the not-yet-headless-certified causal model may feed production alerts.
+  if (!BC_RDA_ALERTS_ELIGIBLE) return [];
   if (!settings.showEpisodeMarkers) return [];
   if (settings.signalIntelligenceMode === "RAW") return settings.showRawSignals ? snapshot.rawSignals : [];
   if (settings.confirmedAlertsOnly) return settings.showConfirmedSignals ? snapshot.signals : [];
@@ -369,7 +443,7 @@ export function ddaProDataHash(input: DDAProCalculationInput) {
   return hasher.digest();
 }
 
-export function ddaProOutputHash(series: DDAProSeries, latest: DDAProLatestMetrics) {
+export function ddaProOutputHash(series: DDAProSeries, latest: DDAProLatestMetrics, signals: readonly DDAProSignalEvent[] = []) {
   const hasher = fnv1aHasher("dda-output-v2|");
   for (const key of Object.keys(series).sort() as Array<keyof DDAProSeries>) {
     hasher.updateString(key + "|");
@@ -384,11 +458,23 @@ export function ddaProOutputHash(series: DDAProSeries, latest: DDAProLatestMetri
     if (typeof value === "number") hasher.updateNumber(value);
     else hasher.updateString(value);
   }
+  for (const signal of signals) {
+    hasher.updateString([signal.id, signal.direction, signal.index, signal.time, signal.lifecycle ?? "NONE", signal.finalized === true ? "FINAL" : "NOT_FINAL", signal.executionEligibleTimestamp ?? "NONE"].join("|") + "|");
+  }
   return hasher.digest();
 }
 
 export function calculationHash(input: DDAProCalculationInput, engine: string, dataHash = ddaProDataHash(input)) {
-  return fnv1aHash("dda-calculation-v1|", (update) => update(engine + "|" + ddaProCalculationSettingsHash(input.settings) + "|" + dataHash));
+  const context = input.signalContext;
+  return fnv1aHash("dda-calculation-v2|", (update) => update([
+    engine,
+    ddaProCalculationSettingsHash(input.settings),
+    dataHash,
+    input.lastBarConfirmed === false ? "DEVELOPING" : "FINAL",
+    context?.exchange ?? "market",
+    context?.symbol ?? "unknown",
+    context?.timeframe ?? `${input.timeframeSeconds ?? 0}s`
+  ].join("|")));
 }
 
 export function latestFromSeries(

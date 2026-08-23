@@ -99,3 +99,5 @@ Validation: `python3 scripts/auction-profile-python-tests.py`.
 ## BC-RDA
 
 BC-RDA adds an auditable Python reference and a production browser TypeScript worker mirror. Run `npm run test:dda-pro-python-parity` to verify the core raw, smoothed, depth, and distribution outputs. The Python package is not claimed as a deployed sidecar.
+
+The Python reference does not certify historical dots or automation. The old dot projection is now `BC_RDA_LEGACY_REPAINTING`; the separate `BC_RDA_CAUSAL_V2` closed-bar signal machine lives in TypeScript and is tested with `npm run test:dda-pro-no-repaint`. Alerts and all strategy runtimes remain blocked until a separately implemented headless runtime passes the same timestamp/checkpoint contract.

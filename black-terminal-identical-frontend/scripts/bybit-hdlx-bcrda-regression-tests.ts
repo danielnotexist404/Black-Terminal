@@ -57,9 +57,9 @@ const alertCandles = [{ time: 100 }, { time: 200 }, { time: 300 }];
 assert.equal(latestConfirmedDDAProCandleTime(alertCandles, 100, 350), 200);
 assert.deepEqual(confirmedNewestDDAProSignals(signals, 3, 100, 350, 200), [],
   "developing and historical BC-RDA dots must never fire configured alerts");
-const latestConfirmedSignal = { ...signals[0]!, id: "bc-rda-long-300", index: 2, time: 300 };
-assert.deepEqual(confirmedNewestDDAProSignals([signals[0]!, latestConfirmedSignal], 3, 100, 401, 200).map((signal) => signal.id), ["bc-rda-long-300"],
-  "only a newly confirmed signal on the newest calculated bar may fire");
+const latestConfirmedSignal = { ...signals[0]!, id: "bc-rda-causal-v2:bybit:btcusdt:100s:300:long:final", index: 2, time: 300, modelVersion: "BC_RDA_CAUSAL_V2" as const, lifecycle: "FINAL" as const, finalized: true, confirmationTimestamp: 300, executionEligibleTimestamp: 400 };
+assert.deepEqual(confirmedNewestDDAProSignals([signals[0]!, latestConfirmedSignal], 3, 100, 401, 200).map((signal) => signal.id), [latestConfirmedSignal.id],
+  "only a finalized causal signal after confirmation-bar close may enter the newest-signal selector");
 
 const engineSource = readFileSync(new URL("../src/chart-engine/BlackChartEngine.ts", import.meta.url), "utf8");
 const chartSource = readFileSync(new URL("../src/components/PixiBlackChart.tsx", import.meta.url), "utf8");

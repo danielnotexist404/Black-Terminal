@@ -154,6 +154,9 @@ async function processStrategy(strategy: JsonRow) {
     exchange: runningDefinition.exchange || "bybit",
     definition: runningDefinition,
   };
+  if (isBcrdaDefinition(runningDefinition)) {
+    return heartbeat(strategy, "DEGRADED", "BC_RDA_SIGNAL_INTEGRITY_BLOCKED");
+  }
   const { data: paper, error: paperError } = await supabase
     .from("strategy_paper_accounts")
     .select("*")
@@ -278,6 +281,12 @@ async function processStrategy(strategy: JsonRow) {
       { onConflict: "strategy_id" },
     );
   if (updateError) throw updateError;
+}
+
+function isBcrdaDefinition(definition: JsonRow) {
+  const indicatorId = String(definition?.indicator?.indicatorId || "").toLowerCase();
+  const indicatorName = String(definition?.indicator?.name || "").toLowerCase();
+  return indicatorId === "black-core-dda-pro" || indicatorId.includes("ddapro") || indicatorName.includes("bc-rda") || indicatorName.includes("risk distribution analysis");
 }
 
 async function enqueueDemoStrategySignal(

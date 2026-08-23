@@ -15,6 +15,7 @@ const indicator = read("src/modules/strategy-lab/my-strategy/wizard/IndicatorMar
 const manifest = read("src/modules/strategy-lab/my-strategy/state/indicatorManifest.ts");
 const cockpit = read("src/modules/strategy-lab/my-strategy/pages/StrategyCockpitPage.tsx");
 const targetMatrix = read("src/modules/strategy-lab/my-strategy/cockpit/TargetSlotMatrix.tsx");
+const repository = read("server/strategy-automation/repository.js");
 const migration = read("supabase/migrations/202608230001_my_strategy_draft_version_model.sql");
 const compose = read("infra/black-cloud/docker-compose.yml");
 
@@ -53,6 +54,10 @@ assert.match(targetMatrix, /No live account allocated/);
 assert.match(targetMatrix, /bindings\.filter/, "only occupied bindings create detailed state");
 assert.doesNotMatch(`${experience}\n${library}\n${wizard}\n${cockpit}`, /localStorage\.setItem|sessionStorage\.setItem/, "server state is authoritative; the workflow does not duplicate strategy persistence in browser storage");
 assert.equal((experience.match(/setInterval\(/g) || []).length, 1, "one cockpit snapshot poller is mounted");
+assert.match(repository, /strategy_paper_accounts"\)\.select\("id,strategy_id,strategy_version,/, "strategy library retains the canonical Paper account identity");
+assert.match(repository, /strategy_automation_trades"\)\.select\("strategy_id,paper_account_id"\)/, "trade summaries use columns that exist in the execution ledger");
+assert.match(repository, /paper_account_id === paper\.id/, "trade counts are scoped to the selected published\/running Paper version");
+assert.doesNotMatch(repository, /strategy_automation_trades"\)\.select\("strategy_id,strategy_version"\)/, "strategy trades do not query the nonexistent strategy_version column");
 
 assert.match(migration, /black_core_save_strategy_draft/);
 assert.match(migration, /black_core_publish_strategy_draft/);

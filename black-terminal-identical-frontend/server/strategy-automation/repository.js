@@ -25,10 +25,10 @@ export async function listStrategies(supabase, userId) {
   if (!rows.length) return [];
   const ids = rows.map((row) => row.id);
   const [papers, bindings, runtimes, trades] = await Promise.all([
-    many(supabase.from("strategy_paper_accounts").select("strategy_id,strategy_version,demo_equity,realized_pnl,unrealized_pnl,maximum_drawdown_percent,status").in("strategy_id", ids)),
+    many(supabase.from("strategy_paper_accounts").select("id,strategy_id,strategy_version,demo_equity,realized_pnl,unrealized_pnl,maximum_drawdown_percent,status").in("strategy_id", ids)),
     many(supabase.from("strategy_target_bindings").select("strategy_id,strategy_version,status").in("strategy_id", ids).neq("status", "DISCONNECTED")),
     many(supabase.from("strategy_automation_runtime_state").select("strategy_id,runtime_state,last_signal_at,last_heartbeat_at,running_version").in("strategy_id", ids)),
-    many(supabase.from("strategy_automation_trades").select("strategy_id,strategy_version").in("strategy_id", ids).eq("mode", "PAPER").limit(25_000))
+    many(supabase.from("strategy_automation_trades").select("strategy_id,paper_account_id").in("strategy_id", ids).eq("mode", "PAPER").limit(25_000))
   ]);
   return rows.map((row) => {
     const version = row.running_version ?? row.published_version;
@@ -41,7 +41,7 @@ export async function listStrategies(supabase, userId) {
       paperEquity: paper ? Number(paper.demo_equity || 0) + Number(paper.realized_pnl || 0) + Number(paper.unrealized_pnl || 0) : 0,
       paperPnl: paper ? Number(paper.realized_pnl || 0) + Number(paper.unrealized_pnl || 0) : 0,
       paperDrawdown: Number(paper?.maximum_drawdown_percent || 0),
-      paperTrades: trades.filter((item) => item.strategy_id === row.id && item.strategy_version === version).length,
+      paperTrades: paper ? trades.filter((item) => item.paper_account_id === paper.id).length : 0,
       connectedTargets: bindings.filter((item) => item.strategy_id === row.id && item.strategy_version === version).length,
       runtimeState: runtime?.runtime_state || (row.running_version ? "RECOVERING" : "NOT STARTED"),
       lastSignalAt: runtime?.last_signal_at || null,

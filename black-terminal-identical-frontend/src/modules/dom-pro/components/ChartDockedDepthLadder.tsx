@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from "react";
-import { Crosshair, Maximize2, X } from "lucide-react";
+import { Crosshair, Lock, X } from "lucide-react";
+import type { ChartPriceTransformSnapshot } from "../../../chart-engine/priceTransform";
 import type { MarketSymbol } from "../../../market-data/types";
 import { blackCorePerformanceMonitor } from "../../../performance/performanceMonitor";
 import { buildChartDockedDepthLadder, type ChartDockedDepthLadderModel, type ChartDockedDepthRow, type ChartDockedDepthScaleMode } from "../chartDockedDepthLadderModel";
 import { blackCoreChartPriceViewportStore } from "../chartPriceViewportStore";
+import { useConsolidatedLiquidityFeed } from "../consolidatedLiquidityClient";
 import { ProfessionalDomLadderTracker } from "../domProfessionalLadder";
 import { useDomFeed } from "../useDomFeed";
 import "../chartDockedDepthLadder.css";
@@ -33,11 +35,32 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, exchangeLabel,
   const [size, setSize] = useState<CanvasSize>({ width: 320, height: 600 });
   const [hover, setHover] = useState<HoverState>(null);
   const [aggregationTicks, setAggregationTicks] = useState(() => readAggregation(workspaceId));
-  const [scaleMode, setScaleMode] = useState<ChartDockedDepthScaleMode>(() => readScaleMode(workspaceId));
+  const [lockedViewport, setLockedViewport] = useState<ChartPriceTransformSnapshot | null>(null);
   const feed = useDomFeed(marketSymbol, { depth: 1000 });
   const subscribeViewport = useCallback((listener: () => void) => blackCoreChartPriceViewportStore.subscribe(viewportKey, listener), [viewportKey]);
   const getViewport = useCallback(() => blackCoreChartPriceViewportStore.getSnapshot(viewportKey), [viewportKey]);
   const viewport = useSyncExternalStore(subscribeViewport, getViewport, () => null);
+  const effectiveViewport = useMemo(() => {
+    if (!viewport) return null;
+    if (!lockedViewport) return viewport;
+    return {
+      ...viewport,
+      priceMin: lockedViewport.priceMin,
+      priceMax: lockedViewport.priceMax,
+      scaleMode: lockedViewport.scaleMode
+    };
+  }, [lockedViewport, viewport]);
+  const scaleMode: ChartDockedDepthScaleMode = lockedViewport ? "locked" : "follow";
+  const requestedRows = effectiveViewport
+    ? clampInteger(Math.round(((effectiveViewport.plotBottom - effectiveViewport.plotTop) / 13) * (20 / aggregationTicks)), 8, 180)
+    : 80;
+  const consolidated = useConsolidatedLiquidityFeed({
+    baseAsset: marketSymbol.baseAsset,
+    minimumPrice: effectiveViewport?.priceMin ?? 0,
+    maximumPrice: effectiveViewport?.priceMax ?? 0,
+    rowCount: requestedRows,
+    enabled: Boolean(effectiveViewport)
+  });
 
   useEffect(() => {
     const element = rootRef.current;
@@ -57,26 +80,26 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, exchangeLabel,
   }, [aggregationTicks, workspaceId]);
 
   useEffect(() => {
-    localStorage.setItem(scaleModeStorageKey(workspaceId), scaleMode);
+    setLockedViewport(null);
     setHover(null);
-  }, [scaleMode, workspaceId]);
+  }, [marketSymbol.baseAsset, viewportKey]);
 
   const professionalDepth = useMemo(() => trackerRef.current.update({
-    book: feed.book,
-    currentPrice: feed.ticker?.lastPrice ?? lastPrice,
-    aggregationTicks,
-    bookStatus: feed.bookStatus,
-    now: feed.updatedAt,
+    book: consolidated.book ?? feed.book,
+    currentPrice: feed.ticker?.lastPrice ?? lastPrice ?? consolidated.snapshot?.referencePrice,
+    aggregationTicks: consolidated.book ? 1 : aggregationTicks,
+    bookStatus: consolidated.book ? `CONSOLIDATED_${consolidated.status.toUpperCase()}` : feed.bookStatus,
+    now: Date.now(),
     maximumRows: 12_000
-  }), [aggregationTicks, feed.book, feed.bookStatus, feed.ticker?.lastPrice, feed.updatedAt, lastPrice]);
+  }), [aggregationTicks, consolidated.book, consolidated.snapshot?.generatedAt, consolidated.snapshot?.referencePrice, consolidated.status, feed.book, feed.bookStatus, feed.ticker?.lastPrice, feed.updatedAt, lastPrice]);
 
-  const model = useMemo(() => viewport ? buildChartDockedDepthLadder({
+  const model = useMemo(() => effectiveViewport ? buildChartDockedDepthLadder({
     depth: professionalDepth,
-    viewport,
+    viewport: effectiveViewport,
     preferredRowHeight: 13,
     maximumRows: 180,
     scaleMode
-  }) : null, [professionalDepth, scaleMode, viewport]);
+  }) : null, [effectiveViewport, professionalDepth, scaleMode]);
   latestModelRef.current = model;
 
   useEffect(() => {
@@ -154,14 +177,16 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, exchangeLabel,
   }
 
   const sourceDepth = professionalDepth.subscribedDepth ?? Math.max(professionalDepth.bidLevels, professionalDepth.askLevels);
-  const status = professionalDepth.state.toUpperCase();
+  const status = consolidated.snapshot
+    ? `CLF ${consolidated.status.toUpperCase()} ${consolidated.snapshot.includedVenues.length}V`
+    : `BYBIT ${professionalDepth.state.toUpperCase()}`;
 
   return (
     <aside
       ref={rootRef}
       className={`chart-docked-depth-ladder chart-docked-depth-ladder--${professionalDepth.state}`}
       data-chart-docked-depth-ladder="true"
-      data-viewport-revision={viewport?.revision ?? -1}
+      data-viewport-revision={effectiveViewport?.revision ?? -1}
       data-subscribed-depth={sourceDepth}
       data-depth-scale-mode={scaleMode}
     >
@@ -170,14 +195,14 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, exchangeLabel,
         <button
           type="button"
           className="chart-docked-depth-scale"
-          onClick={() => setScaleMode((current) => current === "book" ? "chart" : "book")}
-          title={scaleMode === "book"
-            ? "Showing the complete order book delivered by the venue. Click to align rows to the chart price scale."
-            : "Showing chart-aligned prices. Click to fit all delivered venue depth into the ladder."}
-          aria-label={`Depth scale: ${scaleMode === "book" ? "full book fit" : "chart lock"}`}
+          onClick={() => setLockedViewport((current) => current ? null : effectiveViewport ? { ...effectiveViewport } : null)}
+          title={scaleMode === "follow"
+            ? "Following the chart's live price scale. Click to freeze the current price range."
+            : "Price scale is frozen. Click to resume following chart pan and zoom."}
+          aria-label={`Depth scale: ${scaleMode === "follow" ? "chart follow" : "scale locked"}`}
         >
-          {scaleMode === "book" ? <Maximize2 size={10} /> : <Crosshair size={10} />}
-          {scaleMode === "book" ? "BOOK FIT" : "CHART LOCK"}
+          {scaleMode === "follow" ? <Crosshair size={10} /> : <Lock size={10} />}
+          {scaleMode === "follow" ? "FOLLOW" : "LOCKED"}
         </button>
         <label title="Aggregate this many native venue ticks before projecting depth onto the chart scale">
           AGG:
@@ -198,13 +223,13 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, exchangeLabel,
         onMouseLeave={() => setHover(null)}
         aria-label={`${marketSymbol.rawSymbol} chart-synchronized full delivered order book`}
       />
-      {!viewport && <div className="chart-docked-depth-awaiting">SYNCHRONIZING CHART PRICE SCALE</div>}
+      {!effectiveViewport && <div className="chart-docked-depth-awaiting">SYNCHRONIZING CHART PRICE SCALE</div>}
       {hover && <DepthTooltip hover={hover} quoteAsset={marketSymbol.quoteAsset} />}
       <footer className="chart-docked-depth-footer">
-        <span>{exchangeLabel.toUpperCase()} {marketSymbol.rawSymbol}</span>
+        <span>{consolidated.snapshot ? consolidated.snapshot.includedVenues.map((venue) => venue.venue.toUpperCase()).join("+") : exchangeLabel.toUpperCase()} {marketSymbol.rawSymbol}</span>
         <span>{formatPrice(model?.coverageMin ?? null, model?.priceDecimals ?? 1)}—{formatPrice(model?.coverageMax ?? null, model?.priceDecimals ?? 1)}</span>
         <span>{model ? `${model.hiddenAboveCount}↑ ${model.hiddenBelowCount}↓` : "—"}</span>
-        <b>VISIBLE RESTING LIMIT DEPTH · HIDDEN/RPI EXCLUDED</b>
+        <b>{consolidated.snapshot ? `${Math.round(consolidated.snapshot.coverageRatio * 100)}% VIEWPORT COVERAGE · ` : ""}VISIBLE RESTING LIMIT DEPTH · HIDDEN/RPI EXCLUDED</b>
       </footer>
     </aside>
   );
@@ -301,11 +326,13 @@ function drawLadder(canvas: HTMLCanvasElement, size: CanvasSize, model: ChartDoc
     if (row.totalSize > 0) {
       const nodeAlpha = Math.min(1, 0.18 + visual.depth * 0.55 + visual.activity * 0.35);
       context.save();
-      context.shadowBlur = 2 + visual.activity * 8;
+      context.shadowBlur = 3 + visual.depth * 4 + visual.activity * 9;
       context.shadowColor = row.side === "ask" ? "rgba(255,0,32,0.9)" : "rgba(255,255,255,0.82)";
       context.fillStyle = row.side === "ask" ? `rgba(255,24,52,${nodeAlpha})` : `rgba(245,247,250,${nodeAlpha})`;
       const nodeHeight = Math.max(2, (height - 3) * (0.58 + visual.depth * 0.42));
-      context.fillRect(size.width - 5, y + (height - nodeHeight) / 2, 3, nodeHeight);
+      context.fillRect(size.width - 7, y + (height - nodeHeight) / 2, 5, nodeHeight);
+      context.fillStyle = row.side === "ask" ? `rgba(255,130,145,${nodeAlpha * 0.82})` : `rgba(255,255,255,${nodeAlpha * 0.88})`;
+      context.fillRect(size.width - 5, y + (height - nodeHeight) / 2, 1, nodeHeight);
       context.restore();
     }
 
@@ -314,6 +341,9 @@ function drawLadder(canvas: HTMLCanvasElement, size: CanvasSize, model: ChartDoc
       context.fillRect(1, y + 1, 2, Math.max(1, height - 2));
     }
   });
+
+  drawCumulativeDepthBand(context, model, visualRows, profileLeft, profileRight, "ask");
+  drawCumulativeDepthBand(context, model, visualRows, profileLeft, profileRight, "bid");
 
   for (let index = 1; index < columns.length - 1; index += 1) {
     context.strokeStyle = "rgba(255,255,255,0.075)";
@@ -341,7 +371,60 @@ function drawLadder(canvas: HTMLCanvasElement, size: CanvasSize, model: ChartDoc
   context.fillStyle = "rgba(116,123,134,0.52)";
   context.font = '600 6px "IBM Plex Mono", monospace';
   context.textAlign = "left";
-  context.fillText(`${quoteAsset} · ${model.scaleMode === "book" ? "FULL DELIVERED BOOK" : "CHART-SYNCHRONIZED"}`, 5, Math.min(size.height - 8, model.plotBottom + 13));
+  context.fillText(`${quoteAsset} · ${model.scaleMode === "follow" ? "CLF CHART-FOLLOW" : "CLF SCALE-LOCKED"}`, 5, Math.min(size.height - 8, model.plotBottom + 13));
+}
+
+function drawCumulativeDepthBand(
+  context: CanvasRenderingContext2D,
+  model: ChartDockedDepthLadderModel,
+  visualRows: VisualRow[],
+  profileLeft: number,
+  profileRight: number,
+  side: "ask" | "bid"
+) {
+  const currentIndex = Math.max(0, model.rows.findIndex((row) => row.isCurrentPrice));
+  const indices = side === "ask"
+    ? Array.from({ length: currentIndex + 1 }, (_, offset) => currentIndex - offset)
+    : Array.from({ length: model.rows.length - currentIndex }, (_, offset) => currentIndex + offset);
+  if (indices.length < 2) return;
+  let cumulative = 0;
+  const points = indices.map((index) => {
+    cumulative += side === "ask" ? (visualRows[index]?.ask ?? 0) : (visualRows[index]?.bid ?? 0);
+    return { index, cumulative };
+  });
+  const maximum = points.at(-1)?.cumulative ?? 0;
+  if (maximum <= 1e-12) return;
+  const width = Math.max(1, profileRight - profileLeft);
+  const coordinates = points.map((point) => ({
+    x: profileRight - Math.sqrt(point.cumulative / maximum) * width,
+    y: model.rows[point.index].top + model.rows[point.index].height / 2
+  }));
+
+  context.save();
+  context.beginPath();
+  context.moveTo(profileRight, coordinates[0].y);
+  for (const point of coordinates) context.lineTo(point.x, point.y);
+  context.lineTo(profileRight, coordinates.at(-1)!.y);
+  context.closePath();
+  const gradient = context.createLinearGradient(profileLeft, 0, profileRight, 0);
+  if (side === "ask") {
+    gradient.addColorStop(0, "rgba(92,0,14,0.08)");
+    gradient.addColorStop(1, "rgba(255,14,42,0.19)");
+  } else {
+    gradient.addColorStop(0, "rgba(118,124,134,0.06)");
+    gradient.addColorStop(1, "rgba(248,250,252,0.16)");
+  }
+  context.fillStyle = gradient;
+  context.fill();
+
+  context.beginPath();
+  coordinates.forEach((point, index) => index === 0 ? context.moveTo(point.x, point.y) : context.lineTo(point.x, point.y));
+  context.strokeStyle = side === "ask" ? "rgba(255,26,52,0.9)" : "rgba(230,234,240,0.88)";
+  context.shadowColor = side === "ask" ? "rgba(255,0,35,0.74)" : "rgba(255,255,255,0.52)";
+  context.shadowBlur = 5;
+  context.lineWidth = 1.15;
+  context.stroke();
+  context.restore();
 }
 
 function drawCoverageBoundary(context: CanvasRenderingContext2D, price: number | null, model: ChartDockedDepthLadderModel, width: number) {
@@ -383,17 +466,9 @@ function aggregationStorageKey(workspaceId: string) {
   return `bt:chart-docked-depth-ladder:agg:${workspaceId}`;
 }
 
-function scaleModeStorageKey(workspaceId: string) {
-  return `bt:chart-docked-depth-ladder:scale:${workspaceId}`;
-}
-
 function readAggregation(workspaceId: string) {
   const stored = Number(localStorage.getItem(aggregationStorageKey(workspaceId)));
   return AGGREGATION_OPTIONS.includes(stored) ? stored : 20;
-}
-
-function readScaleMode(workspaceId: string): ChartDockedDepthScaleMode {
-  return localStorage.getItem(scaleModeStorageKey(workspaceId)) === "chart" ? "chart" : "book";
 }
 
 function formatPrice(value: number | null, decimals: number) {
@@ -419,4 +494,8 @@ function formatSignedCompact(value: number) {
 
 function trim(value: number) {
   return Math.abs(value).toFixed(Math.abs(value) >= 100 ? 0 : Math.abs(value) >= 10 ? 1 : 2).replace(/\.0+$|(?<=\.[0-9])0+$/, "");
+}
+
+function clampInteger(value: number, minimum: number, maximum: number) {
+  return Math.max(minimum, Math.min(maximum, Math.round(value)));
 }

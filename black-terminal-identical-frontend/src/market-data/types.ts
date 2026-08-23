@@ -16,6 +16,7 @@ export type ExchangeId =
   | "gateio"
   | "mexc"
   | "bitmex"
+  | "composite"
   | "mock";
 
 export type MarketKind = "spot" | "margin" | "perpetual" | "futures" | "options" | "swap";

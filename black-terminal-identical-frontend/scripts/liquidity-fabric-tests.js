@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { buildCompositeLiquidity } from "../server/liquidity-fabric/composite-engine.js";
 import { createCanonicalInstrument, convertNativeQuantity } from "../server/liquidity-fabric/contracts.js";
 import { CanonicalOrderBookReconstructor } from "../server/liquidity-fabric/order-book-reconstructor.js";
 import { assessBookQuality } from "../server/liquidity-fabric/quality.js";
 import { venueDepthPolicies } from "../server/liquidity-fabric/venue-policies.js";
+import { projectLiquidityViewport } from "../server/liquidity-fabric/viewport-compositor.js";
+import { VenueBookSession } from "../server/liquidity-fabric/direct-runtime.js";
 
 const NOW = 1_787_508_800_000;
 const direct = (venue) => ({
@@ -57,6 +60,71 @@ function snapshot(reconstructor, venue, sequence = 100, overrides = {}) {
   assert.equal(result.ok, false);
   assert.equal(result.code, "LIQUIDITY_FABRIC_PROVENANCE_INVALID");
   assert.equal(book.snapshot().status, "AWAITING_SNAPSHOT");
+}
+
+{
+  const venueBook = (venue, bids, asks, receivedAt = NOW) => ({
+    venue,
+    marketKind: venue === "coinbase" ? "spot" : "perpetual",
+    exchangeSymbol: venue === "coinbase" ? "BTC-USD" : "BTCUSDT",
+    baseAsset: "BTC",
+    quoteAsset: venue === "coinbase" ? "USD" : "USDT",
+    transport: "PUBLIC_L2",
+    direct: true,
+    relabelled: false,
+    status: "HEALTHY",
+    sourceTimestamp: receivedAt,
+    receivedAt,
+    bids: bids.map(([price, quantity]) => ({ price, quantity })),
+    asks: asks.map(([price, quantity]) => ({ price, quantity }))
+  });
+  const coinbase = venueBook("coinbase", [[72_000, 2], [62_100, 3]], [[72_010, 4], [87_900, 5]]);
+  const bybit = venueBook("bybit", [[72_000, 1]], [[72_010, 1.5]]);
+  const field = projectLiquidityViewport({
+    books: [coinbase, bybit],
+    now: NOW,
+    baseAsset: "BTC",
+    minimumPrice: 62_000,
+    maximumPrice: 88_000,
+    rowCount: 52
+  });
+  assert.equal(field.state, "live");
+  assert.equal(field.viewport.maximumPrice - field.viewport.minimumPrice, 26_000, "the chart field must preserve the complete requested $26k viewport");
+  assert.equal(field.coverageRatio, 1, "a verified full-book source spanning the viewport must certify every display row as covered");
+  assert.deepEqual(field.includedVenues.map((item) => item.venue), ["coinbase", "bybit"]);
+  assert.equal(field.semantics.syntheticLiquidityIncluded, false);
+  assert.equal(field.rows.reduce((total, row) => total + row.bidBase, 0), 6);
+  assert.equal(field.rows.reduce((total, row) => total + row.askBase, 0), 10.5);
+  const combinedBid = field.rows.find((row) => row.contributions.length === 2 && row.bidBase > 0);
+  assert.ok(combinedBid, "same-price liquidity from multiple direct venues must be aggregated with provenance intact");
+  assert.deepEqual(combinedBid.contributions.map((item) => item.venue).sort(), ["bybit", "coinbase"]);
+
+  const staleOnly = projectLiquidityViewport({
+    books: [venueBook("coinbase", [[72_000, 1]], [[72_010, 1]], NOW - 20_000)],
+    now: NOW,
+    baseAsset: "BTC",
+    minimumPrice: 62_000,
+    maximumPrice: 88_000,
+    rowCount: 52,
+    maximumAgeMs: 15_000
+  });
+  assert.equal(staleOnly.state, "initializing");
+  assert.equal(staleOnly.rows.every((row) => row.bidBase === 0 && row.askBase === 0), true, "stale liquidity must never be painted into the chart");
+  assert.ok(staleOnly.excludedVenues[0].reasons.includes("STALE_BOOK"));
+}
+
+{
+  let now = NOW;
+  const session = new VenueBookSession({ venue: "fixture", marketKind: "spot", exchangeSymbol: "BTC-USD", baseAsset: "BTC", quoteAsset: "USD", transport: "TEST", now: () => now });
+  session.replace({ bids: [[100, 2]], asks: [[101, 3]], sourceTimestamp: now, sequence: 1 });
+  const first = session.snapshot();
+  assert.equal(session.snapshot(), first, "an unchanged deep book snapshot must reuse its immutable sorted cache");
+  now += 800;
+  session.apply([{ side: "bid", price: 100, quantity: 4 }], now, 2);
+  const second = session.snapshot();
+  assert.notEqual(second, first, "a genuine update must invalidate the sorted snapshot cache");
+  assert.equal(second.bids[0].quantity, 4);
+  assert.equal(second.receivedAt, now);
 }
 
 {
@@ -243,4 +311,13 @@ function snapshot(reconstructor, venue, sequence = 100, overrides = {}) {
   assert.ok(composite.excluded[0].reasons.includes("MISSING_QUOTE_FX"));
 }
 
-console.log("Consolidated Liquidity Fabric Phase I tests passed: provenance, reconstruction, quality, conversion and composite semantics.");
+{
+  const route = readFileSync(new URL("../server/liquidity-fabric/route.js", import.meta.url), "utf8");
+  const runtime = readFileSync(new URL("../server/liquidity-fabric/direct-runtime.js", import.meta.url), "utf8");
+  assert.match(route, /requireMethod\(req, "GET"\)/, "the consolidated endpoint must remain read-only");
+  assert.doesNotMatch(`${route}\n${runtime}`, /\/api\/(execution|order\/create)|placeOrder|cancelOrder|amendOrder/, "liquidity synchronization must not contain an order-mutation path");
+  assert.match(runtime, /orderbook\.full\./, "Bybit must use the official full-depth delta stream rather than the legacy narrow ladder feed");
+  assert.match(runtime, /full_orderbook\?category=linear/, "Bybit full-depth reconstruction must be initialized by its official REST snapshot");
+}
+
+console.log("Consolidated Liquidity Fabric tests passed: provenance, reconstruction, full-range projection, cache discipline and read-only source contracts.");

@@ -98,16 +98,14 @@ function depth(rows: ProfessionalDomRow[]): ProfessionalDomLadderModel {
     return index < 1_000 ? sourceRow(price, 1, 0, 0.5) : sourceRow(price, 0, 2, -0.75);
   });
   const source = depth(rows);
-  const chartLocked = buildChartDockedDepthLadder({ depth: source, viewport: viewport(7, 1_900, 2_100), preferredRowHeight: 10, scaleMode: "chart" });
-  assert.ok(chartLocked.hiddenAboveCount > 0 && chartLocked.hiddenBelowCount > 0, "chart lock must disclose delivered depth outside the visible chart scale");
+  const following = buildChartDockedDepthLadder({ depth: source, viewport: viewport(7, 1_900, 2_100), preferredRowHeight: 10, scaleMode: "follow" });
+  assert.ok(following.hiddenAboveCount > 0 && following.hiddenBelowCount > 0, "chart-follow must disclose authoritative depth outside the visible chart scale");
+  assert.equal(following.scaleMode, "follow");
 
-  const bookFit = buildChartDockedDepthLadder({ depth: source, viewport: viewport(8, 1_900, 2_100), preferredRowHeight: 10, scaleMode: "book" });
-  assert.equal(bookFit.visibleBidSize, source.totalBidSize, "book fit must conserve every delivered bid quantity");
-  assert.equal(bookFit.visibleAskSize, source.totalAskSize, "book fit must conserve every delivered ask quantity");
-  assert.equal(bookFit.hiddenAboveCount, 0, "book fit must not hide delivered asks above the chart viewport");
-  assert.equal(bookFit.hiddenBelowCount, 0, "book fit must not hide delivered bids below the chart viewport");
-  assert.equal(bookFit.scaleMode, "book");
-  assert.ok(bookFit.rows.some((row) => row.bidSize > 0) && bookFit.rows.some((row) => row.askSize > 0), "both sides of the delivered book must remain visible");
+  const locked = buildChartDockedDepthLadder({ depth: source, viewport: viewport(8, 1_900, 2_100), preferredRowHeight: 10, scaleMode: "locked" });
+  assert.equal(locked.visibleBidSize, following.visibleBidSize, "locking must freeze the selected chart range rather than detach into book-fit mode");
+  assert.equal(locked.visibleAskSize, following.visibleAskSize, "locked and following modes use the same explicit price transform");
+  assert.equal(locked.scaleMode, "locked");
 }
 
 const componentSource = readFileSync(resolve(projectRoot, "src/modules/dom-pro/components/ChartDockedDepthLadder.tsx"), "utf8");
@@ -116,11 +114,14 @@ const pixiSource = readFileSync(resolve(projectRoot, "src/components/PixiBlackCh
 const engineSource = readFileSync(resolve(projectRoot, "src/market-data/engine/marketDataEngine.ts"), "utf8");
 const bybitSource = readFileSync(resolve(projectRoot, "src/market-data/adapters/bybit.ts"), "utf8");
 assert.match(componentSource, /useDomFeed\(marketSymbol, \{ depth: 1000 \}\)/, "docked ladder must request the deepest supported Bybit public book");
+assert.match(componentSource, /useConsolidatedLiquidityFeed/, "the docked ladder must consume the server-side multi-venue liquidity fabric");
 assert.match(componentSource, /requestAnimationFrame\(animate\)/, "depth transitions must be synchronized to display frames");
 assert.doesNotMatch(componentSource, /setInterval\(/, "the dock renderer must not introduce a fixed-FPS interval");
 assert.match(componentSource, /HIDDEN\/RPI EXCLUDED/, "coverage limits must be disclosed in the UI");
-assert.match(componentSource, /BOOK FIT/, "the ladder must expose a full delivered-book scale");
-assert.match(componentSource, /CHART LOCK/, "the ladder must retain exact chart-scale synchronization as an explicit mode");
+assert.doesNotMatch(componentSource, /BOOK FIT/, "the ladder must never detach itself into a venue-book scale");
+assert.match(componentSource, /"FOLLOW" : "LOCKED"/, "chart-follow must be the visible default and scale-lock the explicit alternate");
+assert.match(componentSource, /setLockedViewport\(null\)/, "a symbol or chart identity change must safely restore chart-follow mode");
+assert.match(componentSource, /drawCumulativeDepthBand/, "the ladder must render the DOM Pro cumulative V-shaped depth bands");
 assert.match(appSource, /<Settings size=\{17\} \/>[\s\S]{0,900}<Rows3 size=\{17\} \/>/, "the dock toggle must sit immediately after Settings");
 assert.match(appSource, /showCompactDom = terminalSettings\.showDOM && !domProOpen && !chartDepthLadderOpen/, "the compact DOM must be replaced while chart depth mode is active");
 assert.match(pixiSource, /priceTransformCallbackRef\.current\?\.\(transform\)/, "the ladder must consume the chart engine's authoritative transform");

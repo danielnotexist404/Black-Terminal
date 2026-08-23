@@ -3,7 +3,7 @@ import type { ProfessionalDomLadderModel, ProfessionalDomSide } from "./domProfe
 import type { WallDetection } from "./types";
 
 export type ChartDockedDepthCoverage = "live" | "unavailable";
-export type ChartDockedDepthScaleMode = "book" | "chart";
+export type ChartDockedDepthScaleMode = "follow" | "locked";
 
 export type ChartDockedDepthRow = {
   key: string;
@@ -62,8 +62,8 @@ const EPSILON = 1e-12;
 
 export function buildChartDockedDepthLadder(input: ChartDockedDepthLadderInput): ChartDockedDepthLadderModel {
   const { depth } = input;
-  const scaleMode = input.scaleMode ?? "chart";
-  const viewport = scaleMode === "book" ? fitViewportToDeliveredBook(input.viewport, depth) : input.viewport;
+  const scaleMode = input.scaleMode ?? "follow";
+  const viewport = input.viewport;
   const plotHeight = Math.max(0, viewport.plotBottom - viewport.plotTop);
   const preferredRowHeight = clamp(input.preferredRowHeight ?? 13, 9, 24);
   const rowCount = plotHeight > 0
@@ -186,20 +186,6 @@ export function buildChartDockedDepthLadder(input: ChartDockedDepthLadderInput):
     hiddenBelowCount,
     scaleMode
   };
-}
-
-function fitViewportToDeliveredBook(viewport: ChartPriceTransformSnapshot, depth: ProfessionalDomLadderModel): ChartPriceTransformSnapshot {
-  const coverageMin = depth.coverageMin;
-  const coverageMax = depth.coverageMax;
-  if (coverageMin === null || coverageMax === null || !Number.isFinite(coverageMin) || !Number.isFinite(coverageMax)) return viewport;
-
-  const span = coverageMax - coverageMin;
-  if (span > EPSILON) {
-    return { ...viewport, priceMin: coverageMin, priceMax: coverageMax };
-  }
-
-  const halfStep = Math.max(depth.priceStep / 2, Math.abs(coverageMin) * 1e-8, EPSILON);
-  return { ...viewport, priceMin: coverageMin - halfStep, priceMax: coverageMax + halfStep };
 }
 
 function classifySide(bidSize: number, askSize: number): ProfessionalDomSide {

@@ -8,6 +8,7 @@ import walls from "../../server/market-depth/routes/walls.js";
 import { enforceAnonymousSecurity, requireApiSecurity } from "../../server/security/securityMiddleware.js";
 import { sendError } from "../../server/portfolio-api.js";
 import bclifVercelHandler from "../../server/liquidation-intelligence/api/vercelHandler.js";
+import consolidated from "../../server/liquidity-fabric/route.js";
 
 const handlers = {
   alerts,
@@ -16,7 +17,8 @@ const handlers = {
   replay,
   status,
   tiles,
-  walls
+  walls,
+  consolidated
 };
 
 export default async function handler(req, res) {
@@ -29,7 +31,8 @@ export default async function handler(req, res) {
       const security = await enforceAnonymousSecurity(req, res, { endpoint: `market-depth.${action}`, maxBytes: 2 * 1024 * 1024, rateLimit: { perMinute: 120, perDay: 100000 } });
       if (security.handled) return;
     } else {
-      const security = await requireApiSecurity(req, res, { endpoint: `market-depth.${action}`, maxBytes: 32768, rateLimit: { perMinute: 60, perDay: 10000 } });
+      const rateLimit = action === "consolidated" ? { perMinute: 180, perDay: 100000 } : { perMinute: 60, perDay: 10000 };
+      const security = await requireApiSecurity(req, res, { endpoint: `market-depth.${action}`, maxBytes: 32768, rateLimit });
       if (security.handled) return;
     }
     return routeHandler(req, res);

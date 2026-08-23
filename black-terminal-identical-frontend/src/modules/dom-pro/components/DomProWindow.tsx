@@ -27,6 +27,7 @@ import { domFreezeWatchdog } from "../domFreezeWatchdog";
 import { domVisualScheduler } from "../domVisualScheduler";
 import { blackDepthHistoryStore, type DepthHistoryPoint, type DepthHistoryRead } from "../depthHistoryStore";
 import { buildDomLadderModel, formatDomLadderQuantity, type DomLadderDisplayUnit } from "../domLadderModel";
+import { resolveDomFullLiveRange } from "../domLiveLadderCamera";
 import { createDomProPriceCamera, domCameraRange, domPriceBucketAt, domPriceToTopPct, type DomProPriceCamera } from "../domPriceCamera";
 import {
   applyDomPanelPreset,
@@ -1102,26 +1103,24 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
       : heatmapViewport.mode === "manual"
         ? "manual"
         : "explore";
-  const sharedPriceRowCount = numberSetting(ladderPanelValues, "levels", settings.mode === "macro" ? 48 : 42);
+  const ladderCameraMode = stringSetting(ladderPanelValues, "cameraMode", "full-live");
+  const ladderRowCount = numberSetting(ladderPanelValues, "levels", 64);
+  const sharedPriceRowCount = ladderCameraMode === "shared" ? ladderRowCount : settings.mode === "macro" ? 48 : 42;
   const sharedPriceCamera = useMemo(
     () => createDomProPriceCamera(heatmapRange, snapshot.lastPrice ?? lastPrice ?? midpoint(heatmapRange), sharedPriceRowCount, sharedPriceCameraMode),
     [heatmapRange, lastPrice, sharedPriceCameraMode, sharedPriceRowCount, snapshot.lastPrice]
   );
   const sharedPriceRange = useMemo(() => domCameraRange(sharedPriceCamera), [sharedPriceCamera]);
-  const ladderCameraMode = stringSetting(ladderPanelValues, "cameraMode", "shared");
   const ladderPriceCamera = useMemo(() => {
     if (ladderCameraMode === "shared") return sharedPriceCamera;
     const marketPrice = ladderSnapshot.lastPrice ?? ladderSnapshot.midPrice ?? lastPrice ?? sharedPriceCamera.centerPrice;
     if (ladderCameraMode === "follow-current") {
       const halfSpan = (sharedPriceCamera.visiblePriceMax - sharedPriceCamera.visiblePriceMin) / 2;
-      return createDomProPriceCamera({ min: Math.max(0.00000001, marketPrice - halfSpan), max: marketPrice + halfSpan, source: sharedPriceCamera.source }, marketPrice, sharedPriceRowCount, "follow");
+      return createDomProPriceCamera({ min: Math.max(0.00000001, marketPrice - halfSpan), max: marketPrice + halfSpan, source: sharedPriceCamera.source }, marketPrice, ladderRowCount, "follow");
     }
-    const bookPrices = [...(ladderSnapshot.sourceBook?.bids ?? []), ...(ladderSnapshot.sourceBook?.asks ?? [])].map((level) => level.price).filter((value) => Number.isFinite(value) && value > 0);
-    const localRange = bookPrices.length
-      ? { min: Math.min(...bookPrices), max: Math.max(...bookPrices), source: "live-depth" as const }
-      : sharedPriceRange;
-    return createDomProPriceCamera(localRange, marketPrice, sharedPriceRowCount, "manual");
-  }, [ladderCameraMode, ladderSnapshot.lastPrice, ladderSnapshot.midPrice, ladderSnapshot.sourceBook, lastPrice, sharedPriceCamera, sharedPriceRange, sharedPriceRowCount]);
+    const localRange = resolveDomFullLiveRange(ladderSnapshot.sourceBook, marketPrice, sharedPriceRange);
+    return createDomProPriceCamera(localRange, marketPrice, ladderRowCount, "manual");
+  }, [ladderCameraMode, ladderRowCount, ladderSnapshot.lastPrice, ladderSnapshot.midPrice, ladderSnapshot.sourceBook, lastPrice, sharedPriceCamera, sharedPriceRange]);
   const ladderCoverageMode = stringSetting(ladderPanelValues, "coverageMode", "dim");
   const ladderModel = useMemo(() => buildDomLadderModel({
     snapshot: ladderSnapshot,
@@ -1630,6 +1629,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const showLadderCoverage = booleanSetting(ladderPanelValues, "showLiveCoverage", true);
   const showWallConfluence = booleanSetting(ladderPanelValues, "showWallConfluence", true);
   const ladderShared = ladderCameraMode === "shared";
+  const ladderFullLive = ladderCameraMode === "full-live";
   const ladderUnit = ladderUnitLabel(ladderDisplayUnits, marketSymbol);
 
   if (windowMode === "detached-browser") {
@@ -1777,10 +1777,11 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
             style={{ gridTemplateColumns: upperColumns }}
           >
           <section className={panelLayoutClass("ladder", "dom-pro-ladder")}>
-            <PanelTitle title="Aggregated DOM Ladder" status={`${ladderShared ? "SHARED" : ladderCameraMode.toUpperCase()} / ${ladderModel.coverage.state.toUpperCase()} ${ladderModel.coverage.subscribedDepth ?? Math.max(ladderModel.coverage.bidLevels, ladderModel.coverage.askLevels)}L`} {...panelHeaderProps("ladder")} />
+            <PanelTitle title="Aggregated DOM Ladder" status={`${ladderFullLive ? "FULL LIVE" : ladderShared ? "SHARED" : ladderCameraMode.toUpperCase()} / ${ladderModel.coverage.state.toUpperCase()} ${ladderModel.coverage.subscribedDepth ?? Math.max(ladderModel.coverage.bidLevels, ladderModel.coverage.askLevels)}L`} {...panelHeaderProps("ladder")} />
             <div className="dom-pro-ladder-head"><span>Price ({marketSymbol.quoteAsset})</span><span>Bid Size ({ladderUnit})</span><span>Ask Size ({ladderUnit})</span></div>
             <div
-              className={`dom-pro-ladder-book shared-camera ${ladderShared ? "is-shared" : "is-independent"}`}
+              className={`dom-pro-ladder-book shared-camera ${ladderShared ? "is-shared" : "is-independent"} ${ladderFullLive ? "is-full-live" : ""}`}
+              data-camera-mode={ladderCameraMode}
               data-camera-version={ladderPriceCamera.version}
               data-camera-min={ladderPriceCamera.visiblePriceMin}
               data-camera-max={ladderPriceCamera.visiblePriceMax}
@@ -1823,7 +1824,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                   <b>{formatPrice(ladderSnapshot.lastPrice)}</b><span>Spread {formatPrice(ladderSnapshot.spread ?? 0)}</span>
                 </div>
               )}
-              {showLadderCoverage && <div className="dom-pro-ladder-coverage-label">LIVE BOOK {formatPrice(ladderModel.coverage.min)} - {formatPrice(ladderModel.coverage.max)} · {ladderModel.coverage.bidLevels}B/{ladderModel.coverage.askLevels}A</div>}
+              {showLadderCoverage && <div className="dom-pro-ladder-coverage-label">{ladderFullLive ? "FULL LIVE BOOK" : "LIVE BOOK"} {formatPrice(ladderModel.coverage.min)} - {formatPrice(ladderModel.coverage.max)} · {ladderModel.coverage.bidLevels}B/{ladderModel.coverage.askLevels}A</div>}
               {domHover && <HoverTooltip hover={domHover} />}
             </div>
           </section>

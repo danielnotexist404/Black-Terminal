@@ -41,6 +41,7 @@ import { availableDomOrderTypes, availableDomTimeInForce, DOM_EQUITY_ALLOCATION_
 import type { VenueExecutionSchema } from "../src/execution/venueExecutionSchema.ts";
 import { computeDomWallLabelLayout } from "../src/modules/dom-pro/domWallLabelLayout.ts";
 import { buildDomLadderModel, formatDomLadderQuantity } from "../src/modules/dom-pro/domLadderModel.ts";
+import { resolveDomFullLiveRange } from "../src/modules/dom-pro/domLiveLadderCamera.ts";
 import { createDomProPriceCamera, domPriceBucketAt, sameDomPriceCamera } from "../src/modules/dom-pro/domPriceCamera.ts";
 import { buildStructuralCvdFromCandles, buildStructuralCvdFromTrades, estimateCandlePressure, structuralCvdRange, structuralCvdStats } from "../src/modules/dom-pro/domStructuralCvd.ts";
 import type { AggregatedDomSnapshot } from "../src/modules/dom-pro/types.ts";
@@ -109,6 +110,20 @@ const ladderSnapshot = {
   lastPrice: 64_000.25,
   renderStats: { bucketSize: 50 }
 } as unknown as AggregatedDomSnapshot;
+const fullLiveRange = resolveDomFullLiveRange(ladderSnapshot.sourceBook, ladderSnapshot.lastPrice, { min: 1, max: 2, source: "fallback" });
+const fullLiveCamera = createDomProPriceCamera(fullLiveRange, ladderSnapshot.lastPrice!, 64, "manual");
+const fullLiveModel = buildDomLadderModel({ snapshot: ladderSnapshot, camera: fullLiveCamera, bookStatus: "LIVE BOOK", now: 1_000_500 });
+const rawBidQuantity = ladderSnapshot.sourceBook!.bids.reduce((total, level) => total + level.quantity, 0);
+const rawAskQuantity = ladderSnapshot.sourceBook!.asks.reduce((total, level) => total + level.quantity, 0);
+assert.equal(fullLiveRange.min, ladderSnapshot.sourceBook!.bids.at(-1)!.price, "full-live ladder starts at the deepest genuine bid supplied by the venue");
+assert.equal(fullLiveRange.max, ladderSnapshot.sourceBook!.asks.at(-1)!.price, "full-live ladder ends at the deepest genuine ask supplied by the venue");
+assert.ok(fullLiveModel.rows.every((row) => row.coverage === "live"), "full-live camera contains the complete verified venue coverage without synthetic gaps");
+assert.ok(Math.abs(fullLiveModel.rows.reduce((total, row) => total + row.bidSize, 0) - rawBidQuantity) < 1e-9, "full-live aggregation conserves every genuine bid quantity");
+assert.ok(Math.abs(fullLiveModel.rows.reduce((total, row) => total + row.askSize, 0) - rawAskQuantity) < 1e-9, "full-live aggregation conserves every genuine ask quantity");
+const expandedBookSnapshot = structuredClone(ladderSnapshot);
+expandedBookSnapshot.sourceBook!.asks.push({ price: 64_250, quantity: 9 });
+const expandedFullLiveRange = resolveDomFullLiveRange(expandedBookSnapshot.sourceBook, expandedBookSnapshot.lastPrice, fullLiveRange);
+assert.equal(expandedFullLiveRange.max, 64_250, "new genuine outer depth expands the full-live camera on the next ladder snapshot");
 const wideCamera = createDomProPriceCamera({ min: 51_200, max: 76_800, source: "historical-ohlcv" }, 64_000.25, 40, "explore");
 const ladderModel = buildDomLadderModel({ snapshot: ladderSnapshot, camera: wideCamera, bookStatus: "LIVE BOOK", now: 1_000_500 });
 assert.equal(ladderModel.rows.length, wideCamera.rowCount, "wide ladder virtualizes to the shared visible bucket count");
@@ -168,7 +183,8 @@ assert.ok(!/DomAggregationEngine|aggregateDomSnapshot|useDomFeed/.test(layoutSou
 const defaults = defaultDomPanelRegistry("desk", "bybit:perpetual:BTCUSDT");
 assert.equal(Object.keys(defaults.panels).length, 10, "all configurable panels have defaults");
 assert.equal(defaults.schemaVersion, DOM_PANEL_SETTINGS_VERSION);
-assert.equal(defaults.panels.ladder.settings.cameraMode, "shared", "shared ladder camera is the persisted factory default");
+assert.equal(defaults.panels.ladder.settings.cameraMode, "full-live", "full venue-book range is the persisted ladder camera default");
+assert.equal(defaults.panels.ladder.settings.levels, 64, "full-live ladder opens with a dense but bounded aggregated row grid");
 assert.equal(defaults.panels["liquidity-heatmap"].settings.enhancedGraphics, true, "institutional heatmap graphics are available through panel settings");
 assert.equal(defaults.panels["heuristic-cvd"].settings.sourceTimeframe, "4h", "structural CVD defaults to a multi-session venue candle source");
 assert.ok(Number(defaults.panels["heuristic-cvd"].settings.visibleCandles) >= 120, "structural CVD opens with a broad market window");
@@ -177,6 +193,9 @@ assert.equal(domWindowSource.match(/useDomFeed\(/g)?.length, 1, "DOM Pro owns ex
 assert.match(domWindowSource, /camera=\{sharedPriceCamera\}/, "heatmap consumes the shared camera object");
 assert.match(domWindowSource, /data-camera-version=\{sharedPriceCamera\.version\}/, "volume profile exposes the shared camera version");
 assert.match(domWindowSource, /ladderCameraMode === "shared"\) return sharedPriceCamera/, "ladder shares the exact camera object in synchronized mode");
+assert.match(domWindowSource, /resolveDomFullLiveRange\(ladderSnapshot\.sourceBook, marketPrice, sharedPriceRange\)/, "full-live ladder derives its camera only from the current genuine venue book");
+assert.match(domWindowSource, /sharedPriceRowCount = ladderCameraMode === "shared" \? ladderRowCount : settings\.mode === "macro" \? 48 : 42/, "full-live ladder density is decoupled from the IMM heatmap camera geometry");
+assert.match(domWindowSource, /camera=\{sharedPriceCamera\}/, "full-live ladder rollout leaves the IMM heatmap camera path intact");
 assert.doesNotMatch(domWindowSource, /const bins = camera\.buckets\.map/, "volume profile must not inherit the ladder bucket grid");
 assert.match(domWindowSource, /numberSetting\(profilePanelValues, "rowCount", 128\)/, "volume profile uses its own high-resolution row setting");
 assert.match(domWindowSource, /dom-pro-profile-label-layer/, "profile labels render outside sub-pixel native data rows");
@@ -197,6 +216,7 @@ const migrated = importDomPanelSettings(JSON.stringify({ schemaVersion: 1, panel
 assert.equal(migrated.schemaVersion, DOM_PANEL_SETTINGS_VERSION);
 assert.equal(migrated.panels["trade-tape"].settings.displayRows, 17);
 assert.ok(Number(migrated.panels["volume-profile"].settings.rowCount) >= 128, "legacy settings migrate to high-resolution profile rows");
+assert.equal(migrated.panels.ladder.settings.cameraMode, "full-live", "legacy ladder settings migrate to the full live venue range");
 assert.ok(migrated.panels["wall-detection"], "migration fills missing panels");
 
 const savedDefault = { ...custom, panels: { ...custom.panels, "depth-chart": { ...custom.panels["depth-chart"], defaultSettings: { ...custom.panels["depth-chart"].settings } } } };

@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildDomLadderModel } from "../src/modules/dom-pro/domLadderModel.ts";
+import { resolveDomFullLiveRange } from "../src/modules/dom-pro/domLiveLadderCamera.ts";
 import { createDomProPriceCamera, sameDomPriceCamera } from "../src/modules/dom-pro/domPriceCamera.ts";
 
 type RawLevel = [string, string];
@@ -24,6 +25,17 @@ const camera = createDomProPriceCamera(
 const firstModel = buildDomLadderModel({ snapshot: firstSnapshot, camera, bookStatus: "LIVE", now: first.result.ts });
 const populated = firstModel.rows.find((row) => row.bidSize > 0 || row.askSize > 0);
 assert(populated, "Bybit live levels did not map into the shared camera");
+
+const fullLiveRange = resolveDomFullLiveRange(firstSnapshot.sourceBook, midpoint, { min: midpoint * 0.95, max: midpoint * 1.05, source: "fallback" });
+const fullLiveCamera = createDomProPriceCamera(fullLiveRange, midpoint, 64, "manual");
+const fullLiveModel = buildDomLadderModel({ snapshot: firstSnapshot, camera: fullLiveCamera, bookStatus: "LIVE", now: first.result.ts });
+const rawTotalBid = sumLevels(first.result.b);
+const rawTotalAsk = sumLevels(first.result.a);
+const renderedTotalBid = fullLiveModel.rows.reduce((sum, row) => sum + row.bidSize, 0);
+const renderedTotalAsk = fullLiveModel.rows.reduce((sum, row) => sum + row.askSize, 0);
+assert(fullLiveModel.rows.every((row) => row.coverage === "live"), "Full-live camera left genuine venue coverage outside its ladder domain");
+assert(close(renderedTotalBid, rawTotalBid), `Full-live bid conservation mismatch: rendered=${renderedTotalBid} raw=${rawTotalBid}`);
+assert(close(renderedTotalAsk, rawTotalAsk), `Full-live ask conservation mismatch: rendered=${renderedTotalAsk} raw=${rawTotalAsk}`);
 
 const rawBid = sumBucket(first.result.b, populated.priceLow, populated.priceHigh, camera.visiblePriceMax === populated.priceHigh);
 const rawAsk = sumBucket(first.result.a, populated.priceLow, populated.priceHigh, camera.visiblePriceMax === populated.priceHigh);
@@ -59,6 +71,17 @@ const evidence = {
     subscribedDepth: firstModel.coverage.subscribedDepth,
     sequence: firstModel.coverage.sequence,
     unavailableRows: firstModel.rows.filter((row) => row.coverage === "unavailable").length
+  },
+  fullLiveLadder: {
+    min: fullLiveCamera.visiblePriceMin,
+    max: fullLiveCamera.visiblePriceMax,
+    aggregatedRows: fullLiveCamera.rowCount,
+    unavailableRows: fullLiveModel.rows.filter((row) => row.coverage === "unavailable").length,
+    renderedTotalBid,
+    rawTotalBid,
+    renderedTotalAsk,
+    rawTotalAsk,
+    quantityConserved: close(renderedTotalBid, rawTotalBid) && close(renderedTotalAsk, rawTotalAsk)
   },
   independentlyVerifiedBucket: {
     key: populated.key,
@@ -121,6 +144,10 @@ function sumBucket(levels: RawLevel[], low: number, high: number, inclusiveHigh:
     const price = Number(rawPrice);
     return price >= low && (price < high || inclusiveHigh && price === high) ? sum + Number(rawQuantity) : sum;
   }, 0);
+}
+
+function sumLevels(levels: RawLevel[]) {
+  return levels.reduce((sum, [, rawQuantity]) => sum + Number(rawQuantity), 0);
 }
 
 function close(left: number, right: number) {

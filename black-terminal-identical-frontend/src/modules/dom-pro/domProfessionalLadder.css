@@ -300,9 +300,9 @@
   text-overflow: ellipsis;
 }
 
-.bt-pro-dom-foot .live { color: #f2f4f6; }
-.bt-pro-dom-foot .stale { color: #9c9092; }
-.bt-pro-dom-foot .offline { color: var(--bt-dom-blood-bright); }
+.bt-pro-dom-foot .bt-pro-dom-state--live { color: #f2f4f6; }
+.bt-pro-dom-foot .bt-pro-dom-state--stale { color: #9c9092; }
+.bt-pro-dom-foot .bt-pro-dom-state--offline { color: var(--bt-dom-blood-bright); }
 
 .bt-pro-dom-empty {
   height: 100%;

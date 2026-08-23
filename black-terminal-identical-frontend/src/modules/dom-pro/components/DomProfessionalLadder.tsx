@@ -81,7 +81,7 @@ export function DomProfessionalLadder({
   return (
     <div
       ref={rootRef}
-      className={`bt-pro-dom ${model.state}`}
+      className={`bt-pro-dom bt-pro-dom--${model.state}`}
       data-professional-dom="true"
       data-book-identity={model.identity}
       data-price-step={model.priceStep}
@@ -130,7 +130,7 @@ export function DomProfessionalLadder({
       </div>
 
       <div className="bt-pro-dom-foot">
-        <span className={model.state}>{model.state.toUpperCase()}</span>
+        <span className={`bt-pro-dom-state bt-pro-dom-state--${model.state}`}>{model.state.toUpperCase()}</span>
         <span>{formatPrice(model.coverageMin, model.priceDecimals)}—{formatPrice(model.coverageMax, model.priceDecimals)}</span>
         <span>{unitLabel}</span>
         <span>{startIndex + 1}-{Math.min(model.rows.length, startIndex + visibleRows.length)} / {model.rows.length}</span>

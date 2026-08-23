@@ -274,6 +274,9 @@ assert.match(professionalLadderComponentSource, /<span>SUM<\/span><span>SIZE<\/s
 assert.match(professionalLadderComponentSource, /onWheel=\{handleWheel\}/, "professional ladder supports fixed-row full-book mouse-wheel navigation");
 assert.match(professionalLadderComponentSource, /bt-pro-dom-outline/, "professional ladder renders a stepped cumulative depth silhouette");
 assert.match(professionalLadderComponentSource, /className=\{`intensity/, "professional ladder renders a dedicated far-right intensity rail");
+assert.match(professionalLadderComponentSource, /bt-pro-dom--\$\{model\.state\}/, "professional ladder namespaces live/stale/offline state on its root");
+assert.doesNotMatch(professionalLadderComponentSource, /className=\{`bt-pro-dom \$\{model\.state\}`\}/, "professional ladder cannot inherit the global live heartbeat-dot selector");
+assert.doesNotMatch(professionalLadderComponentSource, /<span className=\{model\.state\}>/, "professional ladder footer cannot emit an unscoped live class");
 
 const custom = patchDomPanel(defaults, "depth-chart", { updateIntervalMs: 7123, mode: "macro" });
 writeDomPanelRegistry(custom, storage);

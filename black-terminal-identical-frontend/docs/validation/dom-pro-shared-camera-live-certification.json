@@ -1,47 +1,59 @@
 {
-  "certifiedAt": "2026-08-23T15:31:04.755Z",
+  "certifiedAt": "2026-08-23T16:14:22.516Z",
   "venue": "BYBIT",
   "symbol": "BTCUSDT",
   "endpoint": "https://api.bybit.com/v5/market/orderbook?category=linear&symbol=BTCUSDT&limit=200",
   "camera": {
-    "version": "73365.9825:81088.7175:60:explore",
-    "min": 73365.9825,
-    "max": 81088.71750000001,
-    "bucketSize": 128.71225000000024,
+    "version": "73382.9875:81107.5125:60:explore",
+    "min": 73382.9875,
+    "max": 81107.5125,
+    "bucketSize": 128.74208333333323,
     "rows": 60
   },
   "liveCoverage": {
-    "min": 77194.9,
-    "max": 77260.1,
+    "min": 77214,
+    "max": 77280.7,
     "bidLevels": 200,
     "askLevels": 200,
     "subscribedDepth": 200,
-    "sequence": 790192299239,
+    "sequence": 790267245373,
     "unavailableRows": 58
   },
   "fullLiveLadder": {
-    "min": 77194.9,
-    "max": 77260.1,
+    "min": 77214,
+    "max": 77280.7,
     "aggregatedRows": 64,
     "unavailableRows": 0,
-    "renderedTotalBid": 51.005999999999986,
-    "rawTotalBid": 51.005999999999986,
-    "renderedTotalAsk": 48.516999999999996,
-    "rawTotalAsk": 48.516999999999975,
+    "renderedTotalBid": 66.753,
+    "rawTotalBid": 66.753,
+    "renderedTotalAsk": 30.991999999999994,
+    "rawTotalAsk": 30.992000000000015,
+    "quantityConserved": true
+  },
+  "professionalLadder": {
+    "requestedAggregationTicks": 20,
+    "effectiveAggregationTicks": 20,
+    "inferredNativeTick": 0.1,
+    "priceStep": 2,
+    "completeRows": 34,
+    "firstIdentity": "bybit:BTCUSDT:790267245373:1787501661.802:20:20:1sxsxr0",
+    "secondIdentity": "bybit:BTCUSDT:790267267747:1787501662.402:20:20:1uletss",
+    "secondSnapshotChanged": true,
+    "temporalDeltaRows": 23,
     "quantityConserved": true
   },
   "independentlyVerifiedBucket": {
-    "key": "73365.9825:81088.7175:60:explore:30",
-    "low": 77227.35,
-    "high": 77356.06225,
+    "key": "73382.9875:81107.5125:60:explore:30",
+    "low": 77245.25,
+    "high": 77373.99208333333,
     "renderedBid": 0,
     "rawBid": 0,
-    "renderedAsk": 48.516999999999975,
-    "rawAsk": 48.516999999999975
+    "renderedAsk": 30.992000000000015,
+    "rawAsk": 30.992000000000015
   },
   "reconnect": {
-    "firstSequence": 790192299239,
-    "secondSequence": 790192323632,
+    "firstSequence": 790267245373,
+    "secondSequence": 790267267747,
     "cameraPreserved": true
   },
   "passed": true

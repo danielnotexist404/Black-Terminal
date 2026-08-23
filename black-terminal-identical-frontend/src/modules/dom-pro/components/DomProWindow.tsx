@@ -28,6 +28,7 @@ import { domVisualScheduler } from "../domVisualScheduler";
 import { blackDepthHistoryStore, type DepthHistoryPoint, type DepthHistoryRead } from "../depthHistoryStore";
 import { buildDomLadderModel, formatDomLadderQuantity, type DomLadderDisplayUnit } from "../domLadderModel";
 import { resolveDomFullLiveRange } from "../domLiveLadderCamera";
+import { ProfessionalDomLadderTracker } from "../domProfessionalLadder";
 import { createDomProPriceCamera, domCameraRange, domPriceBucketAt, domPriceToTopPct, type DomProPriceCamera } from "../domPriceCamera";
 import {
   applyDomPanelPreset,
@@ -98,6 +99,7 @@ import type {
   VolumeProfileNode
 } from "../types";
 import { DomHeatmapCanvas } from "./DomHeatmapCanvas";
+import { DomProfessionalLadder } from "./DomProfessionalLadder";
 
 type DomProWindowProps = {
   marketSymbol: MarketSymbol;
@@ -320,6 +322,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const depthProcessorRef = useRef(new PersistentDepthProcessor());
   const wallProcessorRef = useRef(new StableWallProcessor());
   const metricsProcessorRef = useRef(new MetricsStabilizer());
+  const professionalLadderTrackerRef = useRef(new ProfessionalDomLadderTracker());
   const qualityControllerRef = useRef(new DomAdaptiveQualityController());
   const [stableWalls, setStableWalls] = useState<Array<AggregatedDomSnapshot["walls"][number] & { reliability?: number; lifecycle?: string; observations?: number }>>([]);
   const [stableTrades, setStableTrades] = useState<AggregatedDomSnapshot["trades"]>([]);
@@ -951,8 +954,10 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   }, [lastPrice, marketSymbol, snapshot.generatedAt, snapshot.lastPrice, snapshot.sourceBook]);
 
   const ladderPanelValues = panelRegistry.panels.ladder.settings;
-  const ladderDisplayUnits = stringSetting(ladderPanelValues, "displayUnits", "base") as DomLadderDisplayUnit;
+  const ladderDisplayUnits = stringSetting(ladderPanelValues, "displayUnits", "notional") as DomLadderDisplayUnit;
   const ladderShowNetDepth = booleanSetting(ladderPanelValues, "showNetDepth", false);
+  const ladderAggregationTicks = numberSetting(ladderPanelValues, "aggregationTicks", 20);
+  const ladderAutoCenter = booleanSetting(ladderPanelValues, "autoCenter", true);
   const profilePanelValues = panelRegistry.panels["volume-profile"].settings;
   const profileShowLabels = booleanSetting(profilePanelValues, "showLabels", true);
   const heatmapPanelValues = panelRegistry.panels["liquidity-heatmap"].settings;
@@ -1130,6 +1135,13 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     minimumSize: numberSetting(ladderPanelValues, "minimumSize", 0),
     hideUncovered: ladderCoverageMode === "hide"
   }), [feed.bookStatus, ladderCoverageMode, ladderPanelValues, ladderPriceCamera, ladderSnapshot, stableWalls]);
+  const professionalLadderModel = useMemo(() => professionalLadderTrackerRef.current.update({
+    book: ladderSnapshot.sourceBook,
+    currentPrice: ladderSnapshot.lastPrice ?? ladderSnapshot.midPrice ?? lastPrice,
+    aggregationTicks: ladderAggregationTicks,
+    walls: stableWalls,
+    bookStatus: feed.bookStatus
+  }), [feed.bookStatus, ladderAggregationTicks, ladderSnapshot.lastPrice, ladderSnapshot.midPrice, ladderSnapshot.sourceBook, lastPrice, stableWalls]);
   const institutionalProfile = useMemo(
     () => traceCalculation("panel.volume_profile", profileSnapshot.volumeProfile.length + macroCandles.length, () => buildInstitutionalProfile(
       profileSnapshot.volumeProfile,
@@ -1778,8 +1790,22 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
           >
           <section className={panelLayoutClass("ladder", "dom-pro-ladder")}>
             <PanelTitle title="Aggregated DOM Ladder" status={`${ladderFullLive ? "FULL LIVE" : ladderShared ? "SHARED" : ladderCameraMode.toUpperCase()} / ${ladderModel.coverage.state.toUpperCase()} ${ladderModel.coverage.subscribedDepth ?? Math.max(ladderModel.coverage.bidLevels, ladderModel.coverage.askLevels)}L`} {...panelHeaderProps("ladder")} />
-            <div className="dom-pro-ladder-head"><span>Price ({marketSymbol.quoteAsset})</span><span>Bid Size ({ladderUnit})</span><span>Ask Size ({ladderUnit})</span></div>
-            <div
+            {ladderFullLive ? (
+              <DomProfessionalLadder
+                model={professionalLadderModel}
+                baseAsset={marketSymbol.baseAsset}
+                quoteAsset={marketSymbol.quoteAsset}
+                displayUnit={ladderDisplayUnits}
+                maximumVisibleRows={ladderRowCount}
+                aggregationTicks={ladderAggregationTicks}
+                autoCenter={ladderAutoCenter}
+                showWallConfluence={showWallConfluence}
+                onAggregationChange={(value) => patchPanelSettings("ladder", { aggregationTicks: value })}
+                onAutoCenterChange={(value) => patchPanelSettings("ladder", { autoCenter: value })}
+              />
+            ) : <>
+              <div className="dom-pro-ladder-head"><span>Price ({marketSymbol.quoteAsset})</span><span>Bid Size ({ladderUnit})</span><span>Ask Size ({ladderUnit})</span></div>
+              <div
               className={`dom-pro-ladder-book shared-camera ${ladderShared ? "is-shared" : "is-independent"} ${ladderFullLive ? "is-full-live" : ""}`}
               data-camera-mode={ladderCameraMode}
               data-camera-version={ladderPriceCamera.version}
@@ -1826,7 +1852,8 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
               )}
               {showLadderCoverage && <div className="dom-pro-ladder-coverage-label">{ladderFullLive ? "FULL LIVE BOOK" : "LIVE BOOK"} {formatPrice(ladderModel.coverage.min)} - {formatPrice(ladderModel.coverage.max)} · {ladderModel.coverage.bidLevels}B/{ladderModel.coverage.askLevels}A</div>}
               {domHover && <HoverTooltip hover={domHover} />}
-            </div>
+              </div>
+            </>}
           </section>
 
           <section className={panelLayoutClass("volume-profile", "dom-pro-profile")}>

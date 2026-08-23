@@ -42,6 +42,7 @@ import type { VenueExecutionSchema } from "../src/execution/venueExecutionSchema
 import { computeDomWallLabelLayout } from "../src/modules/dom-pro/domWallLabelLayout.ts";
 import { buildDomLadderModel, formatDomLadderQuantity } from "../src/modules/dom-pro/domLadderModel.ts";
 import { resolveDomFullLiveRange } from "../src/modules/dom-pro/domLiveLadderCamera.ts";
+import { ProfessionalDomLadderTracker, buildProfessionalDomLadder } from "../src/modules/dom-pro/domProfessionalLadder.ts";
 import { createDomProPriceCamera, domPriceBucketAt, sameDomPriceCamera } from "../src/modules/dom-pro/domPriceCamera.ts";
 import { buildStructuralCvdFromCandles, buildStructuralCvdFromTrades, estimateCandlePressure, structuralCvdRange, structuralCvdStats } from "../src/modules/dom-pro/domStructuralCvd.ts";
 import type { AggregatedDomSnapshot } from "../src/modules/dom-pro/types.ts";
@@ -120,6 +121,60 @@ assert.equal(fullLiveRange.max, ladderSnapshot.sourceBook!.asks.at(-1)!.price, "
 assert.ok(fullLiveModel.rows.every((row) => row.coverage === "live"), "full-live camera contains the complete verified venue coverage without synthetic gaps");
 assert.ok(Math.abs(fullLiveModel.rows.reduce((total, row) => total + row.bidSize, 0) - rawBidQuantity) < 1e-9, "full-live aggregation conserves every genuine bid quantity");
 assert.ok(Math.abs(fullLiveModel.rows.reduce((total, row) => total + row.askSize, 0) - rawAskQuantity) < 1e-9, "full-live aggregation conserves every genuine ask quantity");
+const professionalTracker = new ProfessionalDomLadderTracker();
+const professionalInitial = professionalTracker.update({
+  book: ladderSnapshot.sourceBook,
+  currentPrice: ladderSnapshot.lastPrice,
+  aggregationTicks: 20,
+  bookStatus: "LIVE BOOK",
+  now: 1_000_500
+});
+assert.equal(professionalInitial.requestedAggregationTicks, 20, "professional ladder honors the selected native tick aggregation");
+assert.equal(professionalInitial.tickSize, 0.5, "native venue tick inference removes floating-point residue without changing the price grid");
+assert.equal(professionalInitial.priceStep, 10, "AGG 20 creates an exact twenty-tick price step");
+assert.ok(professionalInitial.rows.length > 0 && professionalInitial.rows.length <= 4_000, "professional ladder builds a bounded contiguous full-book grid");
+assert.ok(Math.abs(professionalInitial.rows.reduce((total, row) => total + row.bidSize, 0) - rawBidQuantity) < 1e-9, "professional ladder conserves every genuine bid quantity");
+assert.ok(Math.abs(professionalInitial.rows.reduce((total, row) => total + row.askSize, 0) - rawAskQuantity) < 1e-9, "professional ladder conserves every genuine ask quantity");
+assert.ok(professionalInitial.rows.every((row) => row.delta === 0), "first authoritative snapshot establishes a temporal baseline without inventing flow");
+const professionalRepeated = professionalTracker.update({
+  book: ladderSnapshot.sourceBook,
+  currentPrice: ladderSnapshot.lastPrice,
+  aggregationTicks: 20,
+  bookStatus: "LIVE BOOK",
+  now: 1_000_550
+});
+assert.equal(professionalRepeated.identity, professionalInitial.identity, "an identical exchange snapshot remains idempotent");
+assert.deepEqual(professionalRepeated.rows.map((row) => row.delta), professionalInitial.rows.map((row) => row.delta), "React rerenders cannot zero or duplicate temporal DOM deltas");
+const professionalChangedSnapshot = structuredClone(ladderSnapshot.sourceBook!);
+professionalChangedSnapshot.sequence = 902;
+professionalChangedSnapshot.time = 1_000.1;
+professionalChangedSnapshot.bids[0].quantity += 5;
+professionalChangedSnapshot.asks[40].quantity += 4;
+const professionalChanged = professionalTracker.update({
+  book: professionalChangedSnapshot,
+  currentPrice: ladderSnapshot.lastPrice,
+  aggregationTicks: 20,
+  bookStatus: "LIVE BOOK",
+  now: 1_000_600
+});
+assert.ok(Math.abs(professionalChanged.rows.reduce((total, row) => total + row.delta, 0) - 1) < 1e-9, "added bids are positive and added asks are negative in the temporal delta column");
+assert.ok(professionalChanged.rows.some((row) => row.delta > 0) && professionalChanged.rows.some((row) => row.delta < 0), "independent bid and ask changes remain visible in their actual price buckets");
+const professionalChangedRepeated = professionalTracker.update({
+  book: professionalChangedSnapshot,
+  currentPrice: ladderSnapshot.lastPrice,
+  aggregationTicks: 20,
+  bookStatus: "LIVE BOOK",
+  now: 1_000_650
+});
+assert.deepEqual(professionalChangedRepeated.rows.map((row) => row.delta), professionalChanged.rows.map((row) => row.delta), "repeated rendering preserves the last genuine snapshot-to-snapshot delta");
+const askCumulative = professionalInitial.rows.filter((row) => row.askSize > 0).map((row) => row.cumulativeSize);
+const bidCumulative = professionalInitial.rows.filter((row) => row.bidSize > 0).map((row) => row.cumulativeSize);
+assert.ok(askCumulative.every((value, index) => index === 0 || value <= askCumulative[index - 1]), "ask cumulative depth grows monotonically outward from best ask");
+assert.ok(bidCumulative.every((value, index) => index === 0 || value >= bidCumulative[index - 1]), "bid cumulative depth grows monotonically outward from best bid");
+const compressedProfessional = buildProfessionalDomLadder({ book: ladderSnapshot.sourceBook, currentPrice: ladderSnapshot.lastPrice, aggregationTicks: 100, bookStatus: "LIVE BOOK", now: 1_000_500 });
+assert.ok(compressedProfessional.rows.length <= professionalInitial.rows.length, "higher AGG values contract the full-book ladder without discarding quantity");
+assert.ok(Math.abs(compressedProfessional.rows.reduce((total, row) => total + row.bidSize, 0) - rawBidQuantity) < 1e-9, "aggregation changes preserve bid quantity");
+assert.ok(Math.abs(compressedProfessional.rows.reduce((total, row) => total + row.askSize, 0) - rawAskQuantity) < 1e-9, "aggregation changes preserve ask quantity");
 const expandedBookSnapshot = structuredClone(ladderSnapshot);
 expandedBookSnapshot.sourceBook!.asks.push({ price: 64_250, quantity: 9 });
 const expandedFullLiveRange = resolveDomFullLiveRange(expandedBookSnapshot.sourceBook, expandedBookSnapshot.lastPrice, fullLiveRange);
@@ -185,6 +240,9 @@ assert.equal(Object.keys(defaults.panels).length, 10, "all configurable panels h
 assert.equal(defaults.schemaVersion, DOM_PANEL_SETTINGS_VERSION);
 assert.equal(defaults.panels.ladder.settings.cameraMode, "full-live", "full venue-book range is the persisted ladder camera default");
 assert.equal(defaults.panels.ladder.settings.levels, 64, "full-live ladder opens with a dense but bounded aggregated row grid");
+assert.equal(defaults.panels.ladder.settings.aggregationTicks, 20, "professional ladder defaults to the readable reference aggregation");
+assert.equal(defaults.panels.ladder.settings.displayUnits, "notional", "professional ladder exposes heavy resting orders in comparable quote notional");
+assert.equal(defaults.panels.ladder.settings.autoCenter, true, "professional ladder follows the current market until the user scrolls away");
 assert.equal(defaults.panels["liquidity-heatmap"].settings.enhancedGraphics, true, "institutional heatmap graphics are available through panel settings");
 assert.equal(defaults.panels["heuristic-cvd"].settings.sourceTimeframe, "4h", "structural CVD defaults to a multi-session venue candle source");
 assert.ok(Number(defaults.panels["heuristic-cvd"].settings.visibleCandles) >= 120, "structural CVD opens with a broad market window");
@@ -196,6 +254,8 @@ assert.match(domWindowSource, /ladderCameraMode === "shared"\) return sharedPric
 assert.match(domWindowSource, /resolveDomFullLiveRange\(ladderSnapshot\.sourceBook, marketPrice, sharedPriceRange\)/, "full-live ladder derives its camera only from the current genuine venue book");
 assert.match(domWindowSource, /sharedPriceRowCount = ladderCameraMode === "shared" \? ladderRowCount : settings\.mode === "macro" \? 48 : 42/, "full-live ladder density is decoupled from the IMM heatmap camera geometry");
 assert.match(domWindowSource, /camera=\{sharedPriceCamera\}/, "full-live ladder rollout leaves the IMM heatmap camera path intact");
+assert.match(domWindowSource, /<DomProfessionalLadder/, "full-live mode renders the fixed-row professional ladder");
+assert.match(domWindowSource, /professionalLadderTrackerRef/, "professional ladder owns one idempotent temporal snapshot tracker");
 assert.doesNotMatch(domWindowSource, /const bins = camera\.buckets\.map/, "volume profile must not inherit the ladder bucket grid");
 assert.match(domWindowSource, /numberSetting\(profilePanelValues, "rowCount", 128\)/, "volume profile uses its own high-resolution row setting");
 assert.match(domWindowSource, /dom-pro-profile-label-layer/, "profile labels render outside sub-pixel native data rows");
@@ -206,6 +266,14 @@ assert.match(heatmapCanvasSource, /data-visual-mode=\{props\.enhancedGraphics \?
 assert.match(heatmapCanvasSource, /band\.touches.*Math\.round\(band\.strength \* 100\)/, "enhanced walls retain touch and strength explanations");
 const ladderSource = readFileSync(new URL("../src/modules/dom-pro/domLadderModel.ts", import.meta.url), "utf8");
 assert.ok(!/useDomFeed|subscribeOrderBook|MarketDataEngine/.test(ladderSource), "ladder aggregation cannot create a second orderbook subscription");
+const professionalLadderSource = readFileSync(new URL("../src/modules/dom-pro/domProfessionalLadder.ts", import.meta.url), "utf8");
+assert.ok(!/DomHeatmapCanvas|immAggregation|useDomFeed|subscribeOrderBook|MarketDataEngine/.test(professionalLadderSource), "professional ladder remains isolated from IMM calculations and owns no market-data subscription");
+assert.match(professionalLadderSource, /\(current\.bidSize - prior\.bidSize\) - \(current\.askSize - prior\.askSize\)/, "delta is a signed authoritative book change rather than a visual estimate");
+const professionalLadderComponentSource = readFileSync(new URL("../src/modules/dom-pro/components/DomProfessionalLadder.tsx", import.meta.url), "utf8");
+assert.match(professionalLadderComponentSource, /<span>SUM<\/span><span>SIZE<\/span><span>DELTA<\/span><span>PRICE<\/span><span>DEPTH<\/span>/, "professional ladder exposes the reference SUM, SIZE, DELTA, PRICE, and DEPTH columns");
+assert.match(professionalLadderComponentSource, /onWheel=\{handleWheel\}/, "professional ladder supports fixed-row full-book mouse-wheel navigation");
+assert.match(professionalLadderComponentSource, /bt-pro-dom-outline/, "professional ladder renders a stepped cumulative depth silhouette");
+assert.match(professionalLadderComponentSource, /className=\{`intensity/, "professional ladder renders a dedicated far-right intensity rail");
 
 const custom = patchDomPanel(defaults, "depth-chart", { updateIntervalMs: 7123, mode: "macro" });
 writeDomPanelRegistry(custom, storage);
@@ -217,6 +285,8 @@ assert.equal(migrated.schemaVersion, DOM_PANEL_SETTINGS_VERSION);
 assert.equal(migrated.panels["trade-tape"].settings.displayRows, 17);
 assert.ok(Number(migrated.panels["volume-profile"].settings.rowCount) >= 128, "legacy settings migrate to high-resolution profile rows");
 assert.equal(migrated.panels.ladder.settings.cameraMode, "full-live", "legacy ladder settings migrate to the full live venue range");
+assert.equal(migrated.panels.ladder.settings.aggregationTicks, 20, "legacy ladder settings migrate to professional price aggregation");
+assert.equal(migrated.panels.ladder.settings.displayUnits, "notional", "legacy ladder settings migrate to readable quote-notional display");
 assert.ok(migrated.panels["wall-detection"], "migration fills missing panels");
 
 const savedDefault = { ...custom, panels: { ...custom.panels, "depth-chart": { ...custom.panels["depth-chart"], defaultSettings: { ...custom.panels["depth-chart"].settings } } } };

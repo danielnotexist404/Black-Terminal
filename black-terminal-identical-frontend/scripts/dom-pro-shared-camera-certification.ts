@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildDomLadderModel } from "../src/modules/dom-pro/domLadderModel.ts";
 import { resolveDomFullLiveRange } from "../src/modules/dom-pro/domLiveLadderCamera.ts";
+import { ProfessionalDomLadderTracker } from "../src/modules/dom-pro/domProfessionalLadder.ts";
 import { createDomProPriceCamera, sameDomPriceCamera } from "../src/modules/dom-pro/domPriceCamera.ts";
 
 type RawLevel = [string, string];
@@ -36,6 +37,17 @@ const renderedTotalAsk = fullLiveModel.rows.reduce((sum, row) => sum + row.askSi
 assert(fullLiveModel.rows.every((row) => row.coverage === "live"), "Full-live camera left genuine venue coverage outside its ladder domain");
 assert(close(renderedTotalBid, rawTotalBid), `Full-live bid conservation mismatch: rendered=${renderedTotalBid} raw=${rawTotalBid}`);
 assert(close(renderedTotalAsk, rawTotalAsk), `Full-live ask conservation mismatch: rendered=${renderedTotalAsk} raw=${rawTotalAsk}`);
+const professionalTracker = new ProfessionalDomLadderTracker();
+const professionalFirst = professionalTracker.update({
+  book: firstSnapshot.sourceBook,
+  currentPrice: midpoint,
+  aggregationTicks: 20,
+  bookStatus: "LIVE",
+  now: first.result.ts
+});
+assert(close(professionalFirst.rows.reduce((sum, row) => sum + row.bidSize, 0), rawTotalBid), "Professional ladder lost live Bybit bid quantity");
+assert(close(professionalFirst.rows.reduce((sum, row) => sum + row.askSize, 0), rawTotalAsk), "Professional ladder lost live Bybit ask quantity");
+assert(professionalFirst.rows.every((row) => row.delta === 0), "Professional ladder baseline invented a temporal delta");
 
 const rawBid = sumBucket(first.result.b, populated.priceLow, populated.priceHigh, camera.visiblePriceMax === populated.priceHigh);
 const rawAsk = sumBucket(first.result.a, populated.priceLow, populated.priceHigh, camera.visiblePriceMax === populated.priceHigh);
@@ -47,6 +59,14 @@ assert(firstModel.rows.filter((row) => row.coverage === "unavailable").every((ro
 await new Promise((resolve) => setTimeout(resolve, 350));
 const second = await fetchBook();
 const secondModel = buildDomLadderModel({ snapshot: toSnapshot(second), camera, bookStatus: "LIVE", now: second.result.ts });
+const secondSnapshot = toSnapshot(second);
+const professionalSecond = professionalTracker.update({
+  book: secondSnapshot.sourceBook,
+  currentPrice: secondSnapshot.midPrice,
+  aggregationTicks: 20,
+  bookStatus: "LIVE",
+  now: second.result.ts
+});
 assert(secondModel.cameraVersion === firstModel.cameraVersion, "Reconnect snapshot changed the user camera");
 assert(sameDomPriceCamera(camera, camera), "Shared camera identity check failed");
 assert(secondModel.coverage.sequence !== null, "Bybit sequence metadata is missing");
@@ -82,6 +102,19 @@ const evidence = {
     renderedTotalAsk,
     rawTotalAsk,
     quantityConserved: close(renderedTotalBid, rawTotalBid) && close(renderedTotalAsk, rawTotalAsk)
+  },
+  professionalLadder: {
+    requestedAggregationTicks: professionalFirst.requestedAggregationTicks,
+    effectiveAggregationTicks: professionalFirst.effectiveAggregationTicks,
+    inferredNativeTick: professionalFirst.tickSize,
+    priceStep: professionalFirst.priceStep,
+    completeRows: professionalFirst.rows.length,
+    firstIdentity: professionalFirst.identity,
+    secondIdentity: professionalSecond.identity,
+    secondSnapshotChanged: professionalSecond.identity !== professionalFirst.identity,
+    temporalDeltaRows: professionalSecond.rows.filter((row) => Math.abs(row.delta) > 1e-12).length,
+    quantityConserved: close(professionalFirst.rows.reduce((sum, row) => sum + row.bidSize, 0), rawTotalBid)
+      && close(professionalFirst.rows.reduce((sum, row) => sum + row.askSize, 0), rawTotalAsk)
   },
   independentlyVerifiedBucket: {
     key: populated.key,

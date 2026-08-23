@@ -44,7 +44,7 @@ export type DomPanelField = {
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-export const DOM_PANEL_SETTINGS_VERSION = 7;
+export const DOM_PANEL_SETTINGS_VERSION = 8;
 const storagePrefix = "bt_dom_pro_panel_settings";
 
 const qualityFields = {
@@ -55,7 +55,7 @@ const qualityFields = {
 };
 
 const panelDefaults: Record<DomPanelId, { preset: string; settings: DomPanelValues }> = {
-  ladder: { preset: "Smoothed", settings: { ...qualityFields, updateIntervalMs: 250, renderFps: 8, levels: 64, minimumSize: 0, smoothing: 4, cameraMode: "full-live", coverageMode: "dim", displayUnits: "base", showCumulativeDepth: false, showNetDepth: false, showLiveCoverage: true, showWallConfluence: true, autoCenter: false } },
+  ladder: { preset: "Smoothed", settings: { ...qualityFields, updateIntervalMs: 250, renderFps: 8, levels: 64, aggregationTicks: 20, minimumSize: 0, smoothing: 4, cameraMode: "full-live", coverageMode: "dim", displayUnits: "notional", showCumulativeDepth: true, showNetDepth: true, showLiveCoverage: true, showWallConfluence: true, autoCenter: true } },
   "volume-profile": { preset: "Structural", settings: { ...qualityFields, updateIntervalMs: 2000, renderFps: 4, rowCount: 128, smoothing: 8, valueAreaPct: 70, showPoc: true, showHvnLvn: true, showLabels: true, sharedCameraLock: true } },
   "liquidity-heatmap": { preset: "Institutional", settings: { ...qualityFields, updateIntervalMs: 1000, renderFps: 8, minimumSize: 0, smoothing: 88, persistenceThreshold: 55, decayPct: 92, majorWallsOnly: false, enhancedGraphics: true, showBuyWalls: true, showSellWalls: true, showLabels: true } },
   "wall-detection": { preset: "Institutional", settings: { ...qualityFields, freezeOnHover: true, updateIntervalMs: 3000, renderFps: 2, minimumWallSize: 0, relativeThreshold: 2.2, activationScore: 62, deactivationScore: 44, minimumPersistenceMs: 8000, minimumAgeMs: 5000, minimumObservations: 3, maximumCancellationRatio: 0.7, maximumRows: 8, sortMode: "reliability", majorOnly: false, showPulled: true, showAbsorbed: true, showMigrated: true } },
@@ -68,7 +68,7 @@ const panelDefaults: Record<DomPanelId, { preset: string; settings: DomPanelValu
 };
 
 export const domPanelFields: Record<DomPanelId, DomPanelField[]> = {
-  ladder: [selectField("cameraMode", "Camera", ["full-live", "shared", "follow-current", "independent"]), selectField("coverageMode", "Uncovered Prices", ["show", "dim", "hide"]), selectField("displayUnits", "Formatting", ["base", "contracts", "notional"]), numberField("updateIntervalMs", "Update Interval", 100, 5000, 50), numberField("levels", "Aggregated Rows", 12, 120, 1), numberField("minimumSize", "Minimum Size", 0, 10000, 0.01), numberField("smoothing", "Smoothing", 1, 30, 1), toggleField("showLiveCoverage", "Live Coverage"), toggleField("showNetDepth", "Net Depth"), toggleField("showWallConfluence", "Wall Confluence"), toggleField("showCumulativeDepth", "Cumulative Depth")],
+  ladder: [selectField("cameraMode", "Camera", ["full-live", "shared", "follow-current", "independent"]), selectField("coverageMode", "Uncovered Prices", ["show", "dim", "hide"]), selectField("displayUnits", "Formatting", ["base", "contracts", "notional"]), selectField("aggregationTicks", "Price Aggregation", ["1", "5", "10", "20", "50", "100"]), numberField("updateIntervalMs", "Update Interval", 100, 5000, 50), numberField("levels", "Maximum Visible Rows", 12, 160, 1), numberField("minimumSize", "Minimum Size", 0, 10000, 0.01), numberField("smoothing", "Smoothing", 1, 30, 1), toggleField("autoCenter", "Follow Current Price"), toggleField("showLiveCoverage", "Live Coverage"), toggleField("showNetDepth", "Net Depth"), toggleField("showWallConfluence", "Wall Confluence"), toggleField("showCumulativeDepth", "Cumulative Depth")],
   "volume-profile": [numberField("updateIntervalMs", "Update Interval", 250, 15000, 250), numberField("rowCount", "Profile Rows", 64, 256, 1), numberField("smoothing", "Smoothing", 1, 30, 1), numberField("valueAreaPct", "Value Area %", 50, 95, 1), toggleField("showPoc", "Show POC"), toggleField("showHvnLvn", "Show HVN/LVN"), toggleField("showLabels", "Show Labels"), toggleField("sharedCameraLock", "Shared Camera Lock")],
   "liquidity-heatmap": [numberField("updateIntervalMs", "Refresh Cadence", 100, 10000, 100), numberField("minimumSize", "Minimum Size", 0, 10000, 0.01), numberField("smoothing", "Smoothing", 40, 98, 1), numberField("persistenceThreshold", "Persistence %", 0, 100, 1), numberField("decayPct", "Decay %", 50, 99, 1), toggleField("enhancedGraphics", "Enhanced Liquidity Graphics"), toggleField("majorWallsOnly", "Major Walls Only"), toggleField("showBuyWalls", "Show Buy Walls"), toggleField("showSellWalls", "Show Sell Walls"), toggleField("showLabels", "Show Level Details")],
   "wall-detection": [numberField("updateIntervalMs", "Refresh Cadence", 250, 15000, 250), numberField("minimumWallSize", "Minimum Wall Size", 0, 10000, 0.01), numberField("relativeThreshold", "Relative Threshold", 1, 8, 0.1), numberField("minimumPersistenceMs", "Minimum Persistence", 0, 120000, 1000), numberField("minimumObservations", "Minimum Observations", 1, 100, 1), numberField("maximumRows", "Maximum Rows", 1, 20, 1), selectField("sortMode", "Sort", ["reliability", "strength", "persistence", "age", "size", "distance"]), toggleField("majorOnly", "Major Only"), toggleField("showPulled", "Show Pulled Walls"), toggleField("freezeOnHover", "Freeze On Hover")],
@@ -81,7 +81,7 @@ export const domPanelFields: Record<DomPanelId, DomPanelField[]> = {
 };
 
 export const domPanelPresets: Record<DomPanelId, Record<string, Partial<DomPanelValues>>> = {
-  ladder: { Raw: { updateIntervalMs: 100, smoothing: 1 }, Smoothed: { updateIntervalMs: 250, smoothing: 4 }, Structural: { updateIntervalMs: 2000, smoothing: 10 } },
+  ladder: { Raw: { updateIntervalMs: 100, smoothing: 1, aggregationTicks: 1 }, Smoothed: { updateIntervalMs: 250, smoothing: 4, aggregationTicks: 20 }, Structural: { updateIntervalMs: 2000, smoothing: 10, aggregationTicks: 50 } },
   "volume-profile": { Visible: { updateIntervalMs: 500, rowCount: 128 }, Structural: { updateIntervalMs: 2000, rowCount: 128, smoothing: 8 }, Macro: { updateIntervalMs: 10000, rowCount: 192, smoothing: 16 } },
   "liquidity-heatmap": { Fast: { updateIntervalMs: 250, smoothing: 68, enhancedGraphics: false }, Institutional: { updateIntervalMs: 1000, smoothing: 88, enhancedGraphics: true }, Macro: { updateIntervalMs: 5000, smoothing: 94, enhancedGraphics: true, majorWallsOnly: true } },
   "wall-detection": { "All Walls": { updateIntervalMs: 500, minimumPersistenceMs: 0, minimumObservations: 1, majorOnly: false }, Persistent: { updateIntervalMs: 2000, minimumPersistenceMs: 5000, minimumObservations: 2 }, Institutional: { updateIntervalMs: 3000, minimumPersistenceMs: 8000, minimumObservations: 3 }, "Major Only": { updateIntervalMs: 5000, minimumPersistenceMs: 15000, minimumObservations: 5, majorOnly: true } },
@@ -184,6 +184,21 @@ export function migrateDomPanelRegistry(input: unknown, workspaceId: string, sym
     ladder.defaultSettings.cameraMode = "full-live";
     ladder.defaultSettings.levels = 64;
     ladder.defaultSettings.updateIntervalMs = 250;
+  }
+  if (sourceVersion < 8) {
+    const ladder = fallback.panels.ladder;
+    ladder.settings.cameraMode = "full-live";
+    ladder.settings.aggregationTicks = 20;
+    ladder.settings.displayUnits = "notional";
+    ladder.settings.autoCenter = true;
+    ladder.settings.showCumulativeDepth = true;
+    ladder.settings.showNetDepth = true;
+    ladder.defaultSettings.cameraMode = "full-live";
+    ladder.defaultSettings.aggregationTicks = 20;
+    ladder.defaultSettings.displayUnits = "notional";
+    ladder.defaultSettings.autoCenter = true;
+    ladder.defaultSettings.showCumulativeDepth = true;
+    ladder.defaultSettings.showNetDepth = true;
   }
   fallback.workspacePreset = source.workspacePreset && workspacePresetMap[source.workspacePreset] ? source.workspacePreset : "institutional";
   return fallback;

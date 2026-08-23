@@ -84,6 +84,7 @@
     "test:black-cloud-infrastructure": "node scripts/black-cloud-infrastructure-tests.js",
     "smoke:black-cloud-target": "node scripts/black-cloud-target-smoke.js",
     "test:market-depth-walls": "node scripts/market-depth-wall-tests.js",
+    "test:liquidity-fabric": "node scripts/liquidity-fabric-tests.js",
     "test:black-cloud-storage-transfer": "node scripts/black-cloud-storage-transfer-tests.js",
     "event-alpha:replay": "node scripts/event-alpha-replay.js",
     "test:event-alpha-engine": "node scripts/event-alpha-engine-tests.js",

@@ -5,7 +5,8 @@ import { dirname, resolve } from "node:path";
 import {
   CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD,
   buildChartDockedDepthLadder,
-  buildPriceFollowingViewport
+  buildPriceFollowingViewport,
+  translateChartViewportToDock
 } from "../src/modules/dom-pro/chartDockedDepthLadderModel.ts";
 import { ChartPriceViewportStore } from "../src/modules/dom-pro/chartPriceViewportStore.ts";
 import { priceToScreenY, type ChartPriceTransformSnapshot } from "../src/chart-engine/priceTransform.ts";
@@ -127,6 +128,28 @@ function depth(rows: ProfessionalDomRow[]): ProfessionalDomLadderModel {
 }
 
 {
+  const chartViewport = viewport(612, 77_200, 77_500);
+  const referencePrice = 77_307.5;
+  const chartY = priceToScreenY(referencePrice, chartViewport) ?? 0;
+  const dockAlignedChartViewport = translateChartViewportToDock(chartViewport, 44);
+  assert.equal((priceToScreenY(referencePrice, dockAlignedChartViewport) ?? 0) - chartY, 44, "the chart host's DOM offset must be added before comparing it with ladder-canvas coordinates");
+  const fullDockViewport: ChartPriceTransformSnapshot = {
+    ...chartViewport,
+    width: 320,
+    height: 600,
+    plotTop: 38,
+    plotBottom: 574
+  };
+  const alignedViewport = buildPriceFollowingViewport(
+    dockAlignedChartViewport,
+    referencePrice,
+    CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD,
+    fullDockViewport
+  );
+  assert.ok(Math.abs((priceToScreenY(referencePrice, alignedViewport) ?? 0) - (chartY + 44)) < 1e-8, "the ladder live-price line must include the chart host's measured vertical origin");
+}
+
+{
   const chartViewport = viewport(62, 64_000, 82_000, "logarithmic");
   const referencePrice = 77_307.5;
   const fullRangeViewport = buildPriceFollowingViewport(chartViewport, referencePrice);
@@ -175,6 +198,7 @@ assert.match(componentSource, /26K FOLLOW/, "the moving 26,000 USD range must be
 assert.match(componentSource, /BOOK FIT/, "the previous delivered-book fitting behavior must remain an explicit optional mode");
 assert.match(componentSource, /buildPriceFollowingViewport/, "the ladder must derive its moving full-range scale from the chart transform");
 assert.match(componentSource, /size\.height - LADDER_FOOTER_HEIGHT_PX/, "the ladder must use its complete dock height instead of stopping at the chart pane boundary");
+assert.match(componentSource, /chartHost\.getBoundingClientRect\(\)\.top - bounds\.top/, "the ladder must measure and correct the chart host's independent vertical coordinate origin");
 assert.match(componentSource, /buildBufferedRequestViewport/, "high-frequency live-price updates must use a buffered request viewport instead of restarting the depth request per tick");
 assert.match(componentSource, /CONSOLIDATED_QUERY_BUCKET_USD/, "the consolidated request range must be stable inside an explicit price bucket");
 assert.match(componentSource, /model\.currentPriceY/, "the live-price line must use the exact transformed price coordinate rather than a row midpoint");

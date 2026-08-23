@@ -65,6 +65,19 @@ type MutableRow = ChartDockedDepthRow;
 const EPSILON = 1e-12;
 export const CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD = 26_000;
 
+export function translateChartViewportToDock(
+  chartViewport: ChartPriceTransformSnapshot,
+  offsetY: number
+): ChartPriceTransformSnapshot {
+  if (!Number.isFinite(offsetY) || Math.abs(offsetY) <= EPSILON) return chartViewport;
+  return {
+    ...chartViewport,
+    height: Math.max(1, chartViewport.height + offsetY),
+    plotTop: chartViewport.plotTop + offsetY,
+    plotBottom: chartViewport.plotBottom + offsetY
+  };
+}
+
 export function buildChartDockedDepthLadder(input: ChartDockedDepthLadderInput): ChartDockedDepthLadderModel {
   const { depth } = input;
   const scaleMode = input.scaleMode ?? "follow";

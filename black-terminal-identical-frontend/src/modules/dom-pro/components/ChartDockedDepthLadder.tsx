@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from "react";
 import { Crosshair, Lock, Maximize2, X } from "lucide-react";
 import type { ChartPriceTransformSnapshot } from "../../../chart-engine/priceTransform";
 import type { MarketSymbol } from "../../../market-data/types";
@@ -8,6 +8,7 @@ import {
   buildChartDockedDepthLadder,
   buildPriceFollowingViewport,
   fitViewportToDeliveredBook,
+  translateChartViewportToDock,
   type ChartDockedDepthLadderModel,
   type ChartDockedDepthRow,
   type ChartDockedDepthScaleMode
@@ -44,6 +45,7 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, viewportKey, w
   const animationRef = useRef<{ raf: number | null; lastAt: number; revision: number; rows: VisualRow[] }>({ raf: null, lastAt: 0, revision: -1, rows: [] });
   const latestModelRef = useRef<ChartDockedDepthLadderModel | null>(null);
   const [size, setSize] = useState<CanvasSize>({ width: 320, height: 600 });
+  const [chartOriginOffsetY, setChartOriginOffsetY] = useState(0);
   const [hover, setHover] = useState<HoverState>(null);
   const [aggregationTicks, setAggregationTicks] = useState(() => readAggregation(workspaceId));
   const [viewMode, setViewMode] = useState<DepthViewMode>(() => readViewMode(workspaceId));
@@ -51,6 +53,9 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, viewportKey, w
   const subscribeViewport = useCallback((listener: () => void) => blackCoreChartPriceViewportStore.subscribe(viewportKey, listener), [viewportKey]);
   const getViewport = useCallback(() => blackCoreChartPriceViewportStore.getSnapshot(viewportKey), [viewportKey]);
   const viewport = useSyncExternalStore(subscribeViewport, getViewport, () => null);
+  const dockAlignedChartViewport = useMemo(() => viewport
+    ? translateChartViewportToDock(viewport, chartOriginOffsetY)
+    : null, [chartOriginOffsetY, viewport]);
   const ladderRenderViewport = useMemo(() => {
     if (!viewport) return null;
     const plotTop = Math.max(LADDER_DATA_TOP_PX, Math.min(viewport.plotTop, size.height - LADDER_FOOTER_HEIGHT_PX - 80));
@@ -63,9 +68,9 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, viewportKey, w
       plotBottom
     };
   }, [size.height, size.width, viewport]);
-  const followingViewport = useMemo(() => viewport && ladderRenderViewport
-    ? buildPriceFollowingViewport(viewport, lastPrice, CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD, ladderRenderViewport)
-    : null, [ladderRenderViewport, lastPrice, viewport]);
+  const followingViewport = useMemo(() => dockAlignedChartViewport && ladderRenderViewport
+    ? buildPriceFollowingViewport(dockAlignedChartViewport, lastPrice, CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD, ladderRenderViewport)
+    : null, [dockAlignedChartViewport, ladderRenderViewport, lastPrice]);
   const bufferedFollowingViewport = useMemo(() => followingViewport
     ? buildBufferedRequestViewport(followingViewport)
     : null, [followingViewport]);
@@ -81,16 +86,22 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, viewportKey, w
     enabled: Boolean(requestViewport)
   });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = rootRef.current;
     if (!element) return;
+    const chartHost = element.closest(".terminal-grid")?.querySelector<HTMLElement>(".pixi-chart-host") ?? null;
     const update = () => {
       const bounds = element.getBoundingClientRect();
       setSize({ width: Math.max(220, bounds.width), height: Math.max(180, bounds.height) });
+      if (chartHost) {
+        const nextOffset = chartHost.getBoundingClientRect().top - bounds.top;
+        setChartOriginOffsetY((current) => Math.abs(current - nextOffset) < 0.25 ? current : nextOffset);
+      }
     };
     update();
     const observer = new ResizeObserver(update);
     observer.observe(element);
+    if (chartHost) observer.observe(chartHost);
     return () => observer.disconnect();
   }, []);
 

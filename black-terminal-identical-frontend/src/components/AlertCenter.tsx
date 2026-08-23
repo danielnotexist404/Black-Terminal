@@ -213,7 +213,6 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
           </button>
         </div>
         <div className="alerts-list">
-          <div className="alerts-empty">BC-RDA ALERTS BLOCKED — HEADLESS DELIVERY RUNTIME NOT CERTIFIED</div>
           {sortedAlerts.length === 0 ? (
             <div className="alerts-empty">NO ALERTS CONFIGURED</div>
           ) : (

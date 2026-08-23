@@ -42,7 +42,7 @@ import type { VenueExecutionSchema } from "../src/execution/venueExecutionSchema
 import { computeDomWallLabelLayout } from "../src/modules/dom-pro/domWallLabelLayout.ts";
 import { buildDomLadderModel, formatDomLadderQuantity } from "../src/modules/dom-pro/domLadderModel.ts";
 import { resolveDomFullLiveRange } from "../src/modules/dom-pro/domLiveLadderCamera.ts";
-import { ProfessionalDomLadderTracker, buildProfessionalDomLadder } from "../src/modules/dom-pro/domProfessionalLadder.ts";
+import { ProfessionalDomLadderTracker, buildProfessionalDomLadder, resolveProfessionalDomNodeMotion } from "../src/modules/dom-pro/domProfessionalLadder.ts";
 import { createDomProPriceCamera, domPriceBucketAt, sameDomPriceCamera } from "../src/modules/dom-pro/domPriceCamera.ts";
 import { buildStructuralCvdFromCandles, buildStructuralCvdFromTrades, estimateCandlePressure, structuralCvdRange, structuralCvdStats } from "../src/modules/dom-pro/domStructuralCvd.ts";
 import type { AggregatedDomSnapshot } from "../src/modules/dom-pro/types.ts";
@@ -159,6 +159,13 @@ const professionalChanged = professionalTracker.update({
 });
 assert.ok(Math.abs(professionalChanged.rows.reduce((total, row) => total + row.delta, 0) - 1) < 1e-9, "added bids are positive and added asks are negative in the temporal delta column");
 assert.ok(professionalChanged.rows.some((row) => row.delta > 0) && professionalChanged.rows.some((row) => row.delta < 0), "independent bid and ask changes remain visible in their actual price buckets");
+const activeNodeRow = professionalChanged.rows.find((row) => Math.abs(row.delta) > 0)!;
+const activeNodeMotion = resolveProfessionalDomNodeMotion(activeNodeRow, true);
+const steadyNodeMotion = resolveProfessionalDomNodeMotion({ ...activeNodeRow, delta: 0 }, true);
+assert.ok(activeNodeMotion.activity > 0 && activeNodeMotion.energy > steadyNodeMotion.energy, "genuine snapshot depth change increases node energy");
+assert.ok(activeNodeMotion.opacity >= steadyNodeMotion.opacity && activeNodeMotion.glowPx > steadyNodeMotion.glowPx, "live node intensity visibly responds to authoritative depth change");
+assert.equal(resolveProfessionalDomNodeMotion(activeNodeRow, false).activity, 0, "stale or offline depth cannot keep a node artificially pulsing");
+assert.deepEqual(resolveProfessionalDomNodeMotion({ totalSize: 0, delta: 100, depthRatio: 0 }, true), { activity: 0, energy: 0, opacity: 0.05, scaleX: 0.68, scaleY: 0.48, glowPx: 0, brightness: 0.82 }, "an empty row cannot manufacture node motion");
 const professionalChangedRepeated = professionalTracker.update({
   book: professionalChangedSnapshot,
   currentPrice: ladderSnapshot.lastPrice,
@@ -274,9 +281,14 @@ assert.match(professionalLadderComponentSource, /<span>SUM<\/span><span>SIZE<\/s
 assert.match(professionalLadderComponentSource, /onWheel=\{handleWheel\}/, "professional ladder supports fixed-row full-book mouse-wheel navigation");
 assert.match(professionalLadderComponentSource, /bt-pro-dom-outline/, "professional ladder renders a stepped cumulative depth silhouette");
 assert.match(professionalLadderComponentSource, /className=\{`intensity/, "professional ladder renders a dedicated far-right intensity rail");
+assert.match(professionalLadderComponentSource, /resolveProfessionalDomNodeMotion\(row, live\)/, "professional ladder node motion is derived from authoritative temporal depth change");
+assert.match(professionalLadderComponentSource, /data-node-activity=\{nodeMotion\.activity\.toFixed\(3\)\}/, "professional ladder exposes bounded node activity for diagnostics");
 assert.match(professionalLadderComponentSource, /bt-pro-dom--\$\{model\.state\}/, "professional ladder namespaces live/stale/offline state on its root");
 assert.doesNotMatch(professionalLadderComponentSource, /className=\{`bt-pro-dom \$\{model\.state\}`\}/, "professional ladder cannot inherit the global live heartbeat-dot selector");
 assert.doesNotMatch(professionalLadderComponentSource, /<span className=\{model\.state\}>/, "professional ladder footer cannot emit an unscoped live class");
+const professionalLadderCssSource = readFileSync(new URL("../src/modules/dom-pro/domProfessionalLadder.css", import.meta.url), "utf8");
+assert.match(professionalLadderCssSource, /transition: opacity 130ms linear, transform 170ms/, "node fluctuations interpolate smoothly between genuine book updates");
+assert.doesNotMatch(professionalLadderCssSource, /animation[^;]*infinite/, "professional ladder cannot fabricate perpetual order-book motion");
 
 const custom = patchDomPanel(defaults, "depth-chart", { updateIntervalMs: 7123, mode: "macro" });
 writeDomPanelRegistry(custom, storage);

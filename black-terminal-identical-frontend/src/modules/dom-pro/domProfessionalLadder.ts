@@ -48,6 +48,16 @@ export type ProfessionalDomLadderModel = {
   state: "live" | "stale" | "offline";
 };
 
+export type ProfessionalDomNodeMotion = {
+  activity: number;
+  energy: number;
+  opacity: number;
+  scaleX: number;
+  scaleY: number;
+  glowPx: number;
+  brightness: number;
+};
+
 type ProfessionalDomLadderInput = {
   book: OrderBookSnapshot | null | undefined;
   currentPrice: number | null | undefined;
@@ -135,6 +145,36 @@ export class ProfessionalDomLadderTracker {
 
 export function buildProfessionalDomLadder(input: ProfessionalDomLadderInput): ProfessionalDomLadderModel {
   return new ProfessionalDomLadderTracker().update(input);
+}
+
+/**
+ * Maps genuine snapshot-to-snapshot depth change into bounded presentation
+ * energy. A steady book still communicates resting depth, while stale/offline
+ * rows can never keep pulsing from their last known delta.
+ */
+export function resolveProfessionalDomNodeMotion(
+  row: Pick<ProfessionalDomRow, "totalSize" | "delta" | "depthRatio">,
+  live = true
+): ProfessionalDomNodeMotion {
+  const totalSize = Number.isFinite(row.totalSize) ? Math.max(0, row.totalSize) : 0;
+  const depth = Number.isFinite(row.depthRatio) ? clamp(row.depthRatio, 0, 1) : 0;
+  if (totalSize <= EPSILON) {
+    return { activity: 0, energy: 0, opacity: 0.05, scaleX: 0.68, scaleY: 0.48, glowPx: 0, brightness: 0.82 };
+  }
+
+  const deltaMagnitude = live && Number.isFinite(row.delta) ? Math.abs(row.delta) : 0;
+  const relativeChange = clamp(deltaMagnitude / Math.max(totalSize, deltaMagnitude, EPSILON), 0, 1);
+  const activity = Math.sqrt(relativeChange);
+  const energy = clamp(depth * 0.64 + activity * 0.36, 0, 1);
+  return {
+    activity,
+    energy,
+    opacity: clamp(0.16 + depth * 0.54 + activity * 0.30, 0.16, 1),
+    scaleX: 0.74 + energy * 0.34,
+    scaleY: 0.58 + energy * 0.42,
+    glowPx: 1.5 + energy * 7.5,
+    brightness: 0.9 + energy * 0.7
+  };
 }
 
 function aggregateBook(book: OrderBookSnapshot, currentPrice: number | null, aggregationTicks = DEFAULT_AGGREGATION_TICKS, maximumRows = DEFAULT_MAXIMUM_ROWS): AggregatedBook {

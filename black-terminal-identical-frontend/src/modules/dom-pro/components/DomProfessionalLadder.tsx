@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type WheelEvent } from "react";
 import type { DomLadderDisplayUnit } from "../domLadderModel";
-import type { ProfessionalDomLadderModel, ProfessionalDomRow } from "../domProfessionalLadder";
+import { resolveProfessionalDomNodeMotion, type ProfessionalDomLadderModel, type ProfessionalDomRow } from "../domProfessionalLadder";
 import "../domProfessionalLadder.css";
 
 type DomProfessionalLadderProps = {
@@ -122,6 +122,7 @@ export function DomProfessionalLadder({
                   unitLabel={unitLabel}
                   priceDecimals={model.priceDecimals}
                   showWallConfluence={showWallConfluence}
+                  live={model.state === "live"}
                 />
               ))}
             </div>
@@ -139,12 +140,13 @@ export function DomProfessionalLadder({
   );
 }
 
-function ProfessionalRow({ row, displayUnit, unitLabel, priceDecimals, showWallConfluence }: {
+function ProfessionalRow({ row, displayUnit, unitLabel, priceDecimals, showWallConfluence, live }: {
   row: ProfessionalDomRow;
   displayUnit: DomLadderDisplayUnit;
   unitLabel: string;
   priceDecimals: number;
   showWallConfluence: boolean;
+  live: boolean;
 }) {
   const cumulative = quantityForDisplay(row.cumulativeSize, row.price, displayUnit);
   const signedSize = quantityForDisplay(row.signedSize, row.price, displayUnit);
@@ -158,14 +160,27 @@ function ProfessionalRow({ row, displayUnit, unitLabel, priceDecimals, showWallC
   ].join("\n");
   const askWidth = row.askSize > 0 ? `${Math.max(2.5, row.depthRatio * 100)}%` : "0%";
   const bidWidth = row.bidSize > 0 ? `${Math.max(2.5, row.depthRatio * 100)}%` : "0%";
+  const nodeMotion = resolveProfessionalDomNodeMotion(row, live);
+  const motionStyle = {
+    "--bt-dom-node-activity": nodeMotion.activity.toFixed(3),
+    "--bt-dom-node-energy": nodeMotion.energy.toFixed(3),
+    "--bt-dom-node-opacity": nodeMotion.opacity.toFixed(3),
+    "--bt-dom-node-scale-x": nodeMotion.scaleX.toFixed(3),
+    "--bt-dom-node-scale-y": nodeMotion.scaleY.toFixed(3),
+    "--bt-dom-node-glow": `${nodeMotion.glowPx.toFixed(2)}px`,
+    "--bt-dom-node-brightness": nodeMotion.brightness.toFixed(3)
+  } as CSSProperties;
 
   return (
     <div
-      className={`bt-pro-dom-row ${row.side} ${row.isCurrentPrice ? "current" : ""} ${row.isBestBid ? "best-bid" : ""} ${row.isBestAsk ? "best-ask" : ""} ${showWallConfluence && row.wall ? `imm-wall ${row.wall.side}` : ""}`}
+      className={`bt-pro-dom-row ${row.side} ${nodeMotion.activity > 0.01 ? "node-active" : "node-steady"} ${row.isCurrentPrice ? "current" : ""} ${row.isBestBid ? "best-bid" : ""} ${row.isBestAsk ? "best-ask" : ""} ${showWallConfluence && row.wall ? `imm-wall ${row.wall.side}` : ""}`}
+      style={motionStyle}
       data-price={row.price}
       data-bid-size={row.bidSize}
       data-ask-size={row.askSize}
       data-snapshot-delta={row.delta}
+      data-node-activity={nodeMotion.activity.toFixed(3)}
+      data-node-energy={nodeMotion.energy.toFixed(3)}
       title={title}
       role="row"
     >
@@ -178,7 +193,7 @@ function ProfessionalRow({ row, displayUnit, unitLabel, priceDecimals, showWallC
         {row.bidSize > 0 && <i className="bid-bar" style={{ width: bidWidth }} />}
         {showWallConfluence && row.wall && <mark>{row.wall.side === "sell" ? "S" : "B"}</mark>}
       </span>
-      <i className={`intensity ${row.side}`} style={{ opacity: row.totalSize > 0 ? Math.max(0.14, row.depthRatio) : 0.05 }} aria-hidden="true" />
+      <i className={`intensity ${row.side}`} aria-hidden="true" />
     </div>
   );
 }

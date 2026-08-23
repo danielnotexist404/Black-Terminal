@@ -24,10 +24,12 @@ type Props = {
   publishedDefinition?: StrategyAutomationDefinition | null;
   saving: boolean;
   message?: string;
+  demoConnection?: { id: string; label: string; state: string } | null;
   onChange: (draft: StrategyWizardDraft) => void;
   onSaveDraft: () => void;
-  onPublish: () => void;
-  onStart: () => void;
+  onConnectDemo: (credentials: { accountName: string; apiKey: string; apiSecret: string }) => Promise<void>;
+  onRefreshDemo: () => Promise<void>;
+  onActivate: () => void;
   onCancel: () => void;
 };
 
@@ -60,13 +62,13 @@ export function StrategyWizardPage(props: Props) {
         {step === 5 ? <FiltersStep draft={props.draft} onChange={props.onChange} /> : null}
         {step === 6 ? <ExitsStep draft={props.draft} onChange={props.onChange} /> : null}
         {step === 7 ? <PaperStep draft={props.draft} onChange={props.onChange} /> : null}
-        {step === 8 ? <TargetsStep draft={props.draft} bindings={props.bindings} /> : null}
-        {step === 9 ? <ReviewStep draft={props.draft} publishedName={props.publishedName} publishedDefinition={props.publishedDefinition} saving={props.saving} onSaveDraft={props.onSaveDraft} onPublish={props.onPublish} onStart={props.onStart} /> : null}
+        {step === 8 ? <TargetsStep draft={props.draft} bindings={props.bindings} demoConnection={props.demoConnection} busy={props.saving} onConnectDemo={props.onConnectDemo} onRefreshDemo={props.onRefreshDemo} /> : null}
+        {step === 9 ? <ReviewStep draft={props.draft} publishedName={props.publishedName} publishedDefinition={props.publishedDefinition} saving={props.saving} demoConnectionReady={["READY", "LIVE"].includes(props.demoConnection?.state || "")} onSaveDraft={props.onSaveDraft} onActivate={props.onActivate} /> : null}
         {issues.length ? <div className="wizard-inline-errors">{issues.map((issue) => <span key={issue}>{issue}</span>)}</div> : null}
         {props.message ? <div className="wizard-save-state" role="status">{props.message}</div> : null}
         <footer><button type="button" onClick={props.onCancel}>CANCEL</button><button type="button" disabled={props.saving} onClick={props.onSaveDraft}><Save size={13} /> SAVE DRAFT</button><span />{step > 0 ? <button type="button" onClick={() => go(step - 1)}><ArrowLeft size={13} /> BACK</button> : null}{step < wizardSteps.length - 1 ? <button type="button" className="primary" onClick={() => go(step + 1)}>CONTINUE <ArrowRight size={13} /></button> : null}</footer>
       </main>
-      <aside className="strategy-wizard-summary"><span>STRATEGY SUMMARY</span><Summary label="Name" value={props.draft.name || "Untitled"} /><Summary label="Indicator" value={props.draft.definition.indicator?.name || "Not selected"} /><Summary label="Signal market" value={`Bybit ${props.draft.definition.symbol}`} /><Summary label="Runtime TF" value={props.draft.definition.timeframe.toUpperCase()} /><Summary label="Market" value={props.draft.definition.marketType} /><Summary label="Paper allocation" value={`${props.draft.paperPolicy.strategyAllocationValue}${props.draft.paperPolicy.strategyAllocationMode === "FIXED_USDT" ? " USDT" : "%"}`} /><Summary label="Live targets" value={`${props.bindings.length} / 10 · locked`} /><div className="wizard-version-summary"><strong>Draft V{props.draft.publishedVersion ? props.draft.publishedVersion + 1 : 1}</strong><span>Published {props.draft.publishedVersion ? `V${props.draft.publishedVersion}` : "—"}</span><span>Running {props.draft.runningVersion ? `V${props.draft.runningVersion}` : "—"}</span></div></aside>
+      <aside className="strategy-wizard-summary"><span>STRATEGY SUMMARY</span><Summary label="Name" value={props.draft.name || "Untitled"} /><Summary label="Indicator" value={props.draft.definition.indicator?.name || "Not selected"} /><Summary label="Signal market" value={`Bybit ${props.draft.definition.symbol}`} /><Summary label="Runtime TF" value={props.draft.definition.timeframe.toUpperCase()} /><Summary label="Market" value={props.draft.definition.marketType} /><Summary label="Strategy allocation" value={`${props.draft.paperPolicy.strategyAllocationValue}${props.draft.paperPolicy.strategyAllocationMode === "FIXED_USDT" ? " USDT" : "%"}`} /><Summary label="Demo target" value={props.demoConnection ? "CONNECTED" : "NOT CONNECTED"} /><div className="wizard-version-summary"><strong>Configuration V{props.draft.publishedVersion ? props.draft.publishedVersion + 1 : 1}</strong><span>Saved {props.draft.publishedVersion ? `V${props.draft.publishedVersion}` : "—"}</span><span>Active {props.draft.runningVersion ? `V${props.draft.runningVersion}` : "—"}</span></div></aside>
     </div>
   </section>;
 }

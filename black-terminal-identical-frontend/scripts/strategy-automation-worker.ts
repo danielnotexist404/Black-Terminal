@@ -37,12 +37,15 @@ const leaseSeconds = Math.max(
 const paperEnabled = process.env.STRATEGY_AUTOMATION_PAPER_ENABLED !== "false";
 const liveExecutionEnabled =
   process.env.STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED === "true";
+const demoExecutionEnabled =
+  process.env.STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED === "true" &&
+  process.env.BYBIT_DEMO_ENABLED === "true";
 let running = true;
 let ticking = false;
 
 if (liveExecutionEnabled) {
   throw new Error(
-    "STRATEGY_AUTOMATION_LIVE_EXECUTION_UNCERTIFIED: this worker build is paper-only and refuses a live execution configuration.",
+    "STRATEGY_AUTOMATION_REAL_FUNDS_FORBIDDEN: this worker may enqueue Bybit Demo orders but refuses real-funds Mainnet execution.",
   );
 }
 
@@ -52,6 +55,7 @@ console.log(
     event: "strategy_automation_worker_started",
     workerId,
     paperEnabled,
+    demoExecutionEnabled,
     liveExecutionEnabled: false,
     intervalMs,
   }),
@@ -86,7 +90,7 @@ console.log(
 );
 
 async function tick() {
-  if (ticking || !paperEnabled) return;
+  if (ticking || (!paperEnabled && !demoExecutionEnabled)) return;
   ticking = true;
   try {
     const { data: strategies, error } = await supabase
@@ -158,7 +162,18 @@ async function processStrategy(strategy: JsonRow) {
     .eq("owner_user_id", strategy.owner_user_id)
     .maybeSingle();
   if (paperError) throw paperError;
-  if (!paper || paper.status !== "ACTIVE")
+  const { data: demoBindings, error: bindingError } = await supabase
+    .from("strategy_target_bindings")
+    .select("*")
+    .eq("strategy_id", strategy.id)
+    .eq("strategy_version", strategy.current_version)
+    .eq("owner_user_id", strategy.owner_user_id)
+    .eq("target_type", "BROKER_ACCOUNT")
+    .eq("status", "LIVE");
+  if (bindingError) throw bindingError;
+  const activePaper = paperEnabled && paper?.status === "ACTIVE" ? paper : null;
+  const activeDemoBindings = demoExecutionEnabled ? (demoBindings || []) : [];
+  if (!activePaper && activeDemoBindings.length === 0)
     return heartbeat(strategy, "PAUSED", null);
   if (
     !["builtin-ema-cross", "builtin-adaptive-swing"].includes(
@@ -198,45 +213,45 @@ async function processStrategy(strategy: JsonRow) {
     return heartbeat(strategy, "LIVE", null);
   }
 
-  const { data: position, error: positionError } = await supabase
-    .from("strategy_paper_positions")
-    .select("*")
-    .eq("paper_account_id", paper.id)
-    .is("closed_at", null)
-    .maybeSingle();
+  const { data: position, error: positionError } = activePaper
+    ? await supabase.from("strategy_paper_positions").select("*").eq("paper_account_id", activePaper.id).is("closed_at", null).maybeSingle()
+    : { data: null, error: null };
   if (positionError) throw positionError;
   let closedThisCandle = false;
   if (position)
     closedThisCandle = await managePaperPosition(
       strategy,
-      paper,
+      activePaper,
       position,
       candle,
     );
 
   let signalKey: string | null = null;
   let signalAt: string | null = null;
-  if (!position && !closedThisCandle) {
-    const signals = createStrategySignals(
-      strategy.runtime_kind,
-      candles,
-      strategy.symbol,
-      strategy.definition?.settings || {},
-    );
-    const signal = [...signals]
-      .reverse()
-      .find((item) => item.entry && Number(item.timestamp) === candle.time);
-    if (signal) {
-      signalKey = `${strategy.id}:${strategy.current_version}:${strategy.symbol}:${strategy.timeframe}:${candle.time}:${signal.direction}`;
-      signalAt = candleAt;
+  const signals = createStrategySignals(
+    strategy.runtime_kind,
+    candles,
+    strategy.symbol,
+    strategy.definition?.settings || {},
+  );
+  const signal = [...signals]
+    .reverse()
+    .find((item) => item.entry && Number(item.timestamp) === candle.time);
+  if (signal) {
+    signalKey = `${strategy.id}:${strategy.current_version}:${strategy.symbol}:${strategy.timeframe}:${candle.time}:${signal.direction}`;
+    signalAt = candleAt;
+    if (activePaper && !position && !closedThisCandle) {
       await openPaperPosition(
         strategy,
-        paper,
+        activePaper,
         candles,
         candle,
         signal,
         signalKey,
       );
+    }
+    for (const binding of activeDemoBindings) {
+      await enqueueDemoStrategySignal(strategy, binding, signal, signalKey);
     }
   }
 
@@ -263,6 +278,98 @@ async function processStrategy(strategy: JsonRow) {
       { onConflict: "strategy_id" },
     );
   if (updateError) throw updateError;
+}
+
+async function enqueueDemoStrategySignal(
+  strategy: JsonRow,
+  binding: JsonRow,
+  signal: JsonRow,
+  signalKey: string,
+) {
+  if (!binding.connection_id || !binding.account_id) return;
+  const { data: connection, error: connectionError } = await supabase
+    .from("connectivity_connections")
+    .select("id,execution_environment,health_status,credential_state,worker_state,synchronization_state,execution_readiness,control_state")
+    .eq("id", binding.connection_id)
+    .eq("user_id", strategy.owner_user_id)
+    .maybeSingle();
+  if (connectionError) throw connectionError;
+  if (!connection || connection.execution_environment !== "DEMO" || connection.health_status !== "CONNECTED_CLOUD" || connection.credential_state !== "AUTHENTICATED" || connection.worker_state !== "LIVE" || connection.synchronization_state !== "SYNCHRONIZED" || connection.execution_readiness !== "READY" || connection.control_state !== "ACTIVE") {
+    await auditDemoSignalBlocked(strategy, binding, signalKey, "DEMO_CONNECTION_NOT_READY");
+    return;
+  }
+  const { data: positions, error: positionError } = await supabase
+    .from("account_positions")
+    .select("direction,quantity,position_idx,strategy_target_binding_id,updated_at")
+    .eq("account_id", binding.account_id)
+    .eq("symbol", strategy.symbol)
+    .gt("quantity", 0);
+  if (positionError) throw positionError;
+  const open = (positions || []).filter((item) => item.direction === "long" || item.direction === "short");
+  const unowned = open.find((item) => item.strategy_target_binding_id !== binding.id);
+  if (unowned) {
+    await auditDemoSignalBlocked(strategy, binding, signalKey, "ACCOUNT_SYMBOL_OCCUPIED_BY_UNOWNED_POSITION");
+    return;
+  }
+  const owned = open.filter((item) => item.strategy_target_binding_id === binding.id);
+  const sameDirection = owned.some((item) => item.direction === signal.direction);
+  const opposite = owned.find((item) => item.direction !== signal.direction);
+  if (sameDirection) return;
+  const conflictResolution = String(strategy.definition?.execution?.conflictResolution || "CLOSE_THEN_REVERSE").toUpperCase();
+  if (opposite && conflictResolution === "IGNORE") {
+    await auditDemoSignalBlocked(strategy, binding, signalKey, "OPPOSITE_SIGNAL_IGNORED_BY_POLICY");
+    return;
+  }
+  const action = opposite ? (conflictResolution === "CLOSE_ONLY" ? "CLOSE" : "REVERSE") : "ENTRY";
+  const commandSignalKey = `${signalKey}:${binding.id}:${action.toLowerCase()}`;
+  const idempotencyKey = crypto.createHash("sha256").update(commandSignalKey).digest("hex");
+  const deterministicClientOrderId = `bt-str-${idempotencyKey.slice(0, 28)}`;
+  const { error } = await supabase.from("execution_commands").upsert({
+    command_type: "PLACE_ORDER",
+    user_id: strategy.owner_user_id,
+    connection_id: binding.connection_id,
+    strategy_automation_id: strategy.id,
+    strategy_target_binding_id: binding.id,
+    strategy_signal_key: commandSignalKey,
+    idempotency_key: idempotencyKey,
+    deterministic_client_order_id: deterministicClientOrderId,
+    payload: {
+      action,
+      symbol: strategy.symbol,
+      marketType: strategy.market_type,
+      direction: signal.direction,
+      positionDirection: opposite?.direction || null,
+      stopLoss: signal.stopLoss || null,
+      takeProfit: signal.takeProfit || null,
+      candleTime: signal.timestamp,
+      strategyVersion: strategy.current_version,
+      simulatedFunds: true
+    },
+    status: "QUEUED",
+    priority: action === "CLOSE" ? 20 : 50
+  }, { onConflict: "idempotency_key", ignoreDuplicates: true });
+  if (error) throw error;
+  await supabase.from("strategy_automation_audit_events").insert({
+    owner_user_id: strategy.owner_user_id,
+    strategy_id: strategy.id,
+    binding_id: binding.id,
+    event_type: "STRATEGY_DEMO_ORDER_QUEUED",
+    severity: "INFO",
+    message: "A confirmed closed-candle signal queued an idempotent Bybit Demo order command.",
+    safe_metadata: { signalKey, action, symbol: strategy.symbol, direction: signal.direction, simulatedFunds: true }
+  });
+}
+
+async function auditDemoSignalBlocked(strategy: JsonRow, binding: JsonRow, signalKey: string, reason: string) {
+  await supabase.from("strategy_automation_audit_events").insert({
+    owner_user_id: strategy.owner_user_id,
+    strategy_id: strategy.id,
+    binding_id: binding.id,
+    event_type: "STRATEGY_DEMO_SIGNAL_BLOCKED",
+    severity: "WARNING",
+    message: "A strategy signal was blocked before broker submission.",
+    safe_metadata: { signalKey, reason, simulatedFunds: true }
+  });
 }
 
 async function openPaperPosition(

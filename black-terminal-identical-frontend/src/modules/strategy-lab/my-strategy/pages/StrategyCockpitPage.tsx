@@ -20,7 +20,7 @@ type Props = {
   onRefresh: () => void;
   onPaperAction: (action: "start" | "pause" | "top-up" | "reset", body?: Record<string, unknown>) => void;
   onAddTarget: (slotIndex: number) => void;
-  onTargetAction: (bindingId: string, action: "pause" | "resume") => void;
+  onTargetAction: (bindingId: string, action: "arm" | "pause" | "resume") => void;
   onDisconnectTarget: (bindingId: string) => void;
 };
 
@@ -37,7 +37,7 @@ export function StrategyCockpitPage(props: Props) {
       {activeTab === "overview" ? <StrategyOverview workspace={props.workspace} paperData={props.paperData} onAddTarget={props.onAddTarget} /> : null}
       {activeTab === "configuration" ? <Configuration workspace={props.workspace} onEdit={props.onEdit} /> : null}
       {activeTab === "paper" ? <PaperCockpit paper={props.workspace.paper} data={props.paperData} busy={props.busy} onAction={props.onPaperAction} /> : null}
-      {activeTab === "liveTargets" ? <><TargetSlotMatrix bindings={props.workspace.bindings} snapshots={props.workspace.snapshots} selectedId={selectedTargetId} onSelect={setSelectedTargetId} onAdd={props.onAddTarget} />{selectedTargetId && props.workspace.bindings.find((item) => item.id === selectedTargetId) ? <TargetCockpit binding={props.workspace.bindings.find((item) => item.id === selectedTargetId)!} snapshot={props.workspace.snapshots.find((item) => item.bindingId === selectedTargetId)} busy={props.busy} onAction={(action) => props.onTargetAction(selectedTargetId, action)} onDisconnect={() => props.onDisconnectTarget(selectedTargetId)} /> : <div className="live-certification-banner"><LockKeyhole size={14} /><div><strong>LIVE EXECUTION NOT CERTIFIED</strong><span>Targets can be prepared with zero allocation, but cannot be armed on preview.</span></div></div>}</> : null}
+      {activeTab === "liveTargets" ? <><TargetSlotMatrix bindings={props.workspace.bindings} snapshots={props.workspace.snapshots} selectedId={selectedTargetId} onSelect={setSelectedTargetId} onAdd={props.onAddTarget} />{selectedTargetId && props.workspace.bindings.find((item) => item.id === selectedTargetId) ? <TargetCockpit binding={props.workspace.bindings.find((item) => item.id === selectedTargetId)!} snapshot={props.workspace.snapshots.find((item) => item.bindingId === selectedTargetId)} busy={props.busy} onAction={(action) => props.onTargetAction(selectedTargetId, action)} onDisconnect={() => props.onDisconnectTarget(selectedTargetId)} /> : <div className="live-certification-banner"><LockKeyhole size={14} /><div><strong>BYBIT DEMO TARGET REQUIRED</strong><span>Connect and verify a Bybit Demo Trading account before activation. Real-funds Mainnet is not available here.</span></div></div>}</> : null}
       {activeTab === "positions" ? <DataTable kind="positions" rows={paperRows.positions} /> : null}
       {activeTab === "trades" ? <DataTable kind="trades" rows={paperRows.trades} /> : null}
       {activeTab === "performance" ? <Performance analytics={paperRows.analytics} trades={paperRows.trades} /> : null}

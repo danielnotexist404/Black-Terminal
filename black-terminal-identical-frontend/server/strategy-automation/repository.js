@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import {
   calculateCapitalPreview,
   calculateEffectiveLeverage,
+  assertCanArmStrategyTarget,
   assertCertifiedStrategyDefinition,
   canonicalRequestHash,
   defaultLiveCapitalPolicy,
@@ -293,7 +294,11 @@ export async function addTarget(supabase, userId, strategyId, body, idempotencyK
   if (!candidate) throw strategyError(404, "STRATEGY_TARGET_NOT_FOUND", "The selected strategy target is unavailable.");
   if (!candidate.validation.eligible) throw strategyError(409, "STRATEGY_TARGET_VALIDATION_FAILED", "The selected strategy target failed validation.", { reasons: candidate.validation.reasons });
   const marketType = normalizeMarketType(body.marketType || strategy.market_type);
-  const policy = defaultLiveCapitalPolicy(marketType);
+  const policy = body.capitalPolicy
+    ? normalizeCapitalPolicy(body.capitalPolicy, marketType, { allowZeroAllocation: candidate.environment !== "DEMO" })
+    : candidate.environment === "DEMO"
+      ? defaultPaperCapitalPolicy(marketType)
+      : defaultLiveCapitalPolicy(marketType);
   const canonicalHash = canonicalRequestHash(policy);
   const version = operationalVersion(strategy);
   const requestHash = canonicalRequestHash({ strategyId, strategyVersion: version, slotIndex: Number(body.slotIndex), targetType: body.targetType, targetId: body.targetId, marketType, policy });
@@ -377,7 +382,20 @@ export async function updateTargetPolicy(supabase, userId, strategyId, bindingId
 export async function setTargetState(supabase, userId, strategyId, bindingId, action, expectedVersion, idempotencyKey, environment = process.env) {
   const binding = await ownedBinding(supabase, userId, strategyId, bindingId);
   let validation = {};
-  if (action === "resume") {
+  if (action === "arm") {
+    if (Number(expectedVersion) === Number(binding.row_version)) {
+      if (binding.status !== "READY") throw strategyError(409, "STRATEGY_TARGET_STATE_CONFLICT", "Only a ready target can be activated.");
+      validation = await validateExistingBinding(supabase, userId, strategyId, binding, environment);
+      const connection = await oneOrNone(supabase.from("connectivity_connections").select("execution_environment").eq("id", binding.connection_id).eq("user_id", userId).maybeSingle());
+      assertCanArmStrategyTarget({
+        policy: policyFromBinding(binding),
+        marketType: binding.market_type,
+        validation,
+        executionEnvironment: connection?.execution_environment,
+        environment
+      });
+    }
+  } else if (action === "resume") {
     if (Number(expectedVersion) === Number(binding.row_version)) {
       if (binding.status !== "PAUSED") throw strategyError(409, "STRATEGY_TARGET_STATE_CONFLICT", "Only a paused target can be resumed.");
       validation = await validateExistingBinding(supabase, userId, strategyId, binding, environment);
@@ -688,9 +706,10 @@ function validateBrokerEligibility({ connection, account, capability, strategy, 
   if (!capability?.can_execute_while_offline) reasons.push("Persistent server execution is not certified.");
   if (strategy.market_type === "FUTURES" && !includesMarket(capability?.supported_market_types, "FUTURES")) reasons.push("The connection does not certify Futures for this strategy.");
   if (strategy.market_type === "SPOT" && !includesMarket(capability?.supported_market_types, "SPOT")) reasons.push("The connection does not certify Spot for this strategy.");
-  if (connection.execution_environment !== "MAINNET_LIVE" || account?.execution_environment !== "MAINNET_LIVE") reasons.push("The account is not locked to the approved mainnet environment.");
+  if (connection.execution_environment !== "DEMO" || account?.execution_environment !== "DEMO") reasons.push("Strategy automation currently requires a Bybit Demo Trading account.");
   if (conflict) reasons.push("This account already occupies a target slot in this strategy version.");
   if (environment.STRATEGY_AUTOMATION_TARGET_CONFIGURATION_ENABLED === "false") reasons.push("Strategy target configuration is disabled by rollout policy.");
+  if (environment.STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED !== "true") reasons.push("Bybit Demo strategy execution is disabled by rollout policy.");
   return { eligible: reasons.length === 0, reasons, checkedAt: new Date().toISOString(), withdrawalPermission: "NONE" };
 }
 

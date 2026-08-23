@@ -123,6 +123,9 @@ const exchangeSchemas = {
   connect: z.object({
     exchange: z.literal("bybit"), accountName: shortText.min(1), apiKey: secret, apiSecret: secret, passphrase: optionalSecret
   }).strict(),
+  "connect-demo": z.object({
+    exchange: z.literal("bybit"), accountName: shortText.min(1), apiKey: secret, apiSecret: secret, passphrase: optionalSecret
+  }).strict(),
   diagnostics: z.object({ accountId: id, symbol: symbol.optional() }).strict(),
   sync: z.object({ accountId: id, symbol: symbol.optional(), marketKind: marketKind.optional() }).strict(),
   health: z.object({ accountId: id }).strict(),
@@ -144,7 +147,6 @@ const hyperliquidSchemas = {
 const cloudSchemas = {
   connection: z.object({
     accountId: id,
-    confirmation: z.literal("ENABLE OFFLINE CLOUD EXECUTION"),
     automation: z.object({
       allowStrategyExecution: boolean.optional(),
       allowCopyTrading: boolean.optional(),

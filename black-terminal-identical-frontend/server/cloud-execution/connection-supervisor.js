@@ -55,10 +55,12 @@ export class BrokerConnectionManager {
   async refresh() {
     if (!this.running) return;
     try {
+      const workerEnvironment = normalizeBybitExecutionEnvironment(process.env.BLACK_CLOUD_EXECUTION_ENVIRONMENT || process.env.BYBIT_EXECUTION_ENVIRONMENT || process.env.BLACK_CLOUD_NETWORK);
       const { data, error } = await this.supabase
         .from("connectivity_connections")
         .select("*")
         .in("connection_mode", ["CLOUD_DELEGATED", "HYBRID"])
+        .eq("execution_environment", workerEnvironment)
         .is("revoked_at", null)
         .is("disabled_at", null);
       if (error) throw error;
@@ -277,6 +279,7 @@ export class BrokerConnectionManager {
       if (String(result.brokerAccountUid || "") !== String(runtime.connection.broker_account_uid || "")) {
         throw typedError("BROKER_ACCOUNT_UID_MISMATCH", "The reconciled Bybit UID no longer matches this connection.");
       }
+      if (runtime.connection.execution_environment === "DEMO") await this.attributeDemoStrategyState(runtime);
       await updateOrThrow(this.supabase.from("connectivity_connections").update({
         status: "connected",
         health_status: "CONNECTED_CLOUD",
@@ -307,6 +310,35 @@ export class BrokerConnectionManager {
       this.metrics.reconciliationDurationMs = Date.now() - startedAt;
       runtime.reconciling = false;
     }
+  }
+
+  async attributeDemoStrategyState(runtime) {
+    const { data: binding, error: bindingError } = await this.supabase.from("strategy_target_bindings")
+      .select("id,strategy_id")
+      .eq("account_id", runtime.account.id)
+      .eq("status", "LIVE")
+      .maybeSingle();
+    if (bindingError) throw bindingError;
+    if (!binding) return;
+    const { data: strategy, error: strategyError } = await this.supabase.from("strategy_automation_strategies")
+      .select("symbol")
+      .eq("id", binding.strategy_id)
+      .maybeSingle();
+    if (strategyError) throw strategyError;
+    if (!strategy?.symbol) return;
+    const { data: latestStrategyOrder, error: orderError } = await this.supabase.from("execution_orders")
+      .select("id,reduce_only,status,created_at")
+      .eq("strategy_target_binding_id", binding.id)
+      .eq("symbol", strategy.symbol)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (orderError) throw orderError;
+    if (!latestStrategyOrder || latestStrategyOrder.reduce_only === true || ["rejected", "cancelled", "canceled", "failed"].includes(String(latestStrategyOrder.status || "").toLowerCase())) return;
+    await updateOrThrow(this.supabase.from("account_positions").update({
+      strategy_automation_id: binding.strategy_id,
+      strategy_target_binding_id: binding.id
+    }).eq("account_id", runtime.account.id).eq("symbol", strategy.symbol).gt("quantity", 0));
   }
 
   async writeHealth(runtime) {

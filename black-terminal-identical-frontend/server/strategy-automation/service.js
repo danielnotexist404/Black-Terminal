@@ -111,7 +111,7 @@ async function targets(req, res, security, strategyId, path) {
       return res.status(200).json({ binding: await disconnectTarget(security.supabase, security.user.id, strategyId, bindingId, body.expectedVersion, body.disconnectPolicy, requireIdempotencyKey(req)) });
     }
   }
-  if (path.length === 2 && ["pause", "resume"].includes(path[1]) && req.method === "POST") {
+  if (path.length === 2 && ["arm", "pause", "resume"].includes(path[1]) && req.method === "POST") {
     const body = parseStrategyBody(strategySchemas.targetControl, req.body);
     return res.status(200).json({ binding: await setTargetState(security.supabase, security.user.id, strategyId, bindingId, path[1], body.expectedVersion, requireIdempotencyKey(req)) });
   }

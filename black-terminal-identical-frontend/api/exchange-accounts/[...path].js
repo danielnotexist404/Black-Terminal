@@ -1,4 +1,5 @@
 import connect from "../../server/routes/exchange-accounts/connect.js";
+import connectDemo from "../../server/routes/exchange-accounts/connect-demo.js";
 import diagnostics from "../../server/routes/exchange-accounts/diagnostics.js";
 import sync from "../../server/routes/exchange-accounts/sync.js";
 import mainnetValidation from "../../server/routes/exchange-accounts/mainnet-validation.js";
@@ -15,6 +16,7 @@ import { validateTradingRequest } from "../../server/security/trading-schemas.js
 
 const routes = new Map([
   ["connect", connect],
+  ["connect-demo", connectDemo],
   ["diagnostics", diagnostics],
   ["sync", sync],
   ["mainnet-validation", mainnetValidation],
@@ -36,7 +38,7 @@ export default async function handler(req, res) {
     if (path[0] === "oauth-callback") return oauthCallback(req, res);
 
     if (route || (path.length === 1 && path[0])) {
-      const permission = ["connect", "list", "capabilities", "oauth-start"].includes(path[0]) ? "execution.connectBroker" : "execution.managePositions";
+      const permission = ["connect", "connect-demo", "list", "capabilities", "oauth-start"].includes(path[0]) ? "execution.connectBroker" : "execution.managePositions";
       const security = await requireApiSecurity(req, res, { endpoint: `exchange-accounts.${path[0]}`, permission, maxBytes: 128 * 1024, rateLimit: { perMinute: 30, perDay: 5000 } });
       if (security.handled) return;
       validateTradingRequest(req, "exchange", path[0]);

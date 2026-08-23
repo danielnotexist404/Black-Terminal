@@ -4,11 +4,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertCanArmLiveTarget,
+  assertCanArmStrategyTarget,
   buildTargetSlots,
   calculateCapitalPreview,
   calculateEffectiveLeverage,
   defaultLiveCapitalPolicy,
   defaultPaperCapitalPolicy,
+  demoAutomationEnabled,
   liveAutomationEnabled,
   normalizeCapitalPolicy,
   normalizeStrategyDefinition,
@@ -48,6 +50,10 @@ assert.throws(() => assertCanArmLiveTarget({ policy: livePolicy, marketType: "FU
 assert.equal(liveAutomationEnabled({ STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "true", STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "false" }), false);
 assert.equal(liveAutomationEnabled({ STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "true", STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "true", BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH: "true" }), false);
 assert.equal(liveAutomationEnabled({ STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "true", STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "true" }), true);
+assert.equal(demoAutomationEnabled({ STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true", BYBIT_DEMO_ENABLED: "true" }), true);
+assert.equal(demoAutomationEnabled({ STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true", BYBIT_DEMO_ENABLED: "true", BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH: "true" }), false);
+assert.doesNotThrow(() => assertCanArmStrategyTarget({ policy: paperPolicyForArm(), marketType: "FUTURES", validation: { eligible: true }, executionEnvironment: "DEMO", environment: { STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true", BYBIT_DEMO_ENABLED: "true" } }));
+assert.throws(() => assertCanArmStrategyTarget({ policy: paperPolicyForArm(), marketType: "FUTURES", validation: { eligible: true }, executionEnvironment: "MAINNET_LIVE", environment: { STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true", BYBIT_DEMO_ENABLED: "true" } }), /Real-funds Mainnet/i);
 
 const paperPolicy = defaultPaperCapitalPolicy("FUTURES");
 const percentPreview = calculateCapitalPreview({ equity: 10_000, availableBalance: 8_000, policy: paperPolicy, marketType: "FUTURES" });
@@ -92,20 +98,25 @@ assert.match(migration, /strategy_target_mutation_requests/);
 assert.match(migration, /strategy_target_reorder_requests/);
 assert.match(migration, /black_core_control_strategy_target/);
 assert.match(migration, /black_core_reorder_strategy_targets/);
-assert.doesNotMatch(`${panel}\n${apiClient}`, /api[_-]?key|api[_-]?secret|credential_ref|vault_secret/i, "Strategy Lab never requests or renders broker secrets");
+assert.doesNotMatch(`${panel}\n${apiClient}`, /credential_ref|vault_secret/i, "Strategy Lab never requests or renders vault internals");
 assert.doesNotMatch(panel, /percentile/i, "capital UI uses Percentage terminology only");
 assert.equal((panel.match(/setInterval\(/g) || []).length, 1, "one strategy-level snapshot cadence replaces per-target polling");
 assert.match(panel, /Array\.from\(\{ length: 10 \}/);
 assert.match(panel, /NAME STRATEGY BEFORE SAVING/);
 assert.match(panel, /RESET PAPER ACCOUNT/);
 assert.match(panel, /Move target one slot left/);
-assert.match(worker, /this worker build is paper-only and refuses a live execution configuration/);
+assert.match(worker, /STRATEGY_AUTOMATION_REAL_FUNDS_FORBIDDEN/);
+assert.match(worker, /strategy_target_binding_id/);
+assert.match(worker, /execution_commands/);
 assert.doesNotMatch(worker, /placeOrder|cancelOrder|modifyOrder|execution_orders.*insert/i, "paper worker contains no broker order mutation path");
 assert.match(worker, /candleClosedAt <= Date\.parse\(position\.opened_at\)/, "same-candle look-ahead exit is rejected");
 assert.match(worker, /averageTrueRange\(candles, 14\)/, "volatility-target sizing is based on closed-candle ATR");
 assert.match(compose, /STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "false"/);
+assert.match(compose, /STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true"/);
 assert.match(compose, /STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "false"/);
 
-console.log("Strategy automation domain and security tests PASS — naming, slots, sizing, leverage, Spot controls, arming gates, one-stream UI, paper-only worker and no-look-ahead contracts verified.");
+console.log("Strategy automation domain and security tests PASS — naming, sizing, demo-only arming, real-funds rejection, durable command emission and no-look-ahead contracts verified.");
+
+function paperPolicyForArm() { return { ...defaultPaperCapitalPolicy("FUTURES"), maximumDailyLoss: 500, maximumDrawdown: 20 }; }
 
 function read(relativePath) { return fs.readFileSync(path.join(root, relativePath), "utf8"); }

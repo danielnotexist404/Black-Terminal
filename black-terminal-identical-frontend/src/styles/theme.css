@@ -4702,6 +4702,43 @@ body.resizing-layout * {
   }
 }
 
+/* Strategy Lab — explicit Bybit Demo execution boundary. */
+.strategy-demo-connect,
+.strategy-demo-connected {
+  margin: 16px 0;
+  border: 1px solid rgba(185, 20, 50, 0.55);
+  border-radius: 8px;
+  background: linear-gradient(145deg, rgba(17, 8, 12, 0.94), rgba(5, 6, 8, 0.98));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 14px 38px rgba(0, 0, 0, 0.28);
+  padding: 16px;
+}
+
+.strategy-demo-connect { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.strategy-demo-connect-head { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; color: #e8e9ec; }
+.strategy-demo-connect-head div { display: grid; gap: 4px; }
+.strategy-demo-connect-head span { color: #858b94; font-size: 10px; }
+.strategy-demo-connect label { display: grid; gap: 6px; color: #868c95; font-size: 9px; letter-spacing: .08em; }
+.strategy-demo-connect input { min-width: 0; height: 36px; border: 1px solid #30323a; border-radius: 5px; background: #07080a; color: #f1f2f4; padding: 0 10px; outline: none; }
+.strategy-demo-connect input:focus { border-color: #b20d32; box-shadow: 0 0 0 2px rgba(178, 13, 50, .15); }
+.strategy-demo-connect > button { grid-column: 1 / -1; justify-self: start; }
+.strategy-demo-connected { display: flex; align-items: center; gap: 12px; color: #eceef1; }
+.strategy-demo-connected > svg { color: #d5d9df; }
+.strategy-demo-connected > div { display: grid; gap: 4px; flex: 1; }
+.strategy-demo-connected span { color: #8d939c; font-size: 9px; letter-spacing: .06em; }
+.strategy-demo-connected button { display: inline-flex; align-items: center; gap: 6px; }
+.demo-boundary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.demo-boundary > div { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; row-gap: 4px; align-items: center; }
+.demo-boundary > div span { grid-column: 2; color: #858b94; }
+.live-certification-banner.demo-ready { border-color: rgba(191, 24, 53, .55); background: linear-gradient(90deg, rgba(93, 4, 22, .28), rgba(10, 10, 13, .9)); }
+
+@media (max-width: 850px) {
+  .strategy-demo-connect { grid-template-columns: 1fr; }
+  .strategy-demo-connect-head,
+  .strategy-demo-connect > button { grid-column: 1; }
+  .strategy-demo-connected { align-items: flex-start; flex-wrap: wrap; }
+  .demo-boundary { grid-template-columns: 1fr; }
+}
+
 /* Strategy Lab — My Strategy library, guided workflow and operating cockpit. */
 .my-strategy-experience { min-height: 100%; color: #d8dbe0; font-size: 12px; }
 .strategy-visual-chart-placeholder { position: absolute; inset: 0; background: #030406; }

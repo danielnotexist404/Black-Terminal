@@ -13,19 +13,14 @@ import { storeBrokerCredential } from "../../cloud-execution/secret-vault.js";
 import { hashCanonicalPayload, signCanonicalPayload } from "../../cloud-execution/canonical.js";
 import { BYBIT_EXECUTION_ENVIRONMENTS, normalizeBybitExecutionEnvironment, resolveBybitEndpointSet } from "../../exchanges/bybit-endpoints.js";
 
-const CONFIRMATION = "ENABLE OFFLINE CLOUD EXECUTION";
+const CONSENT_ACTION = "ACTIVATE_BYBIT_DEMO_STRATEGY_EXECUTION";
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
   try {
     requireMethod(req, "POST");
     const { supabase, user } = await requireUser(req);
-    requireFields(req.body, ["accountId", "confirmation"]);
-    if (req.body.confirmation !== CONFIRMATION) {
-      const error = new Error(`Explicit confirmation is required: ${CONFIRMATION}`);
-      error.statusCode = 400;
-      throw error;
-    }
+    requireFields(req.body, ["accountId"]);
     if (process.env.CLOUD_EXECUTION_CONTROL_PLANE_ENABLED !== "true") {
       const error = new Error("Black Cloud connection activation is disabled by rollout policy.");
       error.statusCode = 403;
@@ -38,7 +33,13 @@ export default async function handler(req, res) {
       error.statusCode = 501;
       throw error;
     }
-    const executionEnvironment = normalizeBybitExecutionEnvironment(BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE);
+    const executionEnvironment = normalizeBybitExecutionEnvironment(account.execution_environment || account.network);
+    if (executionEnvironment !== BYBIT_EXECUTION_ENVIRONMENTS.DEMO) {
+      const error = new Error("Persistent Strategy Lab execution is currently available only for Bybit Demo Trading. Real-funds Mainnet remains locked.");
+      error.statusCode = 403;
+      error.code = "BYBIT_REAL_FUNDS_AUTOMATION_LOCKED";
+      throw error;
+    }
     const endpointSet = resolveBybitEndpointSet({ executionEnvironment, endpointProfile: "GLOBAL" });
     const { data: legacyCredential, error: credentialError } = await supabase
       .from("exchange_credentials")
@@ -99,7 +100,7 @@ export default async function handler(req, res) {
       execution_readiness: "BLOCKED",
       control_state: "ACTIVE",
       last_authenticated_at: new Date().toISOString(),
-      capabilities: ["read-balances", "read-positions", "read-orders", "market-orders", "limit-orders", "offline-execution", "group-orders"],
+      capabilities: ["read-balances", "read-positions", "read-orders", "market-orders", "limit-orders", "offline-execution", "strategy-orders"],
       permissions: { trading: true, withdrawal: false },
       execution_environment: executionEnvironment,
       endpoint_profile: endpointSet.region,
@@ -111,7 +112,9 @@ export default async function handler(req, res) {
         executionEnvironment,
         endpointProfile: endpointSet.region,
         websocketOrderEntrySupported: endpointSet.websocketOrderEntrySupported,
-        activation: "explicit-user-consent"
+        activation: CONSENT_ACTION,
+        simulatedFunds: true,
+        mainnetPublicMarketData: true
       }
     };
     const { data: connection, error: connectionError } = await supabase
@@ -136,8 +139,8 @@ export default async function handler(req, res) {
       can_manage_leverage: true,
       can_manage_margin_mode: true,
       can_execute_while_offline: true,
-      can_copy_trade: true,
-      can_receive_group_orders: true,
+      can_copy_trade: false,
+      can_receive_group_orders: false,
       can_withdraw: false,
       can_transfer: false,
       supported_order_types: supportedOrderTypes,
@@ -273,7 +276,7 @@ async function createAutomationMandate(supabase, userId, account, connection, re
   const canonicalHash = hashCanonicalPayload(policy);
   const serviceSignature = signCanonicalPayload(policy);
   const consentEvidence = {
-    confirmation: CONFIRMATION,
+    action: CONSENT_ACTION,
     executionEnvironment: requested.executionEnvironment,
     acceptedAt,
     persistentAfterLogout: true

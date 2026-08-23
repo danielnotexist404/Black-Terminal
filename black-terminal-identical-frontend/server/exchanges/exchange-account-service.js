@@ -6,7 +6,13 @@ import { BYBIT_EXECUTION_ENVIRONMENTS, resolveBybitEndpointSet } from "./bybit-e
 import { getBrokerAdapterDefinition } from "./broker-adapter-registry.js";
 import { settleSupabaseQuery } from "../supabase-query.js";
 
-export async function establishExchangeAccount({ supabase, user, input, authorization = null }) {
+export async function establishExchangeAccount({
+  supabase,
+  user,
+  input,
+  authorization = null,
+  executionEnvironment: serverExecutionEnvironment = BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE
+}) {
   const exchange = String(input.exchange || "").trim().toLowerCase();
   const definition = getBrokerAdapterDefinition(exchange);
   if (!definition?.authorization?.apiCredentials) {
@@ -14,10 +20,10 @@ export async function establishExchangeAccount({ supabase, user, input, authoriz
   }
   const accountName = String(input.accountName || "").trim();
   if (!accountName || !input.apiKey || !input.apiSecret) throw typedError("MISSING_BROKER_CREDENTIALS", "Account name, API key and API secret are required.", 400);
-  // This production adapter is intentionally locked. Client-provided legacy
-  // environment/region fields are ignored so hidden controls cannot redirect
-  // credentials to another Bybit endpoint.
-  const endpointSet = resolveBybitEndpointSet({ executionEnvironment: BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE, endpointProfile: "GLOBAL" });
+  // Routing is selected by the authenticated server route. Client-provided
+  // environment/region fields are ignored so hidden controls can never move a
+  // credential between Bybit Demo and real-funds Mainnet.
+  const endpointSet = resolveBybitEndpointSet({ executionEnvironment: serverExecutionEnvironment, endpointProfile: "GLOBAL" });
   const executionEnvironment = endpointSet.environment;
   const endpointProfile = endpointSet.region;
   const network = executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO ? "demo" : "mainnet";

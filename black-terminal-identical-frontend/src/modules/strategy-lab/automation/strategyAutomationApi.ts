@@ -100,10 +100,11 @@ export const strategyAutomationApi = {
     targetType: StrategyTargetType,
     targetId: string,
     marketType: "SPOT" | "FUTURES",
+    capitalPolicy?: StrategyCapitalPolicy,
   ) =>
     request<{ binding: StrategyTargetBinding }>(
       `${encodeURIComponent(strategyId)}/targets`,
-      mutation({ slotIndex, targetType, targetId, marketType }),
+      mutation({ slotIndex, targetType, targetId, marketType, ...(capitalPolicy ? { capitalPolicy } : {}) }),
     ),
   reorderTargets: (
     strategyId: string,
@@ -132,7 +133,7 @@ export const strategyAutomationApi = {
   targetAction: (
     strategyId: string,
     binding: StrategyTargetBinding,
-    action: "pause" | "resume",
+    action: "arm" | "pause" | "resume",
   ) =>
     request<{ binding: StrategyTargetBinding }>(
       `${encodeURIComponent(strategyId)}/targets/${encodeURIComponent(binding.id)}/${action}`,

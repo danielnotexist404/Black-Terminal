@@ -1,6 +1,7 @@
 import {
   findBybitOrderByClientOrderId,
   getBybitInstrumentMetadata,
+  getBybitPositions,
   getBybitTicker,
   getBybitWalletSnapshot,
   validateBybitOrderDraft
@@ -22,6 +23,7 @@ import { createCloudExchangeAdapter } from "./adapters/registry.js";
 import { normalizeBybitExecutionEnvironment } from "../exchanges/bybit-endpoints.js";
 import { runBrokerCredentialCryptoSelfTest } from "./secret-vault.js";
 import { measureBybitClockHealth, WORKER_CLOCK_STATUSES } from "./clock-health.js";
+import { calculateCapitalPreview, calculateEffectiveLeverage, normalizeCapitalPolicy } from "../strategy-automation/domain.js";
 import fs from "node:fs";
 
 const BLACK_CLOUD_SOFTWARE_VERSION = readPackageVersion();
@@ -240,6 +242,7 @@ export class BlackCloudExecutionWorker {
     try {
       let result;
       if (command.command_type === "EXPAND_GROUP_INTENT") result = await this.expandGroupIntent(command);
+      else if (command.command_type === "PLACE_ORDER" && command.strategy_target_binding_id) result = await this.placeStrategyOrder(command, fencingToken);
       else if (command.command_type === "PLACE_ORDER") result = await this.placeFollowerOrder(command, fencingToken);
       else if (command.command_type === "MODIFY_ORDER") result = await this.executeBrokerMutation(command, fencingToken, "modify");
       else if (command.command_type === "CANCEL_ORDER") result = await this.executeBrokerMutation(command, fencingToken, "cancel");
@@ -257,7 +260,7 @@ export class BlackCloudExecutionWorker {
       const classification = classifyExecutionError(error, command);
       this.metricsCounters.commandsFailed += 1;
       if (/fencing|stale worker/i.test(String(error?.message || error))) this.metricsCounters.fencingRejections += 1;
-      if (command.command_type === "PLACE_ORDER" && !classification.ambiguous) this.metricsCounters.ordersRejected += 1;
+      if (command.command_type === "PLACE_ORDER" && !classification.ambiguous && classification.code !== "STRATEGY_REVERSE_WAITING_FOR_FLAT") this.metricsCounters.ordersRejected += 1;
       if (classification.ambiguous) this.metricsCounters.unknownSubmissionOutcomes += 1;
       await this.repository.finishAttempt(attemptId, classification.attemptOutcome, {
         errorCode: classification.code,
@@ -349,6 +352,7 @@ export class BlackCloudExecutionWorker {
 
   async placeFollowerOrder(command, fencingToken) {
     this.assertSubmissionClockSafe();
+    if (process.env.INVESTMENT_GROUP_EXECUTION_ENABLED !== "true") throw terminalError("INVESTMENT_GROUP_EXECUTION_DISABLED", "Investment Group execution is disabled on this worker.");
     if (process.env.BYBIT_CLOUD_EXECUTION_ENABLED !== "true") throw terminalError("BYBIT_CLOUD_DISABLED", "Bybit Cloud execution is disabled.");
     const [plan, intent, mandate, connection, capabilities] = await Promise.all([
       single(this.supabase.from("follower_execution_plans").select("*").eq("id", command.follower_plan_id)),
@@ -484,6 +488,256 @@ export class BlackCloudExecutionWorker {
     }
 
     return this.persistAcceptedOrder({ command, plan, intent, account, allocation, venueReport });
+  }
+
+  async placeStrategyOrder(command, fencingToken) {
+    this.assertSubmissionClockSafe();
+    if (process.env.BYBIT_CLOUD_EXECUTION_ENABLED !== "true" || process.env.STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED !== "true") {
+      throw terminalError("BYBIT_DEMO_STRATEGY_DISABLED", "Bybit Demo strategy execution is disabled.");
+    }
+    const [binding, strategy, connection, capabilities] = await Promise.all([
+      single(this.supabase.from("strategy_target_bindings").select("*").eq("id", command.strategy_target_binding_id)),
+      single(this.supabase.from("strategy_automation_strategies").select("*").eq("id", command.strategy_automation_id)),
+      single(this.supabase.from("connectivity_connections").select("*").eq("id", command.connection_id)),
+      single(this.supabase.from("broker_connection_capabilities").select("*").eq("connection_id", command.connection_id))
+    ]);
+    if (binding.strategy_id !== strategy.id || binding.connection_id !== connection.id || binding.owner_user_id !== command.user_id) {
+      throw terminalError("STRATEGY_COMMAND_OWNERSHIP_MISMATCH", "Strategy command ownership or binding identity does not match.");
+    }
+    if (binding.target_type !== "BROKER_ACCOUNT" || binding.status !== "LIVE") throw terminalError("STRATEGY_TARGET_NOT_LIVE", "The Strategy Lab target is not armed.");
+    if (Number(binding.strategy_version) !== Number(strategy.running_version)) throw terminalError("STRATEGY_VERSION_NOT_RUNNING", "The armed target does not match the running strategy version.");
+    if (connection.provider !== "bybit" || !connection.account_id) throw terminalError("PROVIDER_UNSUPPORTED", "Only a linked Bybit Demo account is supported.");
+    if (connection.control_state !== "ACTIVE" || connection.execution_readiness !== "READY") throw terminalError("CONNECTION_NOT_READY", "The Bybit Demo connection is not ready for strategy execution.");
+    if (!capabilities.can_place_market_orders || capabilities.can_withdraw || capabilities.can_transfer) {
+      throw terminalError("BROKER_CAPABILITY_REJECTED", "The broker capability set is not safe for demo strategy execution.");
+    }
+    const automationMandate = await this.repository.requireAutomationMandate(connection.id, "strategy");
+    const [account, secretReference, riskControl, latestSnapshot] = await Promise.all([
+      single(this.supabase.from("exchange_accounts").select("*").eq("id", connection.account_id)),
+      single(this.supabase.from("broker_secret_references").select("id,status").eq("connection_id", connection.id).eq("status", "ACTIVE")),
+      oneOrNull(this.supabase.from("account_risk_controls").select("*").eq("account_id", connection.account_id).maybeSingle()),
+      oneOrNull(this.supabase.from("strategy_target_snapshots").select("snapshot").eq("binding_id", binding.id).maybeSingle())
+    ]);
+    const credentials = await this.repository.readBrokerSecret(secretReference.id, "strategy_demo_order_execution");
+    const credentialEnvironment = assertWorkerEnvironment(connection, credentials);
+    if (credentialEnvironment !== "DEMO" || account.execution_environment !== "DEMO" || automationMandate.execution_environment !== "DEMO") {
+      throw terminalError("REAL_FUNDS_STRATEGY_EXECUTION_FORBIDDEN", "Strategy Lab demo execution cannot route to a real-funds Mainnet account.");
+    }
+    if (!account.trading_enabled || account.is_read_only) throw terminalError("ACCOUNT_READ_ONLY", "The Bybit Demo account is not trade enabled.");
+    if (riskControl?.emergency_stop) throw terminalError("ACCOUNT_EMERGENCY_STOP", "The account emergency stop is active.");
+
+    const payload = command.payload || {};
+    const symbol = String(payload.symbol || strategy.symbol || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    if (!symbol || symbol !== String(strategy.symbol).replace(/[^A-Za-z0-9]/g, "").toUpperCase()) throw terminalError("STRATEGY_SYMBOL_MISMATCH", "The command symbol does not match the running strategy.");
+    if (Array.isArray(automationMandate.allowed_strategies) && automationMandate.allowed_strategies.length && !automationMandate.allowed_strategies.includes(strategy.id)) {
+      throw terminalError("MANDATE_STRATEGY_REJECTED", "The automation mandate does not permit this strategy.");
+    }
+    if (Array.isArray(automationMandate.allowed_symbols) && automationMandate.allowed_symbols.length && !automationMandate.allowed_symbols.includes(symbol)) {
+      throw terminalError("MANDATE_SYMBOL_REJECTED", "The automation mandate does not permit this symbol.");
+    }
+    const marketKind = binding.market_type === "SPOT" ? "spot" : "perpetual";
+    const category = marketKind === "spot" ? "spot" : "linear";
+    const [wallet, metadataRows, ticker, venuePositions] = await Promise.all([
+      getBybitWalletSnapshot(credentials),
+      getBybitInstrumentMetadata({ category, symbol, executionEnvironment: credentialEnvironment, endpointProfile: credentials.endpointProfile }),
+      getBybitTicker({ category, symbol, executionEnvironment: credentialEnvironment, endpointProfile: credentials.endpointProfile }),
+      marketKind === "spot" ? Promise.resolve([]) : getBybitPositions(credentials, { category, symbol, includeEmpty: true })
+    ]);
+    const instrument = metadataRows[0];
+    if (!instrument || String(instrument.tradingStatus).toLowerCase() !== "trading") throw terminalError("MARKET_UNAVAILABLE", `${symbol} is not currently tradable.`);
+    const referencePrice = Number(ticker.markPrice || ticker.lastPrice);
+    if (!Number.isFinite(referencePrice) || referencePrice <= 0) throw terminalError("REFERENCE_PRICE_REQUIRED", "A current server-side Bybit price is required.");
+
+    const openPositions = venuePositions.filter((position) => position.quantity > 0 && position.direction !== "flat");
+    const persistedPositions = await rows(this.supabase.from("account_positions")
+      .select("direction,quantity,position_idx,strategy_target_binding_id,updated_at")
+      .eq("account_id", account.id)
+      .eq("symbol", symbol)
+      .gt("quantity", 0));
+    const strategyOwnedKeys = new Set(persistedPositions
+      .filter((position) => position.strategy_target_binding_id === binding.id)
+      .map((position) => `${position.position_idx}:${position.direction}`));
+    const currentAccountPnl = openPositions.reduce((sum, position) => sum + Number(position.unrealizedPnl || 0), 0);
+    const requestedAction = String(payload.action || "ENTRY").toUpperCase();
+    const desiredDirection = String(payload.direction || "").toLowerCase();
+    const sameDirectionPosition = openPositions.find((item) => item.direction === desiredDirection);
+    const oppositeDirectionPositions = openPositions.filter((item) => item.direction !== desiredDirection);
+    if (requestedAction === "REVERSE" && sameDirectionPosition && oppositeDirectionPositions.length === 0) {
+      return { skipped: true, reason: "DESIRED_POSITION_ALREADY_OPEN", simulatedFunds: true };
+    }
+    if (requestedAction === "REVERSE" && sameDirectionPosition && oppositeDirectionPositions.length > 0) {
+      throw terminalError("STRATEGY_HEDGE_STATE_AMBIGUOUS", "Bybit Demo has both hedge legs open; automated reversal is blocked until the account is reconciled manually.");
+    }
+    const reversingClose = requestedAction === "REVERSE" && oppositeDirectionPositions.length > 0;
+    const action = requestedAction === "REVERSE" ? (reversingClose ? "CLOSE" : "ENTRY") : requestedAction;
+    let side;
+    let quantity;
+    let reduceOnly = false;
+    let positionIdx = 0;
+    let policy;
+    let effectiveLeverage = 1;
+    let estimatedMargin = 0;
+    let estimatedNotional = 0;
+    if (action === "CLOSE") {
+      const requestedDirection = reversingClose ? oppositeDirectionPositions[0]?.direction : String(payload.positionDirection || "").toLowerCase();
+      const position = openPositions.find((item) => !requestedDirection || item.direction === requestedDirection);
+      if (!position) return { skipped: true, reason: "POSITION_ALREADY_FLAT" };
+      if (!strategyOwnedKeys.has(`${position.positionIdx}:${position.direction}`)) {
+        throw terminalError("STRATEGY_POSITION_OWNERSHIP_REQUIRED", "Black Cloud refused to close a Bybit Demo position that is not attributed to this strategy target.");
+      }
+      side = position.direction === "long" ? "sell" : "buy";
+      quantity = position.quantity;
+      reduceOnly = true;
+      positionIdx = position.positionIdx;
+      estimatedNotional = Math.abs(quantity * referencePrice);
+      estimatedMargin = Number(position.margin || 0);
+    } else if (action === "ENTRY") {
+      if (openPositions.length) return { skipped: true, reason: "VENUE_POSITION_ALREADY_OPEN" };
+      policy = normalizeCapitalPolicy(policyFromStrategyBinding(binding), binding.market_type, { allowZeroAllocation: false });
+      const drawdown = Number(latestSnapshot?.snapshot?.currentDrawdownPercent || 0);
+      if (policy.maximumDrawdown > 0 && drawdown >= policy.maximumDrawdown) throw terminalError("STRATEGY_MAX_DRAWDOWN", "The strategy target reached its maximum drawdown.");
+      const dailyLossLimit = Math.min(
+        policy.maximumDailyLoss,
+        nullablePositive(automationMandate.max_daily_loss) || Number.POSITIVE_INFINITY,
+        nullablePositive(riskControl?.max_daily_loss_usd) || Number.POSITIVE_INFINITY
+      );
+      if (Number.isFinite(dailyLossLimit) && currentAccountPnl <= -dailyLossLimit) {
+        throw terminalError("STRATEGY_MAX_DAILY_LOSS", "The Bybit Demo account reached the configured daily-loss ceiling.");
+      }
+      effectiveLeverage = binding.market_type === "SPOT" ? 1 : calculateEffectiveLeverage({
+        requested: policy.requestedLeverage,
+        targetMaximum: policy.maximumLeverage,
+        accountRiskCap: riskControl?.max_leverage,
+        emsRiskCap: automationMandate.max_leverage,
+        providerCap: instrument.leverageLimits?.max
+      });
+      const preview = calculateCapitalPreview({
+        equity: wallet.accountMetrics.equityUsd,
+        availableBalance: wallet.accountMetrics.availableBalanceUsd,
+        policy,
+        marketType: binding.market_type,
+        caps: { accountRiskCap: riskControl?.max_leverage, emsRiskCap: automationMandate.max_leverage, providerCap: instrument.leverageLimits?.max }
+      });
+      quantity = policy.tradeAmountMode === "FIXED_QUANTITY" ? policy.tradeAmountValue : preview.estimatedNotional / referencePrice;
+      const maxPositionNotional = preview.allocatedStrategyCapital * policy.maximumPositionPercent / 100 * effectiveLeverage;
+      const maxExposureNotional = preview.allocatedStrategyCapital * policy.maximumExposurePercent / 100 * effectiveLeverage;
+      const mandateCap = Number(automationMandate.max_order_notional || Number.POSITIVE_INFINITY);
+      const accountCap = Number(riskControl?.max_position_usd || Number.POSITIVE_INFINITY);
+      estimatedNotional = Math.min(quantity * referencePrice, maxPositionNotional, maxExposureNotional, mandateCap, accountCap);
+      quantity = estimatedNotional / referencePrice;
+      estimatedMargin = binding.market_type === "SPOT" ? estimatedNotional : estimatedNotional / effectiveLeverage;
+      side = String(payload.direction).toLowerCase() === "short" ? "sell" : "buy";
+      const hedgeMode = venuePositions.some((item) => item.positionIdx === 1 || item.positionIdx === 2);
+      positionIdx = hedgeMode ? (side === "buy" ? 1 : 2) : 0;
+    } else {
+      throw terminalError("STRATEGY_ACTION_INVALID", "Unsupported Strategy Lab order action.");
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) throw terminalError("STRATEGY_QUANTITY_INVALID", "The risk-bounded strategy quantity is zero or invalid.");
+
+    const orderDraft = {
+      accountId: account.id,
+      symbol,
+      marketKind,
+      side,
+      orderType: "market",
+      quantity,
+      quantityMode: "quantity",
+      referencePrice,
+      takeProfit: reduceOnly ? undefined : nullablePositive(payload.takeProfit),
+      stopLoss: reduceOnly ? undefined : nullablePositive(payload.stopLoss),
+      leverage: effectiveLeverage,
+      marginMode: String(policy?.marginMode || "CROSS").toLowerCase(),
+      reduceOnly,
+      positionIdx,
+      timeInForce: "ioc",
+      clientOrderId: requestedAction === "REVERSE"
+        ? deterministicStrategyLegId(command.deterministic_client_order_id, reversingClose ? "c" : "e")
+        : command.deterministic_client_order_id,
+      source: "strategy-automation-demo"
+    };
+    const venueValidation = await validateBybitOrderDraft(credentials, orderDraft);
+    if (!venueValidation.ok) throw terminalError("VENUE_VALIDATION_REJECTED", venueValidation.reasons.join(" "));
+    orderDraft.quantity = venueValidation.normalized.quantity;
+    estimatedNotional = orderDraft.quantity * referencePrice;
+    if (!reduceOnly) estimatedMargin = binding.market_type === "SPOT" ? estimatedNotional : estimatedNotional / effectiveLeverage;
+    const existingVenueOrder = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol, clientOrderId: orderDraft.clientOrderId });
+    if (existingVenueOrder) {
+      if (["rejected", "cancelled", "canceled", "failed"].includes(String(existingVenueOrder.status || "").toLowerCase())) {
+        throw terminalError("STRATEGY_REVERSE_CLOSE_REJECTED", "Bybit Demo rejected or cancelled the reversal close order.");
+      }
+      const persisted = await this.persistStrategyAcceptedOrder({ command, binding, strategy, account, orderDraft, venueReport: existingVenueOrder, estimatedMargin, estimatedNotional, recovered: true });
+      if (reversingClose) throw retryableError("STRATEGY_REVERSE_WAITING_FOR_FLAT", "The close leg was acknowledged; waiting for Bybit Demo to confirm the position is flat before entering the reverse leg.", 2);
+      return persisted;
+    }
+
+    let venueReport;
+    try {
+      await this.repository.assertFencingToken(connection.id, fencingToken);
+      this.assertSubmissionClockSafe();
+      const adapter = createCloudExchangeAdapter("bybit", { credentials, executionEnvironment: credentialEnvironment, endpointProfile: credentials.endpointProfile || "GLOBAL", connectionId: connection.id });
+      venueReport = await adapter.placeOrder(orderDraft, venueValidation);
+      this.metricsCounters.ordersSubmitted += 1;
+    } catch (error) {
+      if (!isAmbiguousTransportError(error)) throw error;
+      const recovered = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol, clientOrderId: orderDraft.clientOrderId }).catch(() => null);
+      if (recovered) {
+        const persisted = await this.persistStrategyAcceptedOrder({ command, binding, strategy, account, orderDraft, venueReport: recovered, estimatedMargin, estimatedNotional, recovered: true });
+        if (reversingClose) throw retryableError("STRATEGY_REVERSE_WAITING_FOR_FLAT", "The close leg was recovered; waiting for Bybit Demo to confirm the position is flat before entering the reverse leg.", 2);
+        return persisted;
+      }
+      throw ambiguousError("Bybit Demo submission timed out before acknowledgement. Reconciliation will query the deterministic client order ID.");
+    }
+    const persisted = await this.persistStrategyAcceptedOrder({ command, binding, strategy, account, orderDraft, venueReport, estimatedMargin, estimatedNotional, recovered: false });
+    if (reversingClose) throw retryableError("STRATEGY_REVERSE_WAITING_FOR_FLAT", "The close leg was acknowledged; waiting for Bybit Demo to confirm the position is flat before entering the reverse leg.", 2);
+    return persisted;
+  }
+
+  async persistStrategyAcceptedOrder({ command, binding, strategy, account, orderDraft, venueReport, estimatedMargin, estimatedNotional, recovered }) {
+    const venueOrderId = venueReport.exchangeOrderId || venueReport.orderId;
+    const { data: existing, error: existingError } = await this.supabase.from("execution_orders").select("id").eq("client_order_id", orderDraft.clientOrderId).maybeSingle();
+    if (existingError) throw existingError;
+    let orderId = existing?.id;
+    if (!orderId) {
+      const order = await insertSingle(this.supabase.from("execution_orders"), {
+        user_id: command.user_id,
+        account_id: account.id,
+        exchange: "bybit",
+        symbol: orderDraft.symbol,
+        side: orderDraft.side,
+        order_type: "market",
+        quantity: orderDraft.quantity,
+        quantity_mode: "quantity",
+        take_profit: orderDraft.takeProfit || null,
+        stop_loss: orderDraft.stopLoss || null,
+        reduce_only: orderDraft.reduceOnly,
+        time_in_force: "ioc",
+        status: normalizeInternalStatus(venueReport.status),
+        exchange_order_id: venueOrderId,
+        client_order_id: orderDraft.clientOrderId,
+        origin: "STRATEGY_AUTOMATION_DEMO",
+        strategy_automation_id: strategy.id,
+        strategy_target_binding_id: binding.id,
+        filled_quantity: 0,
+        estimated_fees: estimatedNotional * 0.0006,
+        estimated_margin: estimatedMargin,
+        estimated_slippage: 0,
+        risk_check_status: "approved",
+        risk_check_reasons: []
+      });
+      orderId = order.id;
+    }
+    await updateOrThrow(this.supabase.from("execution_commands").update({ execution_order_id: orderId }).eq("id", command.id));
+    await this.repository.audit({
+      userId: command.user_id,
+      connectionId: command.connection_id,
+      commandId: command.id,
+      eventType: recovered ? "STRATEGY_DEMO_ORDER_RECONCILED" : "STRATEGY_DEMO_ORDER_ACKNOWLEDGED",
+      purpose: "strategy_demo_order_execution",
+      message: recovered ? "An existing Bybit Demo order was adopted by deterministic client order ID." : "A Bybit Demo strategy order was acknowledged.",
+      metadata: { strategyId: strategy.id, bindingId: binding.id, symbol: orderDraft.symbol, reduceOnly: orderDraft.reduceOnly, simulatedFunds: true, venueOrderId }
+    });
+    this.metricsCounters.ordersConfirmed += 1;
+    return { venueOrderId, orderId, recovered, simulatedFunds: true };
   }
 
   async adoptVenueOrder({ command, plan, intent, account, allocation, existingVenueOrder }) {
@@ -765,6 +1019,11 @@ function retryableError(code, message, retryAfterSeconds) {
   return error;
 }
 
+function deterministicStrategyLegId(baseId, leg) {
+  const safeBase = String(baseId || "bt-strategy").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 33);
+  return `${safeBase}-${leg}`.slice(0, 36);
+}
+
 function ambiguousError(message) {
   const error = terminalError("SUBMISSION_UNKNOWN", message);
   error.ambiguous = true;
@@ -801,6 +1060,37 @@ async function single(query) {
   const { data, error } = await query.single();
   if (error || !data) throw error || new Error("Required Black Cloud record was not found.");
   return data;
+}
+
+async function oneOrNull(query) {
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || null;
+}
+
+function policyFromStrategyBinding(row) {
+  return {
+    strategyAllocationMode: row.strategy_allocation_mode,
+    strategyAllocationValue: Number(row.strategy_allocation_value),
+    tradeAmountMode: row.trade_amount_mode,
+    tradeAmountValue: Number(row.trade_amount_value),
+    requestedLeverage: row.requested_leverage == null ? undefined : Number(row.requested_leverage),
+    maximumLeverage: row.maximum_leverage == null ? undefined : Number(row.maximum_leverage),
+    maximumPositionPercent: Number(row.maximum_position_percent),
+    maximumExposurePercent: Number(row.maximum_exposure_percent),
+    maximumDailyLoss: Number(row.maximum_daily_loss),
+    maximumDrawdown: Number(row.maximum_drawdown),
+    maximumPositions: Number(row.maximum_positions),
+    slippageBps: Number(row.slippage_bps),
+    marginMode: row.margin_mode || undefined,
+    quoteAssetReservePercent: row.quote_asset_reserve_percent == null ? undefined : Number(row.quote_asset_reserve_percent),
+    maximumBaseAssetExposurePercent: row.maximum_base_asset_exposure_percent == null ? undefined : Number(row.maximum_base_asset_exposure_percent)
+  };
+}
+
+function nullablePositive(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 async function insertSingle(query, payload) {

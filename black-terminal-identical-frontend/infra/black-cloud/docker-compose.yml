@@ -131,6 +131,8 @@ services:
     environment:
       SUPABASE_URL: http://supabase-kong:8000
       STRATEGY_AUTOMATION_PAPER_ENABLED: "true"
+      STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true"
+      BYBIT_DEMO_ENABLED: "true"
       STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "false"
       STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "false"
     profiles: ["strategy-automation"]
@@ -185,11 +187,35 @@ services:
     read_only: true
     profiles: ["analytics"]
 
+  black-cloud-demo-execution-worker:
+    <<: *runtime
+    command: ["node", "scripts/black-cloud-execution-worker.js"]
+    environment:
+      SUPABASE_URL: http://supabase-kong:8000
+      BLACK_CLOUD_EXECUTION_ENVIRONMENT: DEMO
+      BYBIT_DEMO_ENABLED: "true"
+      STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true"
+      INVESTMENT_GROUP_EXECUTION_ENABLED: "false"
+      BLACK_CLOUD_MAINNET_ENABLED: "false"
+    profiles: ["strategy-automation"]
+
+  bybit-demo-private-stream:
+    <<: *runtime
+    command: ["node", "scripts/bybit-private-stream-supervisor.js"]
+    environment:
+      SUPABASE_URL: http://supabase-kong:8000
+      BLACK_CLOUD_EXECUTION_ENVIRONMENT: DEMO
+      BYBIT_DEMO_ENABLED: "true"
+      STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true"
+      BLACK_CLOUD_MAINNET_ENABLED: "false"
+    profiles: ["strategy-automation"]
+
   black-cloud-execution-worker:
     <<: *runtime
     command: ["node", "scripts/black-cloud-execution-worker.js"]
     environment:
       SUPABASE_URL: http://supabase-kong:8000
+      STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "false"
     profiles: ["live-execution"]
 
   bybit-private-stream:
@@ -197,6 +223,7 @@ services:
     command: ["node", "scripts/bybit-private-stream-supervisor.js"]
     environment:
       SUPABASE_URL: http://supabase-kong:8000
+      STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "false"
     profiles: ["live-execution"]
 
 networks:

@@ -31,6 +31,7 @@ const validCases = [
   ["execution", "account-mode", { accountId, action: "set-leverage", symbol: "BTCUSDT", leverage: 2 }],
   ["execution", "strategy", { accountId, strategyId: "strategy-123", symbol: "BTCUSDT" }],
   ["exchange", "connect", { exchange: "bybit", accountName: "Demo", apiKey: "key-12345", apiSecret: "secret-12345" }],
+  ["exchange", "connect-demo", { exchange: "bybit", accountName: "Demo", apiKey: "key-12345", apiSecret: "secret-12345" }],
   ["exchange", "diagnostics", { accountId, symbol: "BTCUSDT" }],
   ["exchange", "sync", { accountId, symbol: "BTCUSDT", marketKind: "perpetual" }],
   ["exchange", "mainnet-validation", { accountId, action: "enable", confirmation: "ENABLE BYBIT MAINNET" }],
@@ -40,7 +41,7 @@ const validCases = [
   ["hyperliquid", "cancel", { accountId, symbol: "BTCUSDT", orderId: "order-123" }],
   ["hyperliquid", "close-position", { accountId, symbol: "BTCUSDT", quantity: 0.01 }],
   ["hyperliquid", "sync", { accountId }],
-  ["cloud", "connection", { accountId, confirmation: "ENABLE OFFLINE CLOUD EXECUTION" }],
+  ["cloud", "connection", { accountId }],
   ["cloud", "control", { connectionId: "connection-123", action: "pause" }],
   ["cloud", "control", { connectionId: "connection-123", action: "resume" }],
   ["cloud", "control", { connectionId: "connection-123", action: "emergency-stop", reason: "operator requested" }],
@@ -91,7 +92,7 @@ assert.equal(tradingSchemasForTests.execution.order.safeParse({ ...order, side: 
 assert.equal(tradingSchemasForTests.execution.protection.safeParse({ accountId, symbol: "BTCUSDT", stopLoss: 60000 }).success, false,
   "native Bybit protection must fail closed without explicit hedge/one-way position identity");
 assert.equal(tradingSchemasForTests.execution.order.safeParse({ ...order, quantity: -1 }).success, false);
-assert.equal(tradingSchemasForTests.cloud.connection.safeParse({ accountId, confirmation: "yes" }).success, false);
+assert.equal(tradingSchemasForTests.cloud.connection.safeParse({ accountId, confirmation: "ENABLE OFFLINE CLOUD EXECUTION" }).success, false, "legacy phrase gates are rejected rather than persisted");
 assert.equal(tradingSchemasForTests.cloud.mandate.safeParse({ action: "accept", mandateId: "mandate-123", confirmation: "yes" }).success, false);
 
 const emptyPassphraseRequest = {

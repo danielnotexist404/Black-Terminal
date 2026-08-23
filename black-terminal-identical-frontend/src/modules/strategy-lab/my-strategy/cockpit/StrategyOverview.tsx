@@ -1,4 +1,4 @@
-import { Activity, LockKeyhole } from "lucide-react";
+import { Activity, ShieldCheck } from "lucide-react";
 import type { StrategyWorkspace } from "../../automation/strategyAutomation.types";
 import { RuntimeTimeline } from "./RuntimeTimeline";
 import { TargetSlotMatrix } from "./TargetSlotMatrix";
@@ -29,7 +29,7 @@ export function StrategyOverview({ workspace, paperData, onAddTarget }: { worksp
     </div>
     <TargetSlotMatrix bindings={workspace.bindings} snapshots={workspace.snapshots} onAdd={onAddTarget} />
     <section className="cockpit-panel runtime-overview"><header><span>RUNTIME TIMELINE</span><strong>SYNCED WITH VPS</strong></header><RuntimeTimeline audit={workspace.audit} /></section>
-    <div className="live-certification-banner"><LockKeyhole size={14} /><div><strong>LIVE TRADING NOT YET CERTIFIED</strong><span>Paper automation is enabled. Broker and Investment Group execution remain disabled.</span></div></div>
+    <div className="live-certification-banner demo-ready"><ShieldCheck size={14} /><div><strong>BYBIT DEMO STRATEGY EXECUTION</strong><span>Armed demo targets use simulated funds and mainnet public market data. Real-funds Mainnet, withdrawals and transfers remain prohibited.</span></div></div>
   </div>;
 }
 

@@ -28,8 +28,8 @@ export const wizardSteps = [
   "Filters and Schedule",
   "Take Profits and Exits",
   "Paper Account",
-  "Live Targets",
-  "Review and Publish",
+  "Bybit Demo Account",
+  "Activate Strategy & Save Configuration",
 ] as const;
 
 export function createWizardDraft(definition: StrategyAutomationDefinition): StrategyWizardDraft {

@@ -72,6 +72,7 @@
     "event-alpha:worker": "node scripts/event-alpha-worker.js",
     "strategy-automation:worker": "node --experimental-strip-types scripts/strategy-automation-worker.ts",
     "test:strategy-automation": "node --experimental-strip-types scripts/strategy-definition-builder-tests.ts && node scripts/strategy-automation-tests.js && node scripts/strategy-automation-postgres-tests.js && node --experimental-strip-types scripts/my-strategy-ux-tests.ts",
+    "test:bybit-demo-strategy": "node scripts/bybit-demo-strategy-execution-tests.js",
     "benchmark:strategy-automation": "node scripts/strategy-automation-performance.js && node scripts/my-strategy-performance.js",
     "test:my-strategy-visual": "node scripts/my-strategy-visual-regression.js",
     "black-cloud:api": "node server/black-cloud/api-server.js",

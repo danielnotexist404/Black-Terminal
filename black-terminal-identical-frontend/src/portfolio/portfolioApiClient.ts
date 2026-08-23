@@ -424,7 +424,7 @@ export async function controlBlackCloudConnectionViaApi(connectionId: string, ac
   return response.json() as Promise<{ connection: BlackCloudStatusPayload["connections"][number]; monitoring: string; reconciliation: string; newOrders: string }>;
 }
 
-export async function activateBlackCloudConnectionViaApi(accountId: string, confirmation: "ENABLE OFFLINE CLOUD EXECUTION", automation: {
+export async function activateBlackCloudConnectionViaApi(accountId: string, automation: {
   allowStrategyExecution?: boolean; allowCopyTrading?: boolean; allowInvestmentGroupExecution?: boolean;
   maxOrderNotional?: number; maxPositionNotional?: number; maxLeverage?: number; maxDailyLoss?: number;
   allowedStrategies?: string[]; allowedSymbols?: string[]; expiresAt?: string; preserveProtectiveOrders?: boolean;
@@ -434,7 +434,7 @@ export async function activateBlackCloudConnectionViaApi(accountId: string, conf
   const response = await fetch("/api/cloud-execution/connection", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ accountId, confirmation, automation })
+    body: JSON.stringify({ accountId, automation })
   });
   if (!response.ok) throw new Error(await readApiError(response));
   return response.json() as Promise<{ connection: { id: string; provider: string; healthStatus: string }; offlineExecution: string; readinessReason: string }>;
@@ -481,6 +481,27 @@ export async function connectExchangeAccountViaApi(draft: ExchangeConnectionDraf
     body: JSON.stringify(payload)
   });
 
+  if (!response.ok) throw new Error(await readApiError(response));
+  const data = await response.json();
+  return mapAccount(data.account);
+}
+
+export async function connectBybitDemoAccountViaApi(draft: Pick<ExchangeConnectionDraft, "accountName" | "apiKey" | "apiSecret">): Promise<PortfolioAccount | null> {
+  const token = await getPortfolioApiToken();
+  if (!token) return null;
+  const response = await fetch("/api/exchange-accounts/connect-demo", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      exchange: "bybit",
+      accountName: draft.accountName,
+      apiKey: draft.apiKey,
+      apiSecret: draft.apiSecret
+    })
+  });
   if (!response.ok) throw new Error(await readApiError(response));
   const data = await response.json();
   return mapAccount(data.account);

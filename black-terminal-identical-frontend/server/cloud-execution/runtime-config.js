@@ -22,8 +22,11 @@ export function validateBlackCloudRuntime(env = process.env) {
     || env.EXCHANGE_CREDENTIAL_MASTER_KEY;
   required(encodedMasterKey, `BLACK_CLOUD_SECRET_MASTER_KEY_V${masterKeyVersion} (or the legacy master-key variable)`, errors);
   if (encodedMasterKey && (!/^[A-Za-z0-9+/]{43}=$/.test(encodedMasterKey) || Buffer.from(encodedMasterKey, "base64").length !== 32)) errors.push("The credential master key must be canonical base64 that decodes to exactly 32 bytes.");
-  for (const flag of ["BLACK_CLOUD_EXECUTION_ENABLED", "INVESTMENT_GROUP_EXECUTION_ENABLED", "BYBIT_CLOUD_EXECUTION_ENABLED"]) {
+  for (const flag of ["BLACK_CLOUD_EXECUTION_ENABLED", "BYBIT_CLOUD_EXECUTION_ENABLED"]) {
     if (env[flag] !== "true") errors.push(`${flag} must be true.`);
+  }
+  if (env.INVESTMENT_GROUP_EXECUTION_ENABLED !== "true" && env.STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED !== "true") {
+    errors.push("At least one bounded execution subsystem must be enabled.");
   }
   let executionEnvironment;
   let endpointSet;
@@ -35,6 +38,7 @@ export function validateBlackCloudRuntime(env = process.env) {
   }
   if (executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE && env.BLACK_CLOUD_MAINNET_ENABLED !== "true") errors.push("BLACK_CLOUD_MAINNET_ENABLED must be true for MAINNET_LIVE.");
   if (executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO && env.BYBIT_DEMO_ENABLED !== "true") errors.push("BYBIT_DEMO_ENABLED must be true for DEMO.");
+  if (executionEnvironment !== BYBIT_EXECUTION_ENVIRONMENTS.DEMO && env.STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED === "true") errors.push("STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED requires a DEMO-isolated worker.");
   if (env.BYBIT_BASE_URL || env.BYBIT_PRIVATE_WS_URL) errors.push("Legacy Bybit endpoint overrides are forbidden. Use BLACK_CLOUD_EXECUTION_ENVIRONMENT and BYBIT_ENDPOINT_PROFILE.");
   if (endpointSet) {
     for (const [endpoint, protocol] of [[endpointSet.rest, "https"], [endpointSet.privateWebSocket, "wss"]]) {

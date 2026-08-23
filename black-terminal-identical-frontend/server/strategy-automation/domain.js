@@ -268,6 +268,31 @@ export function liveAutomationEnabled(environment = process.env) {
     && environment.BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH !== "true";
 }
 
+export function demoAutomationEnabled(environment = process.env) {
+  return environment.STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED === "true"
+    && environment.BYBIT_DEMO_ENABLED === "true"
+    && environment.BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH !== "true";
+}
+
+export function assertCanArmStrategyTarget({ policy, marketType, validation, executionEnvironment, environment = process.env }) {
+  const reasons = [];
+  const normalized = normalizeCapitalPolicy(policy, marketType, { allowZeroAllocation: true });
+  if (normalized.strategyAllocationValue <= 0) reasons.push("A non-zero strategy allocation is required.");
+  if (normalized.tradeAmountValue <= 0) reasons.push("A non-zero per-trade amount is required.");
+  if (normalized.maximumPositionPercent <= 0) reasons.push("A non-zero maximum position size is required.");
+  if (normalized.maximumExposurePercent <= 0) reasons.push("A non-zero maximum exposure is required.");
+  if (normalized.maximumDailyLoss <= 0) reasons.push("A non-zero maximum daily loss is required.");
+  if (normalized.maximumDrawdown <= 0) reasons.push("A non-zero maximum drawdown is required.");
+  if (!validation?.eligible) reasons.push(...(validation?.reasons || ["Target validation is incomplete."]));
+  if (executionEnvironment === "DEMO") {
+    if (!demoAutomationEnabled(environment)) reasons.push("Bybit Demo strategy execution is disabled by VPS rollout policy.");
+  } else {
+    reasons.push("Real-funds Mainnet strategy automation is not available through the demo activation path.");
+  }
+  if (reasons.length) throw strategyError(403, "STRATEGY_TARGET_NOT_ARMABLE", `This target cannot be armed: ${reasons.join(" ")}`, { reasons });
+  return normalized;
+}
+
 export function assertCanArmLiveTarget({ policy, marketType, validation, environment = process.env }) {
   const reasons = [];
   const normalized = normalizeCapitalPolicy(policy, marketType, { allowZeroAllocation: true });

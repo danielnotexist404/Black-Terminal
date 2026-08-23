@@ -1859,7 +1859,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
           </section>
 
           <section className={panelLayoutClass("liquidity-heatmap", "dom-pro-heatmap")}>
-            <PanelTitle title="Liquidity Heatmap" status={`${settings.heatmapHorizon.toUpperCase()} HISTORICAL DEPTH`} {...panelHeaderProps("liquidity-heatmap")} />
+            <PanelTitle title="IMM Heatmap" status={`${settings.heatmapHorizon.toUpperCase()} HISTORICAL DEPTH`} {...panelHeaderProps("liquidity-heatmap")} />
             <div className="dom-pro-horizon-controls">
               {cameraPresets.map((preset) => (
                 <button
@@ -3521,7 +3521,7 @@ function buildDomProPopoutDocument(channelName: string) {
     <main class="grid">
       <section class="panel ladder"><div class="panel-title"><span>Aggregated DOM Ladder</span><b id="bookStatus">--</b></div><div id="ladder" class="ladder-body empty">Awaiting live orderbook stream.</div></section>
       <section class="panel profile"><div class="panel-title"><span>Volume Profile</span><b>DOM</b></div><div id="profile" class="profile-body empty">Awaiting live orderbook stream.</div></section>
-      <section class="panel heatmap"><div class="panel-title"><span>Liquidity Heatmap</span><b>LOW -> HIGH</b></div><div id="heatmap" class="heatmap-canvas"></div></section>
+      <section class="panel heatmap"><div class="panel-title"><span>IMM Heatmap</span><b>LOW -> HIGH</b></div><div id="heatmap" class="heatmap-canvas"></div></section>
       <section class="panel walls"><div class="panel-title"><span>Wall Detection</span><b>HEURISTIC</b></div><div id="walls" class="empty">No persistent liquidity wall detected.</div></section>
       <section class="panel tape"><div class="panel-title"><span>Trade Tape</span><b id="tapeStatus">--</b></div><div id="tape"></div></section>
       <section class="panel metrics"><div class="panel-title"><span>DOM Metrics</span><b>LIVE</b></div><div id="metrics"></div></section>

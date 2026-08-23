@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from "react";
-import { Crosshair, X } from "lucide-react";
+import { Crosshair, Maximize2, X } from "lucide-react";
 import type { MarketSymbol } from "../../../market-data/types";
 import { blackCorePerformanceMonitor } from "../../../performance/performanceMonitor";
-import { buildChartDockedDepthLadder, type ChartDockedDepthLadderModel, type ChartDockedDepthRow } from "../chartDockedDepthLadderModel";
+import { buildChartDockedDepthLadder, type ChartDockedDepthLadderModel, type ChartDockedDepthRow, type ChartDockedDepthScaleMode } from "../chartDockedDepthLadderModel";
 import { blackCoreChartPriceViewportStore } from "../chartPriceViewportStore";
 import { ProfessionalDomLadderTracker } from "../domProfessionalLadder";
 import { useDomFeed } from "../useDomFeed";
@@ -33,6 +33,7 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, exchangeLabel,
   const [size, setSize] = useState<CanvasSize>({ width: 320, height: 600 });
   const [hover, setHover] = useState<HoverState>(null);
   const [aggregationTicks, setAggregationTicks] = useState(() => readAggregation(workspaceId));
+  const [scaleMode, setScaleMode] = useState<ChartDockedDepthScaleMode>(() => readScaleMode(workspaceId));
   const feed = useDomFeed(marketSymbol, { depth: 1000 });
   const subscribeViewport = useCallback((listener: () => void) => blackCoreChartPriceViewportStore.subscribe(viewportKey, listener), [viewportKey]);
   const getViewport = useCallback(() => blackCoreChartPriceViewportStore.getSnapshot(viewportKey), [viewportKey]);
@@ -55,6 +56,11 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, exchangeLabel,
     localStorage.setItem(aggregationStorageKey(workspaceId), String(aggregationTicks));
   }, [aggregationTicks, workspaceId]);
 
+  useEffect(() => {
+    localStorage.setItem(scaleModeStorageKey(workspaceId), scaleMode);
+    setHover(null);
+  }, [scaleMode, workspaceId]);
+
   const professionalDepth = useMemo(() => trackerRef.current.update({
     book: feed.book,
     currentPrice: feed.ticker?.lastPrice ?? lastPrice,
@@ -68,8 +74,9 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, exchangeLabel,
     depth: professionalDepth,
     viewport,
     preferredRowHeight: 13,
-    maximumRows: 180
-  }) : null, [professionalDepth, viewport]);
+    maximumRows: 180,
+    scaleMode
+  }) : null, [professionalDepth, scaleMode, viewport]);
   latestModelRef.current = model;
 
   useEffect(() => {
@@ -156,10 +163,22 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, exchangeLabel,
       data-chart-docked-depth-ladder="true"
       data-viewport-revision={viewport?.revision ?? -1}
       data-subscribed-depth={sourceDepth}
+      data-depth-scale-mode={scaleMode}
     >
       <header className="chart-docked-depth-toolbar">
         <strong>LPP</strong>
-        <span className="chart-docked-depth-lock"><Crosshair size={10} /> CHART LOCK</span>
+        <button
+          type="button"
+          className="chart-docked-depth-scale"
+          onClick={() => setScaleMode((current) => current === "book" ? "chart" : "book")}
+          title={scaleMode === "book"
+            ? "Showing the complete order book delivered by the venue. Click to align rows to the chart price scale."
+            : "Showing chart-aligned prices. Click to fit all delivered venue depth into the ladder."}
+          aria-label={`Depth scale: ${scaleMode === "book" ? "full book fit" : "chart lock"}`}
+        >
+          {scaleMode === "book" ? <Maximize2 size={10} /> : <Crosshair size={10} />}
+          {scaleMode === "book" ? "BOOK FIT" : "CHART LOCK"}
+        </button>
         <label title="Aggregate this many native venue ticks before projecting depth onto the chart scale">
           AGG:
           <select value={aggregationTicks} onChange={(event) => setAggregationTicks(Number(event.target.value))}>
@@ -322,7 +341,7 @@ function drawLadder(canvas: HTMLCanvasElement, size: CanvasSize, model: ChartDoc
   context.fillStyle = "rgba(116,123,134,0.52)";
   context.font = '600 6px "IBM Plex Mono", monospace';
   context.textAlign = "left";
-  context.fillText(`${quoteAsset} · CHART-SYNCHRONIZED`, 5, Math.min(size.height - 8, model.plotBottom + 13));
+  context.fillText(`${quoteAsset} · ${model.scaleMode === "book" ? "FULL DELIVERED BOOK" : "CHART-SYNCHRONIZED"}`, 5, Math.min(size.height - 8, model.plotBottom + 13));
 }
 
 function drawCoverageBoundary(context: CanvasRenderingContext2D, price: number | null, model: ChartDockedDepthLadderModel, width: number) {
@@ -364,9 +383,17 @@ function aggregationStorageKey(workspaceId: string) {
   return `bt:chart-docked-depth-ladder:agg:${workspaceId}`;
 }
 
+function scaleModeStorageKey(workspaceId: string) {
+  return `bt:chart-docked-depth-ladder:scale:${workspaceId}`;
+}
+
 function readAggregation(workspaceId: string) {
   const stored = Number(localStorage.getItem(aggregationStorageKey(workspaceId)));
   return AGGREGATION_OPTIONS.includes(stored) ? stored : 20;
+}
+
+function readScaleMode(workspaceId: string): ChartDockedDepthScaleMode {
+  return localStorage.getItem(scaleModeStorageKey(workspaceId)) === "chart" ? "chart" : "book";
 }
 
 function formatPrice(value: number | null, decimals: number) {

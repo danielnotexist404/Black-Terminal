@@ -3,6 +3,7 @@ import type { ProfessionalDomLadderModel, ProfessionalDomSide } from "./domProfe
 import type { WallDetection } from "./types";
 
 export type ChartDockedDepthCoverage = "live" | "unavailable";
+export type ChartDockedDepthScaleMode = "book" | "chart";
 
 export type ChartDockedDepthRow = {
   key: string;
@@ -44,6 +45,7 @@ export type ChartDockedDepthLadderModel = {
   visibleAskSize: number;
   hiddenAboveCount: number;
   hiddenBelowCount: number;
+  scaleMode: ChartDockedDepthScaleMode;
 };
 
 type ChartDockedDepthLadderInput = {
@@ -51,6 +53,7 @@ type ChartDockedDepthLadderInput = {
   viewport: ChartPriceTransformSnapshot;
   preferredRowHeight?: number;
   maximumRows?: number;
+  scaleMode?: ChartDockedDepthScaleMode;
 };
 
 type MutableRow = ChartDockedDepthRow;
@@ -58,7 +61,9 @@ type MutableRow = ChartDockedDepthRow;
 const EPSILON = 1e-12;
 
 export function buildChartDockedDepthLadder(input: ChartDockedDepthLadderInput): ChartDockedDepthLadderModel {
-  const { depth, viewport } = input;
+  const { depth } = input;
+  const scaleMode = input.scaleMode ?? "chart";
+  const viewport = scaleMode === "book" ? fitViewportToDeliveredBook(input.viewport, depth) : input.viewport;
   const plotHeight = Math.max(0, viewport.plotBottom - viewport.plotTop);
   const preferredRowHeight = clamp(input.preferredRowHeight ?? 13, 9, 24);
   const rowCount = plotHeight > 0
@@ -178,8 +183,23 @@ export function buildChartDockedDepthLadder(input: ChartDockedDepthLadderInput):
     visibleBidSize: rows.reduce((total, row) => total + row.bidSize, 0),
     visibleAskSize: rows.reduce((total, row) => total + row.askSize, 0),
     hiddenAboveCount,
-    hiddenBelowCount
+    hiddenBelowCount,
+    scaleMode
   };
+}
+
+function fitViewportToDeliveredBook(viewport: ChartPriceTransformSnapshot, depth: ProfessionalDomLadderModel): ChartPriceTransformSnapshot {
+  const coverageMin = depth.coverageMin;
+  const coverageMax = depth.coverageMax;
+  if (coverageMin === null || coverageMax === null || !Number.isFinite(coverageMin) || !Number.isFinite(coverageMax)) return viewport;
+
+  const span = coverageMax - coverageMin;
+  if (span > EPSILON) {
+    return { ...viewport, priceMin: coverageMin, priceMax: coverageMax };
+  }
+
+  const halfStep = Math.max(depth.priceStep / 2, Math.abs(coverageMin) * 1e-8, EPSILON);
+  return { ...viewport, priceMin: coverageMin - halfStep, priceMax: coverageMax + halfStep };
 }
 
 function classifySide(bidSize: number, askSize: number): ProfessionalDomSide {

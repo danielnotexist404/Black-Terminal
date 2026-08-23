@@ -41,7 +41,7 @@
 }
 
 .chart-docked-depth-toolbar label,
-.chart-docked-depth-lock {
+.chart-docked-depth-scale {
   height: 15px;
   display: inline-flex;
   align-items: center;
@@ -53,7 +53,13 @@
   white-space: nowrap;
 }
 
-.chart-docked-depth-lock svg { color: #ff1834; }
+.chart-docked-depth-scale {
+  width: auto !important;
+  min-width: 56px;
+  font: 800 6px "IBM Plex Mono", monospace;
+}
+
+.chart-docked-depth-scale svg { color: #ff1834; }
 
 .chart-docked-depth-toolbar select {
   width: 35px;
@@ -88,6 +94,16 @@
 }
 
 .chart-docked-depth-toolbar button:hover { border-color: #a6001b; color: #fff; }
+
+.chart-docked-depth-toolbar .chart-docked-depth-scale {
+  width: auto;
+  min-width: 56px;
+  display: inline-flex;
+  place-items: initial;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 3px;
+}
 
 .chart-docked-depth-columns {
   top: 21px;
@@ -192,6 +208,6 @@
 .chart-docked-depth-tooltip .bid { color: #f4f6f8; }
 
 @media (max-width: 1100px) {
-  .chart-docked-depth-lock { display: none; }
+  .chart-docked-depth-scale { display: none; }
   .chart-docked-depth-toolbar { grid-template-columns: auto auto minmax(0, 1fr) 20px; }
 }

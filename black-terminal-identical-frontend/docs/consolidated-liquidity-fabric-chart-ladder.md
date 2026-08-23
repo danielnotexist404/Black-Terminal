@@ -25,9 +25,9 @@ Official protocol references:
 
 ## Scale behavior
 
-`FOLLOW` is the default. The ladder always consumes the active chart's authoritative price transform, so panning and zooming reprojects the requested market-depth viewport.
+`CHART SYNC` is the default. The ladder measures the chart host's DOM origin and extends the active chart's authoritative price transform through the taller dock. Every price shared by the chart and ladder therefore occupies the exact same screen Y coordinate, allowing direct confluence checks between resting depth and chart structures such as HDLX LVN/HVN levels. Panning, zooming, logarithmic scaling, and panel resizing reproject the ladder without changing those shared coordinates.
 
-`LOCKED` freezes only the current price range. It never replaces the chart scale with the narrow delivered range of one venue. Changing symbol or chart identity returns to `FOLLOW`.
+`26K` remains an optional moving USD 26,000 scale and `BOOK FIT` remains an optional fit to the currently delivered consolidated coverage. `LOCKED` freezes whichever scale is selected while genuine depth updates continue. Changing symbol or chart identity clears the lock. New workspaces start in `CHART SYNC`; the selection then persists per workspace.
 
 ## Rendering and update cadence
 

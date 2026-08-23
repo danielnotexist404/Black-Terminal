@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from "react";
-import { Crosshair, Lock, Maximize2, X } from "lucide-react";
+import { Crosshair, Lock, X } from "lucide-react";
 import type { ChartPriceTransformSnapshot } from "../../../chart-engine/priceTransform";
 import type { MarketSymbol } from "../../../market-data/types";
 import { blackCorePerformanceMonitor } from "../../../performance/performanceMonitor";
 import {
   CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD,
+  buildChartSynchronizedViewport,
   buildChartDockedDepthLadder,
   buildPriceFollowingViewport,
   fitViewportToDeliveredBook,
@@ -29,7 +30,7 @@ type ChartDockedDepthLadderProps = {
 type CanvasSize = { width: number; height: number };
 type VisualRow = { bid: number; ask: number; delta: number; depth: number; activity: number };
 type HoverState = { row: ChartDockedDepthRow; x: number; y: number } | null;
-type DepthViewMode = "range" | "book";
+type DepthViewMode = "chart" | "range" | "book";
 
 const AGGREGATION_OPTIONS = [1, 5, 10, 20, 50, 100];
 const SMOOTHING_TAU_MS = 82;
@@ -71,10 +72,14 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, viewportKey, w
   const followingViewport = useMemo(() => dockAlignedChartViewport && ladderRenderViewport
     ? buildPriceFollowingViewport(dockAlignedChartViewport, lastPrice, CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD, ladderRenderViewport)
     : null, [dockAlignedChartViewport, ladderRenderViewport, lastPrice]);
-  const bufferedFollowingViewport = useMemo(() => followingViewport
-    ? buildBufferedRequestViewport(followingViewport)
-    : null, [followingViewport]);
-  const requestViewport = lockedViewport ?? bufferedFollowingViewport;
+  const chartSynchronizedViewport = useMemo(() => dockAlignedChartViewport && ladderRenderViewport
+    ? buildChartSynchronizedViewport(dockAlignedChartViewport, ladderRenderViewport)
+    : null, [dockAlignedChartViewport, ladderRenderViewport]);
+  const selectedLiveViewport = viewMode === "chart" ? chartSynchronizedViewport : followingViewport;
+  const bufferedLiveViewport = useMemo(() => selectedLiveViewport
+    ? buildBufferedRequestViewport(selectedLiveViewport)
+    : null, [selectedLiveViewport]);
+  const requestViewport = lockedViewport ?? bufferedLiveViewport;
   const requestedRows = requestViewport
     ? clampInteger(Math.round(((requestViewport.plotBottom - requestViewport.plotTop) / 13) * (20 / aggregationTicks)), 80, 180)
     : 80;
@@ -129,13 +134,13 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, viewportKey, w
   }), [consolidated.book, consolidated.snapshot?.generatedAt, consolidated.snapshot?.referencePrice, consolidated.status, lastPrice]);
 
   const unlockedViewport = useMemo(() => {
-    if (!followingViewport) return null;
+    if (!selectedLiveViewport) return null;
     return viewMode === "book"
-      ? fitViewportToDeliveredBook(followingViewport, professionalDepth)
-      : followingViewport;
-  }, [followingViewport, professionalDepth, viewMode]);
+      ? fitViewportToDeliveredBook(selectedLiveViewport, professionalDepth)
+      : selectedLiveViewport;
+  }, [professionalDepth, selectedLiveViewport, viewMode]);
   const effectiveViewport = lockedViewport ?? unlockedViewport;
-  const scaleMode: ChartDockedDepthScaleMode = lockedViewport ? "locked" : viewMode === "book" ? "book" : "follow";
+  const scaleMode: ChartDockedDepthScaleMode = lockedViewport ? "locked" : viewMode === "book" ? "book" : viewMode === "chart" ? "chart" : "follow";
 
   const model = useMemo(() => effectiveViewport ? buildChartDockedDepthLadder({
     depth: professionalDepth,
@@ -242,26 +247,26 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, viewportKey, w
           title={scaleMode === "locked"
             ? "Price scale is frozen. Click to resume the selected live range mode."
             : "Freeze the ladder's current price range while keeping live depth updates active."}
-          aria-label={`Depth scale: ${scaleMode === "locked" ? "scale locked" : viewMode === "book" ? "book fit live" : "26 thousand dollar follow"}`}
+          aria-label={`Depth scale: ${scaleMode === "locked" ? "scale locked" : viewMode === "book" ? "book fit live" : viewMode === "chart" ? "chart synchronized" : "26 thousand dollar follow"}`}
         >
           {scaleMode === "locked" ? <Lock size={10} /> : <Crosshair size={10} />}
-          {scaleMode === "locked" ? "LOCKED" : viewMode === "book" ? "BOOK LIVE" : "26K FOLLOW"}
+          {scaleMode === "locked" ? "LOCKED" : viewMode === "book" ? "BOOK LIVE" : viewMode === "chart" ? "CHART SYNC" : "26K FOLLOW"}
         </button>
-        <button
-          type="button"
-          className={`chart-docked-depth-book-fit${viewMode === "book" && scaleMode !== "locked" ? " is-active" : ""}`}
-          onClick={() => {
-            setLockedViewport(null);
-            setViewMode((current) => current === "book" ? "range" : "book");
-          }}
-          title={viewMode === "book"
-            ? "Return to the moving 26,000 USD full-range scale."
-            : "Fit the ladder to the complete consolidated depth currently delivered."}
-          aria-pressed={viewMode === "book" && scaleMode !== "locked"}
-          aria-label="Toggle complete delivered book fit"
-        >
-          <Maximize2 size={9} /> BOOK FIT
-        </button>
+        <label className="chart-docked-depth-view" title="Choose exact chart confluence, a moving 26,000 USD range, or all currently delivered depth">
+          VIEW:
+          <select
+            aria-label="Ladder price scale mode"
+            value={viewMode}
+            onChange={(event) => {
+              setViewMode(event.target.value as DepthViewMode);
+              setLockedViewport(null);
+            }}
+          >
+            <option value="chart">CHART</option>
+            <option value="range">26K</option>
+            <option value="book">BOOK FIT</option>
+          </select>
+        </label>
         <label title="Aggregate this many native venue ticks before projecting depth onto the chart scale">
           AGG:
           <select value={aggregationTicks} onChange={(event) => setAggregationTicks(Number(event.target.value))}>
@@ -428,7 +433,7 @@ function drawLadder(canvas: HTMLCanvasElement, size: CanvasSize, model: ChartDoc
   context.fillStyle = "rgba(116,123,134,0.52)";
   context.font = '600 6px "IBM Plex Mono", monospace';
   context.textAlign = "left";
-  const scaleLabel = model.scaleMode === "follow" ? "CLF 26K-FOLLOW" : model.scaleMode === "book" ? "CLF BOOK-FIT" : "CLF SCALE-LOCKED";
+  const scaleLabel = model.scaleMode === "chart" ? "CLF CHART-SYNC" : model.scaleMode === "follow" ? "CLF 26K-FOLLOW" : model.scaleMode === "book" ? "CLF BOOK-FIT" : "CLF SCALE-LOCKED";
   context.fillText(`${quoteAsset} · ${scaleLabel}`, 5, Math.min(size.height - 8, model.plotBottom + 13));
 }
 
@@ -525,7 +530,7 @@ function aggregationStorageKey(workspaceId: string) {
 }
 
 function viewModeStorageKey(workspaceId: string) {
-  return `bt:chart-docked-depth-ladder:view:${workspaceId}`;
+  return `bt:chart-docked-depth-ladder:view:v2:${workspaceId}`;
 }
 
 function readAggregation(workspaceId: string) {
@@ -534,7 +539,8 @@ function readAggregation(workspaceId: string) {
 }
 
 function readViewMode(workspaceId: string): DepthViewMode {
-  return localStorage.getItem(viewModeStorageKey(workspaceId)) === "book" ? "book" : "range";
+  const stored = localStorage.getItem(viewModeStorageKey(workspaceId));
+  return stored === "range" || stored === "book" ? stored : "chart";
 }
 
 function buildBufferedRequestViewport(viewport: ChartPriceTransformSnapshot): ChartPriceTransformSnapshot {

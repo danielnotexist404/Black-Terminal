@@ -3,7 +3,7 @@ import type { ProfessionalDomLadderModel, ProfessionalDomSide } from "./domProfe
 import type { WallDetection } from "./types";
 
 export type ChartDockedDepthCoverage = "live" | "unavailable";
-export type ChartDockedDepthScaleMode = "follow" | "book" | "locked";
+export type ChartDockedDepthScaleMode = "chart" | "follow" | "book" | "locked";
 
 export type ChartDockedDepthRow = {
   key: string;
@@ -75,6 +75,28 @@ export function translateChartViewportToDock(
     height: Math.max(1, chartViewport.height + offsetY),
     plotTop: chartViewport.plotTop + offsetY,
     plotBottom: chartViewport.plotBottom + offsetY
+  };
+}
+
+/**
+ * Extends the chart's authoritative price transform through the ladder's taller
+ * render area. Every price inside the chart remains at the exact same screen Y;
+ * the additional ladder area simply continues the same pixels-per-price scale.
+ */
+export function buildChartSynchronizedViewport(
+  chartViewport: ChartPriceTransformSnapshot,
+  renderViewport: ChartPriceTransformSnapshot
+): ChartPriceTransformSnapshot {
+  const priceAtTop = screenYToPrice(renderViewport.plotTop, chartViewport);
+  const priceAtBottom = screenYToPrice(renderViewport.plotBottom, chartViewport);
+  if (priceAtTop === null || priceAtBottom === null || !Number.isFinite(priceAtTop) || !Number.isFinite(priceAtBottom)) {
+    return renderViewport;
+  }
+  return {
+    ...renderViewport,
+    scaleMode: chartViewport.scaleMode,
+    priceMin: Math.min(priceAtTop, priceAtBottom),
+    priceMax: Math.max(priceAtTop, priceAtBottom)
   };
 }
 

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import {
   CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD,
+  buildChartSynchronizedViewport,
   buildChartDockedDepthLadder,
   buildPriceFollowingViewport,
   translateChartViewportToDock
@@ -150,6 +151,40 @@ function depth(rows: ProfessionalDomRow[]): ProfessionalDomLadderModel {
 }
 
 {
+  const chartViewport = viewport(613, 57_187, 110_815);
+  const dockAlignedChartViewport = translateChartViewportToDock(chartViewport, 44);
+  const fullDockViewport: ChartPriceTransformSnapshot = {
+    ...chartViewport,
+    width: 320,
+    height: 900,
+    plotTop: 38,
+    plotBottom: 874
+  };
+  const synchronized = buildChartSynchronizedViewport(dockAlignedChartViewport, fullDockViewport);
+  for (const price of [57_187, 77_400, 84_001, 94_727, 110_815]) {
+    assert.ok(Math.abs((priceToScreenY(price, synchronized) ?? 0) - (priceToScreenY(price, dockAlignedChartViewport) ?? 1)) < 1e-8, `chart-synchronized ladder price ${price} must occupy the chart's exact Y coordinate`);
+  }
+  assert.ok(synchronized.priceMin < chartViewport.priceMin, "the full-height ladder must continue the chart's pixels-per-price scale below the shorter chart pane");
+  assert.equal(synchronized.scaleMode, chartViewport.scaleMode, "chart synchronization must retain the chart's scale semantics");
+}
+
+{
+  const chartViewport = viewport(614, 57_187, 110_815, "logarithmic");
+  const dockAlignedChartViewport = translateChartViewportToDock(chartViewport, 44);
+  const fullDockViewport: ChartPriceTransformSnapshot = {
+    ...chartViewport,
+    width: 320,
+    height: 900,
+    plotTop: 38,
+    plotBottom: 874
+  };
+  const synchronized = buildChartSynchronizedViewport(dockAlignedChartViewport, fullDockViewport);
+  for (const price of [57_187, 77_400, 94_727, 110_815]) {
+    assert.ok(Math.abs((priceToScreenY(price, synchronized) ?? 0) - (priceToScreenY(price, dockAlignedChartViewport) ?? 1)) < 1e-6, `logarithmic chart-synchronized ladder price ${price} must occupy the chart's exact Y coordinate`);
+  }
+}
+
+{
   const chartViewport = viewport(62, 64_000, 82_000, "logarithmic");
   const referencePrice = 77_307.5;
   const fullRangeViewport = buildPriceFollowingViewport(chartViewport, referencePrice);
@@ -194,8 +229,12 @@ assert.doesNotMatch(consolidatedClientSource, /input\.exchange|exchangeLabel|sel
 assert.match(componentSource, /requestAnimationFrame\(animate\)/, "depth transitions must be synchronized to display frames");
 assert.doesNotMatch(componentSource, /setInterval\(/, "the dock renderer must not introduce a fixed-FPS interval");
 assert.match(componentSource, /HIDDEN\/RPI EXCLUDED/, "coverage limits must be disclosed in the UI");
-assert.match(componentSource, /26K FOLLOW/, "the moving 26,000 USD range must be the visible default");
+assert.match(componentSource, /26K FOLLOW/, "the moving 26,000 USD range must remain an explicit optional scale");
 assert.match(componentSource, /BOOK FIT/, "the previous delivered-book fitting behavior must remain an explicit optional mode");
+assert.match(componentSource, /CHART SYNC/, "exact chart-scale confluence must be the default ladder mode");
+assert.match(componentSource, /<option value="range">26K<\/option>/, "the 26,000 USD full-range view must remain available as an optional mode");
+assert.match(componentSource, /<option value="book">BOOK FIT<\/option>/, "complete delivered-book fitting must remain available as an optional mode");
+assert.match(componentSource, /return stored === "range" \|\| stored === "book" \? stored : "chart"/, "new workspaces must default to exact chart synchronization");
 assert.match(componentSource, /buildPriceFollowingViewport/, "the ladder must derive its moving full-range scale from the chart transform");
 assert.match(componentSource, /size\.height - LADDER_FOOTER_HEIGHT_PX/, "the ladder must use its complete dock height instead of stopping at the chart pane boundary");
 assert.match(componentSource, /chartHost\.getBoundingClientRect\(\)\.top - bounds\.top/, "the ladder must measure and correct the chart host's independent vertical coordinate origin");

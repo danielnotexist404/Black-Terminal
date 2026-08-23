@@ -165,6 +165,11 @@ export type CandleQuery = {
   signal?: AbortSignal;
 };
 
+export type OrderBookSubscriptionOptions = {
+  /** Preferred venue depth. Adapters must resolve this to a depth the venue actually supports. */
+  depth?: number;
+};
+
 export type MarketDataAdapter = {
   id: ExchangeId;
   label: string;
@@ -186,6 +191,7 @@ export type MarketDataAdapter = {
   ) => MarketDataSubscription<TradeTick>;
   subscribeOrderBook?: (
     symbol: MarketSymbol,
-    onBook: (book: OrderBookSnapshot) => void
+    onBook: (book: OrderBookSnapshot) => void,
+    options?: OrderBookSubscriptionOptions
   ) => MarketDataSubscription<OrderBookSnapshot>;
 };

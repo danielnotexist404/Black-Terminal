@@ -112,6 +112,7 @@ import { blackCoreWindowDockManager } from "./core/windows/windowDockManager";
 import type { BlackCoreModuleMode } from "./core/modules/moduleRegistry";
 import { PerformanceHud } from "./performance/PerformanceHud";
 import { mergeNewestWorkspaceSnapshots } from "./indicators/indicatorSettingsPersistence";
+import { blackCoreChartPriceViewportStore } from "./modules/dom-pro/chartPriceViewportStore";
 import blackCoreEngine from "./assets/black-core-engine-sidebar.png";
 import {
   ADMIN_ALLOWED_INDICATORS,
@@ -124,6 +125,9 @@ import {
 
 const DomProWindow = lazy(() =>
   import("./modules/dom-pro/components/DomProWindow").then((module) => ({ default: module.DomProWindow }))
+);
+const ChartDockedDepthLadder = lazy(() =>
+  import("./modules/dom-pro/components/ChartDockedDepthLadder").then((module) => ({ default: module.ChartDockedDepthLadder }))
 );
 const MarketBattlefield = lazy(() =>
   import("./components/MarketBattlefield").then((module) => ({ default: module.MarketBattlefield }))
@@ -596,6 +600,7 @@ export default function App() {
     }
     return {
       showDOM: true,
+      chartDepthLadder: false,
       enabledTimeframes: ["1m", "5m", "15m", "1h", "4h", "1d"]
     };
   });
@@ -620,22 +625,26 @@ export default function App() {
   const [domProOpen, setDomProOpen] = useState(false);
   const [domProMode, setDomProMode] = useState<BlackCoreModuleMode>("expanded");
   const [domProSettingsSignal, setDomProSettingsSignal] = useState(0);
-  const showCompactDom = terminalSettings.showDOM && !domProOpen;
-  const bothSidePanelsCollapsed = sidebarCollapsed && !terminalSettings.showDOM;
+  const chartDepthLadderOpen = Boolean(terminalSettings.chartDepthLadder) && canUseDomPro && !domProOpen;
+  const showCompactDom = terminalSettings.showDOM && !domProOpen && !chartDepthLadderOpen;
+  const rightDockVisible = showCompactDom || chartDepthLadderOpen;
+  const bothSidePanelsCollapsed = sidebarCollapsed && !rightDockVisible;
 
   const toggleBothSidePanels = useCallback(() => {
-    const shouldExpand = sidebarCollapsed && !terminalSettings.showDOM;
+    const shouldExpand = sidebarCollapsed && !rightDockVisible;
     setSidebarCollapsed(!shouldExpand);
     setTerminalSettings((current: typeof terminalSettings) => ({
       ...current,
-      showDOM: shouldExpand
+      showDOM: shouldExpand,
+      chartDepthLadder: false
     }));
-  }, [sidebarCollapsed, terminalSettings.showDOM]);
+  }, [rightDockVisible, sidebarCollapsed]);
 
   const toggleRightPanel = useCallback(() => {
     setTerminalSettings((current: typeof terminalSettings) => ({
       ...current,
-      showDOM: !current.showDOM
+      showDOM: current.chartDepthLadder ? true : !current.showDOM,
+      chartDepthLadder: false
     }));
   }, []);
 
@@ -651,6 +660,7 @@ export default function App() {
       void dbAddAuditLog("SYSTEM", `Blocked DOM Pro+ access attempt by ${currentUser?.username || "anonymous"}.`);
       return;
     }
+    setTerminalSettings((current: typeof terminalSettings) => ({ ...current, chartDepthLadder: false }));
     blackCoreWindowDockManager.open("dom-pro", "DOM Pro+", mode);
     if (options?.openSettings) setDomProSettingsSignal((value) => value + 1);
   }, [canUseDomPro, currentUser?.username]);
@@ -659,9 +669,30 @@ export default function App() {
     blackCoreWindowDockManager.close("dom-pro");
   }, []);
 
+  const toggleChartDepthLadder = useCallback(() => {
+    if (!canUseDomPro) {
+      setShowRevokedPopup(true);
+      void dbAddAuditLog("SYSTEM", `Blocked chart depth ladder access attempt by ${currentUser?.username || "anonymous"}.`);
+      return;
+    }
+    closeDomPro();
+    setBattlefieldMode(false);
+    setActiveNav("CHART");
+    setTerminalSettings((current: typeof terminalSettings) => ({
+      ...current,
+      showDOM: Boolean(current.chartDepthLadder),
+      chartDepthLadder: !current.chartDepthLadder
+    }));
+  }, [canUseDomPro, closeDomPro, currentUser?.username]);
+
   useEffect(() => {
     if (domProOpen && !canUseDomPro) closeDomPro();
   }, [canUseDomPro, closeDomPro, domProOpen]);
+
+  useEffect(() => {
+    if (canUseDomPro || !terminalSettings.chartDepthLadder) return;
+    setTerminalSettings((current: typeof terminalSettings) => ({ ...current, chartDepthLadder: false, showDOM: true }));
+  }, [canUseDomPro, terminalSettings.chartDepthLadder]);
 
   useEffect(() => {
     if (canUseHdlxProfile) return;
@@ -1094,6 +1125,20 @@ export default function App() {
     }),
     [layout]
   );
+  const chartDepthViewportKey = useMemo(
+    () => [workspace, symbol.exchange, symbol.marketKind, symbol.rawSymbol, timeframe].join(":"),
+    [symbol.exchange, symbol.marketKind, symbol.rawSymbol, timeframe, workspace]
+  );
+  const publishChartDepthViewport = useCallback(
+    (transform: import("./chart-engine/priceTransform").ChartPriceTransformSnapshot) => {
+      blackCoreChartPriceViewportStore.publish(chartDepthViewportKey, transform);
+    },
+    [chartDepthViewportKey]
+  );
+
+  useEffect(() => () => {
+    blackCoreChartPriceViewportStore.clear(chartDepthViewportKey);
+  }, [chartDepthViewportKey]);
 
   useEffect(() => {
     if (!("__TAURI_INTERNALS__" in window)) return;
@@ -2147,6 +2192,15 @@ export default function App() {
           <Settings size={17} />
         </button>
         <button
+          className={chartDepthLadderOpen ? "icon-btn active chart-depth-ladder-toggle" : "icon-btn chart-depth-ladder-toggle"}
+          onClick={toggleChartDepthLadder}
+          title={chartDepthLadderOpen ? "Close chart-synchronized full-book ladder" : "Open chart-synchronized full-book ladder"}
+          aria-label={chartDepthLadderOpen ? "Close chart-synchronized full-book ladder" : "Open chart-synchronized full-book ladder"}
+          aria-pressed={chartDepthLadderOpen}
+        >
+          <Rows3 size={17} />
+        </button>
+        <button
           className={sidebarCollapsed ? "icon-btn active" : "icon-btn"}
           onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
           title={sidebarCollapsed ? "Show left menu" : "Minimize left menu"}
@@ -2318,7 +2372,7 @@ export default function App() {
           </Suspense>
         </div>
       ) : (
-        <main className={battlefieldMode ? "terminal-grid battlefield-grid" : showCompactDom ? "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>
+        <main className={battlefieldMode ? "terminal-grid battlefield-grid" : rightDockVisible ? chartDepthLadderOpen ? "terminal-grid chart-depth-ladder-mode" : "terminal-grid" : "terminal-grid hide-right-panel"} style={gridStyle}>
         <section className={["chart-panel", battlefieldMode ? "battlefield-active" : "", !battlefieldMode && drawingsEnabled ? "drawing-tools-open" : "", chartWorkspaceIsolated ? "foreground-workspace-open" : ""].filter(Boolean).join(" ")}>
           <div ref={chartUnderlayRef} className="chart-underlay" aria-hidden={chartWorkspaceIsolated || undefined}>
           {isStrategyLabVisualFixture ? (
@@ -2369,6 +2423,7 @@ export default function App() {
             onOpenAlerts={() => setActiveNav("ALERTS")}
             onOpenStrategyLab={() => setActiveNav("STRATEGY LAB")}
             onPriceChange={setLastPrice}
+            onPriceTransformChange={publishChartDepthViewport}
             onCandleChange={(candle) => {
               recentCandlesRef.current = [...recentCandlesRef.current.slice(-19), candle];
               setRecentCandles(recentCandlesRef.current);
@@ -2507,6 +2562,18 @@ export default function App() {
             </div>
           </aside>
         )}
+        {!battlefieldMode && chartDepthLadderOpen && (
+          <Suspense fallback={<aside className="chart-docked-depth-ladder"><div className="chart-docked-depth-awaiting">INITIALIZING FULL-BOOK LADDER</div></aside>}>
+            <ChartDockedDepthLadder
+              marketSymbol={symbol}
+              lastPrice={lastPrice}
+              exchangeLabel={selectedExchange.label}
+              viewportKey={chartDepthViewportKey}
+              workspaceId={workspace}
+              onClose={toggleChartDepthLadder}
+            />
+          </Suspense>
+        )}
         {!battlefieldMode && <section className={activeNav === "SCRIPT EDITOR" ? "bottom-panel script-mode" : activeNav === "ALERTS" ? "bottom-panel alerts-mode" : activeNav === "POSITIONS" ? "bottom-panel positions-mode" : "bottom-panel"}>
           {activeNav === "SCRIPT EDITOR" ? (
             <ScriptEditor
@@ -2550,7 +2617,7 @@ export default function App() {
             />
           </Suspense>
         )}
-        {!battlefieldMode && showCompactDom && (
+        {!battlefieldMode && rightDockVisible && (
           <div className="layout-resizer resize-main-x" onPointerDown={(event) => startLayoutResize("right", event)} />
         )}
         {!battlefieldMode && <div className={activeNav === "POSITIONS" ? "layout-resizer resize-main-y positions-resizer" : "layout-resizer resize-main-y"} onPointerDown={(event) => startLayoutResize("bottom", event)} />}

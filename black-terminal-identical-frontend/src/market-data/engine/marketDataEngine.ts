@@ -9,6 +9,7 @@ import type {
   MarketDataSubscription,
   MarketKind,
   MarketSymbol,
+  OrderBookSubscriptionOptions,
   OrderBookSnapshot,
   TickerSnapshot,
   TradeTick
@@ -125,7 +126,7 @@ export class MarketDataEngine {
         ? (symbol: MarketSymbol, onTrade: (trade: TradeTick) => void) => this.subscribeSharedTrade(source, symbol, onTrade)
         : undefined,
       subscribeOrderBook: source.subscribeOrderBook
-        ? (symbol: MarketSymbol, onBook: (book: OrderBookSnapshot) => void) => this.subscribeSharedOrderBook(source, symbol, onBook)
+        ? (symbol: MarketSymbol, onBook: (book: OrderBookSnapshot) => void, options?: OrderBookSubscriptionOptions) => this.subscribeSharedOrderBook(source, symbol, onBook, options)
         : undefined
     };
   }
@@ -151,8 +152,14 @@ export class MarketDataEngine {
     return this.attachSharedSubscription(this.tradeSubscriptions, key, shared, onTrade);
   }
 
-  private subscribeSharedOrderBook(source: MarketDataAdapter, symbol: MarketSymbol, onBook: (book: OrderBookSnapshot) => void): MarketDataSubscription<OrderBookSnapshot> {
-    const key = this.subscriptionKey(source.id, symbol, "orderbook");
+  private subscribeSharedOrderBook(
+    source: MarketDataAdapter,
+    symbol: MarketSymbol,
+    onBook: (book: OrderBookSnapshot) => void,
+    options?: OrderBookSubscriptionOptions
+  ): MarketDataSubscription<OrderBookSnapshot> {
+    const requestedDepth = normalizeRequestedDepth(options?.depth);
+    const key = this.subscriptionKey(source.id, symbol, `orderbook:${requestedDepth ?? "default"}`);
     let shared = this.orderBookSubscriptions.get(key);
 
     if (!shared) {
@@ -163,7 +170,7 @@ export class MarketDataEngine {
         this.cache.setOrderBook(book);
         blackCoreEventBus.publishLatest("orderbook.updated", book, 50);
         handlers.forEach((handler) => handler(book));
-      }) as MarketDataSubscription<OrderBookSnapshot>;
+      }, requestedDepth ? { depth: requestedDepth } : undefined) as MarketDataSubscription<OrderBookSnapshot>;
       sourceSubscription.onError((error) => errorHandlers.forEach((handler) => handler(error)));
       shared = { source: sourceSubscription, handlers, errorHandlers };
       this.orderBookSubscriptions.set(key, shared);
@@ -215,6 +222,11 @@ export class MarketDataEngine {
     this.lastPublicRateMetricAt = now;
     blackCorePerformanceMonitor.recordMetric("stream.public_messages_per_second", this.publicMessageTimes.length, "msg/s");
   }
+}
+
+function normalizeRequestedDepth(value: number | undefined) {
+  if (!Number.isFinite(value) || Number(value) <= 0) return undefined;
+  return Math.max(1, Math.floor(Number(value)));
 }
 
 function symbolFromQuery(query: CandleQuery): MarketSymbol {

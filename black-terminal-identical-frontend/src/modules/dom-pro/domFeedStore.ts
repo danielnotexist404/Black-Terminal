@@ -1,5 +1,5 @@
 import { blackCoreMarketDataEngine } from "../../market-data/engine/marketDataEngine";
-import type { MarketDataSubscription, MarketSymbol, OrderBookSnapshot, TickerSnapshot, TradeTick } from "../../market-data/types";
+import type { MarketDataSubscription, MarketSymbol, OrderBookSnapshot, OrderBookSubscriptionOptions, TickerSnapshot, TradeTick } from "../../market-data/types";
 import { blackCorePerformanceMonitor } from "../../performance/performanceMonitor";
 import { blackCoreResourceTracker } from "../../performance/resourceTracker";
 import { domPerformanceTrace } from "./domPerformanceTrace";
@@ -21,6 +21,7 @@ type DomFeedListener = (snapshot: DomFeedSnapshot) => void;
 
 type FeedEntry = {
   key: string;
+  preferredBookDepth?: number;
   snapshot: DomFeedSnapshot;
   listeners: Set<DomFeedListener>;
   bookSubscription?: MarketDataSubscription<OrderBookSnapshot>;
@@ -43,8 +44,8 @@ export class DomFeedStore {
   private visibilityListenerInstalled = false;
   private releaseVisibilityListener: (() => void) | null = null;
 
-  subscribe(marketSymbol: MarketSymbol, listener: DomFeedListener) {
-    const entry = this.ensureEntry(marketSymbol);
+  subscribe(marketSymbol: MarketSymbol, listener: DomFeedListener, options?: OrderBookSubscriptionOptions) {
+    const entry = this.ensureEntry(marketSymbol, options);
     entry.listeners.add(listener);
     entry.snapshot.subscriptionCount = entry.listeners.size;
     listener(entry.snapshot);
@@ -58,12 +59,13 @@ export class DomFeedStore {
     };
   }
 
-  getSnapshot(marketSymbol: MarketSymbol) {
-    return this.ensureEntry(marketSymbol).snapshot;
+  getSnapshot(marketSymbol: MarketSymbol, options?: OrderBookSubscriptionOptions) {
+    return this.ensureEntry(marketSymbol, options).snapshot;
   }
 
-  private ensureEntry(marketSymbol: MarketSymbol): FeedEntry {
-    const key = feedKey(marketSymbol);
+  private ensureEntry(marketSymbol: MarketSymbol, options?: OrderBookSubscriptionOptions): FeedEntry {
+    const preferredBookDepth = normalizeDepth(options?.depth);
+    const key = feedKey(marketSymbol, preferredBookDepth);
     const existing = this.entries.get(key);
     if (existing) return existing;
 
@@ -72,6 +74,7 @@ export class DomFeedStore {
     const cachedTicker = blackCoreMarketDataEngine.cache.getTicker(marketSymbol) ?? null;
     const entry: FeedEntry = {
       key,
+      preferredBookDepth,
       snapshot: {
         marketSymbol,
         book: cachedBook,
@@ -105,7 +108,7 @@ export class DomFeedStore {
         entry.snapshot = { ...entry.snapshot, book, bookStatus: "LIVE BOOK", updatedAt: Date.now() };
         domPerformanceTrace.record("feed.receive_book", performance.now() - startedAt, book.bids.length + book.asks.length, 1);
         this.notify(entry);
-      });
+      }, entry.preferredBookDepth ? { depth: entry.preferredBookDepth } : undefined);
       entry.bookSubscription.onError((error) => {
         entry.snapshot = { ...entry.snapshot, bookStatus: "REST BOOK", lastError: error.message, updatedAt: Date.now() };
         this.notify(entry);
@@ -178,7 +181,7 @@ export class DomFeedStore {
       return;
     }
     entry.bookPollInFlight = true;
-    adapter.getOrderBookSnapshot(entry.snapshot.marketSymbol, 1000)
+    adapter.getOrderBookSnapshot(entry.snapshot.marketSymbol, entry.preferredBookDepth ?? 1000)
       .then((book) => {
         if (!this.entries.has(entry.key)) return;
         entry.snapshot = {
@@ -316,8 +319,13 @@ export class DomFeedStore {
   };
 }
 
-function feedKey(symbol: MarketSymbol) {
-  return [symbol.exchange, symbol.marketKind, symbol.rawSymbol].join(":");
+function normalizeDepth(value: number | undefined) {
+  if (!Number.isFinite(value) || Number(value) <= 0) return undefined;
+  return Math.max(1, Math.floor(Number(value)));
+}
+
+function feedKey(symbol: MarketSymbol, depth?: number) {
+  return [symbol.exchange, symbol.marketKind, symbol.rawSymbol, depth ?? "default"].join(":");
 }
 
 export const blackCoreDomFeedStore = new DomFeedStore();

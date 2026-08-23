@@ -4,6 +4,7 @@ import {
   MarketDataSubscription,
   MarketKind,
   MarketSymbol,
+  OrderBookSubscriptionOptions,
   OrderBookSnapshot,
   TickerSnapshot,
   Timeframe,
@@ -317,13 +318,14 @@ function sortedLevels(book: Map<number, number>, side: "bid" | "ask", limit = 20
 
 function createBybitOrderBookSubscription(
   symbol: MarketSymbol,
-  onBook: (book: OrderBookSnapshot) => void
+  onBook: (book: OrderBookSnapshot) => void,
+  options?: OrderBookSubscriptionOptions
 ): MarketDataSubscription<OrderBookSnapshot> {
   const bids = new Map<number, number>();
   const asks = new Map<number, number>();
   const messageHandlers = new Set<(message: OrderBookSnapshot) => void>([onBook]);
   const errorHandlers = new Set<(error: Error) => void>();
-  const depth = symbol.marketKind === "spot" || symbol.marketKind === "margin" ? 50 : 200;
+  const depth = resolveBybitOrderBookDepth(symbol.marketKind, options?.depth);
   let updateId: number | undefined;
   let sequence: number | undefined;
   const ws = new WebSocket(categoryFor(symbol.marketKind) === "spot" ? BYBIT_WS_SPOT : BYBIT_WS_LINEAR);
@@ -444,10 +446,11 @@ export const bybitMarketDataAdapter: MarketDataAdapter = {
     return parseBybitKlineRows(result.list);
   },
   getOrderBookSnapshot: async (symbol, limit = 25) => {
+    const resolvedLimit = Math.min(Math.max(Math.floor(limit), 1), symbol.marketKind === "options" ? 100 : 1000);
     const params = new URLSearchParams({
       category: categoryFor(symbol.marketKind),
       symbol: normalizeBybitSymbol(symbol.rawSymbol),
-      limit: String(Math.min(Math.max(limit, 1), 200))
+      limit: String(resolvedLimit)
     });
     const result = await bybitGet<BybitBookResult>("/v5/market/orderbook", params);
     return mapBook(symbol, result);
@@ -474,5 +477,13 @@ export const bybitMarketDataAdapter: MarketDataAdapter = {
     return mapTicker(symbol, ticker);
   },
   subscribeTrades: (symbol, onTrade) => createBybitTradeSubscription(symbol, onTrade),
-  subscribeOrderBook: (symbol, onBook) => createBybitOrderBookSubscription(symbol, onBook)
+  subscribeOrderBook: (symbol, onBook, options) => createBybitOrderBookSubscription(symbol, onBook, options)
 };
+
+export function resolveBybitOrderBookDepth(marketKind: MarketKind, requestedDepth?: number) {
+  const supported = marketKind === "options" ? [1, 25, 100] : [1, 50, 200, 1000];
+  const fallback = marketKind === "spot" || marketKind === "margin" ? 50 : marketKind === "options" ? 25 : 200;
+  if (!Number.isFinite(requestedDepth) || Number(requestedDepth) <= 0) return fallback;
+  const requested = Math.max(1, Math.floor(Number(requestedDepth)));
+  return supported.find((depth) => depth >= requested) ?? supported[supported.length - 1];
+}

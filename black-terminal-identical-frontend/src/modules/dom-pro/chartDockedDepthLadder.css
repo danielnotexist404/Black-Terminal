@@ -1,0 +1,197 @@
+.chart-docked-depth-ladder {
+  position: relative;
+  grid-column: 2 / 3;
+  grid-row: 1 / 3;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid rgba(164, 0, 23, 0.42);
+  background: #020304;
+  color: #b8bec7;
+  font-family: "IBM Plex Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  isolation: isolate;
+}
+
+.chart-docked-depth-toolbar,
+.chart-docked-depth-columns {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 4;
+  display: grid;
+  align-items: center;
+  background: rgba(5, 6, 8, 0.97);
+}
+
+.chart-docked-depth-toolbar {
+  top: 0;
+  height: 21px;
+  grid-template-columns: auto auto auto minmax(0, 1fr) 20px;
+  gap: 4px;
+  padding: 0 4px;
+  border-bottom: 1px solid #272a2f;
+  font-size: 6px;
+}
+
+.chart-docked-depth-toolbar strong {
+  color: #f0f2f5;
+  font-size: 7px;
+  letter-spacing: .08em;
+}
+
+.chart-docked-depth-toolbar label,
+.chart-docked-depth-lock {
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 3px;
+  border: 1px solid #2a2d32;
+  color: #8f96a0;
+  background: #08090b;
+  white-space: nowrap;
+}
+
+.chart-docked-depth-lock svg { color: #ff1834; }
+
+.chart-docked-depth-toolbar select {
+  width: 35px;
+  border: 0;
+  color: #d9dde2;
+  background: #08090b;
+  font: 800 6px "IBM Plex Mono", monospace;
+}
+
+.chart-docked-depth-toolbar em {
+  min-width: 0;
+  overflow: hidden;
+  color: #7e858e;
+  font-style: normal;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-docked-depth-ladder--live .chart-docked-depth-toolbar em { color: #d9dde2; }
+
+.chart-docked-depth-toolbar button {
+  width: 18px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #292c31;
+  color: #8b929c;
+  background: #070809;
+  cursor: pointer;
+}
+
+.chart-docked-depth-toolbar button:hover { border-color: #a6001b; color: #fff; }
+
+.chart-docked-depth-columns {
+  top: 21px;
+  height: 17px;
+  grid-template-columns: 16% 18% 18% 23% 25%;
+  border-bottom: 1px solid #282b30;
+  color: #7d848f;
+  font-size: 6px;
+  font-weight: 900;
+  letter-spacing: .03em;
+  text-align: right;
+}
+
+.chart-docked-depth-columns span {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 4px;
+  border-right: 1px solid #1a1c20;
+}
+
+.chart-docked-depth-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: crosshair;
+}
+
+.chart-docked-depth-awaiting {
+  position: absolute;
+  inset: 38px 0 24px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  color: #686f79;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  background: #020304;
+}
+
+.chart-docked-depth-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  min-height: 22px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 5px;
+  border-top: 1px solid #24272c;
+  color: #717883;
+  background: rgba(5, 6, 8, .97);
+  font-size: 5.5px;
+}
+
+.chart-docked-depth-footer span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-docked-depth-footer b {
+  grid-column: 1 / -1;
+  color: #555c66;
+  font-size: 5px;
+  font-weight: 700;
+  letter-spacing: .025em;
+  text-align: center;
+}
+
+.chart-docked-depth-tooltip {
+  position: absolute;
+  z-index: 8;
+  width: 142px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 8px;
+  padding: 7px;
+  border: 1px solid #631020;
+  box-shadow: 0 8px 22px rgba(0,0,0,.72), 0 0 12px rgba(164,0,24,.14);
+  color: #8d949e;
+  background: rgba(5,6,8,.97);
+  font-size: 6px;
+  pointer-events: none;
+}
+
+.chart-docked-depth-tooltip strong,
+.chart-docked-depth-tooltip em { grid-column: 1 / -1; }
+.chart-docked-depth-tooltip strong { color: #f0f2f5; font-size: 7px; }
+.chart-docked-depth-tooltip em { margin-top: 2px; color: #5f6670; font-size: 5px; font-style: normal; }
+.chart-docked-depth-tooltip .ask { color: #ff1834; }
+.chart-docked-depth-tooltip .bid { color: #f4f6f8; }
+
+@media (max-width: 1100px) {
+  .chart-docked-depth-lock { display: none; }
+  .chart-docked-depth-toolbar { grid-template-columns: auto auto minmax(0, 1fr) 20px; }
+}

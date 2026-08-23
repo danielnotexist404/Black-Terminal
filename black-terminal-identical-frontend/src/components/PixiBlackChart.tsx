@@ -173,6 +173,7 @@ type PixiBlackChartProps = {
   onOpenAlerts?: () => void;
   onOpenStrategyLab?: () => void;
   onPriceChange?: (price: number) => void;
+  onPriceTransformChange?: (transform: ChartPriceTransformSnapshot) => void;
   onCandleChange?: (candle: import("../chart-engine/types").Candle) => void;
   onReplayStatusChange?: (status: ReplayStatus) => void;
   onReplayStartSelected?: (selection: ReplaySelection) => void;
@@ -443,6 +444,7 @@ export function PixiBlackChart({
   onOpenAlerts,
   onOpenStrategyLab,
   onPriceChange,
+  onPriceTransformChange,
   onCandleChange,
   onReplayStatusChange,
   onReplayStartSelected,
@@ -573,6 +575,7 @@ export function PixiBlackChart({
   const replayControlsRef = useRef(replayControls);
   const replayStatusCallbackRef = useRef(onReplayStatusChange);
   const replaySelectionCallbackRef = useRef(onReplayStartSelected);
+  const priceTransformCallbackRef = useRef(onPriceTransformChange);
   const replayActiveRef = useRef(replayControls.enabled);
   const replayTimerRef = useRef<number | undefined>(undefined);
   const replayCursorRef = useRef(0);
@@ -847,6 +850,10 @@ export function PixiBlackChart({
   useEffect(() => {
     replaySelectionCallbackRef.current = onReplayStartSelected;
   }, [onReplayStartSelected]);
+
+  useEffect(() => {
+    priceTransformCallbackRef.current = onPriceTransformChange;
+  }, [onPriceTransformChange]);
 
   useEffect(() => {
     engineRef.current?.setReplaySelectionMode(
@@ -1327,6 +1334,7 @@ export function PixiBlackChart({
       },
       onPriceTransformChange: (transform) => {
         if (aifActiveRef.current || qalcActiveRef.current || liquidationFieldActiveRef.current) setAifPriceTransform(transform);
+        priceTransformCallbackRef.current?.(transform);
       },
       onLiquidationRendererMetrics: setLiquidationFieldRendererMetrics,
       priceLineColor,

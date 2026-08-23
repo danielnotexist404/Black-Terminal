@@ -2567,7 +2567,6 @@ export default function App() {
             <ChartDockedDepthLadder
               marketSymbol={symbol}
               lastPrice={lastPrice}
-              exchangeLabel={selectedExchange.label}
               viewportKey={chartDepthViewportKey}
               workspaceId={workspace}
               onClose={toggleChartDepthLadder}

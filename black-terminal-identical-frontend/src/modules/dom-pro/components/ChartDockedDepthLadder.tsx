@@ -7,13 +7,11 @@ import { buildChartDockedDepthLadder, type ChartDockedDepthLadderModel, type Cha
 import { blackCoreChartPriceViewportStore } from "../chartPriceViewportStore";
 import { useConsolidatedLiquidityFeed } from "../consolidatedLiquidityClient";
 import { ProfessionalDomLadderTracker } from "../domProfessionalLadder";
-import { useDomFeed } from "../useDomFeed";
 import "../chartDockedDepthLadder.css";
 
 type ChartDockedDepthLadderProps = {
   marketSymbol: MarketSymbol;
   lastPrice: number;
-  exchangeLabel: string;
   viewportKey: string;
   workspaceId: string;
   onClose: () => void;
@@ -26,7 +24,7 @@ type HoverState = { row: ChartDockedDepthRow; x: number; y: number } | null;
 const AGGREGATION_OPTIONS = [1, 5, 10, 20, 50, 100];
 const SMOOTHING_TAU_MS = 82;
 
-export function ChartDockedDepthLadder({ marketSymbol, lastPrice, exchangeLabel, viewportKey, workspaceId, onClose }: ChartDockedDepthLadderProps) {
+export function ChartDockedDepthLadder({ marketSymbol, lastPrice, viewportKey, workspaceId, onClose }: ChartDockedDepthLadderProps) {
   const rootRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const trackerRef = useRef(new ProfessionalDomLadderTracker());
@@ -36,7 +34,6 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, exchangeLabel,
   const [hover, setHover] = useState<HoverState>(null);
   const [aggregationTicks, setAggregationTicks] = useState(() => readAggregation(workspaceId));
   const [lockedViewport, setLockedViewport] = useState<ChartPriceTransformSnapshot | null>(null);
-  const feed = useDomFeed(marketSymbol, { depth: 1000 });
   const subscribeViewport = useCallback((listener: () => void) => blackCoreChartPriceViewportStore.subscribe(viewportKey, listener), [viewportKey]);
   const getViewport = useCallback(() => blackCoreChartPriceViewportStore.getSnapshot(viewportKey), [viewportKey]);
   const viewport = useSyncExternalStore(subscribeViewport, getViewport, () => null);
@@ -85,13 +82,13 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, exchangeLabel,
   }, [marketSymbol.baseAsset, viewportKey]);
 
   const professionalDepth = useMemo(() => trackerRef.current.update({
-    book: consolidated.book ?? feed.book,
-    currentPrice: feed.ticker?.lastPrice ?? lastPrice ?? consolidated.snapshot?.referencePrice,
-    aggregationTicks: consolidated.book ? 1 : aggregationTicks,
-    bookStatus: consolidated.book ? `CONSOLIDATED_${consolidated.status.toUpperCase()}` : feed.bookStatus,
+    book: consolidated.book,
+    currentPrice: lastPrice ?? consolidated.snapshot?.referencePrice,
+    aggregationTicks: 1,
+    bookStatus: `CONSOLIDATED_${consolidated.status.toUpperCase()}`,
     now: Date.now(),
     maximumRows: 12_000
-  }), [aggregationTicks, consolidated.book, consolidated.snapshot?.generatedAt, consolidated.snapshot?.referencePrice, consolidated.status, feed.book, feed.bookStatus, feed.ticker?.lastPrice, feed.updatedAt, lastPrice]);
+  }), [consolidated.book, consolidated.snapshot?.generatedAt, consolidated.snapshot?.referencePrice, consolidated.status, lastPrice]);
 
   const model = useMemo(() => effectiveViewport ? buildChartDockedDepthLadder({
     depth: professionalDepth,
@@ -177,9 +174,7 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, exchangeLabel,
   }
 
   const sourceDepth = professionalDepth.subscribedDepth ?? Math.max(professionalDepth.bidLevels, professionalDepth.askLevels);
-  const status = consolidated.snapshot
-    ? `CLF ${consolidated.status.toUpperCase()} ${consolidated.snapshot.includedVenues.length}V`
-    : `BYBIT ${professionalDepth.state.toUpperCase()}`;
+  const status = `CLF ${consolidated.status.toUpperCase()} ${consolidated.snapshot?.includedVenues.length ?? 0}V`;
 
   return (
     <aside
@@ -226,7 +221,7 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, exchangeLabel,
       {!effectiveViewport && <div className="chart-docked-depth-awaiting">SYNCHRONIZING CHART PRICE SCALE</div>}
       {hover && <DepthTooltip hover={hover} quoteAsset={marketSymbol.quoteAsset} />}
       <footer className="chart-docked-depth-footer">
-        <span>{consolidated.snapshot ? consolidated.snapshot.includedVenues.map((venue) => venue.venue.toUpperCase()).join("+") : exchangeLabel.toUpperCase()} {marketSymbol.rawSymbol}</span>
+        <span>{consolidated.snapshot ? consolidated.snapshot.includedVenues.map((venue) => venue.venue.toUpperCase()).join("+") : "MULTI-VENUE CLF"} {marketSymbol.rawSymbol}</span>
         <span>{formatPrice(model?.coverageMin ?? null, model?.priceDecimals ?? 1)}—{formatPrice(model?.coverageMax ?? null, model?.priceDecimals ?? 1)}</span>
         <span>{model ? `${model.hiddenAboveCount}↑ ${model.hiddenBelowCount}↓` : "—"}</span>
         <b>{consolidated.snapshot ? `${Math.round(consolidated.snapshot.coverageRatio * 100)}% VIEWPORT COVERAGE · ` : ""}VISIBLE RESTING LIMIT DEPTH · HIDDEN/RPI EXCLUDED</b>

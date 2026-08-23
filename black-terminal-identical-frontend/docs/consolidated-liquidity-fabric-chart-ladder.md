@@ -41,4 +41,6 @@ The canvas renders:
 - size, signed size, snapshot delta, price, and cumulative depth columns;
 - venue count, source depth, observed coverage, and degraded/fallback state.
 
-During a temporary consolidated-feed failure, the last verified frame is marked degraded and ages into stale state. If no consolidated frame has ever succeeded, the existing direct Bybit book is shown explicitly as a degraded fallback rather than being relabelled as multi-venue data.
+During a temporary consolidated-feed failure, the last verified frame is marked degraded and retained. If no consolidated frame has ever succeeded, the ladder remains in an explicit `CLF INITIALIZING` or error state. It never falls back to the chart-selected exchange and never changes its source identity when the user changes the chart venue.
+
+The chart exchange selector controls the candles and chart price context only. The chart-docked ladder is always sourced from the Consolidated Liquidity Fabric for the selected base asset, combining every healthy supported venue regardless of which exchange is selected in the terminal header.

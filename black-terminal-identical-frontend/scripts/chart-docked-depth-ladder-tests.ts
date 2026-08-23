@@ -109,12 +109,16 @@ function depth(rows: ProfessionalDomRow[]): ProfessionalDomLadderModel {
 }
 
 const componentSource = readFileSync(resolve(projectRoot, "src/modules/dom-pro/components/ChartDockedDepthLadder.tsx"), "utf8");
+const consolidatedClientSource = readFileSync(resolve(projectRoot, "src/modules/dom-pro/consolidatedLiquidityClient.ts"), "utf8");
 const appSource = readFileSync(resolve(projectRoot, "src/App.tsx"), "utf8");
 const pixiSource = readFileSync(resolve(projectRoot, "src/components/PixiBlackChart.tsx"), "utf8");
 const engineSource = readFileSync(resolve(projectRoot, "src/market-data/engine/marketDataEngine.ts"), "utf8");
 const bybitSource = readFileSync(resolve(projectRoot, "src/market-data/adapters/bybit.ts"), "utf8");
-assert.match(componentSource, /useDomFeed\(marketSymbol, \{ depth: 1000 \}\)/, "docked ladder must request the deepest supported Bybit public book");
 assert.match(componentSource, /useConsolidatedLiquidityFeed/, "the docked ladder must consume the server-side multi-venue liquidity fabric");
+assert.doesNotMatch(componentSource, /useDomFeed|feed\.book|feed\.ticker|exchangeLabel/, "the docked ladder must never couple to the chart-selected venue or use a venue-specific fallback");
+assert.doesNotMatch(componentSource, /BYBIT/, "consolidated warm-up must not be presented as a Bybit-specific ladder");
+assert.match(componentSource, /MULTI-VENUE CLF/, "cold start must disclose the venue-independent consolidated source");
+assert.doesNotMatch(consolidatedClientSource, /input\.exchange|exchangeLabel|selectedExchange/, "the consolidated request identity must remain independent of the chart-selected exchange");
 assert.match(componentSource, /requestAnimationFrame\(animate\)/, "depth transitions must be synchronized to display frames");
 assert.doesNotMatch(componentSource, /setInterval\(/, "the dock renderer must not introduce a fixed-FPS interval");
 assert.match(componentSource, /HIDDEN\/RPI EXCLUDED/, "coverage limits must be disclosed in the UI");

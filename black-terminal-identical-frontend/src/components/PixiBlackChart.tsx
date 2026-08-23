@@ -4972,7 +4972,7 @@ export function PixiBlackChart({
           <label>Maximum Toxicity<input type="number" min={1} max={100} value={qalcSettings.maximumToxicity} onChange={(event) => updateQalcSetting("maximumToxicity", clampNumber(Number(event.target.value), 1, 100))} /></label>
           <label>Quote Lifetime ms<input type="number" min={100} max={5000} step={50} value={qalcSettings.quoteLifetimeMs} onChange={(event) => updateQalcSetting("quoteLifetimeMs", clampNumber(Number(event.target.value), 100, 5000))} /></label>
           <div className="indicator-settings-section">Marker Semantics</div>
-          <label>Candidate Decisions<input type="checkbox" checked={qalcSettings.showCandidates} onChange={(event) => updateQalcSetting("showCandidates", event.target.checked)} /></label>
+          <label>Research Long / Short Setups<input type="checkbox" checked={qalcSettings.showCandidates} onChange={(event) => updateQalcSetting("showCandidates", event.target.checked)} /></label>
           <label>Rejected Decisions<input type="checkbox" checked={qalcSettings.showRejected} onChange={(event) => updateQalcSetting("showRejected", event.target.checked)} /></label>
           <label>Working Quotes<input type="checkbox" checked={qalcSettings.showQuotes} onChange={(event) => updateQalcSetting("showQuotes", event.target.checked)} /></label>
           <label>Cancels / Expiry<input type="checkbox" checked={qalcSettings.showCancellations} onChange={(event) => updateQalcSetting("showCancellations", event.target.checked)} /></label>
@@ -4986,7 +4986,7 @@ export function PixiBlackChart({
           <label>Short Color<input type="color" value={qalcSettings.shortColor} onChange={(event) => updateQalcSetting("shortColor", event.target.value)} /></label>
           <label>Neutral Color<input type="color" value={qalcSettings.neutralColor} onChange={(event) => updateQalcSetting("neutralColor", event.target.value)} /></label>
           <label>Tooltip<select value={qalcSettings.tooltipDetail} onChange={(event) => updateQalcSetting("tooltipDetail", event.target.value as QalcIndicatorSettings["tooltipDetail"])}><option value="COMPACT">Compact</option><option value="FULL">Full Engine Evidence</option></select></label>
-          <div className="qalc-settings-truth">Markers show the configuration recorded by the VPS event itself; these controls define the exact Strategy Lab handoff. The chart never rewrites history or infers BC-QALC entries from candle direction.</div>
+          <div className="qalc-settings-truth">RESEARCH LONG/SHORT marks a causal microstructure setup, not an order or fill. MODEL TP and INVALIDATION are recorded projections. PAPER ENTRY/EXIT appears only after the conservative queue simulator records an actual fill lifecycle. The chart never infers BC-QALC signals from candle direction.</div>
           <button type="button" className="profile-inline-button strategy-lab-jump" onClick={openQalcStrategyLab}>OPEN THIS CONFIGURATION IN STRATEGY LAB</button>
           <button type="button" className="tv-defaults" onClick={() => onIndicatorAdvancedSettingsChange((current) => ({ ...current, qalc: defaultQalcIndicatorSettings }))}>Defaults</button>
         </div>

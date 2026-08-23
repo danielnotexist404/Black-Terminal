@@ -24,7 +24,11 @@ export function directionModel(features: QalcFeatureSnapshot, config: QalcConfig
 
 /** Queue-aware fill prior. Queue position is explicit and conservative. */
 export function fillModel(features: QalcFeatureSnapshot, queueAhead: number, side: "BUY" | "SELL", config: QalcConfig): QalcFillEstimate {
-  const opposingFlow = Math.max(0, side === "BUY" ? -features.tradeOfi["1000"] : features.tradeOfi["1000"]);
+  // A passive bid advances when aggressive sells consume the bid queue; a
+  // passive ask advances when aggressive buys consume the ask queue. Net OFI
+  // is directional evidence, not executed queue-consumption volume: opposing
+  // trades must not disappear merely because same-window trades offset them.
+  const opposingFlow = side === "BUY" ? features.aggressiveSellBase["1000"] : features.aggressiveBuyBase["1000"];
   const sameSideCancel = side === "BUY" ? features.bidCancellationRate : features.askCancellationRate;
   const replenishment = side === "BUY" ? features.bidReplenishment : features.askReplenishment;
   const effectiveQueue = Math.max(0.000001, queueAhead + replenishment * 0.5);

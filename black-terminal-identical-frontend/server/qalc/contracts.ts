@@ -156,6 +156,8 @@ export type QalcFeatureSnapshot = {
   limitOfi: Record<"100" | "250" | "1000" | "3000" | "10000", number>;
   tradeOfi: Record<"100" | "250" | "1000" | "3000" | "10000", number>;
   combinedOfi: Record<"100" | "250" | "1000" | "3000" | "10000", number>;
+  aggressiveBuyBase: Record<"100" | "250" | "1000" | "3000" | "10000", number>;
+  aggressiveSellBase: Record<"100" | "250" | "1000" | "3000" | "10000", number>;
   baseCvd: Record<"250" | "1000" | "3000" | "5000" | "10000" | "30000", number>;
   notionalCvd: Record<"250" | "1000" | "3000" | "5000" | "10000" | "30000", number>;
   flowEfficiency: Record<"250" | "1000" | "3000" | "5000" | "10000" | "30000", number>;
@@ -232,6 +234,9 @@ export type QalcDecision = {
   reason: string;
   quotePrice?: number;
   quantity?: number;
+  projectedTargetPrice?: number;
+  invalidationPrice?: number;
+  expiresAt?: number;
   directional: QalcModelOutput;
   fill: QalcFillEstimate;
   costs: QalcCostEstimate;

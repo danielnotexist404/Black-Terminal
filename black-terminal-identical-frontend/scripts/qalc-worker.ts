@@ -4,7 +4,7 @@ import { QalcBybitGateway, type QalcGatewayStatus } from "../server/qalc/bybit-g
 import type { QalcConfig, QalcMarketEvent, QalcSymbol } from "../server/qalc/contracts.ts";
 import { QalcEngine } from "../server/qalc/engine.ts";
 import { QalcStateStore } from "../server/qalc/state-store.ts";
-import { QalcTimelineProjector, QalcTimelineStore } from "../server/qalc/timeline.ts";
+import { deriveRecordedResearchSignals, QalcTimelineProjector, QalcTimelineStore } from "../server/qalc/timeline.ts";
 
 const symbol = requiredSymbol(process.env.QALC_SYMBOL || "BTCUSDT");
 const mode = modeValue(process.env.QALC_MODE || "RESEARCH");
@@ -33,13 +33,15 @@ const archive = new QalcEventArchive(archiveRoot, symbol, runId);
 const stateStore = new QalcStateStore(statePath);
 const timelineStore = new QalcTimelineStore(timelinePath);
 const existingTimeline = await timelineStore.load();
+const recoveredResearchSignals = deriveRecordedResearchSignals(existingTimeline.events);
+if (recoveredResearchSignals.length) await timelineStore.append(recoveredResearchSignals);
 const timelineProjector = new QalcTimelineProjector({
   strategyId: String(config.strategyId),
   runId,
   modelVersion: "BC-QALC-BASELINE-1",
   symbol,
   origin: mode,
-}, existingTimeline.events);
+}, [...existingTimeline.events, ...recoveredResearchSignals]);
 configureResearchFees(engine);
 const gateway = new QalcBybitGateway({
   symbol,

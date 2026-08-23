@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { QalcMarketEvent, QalcPaperExecution, QalcPaperInventory, QalcPaperOrder, QalcTelemetry } from "../server/qalc/contracts.ts";
-import { QalcTimelineProjector, QalcTimelineStore } from "../server/qalc/timeline.ts";
+import { deriveRecordedResearchSignals, QalcTimelineProjector, QalcTimelineStore } from "../server/qalc/timeline.ts";
 import { handleQalcRequest } from "../server/qalc/service.js";
 
 const source = event("source-1", 1_000, 100);
@@ -32,6 +32,13 @@ assert.equal(lifecycle.find((row) => row.kind === "ENTRY_LONG")?.positionCycleId
 const prefixIds = lifecycle.map((row) => row.id);
 projector.observe(event("future", 9_000, 102), telemetry({ decision: decision("NO_QUOTE", "TOXICITY_GATE", 102) }));
 assert.deepEqual(projector.pendingEvents().slice(0, prefixIds.length).map((row) => row.id), prefixIds, "future events cannot mutate finalized marker identities");
+const gatedRows = projector.pendingEvents().slice(prefixIds.length);
+assert.equal(gatedRows.filter((row) => row.kind === "CANDIDATE_LONG").length, 1, "a direction-confirmed gate rejection must remain visible as a research setup");
+assert.equal(gatedRows.filter((row) => row.kind === "ENTRY_LONG" || row.kind === "ENTRY_SHORT").length, 0, "a rejected research setup must never become a fake fill");
+assert.match(gatedRows.find((row) => row.kind === "CANDIDATE_LONG")?.reason || "", /^RESEARCH_SETUP:/);
+const recovered = deriveRecordedResearchSignals(gatedRows.filter((row) => row.kind === "REJECTED"));
+assert.equal(recovered.length, 1, "recorded causal rejection metrics must support deterministic research-marker recovery");
+assert.equal(deriveRecordedResearchSignals([...gatedRows, ...recovered]).length, 0, "research-marker recovery must be idempotent");
 
 const folder = await mkdtemp(join(tmpdir(), "qalc-timeline-"));
 try {
@@ -61,11 +68,13 @@ const manifestSource = await readFile(new URL("../src/modules/strategy-lab/my-st
 assert.match(overlaySource, /event\.eventTime\s*\/\s*1_000/, "markers must map canonical exchange event time directly to chart coordinates");
 assert.doesNotMatch(overlaySource, /candle.*(signal|entry)|close\s*[<>]=?/i, "QALC overlay must not synthesize decisions from candle direction or close");
 assert.match(overlaySource, /NO CANDLE FALLBACK/);
+assert.match(overlaySource, /RESEARCH SETUP — NOT AN ORDER OR FILL/, "research setups must be explicitly separated from Paper fills");
+assert.match(overlaySource, /PAPER ENTRIES/, "the overlay must expose actual fill count instead of appearing silently empty");
 assert.match(chartSource, /saveQalcStrategyHandoff\(displaySymbol, qalcSettings\)/, "chart configuration must hand off exactly to Strategy Lab");
 assert.match(manifestSource, /id:\s*"qalc:candidate-long"[\s\S]*?intrabar:\s*true/, "Strategy Lab must expose QALC event-time semantics");
 assert.match(manifestSource, /key:\s*"qalc"/, "BC-QALC must be registered as an active-chart indicator");
 
-console.log("QALC_CHART_INTEGRATION_TESTS_OK 13");
+console.log("QALC_CHART_INTEGRATION_TESTS_OK 20");
 
 function event(id: string, time: number, price: number): QalcMarketEvent {
   return { id, venue: "BYBIT", category: "linear", symbol: "BTCUSDT", eventType: "TRADE", exchangeTimestamp: time, receiveTimestamp: time, processTimestamp: time, payloadVersion: 1, payload: { tradeId: id, side: "BUY", price, quantity: 1, notional: price, blockTrade: false, rpiTrade: false } };

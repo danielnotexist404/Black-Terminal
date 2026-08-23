@@ -8,6 +8,7 @@ import { QalcClockMonitor } from "../server/qalc/clock.ts";
 import { defaultQalcConfig, type QalcBookPayload, type QalcMarketEvent } from "../server/qalc/contracts.ts";
 import { QalcEngine } from "../server/qalc/engine.ts";
 import { QalcFeatureEngine } from "../server/qalc/features.ts";
+import { fillModel } from "../server/qalc/models.ts";
 import { QalcOrderBook } from "../server/qalc/order-book.ts";
 import { QalcPaperBroker } from "../server/qalc/paper-broker.ts";
 import { QalcEventSequencer } from "../server/qalc/sequencer.ts";
@@ -82,6 +83,24 @@ test("feature formulas use weighted queue depth and signed-notional flow efficie
   assert.ok(value.baseCvd["250"] > 0);
   assert.ok(value.notionalCvd["250"] > 0);
   assert.ok(value.flowEfficiency["250"] > 0 && value.flowEfficiency["250"] <= 1);
+  assert.equal(value.aggressiveBuyBase["1000"], 2);
+  assert.equal(value.aggressiveSellBase["1000"], 1);
+});
+
+test("fill probability uses gross opposing aggression even when signed trade flow nets to zero", () => {
+  const book = new QalcOrderBook("BTCUSDT");
+  const features = new QalcFeatureEngine(1);
+  const snapshot = bookEvent("BOOK_SNAPSHOT", 1, [[100, 1]], [[101, 1]], 1_000);
+  const mutation = book.apply(snapshot);
+  features.observeBook(snapshot, mutation, book.view(1_000));
+  features.observeTrade(tradeEvent("offset-buy", "BUY", 101, 1, 1_010));
+  features.observeTrade(tradeEvent("offset-sell", "SELL", 100, 1, 1_020));
+  const value = features.snapshot(book.view(1_020), 1_020)!;
+  assert.equal(value.tradeOfi["1000"], 0, "signed directional flow should remain net zero");
+  assert.equal(value.aggressiveBuyBase["1000"], 1);
+  assert.equal(value.aggressiveSellBase["1000"], 1);
+  assert.ok(fillModel(value, 1, "BUY", defaultQalcConfig()).beforeInvalidation > 0, "aggressive sells must advance a passive bid queue");
+  assert.ok(fillModel(value, 1, "SELL", defaultQalcConfig()).beforeInvalidation > 0, "aggressive buys must advance a passive ask queue");
 });
 
 test("Paper quote is PostOnly, price touch never fills, and actual taker flow consumes queue before partial fill", () => {

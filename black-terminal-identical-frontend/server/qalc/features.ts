@@ -86,6 +86,16 @@ export class QalcFeatureEngine {
     const limitOfi = windowRecord(FLOW_WINDOWS, (window) => this.sumFlow(now, window, "limit"));
     const tradeOfi = windowRecord(FLOW_WINDOWS, (window) => this.sumFlow(now, window, "tradeBase"));
     const combinedOfi = windowRecord(FLOW_WINDOWS, (window) => limitOfi[String(window) as `${FlowWindow}`] + tradeOfi[String(window) as `${FlowWindow}`]);
+    const aggressiveBuyBase = windowRecord(FLOW_WINDOWS, (window) => {
+      const signed = this.sumFlow(now, window, "tradeBase");
+      const gross = this.grossFlow(now, window, "tradeBase");
+      return Math.max(0, (gross + signed) / 2);
+    });
+    const aggressiveSellBase = windowRecord(FLOW_WINDOWS, (window) => {
+      const signed = this.sumFlow(now, window, "tradeBase");
+      const gross = this.grossFlow(now, window, "tradeBase");
+      return Math.max(0, (gross - signed) / 2);
+    });
     const baseCvd = windowRecord(CVD_WINDOWS, (window) => this.sumFlow(now, window, "tradeBase"));
     const notionalCvd = windowRecord(CVD_WINDOWS, (window) => this.sumFlow(now, window, "tradeNotional"));
     const flowEfficiency = windowRecord(CVD_WINDOWS, (window) => {
@@ -129,6 +139,8 @@ export class QalcFeatureEngine {
       limitOfi,
       tradeOfi,
       combinedOfi,
+      aggressiveBuyBase,
+      aggressiveSellBase,
       baseCvd,
       notionalCvd,
       flowEfficiency,

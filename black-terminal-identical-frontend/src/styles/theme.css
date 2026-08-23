@@ -7115,7 +7115,24 @@ body.resizing-layout * {
   letter-spacing: .07em;
 }
 .qalc-chart-badge span { color: #858b94; font-weight: 500; }
+.qalc-signal-strip {
+  position: absolute;
+  top: 38px;
+  right: 92px;
+  z-index: 2;
+  display: flex;
+  gap: 1px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(2,3,4,.92);
+  color: #7f858e;
+  font-size: 7px;
+  letter-spacing: .055em;
+}
+.qalc-signal-strip span { padding: 4px 6px; border-left: 1px solid rgba(255,255,255,.06); white-space: nowrap; }
+.qalc-signal-strip span:first-child { border-left: 0; }
+.qalc-signal-strip b { color: #e5e7ea; font-weight: 800; }
 .qalc-marker-layer { position: absolute; inset: 0; pointer-events: none; }
+.qalc-marker-bundle { position: static; }
 .qalc-marker {
   position: absolute;
   width: calc(var(--qalc-marker-size) * 2.4);
@@ -7128,6 +7145,24 @@ body.resizing-layout * {
   cursor: help;
 }
 .qalc-marker i { position: absolute; inset: 25%; display: block; }
+.qalc-marker > span {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 2px);
+  min-width: max-content;
+  transform: translateX(-50%);
+  padding: 2px 4px;
+  border: 1px solid rgba(255,255,255,.11);
+  border-radius: 2px;
+  background: rgba(1,2,3,.9);
+  color: #bfc3c9;
+  font: 700 6px "IBM Plex Mono", monospace;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.qalc-marker-candidate-long > span { color: var(--qalc-long); }
+.qalc-marker-candidate-short > span { color: var(--qalc-short); border-color: rgba(208,0,36,.25); }
+.qalc-marker-entry-long > span, .qalc-marker-entry-short > span { border-color: currentColor; color: #fff; }
 .qalc-marker-candidate-long i, .qalc-marker-entry-long i {
   border-right: var(--qalc-marker-size) solid transparent;
   border-bottom: calc(var(--qalc-marker-size) * 1.35) solid var(--qalc-long);
@@ -7151,6 +7186,29 @@ body.resizing-layout * {
 .qalc-marker-exit-long i::after, .qalc-marker-exit-short i::after, .qalc-marker-quote-cancelled i::after, .qalc-marker-quote-expired i::after, .qalc-marker-rejected i::after { transform:rotate(-45deg); }
 .qalc-marker-exit-short i::before, .qalc-marker-exit-short i::after { background:var(--qalc-short); }
 .qalc-marker-exit-long i::before, .qalc-marker-exit-long i::after { background:var(--qalc-long); }
+.qalc-plan-line {
+  position: absolute;
+  z-index: 0;
+  width: 88px;
+  height: 1px;
+  border-top: 1px dashed currentColor;
+  pointer-events: none;
+  opacity: .78;
+}
+.qalc-plan-line b, .qalc-plan-line em {
+  position: absolute;
+  top: -8px;
+  padding: 1px 3px;
+  background: rgba(1,2,3,.92);
+  font: 700 6px "IBM Plex Mono", monospace;
+  font-style: normal;
+  white-space: nowrap;
+}
+.qalc-plan-line b { left: 2px; }
+.qalc-plan-line em { right: 0; }
+.qalc-plan-target.long { color: var(--qalc-long); }
+.qalc-plan-target.short { color: var(--qalc-short); }
+.qalc-plan-invalidation { color: var(--qalc-short); }
 .qalc-micro-pane {
   position: absolute;
   right: 88px;

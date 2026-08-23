@@ -27,7 +27,7 @@ export type QalcChartEvent = {
   eventTime: number; receiveTime: number; price: number; quantity: number; side?: "BUY" | "SELL"; direction?: "LONG" | "SHORT";
   reason: string; sourceEventId: string; decisionId?: string; orderId?: string; fillId?: string; positionCycleId?: string;
   origin: "RESEARCH" | "REPLAY" | "PAPER" | "SHADOW"; certificationState: string;
-  metrics: { probabilityUp?: number; probabilityDown?: number; expectedMoveTicks?: number; expectedNetEdgeUsdt?: number; allInCostUsdt?: number; fillProbability?: number; toxicity?: number; queueAhead?: number; queueConfidence?: number; feeSource?: string };
+  metrics: { probabilityUp?: number; probabilityDown?: number; expectedMoveTicks?: number; expectedNetEdgeUsdt?: number; allInCostUsdt?: number; fillProbability?: number; toxicity?: number; queueAhead?: number; queueConfidence?: number; feeSource?: string; projectedTargetPrice?: number; invalidationPrice?: number; expiresAt?: number; quoteEligible?: boolean };
 };
 export type QalcTimelineResponse = {
   available: boolean; source: "VPS_CANONICAL_QALC_TIMELINE" | "NO_FALLBACK"; updatedAt: number;

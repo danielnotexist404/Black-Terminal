@@ -145,7 +145,14 @@ export class QalcEngine {
     const expectedMove = side === "BUY" ? directional.expectedMoveTicks : -directional.expectedMoveTicks;
     const quantity = this.risk.size(quotePrice, this.tickSize, this.quantityStep);
     const costs = costModel({ quotePrice, quantity, tickSize: this.tickSize, expectedMoveTicks: expectedMove, adverseSelectionTicks: adverse, fees: this.feeSchedule, config: this.config });
-    const decisionBase = { time: now, directional, fill, costs, toxicity: features.toxicity.score };
+    const direction = side === "BUY" ? 1 : -1;
+    const projectedMoveTicks = Math.max(1, Math.abs(expectedMove));
+    const decisionBase = {
+      time: now, directional, fill, costs, toxicity: features.toxicity.score, quotePrice, quantity,
+      projectedTargetPrice: quotePrice + direction * projectedMoveTicks * this.tickSize,
+      invalidationPrice: quotePrice - direction * this.config.hardStopTicks * this.tickSize,
+      expiresAt: now + this.config.predictionHorizonMs,
+    };
     if (features.toxicity.score > this.config.maximumToxicity) return this.setDecision({ ...decisionBase, action: "NO_QUOTE", reason: "TOXICITY_GATE" });
     if (fill.beforeInvalidation < this.config.minimumFillProbability) return this.setDecision({ ...decisionBase, action: "NO_QUOTE", reason: "FILL_PROBABILITY_GATE" });
     if (costs.expectedNetEdgeUsdt <= 0 || costs.grossEdgeUsdt < costs.allInCostUsdt * this.config.minimumNetEdgeMultiplier) return this.setDecision({ ...decisionBase, action: "NO_QUOTE", reason: "NET_EDGE_GATE" });

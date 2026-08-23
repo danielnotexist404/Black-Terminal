@@ -59,6 +59,10 @@ export type QalcChartEvent = {
     queueAhead?: number;
     queueConfidence?: number;
     feeSource?: string;
+    projectedTargetPrice?: number;
+    invalidationPrice?: number;
+    expiresAt?: number;
+    quoteEligible?: boolean;
   };
 };
 
@@ -87,7 +91,7 @@ export class QalcTimelineProjector {
   private readonly options: ProjectorOptions;
   private readonly seen = new Set<string>();
   private pending: QalcChartEvent[] = [];
-  private lastCandidate?: { signature: string; at: number };
+  private lastResearchSignal?: { side: "BUY" | "SELL"; at: number };
   private lastRejected?: { reason: string; at: number };
   private lastOrder?: QalcPaperOrder;
   private lastInventory?: QalcPaperInventory;
@@ -115,27 +119,35 @@ export class QalcTimelineProjector {
       queueAhead: telemetry.activeQuote?.queueAheadEstimated,
       queueConfidence: telemetry.activeQuote?.queueConfidence,
       feeSource: decision?.costs.feeSource,
+      projectedTargetPrice: decision?.projectedTargetPrice,
+      invalidationPrice: decision?.invalidationPrice,
+      expiresAt: decision?.expiresAt,
+      quoteEligible: decision?.action === "QUOTE_BID" || decision?.action === "QUOTE_ASK",
     });
 
-    if (decision?.action === "QUOTE_BID" || decision?.action === "QUOTE_ASK") {
-      const side = decision.action === "QUOTE_BID" ? "BUY" : "SELL";
-      const signature = `${side}:${decision.reason}:${roundPrice(decision.quotePrice)}`;
-      const cooldown = Math.max(250, this.options.candidateCooldownMs ?? 500);
-      if (decision.reason === "SHADOW_CANDIDATE" && (!this.lastCandidate || this.lastCandidate.signature !== signature || receiveTime - this.lastCandidate.at >= cooldown)) {
+    const researchSide = researchSignalSide(decision);
+    if (decision && researchSide) {
+      const cooldown = Math.max(1_000, this.options.candidateCooldownMs ?? 15_000);
+      if (!this.lastResearchSignal || this.lastResearchSignal.side !== researchSide || receiveTime - this.lastResearchSignal.at >= cooldown) {
+        const side = researchSide;
         const decisionId = identity("decision", this.options.runId, source.id, decision.action, decision.reason);
         this.emit({
           kind: side === "BUY" ? "CANDIDATE_LONG" : "CANDIDATE_SHORT",
           eventTime, receiveTime, price: decision.quotePrice || telemetry.features?.mid || 0,
           quantity: decision.quantity || 0, side, direction: side === "BUY" ? "LONG" : "SHORT",
-          reason: decision.reason, sourceEventId: source.id, decisionId, metrics: metrics(),
+          reason: decision.action === "NO_QUOTE" ? `RESEARCH_SETUP:${decision.reason}` : decision.reason,
+          sourceEventId: source.id, decisionId, metrics: metrics(),
         });
-        this.lastCandidate = { signature, at: receiveTime };
+        this.lastResearchSignal = { side, at: receiveTime };
       }
-    } else if (decision?.action === "NO_QUOTE" && decision.reason && (
+    } else {
+      this.lastResearchSignal = undefined;
+    }
+    if (decision?.action === "NO_QUOTE" && decision.reason && (
       !this.lastRejected || this.lastRejected.reason !== decision.reason || receiveTime - this.lastRejected.at >= 5_000
     )) {
       this.emit({
-        kind: "REJECTED", eventTime, receiveTime, price: telemetry.features?.mid || 0, quantity: 0,
+        kind: "REJECTED", eventTime, receiveTime, price: telemetry.features?.mid || decision.quotePrice || 0, quantity: 0,
         reason: decision.reason, sourceEventId: source.id,
         decisionId: identity("decision", this.options.runId, source.id, decision.action, decision.reason), metrics: metrics(),
       });
@@ -265,10 +277,53 @@ export function emptyTimeline(): QalcTimelineDocument {
   return { schemaVersion: 1, updatedAt: 0, coverage: { complete: false, source: "RECORDED_QALC_EVENT_TIME" }, events: [] };
 }
 
+/**
+ * Deterministically promotes previously recorded, direction-confirmed gate
+ * rejections into research setup markers. These are explicitly not fills or
+ * executable quotes and never create ENTRY/EXIT lifecycle events.
+ */
+export function deriveRecordedResearchSignals(events: readonly QalcChartEvent[], cooldownMs = 15_000) {
+  const derived: QalcChartEvent[] = [];
+  const seen = new Set(events.map((event) => event.id));
+  const lastByRun = new Map<string, { side: "BUY" | "SELL"; at: number }>();
+  const ordered = [...events].sort((left, right) => left.eventTime - right.eventTime || left.id.localeCompare(right.id));
+  for (const event of ordered) {
+    if (event.kind === "CANDIDATE_LONG" || event.kind === "CANDIDATE_SHORT") {
+      lastByRun.set(event.runId, { side: event.kind === "CANDIDATE_LONG" ? "BUY" : "SELL", at: event.receiveTime });
+      continue;
+    }
+    if (event.kind !== "REJECTED" || !researchGateReason(event.reason)) continue;
+    const side = researchSideFromMetrics(event.metrics);
+    if (!side) continue;
+    const last = lastByRun.get(event.runId);
+    if (last && last.side === side && event.receiveTime - last.at < Math.max(1_000, cooldownMs)) continue;
+    const kind = side === "BUY" ? "CANDIDATE_LONG" : "CANDIDATE_SHORT";
+    const id = identity("chart", event.runId, kind, event.sourceEventId, "", "", String(event.eventTime));
+    lastByRun.set(event.runId, { side, at: event.receiveTime });
+    if (seen.has(id)) continue;
+    seen.add(id);
+    derived.push({
+      ...event, id, kind, quantity: 0, side, direction: side === "BUY" ? "LONG" : "SHORT",
+      reason: `RESEARCH_SETUP:${event.reason}`, metrics: { ...event.metrics, quoteEligible: false },
+    });
+  }
+  return derived;
+}
+
 function identity(...parts: string[]) {
   return `qalc-${createHash("sha256").update(parts.join("\u001f")).digest("hex").slice(0, 32)}`;
 }
-function roundPrice(value?: number) { return Number.isFinite(value) ? Number(value).toFixed(8) : "0"; }
 function latestExitReason(telemetry: QalcTelemetry) {
   return [...telemetry.recentAudit].reverse().find((event) => event.type === "PAPER_INVENTORY_CLOSED")?.message || "PAPER_INVENTORY_EXIT";
+}
+function researchSignalSide(decision?: QalcTelemetry["decision"]): "BUY" | "SELL" | undefined {
+  if (!decision?.quotePrice || !Number.isFinite(decision.quotePrice)) return undefined;
+  if (decision.action !== "QUOTE_BID" && decision.action !== "QUOTE_ASK" && !(decision.action === "NO_QUOTE" && researchGateReason(decision.reason))) return undefined;
+  return decision.directional.probabilityUp >= 0.58 ? "BUY" : decision.directional.probabilityDown >= 0.58 ? "SELL" : undefined;
+}
+function researchSideFromMetrics(metrics: QalcChartEvent["metrics"]): "BUY" | "SELL" | undefined {
+  return Number(metrics.probabilityUp) >= 0.58 ? "BUY" : Number(metrics.probabilityDown) >= 0.58 ? "SELL" : undefined;
+}
+function researchGateReason(reason: string) {
+  return ["TOXICITY_GATE", "FILL_PROBABILITY_GATE", "NET_EDGE_GATE", "QUOTE_ACTION_RATE_LIMIT"].includes(reason);
 }

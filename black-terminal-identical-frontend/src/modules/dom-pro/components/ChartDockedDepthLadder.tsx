@@ -4,6 +4,7 @@ import type { ChartPriceTransformSnapshot } from "../../../chart-engine/priceTra
 import type { MarketSymbol } from "../../../market-data/types";
 import { blackCorePerformanceMonitor } from "../../../performance/performanceMonitor";
 import {
+  CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD,
   buildChartDockedDepthLadder,
   buildPriceFollowingViewport,
   fitViewportToDeliveredBook,
@@ -33,6 +34,8 @@ const AGGREGATION_OPTIONS = [1, 5, 10, 20, 50, 100];
 const SMOOTHING_TAU_MS = 82;
 const CONSOLIDATED_QUERY_BUCKET_USD = 1_000;
 const CONSOLIDATED_QUERY_BUFFER_USD = 2_000;
+const LADDER_DATA_TOP_PX = 38;
+const LADDER_FOOTER_HEIGHT_PX = 26;
 
 export function ChartDockedDepthLadder({ marketSymbol, lastPrice, viewportKey, workspaceId, onClose }: ChartDockedDepthLadderProps) {
   const rootRef = useRef<HTMLElement | null>(null);
@@ -48,9 +51,21 @@ export function ChartDockedDepthLadder({ marketSymbol, lastPrice, viewportKey, w
   const subscribeViewport = useCallback((listener: () => void) => blackCoreChartPriceViewportStore.subscribe(viewportKey, listener), [viewportKey]);
   const getViewport = useCallback(() => blackCoreChartPriceViewportStore.getSnapshot(viewportKey), [viewportKey]);
   const viewport = useSyncExternalStore(subscribeViewport, getViewport, () => null);
-  const followingViewport = useMemo(() => viewport
-    ? buildPriceFollowingViewport(viewport, lastPrice)
-    : null, [lastPrice, viewport]);
+  const ladderRenderViewport = useMemo(() => {
+    if (!viewport) return null;
+    const plotTop = Math.max(LADDER_DATA_TOP_PX, Math.min(viewport.plotTop, size.height - LADDER_FOOTER_HEIGHT_PX - 80));
+    const plotBottom = Math.max(plotTop + 80, size.height - LADDER_FOOTER_HEIGHT_PX);
+    return {
+      ...viewport,
+      width: size.width,
+      height: size.height,
+      plotTop,
+      plotBottom
+    };
+  }, [size.height, size.width, viewport]);
+  const followingViewport = useMemo(() => viewport && ladderRenderViewport
+    ? buildPriceFollowingViewport(viewport, lastPrice, CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD, ladderRenderViewport)
+    : null, [ladderRenderViewport, lastPrice, viewport]);
   const bufferedFollowingViewport = useMemo(() => followingViewport
     ? buildBufferedRequestViewport(followingViewport)
     : null, [followingViewport]);

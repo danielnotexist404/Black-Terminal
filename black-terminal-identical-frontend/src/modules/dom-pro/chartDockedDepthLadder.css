@@ -157,7 +157,7 @@
 
 .chart-docked-depth-awaiting {
   position: absolute;
-  inset: 38px 0 24px;
+  inset: 38px 0 26px;
   z-index: 3;
   display: grid;
   place-items: center;
@@ -174,7 +174,7 @@
   right: 0;
   bottom: 0;
   z-index: 4;
-  min-height: 22px;
+  height: 26px;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;

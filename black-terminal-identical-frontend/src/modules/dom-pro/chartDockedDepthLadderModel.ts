@@ -206,22 +206,23 @@ export function buildChartDockedDepthLadder(input: ChartDockedDepthLadderInput):
 export function buildPriceFollowingViewport(
   chartViewport: ChartPriceTransformSnapshot,
   referencePrice: number,
-  priceSpan = CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD
+  priceSpan = CHART_DOCKED_DEPTH_FOLLOW_SPAN_USD,
+  renderViewport: ChartPriceTransformSnapshot = chartViewport
 ): ChartPriceTransformSnapshot {
   if (!Number.isFinite(referencePrice) || referencePrice <= 0 || !Number.isFinite(priceSpan) || priceSpan <= EPSILON) {
-    return chartViewport;
+    return renderViewport;
   }
   const chartY = priceToScreenY(referencePrice, chartViewport);
-  const plotHeight = chartViewport.plotBottom - chartViewport.plotTop;
-  if (chartY === null || !Number.isFinite(plotHeight) || plotHeight <= EPSILON) return chartViewport;
+  const plotHeight = renderViewport.plotBottom - renderViewport.plotTop;
+  if (chartY === null || !Number.isFinite(plotHeight) || plotHeight <= EPSILON) return renderViewport;
 
-  const topRatio = clamp((chartY - chartViewport.plotTop) / plotHeight, 0, 1);
-  const priceMin = chartViewport.scaleMode === "logarithmic"
+  const topRatio = clamp((chartY - renderViewport.plotTop) / plotHeight, 0, 1);
+  const priceMin = renderViewport.scaleMode === "logarithmic"
     ? solveLogarithmicMinimum(referencePrice, priceSpan, 1 - topRatio)
     : referencePrice - (1 - topRatio) * priceSpan;
   const safeMinimum = Math.max(Math.min(referencePrice, priceMin), Math.max(EPSILON, referencePrice * 1e-12));
   return {
-    ...chartViewport,
+    ...renderViewport,
     priceMin: safeMinimum,
     priceMax: safeMinimum + priceSpan
   };

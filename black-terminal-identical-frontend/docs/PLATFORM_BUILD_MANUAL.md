@@ -440,3 +440,9 @@ npm run build
 ```
 
 For local visual evidence, start Vite on `127.0.0.1:4178` and run `npm run test:my-strategy-visual`. Visual fixtures are accepted only on localhost with `uiPreview=1`; they are not production data paths.
+
+# BC-QALC Research Worker
+
+Run `npm run test:qalc`, `npm run benchmark:qalc`, `npm run typecheck`, `npm run security:contracts`, `npm run security:verify-migration-source` and `npm run build`. Build `Dockerfile.qalc` with an immutable commit tag. `docker-compose.qalc.yml` defaults to BTCUSDT Research capture and mounts private NVMe storage; keep `QALC_PAPER_ENABLED`, `QALC_LIVE_EXECUTION_ENABLED` and `QALC_GROUP_FANOUT_ENABLED` false for initial deployment.
+
+Before starting the worker, verify NTP/chrony is active, create the bounded data directory owned by the container UID, verify only expected internal/public egress networks are attached, and apply the QALC metadata migration only after backup and RLS/source tests. The API container needs read-only access to the QALC state volume, not the raw event archive. Do not label a deployment Paper Certified until the checklist in `docs/strategies/qalc/BC_QALC_CERTIFICATION.md` is complete.

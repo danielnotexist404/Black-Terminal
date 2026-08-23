@@ -124,6 +124,26 @@ export async function getBybitInstrumentMetadata({ category = "linear", symbol =
   return metadata;
 }
 
+export async function getBybitFeeRates(credentials, { category = "linear", symbol } = {}) {
+  const response = await bybitRequest(credentials, "GET", "/v5/account/fee-rate", { category, symbol });
+  const row = response?.list?.[0];
+  const makerRate = Number(row?.makerFeeRate);
+  const takerRate = Number(row?.takerFeeRate);
+  if (!Number.isFinite(makerRate) || !Number.isFinite(takerRate) || makerRate < 0 || takerRate < 0) {
+    const error = new Error("Bybit did not return a valid account fee schedule.");
+    error.code = "BYBIT_FEE_SCHEDULE_UNAVAILABLE";
+    throw error;
+  }
+  const observedAt = Date.now();
+  return {
+    makerRate,
+    takerRate,
+    source: "ACCOUNT_API",
+    observedAt,
+    version: `bybit:${category}:${symbol || "account"}:${observedAt}`,
+  };
+}
+
 export async function getBybitRiskLimits({ category = "linear", symbol = "BTCUSDT", network, executionEnvironment, endpointProfile } = {}) {
   const cacheKey = `risk:${network || "default"}:${category}:${symbol}`;
   const cached = readBybitPublicCache(cacheKey);

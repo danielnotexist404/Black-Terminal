@@ -26,6 +26,8 @@ test -f "$INFRA_DIR/secrets/runtime.env" || fail "runtime secret environment is 
 test "$(stat -c '%a' "$INFRA_DIR/.env")" -le 600 || fail ".env must not be group/world readable"
 test "$(stat -c '%a' "$INFRA_DIR/secrets/runtime.env")" -le 600 || fail "runtime.env must not be group/world readable"
 grep -Eq '^BLACK_CLOUD_SUPABASE_STATE_ROOT=/var/lib/black-cloud/supabase$' "$INFRA_DIR/.env" || fail "Supabase state must remain outside immutable releases at /var/lib/black-cloud/supabase"
+qalc_data_root=$(sed -n 's/^QALC_DATA_ROOT=//p' "$INFRA_DIR/.env" | head -n 1)
+test "${qalc_data_root:-/var/lib/black-cloud/qalc}" = "/var/lib/black-cloud/qalc" || fail "QALC data must remain outside immutable releases at /var/lib/black-cloud/qalc"
 
 if [ "$MODE" = staging ]; then
   compose_overlay="$INFRA_DIR/docker-compose.staging.yml"

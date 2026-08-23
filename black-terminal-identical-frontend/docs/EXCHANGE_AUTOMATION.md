@@ -118,3 +118,7 @@ Bybit Demo and Mainnet Live are the only active Black Cloud execution environmen
   a fallback instead of blanking the chart.
 - DOM/order book, trades tape, market stats, and funding panels are still using mock rows until the
   adapter streams are wired into those React panels.
+
+## BC-QALC provider boundary
+
+QALC uses Bybit public order-book/trade streams and dynamic instrument metadata. Its authenticated provider surface is read-only fee discovery through `/v5/account/fee-rate`. The QALC worker cannot create, amend or cancel an exchange order; Paper matching is internal and live/group execution is a future chapter. Missing account fees, unsafe clock, stale/gapped book or failed metadata all block quoting.

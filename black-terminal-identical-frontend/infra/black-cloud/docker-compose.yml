@@ -101,6 +101,9 @@ services:
       BLACK_CLOUD_DEPLOYMENT_COMMIT: ${BLACK_CLOUD_DEPLOYMENT_COMMIT}
       SUPABASE_URL: http://supabase-kong:8000
       IMM_ENABLED: ${IMM_ENABLED:-false}
+      QALC_STATE_PATH: /var/lib/black-terminal/qalc/state/current.json
+    volumes:
+      - ${QALC_DATA_ROOT:-/var/lib/black-cloud/qalc}/state:/var/lib/black-terminal/qalc/state:ro
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -136,6 +139,46 @@ services:
       STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "false"
       STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "false"
     profiles: ["strategy-automation"]
+
+  qalc-data-init:
+    image: alpine:3.22.1
+    command: ["sh", "-c", "mkdir -p /var/lib/black-terminal/qalc/events /var/lib/black-terminal/qalc/state && chown -R 10001:10001 /var/lib/black-terminal/qalc && chmod 0750 /var/lib/black-terminal/qalc /var/lib/black-terminal/qalc/events /var/lib/black-terminal/qalc/state"]
+    user: "0:0"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
+      - DAC_OVERRIDE
+    network_mode: none
+    volumes:
+      - ${QALC_DATA_ROOT:-/var/lib/black-cloud/qalc}:/var/lib/black-terminal/qalc
+    profiles: ["qalc-research"]
+
+  qalc-worker:
+    <<: *runtime
+    command: ["node", "--experimental-strip-types", "scripts/qalc-worker.ts"]
+    environment:
+      QALC_SYMBOL: BTCUSDT
+      QALC_MODE: RESEARCH
+      QALC_PAPER_ENABLED: "false"
+      QALC_LIVE_EXECUTION_ENABLED: "false"
+      QALC_GROUP_FANOUT_ENABLED: "false"
+      QALC_ARCHIVE_ROOT: /var/lib/black-terminal/qalc/events
+      QALC_STATE_PATH: /var/lib/black-terminal/qalc/state/current.json
+    volumes:
+      - ${QALC_DATA_ROOT:-/var/lib/black-cloud/qalc}:/var/lib/black-terminal/qalc
+    depends_on:
+      qalc-data-init:
+        condition: service_completed_successfully
+    networks:
+      - egress
+    mem_limit: 2g
+    cpus: 2.0
+    profiles: ["qalc-research"]
 
   market-depth-worker:
     <<: *runtime

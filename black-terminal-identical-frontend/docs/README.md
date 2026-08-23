@@ -228,3 +228,7 @@ The former marker model is explicitly classified as repainting and research-only
 # Strategy automation
 
 The Strategy Lab My Strategy documentation is under `docs/strategy-automation/`. Start with `MY_STRATEGY_UX_RECONSTRUCTION.md` for the Library → Wizard → Cockpit workflow and `STRATEGY_VERSION_AND_DRAFT_MODEL.md` for the server authority boundary.
+
+# BC-QALC documentation
+
+The native microstructure strategy documentation is under [`docs/strategies/qalc`](./strategies/qalc/). Start with [Overview](./strategies/qalc/BC_QALC_OVERVIEW.md), [Architecture](./strategies/qalc/BC_QALC_ARCHITECTURE.md), [Market Data](./strategies/qalc/BC_QALC_MARKET_DATA.md), [Paper Broker](./strategies/qalc/BC_QALC_PAPER_BROKER.md), [Certification](./strategies/qalc/BC_QALC_CERTIFICATION.md) and [Limitations](./strategies/qalc/BC_QALC_LIMITATIONS.md). Current certification is Research, not Paper Certified.

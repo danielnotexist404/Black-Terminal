@@ -435,3 +435,7 @@ context cannot receive yellow authority.
 ## BC-RDA risk analytics
 
 BC-RDA is registered as `black-core-dda-pro`. Authorized candle data flows into a versioned deterministic TypeScript mirror in a dedicated worker, then into the shared Pixi oscillator renderer and read-only DDA event bus. The auditable Python reference lives under `python/black_core_indicators/dda_pro`. It has no dependency on execution authority.
+
+## BC-QALC microstructure research
+
+BC-QALC is a separate server-native event engine. One Bybit public socket per symbol feeds canonical depth/trade events into an atomic book, feature/model pipeline and conservative Paper simulator. Raw events live in checksummed hourly NVMe chunks; PostgreSQL contains only private user configuration and metadata. The worker has no broker-mutation adapter and starts in Research with live/group flags hard false. See `docs/strategies/qalc/BC_QALC_ARCHITECTURE.md`.

@@ -15,8 +15,9 @@ import { StrategyCockpitPage } from "./pages/StrategyCockpitPage";
 import { StrategyLibraryPage } from "./pages/StrategyLibraryPage";
 import { StrategyWizardPage } from "./pages/StrategyWizardPage";
 import { activateBlackCloudConnectionViaApi, connectBybitDemoAccountViaApi, fetchBlackCloudStatusViaApi } from "../../../portfolio/portfolioApiClient";
+import { QalcExperience } from "../qalc/QalcExperience";
 
-type View = "library" | "wizard" | "cockpit";
+type View = "library" | "wizard" | "cockpit" | "qalc";
 type Props = {
   definition: StrategyAutomationDefinition;
   chartTimeframe: string;
@@ -357,7 +358,8 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
   };
 
   return <div className="my-strategy-experience">
-    {view === "library" ? <StrategyLibraryPage strategies={strategies} loading={loading} message={message} onCreate={newStrategy} onOpen={(id) => void openStrategy(id)} onBacktest={onOpenBacktest} onPaperAction={(strategy, action) => void libraryPaperAction(strategy, action)} /> : null}
+    {view === "library" ? <StrategyLibraryPage strategies={strategies} loading={loading} message={message} onCreate={newStrategy} onOpen={(id) => void openStrategy(id)} onBacktest={onOpenBacktest} onPaperAction={(strategy, action) => void libraryPaperAction(strategy, action)} onOpenQalc={() => setView("qalc")} /> : null}
+    {view === "qalc" ? <QalcExperience onBack={() => setView("library")} /> : null}
     {view === "wizard" && draft ? <StrategyWizardPage draft={draft} chartTimeframe={chartTimeframe} indicators={indicators} templates={templates} bindings={workspace?.bindings || []} publishedName={workspace?.strategy.name} publishedDefinition={workspace?.strategy.definition} saving={busy} message={message || (dirty ? "Draft changes have not been saved." : undefined)} demoConnection={demoConnection} onChange={(next) => { setDraft(next); setDirty(true); }} onSaveDraft={() => void persistDraft()} onConnectDemo={connectDemo} onRefreshDemo={refreshDemo} onActivate={() => void activateDemoStrategy()} onCancel={() => { setView(workspace?.strategy.publishedVersion ? "cockpit" : "library"); setMessage(undefined); }} /> : null}
     {view === "cockpit" && workspace ? <StrategyCockpitPage workspace={workspace} paperData={paperData} busy={busy} message={message} onEdit={editStrategy} onRefresh={() => void refreshCockpit()} onPaperAction={(action, body) => void paperAction(action, body)} onAddTarget={(slot) => void openTargetPicker(slot)} onTargetAction={(bindingId, action) => void targetAction(bindingId, action)} onDisconnectTarget={(bindingId) => void disconnectTarget(bindingId)} /> : null}
     {addSlot !== null ? <TargetPicker slot={addSlot} eligible={eligible} busy={busy} onClose={() => { setAddSlot(null); setEligible(null); }} onSelect={(target) => void addTarget(target)} /> : null}

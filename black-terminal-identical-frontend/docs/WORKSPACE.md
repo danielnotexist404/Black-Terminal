@@ -299,3 +299,7 @@ Strategy definitions are not workspace-local preferences. The VPS stores mutable
 - `docs/indicators/BC_RDA_*.md` and `docs/indicators/DDA_PRO_*.md` — current integrity contracts and earlier mathematical/history references.
 
 Run `npm run test:dda-pro-all` for the complete indicator suite. `BC_RDA_LEGACY_REPAINTING` is never alert/backtest/automation eligible; Causal V2 remains chart-research-only until independent VPS runtime certification.
+
+## BC-QALC workspace authority
+
+QALC is not an indicator workspace preference. Private configuration is stored in `qalc_strategy_configs`; canonical worker state is read from the VPS shared state volume, and raw events stay in private checksummed archives. Removing a chart indicator, changing chart timeframe or closing the browser cannot alter a QALC server configuration. The UI has no local Paper/runtime fallback.

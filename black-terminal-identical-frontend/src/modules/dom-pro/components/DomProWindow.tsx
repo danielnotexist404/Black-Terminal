@@ -21,6 +21,8 @@ import { requestUserText } from "../../../ui/requestUserText";
 import { DomAggregationEngine } from "../domAggregationEngine";
 import { aggregateDomSnapshot } from "../domAggregationClient";
 import { DomAdaptiveQualityController, type DomVisualQuality } from "../domAdaptiveQuality";
+import { buildStableLiquidityProjection, resolveChartDockedProjectionRowCount } from "../chartDockedDepthLadderModel";
+import { useConsolidatedLiquidityFeed } from "../consolidatedLiquidityClient";
 import { domInteractionCoordinator } from "../domInteractionCoordinator";
 import { domPerformanceTrace } from "../domPerformanceTrace";
 import { domFreezeWatchdog } from "../domFreezeWatchdog";
@@ -957,7 +959,6 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const ladderDisplayUnits = stringSetting(ladderPanelValues, "displayUnits", "notional") as DomLadderDisplayUnit;
   const ladderShowNetDepth = booleanSetting(ladderPanelValues, "showNetDepth", false);
   const ladderAggregationTicks = numberSetting(ladderPanelValues, "aggregationTicks", 20);
-  const ladderAutoCenter = booleanSetting(ladderPanelValues, "autoCenter", true);
   const profilePanelValues = panelRegistry.panels["volume-profile"].settings;
   const profileShowLabels = booleanSetting(profilePanelValues, "showLabels", true);
   const heatmapPanelValues = panelRegistry.panels["liquidity-heatmap"].settings;
@@ -1135,13 +1136,38 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     minimumSize: numberSetting(ladderPanelValues, "minimumSize", 0),
     hideUncovered: ladderCoverageMode === "hide"
   }), [feed.bookStatus, ladderCoverageMode, ladderPanelValues, ladderPriceCamera, ladderSnapshot, stableWalls]);
+  const professionalLadderProjection = useMemo(() => buildStableLiquidityProjection({
+    revision: hashString(sharedPriceCamera.version),
+    width: 1,
+    height: 1,
+    plotLeft: 0,
+    plotRight: 1,
+    plotTop: 0,
+    plotBottom: 1,
+    priceMin: sharedPriceCamera.visiblePriceMin,
+    priceMax: sharedPriceCamera.visiblePriceMax,
+    scaleMode: "linear",
+    firstIndex: 0,
+    lastIndex: 0
+  }, resolveChartDockedProjectionRowCount(ladderRowCount * 15, ladderAggregationTicks)), [ladderAggregationTicks, ladderRowCount, sharedPriceCamera]);
+  const consolidatedProfessionalLadder = useConsolidatedLiquidityFeed({
+    baseAsset: marketSymbol.baseAsset,
+    minimumPrice: professionalLadderProjection.minimumPrice,
+    maximumPrice: professionalLadderProjection.maximumPrice,
+    rowCount: professionalLadderProjection.rowCount,
+    priceStep: professionalLadderProjection.priceStep
+  });
+  const professionalLadderBook = consolidatedProfessionalLadder.book ?? ladderSnapshot.sourceBook;
   const professionalLadderModel = useMemo(() => professionalLadderTrackerRef.current.update({
-    book: ladderSnapshot.sourceBook,
+    book: professionalLadderBook,
     currentPrice: ladderSnapshot.lastPrice ?? ladderSnapshot.midPrice ?? lastPrice,
-    aggregationTicks: ladderAggregationTicks,
+    aggregationTicks: consolidatedProfessionalLadder.book ? 1 : ladderAggregationTicks,
     walls: stableWalls,
-    bookStatus: feed.bookStatus
-  }), [feed.bookStatus, ladderAggregationTicks, ladderSnapshot.lastPrice, ladderSnapshot.midPrice, ladderSnapshot.sourceBook, lastPrice, stableWalls]);
+    bookStatus: consolidatedProfessionalLadder.book
+      ? consolidatedProfessionalLadder.status === "live" ? "LIVE CONSOLIDATED BOOK" : "STALE CONSOLIDATED CACHE"
+      : feed.bookStatus,
+    maximumRows: 12_000
+  }), [consolidatedProfessionalLadder.book, consolidatedProfessionalLadder.status, feed.bookStatus, ladderAggregationTicks, ladderSnapshot.lastPrice, ladderSnapshot.midPrice, lastPrice, professionalLadderBook, stableWalls]);
   const institutionalProfile = useMemo(
     () => traceCalculation("panel.volume_profile", profileSnapshot.volumeProfile.length + macroCandles.length, () => buildInstitutionalProfile(
       profileSnapshot.volumeProfile,
@@ -1798,10 +1824,20 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                 displayUnit={ladderDisplayUnits}
                 maximumVisibleRows={ladderRowCount}
                 aggregationTicks={ladderAggregationTicks}
-                autoCenter={ladderAutoCenter}
+                autoCenter={heatmapViewport.mode === "current"}
                 showWallConfluence={showWallConfluence}
                 onAggregationChange={(value) => patchPanelSettings("ladder", { aggregationTicks: value })}
-                onAutoCenterChange={(value) => patchPanelSettings("ladder", { autoCenter: value })}
+                onAutoCenterChange={(value) => {
+                  patchPanelSettings("ladder", { autoCenter: value });
+                  if (value) centerMarketCamera();
+                }}
+                synchronizedCamera={sharedPriceCamera}
+                synchronizedCursorPrice={domHover?.price ?? null}
+                onSynchronizedWheel={handleHeatmapWheel}
+                onSynchronizedMouseDown={handleHeatmapMouseDown}
+                onSynchronizedMouseMove={moveSharedPriceCamera}
+                onSynchronizedMouseLeave={() => setDomHover(null)}
+                onSynchronizedDoubleClick={centerMarketCamera}
               />
             ) : <>
               <div className="dom-pro-ladder-head"><span>Price ({marketSymbol.quoteAsset})</span><span>Bid Size ({ladderUnit})</span><span>Ask Size ({ladderUnit})</span></div>
@@ -3735,4 +3771,13 @@ function normalizeCvd(value: number, points: Array<{ value: number }>) {
   const max = Math.max(...values);
   if (max === min) return 0;
   return ((value - min) / (max - min) - 0.5) * 2;
+}
+
+function hashString(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
 }

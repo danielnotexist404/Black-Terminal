@@ -121,6 +121,12 @@
   z-index: 2;
 }
 
+.bt-pro-dom-rows.synchronized .bt-pro-dom-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
 .bt-pro-dom-row {
   --bt-dom-node-activity: 0;
   --bt-dom-node-energy: 0;
@@ -194,6 +200,31 @@
   background: var(--bt-dom-blood-bright);
   box-shadow: 0 0 6px rgba(255, 0, 30, 0.72);
   pointer-events: none;
+}
+
+.bt-pro-dom-viewport.camera-synchronized .bt-pro-dom-row.current::after {
+  display: none;
+}
+
+.bt-pro-dom-synchronized-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 8;
+  height: 1px;
+  transform: translateY(-0.5px);
+  pointer-events: none;
+}
+
+.bt-pro-dom-synchronized-line.current-price {
+  background: var(--bt-dom-blood-bright);
+  box-shadow: 0 0 6px rgba(255, 0, 30, 0.72);
+}
+
+.bt-pro-dom-synchronized-line.cursor-price {
+  z-index: 9;
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.3);
 }
 
 .bt-pro-dom-row .price b {

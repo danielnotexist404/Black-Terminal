@@ -58,19 +58,24 @@ try {
   await waitFor(() => cdp.evaluate(`Boolean(document.querySelector(".app-shell"))`), 45_000);
   await cdp.evaluate(`document.querySelector('button[title="Open DOM Pro+"]')?.click()`);
   await waitFor(() => cdp.evaluate(`Boolean(document.querySelector(".dom-pro-window"))`), 20_000);
-  await waitFor(() => cdp.evaluate(`document.querySelectorAll('.dom-pro-ladder-row.shared-row').length >= 12`), 20_000);
+  await waitFor(() => cdp.evaluate(`document.querySelectorAll('.bt-pro-dom-row').length >= 12`), 20_000);
   const readSharedCamera = `(() => {
-    const ladder=document.querySelector('.dom-pro-ladder-book.shared-camera');
+    const ladder=document.querySelector('.bt-pro-dom[data-synchronized-camera]');
     const profile=document.querySelector('.dom-pro-profile-scale.shared-camera');
     const heatmap=document.querySelector('.dom-pro-heatmap-layer');
     const pick=(node)=>node ? {version:node.dataset.cameraVersion,min:Number(node.dataset.cameraMin),max:Number(node.dataset.cameraMax),bucket:node.dataset.bucketSize ? Number(node.dataset.bucketSize) : null,resolution:Number(node.dataset.resolutionRows||0),currentTop:Number(node.dataset.currentPriceTop)} : null;
-    const rows=[...document.querySelectorAll('.dom-pro-ladder-row.shared-row')];
+    const rows=[...document.querySelectorAll('.bt-pro-dom-row')];
     const profileRows=document.querySelectorAll('.dom-pro-profile-node.native-row').length;
     return {ladder:pick(ladder),profile:pick(profile),heatmap:pick(heatmap),heatmapVisualMode:heatmap?.dataset.visualMode,rows:rows.length,profileRows,profileLabels:document.querySelectorAll('.dom-pro-profile-label-layer.dense .dom-pro-profile-label').length,live:rows.filter((row)=>row.dataset.coverage==='live').length,unavailable:rows.filter((row)=>row.dataset.coverage==='unavailable').length,bid:rows.reduce((sum,row)=>sum+Number(row.dataset.bidSize||0),0),ask:rows.reduce((sum,row)=>sum+Number(row.dataset.askSize||0),0)};
   })()`;
   const initialSharedCamera = await cdp.evaluate(readSharedCamera);
   assertSharedCamera(initialSharedCamera, "initial");
   if (initialSharedCamera.bid <= 0 || initialSharedCamera.ask <= 0) throw new Error(`Fixture live depth did not reach shared ladder: ${JSON.stringify(initialSharedCamera)}`);
+  const heatmapCursorTarget = await cdp.evaluate(`(() => { const rect=document.querySelector('.dom-pro-heatmap-canvas').getBoundingClientRect(); return {x:rect.left+rect.width*.42,y:rect.top+rect.height*.37,expectedTopPct:37}; })()`);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: heatmapCursorTarget.x, y: heatmapCursorTarget.y, buttons: 0 });
+  await sleep(160);
+  const cursorSynchronization = await cdp.evaluate(`(() => { const line=document.querySelector('.bt-pro-dom-synchronized-line.cursor-price'); return line ? {topPct:Number.parseFloat(line.style.top),visible:true} : {topPct:null,visible:false}; })()`);
+  if (!cursorSynchronization.visible || Math.abs(cursorSynchronization.topPct - heatmapCursorTarget.expectedTopPct) > 0.15) throw new Error(`IMM cursor did not align with the professional ladder: ${JSON.stringify({heatmapCursorTarget,cursorSynchronization})}`);
   await screenshot("shared-follow-near-market.png");
 
   await cdp.evaluate(`(() => { const button=[...document.querySelectorAll('.dom-pro-horizon-controls button')].find((node)=>node.textContent?.trim()==='+/-5%'); button?.click(); })()`);
@@ -81,7 +86,7 @@ try {
   await screenshot("shared-wide-5pct-uncovered.png");
 
   const prePanVersion = wideSharedCamera.ladder.version;
-  const ladderBounds = await cdp.evaluate(`(() => { const rect=document.querySelector('.dom-pro-ladder-book.shared-camera').getBoundingClientRect(); return {x:rect.left+40,y:rect.top+rect.height*.52,endY:rect.top+rect.height*.67}; })()`);
+  const ladderBounds = await cdp.evaluate(`(() => { const rect=document.querySelector('.bt-pro-dom-viewport.camera-synchronized').getBoundingClientRect(); return {x:rect.left+40,y:rect.top+rect.height*.52,endY:rect.top+rect.height*.67}; })()`);
   await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: ladderBounds.x, y: ladderBounds.y, button: "left", buttons: 1, clickCount: 1 });
   await sleep(80);
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: ladderBounds.x, y: ladderBounds.endY, button: "left", buttons: 1 });
@@ -94,7 +99,7 @@ try {
   await screenshot("shared-simultaneous-pan.png");
 
   const preZoomBucket = pannedSharedCamera.ladder.bucket;
-  await cdp.evaluate(`(() => { const node=document.querySelector('.dom-pro-ladder-book.shared-camera'); const rect=node.getBoundingClientRect(); node.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-120,clientX:rect.left+40,clientY:rect.top+rect.height*.45})); })()`);
+  await cdp.evaluate(`(() => { const node=document.querySelector('.bt-pro-dom-viewport.camera-synchronized'); const rect=node.getBoundingClientRect(); node.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-120,clientX:rect.left+40,clientY:rect.top+rect.height*.45})); })()`);
   await sleep(350);
   const zoomedSharedCamera = await cdp.evaluate(readSharedCamera);
   assertSharedCamera(zoomedSharedCamera, "ladder zoom");
@@ -155,7 +160,7 @@ try {
     await cdp.evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", {key:"Escape", bubbles:true}))`);
   }
 
-  writeFileSync(join(output, "summary.json"), `${JSON.stringify({ capturedAt: new Date().toISOString(), viewport: "1920x1080 + 1280x800", panelCogs: labels.length, cockpitContract, sharedCamera: { initial: initialSharedCamera, wide: wideSharedCamera, pan: pannedSharedCamera, zoom: zoomedSharedCamera, macro: macroSharedCamera, fit: fitSharedCamera }, presets: presetNames, popovers: labels }, null, 2)}\n`);
+  writeFileSync(join(output, "summary.json"), `${JSON.stringify({ capturedAt: new Date().toISOString(), viewport: "1920x1080 + 1280x800", panelCogs: labels.length, cockpitContract, cursorSynchronization, sharedCamera: { initial: initialSharedCamera, wide: wideSharedCamera, pan: pannedSharedCamera, zoom: zoomedSharedCamera, macro: macroSharedCamera, fit: fitSharedCamera }, presets: presetNames, popovers: labels }, null, 2)}\n`);
   console.log(`DOM Pro visual regression captured ${labels.length + presetNames.length + 12} snapshots.`);
 } finally {
   cdp?.close();
@@ -171,7 +176,16 @@ async function screenshot(name) {
 }
 
 function findBrowser() {
-  const candidates = [`${process.env.PROGRAMFILES ?? "C:\\Program Files"}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`, `${process.env["PROGRAMFILES(X86)"] ?? "C:\\Program Files (x86)"}\\Microsoft\\Edge\\Application\\msedge.exe`, `${process.env.PROGRAMFILES ?? "C:\\Program Files"}\\Google\\Chrome\\Application\\chrome.exe`];
+  const candidates = [
+    "/usr/bin/brave-browser",
+    "/usr/bin/brave",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+    `${process.env.PROGRAMFILES ?? "C:\\Program Files"}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`,
+    `${process.env["PROGRAMFILES(X86)"] ?? "C:\\Program Files (x86)"}\\Microsoft\\Edge\\Application\\msedge.exe`,
+    `${process.env.PROGRAMFILES ?? "C:\\Program Files"}\\Google\\Chrome\\Application\\chrome.exe`
+  ];
   const found = candidates.find(existsSync);
   if (!found) throw new Error("Chromium browser not found.");
   return found;
@@ -204,7 +218,7 @@ function assertSharedCamera(contract, label) {
   }
   if (contract.rows < 12 || contract.rows > 120) throw new Error(`${label} row virtualization failed: ${JSON.stringify(contract)}`);
   if (contract.profileRows < 128 || contract.profile.resolution !== contract.profileRows) throw new Error(`${label} profile resolution regressed: ${JSON.stringify(contract)}`);
-  if (contract.profileLabels < 24) throw new Error(`${label} dense profile annotations regressed: ${JSON.stringify(contract)}`);
+  if (contract.profileLabels < 6) throw new Error(`${label} collision-safe profile annotations regressed: ${JSON.stringify(contract)}`);
   if (contract.heatmap.resolution < 64 || contract.heatmap.resolution <= contract.rows) throw new Error(`${label} heatmap resolution regressed: ${JSON.stringify(contract)}`);
   if (contract.heatmapVisualMode !== "enhanced") throw new Error(`${label} enhanced heatmap graphics are not active: ${JSON.stringify(contract)}`);
 }

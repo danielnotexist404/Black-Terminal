@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type WheelEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type WheelEvent } from "react";
+import type { ChartPriceTransformSnapshot } from "../../../chart-engine/priceTransform";
 import type { DomLadderDisplayUnit } from "../domLadderModel";
 import { resolveProfessionalDomNodeMotion, type ProfessionalDomLadderModel, type ProfessionalDomRow } from "../domProfessionalLadder";
+import { buildChartDockedDepthLadder, type ChartDockedDepthRow } from "../chartDockedDepthLadderModel";
+import { domPriceToTopPct, type DomProPriceCamera } from "../domPriceCamera";
 import "../domProfessionalLadder.css";
 
 type DomProfessionalLadderProps = {
@@ -14,6 +17,13 @@ type DomProfessionalLadderProps = {
   showWallConfluence: boolean;
   onAggregationChange: (value: number) => void;
   onAutoCenterChange: (value: boolean) => void;
+  synchronizedCamera?: DomProPriceCamera;
+  synchronizedCursorPrice?: number | null;
+  onSynchronizedWheel?: (event: WheelEvent<HTMLDivElement>) => void;
+  onSynchronizedMouseDown?: (event: ReactMouseEvent<HTMLDivElement>) => void;
+  onSynchronizedMouseMove?: (event: ReactMouseEvent<HTMLDivElement>) => void;
+  onSynchronizedMouseLeave?: () => void;
+  onSynchronizedDoubleClick?: () => void;
 };
 
 const ROW_HEIGHT = 15;
@@ -30,18 +40,53 @@ export function DomProfessionalLadder({
   autoCenter,
   showWallConfluence,
   onAggregationChange,
-  onAutoCenterChange
+  onAutoCenterChange,
+  synchronizedCamera,
+  synchronizedCursorPrice,
+  onSynchronizedWheel,
+  onSynchronizedMouseDown,
+  onSynchronizedMouseMove,
+  onSynchronizedMouseLeave,
+  onSynchronizedDoubleClick
 }: DomProfessionalLadderProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [height, setHeight] = useState(420);
   const [manualOffset, setManualOffset] = useState(0);
-  const visibleRowCount = clamp(Math.floor((height - CHROME_HEIGHT) / ROW_HEIGHT), 8, clamp(Math.round(maximumVisibleRows), 8, 160));
+  const viewportHeight = Math.max(80, height - CHROME_HEIGHT);
+  const visibleRowCount = clamp(Math.floor(viewportHeight / ROW_HEIGHT), 8, clamp(Math.round(maximumVisibleRows), 8, 160));
   const currentIndex = useMemo(() => resolveCurrentIndex(model), [model]);
   const maximumStart = Math.max(0, model.rows.length - visibleRowCount);
   const centeredStart = clamp(currentIndex - Math.floor(visibleRowCount / 2), 0, maximumStart);
   const startIndex = clamp(centeredStart + manualOffset, 0, maximumStart);
-  const visibleRows = model.rows.slice(startIndex, startIndex + visibleRowCount);
-  const outlineHeight = Math.max(ROW_HEIGHT, visibleRows.length * ROW_HEIGHT);
+  const synchronizedModel = useMemo(() => {
+    if (!synchronizedCamera) return null;
+    const viewport: ChartPriceTransformSnapshot = {
+      revision: hashCameraVersion(synchronizedCamera.version),
+      width: 1,
+      height: viewportHeight,
+      plotLeft: 0,
+      plotRight: 1,
+      plotTop: 0,
+      plotBottom: viewportHeight,
+      priceMin: synchronizedCamera.visiblePriceMin,
+      priceMax: synchronizedCamera.visiblePriceMax,
+      scaleMode: "linear",
+      firstIndex: 0,
+      lastIndex: 0
+    };
+    return buildChartDockedDepthLadder({
+      depth: model,
+      viewport,
+      preferredRowHeight: ROW_HEIGHT,
+      maximumRows: visibleRowCount,
+      scaleMode: "chart"
+    });
+  }, [model, synchronizedCamera, viewportHeight, visibleRowCount]);
+  const visibleRows = useMemo<RenderedProfessionalRow[]>(() => synchronizedModel
+    ? synchronizedModel.rows.map((row) => adaptSynchronizedRow(row, model))
+    : model.rows.slice(startIndex, startIndex + visibleRowCount).map((row, index) => ({ ...row, top: index * ROW_HEIGHT, height: ROW_HEIGHT })),
+  [model, startIndex, synchronizedModel, visibleRowCount]);
+  const outlineHeight = synchronizedModel?.plotBottom ?? Math.max(ROW_HEIGHT, visibleRows.length * ROW_HEIGHT);
   const unitLabel = displayUnit === "notional" ? quoteAsset : displayUnit === "contracts" ? "CONTRACTS" : baseAsset;
 
   useEffect(() => {
@@ -63,6 +108,10 @@ export function DomProfessionalLadder({
   }, [autoCenter, model.identity, visibleRowCount]);
 
   function handleWheel(event: WheelEvent<HTMLDivElement>) {
+    if (synchronizedCamera && onSynchronizedWheel) {
+      onSynchronizedWheel(event);
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     const movement = Math.sign(event.deltaY) * Math.max(1, Math.round(Math.abs(event.deltaY) / 36));
@@ -71,6 +120,10 @@ export function DomProfessionalLadder({
   }
 
   function centerOnMarket() {
+    if (synchronizedCamera && onSynchronizedDoubleClick) {
+      onSynchronizedDoubleClick();
+      return;
+    }
     setManualOffset(0);
     if (!autoCenter) onAutoCenterChange(true);
   }
@@ -87,6 +140,12 @@ export function DomProfessionalLadder({
       data-price-step={model.priceStep}
       data-visible-start={startIndex}
       data-visible-rows={visibleRows.length}
+      data-synchronized-camera={synchronizedCamera?.version ?? "independent"}
+      data-camera-version={synchronizedCamera?.version}
+      data-camera-min={synchronizedCamera?.visiblePriceMin}
+      data-camera-max={synchronizedCamera?.visiblePriceMax}
+      data-bucket-size={synchronizedModel?.priceStep ?? model.priceStep}
+      data-current-price-top={synchronizedCamera && model.currentPrice !== null ? domPriceToTopPct(synchronizedCamera, model.currentPrice) : undefined}
     >
       <div className="bt-pro-dom-toolbar">
         <b>DOM</b>
@@ -104,7 +163,15 @@ export function DomProfessionalLadder({
         <span>SUM</span><span>SIZE</span><span>DELTA</span><span>PRICE</span><span>DEPTH</span><i />
       </div>
 
-      <div className="bt-pro-dom-viewport" onWheel={handleWheel} onDoubleClick={centerOnMarket} title="Scroll to inspect the full live order book. Double-click to recenter.">
+      <div
+        className={`bt-pro-dom-viewport ${synchronizedCamera ? "camera-synchronized" : ""}`}
+        onWheel={handleWheel}
+        onMouseDown={onSynchronizedMouseDown}
+        onMouseMove={onSynchronizedMouseMove}
+        onMouseLeave={onSynchronizedMouseLeave}
+        onDoubleClick={centerOnMarket}
+        title={synchronizedCamera ? "IMM-synchronized price scale. Scroll or drag to inspect both panels together; double-click to recenter." : "Scroll to inspect the full live order book. Double-click to recenter."}
+      >
         {visibleRows.length === 0 ? (
           <div className="bt-pro-dom-empty">AWAITING AUTHORITATIVE ORDER BOOK</div>
         ) : (
@@ -113,7 +180,7 @@ export function DomProfessionalLadder({
               {askOutline && <polyline className="ask" points={askOutline} />}
               {bidOutline && <polyline className="bid" points={bidOutline} />}
             </svg>
-            <div className="bt-pro-dom-rows" style={{ "--bt-dom-row-height": `${ROW_HEIGHT}px` } as CSSProperties}>
+            <div className={`bt-pro-dom-rows ${synchronizedCamera ? "synchronized" : ""}`} style={{ "--bt-dom-row-height": `${ROW_HEIGHT}px`, height: `${outlineHeight}px` } as CSSProperties}>
               {visibleRows.map((row) => (
                 <ProfessionalRow
                   key={row.key}
@@ -126,6 +193,12 @@ export function DomProfessionalLadder({
                 />
               ))}
             </div>
+            {synchronizedCamera && model.currentPrice !== null && (
+              <div className="bt-pro-dom-synchronized-line current-price" style={{ top: `${domPriceToTopPct(synchronizedCamera, model.currentPrice)}%` }} aria-hidden="true" />
+            )}
+            {synchronizedCamera && synchronizedCursorPrice !== null && synchronizedCursorPrice !== undefined && Number.isFinite(synchronizedCursorPrice) && (
+              <div className="bt-pro-dom-synchronized-line cursor-price" style={{ top: `${domPriceToTopPct(synchronizedCamera, synchronizedCursorPrice)}%` }} aria-hidden="true" />
+            )}
           </>
         )}
       </div>
@@ -140,8 +213,10 @@ export function DomProfessionalLadder({
   );
 }
 
+type RenderedProfessionalRow = ProfessionalDomRow & { top: number; height: number; coverage?: "live" | "unavailable" };
+
 function ProfessionalRow({ row, displayUnit, unitLabel, priceDecimals, showWallConfluence, live }: {
-  row: ProfessionalDomRow;
+  row: RenderedProfessionalRow;
   displayUnit: DomLadderDisplayUnit;
   unitLabel: string;
   priceDecimals: number;
@@ -162,6 +237,8 @@ function ProfessionalRow({ row, displayUnit, unitLabel, priceDecimals, showWallC
   const bidWidth = row.bidSize > 0 ? `${Math.max(2.5, row.depthRatio * 100)}%` : "0%";
   const nodeMotion = resolveProfessionalDomNodeMotion(row, live);
   const motionStyle = {
+    top: `${row.top}px`,
+    height: `${row.height}px`,
     "--bt-dom-node-activity": nodeMotion.activity.toFixed(3),
     "--bt-dom-node-energy": nodeMotion.energy.toFixed(3),
     "--bt-dom-node-opacity": nodeMotion.opacity.toFixed(3),
@@ -179,6 +256,7 @@ function ProfessionalRow({ row, displayUnit, unitLabel, priceDecimals, showWallC
       data-bid-size={row.bidSize}
       data-ask-size={row.askSize}
       data-snapshot-delta={row.delta}
+      data-coverage={row.coverage ?? "live"}
       data-node-activity={nodeMotion.activity.toFixed(3)}
       data-node-energy={nodeMotion.energy.toFixed(3)}
       title={title}
@@ -213,10 +291,46 @@ function resolveCurrentIndex(model: ProfessionalDomLadderModel) {
 
 function outlinePoints(rows: ProfessionalDomRow[], side: "ask" | "bid") {
   const points = rows
-    .map((row, index) => ({ row, index }))
-    .filter(({ row }) => side === "ask" ? row.askSize > 0 : row.bidSize > 0)
-    .map(({ row, index }) => `${(100 - row.cumulativeRatio * 92).toFixed(2)},${((index + 0.5) * ROW_HEIGHT).toFixed(2)}`);
+    .map((row) => row as RenderedProfessionalRow)
+    .filter((row) => side === "ask" ? row.askSize > 0 : row.bidSize > 0)
+    .map((row) => `${(100 - row.cumulativeRatio * 92).toFixed(2)},${(row.top + row.height / 2).toFixed(2)}`);
   return points.length > 1 ? points.join(" ") : "";
+}
+
+function adaptSynchronizedRow(row: ChartDockedDepthRow, model: ProfessionalDomLadderModel): RenderedProfessionalRow {
+  const cumulativeSize = row.side === "ask" ? row.askCumulative : row.side === "bid" ? row.bidCumulative : Math.max(row.askCumulative, row.bidCumulative);
+  const cumulativeReference = row.side === "ask" ? model.totalAskSize : row.side === "bid" ? model.totalBidSize : Math.max(model.totalAskSize, model.totalBidSize);
+  return {
+    key: row.key,
+    price: row.price,
+    priceLow: row.priceLow,
+    priceHigh: row.priceHigh,
+    bidSize: row.bidSize,
+    askSize: row.askSize,
+    totalSize: row.totalSize,
+    signedSize: row.signedSize,
+    delta: row.delta,
+    cumulativeSize,
+    depthRatio: row.depthRatio,
+    cumulativeRatio: cumulativeReference > 1e-12 ? clamp(cumulativeSize / cumulativeReference, 0, 1) : 0,
+    side: row.side,
+    isCurrentPrice: row.isCurrentPrice,
+    isBestBid: model.bestBid !== null && model.bestBid >= row.priceLow && model.bestBid <= row.priceHigh,
+    isBestAsk: model.bestAsk !== null && model.bestAsk >= row.priceLow && model.bestAsk <= row.priceHigh,
+    wall: row.wall,
+    coverage: row.coverage,
+    top: row.top,
+    height: row.height
+  };
+}
+
+function hashCameraVersion(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
 }
 
 function quantityForDisplay(quantity: number, price: number, unit: DomLadderDisplayUnit) {

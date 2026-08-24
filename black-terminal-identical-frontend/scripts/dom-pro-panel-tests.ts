@@ -43,7 +43,8 @@ import { computeDomWallLabelLayout } from "../src/modules/dom-pro/domWallLabelLa
 import { buildDomLadderModel, formatDomLadderQuantity } from "../src/modules/dom-pro/domLadderModel.ts";
 import { resolveDomFullLiveRange } from "../src/modules/dom-pro/domLiveLadderCamera.ts";
 import { ProfessionalDomLadderTracker, buildProfessionalDomLadder, resolveProfessionalDomNodeMotion } from "../src/modules/dom-pro/domProfessionalLadder.ts";
-import { createDomProPriceCamera, domPriceBucketAt, sameDomPriceCamera } from "../src/modules/dom-pro/domPriceCamera.ts";
+import { buildChartDockedDepthLadder } from "../src/modules/dom-pro/chartDockedDepthLadderModel.ts";
+import { createDomProPriceCamera, domPriceBucketAt, domPriceToTopPct, sameDomPriceCamera } from "../src/modules/dom-pro/domPriceCamera.ts";
 import { buildStructuralCvdFromCandles, buildStructuralCvdFromTrades, estimateCandlePressure, structuralCvdRange, structuralCvdStats } from "../src/modules/dom-pro/domStructuralCvd.ts";
 import type { AggregatedDomSnapshot } from "../src/modules/dom-pro/types.ts";
 
@@ -212,6 +213,30 @@ assert.ok(zoomCamera.bucketSize < wideCamera.bucketSize, "wheel zoom reduces the
 assert.ok(sameDomPriceCamera(wideCamera, createDomProPriceCamera({ min: 51_200, max: 76_800, source: "historical-ohlcv" }, 64_000.25, 40, "explore")), "all synchronized consumers resolve identical domains and boundaries");
 assert.equal(createDomProPriceCamera({ min: 63_000, max: 65_000, source: "live-depth" }, 64_000, 40, "follow").mode, "follow");
 assert.equal(createDomProPriceCamera({ min: 40_000, max: 90_000, source: "historical-ohlcv" }, 64_000, 40, "fit").mode, "fit");
+const synchronizedPlotHeight = 420;
+const synchronizedProfessional = buildChartDockedDepthLadder({
+  depth: professionalInitial,
+  viewport: {
+    revision: 19,
+    width: 1,
+    height: synchronizedPlotHeight,
+    plotLeft: 0,
+    plotRight: 1,
+    plotTop: 0,
+    plotBottom: synchronizedPlotHeight,
+    priceMin: wideCamera.visiblePriceMin,
+    priceMax: wideCamera.visiblePriceMax,
+    scaleMode: "linear",
+    firstIndex: 0,
+    lastIndex: 0
+  },
+  preferredRowHeight: 15,
+  maximumRows: 64,
+  scaleMode: "chart"
+});
+assert.equal(synchronizedProfessional.priceMin, wideCamera.visiblePriceMin, "professional ladder inherits the IMM camera minimum exactly");
+assert.equal(synchronizedProfessional.priceMax, wideCamera.visiblePriceMax, "professional ladder inherits the IMM camera maximum exactly");
+assert.ok(Math.abs((synchronizedProfessional.currentPriceY ?? -1) / synchronizedPlotHeight * 100 - domPriceToTopPct(wideCamera, professionalInitial.currentPrice)) < 1e-9, "professional ladder and IMM camera map the current market to the same normalized Y coordinate");
 
 const narrowCamera = createDomProPriceCamera({ min: 63_900, max: 64_101, source: "live-depth" }, 64_000.25, 40, "follow");
 const zeroBucket = narrowCamera.buckets.find((bucket) => bucket.center > 63_950 && bucket.center < 63_960)!;
@@ -257,10 +282,10 @@ const domWindowSource = readFileSync(new URL("../src/modules/dom-pro/components/
 assert.equal(domWindowSource.match(/useDomFeed\(/g)?.length, 1, "DOM Pro owns exactly one shared feed subscription hook");
 assert.match(domWindowSource, /camera=\{sharedPriceCamera\}/, "heatmap consumes the shared camera object");
 assert.match(domWindowSource, /data-camera-version=\{sharedPriceCamera\.version\}/, "volume profile exposes the shared camera version");
-assert.match(domWindowSource, /ladderCameraMode === "shared"\) return sharedPriceCamera/, "ladder shares the exact camera object in synchronized mode");
-assert.match(domWindowSource, /resolveDomFullLiveRange\(ladderSnapshot\.sourceBook, marketPrice, sharedPriceRange\)/, "full-live ladder derives its camera only from the current genuine venue book");
-assert.match(domWindowSource, /sharedPriceRowCount = ladderCameraMode === "shared" \? ladderRowCount : settings\.mode === "macro" \? 48 : 42/, "full-live ladder density is decoupled from the IMM heatmap camera geometry");
-assert.match(domWindowSource, /camera=\{sharedPriceCamera\}/, "full-live ladder rollout leaves the IMM heatmap camera path intact");
+assert.match(domWindowSource, /synchronizedCamera=\{sharedPriceCamera\}/, "professional ladder consumes the exact IMM price camera");
+assert.match(domWindowSource, /synchronizedCursorPrice=\{domHover\?\.price \?\? null\}/, "IMM cursor price is forwarded to the professional ladder");
+assert.match(domWindowSource, /onSynchronizedWheel=\{handleHeatmapWheel\}/, "professional ladder and IMM heatmap share one wheel camera handler");
+assert.match(domWindowSource, /useConsolidatedLiquidityFeed\(\{/, "DOM Pro requests consolidated depth for the shared full-range viewport");
 assert.match(domWindowSource, /<DomProfessionalLadder/, "full-live mode renders the fixed-row professional ladder");
 assert.match(domWindowSource, /professionalLadderTrackerRef/, "professional ladder owns one idempotent temporal snapshot tracker");
 assert.doesNotMatch(domWindowSource, /const bins = camera\.buckets\.map/, "volume profile must not inherit the ladder bucket grid");
@@ -278,7 +303,11 @@ assert.ok(!/DomHeatmapCanvas|immAggregation|useDomFeed|subscribeOrderBook|Market
 assert.match(professionalLadderSource, /\(current\.bidSize - prior\.bidSize\) - \(current\.askSize - prior\.askSize\)/, "delta is a signed authoritative book change rather than a visual estimate");
 const professionalLadderComponentSource = readFileSync(new URL("../src/modules/dom-pro/components/DomProfessionalLadder.tsx", import.meta.url), "utf8");
 assert.match(professionalLadderComponentSource, /<span>SUM<\/span><span>SIZE<\/span><span>DELTA<\/span><span>PRICE<\/span><span>DEPTH<\/span>/, "professional ladder exposes the reference SUM, SIZE, DELTA, PRICE, and DEPTH columns");
-assert.match(professionalLadderComponentSource, /onWheel=\{handleWheel\}/, "professional ladder supports fixed-row full-book mouse-wheel navigation");
+assert.match(professionalLadderComponentSource, /buildChartDockedDepthLadder\(\{/, "professional ladder reprojects genuine depth through the synchronized IMM price domain");
+assert.match(professionalLadderComponentSource, /onSynchronizedWheel\(event\)/, "professional ladder delegates navigation to the IMM camera instead of retaining an independent row offset");
+assert.match(professionalLadderComponentSource, /bt-pro-dom-synchronized-line cursor-price/, "professional ladder renders the matching IMM cursor mark line");
+assert.match(professionalLadderComponentSource, /priceMin: synchronizedCamera\.visiblePriceMin/, "professional ladder uses the exact IMM camera minimum");
+assert.match(professionalLadderComponentSource, /priceMax: synchronizedCamera\.visiblePriceMax/, "professional ladder uses the exact IMM camera maximum");
 assert.match(professionalLadderComponentSource, /bt-pro-dom-outline/, "professional ladder renders a stepped cumulative depth silhouette");
 assert.match(professionalLadderComponentSource, /className=\{`intensity/, "professional ladder renders a dedicated far-right intensity rail");
 assert.match(professionalLadderComponentSource, /resolveProfessionalDomNodeMotion\(row, live\)/, "professional ladder node motion is derived from authoritative temporal depth change");

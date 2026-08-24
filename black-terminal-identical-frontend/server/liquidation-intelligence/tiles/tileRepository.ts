@@ -4,6 +4,26 @@ import { BclifObjectStore } from "../state/objectStore.ts";
 import { decodeBclifTile, encodeBclifTile } from "./tileCodec.ts";
 import { validateWriterFence, writerFenceColumns } from "../state/writerFence.ts";
 
+export const BCLIF_LIVE_STAGING_HORIZONS = ["6H", "12H", "1D", "3D", "1W", "3W", "1M"] as const satisfies readonly BclifTileHorizon[];
+
+export function selectNewestBclifStagingBucket(rows: readonly any[], horizon: BclifTileHorizon) {
+  const candidates = rows
+    .filter((row) => String(row.horizon) === horizon)
+    .map((row) => {
+      const chunkStart = Date.parse(String(row.chunk_start));
+      const sourceCutoff = Date.parse(String(row.source_cutoff_at));
+      if (!Number.isFinite(chunkStart) || !Number.isFinite(sourceCutoff)) throw new Error(`BCLIF STAGING ${row.id} has an invalid timestamp`);
+      return { row, chunkStart, sourceCutoff };
+    })
+    .sort((left, right) => right.chunkStart - left.chunkStart || right.sourceCutoff - left.sourceCutoff || String(left.row.id).localeCompare(String(right.row.id)));
+  if (!candidates.length) return null;
+  const latestBucket = candidates[0]!.chunkStart;
+  if (candidates.filter((candidate) => candidate.chunkStart === latestBucket).length > 1) {
+    throw new Error(`BCLIF source has multiple STAGING authorities for one ${horizon} UTC bucket`);
+  }
+  return candidates[0]!.row;
+}
+
 export class BclifTileRepository {
   private readonly supabase: any;
   private readonly objectStore: BclifObjectStore;
@@ -405,22 +425,32 @@ export class BclifTileRepository {
     return [...selected.values()].sort((left, right) => left.startTime - right.startTime).slice(-bounded);
   }
 
-  /** Restore the single authoritative cumulative STAGING pointer per horizon. */
+  /**
+   * Restore the newest verified cumulative STAGING pointer per live horizon.
+   *
+   * STAGING uniqueness is scoped to a UTC bucket. A process interruption can
+   * therefore leave an older, incomplete bucket beside the current bucket.
+   * That historical residue is not a competing live authority and must not
+   * prevent restart. We query each horizon independently so accumulated old
+   * buckets cannot crowd another horizon out of a global result limit.
+   */
   async loadCurrentStaging(symbol: string, modelVersion: string): Promise<Map<BclifTileHorizon, BclifDecodedTile>> {
-    const result = await this.supabase.from("bclif_field_chunks")
-      .select("id,object_path,checksum,chunk_start,chunk_end,source_cutoff_at,coverage_quality,published_at,created_at,tile_version,schema_version,model_version,horizon,publication_state")
-      .eq("source_id", this.sourceId)
-      .eq("model_version", modelVersion)
-      .eq("schema_version", BCLIF_TILE_SCHEMA_VERSION)
-      .eq("tile_version", 1)
-      .eq("publication_state", "STAGING")
-      .order("source_cutoff_at", { ascending: false })
-      .limit(16);
-    if (result.error) throw result.error;
     const output = new Map<BclifTileHorizon, BclifDecodedTile>();
-    for (const row of result.data || []) {
-      const horizon = String(row.horizon) as BclifTileHorizon;
-      if (output.has(horizon)) throw new Error(`BCLIF source has multiple STAGING authorities for ${horizon}`);
+    for (const horizon of BCLIF_LIVE_STAGING_HORIZONS) {
+      const result = await this.supabase.from("bclif_field_chunks")
+        .select("id,object_path,checksum,chunk_start,chunk_end,source_cutoff_at,coverage_quality,published_at,created_at,tile_version,schema_version,model_version,horizon,publication_state")
+        .eq("source_id", this.sourceId)
+        .eq("horizon", horizon)
+        .eq("model_version", modelVersion)
+        .eq("schema_version", BCLIF_TILE_SCHEMA_VERSION)
+        .eq("tile_version", 1)
+        .eq("publication_state", "STAGING")
+        .order("chunk_start", { ascending: false })
+        .order("source_cutoff_at", { ascending: false })
+        .limit(2);
+      if (result.error) throw result.error;
+      const row = selectNewestBclifStagingBucket(result.data || [], horizon);
+      if (!row) continue;
       const bytes = await this.objectStore.download(String(row.object_path), "tile");
       if (`sha256:${createHash("sha256").update(bytes).digest("hex")}` !== String(row.checksum)) throw new Error(`BCLIF STAGING ${row.id} failed restart checksum verification`);
       const tile = decodeBclifTile(bytes);

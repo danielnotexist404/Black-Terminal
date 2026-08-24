@@ -12,6 +12,7 @@ const draftMigration = fs.readFileSync(path.join(root, "supabase/migrations/2026
 const demoExecutionMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608230002_bybit_demo_strategy_execution.sql"), "utf8");
 const bcrdaContainmentMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608230003_bcrda_signal_integrity_containment.sql"), "utf8");
 const archiveMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608240001_strategy_automation_archive.sql"), "utf8");
+const brokerGroupExecutionMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608240002_strategy_broker_group_execution.sql"), "utf8");
 const db = new PGlite();
 
 await db.exec(`
@@ -27,7 +28,7 @@ await db.exec(`
   create table public.execution_orders(id uuid primary key default gen_random_uuid(), created_at timestamptz not null default now());
   create table public.execution_fills(id uuid primary key default gen_random_uuid(), filled_at timestamptz not null default now());
   create table public.account_positions(id uuid primary key default gen_random_uuid(), quantity numeric not null default 0, updated_at timestamptz not null default now());
-  create table public.group_trade_intents(id uuid primary key default gen_random_uuid(), created_at timestamptz not null default now());
+  create table public.group_trade_intents(id uuid primary key default gen_random_uuid(), client_intent_id text not null default gen_random_uuid()::text, created_at timestamptz not null default now());
 `);
 await db.exec(migration);
 await db.exec(draftMigration);
@@ -41,15 +42,24 @@ await db.exec(`
   alter table public.connectivity_connections add column disabled_at timestamptz;
   create table public.execution_commands(
     id uuid primary key default gen_random_uuid(),
+    connection_id uuid references public.connectivity_connections(id),
     command_type text not null,
     idempotency_key text not null unique,
     status text not null default 'QUEUED',
-    created_at timestamptz not null default now()
+    priority integer not null default 100,
+    available_at timestamptz not null default now(),
+    locked_by text,
+    locked_until timestamptz,
+    attempt_count integer not null default 0,
+    max_attempts integer not null default 5,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
   );
   create table public.broker_connection_capabilities(
     connection_id uuid primary key,
     can_place_market_orders boolean not null default false,
     can_execute_while_offline boolean not null default false,
+    can_receive_group_orders boolean not null default false,
     can_withdraw boolean not null default false,
     can_transfer boolean not null default false
   );
@@ -78,6 +88,7 @@ await db.exec(`
 await db.exec(demoExecutionMigration);
 await db.exec(bcrdaContainmentMigration);
 await db.exec(archiveMigration);
+await db.exec(brokerGroupExecutionMigration);
 await db.exec("set request.jwt.claim.role='service_role'");
 
 const ownerId = crypto.randomUUID();
@@ -100,11 +111,25 @@ const mandatePolicy = { executionEnvironment: "DEMO", broker: "bybit", accountRe
 const mandateEvidence = { action: "ACTIVATE_BYBIT_DEMO_STRATEGY_EXECUTION", executionEnvironment: "DEMO", acceptedAt: mandateAcceptedAt, persistentAfterLogout: true };
 const mandateRisk = { maxDailyLoss: 500, allowedSymbols: ["BTCUSDT"] };
 const callDemoMandate = (evidence) => call("select public.black_cloud_activate_automation_mandate_v2($1,$2,$3::jsonb,$4,$5,$6::jsonb,$7::jsonb,$8,$9) as result", [ownerId, demoMandateConnectionId, json(mandatePolicy), sha(mandatePolicy), sha("mandate-signature"), json(evidence), json(mandateRisk), sha(mandateRisk), sha("risk-signature")]);
-await assert.rejects(() => callDemoMandate({ ...mandateEvidence, action: "ENABLE OFFLINE CLOUD EXECUTION" }), /demo strategy activation evidence missing/i, "the obsolete phrase is rejected at the database boundary");
+await assert.rejects(() => callDemoMandate({ ...mandateEvidence, action: "ENABLE OFFLINE CLOUD EXECUTION" }), /strategy activation evidence missing/i, "the obsolete phrase is rejected at the database boundary");
 await callDemoMandate(mandateEvidence);
 assert.equal(await scalar("select execution_environment as value from public.broker_automation_mandates where connection_id=$1 and status='ACTIVE'", [demoMandateConnectionId]), "DEMO");
 assert.equal(await scalar("select allow_strategy_execution as value from public.broker_automation_mandates where connection_id=$1 and status='ACTIVE'", [demoMandateConnectionId]), true);
 assert.equal(await scalar("select allow_withdrawals as value from public.broker_automation_mandates where connection_id=$1 and status='ACTIVE'", [demoMandateConnectionId]), false);
+const mainnetMandateConnectionId = crypto.randomUUID();
+await db.query("insert into public.connectivity_connections(id,user_id,provider,execution_environment,endpoint_profile) values($1,$2,'bybit','MAINNET_LIVE','GLOBAL')", [mainnetMandateConnectionId, ownerId]);
+await db.query("insert into public.broker_connection_capabilities(connection_id,can_place_market_orders,can_execute_while_offline,can_receive_group_orders,can_withdraw,can_transfer) values($1,true,true,true,false,false)", [mainnetMandateConnectionId]);
+const mainnetPolicy = { ...mandatePolicy, executionEnvironment: "MAINNET_LIVE", accountReference: "Small-funds audit", allowInvestmentGroupExecution: true, mandateVersion: 1, riskPolicyVersion: 1, policyVersion: "mainnet-v1" };
+const mainnetEvidence = { ...mandateEvidence, action: "ACTIVATE_BYBIT_MAINNET_STRATEGY_EXECUTION", executionEnvironment: "MAINNET_LIVE" };
+await call("select public.black_cloud_activate_automation_mandate_v2($1,$2,$3::jsonb,$4,$5,$6::jsonb,$7::jsonb,$8,$9) as result", [ownerId, mainnetMandateConnectionId, json(mainnetPolicy), sha(mainnetPolicy), sha("mainnet-mandate-signature"), json(mainnetEvidence), json(mandateRisk), sha(mandateRisk), sha("mainnet-risk-signature")]);
+assert.equal(await scalar("select execution_environment as value from public.broker_automation_mandates where connection_id=$1 and status='ACTIVE'", [mainnetMandateConnectionId]), "MAINNET_LIVE");
+assert.equal(await scalar("select allow_investment_group_execution as value from public.broker_automation_mandates where connection_id=$1 and status='ACTIVE'", [mainnetMandateConnectionId]), true);
+assert.equal(await scalar("select allow_withdrawals as value from public.broker_automation_mandates where connection_id=$1 and status='ACTIVE'", [mainnetMandateConnectionId]), false);
+await db.query("insert into public.execution_commands(connection_id,command_type,idempotency_key) values($1,'SYNC_ACCOUNT','claim-demo'),($2,'SYNC_ACCOUNT','claim-mainnet')", [demoMandateConnectionId, mainnetMandateConnectionId]);
+const demoClaims = await db.query("select idempotency_key from public.black_cloud_claim_execution_commands('demo-worker',10,45,'DEMO',false)");
+assert.deepEqual(demoClaims.rows.map((row) => row.idempotency_key), ["claim-demo"], "the Demo worker claims only Demo-bound commands");
+const mainnetClaims = await db.query("select idempotency_key from public.black_cloud_claim_execution_commands('mainnet-worker',10,45,'MAINNET_LIVE',true)");
+assert.deepEqual(mainnetClaims.rows.map((row) => row.idempotency_key), ["claim-mainnet"], "the Mainnet worker claims only Mainnet-bound commands when no global command exists");
 const definition = { runtimeKind: "builtin-adaptive-swing", symbol: "BTCUSDT", timeframe: "4h", marketType: "FUTURES", exchange: "bybit", settings: {}, execution: {} };
 const globalPolicy = policy({ strategyAllocationValue: 100, tradeAmountValue: 100, maximumLeverage: 10, maximumPositionPercent: 100, maximumExposurePercent: 100, maximumDailyLoss: 1000000, maximumDrawdown: 100, maximumPositions: 100 });
 const paperPolicy = policy({ strategyAllocationValue: 100, tradeAmountValue: 10, maximumLeverage: 3, maximumPositionPercent: 25, maximumExposurePercent: 100, maximumDailyLoss: 500, maximumDrawdown: 20, maximumPositions: 1 });
@@ -285,7 +310,7 @@ await assert.rejects(() => db.query("select * from public.strategy_automation_st
 await db.exec("reset role");
 
 await db.close();
-console.log("Strategy automation PostgreSQL tests PASS — naming, immutable versions, private activation, demo target arming, one-live-account fencing, exactly-once signal commands, Paper transitions, idempotency, RLS and audit immutability verified.");
+console.log("Strategy automation PostgreSQL tests PASS — Demo/Mainnet mandates, environment-partitioned claims, immutable versions, private activation, target fencing, exactly-once signals, Paper transitions, RLS and audit immutability verified.");
 
 async function call(statement, values = []) {
   const result = await db.query(statement, values);

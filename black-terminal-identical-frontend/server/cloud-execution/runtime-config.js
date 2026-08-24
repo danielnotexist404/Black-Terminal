@@ -4,7 +4,7 @@ import { BYBIT_EXECUTION_ENVIRONMENTS, normalizeBybitExecutionEnvironment, resol
 export function validateBlackCloudRuntime(env = process.env) {
   const errors = [];
   required(env.BLACK_CLOUD_NODE_ID, "BLACK_CLOUD_NODE_ID", errors);
-  if (env.BLACK_CLOUD_NODE_ID && env.BLACK_CLOUD_NODE_ID !== "BLACK_CLOUD_NODE_01") errors.push("BLACK_CLOUD_NODE_ID must be BLACK_CLOUD_NODE_01 for the first production node.");
+  if (env.BLACK_CLOUD_NODE_ID && !/^BLACK_CLOUD_(?:NODE|DEMO_NODE|MAINNET_NODE)_01$/.test(env.BLACK_CLOUD_NODE_ID)) errors.push("BLACK_CLOUD_NODE_ID must identify the approved first Mainnet or Demo execution node.");
   required(env.BLACK_CLOUD_WORKER_REGION, "BLACK_CLOUD_WORKER_REGION", errors);
   required(env.BLACK_CLOUD_DEPLOYMENT_ENVIRONMENT, "BLACK_CLOUD_DEPLOYMENT_ENVIRONMENT", errors);
   if (env.BLACK_CLOUD_DEPLOYMENT_ENVIRONMENT && env.BLACK_CLOUD_DEPLOYMENT_ENVIRONMENT !== "PRODUCTION") errors.push("BLACK_CLOUD_DEPLOYMENT_ENVIRONMENT must be PRODUCTION.");
@@ -25,7 +25,7 @@ export function validateBlackCloudRuntime(env = process.env) {
   for (const flag of ["BLACK_CLOUD_EXECUTION_ENABLED", "BYBIT_CLOUD_EXECUTION_ENABLED"]) {
     if (env[flag] !== "true") errors.push(`${flag} must be true.`);
   }
-  if (env.INVESTMENT_GROUP_EXECUTION_ENABLED !== "true" && env.STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED !== "true") {
+  if (env.INVESTMENT_GROUP_EXECUTION_ENABLED !== "true" && env.STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED !== "true" && env.STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED !== "true") {
     errors.push("At least one bounded execution subsystem must be enabled.");
   }
   let executionEnvironment;
@@ -37,8 +37,10 @@ export function validateBlackCloudRuntime(env = process.env) {
     errors.push(error.message);
   }
   if (executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE && env.BLACK_CLOUD_MAINNET_ENABLED !== "true") errors.push("BLACK_CLOUD_MAINNET_ENABLED must be true for MAINNET_LIVE.");
+  if (executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE && env.STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED === "true" && env.STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED !== "true") errors.push("Mainnet strategy execution requires STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED=true.");
   if (executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO && env.BYBIT_DEMO_ENABLED !== "true") errors.push("BYBIT_DEMO_ENABLED must be true for DEMO.");
   if (executionEnvironment !== BYBIT_EXECUTION_ENVIRONMENTS.DEMO && env.STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED === "true") errors.push("STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED requires a DEMO-isolated worker.");
+  if (executionEnvironment !== BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE && env.STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED === "true") errors.push("STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED requires a MAINNET_LIVE-isolated worker.");
   if (env.BYBIT_BASE_URL || env.BYBIT_PRIVATE_WS_URL) errors.push("Legacy Bybit endpoint overrides are forbidden. Use BLACK_CLOUD_EXECUTION_ENVIRONMENT and BYBIT_ENDPOINT_PROFILE.");
   if (endpointSet) {
     for (const [endpoint, protocol] of [[endpointSet.rest, "https"], [endpointSet.privateWebSocket, "wss"]]) {

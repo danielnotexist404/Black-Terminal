@@ -19,10 +19,11 @@ assert.throws(() => normalizeBybitExecutionEnvironment("testnet"), /not part of 
 
 const policy = { ...defaultPaperCapitalPolicy("FUTURES"), maximumDailyLoss: 500, maximumDrawdown: 20 };
 assert.doesNotThrow(() => assertCanArmStrategyTarget({ policy, marketType: "FUTURES", validation: { eligible: true }, executionEnvironment: "DEMO", environment: { STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true", BYBIT_DEMO_ENABLED: "true" } }));
-assert.throws(() => assertCanArmStrategyTarget({ policy, marketType: "FUTURES", validation: { eligible: true }, executionEnvironment: "MAINNET_LIVE", environment: { STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true", BYBIT_DEMO_ENABLED: "true" } }), /real-funds mainnet/i);
+assert.doesNotThrow(() => assertCanArmStrategyTarget({ policy, marketType: "FUTURES", validation: { eligible: true }, executionEnvironment: "MAINNET_LIVE", environment: { STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "true", STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "true" } }));
+assert.throws(() => assertCanArmStrategyTarget({ policy, marketType: "FUTURES", validation: { eligible: true }, executionEnvironment: "MAINNET_LIVE", environment: { STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "true" } }), /disabled or not certified/i);
 
 const validRuntime = {
-  BLACK_CLOUD_NODE_ID: "BLACK_CLOUD_NODE_01",
+  BLACK_CLOUD_NODE_ID: "BLACK_CLOUD_DEMO_NODE_01",
   BLACK_CLOUD_WORKER_REGION: "Singapore",
   BLACK_CLOUD_DEPLOYMENT_ENVIRONMENT: "PRODUCTION",
   BLACK_CLOUD_DEPLOYMENT_COMMIT: "abcdef1",
@@ -42,6 +43,17 @@ const validRuntime = {
 };
 assert.equal(validateBlackCloudRuntime(validRuntime).executionEnvironment, "DEMO");
 assert.throws(() => validateBlackCloudRuntime({ ...validRuntime, BLACK_CLOUD_EXECUTION_ENVIRONMENT: "MAINNET_LIVE", BLACK_CLOUD_MAINNET_ENABLED: "true" }), /DEMO-isolated worker/i, "demo automation cannot start inside a real-funds worker");
+const mainnetRuntime = {
+  ...validRuntime,
+  BLACK_CLOUD_NODE_ID: "BLACK_CLOUD_MAINNET_NODE_01",
+  BLACK_CLOUD_EXECUTION_ENVIRONMENT: "MAINNET_LIVE",
+  BLACK_CLOUD_MAINNET_ENABLED: "true",
+  STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "false",
+  STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "true",
+  STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "true",
+  BYBIT_DEMO_ENABLED: "false"
+};
+assert.equal(validateBlackCloudRuntime(mainnetRuntime).executionEnvironment, "MAINNET_LIVE");
 
 const connectRoute = read("server/routes/exchange-accounts/connect-demo.js");
 const accountService = read("server/exchanges/exchange-account-service.js");
@@ -50,12 +62,14 @@ const signalWorker = read("scripts/strategy-automation-worker.ts");
 const brokerWorker = read("server/cloud-execution/worker.js");
 const connectionSupervisor = read("server/cloud-execution/connection-supervisor.js");
 const migration = read("supabase/migrations/202608230002_bybit_demo_strategy_execution.sql");
+const executionMigration = read("supabase/migrations/202608240002_strategy_broker_group_execution.sql");
 const schema = read("server/security/trading-schemas.js");
 
 assert.match(connectRoute, /executionEnvironment:\s*BYBIT_EXECUTION_ENVIRONMENTS\.DEMO/, "the server, not the browser, chooses demo execution");
 assert.match(accountService, /Client-provided[\s\S]*environment\/region fields are ignored/);
 assert.doesNotMatch(schema.match(/"connect-demo":[\s\S]*?\.strict\(\)/)?.[0] || "", /environment|network|region|endpointProfile/, "the demo connection envelope accepts no routing controls");
-assert.match(cloudRoute, /executionEnvironment !== BYBIT_EXECUTION_ENVIRONMENTS\.DEMO/);
+assert.match(cloudRoute, /executionEnvironmentEnabled/);
+assert.match(cloudRoute, /ACTIVATE_BYBIT_MAINNET_STRATEGY_EXECUTION/);
 assert.match(cloudRoute, /permissionReport\.withdrawal/);
 assert.match(cloudRoute, /permissionReport\.transfer/);
 assert.match(cloudRoute, /allow_strategy_execution/);
@@ -68,9 +82,9 @@ assert.match(signalWorker, /conflictResolution/);
 assert.match(signalWorker, /"REVERSE"/, "close-then-reverse is represented as one durable state-machine command");
 assert.match(signalWorker, /ACCOUNT_SYMBOL_OCCUPIED_BY_UNOWNED_POSITION/, "manual positions block strategy mutation instead of being adopted");
 assert.doesNotMatch(signalWorker, /placeBybitOrder|placeOrder\s*\(|cancelBybitOrder|modifyBybitOrder/, "the signal evaluator only emits durable commands");
-assert.match(brokerWorker, /credentialEnvironment !== "DEMO"/);
-assert.match(brokerWorker, /REAL_FUNDS_STRATEGY_EXECUTION_FORBIDDEN/);
-assert.match(brokerWorker, /adapter\.placeOrder\(orderDraft, venueValidation\)/, "only the fenced broker worker submits a demo order");
+assert.match(brokerWorker, /credentialEnvironment !== workerEnvironment/);
+assert.doesNotMatch(brokerWorker, /REAL_FUNDS_STRATEGY_EXECUTION_FORBIDDEN/);
+assert.match(brokerWorker, /adapter\.placeOrder\(orderDraft, venueValidation\)/, "only the fenced environment-isolated broker worker submits an order");
 assert.match(brokerWorker, /findBybitOrderByClientOrderId/, "ambiguous acknowledgements reconcile by deterministic venue identity");
 assert.match(brokerWorker, /STRATEGY_REVERSE_WAITING_FOR_FLAT/);
 assert.match(brokerWorker, /deterministicStrategyLegId/, "reversal close and entry legs have separate deterministic venue identities");
@@ -86,5 +100,9 @@ assert.match(migration, /command_type='PLACE_ORDER'/);
 assert.match(migration, /ACTIVATE_BYBIT_DEMO_STRATEGY_EXECUTION/);
 assert.doesNotMatch(migration, /ENABLE OFFLINE CLOUD EXECUTION/);
 assert.match(migration, /coalesce\(auth\.role\(\),''\) <> 'service_role'/, "only the server service boundary can arm a target");
+assert.match(executionMigration, /p_execution_environment text/);
+assert.match(executionMigration, /execution_environment=p_execution_environment/);
+assert.match(executionMigration, /ACTIVATE_BYBIT_MAINNET_STRATEGY_EXECUTION/);
+assert.match(executionMigration, /allow_strategy_execution,[\s\S]*allow_withdrawals/);
 
-console.log("Bybit Demo strategy execution tests PASS — official endpoint isolation, server-owned routing, demo-only arming, durable idempotent commands, fenced REST submission, risk ceilings and withdrawal/transfer prohibition verified without placing an order.");
+console.log("Bybit strategy execution tests PASS — official Demo/Mainnet endpoint isolation, server-owned routing, certified arming, environment-partitioned durable commands, fenced REST submission, risk ceilings and withdrawal/transfer prohibition verified without placing an order.");

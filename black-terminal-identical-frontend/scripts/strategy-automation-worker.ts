@@ -6,6 +6,11 @@ import {
   normalizeCapitalPolicy,
 } from "../server/strategy-automation/domain.js";
 import { createStrategySignals } from "../src/modules/strategy-lab/adapters/signalAdapter.ts";
+import {
+  hashCanonicalPayload,
+  intentSigningPayload,
+  signCanonicalPayload,
+} from "../server/cloud-execution/canonical.js";
 import type { Candle } from "../src/chart-engine/types.ts";
 
 type JsonRow = Record<string, any>;
@@ -36,18 +41,19 @@ const leaseSeconds = Math.max(
 );
 const paperEnabled = process.env.STRATEGY_AUTOMATION_PAPER_ENABLED !== "false";
 const liveExecutionEnabled =
-  process.env.STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED === "true";
+  process.env.STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED === "true" &&
+  process.env.STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED === "true" &&
+  process.env.BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH !== "true";
 const demoExecutionEnabled =
   process.env.STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED === "true" &&
-  process.env.BYBIT_DEMO_ENABLED === "true";
+  process.env.BYBIT_DEMO_ENABLED === "true" &&
+  process.env.BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH !== "true";
+const groupExecutionEnabled =
+  process.env.STRATEGY_AUTOMATION_GROUP_EXECUTION_ENABLED === "true" &&
+  process.env.INVESTMENT_GROUP_EXECUTION_ENABLED === "true" &&
+  process.env.BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH !== "true";
 let running = true;
 let ticking = false;
-
-if (liveExecutionEnabled) {
-  throw new Error(
-    "STRATEGY_AUTOMATION_REAL_FUNDS_FORBIDDEN: this worker may enqueue Bybit Demo orders but refuses real-funds Mainnet execution.",
-  );
-}
 
 console.log(
   JSON.stringify({
@@ -56,7 +62,8 @@ console.log(
     workerId,
     paperEnabled,
     demoExecutionEnabled,
-    liveExecutionEnabled: false,
+    liveExecutionEnabled,
+    groupExecutionEnabled,
     intervalMs,
   }),
 );
@@ -90,7 +97,7 @@ console.log(
 );
 
 async function tick() {
-  if (ticking || (!paperEnabled && !demoExecutionEnabled)) return;
+  if (ticking || (!paperEnabled && !demoExecutionEnabled && !liveExecutionEnabled && !groupExecutionEnabled)) return;
   ticking = true;
   try {
     const { data: strategies, error } = await supabase
@@ -165,18 +172,21 @@ async function processStrategy(strategy: JsonRow) {
     .eq("owner_user_id", strategy.owner_user_id)
     .maybeSingle();
   if (paperError) throw paperError;
-  const { data: demoBindings, error: bindingError } = await supabase
+  const { data: targetBindings, error: bindingError } = await supabase
     .from("strategy_target_bindings")
     .select("*")
     .eq("strategy_id", strategy.id)
     .eq("strategy_version", strategy.current_version)
     .eq("owner_user_id", strategy.owner_user_id)
-    .eq("target_type", "BROKER_ACCOUNT")
     .eq("status", "LIVE");
   if (bindingError) throw bindingError;
   const activePaper = paperEnabled && paper?.status === "ACTIVE" ? paper : null;
-  const activeDemoBindings = demoExecutionEnabled ? (demoBindings || []) : [];
-  if (!activePaper && activeDemoBindings.length === 0)
+  const brokerBindings = (targetBindings || []).filter((binding) => binding.target_type === "BROKER_ACCOUNT");
+  const groupBindings = groupExecutionEnabled
+    ? (targetBindings || []).filter((binding) => binding.target_type === "INVESTMENT_GROUP")
+    : [];
+  const activeBrokerBindings = (demoExecutionEnabled || liveExecutionEnabled) ? brokerBindings : [];
+  if (!activePaper && activeBrokerBindings.length === 0 && groupBindings.length === 0)
     return heartbeat(strategy, "PAUSED", null);
   if (
     !["builtin-ema-cross", "builtin-adaptive-swing"].includes(
@@ -247,8 +257,11 @@ async function processStrategy(strategy: JsonRow) {
         signalKey,
       );
     }
-    for (const binding of activeDemoBindings) {
-      await enqueueDemoStrategySignal(strategy, binding, signal, signalKey);
+    for (const binding of activeBrokerBindings) {
+      await enqueueBrokerStrategySignal(strategy, binding, signal, signalKey);
+    }
+    for (const binding of groupBindings) {
+      await enqueueGroupStrategySignal(strategy, binding, signal, signalKey);
     }
   }
   if (activePaper && position && closeResult.closed && closeResult.reason === "STOP_LOSS" && strategy.definition?.execution?.stopReversalEnabled === true) {
@@ -286,7 +299,7 @@ function isBcrdaDefinition(definition: JsonRow) {
   return indicatorId === "black-core-dda-pro" || indicatorId.includes("ddapro") || indicatorName.includes("bc-rda") || indicatorName.includes("risk distribution analysis");
 }
 
-async function enqueueDemoStrategySignal(
+async function enqueueBrokerStrategySignal(
   strategy: JsonRow,
   binding: JsonRow,
   signal: JsonRow,
@@ -300,8 +313,10 @@ async function enqueueDemoStrategySignal(
     .eq("user_id", strategy.owner_user_id)
     .maybeSingle();
   if (connectionError) throw connectionError;
-  if (!connection || connection.execution_environment !== "DEMO" || connection.health_status !== "CONNECTED_CLOUD" || connection.credential_state !== "AUTHENTICATED" || connection.worker_state !== "LIVE" || connection.synchronization_state !== "SYNCHRONIZED" || connection.execution_readiness !== "READY" || connection.control_state !== "ACTIVE") {
-    await auditDemoSignalBlocked(strategy, binding, signalKey, "DEMO_CONNECTION_NOT_READY");
+  const executionEnvironment = String(connection?.execution_environment || "");
+  const environmentEnabled = executionEnvironment === "DEMO" ? demoExecutionEnabled : executionEnvironment === "MAINNET_LIVE" ? liveExecutionEnabled : false;
+  if (!connection || !environmentEnabled || !["CONNECTED_CLOUD", "CONNECTED_HYBRID"].includes(connection.health_status) || connection.credential_state !== "AUTHENTICATED" || connection.worker_state !== "LIVE" || connection.synchronization_state !== "SYNCHRONIZED" || connection.execution_readiness !== "READY" || connection.control_state !== "ACTIVE") {
+    await auditBrokerSignalBlocked(strategy, binding, signalKey, "BROKER_CONNECTION_NOT_READY", executionEnvironment);
     return;
   }
   const { data: positions, error: positionError } = await supabase
@@ -314,7 +329,7 @@ async function enqueueDemoStrategySignal(
   const open = (positions || []).filter((item) => item.direction === "long" || item.direction === "short");
   const unowned = open.find((item) => item.strategy_target_binding_id !== binding.id);
   if (unowned) {
-    await auditDemoSignalBlocked(strategy, binding, signalKey, "ACCOUNT_SYMBOL_OCCUPIED_BY_UNOWNED_POSITION");
+    await auditBrokerSignalBlocked(strategy, binding, signalKey, "ACCOUNT_SYMBOL_OCCUPIED_BY_UNOWNED_POSITION", executionEnvironment);
     return;
   }
   const owned = open.filter((item) => item.strategy_target_binding_id === binding.id);
@@ -326,7 +341,7 @@ async function enqueueDemoStrategySignal(
     ? "CLOSE_THEN_REVERSE"
     : String(strategy.definition?.execution?.conflictResolution || "CLOSE_ONLY").toUpperCase();
   if (opposite && conflictResolution === "IGNORE") {
-    await auditDemoSignalBlocked(strategy, binding, signalKey, "OPPOSITE_SIGNAL_IGNORED_BY_POLICY");
+    await auditBrokerSignalBlocked(strategy, binding, signalKey, "OPPOSITE_SIGNAL_IGNORED_BY_POLICY", executionEnvironment);
     return;
   }
   const action = opposite ? (conflictResolution === "CLOSE_ONLY" ? "CLOSE" : "REVERSE") : "ENTRY";
@@ -352,7 +367,8 @@ async function enqueueDemoStrategySignal(
       takeProfit: signal.takeProfit || null,
       candleTime: signal.timestamp,
       strategyVersion: strategy.current_version,
-      simulatedFunds: true
+      executionEnvironment,
+      simulatedFunds: executionEnvironment === "DEMO"
     },
     status: "QUEUED",
     priority: action === "CLOSE" ? 20 : 50
@@ -362,23 +378,176 @@ async function enqueueDemoStrategySignal(
     owner_user_id: strategy.owner_user_id,
     strategy_id: strategy.id,
     binding_id: binding.id,
-    event_type: "STRATEGY_DEMO_ORDER_QUEUED",
+    event_type: executionEnvironment === "DEMO" ? "STRATEGY_DEMO_ORDER_QUEUED" : "STRATEGY_MAINNET_ORDER_QUEUED",
     severity: "INFO",
-    message: "A confirmed closed-candle signal queued an idempotent Bybit Demo order command.",
-    safe_metadata: { signalKey, action, symbol: strategy.symbol, direction: signal.direction, simulatedFunds: true }
+    message: `A confirmed closed-candle signal queued an idempotent Bybit ${executionEnvironment === "DEMO" ? "Demo" : "Mainnet"} order command.`,
+    safe_metadata: { signalKey, action, symbol: strategy.symbol, direction: signal.direction, executionEnvironment, simulatedFunds: executionEnvironment === "DEMO" }
   });
 }
 
-async function auditDemoSignalBlocked(strategy: JsonRow, binding: JsonRow, signalKey: string, reason: string) {
+async function auditBrokerSignalBlocked(strategy: JsonRow, binding: JsonRow, signalKey: string, reason: string, executionEnvironment: string) {
   await supabase.from("strategy_automation_audit_events").insert({
     owner_user_id: strategy.owner_user_id,
     strategy_id: strategy.id,
     binding_id: binding.id,
-    event_type: "STRATEGY_DEMO_SIGNAL_BLOCKED",
+    event_type: "STRATEGY_BROKER_SIGNAL_BLOCKED",
     severity: "WARNING",
     message: "A strategy signal was blocked before broker submission.",
-    safe_metadata: { signalKey, reason, simulatedFunds: true }
+    safe_metadata: { signalKey, reason, executionEnvironment, simulatedFunds: executionEnvironment === "DEMO" }
   });
+}
+
+async function enqueueGroupStrategySignal(
+  strategy: JsonRow,
+  binding: JsonRow,
+  signal: JsonRow,
+  signalKey: string,
+) {
+  if (!binding.group_id || !groupExecutionEnabled) return;
+  const { data: group, error: groupError } = await supabase
+    .from("investment_groups")
+    .select("id,owner_user_id,status")
+    .eq("id", binding.group_id)
+    .maybeSingle();
+  if (groupError) throw groupError;
+  if (!group || group.owner_user_id !== strategy.owner_user_id || group.status !== "active") {
+    await auditGroupSignalBlocked(strategy, binding, signalKey, "GROUP_NOT_ACTIVE_OR_OWNED");
+    return;
+  }
+  const { count, error: mandateError } = await supabase
+    .from("group_execution_mandates")
+    .select("id", { count: "exact", head: true })
+    .eq("group_id", binding.group_id)
+    .eq("status", "ACTIVE");
+  if (mandateError) throw mandateError;
+  if (!Number(count || 0)) {
+    await auditGroupSignalBlocked(strategy, binding, signalKey, "NO_ACTIVE_GROUP_MANDATES");
+    return;
+  }
+
+  const clientIntentId = `strategy:${hashCanonicalPayload({ signalKey, bindingId: binding.id }).slice(0, 48)}`;
+  const idempotencyKey = hashCanonicalPayload({ groupId: binding.group_id, clientIntentId });
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + Math.max(60_000, timeframeMilliseconds(strategy.timeframe))).toISOString();
+  const policy = normalizeCapitalPolicy(bindingPolicy(binding), binding.market_type, { allowZeroAllocation: false });
+  const row: JsonRow = {
+    id: crypto.randomUUID(),
+    group_id: binding.group_id,
+    strategy_automation_id: strategy.id,
+    strategy_target_binding_id: binding.id,
+    created_by: strategy.owner_user_id,
+    client_intent_id: clientIntentId,
+    symbol: String(strategy.symbol).replace(/[^A-Za-z0-9]/g, "").toUpperCase(),
+    market_type: binding.market_type === "SPOT" ? "SPOT" : "PERPETUAL",
+    side: signal.direction === "short" ? "SELL" : "BUY",
+    order_type: "MARKET",
+    quantity_model: "MANDATE_ALLOCATION",
+    quantity_value: 1,
+    leverage: binding.market_type === "SPOT" ? null : policy.requestedLeverage,
+    margin_mode: binding.market_type === "SPOT" ? null : String(policy.marginMode || "CROSS").toUpperCase(),
+    time_in_force: "IOC",
+    reduce_only: false,
+    take_profit: nullablePositiveValue(signal.takeProfit),
+    stop_loss: nullablePositiveValue(signal.stopLoss),
+    valid_from: now.toISOString(),
+    expires_at: expiresAt,
+    status: "QUEUED",
+    intent_version: 1,
+    mandate_policy_version: 1,
+    idempotency_key: idempotencyKey,
+    strategy_action: "SYNC_DIRECTION",
+    strategy_direction: signal.direction,
+    strategy_execution_policy: {
+      conflictResolution: strategy.definition?.execution?.perpetualSignalReversalEnabled === true
+        ? "CLOSE_THEN_REVERSE"
+        : String(strategy.definition?.execution?.conflictResolution || "CLOSE_ONLY").toUpperCase(),
+      stopReversalEnabled: strategy.definition?.execution?.stopReversalEnabled === true,
+      strategyVersion: strategy.current_version,
+      candleTime: signal.timestamp,
+    },
+  };
+  const envelope = intentSigningPayload(row);
+  row.canonical_hash = hashCanonicalPayload(envelope);
+  row.service_signature = signCanonicalPayload(envelope);
+  const { data: intent, error: intentError } = await supabase
+    .from("group_trade_intents")
+    .upsert(row, { onConflict: "group_id,client_intent_id", ignoreDuplicates: true })
+    .select("id")
+    .maybeSingle();
+  if (intentError) throw intentError;
+  const intentId = intent?.id || (await existingGroupIntent(binding.group_id, clientIntentId));
+  if (!intentId) return;
+  const { error: versionError } = await supabase.from("group_trade_intent_versions").upsert({
+    group_intent_id: intentId,
+    version: 1,
+    canonical_payload: envelope,
+    canonical_hash: row.canonical_hash,
+    service_signature: row.service_signature,
+    created_by: strategy.owner_user_id,
+  }, { onConflict: "group_intent_id,version", ignoreDuplicates: true });
+  if (versionError) throw versionError;
+  const { error: commandError } = await supabase.from("execution_commands").upsert({
+    command_type: "EXPAND_GROUP_INTENT",
+    group_intent_id: intentId,
+    strategy_automation_id: strategy.id,
+    strategy_target_binding_id: binding.id,
+    strategy_signal_key: `${signalKey}:${binding.id}:group`,
+    idempotency_key: `expand:${idempotencyKey}`,
+    payload: { groupIntentId: intentId },
+    status: "QUEUED",
+    priority: 20,
+  }, { onConflict: "idempotency_key", ignoreDuplicates: true });
+  if (commandError) throw commandError;
+  await supabase.from("strategy_automation_audit_events").insert({
+    owner_user_id: strategy.owner_user_id,
+    strategy_id: strategy.id,
+    binding_id: binding.id,
+    event_type: "STRATEGY_GROUP_INTENT_QUEUED",
+    severity: "INFO",
+    message: "A confirmed closed-candle signal queued one signed, idempotent Investment Group intent.",
+    safe_metadata: { signalKey, groupId: binding.group_id, symbol: row.symbol, direction: signal.direction, authorizedMandates: Number(count || 0) },
+  });
+}
+
+async function existingGroupIntent(groupId: string, clientIntentId: string) {
+  const { data, error } = await supabase.from("group_trade_intents").select("id").eq("group_id", groupId).eq("client_intent_id", clientIntentId).maybeSingle();
+  if (error) throw error;
+  return data?.id || null;
+}
+
+async function auditGroupSignalBlocked(strategy: JsonRow, binding: JsonRow, signalKey: string, reason: string) {
+  await supabase.from("strategy_automation_audit_events").insert({
+    owner_user_id: strategy.owner_user_id,
+    strategy_id: strategy.id,
+    binding_id: binding.id,
+    event_type: "STRATEGY_GROUP_SIGNAL_BLOCKED",
+    severity: "WARNING",
+    message: "A strategy signal was blocked before Investment Group fanout.",
+    safe_metadata: { signalKey, reason },
+  });
+}
+
+function bindingPolicy(binding: JsonRow) {
+  return {
+    strategyAllocationMode: binding.strategy_allocation_mode,
+    strategyAllocationValue: binding.strategy_allocation_value,
+    tradeAmountMode: binding.trade_amount_mode,
+    tradeAmountValue: binding.trade_amount_value,
+    requestedLeverage: binding.requested_leverage,
+    maximumLeverage: binding.maximum_leverage,
+    maximumPositionPercent: binding.maximum_position_percent,
+    maximumExposurePercent: binding.maximum_exposure_percent,
+    maximumDailyLoss: binding.maximum_daily_loss,
+    maximumDrawdown: binding.maximum_drawdown,
+    maximumPositions: binding.maximum_positions,
+    slippageBps: binding.slippage_bps,
+    marginMode: binding.margin_mode,
+  };
+}
+
+function nullablePositiveValue(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 async function openPaperPosition(

@@ -13,7 +13,10 @@ import { storeBrokerCredential } from "../../cloud-execution/secret-vault.js";
 import { hashCanonicalPayload, signCanonicalPayload } from "../../cloud-execution/canonical.js";
 import { BYBIT_EXECUTION_ENVIRONMENTS, normalizeBybitExecutionEnvironment, resolveBybitEndpointSet } from "../../exchanges/bybit-endpoints.js";
 
-const CONSENT_ACTION = "ACTIVATE_BYBIT_DEMO_STRATEGY_EXECUTION";
+const CONSENT_ACTIONS = Object.freeze({
+  DEMO: "ACTIVATE_BYBIT_DEMO_STRATEGY_EXECUTION",
+  MAINNET_LIVE: "ACTIVATE_BYBIT_MAINNET_STRATEGY_EXECUTION"
+});
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -34,10 +37,10 @@ export default async function handler(req, res) {
       throw error;
     }
     const executionEnvironment = normalizeBybitExecutionEnvironment(account.execution_environment || account.network);
-    if (executionEnvironment !== BYBIT_EXECUTION_ENVIRONMENTS.DEMO) {
-      const error = new Error("Persistent Strategy Lab execution is currently available only for Bybit Demo Trading. Real-funds Mainnet remains locked.");
+    if (!executionEnvironmentEnabled(executionEnvironment)) {
+      const error = new Error(`Persistent Strategy Lab execution is disabled or not certified for ${executionEnvironment}.`);
       error.statusCode = 403;
-      error.code = "BYBIT_REAL_FUNDS_AUTOMATION_LOCKED";
+      error.code = "BYBIT_STRATEGY_AUTOMATION_DISABLED";
       throw error;
     }
     const endpointSet = resolveBybitEndpointSet({ executionEnvironment, endpointProfile: "GLOBAL" });
@@ -112,8 +115,8 @@ export default async function handler(req, res) {
         executionEnvironment,
         endpointProfile: endpointSet.region,
         websocketOrderEntrySupported: endpointSet.websocketOrderEntrySupported,
-        activation: CONSENT_ACTION,
-        simulatedFunds: true,
+        activation: CONSENT_ACTIONS[executionEnvironment],
+        simulatedFunds: executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO,
         mainnetPublicMarketData: true
       }
     };
@@ -140,7 +143,7 @@ export default async function handler(req, res) {
       can_manage_margin_mode: true,
       can_execute_while_offline: true,
       can_copy_trade: false,
-      can_receive_group_orders: false,
+      can_receive_group_orders: process.env.INVESTMENT_GROUP_EXECUTION_ENABLED === "true",
       can_withdraw: false,
       can_transfer: false,
       supported_order_types: supportedOrderTypes,
@@ -162,6 +165,8 @@ export default async function handler(req, res) {
       withdrawalEnabled: false
     });
     const automationMandate = await createAutomationMandate(supabase, user.id, account, connection, {
+      allowStrategyExecution: true,
+      allowInvestmentGroupExecution: process.env.INVESTMENT_GROUP_EXECUTION_ENABLED === "true",
       ...(req.body.automation || {}), executionEnvironment });
 
     const { error: auditError } = await supabase.from("execution_audit_events").insert({
@@ -255,7 +260,7 @@ async function createAutomationMandate(supabase, userId, account, connection, re
     allowModify: true,
     allowStrategyExecution: requested.allowStrategyExecution !== false,
     allowCopyTrading: requested.allowCopyTrading === true,
-    allowInvestmentGroupExecution: requested.allowInvestmentGroupExecution === true,
+    allowInvestmentGroupExecution: requested.allowInvestmentGroupExecution === true && process.env.INVESTMENT_GROUP_EXECUTION_ENABLED === "true",
     allowWithdrawals: false,
     executionEnvironment: requested.executionEnvironment,
     maxOrderNotional: nullablePositive(requested.maxOrderNotional),
@@ -276,7 +281,7 @@ async function createAutomationMandate(supabase, userId, account, connection, re
   const canonicalHash = hashCanonicalPayload(policy);
   const serviceSignature = signCanonicalPayload(policy);
   const consentEvidence = {
-    action: CONSENT_ACTION,
+    action: CONSENT_ACTIONS[requested.executionEnvironment],
     executionEnvironment: requested.executionEnvironment,
     acceptedAt,
     persistentAfterLogout: true
@@ -334,4 +339,17 @@ function nullableNumber(value) { return value === null || value === undefined ? 
 function maskAccountReference(value) {
   const text = String(value || "Bybit account");
   return text.length <= 6 ? text : `${text.slice(0, 3)}...${text.slice(-3)}`;
+}
+
+function executionEnvironmentEnabled(executionEnvironment) {
+  if (process.env.BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH === "true") return false;
+  if (executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO) {
+    return process.env.BYBIT_DEMO_ENABLED === "true" && process.env.STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED === "true";
+  }
+  if (executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE) {
+    return process.env.BLACK_CLOUD_MAINNET_ENABLED === "true"
+      && process.env.STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED === "true"
+      && process.env.STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED === "true";
+  }
+  return false;
 }

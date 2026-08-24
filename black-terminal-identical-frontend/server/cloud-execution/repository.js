@@ -2,16 +2,20 @@ import crypto from "node:crypto";
 import { decryptBrokerCredential } from "./secret-vault.js";
 
 export class BlackCloudRepository {
-  constructor(supabase, workerId) {
+  constructor(supabase, workerId, executionEnvironment = null, claimGlobalCommands = false) {
     this.supabase = supabase;
     this.workerId = workerId;
+    this.executionEnvironment = executionEnvironment;
+    this.claimGlobalCommands = claimGlobalCommands;
   }
 
   async claimCommands(limit = 10, lockSeconds = 45) {
     return this.rpc("black_cloud_claim_execution_commands", {
       p_worker_id: this.workerId,
       p_limit: limit,
-      p_lock_seconds: lockSeconds
+      p_lock_seconds: lockSeconds,
+      p_execution_environment: this.executionEnvironment,
+      p_claim_global: this.claimGlobalCommands
     });
   }
 

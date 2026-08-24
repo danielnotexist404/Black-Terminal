@@ -12,6 +12,7 @@ import {
   defaultLiveCapitalPolicy,
   defaultPaperCapitalPolicy,
   demoAutomationEnabled,
+  groupAutomationEnabled,
   liveAutomationEnabled,
   normalizeCapitalPolicy,
   normalizeStrategyDefinition,
@@ -25,6 +26,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const migration = read("supabase/migrations/202608220001_black_core_strategy_automation.sql");
 const containmentMigration = read("supabase/migrations/202608230003_bcrda_signal_integrity_containment.sql");
 const archiveMigration = read("supabase/migrations/202608240001_strategy_automation_archive.sql");
+const executionMigration = read("supabase/migrations/202608240002_strategy_broker_group_execution.sql");
 const panel = read("src/modules/strategy-lab/automation/StrategyAutomationPanel.tsx");
 const apiClient = read("src/modules/strategy-lab/automation/strategyAutomationApi.ts");
 const worker = read("scripts/strategy-automation-worker.ts");
@@ -69,7 +71,10 @@ assert.equal(liveAutomationEnabled({ STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED:
 assert.equal(demoAutomationEnabled({ STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true", BYBIT_DEMO_ENABLED: "true" }), true);
 assert.equal(demoAutomationEnabled({ STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true", BYBIT_DEMO_ENABLED: "true", BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH: "true" }), false);
 assert.doesNotThrow(() => assertCanArmStrategyTarget({ policy: paperPolicyForArm(), marketType: "FUTURES", validation: { eligible: true }, executionEnvironment: "DEMO", environment: { STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true", BYBIT_DEMO_ENABLED: "true" } }));
-assert.throws(() => assertCanArmStrategyTarget({ policy: paperPolicyForArm(), marketType: "FUTURES", validation: { eligible: true }, executionEnvironment: "MAINNET_LIVE", environment: { STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true", BYBIT_DEMO_ENABLED: "true" } }), /Real-funds Mainnet/i);
+assert.doesNotThrow(() => assertCanArmStrategyTarget({ policy: paperPolicyForArm(), marketType: "FUTURES", validation: { eligible: true }, executionEnvironment: "MAINNET_LIVE", environment: { STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "true", STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "true" } }));
+assert.throws(() => assertCanArmStrategyTarget({ policy: paperPolicyForArm(), marketType: "FUTURES", validation: { eligible: true }, executionEnvironment: "MAINNET_LIVE", environment: { STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "true", STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "false" } }), /disabled or not certified/i);
+assert.equal(groupAutomationEnabled({ INVESTMENT_GROUP_EXECUTION_ENABLED: "true", STRATEGY_AUTOMATION_GROUP_EXECUTION_ENABLED: "true" }), true);
+assert.doesNotThrow(() => assertCanArmStrategyTarget({ policy: paperPolicyForArm(), marketType: "FUTURES", validation: { eligible: true }, executionEnvironment: "INVESTMENT_GROUP", environment: { INVESTMENT_GROUP_EXECUTION_ENABLED: "true", STRATEGY_AUTOMATION_GROUP_EXECUTION_ENABLED: "true" } }));
 
 const paperPolicy = defaultPaperCapitalPolicy("FUTURES");
 const percentPreview = calculateCapitalPreview({ equity: 10_000, availableBalance: 8_000, policy: paperPolicy, marketType: "FUTURES" });
@@ -131,20 +136,28 @@ assert.match(panel, /Array\.from\(\{ length: 10 \}/);
 assert.match(panel, /NAME STRATEGY BEFORE SAVING/);
 assert.match(panel, /RESET PAPER ACCOUNT/);
 assert.match(panel, /Move target one slot left/);
-assert.match(worker, /STRATEGY_AUTOMATION_REAL_FUNDS_FORBIDDEN/);
+assert.doesNotMatch(worker, /STRATEGY_AUTOMATION_REAL_FUNDS_FORBIDDEN/);
 assert.match(worker, /strategy_target_binding_id/);
 assert.match(worker, /execution_commands/);
+assert.match(worker, /group_trade_intents/);
+assert.match(worker, /signCanonicalPayload/);
 assert.match(worker, /isBcrdaDefinition[\s\S]*BC_RDA_SIGNAL_INTEGRITY_BLOCKED/);
 assert.doesNotMatch(worker, /placeOrder|cancelOrder|modifyOrder|execution_orders.*insert/i, "paper worker contains no broker order mutation path");
 assert.match(worker, /candleClosedAt <= Date\.parse\(position\.opened_at\)/, "same-candle look-ahead exit is rejected");
 assert.match(worker, /averageTrueRange\(candles, 14\)/, "volatility-target sizing is based on closed-candle ATR");
 assert.match(worker, /MAXIMUM_CONSECUTIVE_LOSSES/, "stop-loss revenge reversals honor the configured loss-chain ceiling");
 assert.match(worker, /priorRiskDistance[\s\S]*stopLoss/, "a revenge reversal always receives a bounded opposite-side stop");
-assert.match(compose, /STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "false"/);
+assert.match(compose, /STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "true"/);
 assert.match(compose, /STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true"/);
-assert.match(compose, /STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "false"/);
+assert.match(compose, /STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "true"/);
+assert.match(compose, /BLACK_CLOUD_DEMO_NODE_01/);
+assert.match(compose, /BLACK_CLOUD_MAINNET_NODE_01/);
+assert.match(executionMigration, /drop function if exists public\.black_cloud_claim_execution_commands\(text,integer,integer\)/);
+assert.match(executionMigration, /execution_environment=p_execution_environment/);
+assert.match(executionMigration, /ACTIVATE_BYBIT_MAINNET_STRATEGY_EXECUTION/);
+assert.doesNotMatch(executionMigration, /allow_withdrawals[^\n]*true/i);
 
-console.log("Strategy automation domain and security tests PASS — naming, sizing, demo-only arming, real-funds rejection, durable command emission and no-look-ahead contracts verified.");
+console.log("Strategy automation domain and security tests PASS — naming, sizing, isolated Demo/Mainnet/group arming, signed durable command emission and no-look-ahead contracts verified.");
 
 function paperPolicyForArm() { return { ...defaultPaperCapitalPolicy("FUTURES"), maximumDailyLoss: 500, maximumDrawdown: 20 }; }
 

@@ -137,8 +137,11 @@ services:
       STRATEGY_AUTOMATION_PAPER_ENABLED: "true"
       STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true"
       BYBIT_DEMO_ENABLED: "true"
-      STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "false"
-      STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "false"
+      STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "true"
+      STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "true"
+      STRATEGY_AUTOMATION_GROUP_EXECUTION_ENABLED: "true"
+      INVESTMENT_GROUP_EXECUTION_ENABLED: "true"
+      BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH: "false"
     profiles: ["strategy-automation"]
 
   qalc-data-init:
@@ -240,11 +243,16 @@ services:
     command: ["node", "scripts/black-cloud-execution-worker.js"]
     environment:
       SUPABASE_URL: http://supabase-kong:8000
+      BLACK_CLOUD_NODE_ID: BLACK_CLOUD_DEMO_NODE_01
       BLACK_CLOUD_EXECUTION_ENVIRONMENT: DEMO
       BYBIT_DEMO_ENABLED: "true"
       STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true"
-      INVESTMENT_GROUP_EXECUTION_ENABLED: "false"
+      STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "false"
+      STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "false"
+      STRATEGY_AUTOMATION_GROUP_EXECUTION_ENABLED: "true"
+      INVESTMENT_GROUP_EXECUTION_ENABLED: "true"
       BLACK_CLOUD_MAINNET_ENABLED: "false"
+      BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH: "false"
     profiles: ["strategy-automation"]
 
   bybit-demo-private-stream:
@@ -256,14 +264,23 @@ services:
       BYBIT_DEMO_ENABLED: "true"
       STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true"
       BLACK_CLOUD_MAINNET_ENABLED: "false"
-    profiles: ["strategy-automation"]
+    profiles: ["private-stream-legacy"]
 
   black-cloud-execution-worker:
     <<: *runtime
     command: ["node", "scripts/black-cloud-execution-worker.js"]
     environment:
       SUPABASE_URL: http://supabase-kong:8000
+      BLACK_CLOUD_NODE_ID: BLACK_CLOUD_MAINNET_NODE_01
+      BLACK_CLOUD_EXECUTION_ENVIRONMENT: MAINNET_LIVE
+      BLACK_CLOUD_MAINNET_ENABLED: "true"
+      BYBIT_DEMO_ENABLED: "false"
       STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "false"
+      STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "true"
+      STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "true"
+      STRATEGY_AUTOMATION_GROUP_EXECUTION_ENABLED: "true"
+      INVESTMENT_GROUP_EXECUTION_ENABLED: "true"
+      BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH: "false"
     profiles: ["live-execution"]
 
   bybit-private-stream:
@@ -272,7 +289,7 @@ services:
     environment:
       SUPABASE_URL: http://supabase-kong:8000
       STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "false"
-    profiles: ["live-execution"]
+    profiles: ["private-stream-legacy"]
 
 networks:
   edge:

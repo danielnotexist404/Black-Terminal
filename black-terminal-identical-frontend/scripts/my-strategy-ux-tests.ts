@@ -101,7 +101,8 @@ assert.match(archiveMigration, /status in \('QUEUED','PROCESSING','RETRY','SUBMI
 assert.match(archiveMigration, /brokerOrderMutation',false/, "delete audit explicitly records that no broker order mutation occurred");
 assert.doesNotMatch(archiveMigration, /delete from public\./i, "user-facing delete retains immutable strategy history");
 assert.match(compose, /STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true"/);
-assert.match(compose, /STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "false"/);
-assert.match(compose, /STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "false"/);
+assert.match(compose, /STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "true"/);
+assert.match(compose, /STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "true"/);
+assert.match(compose, /STRATEGY_AUTOMATION_GROUP_EXECUTION_ENABLED: "true"/);
 
 console.log("My Strategy UX tests PASS — empty strategy library, explicit indicator selection, private activation, ten-step workflow, versioning, cockpit navigation and destination controls verified.");

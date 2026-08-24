@@ -179,6 +179,7 @@ export type StrategyTargetBinding = {
   targetId: string;
   targetLabel?: string;
   targetProvider?: string;
+  executionEnvironment?: "DEMO" | "MAINNET_LIVE" | "INVESTMENT_GROUP";
   connectionId?: string;
   accountId?: string;
   groupId?: string;

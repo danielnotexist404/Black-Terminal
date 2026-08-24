@@ -29,7 +29,7 @@ export function StrategyOverview({ workspace, paperData, onAddTarget }: { worksp
     </div>
     <TargetSlotMatrix bindings={workspace.bindings} snapshots={workspace.snapshots} onAdd={onAddTarget} />
     <section className="cockpit-panel runtime-overview"><header><span>RUNTIME TIMELINE</span><strong>SYNCED WITH VPS</strong></header><RuntimeTimeline audit={workspace.audit} /></section>
-    <div className="live-certification-banner demo-ready"><ShieldCheck size={14} /><div><strong>BYBIT DEMO STRATEGY EXECUTION</strong><span>Armed demo targets use simulated funds and mainnet public market data. Real-funds Mainnet, withdrawals and transfers remain prohibited.</span></div></div>
+    <div className="live-certification-banner demo-ready"><ShieldCheck size={14} /><div><strong>BROKER &amp; INVESTMENT GROUP EXECUTION</strong><span>Each armed target is server-authoritative, environment-isolated, mandate-bounded and idempotent. Withdrawals and asset transfers remain prohibited.</span></div></div>
   </div>;
 }
 

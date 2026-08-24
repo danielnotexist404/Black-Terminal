@@ -341,7 +341,7 @@ export async function addTarget(supabase, userId, strategyId, body, idempotencyK
     p_group_id: isBroker ? null : body.targetId,
     p_market_type: marketType,
     p_policy: policy,
-    p_validation: { ...candidate.validation, targetLabel: candidate.label, targetProvider: candidate.provider || null },
+    p_validation: { ...candidate.validation, targetLabel: candidate.label, targetProvider: candidate.provider || null, targetEnvironment: candidate.environment || (body.targetType === "INVESTMENT_GROUP" ? "INVESTMENT_GROUP" : null) },
     p_canonical_hash: canonicalHash,
     p_request_hash: requestHash,
     p_idempotency_key: idempotencyKey
@@ -411,12 +411,14 @@ export async function setTargetState(supabase, userId, strategyId, bindingId, ac
     if (Number(expectedVersion) === Number(binding.row_version)) {
       if (binding.status !== "READY") throw strategyError(409, "STRATEGY_TARGET_STATE_CONFLICT", "Only a ready target can be activated.");
       validation = await validateExistingBinding(supabase, userId, strategyId, binding, environment);
-      const connection = await oneOrNone(supabase.from("connectivity_connections").select("execution_environment").eq("id", binding.connection_id).eq("user_id", userId).maybeSingle());
+      const connection = binding.target_type === "BROKER_ACCOUNT"
+        ? await oneOrNone(supabase.from("connectivity_connections").select("execution_environment").eq("id", binding.connection_id).eq("user_id", userId).maybeSingle())
+        : null;
       assertCanArmStrategyTarget({
         policy: policyFromBinding(binding),
         marketType: binding.market_type,
         validation,
-        executionEnvironment: connection?.execution_environment,
+        executionEnvironment: binding.target_type === "INVESTMENT_GROUP" ? "INVESTMENT_GROUP" : connection?.execution_environment,
         environment
       });
     }
@@ -731,10 +733,13 @@ function validateBrokerEligibility({ connection, account, capability, strategy, 
   if (!capability?.can_execute_while_offline) reasons.push("Persistent server execution is not certified.");
   if (strategy.market_type === "FUTURES" && !includesMarket(capability?.supported_market_types, "FUTURES")) reasons.push("The connection does not certify Futures for this strategy.");
   if (strategy.market_type === "SPOT" && !includesMarket(capability?.supported_market_types, "SPOT")) reasons.push("The connection does not certify Spot for this strategy.");
-  if (connection.execution_environment !== "DEMO" || account?.execution_environment !== "DEMO") reasons.push("Strategy automation currently requires a Bybit Demo Trading account.");
+  const executionEnvironment = connection.execution_environment || account?.execution_environment;
+  if (!['DEMO','MAINNET_LIVE'].includes(executionEnvironment) || account?.execution_environment !== executionEnvironment) reasons.push("The broker account and cloud connection execution environments do not match.");
   if (conflict) reasons.push("This account already occupies a target slot in this strategy version.");
   if (environment.STRATEGY_AUTOMATION_TARGET_CONFIGURATION_ENABLED === "false") reasons.push("Strategy target configuration is disabled by rollout policy.");
-  if (environment.STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED !== "true") reasons.push("Bybit Demo strategy execution is disabled by rollout policy.");
+  if (executionEnvironment === "DEMO" && (environment.STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED !== "true" || environment.BYBIT_DEMO_ENABLED !== "true")) reasons.push("Bybit Demo strategy execution is disabled by rollout policy.");
+  if (executionEnvironment === "MAINNET_LIVE" && (environment.STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED !== "true" || environment.STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED !== "true")) reasons.push("Bybit Mainnet strategy execution is disabled or not certified by rollout policy.");
+  if (environment.BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH === "true") reasons.push("The Black Cloud global execution kill switch is engaged.");
   return { eligible: reasons.length === 0, reasons, checkedAt: new Date().toISOString(), withdrawalPermission: "NONE" };
 }
 
@@ -743,6 +748,7 @@ function validateGroupEligibility({ group, activeMandates, conflict, environment
   if (group.status !== "active") reasons.push("Investment Group is not active.");
   if (environment.INVESTMENT_GROUP_EXECUTION_ENABLED !== "true") reasons.push("Investment Group execution is disabled by rollout policy.");
   if (environment.STRATEGY_AUTOMATION_GROUP_EXECUTION_ENABLED !== "true") reasons.push("Strategy-to-group signal fanout is not certified on this Black Cloud deployment.");
+  if (environment.BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH === "true") reasons.push("The Black Cloud global execution kill switch is engaged.");
   if (!activeMandates.length) reasons.push("No active authorized follower mandate is available.");
   if (conflict) reasons.push("This Investment Group already occupies a target slot in this strategy version.");
   return { eligible: reasons.length === 0, reasons, checkedAt: new Date().toISOString(), authorizedMembers: activeMandates.length };
@@ -886,6 +892,7 @@ function safeBinding(row) {
     targetId: row.target_id,
     targetLabel: row.validation_snapshot?.targetLabel || null,
     targetProvider: row.validation_snapshot?.targetProvider || null,
+    executionEnvironment: row.validation_snapshot?.targetEnvironment || null,
     connectionId: row.connection_id,
     accountId: row.account_id,
     groupId: row.group_id,

@@ -84,7 +84,12 @@ export function intentSigningPayload(intent) {
     intentVersion: Number(intent.intent_version ?? intent.intentVersion),
     mandatePolicyVersion: Number(intent.mandate_policy_version ?? intent.mandatePolicyVersion),
     idempotencyKey: intent.idempotency_key ?? intent.idempotencyKey,
-    supersedesIntentId: intent.supersedes_intent_id ?? intent.supersedesIntentId ?? null
+    supersedesIntentId: intent.supersedes_intent_id ?? intent.supersedesIntentId ?? null,
+    strategyAutomationId: intent.strategy_automation_id ?? intent.strategyAutomationId ?? null,
+    strategyTargetBindingId: intent.strategy_target_binding_id ?? intent.strategyTargetBindingId ?? null,
+    strategyAction: intent.strategy_action ?? intent.strategyAction ?? null,
+    strategyDirection: intent.strategy_direction ?? intent.strategyDirection ?? null,
+    strategyExecutionPolicy: intent.strategy_execution_policy ?? intent.strategyExecutionPolicy ?? null
   };
 }
 

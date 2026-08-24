@@ -319,6 +319,12 @@ export function demoAutomationEnabled(environment = process.env) {
     && environment.BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH !== "true";
 }
 
+export function groupAutomationEnabled(environment = process.env) {
+  return environment.INVESTMENT_GROUP_EXECUTION_ENABLED === "true"
+    && environment.STRATEGY_AUTOMATION_GROUP_EXECUTION_ENABLED === "true"
+    && environment.BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH !== "true";
+}
+
 export function assertCanArmStrategyTarget({ policy, marketType, validation, executionEnvironment, environment = process.env }) {
   const reasons = [];
   const normalized = normalizeCapitalPolicy(policy, marketType, { allowZeroAllocation: true });
@@ -331,8 +337,12 @@ export function assertCanArmStrategyTarget({ policy, marketType, validation, exe
   if (!validation?.eligible) reasons.push(...(validation?.reasons || ["Target validation is incomplete."]));
   if (executionEnvironment === "DEMO") {
     if (!demoAutomationEnabled(environment)) reasons.push("Bybit Demo strategy execution is disabled by VPS rollout policy.");
+  } else if (executionEnvironment === "MAINNET_LIVE") {
+    if (!liveAutomationEnabled(environment)) reasons.push("Bybit Mainnet strategy execution is disabled or not certified by VPS rollout policy.");
+  } else if (executionEnvironment === "INVESTMENT_GROUP") {
+    if (!groupAutomationEnabled(environment)) reasons.push("Investment Group strategy execution is disabled by VPS rollout policy.");
   } else {
-    reasons.push("Real-funds Mainnet strategy automation is not available through the demo activation path.");
+    reasons.push("The target execution environment is unavailable or unsupported.");
   }
   if (reasons.length) throw strategyError(403, "STRATEGY_TARGET_NOT_ARMABLE", `This target cannot be armed: ${reasons.join(" ")}`, { reasons });
   return normalized;

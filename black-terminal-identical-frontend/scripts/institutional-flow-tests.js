@@ -46,6 +46,10 @@ assert.match(component, /STRATEGY · TREASURY \/ PERIODIC 8-K/);
 assert.match(component, /VANGUARD · NO NATIVE FUND/);
 assert.match(component, /HISTORICAL COIN PRICE/);
 assert.match(component, /onPointerMove/);
+assert.match(component, /Maximize ETF Flow Intelligence/);
+assert.match(component, /Close enlarged ETF Flow Intelligence/);
+assert.match(component, /createPortal\(panel, fullscreenHost\)/, "the enlarged panel must portal into the isolated terminal workspace");
+assert.match(component, /event\.key !== "Escape"/, "Escape must restore the compact ETF panel");
 assert.doesNotMatch(component, /institutional-pressure" title=/, "the oscillator must use its bounded hover table instead of a native browser tooltip");
 assert.doesNotMatch(component, /reportedNetFlowUsd\s*\?\?\s*signedTurnoverUsd/, "the UI cannot substitute turnover when primary flow is absent");
 

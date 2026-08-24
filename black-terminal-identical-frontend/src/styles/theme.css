@@ -8641,6 +8641,20 @@ body.resizing-layout * {
     #030405;
 }
 
+.institutional-flow.is-maximized {
+  position: absolute;
+  z-index: 7200;
+  inset: 0;
+  grid-template-rows: 48px minmax(64px, auto) minmax(270px, 1.35fr) minmax(210px, 1fr) 30px;
+  isolation: isolate;
+  border: 1px solid rgba(255, 0, 34, 0.42);
+  background:
+    radial-gradient(circle at 72% 18%, rgba(150, 0, 24, 0.14), transparent 42%),
+    linear-gradient(135deg, rgba(9, 10, 12, 0.995), rgba(2, 3, 4, 0.998));
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.86), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  pointer-events: auto;
+}
+
 .institutional-flow-head {
   min-height: 36px;
   display: flex;
@@ -8692,6 +8706,43 @@ body.resizing-layout * {
 .institutional-flow-head em.degraded { color: #ff687d; border-color: rgba(255, 24, 53, 0.32); }
 .institutional-flow-head em.error { color: #ff3350; border-color: rgba(255, 24, 53, 0.44); }
 
+.institutional-flow-head-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.institutional-flow-head-actions button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  outline: 0;
+  color: #aeb3ba;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.institutional-flow-head-actions button:hover,
+.institutional-flow-head-actions button:focus-visible {
+  border-color: rgba(255, 0, 34, 0.55);
+  color: #f2f4f6;
+  background: rgba(126, 0, 18, 0.28);
+  box-shadow: 0 0 12px rgba(211, 0, 31, 0.14);
+}
+
+.institutional-flow.is-maximized .institutional-flow-head {
+  padding-inline: 14px;
+  border-bottom-color: rgba(255, 0, 34, 0.22);
+}
+
+.institutional-flow.is-maximized .institutional-flow-head b { font-size: 10px; }
+.institutional-flow.is-maximized .institutional-flow-head span { font-size: 7px; }
+.institutional-flow.is-maximized .institutional-flow-head-actions button { width: 28px; height: 28px; }
+
 .institutional-flow-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -8725,6 +8776,13 @@ body.resizing-layout * {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.institutional-flow.is-maximized .institutional-flow-metric {
+  min-height: 64px;
+  padding-inline: 14px;
+}
+.institutional-flow.is-maximized .institutional-flow-metric span { font-size: 7px; }
+.institutional-flow.is-maximized .institutional-flow-metric b { font-size: 13px; }
 
 .institutional-flow .positive { color: #f1f3f6; text-shadow: 0 0 7px rgba(232, 237, 243, 0.24); }
 .institutional-flow .negative { color: #ef1738; text-shadow: 0 0 7px rgba(225, 0, 34, 0.28); }
@@ -8833,6 +8891,21 @@ body.resizing-layout * {
 }
 .institutional-pressure-scale b { color: #858b94; font-weight: 600; }
 
+.institutional-flow.is-maximized .institutional-pressure { padding: 10px 16px 5px; }
+.institutional-flow.is-maximized .institutional-pressure-label { top: 11px; left: 17px; right: 17px; }
+.institutional-flow.is-maximized .institutional-pressure-label span,
+.institutional-flow.is-maximized .institutional-pressure-label b { font-size: 7px; }
+.institutional-flow.is-maximized .institutional-pressure svg { min-height: 250px; }
+.institutional-flow.is-maximized .institutional-pressure-scale { left: 17px; right: 17px; bottom: 6px; font-size: 6px; }
+.institutional-flow.is-maximized .institutional-pressure-hover {
+  top: 26px;
+  width: min(220px, calc(100% - 24px));
+  padding: 8px 10px;
+}
+.institutional-flow.is-maximized .institutional-pressure-hover > div { min-height: 16px; }
+.institutional-flow.is-maximized .institutional-pressure-hover dt,
+.institutional-flow.is-maximized .institutional-pressure-hover dd { font-size: 7px; }
+
 .institutional-fund-table {
   min-height: 0;
   overflow: auto;
@@ -8878,6 +8951,16 @@ body.resizing-layout * {
 .institutional-fund-row b { color: #edf0f3; font: 800 7px "IBM Plex Mono", monospace; }
 .institutional-fund-row small { overflow: hidden; color: #5e646d; font: 600 5px "IBM Plex Mono", monospace; text-overflow: ellipsis; white-space: nowrap; }
 
+.institutional-flow.is-maximized .institutional-fund-head,
+.institutional-flow.is-maximized .institutional-fund-row {
+  grid-template-columns: minmax(140px, 1.6fr) repeat(3, minmax(90px, 0.7fr));
+  padding-inline: 16px;
+}
+.institutional-flow.is-maximized .institutional-fund-head { min-height: 28px; font-size: 7px; }
+.institutional-flow.is-maximized .institutional-fund-row { min-height: 38px; font-size: 9px; }
+.institutional-flow.is-maximized .institutional-fund-row b { font-size: 9px; }
+.institutional-flow.is-maximized .institutional-fund-row small { font-size: 6px; }
+
 .institutional-flow-foot {
   min-height: 21px;
   display: flex;
@@ -8903,6 +8986,13 @@ body.resizing-layout * {
   font: 650 7px "IBM Plex Mono", monospace;
 }
 .institutional-flow-empty b { color: #a8adb5; font-size: 8px; }
+
+@media (max-height: 720px) {
+  .institutional-flow.is-maximized {
+    grid-template-rows: 42px minmax(52px, auto) minmax(190px, 1.2fr) minmax(150px, 1fr) 24px;
+  }
+  .institutional-flow.is-maximized .institutional-pressure svg { min-height: 176px; }
+}
 
 .panel-title {
   height: 38px;

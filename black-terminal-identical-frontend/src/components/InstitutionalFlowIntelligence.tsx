@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Maximize2, Minimize2, X } from "lucide-react";
 import type { MarketSymbol } from "../market-data/types";
 import { getMarketDataEngineAdapter } from "../market-data/engine/marketDataEngine";
 import { fetchInstitutionalFlow } from "../institutional-flow/institutionalFlowClient";
@@ -26,6 +28,18 @@ export function InstitutionalFlowIntelligence({ marketSymbol }: InstitutionalFlo
   const [status, setStatus] = useState<"loading" | "live" | "degraded" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
   const [coinSeries, setCoinSeries] = useState<HistoricalCoinSeries>(EMPTY_COIN_SERIES);
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  useEffect(() => {
+    if (!isMaximized) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setIsMaximized(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isMaximized]);
 
   useEffect(() => {
     let disposed = false;
@@ -128,14 +142,35 @@ export function InstitutionalFlowIntelligence({ marketSymbol }: InstitutionalFlo
   const pressureClass = pressure > 4 ? "positive" : pressure < -4 ? "negative" : "neutral";
   const freshness = snapshot ? freshnessLabel(snapshot) : status === "loading" ? "SYNCING" : "UNAVAILABLE";
 
-  return (
-    <section className="institutional-flow panel-block" aria-label="Institutional flow intelligence">
+  const panel = (
+    <section
+      className={`institutional-flow panel-block ${isMaximized ? "is-maximized" : ""}`}
+      aria-label="Institutional flow intelligence"
+      aria-modal={isMaximized || undefined}
+      role={isMaximized ? "dialog" : undefined}
+    >
       <div className="institutional-flow-head">
         <div>
           <b>ETF FLOW INTELLIGENCE</b>
           <span>{snapshot?.asset || marketSymbol.baseAsset.toUpperCase()} INSTITUTIONAL TAPE</span>
         </div>
-        <em className={status}>{freshness}</em>
+        <div className="institutional-flow-head-actions">
+          <em className={status}>{freshness}</em>
+          {isMaximized ? (
+            <>
+              <button type="button" title="Restore ETF Flow Intelligence" aria-label="Restore ETF Flow Intelligence" onClick={() => setIsMaximized(false)}>
+                <Minimize2 size={13} />
+              </button>
+              <button type="button" title="Close enlarged ETF Flow Intelligence" aria-label="Close enlarged ETF Flow Intelligence" onClick={() => setIsMaximized(false)} autoFocus>
+                <X size={14} />
+              </button>
+            </>
+          ) : (
+            <button type="button" title="Maximize ETF Flow Intelligence" aria-label="Maximize ETF Flow Intelligence" onClick={() => setIsMaximized(true)}>
+              <Maximize2 size={13} />
+            </button>
+          )}
+        </div>
       </div>
 
       {snapshot?.state === "unsupported" ? (
@@ -179,6 +214,11 @@ export function InstitutionalFlowIntelligence({ marketSymbol }: InstitutionalFlo
       )}
     </section>
   );
+
+  const fullscreenHost = isMaximized && typeof document !== "undefined"
+    ? document.querySelector<HTMLElement>(".terminal-grid")
+    : null;
+  return fullscreenHost ? createPortal(panel, fullscreenHost) : panel;
 }
 
 function Metric({ label, value, tone, title }: { label: string; value: string; tone: string; title: string }) {

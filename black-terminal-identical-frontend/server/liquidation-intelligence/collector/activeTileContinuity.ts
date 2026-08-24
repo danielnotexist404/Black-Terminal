@@ -129,6 +129,10 @@ export function assertSingleBoundedBucket(
   }
 }
 
+export function hasBclifPublishableActiveRange(timestampsToCheck: readonly number[]) {
+  return timestampsToCheck.length >= 2 && timestampsToCheck.at(-1)! > timestampsToCheck[0]!;
+}
+
 function assertStrictCadence(values: readonly number[], cadenceMs: number, label: string) {
   for (let index = 0; index < values.length; index += 1) {
     const timestamp = values[index]!;

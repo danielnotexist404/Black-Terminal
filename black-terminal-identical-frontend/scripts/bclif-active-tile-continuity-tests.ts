@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   assertSingleBoundedBucket,
   bclifBaseBucketStart,
+  hasBclifPublishableActiveRange,
   planActiveColumnTransition,
   recoverLatestActiveBucket
 } from "../server/liquidation-intelligence/collector/activeTileContinuity.ts";
@@ -23,6 +24,8 @@ assert.equal(recovered.suppressReplayPublicationThrough, secondBucket + sixHours
 assert.equal(recovered.discardRecoveredBucketOnResume, true, "the retained legacy fragment must be discarded before a new tile is published");
 assert.equal(bclifBaseBucketStart(secondBucket, sixHours), firstBucket, "the boundary column closes the preceding bucket");
 assert.equal(bclifBaseBucketStart(secondBucket + minute, sixHours), secondBucket);
+assert.equal(hasBclifPublishableActiveRange([secondBucket + minute]), false, "one column has no publishable coverage duration");
+assert.equal(hasBclifPublishableActiveRange([secondBucket + minute, secondBucket + 2 * minute]), true);
 
 const rollover = planActiveColumnTransition(
   recovered.columns.map((column) => column.timestamp),

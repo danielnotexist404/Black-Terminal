@@ -57,6 +57,7 @@ import { BybitOrderBookReconstructor } from "../sources/bybitOrderBook.ts";
 import { BybitPublicSocket, verifyBybitServerClock } from "../sources/bybitTransport.ts";
 import {
   assertSingleBoundedBucket,
+  hasBclifPublishableActiveRange,
   planActiveColumnTransition,
   recoverLatestActiveBucket
 } from "./activeTileContinuity.ts";
@@ -831,7 +832,9 @@ class BclifSymbolCollector {
   }
 
   private async publishActiveEdgesAndClosures() {
-    if (!this.activeColumns.length || !this.exposure || !this.tileRepository || !this.coverageRepository) return;
+    // A single column has no positive-duration coverage interval and is not a
+    // publishable live edge. Retain it until the next cadence column arrives.
+    if (!hasBclifPublishableActiveRange(this.activeColumns.map((column) => column.timestamp)) || !this.exposure || !this.tileRepository || !this.coverageRepository) return;
     const started = performance.now();
     const now = Date.now();
     const first = this.activeColumns[0]!.timestamp;

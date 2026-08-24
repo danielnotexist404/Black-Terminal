@@ -16,6 +16,7 @@ import {
 } from "../src/modules/liquidation-field/data/LiquidationFieldTileAssembler.ts";
 import { LiquidationFieldTileCache, liquidationFieldTileCacheKey } from "../src/modules/liquidation-field/data/LiquidationFieldTileCache.ts";
 import {
+  PersistentLiquidationFieldAccessError,
   PersistentLiquidationFieldClient,
   parsePersistentCoverageGaps,
   persistentLiquidationFieldRequestRange,
@@ -592,6 +593,9 @@ assert.deepEqual(
 );
 
 await certifyBrowserFallbackRecovery(gapped);
+await certifyContractFailureStartsQuarantinedFallback();
+await certifyRecoveryContractFailureRestoresFallback();
+await certifyAccessFailureRemainsFailClosed();
 await certifyPersistentMicrotileRefresh(prefixSnapshot, rootPlusMicrotile);
 await certifyLiveEdgeRevisionRace();
 await certifyMalformedManifestNumerics();
@@ -603,6 +607,8 @@ console.log(JSON.stringify({
   gapMasked: true,
   historicalClip: true,
   fallbackRecovery: true,
+  contractFailureFallback: true,
+  accessFailureFailClosed: true,
   persistentMicrotileSeam: true,
   adversarialManifestRejected: true,
   liveEdgeRevisionRace: true,
@@ -1262,6 +1268,183 @@ async function certifyBrowserFallbackRecovery(snapshot: LiquidationFieldSnapshot
   } finally {
     controller.dispose();
     assert.equal(clearCount, 1);
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+  }
+}
+
+async function certifyContractFailureStartsQuarantinedFallback() {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const timers = new Map<number, { callback: () => void; delay: number }>();
+  let nextTimer = 1;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    writable: true,
+    value: {
+      location: { hostname: "contract-test.invalid", search: "" },
+      setTimeout(callback: () => void, delay: number) {
+        const id = nextTimer++;
+        timers.set(id, { callback, delay });
+        return id;
+      },
+      clearTimeout(id: number) {
+        timers.delete(id);
+      }
+    }
+  });
+  let fallbackStarts = 0;
+  let clearCount = 0;
+  let fallbackReason = "";
+  const persistent: PersistentLiquidationFieldAuthorityClient = {
+    async load() {
+      throw new LiquidationFieldTileContractError("BCLIF_OUTER_CHECKSUM", "fixture checksum rejection");
+    },
+    async probe() { return false; },
+    updateSettings() { return false; },
+    clear() { clearCount += 1; }
+  };
+  const controller = new LiquidationFieldController({
+    symbol: "BTCUSDT",
+    settings: DEFAULT_LIQUIDATION_FIELD_SETTINGS,
+    getCandles: () => [],
+    onSnapshot: () => {},
+    onStatus: () => {},
+    persistentClient: persistent,
+    createBrowserFallback: () => ({
+      async start(reason) {
+        fallbackStarts += 1;
+        fallbackReason = reason ?? "";
+      },
+      updateSettings() {},
+      dispose() {}
+    })
+  });
+  try {
+    await controller.start();
+    assert.equal(fallbackStarts, 1, "a rejected persistent tile must start exactly one independent browser authority");
+    assert.equal(fallbackReason, "PERSISTENT_TILE_QUARANTINED:BCLIF_OUTER_CHECKSUM");
+    assert.equal(clearCount, 1, "rejected persistent bytes must be evicted before browser fallback starts");
+    assert.equal(timers.size, 1, "quarantined persistent authority must receive one bounded recovery probe");
+    assert.equal([...timers.values()][0]?.delay, 5 * 60_000, "contract recovery must not churn the browser stream");
+  } finally {
+    controller.dispose();
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+  }
+}
+
+async function certifyRecoveryContractFailureRestoresFallback() {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const timers = new Map<number, { callback: () => void; delay: number }>();
+  let nextTimer = 1;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    writable: true,
+    value: {
+      location: { hostname: "contract-test.invalid", search: "" },
+      setTimeout(callback: () => void, delay: number) {
+        const id = nextTimer++;
+        timers.set(id, { callback, delay });
+        return id;
+      },
+      clearTimeout(id: number) {
+        timers.delete(id);
+      }
+    }
+  });
+  let loadCount = 0;
+  let fallbackStarts = 0;
+  let fallbackDisposals = 0;
+  let clearCount = 0;
+  const statuses: LiquidationFieldRuntimeStatus[] = [];
+  const persistent: PersistentLiquidationFieldAuthorityClient = {
+    async load(): Promise<PersistentLiquidationFieldLoadResult> {
+      loadCount += 1;
+      if (loadCount === 1) return { kind: "FALLBACK", reason: "NOT_DEPLOYED", message: "fixture fallback" };
+      throw new LiquidationFieldTileContractError("BCLIF_LIVE_EDGE_GENERATION", "fixture generation rejection");
+    },
+    async probe() { return true; },
+    updateSettings() { return false; },
+    clear() { clearCount += 1; }
+  };
+  const controller = new LiquidationFieldController({
+    symbol: "BTCUSDT",
+    settings: DEFAULT_LIQUIDATION_FIELD_SETTINGS,
+    getCandles: () => [],
+    onSnapshot: () => {},
+    onStatus: (status) => statuses.push(status),
+    persistentClient: persistent,
+    createBrowserFallback: () => ({
+      async start() { fallbackStarts += 1; },
+      updateSettings() {},
+      dispose() { fallbackDisposals += 1; }
+    })
+  });
+  try {
+    await controller.start();
+    const firstTimer = timers.entries().next().value as [number, { callback: () => void; delay: number }] | undefined;
+    assert.ok(firstTimer);
+    timers.delete(firstTimer[0]);
+    firstTimer[1].callback();
+    await drainAsyncControllerWork();
+    assert.equal(fallbackStarts, 2, "failed persistent recovery must restore one fresh browser authority");
+    assert.equal(fallbackDisposals, 1, "authority handoff must stop the former browser stream before verification");
+    assert.equal(clearCount, 1, "failed persistent recovery must clear rejected tile state");
+    assert.ok(!statuses.some((status) => status.state === "ERROR" || status.state === "UNAVAILABLE"));
+    assert.equal(timers.size, 1, "restored fallback must retain one delayed recovery probe");
+    assert.equal([...timers.values()][0]?.delay, 5 * 60_000);
+  } finally {
+    controller.dispose();
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+  }
+}
+
+async function certifyAccessFailureRemainsFailClosed() {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const timers = new Map<number, () => void>();
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    writable: true,
+    value: {
+      location: { hostname: "contract-test.invalid", search: "" },
+      setTimeout(callback: () => void) {
+        timers.set(1, callback);
+        return 1;
+      },
+      clearTimeout() {
+        timers.clear();
+      }
+    }
+  });
+  let fallbackStarts = 0;
+  const statuses: LiquidationFieldRuntimeStatus[] = [];
+  const controller = new LiquidationFieldController({
+    symbol: "BTCUSDT",
+    settings: DEFAULT_LIQUIDATION_FIELD_SETTINGS,
+    getCandles: () => [],
+    onSnapshot: () => {},
+    onStatus: (status) => statuses.push(status),
+    persistentClient: {
+      async load() { throw new PersistentLiquidationFieldAccessError(403, "fixture access denial"); },
+      async probe() { return false; },
+      updateSettings() { return false; },
+      clear() {}
+    },
+    createBrowserFallback: () => ({
+      async start() { fallbackStarts += 1; },
+      updateSettings() {},
+      dispose() {}
+    })
+  });
+  try {
+    await controller.start();
+    assert.equal(fallbackStarts, 0, "authentication and authorization failures must never open public fallback");
+    assert.equal(statuses.at(-1)?.state, "UNAVAILABLE");
+    assert.equal(statuses.at(-1)?.authority, "PERSISTENT_NODE");
+    assert.equal(timers.size, 0);
+  } finally {
+    controller.dispose();
     if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
     else Reflect.deleteProperty(globalThis, "window");
   }

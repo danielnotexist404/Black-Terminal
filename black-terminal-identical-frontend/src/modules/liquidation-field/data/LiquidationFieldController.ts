@@ -49,6 +49,8 @@ export interface BrowserLiquidationFieldHandle {
 
 type SelectedAuthority = BclifModelAuthority | "PROBING";
 
+const PERSISTENT_CONTRACT_RETRY_MS = 5 * 60_000;
+
 /**
  * Authority selector for BCLIF. Persistent market memory is resolved before a
  * browser WebSocket can be constructed. Once selected, an authority remains
@@ -125,6 +127,14 @@ export class LiquidationFieldController {
       this.schedulePersistentRefresh();
     } catch (error) {
       if (this.disposed || isAbort(error)) return;
+      if (error instanceof LiquidationFieldTileContractError) {
+        this.persistent.clear();
+        await this.startBrowserFallback(
+          persistentTileQuarantineReason(error),
+          PERSISTENT_CONTRACT_RETRY_MS
+        );
+        return;
+      }
       if (persistentErrorAllowsInitialBrowserFallback(error)) {
         await this.startBrowserFallback(fallbackReason(error));
         return;
@@ -153,7 +163,7 @@ export class LiquidationFieldController {
     this.persistent.clear();
   }
 
-  private async startBrowserFallback(reason: string) {
+  private async startBrowserFallback(reason: string, persistentRetryDelayMs?: number) {
     if (this.disposed || this.selectedAuthority === "PERSISTENT_NODE") return;
     this.selectedAuthority = "BROWSER_FALLBACK";
     this.fallback?.dispose();
@@ -166,7 +176,7 @@ export class LiquidationFieldController {
     };
     this.fallback = this.options.createBrowserFallback?.(fallbackOptions) ?? new BrowserLiquidationFieldFallback(fallbackOptions);
     await this.fallback.start(reason);
-    this.scheduleFallbackProbe();
+    this.scheduleFallbackProbe(persistentRetryDelayMs);
   }
 
   private scheduleFallbackProbe(delayMs?: number) {
@@ -222,11 +232,19 @@ export class LiquidationFieldController {
       this.schedulePersistentRefresh();
     } catch (error) {
       if (this.disposed || isAbort(error)) return;
-      if (error instanceof PersistentLiquidationFieldAccessError || error instanceof LiquidationFieldTileContractError) {
+      if (error instanceof PersistentLiquidationFieldAccessError) {
         this.fallback?.dispose();
         this.fallback = null;
         this.selectedAuthority = "PROBING";
         this.failClosed(error);
+        return;
+      }
+      if (error instanceof LiquidationFieldTileContractError) {
+        this.persistent.clear();
+        await this.startBrowserFallback(
+          persistentTileQuarantineReason(error),
+          PERSISTENT_CONTRACT_RETRY_MS
+        );
         return;
       }
       if (this.selectedAuthority === "PROBING") {
@@ -234,7 +252,9 @@ export class LiquidationFieldController {
       }
     } finally {
       this.fallbackProbeInFlight = false;
-      if (this.selectedAuthority === "BROWSER_FALLBACK") this.scheduleFallbackProbe();
+      if (this.selectedAuthority === "BROWSER_FALLBACK" && this.fallbackProbeTimer === null) {
+        this.scheduleFallbackProbe();
+      }
     }
   }
 
@@ -388,4 +408,8 @@ function isAbort(error: unknown) {
 function fallbackReason(error: unknown) {
   if (error instanceof PersistentLiquidationFieldUnavailableError) return error.reason;
   return error instanceof Error ? error.name : "NETWORK";
+}
+
+function persistentTileQuarantineReason(error: LiquidationFieldTileContractError) {
+  return `PERSISTENT_TILE_QUARANTINED:${error.code}`;
 }

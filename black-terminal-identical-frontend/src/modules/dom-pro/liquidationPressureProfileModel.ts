@@ -52,6 +52,12 @@ export type LiquidationPressureProfileModel = {
   certainty: LiquidationFieldSnapshot["certainty"];
 };
 
+export type CumulativeLiquidationPressurePoint = {
+  rowIndex: number;
+  cumulativeExposure: number;
+  ratio: number;
+};
+
 type BuildLiquidationPressureProfileInput = {
   snapshot: LiquidationFieldSnapshot;
   viewport: ChartPriceTransformSnapshot;
@@ -219,6 +225,56 @@ export function resolvePressureSignificance(value: number, noiseFloor: number, e
   }
   const normalized = clamp((logged - loggedFloor) / (loggedExtreme - loggedFloor), 0, 1);
   return clamp(0.1 + 0.9 * normalized ** 0.72, 0.1, 1);
+}
+
+/**
+ * Builds the two causal legs of the LPP V field from current price outward.
+ * Long-position exposure is accumulated only below market (forced sells) and
+ * short-position exposure only above market (forced buys). The result is a
+ * normalized display envelope; it never changes or invents modeled notional.
+ */
+export function buildCumulativeLiquidationPressureBand(
+  model: LiquidationPressureProfileModel,
+  side: "long" | "short",
+  exposureByRow?: readonly number[]
+): CumulativeLiquidationPressurePoint[] {
+  if (model.currentPriceY === null || model.rows.length < 2) return [];
+  const currentIndex = model.rows.findIndex((row) => row.isCurrentPrice);
+  if (currentIndex < 0) return [];
+  const rowIndices = side === "short"
+    ? Array.from({ length: currentIndex }, (_, offset) => currentIndex - offset - 1)
+    : Array.from({ length: model.rows.length - currentIndex - 1 }, (_, offset) => currentIndex + offset + 1);
+  const exposureFor = (rowIndex: number) => exposureByRow?.[rowIndex] ?? (side === "long"
+    ? model.rows[rowIndex]?.longExposure ?? 0
+    : model.rows[rowIndex]?.shortExposure ?? 0);
+  const total = rowIndices.reduce((sum, rowIndex) => sum + Math.max(0, exposureFor(rowIndex)), 0);
+  if (total <= EPSILON) return [];
+  let cumulativeExposure = 0;
+  return [
+    { rowIndex: currentIndex, cumulativeExposure: 0, ratio: 0 },
+    ...rowIndices.map((rowIndex) => {
+      cumulativeExposure += Math.max(0, exposureFor(rowIndex));
+      return { rowIndex, cumulativeExposure, ratio: clamp(cumulativeExposure / total, 0, 1) };
+    })
+  ];
+}
+
+/**
+ * Expands statistically meaningful local nodes without allowing a tiny
+ * minority side in a mixed row to inherit the dominant side's full width.
+ */
+export function resolveLiquidationNodeWidthRatio(
+  intensity: number,
+  sideShare: number,
+  isHeavy: boolean,
+  isExtreme: boolean
+) {
+  const boundedIntensity = clamp(intensity, 0, 1);
+  const boundedShare = clamp(sideShare, 0, 1);
+  if (boundedIntensity <= EPSILON || boundedShare <= EPSILON) return 0;
+  const continuousWidth = boundedIntensity ** 1.38 * boundedShare ** 0.7;
+  const significanceFloor = (isExtreme ? 0.96 : isHeavy ? 0.72 : 0) * boundedShare ** 0.58;
+  return clamp(Math.max(continuousWidth, significanceFloor), 0, 1);
 }
 
 function resolveLatestValidColumn(snapshot: LiquidationFieldSnapshot) {

@@ -4,8 +4,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ChartPriceTransformSnapshot } from "../src/chart-engine/priceTransform.ts";
 import {
+  buildCumulativeLiquidationPressureBand,
   buildLiquidationPressureProfile,
   fitViewportToLiquidationProfile,
+  resolveLiquidationNodeWidthRatio,
   resolvePressureSignificance
 } from "../src/modules/dom-pro/liquidationPressureProfileModel.ts";
 import type { LiquidationFieldSnapshot } from "../src/modules/liquidation-field/core/types.ts";
@@ -111,6 +113,17 @@ function snapshot(): LiquidationFieldSnapshot {
   assert.ok(model.rows.some((row) => row.confirmedNotional === 75 && row.confirmedCount === 2), "observed liquidation calibration must survive price projection");
   assert.ok(model.rows.some((row) => row.isHeavy), "the distribution must identify heavy nodes");
   assert.ok(model.rows.some((row) => row.isCurrentPrice), "the current chart price must be registered to one model row");
+
+  const forcedSellBand = buildCumulativeLiquidationPressureBand(model, "long");
+  const forcedBuyBand = buildCumulativeLiquidationPressureBand(model, "short");
+  assert.equal(forcedSellBand.at(-1)?.cumulativeExposure, 500, "the lower V leg must conserve all below-market forced-sell exposure");
+  assert.equal(forcedBuyBand.at(-1)?.cumulativeExposure, 350, "the upper V leg must conserve all above-market forced-buy exposure");
+  assert.equal(forcedSellBand[0]?.ratio, 0, "the lower cumulative V leg must originate at current price");
+  assert.equal(forcedBuyBand[0]?.ratio, 0, "the upper cumulative V leg must originate at current price");
+  assert.equal(forcedSellBand.at(-1)?.ratio, 1, "the lower V leg must normalize only after conserving its genuine exposure");
+  assert.equal(forcedBuyBand.at(-1)?.ratio, 1, "the upper V leg must normalize only after conserving its genuine exposure");
+  assert.ok(forcedSellBand.every((point, index) => index === 0 || point.ratio >= forcedSellBand[index - 1]!.ratio), "the lower V leg must widen monotonically away from market");
+  assert.ok(forcedBuyBand.every((point, index) => index === 0 || point.ratio >= forcedBuyBand[index - 1]!.ratio), "the upper V leg must widen monotonically away from market");
 }
 
 {
@@ -123,6 +136,11 @@ function snapshot(): LiquidationFieldSnapshot {
 {
   assert.equal(resolvePressureSignificance(0, 10, 100), 0, "zero model exposure must remain visually empty");
   assert.ok(resolvePressureSignificance(100, 10, 100) > resolvePressureSignificance(5, 10, 100), "heavy exposure must be more prominent than sub-noise exposure");
+  const ordinaryWidth = resolveLiquidationNodeWidthRatio(0.5, 1, false, false);
+  const heavyWidth = resolveLiquidationNodeWidthRatio(0.5, 1, true, false);
+  const extremeWidth = resolveLiquidationNodeWidthRatio(0.5, 1, true, true);
+  assert.ok(ordinaryWidth < heavyWidth && heavyWidth < extremeWidth, "heavy and extreme modeled nodes must receive progressively stronger extension");
+  assert.ok(resolveLiquidationNodeWidthRatio(1, 0.02, true, true) < 0.2, "a tiny minority side cannot inherit a mixed row's extreme-node width");
 }
 
 {
@@ -131,6 +149,8 @@ function snapshot(): LiquidationFieldSnapshot {
   assert.match(component, /LONG LIQ \/ FORCED SELL/, "long liquidation pressure semantics must be explicit");
   assert.match(component, /SHORT LIQ \/ FORCED BUY/, "short liquidation pressure semantics must be explicit");
   assert.match(component, /profileMode === "dom" && Boolean\(requestProjection\)/, "the consolidated order-book poller must stop while LPP is active");
+  assert.match(component, /drawCumulativeLiquidationPressureBand/, "LPP must render its truthful current-price-outward cumulative V field");
+  assert.match(component, /resolveLiquidationNodeWidthRatio/, "LPP must expand statistically significant local pressure nodes independently of the V field");
 }
 
 console.log("liquidation pressure profile tests passed");

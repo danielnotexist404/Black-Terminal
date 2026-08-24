@@ -22,8 +22,10 @@ import { blackCoreChartPriceViewportStore } from "../chartPriceViewportStore";
 import { useConsolidatedLiquidityFeed } from "../consolidatedLiquidityClient";
 import { ProfessionalDomLadderTracker } from "../domProfessionalLadder";
 import {
+  buildCumulativeLiquidationPressureBand,
   buildLiquidationPressureProfile,
   fitViewportToLiquidationProfile,
+  resolveLiquidationNodeWidthRatio,
   type LiquidationPressureProfileModel,
   type LiquidationPressureProfileRow
 } from "../liquidationPressureProfileModel";
@@ -491,7 +493,7 @@ function drawLiquidationPressureProfile(
   context.fillStyle = "#020304";
   context.fillRect(0, 0, size.width, size.height);
 
-  const columns = [0, size.width * 0.16, size.width * 0.34, size.width * 0.52, size.width * 0.75, size.width];
+  const columns = [0, size.width * 0.15, size.width * 0.30, size.width * 0.45, size.width * 0.62, size.width];
   const profileLeft = columns[4];
   const profileRight = size.width - 7;
   const profileWidth = Math.max(1, profileRight - profileLeft);
@@ -530,8 +532,8 @@ function drawLiquidationPressureProfile(
     context.stroke();
 
     if (visual.total > EPSILON) {
-      const longWidth = profileWidth * visual.intensity * Math.pow(longShare, 0.68);
-      const shortWidth = profileWidth * visual.intensity * Math.pow(shortShare, 0.68);
+      const longWidth = profileWidth * resolveLiquidationNodeWidthRatio(visual.intensity, longShare, row.isHeavy, row.isExtreme);
+      const shortWidth = profileWidth * resolveLiquidationNodeWidthRatio(visual.intensity, shortShare, row.isHeavy, row.isExtreme);
       const bothSides = visual.long > EPSILON && visual.short > EPSILON;
       const splitHeight = bothSides ? Math.max(1, (height - 2) / 2) : Math.max(1, height - 2);
       context.save();
@@ -539,14 +541,22 @@ function drawLiquidationPressureProfile(
       if (longWidth > 0.5) {
         context.fillStyle = longGradient;
         context.shadowColor = "rgba(255,0,36,0.85)";
-        context.shadowBlur = row.isExtreme ? 12 : row.isHeavy ? 7 : 2;
+        context.shadowBlur = row.isExtreme ? 16 : row.isHeavy ? 10 : 2;
         context.fillRect(profileRight - longWidth, y + 1, longWidth, splitHeight);
+        if (row.isHeavy) {
+          context.fillStyle = row.isExtreme ? "rgba(255,116,134,0.98)" : "rgba(255,48,74,0.9)";
+          context.fillRect(profileRight - longWidth, y + 1, row.isExtreme ? 2 : 1, splitHeight);
+        }
       }
       if (shortWidth > 0.5) {
         context.fillStyle = shortGradient;
         context.shadowColor = "rgba(255,255,255,0.72)";
-        context.shadowBlur = row.isExtreme ? 11 : row.isHeavy ? 6 : 2;
+        context.shadowBlur = row.isExtreme ? 15 : row.isHeavy ? 9 : 2;
         context.fillRect(profileRight - shortWidth, y + (bothSides ? 1 + splitHeight : 1), shortWidth, splitHeight);
+        if (row.isHeavy) {
+          context.fillStyle = row.isExtreme ? "rgba(255,255,255,1)" : "rgba(228,232,238,0.94)";
+          context.fillRect(profileRight - shortWidth, y + (bothSides ? 1 + splitHeight : 1), row.isExtreme ? 2 : 1, splitHeight);
+        }
       }
       context.restore();
 
@@ -580,8 +590,8 @@ function drawLiquidationPressureProfile(
     drawRightText(context, formatPrice(row.price, model.priceDecimals), columns[4] - 5, y + height / 2, row.isCurrentPrice ? "#ffffff" : "#d7dbe1");
   });
 
-  drawLiquidationPressureCurve(context, model, visualRows, profileLeft, profileRight, "long");
-  drawLiquidationPressureCurve(context, model, visualRows, profileLeft, profileRight, "short");
+  drawCumulativeLiquidationPressureBand(context, model, visualRows, profileLeft, profileRight, "long");
+  drawCumulativeLiquidationPressureBand(context, model, visualRows, profileLeft, profileRight, "short");
 
   for (let index = 1; index < columns.length - 1; index += 1) {
     context.strokeStyle = "rgba(255,255,255,0.075)";
@@ -609,7 +619,7 @@ function drawLiquidationPressureProfile(
   context.fillText(`${quoteAsset} · BCLIF LPP · ${model.authority} · ${model.certainty}`, 5, Math.min(size.height - 8, model.plotBottom + 13));
 }
 
-function drawLiquidationPressureCurve(
+function drawCumulativeLiquidationPressureBand(
   context: CanvasRenderingContext2D,
   model: LiquidationPressureProfileModel,
   visualRows: LiquidationVisualRow[],
@@ -617,25 +627,47 @@ function drawLiquidationPressureCurve(
   profileRight: number,
   side: "long" | "short"
 ) {
+  const band = buildCumulativeLiquidationPressureBand(
+    model,
+    side,
+    visualRows.map((row) => side === "long" ? row.long : row.short)
+  );
+  if (band.length < 2) return;
   const profileWidth = Math.max(1, profileRight - profileLeft);
-  const points = model.rows.map((row, index) => {
-    const visual = visualRows[index] ?? toLiquidationVisualRow(row);
-    const sideValue = side === "long" ? visual.long : visual.short;
-    const share = visual.total > EPSILON ? sideValue / visual.total : 0;
+  const points = band.map((point) => {
+    const row = model.rows[point.rowIndex]!;
     return {
-      x: profileRight - profileWidth * visual.intensity * Math.pow(Math.max(0, share), 0.68),
-      y: row.top + row.height / 2,
-      active: sideValue > EPSILON
+      x: profileRight - Math.pow(point.ratio, 0.56) * profileWidth * 0.97,
+      y: row.top + row.height / 2
     };
-  }).filter((point) => point.active);
-  if (points.length < 2) return;
+  });
   context.save();
   context.beginPath();
+  context.moveTo(profileRight, points[0]!.y);
+  for (const point of points) context.lineTo(point.x, point.y);
+  context.lineTo(profileRight, points.at(-1)!.y);
+  context.closePath();
+  const fill = context.createLinearGradient(profileLeft, 0, profileRight, 0);
+  if (side === "long") {
+    fill.addColorStop(0, "rgba(123,0,20,0.06)");
+    fill.addColorStop(0.68, "rgba(210,0,34,0.13)");
+    fill.addColorStop(1, "rgba(255,17,47,0.22)");
+  } else {
+    fill.addColorStop(0, "rgba(151,157,166,0.05)");
+    fill.addColorStop(0.68, "rgba(225,229,235,0.11)");
+    fill.addColorStop(1, "rgba(255,255,255,0.19)");
+  }
+  context.fillStyle = fill;
+  context.fill();
+
+  context.beginPath();
   points.forEach((point, index) => index === 0 ? context.moveTo(point.x, point.y) : context.lineTo(point.x, point.y));
-  context.strokeStyle = side === "long" ? "rgba(255,20,49,0.88)" : "rgba(239,242,246,0.86)";
-  context.shadowColor = side === "long" ? "rgba(255,0,35,0.72)" : "rgba(255,255,255,0.48)";
-  context.shadowBlur = 5;
-  context.lineWidth = 1.1;
+  context.strokeStyle = side === "long" ? "rgba(255,23,52,0.94)" : "rgba(239,243,248,0.92)";
+  context.shadowColor = side === "long" ? "rgba(255,0,35,0.82)" : "rgba(255,255,255,0.62)";
+  context.shadowBlur = 7;
+  context.lineWidth = 1.2;
+  context.lineJoin = "round";
+  context.lineCap = "round";
   context.stroke();
   context.restore();
 }

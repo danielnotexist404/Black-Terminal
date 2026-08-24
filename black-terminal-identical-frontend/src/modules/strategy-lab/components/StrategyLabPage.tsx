@@ -12,7 +12,7 @@ import { buildStrategyReviewInput } from "../engine/tradeAnalyzer";
 import { runWalkForward } from "../engine/walkForward";
 import { createDefaultBacktestConfig } from "../state/strategyLabStore";
 import { StrategyAutomationExperience } from "../my-strategy/StrategyAutomationExperience";
-import { buildActiveIndicatorInstances, ownedCustomIndicatorInstances, templateIndicatorInstances } from "../my-strategy/state/indicatorManifest";
+import { buildSelectableIndicatorInstances, ownedCustomIndicatorInstances } from "../my-strategy/state/indicatorManifest";
 import {
   applyAutomationDefinitionToConfig,
   marketSymbolFromBacktestConfig,
@@ -279,13 +279,12 @@ export function StrategyLabPage({
     },
     [],
   );
-  const activeIndicatorInstances = useMemo(() => [...buildActiveIndicatorInstances({
+  const selectableIndicatorInstances = useMemo(() => [...buildSelectableIndicatorInstances({
     visible: visibleIndicators,
     periods: indicatorPeriods,
     advanced: indicatorAdvancedSettings,
     configuredAlerts: indicatorAlerts,
   }), ...ownedCustomIndicatorInstances()], [visibleIndicators, indicatorPeriods, indicatorAdvancedSettings, indicatorAlerts]);
-  const strategyTemplates = useMemo(() => templateIndicatorInstances(), []);
 
   const openStrategyBacktest = useCallback((strategy: { symbol: string; timeframe: string; marketType: "SPOT" | "FUTURES" }) => {
     setConfig((current) => ({ ...current, symbol: strategy.symbol, rawSymbol: strategy.symbol, timeframe: strategy.timeframe as Timeframe, marketKind: strategy.marketType === "SPOT" ? "spot" : "perpetual" }));
@@ -319,7 +318,7 @@ export function StrategyLabPage({
 
   const renderActiveTab = () => {
     if (activeTab === "myStrategy") {
-      return <StrategyAutomationExperience definition={automationDefinition} chartTimeframe={timeframe} indicators={activeIndicatorInstances} templates={strategyTemplates} onDefinitionChange={updateAutomationDefinition} onOpenBacktest={openStrategyBacktest} />;
+      return <StrategyAutomationExperience definition={automationDefinition} chartTimeframe={timeframe} indicators={selectableIndicatorInstances} onDefinitionChange={updateAutomationDefinition} onOpenBacktest={openStrategyBacktest} />;
     }
     if (activeTab === "backtest") {
       return <BacktestPanel config={config} runState={runState} error={error} onConfigChange={setConfig} onRun={() => run()} />;
@@ -327,7 +326,7 @@ export function StrategyLabPage({
     if (activeTab === "analytics") return renderAnalyticsDashboard();
     if (activeTab === "research") return renderResearch();
     if (activeTab === "paperTrading") return <div className="strategy-primary-empty"><FlaskConical size={25} /><strong>Paper Trading lives inside each strategy cockpit</strong><span>Open a saved strategy to view its Paper equity, positions, trades, controls and runtime health.</span><button type="button" onClick={() => setActiveTab("myStrategy")}>OPEN MY STRATEGY</button></div>;
-    if (activeTab === "liveAutomation") return <div className="strategy-primary-empty locked"><LockKeyhole size={25} /><strong>Live Trading Not Yet Certified</strong><span>Paper automation is enabled. Broker and Investment Group execution remain disabled for this preview chapter.</span></div>;
+    if (activeTab === "liveAutomation") return <div className="strategy-primary-empty locked"><LockKeyhole size={25} /><strong>Execution authorization is strategy-specific</strong><span>Open or create a strategy, choose its Execution Destination, then approve an eligible connected broker or Investment Group. A destination is never armed implicitly.</span><button type="button" onClick={() => setActiveTab("myStrategy")}>OPEN MY STRATEGY</button></div>;
     return <div className="strategy-primary-empty"><Database size={25} /><strong>Strategy logs are scoped to each runtime</strong><span>Open a strategy and select LOGS to inspect readable signals, fills, risk decisions and worker recovery events.</span><button type="button" onClick={() => setActiveTab("myStrategy")}>OPEN MY STRATEGY</button></div>;
   };
 

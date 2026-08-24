@@ -1,35 +1,39 @@
-import { CheckCircle2, CloudCog, KeyRound, RefreshCw, ShieldCheck } from "lucide-react";
-import { useState } from "react";
-import type { StrategyTargetBinding } from "../../automation/strategyAutomation.types";
+import { CheckCircle2, CloudCog, RefreshCw, ShieldCheck, Users } from "lucide-react";
+import type { EligibleBrokerTarget, EligibleGroupTarget, StrategyDeploymentType, StrategyTargetBinding } from "../../automation/strategyAutomation.types";
 import type { StrategyWizardDraft } from "../state/strategyDraftStore";
 
-type DemoConnection = { id: string; label: string; state: string };
+type Eligible = { brokerAccounts: EligibleBrokerTarget[]; groups: EligibleGroupTarget[] } | null;
 
-export function TargetsStep({ draft, bindings, demoConnection, busy, onConnectDemo, onRefreshDemo }: {
+export function TargetsStep({ draft, bindings, eligible, busy, onRefreshTargets, onChange }: {
   draft: StrategyWizardDraft;
   bindings: StrategyTargetBinding[];
-  demoConnection?: DemoConnection | null;
+  eligible: Eligible;
   busy: boolean;
-  onConnectDemo: (credentials: { accountName: string; apiKey: string; apiSecret: string }) => Promise<void>;
-  onRefreshDemo: () => Promise<void>;
+  onRefreshTargets: () => Promise<void>;
+  onChange: (draft: StrategyWizardDraft) => void;
 }) {
-  const [accountName, setAccountName] = useState("Black Core Demo");
-  const [apiKey, setApiKey] = useState("");
-  const [apiSecret, setApiSecret] = useState("");
-  const demoBinding = bindings.find((binding) => binding.targetType === "BROKER_ACCOUNT");
-  const connect = async () => {
-    if (!accountName.trim() || !apiKey.trim() || !apiSecret.trim()) return;
-    try {
-      await onConnectDemo({ accountName: accountName.trim(), apiKey: apiKey.trim(), apiSecret: apiSecret.trim() });
-    } finally {
-      setApiKey("");
-      setApiSecret("");
-    }
-  };
-  return <div className="strategy-wizard-section"><header><span>09</span><div><h2>Bybit Demo account</h2><p>Simulated funds on Bybit Demo execution, using mainnet public market data. Testnet and real-funds automation are not part of this path.</p></div></header>
-    <div className="target-boundary demo-boundary"><div><ShieldCheck size={15} /><strong>DEMO EXECUTION ONLY</strong><span>Orders route only to api-demo.bybit.com. Withdrawals and transfers are prohibited.</span></div><div><CloudCog size={15} /><strong>BLACK CLOUD PERSISTENT RUNTIME</strong><span>Closed-candle signals continue on the VPS after the browser closes.</span></div></div>
-    {demoConnection ? <section className="strategy-demo-connected"><CheckCircle2 size={18} /><div><strong>{demoConnection.label}</strong><span>{demoConnection.state} · SIMULATED FUNDS · MAINNET PUBLIC DATA</span></div><button type="button" disabled={busy} onClick={() => void onRefreshDemo()}><RefreshCw size={13} /> REFRESH READINESS</button></section> : <section className="strategy-demo-connect"><div className="strategy-demo-connect-head"><KeyRound size={15} /><div><strong>CONNECT BYBIT DEMO TRADING API</strong><span>Create the key inside Bybit Mainnet → Demo Trading. Enable read and trade only.</span></div></div><label><span>ACCOUNT NAME</span><input value={accountName} maxLength={80} autoComplete="off" onChange={(event) => setAccountName(event.target.value)} /></label><label><span>DEMO API KEY</span><input value={apiKey} type="password" autoComplete="off" onChange={(event) => setApiKey(event.target.value)} /></label><label><span>DEMO API SECRET</span><input value={apiSecret} type="password" autoComplete="new-password" onChange={(event) => setApiSecret(event.target.value)} /></label><button type="button" className="primary" disabled={busy || !accountName.trim() || !apiKey.trim() || !apiSecret.trim()} onClick={() => void connect()}>{busy ? "VERIFYING DEMO ACCOUNT…" : "CONNECT & VERIFY DEMO ACCOUNT"}</button></section>}
-    <div className="review-summary-grid"><div><span>STRATEGY MARKET</span><strong>{draft.definition.symbol} · {draft.definition.timeframe.toUpperCase()}</strong></div><div><span>ALLOCATION</span><strong>{draft.paperPolicy.strategyAllocationValue}{draft.paperPolicy.strategyAllocationMode === "FIXED_USDT" ? " USDT" : "%"}</strong></div><div><span>PER TRADE</span><strong>{draft.paperPolicy.tradeAmountValue}{draft.paperPolicy.tradeAmountMode === "FIXED_USDT" ? " USDT" : "%"}</strong></div><div><span>TARGET STATE</span><strong>{demoBinding?.status || demoConnection?.state || "NOT CONNECTED"}</strong></div></div>
-    <p className="target-matrix-note">Activation requires authenticated credentials, a synchronized private stream, deterministic order identity, a non-zero risk policy and an immutable strategy version. API secrets are cleared from this form immediately after submission and never returned by the server.</p>
+  const plan = draft.definition.deployment || { targetType: "PAPER", authorizationAccepted: false, armOnActivation: false };
+  const patch = (value: Partial<typeof plan>) => onChange({ ...draft, definition: { ...draft.definition, deployment: { ...plan, ...value } } });
+  const chooseType = (targetType: StrategyDeploymentType) => patch({ targetType, targetId: undefined, targetLabel: targetType === "PAPER" ? "Paper Backtester" : undefined, authorizationAccepted: false, armOnActivation: false });
+  const candidates: Array<EligibleBrokerTarget | EligibleGroupTarget> = plan.targetType === "INVESTMENT_GROUP" ? eligible?.groups || [] : eligible?.brokerAccounts || [];
+  const selected = candidates.find((candidate) => candidate.targetId === plan.targetId);
+  return <div className="strategy-wizard-section">
+    <header><span>09</span><div><h2>Execution destination</h2><p>Choose exactly where this private strategy runs. No broker or group is armed without explicit approval.</p></div></header>
+    <div className="strategy-destination-grid">
+      <Destination active={plan.targetType === "PAPER"} icon={<ShieldCheck size={18} />} title="Paper Backtester" text="Black Cloud simulated account. No broker order can be submitted." onClick={() => chooseType("PAPER")} />
+      <Destination active={plan.targetType === "BROKER_ACCOUNT"} icon={<CloudCog size={18} />} title="Connected Broker" text="Use one eligible, synchronized account already connected to Black Terminal." onClick={() => chooseType("BROKER_ACCOUNT")} />
+      <Destination active={plan.targetType === "INVESTMENT_GROUP"} icon={<Users size={18} />} title="Investment Group" text="Use an owned or managed group with active execution mandates." onClick={() => chooseType("INVESTMENT_GROUP")} />
+    </div>
+    {plan.targetType === "PAPER" ? <section className="strategy-destination-ready"><CheckCircle2 size={17} /><div><strong>PAPER BACKTESTER SELECTED</strong><span>Activation creates an immutable version and starts its isolated Paper runtime. Live targets remain untouched.</span></div></section> : <>
+      <div className="strategy-target-discovery"><div><strong>{plan.targetType === "BROKER_ACCOUNT" ? "ELIGIBLE BROKER ACCOUNTS" : "ELIGIBLE INVESTMENT GROUPS"}</strong><span>{draft.strategyId ? "Read from authenticated Black Cloud ownership and readiness state." : "Save the draft first so target eligibility can be checked against this strategy."}</span></div><button type="button" disabled={busy} onClick={() => void onRefreshTargets()}><RefreshCw size={13} /> {draft.strategyId ? "REFRESH TARGETS" : "SAVE DRAFT & LOAD TARGETS"}</button></div>
+      <div className="eligible-target-list wizard-target-list">{candidates.map((candidate) => <button type="button" key={`${candidate.targetType}:${candidate.targetId}`} className={plan.targetId === candidate.targetId ? "selected" : ""} disabled={!candidate.validation.eligible || busy} onClick={() => patch({ targetId: candidate.targetId, targetLabel: candidate.label, authorizationAccepted: false, armOnActivation: false })}><span>{candidate.targetType === "BROKER_ACCOUNT" ? `${candidate.provider} · ${candidate.environment}` : "INVESTMENT GROUP"}</span><strong>{candidate.label}</strong><em>{candidate.validation.eligible ? "Eligible and owner-authorized" : candidate.validation.reasons.join(" · ")}</em></button>)}</div>
+      {eligible && candidates.length === 0 ? <div className="cockpit-empty-state compact"><strong>No eligible destination found</strong><span>Connect and synchronize a broker account, or create an Investment Group mandate, then refresh.</span></div> : null}
+      {selected ? <div className="strategy-target-approval"><label className="wizard-toggle"><span><strong>AUTHORIZE THIS DESTINATION</strong><em>I approve {selected.label} as the execution destination for this private strategy configuration.</em></span><input type="checkbox" checked={plan.authorizationAccepted} onChange={(event) => patch({ authorizationAccepted: event.target.checked })} /></label><label className="wizard-toggle"><span><strong>ARM AFTER ACTIVATION</strong><em>After validation, bind and arm this target. Leave disabled to create a READY binding for later manual arming.</em></span><input type="checkbox" checked={plan.armOnActivation} disabled={!plan.authorizationAccepted} onChange={(event) => patch({ armOnActivation: event.target.checked })} /></label></div> : null}
+    </>}
+    {bindings.length ? <p className="target-matrix-note">Existing bindings: {bindings.map((binding) => `${binding.targetLabel || binding.targetType} · ${binding.status}`).join(" / ")}. A new immutable version never silently reassigns them.</p> : null}
   </div>;
+}
+
+function Destination({ active, icon, title, text, onClick }: { active: boolean; icon: React.ReactNode; title: string; text: string; onClick: () => void }) {
+  return <button type="button" className={active ? "active" : ""} onClick={onClick}>{icon}<strong>{title}</strong><span>{text}</span></button>;
 }

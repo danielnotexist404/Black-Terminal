@@ -14,7 +14,6 @@ import { createWizardDraft, defaultWizardPaperPolicy, validateWizardStep, withWo
 import { StrategyCockpitPage } from "./pages/StrategyCockpitPage";
 import { StrategyLibraryPage } from "./pages/StrategyLibraryPage";
 import { StrategyWizardPage } from "./pages/StrategyWizardPage";
-import { activateBlackCloudConnectionViaApi, connectBybitDemoAccountViaApi, fetchBlackCloudStatusViaApi } from "../../../portfolio/portfolioApiClient";
 import { QalcExperience } from "../qalc/QalcExperience";
 import { consumeQalcStrategyHandoffIntent } from "../../qalc-indicator/config";
 
@@ -23,12 +22,11 @@ type Props = {
   definition: StrategyAutomationDefinition;
   chartTimeframe: string;
   indicators: StrategyIndicatorInstance[];
-  templates: StrategyIndicatorInstance[];
   onDefinitionChange: (definition: StrategyAutomationDefinition) => void;
   onOpenBacktest: (strategy: StrategySummary) => void;
 };
 
-export function StrategyAutomationExperience({ definition, chartTimeframe, indicators, templates, onDefinitionChange, onOpenBacktest }: Props) {
+export function StrategyAutomationExperience({ definition, chartTimeframe, indicators, onDefinitionChange, onOpenBacktest }: Props) {
   const fixtureMode = typeof window !== "undefined" && window.location.hostname === "127.0.0.1" && new URLSearchParams(window.location.search).get("uiPreview") === "1"
     ? new URLSearchParams(window.location.search).get("strategyLabFixture")
     : null;
@@ -44,12 +42,12 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
   const [pendingDelete, setPendingDelete] = useState<StrategySummary | null>(null);
   const [addSlot, setAddSlot] = useState<number | null>(null);
   const [eligible, setEligible] = useState<{ brokerAccounts: EligibleBrokerTarget[]; groups: EligibleGroupTarget[] } | null>(null);
+  const [wizardEligible, setWizardEligible] = useState<{ brokerAccounts: EligibleBrokerTarget[]; groups: EligibleGroupTarget[] } | null>(null);
   useEffect(() => {
     const openQalc = () => { consumeQalcStrategyHandoffIntent(); setView("qalc"); };
     window.addEventListener("bt:qalc-open-strategy-lab", openQalc);
     return () => window.removeEventListener("bt:qalc-open-strategy-lab", openQalc);
   }, []);
-  const [demoConnection, setDemoConnection] = useState<{ id: string; label: string; state: string } | null>(null);
   const generation = useRef(0);
 
   const loadList = useCallback(async (signal?: AbortSignal) => {
@@ -74,7 +72,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
 
   useEffect(() => {
     if (fixtureMode) {
-      const next = fixtureWorkspace(definition, templates[0] || indicators[0]);
+      const next = fixtureWorkspace(definition, indicators[0]);
       setStrategies(fixtureStrategies(next));
       setLoading(false);
       if (fixtureMode === "wizard") { setWorkspace(next); setDraft(hydrateDraft(next)); setView("wizard"); }
@@ -85,7 +83,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
     setLoading(true);
     loadList(controller.signal).catch((error) => !controller.signal.aborted && setMessage(errorMessage(error, "Strategy library is unavailable."))).finally(() => !controller.signal.aborted && setLoading(false));
     return () => controller.abort();
-  }, [definition, fixtureMode, indicators, loadList, templates]);
+  }, [definition, fixtureMode, indicators, loadList]);
 
   useEffect(() => {
     if (fixtureMode || view !== "cockpit" || !workspace?.strategy.id) return;
@@ -114,8 +112,8 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
     setWorkspace(null);
     setDraft(createWizardDraft(definition));
     setDirty(false);
-    setMessage("Choose an active chart indicator or start from a separate Black Core template.");
-    setDemoConnection(null);
+    setMessage("Choose an existing Black Terminal indicator with alert events, or one of your own saved scripts.");
+    setWizardEligible(null);
     setView("wizard");
   };
 
@@ -130,8 +128,6 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
       } else {
         setView("cockpit"); setMessage("Strategy cockpit restored from authoritative VPS state.");
       }
-      const demoBinding = next.bindings.find((binding) => binding.targetType === "BROKER_ACCOUNT");
-      setDemoConnection(demoBinding?.connectionId ? { id: demoBinding.connectionId, label: demoBinding.targetLabel || "Bybit Demo", state: demoBinding.status } : null);
     } catch (error) { setMessage(errorMessage(error, "Strategy could not be opened.")); }
     finally { setBusy(false); }
   };
@@ -150,8 +146,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
       if (!next) return;
       setDraft(hydrateDraft(next));
       setDirty(false);
-      const demoBinding = next.bindings.find((binding) => binding.targetType === "BROKER_ACCOUNT");
-      setDemoConnection(demoBinding?.connectionId ? { id: demoBinding.connectionId, label: demoBinding.targetLabel || "Bybit Demo", state: demoBinding.status } : null);
+      setWizardEligible(null);
       setView("wizard");
       setMessage(`Modifying the saved draft. Published V${next.strategy.publishedVersion || "—"} and running V${next.strategy.runningVersion || "—"} remain unchanged until an explicit save and activation.`);
     } catch (error) { setMessage(errorMessage(error, "Strategy configuration could not be loaded.")); }
@@ -173,7 +168,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
         setWorkspace(null);
         setDraft(null);
         setPaperData(null);
-        setDemoConnection(null);
+        setWizardEligible(null);
       }
       setPendingDelete(null);
       setView("library");
@@ -231,51 +226,26 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
     finally { setBusy(false); }
   };
 
-  const connectDemo = async (credentials: { accountName: string; apiKey: string; apiSecret: string }) => {
-    if (busy || !draft) return;
-    setBusy(true);
-    setMessage("Verifying the Bybit Demo Trading account and creating its encrypted Black Cloud delegation…");
-    try {
-      const account = await connectBybitDemoAccountViaApi(credentials);
-      if (!account) throw new Error("An authenticated session is required to connect Bybit Demo Trading.");
-      const activation = await activateBlackCloudConnectionViaApi(account.id, {
-        allowStrategyExecution: true,
-        allowCopyTrading: false,
-        allowInvestmentGroupExecution: false,
-        maxLeverage: draft.paperPolicy.maximumLeverage,
-        maxDailyLoss: draft.paperPolicy.maximumDailyLoss,
-        allowedSymbols: [draft.definition.symbol],
-        preserveProtectiveOrders: true
-      });
-      if (!activation?.connection?.id) throw new Error("Black Cloud did not return a demo connection identity.");
-      setDemoConnection({ id: activation.connection.id, label: credentials.accountName, state: "SYNCING" });
-      setMessage("Bybit Demo credentials verified. Black Cloud is authenticating the private stream and reconciling the simulated account.");
-    } catch (error) {
-      setMessage(errorMessage(error, "Bybit Demo connection failed."));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const refreshDemo = async () => {
-    if (!demoConnection || busy) return;
+  const prepareWizardTargets = async () => {
+    if (!draft || busy) return;
+    let saved = workspace;
+    if (!draft.strategyId || dirty) saved = await persistDraft();
+    if (!saved) return;
     setBusy(true);
     try {
-      const status = await fetchBlackCloudStatusViaApi();
-      const row = status?.connections?.find((connection) => connection.id === demoConnection.id);
-      const state = row?.execution_readiness === "READY" ? "READY" : row?.synchronization_state || row?.health_status || "SYNCING";
-      setDemoConnection((current) => current ? { ...current, state } : current);
-      setMessage(state === "READY" ? "Bybit Demo is synchronized and ready for activation." : `Bybit Demo is ${state}. Activation remains fail-closed until reconciliation completes.`);
-    } catch (error) { setMessage(errorMessage(error, "Bybit Demo readiness is unavailable.")); }
+      const result = await strategyAutomationApi.eligibleTargets(saved.strategy.id);
+      setWizardEligible({ brokerAccounts: result.brokerAccounts, groups: result.groups });
+      setMessage("Execution destinations refreshed from authenticated Black Cloud ownership and readiness state.");
+    } catch (error) { setMessage(errorMessage(error, "Execution destinations are unavailable.")); }
     finally { setBusy(false); }
   };
 
-  const activateDemoStrategy = async () => {
-    if (!draft || !demoConnection || busy) return;
+  const activateConfiguredStrategy = async () => {
+    if (!draft || busy) return;
     const issues = validateWizardStep(draft, 9);
     if (issues.length) { setMessage(issues.join(" ")); return; }
     setBusy(true);
-    setMessage("Saving the private configuration and preparing Bybit Demo activation…");
+    setMessage("Saving the private configuration and validating its selected execution destination…");
     try {
       const definitionWithPolicy = persistedDefinition(draft);
       let next = draft.strategyId
@@ -289,34 +259,31 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
       if (!version) throw new Error("The immutable strategy configuration was not created.");
       if (next.strategy.runningVersion !== version) next = await strategyAutomationApi.startVersion(next.strategy.id, version);
 
-      let binding = next.bindings.find((item) => item.connectionId === demoConnection.id && item.strategyVersion === version && item.status !== "DISCONNECTED");
-      if (!binding) {
-        let candidate: EligibleBrokerTarget | undefined;
-        for (let attempt = 0; attempt < 12; attempt += 1) {
-          const targets = await strategyAutomationApi.eligibleTargets(next.strategy.id);
-          candidate = targets.brokerAccounts.find((item) => item.targetId === demoConnection.id);
-          if (candidate?.validation.eligible) break;
-          await new Promise((resolve) => window.setTimeout(resolve, 1_000));
-        }
-        if (!candidate) throw new Error("The verified Bybit Demo connection is not visible to Strategy Lab.");
-        if (!candidate.validation.eligible) throw new Error(`Bybit Demo is not ready: ${candidate.validation.reasons.join(" ")}`);
-        const added = await strategyAutomationApi.addTarget(next.strategy.id, 1, "BROKER_ACCOUNT", candidate.targetId, next.strategy.marketType, draft.paperPolicy);
-        binding = added.binding;
-      }
-      if (binding.status === "READY") {
-        const armed = await strategyAutomationApi.targetAction(next.strategy.id, binding, "arm");
-        binding = armed.binding;
+      const plan = definitionWithPolicy.deployment;
+      let activationMessage = `Strategy V${version} is active in the isolated Paper Backtester.`;
+      if (plan && plan.targetType !== "PAPER") {
+        if (!plan.targetId || !plan.authorizationAccepted) throw new Error("The execution destination is not explicitly authorized.");
+        const targets = await strategyAutomationApi.eligibleTargets(next.strategy.id);
+        const candidates: Array<EligibleBrokerTarget | EligibleGroupTarget> = plan.targetType === "INVESTMENT_GROUP" ? targets.groups : targets.brokerAccounts;
+        const candidate = candidates.find((item) => item.targetId === plan.targetId);
+        if (!candidate) throw new Error("The selected execution destination is no longer available.");
+        if (!candidate.validation.eligible) throw new Error(`${candidate.label} is not ready: ${candidate.validation.reasons.join(" ")}`);
+        let binding = next.bindings.find((item) => item.targetType === plan.targetType && item.targetId === plan.targetId && item.strategyVersion === version && item.status !== "DISCONNECTED");
+        if (!binding) binding = (await strategyAutomationApi.addTarget(next.strategy.id, 1, plan.targetType, plan.targetId, next.strategy.marketType, draft.paperPolicy)).binding;
+        if (plan.armOnActivation && binding.status === "READY") binding = (await strategyAutomationApi.targetAction(next.strategy.id, binding, "arm")).binding;
+        activationMessage = plan.armOnActivation
+          ? `Strategy V${version} is active and ${candidate.label} is armed after server-side validation.`
+          : `Strategy V${version} is active; ${candidate.label} is bound in ${binding.status} state and remains manually armable.`;
       }
       next = await strategyAutomationApi.get(next.strategy.id);
       setWorkspace(next);
       setDraft(hydrateDraft(next));
       setDirty(false);
-      setDemoConnection({ id: demoConnection.id, label: demoConnection.label, state: binding.status });
       await loadList();
       setView("cockpit");
-      setMessage(`Strategy V${version} is active on Bybit Demo Trading with simulated funds. Real-funds Mainnet remains locked.`);
+      setMessage(activationMessage);
     } catch (error) {
-      setMessage(errorMessage(error, "Bybit Demo strategy activation failed."));
+      setMessage(errorMessage(error, "Strategy activation failed."));
     } finally {
       setBusy(false);
     }
@@ -366,7 +333,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
   };
 
   const openTargetPicker = async (slot: number) => {
-    if (!workspace) { setMessage("Save the strategy configuration before adding a Bybit Demo target."); return; }
+    if (!workspace) { setMessage("Save the strategy configuration before adding an execution target."); return; }
     setBusy(true); setAddSlot(slot); setEligible(null);
     try { const result = await strategyAutomationApi.eligibleTargets(workspace.strategy.id); setEligible({ brokerAccounts: result.brokerAccounts, groups: result.groups }); }
     catch (error) { setMessage(errorMessage(error, "Eligible targets are unavailable.")); setAddSlot(null); }
@@ -379,7 +346,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
     try {
       await strategyAutomationApi.addTarget(workspace.strategy.id, addSlot, target.targetType, target.targetId, workspace.strategy.marketType, workspace.paper?.capitalPolicy || workspace.strategy.globalCapitalPolicy);
       await loadWorkspace(workspace.strategy.id); setAddSlot(null); setEligible(null);
-      setMessage("Bybit Demo target prepared. Review its risk policy, then activate demo execution.");
+      setMessage("Execution target prepared. Review its risk policy, then arm it explicitly when ready.");
     } catch (error) { setMessage(errorMessage(error, "Target could not be prepared.")); }
     finally { setBusy(false); }
   };
@@ -389,7 +356,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
     const binding = workspace.bindings.find((item) => item.id === bindingId);
     if (!binding) return;
     setBusy(true);
-    try { await strategyAutomationApi.targetAction(workspace.strategy.id, binding, action); await loadWorkspace(workspace.strategy.id); setMessage(action === "arm" ? "Bybit Demo strategy execution activated." : action === "pause" ? "Demo target paused." : "Demo target revalidated and resumed."); }
+    try { await strategyAutomationApi.targetAction(workspace.strategy.id, binding, action); await loadWorkspace(workspace.strategy.id); setMessage(action === "arm" ? "Strategy target armed after server-side validation." : action === "pause" ? "Strategy target paused." : "Strategy target revalidated and resumed."); }
     catch (error) { setMessage(errorMessage(error, "Target action failed.")); }
     finally { setBusy(false); }
   };
@@ -405,9 +372,9 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
   };
 
   return <div className="my-strategy-experience">
-    {view === "library" ? <StrategyLibraryPage strategies={strategies} loading={loading} message={message} onCreate={newStrategy} onOpen={(id) => void openStrategy(id)} onModify={(id) => void modifyStrategy(id)} onDelete={setPendingDelete} onBacktest={onOpenBacktest} onPaperAction={(strategy, action) => void libraryPaperAction(strategy, action)} onOpenQalc={() => setView("qalc")} /> : null}
+    {view === "library" ? <StrategyLibraryPage strategies={strategies} loading={loading} message={message} onCreate={newStrategy} onOpen={(id) => void openStrategy(id)} onModify={(id) => void modifyStrategy(id)} onDelete={setPendingDelete} onBacktest={onOpenBacktest} onPaperAction={(strategy, action) => void libraryPaperAction(strategy, action)} /> : null}
     {view === "qalc" ? <QalcExperience onBack={() => setView("library")} /> : null}
-    {view === "wizard" && draft ? <StrategyWizardPage draft={draft} chartTimeframe={chartTimeframe} indicators={indicators} templates={templates} bindings={workspace?.bindings || []} publishedName={workspace?.strategy.name} publishedDefinition={workspace?.strategy.definition} saving={busy} message={message || (dirty ? "Draft changes have not been saved." : undefined)} demoConnection={demoConnection} onChange={(next) => { setDraft(next); setDirty(true); }} onSaveDraft={() => void persistDraft()} onConnectDemo={connectDemo} onRefreshDemo={refreshDemo} onActivate={() => void activateDemoStrategy()} onCancel={() => { setView(workspace?.strategy.publishedVersion ? "cockpit" : "library"); setMessage(undefined); }} /> : null}
+    {view === "wizard" && draft ? <StrategyWizardPage draft={draft} chartTimeframe={chartTimeframe} indicators={indicators} bindings={workspace?.bindings || []} eligibleTargets={wizardEligible} publishedName={workspace?.strategy.name} publishedDefinition={workspace?.strategy.definition} saving={busy} message={message || (dirty ? "Draft changes have not been saved." : undefined)} onChange={(next) => { setDraft(next); setDirty(true); }} onSaveDraft={() => void persistDraft()} onRefreshTargets={prepareWizardTargets} onActivate={() => void activateConfiguredStrategy()} onCancel={() => { setView(workspace?.strategy.publishedVersion ? "cockpit" : "library"); setMessage(undefined); }} /> : null}
     {view === "cockpit" && workspace ? <StrategyCockpitPage workspace={workspace} paperData={paperData} busy={busy} message={message} onEdit={editStrategy} onRefresh={() => void refreshCockpit()} onPaperAction={(action, body) => void paperAction(action, body)} onAddTarget={(slot) => void openTargetPicker(slot)} onTargetAction={(bindingId, action) => void targetAction(bindingId, action)} onDisconnectTarget={(bindingId) => void disconnectTarget(bindingId)} /> : null}
     {addSlot !== null ? <TargetPicker slot={addSlot} eligible={eligible} busy={busy} onClose={() => { setAddSlot(null); setEligible(null); }} onSelect={(target) => void addTarget(target)} /> : null}
     {pendingDelete ? <DeleteStrategyDialog strategy={pendingDelete} busy={busy} onCancel={() => setPendingDelete(null)} onConfirm={() => void deleteStrategy()} /> : null}
@@ -439,8 +406,8 @@ function hydrateDraft(workspace: StrategyWorkspace): StrategyWizardDraft {
 function isCapitalPolicy(value: unknown): value is StrategyCapitalPolicy { return Boolean(value && typeof value === "object" && "strategyAllocationMode" in value && "tradeAmountMode" in value); }
 
 function TargetPicker({ slot, eligible, busy, onClose, onSelect }: { slot: number; eligible: { brokerAccounts: EligibleBrokerTarget[]; groups: EligibleGroupTarget[] } | null; busy: boolean; onClose: () => void; onSelect: (target: EligibleBrokerTarget | EligibleGroupTarget) => void }) {
-  const targets = eligible?.brokerAccounts || [];
-  return <div className="strategy-modal-backdrop" role="presentation"><section className="strategy-target-picker" role="dialog" aria-modal="true" aria-label={`Add target ${slot}`}><header><div><span>TARGET {String(slot).padStart(2, "0")}</span><h2>Add Bybit Demo account</h2></div><button type="button" aria-label="Close target picker" onClick={onClose}><X size={16} /></button></header><div className="target-picker-warning"><LockKeyhole size={13} /><span>Only synchronized Bybit Demo Trading accounts are eligible. Real-funds Mainnet accounts are rejected.</span></div>{busy && !eligible ? <div className="cockpit-empty-state compact">Checking ownership, private-stream health and reconciliation…</div> : targets.length ? <div className="eligible-target-list">{targets.map((target) => <button type="button" key={`${target.targetType}:${target.targetId}`} disabled={!target.validation.eligible || busy} onClick={() => onSelect(target)}><span>{target.targetType === "BROKER_ACCOUNT" ? `${target.provider} DEMO` : "INVESTMENT GROUP"}</span><strong>{target.label}</strong><em>{target.validation.eligible ? "Eligible for simulated-funds execution" : target.validation.reasons.join(" · ")}</em></button>)}</div> : <div className="cockpit-empty-state"><AlertTriangle size={19} /><strong>No eligible Bybit Demo target</strong><span>Connect a trade-enabled Bybit Demo API key and wait for Black Cloud reconciliation.</span></div>}</section></div>;
+  const targets: Array<EligibleBrokerTarget | EligibleGroupTarget> = [...(eligible?.brokerAccounts || []), ...(eligible?.groups || [])];
+  return <div className="strategy-modal-backdrop" role="presentation"><section className="strategy-target-picker" role="dialog" aria-modal="true" aria-label={`Add target ${slot}`}><header><div><span>TARGET {String(slot).padStart(2, "0")}</span><h2>Add execution destination</h2></div><button type="button" aria-label="Close target picker" onClick={onClose}><X size={16} /></button></header><div className="target-picker-warning"><LockKeyhole size={13} /><span>Only owner-authorized, synchronized broker accounts and Investment Groups with active mandates can be selected.</span></div>{busy && !eligible ? <div className="cockpit-empty-state compact">Checking ownership, private-stream health, mandates and reconciliation…</div> : targets.length ? <div className="eligible-target-list">{targets.map((target) => <button type="button" key={`${target.targetType}:${target.targetId}`} disabled={!target.validation.eligible || busy} onClick={() => onSelect(target)}><span>{target.targetType === "BROKER_ACCOUNT" ? `${target.provider} · ${target.environment}` : "INVESTMENT GROUP"}</span><strong>{target.label}</strong><em>{target.validation.eligible ? "Eligible for explicit strategy authorization" : target.validation.reasons.join(" · ")}</em></button>)}</div> : <div className="cockpit-empty-state"><AlertTriangle size={19} /><strong>No eligible execution destination</strong><span>Connect and synchronize a broker, or activate an Investment Group mandate, then refresh.</span></div>}</section></div>;
 }
 
 function DeleteStrategyDialog({ strategy, busy, onCancel, onConfirm }: { strategy: StrategySummary; busy: boolean; onCancel: () => void; onConfirm: () => void }) {

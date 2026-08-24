@@ -220,15 +220,6 @@ async function processStrategy(strategy: JsonRow) {
     ? await supabase.from("strategy_paper_positions").select("*").eq("paper_account_id", activePaper.id).is("closed_at", null).maybeSingle()
     : { data: null, error: null };
   if (positionError) throw positionError;
-  let closedThisCandle = false;
-  if (position)
-    closedThisCandle = await managePaperPosition(
-      strategy,
-      activePaper,
-      position,
-      candle,
-    );
-
   let signalKey: string | null = null;
   let signalAt: string | null = null;
   const signals = createStrategySignals(
@@ -240,10 +231,13 @@ async function processStrategy(strategy: JsonRow) {
   const signal = [...signals]
     .reverse()
     .find((item) => item.entry && Number(item.timestamp) === candle.time);
+  let closeResult: { closed: boolean; reason: string | null } = { closed: false, reason: null };
+  if (position) closeResult = await managePaperPosition(strategy, activePaper, position, candle, signal || null);
   if (signal) {
     signalKey = `${strategy.id}:${strategy.current_version}:${strategy.symbol}:${strategy.timeframe}:${candle.time}:${signal.direction}`;
     signalAt = candleAt;
-    if (activePaper && !position && !closedThisCandle) {
+    const reverseAfterOpposite = closeResult.closed && closeResult.reason === "OPPOSITE_SIGNAL" && strategy.definition?.execution?.perpetualSignalReversalEnabled === true;
+    if (activePaper && (!position || reverseAfterOpposite)) {
       await openPaperPosition(
         strategy,
         activePaper,
@@ -256,6 +250,9 @@ async function processStrategy(strategy: JsonRow) {
     for (const binding of activeDemoBindings) {
       await enqueueDemoStrategySignal(strategy, binding, signal, signalKey);
     }
+  }
+  if (activePaper && position && closeResult.closed && closeResult.reason === "STOP_LOSS" && strategy.definition?.execution?.stopReversalEnabled === true) {
+    await openPaperRevengePosition(strategy, activePaper, position, candles, candle);
   }
 
   const { error: updateError } = await supabase
@@ -324,7 +321,10 @@ async function enqueueDemoStrategySignal(
   const sameDirection = owned.some((item) => item.direction === signal.direction);
   const opposite = owned.find((item) => item.direction !== signal.direction);
   if (sameDirection) return;
-  const conflictResolution = String(strategy.definition?.execution?.conflictResolution || "CLOSE_THEN_REVERSE").toUpperCase();
+  const perpetualReversal = strategy.definition?.execution?.perpetualSignalReversalEnabled === true;
+  const conflictResolution = perpetualReversal
+    ? "CLOSE_THEN_REVERSE"
+    : String(strategy.definition?.execution?.conflictResolution || "CLOSE_ONLY").toUpperCase();
   if (opposite && conflictResolution === "IGNORE") {
     await auditDemoSignalBlocked(strategy, binding, signalKey, "OPPOSITE_SIGNAL_IGNORED_BY_POLICY");
     return;
@@ -526,10 +526,11 @@ async function managePaperPosition(
   paper: JsonRow,
   position: JsonRow,
   candle: Candle,
+  signal: JsonRow | null,
 ) {
   const candleClosedAt =
     candle.time * 1000 + timeframeMilliseconds(strategy.timeframe);
-  if (candleClosedAt <= Date.parse(position.opened_at)) return false;
+  if (candleClosedAt <= Date.parse(position.opened_at)) return { closed: false, reason: null };
   const direction = position.side === "LONG" ? 1 : -1;
   const unrealized =
     (candle.close - Number(position.entry_price)) *
@@ -572,7 +573,13 @@ async function managePaperPosition(
     reason = "TAKE_PROFIT";
     reference = Number(position.take_profit);
   }
-  if (!reason) return false;
+  if (!reason && signal && ((position.side === "LONG" && signal.direction === "short") || (position.side === "SHORT" && signal.direction === "long"))) {
+    const conflictResolution = strategy.definition?.execution?.perpetualSignalReversalEnabled === true
+      ? "CLOSE_THEN_REVERSE"
+      : String(strategy.definition?.execution?.conflictResolution || "CLOSE_ONLY").toUpperCase();
+    if (conflictResolution !== "IGNORE") reason = "OPPOSITE_SIGNAL";
+  }
+  if (!reason) return { closed: false, reason: null };
   const policy = normalizeCapitalPolicy(
     paper.capital_policy,
     paper.market_type,
@@ -612,7 +619,44 @@ async function managePaperPosition(
     },
   );
   if (error) throw error;
-  return data === true;
+  return { closed: data === true, reason: data === true ? reason : null };
+}
+
+async function openPaperRevengePosition(strategy: JsonRow, paper: JsonRow, stoppedPosition: JsonRow, candles: Candle[], candle: Candle) {
+  const execution = strategy.definition?.execution || {};
+  const maximumChain = boundedInteger(execution.maximumReversalChain, 1, 1, 5);
+  const chainDepth = (String(stoppedPosition.signal_key).match(/:revenge:/g) || []).length;
+  if (chainDepth >= maximumChain) return auditBlocked(strategy, stoppedPosition.signal_key, "MAXIMUM_REVERSAL_CHAIN");
+  const startOfDay = new Date(candle.time * 1000);
+  startOfDay.setUTCHours(0, 0, 0, 0);
+  const { count, error: countError } = await supabase.from("strategy_automation_audit_events").select("id", { count: "exact", head: true }).eq("strategy_id", strategy.id).eq("event_type", "PAPER_REVENGE_REVERSAL_FILLED").gte("created_at", startOfDay.toISOString());
+  if (countError) throw countError;
+  const maximumPerDay = boundedInteger(execution.maximumReversalsPerDay, 2, 1, 20);
+  if (Number(count || 0) >= maximumPerDay) return auditBlocked(strategy, stoppedPosition.signal_key, "MAXIMUM_REVERSALS_PER_DAY");
+  const maximumConsecutiveLosses = boundedInteger(execution.maximumConsecutiveLosses, 3, 1, 100);
+  const { data: recentTrades, error: tradeError } = await supabase.from("strategy_automation_trades")
+    .select("net_pnl")
+    .eq("paper_account_id", paper.id)
+    .eq("mode", "PAPER")
+    .order("closed_at", { ascending: false })
+    .limit(maximumConsecutiveLosses);
+  if (tradeError) throw tradeError;
+  const consecutiveLosses = (recentTrades || []).findIndex((trade) => Number(trade.net_pnl || 0) >= 0);
+  const lossCount = consecutiveLosses === -1 ? (recentTrades || []).length : consecutiveLosses;
+  if (lossCount >= maximumConsecutiveLosses) return auditBlocked(strategy, stoppedPosition.signal_key, "MAXIMUM_CONSECUTIVE_LOSSES");
+  const cooldownBars = boundedInteger(execution.reversalCooldownBars, 0, 0, 10_000);
+  if (cooldownBars > 0) return auditBlocked(strategy, stoppedPosition.signal_key, "REVERSAL_COOLDOWN_ACTIVE");
+  const direction = stoppedPosition.side === "LONG" ? "short" : "long";
+  const signalKey = `${stoppedPosition.signal_key}:revenge:${candle.time}:${direction}`;
+  const priorRiskDistance = stoppedPosition.stop_loss
+    ? Math.abs(Number(stoppedPosition.entry_price) - Number(stoppedPosition.stop_loss))
+    : Number(stoppedPosition.entry_price) * 0.01;
+  const stopLoss = direction === "long"
+    ? Math.max(0, candle.close - priorRiskDistance)
+    : candle.close + priorRiskDistance;
+  const opened = await openPaperPosition(strategy, paper, candles, candle, { timestamp: candle.time, symbol: strategy.symbol, direction, entry: true, stopLoss, signalName: "Stop-Loss Revenge Reversal" }, signalKey);
+  if (opened) await supabase.from("strategy_automation_audit_events").insert({ owner_user_id: strategy.owner_user_id, strategy_id: strategy.id, event_type: "PAPER_REVENGE_REVERSAL_FILLED", severity: "WARNING", message: "A bounded stop-loss reversal opened after the prior position was authoritatively closed.", safe_metadata: { priorPositionId: stoppedPosition.id, signalKey, chainDepth: chainDepth + 1 } });
+  return opened;
 }
 
 async function auditBlocked(

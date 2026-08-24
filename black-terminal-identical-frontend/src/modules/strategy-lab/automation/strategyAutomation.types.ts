@@ -5,6 +5,15 @@ import type {
 
 export type StrategyMarketType = "SPOT" | "FUTURES";
 export type StrategyTargetType = "BROKER_ACCOUNT" | "INVESTMENT_GROUP";
+export type StrategyDeploymentType = "PAPER" | StrategyTargetType;
+
+export type StrategyDeploymentPlan = {
+  targetType: StrategyDeploymentType;
+  targetId?: string;
+  targetLabel?: string;
+  authorizationAccepted: boolean;
+  armOnActivation: boolean;
+};
 export type StrategyTargetStatus =
   | "PENDING"
   | "READY"
@@ -37,6 +46,7 @@ export type StrategyAutomationDefinition = {
   exits?: Record<string, unknown>;
   schedule?: Record<string, unknown>;
   paper?: Record<string, unknown>;
+  deployment?: StrategyDeploymentPlan;
   metadata?: {
     description?: string;
     tags?: string[];

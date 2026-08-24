@@ -37,6 +37,13 @@ const definition = z.object({
   exits: z.record(z.unknown()).optional(),
   schedule: z.record(z.unknown()).optional(),
   paper: z.record(z.unknown()).optional(),
+  deployment: z.object({
+    targetType: z.enum(["PAPER", "BROKER_ACCOUNT", "INVESTMENT_GROUP"]),
+    targetId: z.string().trim().min(1).max(80).optional(),
+    targetLabel: z.string().trim().min(1).max(160).optional(),
+    authorizationAccepted: z.boolean(),
+    armOnActivation: z.boolean()
+  }).strict().optional(),
   metadata: z.record(z.unknown()).optional()
 }).strict();
 

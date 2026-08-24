@@ -38,6 +38,18 @@ const definition = normalizeStrategyDefinition({ runtimeKind: "builtin-adaptive-
 assert.deepEqual({ symbol: definition.symbol, timeframe: definition.timeframe, marketType: definition.marketType, exchange: definition.exchange }, { symbol: "BTCUSDT", timeframe: "4h", marketType: "FUTURES", exchange: "bybit" });
 for (const timeframe of ["1s", "10s", "30s", "8h", "10t", "100t"]) assert.throws(() => normalizeStrategyDefinition({ ...definition, timeframe }), /closed-candle timeframe/i);
 assert.throws(() => assertCertifiedStrategyDefinition(normalizeStrategyDefinition({ ...definition, indicator: { indicatorId: "black-core-dda-pro", name: "BC-RDA", runtimeStatus: "CERTIFIED" } })), /BC-RDA is blocked/i, "a forged runtime label cannot enable BC-RDA");
+const certifiedIndicator = { indicatorId: "adaptiveSwingStrategy", instanceId: "chart:adaptiveSwingStrategy", name: "Adaptive Swing Reversal", instanceName: "Adaptive Swing Reversal — Main Instance", version: "1", settingsHash: "settings", settingsSummary: "test", alertManifestVersion: "1", runtimeVersion: "black-cloud-paper-v1", warmupBars: 240, runtimeStatus: "CERTIFIED", useCurrentChartSettings: true, alerts: [
+  { id: "long-entry", name: "Long Entry", semantic: "LONG_ENTRY", confirmedBar: true, intrabar: false },
+  { id: "short-entry", name: "Short Entry", semantic: "SHORT_ENTRY", confirmedBar: true, intrabar: false },
+  { id: "take-profit", name: "Take Profit", semantic: "LONG_EXIT", confirmedBar: true, intrabar: false }
+] };
+const mappedDefinition = normalizeStrategyDefinition({ ...definition, indicator: certifiedIndicator, signals: { longEntry: "long-entry", shortEntry: "short-entry" }, deployment: { targetType: "PAPER", authorizationAccepted: false, armOnActivation: false } });
+assert.doesNotThrow(() => assertCertifiedStrategyDefinition(mappedDefinition));
+assert.throws(() => assertCertifiedStrategyDefinition(normalizeStrategyDefinition({ ...mappedDefinition, signals: { longEntry: "forged-alert", shortEntry: "short-entry" } })), /pinned indicator alert manifest/i);
+assert.throws(() => assertCertifiedStrategyDefinition(normalizeStrategyDefinition({ ...mappedDefinition, exits: { takeProfits: [{ id: "tp1", mode: "ALERT", alertId: "missing", closePercent: 50 }] } })), /take-profit alert/i);
+assert.throws(() => assertCertifiedStrategyDefinition(normalizeStrategyDefinition({ ...mappedDefinition, exits: { takeProfits: [{ id: "tp1", mode: "R_MULTIPLE", value: 2, closePercent: 60 }, { id: "tp2", mode: "R_MULTIPLE", value: 3, closePercent: 60 }] } })), /cannot exceed 100/i);
+assert.throws(() => assertCertifiedStrategyDefinition(normalizeStrategyDefinition({ ...mappedDefinition, deployment: { targetType: "BROKER_ACCOUNT", targetId: "not-a-target", authorizationAccepted: true, armOnActivation: true } })), /valid owned execution destination/i);
+assert.throws(() => assertCertifiedStrategyDefinition(normalizeStrategyDefinition({ ...mappedDefinition, execution: { stopReversalEnabled: true, maximumReversalChain: 6 } })), /maximum reversal chain/i);
 
 const emptySlots = buildTargetSlots([]);
 assert.equal(emptySlots.length, 10);
@@ -126,6 +138,8 @@ assert.match(worker, /isBcrdaDefinition[\s\S]*BC_RDA_SIGNAL_INTEGRITY_BLOCKED/);
 assert.doesNotMatch(worker, /placeOrder|cancelOrder|modifyOrder|execution_orders.*insert/i, "paper worker contains no broker order mutation path");
 assert.match(worker, /candleClosedAt <= Date\.parse\(position\.opened_at\)/, "same-candle look-ahead exit is rejected");
 assert.match(worker, /averageTrueRange\(candles, 14\)/, "volatility-target sizing is based on closed-candle ATR");
+assert.match(worker, /MAXIMUM_CONSECUTIVE_LOSSES/, "stop-loss revenge reversals honor the configured loss-chain ceiling");
+assert.match(worker, /priorRiskDistance[\s\S]*stopLoss/, "a revenge reversal always receives a bounded opposite-side stop");
 assert.match(compose, /STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "false"/);
 assert.match(compose, /STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true"/);
 assert.match(compose, /STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "false"/);

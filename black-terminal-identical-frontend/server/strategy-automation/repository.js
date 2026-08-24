@@ -742,6 +742,7 @@ function validateGroupEligibility({ group, activeMandates, conflict, environment
   const reasons = [];
   if (group.status !== "active") reasons.push("Investment Group is not active.");
   if (environment.INVESTMENT_GROUP_EXECUTION_ENABLED !== "true") reasons.push("Investment Group execution is disabled by rollout policy.");
+  if (environment.STRATEGY_AUTOMATION_GROUP_EXECUTION_ENABLED !== "true") reasons.push("Strategy-to-group signal fanout is not certified on this Black Cloud deployment.");
   if (!activeMandates.length) reasons.push("No active authorized follower mandate is available.");
   if (conflict) reasons.push("This Investment Group already occupies a target slot in this strategy version.");
   return { eligible: reasons.length === 0, reasons, checkedAt: new Date().toISOString(), authorizedMembers: activeMandates.length };

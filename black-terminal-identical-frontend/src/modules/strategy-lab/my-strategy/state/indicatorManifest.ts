@@ -69,16 +69,35 @@ export function buildActiveIndicatorInstances(input: {
   advanced: IndicatorAdvancedSettings;
   configuredAlerts: IndicatorAlertDefinition[];
 }): StrategyIndicatorInstance[] {
+  return buildIndicatorInstances(input, true);
+}
+
+export function buildSelectableIndicatorInstances(input: {
+  visible: VisibleIndicators;
+  periods: IndicatorPeriods;
+  advanced: IndicatorAdvancedSettings;
+  configuredAlerts: IndicatorAlertDefinition[];
+}): StrategyIndicatorInstance[] {
+  return buildIndicatorInstances(input, false).filter((instance) => instance.alerts.length > 0);
+}
+
+function buildIndicatorInstances(input: {
+  visible: VisibleIndicators;
+  periods: IndicatorPeriods;
+  advanced: IndicatorAdvancedSettings;
+  configuredAlerts: IndicatorAlertDefinition[];
+}, activeOnly: boolean): StrategyIndicatorInstance[] {
   return manifests
-    .filter((manifest) => input.visible[manifest.key])
+    .filter((manifest) => !activeOnly || input.visible[manifest.key])
     .map((manifest) => {
+      const active = input.visible[manifest.key] === true;
       const settings = settingsFor(manifest.key, input.periods, input.advanced);
       const configured = input.configuredAlerts
         .filter((alert) => alert.enabled && alert.indicator === alertTargetFor(manifest.key))
         .map<StrategyIndicatorAlert>((alert) => ({
           id: `configured:${alert.id}`,
           name: alert.name,
-          description: alert.message || "User-configured chart alert.",
+          description: alert.message || "User-configured Black Terminal alert.",
           semantic: inferSemantic(alert.name),
           confirmedBar: true,
           intrabar: false,
@@ -87,9 +106,9 @@ export function buildActiveIndicatorInstances(input: {
       const settingsHash = stableHash(settings);
       return {
         indicatorId: String(manifest.key),
-        instanceId: `chart:${String(manifest.key)}`,
+        instanceId: `${active ? "chart" : "library"}:${String(manifest.key)}`,
         name: manifest.name,
-        instanceName: `${manifest.name} — Main Instance`,
+        instanceName: `${manifest.name} — ${active ? "Active Chart Instance" : "Indicator Library"}`,
         version: manifest.version,
         settingsHash,
         settingsSummary: summarizeSettings(settings),
@@ -97,29 +116,22 @@ export function buildActiveIndicatorInstances(input: {
         runtimeVersion: manifest.runtimeStatus === "CERTIFIED" ? "black-cloud-paper-v1" : "unavailable",
         warmupBars: manifest.warmup,
         runtimeStatus: manifest.runtimeStatus,
-        useCurrentChartSettings: true,
+        useCurrentChartSettings: active,
         alerts,
-        source: "ACTIVE_CHART",
+        source: active ? "ACTIVE_CHART" : "BUILT_IN",
         runtimeKind: manifest.runtimeKind,
         settings,
       };
     });
 }
 
-export function templateIndicatorInstances(): StrategyIndicatorInstance[] {
-  return [
-    template("builtin-adaptive-swing", "Hidden Distribution Swing", "hidden-distribution-swing", longShortAlerts, 240),
-    template("builtin-ema-cross", "EMA Cross Baseline", "ema-cross-baseline", longShortAlerts, 60),
-  ];
-}
-
 export function ownedCustomIndicatorInstances(): StrategyIndicatorInstance[] {
   if (typeof window === "undefined") return [];
   try {
     const rows = JSON.parse(window.localStorage.getItem("bt_user_scripts") || "[]") as Array<{ id?: string; name?: string; kind?: string; source?: string }>;
-    return rows.filter((row) => row.kind === "indicator" && row.id && row.name).map((row) => {
+    return rows.filter((row) => ["indicator", "strategy"].includes(String(row.kind)) && row.id && row.name).map<StrategyIndicatorInstance>((row) => {
       const sourceHash = stableHash(row.source || "");
-      const alerts = parseCustomAlertManifest(row.source || "");
+      const alerts = parseCustomAlertManifest(row.source || "", row.kind === "strategy");
       return {
         indicatorId: `custom:${row.id}`,
         instanceId: `custom:${row.id}`,
@@ -127,42 +139,21 @@ export function ownedCustomIndicatorInstances(): StrategyIndicatorInstance[] {
         instanceName: `${row.name || "Custom Indicator"} — Owned Script`,
         version: sourceHash,
         settingsHash: sourceHash,
-        settingsSummary: "Owned custom indicator · runtime certification required",
+        settingsSummary: `Owned custom ${row.kind === "strategy" ? "strategy" : "indicator"} · runtime certification required`,
         alertManifestVersion: `custom:${stableHash(alerts)}`,
         runtimeVersion: "unavailable",
         warmupBars: 500,
-        runtimeStatus: "REQUIRES_CERTIFICATION",
+        runtimeStatus: "REQUIRES_CERTIFICATION" as const,
         useCurrentChartSettings: false,
         alerts,
-        source: "CUSTOM",
-        runtimeKind: "python-script",
+        source: "CUSTOM" as const,
+        runtimeKind: "python-script" as const,
         settings: {},
       };
-    });
+    }).filter((instance) => instance.alerts.length > 0);
   } catch {
     return [];
   }
-}
-
-function template(runtimeKind: StrategyRuntimeKind, name: string, id: string, alerts: StrategyIndicatorAlert[], warmupBars: number): StrategyIndicatorInstance {
-  return {
-    indicatorId: id,
-    instanceId: `template:${id}`,
-    name,
-    instanceName: `${name} Template`,
-    version: "1",
-    settingsHash: stableHash({ template: id }),
-    settingsSummary: "Black Core recommended defaults",
-    alertManifestVersion: "1",
-    runtimeVersion: "black-cloud-paper-v1",
-    warmupBars,
-    runtimeStatus: "CERTIFIED",
-    useCurrentChartSettings: false,
-    alerts,
-    source: "BUILT_IN",
-    runtimeKind,
-    settings: {},
-  };
 }
 
 function settingsFor(key: keyof VisibleIndicators, periods: IndicatorPeriods, advanced: IndicatorAdvancedSettings) {
@@ -195,12 +186,25 @@ function inferSemantic(name: string): StrategyIndicatorAlert["semantic"] {
   return "NEUTRAL";
 }
 
-function parseCustomAlertManifest(source: string): StrategyIndicatorAlert[] {
+function parseCustomAlertManifest(source: string, strategyScript = false): StrategyIndicatorAlert[] {
   const rows: StrategyIndicatorAlert[] = [];
   for (const match of source.matchAll(/alertcondition\s*\([^,]+,\s*["']([^"']+)["']/gi)) {
     const name = match[1]?.trim();
     if (!name) continue;
     rows.push({ id: `custom-alert:${stableHash(name)}`, name, description: "Owned script alert; VPS certification is required before publish.", semantic: inferSemantic(name), confirmedBar: true, intrabar: false });
+  }
+  for (const match of source.matchAll(/\balert\s*\(\s*["']([^"']+)["']/gi)) {
+    const name = match[1]?.trim();
+    if (!name) continue;
+    rows.push({ id: `custom-alert:${stableHash(name)}`, name, description: "Owned script alert; VPS certification is required before activation.", semantic: inferSemantic(name), confirmedBar: true, intrabar: false });
+  }
+  if (strategyScript) {
+    for (const match of source.matchAll(/strategy\.entry\s*\(\s*["']([^"']+)["']\s*,\s*strategy\.(long|short)/gi)) {
+      const name = match[1]?.trim();
+      const direction = match[2]?.toLowerCase();
+      if (!name || !direction) continue;
+      rows.push({ id: `custom-entry:${stableHash(`${name}:${direction}`)}`, name, description: `Owned script ${direction} entry event; VPS certification is required before activation.`, semantic: direction === "long" ? "LONG_ENTRY" : "SHORT_ENTRY", confirmedBar: true, intrabar: false });
+    }
   }
   return uniqueAlerts(rows);
 }

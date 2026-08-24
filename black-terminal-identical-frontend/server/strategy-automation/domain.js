@@ -63,7 +63,21 @@ export function normalizeStrategyDefinition(value = {}) {
     exits: plainObject(value.exits),
     schedule: plainObject(value.schedule),
     paper: plainObject(value.paper),
+    deployment: normalizeDeploymentPlan(value.deployment),
     metadata: normalizeStrategyMetadata(value.metadata)
+  };
+}
+
+function normalizeDeploymentPlan(value) {
+  const plan = plainObject(value);
+  const requested = String(plan.targetType || "PAPER").toUpperCase();
+  const targetType = ["PAPER", "BROKER_ACCOUNT", "INVESTMENT_GROUP"].includes(requested) ? requested : "PAPER";
+  return {
+    targetType,
+    targetId: targetType === "PAPER" ? undefined : String(plan.targetId || "").trim().slice(0, 80) || undefined,
+    targetLabel: targetType === "PAPER" ? "Paper Backtester" : String(plan.targetLabel || "").trim().slice(0, 160) || undefined,
+    authorizationAccepted: targetType === "PAPER" ? false : plan.authorizationAccepted === true,
+    armOnActivation: targetType === "PAPER" ? false : plan.armOnActivation === true
   };
 }
 
@@ -84,6 +98,32 @@ export function assertCertifiedStrategyDefinition(definition) {
     : [definition.signals?.longEntry, definition.signals?.shortEntry];
   if (definition.indicator && required.some((value) => !value)) {
     throw strategyError(409, "STRATEGY_SIGNAL_MAPPING_INCOMPLETE", "Map every required entry action to a certified indicator alert before publishing.");
+  }
+  const alertIds = new Set((definition.indicator?.alerts || []).map((alert) => String(alert.id)));
+  const mappedIds = Object.values(definition.signals || {}).filter(Boolean).map(String);
+  if (mappedIds.some((id) => !alertIds.has(id))) {
+    throw strategyError(409, "STRATEGY_ALERT_IDENTITY_INVALID", "One or more signal mappings are not present in the pinned indicator alert manifest.");
+  }
+  const takeProfits = Array.isArray(definition.exits?.takeProfits) ? definition.exits.takeProfits : [];
+  const totalExitPercent = takeProfits.reduce((sum, target) => sum + finite(target?.closePercent), 0);
+  if (totalExitPercent > 100) throw strategyError(409, "STRATEGY_EXIT_ALLOCATION_INVALID", "Take-profit allocations cannot exceed 100 percent.");
+  for (const target of takeProfits) {
+    const mode = String(target?.mode || (target?.alertId ? "ALERT" : "R_MULTIPLE")).toUpperCase();
+    if (!['ALERT','R_MULTIPLE','PRICE_PERCENT'].includes(mode)) throw strategyError(409, "STRATEGY_EXIT_TRIGGER_INVALID", "Take-profit trigger type is invalid.");
+    if (mode === "ALERT" && !alertIds.has(String(target?.alertId || ""))) throw strategyError(409, "STRATEGY_EXIT_ALERT_INVALID", "A take-profit alert is not present in the pinned indicator manifest.");
+    if (mode !== "ALERT" && finite(target?.value) <= 0) throw strategyError(409, "STRATEGY_EXIT_VALUE_INVALID", "A price or risk-multiple take-profit requires a positive trigger value.");
+    if (finite(target?.closePercent) <= 0) throw strategyError(409, "STRATEGY_EXIT_PERCENT_INVALID", "Every take-profit must close a positive percentage.");
+  }
+  const execution = definition.execution || {};
+  if (execution.stopReversalEnabled === true) {
+    bounded(execution.maximumReversalChain ?? 1, 1, 5, "maximum reversal chain");
+    bounded(execution.maximumReversalsPerDay ?? 2, 1, 20, "maximum reversals per day");
+    bounded(execution.reversalCooldownBars ?? 1, 0, 10_000, "reversal cooldown");
+  }
+  const deployment = definition.deployment || { targetType: "PAPER" };
+  if (deployment.targetType !== "PAPER") {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(deployment.targetId || ""))) throw strategyError(409, "STRATEGY_DESTINATION_INVALID", "Select a valid owned execution destination.");
+    if (deployment.authorizationAccepted !== true) throw strategyError(409, "STRATEGY_DESTINATION_NOT_AUTHORIZED", "Explicitly authorize the selected execution destination.");
   }
   return definition;
 }

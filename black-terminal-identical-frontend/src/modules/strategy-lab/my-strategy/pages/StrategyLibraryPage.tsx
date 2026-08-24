@@ -12,10 +12,9 @@ type Props = {
   onDelete: (strategy: StrategySummary) => void;
   onBacktest: (strategy: StrategySummary) => void;
   onPaperAction: (strategy: StrategySummary, action: "start" | "pause") => void;
-  onOpenQalc: () => void;
 };
 
-export function StrategyLibraryPage({ strategies, loading, message, onCreate, onOpen, onModify, onDelete, onBacktest, onPaperAction, onOpenQalc }: Props) {
+export function StrategyLibraryPage({ strategies, loading, message, onCreate, onOpen, onModify, onDelete, onBacktest, onPaperAction }: Props) {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -38,12 +37,11 @@ export function StrategyLibraryPage({ strategies, loading, message, onCreate, on
         <div>
           <span>MY STRATEGY</span>
           <h1>Build, test and automate indicator-driven strategies.</h1>
-          <p>Create with a guided workflow, then operate each published strategy from its own cockpit.</p>
+          <p>Your private automated strategies. Create a configuration, then modify or operate it from its own cockpit.</p>
         </div>
         <button type="button" className="strategy-primary-button" onClick={onCreate}><Plus size={15} /> CREATE NEW STRATEGY</button>
       </header>
       {message ? <div className="strategy-library-message" role="status">{message}</div> : null}
-      <section className="qalc-template-card"><div><span>START FROM TEMPLATE / MICROSTRUCTURE</span><h2>BC-QALC — Queue-Aware Liquidity Capture</h2><p>Native event-driven Bybit order-book strategy with real aggressor flow, conservative queue fills, all-in cost gating and bounded Paper inventory.</p></div><div><b>PAPER CERTIFICATION REQUIRED</b><button type="button" onClick={onOpenQalc}>OPEN BC-QALC</button></div></section>
       {loading ? (
         <div className="strategy-library-empty"><Activity className="spin" size={22} /><strong>Loading strategies</strong><span>Restoring VPS strategy and Paper runtime state.</span></div>
       ) : strategies.length === 0 ? (

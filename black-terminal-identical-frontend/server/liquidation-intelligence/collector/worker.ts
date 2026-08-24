@@ -55,6 +55,11 @@ import { fetchBybitFundingHistory, type BclifFundingPoint } from "../sources/byb
 import { fetchBybitAccountRatios } from "../sources/bybitRatios.ts";
 import { BybitOrderBookReconstructor } from "../sources/bybitOrderBook.ts";
 import { BybitPublicSocket, verifyBybitServerClock } from "../sources/bybitTransport.ts";
+import {
+  assertSingleBoundedBucket,
+  planActiveColumnTransition,
+  recoverLatestActiveBucket
+} from "./activeTileContinuity.ts";
 
 const BASE_TILE_HORIZON_MS = 6 * 60 * 60 * 1_000;
 const MEMORY_WINDOW_MS = 2 * 60 * 60 * 1_000;
@@ -777,18 +782,21 @@ class BclifSymbolCollector {
 
   private async acceptColumn(column: BclifModelColumn) {
     const cadence = this.deps.config.tileColumnCadenceMs;
-    const bucketStart = Math.floor((column.timestamp - 1) / BASE_TILE_HORIZON_MS) * BASE_TILE_HORIZON_MS;
-    if (!this.activeColumns.length) {
-      for (let timestamp = bucketStart + cadence; timestamp < column.timestamp; timestamp += cadence) this.activeColumns.push(missingColumn(timestamp, this.exposure!));
+    const transition = planActiveColumnTransition(
+      this.activeColumns.map((active) => active.timestamp),
+      column.timestamp,
+      cadence,
+      BASE_TILE_HORIZON_MS
+    );
+    if (transition.disposition === "STALE") return;
+    for (const timestamp of transition.closeBucketWith) this.activeColumns.push(missingColumn(timestamp, this.exposure!));
+    if (transition.closeBucketWith.length) {
+      await this.publishActiveEdgesAndClosures();
+      if (this.activeColumns.length) throw new Error("BCLIF completed UTC bucket was not finalized before rollover");
     }
-    const expected = this.activeColumns.length ? this.activeColumns.at(-1)!.timestamp + cadence : bucketStart + cadence;
-    if (column.timestamp < expected) return;
-    if (column.timestamp !== expected) {
-      for (let timestamp = expected; timestamp < column.timestamp; timestamp += cadence) this.activeColumns.push(missingColumn(timestamp, this.exposure!));
-    }
+    for (const timestamp of transition.initializeCurrentWith) this.activeColumns.push(missingColumn(timestamp, this.exposure!));
     this.activeColumns.push(column);
-    const targetColumns = BASE_TILE_HORIZON_MS / cadence;
-    if (this.activeColumns.length > targetColumns) throw new Error("BCLIF active tile exceeded its bounded UTC bucket");
+    assertSingleBoundedBucket(this.activeColumns.map((active) => active.timestamp), cadence, BASE_TILE_HORIZON_MS);
     await this.publishActiveEdgesAndClosures();
   }
 
@@ -965,7 +973,20 @@ class BclifSymbolCollector {
     }
     this.lastEnvelope = state.activeFrame;
     if (state.activeFrame) this.restoreFrameContext(state.activeFrame);
-    if (state.activeTile) this.activeColumns = restoreColumns(state.activeTile);
+    if (state.activeTile) {
+      const restored = restoreColumns(state.activeTile);
+      const recovered = recoverLatestActiveBucket(restored, this.deps.config.tileColumnCadenceMs, BASE_TILE_HORIZON_MS);
+      this.activeColumns = recovered.columns;
+      if (recovered.droppedColumns > 0) {
+        this.deps.metrics.counter("bclif_legacy_checkpoint_columns_discarded_total", "Legacy active-tile columns discarded while recovering the newest bounded UTC bucket.", recovered.droppedColumns);
+        this.deps.logger.warn("collector.legacy_active_tile_recovered", {
+          symbol: this.symbol,
+          keptBucketStart: recovered.bucketStart,
+          droppedColumns: recovered.droppedColumns,
+          droppedBuckets: recovered.droppedBuckets
+        });
+      }
+    }
   }
 
   private async saveCheckpoint(reason: "INTERVAL" | "GRACEFUL_SHUTDOWN" | "BACKFILL_COMPLETE") {
@@ -1215,6 +1236,7 @@ function missingColumn(timestamp: number, exposure: BclifExposureRuntime): Bclif
 
 function checkpointTile(columns: readonly BclifModelColumn[], exposure: BclifExposureRuntime, configuredCadenceMs: number): BclifActiveTileCheckpoint | null {
   if (!columns.length) return null;
+  assertSingleBoundedBucket(columns.map((column) => column.timestamp), configuredCadenceMs, BASE_TILE_HORIZON_MS, "checkpoint active tile");
   return {
     rows: exposure.rows,
     minPrice: exposure.minPrice,

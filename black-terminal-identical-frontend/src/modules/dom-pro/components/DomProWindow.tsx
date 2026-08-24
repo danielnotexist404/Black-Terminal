@@ -2108,13 +2108,43 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
                 data-ask-continuity={depthChart.askHeld ? "held" : "live"}
               >
                 <svg className="dom-pro-depth-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Cumulative market depth">
+                  <defs>
+                    <linearGradient id="dom-depth-bid-field" x1="1" y1="0" x2="0" y2="0">
+                      <stop offset="0%" stopColor="#ffffff" stopOpacity="0.04" />
+                      <stop offset="56%" stopColor="#e4e8ef" stopOpacity="0.13" />
+                      <stop offset="100%" stopColor="#ffffff" stopOpacity="0.34" />
+                    </linearGradient>
+                    <linearGradient id="dom-depth-ask-field" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor="#ff0000" stopOpacity="0.04" />
+                      <stop offset="56%" stopColor="#b9000b" stopOpacity="0.18" />
+                      <stop offset="100%" stopColor="#ff0018" stopOpacity="0.4" />
+                    </linearGradient>
+                  </defs>
                   <line className="axis" x1="50" y1="8" x2="50" y2="94" />
                   <line className="axis zero" x1="0" y1="94" x2="100" y2="94" />
-                  {depthChart.bidArea && <polygon className={`bid-fill${depthChart.bidHeld ? " is-held" : ""}`} points={depthChart.bidArea} />}
-                  {depthChart.askArea && <polygon className={`ask-fill${depthChart.askHeld ? " is-held" : ""}`} points={depthChart.askArea} />}
-                  {depthChart.bidLine && <polyline className={`bid-line${depthChart.bidHeld ? " is-held" : ""}`} points={depthChart.bidLine} />}
-                  {depthChart.askLine && <polyline className={`ask-line${depthChart.askHeld ? " is-held" : ""}`} points={depthChart.askLine} />}
+                  {depthChart.bidAreaCurve && <path className={`bid-fill${depthChart.bidHeld ? " is-held" : ""}`} d={depthChart.bidAreaCurve} />}
+                  {depthChart.askAreaCurve && <path className={`ask-fill${depthChart.askHeld ? " is-held" : ""}`} d={depthChart.askAreaCurve} />}
+                  {depthChart.bidCurve && <path className={`bid-aura${depthChart.bidHeld ? " is-held" : ""}`} d={depthChart.bidCurve} />}
+                  {depthChart.askCurve && <path className={`ask-aura${depthChart.askHeld ? " is-held" : ""}`} d={depthChart.askCurve} />}
+                  {depthChart.bidCurve && <path className={`bid-line${depthChart.bidHeld ? " is-held" : ""}`} d={depthChart.bidCurve} />}
+                  {depthChart.askCurve && <path className={`ask-line${depthChart.askHeld ? " is-held" : ""}`} d={depthChart.askCurve} />}
                 </svg>
+                <div className="dom-pro-depth-node-layer" aria-hidden="true">
+                  {depthChart.bidNodes.map((node, index) => (
+                    <i
+                      key={`bid-depth-node-${index}`}
+                      className="bid-node"
+                      style={{ left: `${node.x}%`, top: `${node.y}%`, opacity: 0.42 + node.strength * 0.58, transform: `translate(-50%, -50%) scale(${0.72 + node.strength * 0.55})` } as CSSProperties}
+                    />
+                  ))}
+                  {depthChart.askNodes.map((node, index) => (
+                    <i
+                      key={`ask-depth-node-${index}`}
+                      className="ask-node"
+                      style={{ left: `${node.x}%`, top: `${node.y}%`, opacity: 0.42 + node.strength * 0.58, transform: `translate(-50%, -50%) scale(${0.72 + node.strength * 0.55})` } as CSSProperties}
+                    />
+                  ))}
+                </div>
                 <div className="dom-pro-depth-summary"><b>Structural Bias {depthChart.bias}</b><span>Bid {depthChart.bidPct.toFixed(0)}% / Ask {depthChart.askPct.toFixed(0)}%</span></div>
                 <div className="dom-pro-depth-status">
                   <span>{depthChart.note}</span>

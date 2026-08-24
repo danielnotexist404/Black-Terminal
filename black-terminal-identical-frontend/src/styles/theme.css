@@ -13264,9 +13264,24 @@ body.dom-pro-resize-active {
   background-size: 100% 30px, 58px 100%, auto;
 }
 
+.dom-pro-depth-wrap {
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse at 24% 94%, rgba(238, 242, 248, 0.065), transparent 48%),
+    radial-gradient(ellipse at 76% 94%, rgba(178, 0, 12, 0.1), transparent 50%),
+    linear-gradient(rgba(255, 255, 255, 0.026) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.024) 1px, transparent 1px),
+    #030405;
+  background-size: auto, auto, 100% 30px, 58px 100%, auto;
+}
+
 .dom-pro-depth-svg {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
   width: 100%;
   height: 100%;
+  overflow: visible;
 }
 
 .dom-pro-depth-status {
@@ -13307,11 +13322,11 @@ body.dom-pro-resize-active {
 }
 
 .dom-pro-depth-svg .bid-fill {
-  fill: rgba(220, 224, 232, 0.18);
+  fill: url(#dom-depth-bid-field);
 }
 
 .dom-pro-depth-svg .ask-fill {
-  fill: rgba(255, 0, 0, 0.2);
+  fill: url(#dom-depth-ask-field);
 }
 
 .dom-pro-depth-svg .bid-fill.is-held,
@@ -13321,22 +13336,73 @@ body.dom-pro-resize-active {
 
 .dom-pro-depth-svg .bid-line {
   fill: none;
-  stroke: rgba(235, 238, 244, 0.86);
-  stroke-width: 1.25;
+  stroke: rgba(249, 251, 255, 0.96);
+  stroke-width: 1.45;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
-  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.18));
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.72)) drop-shadow(0 0 7px rgba(206, 220, 244, 0.34));
 }
 
 .dom-pro-depth-svg .ask-line {
   fill: none;
-  stroke: rgba(255, 18, 18, 0.92);
-  stroke-width: 1.25;
+  stroke: rgba(255, 12, 25, 0.98);
+  stroke-width: 1.45;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
-  filter: drop-shadow(0 0 5px rgba(255, 0, 0, 0.3));
+  filter: drop-shadow(0 0 2px rgba(255, 0, 18, 0.82)) drop-shadow(0 0 8px rgba(255, 0, 20, 0.42));
+}
+
+.dom-pro-depth-svg .bid-aura,
+.dom-pro-depth-svg .ask-aura {
+  fill: none;
+  stroke-width: 5.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.22;
+  filter: blur(1.6px);
+}
+
+.dom-pro-depth-svg .bid-aura { stroke: rgba(224, 233, 248, 0.88); }
+.dom-pro-depth-svg .ask-aura { stroke: rgba(255, 0, 22, 0.94); }
+
+.dom-pro-depth-node-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.dom-pro-depth-node-layer i {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  display: block;
+  border-radius: 999px;
+}
+
+.dom-pro-depth-node-layer .bid-node {
+  background: #fff;
+  box-shadow: 0 0 3px #fff, 0 0 8px rgba(211, 226, 251, 0.78), 0 0 15px rgba(255, 255, 255, 0.28);
+}
+
+.dom-pro-depth-node-layer .ask-node {
+  background: #ff0a1d;
+  box-shadow: 0 0 3px #ff0018, 0 0 9px rgba(255, 0, 24, 0.86), 0 0 16px rgba(255, 0, 12, 0.34);
+}
+
+.dom-pro-depth-wrap[data-bid-continuity="held"] .bid-node,
+.dom-pro-depth-wrap[data-ask-continuity="held"] .ask-node {
+  filter: saturate(0.28);
 }
 
 .dom-pro-depth-svg .bid-line.is-held,
-.dom-pro-depth-svg .ask-line.is-held {
+.dom-pro-depth-svg .ask-line.is-held,
+.dom-pro-depth-svg .bid-aura.is-held,
+.dom-pro-depth-svg .ask-aura.is-held {
   opacity: 0.66;
   stroke-dasharray: 1.4 1.1;
 }

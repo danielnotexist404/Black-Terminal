@@ -194,12 +194,21 @@ const depthChartInitial = depthChartTracker.update({
   jointNormalization: true
 });
 assert.ok(depthChartInitial.bidPoints > 0 && depthChartInitial.askPoints > 0, "consolidated professional depth produces a complete two-sided V curve");
+assert.match(depthChartInitial.bidCurve, /^M .* C /, "bid depth uses a rounded monotone cubic projection rather than a staircase");
+assert.match(depthChartInitial.askCurve, /^M .* C /, "ask depth uses a rounded monotone cubic projection rather than a staircase");
+assert.match(depthChartInitial.bidAreaCurve, / Z$/, "rounded bid depth closes into a genuine filled field");
+assert.match(depthChartInitial.askAreaCurve, / Z$/, "rounded ask depth closes into a genuine filled field");
+assert.ok(depthChartInitial.bidNodes.length > 0 && depthChartInitial.askNodes.length > 0, "both sides expose restrained structural detail beads");
+assert.ok(depthChartInitial.bidNodes.length <= 9 && depthChartInitial.askNodes.length <= 9, "structural detail remains bounded and cannot become visual noise");
+assert.ok([...depthChartInitial.bidNodes, ...depthChartInitial.askNodes].every((node) => node.strength >= 0 && node.strength <= 1), "detail brightness is normalized from genuine effective depth");
 assert.equal(depthChartInitial.warning, "", "a complete authoritative snapshot requires no continuity warning");
 assert.ok(depthChartInitial.effectiveBidSize <= depthChartInitial.sourceBidSize && depthChartInitial.effectiveAskSize <= depthChartInitial.sourceAskSize, "structural significance suppresses noise without manufacturing depth");
 assert.ok(depthChartInitial.aggregationSize >= 4, "structural depth inherits the professional ladder's quieter canonical aggregation");
 const depthChartRepeated = depthChartTracker.update({ depth: professionalInitial, mode: "structural", bucketAggregation: 4, emaLength: 10, outlierPercentile: 98 });
 assert.equal(depthChartRepeated.bidLine, depthChartInitial.bidLine, "an identical consolidated bid snapshot cannot make the depth curve flicker");
 assert.equal(depthChartRepeated.askLine, depthChartInitial.askLine, "an identical consolidated ask snapshot cannot make the depth curve flicker");
+assert.equal(depthChartRepeated.bidCurve, depthChartInitial.bidCurve, "rounded bid neon geometry is idempotent across React renders");
+assert.equal(depthChartRepeated.askCurve, depthChartInitial.askCurve, "rounded ask neon geometry is idempotent across React renders");
 const transientBidOnly = {
   ...professionalInitial,
   identity: `${professionalInitial.identity}:one-sided-refresh`,

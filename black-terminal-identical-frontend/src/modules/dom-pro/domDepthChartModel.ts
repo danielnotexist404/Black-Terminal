@@ -3,6 +3,7 @@ import type { ProfessionalDomLadderModel, ProfessionalDomRow } from "./domProfes
 
 export type DomDepthChartMode = "raw" | "smoothed" | "structural" | "macro";
 export type DomDepthBias = "BID HEAVY" | "ASK HEAVY" | "BALANCED" | "UNAVAILABLE";
+export type DomDepthDetailNode = { x: number; y: number; strength: number };
 
 export type DomDepthChartModel = {
   empty: boolean;
@@ -10,6 +11,12 @@ export type DomDepthChartModel = {
   askLine: string;
   bidArea: string;
   askArea: string;
+  bidCurve: string;
+  askCurve: string;
+  bidAreaCurve: string;
+  askAreaCurve: string;
+  bidNodes: DomDepthDetailNode[];
+  askNodes: DomDepthDetailNode[];
   bidPoints: number;
   askPoints: number;
   bidPct: number;
@@ -113,15 +120,23 @@ export class DomDepthChartTracker {
     const curvePower = clamp(finite(input.curvePower, 0.72), 0.45, 1.4);
     const bidPoints = cumulativePoints(bidTotals, "bid", jointNormalization ? sharedMaximum : Math.max(1, bidTotals.at(-1) ?? 0), curvePower);
     const askPoints = cumulativePoints(askTotals, "ask", jointNormalization ? sharedMaximum : Math.max(1, askTotals.at(-1) ?? 0), curvePower);
-    const bidPath = bidPoints.length ? buildStepPath([{ x: 50, y: 94 }, ...bidPoints], "bid") : [];
-    const askPath = askPoints.length ? buildStepPath([{ x: 50, y: 94 }, ...askPoints], "ask") : [];
+    const bidPath = bidPoints.length ? orderCurvePoints([{ x: 50, y: 94 }, ...bidPoints]) : [];
+    const askPath = askPoints.length ? orderCurvePoints([{ x: 50, y: 94 }, ...askPoints]) : [];
+    const bidCurve = monotoneCurvePath(bidPath);
+    const askCurve = monotoneCurvePath(askPath);
 
     return {
-      empty: bidPath.length === 0 && askPath.length === 0,
+      empty: !bidCurve && !askCurve,
       bidLine: pointString(bidPath),
       askLine: pointString(askPath),
       bidArea: areaString(bidPath),
       askArea: areaString(askPath),
+      bidCurve,
+      askCurve,
+      bidAreaCurve: curveAreaPath(bidCurve, bidPath),
+      askAreaCurve: curveAreaPath(askCurve, askPath),
+      bidNodes: structuralDetailNodes(bidPoints, bidWeights),
+      askNodes: structuralDetailNodes(askPoints, askWeights),
       bidPoints: bidPath.length,
       askPoints: askPath.length,
       bidPct,
@@ -236,17 +251,85 @@ function cumulativePoints(values: number[], side: DepthSide, maximum: number, cu
   }));
 }
 
-function buildStepPath(points: Array<{ x: number; y: number }>, side: DepthSide) {
-  const ordered = side === "bid"
-    ? points.slice().sort((left, right) => right.x - left.x)
-    : points.slice().sort((left, right) => left.x - right.x);
-  const stepped: Array<{ x: number; y: number }> = [];
-  for (const point of ordered) {
-    const prior = stepped.at(-1);
-    if (prior) stepped.push({ x: point.x, y: prior.y });
-    stepped.push(point);
+function orderCurvePoints(points: Array<{ x: number; y: number }>) {
+  return points.slice().sort((left, right) => left.x - right.x);
+}
+
+/**
+ * Fritsch-Carlson monotone cubic interpolation rounds the visual curve without
+ * overshooting cumulative depth or creating synthetic peaks between buckets.
+ */
+function monotoneCurvePath(points: Array<{ x: number; y: number }>) {
+  if (!points.length) return "";
+  if (points.length === 1) return `M ${formatPoint(points[0])}`;
+  const intervals = points.slice(0, -1).map((point, index) => points[index + 1].x - point.x);
+  const secants = intervals.map((interval, index) => interval > EPSILON ? (points[index + 1].y - points[index].y) / interval : 0);
+  const tangents = new Array<number>(points.length).fill(0);
+  if (points.length === 2) {
+    tangents[0] = secants[0];
+    tangents[1] = secants[0];
+  } else {
+    tangents[0] = endpointTangent(intervals[0], intervals[1], secants[0], secants[1]);
+    tangents[tangents.length - 1] = endpointTangent(
+      intervals[intervals.length - 1],
+      intervals[intervals.length - 2],
+      secants[secants.length - 1],
+      secants[secants.length - 2]
+    );
+    for (let index = 1; index < points.length - 1; index += 1) {
+      const previous = secants[index - 1];
+      const next = secants[index];
+      if (previous * next <= 0) continue;
+      const previousInterval = intervals[index - 1];
+      const nextInterval = intervals[index];
+      const weightOne = 2 * nextInterval + previousInterval;
+      const weightTwo = nextInterval + 2 * previousInterval;
+      tangents[index] = (weightOne + weightTwo) / (weightOne / previous + weightTwo / next);
+    }
   }
-  return stepped;
+  const commands = [`M ${formatPoint(points[0])}`];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const left = points[index];
+    const right = points[index + 1];
+    const interval = intervals[index];
+    commands.push([
+      "C",
+      `${(left.x + interval / 3).toFixed(2)},${(left.y + tangents[index] * interval / 3).toFixed(2)}`,
+      `${(right.x - interval / 3).toFixed(2)},${(right.y - tangents[index + 1] * interval / 3).toFixed(2)}`,
+      formatPoint(right)
+    ].join(" "));
+  }
+  return commands.join(" ");
+}
+
+function endpointTangent(primaryInterval: number, adjacentInterval: number, primarySecant: number, adjacentSecant: number) {
+  const tangent = ((2 * primaryInterval + adjacentInterval) * primarySecant - primaryInterval * adjacentSecant)
+    / Math.max(primaryInterval + adjacentInterval, EPSILON);
+  if (tangent * primarySecant <= 0) return 0;
+  if (primarySecant * adjacentSecant < 0 && Math.abs(tangent) > Math.abs(3 * primarySecant)) return 3 * primarySecant;
+  return tangent;
+}
+
+function formatPoint(point: { x: number; y: number }) {
+  return `${point.x.toFixed(2)},${point.y.toFixed(2)}`;
+}
+
+function curveAreaPath(curve: string, points: Array<{ x: number; y: number }>) {
+  if (!curve || !points.length) return "";
+  return `${curve} L ${points.at(-1)!.x.toFixed(2)},94.00 L ${points[0].x.toFixed(2)},94.00 Z`;
+}
+
+function structuralDetailNodes(points: Array<{ x: number; y: number }>, weights: number[]): DomDepthDetailNode[] {
+  if (!points.length || !weights.length) return [];
+  const maximum = Math.max(...weights, EPSILON);
+  const threshold = percentile(weights.filter((value) => value > EPSILON), 0.68);
+  return points
+    .map((point, index) => ({ ...point, strength: clamp(weights[index] / maximum, 0, 1), weight: weights[index] }))
+    .filter((node) => node.weight >= threshold && node.strength >= 0.16)
+    .sort((left, right) => right.strength - left.strength)
+    .slice(0, 9)
+    .sort((left, right) => left.x - right.x)
+    .map(({ x, y, strength }) => ({ x, y, strength }));
 }
 
 function pointString(points: Array<{ x: number; y: number }>) {
@@ -296,6 +379,12 @@ function emptyModel(priceStep: number): DomDepthChartModel {
     askLine: "",
     bidArea: "",
     askArea: "",
+    bidCurve: "",
+    askCurve: "",
+    bidAreaCurve: "",
+    askAreaCurve: "",
+    bidNodes: [],
+    askNodes: [],
     bidPoints: 0,
     askPoints: 0,
     bidPct: 0,

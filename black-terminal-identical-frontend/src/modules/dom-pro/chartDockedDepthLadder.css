@@ -298,6 +298,14 @@
 .chart-docked-depth-tooltip--lpp span b { color: #d9dde3; }
 .chart-docked-depth-tooltip--lpp span b.ask { color: #ff1834; }
 .chart-docked-depth-tooltip--lpp span b.bid { color: #f4f6f8; }
+.chart-docked-depth-tooltip--lpp .lifecycle--forming { color: #ff526b; }
+.chart-docked-depth-tooltip--lpp .lifecycle--active { color: #e9ecf1; }
+.chart-docked-depth-tooltip--lpp .lifecycle--strengthening { color: #ff1834; text-shadow: 0 0 7px rgba(255,0,38,.62); }
+.chart-docked-depth-tooltip--lpp .lifecycle--decaying { color: #861629; }
+.chart-docked-depth-tooltip--lpp .lifecycle--triggered { color: #d73a53; }
+.chart-docked-depth-tooltip--lpp .lifecycle--absorbed { color: #8d939c; }
+.chart-docked-depth-tooltip--lpp .lifecycle--exhausted,
+.chart-docked-depth-tooltip--lpp .lifecycle--empty { color: #555b64; }
 
 @media (max-width: 1100px) {
   .chart-docked-depth-scale,

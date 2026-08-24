@@ -3,6 +3,27 @@ import type { LiquidationFieldSnapshot } from "../liquidation-field/core/types.t
 
 export type LiquidationPressureSide = "long" | "short" | "mixed" | "empty";
 
+export type LiquidationPressureLifecycleState =
+  | "FORMING"
+  | "ACTIVE"
+  | "STRENGTHENING"
+  | "DECAYING"
+  | "TRIGGERED"
+  | "ABSORBED"
+  | "EXHAUSTED"
+  | "EMPTY";
+
+export type LiquidationPressureLifecycle = {
+  state: LiquidationPressureLifecycleState;
+  windowColumns: number;
+  persistence: number;
+  survivalRatio: number;
+  recentPeakExposure: number;
+  priorExposure: number;
+  observedNotional: number;
+  observedCount: number;
+};
+
 export type LiquidationPressureProfileRow = {
   key: string;
   index: number;
@@ -23,6 +44,7 @@ export type LiquidationPressureProfileRow = {
   isHeavy: boolean;
   isExtreme: boolean;
   sourceRows: number;
+  lifecycle: LiquidationPressureLifecycle;
 };
 
 export type LiquidationPressureProfileModel = {
@@ -153,6 +175,13 @@ export function buildLiquidationPressureProfile(
       validSourceRows += 1;
     }
 
+    const lifecycle = buildLiquidationPressureLifecycle(
+      snapshot,
+      latestColumn,
+      groupSourceLow,
+      groupSourceHigh
+    );
+
     const totalExposure = longExposure + shortExposure;
     rows.push({
       key: `${snapshot.header.gridVersion ?? snapshot.header.modelVersion}:${latestColumn}:${group}`,
@@ -173,7 +202,8 @@ export function buildLiquidationPressureProfile(
       isCurrentPrice: input.currentPrice >= priceLow && input.currentPrice <= priceHigh,
       isHeavy: false,
       isExtreme: false,
-      sourceRows: validSourceRows
+      sourceRows: validSourceRows,
+      lifecycle
     });
   }
 
@@ -275,6 +305,103 @@ export function resolveLiquidationNodeWidthRatio(
   const continuousWidth = boundedIntensity ** 1.38 * boundedShare ** 0.7;
   const significanceFloor = (isExtreme ? 0.96 : isHeavy ? 0.72 : 0) * boundedShare ** 0.58;
   return clamp(Math.max(continuousWidth, significanceFloor), 0, 1);
+}
+
+/**
+ * Classifies remaining modeled exposure from causal BCLIF columns. An
+ * ABSORBED/EXHAUSTED state is impossible without quantitative confirmed-
+ * liquidation evidence in the same price group; an unobserved fade remains
+ * DECAYING so the UI cannot imply an execution event that was never seen.
+ */
+export function classifyLiquidationPressureLifecycle(
+  exposureHistory: readonly number[],
+  observedNotionalHistory: readonly number[] = [],
+  observedCountHistory: readonly number[] = []
+): LiquidationPressureLifecycle {
+  const exposure = exposureHistory.map((value) => Math.max(0, Number.isFinite(value) ? value : 0));
+  const windowColumns = exposure.length;
+  const recentPeakExposure = exposure.reduce((maximum, value) => Math.max(maximum, value), 0);
+  const latestExposure = exposure.at(-1) ?? 0;
+  const priorSamples = exposure.length > 5
+    ? exposure.slice(Math.max(0, exposure.length - 9), Math.max(0, exposure.length - 4))
+    : exposure.slice(0, -1);
+  const priorExposure = priorSamples.length
+    ? priorSamples.reduce((sum, value) => sum + value, 0) / priorSamples.length
+    : 0;
+  const activeFloor = recentPeakExposure * 0.35;
+  const activeColumns = recentPeakExposure > EPSILON
+    ? exposure.filter((value) => value >= activeFloor).length
+    : 0;
+  const persistence = windowColumns > 0 ? activeColumns / windowColumns : 0;
+  const survivalRatio = recentPeakExposure > EPSILON ? clamp(latestExposure / recentPeakExposure, 0, 1) : 0;
+  // Confirmed cells are a rolling event window and may repeat in adjacent
+  // columns. Max, rather than sum, prevents double-counting one observation.
+  const observedNotional = observedNotionalHistory.reduce(
+    (maximum, value) => Math.max(maximum, Math.max(0, Number.isFinite(value) ? value : 0)),
+    0
+  );
+  const observedCount = Math.round(observedCountHistory.reduce(
+    (maximum, value) => Math.max(maximum, Math.max(0, Number.isFinite(value) ? value : 0)),
+    0
+  ));
+  const hasObservedLiquidation = observedNotional > EPSILON && observedCount > 0;
+
+  let state: LiquidationPressureLifecycleState;
+  if (recentPeakExposure <= EPSILON) state = "EMPTY";
+  else if (hasObservedLiquidation && survivalRatio <= 0.05) state = "EXHAUSTED";
+  else if (hasObservedLiquidation && survivalRatio <= 0.25) state = "ABSORBED";
+  else if (hasObservedLiquidation) state = "TRIGGERED";
+  else if (priorExposure <= EPSILON || persistence < 0.25) state = "FORMING";
+  else if (latestExposure > priorExposure * 1.18) state = "STRENGTHENING";
+  else if (latestExposure < priorExposure * 0.68) state = "DECAYING";
+  else state = "ACTIVE";
+
+  return {
+    state,
+    windowColumns,
+    persistence,
+    survivalRatio,
+    recentPeakExposure,
+    priorExposure,
+    observedNotional,
+    observedCount
+  };
+}
+
+function buildLiquidationPressureLifecycle(
+  snapshot: LiquidationFieldSnapshot,
+  latestColumn: number,
+  sourceRowLow: number,
+  sourceRowHigh: number
+) {
+  const sourceRows = snapshot.header.rows;
+  const firstColumn = Math.max(0, latestColumn - 23);
+  const exposureHistory: number[] = [];
+  const observedNotionalHistory: number[] = [];
+  const observedCountHistory: number[] = [];
+  for (let column = firstColumn; column <= latestColumn; column += 1) {
+    let exposure = 0;
+    let observedNotional = 0;
+    let observedCount = 0;
+    let valid = false;
+    for (let sourceRow = sourceRowLow; sourceRow <= sourceRowHigh; sourceRow += 1) {
+      const sourceIndex = column * sourceRows + sourceRow;
+      if ((snapshot.validity[sourceIndex] ?? 0) <= 0) continue;
+      valid = true;
+      exposure += Math.max(0, snapshot.longExposure[sourceIndex] ?? 0)
+        + Math.max(0, snapshot.shortExposure[sourceIndex] ?? 0);
+      // One observed event is rasterized across neighboring price cells. Use
+      // the strongest cell in the compressed display group so its Gaussian
+      // footprint is not misreported as several independent liquidations.
+      observedNotional = Math.max(observedNotional, Math.max(0, snapshot.confirmedNotional[sourceIndex] ?? 0));
+      observedCount = Math.max(observedCount, Math.max(0, snapshot.confirmedCount[sourceIndex] ?? 0));
+    }
+    if (!valid) continue;
+    exposureHistory.push(exposure);
+    observedNotionalHistory.push(observedNotional);
+    observedCountHistory.push(observedCount);
+  }
+  return classifyLiquidationPressureLifecycle(exposureHistory, observedNotionalHistory, observedCountHistory);
 }
 
 function resolveLatestValidColumn(snapshot: LiquidationFieldSnapshot) {

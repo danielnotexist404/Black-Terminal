@@ -341,7 +341,8 @@ export function ChartDockedDepthLadder({
     const row = activeModel.rows.find((candidate) => y >= candidate.top && y <= candidate.top + candidate.height);
     if (!row) return setHover(null);
     const x = Math.min(bounds.width - 150, Math.max(8, event.clientX - bounds.left + 10));
-    const tooltipY = Math.min(bounds.height - 108, Math.max(42, y + 8));
+    const tooltipHeight = profileMode === "lpp" ? 164 : 108;
+    const tooltipY = Math.min(bounds.height - tooltipHeight, Math.max(42, y + 8));
     if (profileMode === "lpp") setHover({ mode: "lpp", row: row as LiquidationPressureProfileRow, x, y: tooltipY });
     else setHover({ mode: "dom", row: row as ChartDockedDepthRow, x, y: tooltipY });
   }
@@ -460,14 +461,19 @@ function LiquidationPressureTooltip({
   authority: LiquidationFieldSnapshot["authority"] | null;
 }) {
   const { row } = hover;
+  const lifecycle = row.lifecycle;
   return (
     <div className="chart-docked-depth-tooltip chart-docked-depth-tooltip--lpp" style={{ left: hover.x, top: hover.y }}>
       <strong>{formatPrice(row.price, 2)} {quoteAsset} · {row.isExtreme ? "EXTREME NODE" : row.isHeavy ? "HEAVY NODE" : "PRESSURE ROW"}</strong>
+      <span>EXPOSURE STATE <b className={`lifecycle lifecycle--${lifecycle.state.toLowerCase()}`}>{liquidationLifecycleLabel(lifecycle.state)}</b></span>
       <span>LONG LIQ / FORCED SELL <b className="ask">{formatCompact(row.longExposure)}</b></span>
       <span>SHORT LIQ / FORCED BUY <b className="bid">{formatCompact(row.shortExposure)}</b></span>
       <span>TOTAL MODELED <b>{formatCompact(row.totalExposure)}</b></span>
       <span>CONFIDENCE <b>{row.confidence.toFixed(0)}%</b></span>
-      <span>OBSERVED NEARBY <b>{formatCompact(row.confirmedNotional)} · {row.confirmedCount}</b></span>
+      <span>PERSISTENCE / SURVIVAL <b>{formatPercent(lifecycle.persistence)} · {formatPercent(lifecycle.survivalRatio)}</b></span>
+      <span>RECENT PEAK / PRIOR <b>{formatCompact(lifecycle.recentPeakExposure)} · {formatCompact(lifecycle.priorExposure)}</b></span>
+      <span>OBSERVED CELL PEAK <b>{formatCompact(lifecycle.observedNotional)} · {lifecycle.observedCount}</b></span>
+      <em>{liquidationLifecycleEvidenceNote(lifecycle.state)}</em>
       <em>{authority ?? "RESOLVING AUTHORITY"} · ESTIMATED EXPOSURE, NOT VISIBLE ORDERS</em>
     </div>
   );
@@ -505,6 +511,10 @@ function drawLiquidationPressureProfile(
   shortGradient.addColorStop(0, "rgba(82,87,96,0.10)");
   shortGradient.addColorStop(0.62, "rgba(190,196,205,0.64)");
   shortGradient.addColorStop(1, "rgba(255,255,255,0.98)");
+  const depletedGradient = context.createLinearGradient(profileLeft, 0, profileRight, 0);
+  depletedGradient.addColorStop(0, "rgba(50,53,59,0.08)");
+  depletedGradient.addColorStop(0.62, "rgba(92,97,106,0.44)");
+  depletedGradient.addColorStop(1, "rgba(153,158,167,0.78)");
   context.font = '700 7px "IBM Plex Mono", monospace';
   context.textBaseline = "middle";
   context.lineWidth = 1;
@@ -517,12 +527,18 @@ function drawLiquidationPressureProfile(
     const longShare = Math.max(0, visual.long / total);
     const shortShare = Math.max(0, visual.short / total);
     const confidence = Math.max(0, Math.min(1, visual.confidence / 100));
-    const backgroundAlpha = visual.total > EPSILON ? (0.018 + visual.intensity * 0.085) * (0.35 + confidence * 0.65) : 0;
-    context.fillStyle = row.side === "long"
-      ? `rgba(105,0,18,${backgroundAlpha})`
-      : row.side === "short"
-        ? `rgba(224,228,234,${backgroundAlpha * 0.55})`
-        : `rgba(116,70,78,${backgroundAlpha * 0.65})`;
+    const lifecycleAlpha = liquidationLifecycleOpacity(row.lifecycle.state);
+    const depleted = row.lifecycle.state === "ABSORBED" || row.lifecycle.state === "EXHAUSTED";
+    const backgroundAlpha = visual.total > EPSILON
+      ? (0.018 + visual.intensity * 0.085) * (0.35 + confidence * 0.65) * lifecycleAlpha
+      : 0;
+    context.fillStyle = depleted
+      ? `rgba(112,117,125,${backgroundAlpha * 0.7})`
+      : row.side === "long"
+        ? `rgba(105,0,18,${backgroundAlpha})`
+        : row.side === "short"
+          ? `rgba(224,228,234,${backgroundAlpha * 0.55})`
+          : `rgba(116,70,78,${backgroundAlpha * 0.65})`;
     context.fillRect(0, y, size.width, height);
 
     context.strokeStyle = "rgba(255,255,255,0.035)";
@@ -537,24 +553,24 @@ function drawLiquidationPressureProfile(
       const bothSides = visual.long > EPSILON && visual.short > EPSILON;
       const splitHeight = bothSides ? Math.max(1, (height - 2) / 2) : Math.max(1, height - 2);
       context.save();
-      context.globalAlpha = 0.25 + confidence * 0.75;
+      context.globalAlpha = (0.25 + confidence * 0.75) * lifecycleAlpha;
       if (longWidth > 0.5) {
-        context.fillStyle = longGradient;
-        context.shadowColor = "rgba(255,0,36,0.85)";
-        context.shadowBlur = row.isExtreme ? 16 : row.isHeavy ? 10 : 2;
+        context.fillStyle = depleted ? depletedGradient : longGradient;
+        context.shadowColor = liquidationLifecycleNodeColor(row.lifecycle.state, "long", 0.85);
+        context.shadowBlur = (row.isExtreme ? 16 : row.isHeavy ? 10 : 2) * lifecycleAlpha;
         context.fillRect(profileRight - longWidth, y + 1, longWidth, splitHeight);
         if (row.isHeavy) {
-          context.fillStyle = row.isExtreme ? "rgba(255,116,134,0.98)" : "rgba(255,48,74,0.9)";
+          context.fillStyle = liquidationLifecycleNodeColor(row.lifecycle.state, "long", row.isExtreme ? 0.98 : 0.9);
           context.fillRect(profileRight - longWidth, y + 1, row.isExtreme ? 2 : 1, splitHeight);
         }
       }
       if (shortWidth > 0.5) {
-        context.fillStyle = shortGradient;
-        context.shadowColor = "rgba(255,255,255,0.72)";
-        context.shadowBlur = row.isExtreme ? 15 : row.isHeavy ? 9 : 2;
+        context.fillStyle = depleted ? depletedGradient : shortGradient;
+        context.shadowColor = liquidationLifecycleNodeColor(row.lifecycle.state, "short", 0.72);
+        context.shadowBlur = (row.isExtreme ? 15 : row.isHeavy ? 9 : 2) * lifecycleAlpha;
         context.fillRect(profileRight - shortWidth, y + (bothSides ? 1 + splitHeight : 1), shortWidth, splitHeight);
         if (row.isHeavy) {
-          context.fillStyle = row.isExtreme ? "rgba(255,255,255,1)" : "rgba(228,232,238,0.94)";
+          context.fillStyle = liquidationLifecycleNodeColor(row.lifecycle.state, "short", row.isExtreme ? 1 : 0.94);
           context.fillRect(profileRight - shortWidth, y + (bothSides ? 1 + splitHeight : 1), row.isExtreme ? 2 : 1, splitHeight);
         }
       }
@@ -563,13 +579,14 @@ function drawLiquidationPressureProfile(
       const nodeAlpha = Math.min(1, 0.12 + visual.intensity * 0.7 + confidence * 0.18);
       const nodeHeight = Math.max(1, (height - 2) * (0.2 + visual.intensity * 0.8));
       context.save();
-      context.shadowBlur = row.isExtreme ? 15 : row.isHeavy ? 9 : 4;
-      context.shadowColor = row.side === "long" ? "rgba(255,0,34,0.98)" : "rgba(255,255,255,0.85)";
-      context.fillStyle = row.side === "long" ? `rgba(255,20,50,${nodeAlpha})` : `rgba(247,249,252,${nodeAlpha})`;
+      context.globalAlpha = lifecycleAlpha;
+      context.shadowBlur = (row.isExtreme ? 15 : row.isHeavy ? 9 : 4) * lifecycleAlpha;
+      context.shadowColor = liquidationLifecycleNodeColor(row.lifecycle.state, row.side === "long" ? "long" : "short", 0.96);
+      context.fillStyle = liquidationLifecycleNodeColor(row.lifecycle.state, row.side === "long" ? "long" : "short", nodeAlpha);
       context.fillRect(size.width - 7, y + (height - nodeHeight) / 2, row.isExtreme ? 6 : 5, nodeHeight);
       context.restore();
       if (row.isHeavy) {
-        context.fillStyle = row.side === "long" ? "#ff1834" : "#f4f6f8";
+        context.fillStyle = liquidationLifecycleNodeColor(row.lifecycle.state, row.side === "long" ? "long" : "short", 1);
         context.fillRect(1, y + 1, row.isExtreme ? 3 : 2, Math.max(1, height - 2));
       }
       if (visual.confirmed > EPSILON) {
@@ -582,6 +599,11 @@ function drawLiquidationPressureProfile(
         context.stroke();
         context.restore();
       }
+    }
+
+    if (row.lifecycle.state !== "EMPTY") {
+      context.fillStyle = liquidationLifecycleNodeColor(row.lifecycle.state, row.side === "long" ? "long" : "short", 0.92);
+      context.fillRect(columns[3] + 2, y + Math.max(1, height / 2 - 0.5), row.lifecycle.state === "STRENGTHENING" ? 5 : 3, 1);
     }
 
     drawRightText(context, visual.total > EPSILON ? formatCompact(visual.total) : "·", columns[1] - 4, y + height / 2, "#b5bbc4");
@@ -617,6 +639,53 @@ function drawLiquidationPressureProfile(
   context.font = '700 6px "IBM Plex Mono", monospace';
   context.textAlign = "left";
   context.fillText(`${quoteAsset} · BCLIF LPP · ${model.authority} · ${model.certainty}`, 5, Math.min(size.height - 8, model.plotBottom + 13));
+}
+
+function liquidationLifecycleLabel(state: LiquidationPressureProfileRow["lifecycle"]["state"]) {
+  if (state === "FORMING") return "FRESH / FORMING";
+  if (state === "STRENGTHENING") return "REPLENISHING";
+  if (state === "TRIGGERED") return "TESTED / TRIGGERED";
+  return state;
+}
+
+function liquidationLifecycleEvidenceNote(state: LiquidationPressureProfileRow["lifecycle"]["state"]) {
+  if (state === "ABSORBED") return "CONFIRMED LIQUIDATION · RESIDUAL ≤25% OF RECENT PEAK";
+  if (state === "EXHAUSTED") return "CONFIRMED LIQUIDATION · RESIDUAL ≤5% OF RECENT PEAK";
+  if (state === "TRIGGERED") return "CONFIRMED LIQUIDATION OBSERVED · MATERIAL EXPOSURE REMAINS";
+  if (state === "DECAYING") return "UNCONFIRMED CONTRACTION · NOT LABELED AS ABSORPTION";
+  if (state === "FORMING") return "NEWLY FORMED INSIDE THE CAUSAL 24-COLUMN WINDOW";
+  return "STATE DERIVED FROM CAUSAL EXPOSURE PERSISTENCE AND SURVIVAL";
+}
+
+function liquidationLifecycleOpacity(state: LiquidationPressureProfileRow["lifecycle"]["state"]) {
+  if (state === "STRENGTHENING") return 1;
+  if (state === "FORMING") return 0.92;
+  if (state === "TRIGGERED") return 0.84;
+  if (state === "DECAYING") return 0.58;
+  if (state === "ABSORBED") return 0.46;
+  if (state === "EXHAUSTED") return 0.28;
+  if (state === "EMPTY") return 0;
+  return 0.76;
+}
+
+function liquidationLifecycleNodeColor(
+  state: LiquidationPressureProfileRow["lifecycle"]["state"],
+  side: "long" | "short",
+  alpha: number
+) {
+  const boundedAlpha = Math.max(0, Math.min(1, alpha));
+  if (state === "ABSORBED") return `rgba(130,136,145,${boundedAlpha})`;
+  if (state === "EXHAUSTED") return `rgba(73,78,86,${boundedAlpha})`;
+  if (side === "short") {
+    if (state === "DECAYING") return `rgba(154,160,169,${boundedAlpha})`;
+    if (state === "FORMING" || state === "STRENGTHENING") return `rgba(255,255,255,${boundedAlpha})`;
+    return `rgba(239,243,248,${boundedAlpha})`;
+  }
+  if (state === "DECAYING") return `rgba(111,15,31,${boundedAlpha})`;
+  if (state === "FORMING") return `rgba(255,72,94,${boundedAlpha})`;
+  if (state === "STRENGTHENING") return `rgba(255,10,42,${boundedAlpha})`;
+  if (state === "TRIGGERED") return `rgba(207,29,55,${boundedAlpha})`;
+  return `rgba(255,24,52,${boundedAlpha})`;
 }
 
 function drawCumulativeLiquidationPressureBand(
@@ -930,6 +999,10 @@ function normalizeLppSymbol(value: string) {
 function formatPrice(value: number | null, decimals: number) {
   if (value === null || !Number.isFinite(value)) return "—";
   return value.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
+function formatPercent(value: number) {
+  return Number.isFinite(value) ? `${(value * 100).toFixed(0)}%` : "—";
 }
 
 function formatCompact(value: number) {

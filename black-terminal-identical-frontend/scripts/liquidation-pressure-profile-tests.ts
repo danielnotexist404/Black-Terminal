@@ -6,6 +6,7 @@ import type { ChartPriceTransformSnapshot } from "../src/chart-engine/priceTrans
 import {
   buildCumulativeLiquidationPressureBand,
   buildLiquidationPressureProfile,
+  classifyLiquidationPressureLifecycle,
   fitViewportToLiquidationProfile,
   resolveLiquidationNodeWidthRatio,
   resolvePressureSignificance
@@ -30,6 +31,19 @@ function viewport(revision = 1, priceMin = 75, priceMax = 120): ChartPriceTransf
     firstIndex: 0,
     lastIndex: 100
   };
+}
+
+{
+  assert.equal(classifyLiquidationPressureLifecycle([0, 0, 100]).state, "FORMING", "new exposure must be classified as forming rather than assumed fresh forever");
+  assert.equal(classifyLiquidationPressureLifecycle([40, 45, 90]).state, "STRENGTHENING", "expanding residual exposure must be classified as strengthening");
+  assert.equal(classifyLiquidationPressureLifecycle([100, 98, 102]).state, "ACTIVE", "persistent stable exposure must remain active");
+  assert.equal(classifyLiquidationPressureLifecycle([100, 95, 50]).state, "DECAYING", "an unconfirmed contraction must remain decaying rather than claiming absorption");
+  assert.equal(classifyLiquidationPressureLifecycle([100, 95, 50], [0, 20], [0, 1]).state, "TRIGGERED", "confirmed liquidation evidence with material residual must be triggered");
+  assert.equal(classifyLiquidationPressureLifecycle([100, 80, 20], [0, 20], [0, 1]).state, "ABSORBED", "confirmed liquidation evidence with at most one-quarter residual must be absorbed");
+  assert.equal(classifyLiquidationPressureLifecycle([100, 80, 5], [0, 20], [0, 1]).state, "EXHAUSTED", "confirmed liquidation evidence with at most five-percent residual must be exhausted");
+  assert.equal(classifyLiquidationPressureLifecycle([100, 80, 5]).state, "DECAYING", "a near-empty shelf without an observed liquidation cannot be mislabeled exhausted");
+  assert.equal(classifyLiquidationPressureLifecycle([0, 0, 0]).state, "EMPTY", "a never-populated price row must remain empty");
+  assert.equal(classifyLiquidationPressureLifecycle([100, 80, 20], [20, 20], [1, 1]).observedNotional, 20, "rolling confirmed-event cells must use max rather than double-counting adjacent columns");
 }
 
 function snapshot(): LiquidationFieldSnapshot {
@@ -113,6 +127,7 @@ function snapshot(): LiquidationFieldSnapshot {
   assert.ok(model.rows.some((row) => row.confirmedNotional === 75 && row.confirmedCount === 2), "observed liquidation calibration must survive price projection");
   assert.ok(model.rows.some((row) => row.isHeavy), "the distribution must identify heavy nodes");
   assert.ok(model.rows.some((row) => row.isCurrentPrice), "the current chart price must be registered to one model row");
+  assert.ok(model.rows.every((row) => row.lifecycle.windowColumns > 0), "every projected row must carry a causal lifecycle window");
 
   const forcedSellBand = buildCumulativeLiquidationPressureBand(model, "long");
   const forcedBuyBand = buildCumulativeLiquidationPressureBand(model, "short");
@@ -151,6 +166,8 @@ function snapshot(): LiquidationFieldSnapshot {
   assert.match(component, /profileMode === "dom" && Boolean\(requestProjection\)/, "the consolidated order-book poller must stop while LPP is active");
   assert.match(component, /drawCumulativeLiquidationPressureBand/, "LPP must render its truthful current-price-outward cumulative V field");
   assert.match(component, /resolveLiquidationNodeWidthRatio/, "LPP must expand statistically significant local pressure nodes independently of the V field");
+  assert.match(component, /EXPOSURE STATE/, "LPP hover evidence must disclose the lifecycle state");
+  assert.match(component, /UNCONFIRMED CONTRACTION · NOT LABELED AS ABSORPTION/, "LPP must not imply absorption without confirmed liquidation evidence");
 }
 
 console.log("liquidation pressure profile tests passed");

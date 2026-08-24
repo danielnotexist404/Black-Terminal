@@ -8761,7 +8761,63 @@ body.resizing-layout * {
   letter-spacing: 0.045em;
 }
 .institutional-pressure-label span { color: #646a73; }
-.institutional-pressure svg { width: 100%; height: 100%; min-height: 78px; display: block; overflow: visible; }
+.institutional-pressure svg { width: 100%; height: 100%; min-height: 78px; display: block; overflow: visible; cursor: crosshair; touch-action: none; }
+
+.institutional-pressure-crosshair line {
+  stroke: rgba(240, 243, 247, 0.48);
+  stroke-width: 0.7;
+  stroke-dasharray: 1.5 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.institutional-pressure-crosshair circle {
+  fill: #f5f7f9;
+  stroke: rgba(225, 0, 34, 0.9);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.65));
+}
+
+.institutional-pressure-hover {
+  position: absolute;
+  z-index: 5;
+  top: 17px;
+  width: min(144px, calc(100% - 12px));
+  margin: 0;
+  padding: 5px 6px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(224, 228, 234, 0.25);
+  border-left-color: rgba(224, 0, 32, 0.72);
+  background: rgba(2, 3, 4, 0.94);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.58), 0 0 12px rgba(181, 0, 28, 0.12);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+.institutional-pressure-hover > div {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.25fr);
+  align-items: center;
+  gap: 5px;
+  min-height: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+}
+
+.institutional-pressure-hover > div:last-child { border-bottom: 0; }
+.institutional-pressure-hover dt,
+.institutional-pressure-hover dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font: 700 5px "IBM Plex Mono", monospace;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.institutional-pressure-hover dt { color: #666c75; }
+.institutional-pressure-hover dd { color: #e7e9ec; text-align: right; }
+.institutional-pressure-hover dd.positive { color: #f5f7f9; }
+.institutional-pressure-hover dd.negative { color: #ef1738; }
 
 .institutional-pressure-scale {
   position: absolute;

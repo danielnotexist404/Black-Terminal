@@ -44,6 +44,9 @@ assert.match(component, /REPORTED FLOW/);
 assert.match(component, /not fund inflow/i);
 assert.match(component, /STRATEGY · TREASURY \/ PERIODIC 8-K/);
 assert.match(component, /VANGUARD · NO NATIVE FUND/);
+assert.match(component, /HISTORICAL COIN PRICE/);
+assert.match(component, /onPointerMove/);
+assert.doesNotMatch(component, /institutional-pressure" title=/, "the oscillator must use its bounded hover table instead of a native browser tooltip");
 assert.doesNotMatch(component, /reportedNetFlowUsd\s*\?\?\s*signedTurnoverUsd/, "the UI cannot substitute turnover when primary flow is absent");
 
 console.log("Institutional flow intelligence tests passed (truthful flow semantics, signed pressure, basket breadth, partial failure, and UI disclosures)." );

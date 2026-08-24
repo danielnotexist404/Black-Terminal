@@ -53,6 +53,7 @@ import { PixiBlackChart } from "./components/PixiBlackChart";
 import { InteractionShield } from "./components/InteractionShield";
 import { ScriptEditor } from "./components/ScriptEditor";
 import { TradesTape } from "./components/TradesTape";
+import { InstitutionalFlowIntelligence } from "./components/InstitutionalFlowIntelligence";
 import LandingPage from "./components/LandingPage";
 import { MarketOverview } from "./components/MarketOverview";
 import type { CompiledPlot } from "./components/ScriptCompiler";
@@ -2556,9 +2557,12 @@ export default function App() {
             />
             <div className="right-stack-resizer" onPointerDown={(event) => startLayoutResize("rightTop", event)} />
             <div className="right-bottom">
-              <MarketStats />
-              <div className="right-bottom-resizer" onPointerDown={(event) => startLayoutResize("rightSplit", event)} />
-              <TradesTape marketSymbol={symbol} exchangeLabel={selectedExchange.label} />
+              <div className="right-bottom-market">
+                <MarketStats />
+                <div className="right-bottom-resizer" onPointerDown={(event) => startLayoutResize("rightSplit", event)} />
+                <TradesTape marketSymbol={symbol} exchangeLabel={selectedExchange.label} />
+              </div>
+              <InstitutionalFlowIntelligence marketSymbol={symbol} />
             </div>
           </aside>
         )}

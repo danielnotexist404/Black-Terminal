@@ -5,6 +5,7 @@ import eventAlphaHandler from "../../api/event-alpha/[...path].js";
 import exchangeAccountsHandler from "../../api/exchange-accounts/[...path].js";
 import executionHandler from "../../api/execution/[...path].js";
 import immStatusHandler from "../../api/imm/status.js";
+import institutionalFlowHandler from "../../api/institutional-flow.js";
 import marketDepthHandler from "../../api/market-depth/[action].js";
 import networkHandler from "../../api/network/[resource].js";
 import investmentGroupActionHandler from "../../api/network/investment-groups/[groupId]/[action].js";
@@ -18,6 +19,7 @@ const EXACT_ROUTES = new Map([
   ["/api/claude", claudeHandler],
   ["/api/email/send", emailHandler],
   ["/api/imm/status", immStatusHandler],
+  ["/api/institutional-flow", institutionalFlowHandler],
   ["/api/portfolio/snapshot", portfolioSnapshotHandler],
   ["/api/strategies", strategiesHandler]
 ]);

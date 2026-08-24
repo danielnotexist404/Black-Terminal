@@ -43,6 +43,7 @@ import { computeDomWallLabelLayout } from "../src/modules/dom-pro/domWallLabelLa
 import { buildDomLadderModel, formatDomLadderQuantity } from "../src/modules/dom-pro/domLadderModel.ts";
 import { resolveDomFullLiveRange } from "../src/modules/dom-pro/domLiveLadderCamera.ts";
 import { ProfessionalDomLadderTracker, buildProfessionalDomLadder, resolveProfessionalDomNodeMotion } from "../src/modules/dom-pro/domProfessionalLadder.ts";
+import { DomDepthChartTracker } from "../src/modules/dom-pro/domDepthChartModel.ts";
 import { buildChartDockedDepthLadder } from "../src/modules/dom-pro/chartDockedDepthLadderModel.ts";
 import { createDomProPriceCamera, domPriceBucketAt, domPriceToTopPct, sameDomPriceCamera } from "../src/modules/dom-pro/domPriceCamera.ts";
 import { buildStructuralCvdFromCandles, buildStructuralCvdFromTrades, estimateCandlePressure, structuralCvdRange, structuralCvdStats } from "../src/modules/dom-pro/domStructuralCvd.ts";
@@ -183,6 +184,43 @@ const compressedProfessional = buildProfessionalDomLadder({ book: ladderSnapshot
 assert.ok(compressedProfessional.rows.length <= professionalInitial.rows.length, "higher AGG values contract the full-book ladder without discarding quantity");
 assert.ok(Math.abs(compressedProfessional.rows.reduce((total, row) => total + row.bidSize, 0) - rawBidQuantity) < 1e-9, "aggregation changes preserve bid quantity");
 assert.ok(Math.abs(compressedProfessional.rows.reduce((total, row) => total + row.askSize, 0) - rawAskQuantity) < 1e-9, "aggregation changes preserve ask quantity");
+const depthChartTracker = new DomDepthChartTracker();
+const depthChartInitial = depthChartTracker.update({
+  depth: professionalInitial,
+  mode: "structural",
+  bucketAggregation: 4,
+  emaLength: 10,
+  outlierPercentile: 98,
+  jointNormalization: true
+});
+assert.ok(depthChartInitial.bidPoints > 0 && depthChartInitial.askPoints > 0, "consolidated professional depth produces a complete two-sided V curve");
+assert.equal(depthChartInitial.warning, "", "a complete authoritative snapshot requires no continuity warning");
+assert.ok(depthChartInitial.effectiveBidSize <= depthChartInitial.sourceBidSize && depthChartInitial.effectiveAskSize <= depthChartInitial.sourceAskSize, "structural significance suppresses noise without manufacturing depth");
+assert.ok(depthChartInitial.aggregationSize >= 4, "structural depth inherits the professional ladder's quieter canonical aggregation");
+const depthChartRepeated = depthChartTracker.update({ depth: professionalInitial, mode: "structural", bucketAggregation: 4, emaLength: 10, outlierPercentile: 98 });
+assert.equal(depthChartRepeated.bidLine, depthChartInitial.bidLine, "an identical consolidated bid snapshot cannot make the depth curve flicker");
+assert.equal(depthChartRepeated.askLine, depthChartInitial.askLine, "an identical consolidated ask snapshot cannot make the depth curve flicker");
+const transientBidOnly = {
+  ...professionalInitial,
+  identity: `${professionalInitial.identity}:one-sided-refresh`,
+  rows: professionalInitial.rows.map((row) => ({
+    ...row,
+    askSize: 0,
+    totalSize: row.bidSize,
+    signedSize: row.bidSize,
+    side: row.bidSize > 0 ? "bid" as const : "empty" as const
+  })),
+  bestAsk: null,
+  totalAskSize: 0,
+  askLevels: 0
+};
+const depthChartTransient = depthChartTracker.update({ depth: transientBidOnly, mode: "structural", bucketAggregation: 4, emaLength: 10, outlierPercentile: 98 });
+assert.ok(depthChartTransient.bidPoints > 0 && depthChartTransient.askPoints > 0, "a transient one-sided refresh cannot erase the last complete opposite half");
+assert.equal(depthChartTransient.askHeld, true, "the retained ask curve is explicitly marked as continuity-held rather than fresh");
+assert.match(depthChartTransient.warning, /Ask side held/, "operators are told when one side is continuity-held");
+const depthChartRestored = depthChartTracker.update({ depth: professionalInitial, mode: "structural", bucketAggregation: 4, emaLength: 10, outlierPercentile: 98 });
+assert.equal(depthChartRestored.askHeld, false, "fresh complete depth replaces the held side immediately");
+assert.ok(depthChartRestored.bidPoints > 0 && depthChartRestored.askPoints > 0, "restoring the authoritative book keeps both depth halves visible");
 const expandedBookSnapshot = structuredClone(ladderSnapshot);
 expandedBookSnapshot.sourceBook!.asks.push({ price: 64_250, quantity: 9 });
 const expandedFullLiveRange = resolveDomFullLiveRange(expandedBookSnapshot.sourceBook, expandedBookSnapshot.lastPrice, fullLiveRange);
@@ -288,6 +326,9 @@ assert.match(domWindowSource, /onSynchronizedWheel=\{handleHeatmapWheel\}/, "pro
 assert.match(domWindowSource, /useConsolidatedLiquidityFeed\(\{/, "DOM Pro requests consolidated depth for the shared full-range viewport");
 assert.match(domWindowSource, /<DomProfessionalLadder/, "full-live mode renders the fixed-row professional ladder");
 assert.match(domWindowSource, /professionalLadderTrackerRef/, "professional ladder owns one idempotent temporal snapshot tracker");
+assert.match(domWindowSource, /depthChartTrackerRef\.current\.update\(\{\s*depth: professionalLadderModel/, "depth chart consumes the consolidated professional ladder rather than a venue-local snapshot");
+assert.match(domWindowSource, /data-depth-source="professional-consolidated-ladder"/, "depth chart exposes its consolidated source contract for browser verification");
+assert.doesNotMatch(domWindowSource, /depthProcessorRef/, "legacy independently sampled per-side depth persistence is removed from the render path");
 assert.doesNotMatch(domWindowSource, /const bins = camera\.buckets\.map/, "volume profile must not inherit the ladder bucket grid");
 assert.match(domWindowSource, /numberSetting\(profilePanelValues, "rowCount", 128\)/, "volume profile uses its own high-resolution row setting");
 assert.match(domWindowSource, /dom-pro-profile-label-layer/, "profile labels render outside sub-pixel native data rows");

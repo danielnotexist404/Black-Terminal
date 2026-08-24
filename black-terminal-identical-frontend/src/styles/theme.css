@@ -13269,14 +13269,31 @@ body.dom-pro-resize-active {
   height: 100%;
 }
 
-.dom-pro-depth-wrap > span {
+.dom-pro-depth-status {
   position: absolute;
   left: 10px;
   right: 10px;
   bottom: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
   color: #a3a9b2;
   font: 800 9px "IBM Plex Mono", monospace;
   text-transform: uppercase;
+  pointer-events: none;
+}
+
+.dom-pro-depth-status > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dom-pro-depth-status > em {
+  color: rgba(255, 72, 82, 0.9);
+  font-style: normal;
+  text-align: right;
 }
 
 .dom-pro-depth-svg .axis {
@@ -13297,6 +13314,11 @@ body.dom-pro-resize-active {
   fill: rgba(255, 0, 0, 0.2);
 }
 
+.dom-pro-depth-svg .bid-fill.is-held,
+.dom-pro-depth-svg .ask-fill.is-held {
+  opacity: 0.56;
+}
+
 .dom-pro-depth-svg .bid-line {
   fill: none;
   stroke: rgba(235, 238, 244, 0.86);
@@ -13311,6 +13333,12 @@ body.dom-pro-resize-active {
   stroke-width: 1.25;
   vector-effect: non-scaling-stroke;
   filter: drop-shadow(0 0 5px rgba(255, 0, 0, 0.3));
+}
+
+.dom-pro-depth-svg .bid-line.is-held,
+.dom-pro-depth-svg .ask-line.is-held {
+  opacity: 0.66;
+  stroke-dasharray: 1.4 1.1;
 }
 
 .dom-pro-flow-histogram b {

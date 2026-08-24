@@ -28,6 +28,7 @@ import { domPerformanceTrace } from "../domPerformanceTrace";
 import { domFreezeWatchdog } from "../domFreezeWatchdog";
 import { domVisualScheduler } from "../domVisualScheduler";
 import { blackDepthHistoryStore, type DepthHistoryPoint, type DepthHistoryRead } from "../depthHistoryStore";
+import { DomDepthChartTracker, type DomDepthChartModel } from "../domDepthChartModel";
 import { buildDomLadderModel, formatDomLadderQuantity, type DomLadderDisplayUnit } from "../domLadderModel";
 import { resolveDomFullLiveRange } from "../domLiveLadderCamera";
 import { ProfessionalDomLadderTracker } from "../domProfessionalLadder";
@@ -81,7 +82,6 @@ import {
   aggregateTradeTape,
   clipAndSmoothSeries,
   MetricsStabilizer,
-  PersistentDepthProcessor,
   StableWallProcessor,
   type StabilizedMetrics
 } from "../domSignalStabilizers";
@@ -321,7 +321,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const [customLayoutPresets, setCustomLayoutPresets] = useState<string[]>(() => listDomProLayoutPresets(workspaceId));
   const [resizeActive, setResizeActive] = useState(false);
   const panelSchedulerRef = useRef(new DomPanelUpdateScheduler());
-  const depthProcessorRef = useRef(new PersistentDepthProcessor());
+  const depthChartTrackerRef = useRef(new DomDepthChartTracker());
   const wallProcessorRef = useRef(new StableWallProcessor());
   const metricsProcessorRef = useRef(new MetricsStabilizer());
   const professionalLadderTrackerRef = useRef(new ProfessionalDomLadderTracker());
@@ -329,7 +329,6 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const [stableWalls, setStableWalls] = useState<Array<AggregatedDomSnapshot["walls"][number] & { reliability?: number; lifecycle?: string; observations?: number }>>([]);
   const [stableTrades, setStableTrades] = useState<AggregatedDomSnapshot["trades"]>([]);
   const [stableMetrics, setStableMetrics] = useState<StabilizedMetrics | null>(null);
-  const [depthModelRevision, setDepthModelRevision] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTransferStatus, setSettingsTransferStatus] = useState("");
   const [heatmapViewport, setHeatmapViewport] = useState<HeatmapViewportState>(() => defaultHeatmapCamera());
@@ -496,7 +495,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
     setSettings(next);
     setPanelRegistry(readDomPanelRegistry(workspaceId, symbolKey));
     engineRef.current = new DomAggregationEngine();
-    depthProcessorRef.current = new PersistentDepthProcessor();
+    depthChartTrackerRef.current.reset();
     wallProcessorRef.current = new StableWallProcessor();
     metricsProcessorRef.current = new MetricsStabilizer();
     setPanelSnapshots(createPanelSnapshotMap(snapshot));
@@ -1029,11 +1028,6 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
 
   useEffect(() => {
     const panelUpdateStartedAt = performance.now();
-    const rawBids = snapshot.sourceBook?.bids ?? [];
-    const rawAsks = snapshot.sourceBook?.asks ?? [];
-    if (rawBids.length || rawAsks.length) {
-      depthProcessorRef.current.ingest(rawBids, rawAsks, numberSetting(depthPanelValues, "smoothingWindow", 12));
-    }
     const scheduler = panelSchedulerRef.current;
     const due = new Set(configurablePanelIds.filter((panelId) => scheduler.coalesceUpdates(panelId, snapshot.generatedAt)));
     if (due.size) {
@@ -1043,7 +1037,6 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
         return next;
       });
     }
-    if (due.has("depth-chart")) setDepthModelRevision((value) => value + 1);
     if (due.has("wall-detection")) {
       const minimumWallSize = numberSetting(wallPanelValues, "minimumWallSize", 0);
       setStableWalls(wallProcessorRef.current.update(snapshot.walls.filter((wall) => wall.size >= minimumWallSize), {
@@ -1081,7 +1074,6 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   }, [depthPanelValues, metricsPanelValues, snapshot.generatedAt, snapshot.metrics, snapshot.sourceBook, snapshot.trades, snapshot.walls, tapePanelValues, wallPanelValues]);
 
   const cvdSnapshot = panelSnapshots["heuristic-cvd"];
-  const depthSnapshot = panelSnapshots["depth-chart"];
   const profileSnapshot = panelSnapshots["volume-profile"];
   const heatmapSnapshot = panelSnapshots["liquidity-heatmap"];
   const ladderSnapshot = panelSnapshots.ladder;
@@ -1211,12 +1203,16 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const cvdVisibleStructure = useMemo(() => cvdStructure.slice(cvdCamera.start, cvdCamera.end), [cvdCamera.end, cvdCamera.start, cvdStructure]);
   const cvdValueDomain = useMemo(() => structuralCvdRange(cvdVisibleStructure, cvdOutlierPercentile), [cvdOutlierPercentile, cvdVisibleStructure]);
   const cvdCameraLabel = cvdCamera.total > 0 ? `${cvdCamera.start + 1}-${cvdCamera.end} / ${cvdCamera.total}` : "No tape";
-  const depthChartRange = useMemo(() => resolveDepthChartRange(depthSnapshot), [depthSnapshot]);
-  const structuralDepth = useMemo(() => ({
-    bids: depthProcessorRef.current.structural("bid", numberSetting(depthPanelValues, "persistenceThreshold", 55), numberSetting(depthPanelValues, "minimumVisibleSize", 0)),
-    asks: depthProcessorRef.current.structural("ask", numberSetting(depthPanelValues, "persistenceThreshold", 55), numberSetting(depthPanelValues, "minimumVisibleSize", 0))
-  }), [depthModelRevision, depthPanelValues]);
-  const depthChart = useMemo(() => traceCalculation("panel.depth_chart", structuralDepth.bids.length + structuralDepth.asks.length, () => buildDepthChart(depthSnapshot, depthChartRange, analyticalSettings, stringSetting(depthPanelValues, "mode", "structural"), structuralDepth)), [analyticalSettings, depthChartRange, depthPanelValues, depthSnapshot, structuralDepth]);
+  const depthChart = useMemo(() => traceCalculation("panel.depth_chart", professionalLadderModel.rows.length, () => depthChartTrackerRef.current.update({
+    depth: professionalLadderModel,
+    mode: stringSetting(depthPanelValues, "mode", "structural"),
+    bucketAggregation: numberSetting(depthPanelValues, "bucketAggregation", 4),
+    emaLength: numberSetting(depthPanelValues, "emaLength", 10),
+    outlierPercentile: numberSetting(depthPanelValues, "outlierPercentile", 98),
+    curvePower: numberSetting(depthPanelValues, "curvePower", 0.72),
+    minimumVisibleSize: numberSetting(depthPanelValues, "minimumVisibleSize", 0),
+    jointNormalization: booleanSetting(depthPanelValues, "jointNormalization", true)
+  })), [depthPanelValues, professionalLadderModel]);
   const stabilizedFlowSeries = useMemo(() => clipAndSmoothSeries(flowSeries, numberSetting(flowPanelValues, "outlierPercentile", 95), numberSetting(flowPanelValues, "smoothingLength", 10)), [flowPanelValues, flowSeries]);
   const flowBars = useMemo(() => traceCalculation("panel.flow_delta", stabilizedFlowSeries.length, () => buildFlowBars(stabilizedFlowSeries, analyticalSettings)), [analyticalSettings, stabilizedFlowSeries]);
   const debugStats = useMemo(
@@ -2103,19 +2099,27 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
           >
 
           <section className={panelLayoutClass("depth-chart", "dom-pro-depth-chart")}>
-            <PanelTitle title="Depth Chart" status={`${stringSetting(depthPanelValues, "mode", "structural").toUpperCase()} DEPTH`} {...panelHeaderProps("depth-chart")} />
+            <PanelTitle title="Depth Chart" status={`CLF ${stringSetting(depthPanelValues, "mode", "structural").toUpperCase()} DEPTH`} {...panelHeaderProps("depth-chart")} />
             {!settings.showDepthChart ? <EmptyState text="Depth chart hidden in DOM settings." /> : depthChart.empty ? <EmptyState text="Depth chart awaiting bid/ask buckets." /> : (
-              <div className="dom-pro-depth-wrap">
+              <div
+                className="dom-pro-depth-wrap"
+                data-depth-source="professional-consolidated-ladder"
+                data-bid-continuity={depthChart.bidHeld ? "held" : "live"}
+                data-ask-continuity={depthChart.askHeld ? "held" : "live"}
+              >
                 <svg className="dom-pro-depth-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Cumulative market depth">
                   <line className="axis" x1="50" y1="8" x2="50" y2="94" />
                   <line className="axis zero" x1="0" y1="94" x2="100" y2="94" />
-                  {depthChart.bidArea && <polygon className="bid-fill" points={depthChart.bidArea} />}
-                  {depthChart.askArea && <polygon className="ask-fill" points={depthChart.askArea} />}
-                  {depthChart.bidLine && <polyline className="bid-line" points={depthChart.bidLine} />}
-                  {depthChart.askLine && <polyline className="ask-line" points={depthChart.askLine} />}
+                  {depthChart.bidArea && <polygon className={`bid-fill${depthChart.bidHeld ? " is-held" : ""}`} points={depthChart.bidArea} />}
+                  {depthChart.askArea && <polygon className={`ask-fill${depthChart.askHeld ? " is-held" : ""}`} points={depthChart.askArea} />}
+                  {depthChart.bidLine && <polyline className={`bid-line${depthChart.bidHeld ? " is-held" : ""}`} points={depthChart.bidLine} />}
+                  {depthChart.askLine && <polyline className={`ask-line${depthChart.askHeld ? " is-held" : ""}`} points={depthChart.askLine} />}
                 </svg>
                 <div className="dom-pro-depth-summary"><b>Structural Bias {depthChart.bias}</b><span>Bid {depthChart.bidPct.toFixed(0)}% / Ask {depthChart.askPct.toFixed(0)}%</span></div>
-                {depthChart.warning && <span>{depthChart.warning}</span>}
+                <div className="dom-pro-depth-status">
+                  <span>{depthChart.note}</span>
+                  {depthChart.warning && <em>{depthChart.warning}</em>}
+                </div>
               </div>
             )}
           </section>
@@ -3221,158 +3225,6 @@ function sameCandleSeries(current: Candle[], next: Candle[]) {
   return before?.time === after?.time && before?.open === after?.open && before?.high === after?.high && before?.low === after?.low && before?.close === after?.close && before?.volume === after?.volume;
 }
 
-function resolveDepthChartRange(snapshot: AggregatedDomSnapshot): MacroLiquidityRange {
-  const rawBids = (snapshot.sourceBook?.bids ?? []).filter((level) => Number.isFinite(level.price) && level.price > 0 && level.quantity > 0);
-  const rawAsks = (snapshot.sourceBook?.asks ?? []).filter((level) => Number.isFinite(level.price) && level.price > 0 && level.quantity > 0);
-  const bidPrices = rawBids.length >= 2
-    ? rawBids.map((level) => level.price)
-    : snapshot.bids.filter((level) => level.bidSize > 0).map((level) => level.price);
-  const askPrices = rawAsks.length >= 2
-    ? rawAsks.map((level) => level.price)
-    : snapshot.asks.filter((level) => level.askSize > 0).map((level) => level.price);
-  const finitePrices = [...bidPrices, ...askPrices].filter((price) => Number.isFinite(price) && price > 0);
-  const bookMid = snapshot.bestBid && snapshot.bestAsk ? (snapshot.bestBid + snapshot.bestAsk) / 2 : null;
-  const currentPrice = snapshot.midPrice ?? snapshot.lastPrice ?? bookMid ?? (finitePrices.length ? (Math.min(...finitePrices) + Math.max(...finitePrices)) / 2 : 1);
-  const lowerLevels = bidPrices
-    .filter((price) => price > 0 && price <= currentPrice)
-    .sort((a, b) => b - a)
-    .slice(0, 180);
-  const upperLevels = askPrices
-    .filter((price) => price > 0 && price >= currentPrice)
-    .sort((a, b) => a - b)
-    .slice(0, 180);
-  const lowerSpan = lowerLevels.length ? currentPrice - lowerLevels[lowerLevels.length - 1] : 0;
-  const upperSpan = upperLevels.length ? upperLevels[upperLevels.length - 1] - currentPrice : 0;
-  const sourceHalfSpan = Math.max(lowerSpan, upperSpan);
-  const spreadSpan = Number.isFinite(snapshot.spread ?? NaN) ? Number(snapshot.spread) * 12 : 0;
-  const fallbackHalfSpan = currentPrice * 0.0015;
-  const naturalHalfSpan = sourceHalfSpan > 0 ? sourceHalfSpan * 1.18 : fallbackHalfSpan;
-  const minHalfSpan = Math.max(spreadSpan, currentPrice * 0.00005, 1);
-  const maxHalfSpan = currentPrice * 0.025;
-  const halfSpan = Math.max(minHalfSpan, Math.min(naturalHalfSpan, maxHalfSpan));
-  return {
-    min: Math.max(0.00000001, currentPrice - halfSpan),
-    max: Math.max(currentPrice + halfSpan, currentPrice + 0.00000002),
-    source: rawBids.length >= 2 || rawAsks.length >= 2 ? "live-depth" : finitePrices.length ? "fallback" : "fallback"
-  };
-}
-
-function buildDepthChart(
-  snapshot: AggregatedDomSnapshot,
-  range: MacroLiquidityRange,
-  settings: DomSettings,
-  mode = "raw",
-  structural?: { bids: Array<{ price: number; quantity: number }>; asks: Array<{ price: number; quantity: number }> }
-) {
-  const currentPrice = snapshot.midPrice ?? snapshot.lastPrice ?? midpoint(range);
-  const rawBidSource = (snapshot.sourceBook?.bids ?? [])
-    .map((level) => ({ price: level.price, bidSize: level.quantity, askSize: 0 }))
-    .filter((level) => level.price > 0 && level.bidSize > 0);
-  const rawAskSource = (snapshot.sourceBook?.asks ?? [])
-    .map((level) => ({ price: level.price, askSize: level.quantity, bidSize: 0 }))
-    .filter((level) => level.price > 0 && level.askSize > 0);
-  const structuralMode = mode === "structural" || mode === "macro";
-  const structuralBids = structural?.bids.map((level) => ({ price: level.price, bidSize: level.quantity, askSize: 0 })) ?? [];
-  const structuralAsks = structural?.asks.map((level) => ({ price: level.price, askSize: level.quantity, bidSize: 0 })) ?? [];
-  const bidSource = structuralMode && structuralBids.length >= 2 ? structuralBids : rawBidSource.length >= 2 ? rawBidSource : snapshot.bids;
-  const askSource = structuralMode && structuralAsks.length >= 2 ? structuralAsks : rawAskSource.length >= 2 ? rawAskSource : snapshot.asks;
-  const depthLevelLimit = Math.max(20, Math.min(420, Math.round(settings.depthDisplayLevels)));
-  const smoothingGroupSize = Math.max(1, Math.min(24, Math.round(settings.depthSmoothingLevels)));
-  const curvePower = Math.max(0.45, Math.min(1.4, settings.depthCurvePower));
-  const rawBidLevels = bidSource
-    .filter((level) => level.price >= range.min && level.price <= Math.min(currentPrice, range.max) && level.bidSize > 0)
-    .sort((a, b) => b.price - a.price)
-    .slice(0, depthLevelLimit);
-  const rawAskLevels = askSource
-    .filter((level) => level.price <= range.max && level.price >= Math.max(currentPrice, range.min) && level.askSize > 0)
-    .sort((a, b) => a.price - b.price)
-    .slice(0, depthLevelLimit);
-  const bidLevels = aggregateDepthLevels(rawBidLevels, "bid", smoothingGroupSize);
-  const askLevels = aggregateDepthLevels(rawAskLevels, "ask", smoothingGroupSize);
-  if (bidLevels.length === 0 && askLevels.length === 0) {
-    return { empty: true, bidLine: "", askLine: "", bidArea: "", askArea: "", bidPoints: 0, askPoints: 0, bidPct: 0, askPct: 0, bias: "UNAVAILABLE", warning: "Awaiting valid bid/ask depth." };
-  }
-  const bidCumulative: Array<{ x: number; y: number }> = [];
-  const askCumulative: Array<{ x: number; y: number }> = [];
-  let bidTotal = 0;
-  let askTotal = 0;
-  const bidTotals = bidLevels.map((level) => {
-    bidTotal += level.bidSize;
-    return bidTotal;
-  });
-  const askTotals = askLevels.map((level) => {
-    askTotal += level.askSize;
-    return askTotal;
-  });
-  const maxTotal = Math.max(1, bidTotal, askTotal);
-  const combinedTotal = Math.max(1, bidTotal + askTotal);
-  const bidPct = bidTotal / combinedTotal * 100;
-  const askPct = askTotal / combinedTotal * 100;
-  const startX = 50;
-  bidLevels.forEach((level, index) => {
-    const x = 50 - ((index + 1) / Math.max(1, bidLevels.length)) * 50;
-    const y = 94 - Math.pow(bidTotals[index] / maxTotal, curvePower) * 82;
-    bidCumulative.push({ x, y });
-  });
-  askLevels.forEach((level, index) => {
-    const x = 50 + ((index + 1) / Math.max(1, askLevels.length)) * 50;
-    const y = 94 - Math.pow(askTotals[index] / maxTotal, curvePower) * 82;
-    askCumulative.push({ x, y });
-  });
-  const bidLinePoints = bidCumulative.length
-    ? buildDepthStepPath([{ x: startX, y: 94 }, ...bidCumulative], "bid")
-    : [];
-  const askLinePoints = askCumulative.length
-    ? buildDepthStepPath([{ x: startX, y: 94 }, ...askCumulative], "ask")
-    : [];
-  const pointString = (points: Array<{ x: number; y: number }>) => points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
-  return {
-    empty: false,
-    bidLine: pointString(bidLinePoints),
-    askLine: pointString(askLinePoints),
-    bidArea: bidLinePoints.length ? `${pointString(bidLinePoints)} ${bidLinePoints[bidLinePoints.length - 1].x.toFixed(2)},94 ${startX.toFixed(2)},94` : "",
-    askArea: askLinePoints.length ? `${pointString(askLinePoints)} ${askLinePoints[askLinePoints.length - 1].x.toFixed(2)},94 ${startX.toFixed(2)},94` : "",
-    bidPoints: bidLinePoints.length,
-    askPoints: askLinePoints.length,
-    bidPct,
-    askPct,
-    bias: bidPct > 55 ? "BID HEAVY" : askPct > 55 ? "ASK HEAVY" : "BALANCED",
-    warning: bidLinePoints.length === 0 ? "Only ask side available from source." : askLinePoints.length === 0 ? "Only bid side available from source." : rawBidSource.length < 2 || rawAskSource.length < 2 ? "Raw depth sparse; using aggregated fallback." : smoothingGroupSize > 1 ? `Depth smoothed ${smoothingGroupSize} levels per step.` : ""
-  };
-}
-
-function aggregateDepthLevels(
-  levels: Array<{ price: number; bidSize: number; askSize: number }>,
-  side: "bid" | "ask",
-  groupSize: number
-) {
-  if (groupSize <= 1) return levels;
-  const grouped: Array<{ price: number; bidSize: number; askSize: number }> = [];
-  for (let index = 0; index < levels.length; index += groupSize) {
-    const group = levels.slice(index, index + groupSize);
-    if (group.length === 0) continue;
-    grouped.push({
-      price: group[group.length - 1].price,
-      bidSize: side === "bid" ? group.reduce((sum, level) => sum + level.bidSize, 0) : 0,
-      askSize: side === "ask" ? group.reduce((sum, level) => sum + level.askSize, 0) : 0
-    });
-  }
-  return grouped;
-}
-
-function buildDepthStepPath(points: Array<{ x: number; y: number }>, side: "bid" | "ask") {
-  const ordered = side === "bid"
-    ? points.slice().sort((a, b) => b.x - a.x)
-    : points.slice().sort((a, b) => a.x - b.x);
-  const stepped: Array<{ x: number; y: number }> = [];
-  for (const point of ordered) {
-    const previous = stepped[stepped.length - 1];
-    if (previous) stepped.push({ x: point.x, y: previous.y });
-    stepped.push(point);
-  }
-  return stepped;
-}
-
 function buildDomDebugStats(
   snapshot: AggregatedDomSnapshot,
   computedDomain: MacroLiquidityRange,
@@ -3380,7 +3232,7 @@ function buildDomDebugStats(
   settings: DomSettings,
   heatmapFrames: AggregatedDomSnapshot["heatmap"],
   profile: VolumeProfileNode[],
-  depthChart: ReturnType<typeof buildDepthChart>,
+  depthChart: DomDepthChartModel,
   depthHistory: DepthHistoryRead,
   currentPrice: number | null | undefined
 ): DomDebugStats {

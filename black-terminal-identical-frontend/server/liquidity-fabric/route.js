@@ -12,5 +12,8 @@ export default async function consolidatedLiquidityRoute(req, res) {
   });
   res.setHeader("Cache-Control", "private, no-store, max-age=0");
   res.setHeader("X-Black-Core-Data-Source", "consolidated-liquidity-fabric");
+  res.setHeader("X-Black-Core-Source-Levels", String(result.sourceLevels));
+  res.setHeader("X-Black-Core-Coverage-Ratio", Number(result.coverageRatio).toFixed(4));
+  res.setHeader("X-Black-Core-Included-Venues", String(result.includedVenues.length));
   return res.status(200).json(result);
 }

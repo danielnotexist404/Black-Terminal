@@ -226,7 +226,7 @@ function ProfessionalRow({ row, displayUnit, unitLabel, priceDecimals, showWallC
   const cumulative = quantityForDisplay(row.cumulativeSize, row.price, displayUnit);
   const signedSize = quantityForDisplay(row.signedSize, row.price, displayUnit);
   const delta = quantityForDisplay(row.delta, row.price, displayUnit);
-  const title = [
+  const diagnosticLabel = [
     `${formatPrice(row.price, priceDecimals)} price bucket`,
     `Resting bid ${formatCompact(quantityForDisplay(row.bidSize, row.price, displayUnit))} ${unitLabel}`,
     `Resting ask ${formatCompact(quantityForDisplay(row.askSize, row.price, displayUnit))} ${unitLabel}`,
@@ -259,7 +259,7 @@ function ProfessionalRow({ row, displayUnit, unitLabel, priceDecimals, showWallC
       data-coverage={row.coverage ?? "live"}
       data-node-activity={nodeMotion.activity.toFixed(3)}
       data-node-energy={nodeMotion.energy.toFixed(3)}
-      title={title}
+      aria-label={diagnosticLabel}
       role="row"
     >
       <span className="sum">{row.totalSize > 0 ? formatCompact(cumulative) : "—"}</span>

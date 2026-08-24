@@ -155,6 +155,23 @@ function snapshot(reconstructor, venue, sequence = 100, overrides = {}) {
 }
 
 {
+  const session = new VenueBookSession({ venue: "bybit", marketKind: "perpetual", exchangeSymbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", transport: "TEST", now: () => NOW });
+  let reconnects = 0;
+  session.reconnectNow = (reason) => {
+    reconnects += 1;
+    assert.match(reason, /synchronization exhausted/);
+  };
+  assert.equal(session.requestReconnect("Bybit full-depth synchronization exhausted"), true, "an exhausted full-depth bootstrap must request a real socket recycle");
+  assert.equal(session.status, "RECOVERING");
+  assert.equal(reconnects, 1, "one recovery request produces exactly one reconnect instruction");
+  session.reconnects = 7;
+  session.replace({ bids: [[100, 1]], asks: [[101, 1]], sourceTimestamp: NOW, sequence: 2 });
+  assert.equal(session.reconnects, 0, "a recovered authoritative snapshot resets socket backoff");
+  session.stop();
+  assert.equal(session.requestReconnect("ignored after stop"), false, "a stopped session cannot create a reconnect loop");
+}
+
+{
   const target = instrument("bybit");
   const book = new CanonicalOrderBookReconstructor({ instrument: target });
   assert.equal(snapshot(book, "bybit").code, "SNAPSHOT_ACCEPTED");
@@ -342,9 +359,12 @@ function snapshot(reconstructor, venue, sequence = 100, overrides = {}) {
   const route = readFileSync(new URL("../server/liquidity-fabric/route.js", import.meta.url), "utf8");
   const runtime = readFileSync(new URL("../server/liquidity-fabric/direct-runtime.js", import.meta.url), "utf8");
   assert.match(route, /requireMethod\(req, "GET"\)/, "the consolidated endpoint must remain read-only");
+  assert.match(route, /X-Black-Core-Source-Levels/, "the live route discloses non-sensitive source-depth health for operations");
+  assert.match(route, /X-Black-Core-Coverage-Ratio/, "the live route discloses non-sensitive viewport coverage for operations");
   assert.doesNotMatch(`${route}\n${runtime}`, /\/api\/(execution|order\/create)|placeOrder|cancelOrder|amendOrder/, "liquidity synchronization must not contain an order-mutation path");
   assert.match(runtime, /orderbook\.full\./, "Bybit must use the official full-depth delta stream rather than the legacy narrow ladder feed");
   assert.match(runtime, /full_orderbook\?category=linear/, "Bybit full-depth reconstruction must be initialized by its official REST snapshot");
+  assert.match(runtime, /session\.requestReconnect\("Bybit full-depth synchronization exhausted/, "an exhausted Bybit bootstrap must recycle the public socket instead of buffering forever");
   assert.match(runtime, /canonical:\$\{priceStep\.toPrecision\(8\)\}/, "canonical price grids must reconcile overlapping rows across viewport pans");
 }
 

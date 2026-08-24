@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import type { OrderBookSnapshot } from "../../market-data/types";
+import { assessConsolidatedLiquiditySnapshot, shouldRetainPreviousConsolidatedSnapshot } from "./consolidatedLiquidityState";
 
 export type ConsolidatedLiquidityVenue = {
   venue: string;
@@ -74,6 +75,7 @@ type FeedInput = {
 
 const POLL_INTERVAL_MS = 850;
 const VIEWPORT_SETTLE_MS = 120;
+const latestSuccessfulByAsset = new Map<string, ConsolidatedLiquidityFeed>();
 
 export function useConsolidatedLiquidityFeed(input: FeedInput): ConsolidatedLiquidityFeed {
   const enabled = input.enabled !== false && validViewport(input);
@@ -84,8 +86,9 @@ export function useConsolidatedLiquidityFeed(input: FeedInput): ConsolidatedLiqu
     Math.round(input.rowCount),
     roundedKey(input.priceStep)
   ].join(":"), [input.baseAsset, input.maximumPrice, input.minimumPrice, input.priceStep, input.rowCount]);
-  const [feed, setFeed] = useState<ConsolidatedLiquidityFeed>({ snapshot: null, book: null, status: "loading", error: null, lastSuccessfulAt: null });
-  const latestSuccessfulRef = useRef<ConsolidatedLiquidityFeed | null>(null);
+  const [feed, setFeed] = useState<ConsolidatedLiquidityFeed>(() => latestSuccessfulByAsset.get(input.baseAsset.toUpperCase())
+    ?? { snapshot: null, book: null, status: "loading", error: null, lastSuccessfulAt: null });
+  const latestSuccessfulRef = useRef<ConsolidatedLiquidityFeed | null>(latestSuccessfulByAsset.get(input.baseAsset.toUpperCase()) ?? null);
   const latestAssetRef = useRef(input.baseAsset.toUpperCase());
 
   useEffect(() => {
@@ -93,8 +96,8 @@ export function useConsolidatedLiquidityFeed(input: FeedInput): ConsolidatedLiqu
     const requestedAsset = input.baseAsset.toUpperCase();
     if (latestAssetRef.current !== requestedAsset) {
       latestAssetRef.current = requestedAsset;
-      latestSuccessfulRef.current = null;
-      setFeed({ snapshot: null, book: null, status: "loading", error: null, lastSuccessfulAt: null });
+      latestSuccessfulRef.current = latestSuccessfulByAsset.get(requestedAsset) ?? null;
+      setFeed(latestSuccessfulRef.current ?? { snapshot: null, book: null, status: "loading", error: null, lastSuccessfulAt: null });
     }
     let stopped = false;
     let timer: number | null = null;
@@ -106,6 +109,17 @@ export function useConsolidatedLiquidityFeed(input: FeedInput): ConsolidatedLiqu
       try {
         const snapshot = await fetchConsolidatedLiquidity(input, controller.signal);
         if (stopped) return;
+        const prior = latestSuccessfulRef.current ?? latestSuccessfulByAsset.get(requestedAsset) ?? null;
+        const quality = assessConsolidatedLiquiditySnapshot(snapshot);
+        if (!quality.populated || shouldRetainPreviousConsolidatedSnapshot(prior?.snapshot, snapshot)) {
+          const reason = quality.populated
+            ? "Consolidated depth coverage regressed; retaining the last verified wide frame."
+            : "Consolidated depth refresh contained no populated authoritative rows."
+          setFeed(prior
+            ? { ...prior, status: "degraded", error: reason }
+            : { snapshot: null, book: null, status: snapshot.state === "initializing" ? "loading" : "degraded", error: reason, lastSuccessfulAt: null });
+          return;
+        }
         const next: ConsolidatedLiquidityFeed = {
           snapshot,
           book: toOrderBook(snapshot),
@@ -114,6 +128,8 @@ export function useConsolidatedLiquidityFeed(input: FeedInput): ConsolidatedLiqu
           lastSuccessfulAt: Date.now()
         };
         latestSuccessfulRef.current = next;
+        latestSuccessfulByAsset.set(requestedAsset, next);
+        if (latestSuccessfulByAsset.size > 8) latestSuccessfulByAsset.delete(latestSuccessfulByAsset.keys().next().value!);
         setFeed(next);
       } catch (error) {
         if (stopped || controller.signal.aborted) return;

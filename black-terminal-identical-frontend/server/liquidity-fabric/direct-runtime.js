@@ -79,6 +79,7 @@ export class VenueBookSession {
     this.lastError = null;
     this.socket = null;
     this.timer = null;
+    this.reconnectNow = null;
     this.stopped = false;
     this.now = now;
     this.snapshotCache = null;
@@ -96,6 +97,7 @@ export class VenueBookSession {
     this.receivedAt = this.now();
     this.sequence = sequence ?? this.sequence;
     this.status = "HEALTHY";
+    this.reconnects = 0;
     this.lastError = null;
     this.snapshotDirty = true;
   }
@@ -149,9 +151,20 @@ export class VenueBookSession {
     return this.snapshotCache;
   }
 
+  requestReconnect(reason) {
+    if (this.stopped) return false;
+    this.status = "RECOVERING";
+    this.lastError = String(reason || `${this.venue} liquidity session requires recovery`);
+    this.snapshotDirty = true;
+    if (typeof this.reconnectNow !== "function") return false;
+    this.reconnectNow(this.lastError);
+    return true;
+  }
+
   stop() {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
+    this.reconnectNow = null;
     try { this.socket?.close(); } catch { /* best effort */ }
   }
 }
@@ -283,8 +296,10 @@ async function synchronizeBybitFull(runtime, session, synchronization, generatio
     await pause(100 * (attempt + 1));
   }
   if (generation === synchronization.generation && !synchronization.synchronized) {
-    session.status = "DISCONNECTED";
-    session.snapshotDirty = true;
+    // A still-open delta socket cannot heal a failed REST/bootstrap cycle by
+    // itself. Recycle it so the normal connection lifecycle creates a fresh
+    // subscription and retries the authoritative full-depth snapshot.
+    session.requestReconnect("Bybit full-depth synchronization exhausted; recycling the public depth socket");
   }
 }
 
@@ -324,21 +339,46 @@ function startHyperliquid(runtime, session) {
 
 function connectSocket(runtime, session, url, onOpen, onPayload) {
   if (session.stopped) return;
+  if (session.timer) {
+    clearTimeout(session.timer);
+    session.timer = null;
+  }
   session.status = "CONNECTING";
   const socket = new runtime.WebSocketCtor(url, { handshakeTimeout: 10_000 });
   session.socket = socket;
+  let reconnectScheduled = false;
+  const scheduleReconnect = () => {
+    if (session.stopped || reconnectScheduled) return;
+    reconnectScheduled = true;
+    if (session.socket === socket) session.socket = null;
+    session.reconnectNow = null;
+    session.status = "DISCONNECTED";
+    session.reconnects += 1;
+    session.snapshotDirty = true;
+    session.timer = setTimeout(() => {
+      session.timer = null;
+      connectSocket(runtime, session, url, onOpen, onPayload);
+    }, Math.min(30_000, 750 * 2 ** Math.min(5, session.reconnects)));
+  };
+  session.reconnectNow = (reason) => {
+    if (session.stopped || reconnectScheduled || session.socket !== socket) return;
+    session.status = "RECOVERING";
+    session.lastError = String(reason || `${session.venue} liquidity socket recycle requested`);
+    session.snapshotDirty = true;
+    try {
+      if (typeof socket.terminate === "function") socket.terminate();
+      else socket.close();
+    } catch {
+      scheduleReconnect();
+    }
+  };
   socket.on("open", () => onOpen(socket));
   socket.on("message", (raw) => {
     try { onPayload(JSON.parse(String(raw))); }
     catch (error) { session.lastError = error instanceof Error ? error.message : String(error); }
   });
   socket.on("error", (error) => { session.lastError = error instanceof Error ? error.message : String(error); });
-  socket.on("close", () => {
-    if (session.stopped) return;
-    session.status = "DISCONNECTED";
-    session.reconnects += 1;
-    session.timer = setTimeout(() => connectSocket(runtime, session, url, onOpen, onPayload), Math.min(30_000, 750 * 2 ** Math.min(5, session.reconnects)));
-  });
+  socket.on("close", scheduleReconnect);
 }
 
 function startPolling(runtime, session, fetcher, intervalMs) {

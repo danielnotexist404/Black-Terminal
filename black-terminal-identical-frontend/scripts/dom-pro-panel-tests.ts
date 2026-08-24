@@ -45,6 +45,7 @@ import { resolveDomFullLiveRange } from "../src/modules/dom-pro/domLiveLadderCam
 import { ProfessionalDomLadderTracker, buildProfessionalDomLadder, resolveProfessionalDomNodeMotion } from "../src/modules/dom-pro/domProfessionalLadder.ts";
 import { DomDepthChartTracker } from "../src/modules/dom-pro/domDepthChartModel.ts";
 import { buildChartDockedDepthLadder } from "../src/modules/dom-pro/chartDockedDepthLadderModel.ts";
+import { assessConsolidatedLiquiditySnapshot, shouldRetainPreviousConsolidatedSnapshot } from "../src/modules/dom-pro/consolidatedLiquidityState.ts";
 import { createDomProPriceCamera, domPriceBucketAt, domPriceToTopPct, sameDomPriceCamera } from "../src/modules/dom-pro/domPriceCamera.ts";
 import { buildStructuralCvdFromCandles, buildStructuralCvdFromTrades, estimateCandlePressure, structuralCvdRange, structuralCvdStats } from "../src/modules/dom-pro/domStructuralCvd.ts";
 import type { AggregatedDomSnapshot } from "../src/modules/dom-pro/types.ts";
@@ -59,6 +60,23 @@ class MemoryStorage {
 }
 
 const storage = new MemoryStorage();
+const populatedConsolidatedFrame = {
+  state: "live" as const,
+  sourceLevels: 72_000,
+  coverageRatio: 0.94,
+  includedVenues: ["bybit", "kraken", "hyperliquid"],
+  rows: Array.from({ length: 80 }, (_, index) => ({ bidBase: index < 40 ? index + 1 : 0, askBase: index >= 40 ? index + 1 : 0 }))
+};
+const collapsedConsolidatedFrame = {
+  state: "degraded" as const,
+  sourceLevels: 1_040,
+  coverageRatio: 0.04,
+  includedVenues: ["kraken", "hyperliquid"],
+  rows: Array.from({ length: 80 }, (_, index) => ({ bidBase: index === 39 ? 1 : 0, askBase: index === 40 ? 1 : 0 }))
+};
+assert.equal(assessConsolidatedLiquiditySnapshot(populatedConsolidatedFrame).populatedRows, 80, "a broad consolidated frame reports every genuine populated row");
+assert.equal(shouldRetainPreviousConsolidatedSnapshot(populatedConsolidatedFrame, collapsedConsolidatedFrame), true, "a transient loss of the wide-depth carrier cannot erase the last verified ladder");
+assert.equal(shouldRetainPreviousConsolidatedSnapshot(null, collapsedConsolidatedFrame), false, "cold start may disclose a narrow truthful frame when no prior wide frame exists");
 const layout = createDomProLayout("desk");
 assert.equal(layout.rootSplit.ratio, 0.70, "factory layout reserves a compact 30 percent bottom row");
 assert.ok(Math.abs(domLeafWeights(layout.upperSplit).reduce((sum, leaf) => sum + leaf.weight, 0) - 1) < 1e-9, "upper split weights remain normalized");

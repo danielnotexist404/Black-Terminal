@@ -24,6 +24,7 @@ import { normalizeStrategyPath } from "../api/strategies/[...path].js";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const migration = read("supabase/migrations/202608220001_black_core_strategy_automation.sql");
 const containmentMigration = read("supabase/migrations/202608230003_bcrda_signal_integrity_containment.sql");
+const archiveMigration = read("supabase/migrations/202608240001_strategy_automation_archive.sql");
 const panel = read("src/modules/strategy-lab/automation/StrategyAutomationPanel.tsx");
 const apiClient = read("src/modules/strategy-lab/automation/strategyAutomationApi.ts");
 const worker = read("scripts/strategy-automation-worker.ts");
@@ -86,6 +87,8 @@ assert.equal(riskIncrease({ ...paperPolicy, requestedLeverage: 3 }, { ...paperPo
 
 assert.equal(strategySchemas.create.safeParse({ definition }).success, false, "strategy name is required before save");
 assert.equal(strategySchemas.create.safeParse({ name: "Named strategy", definition }).success, true);
+assert.equal(strategySchemas.archive.safeParse({ expectedName: "Named strategy", expectedRevision: 2 }).success, true);
+assert.equal(strategySchemas.archive.safeParse({ expectedName: "Named strategy", expectedRevision: 2, force: true }).success, false, "archive schema rejects client-side force deletion");
 assert.equal(strategySchemas.create.safeParse({ name: "Named strategy", definition, apiSecret: "forbidden" }).success, false, "strict strategy schema rejects credentials and unknown fields");
 assert.deepEqual(normalizeStrategyPath(undefined, { url: "/api/strategies/00000000-0000-4000-8000-000000000001/targets" }), ["00000000-0000-4000-8000-000000000001", "targets"]);
 
@@ -102,6 +105,10 @@ assert.match(migration, /strategy_target_reorder_requests/);
 assert.match(migration, /black_core_control_strategy_target/);
 assert.match(containmentMigration, /BC_RDA_SIGNAL_INTEGRITY_BLOCKED/);
 assert.match(containmentMigration, /trg_guard_bcrda_strategy_activation/);
+assert.match(archiveMigration, /black_core_archive_strategy/);
+assert.match(archiveMigration, /active strategy targets must be disconnected before archive/);
+assert.match(archiveMigration, /pending strategy commands must settle before archive/);
+assert.doesNotMatch(archiveMigration, /delete from public\./i, "strategy deletion is an audit-preserving archive");
 assert.match(migration, /black_core_reorder_strategy_targets/);
 assert.doesNotMatch(`${panel}\n${apiClient}`, /credential_ref|vault_secret/i, "Strategy Lab never requests or renders vault internals");
 assert.doesNotMatch(panel, /percentile/i, "capital UI uses Percentage terminology only");

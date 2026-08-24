@@ -11,6 +11,7 @@ const migration = fs.readFileSync(path.join(root, "supabase/migrations/202608220
 const draftMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608230001_my_strategy_draft_version_model.sql"), "utf8");
 const demoExecutionMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608230002_bybit_demo_strategy_execution.sql"), "utf8");
 const bcrdaContainmentMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608230003_bcrda_signal_integrity_containment.sql"), "utf8");
+const archiveMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608240001_strategy_automation_archive.sql"), "utf8");
 const db = new PGlite();
 
 await db.exec(`
@@ -76,6 +77,7 @@ await db.exec(`
 `);
 await db.exec(demoExecutionMigration);
 await db.exec(bcrdaContainmentMigration);
+await db.exec(archiveMigration);
 await db.exec("set request.jwt.claim.role='service_role'");
 
 const ownerId = crypto.randomUUID();
@@ -264,6 +266,19 @@ await call("select public.black_core_start_strategy_version($1,$2,2) as result",
 assert.equal(Number(await scalar("select running_version::int as value from public.strategy_automation_strategies where id=$1", [guidedId])), 2, "explicit start performs the version transition");
 assert.equal(await scalar("select status as value from public.strategy_paper_accounts where strategy_id=$1 and strategy_version=1", [guidedId]), "PAUSED");
 assert.equal(await scalar("select status as value from public.strategy_paper_accounts where strategy_id=$1 and strategy_version=2", [guidedId]), "ACTIVE");
+
+const archiveHash = sha({ action: "ARCHIVE_STRATEGY", strategyId: guidedId, expectedName: "Guided Strategy V2", expectedRevision: 3 });
+const archiveKey = "strategy-archive-guided-0001";
+const archive = () => call("select public.black_core_archive_strategy($1,$2,$3,3,$4,$5) as result", [ownerId, guidedId, "Guided Strategy V2", archiveHash, archiveKey]);
+const archived = await archive();
+assert.equal(archived.result.idempotent, false);
+assert.equal((await archive()).result.idempotent, true, "strategy delete retries are idempotent");
+assert.equal(await scalar("select archived_at is not null as value from public.strategy_automation_strategies where id=$1", [guidedId]), true, "deleted strategy leaves the active library scope");
+assert.equal(await scalar("select status as value from public.strategy_automation_strategies where id=$1", [guidedId]), "STOPPED");
+assert.equal(await scalar("select count(*)::int as value from public.strategy_paper_accounts where strategy_id=$1 and status<>'STOPPED'", [guidedId]), 0, "all Paper versions are stopped");
+assert.equal(await scalar("select runtime_state as value from public.strategy_automation_runtime_state where strategy_id=$1", [guidedId]), "STOPPED");
+assert.equal(await scalar("select count(*)::int as value from public.strategy_automation_versions where strategy_id=$1", [guidedId]), 2, "immutable strategy versions are retained");
+assert.equal(await scalar("select count(*)::int as value from public.strategy_automation_audit_events where strategy_id=$1 and event_type='STRATEGY_ARCHIVED'", [guidedId]), 1, "archive action is audited exactly once");
 
 await db.exec("set role anon");
 await assert.rejects(() => db.query("select * from public.strategy_automation_strategies"), /permission denied/i);

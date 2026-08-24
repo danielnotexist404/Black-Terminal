@@ -1,4 +1,5 @@
-import { Activity, FlaskConical, MoreHorizontal, Pause, Play, Plus } from "lucide-react";
+import { Activity, FlaskConical, MoreHorizontal, Pause, Pencil, Play, Plus, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { StrategySummary } from "../../automation/strategyAutomation.types";
 
 type Props = {
@@ -7,12 +8,30 @@ type Props = {
   message?: string;
   onCreate: () => void;
   onOpen: (id: string) => void;
+  onModify: (id: string) => void;
+  onDelete: (strategy: StrategySummary) => void;
   onBacktest: (strategy: StrategySummary) => void;
   onPaperAction: (strategy: StrategySummary, action: "start" | "pause") => void;
   onOpenQalc: () => void;
 };
 
-export function StrategyLibraryPage({ strategies, loading, message, onCreate, onOpen, onBacktest, onPaperAction, onOpenQalc }: Props) {
+export function StrategyLibraryPage({ strategies, loading, message, onCreate, onOpen, onModify, onDelete, onBacktest, onPaperAction, onOpenQalc }: Props) {
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!openMenuId) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest(`[data-strategy-action-menu="${openMenuId}"]`)) setOpenMenuId(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpenMenuId(null); };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [openMenuId]);
+
   return (
     <section className="my-strategy-library" aria-label="My Strategy library">
       <header className="my-strategy-library-head">
@@ -43,7 +62,21 @@ export function StrategyLibraryPage({ strategies, loading, message, onCreate, on
               <article className="strategy-library-card" key={strategy.id}>
                 <div className="strategy-card-title">
                   <div><span>{statusLabel(strategy)}</span><h2>{strategy.name}</h2></div>
-                  <button type="button" aria-label={`More actions for ${strategy.name}`}><MoreHorizontal size={16} /></button>
+                  <div className="strategy-card-menu" data-strategy-action-menu={strategy.id}>
+                    <button
+                      type="button"
+                      aria-label={`More actions for ${strategy.name}`}
+                      aria-haspopup="menu"
+                      aria-expanded={openMenuId === strategy.id}
+                      onClick={() => setOpenMenuId((current) => current === strategy.id ? null : strategy.id)}
+                    ><MoreHorizontal size={16} /></button>
+                    {openMenuId === strategy.id ? (
+                      <div className="strategy-card-menu-popover" role="menu" aria-label={`Actions for ${strategy.name}`}>
+                        <button type="button" role="menuitem" onClick={() => { setOpenMenuId(null); onModify(strategy.id); }}><Pencil size={13} /> MODIFY STRATEGY</button>
+                        <button type="button" role="menuitem" className="danger" onClick={() => { setOpenMenuId(null); onDelete(strategy); }}><Trash2 size={13} /> DELETE STRATEGY</button>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
                 <p>{strategy.indicatorName || "Indicator not selected"} · {strategy.symbol} · {strategy.timeframe.toUpperCase()} · {titleCase(strategy.marketType)}</p>
                 <div className="strategy-card-version">

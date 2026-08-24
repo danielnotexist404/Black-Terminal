@@ -88,6 +88,11 @@ export const strategyAutomationApi = {
       encodeURIComponent(strategyId),
       mutation({ name, definition }, "PATCH"),
     ),
+  remove: (strategy: Pick<StrategySummary, "id" | "name" | "draftRevision">) =>
+    request<{ strategyId: string; archivedAt: string; idempotent: boolean }>(
+      encodeURIComponent(strategy.id),
+      mutation({ expectedName: strategy.name, expectedRevision: strategy.draftRevision || 0 }, "DELETE"),
+    ),
   eligibleTargets: (strategyId: string, signal?: AbortSignal) =>
     request<{
       strategyId: string;

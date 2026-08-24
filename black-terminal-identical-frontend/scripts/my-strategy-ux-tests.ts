@@ -18,7 +18,10 @@ const targetMatrix = read("src/modules/strategy-lab/my-strategy/cockpit/TargetSl
 const targetsStep = read("src/modules/strategy-lab/my-strategy/wizard/TargetsStep.tsx");
 const reviewStep = read("src/modules/strategy-lab/my-strategy/wizard/ReviewStep.tsx");
 const repository = read("server/strategy-automation/repository.js");
+const service = read("server/strategy-automation/service.js");
+const apiClient = read("src/modules/strategy-lab/automation/strategyAutomationApi.ts");
 const migration = read("supabase/migrations/202608230001_my_strategy_draft_version_model.sql");
+const archiveMigration = read("supabase/migrations/202608240001_strategy_automation_archive.sql");
 const compose = read("infra/black-cloud/docker-compose.yml");
 
 for (const label of ["Identity", "Indicator and Market", "Signal Mapping", "Execution Behavior", "Risk Management", "Filters and Schedule", "Take Profits and Exits", "Paper Account", "Bybit Demo Account", "Activate Strategy & Save Configuration"]) assert.match(draftStore, new RegExp(`"${label}"`));
@@ -38,6 +41,14 @@ for (const researchTool of ["Optimization", "Heatmap", "AI Review", "Code Sugges
 
 assert.match(library, /CREATE NEW STRATEGY/);
 assert.match(library, /strategies\.map/);
+assert.match(library, /MODIFY STRATEGY/);
+assert.match(library, /DELETE STRATEGY/);
+assert.match(library, /aria-haspopup="menu"/);
+assert.match(experience, /Modifying the saved draft/);
+assert.match(experience, /DeleteStrategyDialog/);
+assert.match(experience, /No broker order is placed, changed or cancelled/);
+assert.match(apiClient, /mutation\(\{ expectedName: strategy\.name, expectedRevision: strategy\.draftRevision \|\| 0 \}, "DELETE"\)/);
+assert.match(service, /req\.method === "DELETE"[\s\S]*archiveStrategy/);
 assert.doesNotMatch(library, /StrategyDefinitionBuilder|NAME STRATEGY BEFORE SAVING/);
 assert.equal((wizard.match(/step === \d/g) || []).length, 10, "wizard renders only the active step");
 assert.match(indicator, /Choose an active chart indicator/);
@@ -72,6 +83,11 @@ assert.match(migration, /black_core_start_strategy_version/);
 assert.match(migration, /running_version/);
 assert.match(migration, /status='PAUSED'/);
 assert.doesNotMatch(migration, /strategy_target_bindings.*insert/is, "draft/publish migration creates no empty target rows");
+assert.match(archiveMigration, /black_core_archive_strategy/);
+assert.match(archiveMigration, /status in \('LIVE','DISCONNECTING'\)/, "active broker targets fail closed instead of being silently detached");
+assert.match(archiveMigration, /status in \('QUEUED','PROCESSING','RETRY','SUBMISSION_UNKNOWN','RECONCILING'\)/, "pending broker commands must settle before deletion");
+assert.match(archiveMigration, /brokerOrderMutation',false/, "delete audit explicitly records that no broker order mutation occurred");
+assert.doesNotMatch(archiveMigration, /delete from public\./i, "user-facing delete retains immutable strategy history");
 assert.match(compose, /STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED: "true"/);
 assert.match(compose, /STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "false"/);
 assert.match(compose, /STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "false"/);

@@ -43,6 +43,7 @@ const definition = z.object({
 export const strategySchemas = Object.freeze({
   create: z.object({ name: z.string().trim().min(1).max(80), definition, globalCapitalPolicy: capitalPolicy.optional() }).strict(),
   save: z.object({ name: z.string().trim().min(1).max(80).optional(), definition: definition.optional() }).strict(),
+  archive: z.object({ expectedName: z.string().trim().min(1).max(80), expectedRevision: z.number().int().nonnegative() }).strict(),
   draft: z.object({ name: z.string().trim().min(1).max(80), definition, expectedRevision: z.number().int().nonnegative().optional() }).strict(),
   publish: z.object({ expectedRevision: z.number().int().nonnegative() }).strict(),
   startVersion: z.object({ version: z.number().int().positive() }).strict(),

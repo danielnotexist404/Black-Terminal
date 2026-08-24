@@ -128,6 +128,31 @@ export async function saveStrategyDraft(supabase, userId, strategyId, body) {
   return getStrategyWorkspace(supabase, userId, strategyId);
 }
 
+export async function archiveStrategy(supabase, userId, strategyId, body, idempotencyKey) {
+  const canonicalHash = canonicalRequestHash({
+    action: "ARCHIVE_STRATEGY",
+    strategyId,
+    expectedName: body.expectedName,
+    expectedRevision: body.expectedRevision
+  });
+  const { data, error } = await supabase.rpc("black_core_archive_strategy", {
+    p_owner_user_id: userId,
+    p_strategy_id: strategyId,
+    p_expected_name: body.expectedName,
+    p_expected_revision: body.expectedRevision,
+    p_request_hash: canonicalHash,
+    p_idempotency_key: idempotencyKey
+  });
+  if (error) {
+    if (error.code === "P0002") throw strategyError(404, "STRATEGY_NOT_FOUND", "Strategy not found.");
+    if (error.code === "40001") throw strategyError(409, "STRATEGY_DELETE_CONFLICT", "This strategy changed in another session. Reload it before deleting.");
+    if (error.code === "55000") throw strategyError(409, "STRATEGY_DELETE_REQUIRES_SAFE_STATE", "Pause and disconnect active targets, then wait for pending execution commands to settle before deleting this strategy.");
+    if (error.code === "22023" && String(error.message).includes("idempotency")) throw strategyError(409, "IDEMPOTENCY_PAYLOAD_MISMATCH", "This idempotency key was already used for a different strategy deletion.");
+    throw persistenceError(error);
+  }
+  return data;
+}
+
 export async function publishStrategyDraft(supabase, userId, strategyId, body) {
   const strategy = await ownedStrategy(supabase, userId, strategyId);
   const definition = assertCertifiedStrategyDefinition(normalizeStrategyDefinition(strategy.draft_definition || strategy.definition));

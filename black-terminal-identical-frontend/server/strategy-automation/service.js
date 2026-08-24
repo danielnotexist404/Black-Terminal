@@ -1,5 +1,6 @@
 import {
   addTarget,
+  archiveStrategy,
   configurePaper,
   controlPaper,
   createStrategy,
@@ -35,6 +36,7 @@ export async function handleStrategyAutomationRequest(req, res, security, path) 
   if (clean.length === 1) {
     if (req.method === "GET") return res.status(200).json(await getStrategyWorkspace(security.supabase, security.user.id, strategyId));
     if (req.method === "PATCH") return res.status(200).json(await renameStrategy(security.supabase, security.user.id, strategyId, parseStrategyBody(strategySchemas.save, req.body), requireIdempotencyKey(req)));
+    if (req.method === "DELETE") return res.status(200).json(await archiveStrategy(security.supabase, security.user.id, strategyId, parseStrategyBody(strategySchemas.archive, req.body), requireIdempotencyKey(req)));
   }
   if (clean[1] === "draft" && clean.length === 2 && req.method === "PATCH") {
     requireIdempotencyKey(req);

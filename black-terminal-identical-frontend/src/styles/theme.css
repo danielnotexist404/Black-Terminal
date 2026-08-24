@@ -4758,7 +4758,12 @@ body.resizing-layout * {
 .strategy-card-title { display: flex; justify-content: space-between; gap: 12px; }
 .strategy-card-title span { color: #e31c48; font-size: 10px; font-weight: 800; letter-spacing: .1em; }
 .strategy-card-title h2 { margin: 5px 0 0; font-size: 16px; color: #f1f2f5; }
-.strategy-card-title > button { min-width: 31px; padding: 5px; }
+.strategy-card-menu { position: relative; align-self: flex-start; }
+.strategy-card-menu > button { min-width: 31px; padding: 5px; }
+.strategy-card-menu-popover { position: absolute; z-index: 24; top: calc(100% + 5px); right: 0; width: 190px; padding: 5px; border: 1px solid #3b242b; border-radius: 6px; background: rgba(8,9,12,.99); box-shadow: 0 18px 45px rgba(0,0,0,.72), 0 0 0 1px rgba(123,11,36,.12); }
+.strategy-card-menu-popover button { width: 100%; justify-content: flex-start; border-color: transparent; background: transparent; color: #c7cad0; font-size: 10px; letter-spacing: .05em; }
+.strategy-card-menu-popover button:hover { background: #170a0e; }
+.strategy-card-menu-popover button.danger { color: #ff4667; }
 .strategy-library-card > p { color: #858a94; margin: 10px 0 13px; }
 .strategy-card-version { display: flex; align-items: center; gap: 15px; padding: 9px 0; border-block: 1px solid #1e2025; color: #777c85; }
 .strategy-card-version b { color: #d6d9df; margin-left: 4px; }.strategy-card-version em { margin-left: auto; color: #e8b7c3; font-style: normal; font-size: 10px; }
@@ -6933,6 +6938,18 @@ body.resizing-layout * {
   backdrop-filter: blur(10px);
 }
 .strategy-modal-backdrop.drawer { place-items: stretch end; padding: 0; }
+.strategy-delete-dialog { overflow: hidden; width: min(520px, 94vw); border: 1px solid #71162b; border-radius: 9px; background: rgba(8,9,12,.99); box-shadow: 0 28px 90px rgba(0,0,0,.72), 0 0 36px rgba(154,8,42,.12); }
+.strategy-delete-dialog > header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid #32151d; background: linear-gradient(90deg,#2a0711,#0a0b0e 62%); }
+.strategy-delete-dialog > header > div { display: flex; align-items: center; gap: 8px; color: #ef234c; }
+.strategy-delete-dialog > header span { color: #e5e7eb; font-size: 10px; font-weight: 700; letter-spacing: .11em; }
+.strategy-delete-dialog > header button { width: 29px; height: 29px; padding: 0; }
+.strategy-delete-dialog-body { padding: 18px; }
+.strategy-delete-dialog-body h2 { margin: 0 0 9px; color: #f3f4f6; font-size: 17px; }
+.strategy-delete-dialog-body > p { margin: 0; color: #969ba4; line-height: 1.6; }
+.strategy-delete-dialog-body > div { display: flex; align-items: flex-start; gap: 9px; margin-top: 15px; padding: 11px; border: 1px solid #4d202a; background: #13090c; color: #b8bbc2; line-height: 1.5; }
+.strategy-delete-dialog-body > div svg { flex: 0 0 auto; margin-top: 2px; color: #f12a50; }
+.strategy-delete-dialog > footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 14px; border-top: 1px solid #282027; background: #07080a; }
+.strategy-delete-dialog > footer button.danger { border-color: #a61031; background: linear-gradient(180deg,#a90d31,#6f091c); color: #fff; }
 .strategy-target-dialog,
 .strategy-disconnect-dialog,
 .strategy-capital-drawer { overflow: auto; width: min(780px, 94vw); max-height: 88vh; border: 1px solid #4a1826; border-radius: 9px; background: rgba(8, 9, 12, .98); box-shadow: 0 24px 80px rgba(0, 0, 0, .65); }

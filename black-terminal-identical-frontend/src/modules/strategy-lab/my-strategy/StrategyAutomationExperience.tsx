@@ -1,4 +1,4 @@
-import { AlertTriangle, LockKeyhole, X } from "lucide-react";
+import { AlertTriangle, LockKeyhole, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   EligibleBrokerTarget,
@@ -41,6 +41,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState<string>();
+  const [pendingDelete, setPendingDelete] = useState<StrategySummary | null>(null);
   const [addSlot, setAddSlot] = useState<number | null>(null);
   const [eligible, setEligible] = useState<{ brokerAccounts: EligibleBrokerTarget[]; groups: EligibleGroupTarget[] } | null>(null);
   useEffect(() => {
@@ -139,6 +140,46 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
     if (!workspace) return;
     setDraft(hydrateDraft(workspace)); setDirty(false); setView("wizard");
     setMessage(`Editing current draft. Running V${workspace.strategy.runningVersion || "—"} remains unchanged.`);
+  };
+
+  const modifyStrategy = async (strategyId: string) => {
+    setBusy(true);
+    setMessage("Loading the saved strategy configuration from the VPS…");
+    try {
+      const next = await loadWorkspace(strategyId);
+      if (!next) return;
+      setDraft(hydrateDraft(next));
+      setDirty(false);
+      const demoBinding = next.bindings.find((binding) => binding.targetType === "BROKER_ACCOUNT");
+      setDemoConnection(demoBinding?.connectionId ? { id: demoBinding.connectionId, label: demoBinding.targetLabel || "Bybit Demo", state: demoBinding.status } : null);
+      setView("wizard");
+      setMessage(`Modifying the saved draft. Published V${next.strategy.publishedVersion || "—"} and running V${next.strategy.runningVersion || "—"} remain unchanged until an explicit save and activation.`);
+    } catch (error) { setMessage(errorMessage(error, "Strategy configuration could not be loaded.")); }
+    finally { setBusy(false); }
+  };
+
+  const deleteStrategy = async () => {
+    if (!pendingDelete || busy) return;
+    const selected = pendingDelete;
+    setBusy(true);
+    try {
+      if (fixtureMode) {
+        setStrategies((current) => current.filter((strategy) => strategy.id !== selected.id));
+      } else {
+        await strategyAutomationApi.remove(selected);
+        await loadList();
+      }
+      if (workspace?.strategy.id === selected.id) {
+        setWorkspace(null);
+        setDraft(null);
+        setPaperData(null);
+        setDemoConnection(null);
+      }
+      setPendingDelete(null);
+      setView("library");
+      setMessage(`“${selected.name}” was deleted from My Strategy. Its runtime was stopped and immutable audit history was retained.`);
+    } catch (error) { setPendingDelete(null); setMessage(errorMessage(error, "Strategy deletion failed.")); }
+    finally { setBusy(false); }
   };
 
   const persistDraft = async (): Promise<StrategyWorkspace | null> => {
@@ -364,11 +405,12 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
   };
 
   return <div className="my-strategy-experience">
-    {view === "library" ? <StrategyLibraryPage strategies={strategies} loading={loading} message={message} onCreate={newStrategy} onOpen={(id) => void openStrategy(id)} onBacktest={onOpenBacktest} onPaperAction={(strategy, action) => void libraryPaperAction(strategy, action)} onOpenQalc={() => setView("qalc")} /> : null}
+    {view === "library" ? <StrategyLibraryPage strategies={strategies} loading={loading} message={message} onCreate={newStrategy} onOpen={(id) => void openStrategy(id)} onModify={(id) => void modifyStrategy(id)} onDelete={setPendingDelete} onBacktest={onOpenBacktest} onPaperAction={(strategy, action) => void libraryPaperAction(strategy, action)} onOpenQalc={() => setView("qalc")} /> : null}
     {view === "qalc" ? <QalcExperience onBack={() => setView("library")} /> : null}
     {view === "wizard" && draft ? <StrategyWizardPage draft={draft} chartTimeframe={chartTimeframe} indicators={indicators} templates={templates} bindings={workspace?.bindings || []} publishedName={workspace?.strategy.name} publishedDefinition={workspace?.strategy.definition} saving={busy} message={message || (dirty ? "Draft changes have not been saved." : undefined)} demoConnection={demoConnection} onChange={(next) => { setDraft(next); setDirty(true); }} onSaveDraft={() => void persistDraft()} onConnectDemo={connectDemo} onRefreshDemo={refreshDemo} onActivate={() => void activateDemoStrategy()} onCancel={() => { setView(workspace?.strategy.publishedVersion ? "cockpit" : "library"); setMessage(undefined); }} /> : null}
     {view === "cockpit" && workspace ? <StrategyCockpitPage workspace={workspace} paperData={paperData} busy={busy} message={message} onEdit={editStrategy} onRefresh={() => void refreshCockpit()} onPaperAction={(action, body) => void paperAction(action, body)} onAddTarget={(slot) => void openTargetPicker(slot)} onTargetAction={(bindingId, action) => void targetAction(bindingId, action)} onDisconnectTarget={(bindingId) => void disconnectTarget(bindingId)} /> : null}
     {addSlot !== null ? <TargetPicker slot={addSlot} eligible={eligible} busy={busy} onClose={() => { setAddSlot(null); setEligible(null); }} onSelect={(target) => void addTarget(target)} /> : null}
+    {pendingDelete ? <DeleteStrategyDialog strategy={pendingDelete} busy={busy} onCancel={() => setPendingDelete(null)} onConfirm={() => void deleteStrategy()} /> : null}
   </div>;
 }
 
@@ -399,6 +441,20 @@ function isCapitalPolicy(value: unknown): value is StrategyCapitalPolicy { retur
 function TargetPicker({ slot, eligible, busy, onClose, onSelect }: { slot: number; eligible: { brokerAccounts: EligibleBrokerTarget[]; groups: EligibleGroupTarget[] } | null; busy: boolean; onClose: () => void; onSelect: (target: EligibleBrokerTarget | EligibleGroupTarget) => void }) {
   const targets = eligible?.brokerAccounts || [];
   return <div className="strategy-modal-backdrop" role="presentation"><section className="strategy-target-picker" role="dialog" aria-modal="true" aria-label={`Add target ${slot}`}><header><div><span>TARGET {String(slot).padStart(2, "0")}</span><h2>Add Bybit Demo account</h2></div><button type="button" aria-label="Close target picker" onClick={onClose}><X size={16} /></button></header><div className="target-picker-warning"><LockKeyhole size={13} /><span>Only synchronized Bybit Demo Trading accounts are eligible. Real-funds Mainnet accounts are rejected.</span></div>{busy && !eligible ? <div className="cockpit-empty-state compact">Checking ownership, private-stream health and reconciliation…</div> : targets.length ? <div className="eligible-target-list">{targets.map((target) => <button type="button" key={`${target.targetType}:${target.targetId}`} disabled={!target.validation.eligible || busy} onClick={() => onSelect(target)}><span>{target.targetType === "BROKER_ACCOUNT" ? `${target.provider} DEMO` : "INVESTMENT GROUP"}</span><strong>{target.label}</strong><em>{target.validation.eligible ? "Eligible for simulated-funds execution" : target.validation.reasons.join(" · ")}</em></button>)}</div> : <div className="cockpit-empty-state"><AlertTriangle size={19} /><strong>No eligible Bybit Demo target</strong><span>Connect a trade-enabled Bybit Demo API key and wait for Black Cloud reconciliation.</span></div>}</section></div>;
+}
+
+function DeleteStrategyDialog({ strategy, busy, onCancel, onConfirm }: { strategy: StrategySummary; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+  return <div className="strategy-modal-backdrop" role="presentation">
+    <section className="strategy-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-strategy-title">
+      <header><div><Trash2 size={15} /><span>DELETE STRATEGY</span></div><button type="button" aria-label="Close delete strategy confirmation" disabled={busy} onClick={onCancel}><X size={15} /></button></header>
+      <div className="strategy-delete-dialog-body">
+        <h2 id="delete-strategy-title">Delete “{strategy.name}”?</h2>
+        <p>This removes the strategy from My Strategy and stops its Paper runtime. Inactive targets are disconnected; immutable versions, trades and audit history remain retained.</p>
+        <div><AlertTriangle size={15} /><span>Any active target must be paused and disconnected, and pending execution commands must settle, before deletion is allowed. No broker order is placed, changed or cancelled by this action.</span></div>
+      </div>
+      <footer><button type="button" disabled={busy} onClick={onCancel}>CANCEL</button><button type="button" className="danger" disabled={busy} onClick={onConfirm}><Trash2 size={13} /> {busy ? "DELETING…" : "DELETE STRATEGY"}</button></footer>
+    </section>
+  </div>;
 }
 
 function errorMessage(error: unknown, fallback: string) { return error instanceof Error ? error.message : fallback; }

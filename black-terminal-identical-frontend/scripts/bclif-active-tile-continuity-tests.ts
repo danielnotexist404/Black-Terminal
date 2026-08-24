@@ -19,6 +19,7 @@ assert.equal(recovered.columns[0]!.timestamp, secondBucket + minute);
 assert.equal(recovered.columns.at(-1)!.timestamp, secondBucket + 351 * minute);
 assert.equal(recovered.droppedColumns, 360, "a complete legacy predecessor bucket must not remain active");
 assert.equal(recovered.droppedBuckets, 1);
+assert.equal(recovered.suppressReplayPublicationThrough, secondBucket + sixHours, "legacy replay must not republish the repaired checkpoint bucket");
 assert.equal(bclifBaseBucketStart(secondBucket, sixHours), firstBucket, "the boundary column closes the preceding bucket");
 assert.equal(bclifBaseBucketStart(secondBucket + minute, sixHours), secondBucket);
 
@@ -72,6 +73,7 @@ console.log(JSON.stringify({
   decision: "PASS",
   legacyColumns: legacyColumns.length,
   retainedColumns: recovered.columns.length,
+  replayPublicationSuppressedThrough: new Date(recovered.suppressReplayPublicationThrough!).toISOString(),
   adjacentClosedMissingColumns: adjacentRollover.closeBucketWith.length,
   staleBucketDiscarded: rollover.discardActiveBucket,
   synthesizedSkippedBuckets: 0

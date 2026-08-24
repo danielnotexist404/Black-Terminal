@@ -183,6 +183,9 @@ type PixiBlackChartProps = {
   priceLineIntensity?: number;
   activeOrders?: OrderUpdate[];
   onRefreshOrders?: () => void | Promise<unknown>;
+  liquidationProfileRequested?: boolean;
+  onLiquidationProfileSnapshotChange?: (snapshot: LiquidationFieldSnapshot | null) => void;
+  onLiquidationProfileStatusChange?: (status: LiquidationFieldRuntimeStatus) => void;
   allowedIndicators: readonly string[];
 };
 
@@ -454,6 +457,9 @@ export function PixiBlackChart({
   priceLineIntensity,
   activeOrders = [],
   onRefreshOrders,
+  liquidationProfileRequested = false,
+  onLiquidationProfileSnapshotChange,
+  onLiquidationProfileStatusChange,
   allowedIndicators
 }: PixiBlackChartProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -474,6 +480,7 @@ export function PixiBlackChart({
   const aifActiveRef = useRef(visibleIndicators.aif);
   const qalcActiveRef = useRef(visibleIndicators.qalc);
   const liquidationFieldActiveRef = useRef(visibleIndicators.liquidationHeatmap);
+  const liquidationFieldOverlayVisibleRef = useRef(visibleIndicators.liquidationHeatmap);
   const [oscillatorHostHeight, setOscillatorHostHeight] = useState(600);
   const [lastPrice, setLastPrice] = useState(66678.1);
   const [lastCandle, setLastCandle] = useState<Candle | null>(null);
@@ -602,7 +609,17 @@ export function PixiBlackChart({
   const alertToastTimerRef = useRef<number | undefined>(undefined);
   aifActiveRef.current = visibleIndicators.aif;
   qalcActiveRef.current = visibleIndicators.qalc;
-  liquidationFieldActiveRef.current = visibleIndicators.liquidationHeatmap;
+  const liquidationFieldRequested = visibleIndicators.liquidationHeatmap || liquidationProfileRequested;
+  liquidationFieldActiveRef.current = liquidationFieldRequested;
+  liquidationFieldOverlayVisibleRef.current = visibleIndicators.liquidationHeatmap;
+
+  useEffect(() => {
+    onLiquidationProfileSnapshotChange?.(liquidationFieldSnapshot);
+  }, [liquidationFieldSnapshot, onLiquidationProfileSnapshotChange]);
+
+  useEffect(() => {
+    onLiquidationProfileStatusChange?.(liquidationFieldStatus);
+  }, [liquidationFieldStatus, onLiquidationProfileStatusChange]);
 
   const scopedChartAlerts = useMemo(() => {
     return alertDefinitions.filter((definition) =>
@@ -1357,7 +1374,10 @@ export function PixiBlackChart({
         releaseBclifSnapshotReplay = liquidationFieldSnapshotStoreRef.current.subscribe((snapshot) => {
           if (disposed || !liquidationFieldActiveRef.current) return;
           setLiquidationFieldSnapshot(snapshot);
-          engine.setLiquidationFieldState(snapshot, latestLiquidationFieldSettingsRef.current);
+          engine.setLiquidationFieldState(
+            liquidationFieldOverlayVisibleRef.current ? snapshot : null,
+            latestLiquidationFieldSettingsRef.current
+          );
         });
 
         if (bclifVisualFixture) {
@@ -2338,7 +2358,7 @@ export function PixiBlackChart({
   useEffect(() => {
     liquidationFieldControllerRef.current?.dispose();
     liquidationFieldControllerRef.current = null;
-    if (!visibleIndicators.liquidationHeatmap) {
+    if (!liquidationFieldRequested) {
       setLiquidationFieldSnapshot(null);
       setLiquidationFieldRendererMetrics(null);
       setLiquidationFieldStatus({
@@ -2351,7 +2371,7 @@ export function PixiBlackChart({
       engineRef.current?.setLiquidationFieldState(null, liquidationFieldSettings);
       return;
     }
-    if (!isBclifVisualFixtureEnabled() && marketSymbol.exchange !== "bybit") {
+    if (!isBclifVisualFixtureEnabled() && marketSymbol.exchange !== "bybit" && !liquidationProfileRequested) {
       const nextStatus: LiquidationFieldRuntimeStatus = {
         state: "UNAVAILABLE",
         message: "This build currently has venue-calibrated liquidation intelligence for Bybit linear contracts only.",
@@ -2381,10 +2401,16 @@ export function PixiBlackChart({
     const retainedBeforeMount = liquidationFieldSnapshotStoreRef.current.getLatestSnapshot();
     if (retainedBeforeMount) {
       setLiquidationFieldSnapshot(retainedBeforeMount);
-      engineRef.current.setLiquidationFieldState(retainedBeforeMount, liquidationFieldSettings);
+      engineRef.current.setLiquidationFieldState(
+        liquidationFieldOverlayVisibleRef.current ? retainedBeforeMount : null,
+        liquidationFieldSettings
+      );
     }
+    const liquidationAuthoritySymbol = liquidationProfileRequested
+      ? `${marketSymbol.baseAsset}USDT`
+      : marketSymbol.rawSymbol;
     const controller = new LiquidationFieldController({
-      symbol: marketSymbol.rawSymbol,
+      symbol: liquidationAuthoritySymbol,
       settings: liquidationFieldSettings,
       getCandles: () => engineRef.current?.getSourceCandles() ?? [],
       getReplayActive: () => replayActiveRef.current,
@@ -2397,7 +2423,10 @@ export function PixiBlackChart({
         }
         const retained = liquidationFieldSnapshotStoreRef.current.publish(snapshot);
         setLiquidationFieldSnapshot(retained);
-        engineRef.current?.setLiquidationFieldState(retained, latestLiquidationFieldSettingsRef.current);
+        engineRef.current?.setLiquidationFieldState(
+          liquidationFieldOverlayVisibleRef.current ? retained : null,
+          latestLiquidationFieldSettingsRef.current
+        );
       },
       onStatus: setLiquidationFieldStatus
     });
@@ -2408,8 +2437,10 @@ export function PixiBlackChart({
       if (liquidationFieldControllerRef.current === controller) liquidationFieldControllerRef.current = null;
     };
   }, [
-    visibleIndicators.liquidationHeatmap,
+    liquidationFieldRequested,
+    liquidationProfileRequested,
     marketSymbol.exchange,
+    marketSymbol.baseAsset,
     marketSymbol.rawSymbol,
     chartHistoryState,
     liquidationFieldCalculationKey

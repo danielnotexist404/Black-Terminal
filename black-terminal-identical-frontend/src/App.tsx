@@ -114,6 +114,7 @@ import type { BlackCoreModuleMode } from "./core/modules/moduleRegistry";
 import { PerformanceHud } from "./performance/PerformanceHud";
 import { mergeNewestWorkspaceSnapshots } from "./indicators/indicatorSettingsPersistence";
 import { blackCoreChartPriceViewportStore } from "./modules/dom-pro/chartPriceViewportStore";
+import type { LiquidationFieldRuntimeStatus, LiquidationFieldSnapshot } from "./modules/liquidation-field/core/types";
 import blackCoreEngine from "./assets/black-core-engine-sidebar.png";
 import {
   ADMIN_ALLOWED_INDICATORS,
@@ -626,6 +627,15 @@ export default function App() {
   const [domProOpen, setDomProOpen] = useState(false);
   const [domProMode, setDomProMode] = useState<BlackCoreModuleMode>("expanded");
   const [domProSettingsSignal, setDomProSettingsSignal] = useState(0);
+  const [chartDepthLppRequested, setChartDepthLppRequested] = useState(false);
+  const [chartDepthLppSnapshot, setChartDepthLppSnapshot] = useState<LiquidationFieldSnapshot | null>(null);
+  const [chartDepthLppStatus, setChartDepthLppStatus] = useState<LiquidationFieldRuntimeStatus>({
+    state: "IDLE",
+    message: "Awaiting LPP activation",
+    source: "NONE",
+    lastInputAt: null,
+    lifecycle: "UNMOUNTED"
+  });
   const chartDepthLadderOpen = Boolean(terminalSettings.chartDepthLadder) && canUseDomPro && !domProOpen;
   const showCompactDom = terminalSettings.showDOM && !domProOpen && !chartDepthLadderOpen;
   const rightDockVisible = showCompactDom || chartDepthLadderOpen;
@@ -2437,6 +2447,9 @@ export default function App() {
             priceLineIntensity={terminalSettings.priceLineIntensity}
             activeOrders={visiblePortfolioOrders}
             onRefreshOrders={() => refreshPortfolioState(true)}
+            liquidationProfileRequested={chartDepthLadderOpen && chartDepthLppRequested}
+            onLiquidationProfileSnapshotChange={setChartDepthLppSnapshot}
+            onLiquidationProfileStatusChange={setChartDepthLppStatus}
             allowedIndicators={effectiveAllowedIndicators}
           />
           )}
@@ -2573,6 +2586,9 @@ export default function App() {
               lastPrice={lastPrice}
               viewportKey={chartDepthViewportKey}
               workspaceId={workspace}
+              liquidationSnapshot={chartDepthLppSnapshot}
+              liquidationStatus={chartDepthLppStatus}
+              onLiquidationProfileDemandChange={setChartDepthLppRequested}
               onClose={toggleChartDepthLadder}
             />
           </Suspense>

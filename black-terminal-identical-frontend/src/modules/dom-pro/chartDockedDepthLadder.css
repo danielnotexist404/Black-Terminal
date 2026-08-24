@@ -34,6 +34,44 @@
   font-size: 6px;
 }
 
+.chart-docked-depth-mode {
+  height: 17px;
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid #292c31;
+  background: #050608;
+}
+
+.chart-docked-depth-toolbar .chart-docked-depth-mode button {
+  width: auto;
+  min-width: 24px;
+  height: 15px;
+  padding: 0 4px;
+  border: 0;
+  border-right: 1px solid #25282d;
+  color: #737a84;
+  background: #050608;
+  font: 900 6px "IBM Plex Mono", monospace;
+  letter-spacing: .055em;
+}
+
+.chart-docked-depth-toolbar .chart-docked-depth-mode button:last-child { border-right: 0; }
+.chart-docked-depth-toolbar .chart-docked-depth-mode button.active {
+  color: #fff;
+  background: linear-gradient(180deg, rgba(170, 0, 28, .66), rgba(67, 0, 12, .8));
+  box-shadow: inset 0 0 8px rgba(255, 17, 49, .35), 0 0 8px rgba(158, 0, 25, .2);
+}
+
+.chart-docked-depth-ladder--lpp .chart-docked-depth-columns {
+  color: #9a858b;
+  border-bottom-color: rgba(175, 0, 28, .5);
+}
+
+.chart-docked-depth-ladder--lpp .chart-docked-depth-toolbar {
+  border-bottom-color: rgba(175, 0, 28, .58);
+}
+
 .chart-docked-depth-toolbar strong {
   color: #f0f2f5;
   font-size: 7px;
@@ -168,6 +206,28 @@
   background: #020304;
 }
 
+.chart-docked-depth-awaiting--lpp {
+  align-content: center;
+  gap: 6px;
+  padding: 18px;
+  text-align: center;
+  background:
+    radial-gradient(circle at 50% 48%, rgba(111, 0, 18, .16), transparent 45%),
+    #020304;
+}
+
+.chart-docked-depth-awaiting--lpp strong {
+  color: #e1e4e8;
+  font-size: 7px;
+}
+
+.chart-docked-depth-awaiting--lpp span {
+  max-width: 260px;
+  color: #737a84;
+  font-size: 6px;
+  line-height: 1.45;
+}
+
 .chart-docked-depth-footer {
   position: absolute;
   left: 0;
@@ -225,6 +285,18 @@
 .chart-docked-depth-tooltip em { margin-top: 2px; color: #5f6670; font-size: 5px; font-style: normal; }
 .chart-docked-depth-tooltip .ask { color: #ff1834; }
 .chart-docked-depth-tooltip .bid { color: #f4f6f8; }
+
+.chart-docked-depth-tooltip--lpp {
+  width: 188px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  border-color: #8a1026;
+  box-shadow: 0 8px 24px rgba(0,0,0,.78), 0 0 18px rgba(190,0,31,.18);
+}
+
+.chart-docked-depth-tooltip--lpp span { white-space: nowrap; }
+.chart-docked-depth-tooltip--lpp span b { color: #d9dde3; }
+.chart-docked-depth-tooltip--lpp span b.ask { color: #ff1834; }
+.chart-docked-depth-tooltip--lpp span b.bid { color: #f4f6f8; }
 
 @media (max-width: 1100px) {
   .chart-docked-depth-scale,

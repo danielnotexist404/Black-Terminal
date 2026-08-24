@@ -119,6 +119,7 @@
     "test:kioseff": "npm run test:kioseff-fixtures && npm run test:kioseff-metadata && npm run test:kioseff-data && npm run test:kioseff-kernel && npm run test:kioseff-canonical && npm run test:kioseff-engines && npm run test:kioseff-edges && npm run test:kioseff-worker && npm run test:kioseff-parity && npm run test:kioseff-render && npm run test:kioseff-platform && npm run test:kioseff-operational",
     "test:dom-pro-panels": "node --experimental-strip-types scripts/dom-pro-panel-tests.ts",
     "test:chart-docked-depth-ladder": "node --experimental-strip-types scripts/chart-docked-depth-ladder-tests.ts",
+    "test:liquidation-pressure-profile": "node --experimental-strip-types scripts/liquidation-pressure-profile-tests.ts",
     "test:dom-pro-visual": "node scripts/dom-pro-visual-regression.js",
     "certify:dom-pro-camera": "node --experimental-strip-types scripts/dom-pro-shared-camera-certification.ts",
     "test:auction-profile": "node --experimental-strip-types scripts/auction-profile-tests.ts",

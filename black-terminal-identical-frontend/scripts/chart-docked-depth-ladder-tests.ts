@@ -296,7 +296,7 @@ const engineSource = readFileSync(resolve(projectRoot, "src/market-data/engine/m
 const bybitSource = readFileSync(resolve(projectRoot, "src/market-data/adapters/bybit.ts"), "utf8");
 assert.match(componentSource, /useConsolidatedLiquidityFeed/, "the docked ladder must consume the server-side multi-venue liquidity fabric");
 assert.doesNotMatch(componentSource, /useDomFeed|feed\.book|feed\.ticker|exchangeLabel/, "the docked ladder must never couple to the chart-selected venue or use a venue-specific fallback");
-assert.doesNotMatch(componentSource, /BYBIT/, "consolidated warm-up must not be presented as a Bybit-specific ladder");
+assert.match(componentSource, /: `CLF \$\{consolidated\.status\.toUpperCase\(\)\}/, "DOM warm-up must remain the venue-independent consolidated-liquidity status");
 assert.match(componentSource, /MULTI-VENUE CLF/, "cold start must disclose the venue-independent consolidated source");
 assert.doesNotMatch(consolidatedClientSource, /input\.exchange|exchangeLabel|selectedExchange/, "the consolidated request identity must remain independent of the chart-selected exchange");
 assert.match(componentSource, /requestAnimationFrame\(animate\)/, "depth transitions must be synchronized to display frames");
@@ -306,7 +306,7 @@ assert.match(componentSource, /26K OVERVIEW/, "the independent 26,000 USD overvi
 assert.match(componentSource, /BOOK FIT/, "the previous delivered-book fitting behavior must remain an explicit optional mode");
 assert.match(componentSource, /CHART SYNC/, "exact chart-scale confluence must be the default ladder mode");
 assert.match(componentSource, /<option value="range">26K OVERVIEW<\/option>/, "the 26,000 USD full-range overview must remain available as an explicit optional mode");
-assert.match(componentSource, /<option value="book">BOOK FIT<\/option>/, "complete delivered-book fitting must remain available as an optional mode");
+assert.match(componentSource, /profileMode === "lpp" \? "MODEL FIT" : "BOOK FIT"/, "complete delivered-book fitting must remain available while LPP exposes its distinct model-fit range");
 assert.match(componentSource, /return stored === "range" \|\| stored === "book" \? stored : "chart"/, "new workspaces must default to exact chart synchronization");
 assert.match(componentSource, /view:v3:/, "existing persisted independent-scale choices must be retired so upgraded workspaces reopen in chart synchronization");
 assert.match(componentSource, /resolveChartDockedProjectionRowCount/, "the aggregation selector must control canonical projection density rather than collapse into a fixed lower clamp");

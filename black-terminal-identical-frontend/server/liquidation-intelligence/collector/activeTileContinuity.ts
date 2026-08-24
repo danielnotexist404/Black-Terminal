@@ -11,6 +11,7 @@ export interface BclifRecoveredActiveBucket<T extends BclifTimestampedColumn> {
 
 export interface BclifActiveColumnTransition {
   disposition: "APPEND" | "STALE";
+  discardActiveBucket: boolean;
   closeBucketWith: number[];
   initializeCurrentWith: number[];
 }
@@ -69,6 +70,7 @@ export function planActiveColumnTransition(
   if (!activeTimestamps.length) {
     return {
       disposition: "APPEND",
+      discardActiveBucket: false,
       closeBucketWith: [],
       initializeCurrentWith: timestamps(incomingBucketStart + cadenceMs, incomingTimestamp, cadenceMs)
     };
@@ -78,19 +80,29 @@ export function planActiveColumnTransition(
   const activeBucketStart = bclifBaseBucketStart(activeTimestamps[0]!, horizonMs);
   const expected = activeTimestamps.at(-1)! + cadenceMs;
   if (incomingTimestamp < expected || incomingBucketStart < activeBucketStart) {
-    return { disposition: "STALE", closeBucketWith: [], initializeCurrentWith: [] };
+    return { disposition: "STALE", discardActiveBucket: false, closeBucketWith: [], initializeCurrentWith: [] };
   }
   if (incomingBucketStart === activeBucketStart) {
     return {
       disposition: "APPEND",
+      discardActiveBucket: false,
       closeBucketWith: [],
       initializeCurrentWith: timestamps(expected, incomingTimestamp, cadenceMs)
     };
   }
 
   const activeBucketEnd = activeBucketStart + horizonMs;
+  if (incomingBucketStart > activeBucketEnd) {
+    return {
+      disposition: "APPEND",
+      discardActiveBucket: true,
+      closeBucketWith: [],
+      initializeCurrentWith: timestamps(incomingBucketStart + cadenceMs, incomingTimestamp, cadenceMs)
+    };
+  }
   return {
     disposition: "APPEND",
+    discardActiveBucket: false,
     closeBucketWith: timestamps(expected, activeBucketEnd + cadenceMs, cadenceMs),
     initializeCurrentWith: timestamps(incomingBucketStart + cadenceMs, incomingTimestamp, cadenceMs)
   };

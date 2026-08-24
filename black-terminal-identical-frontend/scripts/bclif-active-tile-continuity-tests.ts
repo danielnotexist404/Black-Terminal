@@ -29,11 +29,8 @@ const rollover = planActiveColumnTransition(
   sixHours
 );
 assert.equal(rollover.disposition, "APPEND");
-assert.deepEqual(
-  rollover.closeBucketWith,
-  Array.from({ length: 9 }, (_, index) => secondBucket + (352 + index) * minute),
-  "the interrupted old bucket must close with only its nine explicit missing columns"
-);
+assert.equal(rollover.discardActiveBucket, true, "a multi-bucket gap must abandon stale unverifiable active data");
+assert.deepEqual(rollover.closeBucketWith, [], "stale coverage must never be manufactured or published");
 assert.equal(rollover.initializeCurrentWith.length, 299, "only the incoming UTC bucket may be initialized; skipped days must not be synthesized");
 assert.equal(rollover.initializeCurrentWith[0], currentBucket + minute);
 assert.equal(rollover.initializeCurrentWith.at(-1), currentBucket + 299 * minute);
@@ -46,6 +43,19 @@ const sameBucket = planActiveColumnTransition(
 );
 assert.deepEqual(sameBucket.closeBucketWith, []);
 assert.deepEqual(sameBucket.initializeCurrentWith, [currentBucket + 3 * minute, currentBucket + 4 * minute]);
+
+const adjacentRollover = planActiveColumnTransition(
+  recovered.columns.map((column) => column.timestamp),
+  secondBucket + sixHours + 5 * minute,
+  minute,
+  sixHours
+);
+assert.equal(adjacentRollover.discardActiveBucket, false);
+assert.deepEqual(
+  adjacentRollover.closeBucketWith,
+  Array.from({ length: 9 }, (_, index) => secondBucket + (352 + index) * minute),
+  "an adjacent interrupted bucket can be closed with explicit missing columns"
+);
 
 const duplicate = planActiveColumnTransition([currentBucket + minute], currentBucket + minute, minute, sixHours);
 assert.equal(duplicate.disposition, "STALE");
@@ -62,6 +72,7 @@ console.log(JSON.stringify({
   decision: "PASS",
   legacyColumns: legacyColumns.length,
   retainedColumns: recovered.columns.length,
-  closedMissingColumns: rollover.closeBucketWith.length,
+  adjacentClosedMissingColumns: adjacentRollover.closeBucketWith.length,
+  staleBucketDiscarded: rollover.discardActiveBucket,
   synthesizedSkippedBuckets: 0
 }, null, 2));

@@ -789,6 +789,19 @@ class BclifSymbolCollector {
       BASE_TILE_HORIZON_MS
     );
     if (transition.disposition === "STALE") return;
+    if (transition.discardActiveBucket) {
+      const discardedColumns = this.activeColumns.length;
+      const discardedThrough = this.activeColumns.at(-1)?.timestamp ?? null;
+      this.activeColumns = [];
+      this.deps.metrics.counter("bclif_stale_active_tile_columns_discarded_total", "Stale active-tile columns discarded across an unverifiable multi-bucket source gap.", discardedColumns);
+      this.deps.logger.warn("collector.stale_active_tile_discarded", {
+        symbol: this.symbol,
+        discardedColumns,
+        discardedThrough,
+        resumedAt: column.timestamp,
+        reason: "MULTI_BUCKET_GAP_WITHOUT_RETAINED_COVERAGE"
+      });
+    }
     for (const timestamp of transition.closeBucketWith) this.activeColumns.push(missingColumn(timestamp, this.exposure!));
     if (transition.closeBucketWith.length) {
       await this.publishActiveEdgesAndClosures();

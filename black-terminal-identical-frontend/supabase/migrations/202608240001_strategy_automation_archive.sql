@@ -33,6 +33,7 @@ declare
   existing_request public.strategy_automation_archive_requests;
   archived_timestamp timestamptz;
   result jsonb;
+  has_pending_strategy_commands boolean := false;
 begin
   if coalesce(auth.role(),'') <> 'service_role' then
     raise exception 'strategy service identity required' using errcode='42501';
@@ -84,11 +85,25 @@ begin
   ) then
     raise exception 'active strategy targets must be disconnected before archive' using errcode='55000';
   end if;
+  -- The Demo-execution linkage is an independently deployed capability. Older
+  -- Strategy Lab installations have no strategy_automation_id column, and in
+  -- that schema execution_commands cannot represent strategy-owned work. Use
+  -- dynamic SQL only when the linkage exists so archive remains fail-closed
+  -- without forcing an unrelated execution migration.
   if exists(
-    select 1 from public.execution_commands
-    where strategy_automation_id=p_strategy_id
-      and status in ('QUEUED','PROCESSING','RETRY','SUBMISSION_UNKNOWN','RECONCILING')
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='execution_commands'
+      and column_name='strategy_automation_id'
   ) then
+    execute $pending$
+      select exists(
+        select 1 from public.execution_commands
+        where strategy_automation_id=$1
+          and status in ('QUEUED','PROCESSING','RETRY','SUBMISSION_UNKNOWN','RECONCILING')
+      )
+    $pending$ into has_pending_strategy_commands using p_strategy_id;
+  end if;
+  if has_pending_strategy_commands then
     raise exception 'pending strategy commands must settle before archive' using errcode='55000';
   end if;
 

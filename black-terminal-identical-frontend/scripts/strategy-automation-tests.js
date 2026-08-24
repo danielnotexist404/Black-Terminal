@@ -108,6 +108,8 @@ assert.match(containmentMigration, /trg_guard_bcrda_strategy_activation/);
 assert.match(archiveMigration, /black_core_archive_strategy/);
 assert.match(archiveMigration, /active strategy targets must be disconnected before archive/);
 assert.match(archiveMigration, /pending strategy commands must settle before archive/);
+assert.match(archiveMigration, /information_schema\.columns[\s\S]*execute \$pending\$/,
+  "archive remains compatible when the independently deployed strategy execution linkage is absent");
 assert.doesNotMatch(archiveMigration, /delete from public\./i, "strategy deletion is an audit-preserving archive");
 assert.match(migration, /black_core_reorder_strategy_targets/);
 assert.doesNotMatch(`${panel}\n${apiClient}`, /credential_ref|vault_secret/i, "Strategy Lab never requests or renders vault internals");

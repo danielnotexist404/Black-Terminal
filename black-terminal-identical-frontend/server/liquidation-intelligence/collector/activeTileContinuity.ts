@@ -6,6 +6,7 @@ export interface BclifRecoveredActiveBucket<T extends BclifTimestampedColumn> {
   columns: T[];
   bucketStart: number | null;
   suppressReplayPublicationThrough: number | null;
+  discardRecoveredBucketOnResume: boolean;
   droppedColumns: number;
   droppedBuckets: number;
 }
@@ -38,7 +39,7 @@ export function recoverLatestActiveBucket<T extends BclifTimestampedColumn>(
   horizonMs: number
 ): BclifRecoveredActiveBucket<T> {
   validateCadence(cadenceMs, horizonMs);
-  if (!columns.length) return { columns: [], bucketStart: null, suppressReplayPublicationThrough: null, droppedColumns: 0, droppedBuckets: 0 };
+  if (!columns.length) return { columns: [], bucketStart: null, suppressReplayPublicationThrough: null, discardRecoveredBucketOnResume: false, droppedColumns: 0, droppedBuckets: 0 };
   assertStrictCadence(columns.map((column) => column.timestamp), cadenceMs, "checkpoint active tile");
   const bucketStarts = columns.map((column) => bclifBaseBucketStart(column.timestamp, horizonMs));
   const newestBucketStart = bucketStarts.at(-1)!;
@@ -49,6 +50,7 @@ export function recoverLatestActiveBucket<T extends BclifTimestampedColumn>(
     columns: [...recovered],
     bucketStart: newestBucketStart,
     suppressReplayPublicationThrough: firstNewestIndex > 0 ? newestBucketStart + horizonMs : null,
+    discardRecoveredBucketOnResume: firstNewestIndex > 0,
     droppedColumns: firstNewestIndex,
     droppedBuckets: new Set(bucketStarts.slice(0, firstNewestIndex)).size
   };

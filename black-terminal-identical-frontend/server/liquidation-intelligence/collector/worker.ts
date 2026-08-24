@@ -299,6 +299,7 @@ class BclifSymbolCollector {
   private lastCalibratedCutoff = 0;
   private lastEnvelope: BclifFrameEnvelope | null = null;
   private suppressReplayTilePublicationThrough: number | null = null;
+  private discardRecoveredActiveBucketOnResume = false;
   private frameTimer: NodeJS.Timeout | null = null;
   private contextTimer: NodeJS.Timeout | null = null;
   private flushTimer: NodeJS.Timeout | null = null;
@@ -774,6 +775,18 @@ class BclifSymbolCollector {
       this.suppressReplayTilePublicationThrough === null || frameEnd > this.suppressReplayTilePublicationThrough
     )) {
       this.suppressReplayTilePublicationThrough = null;
+      if (this.discardRecoveredActiveBucketOnResume) {
+        const discardedColumns = this.activeColumns.length;
+        this.activeColumns = [];
+        this.discardRecoveredActiveBucketOnResume = false;
+        this.deps.metrics.counter("bclif_legacy_checkpoint_columns_discarded_total", "Legacy active-tile columns discarded while recovering the newest bounded UTC bucket.", discardedColumns);
+        this.deps.logger.warn("collector.legacy_active_tile_fragment_discarded", {
+          symbol: this.symbol,
+          discardedColumns,
+          resumedAt: frameEnd,
+          reason: "MULTI_BUCKET_CHECKPOINT_CANNOT_BE_REPUBLISHED"
+        });
+      }
       const rasterStarted = performance.now();
       const column = this.exposure.rasterize(envelope.frame, snapshot.particles, this.confirmed, frameEnd);
       this.deps.metrics.observe("bclif_raster_duration_ms", "Exposure rasterization duration.", performance.now() - rasterStarted);
@@ -995,6 +1008,7 @@ class BclifSymbolCollector {
       const recovered = recoverLatestActiveBucket(restored, this.deps.config.tileColumnCadenceMs, BASE_TILE_HORIZON_MS);
       this.activeColumns = recovered.columns;
       this.suppressReplayTilePublicationThrough = recovered.suppressReplayPublicationThrough;
+      this.discardRecoveredActiveBucketOnResume = recovered.discardRecoveredBucketOnResume;
       if (recovered.droppedColumns > 0) {
         this.deps.metrics.counter("bclif_legacy_checkpoint_columns_discarded_total", "Legacy active-tile columns discarded while recovering the newest bounded UTC bucket.", recovered.droppedColumns);
         this.deps.logger.warn("collector.legacy_active_tile_recovered", {

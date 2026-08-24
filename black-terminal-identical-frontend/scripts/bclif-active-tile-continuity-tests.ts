@@ -20,6 +20,7 @@ assert.equal(recovered.columns.at(-1)!.timestamp, secondBucket + 351 * minute);
 assert.equal(recovered.droppedColumns, 360, "a complete legacy predecessor bucket must not remain active");
 assert.equal(recovered.droppedBuckets, 1);
 assert.equal(recovered.suppressReplayPublicationThrough, secondBucket + sixHours, "legacy replay must not republish the repaired checkpoint bucket");
+assert.equal(recovered.discardRecoveredBucketOnResume, true, "the retained legacy fragment must be discarded before a new tile is published");
 assert.equal(bclifBaseBucketStart(secondBucket, sixHours), firstBucket, "the boundary column closes the preceding bucket");
 assert.equal(bclifBaseBucketStart(secondBucket + minute, sixHours), secondBucket);
 

@@ -116,7 +116,7 @@ import { AcvdWorkerClient } from "../modules/acvd/workers/AcvdWorkerClient";
 import { DEFAULT_ACVD_SETTINGS, migrateAcvdSettings, stableHash as acvdStableHash } from "../modules/acvd/core/settings";
 import type { AcvdSettings, AcvdSnapshot } from "../modules/acvd/core/types";
 import { fetchPersistentAuthenticFlow, type PersistentFlowSnapshot } from "../modules/acvd/data/persistentFlowClient";
-import { mergePersistentAndLiveFlow } from "../modules/acvd/data/flowMerge";
+import { authenticFlowRevision, mergePersistentAndLiveFlow } from "../modules/acvd/data/flowMerge";
 import { AuctionProfileWorkerClient } from "../modules/auction-profile/worker/AuctionProfileWorkerClient";
 import { resolveAuctionVisualizationLayers } from "../modules/auction-profile/rendering/visualization";
 import type { TradeTick } from "../market-data/types";
@@ -2281,29 +2281,40 @@ export function PixiBlackChart({
     const lookback = migrateAcvdSettings({ ...indicatorAdvancedSettings.acvdOscillator, lookback: indicatorPeriods.acvdOscillator }).lookback;
     const source = engine.getSourceCandles().slice(-lookback);
     if (source.length < 2) return;
-    const start = source[0]!.time;
     const end = source.at(-1)!.time + timeframeDuration;
+    const start = Math.max(60, end - lookback * timeframeDuration);
     const identity = `${marketSymbol.exchange}:${marketSymbol.rawSymbol}:${timeframeDuration}:${start}:${end}`;
     if (acvdPersistentRequestRef.current === identity) return;
     acvdPersistentRequestRef.current = identity;
-    setAcvdPersistentFlow(null);
     setAcvdPersistentFlowError(null);
     const controller = new AbortController();
-    void fetchPersistentAuthenticFlow({
-      venue: marketSymbol.exchange,
-      symbol: marketSymbol.rawSymbol,
-      timeframeSeconds: timeframeDuration,
-      start,
-      end,
-      signal: controller.signal
-    }).then((snapshot) => {
-      if (acvdPersistentRequestRef.current !== identity) return;
-      setAcvdPersistentFlow(snapshot);
-    }).catch((error: unknown) => {
-      if (controller.signal.aborted || acvdPersistentRequestRef.current !== identity) return;
-      setAcvdPersistentFlowError(error instanceof Error ? error.message : "Authentic flow archive could not be loaded.");
-    });
-    return () => controller.abort();
+    setAcvdPersistentFlow((current) => current
+      && current.venue === marketSymbol.exchange.toUpperCase()
+      && current.symbol === marketSymbol.rawSymbol.toUpperCase()
+      && current.timeframeSeconds === timeframeDuration
+      ? current
+      : null);
+    const requestTimer = window.setTimeout(() => {
+      void fetchPersistentAuthenticFlow({
+        venue: marketSymbol.exchange,
+        symbol: marketSymbol.rawSymbol,
+        timeframeSeconds: timeframeDuration,
+        start,
+        end,
+        signal: controller.signal
+      }).then((snapshot) => {
+        if (acvdPersistentRequestRef.current !== identity) return;
+        setAcvdPersistentFlow(snapshot);
+      }).catch((error: unknown) => {
+        if (controller.signal.aborted || acvdPersistentRequestRef.current !== identity) return;
+        acvdPersistentRequestRef.current = "";
+        setAcvdPersistentFlowError(error instanceof Error ? error.message : "Authentic flow archive could not be loaded.");
+      });
+    }, 450);
+    return () => {
+      window.clearTimeout(requestTimer);
+      controller.abort();
+    };
   }, [
     visibleIndicators.acvdOscillator,
     indicatorPeriods.acvdOscillator,
@@ -2383,7 +2394,7 @@ export function PixiBlackChart({
         source.length,
         source.at(-1)?.time,
         source.at(-1)?.close,
-        flowInput.flowBars?.at(-1)?.exactTradeCount
+        authenticFlowRevision(flowInput.flowBars)
       ])}`;
       if (acvdCalculationIdentityRef.current === calculationIdentity) return;
       acvdCalculationIdentityRef.current = calculationIdentity;

@@ -5,9 +5,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { aggregateCachedFlowBars, decodeVerifiedTradeChunk, mergeAuthoritativeFlowBars, parseAuthenticCvdQuery } from "../server/market-flow/authenticCvdService.js";
+import { aggregateCachedFlowBars, decodeVerifiedTradeChunk, mergeAuthoritativeFlowBars, parseAuthenticCvdQuery, readOfficialArchiveBars } from "../server/market-flow/authenticCvdService.js";
 import { buildBybitPublicTradeArchiveUrl, parseDownloadedArchive } from "../server/market-flow/bybitPublicTradeArchive.js";
-import { mergePersistentAndLiveFlow } from "../src/modules/acvd/data/flowMerge.ts";
+import { authenticFlowRevision, mergePersistentAndLiveFlow } from "../src/modules/acvd/data/flowMerge.ts";
 import type { AuthenticFlowBarInput } from "../src/modules/acvd/core/types.ts";
 
 const source = { id: "00000000-0000-4000-8000-000000000001", symbol: "BTCUSDT", state: "LIVE", continuity_state: "DERIVED", trade_continuity_state: "OBSERVED", source_cutoff_at: new Date(1_800_180_000_000).toISOString(), trade_cutoff_at: new Date(1_800_180_000_000).toISOString() };
@@ -49,6 +49,31 @@ const overlappingBclif = [{ ...bars[0]!, buyVolume: 999, authority: "BCLIF_CANON
 assert.equal(mergeAuthoritativeFlowBars(official, overlappingBclif)[0]!.buyVolume, 5, "official completed history cannot be double counted with overlapping BCLIF chunks");
 assert.equal(mergeAuthoritativeFlowBars([{ ...official[0]!, deliveryComplete: false }], overlappingBclif)[0]!.buyVolume, 999, "a completed BCLIF bar replaces an incomplete official bucket");
 
+const pagedRows = Array.from({ length: 2_505 }, (_, index) => ({
+  time: 1_700_000_000 + index * 300,
+  buy_volume: 10,
+  sell_volume: 9,
+  buy_notional: 1_000,
+  sell_notional: 900,
+  exact_trade_count: 2,
+  total_trade_count: 2,
+  minute_count: 5,
+  delivery_complete: true
+}));
+let pageCalls = 0;
+const pagedRpc = {
+  rpc: () => ({
+    range: async (from: number, to: number) => {
+      pageCalls += 1;
+      return { data: pagedRows.slice(from, to + 1), error: null };
+    }
+  })
+};
+const pagedOfficial = await readOfficialArchiveBars(pagedRpc, { venue: "BYBIT", symbol: "BTCUSDT", timeframeSeconds: 300, start: 1_700_000_000, end: 1_700_751_500 });
+assert.equal(pagedOfficial.length, 2_505, "official archive reads past the PostgREST 1,000-row response ceiling");
+assert.equal(pageCalls, 3, "official archive pagination stops after the terminal partial page");
+assert.equal(pagedOfficial.at(-1)?.time, pagedRows.at(-1)?.time);
+
 assert.equal(buildBybitPublicTradeArchiveUrl("btcusdt", "2026-08-24"), "https://public.bybit.com/trading/BTCUSDT/BTCUSDT2026-08-24.csv.gz");
 assert.throws(() => buildBybitPublicTradeArchiveUrl("BTC/USDT", "2026-08-24"), /Invalid/);
 const archiveRoot = await mkdtemp(join(tmpdir(), "acvd-public-archive-test-"));
@@ -77,6 +102,9 @@ const archived: AuthenticFlowBarInput = { time: 1_800_000_000, buyVolume: 5, sel
 const live: AuthenticFlowBarInput = { ...archived, buyVolume: 999, buyNotional: 999, exactTradeCount: 99 };
 const merged = mergePersistentAndLiveFlow([archived.time], { version: 1, authority: "EXACT_AGGRESSOR_TRADES", venue: "BYBIT", symbol: "BTCUSDT", timeframeSeconds: 120, bars: [archived], coverage: { completeBars: 1, pendingChunks: 0, availableStart: archived.time, availableEnd: archived.time }, warning: null }, [live]);
 assert.equal(merged[0]!.buyVolume, 5, "verified archive wins over overlapping session capture and cannot double count");
+const olderChanged = [{ ...archived, time: archived.time - 120 }, archived];
+const sameTailDifferentHistory = [{ ...olderChanged[0]!, buyNotional: olderChanged[0]!.buyNotional + 1 }, archived];
+assert.notEqual(authenticFlowRevision(olderChanged), authenticFlowRevision(sameTailDifferentHistory), "an older archive update invalidates the ACVD calculation even when the last bar is unchanged");
 
 const handler = readFileSync(new URL("../api/market-flow/[action].js", import.meta.url), "utf8");
 assert.match(handler, /requireApiSecurity/);

@@ -13,4 +13,28 @@ export function mergePersistentAndLiveFlow(candleTimes: readonly number[], persi
   });
 }
 
+export function authenticFlowRevision(bars: readonly AuthenticFlowBarInput[] | undefined) {
+  if (!bars?.length) return "00000000";
+  const bytes = new ArrayBuffer(8);
+  const view = new DataView(bytes);
+  let hash = 2166136261;
+  const mix = (value: number) => {
+    view.setFloat64(0, Number.isFinite(value) ? value : Number.NaN, true);
+    for (let offset = 0; offset < 8; offset++) {
+      hash ^= view.getUint8(offset);
+      hash = Math.imul(hash, 16777619);
+    }
+  };
+  for (const bar of bars) {
+    mix(bar.time);
+    mix(bar.buyNotional);
+    mix(bar.sellNotional);
+    mix(bar.exactTradeCount);
+    mix(bar.totalTradeCount);
+    hash ^= bar.deliveryComplete ? 1 : 0;
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
 function empty(time: number): AuthenticFlowBarInput { return { time, buyVolume: 0, sellVolume: 0, unknownVolume: 0, buyNotional: 0, sellNotional: 0, unknownNotional: 0, exactTradeCount: 0, totalTradeCount: 0, deliveryComplete: false }; }

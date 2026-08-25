@@ -5,6 +5,7 @@ const MINUTE_MS = 60_000;
 const MAX_BARS = 20_000;
 const MAX_CHUNKS = 20_000;
 const MAX_CACHE_ROWS = 250_000;
+const POSTGREST_PAGE_SIZE = 1_000;
 // A healthy high-volume market can publish more than one immutable chunk per
 // minute.  Keep enough headroom to cover several hours after an API restart,
 // while retaining a hard request-time bound.
@@ -85,19 +86,27 @@ export async function readAuthenticCvdBars(controlPlane, storageClient, query) {
   };
 }
 
-async function readOfficialArchiveBars(supabase, scope) {
+export async function readOfficialArchiveBars(supabase, scope) {
   if (typeof supabase?.rpc !== "function") return [];
-  const result = await supabase.rpc("acvd_read_bybit_public_trade_bars", {
-    p_symbol: scope.symbol,
-    p_timeframe_seconds: scope.timeframeSeconds,
-    p_start_epoch: scope.start,
-    p_end_epoch: scope.end
-  });
-  if (result.error) {
-    if (["42883", "PGRST202"].includes(String(result.error.code || ""))) throw httpError(503, "Official Bybit archive migration is not deployed.", "OFFICIAL_FLOW_ARCHIVE_NOT_DEPLOYED");
-    throw result.error;
+  const rows = [];
+  for (let offset = 0; offset < MAX_BARS; offset += POSTGREST_PAGE_SIZE) {
+    const request = supabase.rpc("acvd_read_bybit_public_trade_bars", {
+      p_symbol: scope.symbol,
+      p_timeframe_seconds: scope.timeframeSeconds,
+      p_start_epoch: scope.start,
+      p_end_epoch: scope.end
+    });
+    const paged = typeof request?.range === "function";
+    const result = await (paged ? request.range(offset, offset + POSTGREST_PAGE_SIZE - 1) : request);
+    if (result.error) {
+      if (["42883", "PGRST202"].includes(String(result.error.code || ""))) throw httpError(503, "Official Bybit archive migration is not deployed.", "OFFICIAL_FLOW_ARCHIVE_NOT_DEPLOYED");
+      throw result.error;
+    }
+    const page = result.data || [];
+    rows.push(...page);
+    if (!paged || page.length < POSTGREST_PAGE_SIZE) break;
   }
-  return (result.data || []).map((row) => ({
+  return rows.slice(0, MAX_BARS).map((row) => ({
     time: Number(row.time),
     buyVolume: numeric(row, "buyVolume", "buy_volume"),
     sellVolume: numeric(row, "sellVolume", "sell_volume"),

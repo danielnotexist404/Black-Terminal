@@ -31,21 +31,32 @@ export function parseAuthenticCvdQuery(query = {}) {
 
 export async function readAuthenticCvdBars(controlPlane, storageClient, query) {
   const scope = parseAuthenticCvdQuery(query);
+  const officialBars = await readOfficialArchiveBars(controlPlane, scope);
   const source = await resolveSource(controlPlane, scope);
-  if (!source) return unavailable(scope, "No persistent BCLIF trade archive exists for this Bybit market.");
-  const tradeOffset = await resolveTradeOffset(controlPlane, source.id);
-  source.trade_continuity_state = tradeOffset?.continuity_state || "MISSING";
-  source.trade_cutoff_at = tradeOffset?.last_exchange_timestamp || null;
-  const chunks = await readChunks(controlPlane, source.id, scope);
-  if (!chunks.length) return unavailable(scope, "No verified BCLIF trade chunks overlap the requested chart history.");
-  let cached = await readCache(controlPlane, source.id, scope);
-  const cachedChunks = new Set(cached.map((row) => String(row.chunk_id)));
-  const missing = chunks.filter((chunk) => !cachedChunks.has(String(chunk.id)));
-  const lazy = missing.slice(-MAX_LAZY_CHUNKS);
-  for (const chunk of lazy) await materializeChunk(controlPlane, storageClient, source, chunk);
-  if (lazy.length) cached = await readCache(controlPlane, source.id, scope);
-  const bars = aggregateCachedFlowBars(cached, scope, source);
+  let chunks = [];
+  let missing = [];
+  let lazy = [];
+  let bclifBars = [];
+  if (source) {
+    const tradeOffset = await resolveTradeOffset(controlPlane, source.id);
+    source.trade_continuity_state = tradeOffset?.continuity_state || "MISSING";
+    source.trade_cutoff_at = tradeOffset?.last_exchange_timestamp || null;
+    chunks = await readChunks(controlPlane, source.id, scope);
+    if (chunks.length) {
+      let cached = await readCache(controlPlane, source.id, scope);
+      const cachedChunks = new Set(cached.map((row) => String(row.chunk_id)));
+      missing = chunks.filter((chunk) => !cachedChunks.has(String(chunk.id)));
+      lazy = missing.slice(-MAX_LAZY_CHUNKS);
+      for (const chunk of lazy) await materializeChunk(controlPlane, storageClient, source, chunk);
+      if (lazy.length) cached = await readCache(controlPlane, source.id, scope);
+      bclifBars = aggregateCachedFlowBars(cached, scope, source);
+    }
+  }
+  const bars = mergeAuthoritativeFlowBars(officialBars, bclifBars);
+  if (!bars.length) return unavailable(scope, "No completed official Bybit archive or verified BCLIF trade chunks overlap the requested chart history.");
   const complete = bars.filter((bar) => bar.deliveryComplete).length;
+  const officialComplete = officialBars.filter((bar) => bar.deliveryComplete).length;
+  const bclifComplete = bclifBars.filter((bar) => bar.deliveryComplete).length;
   return {
     version: 1,
     authority: complete ? "EXACT_AGGRESSOR_TRADES" : "UNAVAILABLE",
@@ -59,17 +70,57 @@ export async function readAuthenticCvdBars(controlPlane, storageClient, query) {
       availableStart: bars[0]?.time ?? null,
       availableEnd: bars.at(-1)?.time ?? null,
       completeBars: complete,
+      officialArchiveBars: officialComplete,
+      liveBclifBars: bclifComplete,
       archivedChunks: chunks.length,
       pendingChunks: Math.max(0, missing.length - lazy.length),
-      sourceState: String(source.state || "UNKNOWN"),
-      continuity: String(source.trade_continuity_state || "MISSING")
+      sourceState: String(source?.state || (officialComplete ? "OFFICIAL_ARCHIVE" : "MISSING")),
+      continuity: String(source?.trade_continuity_state || (officialComplete ? "ARCHIVED" : "MISSING"))
     },
     warning: missing.length > lazy.length
       ? "Authentic archive cache is catching up; only checksum-verified completed bars are displayed."
       : complete
-        ? "Historical CVD is derived from checksum-verified Bybit aggressor trades. Gaps remain unavailable and are never synthesized."
+        ? "Historical CVD is derived from official Bybit public taker-side archives and checksum-verified live BCLIF aggressor trades. Gaps remain unavailable and are never synthesized."
         : "Verified trade history exists, but no complete causal interval is available yet."
   };
+}
+
+async function readOfficialArchiveBars(supabase, scope) {
+  if (typeof supabase?.rpc !== "function") return [];
+  const result = await supabase.rpc("acvd_read_bybit_public_trade_bars", {
+    p_symbol: scope.symbol,
+    p_timeframe_seconds: scope.timeframeSeconds,
+    p_start_epoch: scope.start,
+    p_end_epoch: scope.end
+  });
+  if (result.error) {
+    if (["42883", "PGRST202"].includes(String(result.error.code || ""))) throw httpError(503, "Official Bybit archive migration is not deployed.", "OFFICIAL_FLOW_ARCHIVE_NOT_DEPLOYED");
+    throw result.error;
+  }
+  return (result.data || []).map((row) => ({
+    time: Number(row.time),
+    buyVolume: numeric(row, "buyVolume", "buy_volume"),
+    sellVolume: numeric(row, "sellVolume", "sell_volume"),
+    unknownVolume: 0,
+    buyNotional: numeric(row, "buyNotional", "buy_notional"),
+    sellNotional: numeric(row, "sellNotional", "sell_notional"),
+    unknownNotional: 0,
+    exactTradeCount: numeric(row, "exactTradeCount", "exact_trade_count"),
+    totalTradeCount: numeric(row, "totalTradeCount", "total_trade_count"),
+    deliveryComplete: Boolean(row.deliveryComplete ?? row.delivery_complete),
+    authority: "BYBIT_OFFICIAL_PUBLIC_ARCHIVE"
+  })).filter((bar) => Number.isFinite(bar.time));
+}
+
+export function mergeAuthoritativeFlowBars(officialBars = [], bclifBars = []) {
+  const merged = new Map();
+  for (const bar of officialBars) merged.set(Number(bar.time), bar);
+  for (const bar of bclifBars) {
+    const time = Number(bar.time);
+    const existing = merged.get(time);
+    if (!existing || (!existing.deliveryComplete && bar.deliveryComplete)) merged.set(time, { ...bar, authority: "BCLIF_CANONICAL_TRADE_CHUNKS" });
+  }
+  return [...merged.values()].sort((left, right) => Number(left.time) - Number(right.time));
 }
 
 export async function backfillAuthenticCvdCache(controlPlane, storageClient, options = {}) {

@@ -5,7 +5,10 @@ const MINUTE_MS = 60_000;
 const MAX_BARS = 20_000;
 const MAX_CHUNKS = 20_000;
 const MAX_CACHE_ROWS = 250_000;
-const MAX_LAZY_CHUNKS = 24;
+// A healthy high-volume market can publish more than one immutable chunk per
+// minute.  Keep enough headroom to cover several hours after an API restart,
+// while retaining a hard request-time bound.
+const MAX_LAZY_CHUNKS = 512;
 const MAX_COMPRESSED_BYTES = 50 * 1024 * 1024;
 const MAX_UNCOMPRESSED_BYTES = 256 * 1024 * 1024;
 const EVENT_PATH = /^events\/v[1-9][0-9]*\/BYBIT\/linear_perpetual\/[A-Z0-9_-]{2,40}\/TRADE\/[0-9]{10,16}\/[0-9a-f-]{36}-[0-9a-f]{64}\.events\.gz$/;

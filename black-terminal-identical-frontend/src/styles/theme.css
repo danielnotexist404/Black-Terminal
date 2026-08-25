@@ -7111,6 +7111,7 @@ body.resizing-layout * {
   position: absolute;
   inset: 44px 0 0;
   overflow: hidden;
+  background: #000;
 }
 
 .qalc-chart-overlay {
@@ -7366,6 +7367,11 @@ body.resizing-layout * {
   display: block;
   width: 100% !important;
   height: 100% !important;
+  background: #000;
+}
+
+.pixi-chart-host.chart-surface-recovering canvas {
+  visibility: hidden;
 }
 
 .liquidation-field-settings {

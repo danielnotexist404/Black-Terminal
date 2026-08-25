@@ -346,6 +346,9 @@ export class BlackChartEngine {
   private resizeRaf?: number;
   private drawRaf?: number;
   private renderRaf?: number;
+  private visibilityRecoveryRaf?: number;
+  private visibilitySettleRaf?: number;
+  private webglContextLost = false;
   private mockTimer?: number;
   private countdownTimer?: number;
   private frameCount = 0;
@@ -584,7 +587,9 @@ export class BlackChartEngine {
     this.releaseResizeObserver = blackCoreResourceTracker.acquire("observer", `${this.resourceOwner}:resize`);
     this.resizeObserver.observe(this.host);
     window.addEventListener("black-terminal-layout-resize", this.queueResize);
-    window.addEventListener("visibilitychange", this.handleVisibilityChange);
+    document.addEventListener("visibilitychange", this.handleVisibilityChange);
+    window.addEventListener("pageshow", this.handlePageShow);
+    window.addEventListener("focus", this.handleWindowFocus);
     this.releaseVisibilityListener = blackCoreResourceTracker.acquire("listener", `${this.resourceOwner}:visibility`);
 
     this.countdownTimer = window.setInterval(() => this.updateCountdown(), 1000);
@@ -994,13 +999,17 @@ export class BlackChartEngine {
 
   private onBclifContextLost = (event: Event) => {
     event.preventDefault();
+    this.webglContextLost = true;
+    this.host.classList.add("chart-surface-recovering");
+    this.cancelScheduledFrames();
     this.liquidationFieldRenderer.handleContextLost();
   };
 
   private onBclifContextRestored = () => {
+    this.webglContextLost = false;
     this.liquidationFieldRenderer.handleContextRestored();
     this.liquidationFieldRenderer.setState(this.liquidationFieldSnapshot, this.liquidationFieldSettings);
-    this.queueDraw();
+    this.recoverVisibleSurface();
   };
 
   destroy() {
@@ -1014,11 +1023,11 @@ export class BlackChartEngine {
     window.removeEventListener("black-terminal-layout-resize", this.queueResize);
     this.app.canvas.removeEventListener("webglcontextlost", this.onBclifContextLost);
     this.app.canvas.removeEventListener("webglcontextrestored", this.onBclifContextRestored);
-    window.removeEventListener("visibilitychange", this.handleVisibilityChange);
-    if (this.resizeRaf) window.cancelAnimationFrame(this.resizeRaf);
-    if (this.drawRaf) window.cancelAnimationFrame(this.drawRaf);
-    if (this.renderRaf) window.cancelAnimationFrame(this.renderRaf);
-    this.host.classList.remove("price-scale-dragging", "price-scale-hover", "drawing-eraser");
+    document.removeEventListener("visibilitychange", this.handleVisibilityChange);
+    window.removeEventListener("pageshow", this.handlePageShow);
+    window.removeEventListener("focus", this.handleWindowFocus);
+    this.cancelScheduledFrames();
+    this.host.classList.remove("price-scale-dragging", "price-scale-hover", "drawing-eraser", "chart-surface-recovering");
     this.setReplaySelectionMode(false);
     this.resizeObserver?.disconnect();
     this.releaseResizeObserver?.();
@@ -1165,14 +1174,51 @@ export class BlackChartEngine {
   private handleVisibilityChange = () => {
     if (this.destroyed) return;
     if (document.visibilityState === "visible") {
-      this.queueDraw();
+      this.recoverVisibleSurface();
     } else {
-      if (this.drawRaf) window.cancelAnimationFrame(this.drawRaf);
-      this.drawRaf = undefined;
-      if (this.renderRaf) window.cancelAnimationFrame(this.renderRaf);
-      this.renderRaf = undefined;
+      this.host.classList.add("chart-surface-recovering");
+      this.cancelScheduledFrames();
     }
   };
+
+  private handlePageShow = () => {
+    this.recoverVisibleSurface();
+  };
+
+  private handleWindowFocus = () => {
+    if (document.visibilityState === "visible") this.recoverVisibleSurface();
+  };
+
+  private cancelScheduledFrames() {
+    if (this.resizeRaf) window.cancelAnimationFrame(this.resizeRaf);
+    if (this.drawRaf) window.cancelAnimationFrame(this.drawRaf);
+    if (this.renderRaf) window.cancelAnimationFrame(this.renderRaf);
+    if (this.visibilityRecoveryRaf) window.cancelAnimationFrame(this.visibilityRecoveryRaf);
+    if (this.visibilitySettleRaf) window.cancelAnimationFrame(this.visibilitySettleRaf);
+    this.resizeRaf = undefined;
+    this.drawRaf = undefined;
+    this.renderRaf = undefined;
+    this.visibilityRecoveryRaf = undefined;
+    this.visibilitySettleRaf = undefined;
+  }
+
+  private recoverVisibleSurface() {
+    if (this.destroyed || this.webglContextLost || document.visibilityState !== "visible") return;
+    this.host.classList.add("chart-surface-recovering");
+    this.cancelScheduledFrames();
+    this.visibilityRecoveryRaf = window.requestAnimationFrame(() => {
+      this.visibilityRecoveryRaf = undefined;
+      if (this.destroyed || this.webglContextLost || document.visibilityState !== "visible") return;
+      this.resize();
+      this.visibilitySettleRaf = window.requestAnimationFrame(() => {
+        this.visibilitySettleRaf = undefined;
+        if (this.destroyed || this.webglContextLost || document.visibilityState !== "visible") return;
+        this.draw();
+        this.app.render();
+        this.host.classList.remove("chart-surface-recovering");
+      });
+    });
+  }
 
   private onContextMenu = (e: MouseEvent) => {
     e.preventDefault();

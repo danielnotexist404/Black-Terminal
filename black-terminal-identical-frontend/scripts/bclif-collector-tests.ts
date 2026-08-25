@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { BclifHealthState } from "../server/liquidation-intelligence/collector/health.ts";
 import { parseSymbols } from "../server/liquidation-intelligence/collector/runtimeConfig.ts";
+import { isBclifTradeTopicFresh } from "../server/liquidation-intelligence/collector/topicFreshness.ts";
 import { deriveMeaningfulClusterPredictions } from "../server/liquidation-intelligence/model/calibrationRuntime.ts";
 import { buildCanonicalFrame, consumeOpenInterestObservation } from "../server/liquidation-intelligence/normalization/canonicalFrame.ts";
 import { BclifCalibrationRepository } from "../server/liquidation-intelligence/state/calibrationRepository.ts";
@@ -57,6 +58,10 @@ assert.equal(frame.frame.openInterestDelta, 125);
 assert.equal(frame.frame.aggressiveBuyNotional, 0);
 assert.equal(frame.frame.certainty.trades, "OBSERVED", "a quiet but continuously subscribed trade stream is observed zero flow");
 assert.equal(frame.frame.certainty.liquidations, "OBSERVED", "a quiet liquidation stream is not an invented coverage gap");
+
+assert.equal(isBclifTradeTopicFresh(100_000, 145_000, 5_000), true, "a topic observation at the freshness boundary remains certified");
+assert.equal(isBclifTradeTopicFresh(100_000, 145_001, 5_000), false, "websocket pongs must not certify a stale trade topic");
+assert.equal(isBclifTradeTopicFresh(null, 145_000, 5_000), false, "an unobserved trade topic is never certified");
 
 assert.throws(() => buildCanonicalFrame({
   symbol: "BTCUSDT", frameStart: 115_000, frameEnd: 120_000, sourceCutoffTimestamp: 120_000,
@@ -366,6 +371,8 @@ assert.ok(dedupQuerySizes.every((size) => size <= 50), "durable dedup lookups mu
 const workerSource = readFileSync(new URL("../server/liquidation-intelligence/collector/worker.ts", import.meta.url), "utf8");
 assert.match(workerSource, /for \(const collector of this\.symbols\) await collector\.startLive\(\)/, "collector startup must await every source-authority transition");
 assert.match(workerSource, /collector\.startup_failed", \{ failedPhase, error:/, "startup failures must report the exact initialization phase");
+assert.match(workerSource, /forceReconnect\("trade topic freshness deadline exceeded"\)/, "a silent-but-open trade topic must force a bounded websocket resubscription");
+assert.match(workerSource, /isBclifTradeTopicFresh\(this\.lastTradeAt, frameEnd, this\.deps\.config\.frameCadenceMs\)/, "zero-flow coverage must be certified by trade-topic freshness rather than transport pongs");
 assert.ok(
   (workerSource.match(/archived\.has\(bclifArchivedEventIdentity\(event\)\)/g) || []).length >= 3,
   "historical accept and spool recovery must compare composite event identities"

@@ -55,6 +55,7 @@ import { fetchBybitFundingHistory, type BclifFundingPoint } from "../sources/byb
 import { fetchBybitAccountRatios } from "../sources/bybitRatios.ts";
 import { BybitOrderBookReconstructor } from "../sources/bybitOrderBook.ts";
 import { BybitPublicSocket, verifyBybitServerClock } from "../sources/bybitTransport.ts";
+import { isBclifTradeTopicFresh } from "./topicFreshness.ts";
 import {
   assertSingleBoundedBucket,
   hasBclifPublishableActiveRange,
@@ -319,6 +320,7 @@ class BclifSymbolCollector {
   private lastBookAt: number | null = null;
   private lastFundingAt: number | null = null;
   private reconnects = 0;
+  private tradeFreshnessReconnectPending = false;
   private gaps = 0;
   private contextPolls = 0;
 
@@ -417,6 +419,7 @@ class BclifSymbolCollector {
       onOpen: () => {
         this.streamConnected = true;
         this.subscriptionsAcknowledged = false;
+        this.tradeFreshnessReconnectPending = false;
         this.lastTransportActivityAt = Date.now();
         this.book.connected();
         this.updateHealth("WEBSOCKET", true, null);
@@ -433,6 +436,7 @@ class BclifSymbolCollector {
       onClose: (reason) => {
         this.streamConnected = false;
         this.subscriptionsAcknowledged = false;
+        this.tradeFreshnessReconnectPending = false;
         if (this.book.state() !== "DISCONNECTED") this.book.transportGap(reason);
         this.gaps += 1;
         this.bumpContinuity(["TRADE", "LIQUIDATION", "BOOK_FRAME"], 1, 0);
@@ -494,6 +498,7 @@ class BclifSymbolCollector {
     const now = Date.now();
     const frameFresh = this.lastEnvelope !== null && now - this.lastEnvelope.sourceCutoffTimestamp <= Math.max(30_000, this.deps.config.frameCadenceMs * 3);
     const transportFresh = this.lastTransportActivityAt !== null && now - this.lastTransportActivityAt <= 45_000;
+    const tradeTopicFresh = isBclifTradeTopicFresh(this.lastTradeAt, now, this.deps.config.frameCadenceMs);
     const bookFresh = this.lastBookAt !== null && now - this.lastBookAt <= Math.max(15_000, this.deps.config.bookFrameCadenceMs * 3);
     const oiFresh = this.lastConsumedOpenInterest?.availabilityMode === "LIVE_OBSERVATION"
       && now - this.lastConsumedOpenInterest.availableAt <= Math.max(30_000, this.deps.config.contextPollIntervalMs * 2);
@@ -503,6 +508,7 @@ class BclifSymbolCollector {
       && this.producedLiveFrame
       && frameFresh
       && transportFresh
+      && tradeTopicFresh
       && bookFresh
       && oiFresh
       && this.book.state() === "LIVE";
@@ -520,6 +526,7 @@ class BclifSymbolCollector {
       this.trades.push(...accepted as BclifCanonicalEvent<PersistentPublicTrade>[]);
       if (accepted.length) {
         this.lastTradeAt = receivedTimestamp;
+        this.tradeFreshnessReconnectPending = false;
         this.observedTrade = true;
         this.deps.metrics.counter("bclif_trade_events_total", "Observed canonical public trades.", accepted.length);
       }
@@ -724,7 +731,7 @@ class BclifSymbolCollector {
     const book = latestKnown(this.bookFrames, frameEnd, (item) => item.exchangeTimestamp, (item) => item.receivedTimestamp);
     const bookFresh = book !== null && frameEnd - book.receivedTimestamp <= Math.max(15_000, this.deps.config.bookFrameCadenceMs * 3);
     const tradeInFrame = this.trades.some((event) => knownAt(event) > frameStart && knownAt(event) <= frameEnd);
-    const liveTradeContinuity = this.lastTransportActivityAt !== null && frameEnd - this.lastTransportActivityAt <= 45_000;
+    const liveTradeContinuity = isBclifTradeTopicFresh(this.lastTradeAt, frameEnd, this.deps.config.frameCadenceMs);
     const liquidationObserved = this.liquidations.some((event) => knownAt(event) > frameStart && knownAt(event) <= frameEnd);
     const liveAcknowledged = this.streamConnected && this.subscriptionsAcknowledged;
     const bookStateBeforeStaleCheck = this.book.state();
@@ -1156,13 +1163,19 @@ class BclifSymbolCollector {
     const now = Date.now();
     const bookStale = !this.subscriptionsAcknowledged || freshness.orderbookAgeMs === null || freshness.orderbookAgeMs > Math.max(15_000, this.deps.config.bookFrameCadenceMs * 3);
     const transportStale = this.lastTransportActivityAt === null || now - this.lastTransportActivityAt > 45_000;
-    const tradesStale = !this.streamConnected || !this.subscriptionsAcknowledged || transportStale;
+    const tradeTopicStale = !isBclifTradeTopicFresh(this.lastTradeAt, now, this.deps.config.frameCadenceMs);
+    const tradesStale = !this.streamConnected || !this.subscriptionsAcknowledged || transportStale || tradeTopicStale;
     const oiStale = freshness.openInterestAgeMs === null || freshness.openInterestAgeMs > Math.max(30_000, this.deps.config.contextPollIntervalMs * 2);
     const secondaryStale = !this.streamConnected || bookStale || tradesStale || oiStale;
     this.deps.health.degrade("ORDERBOOK_STALE", bookStale, this.symbol);
     this.deps.health.degrade("TRADES_STALE", tradesStale, this.symbol);
     this.deps.health.degrade("LIQUIDATIONS_STALE", !this.streamConnected || !this.subscriptionsAcknowledged, this.symbol);
     this.deps.health.degrade("OI_STALE", oiStale, this.symbol);
+    this.updateHealth("TRADE", !tradesStale, tradesStale ? "trade topic freshness deadline exceeded" : null);
+    if (tradeTopicStale && this.streamConnected && this.subscriptionsAcknowledged && !this.tradeFreshnessReconnectPending) {
+      this.tradeFreshnessReconnectPending = true;
+      this.socket?.forceReconnect("trade topic freshness deadline exceeded");
+    }
     await this.deps.sourceRepository.updateSource(this.sourceId, {
       state: !this.liveReady() ? "SYNCING" : secondaryStale ? "DEGRADED" : "LIVE",
       continuityState: freshness.openInterestAgeMs !== null ? "DERIVED" : "MISSING",

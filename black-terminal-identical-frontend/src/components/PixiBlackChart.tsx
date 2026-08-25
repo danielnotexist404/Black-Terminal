@@ -112,6 +112,9 @@ import type { AuctionProfileSettings, AuctionProfileSnapshot, CanonicalTrade } f
 import { retainCertifiedRadapSnapshots } from "../modules/auction-profile/core/stability";
 import { canonicalCvdService, normalizeCanonicalTrade } from "../modules/auction-profile/data/tradeSource";
 import { buildDDAProFlowInput } from "../modules/dda-pro/data/flowPressureSource";
+import { AcvdWorkerClient } from "../modules/acvd/workers/AcvdWorkerClient";
+import { DEFAULT_ACVD_SETTINGS, migrateAcvdSettings, stableHash as acvdStableHash } from "../modules/acvd/core/settings";
+import type { AcvdSettings, AcvdSnapshot } from "../modules/acvd/core/types";
 import { AuctionProfileWorkerClient } from "../modules/auction-profile/worker/AuctionProfileWorkerClient";
 import { resolveAuctionVisualizationLayers } from "../modules/auction-profile/rendering/visualization";
 import type { TradeTick } from "../market-data/types";
@@ -323,7 +326,8 @@ const configuredAlertIndicatorLabels: Record<AlertIndicatorTarget, string> = {
   ema20: "EMA 20",
   ema50: "EMA 50",
   ema200: "EMA 200",
-  ddaPro: "BC-RDA"
+  ddaPro: "BC-RDA",
+  acvd: "BC-ACVD"
 };
 
 const configuredAlertConditionLabels: Record<AlertCondition, string> = {
@@ -475,6 +479,7 @@ export function PixiBlackChart({
   const previousOscillatorVisibilityRef = useRef<Record<OscillatorIndicatorKey, boolean>>({
     openInterestOscillator: visibleIndicators.openInterestOscillator,
     ddaProOscillator: visibleIndicators.ddaProOscillator,
+    acvdOscillator: visibleIndicators.acvdOscillator,
     zScoreOscillator: visibleIndicators.zScoreOscillator,
     waveTrendOscillator: visibleIndicators.waveTrendOscillator
   });
@@ -494,6 +499,13 @@ export function PixiBlackChart({
   const ddaDispatchedEventsRef = useRef(new Set<string>());
   const ddaConfiguredEventsRef = useRef(new Set<string>());
   const ddaSignalAlertArmedAtRef = useRef(new Map<string, number>());
+  const [acvdSnapshot, setAcvdSnapshot] = useState<AcvdSnapshot | null>(null);
+  const [acvdStatus, setAcvdStatus] = useState<"IDLE" | "CALCULATING" | "READY" | "UNAVAILABLE">("IDLE");
+  const acvdWorkerRef = useRef<AcvdWorkerClient | null>(null);
+  const acvdCalculationIdentityRef = useRef("");
+  const acvdDispatchedSignalsRef = useRef(new Set<string>());
+  const acvdConfiguredSignalsRef = useRef(new Set<string>());
+  const acvdSignalAlertArmedAtRef = useRef(new Map<string, number>());
   const [auctionProfileSnapshots, setAuctionProfileSnapshots] = useState<AuctionProfileSnapshot[]>([]);
   const auctionProfileSnapshotsRef = useRef<AuctionProfileSnapshot[]>([]);
   const auctionProfileSnapshot = auctionProfileSnapshots.at(-1) ?? null;
@@ -1343,6 +1355,7 @@ export function PixiBlackChart({
       auctionProfileSettings: normalizedAuctionProfileSettings,
       auctionProfileSnapshots,
       ddaProSnapshot,
+      acvdSnapshot,
       onAlertEditRequest: (alertId) => {
         setEditingChartAlertId(alertId);
         setChartContextMenu(null);
@@ -2246,8 +2259,111 @@ export function PixiBlackChart({
     return () => {
       ddaProWorkerRef.current?.dispose();
       ddaProWorkerRef.current = null;
+      acvdWorkerRef.current?.dispose();
+      acvdWorkerRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!visibleIndicators.acvdOscillator || !engine) {
+      acvdCalculationIdentityRef.current = "";
+      setAcvdSnapshot(null);
+      setAcvdStatus("IDLE");
+      engine?.setAcvdState(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const settings = migrateAcvdSettings({
+        ...indicatorAdvancedSettings.acvdOscillator,
+        lookback: indicatorPeriods.acvdOscillator
+      });
+      const timeframeDuration = timeframeSeconds[timeframe];
+      const available = engine.getSourceCandles().slice(-settings.lookback);
+      const latestIsDeveloping = Boolean(available.length && (available.at(-1)?.time ?? 0) + timeframeDuration > Date.now() / 1000);
+      const source = settings.realtimeMode === "CONFIRMED_BARS" && latestIsDeveloping ? available.slice(0, -1) : available;
+      if (source.length < 2) return;
+      const capture = ddaFlowCaptureRef.current;
+      const sourceMatches = capture.streamHealthy
+        && capture.venue === marketSymbol.exchange
+        && capture.symbol === marketSymbol.rawSymbol
+        && chartSourceVenueRef.current === marketSymbol.exchange;
+      const flowInput = sourceMatches
+        ? buildDDAProFlowInput({
+            candles: source,
+            trades: canonicalCvdService.getTrades({
+              venue: marketSymbol.exchange,
+              symbol: marketSymbol.rawSymbol,
+              start: source[0]?.time ?? 0,
+              end: (source.at(-1)?.time ?? 0) + timeframeDuration
+            }),
+            timeframeSeconds: timeframeDuration,
+            captureStartedAt: capture.captureStartedAt,
+            streamHealthy: true,
+            consumerLabel: "BC-ACVD"
+          })
+        : {
+            flowBars: undefined,
+            flowAuthority: "UNAVAILABLE" as const,
+            flowWarning: chartSourceVenueRef.current !== marketSymbol.exchange
+              ? "BC-ACVD is unavailable because chart candles and authentic trade flow are from different venues."
+              : "BC-ACVD is warming until the venue-matched aggressor stream is continuous and healthy."
+          };
+      const calculationInput = {
+        candles: source,
+        flowBars: flowInput.flowBars,
+        flowAuthority: flowInput.flowAuthority,
+        flowWarning: flowInput.flowWarning,
+        settings,
+        timeframeSeconds: timeframeDuration,
+        lastBarConfirmed: settings.realtimeMode === "CONFIRMED_BARS" || !latestIsDeveloping,
+        marketIdentity: `${marketSymbol.exchange}:${marketSymbol.rawSymbol}:${timeframe}`
+      };
+      const calculationIdentity = `${calculationInput.marketIdentity}:${ddaProSourceRevision}:${acvdStableHash([
+        settings,
+        source.length,
+        source.at(-1)?.time,
+        source.at(-1)?.close,
+        flowInput.flowBars?.at(-1)?.exactTradeCount
+      ])}`;
+      if (acvdCalculationIdentityRef.current === calculationIdentity) return;
+      acvdCalculationIdentityRef.current = calculationIdentity;
+      const worker = acvdWorkerRef.current ?? new AcvdWorkerClient();
+      acvdWorkerRef.current = worker;
+      setAcvdStatus("CALCULATING");
+      void worker.calculate(calculationInput).then((snapshot) => {
+        if (acvdCalculationIdentityRef.current !== calculationIdentity) return;
+        setAcvdSnapshot(snapshot);
+        setAcvdStatus(snapshot.authority === "EXACT_AGGRESSOR_TRADES" ? "READY" : "UNAVAILABLE");
+        engineRef.current?.setAcvdState(snapshot);
+        const nowSeconds = Date.now() / 1000;
+        const freshSignalWindow = Math.max(5, Math.min(60, timeframeDuration * 0.1));
+        for (const signal of snapshot.signals) {
+          if (!signal.finalized || acvdDispatchedSignalsRef.current.has(signal.id)) continue;
+          acvdDispatchedSignalsRef.current.add(signal.id);
+          if (signal.executionEligibleTimestamp > nowSeconds || nowSeconds - signal.executionEligibleTimestamp > freshSignalWindow) continue;
+          window.dispatchEvent(new CustomEvent("black-terminal:acvd-signal", { detail: signal }));
+        }
+      }).catch((error: unknown) => {
+        if (acvdCalculationIdentityRef.current !== calculationIdentity || (error instanceof Error && error.message.includes("STALE_GENERATION"))) return;
+        console.error("BC-ACVD calculation failed", error);
+        acvdCalculationIdentityRef.current = "";
+        setAcvdStatus("UNAVAILABLE");
+        engineRef.current?.setAcvdState(null);
+      });
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [
+    visibleIndicators.acvdOscillator,
+    indicatorPeriods.acvdOscillator,
+    indicatorAdvancedSettings.acvdOscillator,
+    marketSymbol.exchange,
+    marketSymbol.rawSymbol,
+    timeframe,
+    ddaProSourceRevision,
+    lastCandle?.time,
+    lastCandle?.close
+  ]);
 
   useEffect(() => {
     const engine = engineRef.current;
@@ -2361,6 +2477,9 @@ export function PixiBlackChart({
     ddaDispatchedEventsRef.current.clear();
     ddaConfiguredEventsRef.current.clear();
     ddaSignalAlertArmedAtRef.current.clear();
+    acvdDispatchedSignalsRef.current.clear();
+    acvdConfiguredSignalsRef.current.clear();
+    acvdSignalAlertArmedAtRef.current.clear();
   }, [marketSymbol.exchange, marketSymbol.rawSymbol, timeframe]);
 
   useEffect(() => {
@@ -2528,6 +2647,7 @@ export function PixiBlackChart({
     previousOscillatorVisibilityRef.current = {
       openInterestOscillator: visibleIndicators.openInterestOscillator,
       ddaProOscillator: visibleIndicators.ddaProOscillator,
+      acvdOscillator: visibleIndicators.acvdOscillator,
       zScoreOscillator: visibleIndicators.zScoreOscillator,
       waveTrendOscillator: visibleIndicators.waveTrendOscillator
     };
@@ -2535,6 +2655,7 @@ export function PixiBlackChart({
     onIndicatorAdvancedSettingsChange,
     visibleIndicators.openInterestOscillator,
     visibleIndicators.ddaProOscillator,
+    visibleIndicators.acvdOscillator,
     visibleIndicators.zScoreOscillator,
     visibleIndicators.waveTrendOscillator
   ]);
@@ -3212,7 +3333,11 @@ export function PixiBlackChart({
       exchange: exchangeLabel,
       timeframe,
       indicator,
-      condition: definition.indicator === "ddaPro" ? (definition.ddaSignal ?? "BC-RDA signal").replaceAll("_", " ") : configuredAlertConditionLabels[definition.condition],
+      condition: definition.indicator === "ddaPro"
+        ? (definition.ddaSignal ?? "BC-RDA signal").replaceAll("_", " ")
+        : definition.indicator === "acvd"
+          ? (definition.acvdSignal ?? "BC-ACVD signal").replaceAll("_", " ")
+          : configuredAlertConditionLabels[definition.condition],
       price: current.close.toFixed(2),
       level: level === undefined ? undefined : level.toFixed(2)
     };
@@ -3338,11 +3463,61 @@ export function PixiBlackChart({
   }, [ddaProSnapshot, alertDefinitions, displaySymbol, exchangeLabel, timeframe, indicatorAdvancedSettings.ddaProOscillator]);
 
   useEffect(() => {
+    if (replayActiveRef.current || !acvdSnapshot || acvdSnapshot.authority !== "EXACT_AGGRESSOR_TRADES") return;
+    const definitions = alertDefinitions.filter((definition) =>
+      definition.enabled && definition.indicator === "acvd" && definition.symbol === displaySymbol
+      && definition.exchange === exchangeLabel && definition.timeframe === timeframe
+    );
+    if (!definitions.length) return;
+    const sourceCandles = engineRef.current?.getSourceCandles() ?? [];
+    const latestFinalSignalTime = acvdSnapshot.signals.at(-1)?.time ?? 0;
+    const activeKeys = new Set(definitions.map((definition) => `${definition.id}:${definition.acvdSignal ?? "BC_ACVD_ANY_SIGNAL"}`));
+    for (const key of acvdSignalAlertArmedAtRef.current.keys()) if (!activeKeys.has(key)) acvdSignalAlertArmedAtRef.current.delete(key);
+    for (const definition of definitions) {
+      const target = definition.acvdSignal ?? "BC_ACVD_ANY_SIGNAL";
+      const armKey = `${definition.id}:${target}`;
+      const armedAfter = acvdSignalAlertArmedAtRef.current.get(armKey);
+      if (armedAfter === undefined) {
+        acvdSignalAlertArmedAtRef.current.set(armKey, latestFinalSignalTime);
+        continue;
+      }
+      for (const signal of acvdSnapshot.signals) {
+        if (signal.time <= armedAfter || !signal.finalized) continue;
+        if (target !== "BC_ACVD_ANY_SIGNAL" && target !== `BC_ACVD_${signal.direction.toUpperCase()}_SIGNAL`) continue;
+        const current = sourceCandles.find((candle) => candle.time === signal.time);
+        if (!current) continue;
+        const eventKey = `${definition.id}:${signal.id}`;
+        if (acvdConfiguredSignalsRef.current.has(eventKey)) continue;
+        acvdConfiguredSignalsRef.current.add(eventKey);
+        dispatchConfiguredAlert(definition, current, {
+          indicator: "BC-ACVD",
+          event: signal.direction.toUpperCase(),
+          direction: signal.direction,
+          level: signal.structurePrice,
+          signalId: signal.id,
+          markerTone: signal.markerTone,
+          eventTimestamp: signal.time,
+          executionEligibleTimestamp: signal.executionEligibleTimestamp,
+          confidence: signal.confidence,
+          pressure: signal.pressure,
+          deltaRatio: signal.deltaRatio,
+          cumulativeDelta: signal.cumulativeDelta,
+          regime: signal.regime,
+          reasonCodes: signal.reasonCodes,
+          sourceAuthority: acvdSnapshot.authority,
+          closedBarConfirmed: true
+        });
+      }
+    }
+  }, [acvdSnapshot, alertDefinitions, displaySymbol, exchangeLabel, timeframe]);
+
+  useEffect(() => {
     if (replayActiveRef.current || alertDefinitions.length === 0) return;
 
     const scopedAlerts = alertDefinitions.filter((definition) =>
       definition.enabled &&
       definition.indicator !== "ddaPro" &&
+      definition.indicator !== "acvd" &&
       definition.symbol === displaySymbol &&
       definition.exchange === exchangeLabel &&
       (definition.indicator === "price" || definition.timeframe === timeframe)
@@ -3422,6 +3597,7 @@ export function PixiBlackChart({
     { key: "sma50", label: "SMA", value: String(indicatorPeriods.sma50) },
     { key: "bollinger", label: "Bollinger", value: String(indicatorPeriods.bollinger) },
     { key: "ddaProOscillator", label: "BC-RDA", value: `${indicatorAdvancedSettings.ddaProOscillator.engineMode === "pine-compatibility" ? "PINE" : "NATIVE"} · ${ddaProStatus.toLowerCase()}` },
+    { key: "acvdOscillator", label: "BC-ACVD", value: `${acvdSnapshot?.latest.regime ?? "AUTHENTIC FLOW"} · ${acvdStatus.toLowerCase()}` },
     { key: "openInterestOscillator", label: "OI Osc", value: String(indicatorPeriods.openInterestOscillator) },
     { key: "zScoreOscillator", label: "Z-Score", value: String(indicatorPeriods.zScoreOscillator) },
     { key: "waveTrendOscillator", label: "WaveTrend", value: String(indicatorPeriods.waveTrendOscillator) },
@@ -3445,8 +3621,8 @@ export function PixiBlackChart({
   };
 
   const updateIndicatorPeriod = (key: keyof IndicatorPeriods, value: number) => {
-    const max = key === "volumeProfile" || key === "ddaProOscillator" ? 20000 : 500;
-    const min = key === "ddaProOscillator" ? 100 : 2;
+    const max = key === "volumeProfile" || key === "ddaProOscillator" || key === "acvdOscillator" ? 20000 : 500;
+    const min = key === "ddaProOscillator" || key === "acvdOscillator" ? 100 : 2;
     const nextValue = Math.max(min, Math.min(max, Number.isFinite(value) ? value : indicatorPeriods[key]));
     onIndicatorPeriodsChange((current) => ({
       ...current,
@@ -3459,6 +3635,12 @@ export function PixiBlackChart({
       onIndicatorAdvancedSettingsChange((current) => ({
         ...current,
         ddaProOscillator: migrateDDAProSettings({ ...current.ddaProOscillator, preset: "Custom", lookback: nextValue })
+      }));
+    }
+    if (key === "acvdOscillator") {
+      onIndicatorAdvancedSettingsChange((current) => ({
+        ...current,
+        acvdOscillator: migrateAcvdSettings({ ...current.acvdOscillator, lookback: nextValue })
       }));
     }
   };
@@ -3516,6 +3698,11 @@ export function PixiBlackChart({
     ...indicatorAdvancedSettings.ddaProOscillator,
     lookback: indicatorPeriods.ddaProOscillator
   });
+  const acvdSettings: AcvdSettings = migrateAcvdSettings({
+    ...DEFAULT_ACVD_SETTINGS,
+    ...indicatorAdvancedSettings.acvdOscillator,
+    lookback: indicatorPeriods.acvdOscillator
+  });
   const oscillatorStack = resolveOscillatorStack(
     visibleIndicators,
     oscillatorPaneSettings,
@@ -3531,6 +3718,7 @@ export function PixiBlackChart({
   const oscillatorSettingsOpen =
     activeIndicator === "openInterestOscillator" ||
     activeIndicator === "ddaProOscillator" ||
+    activeIndicator === "acvdOscillator" ||
     activeIndicator === "zScoreOscillator" ||
     activeIndicator === "waveTrendOscillator";
   const activeOscillatorKey = oscillatorSettingsOpen
@@ -3618,6 +3806,12 @@ export function PixiBlackChart({
     const next = migrateDDAProSettings({ ...ddaProSettings, preset: key === "preset" ? value as DDAProPreset : "Custom", [key]: value });
     onIndicatorAdvancedSettingsChange((current) => ({ ...current, ddaProOscillator: next }));
     if (key === "lookback") onIndicatorPeriodsChange((current) => ({ ...current, ddaProOscillator: next.lookback }));
+  };
+
+  const updateAcvdSetting = <Key extends keyof AcvdSettings>(key: Key, value: AcvdSettings[Key]) => {
+    const next = migrateAcvdSettings({ ...acvdSettings, [key]: value });
+    onIndicatorAdvancedSettingsChange((current) => ({ ...current, acvdOscillator: next }));
+    if (key === "lookback") onIndicatorPeriodsChange((current) => ({ ...current, acvdOscillator: next.lookback }));
   };
 
   const selectDDAProPreset = (preset: DDAProPreset) => {
@@ -5047,6 +5241,8 @@ export function PixiBlackChart({
               ? "indicator-settings profile-settings oscillator-settings"
               : activeIndicator === "ddaProOscillator"
                 ? "indicator-settings profile-settings oscillator-settings dda-pro-settings"
+              : activeIndicator === "acvdOscillator"
+                ? "indicator-settings profile-settings oscillator-settings dda-pro-settings"
               : activeIndicator === "vwap"
                 ? "indicator-settings profile-settings vwap-settings"
                 : activeIndicator === "liquidationHeatmap"
@@ -5071,8 +5267,8 @@ export function PixiBlackChart({
               Length
               <input
                 type="number"
-                min={activeIndicator === "ddaProOscillator" ? 100 : 2}
-                max={activeIndicator === "ddaProOscillator" ? 20000 : 500}
+                min={activeIndicator === "ddaProOscillator" || activeIndicator === "acvdOscillator" ? 100 : 2}
+                max={activeIndicator === "ddaProOscillator" || activeIndicator === "acvdOscillator" ? 20000 : 500}
                 value={indicatorPeriods[activeIndicator as keyof IndicatorPeriods]}
                 onChange={(event) => updateIndicatorPeriod(activeIndicator as keyof IndicatorPeriods, Number(event.target.value))}
               />
@@ -5641,6 +5837,64 @@ export function PixiBlackChart({
                   <b>{oscillatorPaneSettings.zeroLineIntensity}</b>
                 </span>
               </label>
+            </>
+          )}
+          {activeIndicator === "acvdOscillator" && (
+            <>
+              <div className="indicator-settings-section">BC-ACVD Authentic Flow Engine</div>
+              <div className="bcrda-integrity-warning">
+                <strong>CAUSAL · CLOSED-BAR SIGNALS · NO SYNTHETIC CVD</strong>
+                <span>Uses only venue-matched trades carrying an exact aggressor classification. Missing or mismatched flow fails closed; candle direction is never substituted.</span>
+              </div>
+              <label>Realtime Semantics<select value={acvdSettings.realtimeMode} onChange={(event) => updateAcvdSetting("realtimeMode", event.target.value as AcvdSettings["realtimeMode"])}><option value="CONFIRMED_BARS">Confirmed Bars Only</option><option value="DEVELOPING_PREVIEW">Developing Preview · Signals Still Final Only</option></select></label>
+              <label>Delta Basis<select value={acvdSettings.deltaBasis} onChange={(event) => updateAcvdSetting("deltaBasis", event.target.value as AcvdSettings["deltaBasis"])}><option value="NOTIONAL">Notional Aggressor Delta</option><option value="QUANTITY">Quantity Aggressor Delta</option></select></label>
+              <label>Lookback Bars<select value={acvdSettings.lookback} onChange={(event) => updateAcvdSetting("lookback", Number(event.target.value))}>{[250, 500, 1000, 2500, 5000, 10000, 20000].map((value) => <option key={value} value={value}>{value.toLocaleString()}</option>)}</select></label>
+              <div className="indicator-settings-section">Adaptive Delta Transformation</div>
+              <label>Smoothing<select value={acvdSettings.smoothingMode} onChange={(event) => updateAcvdSetting("smoothingMode", event.target.value as AcvdSettings["smoothingMode"])}><option value="ADAPTIVE_KAMA">Adaptive KAMA</option><option value="EMA">EMA</option><option value="RMA">RMA / Wilder</option></select></label>
+              <label>Smoothing Length<input type="number" min={1} max={200} value={acvdSettings.smoothingLength} onChange={(event) => updateAcvdSetting("smoothingLength", Number(event.target.value))} /></label>
+              {acvdSettings.smoothingMode === "ADAPTIVE_KAMA" && <><label>Adaptive Fast<input type="number" min={1} max={50} value={acvdSettings.adaptiveFastLength} onChange={(event) => updateAcvdSetting("adaptiveFastLength", Number(event.target.value))} /></label><label>Adaptive Slow<input type="number" min={2} max={300} value={acvdSettings.adaptiveSlowLength} onChange={(event) => updateAcvdSetting("adaptiveSlowLength", Number(event.target.value))} /></label></>}
+              <label>Robust Normalization<input type="number" min={20} max={2000} value={acvdSettings.normalizationLookback} onChange={(event) => updateAcvdSetting("normalizationLookback", Number(event.target.value))} /></label>
+              <label>Dynamic Envelope<input type="number" min={30} max={3000} value={acvdSettings.envelopeLookback} onChange={(event) => updateAcvdSetting("envelopeLookback", Number(event.target.value))} /></label>
+              <label>Envelope Deviation<input type="number" min={0.5} max={5} step={0.05} value={acvdSettings.envelopeDeviation} onChange={(event) => updateAcvdSetting("envelopeDeviation", Number(event.target.value))} /></label>
+              <label>Minimum Envelope Width<input type="number" min={2} max={80} value={acvdSettings.minimumEnvelopeWidth} onChange={(event) => updateAcvdSetting("minimumEnvelopeWidth", Number(event.target.value))} /></label>
+              <label>Minimum Exact Coverage %<input type="number" min={50} max={100} value={acvdSettings.minimumCoveragePercent} onChange={(event) => updateAcvdSetting("minimumCoveragePercent", Number(event.target.value))} /></label>
+              <div className="indicator-settings-section">Structure Test & Confirmation</div>
+              <label>Structure Lookback<input type="number" min={5} max={300} value={acvdSettings.structureLookback} onChange={(event) => updateAcvdSetting("structureLookback", Number(event.target.value))} /></label>
+              <label>ATR Length<input type="number" min={3} max={200} value={acvdSettings.atrLength} onChange={(event) => updateAcvdSetting("atrLength", Number(event.target.value))} /></label>
+              <label>Structure Tolerance ATR<input type="number" min={0.05} max={3} step={0.05} value={acvdSettings.structureToleranceAtr} onChange={(event) => updateAcvdSetting("structureToleranceAtr", Number(event.target.value))} /></label>
+              <label>Minimum Rejection Wick<input type="number" min={0} max={0.9} step={0.01} value={acvdSettings.minimumRejectionWickRatio} onChange={(event) => updateAcvdSetting("minimumRejectionWickRatio", Number(event.target.value))} /></label>
+              <label>Confirmation Window<input type="number" min={1} max={10} value={acvdSettings.confirmationBars} onChange={(event) => updateAcvdSetting("confirmationBars", Number(event.target.value))} /></label>
+              <div className="indicator-settings-section">Regime & Noise Arbitration</div>
+              <label>Trend Protection<input type="checkbox" checked={acvdSettings.trendProtection} onChange={(event) => updateAcvdSetting("trendProtection", event.target.checked)} /></label>
+              <label>Trend Efficiency Length<input type="number" min={10} max={500} value={acvdSettings.trendLength} onChange={(event) => updateAcvdSetting("trendLength", Number(event.target.value))} /></label>
+              <label>Trend Efficiency Threshold<input type="number" min={0.05} max={0.95} step={0.01} value={acvdSettings.trendEfficiencyThreshold} onChange={(event) => updateAcvdSetting("trendEfficiencyThreshold", Number(event.target.value))} /></label>
+              <label>Divergence Lookback<input type="number" min={8} max={500} value={acvdSettings.divergenceLookback} onChange={(event) => updateAcvdSetting("divergenceLookback", Number(event.target.value))} /></label>
+              <label>Minimum Divergence Score<input type="number" min={0} max={100} value={acvdSettings.minimumDivergenceScore} onChange={(event) => updateAcvdSetting("minimumDivergenceScore", Number(event.target.value))} /></label>
+              <label>Maximum Chop Probability<input type="number" min={0} max={100} value={acvdSettings.maximumChopProbability} onChange={(event) => updateAcvdSetting("maximumChopProbability", Number(event.target.value))} /></label>
+              <div className="indicator-settings-section">Signal Selectivity</div>
+              <label>Minimum Extreme Score<input type="number" min={20} max={100} value={acvdSettings.minimumExtremeScore} onChange={(event) => updateAcvdSetting("minimumExtremeScore", Number(event.target.value))} /></label>
+              <label>Minimum Reversal Impulse<input type="number" min={0} max={80} value={acvdSettings.minimumReversalImpulse} onChange={(event) => updateAcvdSetting("minimumReversalImpulse", Number(event.target.value))} /></label>
+              <label>Minimum Signal Confidence<input type="number" min={40} max={100} value={acvdSettings.minimumSignalConfidence} onChange={(event) => updateAcvdSetting("minimumSignalConfidence", Number(event.target.value))} /></label>
+              <label>Episode Cooldown Bars<input type="number" min={0} max={500} value={acvdSettings.cooldownBars} onChange={(event) => updateAcvdSetting("cooldownBars", Number(event.target.value))} /></label>
+              <label>Episode Reset Threshold<input type="number" min={2} max={80} value={acvdSettings.resetThreshold} onChange={(event) => updateAcvdSetting("resetThreshold", Number(event.target.value))} /></label>
+              <div className="indicator-settings-section">Plots & Appearance</div>
+              <div className="vwap-mode-note">Pane camera: drag anywhere inside BC-ACVD to inspect time and delta depth. Scroll over its right scale to expand or contract; double-click the scale to reset.</div>
+              <label>Adaptive Pressure<input type="checkbox" checked={acvdSettings.showAdaptivePressure} onChange={(event) => updateAcvdSetting("showAdaptivePressure", event.target.checked)} /></label>
+              <label>Dynamic Envelope<input type="checkbox" checked={acvdSettings.showDynamicEnvelope} onChange={(event) => updateAcvdSetting("showDynamicEnvelope", event.target.checked)} /></label>
+              <label>Delta Impulse Histogram<input type="checkbox" checked={acvdSettings.showDeltaHistogram} onChange={(event) => updateAcvdSetting("showDeltaHistogram", event.target.checked)} /></label>
+              <label>Long / Short Dots<input type="checkbox" checked={acvdSettings.showSignals} onChange={(event) => updateAcvdSetting("showSignals", event.target.checked)} /></label>
+              <label>Dashboard<input type="checkbox" checked={acvdSettings.showDashboard} onChange={(event) => updateAcvdSetting("showDashboard", event.target.checked)} /></label>
+              <label>Regime Diagnostics<input type="checkbox" checked={acvdSettings.showRegimeDiagnostics} onChange={(event) => updateAcvdSetting("showRegimeDiagnostics", event.target.checked)} /></label>
+              <label className="indicator-color-setting">Long / Buying<input type="color" value={acvdSettings.bullishColor} onChange={(event) => updateAcvdSetting("bullishColor", event.target.value)} /></label>
+              <label className="indicator-color-setting">Short / Selling<input type="color" value={acvdSettings.bearishColor} onChange={(event) => updateAcvdSetting("bearishColor", event.target.value)} /></label>
+              <label className="indicator-color-setting">Neutral<input type="color" value={acvdSettings.neutralColor} onChange={(event) => updateAcvdSetting("neutralColor", event.target.value)} /></label>
+              <label className="indicator-color-setting">Envelope<input type="color" value={acvdSettings.envelopeColor} onChange={(event) => updateAcvdSetting("envelopeColor", event.target.value)} /></label>
+              <label className="indicator-range-row">Line Intensity<span><input type="range" min={0} max={100} value={acvdSettings.lineIntensity} onChange={(event) => updateAcvdSetting("lineIntensity", Number(event.target.value))} /><b>{acvdSettings.lineIntensity}</b></span></label>
+              <label className="indicator-range-row">Fill Intensity<span><input type="range" min={0} max={60} value={acvdSettings.fillIntensity} onChange={(event) => updateAcvdSetting("fillIntensity", Number(event.target.value))} /><b>{acvdSettings.fillIntensity}</b></span></label>
+              <div className="vwap-mode-note">{acvdStatus} · {acvdSnapshot ? `${acvdSnapshot.authority} · ${acvdSnapshot.inputSize.toLocaleString()} bars · ${acvdSnapshot.integrity.signalCount} finalized signals` : "Awaiting worker result"}</div>
+              {acvdSnapshot?.warning && <div className="vwap-mode-note">{acvdSnapshot.warning}</div>}
+              <details className="indicator-advanced-details"><summary>Integrity / Diagnostics</summary><div className="vwap-mode-note">Model {acvdSnapshot?.modelVersion ?? "--"} · {acvdSnapshot?.integrity.currentBar ?? "--"} · future bars consumed {acvdSnapshot?.integrity.futureBarsConsumed ?? 0}</div><div className="vwap-mode-note">Worker {acvdWorkerRef.current?.executionMode() ?? "NOT STARTED"} · {acvdWorkerRef.current?.lastCalculationTimeMs()?.toFixed(2) ?? "--"} ms</div></details>
+              <button type="button" className="tv-defaults" onClick={() => { onIndicatorAdvancedSettingsChange((current) => ({ ...current, acvdOscillator: DEFAULT_ACVD_SETTINGS })); onIndicatorPeriodsChange((current) => ({ ...current, acvdOscillator: DEFAULT_ACVD_SETTINGS.lookback })); }}>Defaults</button>
             </>
           )}
           {activeIndicator === "ddaProOscillator" && (
@@ -6479,7 +6733,7 @@ export function PixiBlackChart({
           className="oscillator-pane-resizer"
           style={{ bottom: `min(${74 + pane.topOffset}px, calc(100% - 110px))` }}
           role="separator"
-          aria-label={`Resize ${pane.key === "ddaProOscillator" ? "BC-RDA" : pane.key === "zScoreOscillator" ? "Z-Score" : pane.key === "waveTrendOscillator" ? "WaveTrend" : "OI Osc"} pane`}
+          aria-label={`Resize ${pane.key === "acvdOscillator" ? "BC-ACVD" : pane.key === "ddaProOscillator" ? "BC-RDA" : pane.key === "zScoreOscillator" ? "Z-Score" : pane.key === "waveTrendOscillator" ? "WaveTrend" : "OI Osc"} pane`}
           aria-orientation="horizontal"
           onPointerDown={(event) => beginOscillatorResize(event, pane.key)}
           onPointerMove={resizeOscillatorPane}

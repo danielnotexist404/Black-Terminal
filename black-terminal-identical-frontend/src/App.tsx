@@ -87,6 +87,7 @@ import { migrateKioseffWorkspaceFields } from "./modules/kioseff-stop-loss-clust
 import { AUCTION_PROFILE_DEFAULT_SETTINGS, migrateAuctionProfileSettings } from "./modules/auction-profile/core/settings";
 import type { AuctionProfileSettings } from "./modules/auction-profile/core/types";
 import { migrateDDAProSettings } from "./modules/dda-pro/core/settings";
+import { migrateAcvdSettings } from "./modules/acvd/core/settings";
 import type {
   ChartDisplayType,
   DrawingToolId,
@@ -229,6 +230,7 @@ const defaultVisibleIndicators: VisibleIndicators = {
   zScoreOscillator: false,
   waveTrendOscillator: false,
   ddaProOscillator: false,
+  acvdOscillator: false,
   volume: false
 };
 
@@ -259,7 +261,8 @@ const defaultIndicatorPeriods: IndicatorPeriods = {
   openInterestOscillator: 34,
   zScoreOscillator: 50,
   waveTrendOscillator: 10,
-  ddaProOscillator: 500
+  ddaProOscillator: 500,
+  acvdOscillator: 1000
 };
 
 const defaultIndicatorVisualSettings: IndicatorVisualSettings = {
@@ -281,6 +284,7 @@ const defaultIndicatorVisualSettings: IndicatorVisualSettings = {
   zScoreOscillator: { color: "white", intensity: 74 },
   waveTrendOscillator: { color: "silver", intensity: 78 },
   ddaProOscillator: { color: "red", intensity: 92 },
+  acvdOscillator: { color: "white", intensity: 92 },
   volume: { color: "red", intensity: 62 }
 };
 
@@ -485,6 +489,7 @@ function migrateIndicatorAdvancedSettings(value: Partial<IndicatorAdvancedSettin
       ...(value?.waveTrendOscillator ?? {})
     },
     ddaProOscillator: migrateDDAProSettings(value?.ddaProOscillator),
+    acvdOscillator: migrateAcvdSettings(value?.acvdOscillator),
     vwap: {
       ...defaultIndicatorAdvancedSettings.vwap,
       ...(value?.vwap ?? {})
@@ -507,6 +512,7 @@ function migrateIndicatorPeriods(value: Partial<IndicatorPeriods> | null | undef
     if (typeof candidate === "number" && Number.isFinite(candidate)) migrated[key] = candidate;
   }
   migrated.ddaProOscillator = Math.max(100, Math.min(20_000, Math.round(migrated.ddaProOscillator)));
+  migrated.acvdOscillator = Math.max(100, Math.min(20_000, Math.round(migrated.acvdOscillator)));
   return migrated;
 }
 

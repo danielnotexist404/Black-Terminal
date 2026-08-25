@@ -1,7 +1,8 @@
 import type { Timeframe } from "../market-data/types";
 import type { DDAProEventType } from "../modules/dda-pro/core/types";
+import type { AcvdSignalKind } from "../modules/acvd/core/types";
 
-export type AlertIndicatorTarget = "price" | "hdlxProfile" | "vwap" | "ema20" | "ema50" | "ema200" | "ddaPro";
+export type AlertIndicatorTarget = "price" | "hdlxProfile" | "vwap" | "ema20" | "ema50" | "ema200" | "ddaPro" | "acvd";
 export type AlertCondition = "testing" | "crossingAbove" | "crossingBelow";
 export type AlertRunMode = "once" | "perpetual";
 export type AlertLevelTarget = "any" | "poc" | "vah" | "val" | "lvn" | "srZone" | "supportZone" | "resistanceZone";
@@ -17,6 +18,7 @@ export type IndicatorAlertDefinition = {
   indicator: AlertIndicatorTarget;
   levelTarget?: AlertLevelTarget;
   ddaSignal?: DDAProAlertSignal;
+  acvdSignal?: AcvdSignalKind;
   targetPrice?: number;
   color?: string;
   condition: AlertCondition;

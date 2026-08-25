@@ -46,6 +46,7 @@ import { resolveBclifDisplayDomain } from "../modules/liquidation-field/renderin
 import { ddaProSigmaUnit, nearestDDAProTailLabel } from "../modules/dda-pro/rendering/diagnostics";
 import { bclifTimestampMsToChartSeconds } from "../modules/liquidation-field/rendering/timeProjection";
 import type { DDAProSnapshot } from "../modules/dda-pro/core/types";
+import type { AcvdSnapshot } from "../modules/acvd/core/types";
 import {
   ddaProDomain,
   ddaProValueToY,
@@ -185,6 +186,7 @@ export class BlackChartEngine {
   private cvdFootprintRenderer = new CvdFootprintRenderer();
   private auctionProfileSnapshots: AuctionProfileSnapshot[] = [];
   private ddaProSnapshot: DDAProSnapshot | null = null;
+  private acvdSnapshot: AcvdSnapshot | null = null;
   private auctionProfileSettings: AuctionProfileSettings = structuredClone(AUCTION_PROFILE_DEFAULT_SETTINGS);
   private constrainedTouchRenderer = false;
   private volumeProfileModel = new VolumeProfileModel();
@@ -232,6 +234,7 @@ export class BlackChartEngine {
     zScoreOscillator: false,
     waveTrendOscillator: false,
     ddaProOscillator: false,
+    acvdOscillator: false,
     volume: true
   };
   private indicatorPeriods: IndicatorPeriods = {
@@ -246,7 +249,8 @@ export class BlackChartEngine {
     openInterestOscillator: 34,
     zScoreOscillator: 50,
     waveTrendOscillator: 10,
-    ddaProOscillator: 500
+    ddaProOscillator: 500,
+    acvdOscillator: 1000
   };
   private indicatorVisualSettings: IndicatorVisualSettings = {
     qalc: { color: "white", intensity: 92 },
@@ -267,6 +271,7 @@ export class BlackChartEngine {
     zScoreOscillator: { color: "white", intensity: 74 },
     waveTrendOscillator: { color: "silver", intensity: 78 },
     ddaProOscillator: { color: "red", intensity: 92 },
+    acvdOscillator: { color: "white", intensity: 92 },
     volume: { color: "red", intensity: 62 }
   };
   private indicatorAdvancedSettings: IndicatorAdvancedSettings = defaultIndicatorAdvancedSettings;
@@ -320,6 +325,9 @@ export class BlackChartEngine {
   private ddaProCamera = resetDDAProCamera();
   private ddaProDragStartCamera: DDAProCamera = resetDDAProCamera();
   private ddaProDragStartBaseDepth = 1;
+  private acvdDragging = false;
+  private acvdCamera: DDAProCamera = resetDDAProCamera();
+  private acvdDragStartCamera: DDAProCamera = resetDDAProCamera();
   private priceScaleDragging = false;
   private priceScaleHover = false;
   private dragStartX = 0;
@@ -376,6 +384,7 @@ export class BlackChartEngine {
     if (options.auctionProfileSnapshots !== undefined) this.auctionProfileSnapshots = options.auctionProfileSnapshots;
     else if (options.auctionProfileSnapshot !== undefined) this.auctionProfileSnapshots = options.auctionProfileSnapshot ? [options.auctionProfileSnapshot] : [];
     if (options.ddaProSnapshot !== undefined) this.ddaProSnapshot = options.ddaProSnapshot;
+    if (options.acvdSnapshot !== undefined) this.acvdSnapshot = options.acvdSnapshot;
     if (options.auctionProfileSettings) {
       this.auctionProfileSettings = migrateAuctionProfileSettings(options.auctionProfileSettings);
     }
@@ -443,18 +452,21 @@ export class BlackChartEngine {
     this.app.stage.on("pointermove", (e: FederatedPointerEvent) => {
       this.pointer = { x: e.global.x, y: e.global.y, active: true };
       const ddaPaneBounds = this.ddaProPaneBounds();
+      const acvdPaneBounds = this.acvdPaneBounds();
       const insideDdaAxis = Boolean(
         ddaPaneBounds
         && e.global.y >= ddaPaneBounds.top
         && e.global.y <= ddaPaneBounds.bottom
         && e.global.x >= ddaPaneBounds.plotWidth - 24
       );
-      this.setPriceScaleHover(!insideDdaAxis && this.isInsidePriceAxis(e.global.x, e.global.y));
-      this.host.classList.toggle("dda-pro-scale-hover", insideDdaAxis);
+      const insideAcvdAxis = Boolean(acvdPaneBounds && e.global.y >= acvdPaneBounds.top && e.global.y <= acvdPaneBounds.bottom && e.global.x >= acvdPaneBounds.plotWidth - 24);
+      this.setPriceScaleHover(!insideDdaAxis && !insideAcvdAxis && this.isInsidePriceAxis(e.global.x, e.global.y));
+      this.host.classList.toggle("dda-pro-scale-hover", insideDdaAxis || insideAcvdAxis);
       this.activePointers.set(e.pointerId, { x: e.global.x, y: e.global.y });
 
       if (this.activePointers.size === 2) {
         this.ddaProDragging = false;
+        this.acvdDragging = false;
         const coords = Array.from(this.activePointers.values());
         const dx = coords[0].x - coords[1].x;
         const dy = coords[0].y - coords[1].y;
@@ -484,6 +496,13 @@ export class BlackChartEngine {
           );
         }
         this.queueDraw();
+      } else if (this.acvdDragging) {
+        const dx = e.global.x - this.dragStartX;
+        const dy = e.global.y - this.dragStartY;
+        this.view.scrollX = this.clampHorizontalScroll(this.dragStartScroll + dx);
+        const pane = this.acvdPaneBounds();
+        if (pane) this.acvdCamera = this.panAcvdCamera(this.acvdDragStartCamera, dy, pane.height);
+        this.queueDraw();
       } else if (this.handleDrawingPointerMove(e)) {
         return;
       } else if (this.priceScaleDragging) {
@@ -507,6 +526,7 @@ export class BlackChartEngine {
       this.activePointers.set(e.pointerId, { x: e.global.x, y: e.global.y });
       if (this.activePointers.size === 2) {
         this.ddaProDragging = false;
+        this.acvdDragging = false;
         this.dragging = false;
         const coords = Array.from(this.activePointers.values());
         const dx = coords[0].x - coords[1].x;
@@ -520,6 +540,22 @@ export class BlackChartEngine {
       if (this.handleReplaySelectionPointerDown(e)) return;
 
       const ddaPaneBounds = this.ddaProPaneBounds();
+      const acvdPaneBounds = this.acvdPaneBounds();
+      if (
+        acvdPaneBounds
+        && e.global.x >= 0
+        && e.global.x <= this.view.width
+        && e.global.y >= acvdPaneBounds.top
+        && e.global.y <= acvdPaneBounds.bottom
+      ) {
+        this.acvdDragging = true;
+        this.dragStartX = e.global.x;
+        this.dragStartY = e.global.y;
+        this.dragStartScroll = this.view.scrollX;
+        this.acvdDragStartCamera = { ...this.acvdCamera };
+        this.host.classList.add("dda-pro-dragging");
+        return;
+      }
       if (
         ddaPaneBounds
         && e.global.x >= 0
@@ -853,6 +889,11 @@ export class BlackChartEngine {
     this.queueDraw();
   }
 
+  setAcvdState(snapshot: AcvdSnapshot | null) {
+    this.acvdSnapshot = snapshot;
+    this.queueDraw();
+  }
+
   setLiquidationFieldState(snapshot: LiquidationFieldSnapshot | null, settings = this.liquidationFieldSettings) {
     this.liquidationFieldSnapshot = snapshot;
     this.liquidationFieldSettings = migrateLiquidationFieldSettings(settings);
@@ -1067,6 +1108,7 @@ export class BlackChartEngine {
   private stopDragging() {
     this.dragging = false;
     this.ddaProDragging = false;
+    this.acvdDragging = false;
     this.priceScaleDragging = false;
     this.host.classList.remove("price-scale-dragging");
     this.host.classList.remove("dda-pro-dragging");
@@ -1126,6 +1168,13 @@ export class BlackChartEngine {
     const x = e.clientX - bounds.left;
     const y = e.clientY - bounds.top;
     const ddaPaneBounds = this.ddaProPaneBounds();
+    const acvdPaneBounds = this.acvdPaneBounds();
+    if (acvdPaneBounds && y >= acvdPaneBounds.top && y <= acvdPaneBounds.bottom && x >= acvdPaneBounds.plotWidth - 24) {
+      e.preventDefault();
+      this.acvdCamera = resetDDAProCamera();
+      this.queueDraw();
+      return;
+    }
     if (
       ddaPaneBounds
       && y >= ddaPaneBounds.top
@@ -1231,6 +1280,13 @@ export class BlackChartEngine {
     const x = e.clientX - bounds.left;
     const y = e.clientY - bounds.top;
     const ddaPaneBounds = this.ddaProPaneBounds();
+    const acvdPaneBounds = this.acvdPaneBounds();
+    if (acvdPaneBounds && y >= acvdPaneBounds.top && y <= acvdPaneBounds.bottom && x >= acvdPaneBounds.plotWidth - 24) {
+      const anchorRatio = (y - acvdPaneBounds.top) / Math.max(1, acvdPaneBounds.height);
+      this.acvdCamera = this.zoomAcvdCamera(this.acvdCamera, e.deltaY, anchorRatio);
+      this.queueDraw();
+      return;
+    }
     if (
       ddaPaneBounds
       && y >= ddaPaneBounds.top
@@ -1668,6 +1724,47 @@ export class BlackChartEngine {
     const bottom = plotHeight - 16 - pane.bottomOffset;
     const top = bottom - pane.height;
     return { top, bottom, height: pane.height, plotWidth };
+  }
+
+  private acvdPaneBounds() {
+    if (!this.visibleIndicators.acvdOscillator) return undefined;
+    const pane = this.oscillatorStackLayout().panes.find((candidate) => candidate.key === "acvdOscillator");
+    if (!pane) return undefined;
+    const plotWidth = this.view.width - this.view.rightAxisWidth;
+    const plotHeight = this.view.height - this.view.bottomAxisHeight;
+    const bottom = plotHeight - 16 - pane.bottomOffset;
+    const top = bottom - pane.height;
+    return { top, bottom, height: pane.height, plotWidth };
+  }
+
+  private acvdDomain(camera = this.acvdCamera) {
+    const zoom = clampNumber(Number.isFinite(camera.zoom) ? camera.zoom : 1, 0.2, 40);
+    const range = 200 / zoom;
+    const center = clampNumber(Number.isFinite(camera.pan) ? camera.pan : 0, -800, 800);
+    return { min: center - range / 2, max: center + range / 2, range };
+  }
+
+  private acvdValueToY(value: number, paneTop: number, paneBottom: number) {
+    const domain = this.acvdDomain();
+    const top = paneTop + 18;
+    const bottom = Math.max(top + 1, paneBottom - 16);
+    const ratio = (domain.max - value) / Math.max(1e-9, domain.range);
+    return top + clampNumber(ratio, 0, 1) * (bottom - top);
+  }
+
+  private panAcvdCamera(camera: DDAProCamera, pixelDeltaY: number, paneHeight: number): DDAProCamera {
+    const domain = this.acvdDomain(camera);
+    return { zoom: camera.zoom, pan: clampNumber(camera.pan + pixelDeltaY / Math.max(1, paneHeight - 34) * domain.range, -800, 800) };
+  }
+
+  private zoomAcvdCamera(camera: DDAProCamera, deltaY: number, anchorRatio: number): DDAProCamera {
+    const before = this.acvdDomain(camera);
+    const ratio = clampNumber(anchorRatio, 0, 1);
+    const anchor = before.max - ratio * before.range;
+    const zoom = clampNumber(camera.zoom * Math.exp(-deltaY * 0.0028), 0.2, 40);
+    const nextRange = 200 / zoom;
+    const center = anchor + ratio * nextRange - nextRange / 2;
+    return { zoom, pan: clampNumber(center, -800, 800) };
   }
 
   private ddaProBaseDepth(data: Candle[] = this.getDisplayCandles()) {
@@ -2727,6 +2824,118 @@ export class BlackChartEngine {
     }
   }
 
+  private drawAcvdPane(data: Candle[], paneTop: number, paneBottom: number, plotWidth: number) {
+    const snapshot = this.acvdSnapshot;
+    const settings = this.indicatorAdvancedSettings.acvdOscillator;
+    const g = this.indicatorLayer;
+    const height = paneBottom - paneTop;
+    const bullish = this.hexColor(settings.bullishColor, theme.silverBright);
+    const bearish = this.hexColor(settings.bearishColor, theme.red);
+    const neutral = this.hexColor(settings.neutralColor, theme.muted);
+    const envelopeColor = this.hexColor(settings.envelopeColor, theme.silver);
+    const lineAlpha = clampNumber(settings.lineIntensity / 100, 0, 1);
+    const fillAlpha = clampNumber(settings.fillIntensity / 100, 0, 0.48);
+
+    g.rect(0, paneTop, plotWidth, height)
+      .fill({ color: 0x010102, alpha: 0.985 })
+      .stroke({ width: 1, color: 0xffffff, alpha: 0.07 });
+    const zeroY = this.acvdValueToY(0, paneTop, paneBottom);
+    g.moveTo(0, zeroY).lineTo(plotWidth, zeroY).stroke({ width: 1, color: neutral, alpha: 0.28 });
+
+    if (!snapshot || snapshot.inputSize === 0) {
+      this.addProfileText("BC-ACVD · CALCULATING AUTHENTIC DELTA", 12, paneTop + 9, theme.silverBright, 9, "700", true);
+      return;
+    }
+    if (snapshot.authority !== "EXACT_AGGRESSOR_TRADES") {
+      this.addProfileText("BC-ACVD · AUTHENTIC FLOW UNAVAILABLE", 12, paneTop + 9, theme.redBright, 9, "700", true);
+      this.addProfileText(snapshot.warning ?? "Waiting for venue-matched classified aggressor trades.", 12, paneTop + 25, theme.muted, 8, "500");
+      return;
+    }
+
+    const offset = Math.max(0, data.length - snapshot.inputSize);
+    const aligned = (values: readonly number[], chartIndex: number) => {
+      const sourceIndex = chartIndex - offset;
+      return sourceIndex >= 0 && sourceIndex < values.length ? values[sourceIndex] : Number.NaN;
+    };
+    const drawLine = (values: readonly number[], color: number, alpha: number, width: number) => {
+      let started = false;
+      for (const chartIndex of this.renderIndices(1)) {
+        const value = aligned(values, chartIndex);
+        if (!Number.isFinite(value)) { started = false; continue; }
+        const x = this.xForIndex(chartIndex);
+        const y = this.acvdValueToY(value, paneTop, paneBottom);
+        if (!started) { g.moveTo(x, y); started = true; }
+        else g.lineTo(x, y);
+      }
+      if (started) g.stroke({ width, color, alpha });
+    };
+
+    if (settings.showDeltaHistogram) {
+      const barWidth = Math.max(0.5, Math.min(this.timeStep() * 0.72, 5));
+      for (const chartIndex of this.renderIndices(1)) {
+        const impulse = aligned(snapshot.series.deltaImpulse, chartIndex);
+        if (!Number.isFinite(impulse)) continue;
+        const y = this.acvdValueToY(clampNumber(impulse * 2.2, -100, 100), paneTop, paneBottom);
+        g.rect(this.xForIndex(chartIndex) - barWidth / 2, Math.min(y, zeroY), barWidth, Math.max(1, Math.abs(y - zeroY)))
+          .fill({ color: impulse >= 0 ? bullish : bearish, alpha: 0.08 + fillAlpha * 0.68 });
+      }
+    }
+
+    if (settings.showDynamicEnvelope) {
+      const upperPoints: number[] = [];
+      const lowerPoints: number[] = [];
+      for (const chartIndex of this.renderIndices(1)) {
+        const upper = aligned(snapshot.series.upperEnvelope, chartIndex);
+        const lower = aligned(snapshot.series.lowerEnvelope, chartIndex);
+        if (!Number.isFinite(upper) || !Number.isFinite(lower)) continue;
+        const x = this.xForIndex(chartIndex);
+        upperPoints.push(x, this.acvdValueToY(upper, paneTop, paneBottom));
+        lowerPoints.push(x, this.acvdValueToY(lower, paneTop, paneBottom));
+      }
+      if (upperPoints.length > 4 && lowerPoints.length > 4) {
+        const polygon = [...upperPoints];
+        for (let index = lowerPoints.length - 2; index >= 0; index -= 2) polygon.push(lowerPoints[index]!, lowerPoints[index + 1]!);
+        g.poly(polygon).fill({ color: envelopeColor, alpha: fillAlpha * 0.34 });
+      }
+      drawLine(snapshot.series.upperEnvelope, bearish, lineAlpha * 0.46, 0.9);
+      drawLine(snapshot.series.lowerEnvelope, bullish, lineAlpha * 0.46, 0.9);
+      drawLine(snapshot.series.center, neutral, lineAlpha * 0.32, 0.75);
+    }
+
+    if (settings.showAdaptivePressure) {
+      drawLine(snapshot.series.adaptivePressure, neutral, lineAlpha * 0.32, Math.max(2.2, settings.lineWidth + 1.4));
+      drawLine(snapshot.series.adaptivePressure, theme.silverBright, lineAlpha, settings.lineWidth);
+    }
+
+    if (settings.showSignals) {
+      for (const signal of snapshot.signals) {
+        const chartIndex = offset + signal.index;
+        if (chartIndex < this.view.firstIndex || chartIndex > this.view.lastIndex) continue;
+        const x = this.xForIndex(chartIndex);
+        const y = this.acvdValueToY(signal.pressure, paneTop, paneBottom);
+        const color = signal.direction === "long" ? bullish : bearish;
+        g.circle(x, y, 5.1).fill({ color, alpha: 0.13 });
+        g.circle(x, y, 2.6).fill({ color, alpha: 0.98 });
+        g.circle(x, y, 4).stroke({ width: 0.8, color, alpha: 0.68 });
+      }
+    }
+
+    this.addProfileText("BC-ACVD · ADAPTIVE CAUSAL VOLUME DELTA", 12, paneTop + 7, theme.silverBright, 9, "700", true);
+    if (settings.showDashboard) {
+      const dashboardWidth = 245;
+      const x = Math.max(8, plotWidth - dashboardWidth - 10);
+      const y = paneTop + 7;
+      g.roundRect(x, y, dashboardWidth, settings.showRegimeDiagnostics ? 47 : 30, 3)
+        .fill({ color: 0x020203, alpha: 0.91 })
+        .stroke({ width: 1, color: snapshot.latest.state === "BEARISH" ? bearish : snapshot.latest.state === "BULLISH" ? bullish : neutral, alpha: 0.46 });
+      const signedPressure = `${snapshot.latest.pressure >= 0 ? "+" : ""}${snapshot.latest.pressure.toFixed(1)}`;
+      this.addProfileText(`${snapshot.latest.state} · Δ ${signedPressure} · COV ${snapshot.latest.coveragePercent.toFixed(0)}%`, x + 7, y + 6, snapshot.latest.state === "BEARISH" ? bearish : snapshot.latest.state === "BULLISH" ? bullish : neutral, 8, "700", true);
+      if (settings.showRegimeDiagnostics) {
+        this.addProfileText(`${snapshot.latest.regime} · CHOP ${snapshot.latest.chopProbability.toFixed(0)} · L ${snapshot.latest.longConfidence.toFixed(0)} / S ${snapshot.latest.shortConfidence.toFixed(0)}`, x + 7, y + 23, theme.muted, 8, "600", true);
+      }
+    }
+  }
+
   private drawOscillatorPanes(data: Candle[]) {
     const stack = this.oscillatorStackLayout();
     if (stack.panes.length === 0) return;
@@ -2761,6 +2970,10 @@ export class BlackChartEngine {
         this.drawDDAProPane(data, paneTop, paneBottom, plotWidth);
         continue;
       }
+      if (pane.key === "acvdOscillator") {
+        this.drawAcvdPane(data, paneTop, paneBottom, plotWidth);
+        continue;
+      }
       const isZScorePane = pane.key === "zScoreOscillator";
       const zeroLineColor = isZScorePane
         ? this.hexColor(zSettings?.midlineColor ?? "#8a8a90", theme.muted)
@@ -2776,7 +2989,7 @@ export class BlackChartEngine {
       });
 
       const series: Array<{
-        key: "openInterestOscillator" | "zScoreOscillator" | "waveTrendOscillator" | "ddaProOscillator";
+        key: "openInterestOscillator" | "zScoreOscillator" | "waveTrendOscillator" | "ddaProOscillator" | "acvdOscillator";
         label: string;
         values: number[];
         fallbackColor: IndicatorColorKey;
@@ -4787,8 +5000,15 @@ export class BlackChartEngine {
 
     const ddaBounds = this.ddaProPaneBounds();
     const insideDdaPane = Boolean(ddaBounds && this.pointer.y >= ddaBounds.top && this.pointer.y <= ddaBounds.bottom);
+    const acvdBounds = this.acvdPaneBounds();
+    const insideAcvdPane = Boolean(acvdBounds && this.pointer.y >= acvdBounds.top && this.pointer.y <= acvdBounds.bottom);
     g.rect(plotWidth + 4, this.pointer.y - 11, 64, 22).fill({ color: theme.red, alpha: 0.95 });
-    if (insideDdaPane && ddaBounds) {
+    if (insideAcvdPane && acvdBounds) {
+      const domain = this.acvdDomain();
+      const ratio = Math.max(0, Math.min(1, (this.pointer.y - (acvdBounds.top + 18)) / Math.max(1, acvdBounds.height - 34)));
+      const value = domain.max - ratio * domain.range;
+      this.addCrosshairText(value.toFixed(1), plotWidth + 8, this.pointer.y - 7);
+    } else if (insideDdaPane && ddaBounds) {
       const domain = ddaProDomain(this.ddaProBaseDepth(), this.ddaProCamera);
       const ratio = Math.max(0, Math.min(1, (this.pointer.y - (ddaBounds.top + 18)) / Math.max(1, ddaBounds.height - 34)));
       const value = domain.max - ratio * domain.range;
@@ -4827,6 +5047,26 @@ export class BlackChartEngine {
           const flowCoverage = ddaSnapshot.series.flowCoveragePercent[sourceIndex] ?? 0;
           this.addCrosshairText("FLOW " + (flowState !== "UNAVAILABLE" && Number.isFinite(flowPressure) ? `${flowPressure! >= 0 ? "+" : ""}${flowPressure!.toFixed(1)}` : "--") + " " + flowState + " · COVERAGE " + flowCoverage.toFixed(0) + "%", tooltipX + 8, tooltipY + 66);
         }
+      }
+    }
+    const acvdSnapshot = this.visibleIndicators.acvdOscillator ? this.acvdSnapshot : null;
+    if (acvdSnapshot && acvdBounds && insideAcvdPane) {
+      const chartIndex = this.indexForX(this.pointer.x);
+      const sourceIndex = chartIndex - Math.max(0, this.getDisplayCandles().length - acvdSnapshot.inputSize);
+      if (sourceIndex >= 0 && sourceIndex < acvdSnapshot.inputSize) {
+        const pressure = acvdSnapshot.series.adaptivePressure[sourceIndex];
+        const deltaRatio = acvdSnapshot.series.deltaRatio[sourceIndex];
+        const coverage = acvdSnapshot.series.coveragePercent[sourceIndex];
+        const regime = acvdSnapshot.series.regime[sourceIndex] ?? "UNAVAILABLE";
+        const tooltipX = Math.max(8, Math.min(plotWidth - 250, this.pointer.x + 14));
+        const tooltipY = Math.max(acvdBounds.top + 5, Math.min(acvdBounds.bottom - 74, this.pointer.y + 12));
+        g.roundRect(tooltipX, tooltipY, 242, 69, 4)
+          .fill({ color: 0x030305, alpha: 0.96 })
+          .stroke({ width: 1, color: theme.red, alpha: 0.62 });
+        this.addCrosshairText(`BC-ACVD ${Number.isFinite(pressure) ? pressure!.toFixed(1) : "--"} · ${regime}`, tooltipX + 8, tooltipY + 6);
+        this.addCrosshairText(`DELTA RATIO ${Number.isFinite(deltaRatio) ? (deltaRatio! * 100).toFixed(2) + "%" : "--"} · COVERAGE ${Number.isFinite(coverage) ? coverage!.toFixed(0) + "%" : "--"}`, tooltipX + 8, tooltipY + 21);
+        this.addCrosshairText(`CHOP ${(acvdSnapshot.series.chopProbability[sourceIndex] ?? 0).toFixed(0)} · DIVERGENCE ${(acvdSnapshot.series.divergenceScore[sourceIndex] ?? 0).toFixed(1)}`, tooltipX + 8, tooltipY + 36);
+        this.addCrosshairText(`LONG ${(acvdSnapshot.series.longConfidence[sourceIndex] ?? 0).toFixed(0)} · SHORT ${(acvdSnapshot.series.shortConfidence[sourceIndex] ?? 0).toFixed(0)} · FINAL BARS`, tooltipX + 8, tooltipY + 51);
       }
     }
     this.queueRender();

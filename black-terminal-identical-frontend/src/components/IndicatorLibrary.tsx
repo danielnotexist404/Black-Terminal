@@ -114,6 +114,18 @@ const builtInIndicators: BuiltInIndicator[] = [
   { key: "sma50", title: "SMA 50", group: "Trend", type: "Overlay", signal: "Medium simple average", periodKey: "sma50", min: 2, max: 500 },
   { key: "bollinger", title: "Bollinger Bands", group: "Volatility", type: "Bands", signal: "2 sigma envelope", periodKey: "bollinger", min: 5, max: 300 },
   {
+    key: "acvdOscillator",
+    stableId: "black-core-acvd",
+    title: "BC-ACVD — Adaptive Causal Volume Delta",
+    group: "Black Core / Authentic Order Flow",
+    type: "Oscillator + Closed-Bar Signals",
+    signal: "Venue-matched aggressor CVD exhaustion, adaptive regime context and market-structure confirmation",
+    runtime: "Worker",
+    periodKey: "acvdOscillator",
+    min: 100,
+    max: 20000
+  },
+  {
     key: "ddaProOscillator",
     stableId: "black-core-dda-pro",
     title: "BC-RDA — Causal V2 / Legacy Research",

@@ -33,6 +33,11 @@ const longShortAlerts: StrategyIndicatorAlert[] = [
   { id: "short-exit", name: "Short Exit", description: "Optional confirmed short-position exit.", semantic: "SHORT_EXIT", confirmedBar: true, intrabar: false },
 ];
 
+const acvdAlerts: StrategyIndicatorAlert[] = [
+  { id: "bc-acvd:long", name: "BC-ACVD Long", description: "Final closed-bar selling-exhaustion and lower-structure confirmation.", semantic: "LONG_ENTRY", confirmedBar: true, intrabar: false },
+  { id: "bc-acvd:short", name: "BC-ACVD Short", description: "Final closed-bar buying-exhaustion and upper-structure confirmation.", semantic: "SHORT_ENTRY", confirmedBar: true, intrabar: false },
+];
+
 const qalcAlerts: StrategyIndicatorAlert[] = [
   { id: "qalc:candidate-long", name: "Candidate Long", description: "Canonical event-time BC-QALC passive-bid candidate.", semantic: "LONG_ENTRY", confirmedBar: false, intrabar: true },
   { id: "qalc:candidate-short", name: "Candidate Short", description: "Canonical event-time BC-QALC passive-ask candidate.", semantic: "SHORT_ENTRY", confirmedBar: false, intrabar: true },
@@ -45,6 +50,7 @@ const qalcAlerts: StrategyIndicatorAlert[] = [
 const manifests: ManifestRow[] = [
   { key: "qalc", name: "BC-QALC — Queue-Aware Liquidity Capture", version: "1", runtimeKind: "external-signals", runtimeStatus: "REQUIRES_CERTIFICATION", warmup: 1_000, alerts: qalcAlerts },
   { key: "adaptiveSwingStrategy", name: "Adaptive Swing Reversal", version: "1", runtimeKind: "builtin-adaptive-swing", runtimeStatus: "CERTIFIED", warmup: 240, alerts: longShortAlerts },
+  { key: "acvdOscillator", name: "BC-ACVD — Adaptive Causal Volume Delta", version: "1", runtimeKind: "external-signals", runtimeStatus: "BROWSER_ONLY", warmup: 1_000, alerts: acvdAlerts },
   // BC-RDA is intentionally absent while BC_RDA_LEGACY_REPAINTING is under
   // forensic containment and BC_RDA_CAUSAL_V2 lacks a certified headless VPS
   // runtime. The chart indicator remains available as research visualization.
@@ -160,6 +166,7 @@ function settingsFor(key: keyof VisibleIndicators, periods: IndicatorPeriods, ad
   if (key === "qalc") return structuredClone(advanced.qalc) as unknown as Record<string, unknown>;
   if (key === "adaptiveSwingStrategy") return structuredClone(advanced.adaptiveSwingStrategy) as unknown as Record<string, unknown>;
   if (key === "ddaProOscillator") return structuredClone(advanced.ddaProOscillator) as unknown as Record<string, unknown>;
+  if (key === "acvdOscillator") return structuredClone(advanced.acvdOscillator) as unknown as Record<string, unknown>;
   if (key === "vwap") return structuredClone(advanced.vwap) as unknown as Record<string, unknown>;
   const period = periods[key as keyof IndicatorPeriods];
   return typeof period === "number" ? { period } : {};
@@ -176,6 +183,7 @@ function alertTargetFor(key: keyof VisibleIndicators) {
   if (["vwap", "ema20", "ema50", "ema200"].includes(String(key))) return key as IndicatorAlertDefinition["indicator"];
   if (key === "volumeProfile") return "hdlxProfile";
   if (key === "ddaProOscillator") return "ddaPro";
+  if (key === "acvdOscillator") return "acvd";
   return "price";
 }
 

@@ -17,6 +17,7 @@ type BuildDDAProFlowInputOptions = {
   timeframeSeconds: number;
   captureStartedAt: number | null;
   streamHealthy: boolean;
+  consumerLabel?: string;
 };
 
 function emptyBar(time: number): DDAProFlowBarInput {
@@ -49,6 +50,7 @@ function candleIndexForTrade(candles: readonly Candle[], timestamp: number, time
 }
 
 export function buildDDAProFlowInput(options: BuildDDAProFlowInputOptions): DDAProFlowInput {
+  const consumerLabel = options.consumerLabel?.trim() || "BC-RDA Flow Pressure";
   const timeframeSeconds = Math.max(1, Math.round(options.timeframeSeconds));
   const flowBars = options.candles.map((candle) => emptyBar(candle.time));
   const captureStartedAt = Number.isFinite(options.captureStartedAt) ? Number(options.captureStartedAt) : null;
@@ -58,7 +60,7 @@ export function buildDDAProFlowInput(options: BuildDDAProFlowInputOptions): DDAP
       flowBars,
       cvdValues: new Array(flowBars.length).fill(Number.NaN),
       flowAuthority: "UNAVAILABLE",
-      flowWarning: "BC-RDA Flow Pressure requires a healthy, continuous aggressor-trade stream. Polling and disconnected feeds are not treated as complete order flow."
+      flowWarning: `${consumerLabel} requires a healthy, continuous aggressor-trade stream. Polling and disconnected feeds are not treated as complete order flow.`
     };
   }
 
@@ -102,6 +104,6 @@ export function buildDDAProFlowInput(options: BuildDDAProFlowInputOptions): DDAP
     flowAuthority: eligibleBars.length ? "EXACT_AGGRESSOR_TRADES" : "UNAVAILABLE",
     flowWarning: eligibleBars.length
       ? "Live aggressor flow is session-scoped. Bars before continuous capture began remain unavailable; no synthetic historical flow was created."
-      : "BC-RDA Flow Pressure is warming until a complete bar interval contains genuine classified aggressor trades."
+      : `${consumerLabel} is warming until a complete bar interval contains genuine classified aggressor trades.`
   };
 }

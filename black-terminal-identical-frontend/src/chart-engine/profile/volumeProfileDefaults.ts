@@ -10,6 +10,7 @@ import type {
 } from "../types.ts";
 import { DEFAULT_LIQUIDATION_FIELD_SETTINGS } from "../../modules/liquidation-field/core/settings.ts";
 import { DEFAULT_DDA_PRO_SETTINGS } from "../../modules/dda-pro/core/settings.ts";
+import { DEFAULT_ACVD_SETTINGS } from "../../modules/acvd/core/settings.ts";
 
 export const defaultVolumeProfileSettings: VolumeProfileSettings = {
   showVolumeProfile: true,
@@ -139,7 +140,8 @@ export const defaultOscillatorPaneSettings: OscillatorPaneSettings = {
     openInterestOscillator: 128,
     zScoreOscillator: 128,
     waveTrendOscillator: 128,
-    ddaProOscillator: 176
+    ddaProOscillator: 176,
+    acvdOscillator: 176
   },
   order: [],
   backgroundColor: "#000000",
@@ -260,5 +262,6 @@ export const defaultIndicatorAdvancedSettings: IndicatorAdvancedSettings = {
   zScoreOscillator: defaultZScoreOscillatorSettings,
   waveTrendOscillator: defaultWaveTrendOscillatorSettings,
   ddaProOscillator: DEFAULT_DDA_PRO_SETTINGS,
+  acvdOscillator: DEFAULT_ACVD_SETTINGS,
   vwap: defaultVwapSettings
 };

@@ -5,6 +5,7 @@ import { DEFAULT_ACVD_SETTINGS, migrateAcvdSettings } from "../src/modules/acvd/
 import type { AuthenticFlowBarInput } from "../src/modules/acvd/core/types.ts";
 import type { Candle } from "../src/chart-engine/types.ts";
 import { AcvdWorkerClient } from "../src/modules/acvd/workers/AcvdWorkerClient.ts";
+import { acvdContiguousFiniteSegments } from "../src/modules/acvd/rendering/segments.ts";
 
 const seconds = 14_400;
 
@@ -94,6 +95,18 @@ const incompleteFlow = flowBars.map((bar, index) => index === 122 ? { ...bar, de
 const incomplete = calculateAcvd({ ...input, flowBars: incompleteFlow });
 assert.ok(!Number.isFinite(incomplete.series.adaptivePressure[122]), "an incomplete delivery interval creates a visible causal gap");
 
+const renderSeries = [1, 2, 3, Number.NaN, 5, 6, 7, 8, Number.NaN, 10];
+assert.deepEqual(
+  acvdContiguousFiniteSegments([0, 2, 4, 6, 8, 9], 0, [renderSeries]),
+  [[0, 2], [4, 6], [9]],
+  "decimated ACVD geometry never bridges hidden unavailable source bars"
+);
+assert.deepEqual(
+  acvdContiguousFiniteSegments([10, 12, 14, 16, 18, 19], 10, [renderSeries, renderSeries]),
+  [[10, 12], [14, 16], [19]],
+  "segmentation remains correct when the ACVD source is chart-offset"
+);
+
 const client = new AcvdWorkerClient(() => { throw new Error("force inline"); });
 const workerSnapshot = await client.calculate(input);
 assert.equal(workerSnapshot.dataHash, snapshot.dataHash, "worker and direct engine remain deterministic");
@@ -113,5 +126,8 @@ assert.match(library, /BC-ACVD — Adaptive Causal Volume Delta/);
 const chart = readFileSync(new URL("../src/components/PixiBlackChart.tsx", import.meta.url), "utf8");
 assert.match(chart, /CAUSAL · CLOSED-BAR SIGNALS · NO SYNTHETIC CVD/);
 assert.match(chart, /black-terminal:acvd-signal/);
+const renderer = readFileSync(new URL("../src/chart-engine/BlackChartEngine.ts", import.meta.url), "utf8");
+assert.match(renderer, /BC-ACVD · VERIFIED FLOW GAP/);
+assert.doesNotMatch(renderer, /CHOP \$\{\(acvdSnapshot\.series\.chopProbability\[sourceIndex\] \?\? 0\)\.toFixed/, "ACVD tooltip must not print NaN through nullish fallbacks");
 
 console.log(`BC-ACVD tests passed (${snapshot.inputSize} bars, ${snapshot.signals.length} finalized signals, exact flow only, prefix-stable; 20K in ${benchmarkMs.toFixed(1)}ms).`);

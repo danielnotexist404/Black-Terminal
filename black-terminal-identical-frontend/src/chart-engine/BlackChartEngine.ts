@@ -47,6 +47,7 @@ import { ddaProSigmaUnit, nearestDDAProTailLabel } from "../modules/dda-pro/rend
 import { bclifTimestampMsToChartSeconds } from "../modules/liquidation-field/rendering/timeProjection";
 import type { DDAProSnapshot } from "../modules/dda-pro/core/types";
 import type { AcvdSnapshot } from "../modules/acvd/core/types";
+import { acvdContiguousFiniteSegments } from "../modules/acvd/rendering/segments";
 import {
   ddaProDomain,
   ddaProValueToY,
@@ -2853,26 +2854,27 @@ export class BlackChartEngine {
     }
 
     const offset = Math.max(0, data.length - snapshot.inputSize);
+    const renderIndices = this.renderIndices(1);
     const aligned = (values: readonly number[], chartIndex: number) => {
       const sourceIndex = chartIndex - offset;
       return sourceIndex >= 0 && sourceIndex < values.length ? values[sourceIndex] : Number.NaN;
     };
     const drawLine = (values: readonly number[], color: number, alpha: number, width: number) => {
-      let started = false;
-      for (const chartIndex of this.renderIndices(1)) {
-        const value = aligned(values, chartIndex);
-        if (!Number.isFinite(value)) { started = false; continue; }
-        const x = this.xForIndex(chartIndex);
-        const y = this.acvdValueToY(value, paneTop, paneBottom);
-        if (!started) { g.moveTo(x, y); started = true; }
-        else g.lineTo(x, y);
+      for (const segment of acvdContiguousFiniteSegments(renderIndices, offset, [values])) {
+        if (segment.length < 2) continue;
+        const firstIndex = segment[0]!;
+        g.moveTo(this.xForIndex(firstIndex), this.acvdValueToY(aligned(values, firstIndex), paneTop, paneBottom));
+        for (let cursor = 1; cursor < segment.length; cursor++) {
+          const chartIndex = segment[cursor]!;
+          g.lineTo(this.xForIndex(chartIndex), this.acvdValueToY(aligned(values, chartIndex), paneTop, paneBottom));
+        }
+        g.stroke({ width, color, alpha });
       }
-      if (started) g.stroke({ width, color, alpha });
     };
 
     if (settings.showDeltaHistogram) {
       const barWidth = Math.max(0.5, Math.min(this.timeStep() * 0.72, 5));
-      for (const chartIndex of this.renderIndices(1)) {
+      for (const chartIndex of renderIndices) {
         const impulse = aligned(snapshot.series.deltaImpulse, chartIndex);
         if (!Number.isFinite(impulse)) continue;
         const y = this.acvdValueToY(clampNumber(impulse * 2.2, -100, 100), paneTop, paneBottom);
@@ -2882,19 +2884,26 @@ export class BlackChartEngine {
     }
 
     if (settings.showDynamicEnvelope) {
-      const upperPoints: number[] = [];
-      const lowerPoints: number[] = [];
-      for (const chartIndex of this.renderIndices(1)) {
-        const upper = aligned(snapshot.series.upperEnvelope, chartIndex);
-        const lower = aligned(snapshot.series.lowerEnvelope, chartIndex);
-        if (!Number.isFinite(upper) || !Number.isFinite(lower)) continue;
-        const x = this.xForIndex(chartIndex);
-        upperPoints.push(x, this.acvdValueToY(upper, paneTop, paneBottom));
-        lowerPoints.push(x, this.acvdValueToY(lower, paneTop, paneBottom));
-      }
-      if (upperPoints.length > 4 && lowerPoints.length > 4) {
-        const polygon = [...upperPoints];
-        for (let index = lowerPoints.length - 2; index >= 0; index -= 2) polygon.push(lowerPoints[index]!, lowerPoints[index + 1]!);
+      const envelopeSegments = acvdContiguousFiniteSegments(renderIndices, offset, [
+        snapshot.series.upperEnvelope,
+        snapshot.series.lowerEnvelope
+      ]);
+      for (const segment of envelopeSegments) {
+        if (segment.length < 2) continue;
+        const polygon: number[] = [];
+        for (const chartIndex of segment) {
+          polygon.push(
+            this.xForIndex(chartIndex),
+            this.acvdValueToY(aligned(snapshot.series.upperEnvelope, chartIndex), paneTop, paneBottom)
+          );
+        }
+        for (let cursor = segment.length - 1; cursor >= 0; cursor--) {
+          const chartIndex = segment[cursor]!;
+          polygon.push(
+            this.xForIndex(chartIndex),
+            this.acvdValueToY(aligned(snapshot.series.lowerEnvelope, chartIndex), paneTop, paneBottom)
+          );
+        }
         g.poly(polygon).fill({ color: envelopeColor, alpha: fillAlpha * 0.34 });
       }
       drawLine(snapshot.series.upperEnvelope, bearish, lineAlpha * 0.46, 0.9);
@@ -5059,14 +5068,22 @@ export class BlackChartEngine {
         const coverage = acvdSnapshot.series.coveragePercent[sourceIndex];
         const regime = acvdSnapshot.series.regime[sourceIndex] ?? "UNAVAILABLE";
         const tooltipX = Math.max(8, Math.min(plotWidth - 250, this.pointer.x + 14));
-        const tooltipY = Math.max(acvdBounds.top + 5, Math.min(acvdBounds.bottom - 74, this.pointer.y + 12));
-        g.roundRect(tooltipX, tooltipY, 242, 69, 4)
+        const certified = Number.isFinite(pressure) && Number.isFinite(deltaRatio) && Number.isFinite(coverage);
+        const tooltipHeight = certified ? 69 : 42;
+        const tooltipY = Math.max(acvdBounds.top + 5, Math.min(acvdBounds.bottom - tooltipHeight - 5, this.pointer.y + 12));
+        g.roundRect(tooltipX, tooltipY, 242, tooltipHeight, 4)
           .fill({ color: 0x030305, alpha: 0.96 })
-          .stroke({ width: 1, color: theme.red, alpha: 0.62 });
-        this.addCrosshairText(`BC-ACVD ${Number.isFinite(pressure) ? pressure!.toFixed(1) : "--"} · ${regime}`, tooltipX + 8, tooltipY + 6);
-        this.addCrosshairText(`DELTA RATIO ${Number.isFinite(deltaRatio) ? (deltaRatio! * 100).toFixed(2) + "%" : "--"} · COVERAGE ${Number.isFinite(coverage) ? coverage!.toFixed(0) + "%" : "--"}`, tooltipX + 8, tooltipY + 21);
-        this.addCrosshairText(`CHOP ${(acvdSnapshot.series.chopProbability[sourceIndex] ?? 0).toFixed(0)} · DIVERGENCE ${(acvdSnapshot.series.divergenceScore[sourceIndex] ?? 0).toFixed(1)}`, tooltipX + 8, tooltipY + 36);
-        this.addCrosshairText(`LONG ${(acvdSnapshot.series.longConfidence[sourceIndex] ?? 0).toFixed(0)} · SHORT ${(acvdSnapshot.series.shortConfidence[sourceIndex] ?? 0).toFixed(0)} · FINAL BARS`, tooltipX + 8, tooltipY + 51);
+          .stroke({ width: 1, color: theme.red, alpha: certified ? 0.62 : 0.38 });
+        if (!certified) {
+          this.addCrosshairText("BC-ACVD · VERIFIED FLOW GAP", tooltipX + 8, tooltipY + 6);
+          this.addCrosshairText("NO CERTIFIED AGGRESSOR FLOW FOR THIS BAR", tooltipX + 8, tooltipY + 21);
+        } else {
+          const finiteText = (value: number | undefined, digits: number) => Number.isFinite(value) ? value!.toFixed(digits) : "--";
+          this.addCrosshairText(`BC-ACVD ${pressure!.toFixed(1)} · ${regime}`, tooltipX + 8, tooltipY + 6);
+          this.addCrosshairText(`DELTA RATIO ${(deltaRatio! * 100).toFixed(2)}% · COVERAGE ${coverage!.toFixed(0)}%`, tooltipX + 8, tooltipY + 21);
+          this.addCrosshairText(`CHOP ${finiteText(acvdSnapshot.series.chopProbability[sourceIndex], 0)} · DIVERGENCE ${finiteText(acvdSnapshot.series.divergenceScore[sourceIndex], 1)}`, tooltipX + 8, tooltipY + 36);
+          this.addCrosshairText(`LONG ${finiteText(acvdSnapshot.series.longConfidence[sourceIndex], 0)} · SHORT ${finiteText(acvdSnapshot.series.shortConfidence[sourceIndex], 0)} · FINAL BARS`, tooltipX + 8, tooltipY + 51);
+        }
       }
     }
     this.queueRender();

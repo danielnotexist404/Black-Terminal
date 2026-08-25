@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { canonicalizeBybitPositions, bybitPositionKey } from "../server/exchanges/bybit-position-identity.js";
 import { canonicalPositionKey, deduplicateCanonicalPositions, reconcileAuthoritativePositions } from "../src/positions/canonicalPosition.ts";
 import { replaceBybitPositions } from "../server/exchanges/bybit-snapshot-store.js";
-import { classifyBrokerSyncError } from "../api/portfolio/snapshot.js";
+import { classifyBrokerSyncError, PORTFOLIO_SNAPSHOT_RATE_LIMIT } from "../api/portfolio/snapshot.js";
 import { markPortfolioSnapshotFallback, unavailablePortfolioFreshness } from "../src/portfolio/portfolioFreshness.ts";
 import type { PortfolioPosition } from "../src/positions/types.ts";
 import type { PortfolioSnapshot } from "../src/portfolio/types.ts";
@@ -118,6 +118,16 @@ const apiClientSource = readFileSync(new URL("../src/portfolio/portfolioApiClien
 const positionManagerSource = readFileSync(new URL("../src/positions/positionManager.ts", import.meta.url), "utf8");
 const migrationSource = readFileSync(new URL("../supabase/migrations/202608120002_bybit_position_identity.sql", import.meta.url), "utf8");
 const connectionManagerSource = readFileSync(new URL("../src/connectivity/connectionManager.ts", import.meta.url), "utf8");
+
+const foregroundPortfolioPollMs = 15_000;
+const expectedDailySnapshotsPerClient = Math.ceil(86_400_000 / foregroundPortfolioPollMs);
+assert.match(appSource, /document\.hidden \? 60_000 : 15_000/, "rate-limit capacity must track the production portfolio polling cadence");
+assert.ok(PORTFOLIO_SNAPSHOT_RATE_LIMIT.perMinute >= 12, "the authenticated burst limit must tolerate bounded workspace/tab concurrency");
+assert.ok(
+  PORTFOLIO_SNAPSHOT_RATE_LIMIT.perDay >= expectedDailySnapshotsPerClient * 3,
+  "the daily limit must not disconnect up to three continuously open authenticated portfolio consumers"
+);
+assert.ok(PORTFOLIO_SNAPSHOT_RATE_LIMIT.perMinute <= 30 && PORTFOLIO_SNAPSHOT_RATE_LIMIT.perDay <= 20_000, "portfolio reads must remain bounded against abuse");
 
 assert.match(portfolioStoreSource, /lastVerifiedSnapshots/);
 assert.match(portfolioStoreSource, /if \(lastVerified\) return markPortfolioSnapshotFallback/);

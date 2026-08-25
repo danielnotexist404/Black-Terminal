@@ -9,13 +9,22 @@ import { syncBybitSnapshotAndReconcile } from "../../server/exchanges/bybit-reco
 import { loadHyperliquidCredential, syncHyperliquidAccount } from "../../server/protocols/hyperliquid.js";
 import { requireApiSecurity } from "../../server/security/securityMiddleware.js";
 
+// The terminal refreshes an authenticated portfolio snapshot every 15 seconds
+// while it is visible. Keep the burst limit strict, but allow that documented
+// cadence to run continuously (including a bounded second tab/workspace)
+// without the daily limiter eventually disconnecting its own read-only feed.
+export const PORTFOLIO_SNAPSHOT_RATE_LIMIT = Object.freeze({
+  perMinute: 20,
+  perDay: 20_000
+});
+
 function num(value) {
   return Number(value || 0);
 }
 
 export default async function handler(req, res) {
   try {
-    const security = await requireApiSecurity(req, res, { endpoint: "portfolio.snapshot", permission: "portfolio.retailAnalytics", maxBytes: 32768, rateLimit: { perMinute: 20, perDay: 5000 } });
+    const security = await requireApiSecurity(req, res, { endpoint: "portfolio.snapshot", permission: "portfolio.retailAnalytics", maxBytes: 32768, rateLimit: PORTFOLIO_SNAPSHOT_RATE_LIMIT });
     if (security.handled) return;
     requireMethod(req, "GET");
     const { supabase, user } = security;

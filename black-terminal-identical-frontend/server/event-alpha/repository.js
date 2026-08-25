@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { normalizeTokenUnlock } from "./domain.js";
+import { normalizeCanonicalEvent, normalizeTokenUnlock, sanitizeSafeMetadata, sha256 } from "./domain.js";
 
 export class EventAlphaRepository {
   constructor(supabase) {
@@ -48,6 +48,104 @@ export class EventAlphaRepository {
     const { data: canonicalEvent, error: eventError } = await this.supabase.from("event_alpha_canonical_events").select("*").eq("id", result.canonical_event_id).single();
     if (eventError) throw infrastructure(eventError, "EVENT_ALPHA_EVENT_READ_AFTER_INGEST_FAILED");
     return { raw: { id: result.raw_event_id }, canonicalEvent, duplicate: Boolean(result.was_duplicate), revision: Number(result.event_revision) };
+  }
+
+  async ingestCanonical(envelope, source) {
+    const canonical = normalizeCanonicalEvent(envelope);
+    const { data, error } = await this.supabase.rpc("event_alpha_ingest_canonical_v2", {
+      p_source_id: source.id,
+      p_source_event_id: envelope.sourceEventId,
+      p_event_family: canonical.eventFamily,
+      p_observed_at: envelope.observedAt,
+      p_first_actionable_at: envelope.firstActionableAt,
+      p_source_published_at: envelope.sourcePublishedAt,
+      p_payload_hash: envelope.payloadHash,
+      p_payload: envelope.payload,
+      p_ingestion_metadata: envelope.ingestionMetadata,
+      p_canonical_key: canonical.canonicalKey,
+      p_asset_id: canonical.assetId,
+      p_symbol: canonical.symbol,
+      p_event_time: canonical.eventTime,
+      p_event_status: canonical.status || "SCHEDULED",
+      p_source_confidence: canonical.sourceConfidence,
+      p_dedupe_fingerprint: canonical.dedupeFingerprint,
+      p_safe_summary: canonical.safeSummary,
+      p_normalized_payload: canonical.normalizedPayload
+    });
+    if (error) throw infrastructure(error, "EVENT_ALPHA_ATOMIC_CANONICAL_INGEST_FAILED");
+    const result = Array.isArray(data) ? data[0] : data;
+    if (!result?.canonical_event_id || !result?.raw_event_id) throw infrastructure(null, "EVENT_ALPHA_ATOMIC_CANONICAL_INGEST_EMPTY");
+    const { data: canonicalEvent, error: eventError } = await this.supabase.from("event_alpha_canonical_events").select("*").eq("id", result.canonical_event_id).single();
+    if (eventError) throw infrastructure(eventError, "EVENT_ALPHA_EVENT_READ_AFTER_INGEST_FAILED");
+    return { raw: { id: result.raw_event_id }, canonicalEvent, duplicate: Boolean(result.was_duplicate), revision: Number(result.event_revision), normalized: canonical };
+  }
+
+  async captureExpectation(canonicalEvent, expectation) {
+    if (!expectation) return null;
+    const asOf = new Date(expectation.asOf).toISOString();
+    if (Date.parse(asOf) >= Date.parse(canonicalEvent.first_actionable_at)) return null;
+    const contributors = Array.isArray(expectation.contributors) ? expectation.contributors.map(sanitizeSafeMetadata) : [];
+    const featureManifest = sanitizeSafeMetadata(expectation.featureManifest || {});
+    const expectationKey = sha256({
+      eventId: canonicalEvent.id,
+      asOf,
+      modelKey: expectation.modelKey,
+      modelVersion: expectation.modelVersion,
+      expectedValue: expectation.expectedValue ?? null,
+      expectedProbability: expectation.expectedProbability ?? null,
+      contributors
+    });
+    const { data, error } = await this.supabase.rpc("event_alpha_insert_expectation_v1", {
+      p_canonical_event_id: canonicalEvent.id,
+      p_expectation_key: expectationKey,
+      p_as_of: asOf,
+      p_first_actionable_at: canonicalEvent.first_actionable_at,
+      p_model_key: String(expectation.modelKey || "LIVE_SOURCE_EXPECTATION").slice(0, 120),
+      p_model_version: String(expectation.modelVersion || "1.0.0").slice(0, 80),
+      p_expected_value: expectation.expectedValue ?? null,
+      p_expected_time: canonicalEvent.event_time,
+      p_expected_probability: expectation.expectedProbability ?? null,
+      p_dispersion: Math.max(0, Number(expectation.dispersion || 0)),
+      p_confidence: Math.min(1, Math.max(0, Number(expectation.confidence || 0))),
+      p_contributors: contributors,
+      p_feature_manifest: featureManifest
+    });
+    if (error) throw infrastructure(error, "EVENT_ALPHA_LIVE_EXPECTATION_WRITE_FAILED");
+    return data;
+  }
+
+  async latestExpectation(eventId, firstActionableAt) {
+    const { data, error } = await this.supabase.from("event_alpha_expectation_snapshots").select("*")
+      .eq("canonical_event_id", eventId).lt("as_of", firstActionableAt).order("as_of", { ascending: false }).order("snapshot_version", { ascending: false }).limit(1).maybeSingle();
+    if (error) throw infrastructure(error, "EVENT_ALPHA_EXPECTATION_READ_FAILED");
+    return data || null;
+  }
+
+  async assessmentContext(job) {
+    const eventId = job.canonical_event_id || job.payload?.canonicalEventId;
+    const eventRevision = Number(job.payload?.eventRevision || 0);
+    const [eventResult, revisionResult] = await Promise.all([
+      this.supabase.from("event_alpha_canonical_events").select("*").eq("id", eventId).single(),
+      this.supabase.from("event_alpha_event_revisions").select("*").eq("canonical_event_id", eventId).eq("revision", eventRevision).single()
+    ]);
+    if (eventResult.error || revisionResult.error) throw infrastructure(eventResult.error || revisionResult.error, "EVENT_ALPHA_ASSESSMENT_CONTEXT_READ_FAILED");
+    return { event: eventResult.data, revision: revisionResult.data, eventRevision };
+  }
+
+  async persistLiveAssessment({ canonicalEventId, eventRevision, expectationSnapshotId, assetProfile, surprise, forecast, thesis }) {
+    const { data, error } = await this.supabase.rpc("event_alpha_persist_live_assessment_v1", {
+      p_canonical_event_id: canonicalEventId,
+      p_event_revision: eventRevision,
+      p_expectation_snapshot_id: expectationSnapshotId,
+      p_asset_profile: assetProfile,
+      p_surprise: surprise,
+      p_forecast: forecast,
+      p_thesis: thesis
+    });
+    if (error) throw infrastructure(error, "EVENT_ALPHA_ASSESSMENT_WRITE_FAILED");
+    const result = Array.isArray(data) ? data[0] : data;
+    if (!result?.surprise_assessment_id || !result?.response_forecast_id || !result?.thesis_id) throw infrastructure(null, "EVENT_ALPHA_ASSESSMENT_WRITE_EMPTY");
+    return result;
   }
 
   async updateCheckpoint(sourceId, checkpoint, outcome = {}) {

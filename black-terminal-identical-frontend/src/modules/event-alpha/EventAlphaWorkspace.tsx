@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Component, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from "react";
 import { Activity, AlertTriangle, BookOpen, Database, FlaskConical, Gauge, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { eventAlphaApi, type EventAlphaAudit, type EventAlphaEvent, type EventAlphaHealth, type EventAlphaRuntimeConfig, type EventAlphaThesis } from "./eventAlphaApi";
 import "./event-alpha.css";
@@ -8,6 +8,10 @@ type Tab = "EVENT FEED" | "THESES" | "RESEARCH" | "HEALTH" | "AUDIT" | "CONTROLS
 type Props = { onClose: () => void };
 
 export function EventAlphaWorkspace({ onClose }: Props) {
+  return <EventAlphaErrorBoundary onClose={onClose}><EventAlphaWorkspaceContent onClose={onClose} /></EventAlphaErrorBoundary>;
+}
+
+function EventAlphaWorkspaceContent({ onClose }: Props) {
   const [tab, setTab] = useState<Tab>("EVENT FEED");
   const [config, setConfig] = useState<EventAlphaRuntimeConfig | null>(null);
   const [events, setEvents] = useState<EventAlphaEvent[]>([]);
@@ -34,10 +38,10 @@ export function EventAlphaWorkspace({ onClose }: Props) {
       ]);
       if (requestGeneration !== generation.current || signal?.aborted) return;
       setConfig(configResult.config);
-      setEvents(feedResult.events);
-      setTheses(thesisResult.theses);
-      setHealth(healthResult);
-      setAudit(auditResult.records);
+      setEvents(Array.isArray(feedResult?.events) ? feedResult.events : []);
+      setTheses(Array.isArray(thesisResult?.theses) ? thesisResult.theses : []);
+      setHealth({ ...healthResult, sources: Array.isArray(healthResult?.sources) ? healthResult.sources : [], pendingJobs: Number(healthResult?.pendingJobs || 0) });
+      setAudit(Array.isArray(auditResult?.records) ? auditResult.records : []);
       setMessage(configResult.config.engineEnabled ? "Server evidence synchronized." : "Engine rollout is disabled. Historical evidence remains readable.");
     } catch (error) {
       if (!signal?.aborted && requestGeneration === generation.current) setMessage(error instanceof Error ? error.message : "Event Alpha synchronization failed.");
@@ -72,13 +76,13 @@ export function EventAlphaWorkspace({ onClose }: Props) {
     events: events.length,
     activeTheses: theses.filter((row) => ["OBSERVING", "ARMED", "TRIGGERED", "PAPER_ACTIVE"].includes(row.state)).length,
     paperActive: theses.filter((row) => row.state === "PAPER_ACTIVE").length,
-    unhealthySources: health?.sources.filter((row) => !["HEALTHY", "DISABLED"].includes(row.health_status)).length || 0
+    unhealthySources: (Array.isArray(health?.sources) ? health.sources : []).filter((row) => !["HEALTHY", "DISABLED"].includes(row.health_status)).length
   }), [events, health, theses]);
 
   return (
     <section className="event-alpha-workspace" aria-label="Event Alpha workspace">
       <header className="event-alpha-header">
-        <div><b>EVENT ALPHA ENGINE</b><span>Point-in-time event research · BC-RDA tactical gate blocked · paper-only execution</span></div>
+        <div><b>EVENT ALPHA ENGINE</b><span>Live point-in-time event intelligence · server-authoritative evidence · paper-only execution</span></div>
         <div className="event-alpha-header-actions">
           <span className={config?.engineEnabled ? "event-alpha-state live" : "event-alpha-state"}>{config?.engineEnabled ? "ENGINE ACTIVE" : "ENGINE OFF"}</span>
           <button type="button" onClick={() => void refresh()} disabled={refreshing} aria-label="Refresh Event Alpha"><RefreshCw size={14} className={refreshing ? "spin" : ""} /></button>
@@ -141,10 +145,11 @@ function ResearchPanel() {
 }
 
 function HealthPanel({ health }: { health: EventAlphaHealth | null }) {
+  const sources = Array.isArray(health?.sources) ? health.sources : [];
   return <div className="event-alpha-health-grid">
     <article><h3>WORK QUEUE</h3><b>{health?.pendingJobs ?? "—"}</b><p>Queued or leased durable jobs</p></article>
-    {(health?.sources || []).map((source) => <article key={source.source_key} className={source.health_status === "HEALTHY" ? "healthy" : "degraded"}><h3>{source.source_key}</h3><b>{source.health_status}</b><p>{source.safe_error_code || `Last success ${formatUtc(source.last_success_at)}`}</p></article>)}
-    {!health?.sources.length && <article><h3>TOKEN UNLOCK SOURCE</h3><b>NOT REGISTERED</b><p>No credentialed adapter has run.</p></article>}
+    {sources.map((source) => <article key={source.source_key} className={source.health_status === "HEALTHY" ? "healthy" : "degraded"}><h3>{source.source_key}</h3><b>{source.health_status}</b><p>{source.safe_error_code || `Last success ${formatUtc(source.last_success_at)}`}</p></article>)}
+    {!sources.length && <article><h3>LIVE SOURCES</h3><b>NOT REGISTERED</b><p>The ingestion worker has not registered a source yet.</p></article>}
   </div>;
 }
 
@@ -164,10 +169,22 @@ function ControlsPanel({ config }: { config: EventAlphaRuntimeConfig | null }) {
     ["Strategy kill switch clear", config ? !config.strategyKillSwitchEngaged : false, "must be explicitly cleared"],
     ["Global execution kill switch clear", config ? !config.globalExecutionKillSwitchEngaged : false, "must be explicitly cleared"],
     ["Token unlock adapter", config?.tokenUnlockSourceConfigured, "credentialed server source"],
-    ["Governance adapter", false, "extension point only"],
-    ["Protocol economics adapter", false, "extension point only"]
+    ["Snapshot governance feed", config?.governanceAdapterEnabled, "public GraphQL · point-in-time vote outcome"],
+    ["DefiLlama economics feed", config?.protocolEconomicsAdapterEnabled, "public protocol revenue evidence"]
   ] as const;
   return <div className="event-alpha-controls"><div className="event-alpha-warning"><AlertTriangle size={17} /><div><b>FAIL-CLOSED ROLLOUT</b><p>Controls are server environment policy, not browser toggles. Live Event Alpha execution is structurally unavailable.</p></div></div>{controls.map(([label, enabled, note]) => <div key={label}><span>{label}</span><b className={enabled ? "on" : "off"}>{enabled ? "ENABLED" : "DISABLED"}</b><small>{note}</small></div>)}</div>;
+}
+
+class EventAlphaErrorBoundary extends Component<{ children: ReactNode; onClose: () => void }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("[event-alpha-ui-boundary]", { name: error.name, componentStack: info.componentStack });
+  }
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return <section className="event-alpha-workspace event-alpha-recovery"><div><AlertTriangle size={22} /><b>EVENT ALPHA DISPLAY RECOVERED</b><p>The workspace encountered an invalid client projection. Server evidence was not changed.</p><button type="button" onClick={() => this.setState({ failed: false })}>RETRY WORKSPACE</button><button type="button" onClick={this.props.onClose}>RETURN TO CHART</button></div></section>;
+  }
 }
 
 function formatUtc(value?: string | null) { if (!value) return "—"; const time = Date.parse(value); return Number.isFinite(time) ? new Date(time).toISOString().replace("T", " ").slice(0, 19) + "Z" : "INVALID"; }

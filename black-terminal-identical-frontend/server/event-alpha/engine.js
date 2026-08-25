@@ -102,24 +102,27 @@ export function assessEventSurprise({ canonicalEvent, expectation, assetProfile,
 
 export function calculateEconomicImpact(canonicalEvent, assetProfile, compositeSurprise) {
   const payload = canonicalEvent.normalizedPayload;
-  const circulatingSupply = finite(Number(assetProfile.circulatingSupply ?? payload.circulatingSupply), "circulatingSupply", { minimum: EPSILON });
   const dailyDollarVolume = finite(Number(assetProfile.averageDailyDollarVolume), "averageDailyDollarVolume", { minimum: EPSILON });
   const valueCaptureScore = clamp(Number(assetProfile.valueCaptureScore ?? 0.5), 0, 1);
   const liquidSupplyRatio = clamp(Number(assetProfile.liquidSupplyRatio ?? 0.5), 0, 1);
   let supplyImpact = 0;
+  let absorptionDays = 0;
   let direction = 0;
   if (canonicalEvent.eventFamily === "TOKEN_SUPPLY") {
+    const circulatingSupply = finite(Number(assetProfile.circulatingSupply ?? payload.circulatingSupply), "circulatingSupply", { minimum: EPSILON });
     supplyImpact = (payload.unlockTokens / circulatingSupply) * Number(payload.liquidImmediatelyPct ?? 1) * liquidSupplyRatio;
+    absorptionDays = Math.abs(payload.unlockTokens * Number(payload.referencePrice || assetProfile.referencePrice || 1) * Number(payload.liquidImmediatelyPct ?? 1) * liquidSupplyRatio) / dailyDollarVolume;
     direction = -1;
   } else if (canonicalEvent.eventFamily === "GOVERNANCE") {
     supplyImpact = Math.abs(Number(payload.treasuryImpactUsd || 0)) / dailyDollarVolume;
+    absorptionDays = supplyImpact;
     direction = Number(payload.directionalImpact || 0);
   } else {
     supplyImpact = Math.abs(Number(payload.annualizedCashFlowDeltaUsd || 0)) / dailyDollarVolume;
+    absorptionDays = supplyImpact;
     direction = Math.sign(Number(payload.annualizedCashFlowDeltaUsd || 0));
   }
-  const absorptionDays = Math.abs(supplyImpact * circulatingSupply * Number(payload.referencePrice || 1)) / dailyDollarVolume;
-  const impactMagnitude = Math.log1p(Math.max(0, absorptionDays)) * (0.5 + 0.5 * (1 - valueCaptureScore)) * Math.abs(compositeSurprise || 1);
+  const impactMagnitude = Math.log1p(Math.max(0, absorptionDays)) * (0.25 + 0.75 * valueCaptureScore) * Math.abs(compositeSurprise || 0);
   return Object.freeze({
     direction,
     supplyImpact,
@@ -127,7 +130,7 @@ export function calculateEconomicImpact(canonicalEvent, assetProfile, compositeS
     valueCaptureScore,
     liquidSupplyRatio,
     impactMagnitude,
-    dataQuality: assetProfile.knownAt && Date.parse(assetProfile.knownAt) <= Date.parse(canonicalEvent.firstActionableAt) ? 1 : 0.35
+    dataQuality: assetProfile.knownAt && Date.parse(assetProfile.knownAt) <= Date.parse(assetProfile.evidenceCutoffAt || canonicalEvent.firstActionableAt) ? 1 : 0.35
   });
 }
 
@@ -249,7 +252,7 @@ export function deterministicPaperFill({ intent, market, model }) {
 function eventActualValue(event) {
   if (event.eventFamily === "TOKEN_SUPPLY") return event.normalizedPayload.unlockTokens;
   if (event.eventFamily === "GOVERNANCE") return event.normalizedPayload.passed ? 1 : 0;
-  return Number(event.normalizedPayload.annualizedCashFlowDeltaUsd || 0);
+  return Number(event.normalizedPayload.actualValue ?? event.normalizedPayload.dailyRevenueUsd ?? 0);
 }
 
 function scaleTiming(days) {

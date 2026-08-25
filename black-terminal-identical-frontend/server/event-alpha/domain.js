@@ -100,7 +100,7 @@ export function normalizeRawEventEnvelope(input, now = new Date()) {
   const observedAt = asUtcIso(input.observedAt, "observedAt");
   const firstActionableAt = asUtcIso(input.firstActionableAt, "firstActionableAt");
   if (Date.parse(observedAt) > now.getTime() + 30_000) throw domainError("EVENT_ALPHA_CLOCK_SKEW", "observedAt is implausibly far in the future.");
-  if (Date.parse(firstActionableAt) > Date.parse(observedAt)) throw domainError("EVENT_ALPHA_CAUSAL_ORDER_INVALID", "firstActionableAt cannot be later than collection time.");
+  if (Date.parse(firstActionableAt) > now.getTime() + 10 * 365 * 24 * 60 * 60 * 1_000) throw domainError("EVENT_ALPHA_CAUSAL_ORDER_INVALID", "firstActionableAt is implausibly far in the future.");
   const sourcePublishedAt = input.sourcePublishedAt ? asUtcIso(input.sourcePublishedAt, "sourcePublishedAt") : null;
   if (sourcePublishedAt && Date.parse(sourcePublishedAt) > Date.parse(observedAt)) throw domainError("EVENT_ALPHA_CAUSAL_ORDER_INVALID", "sourcePublishedAt cannot be later than collection time.");
   const payload = sanitizeExternalPayload(input.payload);
@@ -140,6 +140,7 @@ export function normalizeTokenUnlock(envelope) {
     beneficiaryClass,
     liquidImmediatelyPct: optionalRatio(payload.liquidImmediatelyPct, 1),
     cliff: Boolean(payload.cliff),
+    referencePrice: optionalFinite(payload.referencePrice, 1),
     sourceNoticeId: payload.sourceNoticeId ? boundedText(payload.sourceNoticeId, "sourceNoticeId", 160) : null
   });
   return Object.freeze({
@@ -154,6 +155,109 @@ export function normalizeTokenUnlock(envelope) {
     sourceConfidence: finite(payload.sourceConfidence ?? 0.8, "sourceConfidence", { minimum: 0, maximum: 1 }),
     safeSummary: `${symbol} unlock ${unlockTokens} tokens (${(unlockPctCirculating * 100).toFixed(4)}% of circulating supply).`
   });
+}
+
+export function normalizeGovernanceEvent(envelope) {
+  if (envelope.eventFamily !== "GOVERNANCE") throw domainError("EVENT_ALPHA_EVENT_FAMILY_MISMATCH", "Governance normalizer received another family.");
+  const payload = envelope.payload;
+  const assetId = normalizedAsset(payload.assetId);
+  const symbol = normalizedSymbol(payload.symbol);
+  const proposalId = boundedText(payload.proposalId, "proposalId", 240);
+  const eventTime = asUtcIso(payload.eventTime, "eventTime");
+  const choices = boundedStringArray(payload.choices, "choices", 50, 160);
+  const scores = boundedNumberArray(payload.scores, "scores", choices.length, 0);
+  const scoresTotal = finite(Number(payload.scoresTotal ?? scores.reduce((sum, value) => sum + value, 0)), "scoresTotal", { minimum: 0 });
+  const winningChoice = scores.length ? scores.indexOf(Math.max(...scores)) : -1;
+  const affirmativeChoice = choices.findIndex((choice) => /^(?:for|yes|approve|accept|support)(?:\b|[,.!?])/i.test(choice.trim()));
+  const negativeChoice = choices.findIndex((choice) => /^(?:against|no|reject|deny|oppose)(?:\b|[,.!?])/i.test(choice.trim()));
+  const resolved = String(payload.state || "").toUpperCase() === "COMPLETED";
+  const passed = resolved && affirmativeChoice >= 0 && winningChoice === affirmativeChoice;
+  const directionalImpact = optionalFinite(payload.directionalImpact, 0);
+  const treasuryImpactUsd = optionalFinite(payload.treasuryImpactUsd, 0);
+  const canonicalKey = `GOVERNANCE:${assetId}:${proposalId}`;
+  const normalizedPayload = Object.freeze({
+    assetId,
+    symbol,
+    proposalId,
+    spaceId: boundedText(payload.spaceId, "spaceId", 160),
+    title: boundedText(payload.title, "title", 500),
+    eventTime,
+    choices,
+    scores,
+    scoresTotal,
+    winningChoice,
+    affirmativeChoice,
+    negativeChoice,
+    passed,
+    state: resolved ? "COMPLETED" : "ACTIVE",
+    directionalImpact,
+    treasuryImpactUsd,
+    structuralBreakScore: optionalFinite(payload.structuralBreakScore, 0)
+  });
+  return Object.freeze({
+    canonicalKey,
+    dedupeFingerprint: sha256({ canonicalKey, eventTime }),
+    eventFamily: "GOVERNANCE",
+    assetId,
+    symbol,
+    eventTime,
+    firstActionableAt: envelope.firstActionableAt,
+    status: resolved ? "COMPLETED" : "ACTIVE",
+    normalizedPayload,
+    sourceConfidence: finite(Number(payload.sourceConfidence ?? 0.82), "sourceConfidence", { minimum: 0, maximum: 1 }),
+    safeSummary: `${symbol} governance: ${normalizedPayload.title}`.slice(0, 2000)
+  });
+}
+
+export function normalizeProtocolEconomicsEvent(envelope) {
+  if (envelope.eventFamily !== "PROTOCOL_ECONOMICS") throw domainError("EVENT_ALPHA_EVENT_FAMILY_MISMATCH", "Protocol-economics normalizer received another family.");
+  const payload = envelope.payload;
+  const assetId = normalizedAsset(payload.assetId);
+  const symbol = normalizedSymbol(payload.symbol);
+  const protocolSlug = boundedText(payload.protocolSlug, "protocolSlug", 160).toLowerCase();
+  const metric = boundedText(payload.metric || "DAILY_REVENUE_USD", "metric", 80).toUpperCase();
+  const eventTime = asUtcIso(payload.eventTime, "eventTime");
+  const state = String(payload.state || "SCHEDULED").toUpperCase() === "COMPLETED" ? "COMPLETED" : "SCHEDULED";
+  const expectedValue = optionalFinite(payload.expectedValue, null);
+  const actualValue = optionalFinite(payload.actualValue, null);
+  const delta = actualValue === null || expectedValue === null ? 0 : actualValue - expectedValue;
+  const canonicalKey = `PROTOCOL_ECONOMICS:${protocolSlug}:${metric}:${eventTime}`;
+  const normalizedPayload = Object.freeze({
+    assetId,
+    symbol,
+    protocolSlug,
+    protocolName: boundedText(payload.protocolName || protocolSlug, "protocolName", 160),
+    metric,
+    eventTime,
+    state,
+    expectedValue,
+    actualValue,
+    dailyRevenueUsd: actualValue,
+    annualizedCashFlowDeltaUsd: delta * 365,
+    referencePrice: optionalFinite(payload.referencePrice, 1),
+    methodologyUrl: optionalUrl(payload.methodologyUrl),
+    sourceWindow: boundedText(payload.sourceWindow || "TRAILING_24H", "sourceWindow", 80)
+  });
+  return Object.freeze({
+    canonicalKey,
+    dedupeFingerprint: sha256({ canonicalKey, metric }),
+    eventFamily: "PROTOCOL_ECONOMICS",
+    assetId,
+    symbol,
+    eventTime,
+    firstActionableAt: envelope.firstActionableAt,
+    status: state,
+    normalizedPayload,
+    sourceConfidence: finite(Number(payload.sourceConfidence ?? 0.78), "sourceConfidence", { minimum: 0, maximum: 1 }),
+    safeSummary: `${symbol} ${metric.replaceAll("_", " ")}: ${state === "COMPLETED" ? formatCompactNumber(actualValue) : `forecast ${formatCompactNumber(expectedValue)}`}`.slice(0, 2000)
+  });
+}
+
+export function normalizeCanonicalEvent(envelope) {
+  if (envelope.eventFamily === "TOKEN_SUPPLY") return normalizeTokenUnlock(envelope);
+  if (envelope.eventFamily === "GOVERNANCE") return normalizeGovernanceEvent(envelope);
+  if (envelope.eventFamily === "PROTOCOL_ECONOMICS") return normalizeProtocolEconomicsEvent(envelope);
+  throw domainError("EVENT_ALPHA_INVALID_EVENT_FAMILY", "Unsupported Event Alpha family.");
 }
 
 export function bindExpectationToEvent(expectation, canonicalEvent) {
@@ -189,6 +293,8 @@ export function eventAlphaRuntimeConfig(env = process.env) {
   const engineEnabled = env.EVENT_ALPHA_ENGINE_ENABLED === "true";
   const ingestionEnabled = engineEnabled && env.EVENT_ALPHA_INGESTION_ENABLED === "true";
   const tokenSupplyEnabled = ingestionEnabled && env.EVENT_ALPHA_TOKEN_SUPPLY_ENABLED === "true";
+  const governanceEnabled = ingestionEnabled && env.EVENT_ALPHA_GOVERNANCE_ENABLED === "true";
+  const protocolEconomicsEnabled = ingestionEnabled && env.EVENT_ALPHA_PROTOCOL_ECONOMICS_ENABLED === "true";
   const strategyKillSwitchEngaged = env.EVENT_ALPHA_STRATEGY_KILL_SWITCH !== "false";
   const globalExecutionKillSwitchEngaged = env.EVENT_ALPHA_GLOBAL_EXECUTION_KILL_SWITCH !== "false";
   const paperRequested = env.EVENT_ALPHA_PAPER_EXECUTION_ENABLED === "true";
@@ -199,6 +305,8 @@ export function eventAlphaRuntimeConfig(env = process.env) {
     engineEnabled,
     ingestionEnabled,
     tokenSupplyEnabled,
+    governanceEnabled,
+    protocolEconomicsEnabled,
     paperExecutionEnabled,
     paperExecutionConfigurationRejected: paperRequested && (strategyKillSwitchEngaged || globalExecutionKillSwitchEngaged),
     liveExecutionEnabled: false,
@@ -207,14 +315,45 @@ export function eventAlphaRuntimeConfig(env = process.env) {
     manualApprovalConfigurationRejected: manualApprovalDisabled,
     strategyKillSwitchEngaged,
     globalExecutionKillSwitchEngaged,
-    tokenUnlockSourceConfigured: tokenSupplyEnabled && Boolean(env.EVENT_ALPHA_TOKEN_UNLOCK_API_URL && env.EVENT_ALPHA_TOKEN_UNLOCK_API_TOKEN),
-    governanceAdapterEnabled: false,
+    tokenUnlockSourceConfigured: tokenSupplyEnabled && Boolean(
+      env.EVENT_ALPHA_TOKENOMIST_API_KEY
+      || (env.EVENT_ALPHA_TOKEN_UNLOCK_API_URL && env.EVENT_ALPHA_TOKEN_UNLOCK_API_TOKEN)
+    ),
+    governanceAdapterEnabled: governanceEnabled,
     governanceConfigurationRequested: env.EVENT_ALPHA_GOVERNANCE_ENABLED === "true",
-    protocolEconomicsAdapterEnabled: false,
+    protocolEconomicsAdapterEnabled: protocolEconomicsEnabled,
     protocolEconomicsConfigurationRequested: env.EVENT_ALPHA_PROTOCOL_ECONOMICS_ENABLED === "true",
     llmExtractionEnabled: false,
     llmExtractionConfigurationRejected: env.EVENT_ALPHA_LLM_EXTRACTION_ENABLED === "true"
   });
+}
+
+function boundedStringArray(value, field, maximumLength, maximumItemLength) {
+  if (!Array.isArray(value) || value.length < 2 || value.length > maximumLength) throw domainError("EVENT_ALPHA_INVALID_SCHEMA", `${field} must be a bounded array.`);
+  return value.map((entry, index) => boundedText(entry, `${field}[${index}]`, maximumItemLength));
+}
+
+function boundedNumberArray(value, field, expectedLength, minimum = Number.NEGATIVE_INFINITY) {
+  if (!Array.isArray(value) || value.length !== expectedLength) throw domainError("EVENT_ALPHA_INVALID_SCHEMA", `${field} must align exactly with the choice array.`);
+  return value.map((entry, index) => finite(Number(entry), `${field}[${index}]`, { minimum }));
+}
+
+function optionalFinite(value, fallback) {
+  if (value === null || value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw domainError("EVENT_ALPHA_INVALID_NUMBER", "Optional numeric evidence must be finite.");
+  return parsed;
+}
+
+function optionalUrl(value) {
+  if (!value) return null;
+  const url = new URL(String(value));
+  if (url.protocol !== "https:") throw domainError("EVENT_ALPHA_SOURCE_HTTPS_REQUIRED", "Methodology URL must use HTTPS.");
+  return url.toString().slice(0, 1000);
+}
+
+function formatCompactNumber(value) {
+  return Number.isFinite(value) ? new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(value) : "pending";
 }
 
 export function sanitizeExternalPayload(value, depth = 0) {

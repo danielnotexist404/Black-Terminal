@@ -3,10 +3,10 @@
 ## Safe rollout
 
 1. Apply the Event Alpha migration using the normal reviewed Supabase migration process. Do not enable flags before the database migration succeeds.
-2. Configure one verified HTTPS provider and an exact host allowlist. Never place its token in a `VITE_` variable or browser bundle.
+2. Snapshot governance (`hub.snapshot.org`) and DefiLlama protocol revenue (`api.llama.fi`) use fixed, allowlisted public HTTPS endpoints. Never place an optional provider token in a `VITE_` variable or browser bundle.
 3. Start with all values from `.env.event-alpha.example` unchanged. The UI should report engine off and no source fallback.
 4. Enable `EVENT_ALPHA_ENGINE_ENABLED=true` for the read/research control plane. This alone does not start ingestion.
-5. Enable `EVENT_ALPHA_INGESTION_ENABLED=true` and `EVENT_ALPHA_TOKEN_SUPPLY_ENABLED=true` only after the provider is reviewed. Confirm the source registers as `HEALTHY` or remains truthfully `DISABLED`.
+5. Enable `EVENT_ALPHA_INGESTION_ENABLED=true`, `EVENT_ALPHA_GOVERNANCE_ENABLED=true`, and `EVENT_ALPHA_PROTOCOL_ECONOMICS_ENABLED=true`; confirm both public sources register as `HEALTHY`. Token supply remains disabled unless a licensed Tokenomist API key or another reviewed provider is configured server-side.
 6. Validate immutable ingestion, duplicate replay, revision behavior, expectation timestamps and audit evidence.
 7. Only after a paper review, set `EVENT_ALPHA_STRATEGY_KILL_SWITCH=false` and `EVENT_ALPHA_GLOBAL_EXECUTION_KILL_SWITCH=false`, enable `EVENT_ALPHA_PAPER_EXECUTION_ENABLED=true`, and keep `EVENT_ALPHA_REQUIRE_MANUAL_APPROVAL=true`.
 
@@ -28,7 +28,7 @@ Run the synthetic point-in-time research replay (it never reaches an order adapt
 npm run event-alpha:replay -- --input fixtures/event-alpha/token-unlock-replay.json
 ```
 
-The worker requires `SUPABASE_URL` plus a server secret, and exits/fails if the durable control plane is unavailable. It never requires exchange credentials.
+The worker requires `SUPABASE_URL` plus a server secret, and exits/fails if the durable control plane is unavailable. Market-response attribution uses Bybit's fixed public V5 endpoints and never requires exchange credentials.
 
 ## Incident response
 

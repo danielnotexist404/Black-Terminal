@@ -7,9 +7,11 @@ import { PGlite } from "@electric-sql/pglite";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sql = fs.readFileSync(path.join(root, "supabase/migrations/20260820014838_phase5_event_alpha_engine.sql"), "utf8");
+const liveSql = fs.readFileSync(path.join(root, "supabase/migrations/20260825013000_event_alpha_live_pipeline.sql"), "utf8");
 const db = new PGlite();
 await db.exec("create role anon; create role authenticated; create role service_role bypassrls;");
 await db.exec(sql);
+await db.exec(liveSql);
 
 const sourceId = crypto.randomUUID();
 await db.query(`insert into public.event_alpha_sources(id,source_key,display_name,event_family,adapter_version,authority_class,enabled,health_status)
@@ -34,6 +36,29 @@ assert.equal(revised.rows[0].event_revision, 2);
 assert.equal((await db.query("select count(*)::int as count from public.event_alpha_processing_jobs where job_type='ASSESS'")).rows[0].count, 2, "a material revision receives exactly one distinct assessment job");
 const eventId = revised.rows[0].canonical_event_id;
 assert.equal((await db.query("select count(*)::int as count from public.event_alpha_event_revisions where canonical_event_id=$1", [eventId])).rows[0].count, 2);
+
+const protocolSourceId = crypto.randomUUID();
+await db.query(`insert into public.event_alpha_sources(id,source_key,display_name,event_family,adapter_version,authority_class,enabled,health_status)
+  values($1,'DEFILLAMA_PROTOCOL_REVENUE_V1','DefiLlama Revenue','PROTOCOL_ECONOMICS','live-v1','SECONDARY',true,'HEALTHY')`, [protocolSourceId]);
+const scheduledRaw = { assetId:"AAVE",symbol:"AAVEUSDT",protocolSlug:"aave",protocolName:"Aave",metric:"ROLLING_24H_REVENUE_USD",eventTime:"2026-09-01T14:00:00Z",state:"SCHEDULED",expectedValue:100,actualValue:null,referencePrice:1,sourceWindow:"TRAILING_24H",sourceConfidence:0.78 };
+const scheduledNormalized = { ...scheduledRaw, dailyRevenueUsd:null, annualizedCashFlowDeltaUsd:0, methodologyUrl:null };
+const scheduled = await db.query(`select * from public.event_alpha_ingest_canonical_v2(
+  $1,$2,'PROTOCOL_ECONOMICS',$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,'SCHEDULED',$13,$14,$15,$16::jsonb
+)`, [protocolSourceId,"aave:revenue:2026-09-01T14:00:00Z","2026-08-01T13:00:00Z","2026-09-01T14:00:00Z","2026-08-01T13:00:00Z",sha(scheduledRaw),JSON.stringify(scheduledRaw),JSON.stringify({adapter:"test"}),"PROTOCOL_ECONOMICS:aave:ROLLING_24H_REVENUE_USD:2026-09-01T14:00:00.000Z","AAVE","AAVEUSDT","2026-09-01T14:00:00Z",0.78,sha("protocol-dedupe"),"AAVE revenue scheduled",JSON.stringify(scheduledNormalized)]);
+assert.equal(scheduled.rows[0].event_revision, 1, "future scheduled evidence must be accepted before it becomes actionable");
+assert.equal((await db.query("select status from public.event_alpha_canonical_events where id=$1", [scheduled.rows[0].canonical_event_id])).rows[0].status, "SCHEDULED");
+const protocolExpectation = await db.query(`select * from public.event_alpha_insert_expectation_v1(
+  $1,$2,$3,$4,'DEFILLAMA_ROBUST_DAILY_REVENUE','1.0.0',100,$5,null,10,0.7,'[]'::jsonb,$6::jsonb
+)`, [scheduled.rows[0].canonical_event_id,sha("protocol-expectation"),"2026-08-01T13:00:00Z","2026-09-01T14:00:00Z","2026-09-01T14:00:00Z",JSON.stringify({valueCaptureScore:0.45})]);
+const liveAssessment = await db.query(`select * from public.event_alpha_persist_live_assessment_v1($1,1,$2,$3::jsonb,$4::jsonb,$5::jsonb,$6::jsonb)`, [
+  scheduled.rows[0].canonical_event_id,
+  protocolExpectation.rows[0].id,
+  JSON.stringify({assetId:"AAVE",effectiveFrom:"2026-09-01T14:01:00Z",knownAt:"2026-09-01T14:01:00Z",circulatingSupply:null,averageDailyDollarVolume:100000000,floatAdjustment:1,liquidSupplyRatio:0.65,valueCaptureScore:0.45,benchmarkSymbol:"BTCUSDT",sourceManifest:{provider:"test"}}),
+  JSON.stringify({assessedAt:"2026-09-01T14:01:00Z",quantitySurprise:0.2,timingSurprise:0,probabilitySurprise:null,structuralSurprise:0,compositeSurprise:0.1,confidence:0.7,economicImpact:{direction:1},reasonCodes:[],calculationManifest:{model:"test"}}),
+  JSON.stringify({horizonSeconds:21600,benchmarkSymbol:"BTCUSDT",expectedAbnormalReturnBps:50,realizedAbnormalReturnBps:10,estimatedRoundTripCostBps:8,uncertaintyPenaltyBps:5,remainingAlphaBps:27,outcome:"UNDERREACTION",confidence:0.7,priceCutoffAt:"2026-09-01T14:01:00Z",calculationManifest:{model:"test"}}),
+  JSON.stringify({thesisKey:sha("protocol-thesis"),state:"OBSERVING",direction:"LONG",confidence:0.7,remainingAlphaBps:27,validFrom:"2026-09-01T14:01:00Z",expiresAt:"2026-09-01T20:01:00Z",reasonCodes:["UNDERREACTION_DETECTED"],invalidationConditions:["EVENT_REVISION_MATERIAL"]})
+]);
+assert.ok(liveAssessment.rows[0].thesis_id, "live assessment persistence returns a durable thesis identity");
 
 const expectationKey = sha({ eventId, expected: 80 });
 const insertExpectation = () => db.query(`select * from public.event_alpha_insert_expectation_v1(

@@ -4,6 +4,8 @@ export type EventAlphaRuntimeConfig = {
   engineEnabled: boolean;
   ingestionEnabled: boolean;
   tokenSupplyEnabled: boolean;
+  governanceEnabled: boolean;
+  protocolEconomicsEnabled: boolean;
   paperExecutionEnabled: boolean;
   paperExecutionConfigurationRejected: boolean;
   liveExecutionEnabled: false;
@@ -13,9 +15,9 @@ export type EventAlphaRuntimeConfig = {
   strategyKillSwitchEngaged: boolean;
   globalExecutionKillSwitchEngaged: boolean;
   tokenUnlockSourceConfigured: boolean;
-  governanceAdapterEnabled: false;
+  governanceAdapterEnabled: boolean;
   governanceConfigurationRequested: boolean;
-  protocolEconomicsAdapterEnabled: false;
+  protocolEconomicsAdapterEnabled: boolean;
   protocolEconomicsConfigurationRequested: boolean;
   llmExtractionEnabled: false;
   llmExtractionConfigurationRejected: boolean;

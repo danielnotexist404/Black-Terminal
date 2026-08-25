@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const migrationPath = path.join(root, "supabase/migrations/20260820014838_phase5_event_alpha_engine.sql");
 const sql = fs.readFileSync(migrationPath, "utf8");
+const liveSql = fs.readFileSync(path.join(root, "supabase/migrations/20260825013000_event_alpha_live_pipeline.sql"), "utf8");
 const tables = [
   "event_alpha_sources","event_alpha_raw_events","event_alpha_canonical_events","event_alpha_event_revisions",
   "event_alpha_expectation_snapshots","event_alpha_asset_profiles","event_alpha_surprise_assessments","event_alpha_response_forecasts",
@@ -37,5 +38,10 @@ assert.ok(sql.trimEnd().endsWith("commit;"), "no SQL may trail the final commit"
 assert.equal((sql.match(/\$\$/g) || []).length % 2, 0, "dollar-quoted function bodies must be balanced");
 assert.doesNotMatch(sql, /grant\s+.*\s+to\s+(?:anon|authenticated)/i, "no Event Alpha grant may expose direct browser authority");
 assert.equal((sql.match(/create or replace function public\.event_alpha_/gi) || []).length, 8, "the migration contains the reviewed Event Alpha function set");
+assert.match(liveSql, /event_alpha_ingest_canonical_v2[\s\S]*?pg_advisory_xact_lock[\s\S]*?event_alpha_processing_jobs/i, "live canonical ingestion and assessment enqueue are atomic");
+assert.match(liveSql, /event_alpha_persist_live_assessment_v1/i, "live assessment persistence must be transactional");
+assert.match(liveSql, /revoke all on function public\.event_alpha_ingest_canonical_v2[\s\S]*?from public, anon, authenticated/i, "live ingestion RPC must remain server-only");
+assert.doesNotMatch(liveSql, /grant\s+.*\s+to\s+(?:anon|authenticated)/i, "live Event Alpha RPCs cannot be exposed to browser roles");
+assert.ok(liveSql.trimEnd().endsWith("commit;"), "live migration must commit atomically");
 
 console.log(`Event Alpha migration contracts PASS — ${tables.length} service-only RLS tables and causal/paper invariants verified.`);

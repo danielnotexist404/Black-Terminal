@@ -205,6 +205,7 @@ export function ChartDockedDepthLadder({
         maximumRows: 180
       })
     : null, [effectiveViewport, lastPrice, liquidationSnapshotForSymbol, profileMode]);
+  const liquidationModelHasRows = Boolean(liquidationModel?.rows.length);
   latestLiquidationModelRef.current = liquidationModel;
 
   useEffect(() => {
@@ -418,16 +419,22 @@ export function ChartDockedDepthLadder({
         aria-label={profileMode === "lpp" ? `${marketSymbol.rawSymbol} calibrated liquidation pressure profile` : `${marketSymbol.rawSymbol} chart-synchronized full delivered order book`}
       />
       {!effectiveViewport && <div className="chart-docked-depth-awaiting">SYNCHRONIZING FULL-RANGE PRICE SCALE</div>}
-      {profileMode === "lpp" && !liquidationModel && effectiveViewport && (
+      {profileMode === "lpp" && (!liquidationModel || !liquidationModelHasRows) && effectiveViewport && (
         <div className="chart-docked-depth-awaiting chart-docked-depth-awaiting--lpp">
-          <strong>{liquidationStatus.state === "UNAVAILABLE" || liquidationStatus.state === "ERROR" ? "LPP UNAVAILABLE" : "CALIBRATING LIQUIDATION PRESSURE"}</strong>
-          <span>{liquidationStatus.message}</span>
+          <strong>{liquidationStatus.state === "UNAVAILABLE" || liquidationStatus.state === "ERROR"
+            ? "LPP UNAVAILABLE"
+            : liquidationSnapshotForSymbol && !liquidationModelHasRows
+              ? "AWAITING VERIFIED PRESSURE CELLS"
+              : "CALIBRATING LIQUIDATION PRESSURE"}</strong>
+          <span>{liquidationSnapshotForSymbol && !liquidationModelHasRows
+            ? "The persistent field contains no verified drawable cells for this live profile. No unverified exposure is being substituted."
+            : liquidationStatus.message}</span>
         </div>
       )}
       {hover?.mode === "dom" && <DepthTooltip hover={hover} quoteAsset={marketSymbol.quoteAsset} />}
       {hover?.mode === "lpp" && <LiquidationPressureTooltip hover={hover} quoteAsset={marketSymbol.quoteAsset} authority={liquidationSnapshotForSymbol?.authority ?? null} />}
       <footer className="chart-docked-depth-footer">
-        <span>{profileMode === "lpp" ? `BYBIT BCLIF ${marketSymbol.rawSymbol}` : `${consolidated.snapshot ? consolidated.snapshot.includedVenues.map((venue) => venue.venue.toUpperCase()).join("+") : "MULTI-VENUE CLF"} ${marketSymbol.rawSymbol}`}</span>
+        <span>{profileMode === "lpp" ? `BYBIT BCLIF ${marketSymbol.rawSymbol} · ${liquidationSnapshotForSymbol?.header.horizon ?? "—"}` : `${consolidated.snapshot ? consolidated.snapshot.includedVenues.map((venue) => venue.venue.toUpperCase()).join("+") : "MULTI-VENUE CLF"} ${marketSymbol.rawSymbol}`}</span>
         <span>{activeModel ? `${formatPrice(activeModel.priceMin, activeModel.priceDecimals)}—${formatPrice(activeModel.priceMax, activeModel.priceDecimals)} · ${formatCompact(activeModel.priceSpan)}` : "—"}</span>
         <span>{activeModel ? `${activeModel.hiddenAboveCount}↑ ${activeModel.hiddenBelowCount}↓` : "—"}</span>
         <b>{profileMode === "lpp"

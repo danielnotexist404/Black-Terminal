@@ -118,7 +118,8 @@ import type { TradeTick } from "../market-data/types";
 import {
   bclifPriceDisplayForRangeMode,
   liquidationFieldModelSettingsKey,
-  migrateLiquidationFieldSettings
+  migrateLiquidationFieldSettings,
+  resolveLiquidationFieldRuntimeSettings
 } from "../modules/liquidation-field/core/settings";
 import type { LiquidationFieldRuntimeStatus, LiquidationFieldSettings, LiquidationFieldSnapshot } from "../modules/liquidation-field/core/types";
 import { LiquidationFieldController, isBclifVisualFixtureEnabled } from "../modules/liquidation-field/data/LiquidationFieldController";
@@ -534,7 +535,6 @@ export function PixiBlackChart({
   };
   const latestLiquidationFieldSettingsRef = useRef(liquidationFieldSettings);
   latestLiquidationFieldSettingsRef.current = liquidationFieldSettings;
-  const liquidationFieldCalculationKey = liquidationFieldModelSettingsKey(liquidationFieldSettings);
   const latestAuctionProfileSettingsRef = useRef(normalizedAuctionProfileSettings);
   latestAuctionProfileSettingsRef.current = normalizedAuctionProfileSettings;
   const auctionDataRequired = resolveAuctionVisualizationLayers(
@@ -610,6 +610,14 @@ export function PixiBlackChart({
   aifActiveRef.current = visibleIndicators.aif;
   qalcActiveRef.current = visibleIndicators.qalc;
   const liquidationFieldRequested = visibleIndicators.liquidationHeatmap || liquidationProfileRequested;
+  const liquidationFieldRuntimeSettings = useMemo(
+    () => resolveLiquidationFieldRuntimeSettings(liquidationFieldSettings, {
+      liquidationProfileRequested,
+      liquidationHeatmapVisible: visibleIndicators.liquidationHeatmap
+    }),
+    [liquidationFieldSettings, liquidationProfileRequested, visibleIndicators.liquidationHeatmap]
+  );
+  const liquidationFieldRuntimeCalculationKey = liquidationFieldModelSettingsKey(liquidationFieldRuntimeSettings);
   liquidationFieldActiveRef.current = liquidationFieldRequested;
   liquidationFieldOverlayVisibleRef.current = visibleIndicators.liquidationHeatmap;
 
@@ -2336,18 +2344,18 @@ export function PixiBlackChart({
   ]);
 
   useEffect(() => {
-    liquidationFieldControllerRef.current?.updateSettings(liquidationFieldSettings);
+    liquidationFieldControllerRef.current?.updateSettings(liquidationFieldRuntimeSettings);
     engineRef.current?.setLiquidationFieldState(
       visibleIndicators.liquidationHeatmap ? liquidationFieldSnapshot : null,
       liquidationFieldSettings
     );
-  }, [liquidationFieldSettings, liquidationFieldSnapshot, visibleIndicators.liquidationHeatmap]);
+  }, [liquidationFieldRuntimeSettings, liquidationFieldSettings, liquidationFieldSnapshot, visibleIndicators.liquidationHeatmap]);
 
   useEffect(() => {
     liquidationFieldSnapshotStoreRef.current.clear();
     setLiquidationFieldSnapshot(null);
     setLiquidationFieldRendererMetrics(null);
-  }, [marketSymbol.rawSymbol, liquidationFieldCalculationKey]);
+  }, [marketSymbol.rawSymbol, liquidationFieldRuntimeCalculationKey]);
 
   useEffect(() => {
     ddaDispatchedEventsRef.current.clear();
@@ -2411,7 +2419,7 @@ export function PixiBlackChart({
       : marketSymbol.rawSymbol;
     const controller = new LiquidationFieldController({
       symbol: liquidationAuthoritySymbol,
-      settings: liquidationFieldSettings,
+      settings: liquidationFieldRuntimeSettings,
       getCandles: () => engineRef.current?.getSourceCandles() ?? [],
       getReplayActive: () => replayActiveRef.current,
       onSnapshot: (snapshot) => {
@@ -2443,7 +2451,7 @@ export function PixiBlackChart({
     marketSymbol.baseAsset,
     marketSymbol.rawSymbol,
     chartHistoryState,
-    liquidationFieldCalculationKey
+    liquidationFieldRuntimeCalculationKey
   ]);
 
   useEffect(() => {

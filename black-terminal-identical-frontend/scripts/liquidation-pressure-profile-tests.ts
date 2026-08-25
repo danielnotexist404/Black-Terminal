@@ -12,6 +12,7 @@ import {
   resolvePressureSignificance
 } from "../src/modules/dom-pro/liquidationPressureProfileModel.ts";
 import type { LiquidationFieldSnapshot } from "../src/modules/liquidation-field/core/types.ts";
+import { DEFAULT_LIQUIDATION_FIELD_SETTINGS, resolveLiquidationFieldRuntimeSettings } from "../src/modules/liquidation-field/core/settings.ts";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(scriptDirectory, "..");
@@ -31,6 +32,26 @@ function viewport(revision = 1, priceMin = 75, priceMax = 120): ChartPriceTransf
     firstIndex: 0,
     lastIndex: 100
   };
+}
+
+{
+  const saved = { ...DEFAULT_LIQUIDATION_FIELD_SETTINGS, horizon: "3W" as const };
+  const lppOnly = resolveLiquidationFieldRuntimeSettings(saved, {
+    liquidationProfileRequested: true,
+    liquidationHeatmapVisible: false
+  });
+  assert.equal(lppOnly.horizon, "1D", "standalone live LPP must use the current verified persistent profile horizon");
+  assert.equal(saved.horizon, "3W", "the standalone LPP runtime must not mutate the user's saved heatmap horizon");
+  assert.equal(
+    resolveLiquidationFieldRuntimeSettings(saved, { liquidationProfileRequested: true, liquidationHeatmapVisible: true }).horizon,
+    "3W",
+    "an active liquidation heatmap must retain the user's selected historical horizon"
+  );
+  assert.equal(
+    resolveLiquidationFieldRuntimeSettings(saved, { liquidationProfileRequested: false, liquidationHeatmapVisible: false }).horizon,
+    "3W",
+    "inactive LPP must not alter BCLIF runtime scope"
+  );
 }
 
 {
@@ -168,6 +189,8 @@ function snapshot(): LiquidationFieldSnapshot {
   assert.match(component, /resolveLiquidationNodeWidthRatio/, "LPP must expand statistically significant local pressure nodes independently of the V field");
   assert.match(component, /EXPOSURE STATE/, "LPP hover evidence must disclose the lifecycle state");
   assert.match(component, /UNCONFIRMED CONTRACTION · NOT LABELED AS ABSORPTION/, "LPP must not imply absorption without confirmed liquidation evidence");
+  assert.match(component, /AWAITING VERIFIED PRESSURE CELLS/, "a verified snapshot with no drawable cells must never degrade into a silent black canvas");
+  assert.match(component, /No unverified exposure is being substituted/, "the empty-state must remain explicit and fail closed");
 }
 
 console.log("liquidation pressure profile tests passed");

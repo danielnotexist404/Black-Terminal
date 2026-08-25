@@ -358,6 +358,23 @@ export function liquidationFieldModelSettingsKey(settings: LiquidationFieldSetti
   ].join(":");
 }
 
+/**
+ * The docked LPP is a live point-in-time pressure profile, not a historical
+ * heatmap. When it is the only BCLIF consumer, keep its authority on the
+ * current 1D persistent lattice so a stale long-horizon rollup cannot blank
+ * the live ladder. Loading the heatmap restores the user's selected horizon
+ * unchanged; this runtime choice is never persisted back into their settings.
+ */
+export function resolveLiquidationFieldRuntimeSettings(
+  settings: LiquidationFieldSettings,
+  options: { liquidationProfileRequested: boolean; liquidationHeatmapVisible: boolean }
+): LiquidationFieldSettings {
+  if (!options.liquidationProfileRequested || options.liquidationHeatmapVisible || settings.horizon === "1D") {
+    return settings;
+  }
+  return { ...settings, horizon: "1D" };
+}
+
 export function liquidationHorizonMs(settings: Pick<LiquidationFieldSettings, "horizon" | "customHours">) {
   const fixed: Record<Exclude<LiquidationFieldHorizon, "CUSTOM">, number> = {
     "6H": 6 * 60 * 60 * 1_000,

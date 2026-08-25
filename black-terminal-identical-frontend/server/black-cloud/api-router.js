@@ -7,6 +7,7 @@ import executionHandler from "../../api/execution/[...path].js";
 import immStatusHandler from "../../api/imm/status.js";
 import institutionalFlowHandler from "../../api/institutional-flow.js";
 import marketDepthHandler from "../../api/market-depth/[action].js";
+import marketFlowHandler from "../../api/market-flow/[action].js";
 import networkHandler from "../../api/network/[resource].js";
 import investmentGroupActionHandler from "../../api/network/investment-groups/[groupId]/[action].js";
 import portfolioSnapshotHandler from "../../api/portfolio/snapshot.js";
@@ -31,6 +32,7 @@ const DYNAMIC_ROUTES = [
   route(/^\/api\/exchange-accounts\/(.+)\/?$/, exchangeAccountsHandler, ["path"], true),
   route(/^\/api\/execution\/(.+)\/?$/, executionHandler, ["path"], true),
   route(/^\/api\/market-depth\/([^/]+)\/?$/, marketDepthHandler, ["action"]),
+  route(/^\/api\/market-flow\/([^/]+)\/?$/, marketFlowHandler, ["action"]),
   route(/^\/api\/qalc\/(.+)\/?$/, qalcHandler, ["path"], true),
   route(/^\/api\/network\/([^/]+)\/?$/, networkHandler, ["resource"]),
   route(/^\/api\/protocols\/hyperliquid\/([^/]+)\/?$/, hyperliquidHandler, ["action"]),
@@ -74,6 +76,7 @@ export function apiRouteManifest() {
       "/api/exchange-accounts/:path*",
       "/api/execution/:path*",
       "/api/market-depth/:action",
+      "/api/market-flow/:action",
       "/api/qalc/:path*",
       "/api/network/:resource",
       "/api/protocols/hyperliquid/:action",

@@ -115,6 +115,8 @@ import { buildDDAProFlowInput } from "../modules/dda-pro/data/flowPressureSource
 import { AcvdWorkerClient } from "../modules/acvd/workers/AcvdWorkerClient";
 import { DEFAULT_ACVD_SETTINGS, migrateAcvdSettings, stableHash as acvdStableHash } from "../modules/acvd/core/settings";
 import type { AcvdSettings, AcvdSnapshot } from "../modules/acvd/core/types";
+import { fetchPersistentAuthenticFlow, type PersistentFlowSnapshot } from "../modules/acvd/data/persistentFlowClient";
+import { mergePersistentAndLiveFlow } from "../modules/acvd/data/flowMerge";
 import { AuctionProfileWorkerClient } from "../modules/auction-profile/worker/AuctionProfileWorkerClient";
 import { resolveAuctionVisualizationLayers } from "../modules/auction-profile/rendering/visualization";
 import type { TradeTick } from "../market-data/types";
@@ -501,6 +503,9 @@ export function PixiBlackChart({
   const ddaSignalAlertArmedAtRef = useRef(new Map<string, number>());
   const [acvdSnapshot, setAcvdSnapshot] = useState<AcvdSnapshot | null>(null);
   const [acvdStatus, setAcvdStatus] = useState<"IDLE" | "CALCULATING" | "READY" | "UNAVAILABLE">("IDLE");
+  const [acvdPersistentFlow, setAcvdPersistentFlow] = useState<PersistentFlowSnapshot | null>(null);
+  const [acvdPersistentFlowError, setAcvdPersistentFlowError] = useState<string | null>(null);
+  const acvdPersistentRequestRef = useRef("");
   const acvdWorkerRef = useRef<AcvdWorkerClient | null>(null);
   const acvdCalculationIdentityRef = useRef("");
   const acvdDispatchedSignalsRef = useRef(new Set<string>());
@@ -2266,6 +2271,51 @@ export function PixiBlackChart({
 
   useEffect(() => {
     const engine = engineRef.current;
+    const timeframeDuration = timeframeSeconds[timeframe];
+    if (!visibleIndicators.acvdOscillator || !engine || marketSymbol.exchange.toLowerCase() !== "bybit" || timeframeDuration < 60 || timeframeDuration % 60 !== 0) {
+      acvdPersistentRequestRef.current = "";
+      setAcvdPersistentFlow(null);
+      setAcvdPersistentFlowError(null);
+      return;
+    }
+    const lookback = migrateAcvdSettings({ ...indicatorAdvancedSettings.acvdOscillator, lookback: indicatorPeriods.acvdOscillator }).lookback;
+    const source = engine.getSourceCandles().slice(-lookback);
+    if (source.length < 2) return;
+    const start = source[0]!.time;
+    const end = source.at(-1)!.time + timeframeDuration;
+    const identity = `${marketSymbol.exchange}:${marketSymbol.rawSymbol}:${timeframeDuration}:${start}:${end}`;
+    if (acvdPersistentRequestRef.current === identity) return;
+    acvdPersistentRequestRef.current = identity;
+    setAcvdPersistentFlow(null);
+    setAcvdPersistentFlowError(null);
+    const controller = new AbortController();
+    void fetchPersistentAuthenticFlow({
+      venue: marketSymbol.exchange,
+      symbol: marketSymbol.rawSymbol,
+      timeframeSeconds: timeframeDuration,
+      start,
+      end,
+      signal: controller.signal
+    }).then((snapshot) => {
+      if (acvdPersistentRequestRef.current !== identity) return;
+      setAcvdPersistentFlow(snapshot);
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted || acvdPersistentRequestRef.current !== identity) return;
+      setAcvdPersistentFlowError(error instanceof Error ? error.message : "Authentic flow archive could not be loaded.");
+    });
+    return () => controller.abort();
+  }, [
+    visibleIndicators.acvdOscillator,
+    indicatorPeriods.acvdOscillator,
+    indicatorAdvancedSettings.acvdOscillator,
+    marketSymbol.exchange,
+    marketSymbol.rawSymbol,
+    timeframe,
+    lastCandle?.time
+  ]);
+
+  useEffect(() => {
+    const engine = engineRef.current;
     if (!visibleIndicators.acvdOscillator || !engine) {
       acvdCalculationIdentityRef.current = "";
       setAcvdSnapshot(null);
@@ -2288,7 +2338,7 @@ export function PixiBlackChart({
         && capture.venue === marketSymbol.exchange
         && capture.symbol === marketSymbol.rawSymbol
         && chartSourceVenueRef.current === marketSymbol.exchange;
-      const flowInput = sourceMatches
+      const liveFlowInput = sourceMatches
         ? buildDDAProFlowInput({
             candles: source,
             trades: canonicalCvdService.getTrades({
@@ -2309,6 +2359,15 @@ export function PixiBlackChart({
               ? "BC-ACVD is unavailable because chart candles and authentic trade flow are from different venues."
               : "BC-ACVD is warming until the venue-matched aggressor stream is continuous and healthy."
           };
+      const mergedFlowBars = mergePersistentAndLiveFlow(source.map((candle) => candle.time), acvdPersistentFlow, liveFlowInput.flowBars);
+      const archivedAuthority = acvdPersistentFlow?.authority === "EXACT_AGGRESSOR_TRADES";
+      const flowInput = {
+        flowBars: mergedFlowBars,
+        flowAuthority: archivedAuthority || liveFlowInput.flowAuthority === "EXACT_AGGRESSOR_TRADES" ? "EXACT_AGGRESSOR_TRADES" as const : "UNAVAILABLE" as const,
+        flowWarning: archivedAuthority
+          ? acvdPersistentFlow?.warning ?? null
+          : acvdPersistentFlowError ?? liveFlowInput.flowWarning
+      };
       const calculationInput = {
         candles: source,
         flowBars: flowInput.flowBars,
@@ -2361,6 +2420,8 @@ export function PixiBlackChart({
     marketSymbol.rawSymbol,
     timeframe,
     ddaProSourceRevision,
+    acvdPersistentFlow,
+    acvdPersistentFlowError,
     lastCandle?.time,
     lastCandle?.close
   ]);

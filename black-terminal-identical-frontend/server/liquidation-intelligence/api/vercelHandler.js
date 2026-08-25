@@ -1,6 +1,6 @@
 import { handleBclifAction } from "./handlers.js";
 import { BCLIF_INDICATOR_KEY, normalizeBclifRouteError, parseBclifAction } from "./contracts.js";
-import { sendError } from "../../portfolio-api.js";
+import { getSupabaseAdmin, sendError } from "../../portfolio-api.js";
 import { requireApiSecurity } from "../../security/securityMiddleware.js";
 
 const RATE_LIMITS = Object.freeze({
@@ -22,7 +22,13 @@ export default async function bclifVercelHandler(req, res, actionInput = req.que
       rateLimit: RATE_LIMITS[action]
     });
     if (security.handled) return;
-    return handleBclifAction(action, req, res, security);
+    // Authentication, entitlement and rate limiting complete before this
+    // privileged storage client is selected. Self-hosted Storage requires the
+    // service-role JWT rather than the opaque Supabase secret key.
+    return handleBclifAction(action, req, res, {
+      ...security,
+      supabase: getSupabaseAdmin({ storageCompatible: true })
+    });
   } catch (error) {
     return sendError(res, normalizeBclifRouteError(error));
   }

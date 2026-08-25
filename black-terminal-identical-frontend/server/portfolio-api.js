@@ -6,9 +6,9 @@ export function applyCors(req, res) {
   return applyHardenedCors(req, res);
 }
 
-export function getSupabaseAdmin() {
+export function getSupabaseAdmin(options = {}) {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const serverSecret = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serverSecret = resolveSupabaseServerSecret(process.env, options);
 
   if (!supabaseUrl || !serverSecret) {
     const error = new Error("Professional Network server authentication is not configured.");
@@ -26,6 +26,17 @@ export function getSupabaseAdmin() {
       persistSession: false
     }
   });
+}
+
+export function resolveSupabaseServerSecret(env = process.env, options = {}) {
+  // Self-hosted Supabase Storage still validates the Authorization value as a
+  // JWT. The newer opaque sb_secret_* key is accepted by Kong/PostgREST but is
+  // rejected by Storage before it reaches the bucket policy. Keep the opaque
+  // key as the default for ordinary control-plane calls, while storage-backed
+  // server routes explicitly request the existing service-role JWT.
+  return options.storageCompatible
+    ? env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SECRET_KEY || ""
+    : env.SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY || "";
 }
 
 export async function requireUser(req) {

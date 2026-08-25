@@ -39,6 +39,11 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     getBybitOrderPriceLimit({ category: marketKind === "spot" ? "spot" : "linear", symbol, executionEnvironment, endpointProfile }).catch(() => null),
     getBybitApiKeyInformation(credentials)
   ]);
+  const selectedPosition = selectBybitExecutionPosition(positionRows, [], symbol);
+  const configuredSymbolPositions = marketKind === "spot" || selectedPosition
+    ? []
+    : await getBybitPositions(credentials, { category: "linear", symbol, includeEmpty: true, maxPages: 2 }).catch(() => []);
+  const selectedExecutionPosition = selectedPosition || selectBybitExecutionPosition([], configuredSymbolPositions, symbol);
   const openOrders = openOrderSnapshot.orders.map((order) => ({
     ...order,
     accountId: account.id,
@@ -169,7 +174,7 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     balances,
     accountMetrics: walletSnapshot.accountMetrics,
     instrumentRules: metadata[0] || null,
-    selectedPosition: positionRows.find((position) => position.symbol === symbol && position.positionIdx === 0) || positionRows.find((position) => position.symbol === symbol) || null,
+    selectedPosition: selectedExecutionPosition,
     accountState,
     riskLimits,
     priceLimit,
@@ -185,6 +190,17 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     syncedAt: new Date().toISOString(),
     latencyMs: Date.now() - startedAt
   };
+}
+
+export function selectBybitExecutionPosition(openPositions, configuredSymbolPositions, symbol) {
+  const nativeSymbol = String(symbol || "").toUpperCase();
+  const matchingOpen = (openPositions || []).filter((position) => String(position?.symbol || "").toUpperCase() === nativeSymbol);
+  const matchingConfigured = (configuredSymbolPositions || []).filter((position) => String(position?.symbol || "").toUpperCase() === nativeSymbol);
+  return matchingOpen.find((position) => Number(position.positionIdx) === 0)
+    || matchingOpen[0]
+    || matchingConfigured.find((position) => Number(position.positionIdx) === 0)
+    || matchingConfigured[0]
+    || null;
 }
 
 async function upsertBalances(supabase, accountId, balances) {

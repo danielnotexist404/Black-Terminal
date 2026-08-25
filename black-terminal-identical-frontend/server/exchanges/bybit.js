@@ -962,12 +962,27 @@ export async function setBybitLeverage(credentials, { category = "linear", symbo
   if (!leverage && !buyLeverage && !sellLeverage) throw new Error("Bybit leverage update requires leverage.");
   const nextBuyLeverage = String(buyLeverage || leverage);
   const nextSellLeverage = String(sellLeverage || leverage);
-  const response = await bybitRequest(credentials, "POST", "/v5/position/set-leverage", {}, {
-    category,
-    symbol,
-    buyLeverage: nextBuyLeverage,
-    sellLeverage: nextSellLeverage
-  });
+  let response;
+  try {
+    response = await bybitRequest(credentials, "POST", "/v5/position/set-leverage", {}, {
+      category,
+      symbol,
+      buyLeverage: nextBuyLeverage,
+      sellLeverage: nextSellLeverage
+    });
+  } catch (error) {
+    // Bybit retCode 110043 is an idempotent no-op: the requested leverage is
+    // already active. It is not a broker outage and must not block trading.
+    if (!isBybitLeverageAlreadySet(error)) throw error;
+    return {
+      status: "unchanged",
+      unchanged: true,
+      symbol,
+      buyLeverage: Number(nextBuyLeverage),
+      sellLeverage: Number(nextSellLeverage),
+      venueCode: Number(error?.bybit?.retCode || 110043)
+    };
+  }
   return {
     status: "accepted",
     symbol,
@@ -975,6 +990,12 @@ export async function setBybitLeverage(credentials, { category = "linear", symbo
     sellLeverage: Number(nextSellLeverage),
     raw: response
   };
+}
+
+export function isBybitLeverageAlreadySet(error) {
+  const code = Number(error?.bybit?.retCode);
+  const message = String(error?.bybit?.retMsg || error?.message || "").trim().toLowerCase();
+  return code === 110043 || /(?:set )?leverage (?:has )?not (?:been )?modified/.test(message);
 }
 
 export async function switchBybitMarginMode(credentials, { category = "linear", symbol, marginMode, leverage, buyLeverage, sellLeverage }) {

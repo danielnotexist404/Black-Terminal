@@ -4,11 +4,13 @@ import {
   normalizeBybitExecutionReport,
   normalizeBybitOrderStatus,
   normalizeBybitSizing,
+  isBybitLeverageAlreadySet,
   precisionFromStep,
   resolveBybitExecutionPolicy,
   validateBybitMainnetValidationRequest,
   validateBybitStrategyParameters
 } from "../server/exchanges/bybit.js";
+import { selectBybitExecutionPosition } from "../server/exchanges/bybit-reconciliation.js";
 import {
   createBybitWsAuthPayload,
   normalizeBybitPrivateStreamMessage
@@ -37,6 +39,20 @@ test("clock skew math is deterministic", () => {
   const localTimeMs = 1_000_000;
   const serverTimeMs = 999_250;
   assert.equal(localTimeMs - serverTimeMs, 750);
+});
+
+test("an already-active leverage response is idempotent rather than a broker outage", () => {
+  assert.equal(isBybitLeverageAlreadySet({ bybit: { retCode: 110043, retMsg: "Set leverage has not been modified." } }), true);
+  assert.equal(isBybitLeverageAlreadySet(new Error("Leverage not modified")), true);
+  assert.equal(isBybitLeverageAlreadySet({ bybit: { retCode: 110044, retMsg: "Available margin is insufficient." } }), false);
+});
+
+test("execution settings retain venue leverage even when the selected symbol has no open position", () => {
+  const configured = { symbol: "BTCUSDT", direction: "flat", quantity: 0, positionIdx: 0, leverage: 15 };
+  assert.equal(selectBybitExecutionPosition([], [configured], "BTCUSDT"), configured);
+  const open = { symbol: "BTCUSDT", direction: "long", quantity: 0.01, positionIdx: 0, leverage: 20 };
+  assert.equal(selectBybitExecutionPosition([open], [configured], "BTCUSDT"), open);
+  assert.equal(selectBybitExecutionPosition([], [configured], "ETHUSDT"), null);
 });
 
 test("metadata precision is derived from exchange steps", () => {

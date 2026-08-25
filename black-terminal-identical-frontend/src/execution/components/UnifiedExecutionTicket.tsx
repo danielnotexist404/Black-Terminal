@@ -321,6 +321,7 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
     setModeUpdatePending(true);
     setStatus("");
     try {
+      const reports: Array<Record<string, unknown>> = [];
       if (marginChanged) {
         const result = await updateBybitAccountModeViaApi({
           accountId: selectedConnection.accountId,
@@ -332,6 +333,7 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
           liveConfirmation: MAINNET_ORDER_CONFIRMATION
         });
         if (!result) throw new Error("Authenticated account session required.");
+        reports.push(result.report);
       }
       if (leverageChanged) {
         const result = await updateBybitAccountModeViaApi({
@@ -344,11 +346,16 @@ export function UnifiedExecutionTicket({ preset, onClose }: UnifiedExecutionTick
           liveConfirmation: MAINNET_ORDER_CONFIRMATION
         });
         if (!result) throw new Error("Authenticated account session required.");
+        reports.push(result.report);
       }
       const next = await syncExchangeAccountViaApi(selectedConnection.accountId, preset.symbol, marketKind);
       setAccountSync(next);
       hydratedAccountRef.current = "";
-      setStatus("Account settings updated by Bybit.");
+      setStatus(reports.some((report) => report.status === "accepted")
+        ? "Account settings updated by Bybit."
+        : reports.length > 0 && reports.every((report) => report.status === "unchanged")
+          ? "Account settings already matched Bybit."
+          : "Account settings synchronized with Bybit.");
     } catch (error) {
       setStatus(formatExecutionError(error));
       const next = await syncExchangeAccountViaApi(selectedConnection.accountId, preset.symbol, marketKind).catch(() => null);

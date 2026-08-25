@@ -136,7 +136,16 @@ assert.match(appSource, /portfolioRequestSequenceRef/);
 assert.match(appSource, /requestSequence !== portfolioRequestSequenceRef\.current/);
 assert.match(appSource, /window\.clearInterval\(timer\)/);
 assert.match(reconciliationSource, /getBybitPositions\(credentials\)/);
-assert.doesNotMatch(reconciliationSource, /getBybitPositions\(credentials,\s*\{[^}]*symbol/);
+assert.match(
+  reconciliationSource,
+  /const \[walletSnapshot, positionRows,[\s\S]*?getBybitPositions\(credentials\),/,
+  "the authoritative portfolio snapshot must remain account-wide rather than chart-symbol filtered"
+);
+assert.match(
+  reconciliationSource,
+  /configuredSymbolPositions[\s\S]*?getBybitPositions\(credentials,\s*\{[^}]*symbol[^}]*includeEmpty:\s*true/,
+  "a separate non-authoritative symbol query may hydrate configured leverage when no position is open"
+);
 assert.doesNotMatch(reconciliationSource, /createBybitOrder|amendBybitOrder|cancelBybitOrder/);
 assert.match(positionManagerSource, /deduplicateCanonicalPositions\(positions\)/);
 assert.match(positionManagerSource, /canonicalPositionKey\(position\)/);

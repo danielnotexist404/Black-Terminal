@@ -6,7 +6,7 @@ INFRA_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 MODE=${1:-staging}
 
 test "$MODE" = staging -o "$MODE" = production || { echo "mode must be staging or production" >&2; exit 2; }
-test -f "$INFRA_DIR/artifacts/RESTORE_VERIFIED" || { echo "Restore verification evidence is missing." >&2; exit 1; }
+"$SCRIPT_DIR/require-database-ready.sh"
 clock_safe=false
 if command -v chronyc >/dev/null 2>&1 && chronyc tracking >/dev/null 2>&1 && chronyc tracking | grep -Eq '^Leap status[[:space:]]*:[[:space:]]*Normal$'; then
   clock_safe=true

@@ -30,6 +30,15 @@ services:
       GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOOGLE_SECRET:-}
       GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${API_EXTERNAL_URL}/callback
 
+  # The upstream self-hosted bundle publishes Supavisor on every interface.
+  # Compose !override is intentional: appending loopback bindings would retain
+  # the upstream 0.0.0.0 bindings and expose PostgreSQL. Compose >=2.24.4 is
+  # enforced by preflight before this model is started.
+  supavisor:
+    ports: !override
+      - 127.0.0.1:15432:5432
+      - 127.0.0.1:16543:6543
+
 networks:
   black-cloud-backplane:
     external: true

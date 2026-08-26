@@ -11,6 +11,8 @@ pass(){ printf 'PRECHECK PASS: %s\n' "$*"; }
 command -v docker >/dev/null 2>&1 || fail "Docker is unavailable"
 docker info >/dev/null 2>&1 || fail "Docker daemon is unavailable"
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is unavailable"
+compose_version=$(docker compose version --short | sed 's/^v//')
+test "$(printf '%s\n' 2.24.4 "$compose_version" | sort -V | head -n 1)" = 2.24.4 || fail "Docker Compose >=2.24.4 is required for fail-closed port overrides"
 command -v git >/dev/null 2>&1 || fail "Git is unavailable"
 command -v openssl >/dev/null 2>&1 || fail "OpenSSL is unavailable"
 pass "Docker, Compose, Git, and OpenSSL are available"
@@ -23,8 +25,10 @@ pass "capacity floor met: memory_kib=$memory_kib free_disk_kib=$disk_kib"
 
 test -f "$INFRA_DIR/.env" || fail "$INFRA_DIR/.env is missing"
 test -f "$INFRA_DIR/secrets/runtime.env" || fail "runtime secret environment is missing"
-test "$(stat -c '%a' "$INFRA_DIR/.env")" -le 600 || fail ".env must not be group/world readable"
-test "$(stat -c '%a' "$INFRA_DIR/secrets/runtime.env")" -le 600 || fail "runtime.env must not be group/world readable"
+env_mode=$((8#$(stat -c '%a' "$INFRA_DIR/.env")))
+runtime_mode=$((8#$(stat -c '%a' "$INFRA_DIR/secrets/runtime.env")))
+test $((env_mode & 8#077)) = 0 || fail ".env must not be group/world readable"
+test $((runtime_mode & 8#077)) = 0 || fail "runtime.env must not be group/world readable"
 grep -Eq '^BLACK_CLOUD_SUPABASE_STATE_ROOT=/var/lib/black-cloud/supabase$' "$INFRA_DIR/.env" || fail "Supabase state must remain outside immutable releases at /var/lib/black-cloud/supabase"
 qalc_data_root=$(sed -n 's/^QALC_DATA_ROOT=//p' "$INFRA_DIR/.env" | head -n 1)
 test "${qalc_data_root:-/var/lib/black-cloud/qalc}" = "/var/lib/black-cloud/qalc" || fail "QALC data must remain outside immutable releases at /var/lib/black-cloud/qalc"
@@ -54,10 +58,14 @@ elif [ "$MODE" = production ]; then
     test -n "$value" || fail "$key is required for full production parity"
     printf '%s' "$value" | grep -Eiq 'replace-with|placeholder|example' && fail "$key still contains a placeholder"
   done
+  grep -Eq '^BYBIT_MAINNET_VALIDATION_ENABLED=true$' "$INFRA_DIR/secrets/runtime.env" || fail "production manual Bybit connectivity requires BYBIT_MAINNET_VALIDATION_ENABLED=true"
+  bybit_symbols=$(sed -n 's/^BYBIT_MAINNET_ALLOWED_SYMBOLS=//p' "$INFRA_DIR/secrets/runtime.env" | head -n 1)
+  test -n "$bybit_symbols" || fail "production manual Bybit connectivity requires a non-empty symbol policy"
 
   backup_env=${BLACK_CLOUD_BACKUP_ENV_FILE:-$INFRA_DIR/secrets/backup.env}
   test -f "$backup_env" || fail "production backup environment is missing"
-  test "$(stat -c '%a' "$backup_env")" -le 600 || fail "backup.env must not be group/world readable"
+  backup_mode=$((8#$(stat -c '%a' "$backup_env")))
+  test $((backup_mode & 8#077)) = 0 || fail "backup.env must not be group/world readable"
   restic_repository=$(sed -n 's/^RESTIC_REPOSITORY=//p' "$backup_env" | head -n 1)
   printf '%s' "$restic_repository" | grep -Eq '^(s3:|sftp:|rest:|rclone:)' || fail "production Restic repository must be off-host"
   pass "production secrets, OAuth continuity and off-host backup prerequisites are present"
@@ -66,7 +74,7 @@ else
 fi
 
 if ss -ltnH | awk '{print $4}' \
-  | awk '/(^|:)5432$|(^|:)6379$|(^|:)9000$/ && !/^127\.0\.0\.1:/ && !/^\[?::1\]?:/' \
+  | awk '/(^|:)5432$|(^|:)6543$|(^|:)6379$|(^|:)9000$/ && !/^127\.0\.0\.1:/ && !/^\[?::1\]?:/' \
   | grep -q .; then
   fail "a database/cache/object-store port is exposed beyond host loopback"
 fi

@@ -90,6 +90,7 @@
     "test:black-cloud-api-router": "node scripts/black-cloud-api-router-tests.js",
     "test:institutional-flow": "node scripts/institutional-flow-tests.js && node --experimental-strip-types scripts/institutional-flow-hover-tests.ts",
     "test:black-cloud-infrastructure": "node scripts/black-cloud-infrastructure-tests.js",
+    "test:ubuntu-installer": "node scripts/ubuntu-installer-tests.js",
     "smoke:black-cloud-target": "node scripts/black-cloud-target-smoke.js",
     "test:market-depth-walls": "node scripts/market-depth-wall-tests.js",
     "test:liquidity-fabric": "node scripts/liquidity-fabric-tests.js",

@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 INFRA_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-test -f "$INFRA_DIR/artifacts/RESTORE_VERIFIED" || { echo "Restore verification evidence is missing; refusing to start analytics." >&2; exit 1; }
+"$SCRIPT_DIR/require-database-ready.sh"
 
 "$SCRIPT_DIR/preflight.sh" staging
 for flag in EVENT_ALPHA_LIVE_EXECUTION_ENABLED EVENT_ALPHA_PAPER_EXECUTION_ENABLED BLACK_CLOUD_EXECUTION_ENABLED INVESTMENT_GROUP_EXECUTION_ENABLED; do

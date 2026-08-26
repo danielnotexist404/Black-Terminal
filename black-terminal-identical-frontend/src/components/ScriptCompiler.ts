@@ -13,6 +13,8 @@ export type CompiledMarker = {
   id: string;
   index: number;
   time: number;
+  /** Exact finalized signal price. `value` remains the visual marker anchor. */
+  signalPrice: number;
   value: number;
   label: string;
   direction: "long" | "short" | "neutral";
@@ -601,7 +603,17 @@ class ScriptRuntime {
       if (!matched) return;
       const candle = this.candles[index];
       const value = direction === "short" ? candle.high : direction === "long" ? candle.low : candle.close;
-      this.markers.push({ id: `${this.sourceHash}:shape:${stableHash(title)}:${candle.time}`, index, time: candle.time, value, label: title, direction, kind: "shape", color });
+      this.markers.push({
+        id: `${this.sourceHash}:shape:${stableHash(title)}:${candle.time}`,
+        index,
+        time: candle.time,
+        signalPrice: candle.close,
+        value,
+        label: title,
+        direction,
+        kind: "shape",
+        color
+      });
     });
     return condition;
   }
@@ -665,6 +677,7 @@ class ScriptRuntime {
         id: `${this.sourceHash}:${kind}:${stableHash(title)}:${candle.time}`,
         index,
         time: candle.time,
+        signalPrice: candle.close,
         value,
         label: title,
         direction,

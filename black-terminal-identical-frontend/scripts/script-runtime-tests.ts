@@ -50,6 +50,7 @@ assert.equal(strategyResult.success, true, JSON.stringify(strategyResult.errors)
 assert.ok(strategyResult.markers.some((marker) => marker.kind === "entry" && marker.direction === "long"));
 assert.ok(strategyResult.markers.some((marker) => marker.kind === "entry" && marker.direction === "short"));
 assert.ok(strategyResult.markers.some((marker) => marker.kind === "shape"));
+assert.ok(strategyResult.markers.every((marker) => marker.signalPrice === candles[marker.index].close), "signal ticks must use the finalized candle price");
 
 const finalized = finalizedScriptResult(strategyResult, candles.at(-2)!.time);
 assert.ok(finalized.events.every((event) => event.time <= candles.at(-2)!.time));
@@ -85,6 +86,7 @@ assert.equal(compileAndRunScript(indicator, []).success, false);
 
 const editorSource = readFileSync(new URL("../src/components/ScriptEditor.tsx", import.meta.url), "utf8");
 const chartSource = readFileSync(new URL("../src/components/PixiBlackChart.tsx", import.meta.url), "utf8");
+const engineSource = readFileSync(new URL("../src/chart-engine/BlackChartEngine.ts", import.meta.url), "utf8");
 const strategyAdapterSource = readFileSync(new URL("../src/modules/strategy-lab/adapters/pythonStrategyAdapter.ts", import.meta.url), "utf8");
 assert.match(editorSource, /getCandles\(\)\.slice\(-20_000\)/, "the editor must compile against the active chart candle reader");
 assert.doesNotMatch(editorSource, /bt_chart_candles_cache/, "the nonexistent local candle cache must never return");
@@ -92,6 +94,8 @@ assert.match(chartSource, /latestConfirmedTime = candles\.at\(-2\)!\.time/, "cus
 assert.match(chartSource, /newlyConfirmedScriptEvents/, "custom alerts must pass the historical replay guard");
 assert.match(chartSource, /replayActiveRef\.current/, "Replay must not emit custom live alerts");
 assert.match(chartSource, /alertSettingsRef\.current\.enabled/, "custom external delivery must honor the alert master switch");
+assert.match(engineSource, /marker\.signalPrice/, "the chart must render markers at their finalized signal price");
+assert.match(engineSource, /0x39ff88/, "the chart must render the phosphor-green signal-price micro-tick");
 assert.match(strategyAdapterSource, /not wired yet|not available/i, "uncertified headless Python automation must remain fail closed");
 
 console.log("Black Terminal Python indicator/strategy/alert runtime: PASS");

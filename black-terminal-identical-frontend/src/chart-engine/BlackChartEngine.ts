@@ -4254,6 +4254,20 @@ export class BlackChartEngine {
         const x = this.xForIndex(index);
         const priceY = this.yForPrice(marker.value);
         const color = this.hexColor(marker.color, marker.direction === "short" ? theme.redBright : theme.silverBright);
+
+        // A marker's triangle is deliberately offset above/below the candle for
+        // readability. This micro-tick remains on the exact finalized signal
+        // price so Replay and live closed-bar signals can be audited visually.
+        const signalPrice = Number.isFinite(marker.signalPrice) ? marker.signalPrice : data[index].close;
+        const signalY = this.yForPrice(signalPrice);
+        const signalHalfWidth = Math.max(1.4, Math.min(7, this.view.candleWidth * 0.48));
+        g.moveTo(x - signalHalfWidth, signalY)
+          .lineTo(x + signalHalfWidth, signalY)
+          .stroke({ width: 3, color: 0x39ff88, alpha: 0.18 });
+        g.moveTo(x - signalHalfWidth, signalY)
+          .lineTo(x + signalHalfWidth, signalY)
+          .stroke({ width: 1, color: 0x39ff88, alpha: 0.98 });
+
         if (marker.direction === "long") {
           const y = priceY + 8;
           g.circle(x, y, 6).fill({ color, alpha: 0.08 });

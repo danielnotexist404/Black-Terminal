@@ -3558,6 +3558,24 @@ body.resizing-layout * {
   font-weight: 500;
 }
 
+.indicator-row.custom-script-row {
+  grid-template-columns: auto auto 18px;
+  border-left: 1px solid rgba(80, 250, 123, 0.5);
+  padding-left: 6px;
+  background: rgba(5, 12, 9, 0.72);
+  cursor: default;
+}
+
+.indicator-row.custom-script-row > span {
+  color: #f4f4f5;
+}
+
+.indicator-row.custom-script-row b {
+  color: #50fa7b;
+  font-size: 8px;
+  letter-spacing: 0.05em;
+}
+
 .indicator-action {
   display: grid;
   place-items: center;

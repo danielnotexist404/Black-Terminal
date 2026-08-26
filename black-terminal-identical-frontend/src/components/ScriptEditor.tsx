@@ -1,26 +1,30 @@
-import { useState, useEffect, useRef } from "react";
-import { Play, Save, TerminalSquare, Trash2, Plus, FileCode, CheckCircle, AlertTriangle } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Play, Save, TerminalSquare, Trash2, Plus, FileCode, CheckCircle, AlertTriangle, X } from "lucide-react";
 import { compileAndRunScript, finalizedScriptResult } from "./ScriptCompiler";
 import type { CompileResult, CompiledScriptActivation } from "./ScriptCompiler";
 import type { Candle } from "../chart-engine/types";
 import type { ChartDisplayType } from "../chart-engine/types";
-import { dbGetUsers, dbUpdateUser } from "../lib/supabase";
+import { dbGetCurrentUserScripts, dbSaveCurrentUserScripts, isSupabaseConfigured } from "../lib/supabase";
 
 type ScriptEditorProps = {
   symbol: string;
   exchange: string;
   chartType: ChartDisplayType;
   getCandles: () => Candle[];
-  onCompiledScript: (activation: CompiledScriptActivation, result: CompileResult) => void;
+  onRunScript: (activation: CompiledScriptActivation, result: CompileResult) => void;
+  onUnloadScript: (scriptId: string) => void;
+  loadedScriptIds: readonly string[];
+  onClose: () => void;
   currentUser: { username: string; role: "admin" | "user" } | null;
 };
 
-type UserScript = {
+export type UserScript = {
   id: string;
   name: string;
   kind: "indicator" | "strategy";
   source: string;
   createdAt: number;
+  updatedAt?: number;
 };
 
 const templates = {
@@ -59,7 +63,17 @@ alertcondition(short_signal, "Short Alert", "Confirmed short signal at {{price}}
 `
 };
 
-export function ScriptEditor({ symbol, exchange, chartType, getCandles, onCompiledScript, currentUser }: ScriptEditorProps) {
+export function ScriptEditor({
+  symbol,
+  exchange,
+  chartType,
+  getCandles,
+  onRunScript,
+  onUnloadScript,
+  loadedScriptIds,
+  onClose,
+  currentUser
+}: ScriptEditorProps) {
   const [scripts, setScripts] = useState<UserScript[]>([]);
   const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null);
   const [name, setName] = useState("My Indicator");
@@ -69,25 +83,23 @@ export function ScriptEditor({ symbol, exchange, chartType, getCandles, onCompil
   // Compiler state
   const [consoleLogs, setConsoleLogs] = useState<{ type: "success" | "error"; text: string; line?: number }[]>([]);
   const [highlightedLine, setHighlightedLine] = useState<number | null>(null);
+  const [storageBusy, setStorageBusy] = useState(false);
+
+  const localStorageKey = currentUser ? `bt_user_scripts:${currentUser.username}` : "bt_user_scripts:anonymous";
 
   // Load scripts
   useEffect(() => {
     const loadScripts = async () => {
       let stored: UserScript[] = [];
-      if (currentUser) {
+      if (currentUser && isSupabaseConfigured) {
         try {
-          const users = await dbGetUsers();
-          const match = users.find(u => u.username === currentUser.username);
-          if (match && match.scripts) {
-            stored = match.scripts;
-          }
+          stored = await dbGetCurrentUserScripts() as UserScript[];
         } catch (e) {
-          console.error("Failed to load scripts from Supabase:", e);
+          setConsoleLogs([{ type: "error", text: `VPS script storage could not be loaded: ${e instanceof Error ? e.message : "Unknown storage error"}` }]);
+          return;
         }
-      }
-      
-      if (stored.length === 0) {
-        const local = localStorage.getItem("bt_user_scripts");
+      } else {
+        const local = localStorage.getItem(localStorageKey);
         if (local) {
           try { stored = JSON.parse(local); } catch (e) {}
         }
@@ -99,19 +111,16 @@ export function ScriptEditor({ symbol, exchange, chartType, getCandles, onCompil
       }
     };
     loadScripts();
-  }, [currentUser]);
+  }, [currentUser, localStorageKey]);
 
   // Save scripts to local/Supabase
   const saveScriptsCollection = async (updated: UserScript[]) => {
-    setScripts(updated);
-    localStorage.setItem("bt_user_scripts", JSON.stringify(updated));
-    if (currentUser) {
-      try {
-        await dbUpdateUser(currentUser.username, { scripts: updated });
-      } catch (e) {
-        console.error("Failed to sync scripts to Supabase:", e);
-      }
+    if (currentUser && isSupabaseConfigured) {
+      await dbSaveCurrentUserScripts(updated);
+    } else {
+      localStorage.setItem(localStorageKey, JSON.stringify(updated));
     }
+    setScripts(updated);
   };
 
   const loadScriptIntoEditor = (script: UserScript) => {
@@ -132,14 +141,16 @@ export function ScriptEditor({ symbol, exchange, chartType, getCandles, onCompil
     setHighlightedLine(null);
   };
 
-  const saveCurrentScript = () => {
+  const saveCurrentScript = async (quiet = false): Promise<UserScript | null> => {
     const id = selectedScriptId || `script-${Date.now()}`;
+    const previous = scripts.find((script) => script.id === id);
     const newScript: UserScript = {
       id,
       name: name.trim() || "Untitled Script",
       kind,
       source,
-      createdAt: Date.now()
+      createdAt: previous?.createdAt ?? Date.now(),
+      updatedAt: Date.now()
     };
 
     let nextScripts: UserScript[];
@@ -147,13 +158,24 @@ export function ScriptEditor({ symbol, exchange, chartType, getCandles, onCompil
       nextScripts = scripts.map(s => s.id === id ? newScript : s);
     } else {
       nextScripts = [newScript, ...scripts];
-      setSelectedScriptId(id);
     }
-    saveScriptsCollection(nextScripts);
-    setConsoleLogs([{ type: "success", text: `Script "${newScript.name}" saved successfully.` }]);
+    setStorageBusy(true);
+    try {
+      await saveScriptsCollection(nextScripts);
+      setSelectedScriptId(id);
+      if (!quiet) {
+        setConsoleLogs([{ type: "success", text: `Script "${newScript.name}" saved to ${isSupabaseConfigured ? "authenticated VPS storage" : "local development storage"}. It was not added to the chart.` }]);
+      }
+      return newScript;
+    } catch (error) {
+      setConsoleLogs([{ type: "error", text: `Save failed: ${error instanceof Error ? error.message : "Unknown storage error"}` }]);
+      return null;
+    } finally {
+      setStorageBusy(false);
+    }
   };
 
-  const deleteScript = (id: string, e: React.MouseEvent) => {
+  const deleteScript = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const script = scripts.find(s => s.id === id);
     if (!script) return;
@@ -162,7 +184,16 @@ export function ScriptEditor({ symbol, exchange, chartType, getCandles, onCompil
     if (!confirm) return;
 
     const updated = scripts.filter(s => s.id !== id);
-    saveScriptsCollection(updated);
+    setStorageBusy(true);
+    try {
+      await saveScriptsCollection(updated);
+      onUnloadScript(id);
+    } catch (error) {
+      setConsoleLogs([{ type: "error", text: `Delete failed: ${error instanceof Error ? error.message : "Unknown storage error"}` }]);
+      setStorageBusy(false);
+      return;
+    }
+    setStorageBusy(false);
 
     if (selectedScriptId === id) {
       if (updated.length > 0) {
@@ -202,23 +233,21 @@ export function ScriptEditor({ symbol, exchange, chartType, getCandles, onCompil
     return result;
   };
 
-  const runScript = () => {
+  const runScript = async () => {
+    const savedScript = await saveCurrentScript(true);
+    if (!savedScript) return;
     const result = compileScript();
     if (result && result.success) {
       const activation: CompiledScriptActivation = {
-        id: selectedScriptId || `draft:${result.sourceHash}`,
-        name: name.trim() || "Untitled Script",
-        kind,
-        source,
+        id: savedScript.id,
+        name: savedScript.name,
+        kind: savedScript.kind,
+        source: savedScript.source,
         sourceHash: result.sourceHash,
         inputFeed: chartType === "renko" ? "CAUSAL_RENKO" : "SOURCE_OHLCV"
       };
-      onCompiledScript(activation, result);
-      setConsoleLogs(prev => [
-        ...prev,
-        { type: "success", text: `Script output is active on ${chartType === "renko" ? "the append-only causal Renko stream" : "authoritative OHLCV"}.` },
-        { type: "success", text: "Live alerts are armed after the latest closed candle; historical signals are not replayed." }
-      ]);
+      onRunScript(activation, result);
+      onClose();
     }
   };
 
@@ -330,10 +359,22 @@ export function ScriptEditor({ symbol, exchange, chartType, getCandles, onCompil
                     overflow: "hidden",
                     textOverflow: "ellipsis"
                   }}>{s.name}</span>
+                  {loadedScriptIds.includes(s.id) && (
+                    <span style={{
+                      border: "1px solid rgba(80,250,123,0.45)",
+                      borderRadius: "2px",
+                      color: "#50fa7b",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: "7px",
+                      letterSpacing: "0.06em",
+                      padding: "1px 3px"
+                    }}>ON CHART</span>
+                  )}
                 </div>
                 <button
                   type="button"
-                  onClick={(e) => deleteScript(s.id, e)}
+                  onClick={(e) => void deleteScript(s.id, e)}
+                  disabled={storageBusy}
                   style={{
                     background: "transparent",
                     border: 0,
@@ -451,7 +492,7 @@ export function ScriptEditor({ symbol, exchange, chartType, getCandles, onCompil
               </button>
             </div>
 
-            <button type="button" onClick={saveCurrentScript} style={{
+            <button type="button" onClick={() => void saveCurrentScript()} disabled={storageBusy} style={{
               background: "transparent",
               border: "1px solid rgba(255,255,255,0.12)",
               color: "var(--strong)",
@@ -462,7 +503,8 @@ export function ScriptEditor({ symbol, exchange, chartType, getCandles, onCompil
               gap: "6px",
               fontSize: "10px",
               fontFamily: "IBM Plex Mono",
-              cursor: "pointer"
+              cursor: storageBusy ? "wait" : "pointer",
+              opacity: storageBusy ? 0.55 : 1
             }}>
               <Save size={12} /> Save
             </button>
@@ -481,7 +523,7 @@ export function ScriptEditor({ symbol, exchange, chartType, getCandles, onCompil
             }}>
               <TerminalSquare size={12} /> Compile
             </button>
-            <button type="button" className="primary" onClick={runScript} style={{
+            <button type="button" className="primary" onClick={() => void runScript()} disabled={storageBusy} style={{
               background: "var(--red-hot)",
               border: 0,
               color: "#fff",
@@ -493,10 +535,24 @@ export function ScriptEditor({ symbol, exchange, chartType, getCandles, onCompil
               fontSize: "10px",
               fontFamily: "IBM Plex Mono, monospace",
               fontWeight: 600,
-              cursor: "pointer",
+              cursor: storageBusy ? "wait" : "pointer",
+              opacity: storageBusy ? 0.55 : 1,
               boxShadow: "0 0 10px rgba(255,0,0,0.3)"
             }}>
-              <Play size={12} /> Run
+              <Play size={12} /> Run / Add to chart
+            </button>
+            <button type="button" onClick={onClose} aria-label="Close Script Editor" title="Close Script Editor" style={{
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.12)",
+              color: "var(--muted)",
+              width: "28px",
+              height: "28px",
+              borderRadius: "3px",
+              display: "grid",
+              placeItems: "center",
+              cursor: "pointer"
+            }}>
+              <X size={13} />
             </button>
           </div>
         </div>

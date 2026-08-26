@@ -58,6 +58,7 @@ import {
   type CompiledPlot,
   type CompiledScriptActivation
 } from "./ScriptCompiler";
+import { mergeCustomScriptOutput } from "../scripts/customScriptLifecycle";
 import { getMarketDataEngineAdapter } from "../market-data/engine/marketDataEngine";
 import { ExchangeId, MarketDataAdapter, MarketDataSubscription, MarketSymbol, Timeframe } from "../market-data/types";
 import {
@@ -198,7 +199,8 @@ type PixiBlackChartProps = {
   onReplayStartSelected?: (selection: ReplaySelection) => void;
   customPlots?: CompiledPlot[];
   customMarkers?: CompiledMarker[];
-  activeCustomScript?: CompiledScriptActivation | null;
+  activeCustomScripts?: readonly CompiledScriptActivation[];
+  onRemoveCustomScript?: (scriptId: string) => void;
   onCandleReaderChange?: (reader: (() => Candle[]) | null) => void;
   onAlertFired?: (symbol: string, message: string) => void;
   priceLineColor?: string;
@@ -478,7 +480,8 @@ export function PixiBlackChart({
   onReplayStartSelected,
   customPlots,
   customMarkers,
-  activeCustomScript,
+  activeCustomScripts = [],
+  onRemoveCustomScript,
   onCandleReaderChange,
   onAlertFired,
   priceLineColor,
@@ -646,12 +649,12 @@ export function PixiBlackChart({
   const lastAlertSentAtRef = useRef(new Map<string, number>());
   const configuredAlertRuntimeRef = useRef(new Map<string, { lastFiredAt: number; fired: boolean }>());
   const candleReaderCallbackRef = useRef(onCandleReaderChange);
-  const customScriptAlertRuntimeRef = useRef<{
+  const customScriptAlertRuntimeRef = useRef(new Map<string, {
     key: string;
     armedAfter: number;
     lastOpenTime: number;
     delivered: Set<string>;
-  } | null>(null);
+  }>());
   const alertToastTimerRef = useRef<number | undefined>(undefined);
   candleReaderCallbackRef.current = onCandleReaderChange;
   aifActiveRef.current = visibleIndicators.aif;
@@ -3727,30 +3730,38 @@ export function PixiBlackChart({
     }
   }, [customMarkers, customPlots]);
 
-  // Re-project an active custom script whenever its selected input stream
-  // changes. Renko is opt-in at this boundary; built-in Black Core engines
-  // continue to consume their explicitly certified source inputs.
+  // Re-project every independently mounted custom script whenever the selected
+  // input stream changes. Outputs are namespaced before they reach the shared
+  // chart renderer, so one user script can never replace another implicitly.
   useEffect(() => {
     const engine = engineRef.current;
-    if (!activeCustomScript || !engine) return;
+    if (!engine) return;
+    if (activeCustomScripts.length === 0) {
+      engine.setCustomScriptOutput([], []);
+      return;
+    }
     const candles = engine.getCustomScriptCandles().slice(-20_000);
     if (candles.length < 2) {
       engine.setCustomScriptOutput([], []);
       return;
     }
-    const compiled = compileAndRunScript(activeCustomScript.source, candles);
-    if (!compiled.success) return;
     const latestConfirmedTime = candles.at(-2)?.time ?? Number.NEGATIVE_INFINITY;
-    const finalized = finalizedScriptResult(compiled, latestConfirmedTime);
-    engine.setCustomScriptOutput(finalized.plots, finalized.markers);
-  }, [activeCustomScript, chartType, customScriptFeedRevision, displaySymbol, marketSymbol.exchange, marketSymbol.rawSymbol, timeframe]);
+    const mounted = activeCustomScripts.flatMap((activation) => {
+      const compiled = compileAndRunScript(activation.source, candles);
+      if (!compiled.success) return [];
+      return [{ activation, result: finalizedScriptResult(compiled, latestConfirmedTime) }];
+    });
+    const combined = mergeCustomScriptOutput(mounted);
+    engine.setCustomScriptOutput(combined.plots, combined.markers);
+  }, [activeCustomScripts, chartType, customScriptFeedRevision, displaySymbol, marketSymbol.exchange, marketSymbol.rawSymbol, timeframe]);
 
   // Custom script alerts are strictly closed-candle, session-local events. A
   // newly activated script arms at the latest finalized candle and never
   // replays its historical signals as live notifications.
   useEffect(() => {
-    if (!activeCustomScript || replayActiveRef.current || !engineRef.current) {
-      customScriptAlertRuntimeRef.current = null;
+    const runtimes = customScriptAlertRuntimeRef.current;
+    if (activeCustomScripts.length === 0 || replayActiveRef.current || !engineRef.current) {
+      runtimes.clear();
       return;
     }
     const candles = engineRef.current.getCustomScriptCandles().slice(-20_000);
@@ -3758,52 +3769,61 @@ export function PixiBlackChart({
     const latestConfirmedTime = candles.at(-2)!.time;
     const lastOpenTime = candles.at(-1)!.time;
     const inputFeed = engineRef.current.getCustomScriptFeed();
-    const runtimeKey = `${activeCustomScript.id}:${activeCustomScript.sourceHash}:${inputFeed}:${marketSymbol.exchange}:${marketSymbol.rawSymbol}:${timeframe}`;
-    const currentRuntime = customScriptAlertRuntimeRef.current;
-    if (!currentRuntime || currentRuntime.key !== runtimeKey) {
-      customScriptAlertRuntimeRef.current = {
-        key: runtimeKey,
-        armedAfter: latestConfirmedTime,
-        lastOpenTime,
-        delivered: new Set()
-      };
-      return;
-    }
-    if (lastOpenTime <= currentRuntime.lastOpenTime) return;
+    const activeRuntimeKeys = new Set<string>();
 
-    const compiled = compileAndRunScript(activeCustomScript.source, candles);
-    if (!compiled.success) return;
-    const finalized = finalizedScriptResult(compiled, latestConfirmedTime);
-    engineRef.current.setCustomScriptOutput(finalized.plots, finalized.markers);
-    const alerts = newlyConfirmedScriptEvents({
-      events: finalized.events.filter((event) => event.type === "alert"),
-      armedAfter: currentRuntime.armedAfter,
-      latestConfirmedTime,
-      deliveredIds: currentRuntime.delivered
-    });
-    for (const event of alerts) {
-      currentRuntime.delivered.add(event.id);
-      const message = `${activeCustomScript.name}: ${event.message}`;
-      showLocalAlertToast(event.title, message);
-      onAlertFired?.(displaySymbol, message);
-      if (alertSettingsRef.current.enabled) {
-        dispatchAlert(`${runtimeKey}:${event.id}`, {
-          type: "custom_script_alert",
-          scriptId: activeCustomScript.id,
-          scriptName: activeCustomScript.name,
-          runtimeVersion: compiled.runtimeVersion,
-          conditionId: event.conditionId,
-          alertName: event.title,
-          timestamp: new Date(event.time * 1000).toISOString(),
-          price: event.price,
-          message: event.message,
-          direction: event.direction
-        });
+    for (const activeCustomScript of activeCustomScripts) {
+      const runtimeKey = `${activeCustomScript.id}:${activeCustomScript.sourceHash}:${inputFeed}:${marketSymbol.exchange}:${marketSymbol.rawSymbol}:${timeframe}`;
+      activeRuntimeKeys.add(runtimeKey);
+      let currentRuntime = runtimes.get(runtimeKey);
+      if (!currentRuntime) {
+        currentRuntime = {
+          key: runtimeKey,
+          armedAfter: latestConfirmedTime,
+          lastOpenTime,
+          delivered: new Set()
+        };
+        runtimes.set(runtimeKey, currentRuntime);
+        continue;
       }
+      if (lastOpenTime <= currentRuntime.lastOpenTime) continue;
+
+      const compiled = compileAndRunScript(activeCustomScript.source, candles);
+      if (!compiled.success) continue;
+      const finalized = finalizedScriptResult(compiled, latestConfirmedTime);
+      const alerts = newlyConfirmedScriptEvents({
+        events: finalized.events.filter((event) => event.type === "alert"),
+        armedAfter: currentRuntime.armedAfter,
+        latestConfirmedTime,
+        deliveredIds: currentRuntime.delivered
+      });
+      for (const event of alerts) {
+        currentRuntime.delivered.add(event.id);
+        const message = `${activeCustomScript.name}: ${event.message}`;
+        showLocalAlertToast(event.title, message);
+        onAlertFired?.(displaySymbol, message);
+        if (alertSettingsRef.current.enabled) {
+          dispatchAlert(`${runtimeKey}:${event.id}`, {
+            type: "custom_script_alert",
+            scriptId: activeCustomScript.id,
+            scriptName: activeCustomScript.name,
+            runtimeVersion: compiled.runtimeVersion,
+            conditionId: event.conditionId,
+            alertName: event.title,
+            timestamp: new Date(event.time * 1000).toISOString(),
+            price: event.price,
+            message: event.message,
+            direction: event.direction
+          });
+        }
+      }
+      currentRuntime.armedAfter = latestConfirmedTime;
+      currentRuntime.lastOpenTime = lastOpenTime;
     }
-    currentRuntime.armedAfter = latestConfirmedTime;
-    currentRuntime.lastOpenTime = lastOpenTime;
-  }, [activeCustomScript, chartType, customScriptFeedRevision, displaySymbol, exchangeLabel, lastCandle?.time, marketSymbol.exchange, marketSymbol.rawSymbol, onAlertFired, timeframe]);
+
+    for (const runtimeKey of runtimes.keys()) {
+      if (!activeRuntimeKeys.has(runtimeKey)) runtimes.delete(runtimeKey);
+    }
+  }, [activeCustomScripts, chartType, customScriptFeedRevision, displaySymbol, exchangeLabel, lastCandle?.time, marketSymbol.exchange, marketSymbol.rawSymbol, onAlertFired, timeframe]);
 
   const displayCandle = lastCandle ?? {
     time: 0,
@@ -5430,6 +5450,21 @@ export function PixiBlackChart({
               </button>
             </div>
           ))}
+          {activeCustomScripts.map((script) => (
+            <div key={script.id} className="indicator-row custom-script-row" data-custom-script-id={script.id}>
+              <span>{script.name}</span>
+              <b>{script.kind === "strategy" ? "USER STRATEGY" : "USER INDICATOR"} · {script.inputFeed === "CAUSAL_RENKO" ? "RENKO" : "OHLCV"}</b>
+              <button
+                type="button"
+                className="indicator-action remove"
+                aria-label={`Remove custom script ${script.name}`}
+                title="Remove from chart (saved source is kept)"
+                onClick={() => onRemoveCustomScript?.(script.id)}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
@@ -6962,7 +6997,7 @@ export function PixiBlackChart({
 
       <button
         className={indicatorsCollapsed ? "chart-collapse collapsed" : "chart-collapse"}
-        style={indicatorsCollapsed ? undefined : { top: 57 + mountedIndicatorRows.length * 26 + 8 }}
+        style={indicatorsCollapsed ? undefined : { top: 57 + (mountedIndicatorRows.length + activeCustomScripts.length) * 26 + 8 }}
         aria-label={indicatorsCollapsed ? "Show indicator legend" : "Collapse indicator legend"}
         onClick={() => {
           setIndicatorsCollapsed((value) => !value);

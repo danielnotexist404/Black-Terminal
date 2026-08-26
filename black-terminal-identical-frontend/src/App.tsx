@@ -56,7 +56,12 @@ import { TradesTape } from "./components/TradesTape";
 import { InstitutionalFlowIntelligence } from "./components/InstitutionalFlowIntelligence";
 import LandingPage from "./components/LandingPage";
 import { MarketOverview } from "./components/MarketOverview";
-import type { CompileResult, CompiledScriptActivation } from "./components/ScriptCompiler";
+import {
+  mergeCustomScriptOutput,
+  mountCustomScript,
+  unmountCustomScript,
+  type MountedCustomScript
+} from "./scripts/customScriptLifecycle";
 import AdminPanel from "./components/AdminPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import UpgradePanel from "./components/UpgradePanel";
@@ -900,13 +905,25 @@ export default function App() {
     const stored = localStorage.getItem("bt_alert_event_logs");
     return stored ? JSON.parse(stored) : [];
   });
-  const [compiledScript, setCompiledScript] = useState<{ activation: CompiledScriptActivation; result: CompileResult } | null>(null);
+  const [mountedCustomScripts, setMountedCustomScripts] = useState<MountedCustomScript[]>([]);
   useEffect(() => {
     const inputFeed = chartType === "renko" ? "CAUSAL_RENKO" : "SOURCE_OHLCV";
-    setCompiledScript((current) => current && current.activation.inputFeed !== inputFeed
-      ? { ...current, activation: { ...current.activation, inputFeed } }
-      : current);
+    setMountedCustomScripts((current) => current.map((script) => script.activation.inputFeed !== inputFeed
+      ? { ...script, activation: { ...script.activation, inputFeed } }
+      : script));
   }, [chartType]);
+  const customScriptOutput = useMemo(
+    () => mergeCustomScriptOutput(mountedCustomScripts),
+    [mountedCustomScripts]
+  );
+  const customScriptActivations = useMemo(
+    () => mountedCustomScripts.map(({ activation }) => activation),
+    [mountedCustomScripts]
+  );
+  const mountedCustomScriptIds = useMemo(
+    () => customScriptActivations.map(({ id }) => id),
+    [customScriptActivations]
+  );
   const chartCandleReaderRef = useRef<() => Candle[]>(() => []);
   const handleCandleReaderChange = useCallback((reader: (() => Candle[]) | null) => {
     chartCandleReaderRef.current = reader ?? (() => []);
@@ -2467,9 +2484,10 @@ export default function App() {
             }}
             onReplayStatusChange={setReplayStatus}
             onReplayStartSelected={handleReplayStartSelected}
-            customPlots={compiledScript?.result.plots}
-            customMarkers={compiledScript?.result.markers}
-            activeCustomScript={compiledScript?.activation ?? null}
+            customPlots={customScriptOutput.plots}
+            customMarkers={customScriptOutput.markers}
+            activeCustomScripts={customScriptActivations}
+            onRemoveCustomScript={(scriptId) => setMountedCustomScripts((current) => unmountCustomScript(current, scriptId))}
             onCandleReaderChange={handleCandleReaderChange}
             onAlertFired={handleAlertFired}
             priceLineColor={terminalSettings.priceLineColor}
@@ -2629,7 +2647,13 @@ export default function App() {
               exchange={selectedExchange.label}
               chartType={chartType}
               getCandles={readChartCandles}
-              onCompiledScript={(activation, result) => setCompiledScript({ activation, result })}
+              onRunScript={(activation, result) => {
+                setMountedCustomScripts((current) => mountCustomScript(current, { activation, result }));
+                setActiveNav("CHART");
+              }}
+              onUnloadScript={(scriptId) => setMountedCustomScripts((current) => unmountCustomScript(current, scriptId))}
+              loadedScriptIds={mountedCustomScriptIds}
+              onClose={() => setActiveNav("CHART")}
               currentUser={currentUser}
             />
           ) : activeNav === "ALERTS" ? (

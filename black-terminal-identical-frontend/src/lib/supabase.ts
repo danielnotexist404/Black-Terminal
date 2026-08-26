@@ -466,6 +466,46 @@ export async function dbUpdateUser(username: string, patch: Partial<DBUser> & { 
   }
 }
 
+/**
+ * Read the signed-in user's custom scripts from the authoritative account row.
+ * This deliberately avoids the administrative user-list path so script source
+ * never depends on another user's username or a browser-global cache.
+ */
+export async function dbGetCurrentUserScripts(): Promise<any[]> {
+  if (!isSupabaseConfigured || !supabase) return [];
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError) throw authError;
+  if (!authData.user) throw new Error("Authenticated script storage session is unavailable.");
+
+  const { data, error } = await supabase
+    .from("bt_users")
+    .select("scripts")
+    .eq("auth_user_id", authData.user.id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Authenticated script storage profile is unavailable.");
+  return Array.isArray(data.scripts) ? data.scripts : [];
+}
+
+/** Persist custom scripts only to the signed-in user's VPS-hosted account row. */
+export async function dbSaveCurrentUserScripts(scripts: any[]): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error("VPS-backed script storage is unavailable.");
+  }
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError) throw authError;
+  if (!authData.user) throw new Error("Authenticated script storage session is unavailable.");
+
+  const { data, error } = await supabase
+    .from("bt_users")
+    .update({ scripts })
+    .eq("auth_user_id", authData.user.id)
+    .select("auth_user_id")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Custom scripts were not persisted to the authenticated account.");
+}
+
 // Helper: Delete user
 export async function dbDeleteUser(username: string): Promise<void> {
   if (isSupabaseConfigured && supabase) {

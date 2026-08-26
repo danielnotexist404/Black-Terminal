@@ -7,6 +7,11 @@ import {
   newlyConfirmedScriptEvents
 } from "../src/components/ScriptCompiler.ts";
 import type { Candle } from "../src/chart-engine/types.ts";
+import {
+  mergeCustomScriptOutput,
+  mountCustomScript,
+  unmountCustomScript
+} from "../src/scripts/customScriptLifecycle.ts";
 
 const closes = [10, 9, 8, 7, 6, 7, 8, 9, 10, 9, 8, 7, 8, 9, 10, 11, 10, 9, 8, 9, 10];
 const candles: Candle[] = closes.map((close, index) => ({
@@ -84,12 +89,39 @@ for (const blocked of [
 
 assert.equal(compileAndRunScript(indicator, []).success, false);
 
+const activation = {
+  id: "saved-script-1",
+  name: "Stored Indicator",
+  kind: "indicator" as const,
+  source: indicator,
+  sourceHash: indicatorResult.sourceHash,
+  inputFeed: "SOURCE_OHLCV" as const
+};
+let mounted = mountCustomScript([], { activation, result: indicatorResult });
+mounted = mountCustomScript(mounted, { activation, result: indicatorResult });
+assert.equal(mounted.length, 1, "running the same saved script repeatedly must update one mounted runtime");
+
+const secondActivation = { ...activation, id: "saved-script-2", name: "Independent Strategy", kind: "strategy" as const };
+mounted = mountCustomScript(mounted, { activation: secondActivation, result: strategyResult });
+assert.equal(mounted.length, 2, "independent saved scripts must coexist on the chart");
+const mergedOutput = mergeCustomScriptOutput(mounted);
+assert.ok(mergedOutput.plots.every((plot) => plot.name.startsWith("saved-script-")), "custom plot identities must be namespaced by saved script");
+assert.equal(new Set(mergedOutput.markers.map((marker) => marker.id)).size, mergedOutput.markers.length, "custom marker identities must remain unique across scripts");
+mounted = unmountCustomScript(mounted, activation.id);
+assert.deepEqual(mounted.map(({ activation: item }) => item.id), [secondActivation.id], "closing one script must preserve every other mounted script");
+
 const editorSource = readFileSync(new URL("../src/components/ScriptEditor.tsx", import.meta.url), "utf8");
 const chartSource = readFileSync(new URL("../src/components/PixiBlackChart.tsx", import.meta.url), "utf8");
 const engineSource = readFileSync(new URL("../src/chart-engine/BlackChartEngine.ts", import.meta.url), "utf8");
 const strategyAdapterSource = readFileSync(new URL("../src/modules/strategy-lab/adapters/pythonStrategyAdapter.ts", import.meta.url), "utf8");
 assert.match(editorSource, /getCandles\(\)\.slice\(-20_000\)/, "the editor must compile against the active chart candle reader");
 assert.doesNotMatch(editorSource, /bt_chart_candles_cache/, "the nonexistent local candle cache must never return");
+const saveLifecycleSource = editorSource.slice(editorSource.indexOf("const saveCurrentScript"), editorSource.indexOf("const deleteScript"));
+assert.doesNotMatch(saveLifecycleSource, /onRunScript/, "Save must persist source without mounting a chart runtime");
+assert.match(editorSource, /dbSaveCurrentUserScripts/, "production script Save must use authenticated VPS-backed storage");
+assert.match(editorSource, /Run \/ Add to chart/, "Run must be the explicit chart activation action");
+assert.match(chartSource, /custom-script-row/, "mounted user scripts must have an independent chart-list row");
+assert.match(chartSource, /onRemoveCustomScript/, "mounted user scripts must be removable without deleting saved source");
 assert.match(chartSource, /latestConfirmedTime = candles\.at\(-2\)!\.time/, "custom alerts must use the latest closed candle");
 assert.match(chartSource, /newlyConfirmedScriptEvents/, "custom alerts must pass the historical replay guard");
 assert.match(chartSource, /replayActiveRef\.current/, "Replay must not emit custom live alerts");

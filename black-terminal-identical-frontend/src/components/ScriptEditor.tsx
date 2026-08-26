@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef } from "react";
 import { Play, Save, TerminalSquare, Trash2, Plus, FileCode, CheckCircle, AlertTriangle } from "lucide-react";
-import { compileAndRunScript } from "./ScriptCompiler";
-import type { CompiledPlot } from "./ScriptCompiler";
+import { compileAndRunScript, finalizedScriptResult } from "./ScriptCompiler";
+import type { CompileResult, CompiledScriptActivation } from "./ScriptCompiler";
+import type { Candle } from "../chart-engine/types";
 import { dbGetUsers, dbUpdateUser } from "../lib/supabase";
 
 type ScriptEditorProps = {
   symbol: string;
   exchange: string;
-  onCompiledPlots: (plots: CompiledPlot[]) => void;
+  getCandles: () => Candle[];
+  onCompiledScript: (activation: CompiledScriptActivation, result: CompileResult) => void;
   currentUser: { username: string; role: "admin" | "user" } | null;
 };
 
@@ -20,28 +22,42 @@ type UserScript = {
 };
 
 const templates = {
-  indicator: `# Black-Terminal Python indicator
-# Indicator scripts can plot values and trigger alerts.
+  indicator: `# Black Terminal Python · deterministic vector runtime
+# Genuine chart candles only. Historical alert events are never replayed live.
 
 length = input.int(21, "EMA Length")
+slow_length = length * 3
 
 ema_fast = ta.ema(close, length)
-ema_slow = ta.ema(close, length * 3)
+ema_slow = ta.ema(close, slow_length)
+long_signal = ta.crossover(ema_fast, ema_slow)
+short_signal = ta.crossunder(ema_fast, ema_slow)
 
-plot(ema_fast, color="#00ffcc", width=2)
-plot(ema_slow, color="#ff0055", width=2)
+plot(ema_fast, title="Fast EMA", color="#f4f4f5", width=2)
+plot(ema_slow, title="Slow EMA", color="#c40024", width=2)
+alertcondition(long_signal, "EMA Long", "Fast EMA crossed above Slow EMA at {{price}}")
+alertcondition(short_signal, "EMA Short", "Fast EMA crossed below Slow EMA at {{price}}")
 `,
-  strategy: `# Black-Terminal Python strategy
-# Strategy scripts emit normalized signals for Strategy Lab.
+  strategy: `# Black Terminal Python strategy · deterministic vector runtime
+# Entries render on the chart and arm closed-candle in-terminal alerts.
 
-length = input.int(14, "RSI Length")
-rsi = ta.sma(close, length) # Simple RSI proxy
+fast_length = input.int(5, "Fast EMA")
+slow_length = input.int(13, "Slow EMA")
+fast = ta.ema(close, fast_length)
+slow = ta.ema(close, slow_length)
+long_signal = ta.crossover(fast, slow)
+short_signal = ta.crossunder(fast, slow)
 
-plot(rsi, color="#ffaa00", width=1)
+plot(fast, title="Fast EMA", color="#f4f4f5", width=2)
+plot(slow, title="Slow EMA", color="#c40024", width=2)
+strategy.entry("Long Entry", strategy.long, when=long_signal)
+strategy.entry("Short Entry", strategy.short, when=short_signal)
+alertcondition(long_signal, "Long Alert", "Confirmed long signal at {{price}}")
+alertcondition(short_signal, "Short Alert", "Confirmed short signal at {{price}}")
 `
 };
 
-export function ScriptEditor({ symbol, exchange, onCompiledPlots, currentUser }: ScriptEditorProps) {
+export function ScriptEditor({ symbol, exchange, getCandles, onCompiledScript, currentUser }: ScriptEditorProps) {
   const [scripts, setScripts] = useState<UserScript[]>([]);
   const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null);
   const [name, setName] = useState("My Indicator");
@@ -159,14 +175,15 @@ export function ScriptEditor({ symbol, exchange, onCompiledPlots, currentUser }:
     setConsoleLogs([{ type: "success", text: "Compiling script..." }]);
     setHighlightedLine(null);
 
-    // Mock candle data fetch from local storage chart cache to run compilation against
-    const cachedCandles = localStorage.getItem("bt_chart_candles_cache");
-    const candles = cachedCandles ? JSON.parse(cachedCandles) : [];
+    const candles = getCandles().slice(-20_000);
 
-    const result = compileAndRunScript(source, candles);
+    const compiled = compileAndRunScript(source, candles);
+    const latestConfirmedTime = candles.at(-2)?.time ?? Number.NEGATIVE_INFINITY;
+    const result = finalizedScriptResult(compiled, latestConfirmedTime);
     if (result.success) {
       setConsoleLogs([
-        { type: "success", text: "Compilation successful! Indicator ready to run." }
+        { type: "success", text: `Compilation successful on ${candles.length.toLocaleString()} authoritative chart candles.` },
+        { type: "success", text: `${result.plots.length} plot(s), ${result.markers.length} historical marker(s), ${result.alertConditions.length} alert condition(s).` }
       ]);
     } else {
       const logs = result.errors.map(err => ({
@@ -185,15 +202,26 @@ export function ScriptEditor({ symbol, exchange, onCompiledPlots, currentUser }:
   const runScript = () => {
     const result = compileScript();
     if (result && result.success) {
-      onCompiledPlots(result.plots);
-      setConsoleLogs(prev => [...prev, { type: "success", text: "Successfully added custom indicator series to the active chart grid." }]);
+      const activation: CompiledScriptActivation = {
+        id: selectedScriptId || `draft:${result.sourceHash}`,
+        name: name.trim() || "Untitled Script",
+        kind,
+        source,
+        sourceHash: result.sourceHash
+      };
+      onCompiledScript(activation, result);
+      setConsoleLogs(prev => [
+        ...prev,
+        { type: "success", text: "Script output is active on the chart." },
+        { type: "success", text: "Live alerts are armed after the latest closed candle; historical signals are not replayed." }
+      ]);
     }
   };
 
   // Basic regex highlighters for the editor overlay
   const renderHighlightedCode = () => {
     const keywords = /\b(def|if|else|elif|and|or|not|in|for|while|return)\b/g;
-    const builtins = /\b(plot|input|ta\.ema|ta\.sma|ta\.atr|ta\.crossover|ta\.crossunder|strategy\.entry|strategy\.exit|alert|input\.int|input\.float)\b/g;
+    const builtins = /\b(plotshape|plot|alertcondition|alert|ta\.ema|ta\.sma|ta\.rsi|ta\.atr|ta\.stdev|ta\.highest|ta\.lowest|ta\.change|ta\.crossover|ta\.crossunder|strategy\.entry|strategy\.exit|input\.int|input\.float|input\.bool|input\.string|math\.abs|nz)\b/g;
     const strings = /(["'])(?:(?=(\\?))\2.)*?\1/g;
     const comments = /(#.*)/g;
     const numbers = /\b(\d+(?:\.\d+)?)\b/g;
@@ -359,6 +387,21 @@ export function ScriptEditor({ symbol, exchange, onCompiledPlots, currentUser }:
             />
             <span style={{ fontSize: "9px", fontFamily: "var(--font-mono)", color: "var(--muted)" }}>
               {exchange} / {symbol}
+            </span>
+            <span
+              title="Deterministic Python-style vector runtime. Uses the active chart's authoritative OHLCV candles. Imports, filesystem, network, loops and user-defined functions are intentionally unavailable."
+              style={{
+                border: "1px solid rgba(196,0,36,0.55)",
+                borderRadius: "3px",
+                color: "#d8d8dc",
+                fontFamily: "var(--font-mono)",
+                fontSize: "8px",
+                letterSpacing: "0.05em",
+                padding: "3px 6px",
+                whiteSpace: "nowrap"
+              }}
+            >
+              PYTHON VECTOR · CLOSED-BAR ALERTS
             </span>
           </div>
 

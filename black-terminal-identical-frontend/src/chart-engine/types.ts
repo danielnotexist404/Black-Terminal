@@ -117,6 +117,7 @@ export type ChartEngineOptions = {
   acvdSnapshot?: AcvdSnapshot | null;
   alertDefinitions?: IndicatorAlertDefinition[];
   customPlots?: any[];
+  customMarkers?: any[];
   onAlertFired?: (symbol: string, message: string) => void;
   onAlertEditRequest?: (alertId: string) => void;
   onNeedMoreHistory?: (oldestCandle: Candle) => void;

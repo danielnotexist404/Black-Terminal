@@ -50,7 +50,14 @@ import { createMockCandles } from "../data/mockMarket";
 import type { AlertCondition, AlertIndicatorTarget, IndicatorAlertDefinition } from "../automation/alerts";
 import { canUseIndicator } from "../features/premium";
 import { sendIndicatorAlert, sendWebhook } from "../lib/tauri";
-import type { CompiledPlot } from "./ScriptCompiler";
+import {
+  compileAndRunScript,
+  finalizedScriptResult,
+  newlyConfirmedScriptEvents,
+  type CompiledMarker,
+  type CompiledPlot,
+  type CompiledScriptActivation
+} from "./ScriptCompiler";
 import { getMarketDataEngineAdapter } from "../market-data/engine/marketDataEngine";
 import { ExchangeId, MarketDataAdapter, MarketDataSubscription, MarketSymbol, Timeframe } from "../market-data/types";
 import {
@@ -190,6 +197,9 @@ type PixiBlackChartProps = {
   onReplayStatusChange?: (status: ReplayStatus) => void;
   onReplayStartSelected?: (selection: ReplaySelection) => void;
   customPlots?: CompiledPlot[];
+  customMarkers?: CompiledMarker[];
+  activeCustomScript?: CompiledScriptActivation | null;
+  onCandleReaderChange?: (reader: (() => Candle[]) | null) => void;
   onAlertFired?: (symbol: string, message: string) => void;
   priceLineColor?: string;
   priceLineIntensity?: number;
@@ -467,6 +477,9 @@ export function PixiBlackChart({
   onReplayStatusChange,
   onReplayStartSelected,
   customPlots,
+  customMarkers,
+  activeCustomScript,
+  onCandleReaderChange,
   onAlertFired,
   priceLineColor,
   priceLineIntensity,
@@ -631,7 +644,15 @@ export function PixiBlackChart({
   const alertSettingsRef = useRef(alertSettings);
   const lastAlertSentAtRef = useRef(new Map<string, number>());
   const configuredAlertRuntimeRef = useRef(new Map<string, { lastFiredAt: number; fired: boolean }>());
+  const candleReaderCallbackRef = useRef(onCandleReaderChange);
+  const customScriptAlertRuntimeRef = useRef<{
+    key: string;
+    armedAfter: number;
+    lastOpenTime: number;
+    delivered: Set<string>;
+  } | null>(null);
   const alertToastTimerRef = useRef<number | undefined>(undefined);
+  candleReaderCallbackRef.current = onCandleReaderChange;
   aifActiveRef.current = visibleIndicators.aif;
   qalcActiveRef.current = visibleIndicators.qalc;
   const liquidationFieldRequested = visibleIndicators.liquidationHeatmap || liquidationProfileRequested;
@@ -1412,6 +1433,7 @@ export function PixiBlackChart({
       kioseffSettings,
       alertDefinitions: scopedChartAlerts,
       customPlots: customPlots || [],
+      customMarkers: customMarkers || [],
       onAlertFired: (alertId, price) => onAlertFired?.(alertId, price),
       auctionProfileSettings: normalizedAuctionProfileSettings,
       auctionProfileSnapshots,
@@ -1440,6 +1462,7 @@ export function PixiBlackChart({
       priceLineIntensity
     });
     engineRef.current = engine;
+    candleReaderCallbackRef.current?.(() => engine.getSourceCandles());
     engine.setReplaySelectionMode(
       replayControlsRef.current.enabled && replayControlsRef.current.selecting,
       (selection) => replaySelectionCallbackRef.current?.(selection)
@@ -1576,6 +1599,7 @@ export function PixiBlackChart({
 
     return () => {
       disposed = true;
+      candleReaderCallbackRef.current?.(null);
       releaseBclifSnapshotReplay?.();
       liveCandles?.unsubscribe();
       liveTrades?.unsubscribe();
@@ -3693,12 +3717,71 @@ export function PixiBlackChart({
     }
   }, [alertDefinitions, lastCandle, visibleIndicators, displaySymbol, exchangeLabel, timeframe]);
 
-  // Synchronize compiled indicators scripts overlays
+  // Synchronize deterministic Black Terminal Python overlays.
   useEffect(() => {
-    if (customPlots && engineRef.current) {
-      engineRef.current.setCustomPlots(customPlots);
+    if (engineRef.current) {
+      engineRef.current.setCustomScriptOutput(customPlots ?? [], customMarkers ?? []);
     }
-  }, [customPlots]);
+  }, [customMarkers, customPlots]);
+
+  // Custom script alerts are strictly closed-candle, session-local events. A
+  // newly activated script arms at the latest finalized candle and never
+  // replays its historical signals as live notifications.
+  useEffect(() => {
+    if (!activeCustomScript || replayActiveRef.current || !engineRef.current) {
+      customScriptAlertRuntimeRef.current = null;
+      return;
+    }
+    const candles = engineRef.current.getSourceCandles().slice(-20_000);
+    if (candles.length < 3) return;
+    const latestConfirmedTime = candles.at(-2)!.time;
+    const lastOpenTime = candles.at(-1)!.time;
+    const runtimeKey = `${activeCustomScript.id}:${activeCustomScript.sourceHash}:${marketSymbol.exchange}:${marketSymbol.rawSymbol}:${timeframe}`;
+    const currentRuntime = customScriptAlertRuntimeRef.current;
+    if (!currentRuntime || currentRuntime.key !== runtimeKey) {
+      customScriptAlertRuntimeRef.current = {
+        key: runtimeKey,
+        armedAfter: latestConfirmedTime,
+        lastOpenTime,
+        delivered: new Set()
+      };
+      return;
+    }
+    if (lastOpenTime <= currentRuntime.lastOpenTime) return;
+
+    const compiled = compileAndRunScript(activeCustomScript.source, candles);
+    if (!compiled.success) return;
+    const finalized = finalizedScriptResult(compiled, latestConfirmedTime);
+    engineRef.current.setCustomScriptOutput(finalized.plots, finalized.markers);
+    const alerts = newlyConfirmedScriptEvents({
+      events: finalized.events.filter((event) => event.type === "alert"),
+      armedAfter: currentRuntime.armedAfter,
+      latestConfirmedTime,
+      deliveredIds: currentRuntime.delivered
+    });
+    for (const event of alerts) {
+      currentRuntime.delivered.add(event.id);
+      const message = `${activeCustomScript.name}: ${event.message}`;
+      showLocalAlertToast(event.title, message);
+      onAlertFired?.(displaySymbol, message);
+      if (alertSettingsRef.current.enabled) {
+        dispatchAlert(`${runtimeKey}:${event.id}`, {
+          type: "custom_script_alert",
+          scriptId: activeCustomScript.id,
+          scriptName: activeCustomScript.name,
+          runtimeVersion: compiled.runtimeVersion,
+          conditionId: event.conditionId,
+          alertName: event.title,
+          timestamp: new Date(event.time * 1000).toISOString(),
+          price: event.price,
+          message: event.message,
+          direction: event.direction
+        });
+      }
+    }
+    currentRuntime.armedAfter = latestConfirmedTime;
+    currentRuntime.lastOpenTime = lastOpenTime;
+  }, [activeCustomScript, displaySymbol, exchangeLabel, lastCandle?.time, marketSymbol.exchange, marketSymbol.rawSymbol, onAlertFired, timeframe]);
 
   const displayCandle = lastCandle ?? {
     time: 0,

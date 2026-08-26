@@ -20,7 +20,7 @@ import {
 } from "./indicators/institutionalVwap";
 import { resolveOscillatorStack } from "./indicators/oscillatorLayout";
 import type { IndicatorAlertDefinition } from "../automation/alerts";
-import type { CompiledPlot } from "../components/ScriptCompiler";
+import type { CompiledMarker, CompiledPlot } from "../components/ScriptCompiler";
 import { createAdaptiveSwingSignals } from "../modules/strategy-lab/adapters/signalAdapter";
 import type { StrategySettings, StrategySignal } from "../modules/strategy-lab/types/strategy.types";
 import { blackCorePerformanceMonitor } from "../performance/performanceMonitor";
@@ -215,6 +215,7 @@ export class BlackChartEngine {
   private emaRenderCacheVersion = -1;
   private volumeAverageCache?: { dataVersion: number; length: number; values: number[] };
   private customPlots: CompiledPlot[] = [];
+  private customMarkers: CompiledMarker[] = [];
   private alertDefinitions: IndicatorAlertDefinition[] = [];
   private visibleIndicators: VisibleIndicators = {
     qalc: false,
@@ -396,6 +397,8 @@ export class BlackChartEngine {
     this.onNeedMoreHistory = options.onNeedMoreHistory;
     this.onFps = options.onFps;
     this.alertDefinitions = options.alertDefinitions ?? [];
+    this.customPlots = (options.customPlots ?? []) as CompiledPlot[];
+    this.customMarkers = (options.customMarkers ?? []) as CompiledMarker[];
     this.onAlertEditRequest = options.onAlertEditRequest;
     if (options.priceLineColor !== undefined) this.priceLineColor = options.priceLineColor;
     if (options.priceLineIntensity !== undefined) this.priceLineIntensity = options.priceLineIntensity;
@@ -4223,9 +4226,10 @@ export class BlackChartEngine {
     // Draw custom compiled script indicator plots
     for (const plot of this.customPlots) {
       const color = this.hexColor(plot.color, 0x00ffcc);
+      const sourceOffset = Math.max(0, data.length - plot.values.length);
       let started = false;
       for (const i of this.renderIndices(1)) {
-        const val = plot.values[i];
+        const val = plot.values[i - sourceOffset];
         if (val === null || val === undefined || Number.isNaN(val)) {
           started = false;
           continue;
@@ -4242,11 +4246,39 @@ export class BlackChartEngine {
       g.stroke({ width: plot.width || 1, color, alpha: 0.95 });
     }
 
+    if (this.customMarkers.length > 0) {
+      const indexByTime = new Map(data.map((candle, index) => [candle.time, index]));
+      for (const marker of this.customMarkers) {
+        const index = indexByTime.get(marker.time);
+        if (index === undefined || index < this.view.firstIndex || index > this.view.lastIndex) continue;
+        const x = this.xForIndex(index);
+        const priceY = this.yForPrice(marker.value);
+        const color = this.hexColor(marker.color, marker.direction === "short" ? theme.redBright : theme.silverBright);
+        if (marker.direction === "long") {
+          const y = priceY + 8;
+          g.circle(x, y, 6).fill({ color, alpha: 0.08 });
+          g.poly([x, y - 5, x - 4, y + 3, x + 4, y + 3]).fill({ color, alpha: 0.98 }).stroke({ width: 0.8, color: 0x050506, alpha: 0.9 });
+        } else if (marker.direction === "short") {
+          const y = priceY - 8;
+          g.circle(x, y, 6).fill({ color, alpha: 0.1 });
+          g.poly([x, y + 5, x - 4, y - 3, x + 4, y - 3]).fill({ color, alpha: 0.98 }).stroke({ width: 0.8, color: 0x050506, alpha: 0.9 });
+        } else {
+          g.circle(x, priceY, 3.2).fill({ color, alpha: 0.94 }).stroke({ width: 0.8, color: 0x050506, alpha: 0.9 });
+        }
+      }
+    }
+
     this.drawOscillatorPanes(data);
   }
 
   public setCustomPlots(plots: CompiledPlot[]) {
     this.customPlots = plots;
+    this.draw();
+  }
+
+  public setCustomScriptOutput(plots: CompiledPlot[], markers: CompiledMarker[]) {
+    this.customPlots = plots;
+    this.customMarkers = markers;
     this.draw();
   }
 

@@ -29,6 +29,7 @@
     "test:chart-render-lod": "node --experimental-strip-types scripts/chart-render-lod-tests.ts",
     "test:chart-visibility-recovery": "node --experimental-strip-types scripts/chart-visibility-recovery-tests.ts",
     "test:timeframes": "node --experimental-strip-types scripts/timeframe-support-tests.ts",
+    "test:script-runtime": "node --experimental-strip-types scripts/script-runtime-tests.ts",
     "test:chart-csp": "node scripts/chart-csp-regression.js",
     "test:liquidation-heatmap": "node --experimental-strip-types scripts/liquidation-heatmap-tests.ts",
     "test:bclif-operational-clarity": "node --experimental-strip-types scripts/bclif-operational-clarity-tests.ts",

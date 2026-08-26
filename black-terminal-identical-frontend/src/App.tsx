@@ -56,7 +56,7 @@ import { TradesTape } from "./components/TradesTape";
 import { InstitutionalFlowIntelligence } from "./components/InstitutionalFlowIntelligence";
 import LandingPage from "./components/LandingPage";
 import { MarketOverview } from "./components/MarketOverview";
-import type { CompiledPlot } from "./components/ScriptCompiler";
+import type { CompileResult, CompiledScriptActivation } from "./components/ScriptCompiler";
 import AdminPanel from "./components/AdminPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import UpgradePanel from "./components/UpgradePanel";
@@ -89,6 +89,7 @@ import type { AuctionProfileSettings } from "./modules/auction-profile/core/type
 import { migrateDDAProSettings } from "./modules/dda-pro/core/settings";
 import { migrateAcvdSettings } from "./modules/acvd/core/settings";
 import type {
+  Candle,
   ChartDisplayType,
   DrawingToolId,
   IndicatorAdvancedSettings,
@@ -899,7 +900,12 @@ export default function App() {
     const stored = localStorage.getItem("bt_alert_event_logs");
     return stored ? JSON.parse(stored) : [];
   });
-  const [compiledPlots, setCompiledPlots] = useState<CompiledPlot[]>([]);
+  const [compiledScript, setCompiledScript] = useState<{ activation: CompiledScriptActivation; result: CompileResult } | null>(null);
+  const chartCandleReaderRef = useRef<() => Candle[]>(() => []);
+  const handleCandleReaderChange = useCallback((reader: (() => Candle[]) | null) => {
+    chartCandleReaderRef.current = reader ?? (() => []);
+  }, []);
+  const readChartCandles = useCallback(() => chartCandleReaderRef.current(), []);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; symbol: string } | null>(null);
   const [portfolioPositions, setPortfolioPositions] = useState<PortfolioPosition[]>([]);
   const [portfolioOrders, setPortfolioOrders] = useState<PortfolioSnapshot["orders"]>([]);
@@ -2455,7 +2461,10 @@ export default function App() {
             }}
             onReplayStatusChange={setReplayStatus}
             onReplayStartSelected={handleReplayStartSelected}
-            customPlots={compiledPlots}
+            customPlots={compiledScript?.result.plots}
+            customMarkers={compiledScript?.result.markers}
+            activeCustomScript={compiledScript?.activation ?? null}
+            onCandleReaderChange={handleCandleReaderChange}
             onAlertFired={handleAlertFired}
             priceLineColor={terminalSettings.priceLineColor}
             priceLineIntensity={terminalSettings.priceLineIntensity}
@@ -2612,7 +2621,8 @@ export default function App() {
             <ScriptEditor
               symbol={symbol.label}
               exchange={selectedExchange.label}
-              onCompiledPlots={setCompiledPlots}
+              getCandles={readChartCandles}
+              onCompiledScript={(activation, result) => setCompiledScript({ activation, result })}
               currentUser={currentUser}
             />
           ) : activeNav === "ALERTS" ? (

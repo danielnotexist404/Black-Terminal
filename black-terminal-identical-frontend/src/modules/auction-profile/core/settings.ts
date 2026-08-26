@@ -201,7 +201,7 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
     customSessionStartMinute: integer(s.customSessionStartMinute, d.customSessionStartMinute, 0, 1439),
     customSessionEndMinute: integer(s.customSessionEndMinute, d.customSessionEndMinute, 1, 1440),
     initialBalanceMinutes: integer(s.initialBalanceMinutes, d.initialBalanceMinutes, 1, 1440),
-    lowerTimeframe: choice(s.lowerTimeframe, ["1s", "10s", "30s", "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "1w", "1M", "10t", "100t"], d.lowerTimeframe),
+    lowerTimeframe: choice(s.lowerTimeframe, ["1s", "10s", "30s", "1m", "3m", "5m", "15m", "30m", "1h", "2h", "3h", "4h", "6h", "8h", "12h", "1d", "1w", "1M", "1t", "10t", "100t"], d.lowerTimeframe),
     rowSizingMode: choice(s.rowSizingMode, ["AUTO", "TICKS", "PRICE", "BASIS_POINTS", "ATR_FRACTION", "VISIBLE_PIXEL_ADAPTIVE", "FIXED_ROW_COUNT"], d.rowSizingMode),
     ticksPerRow: integer(s.ticksPerRow, d.ticksPerRow, 1, 10000),
     rowSizePrice: finite(s.rowSizePrice, d.rowSizePrice, Number.EPSILON),

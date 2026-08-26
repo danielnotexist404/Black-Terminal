@@ -53,6 +53,12 @@ import { sendIndicatorAlert, sendWebhook } from "../lib/tauri";
 import type { CompiledPlot } from "./ScriptCompiler";
 import { getMarketDataEngineAdapter } from "../market-data/engine/marketDataEngine";
 import { ExchangeId, MarketDataAdapter, MarketDataSubscription, MarketSymbol, Timeframe } from "../market-data/types";
+import {
+  buildCandlesFromTrades,
+  CandleAggregationEngine,
+  isTradeBuiltTimeframe,
+  requiresTradeSynthesis
+} from "../market-data/aggregation/candleAggregator";
 import { UnifiedExecutionTicket, type UnifiedExecutionTicketPreset } from "../execution/components/UnifiedExecutionTicket";
 import { InteractionShield } from "./InteractionShield";
 import type { ExecutionSource, OrderSide, OrderType } from "../execution/types";
@@ -294,6 +300,7 @@ const timeframeSeconds: Record<any, number> = {
   "30m": 1800,
   "1h": 3600,
   "2h": 7200,
+  "3h": 10800,
   "4h": 14400,
   "6h": 21600,
   "8h": 28800,
@@ -301,6 +308,7 @@ const timeframeSeconds: Record<any, number> = {
   "1d": 86400,
   "1w": 604800,
   "1M": 2592000,
+  "1t": 1,
   "10t": 10,
   "100t": 100
 };
@@ -927,6 +935,9 @@ export function PixiBlackChart({
     let lastHistoryCursor: number | undefined;
     const seenTrades = new Set<string>();
     const seenTradeOrder: string[] = [];
+    const tradeCandleBuilder = new CandleAggregationEngine();
+    const tradeBuiltTimeframe = isTradeBuiltTimeframe(timeframe);
+    const tradeSynthesizedTimeframe = requiresTradeSynthesis(timeframe);
     const host = hostRef.current;
     if (!host) return;
     const flushChartUiState = () => {
@@ -970,7 +981,7 @@ export function PixiBlackChart({
     setLastCandle(null);
     setChartHistoryState("loading");
     setDataStatus(adapter ? `${adapter.label.toUpperCase()} CONNECTING` : allowSimulatedFallback ? "SIMULATION" : "MARKET DATA UNAVAILABLE");
-    synthesizeCandlesFromTrades = !adapter?.subscribeCandles;
+    synthesizeCandlesFromTrades = tradeSynthesizedTimeframe || !adapter?.subscribeCandles;
 
     const chartQuery = {
       exchange: marketSymbol.exchange,
@@ -1003,7 +1014,7 @@ export function PixiBlackChart({
           timeframe,
           marketKind: marketSymbol.marketKind,
           limit: Math.min(sourcePageLimit, remaining),
-          to: cursor ? cursor - timeframeSeconds[timeframe] : undefined
+          to: cursor ? cursor - 1 : undefined
         });
 
         const eligibleCandles = cursor ? candles.filter((candle) => candle.time < cursor) : candles;
@@ -1082,7 +1093,7 @@ export function PixiBlackChart({
           timeframe,
           marketKind: marketSymbol.marketKind,
           limit: pageLimitFor(historyExchange),
-          to: oldestTime - timeframeSeconds[timeframe]
+          to: oldestTime - 1
         })
         .then((candles) => {
           if (disposed) return;
@@ -1192,6 +1203,14 @@ export function PixiBlackChart({
         }
 
         lastTradeAt = Date.now();
+        if (tradeBuiltTimeframe) {
+          const aggregated = tradeCandleBuilder.ingestTrade(trade, timeframe);
+          if (!aggregated) continue;
+          upsertReplaySourceCandle(aggregated.candle);
+          if (replayActiveRef.current) continue;
+          engineRef.current?.upsertCandle(aggregated.candle);
+          continue;
+        }
         if (synthesizeCandlesFromTrades || candleStreamIsStale()) {
           ingestTradeIntoReplaySource(trade.price, trade.quantity, trade.time);
           if (replayActiveRef.current) continue;
@@ -1225,6 +1244,10 @@ export function PixiBlackChart({
     const applyTickerHeartbeat = (price: number, time: number) => {
       if (!Number.isFinite(price) || price <= 0) return;
       lastTickerHeartbeatAt = Date.now();
+      if (tradeBuiltTimeframe) {
+        if (!replayActiveRef.current) engineRef.current?.updateLastPrice(price);
+        return;
+      }
       ingestTradeIntoReplaySource(price, 0, time);
       if (replayActiveRef.current) return;
       engineRef.current?.ingestTrade(price, 0, time, timeframeSeconds[timeframe]);
@@ -1300,12 +1323,14 @@ export function PixiBlackChart({
     const startPrimaryLiveFeeds = () => {
       if (!adapter || disposed) return;
 
-      liveCandles = adapter.subscribeCandles?.({ ...chartQuery, limit: pageLimit }, (candle) => {
-        lastLiveCandleAt = Date.now();
-        upsertReplaySourceCandle(candle);
-        if (replayActiveRef.current) return;
-        engine.upsertCandle(candle);
-      });
+      liveCandles = tradeSynthesizedTimeframe
+        ? undefined
+        : adapter.subscribeCandles?.({ ...chartQuery, limit: pageLimit }, (candle) => {
+            lastLiveCandleAt = Date.now();
+            upsertReplaySourceCandle(candle);
+            if (replayActiveRef.current) return;
+            engine.upsertCandle(candle);
+          });
 
       liveTrades = adapter.subscribeTrades?.(marketSymbol, (trade) => {
         ingestTrades([trade]);
@@ -1338,6 +1363,37 @@ export function PixiBlackChart({
         liveTrades = undefined;
         startTradePolling();
       });
+    };
+
+    const loadTradeBuiltHistory = async () => {
+      if (!adapter?.getRecentTrades) throw new Error(`${adapter?.label ?? "Market"} does not provide public trades`);
+      const trades = await adapter.getRecentTrades(marketSymbol, 1_000);
+      const candles = buildCandlesFromTrades(trades, timeframe, tradeCandleBuilder);
+      const canonicalTrades = trades.map(normalizeCanonicalTrade);
+      canonicalCvdService.ingest(canonicalTrades);
+      auctionTradeHistoryRef.current.push(...canonicalTrades);
+      if (auctionTradeHistoryRef.current.length > 250_000) {
+        auctionTradeHistoryRef.current.splice(0, auctionTradeHistoryRef.current.length - 250_000);
+      }
+      for (const trade of trades) {
+        if (seenTrades.has(trade.tradeId)) continue;
+        seenTrades.add(trade.tradeId);
+        seenTradeOrder.push(trade.tradeId);
+      }
+      lastTradeAt = trades.length ? Date.now() : 0;
+      if (candles.length) return candles;
+
+      const ticker = await adapter.getTickerSnapshot?.(marketSymbol);
+      if (!ticker?.lastPrice) throw new Error(`${adapter.label} returned no recent trades or ticker seed`);
+      const seedTime = Number(ticker.time || Math.floor(Date.now() / 1000));
+      return [{
+        time: tradeBuiltTimeframe ? seedTime : Math.floor(seedTime / timeframeSeconds[timeframe]) * timeframeSeconds[timeframe],
+        open: ticker.lastPrice,
+        high: ticker.lastPrice,
+        low: ticker.lastPrice,
+        close: ticker.lastPrice,
+        volume: 0
+      }];
     };
 
     const engine = new BlackChartEngine({
@@ -1422,6 +1478,27 @@ export function PixiBlackChart({
             setChartHistoryState("unavailable");
           }
           return;
+        }
+
+        if (tradeBuiltTimeframe) {
+          historyExhausted = true;
+          setDataStatus(`${adapter.label.toUpperCase()} TRADE HISTORY`);
+          return loadTradeBuiltHistory()
+            .then((candles) => {
+              if (disposed) return;
+              chartSourceVenueRef.current = marketSymbol.exchange;
+              setReplaySource(candles);
+              setChartHistoryState("ready");
+              if (!replayActiveRef.current) engine.setCandles(candles);
+              setDataStatus(`${adapter.label.toUpperCase()} LIVE TRADE BARS - ${candles.length.toLocaleString()} BARS`);
+              startPrimaryLiveFeeds();
+            })
+            .catch((err: unknown) => {
+              console.error(`${adapter.label} trade-built history failed`, err);
+              setDataStatus(`${adapter.label.toUpperCase()} LIVE - TRADE HISTORY UNAVAILABLE`);
+              setChartHistoryState("unavailable");
+              startPrimaryLiveFeeds();
+            });
         }
 
         const reportChartHistoryProgress = (loaded: number, target: number) => {

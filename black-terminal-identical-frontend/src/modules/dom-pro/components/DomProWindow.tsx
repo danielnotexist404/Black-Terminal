@@ -3237,6 +3237,7 @@ function timeframeSeconds(timeframe: Timeframe) {
     "30m": 1800,
     "1h": 3600,
     "2h": 7200,
+    "3h": 10800,
     "4h": 14400,
     "6h": 21600,
     "8h": 28800,

@@ -32,6 +32,7 @@ export const automationTimeframes: readonly Timeframe[] = [
   "30m",
   "1h",
   "2h",
+  "3h",
   "4h",
   "6h",
   "12h",

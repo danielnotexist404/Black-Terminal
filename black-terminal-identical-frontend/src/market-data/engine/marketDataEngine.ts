@@ -14,7 +14,13 @@ import type {
   TickerSnapshot,
   TradeTick
 } from "../types";
-import { CandleAggregationEngine } from "../aggregation/candleAggregator";
+import {
+  aggregateCandlesToTimeframe,
+  baseTimeframeForDerived,
+  CandleAggregationEngine,
+  derivedTimeframeFactor,
+  timeframeSeconds
+} from "../aggregation/candleAggregator";
 import { MarketCache } from "../cache/marketCache";
 import { WebSocketManager } from "../websocket/webSocketManager";
 import { blackCorePerformanceMonitor } from "../../performance/performanceMonitor";
@@ -76,7 +82,7 @@ export class MarketDataEngine {
         ? (symbol: MarketSymbol) => source.getSymbolMetadata!(symbol)
         : undefined,
       getHistoricalCandles: async (query: CandleQuery) => {
-        const candles = await source.getHistoricalCandles(query);
+        const candles = await getHistoricalCandlesWithDerivation(source, query);
         const symbol = symbolFromQuery(query);
         this.cache.setCandles(symbol, query.timeframe, candles);
         return candles;
@@ -222,6 +228,56 @@ export class MarketDataEngine {
     this.lastPublicRateMetricAt = now;
     blackCorePerformanceMonitor.recordMetric("stream.public_messages_per_second", this.publicMessageTimes.length, "msg/s");
   }
+}
+
+async function getHistoricalCandlesWithDerivation(source: MarketDataAdapter, query: CandleQuery) {
+  const baseTimeframe = baseTimeframeForDerived(query.timeframe);
+  if (!baseTimeframe) return source.getHistoricalCandles(query);
+
+  const targetLimit = Math.max(1, Math.min(1_000, Math.floor(query.limit ?? 500)));
+  const factor = Math.max(1, Math.ceil(derivedTimeframeFactor(query.timeframe)));
+  const requiredBaseCandles = targetLimit * factor + factor;
+  const collected = new Map<number, Candle>();
+  let before = query.to;
+
+  for (let request = 0; request < 64 && collected.size < requiredBaseCandles; request += 1) {
+    const remaining = requiredBaseCandles - collected.size;
+    const page = await source.getHistoricalCandles({
+      ...query,
+      timeframe: baseTimeframe,
+      limit: Math.min(1_000, Math.max(factor, remaining)),
+      to: before
+    });
+    const eligible = page.filter((candle) =>
+      (query.from === undefined || candle.time >= query.from)
+      && (before === undefined || candle.time <= before)
+    );
+    let accepted = 0;
+    for (const candle of eligible) {
+      if (collected.has(candle.time)) continue;
+      collected.set(candle.time, candle);
+      accepted += 1;
+    }
+    if (!accepted) break;
+    const oldest = Math.min(...eligible.map((candle) => candle.time));
+    if (!Number.isFinite(oldest) || (query.from !== undefined && oldest <= query.from)) break;
+    before = oldest - 1;
+  }
+
+  const sourceCandles = [...collected.values()].sort((left, right) => left.time - right.time);
+  const targetSeconds = timeframeSeconds[query.timeframe];
+  const firstSource = sourceCandles[0];
+  let derived = aggregateCandlesToTimeframe(sourceCandles, query.timeframe);
+  if (firstSource && targetSeconds) {
+    const firstBucket = Math.floor(firstSource.time / targetSeconds) * targetSeconds;
+    if (firstSource.time > firstBucket) derived = derived.filter((candle) => candle.time !== firstBucket);
+  }
+  return derived
+    .filter((candle) =>
+      (query.from === undefined || candle.time >= query.from)
+      && (query.to === undefined || candle.time <= query.to)
+    )
+    .slice(-targetLimit);
 }
 
 function normalizeRequestedDepth(value: number | undefined) {

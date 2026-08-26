@@ -180,18 +180,24 @@ function StrategyLabIcon({ size = 19, ...props }: SVGProps<SVGSVGElement> & { si
 }
 
 const timeframes: { label: string; value: Timeframe }[] = [
+  { label: "1s", value: "1s" },
   { label: "10s", value: "10s" },
   { label: "30s", value: "30s" },
   { label: "1m", value: "1m" },
+  { label: "3m", value: "3m" },
   { label: "5m", value: "5m" },
   { label: "15m", value: "15m" },
   { label: "30m", value: "30m" },
   { label: "1H", value: "1h" },
+  { label: "2H", value: "2h" },
+  { label: "3H", value: "3h" },
   { label: "4H", value: "4h" },
+  { label: "6H", value: "6h" },
   { label: "12H", value: "12h" },
   { label: "1D", value: "1d" },
   { label: "1W", value: "1w" },
   { label: "1M", value: "1M" },
+  { label: "1t", value: "1t" },
   { label: "10t", value: "10t" },
   { label: "100t", value: "100t" }
 ];
@@ -1104,7 +1110,9 @@ export default function App() {
     };
   }, []);
 
-  const selectedTimeframe = timeframes.find((item) => item.value === timeframe) ?? timeframes[2];
+  const selectedTimeframe = timeframes.find((item) => item.value === timeframe)
+    ?? timeframes.find((item) => item.value === "1m")
+    ?? timeframes[0];
   const selectedChartType = chartTypes.find((item) => item.value === chartType) ?? chartTypes[0];
   const sortedSymbols = useMemo(() => {
     const list = [...availableSymbols];

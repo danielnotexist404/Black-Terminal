@@ -1,5 +1,5 @@
 import type { Candle } from "../../../chart-engine/types";
-import { getPublicMarketDataAdapter } from "../../../market-data/exchangeRegistry";
+import { getMarketDataEngineAdapter } from "../../../market-data/engine/marketDataEngine";
 import type { MarketSymbol, Timeframe } from "../../../market-data/types";
 
 const timeframeSeconds: Record<Timeframe, number> = {
@@ -13,6 +13,7 @@ const timeframeSeconds: Record<Timeframe, number> = {
   "30m": 1800,
   "1h": 3600,
   "2h": 7200,
+  "3h": 10800,
   "4h": 14400,
   "6h": 21600,
   "8h": 28800,
@@ -20,6 +21,7 @@ const timeframeSeconds: Record<Timeframe, number> = {
   "1d": 86400,
   "1w": 604800,
   "1M": 2592000,
+  "1t": 1,
   "10t": 10,
   "100t": 100
 };
@@ -37,7 +39,7 @@ export async function fetchStrategyLabCandles(
   endDate: string,
   targetBars = 1500
 ) {
-  const adapter = getPublicMarketDataAdapter(marketSymbol.exchange);
+  const adapter = getMarketDataEngineAdapter(marketSymbol.exchange);
   if (!adapter) {
     throw new Error(`${marketSymbol.exchange} does not have an enabled public market adapter yet.`);
   }
@@ -62,7 +64,7 @@ export async function fetchStrategyLabCandles(
     collected.push(...candles.filter((candle) => candle.time >= (from ?? 0) && candle.time <= (to ?? Number.POSITIVE_INFINITY)));
     const oldest = Math.min(...candles.map((candle) => candle.time));
     if (!Number.isFinite(oldest) || (from && oldest <= from)) break;
-    to = oldest - timeframeSeconds[timeframe];
+    to = oldest - 1;
   }
 
   const history = uniqueSortedCandles(collected).slice(-targetBars);

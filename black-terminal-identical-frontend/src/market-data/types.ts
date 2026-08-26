@@ -50,6 +50,7 @@ export type Timeframe =
   | "30m"
   | "1h"
   | "2h"
+  | "3h"
   | "4h"
   | "6h"
   | "8h"
@@ -57,6 +58,7 @@ export type Timeframe =
   | "1d"
   | "1w"
   | "1M"
+  | "1t"
   | "10t"
   | "100t";
 

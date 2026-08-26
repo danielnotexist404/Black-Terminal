@@ -26,6 +26,7 @@ const TIMEFRAME_SECONDS: Partial<Record<Timeframe, number>> = {
   "30m": 1800,
   "1h": 3600,
   "2h": 7200,
+  "3h": 10_800,
   "4h": 14_400,
   "6h": 21_600,
   "8h": 28_800,

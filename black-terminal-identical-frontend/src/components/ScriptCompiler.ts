@@ -46,6 +46,7 @@ export type CompiledScriptActivation = {
   kind: "indicator" | "strategy";
   source: string;
   sourceHash: string;
+  inputFeed: "SOURCE_OHLCV" | "CAUSAL_RENKO";
 };
 
 export type CompileResult = {

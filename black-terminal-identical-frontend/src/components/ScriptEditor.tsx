@@ -3,11 +3,13 @@ import { Play, Save, TerminalSquare, Trash2, Plus, FileCode, CheckCircle, AlertT
 import { compileAndRunScript, finalizedScriptResult } from "./ScriptCompiler";
 import type { CompileResult, CompiledScriptActivation } from "./ScriptCompiler";
 import type { Candle } from "../chart-engine/types";
+import type { ChartDisplayType } from "../chart-engine/types";
 import { dbGetUsers, dbUpdateUser } from "../lib/supabase";
 
 type ScriptEditorProps = {
   symbol: string;
   exchange: string;
+  chartType: ChartDisplayType;
   getCandles: () => Candle[];
   onCompiledScript: (activation: CompiledScriptActivation, result: CompileResult) => void;
   currentUser: { username: string; role: "admin" | "user" } | null;
@@ -23,7 +25,7 @@ type UserScript = {
 
 const templates = {
   indicator: `# Black Terminal Python · deterministic vector runtime
-# Genuine chart candles only. Historical alert events are never replayed live.
+# Uses the selected chart feed. Renko is append-only and closed-brick confirmed.
 
 length = input.int(21, "EMA Length")
 slow_length = length * 3
@@ -57,7 +59,7 @@ alertcondition(short_signal, "Short Alert", "Confirmed short signal at {{price}}
 `
 };
 
-export function ScriptEditor({ symbol, exchange, getCandles, onCompiledScript, currentUser }: ScriptEditorProps) {
+export function ScriptEditor({ symbol, exchange, chartType, getCandles, onCompiledScript, currentUser }: ScriptEditorProps) {
   const [scripts, setScripts] = useState<UserScript[]>([]);
   const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null);
   const [name, setName] = useState("My Indicator");
@@ -176,13 +178,14 @@ export function ScriptEditor({ symbol, exchange, getCandles, onCompiledScript, c
     setHighlightedLine(null);
 
     const candles = getCandles().slice(-20_000);
+    const inputFeed = chartType === "renko" ? "CAUSAL_RENKO" : "SOURCE_OHLCV";
 
     const compiled = compileAndRunScript(source, candles);
     const latestConfirmedTime = candles.at(-2)?.time ?? Number.NEGATIVE_INFINITY;
     const result = finalizedScriptResult(compiled, latestConfirmedTime);
     if (result.success) {
       setConsoleLogs([
-        { type: "success", text: `Compilation successful on ${candles.length.toLocaleString()} authoritative chart candles.` },
+        { type: "success", text: `Compilation successful on ${candles.length.toLocaleString()} ${inputFeed === "CAUSAL_RENKO" ? "causal Renko bricks" : "authoritative OHLCV candles"}.` },
         { type: "success", text: `${result.plots.length} plot(s), ${result.markers.length} historical marker(s), ${result.alertConditions.length} alert condition(s).` }
       ]);
     } else {
@@ -207,12 +210,13 @@ export function ScriptEditor({ symbol, exchange, getCandles, onCompiledScript, c
         name: name.trim() || "Untitled Script",
         kind,
         source,
-        sourceHash: result.sourceHash
+        sourceHash: result.sourceHash,
+        inputFeed: chartType === "renko" ? "CAUSAL_RENKO" : "SOURCE_OHLCV"
       };
       onCompiledScript(activation, result);
       setConsoleLogs(prev => [
         ...prev,
-        { type: "success", text: "Script output is active on the chart." },
+        { type: "success", text: `Script output is active on ${chartType === "renko" ? "the append-only causal Renko stream" : "authoritative OHLCV"}.` },
         { type: "success", text: "Live alerts are armed after the latest closed candle; historical signals are not replayed." }
       ]);
     }
@@ -389,7 +393,9 @@ export function ScriptEditor({ symbol, exchange, getCandles, onCompiledScript, c
               {exchange} / {symbol}
             </span>
             <span
-              title="Deterministic Python-style vector runtime. Uses the active chart's authoritative OHLCV candles. Imports, filesystem, network, loops and user-defined functions are intentionally unavailable."
+              title={chartType === "renko"
+                ? "Deterministic Python-style vector runtime on causal Renko. Historical bricks bootstrap from source-candle closes; new live bricks use canonical public trades and never rewrite after confirmation."
+                : "Deterministic Python-style vector runtime on authoritative OHLCV. Imports, filesystem, network, loops and user-defined functions are intentionally unavailable."}
               style={{
                 border: "1px solid rgba(196,0,36,0.55)",
                 borderRadius: "3px",
@@ -401,7 +407,7 @@ export function ScriptEditor({ symbol, exchange, getCandles, onCompiledScript, c
                 whiteSpace: "nowrap"
               }}
             >
-              PYTHON VECTOR · CLOSED-BAR ALERTS
+              {chartType === "renko" ? "CAUSAL RENKO · CLOSED-BRICK ALERTS" : "PYTHON VECTOR · CLOSED-BAR ALERTS"}
             </span>
           </div>
 

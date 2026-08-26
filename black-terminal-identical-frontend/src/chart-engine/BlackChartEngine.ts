@@ -6,6 +6,7 @@ import {
   Text
 } from "pixi.js";
 import { CandleBuffer } from "./data/CandleBuffer";
+import { CausalRenkoStream, type CausalRenkoSnapshot } from "./causalRenko";
 import { resolveFixedLookbackWindow, VolumeProfileModel, VolumeProfileResult, VolumeProfileRow } from "./profile/VolumeProfileModel";
 import {
   defaultIndicatorAdvancedSettings,
@@ -172,8 +173,10 @@ export class BlackChartEngine {
   private app = new Application();
   private destroyed = false;
   private candles: CandleBuffer;
+  private causalRenko = new CausalRenkoStream();
+  private causalRenkoRevision = 0;
   private displayedCandles: Candle[] = [];
-  private displayedCandlesCache?: { dataVersion: number; chartType: ChartDisplayType; candles: Candle[] };
+  private displayedCandlesCache?: { dataVersion: number; renkoRevision: number; chartType: ChartDisplayType; candles: Candle[] };
   private liquidationFieldRenderer = new BlackCoreLiquidationFieldRenderer((metrics) => {
     this.queueDraw();
     this.onLiquidationRendererMetrics?.(metrics);
@@ -201,6 +204,7 @@ export class BlackChartEngine {
   private snapToLatest = true;
   private onPriceChange?: (price: number) => void;
   private onCandleChange?: (candle: Candle) => void;
+  private onScriptFeedChange?: (revision: number) => void;
   private onPriceTransformChange?: (transform: ChartPriceTransformSnapshot) => void;
   private onLiquidationRendererMetrics?: (metrics: BclifRendererMetrics) => void;
   private onNeedMoreHistory?: (oldestCandle: Candle) => void;
@@ -371,6 +375,7 @@ export class BlackChartEngine {
   constructor(options: ChartEngineOptions) {
     this.host = options.host;
     this.candles = new CandleBuffer(options.candles);
+    this.causalRenko.resetFromCandles(options.candles);
     if (options.chartType) this.chartType = options.chartType;
     if (options.snapToLatest !== undefined) this.snapToLatest = options.snapToLatest;
     if (options.visibleIndicators) this.visibleIndicators = options.visibleIndicators;
@@ -392,6 +397,7 @@ export class BlackChartEngine {
     }
     this.onPriceChange = options.onPriceChange;
     this.onCandleChange = options.onCandleChange;
+    this.onScriptFeedChange = options.onScriptFeedChange;
     this.onPriceTransformChange = options.onPriceTransformChange;
     this.onLiquidationRendererMetrics = options.onLiquidationRendererMetrics;
     this.onNeedMoreHistory = options.onNeedMoreHistory;
@@ -660,6 +666,7 @@ export class BlackChartEngine {
 
       let emittedCandle = next;
       if (shouldRollCandle) {
+        this.causalRenko.ingestSourceCandleClose(last);
         this.candles.push(next);
       } else {
         emittedCandle = {
@@ -671,6 +678,9 @@ export class BlackChartEngine {
         };
         this.candles.updateLast(emittedCandle);
       }
+
+      this.causalRenko.observeSourceCandle(emittedCandle);
+      this.causalRenkoRevision += 1;
 
       this.volumeProfileDataVersion += 1;
       this.setHeatmapSource(this.candles.all());
@@ -693,6 +703,8 @@ export class BlackChartEngine {
     options: { preserveView?: boolean; heatmapSource?: Candle[]; heatmapUntilIndex?: number } = {}
   ) {
     this.candles = new CandleBuffer(candles);
+    this.causalRenko.resetFromCandles(candles);
+    this.causalRenkoRevision += 1;
     this.volumeProfileDataVersion += 1;
     this.setHeatmapSource(options.heatmapSource ?? candles, options.heatmapUntilIndex);
     if (!options.preserveView) {
@@ -702,6 +714,7 @@ export class BlackChartEngine {
     const last = this.candles.last();
     this.onPriceChange?.(last?.close ?? 0);
     if (last) this.onCandleChange?.(last);
+    this.onScriptFeedChange?.(this.causalRenkoRevision);
     this.draw();
   }
 
@@ -717,17 +730,33 @@ export class BlackChartEngine {
   upsertCandle(candle: Candle) {
     const last = this.candles.last();
     if (last && candle.time < last.time) return;
+    let completedRenkoBrick = false;
     if (last?.time === candle.time) {
       this.candles.updateLast(candle);
     } else {
+      if (last) completedRenkoBrick = this.causalRenko.ingestSourceCandleClose(last);
       this.candles.push(candle);
     }
+    this.causalRenko.observeSourceCandle(candle);
+    this.causalRenkoRevision += 1;
 
     this.volumeProfileDataVersion += 1;
     this.setHeatmapSource(this.candles.all());
     this.onPriceChange?.(candle.close);
     this.onCandleChange?.(candle);
+    if (completedRenkoBrick) this.onScriptFeedChange?.(this.causalRenkoRevision);
     this.queueDraw();
+  }
+
+  /** Ingests only canonical public trades; ticker heartbeats must never enter this stream. */
+  ingestCausalRenkoTrade(price: number, quantity: number, time: number, identity?: string) {
+    const normalizedTime = time > 1_000_000_000_000 ? time / 1000 : time;
+    const completedRenkoBrick = this.causalRenko.ingestTrade(price, quantity, normalizedTime, identity);
+    this.causalRenkoRevision += 1;
+    this.displayedCandlesCache = undefined;
+    if (completedRenkoBrick) this.onScriptFeedChange?.(this.causalRenkoRevision);
+    if (this.chartType === "renko") this.queueDraw();
+    return completedRenkoBrick;
   }
 
   updateLastPrice(price: number) {
@@ -912,6 +941,19 @@ export class BlackChartEngine {
     return this.candles.all().map((candle) => ({ ...candle }));
   }
 
+  getCustomScriptCandles() {
+    if (this.chartType !== "renko") return this.getSourceCandles();
+    return this.causalRenko.snapshot().candles.map((candle) => ({ ...candle }));
+  }
+
+  getCustomScriptFeed(): "SOURCE_OHLCV" | "CAUSAL_RENKO" {
+    return this.chartType === "renko" ? "CAUSAL_RENKO" : "SOURCE_OHLCV";
+  }
+
+  getCausalRenkoStatus(): CausalRenkoSnapshot {
+    return this.causalRenko.snapshot();
+  }
+
   setKioseffState(snapshot: KioseffSnapshot | null, settings = this.kioseffSettings) {
     this.kioseffSnapshot = snapshot;
     // Normalize legacy palette values at the renderer boundary as well as when
@@ -1018,6 +1060,7 @@ export class BlackChartEngine {
         volume: last.volume + quantity
       };
       this.candles.updateLast(next);
+      this.causalRenko.observeSourceCandle(next);
       this.onCandleChange?.(next);
     } else {
       const next = {
@@ -1028,7 +1071,11 @@ export class BlackChartEngine {
         close: price,
         volume: quantity
       };
+      const completedRenkoBrick = this.causalRenko.ingestSourceCandleClose(last);
       this.candles.push(next);
+      this.causalRenko.observeSourceCandle(next);
+      this.causalRenkoRevision += 1;
+      if (completedRenkoBrick) this.onScriptFeedChange?.(this.causalRenkoRevision);
       this.onCandleChange?.(next);
     }
 
@@ -1426,13 +1473,14 @@ export class BlackChartEngine {
 
   private refreshDisplayCandles() {
     const cached = this.displayedCandlesCache;
-    if (cached?.dataVersion === this.volumeProfileDataVersion && cached.chartType === this.chartType) {
+    if (cached?.dataVersion === this.volumeProfileDataVersion && cached.renkoRevision === this.causalRenkoRevision && cached.chartType === this.chartType) {
       this.displayedCandles = cached.candles;
       return;
     }
     const candles = this.createDisplayCandles(this.candles.all());
     this.displayedCandlesCache = {
       dataVersion: this.volumeProfileDataVersion,
+      renkoRevision: this.causalRenkoRevision,
       chartType: this.chartType,
       candles
     };
@@ -1529,62 +1577,8 @@ export class BlackChartEngine {
     return transformed;
   }
 
-  private toRenko(source: Candle[]) {
-    const first = source[0];
-    const last = source[source.length - 1];
-    if (!first || !last) return [];
-
-    const atr = this.averageTrueRange(source.slice(-160));
-    const fallbackSize = Math.max(last.close * 0.0012, 1);
-    const brickSize = Math.max(atr * 0.72, fallbackSize);
-    const bricks: Candle[] = [];
-    let anchor = first.open;
-    let volumeBucket = 0;
-
-    for (const candle of source) {
-      volumeBucket += candle.volume;
-      let diff = candle.close - anchor;
-      let guard = 0;
-
-      while (Math.abs(diff) >= brickSize && guard < 80) {
-        const direction = diff > 0 ? 1 : -1;
-        const open = anchor;
-        const close = anchor + direction * brickSize;
-        bricks.push({
-          time: candle.time,
-          open,
-          high: Math.max(open, close),
-          low: Math.min(open, close),
-          close,
-          volume: volumeBucket
-        });
-
-        if (bricks.length > 12000) bricks.shift();
-        anchor = close;
-        volumeBucket = 0;
-        diff = candle.close - anchor;
-        guard++;
-      }
-    }
-
-    return bricks.length ? bricks : source.slice(-240);
-  }
-
-  private averageTrueRange(source: Candle[]) {
-    if (source.length < 2) return 0;
-
-    let sum = 0;
-    for (let i = 1; i < source.length; i++) {
-      const current = source[i];
-      const previous = source[i - 1];
-      sum += Math.max(
-        current.high - current.low,
-        Math.abs(current.high - previous.close),
-        Math.abs(current.low - previous.close)
-      );
-    }
-
-    return sum / (source.length - 1);
+  private toRenko(_source: Candle[]) {
+    return this.causalRenko.snapshot().candles;
   }
 
   private calculateView() {

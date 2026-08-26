@@ -123,6 +123,7 @@ export type ChartEngineOptions = {
   onNeedMoreHistory?: (oldestCandle: Candle) => void;
   onPriceChange?: (price: number) => void;
   onCandleChange?: (candle: Candle) => void;
+  onScriptFeedChange?: (revision: number) => void;
   onPriceTransformChange?: (transform: ChartPriceTransformSnapshot) => void;
   onLiquidationRendererMetrics?: (metrics: BclifRendererMetrics) => void;
   onFps?: (fps: number) => void;

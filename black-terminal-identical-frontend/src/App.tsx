@@ -299,7 +299,7 @@ const chartTypes: { label: string; value: ChartDisplayType; description: string 
   { label: "Candlesticks", value: "candlesticks", description: "OHLC candles" },
   { label: "Heikin Ashi", value: "heikinAshi", description: "Smoothed OHLC transform" },
   { label: "CVD Footprint", value: "volumeFootprint", description: "Time × price CVD cells from canonical trade flow" },
-  { label: "Renko", value: "renko", description: "ATR-sized price bricks" },
+  { label: "Renko", value: "renko", description: "Causal frozen-size price bricks" },
   { label: "Hollow Candles", value: "hollow", description: "Hollow up, filled down" },
   { label: "Line", value: "line", description: "Close-price line" }
 ];
@@ -901,6 +901,12 @@ export default function App() {
     return stored ? JSON.parse(stored) : [];
   });
   const [compiledScript, setCompiledScript] = useState<{ activation: CompiledScriptActivation; result: CompileResult } | null>(null);
+  useEffect(() => {
+    const inputFeed = chartType === "renko" ? "CAUSAL_RENKO" : "SOURCE_OHLCV";
+    setCompiledScript((current) => current && current.activation.inputFeed !== inputFeed
+      ? { ...current, activation: { ...current.activation, inputFeed } }
+      : current);
+  }, [chartType]);
   const chartCandleReaderRef = useRef<() => Candle[]>(() => []);
   const handleCandleReaderChange = useCallback((reader: (() => Candle[]) | null) => {
     chartCandleReaderRef.current = reader ?? (() => []);
@@ -2621,6 +2627,7 @@ export default function App() {
             <ScriptEditor
               symbol={symbol.label}
               exchange={selectedExchange.label}
+              chartType={chartType}
               getCandles={readChartCandles}
               onCompiledScript={(activation, result) => setCompiledScript({ activation, result })}
               currentUser={currentUser}

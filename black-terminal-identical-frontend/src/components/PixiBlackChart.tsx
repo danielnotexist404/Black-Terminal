@@ -513,6 +513,7 @@ export function PixiBlackChart({
   const [oscillatorHostHeight, setOscillatorHostHeight] = useState(600);
   const [lastPrice, setLastPrice] = useState(66678.1);
   const [lastCandle, setLastCandle] = useState<Candle | null>(null);
+  const [customScriptFeedRevision, setCustomScriptFeedRevision] = useState(0);
   const [aifPriceTransform, setAifPriceTransform] = useState<ChartPriceTransformSnapshot | null>(null);
   const [kioseffSnapshot, setKioseffSnapshot] = useState<KioseffSnapshot | null>(null);
   const [ddaProSnapshot, setDDAProSnapshot] = useState<DDAProSnapshot | null>(null);
@@ -1224,6 +1225,7 @@ export function PixiBlackChart({
         }
 
         lastTradeAt = Date.now();
+        engineRef.current?.ingestCausalRenkoTrade(trade.price, trade.quantity, trade.time, trade.tradeId);
         if (tradeBuiltTimeframe) {
           const aggregated = tradeCandleBuilder.ingestTrade(trade, timeframe);
           if (!aggregated) continue;
@@ -1453,6 +1455,7 @@ export function PixiBlackChart({
         pendingUiCandle = candle;
         scheduleChartUiState();
       },
+      onScriptFeedChange: setCustomScriptFeedRevision,
       onPriceTransformChange: (transform) => {
         if (aifActiveRef.current || qalcActiveRef.current || liquidationFieldActiveRef.current) setAifPriceTransform(transform);
         priceTransformCallbackRef.current?.(transform);
@@ -1462,7 +1465,7 @@ export function PixiBlackChart({
       priceLineIntensity
     });
     engineRef.current = engine;
-    candleReaderCallbackRef.current?.(() => engine.getSourceCandles());
+    candleReaderCallbackRef.current?.(() => engine.getCustomScriptCandles());
     engine.setReplaySelectionMode(
       replayControlsRef.current.enabled && replayControlsRef.current.selecting,
       (selection) => replaySelectionCallbackRef.current?.(selection)
@@ -3724,6 +3727,24 @@ export function PixiBlackChart({
     }
   }, [customMarkers, customPlots]);
 
+  // Re-project an active custom script whenever its selected input stream
+  // changes. Renko is opt-in at this boundary; built-in Black Core engines
+  // continue to consume their explicitly certified source inputs.
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!activeCustomScript || !engine) return;
+    const candles = engine.getCustomScriptCandles().slice(-20_000);
+    if (candles.length < 2) {
+      engine.setCustomScriptOutput([], []);
+      return;
+    }
+    const compiled = compileAndRunScript(activeCustomScript.source, candles);
+    if (!compiled.success) return;
+    const latestConfirmedTime = candles.at(-2)?.time ?? Number.NEGATIVE_INFINITY;
+    const finalized = finalizedScriptResult(compiled, latestConfirmedTime);
+    engine.setCustomScriptOutput(finalized.plots, finalized.markers);
+  }, [activeCustomScript, chartType, customScriptFeedRevision, displaySymbol, marketSymbol.exchange, marketSymbol.rawSymbol, timeframe]);
+
   // Custom script alerts are strictly closed-candle, session-local events. A
   // newly activated script arms at the latest finalized candle and never
   // replays its historical signals as live notifications.
@@ -3732,11 +3753,12 @@ export function PixiBlackChart({
       customScriptAlertRuntimeRef.current = null;
       return;
     }
-    const candles = engineRef.current.getSourceCandles().slice(-20_000);
+    const candles = engineRef.current.getCustomScriptCandles().slice(-20_000);
     if (candles.length < 3) return;
     const latestConfirmedTime = candles.at(-2)!.time;
     const lastOpenTime = candles.at(-1)!.time;
-    const runtimeKey = `${activeCustomScript.id}:${activeCustomScript.sourceHash}:${marketSymbol.exchange}:${marketSymbol.rawSymbol}:${timeframe}`;
+    const inputFeed = engineRef.current.getCustomScriptFeed();
+    const runtimeKey = `${activeCustomScript.id}:${activeCustomScript.sourceHash}:${inputFeed}:${marketSymbol.exchange}:${marketSymbol.rawSymbol}:${timeframe}`;
     const currentRuntime = customScriptAlertRuntimeRef.current;
     if (!currentRuntime || currentRuntime.key !== runtimeKey) {
       customScriptAlertRuntimeRef.current = {
@@ -3781,7 +3803,7 @@ export function PixiBlackChart({
     }
     currentRuntime.armedAfter = latestConfirmedTime;
     currentRuntime.lastOpenTime = lastOpenTime;
-  }, [activeCustomScript, displaySymbol, exchangeLabel, lastCandle?.time, marketSymbol.exchange, marketSymbol.rawSymbol, onAlertFired, timeframe]);
+  }, [activeCustomScript, chartType, customScriptFeedRevision, displaySymbol, exchangeLabel, lastCandle?.time, marketSymbol.exchange, marketSymbol.rawSymbol, onAlertFired, timeframe]);
 
   const displayCandle = lastCandle ?? {
     time: 0,

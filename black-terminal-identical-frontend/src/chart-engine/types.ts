@@ -7,6 +7,7 @@ import type { LiquidationFieldSettings } from "../modules/liquidation-field/core
 import type { BclifRendererMetrics } from "../modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer";
 import type { DDAProSettings, DDAProSnapshot } from "../modules/dda-pro/core/types";
 import type { AcvdSettings, AcvdSnapshot } from "../modules/acvd/core/types";
+import type { CvdOscillatorSettings } from "../modules/cvd-oscillator/core/types";
 
 
 export type Candle = {
@@ -151,6 +152,7 @@ export type VisibleIndicators = {
   waveTrendOscillator: boolean;
   ddaProOscillator: boolean;
   acvdOscillator: boolean;
+  cvdOscillator: boolean;
   volume: boolean;
 };
 
@@ -168,6 +170,7 @@ export type IndicatorPeriods = {
   waveTrendOscillator: number;
   ddaProOscillator: number;
   acvdOscillator: number;
+  cvdOscillator: number;
 };
 
 export type IndicatorColorKey = "red" | "white" | "silver" | "gray" | "green" | "orange";
@@ -338,7 +341,8 @@ export type OscillatorIndicatorKey =
   | "zScoreOscillator"
   | "waveTrendOscillator"
   | "ddaProOscillator"
-  | "acvdOscillator";
+  | "acvdOscillator"
+  | "cvdOscillator";
 
 export type OscillatorPaneSettings = {
   height: number;
@@ -463,6 +467,7 @@ export type IndicatorAdvancedSettings = {
   waveTrendOscillator: WaveTrendOscillatorSettings;
   ddaProOscillator: DDAProSettings;
   acvdOscillator: AcvdSettings;
+  cvdOscillator: CvdOscillatorSettings;
   vwap: VwapSettings;
 };
 

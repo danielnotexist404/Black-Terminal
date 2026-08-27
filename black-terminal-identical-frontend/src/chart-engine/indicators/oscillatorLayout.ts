@@ -6,6 +6,7 @@ import type {
 } from "../types";
 
 export const OSCILLATOR_KEYS: readonly OscillatorIndicatorKey[] = [
+  "cvdOscillator",
   "acvdOscillator",
   "ddaProOscillator",
   "zScoreOscillator",

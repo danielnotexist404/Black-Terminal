@@ -139,6 +139,8 @@ import { buildDDAProFlowInput } from "../modules/dda-pro/data/flowPressureSource
 import { AcvdWorkerClient } from "../modules/acvd/workers/AcvdWorkerClient";
 import { DEFAULT_ACVD_SETTINGS, migrateAcvdSettings, stableHash as acvdStableHash } from "../modules/acvd/core/settings";
 import type { AcvdSettings, AcvdSnapshot } from "../modules/acvd/core/types";
+import { DEFAULT_CVD_OSCILLATOR_SETTINGS, migrateCvdOscillatorSettings } from "../modules/cvd-oscillator/core/settings";
+import type { CvdOscillatorSettings } from "../modules/cvd-oscillator/core/types";
 import { fetchPersistentAuthenticFlow, type PersistentFlowSnapshot } from "../modules/acvd/data/persistentFlowClient";
 import { authenticFlowRevision, mergePersistentAndLiveFlow } from "../modules/acvd/data/flowMerge";
 import { AuctionProfileWorkerClient } from "../modules/auction-profile/worker/AuctionProfileWorkerClient";
@@ -523,6 +525,7 @@ export function PixiBlackChart({
     openInterestOscillator: visibleIndicators.openInterestOscillator,
     ddaProOscillator: visibleIndicators.ddaProOscillator,
     acvdOscillator: visibleIndicators.acvdOscillator,
+    cvdOscillator: visibleIndicators.cvdOscillator,
     zScoreOscillator: visibleIndicators.zScoreOscillator,
     waveTrendOscillator: visibleIndicators.waveTrendOscillator
   });
@@ -2848,6 +2851,7 @@ export function PixiBlackChart({
       openInterestOscillator: visibleIndicators.openInterestOscillator,
       ddaProOscillator: visibleIndicators.ddaProOscillator,
       acvdOscillator: visibleIndicators.acvdOscillator,
+      cvdOscillator: visibleIndicators.cvdOscillator,
       zScoreOscillator: visibleIndicators.zScoreOscillator,
       waveTrendOscillator: visibleIndicators.waveTrendOscillator
     };
@@ -2856,6 +2860,7 @@ export function PixiBlackChart({
     visibleIndicators.openInterestOscillator,
     visibleIndicators.ddaProOscillator,
     visibleIndicators.acvdOscillator,
+    visibleIndicators.cvdOscillator,
     visibleIndicators.zScoreOscillator,
     visibleIndicators.waveTrendOscillator
   ]);
@@ -3895,6 +3900,7 @@ export function PixiBlackChart({
     { key: "bollinger", label: "Bollinger", value: String(indicatorPeriods.bollinger) },
     { key: "ddaProOscillator", label: "BC-RDA", value: `${indicatorAdvancedSettings.ddaProOscillator.engineMode === "pine-compatibility" ? "PINE" : "NATIVE"} · ${ddaProStatus.toLowerCase()}` },
     { key: "acvdOscillator", label: "BC-ACVD", value: `${acvdSnapshot?.latest.regime ?? "AUTHENTIC FLOW"} · ${acvdStatus.toLowerCase()}` },
+    { key: "cvdOscillator", label: "BC-CVD-OSC", value: "NATIVE · MARKET STATE" },
     { key: "openInterestOscillator", label: "OI Osc", value: String(indicatorPeriods.openInterestOscillator) },
     { key: "zScoreOscillator", label: "Z-Score", value: String(indicatorPeriods.zScoreOscillator) },
     { key: "waveTrendOscillator", label: "WaveTrend", value: String(indicatorPeriods.waveTrendOscillator) },
@@ -3918,8 +3924,8 @@ export function PixiBlackChart({
   };
 
   const updateIndicatorPeriod = (key: keyof IndicatorPeriods, value: number) => {
-    const max = key === "volumeProfile" || key === "ddaProOscillator" || key === "acvdOscillator" ? 20000 : 500;
-    const min = key === "ddaProOscillator" || key === "acvdOscillator" ? 100 : 2;
+    const max = key === "volumeProfile" || key === "ddaProOscillator" || key === "acvdOscillator" || key === "cvdOscillator" ? 20000 : 500;
+    const min = key === "ddaProOscillator" || key === "acvdOscillator" || key === "cvdOscillator" ? 100 : 2;
     const nextValue = Math.max(min, Math.min(max, Number.isFinite(value) ? value : indicatorPeriods[key]));
     onIndicatorPeriodsChange((current) => ({
       ...current,
@@ -3938,6 +3944,12 @@ export function PixiBlackChart({
       onIndicatorAdvancedSettingsChange((current) => ({
         ...current,
         acvdOscillator: migrateAcvdSettings({ ...current.acvdOscillator, lookback: nextValue })
+      }));
+    }
+    if (key === "cvdOscillator") {
+      onIndicatorAdvancedSettingsChange((current) => ({
+        ...current,
+        cvdOscillator: migrateCvdOscillatorSettings({ ...current.cvdOscillator, lookback: nextValue })
       }));
     }
   };
@@ -4004,6 +4016,11 @@ export function PixiBlackChart({
     ...indicatorAdvancedSettings.acvdOscillator,
     lookback: indicatorPeriods.acvdOscillator
   });
+  const cvdOscillatorSettings = migrateCvdOscillatorSettings({
+    ...DEFAULT_CVD_OSCILLATOR_SETTINGS,
+    ...indicatorAdvancedSettings.cvdOscillator,
+    lookback: indicatorPeriods.cvdOscillator
+  });
   const customOscillatorIds = customOscillatorScriptIds(customPlots ?? []);
   const oscillatorStack = resolveOscillatorStack(
     visibleIndicators,
@@ -4022,6 +4039,7 @@ export function PixiBlackChart({
     activeIndicator === "openInterestOscillator" ||
     activeIndicator === "ddaProOscillator" ||
     activeIndicator === "acvdOscillator" ||
+    activeIndicator === "cvdOscillator" ||
     activeIndicator === "zScoreOscillator" ||
     activeIndicator === "waveTrendOscillator";
   const activeOscillatorKey = oscillatorSettingsOpen
@@ -4136,6 +4154,12 @@ export function PixiBlackChart({
     const next = migrateAcvdSettings({ ...acvdSettings, [key]: value });
     onIndicatorAdvancedSettingsChange((current) => ({ ...current, acvdOscillator: next }));
     if (key === "lookback") onIndicatorPeriodsChange((current) => ({ ...current, acvdOscillator: next.lookback }));
+  };
+
+  const updateCvdOscillatorSetting = <Key extends keyof CvdOscillatorSettings>(key: Key, value: CvdOscillatorSettings[Key]) => {
+    const next = migrateCvdOscillatorSettings({ ...cvdOscillatorSettings, [key]: value });
+    onIndicatorAdvancedSettingsChange((current) => ({ ...current, cvdOscillator: next }));
+    if (key === "lookback") onIndicatorPeriodsChange((current) => ({ ...current, cvdOscillator: next.lookback }));
   };
 
   const selectDDAProPreset = (preset: DDAProPreset) => {
@@ -5619,6 +5643,8 @@ export function PixiBlackChart({
                 ? "indicator-settings profile-settings oscillator-settings dda-pro-settings"
               : activeIndicator === "acvdOscillator"
                 ? "indicator-settings profile-settings oscillator-settings dda-pro-settings"
+              : activeIndicator === "cvdOscillator"
+                ? "indicator-settings profile-settings oscillator-settings dda-pro-settings"
               : activeIndicator === "vwap"
                 ? "indicator-settings profile-settings vwap-settings"
                 : activeIndicator === "liquidationHeatmap"
@@ -5643,8 +5669,8 @@ export function PixiBlackChart({
               Length
               <input
                 type="number"
-                min={activeIndicator === "ddaProOscillator" || activeIndicator === "acvdOscillator" ? 100 : 2}
-                max={activeIndicator === "ddaProOscillator" || activeIndicator === "acvdOscillator" ? 20000 : 500}
+                min={activeIndicator === "ddaProOscillator" || activeIndicator === "acvdOscillator" || activeIndicator === "cvdOscillator" ? 100 : 2}
+                max={activeIndicator === "ddaProOscillator" || activeIndicator === "acvdOscillator" || activeIndicator === "cvdOscillator" ? 20000 : 500}
                 value={indicatorPeriods[activeIndicator as keyof IndicatorPeriods]}
                 onChange={(event) => updateIndicatorPeriod(activeIndicator as keyof IndicatorPeriods, Number(event.target.value))}
               />
@@ -6271,6 +6297,35 @@ export function PixiBlackChart({
               {acvdSnapshot?.warning && <div className="vwap-mode-note">{acvdSnapshot.warning}</div>}
               <details className="indicator-advanced-details"><summary>Integrity / Diagnostics</summary><div className="vwap-mode-note">Model {acvdSnapshot?.modelVersion ?? "--"} · {acvdSnapshot?.integrity.currentBar ?? "--"} · future bars consumed {acvdSnapshot?.integrity.futureBarsConsumed ?? 0}</div><div className="vwap-mode-note">Worker {acvdWorkerRef.current?.executionMode() ?? "NOT STARTED"} · {acvdWorkerRef.current?.lastCalculationTimeMs()?.toFixed(2) ?? "--"} ms</div></details>
               <button type="button" className="tv-defaults" onClick={() => { onIndicatorAdvancedSettingsChange((current) => ({ ...current, acvdOscillator: DEFAULT_ACVD_SETTINGS })); onIndicatorPeriodsChange((current) => ({ ...current, acvdOscillator: DEFAULT_ACVD_SETTINGS.lookback })); }}>Defaults</button>
+            </>
+          )}
+          {activeIndicator === "cvdOscillator" && (
+            <>
+              <div className="indicator-settings-section">BC-CVD-OSC Engine</div>
+              <div className="vwap-mode-note">Native candle-signed OHLCV CVD. This estimates directional volume from each candle; BC-ACVD remains the authentic exchange-classified aggressor-flow engine.</div>
+              <label>Parameters<select value={cvdOscillatorSettings.parametersMode} onChange={(event) => updateCvdOscillatorSetting("parametersMode", event.target.value as CvdOscillatorSettings["parametersMode"])}><option value="Auto">Auto by Timeframe</option><option value="Custom">Custom</option></select></label>
+              <label>Volume Model<select value={cvdOscillatorSettings.useVolumeIntegration ? "integrated" : "normalized"} onChange={(event) => updateCvdOscillatorSetting("useVolumeIntegration", event.target.value === "integrated")}><option value="normalized">Range-Normalized Signed Volume</option><option value="integrated">Integrated Signed Volume</option></select></label>
+              {cvdOscillatorSettings.parametersMode === "Custom" && <>
+                <label>Fast Length<input type="number" min={2} max={1000} value={cvdOscillatorSettings.fastLength} onChange={(event) => updateCvdOscillatorSetting("fastLength", Number(event.target.value))} /></label>
+                <label>Fast Method<select value={cvdOscillatorSettings.fastMaType} onChange={(event) => updateCvdOscillatorSetting("fastMaType", event.target.value as CvdOscillatorSettings["fastMaType"])}>{["EMA", "SMA", "WMA", "RMA"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+                <label>Slow Length<input type="number" min={3} max={2000} value={cvdOscillatorSettings.slowLength} onChange={(event) => updateCvdOscillatorSetting("slowLength", Number(event.target.value))} /></label>
+                <label>Slow Method<select value={cvdOscillatorSettings.slowMaType} onChange={(event) => updateCvdOscillatorSetting("slowMaType", event.target.value as CvdOscillatorSettings["slowMaType"])}>{["EMA", "SMA", "WMA", "RMA"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+              </>}
+              <div className="indicator-settings-section">Fast Wave</div>
+              <label className="indicator-color-setting">Color<input type="color" value={cvdOscillatorSettings.fastWaveColor} onChange={(event) => updateCvdOscillatorSetting("fastWaveColor", event.target.value)} /></label>
+              <label className="indicator-range-row">Thickness<span><input type="range" min={0.5} max={5} step={0.25} value={cvdOscillatorSettings.fastWaveWidth} onChange={(event) => updateCvdOscillatorSetting("fastWaveWidth", Number(event.target.value))} /><b>{cvdOscillatorSettings.fastWaveWidth.toFixed(2)}</b></span></label>
+              <label className="indicator-range-row">Intensity<span><input type="range" min={0} max={100} value={cvdOscillatorSettings.fastWaveIntensity} onChange={(event) => updateCvdOscillatorSetting("fastWaveIntensity", Number(event.target.value))} /><b>{cvdOscillatorSettings.fastWaveIntensity}</b></span></label>
+              <div className="indicator-settings-section">Slow Wave</div>
+              <label className="indicator-color-setting">Color<input type="color" value={cvdOscillatorSettings.slowWaveColor} onChange={(event) => updateCvdOscillatorSetting("slowWaveColor", event.target.value)} /></label>
+              <label className="indicator-range-row">Thickness<span><input type="range" min={0.5} max={5} step={0.25} value={cvdOscillatorSettings.slowWaveWidth} onChange={(event) => updateCvdOscillatorSetting("slowWaveWidth", Number(event.target.value))} /><b>{cvdOscillatorSettings.slowWaveWidth.toFixed(2)}</b></span></label>
+              <label className="indicator-range-row">Intensity<span><input type="range" min={0} max={100} value={cvdOscillatorSettings.slowWaveIntensity} onChange={(event) => updateCvdOscillatorSetting("slowWaveIntensity", Number(event.target.value))} /><b>{cvdOscillatorSettings.slowWaveIntensity}</b></span></label>
+              <div className="indicator-settings-section">Display</div>
+              <label>Raw CVD<input type="checkbox" checked={cvdOscillatorSettings.showRawCvd} onChange={(event) => updateCvdOscillatorSetting("showRawCvd", event.target.checked)} /></label>
+              <label>Dynamic Cloud<input type="checkbox" checked={cvdOscillatorSettings.showClouds} onChange={(event) => updateCvdOscillatorSetting("showClouds", event.target.checked)} /></label>
+              <label>Market Status Panel<input type="checkbox" checked={cvdOscillatorSettings.showStatusPanel} onChange={(event) => updateCvdOscillatorSetting("showStatusPanel", event.target.checked)} /></label>
+              <label>Shift Candles Left<input type="checkbox" checked={cvdOscillatorSettings.reserveRightGutter} onChange={(event) => updateCvdOscillatorSetting("reserveRightGutter", event.target.checked)} /></label>
+              <label className="indicator-range-row">Panel Width<span><input type="range" min={170} max={300} value={cvdOscillatorSettings.statusPanelWidth} onChange={(event) => updateCvdOscillatorSetting("statusPanelWidth", Number(event.target.value))} /><b>{cvdOscillatorSettings.statusPanelWidth}px</b></span></label>
+              <button type="button" className="tv-defaults" onClick={() => { onIndicatorAdvancedSettingsChange((current) => ({ ...current, cvdOscillator: DEFAULT_CVD_OSCILLATOR_SETTINGS })); onIndicatorPeriodsChange((current) => ({ ...current, cvdOscillator: DEFAULT_CVD_OSCILLATOR_SETTINGS.lookback })); }}>Defaults</button>
             </>
           )}
           {activeIndicator === "ddaProOscillator" && (
@@ -7109,7 +7164,7 @@ export function PixiBlackChart({
           className="oscillator-pane-resizer"
           style={{ bottom: `min(${74 + pane.topOffset}px, calc(100% - 110px))` }}
           role="separator"
-          aria-label={`Resize ${pane.key === "acvdOscillator" ? "BC-ACVD" : pane.key === "ddaProOscillator" ? "BC-RDA" : pane.key === "zScoreOscillator" ? "Z-Score" : pane.key === "waveTrendOscillator" ? "WaveTrend" : "OI Osc"} pane`}
+          aria-label={`Resize ${pane.key === "cvdOscillator" ? "BC-CVD-OSC" : pane.key === "acvdOscillator" ? "BC-ACVD" : pane.key === "ddaProOscillator" ? "BC-RDA" : pane.key === "zScoreOscillator" ? "Z-Score" : pane.key === "waveTrendOscillator" ? "WaveTrend" : "OI Osc"} pane`}
           aria-orientation="horizontal"
           onPointerDown={(event) => beginOscillatorResize(
             event,

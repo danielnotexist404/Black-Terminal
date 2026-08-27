@@ -52,6 +52,9 @@ import { ddaProSigmaUnit, nearestDDAProTailLabel } from "../modules/dda-pro/rend
 import { bclifTimestampMsToChartSeconds } from "../modules/liquidation-field/rendering/timeProjection";
 import type { DDAProSnapshot } from "../modules/dda-pro/core/types";
 import type { AcvdSnapshot } from "../modules/acvd/core/types";
+import { calculateCvdOscillator } from "../modules/cvd-oscillator/core/engine";
+import { migrateCvdOscillatorSettings } from "../modules/cvd-oscillator/core/settings";
+import type { CvdOscillatorSnapshot } from "../modules/cvd-oscillator/core/types";
 import { acvdContiguousFiniteSegments } from "../modules/acvd/rendering/segments";
 import {
   ddaProDomain,
@@ -245,6 +248,7 @@ export class BlackChartEngine {
     waveTrendOscillator: false,
     ddaProOscillator: false,
     acvdOscillator: false,
+    cvdOscillator: false,
     volume: true
   };
   private indicatorPeriods: IndicatorPeriods = {
@@ -260,7 +264,8 @@ export class BlackChartEngine {
     zScoreOscillator: 50,
     waveTrendOscillator: 10,
     ddaProOscillator: 500,
-    acvdOscillator: 1000
+    acvdOscillator: 1000,
+    cvdOscillator: 5000
   };
   private indicatorVisualSettings: IndicatorVisualSettings = {
     qalc: { color: "white", intensity: 92 },
@@ -282,10 +287,12 @@ export class BlackChartEngine {
     waveTrendOscillator: { color: "silver", intensity: 78 },
     ddaProOscillator: { color: "red", intensity: 92 },
     acvdOscillator: { color: "white", intensity: 92 },
+    cvdOscillator: { color: "white", intensity: 100 },
     volume: { color: "red", intensity: 62 }
   };
   private indicatorAdvancedSettings: IndicatorAdvancedSettings = defaultIndicatorAdvancedSettings;
   private institutionalVwapCache?: { key: string; result: InstitutionalVwapResult };
+  private cvdOscillatorCache?: { key: string; snapshot: CvdOscillatorSnapshot };
 
   private rootLayer = new Container();
   private gridLayer = new Graphics();
@@ -1177,7 +1184,7 @@ export class BlackChartEngine {
   }
 
   private isInsidePriceAxis(x: number, y: number) {
-    const plotWidth = this.view.width - this.view.rightAxisWidth - this.volumeProfileRightGutter();
+    const plotWidth = this.view.width - this.view.rightAxisWidth - this.rightAnalysisGutter();
     const plotHeight = this.view.height - this.view.bottomAxisHeight;
     return x >= plotWidth && x <= this.view.width && y >= this.view.topPadding && y <= plotHeight;
   }
@@ -1657,7 +1664,7 @@ export class BlackChartEngine {
   }
 
   private xForIndex(index: number) {
-    const plotWidth = this.view.width - this.view.rightAxisWidth - this.volumeProfileRightGutter();
+    const plotWidth = this.view.width - this.view.rightAxisWidth - this.rightAnalysisGutter();
     const step = this.timeStep();
     const barsFromLatest = this.getDisplayCandles().length - 1 - index;
     return plotWidth - barsFromLatest * step - this.view.candleWidth / 2 - 12 + this.view.scrollX;
@@ -1668,6 +1675,17 @@ export class BlackChartEngine {
     if (!this.visibleIndicators.volumeProfile || settings.rangeMode !== "fixed" || settings.placement !== "right" || !settings.showVolumeProfile) return 0;
     const plotWidth = Math.max(0, this.view.width - this.view.rightAxisWidth);
     return Math.min(plotWidth * 0.36, Math.max(110, 70 + Math.max(0, settings.widthPercent) * 3.2));
+  }
+
+  private cvdOscillatorRightGutter() {
+    const settings = migrateCvdOscillatorSettings(this.indicatorAdvancedSettings.cvdOscillator);
+    if (!this.visibleIndicators.cvdOscillator || !settings.showStatusPanel || !settings.reserveRightGutter) return 0;
+    const plotWidth = Math.max(0, this.view.width - this.view.rightAxisWidth);
+    return Math.min(plotWidth * 0.3, Math.max(170, settings.statusPanelWidth + 20));
+  }
+
+  private rightAnalysisGutter() {
+    return Math.max(this.volumeProfileRightGutter(), this.cvdOscillatorRightGutter());
   }
 
   private xForTimestamp(time: number) {
@@ -2831,6 +2849,123 @@ export class BlackChartEngine {
     }
   }
 
+  private cvdOscillatorSnapshotFor(data: Candle[]) {
+    const settings = migrateCvdOscillatorSettings({
+      ...this.indicatorAdvancedSettings.cvdOscillator,
+      lookback: this.indicatorPeriods.cvdOscillator
+    });
+    const timeframeSeconds = data.length >= 2
+      ? Math.max(1, Math.round(data[data.length - 1]!.time - data[data.length - 2]!.time))
+      : 60;
+    const key = `${this.volumeProfileDataVersion}:${timeframeSeconds}:${JSON.stringify(settings)}`;
+    if (this.cvdOscillatorCache?.key === key) return this.cvdOscillatorCache.snapshot;
+    const snapshot = calculateCvdOscillator({ candles: data, settings, timeframeSeconds });
+    this.cvdOscillatorCache = { key, snapshot };
+    return snapshot;
+  }
+
+  private drawCvdOscillatorPane(data: Candle[], paneTop: number, paneBottom: number, plotWidth: number) {
+    const settings = migrateCvdOscillatorSettings({
+      ...this.indicatorAdvancedSettings.cvdOscillator,
+      lookback: this.indicatorPeriods.cvdOscillator
+    });
+    const snapshot = this.cvdOscillatorSnapshotFor(data);
+    const g = this.indicatorLayer;
+    const paneHeight = paneBottom - paneTop;
+    const offset = Math.max(0, data.length - snapshot.inputSize);
+    const indices = this.renderIndices(1).filter((index) => index >= offset);
+    const fastColor = this.hexColor(settings.fastWaveColor, theme.silverBright);
+    const slowColor = this.hexColor(settings.slowWaveColor, theme.red);
+    const rawColor = this.hexColor(settings.rawCvdColor, theme.silver);
+    const statusColor = snapshot.latest.state === "LONG"
+      ? theme.green
+      : snapshot.latest.state === "SHORT"
+        ? theme.redBright
+        : theme.muted;
+
+    g.rect(0, paneTop, plotWidth, paneHeight)
+      .fill({ color: 0x010102, alpha: 0.99 })
+      .stroke({ width: 1, color: 0xffffff, alpha: 0.07 });
+
+    const sourceIndex = (chartIndex: number) => chartIndex - offset;
+    const aligned = (values: readonly number[], chartIndex: number) => values[sourceIndex(chartIndex)] ?? Number.NaN;
+    const domainValues: number[] = [];
+    for (const chartIndex of indices) {
+      for (const values of [snapshot.series.cvd, snapshot.series.fast, snapshot.series.slow, snapshot.series.upperCloud, snapshot.series.lowerCloud]) {
+        const value = aligned(values, chartIndex);
+        if (Number.isFinite(value)) domainValues.push(value);
+      }
+    }
+    let minimum = domainValues.length ? Number.POSITIVE_INFINITY : -1;
+    let maximum = domainValues.length ? Number.NEGATIVE_INFINITY : 1;
+    for (const value of domainValues) {
+      if (value < minimum) minimum = value;
+      if (value > maximum) maximum = value;
+    }
+    if (!(maximum > minimum)) { minimum -= 1; maximum += 1; }
+    const padding = (maximum - minimum) * 0.08;
+    minimum -= padding;
+    maximum += padding;
+    const yFor = (value: number) => paneBottom - 9 - ((value - minimum) / (maximum - minimum)) * Math.max(1, paneHeight - 25);
+
+    if (settings.showClouds) {
+      let segment: number[] = [];
+      const flush = () => {
+        if (segment.length < 2) { segment = []; return; }
+        const polygon: number[] = [];
+        for (const chartIndex of segment) polygon.push(this.xForIndex(chartIndex), yFor(aligned(snapshot.series.upperCloud, chartIndex)));
+        for (let cursor = segment.length - 1; cursor >= 0; cursor--) {
+          const chartIndex = segment[cursor]!;
+          polygon.push(this.xForIndex(chartIndex), yFor(aligned(snapshot.series.lowerCloud, chartIndex)));
+        }
+        g.poly(polygon).fill({ color: slowColor, alpha: clampNumber(settings.cloudIntensity / 100, 0, 0.4) });
+        segment = [];
+      };
+      for (const chartIndex of indices) {
+        const upper = aligned(snapshot.series.upperCloud, chartIndex);
+        const lower = aligned(snapshot.series.lowerCloud, chartIndex);
+        if (!Number.isFinite(upper) || !Number.isFinite(lower)) flush();
+        else segment.push(chartIndex);
+      }
+      flush();
+    }
+
+    const drawLine = (values: readonly number[], color: number, width: number, alpha: number) => {
+      let active = false;
+      for (const chartIndex of indices) {
+        const value = aligned(values, chartIndex);
+        if (!Number.isFinite(value)) { active = false; continue; }
+        const x = this.xForIndex(chartIndex);
+        const y = yFor(value);
+        if (!active) { g.moveTo(x, y); active = true; }
+        else g.lineTo(x, y);
+      }
+      if (active) g.stroke({ width, color, alpha });
+    };
+
+    if (settings.showRawCvd) drawLine(snapshot.series.cvd, rawColor, 0.85, settings.rawCvdIntensity / 100);
+    drawLine(snapshot.series.slow, slowColor, settings.slowWaveWidth + 1.5, settings.slowWaveIntensity / 100 * 0.16);
+    drawLine(snapshot.series.slow, slowColor, settings.slowWaveWidth, settings.slowWaveIntensity / 100);
+    drawLine(snapshot.series.fast, fastColor, settings.fastWaveWidth + 1.5, settings.fastWaveIntensity / 100 * 0.18);
+    drawLine(snapshot.series.fast, fastColor, settings.fastWaveWidth, settings.fastWaveIntensity / 100);
+
+    this.addProfileText("BC-CVD-OSC · CANDLE-SIGNED CVD MARKET STATE", 12, paneTop + 7, theme.silverBright, 9, "700", true);
+    this.addProfileText(`FAST ${snapshot.lengths.fast} · SLOW ${snapshot.lengths.slow} · OHLCV ESTIMATE`, 12, paneTop + 21, theme.muted, 8, "600", true);
+
+    if (settings.showStatusPanel) {
+      const panelWidth = Math.min(settings.statusPanelWidth, Math.max(170, plotWidth - 24));
+      const panelX = Math.max(8, plotWidth - panelWidth - 10);
+      const panelY = paneTop + 8;
+      g.roundRect(panelX, panelY, panelWidth, 49, 4)
+        .fill({ color: 0x020203, alpha: 0.94 })
+        .stroke({ width: 1, color: statusColor, alpha: 0.6 });
+      g.rect(panelX, panelY + 1, 3, 47).fill({ color: statusColor, alpha: 0.92 });
+      this.addProfileText("MARKET STATUS", panelX + 11, panelY + 7, theme.muted, 8, "700", true);
+      this.addProfileText(snapshot.latest.state, panelX + 11, panelY + 22, statusColor, 12, "700", true);
+      this.addProfileText("OHLCV-SIGNED CVD", panelX + panelWidth - 96, panelY + 25, theme.muted, 7, "600", true);
+    }
+  }
+
   private drawAcvdPane(data: Candle[], paneTop: number, paneBottom: number, plotWidth: number) {
     const snapshot = this.acvdSnapshot;
     const settings = this.indicatorAdvancedSettings.acvdOscillator;
@@ -2990,6 +3125,10 @@ export class BlackChartEngine {
         this.drawAcvdPane(data, paneTop, paneBottom, plotWidth);
         continue;
       }
+      if (pane.key === "cvdOscillator") {
+        this.drawCvdOscillatorPane(data, paneTop, paneBottom, plotWidth);
+        continue;
+      }
       const isZScorePane = pane.key === "zScoreOscillator";
       const zeroLineColor = isZScorePane
         ? this.hexColor(zSettings?.midlineColor ?? "#8a8a90", theme.muted)
@@ -3005,7 +3144,7 @@ export class BlackChartEngine {
       });
 
       const series: Array<{
-        key: "openInterestOscillator" | "zScoreOscillator" | "waveTrendOscillator" | "ddaProOscillator" | "acvdOscillator";
+        key: "openInterestOscillator" | "zScoreOscillator" | "waveTrendOscillator" | "ddaProOscillator" | "acvdOscillator" | "cvdOscillator";
         label: string;
         values: number[];
         fallbackColor: IndicatorColorKey;

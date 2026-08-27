@@ -109,6 +109,7 @@ import type {
   VisibleIndicators
 } from "./chart-engine/types";
 import { defaultIndicatorAdvancedSettings } from "./chart-engine/profile/volumeProfileDefaults";
+import { migrateCvdOscillatorSettings } from "./modules/cvd-oscillator/core/settings";
 import {
   clearSupabaseAuthSession,
   dbAddAuditLog,
@@ -254,6 +255,7 @@ const defaultVisibleIndicators: VisibleIndicators = {
   waveTrendOscillator: false,
   ddaProOscillator: false,
   acvdOscillator: false,
+  cvdOscillator: false,
   volume: false
 };
 
@@ -285,7 +287,8 @@ const defaultIndicatorPeriods: IndicatorPeriods = {
   zScoreOscillator: 50,
   waveTrendOscillator: 10,
   ddaProOscillator: 500,
-  acvdOscillator: 1000
+  acvdOscillator: 1000,
+  cvdOscillator: 5000
 };
 
 const defaultIndicatorVisualSettings: IndicatorVisualSettings = {
@@ -308,6 +311,7 @@ const defaultIndicatorVisualSettings: IndicatorVisualSettings = {
   waveTrendOscillator: { color: "silver", intensity: 78 },
   ddaProOscillator: { color: "red", intensity: 92 },
   acvdOscillator: { color: "white", intensity: 92 },
+  cvdOscillator: { color: "white", intensity: 100 },
   volume: { color: "red", intensity: 62 }
 };
 
@@ -517,6 +521,7 @@ function migrateIndicatorAdvancedSettings(value: Partial<IndicatorAdvancedSettin
     },
     ddaProOscillator: migrateDDAProSettings(value?.ddaProOscillator),
     acvdOscillator: migrateAcvdSettings(value?.acvdOscillator),
+    cvdOscillator: migrateCvdOscillatorSettings(value?.cvdOscillator),
     vwap: {
       ...defaultIndicatorAdvancedSettings.vwap,
       ...(value?.vwap ?? {})
@@ -540,6 +545,7 @@ function migrateIndicatorPeriods(value: Partial<IndicatorPeriods> | null | undef
   }
   migrated.ddaProOscillator = Math.max(100, Math.min(20_000, Math.round(migrated.ddaProOscillator)));
   migrated.acvdOscillator = Math.max(100, Math.min(20_000, Math.round(migrated.acvdOscillator)));
+  migrated.cvdOscillator = Math.max(100, Math.min(20_000, Math.round(migrated.cvdOscillator)));
   return migrated;
 }
 

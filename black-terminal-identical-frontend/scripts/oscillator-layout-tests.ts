@@ -26,8 +26,18 @@ const hidden: VisibleIndicators = {
   waveTrendOscillator: false,
   ddaProOscillator: false,
   acvdOscillator: false,
+  cvdOscillator: false,
   volume: false
 };
+
+const cvdStandalone = resolveOscillatorStack(
+  { ...hidden, cvdOscillator: true },
+  defaultOscillatorPaneSettings,
+  defaultWaveTrendOscillatorSettings,
+  900
+);
+assert.deepEqual(cvdStandalone.panes.map((pane) => pane.key), ["cvdOscillator"]);
+assert.equal(cvdStandalone.panes[0]?.height, 176);
 
 const acvdStandalone = resolveOscillatorStack(
   { ...hidden, acvdOscillator: true },

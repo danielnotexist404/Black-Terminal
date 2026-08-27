@@ -24,6 +24,7 @@ export const DEFAULT_ALLOWED_INDICATORS = [
   "bollinger",
   "ddaProOscillator",
   "acvdOscillator",
+  "cvdOscillator",
   "openInterestOscillator",
   "zScoreOscillator",
   "waveTrendOscillator",

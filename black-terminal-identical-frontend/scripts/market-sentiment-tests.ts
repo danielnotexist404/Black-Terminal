@@ -59,4 +59,90 @@ assert.ok(migrated.overbought > migrated.oversold);
 assert.equal(migrated.lookback, 250);
 assert.equal(migrated.lineWidth, 5);
 
-console.log(`BC-MSO core tests passed (${snapshot.events.length} confirmed band events).`);
+function swingFixture(length = 1800, secondsPerBar = 7200): Candle[] {
+  return Array.from({ length }, (_, index) => {
+    const cycle = Math.sin(index / 17) * 5 + Math.sin(index / 61) * 11;
+    const trend = index < 600 ? index * 0.08 : index < 1200 ? (1200 - index) * 0.13 : (index - 1200) * 0.06;
+    const close = 120 + cycle + trend;
+    const open = close - Math.sin(index / 4) * 0.7;
+    return {
+      time: 1_700_000_000 + index * secondsPerBar,
+      open,
+      high: Math.max(open, close) + 0.7 + index % 3 * 0.08,
+      low: Math.min(open, close) - 0.65 - index % 5 * 0.04,
+      close,
+      volume: 800 + (index % 41) * 19 + Math.abs(Math.sin(index / 7)) * 1100
+    };
+  });
+}
+
+const adaptiveCandles = swingFixture();
+const adaptiveSettings = migrateMarketSentimentSettings({
+  calculationMode: "ADAPTIVE_EVT",
+  adaptiveWindow: 500,
+  minimumCalibrationSamples: 80,
+  evtMinimumTailSamples: 12
+});
+const adaptive = calculateMarketSentiment({ candles: adaptiveCandles, settings: adaptiveSettings, lastBarConfirmed: true });
+assert.equal(adaptive.authority, "CAUSAL_REGIME_EVT");
+assert.equal(adaptive.integrity.priorBarsOnlyCalibration, true);
+assert.equal(adaptive.integrity.historicalValuesFrozen, true);
+assert.ok(adaptive.series.sentiment.some((value) => value !== null));
+assert.ok(adaptive.series.sentiment.every((value) => value === null || (value >= 0 && value <= 10)));
+assert.ok(adaptive.series.evtActive.some(Boolean), "EVT never activated with a sufficient prior tail sample");
+assert.ok(adaptive.series.dynamicUpper.some((value) => value !== null && value > adaptiveSettings.tailConfidence / 10), "uptrend did not expand the upper extreme");
+assert.ok(adaptive.series.dynamicLower.some((value) => value !== null && value < (100 - adaptiveSettings.tailConfidence) / 10), "downtrend did not expand the lower extreme");
+
+const adaptiveSignals = adaptive.events.filter((event) => event.kind.startsWith("CONFIRMED_ADAPTIVE"));
+assert.ok(adaptiveSignals.length > 0, "deterministic swing fixture produced no confirmed adaptive signal");
+for (const signal of adaptiveSignals) {
+  const matchingTail = adaptive.events.findLast((event) => event.index <= signal.index && (
+    signal.kind === "CONFIRMED_ADAPTIVE_LONG" ? event.kind === "ENTER_OVERSOLD" : event.kind === "ENTER_OVERBOUGHT"
+  ));
+  assert.ok(matchingTail && matchingTail.index < signal.index, `${signal.kind} was not armed by an earlier tail entry`);
+  assert.ok(signal.tailProbability !== null);
+}
+for (const kind of ["CONFIRMED_ADAPTIVE_LONG", "CONFIRMED_ADAPTIVE_SHORT"] as const) {
+  const sameSide = adaptiveSignals.filter((event) => event.kind === kind);
+  for (let index = 1; index < sameSide.length; index += 1) {
+    assert.ok(sameSide[index]!.index - sameSide[index - 1]!.index >= adaptiveSettings.signalCooldownBars, `${kind} violated cooldown`);
+  }
+}
+
+const adaptivePrefixLength = 1400;
+const adaptivePrefix = calculateMarketSentiment({ candles: adaptiveCandles.slice(0, adaptivePrefixLength), settings: adaptiveSettings, lastBarConfirmed: true });
+for (const key of ["latentSentiment", "empiricalPercentile", "sentiment", "dynamicUpper", "dynamicLower", "tailProbability", "regime"] as const) {
+  assert.deepEqual(adaptive.series[key].slice(0, adaptivePrefixLength), adaptivePrefix.series[key], `future bars changed adaptive ${key}`);
+}
+assert.deepEqual(
+  adaptive.events.filter((event) => event.index < adaptivePrefixLength),
+  adaptivePrefix.events,
+  "future bars changed confirmed adaptive event history"
+);
+const adaptiveDeveloping = calculateMarketSentiment({ candles: adaptiveCandles, settings: adaptiveSettings, lastBarConfirmed: false });
+assert.deepEqual(adaptiveDeveloping.series, adaptive.series, "developing-bar status changed historical or current calculations");
+assert.ok(adaptiveDeveloping.events.every((event) => event.index < adaptiveCandles.length - 1), "developing adaptive bar emitted an event");
+
+const dailyCandles = swingFixture(1800, 86_400);
+const dailyAdaptive = calculateMarketSentiment({ candles: dailyCandles, settings: adaptiveSettings, lastBarConfirmed: true });
+assert.deepEqual(dailyAdaptive.series.sentiment, adaptive.series.sentiment, "identical OHLCV produced different 2H and daily adaptive scores");
+assert.deepEqual(
+  dailyAdaptive.events.map(({ index, kind }) => ({ index, kind })),
+  adaptive.events.map(({ index, kind }) => ({ index, kind })),
+  "identical OHLCV produced different 2H and daily event locations"
+);
+
+const empiricalFallbackSettings = migrateMarketSentimentSettings({
+  ...adaptiveSettings,
+  evtMinimumTailSamples: 250
+});
+const empiricalFallback = calculateMarketSentiment({ candles: adaptiveCandles, settings: empiricalFallbackSettings, lastBarConfirmed: true });
+assert.ok(!empiricalFallback.series.evtActive.some(Boolean), "EVT activated without its configured tail sample");
+assert.ok(empiricalFallback.series.sentiment.some((value) => value !== null), "empirical fallback stopped the oscillator");
+
+const adaptiveStart = performance.now();
+calculateMarketSentiment({ candles: swingFixture(20_000), settings: migrateMarketSentimentSettings({ ...adaptiveSettings, lookback: 20_000 }) });
+const adaptiveElapsed = performance.now() - adaptiveStart;
+assert.ok(adaptiveElapsed < 5000, `20K adaptive evaluation exceeded 5s (${adaptiveElapsed.toFixed(1)}ms)`);
+
+console.log(`BC-MSO core tests passed (${snapshot.events.length} original events, ${adaptiveSignals.length} adaptive signals, 20K in ${adaptiveElapsed.toFixed(1)}ms).`);

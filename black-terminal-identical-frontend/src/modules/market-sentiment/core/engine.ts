@@ -1,8 +1,10 @@
 import type { Candle } from "../../../chart-engine/types.ts";
+import { calculateAdaptiveMarketSentiment } from "./adaptive.ts";
 import { migrateMarketSentimentSettings } from "./settings.ts";
 import type {
   MarketSentimentComponents,
   MarketSentimentInput,
+  MarketSentimentRegime,
   MarketSentimentSnapshot,
   MarketSentimentZone
 } from "./types.ts";
@@ -137,6 +139,10 @@ function thresholdScore(value: number | null, low: number, high: number): number
   return value < low ? 0 : value > high ? 1 : 0.5;
 }
 
+function squash(value: number) {
+  return 0.5 + 0.5 * Math.tanh(value);
+}
+
 function zone(score: number | null, oversold: number, overbought: number): MarketSentimentZone {
   if (!valid(score)) return "INSUFFICIENT";
   if (score >= overbought) return "OVERBOUGHT";
@@ -196,7 +202,47 @@ export function calculateMarketSentiment(input: MarketSentimentInput): MarketSen
   const rawSentiment: NullableSeries = closes.map((_, index) => componentSeries.every((series) => valid(series[index]))
     ? componentSeries.reduce((total, series) => total + series[index]!, 0)
     : null);
-  const sentiment = settings.smoothingEnabled && settings.smoothingLength > 1 ? wmaNullable(rawSentiment, settings.smoothingLength) : [...rawSentiment];
+  const originalSentiment = settings.smoothingEnabled && settings.smoothingLength > 1 ? wmaNullable(rawSentiment, settings.smoothingLength) : [...rawSentiment];
+
+  const trueRange = candles.map((candle, index) => index === 0
+    ? candle.high - candle.low
+    : Math.max(candle.high - candle.low, Math.abs(candle.high - candles[index - 1]!.close), Math.abs(candle.low - candles[index - 1]!.close)));
+  const atrValue = rma(trueRange, settings.atrLength);
+  const latentRaw: NullableSeries = closes.map((close, index) => {
+    const atr = atrValue[index];
+    if (!valid(atr) || atr <= 1e-12 || !valid(ocTrend[index]) || !valid(sma13[index]) || !valid(sma48[index])
+      || !valid(rsiValue[index]) || !valid(stochasticValue[index]) || !valid(sma200[index]) || !valid(mfiValue[index])
+      || !valid(cciValue[index]) || index === 0) return null;
+    const histogramVelocity = histogram[index]! - histogram[index - 1]!;
+    return (
+      squash((haClose[index]! - haOpen[index]!) / atr * 2)
+      + squash(ocTrend[index]! / atr * 18)
+      + squash((ema9[index]! - ema21[index]!) / atr * 0.8)
+      + squash((sma13[index]! - sma48[index]!) / atr * 0.35)
+      + squash((rsiValue[index]! - 50) / 18)
+      + 0.5 * squash((macdLine[index]! - signalLine[index]!) / atr * 5)
+      + 0.5 * squash(histogram[index]! / atr * 5 + histogramVelocity / atr * 8)
+      + squash((stochasticValue[index]! - 50) / 22)
+      + squash((close - sma200[index]!) / atr / 8)
+      + squash((mfiValue[index]! - 50) / 22)
+      + squash(cciValue[index]! / 120)
+    );
+  });
+  const latentSentiment = settings.smoothingEnabled && settings.smoothingLength > 1
+    ? wmaNullable(latentRaw, settings.smoothingLength)
+    : latentRaw;
+  const adaptive = settings.calculationMode === "ORIGINAL_COMPOSITE"
+    ? null
+    : calculateAdaptiveMarketSentiment(candles, latentSentiment, settings);
+  const sentiment = adaptive ? adaptive.adaptiveScore : originalSentiment;
+  const dynamicUpper: NullableSeries = adaptive?.dynamicUpper ?? sentiment.map((value) => valid(value) ? settings.overbought : null);
+  const dynamicLower: NullableSeries = adaptive?.dynamicLower ?? sentiment.map((value) => valid(value) ? settings.oversold : null);
+  const empiricalPercentile: NullableSeries = adaptive?.empiricalPercentile ?? sentiment.map((value) => valid(value) ? value / 10 : null);
+  const tailProbability: NullableSeries = adaptive?.tailProbability ?? sentiment.map((value) => valid(value) ? Math.min(value / 10, 1 - value / 10) : null);
+  const calibrationSamples = adaptive?.calibrationSamples ?? Array(count).fill(0);
+  const evtActive = adaptive?.evtActive ?? Array(count).fill(false);
+  const regimes: MarketSentimentRegime[] = adaptive?.regime ?? Array(count).fill("INSUFFICIENT");
+  const regimeStrength = adaptive?.regimeStrength ?? Array(count).fill(0);
 
   const transformedOpen = nullableSma(sentiment.map((_, index) => index > 0 ? sentiment[index - 1]! : null), settings.candleTransform);
   const transformedClose = nullableSma(sentiment, settings.candleTransform);
@@ -224,17 +270,86 @@ export function calculateMarketSentiment(input: MarketSentimentInput): MarketSen
 
   const lastEventIndex = input.lastBarConfirmed === false ? count - 2 : count - 1;
   const events: MarketSentimentSnapshot["events"] = [];
+  const pushEvent = (index: number, kind: MarketSentimentSnapshot["events"][number]["kind"], threshold: number) => {
+    events.push({
+      index,
+      time: candles[index]!.time,
+      score: sentiment[index]!,
+      kind,
+      threshold,
+      regime: regimes[index] ?? "INSUFFICIENT",
+      tailProbability: tailProbability[index] ?? null
+    });
+  };
   for (let index = 1; index <= lastEventIndex; index += 1) {
     const previous = sentiment[index - 1];
     const current = sentiment[index];
-    if (!valid(previous) || !valid(current)) continue;
-    if (previous < settings.overbought && current >= settings.overbought) events.push({ index, time: candles[index]!.time, score: current, kind: "ENTER_OVERBOUGHT" });
-    if (previous >= settings.overbought && current < settings.overbought) events.push({ index, time: candles[index]!.time, score: current, kind: "EXIT_OVERBOUGHT" });
-    if (previous > settings.oversold && current <= settings.oversold) events.push({ index, time: candles[index]!.time, score: current, kind: "ENTER_OVERSOLD" });
-    if (previous <= settings.oversold && current > settings.oversold) events.push({ index, time: candles[index]!.time, score: current, kind: "EXIT_OVERSOLD" });
+    const previousUpper = dynamicUpper[index - 1];
+    const currentUpper = dynamicUpper[index];
+    const previousLower = dynamicLower[index - 1];
+    const currentLower = dynamicLower[index];
+    if (![previous, current, previousUpper, currentUpper, previousLower, currentLower].every(valid)) continue;
+    if (previous! < previousUpper! && current! >= currentUpper!) pushEvent(index, "ENTER_OVERBOUGHT", currentUpper!);
+    if (previous! >= previousUpper! && current! < currentUpper!) pushEvent(index, "EXIT_OVERBOUGHT", currentUpper!);
+    if (previous! > previousLower! && current! <= currentLower!) pushEvent(index, "ENTER_OVERSOLD", currentLower!);
+    if (previous! <= previousLower! && current! > currentLower!) pushEvent(index, "EXIT_OVERSOLD", currentLower!);
   }
 
+  if (adaptive) {
+    const confirmationLine = ema(closes, settings.structureLength);
+    const maximumConfirmationBars = Math.max(12, settings.structureLength * 3);
+    let upperDwell = 0;
+    let lowerDwell = 0;
+    let shortArmedAt = -1;
+    let longArmedAt = -1;
+    let shortLocked = false;
+    let longLocked = false;
+    let lastShortSignal = -Infinity;
+    let lastLongSignal = -Infinity;
+    for (let index = 2; index <= lastEventIndex; index += 1) {
+      const current = sentiment[index];
+      const previous = sentiment[index - 1];
+      const prior = sentiment[index - 2];
+      const upper = dynamicUpper[index];
+      const lower = dynamicLower[index];
+      if (![current, previous, prior, upper, lower].every(valid)) continue;
+      if (current! <= 5) shortLocked = false;
+      if (current! >= 5) longLocked = false;
+      upperDwell = current! >= upper! ? upperDwell + 1 : 0;
+      lowerDwell = current! <= lower! ? lowerDwell + 1 : 0;
+      if (!shortLocked && shortArmedAt < 0 && upperDwell >= settings.minimumTailDwell) shortArmedAt = index;
+      if (!longLocked && longArmedAt < 0 && lowerDwell >= settings.minimumTailDwell) longArmedAt = index;
+      if (shortArmedAt >= 0 && index - shortArmedAt > maximumConfirmationBars) { shortArmedAt = -1; shortLocked = true; }
+      if (longArmedAt >= 0 && index - longArmedAt > maximumConfirmationBars) { longArmedAt = -1; longLocked = true; }
+      const velocity = current! - previous!;
+      const previousVelocity = previous! - prior!;
+      const shortTurn = velocity < 0 && (previous! >= (dynamicUpper[index - 1] ?? upper!) || velocity < previousVelocity);
+      const longTurn = velocity > 0 && (previous! <= (dynamicLower[index - 1] ?? lower!) || velocity > previousVelocity);
+      const shortStructure = !settings.requireStructureConfirmation
+        || (closes[index]! < confirmationLine[index]!
+          && (closes[index - 1]! >= confirmationLine[index - 1]! || closes[index]! < candles[index - 1]!.low));
+      const longStructure = !settings.requireStructureConfirmation
+        || (closes[index]! > confirmationLine[index]!
+          && (closes[index - 1]! <= confirmationLine[index - 1]! || closes[index]! > candles[index - 1]!.high));
+      if (shortArmedAt >= 0 && current! < upper! && shortTurn && shortStructure && index - lastShortSignal >= settings.signalCooldownBars) {
+        pushEvent(index, "CONFIRMED_ADAPTIVE_SHORT", upper!);
+        lastShortSignal = index;
+        shortArmedAt = -1;
+        shortLocked = true;
+      }
+      if (longArmedAt >= 0 && current! > lower! && longTurn && longStructure && index - lastLongSignal >= settings.signalCooldownBars) {
+        pushEvent(index, "CONFIRMED_ADAPTIVE_LONG", lower!);
+        lastLongSignal = index;
+        longArmedAt = -1;
+        longLocked = true;
+      }
+    }
+  }
+  events.sort((left, right) => left.index - right.index || left.kind.localeCompare(right.kind));
+
   const latestScore = count ? sentiment[count - 1]! : null;
+  const latestUpper = count ? dynamicUpper[count - 1]! : null;
+  const latestLower = count ? dynamicLower[count - 1]! : null;
   const components: MarketSentimentComponents = {
     heikinAshi: haScore,
     emaVelocity: ocScore,
@@ -249,16 +364,45 @@ export function calculateMarketSentiment(input: MarketSentimentInput): MarketSen
     cci: cciScore
   };
   return {
-    schemaVersion: 1,
-    modelVersion: "BC-MSO-PYTHON-V1",
-    authority: "CAUSAL_OHLCV_COMPOSITE",
+    schemaVersion: 2,
+    modelVersion: "BC-MSO-PYTHON-V2",
+    authority: settings.calculationMode === "ADAPTIVE_EVT" ? "CAUSAL_REGIME_EVT" : settings.calculationMode === "REGIME_PERCENTILE" ? "CAUSAL_REGIME_PERCENTILE" : "CAUSAL_OHLCV_COMPOSITE",
     inputSize: count,
     sourceOffset,
     settings,
-    series: { rawSentiment, sentiment, candleOpen, candleHigh, candleLow, candleClose, candleDirection },
+    series: {
+      rawSentiment,
+      latentSentiment,
+      empiricalPercentile,
+      sentiment,
+      dynamicUpper,
+      dynamicLower,
+      tailProbability,
+      calibrationSamples,
+      evtActive,
+      regime: regimes,
+      regimeStrength,
+      candleOpen,
+      candleHigh,
+      candleLow,
+      candleClose,
+      candleDirection
+    },
     components,
     events,
-    latest: { score: valid(latestScore) ? latestScore : null, zone: zone(latestScore, settings.oversold, settings.overbought) },
-    integrity: { causal: true, finalizedBarEventsOnly: true, futureBarsConsumed: 0 }
+    latest: {
+      score: valid(latestScore) ? latestScore : null,
+      rawScore: count && valid(rawSentiment[count - 1]) ? rawSentiment[count - 1]! : null,
+      latentScore: count && valid(latentSentiment[count - 1]) ? latentSentiment[count - 1]! : null,
+      zone: zone(latestScore, valid(latestLower) ? latestLower : settings.oversold, valid(latestUpper) ? latestUpper : settings.overbought),
+      regime: count ? regimes[count - 1]! : "INSUFFICIENT",
+      regimeStrength: count ? regimeStrength[count - 1]! : 0,
+      dynamicUpper: valid(latestUpper) ? latestUpper : null,
+      dynamicLower: valid(latestLower) ? latestLower : null,
+      tailProbability: count && valid(tailProbability[count - 1]) ? tailProbability[count - 1]! : null,
+      calibrationSamples: count ? calibrationSamples[count - 1]! : 0,
+      evtActive: count ? evtActive[count - 1]! : false
+    },
+    integrity: { causal: true, finalizedBarEventsOnly: true, futureBarsConsumed: 0, priorBarsOnlyCalibration: true, historicalValuesFrozen: true }
   };
 }

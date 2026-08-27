@@ -3015,26 +3015,53 @@ export class BlackChartEngine {
     const lineColor = this.hexColor(settings.lineColor, theme.silverBright);
     const chartIndexToSource = (index: number) => index - offset;
     const aligned = (values: readonly (number | null)[], index: number) => values[chartIndexToSource(index)] ?? null;
+    const finiteValue = (value: number | null): value is number => typeof value === "number" && Number.isFinite(value);
     const yFor = (value: number) => paneBottom - 11 - clampNumber(value / 10, 0, 1) * Math.max(1, paneHeight - 29);
+    const adaptiveMode = settings.calculationMode !== "ORIGINAL_COMPOSITE";
 
     g.rect(0, paneTop, plotWidth, paneHeight)
       .fill({ color: 0x010102, alpha: 0.99 })
       .stroke({ width: 1, color: 0xffffff, alpha: 0.07 });
 
-    if (settings.showBandFill) {
+    if (settings.showBandFill && !adaptiveMode) {
       g.rect(0, yFor(10), plotWidth, Math.max(1, yFor(settings.overbought) - yFor(10)))
         .fill({ color: bearish, alpha: clampNumber(settings.bandFillIntensity / 100, 0, 0.4) });
       g.rect(0, yFor(settings.oversold), plotWidth, Math.max(1, yFor(0) - yFor(settings.oversold)))
         .fill({ color: bullish, alpha: clampNumber(settings.bandFillIntensity / 100, 0, 0.3) });
     }
-    for (const [value, color, alpha] of [
-      [10, neutral, 0.22],
-      [settings.overbought, bearish, settings.bandIntensity / 100],
-      [5, neutral, 0.36],
-      [settings.oversold, bullish, settings.bandIntensity / 100],
-      [0, neutral, 0.22]
-    ] as const) {
+    const referenceLines = adaptiveMode
+      ? [[10, neutral, 0.22], [5, neutral, 0.36], [0, neutral, 0.22]] as const
+      : [[10, neutral, 0.22], [settings.overbought, bearish, settings.bandIntensity / 100], [5, neutral, 0.36], [settings.oversold, bullish, settings.bandIntensity / 100], [0, neutral, 0.22]] as const;
+    for (const [value, color, alpha] of referenceLines) {
       g.moveTo(0, yFor(value)).lineTo(plotWidth, yFor(value)).stroke({ width: 1, color, alpha });
+    }
+    if (adaptiveMode && settings.showDynamicBands) {
+      const bandColumnWidth = Math.max(1, this.timeStep() * Math.max(1, this.renderStride(1)));
+      if (settings.showBandFill) {
+        for (const chartIndex of indices) {
+          const upper = aligned(snapshot.series.dynamicUpper, chartIndex);
+          const lower = aligned(snapshot.series.dynamicLower, chartIndex);
+          if (!finiteValue(upper) || !finiteValue(lower)) continue;
+          const x = this.xForIndex(chartIndex) - bandColumnWidth / 2;
+          g.rect(x, yFor(10), bandColumnWidth + 0.5, Math.max(1, yFor(upper) - yFor(10)))
+            .fill({ color: bearish, alpha: clampNumber(settings.bandFillIntensity / 100, 0, 0.4) });
+          g.rect(x, yFor(lower), bandColumnWidth + 0.5, Math.max(1, yFor(0) - yFor(lower)))
+            .fill({ color: bullish, alpha: clampNumber(settings.bandFillIntensity / 100, 0, 0.3) });
+        }
+      }
+      const drawAdaptiveBand = (values: readonly (number | null)[], color: number) => {
+        let active = false;
+        for (const chartIndex of indices) {
+          const value = aligned(values, chartIndex);
+          if (!finiteValue(value)) { active = false; continue; }
+          const x = this.xForIndex(chartIndex);
+          const y = yFor(value);
+          if (!active) { g.moveTo(x, y); active = true; } else g.lineTo(x, y);
+        }
+        if (active) g.stroke({ width: 1.1, color, alpha: settings.bandIntensity / 100 });
+      };
+      drawAdaptiveBand(snapshot.series.dynamicUpper, bearish);
+      drawAdaptiveBand(snapshot.series.dynamicLower, bullish);
     }
 
     if (settings.candleView) {
@@ -3066,23 +3093,42 @@ export class BlackChartEngine {
       if (active) g.stroke({ width: settings.lineWidth, color: lineColor, alpha: settings.lineIntensity / 100 });
     }
 
+    if (adaptiveMode && settings.showRawComposite) {
+      let active = false;
+      for (const chartIndex of indices) {
+        const value = aligned(snapshot.series.rawSentiment, chartIndex);
+        if (!finiteValue(value)) { active = false; continue; }
+        const x = this.xForIndex(chartIndex);
+        const y = yFor(value);
+        if (!active) { g.moveTo(x, y); active = true; } else g.lineTo(x, y);
+      }
+      if (active) g.stroke({ width: 0.8, color: neutral, alpha: 0.38 });
+    }
+
     for (const event of snapshot.events) {
       const chartIndex = offset + event.index;
       if (chartIndex < this.view.firstIndex || chartIndex > this.view.lastIndex) continue;
       const isOverbought = event.kind.includes("OVERBOUGHT");
       const isEntry = event.kind.startsWith("ENTER");
-      const color = isOverbought ? bearish : bullish;
+      const adaptiveSignal = event.kind.startsWith("CONFIRMED_ADAPTIVE");
+      const shortSignal = event.kind === "CONFIRMED_ADAPTIVE_SHORT";
+      const color = adaptiveSignal ? (shortSignal ? bearish : bullish) : (isOverbought ? bearish : bullish);
       const y = yFor(event.score);
       const x = this.xForIndex(chartIndex);
-      if (isEntry) g.circle(x, y, 2.7).fill({ color, alpha: 0.98 });
+      if (adaptiveSignal) {
+        g.circle(x, y, 4.6).fill({ color, alpha: 0.16 });
+        g.circle(x, y, 3.1).fill({ color, alpha: 1 });
+      } else if (isEntry) g.circle(x, y, 2.7).fill({ color, alpha: 0.98 });
       else g.circle(x, y, 2.5).stroke({ width: 1, color, alpha: 0.88 });
     }
 
-    this.addProfileText("BC-MSO · PYTHON COMPOSITE SENTIMENT", 12, paneTop + 7, theme.silverBright, 9, "700", true);
+    const modeLabel = settings.calculationMode === "ADAPTIVE_EVT" ? "ADAPTIVE EXTREME VALUE" : settings.calculationMode === "REGIME_PERCENTILE" ? "REGIME PERCENTILE" : "PYTHON COMPOSITE";
+    this.addProfileText(`BC-MSO · ${modeLabel} SENTIMENT`, 12, paneTop + 7, theme.silverBright, 9, "700", true);
     const latestScore = snapshot.latest.score;
     const statusColor = snapshot.latest.zone === "OVERBOUGHT" ? bearish : snapshot.latest.zone === "OVERSOLD" ? bullish : neutral;
-    const status = latestScore === null ? "WARMING UP" : `${snapshot.latest.zone} · ${latestScore.toFixed(2)} / 10`;
-    this.addProfileText(status, Math.max(12, plotWidth - 142), paneTop + 7, statusColor, 8, "700", true);
+    const calibration = adaptiveMode ? ` · ${snapshot.latest.regime} · N${snapshot.latest.calibrationSamples}${snapshot.latest.evtActive ? " · EVT TAIL" : settings.calculationMode === "ADAPTIVE_EVT" ? " · EMPIRICAL" : ""}` : "";
+    const status = latestScore === null ? "WARMING UP" : `${snapshot.latest.zone} · ${latestScore.toFixed(2)} / 10${calibration}`;
+    this.addProfileText(status, Math.max(12, plotWidth - Math.min(270, 142 + calibration.length * 3.5)), paneTop + 7, statusColor, 8, "700", true);
   }
 
   private drawAcvdPane(data: Candle[], paneTop: number, paneBottom: number, plotWidth: number) {

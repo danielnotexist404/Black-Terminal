@@ -3770,7 +3770,10 @@ export function PixiBlackChart({
         continue;
       }
       for (const bandEvent of snapshot.events) {
-        if (bandEvent.time <= armedAfter || (target !== "ANY_BAND_EVENT" && target !== bandEvent.kind)) continue;
+        const isBandEvent = bandEvent.kind === "ENTER_OVERBOUGHT" || bandEvent.kind === "EXIT_OVERBOUGHT" || bandEvent.kind === "ENTER_OVERSOLD" || bandEvent.kind === "EXIT_OVERSOLD";
+        const isAdaptiveSignal = bandEvent.kind === "CONFIRMED_ADAPTIVE_LONG" || bandEvent.kind === "CONFIRMED_ADAPTIVE_SHORT";
+        const matchesTarget = target === bandEvent.kind || (target === "ANY_BAND_EVENT" && isBandEvent) || (target === "ANY_ADAPTIVE_SIGNAL" && isAdaptiveSignal);
+        if (bandEvent.time <= armedAfter || !matchesTarget) continue;
         const current = sourceCandles.find((candle) => candle.time === bandEvent.time);
         if (!current) continue;
         const eventKey = `${definition.id}:${bandEvent.time}:${bandEvent.kind}`;
@@ -3780,8 +3783,12 @@ export function PixiBlackChart({
           indicator: "BC-MSO",
           event: bandEvent.kind,
           score: bandEvent.score,
-          overbought: marketSentimentSettings.overbought,
-          oversold: marketSentimentSettings.oversold,
+          threshold: bandEvent.threshold,
+          regime: bandEvent.regime,
+          tailProbability: bandEvent.tailProbability,
+          calculationMode: marketSentimentSettings.calculationMode,
+          overbought: snapshot.series.dynamicUpper[bandEvent.index] ?? marketSentimentSettings.overbought,
+          oversold: snapshot.series.dynamicLower[bandEvent.index] ?? marketSentimentSettings.oversold,
           sourceAuthority: snapshot.authority,
           closedBarConfirmed: true
         });
@@ -3976,7 +3983,7 @@ export function PixiBlackChart({
     { key: "ddaProOscillator", label: "BC-RDA", value: `${indicatorAdvancedSettings.ddaProOscillator.engineMode === "pine-compatibility" ? "PINE" : "NATIVE"} · ${ddaProStatus.toLowerCase()}` },
     { key: "acvdOscillator", label: "BC-ACVD", value: `${acvdSnapshot?.latest.regime ?? "AUTHENTIC FLOW"} · ${acvdStatus.toLowerCase()}` },
     { key: "cvdOscillator", label: "BC-CVD-OSC", value: cvdAuthenticFlowRequested ? `AGGRESSOR · ${acvdStatus.toLowerCase()}` : "OHLCV · MARKET STATE" },
-    { key: "marketSentimentOscillator", label: "BC-MSO", value: "PYTHON · 0–10 COMPOSITE" },
+    { key: "marketSentimentOscillator", label: "BC-MSO", value: marketSentimentSettings.calculationMode === "ADAPTIVE_EVT" ? "ADAPTIVE EVT · CAUSAL" : marketSentimentSettings.calculationMode === "REGIME_PERCENTILE" ? "REGIME PERCENTILE · CAUSAL" : "PYTHON · 0–10 COMPOSITE" },
     { key: "openInterestOscillator", label: "OI Osc", value: String(indicatorPeriods.openInterestOscillator) },
     { key: "zScoreOscillator", label: "Z-Score", value: String(indicatorPeriods.zScoreOscillator) },
     { key: "waveTrendOscillator", label: "WaveTrend", value: String(indicatorPeriods.waveTrendOscillator) },
@@ -6427,15 +6434,53 @@ export function PixiBlackChart({
           {activeIndicator === "marketSentimentOscillator" && (
             <>
               <div className="indicator-settings-section">BC-MSO Python Engine</div>
-              <div className="vwap-mode-note">Causal 0–10 composite of HA direction, EMA velocity/regime, SMA regime, RSI, MACD, histogram, stochastic, MA200, MFI and CCI. Alerts fire only on confirmed crossings into or out of the configured bands.</div>
+              <div className="vwap-mode-note">The original 0–10 composite remains available unchanged. Adaptive modes calibrate a continuous latent score against prior confirmed bars only; EVT automatically falls back to empirical percentiles when its tail sample is insufficient.</div>
+              <label>Calculation
+                <select value={marketSentimentSettings.calculationMode} onChange={(event) => updateMarketSentimentSetting("calculationMode", event.target.value as MarketSentimentSettings["calculationMode"])}>
+                  <option value="ORIGINAL_COMPOSITE">Original Composite</option>
+                  <option value="REGIME_PERCENTILE">Regime-Conditioned Percentile</option>
+                  <option value="ADAPTIVE_EVT">Adaptive Value Theory Mode (EVT)</option>
+                </select>
+              </label>
               <label>Candle View<input type="checkbox" checked={marketSentimentSettings.candleView} onChange={(event) => updateMarketSentimentSetting("candleView", event.target.checked)} /></label>
               <label>Heikin Ashi Transform<input type="checkbox" checked={marketSentimentSettings.heikinAshi} onChange={(event) => updateMarketSentimentSetting("heikinAshi", event.target.checked)} /></label>
               <label>Candle Transform<input type="number" min={1} max={100} value={marketSentimentSettings.candleTransform} onChange={(event) => updateMarketSentimentSetting("candleTransform", Number(event.target.value))} /></label>
               <label>Smoothing<input type="checkbox" checked={marketSentimentSettings.smoothingEnabled} onChange={(event) => updateMarketSentimentSetting("smoothingEnabled", event.target.checked)} /></label>
               <label>Smoothing Length<input type="number" min={1} max={100} disabled={!marketSentimentSettings.smoothingEnabled} value={marketSentimentSettings.smoothingLength} onChange={(event) => updateMarketSentimentSetting("smoothingLength", Number(event.target.value))} /></label>
-              <div className="indicator-settings-section">OB / OS Bands</div>
-              <label>Overbought<input type="number" min={0.25} max={10} step={0.25} value={marketSentimentSettings.overbought} onChange={(event) => updateMarketSentimentSetting("overbought", Number(event.target.value))} /></label>
-              <label>Oversold<input type="number" min={0} max={9.5} step={0.25} value={marketSentimentSettings.oversold} onChange={(event) => updateMarketSentimentSetting("oversold", Number(event.target.value))} /></label>
+              {marketSentimentSettings.calculationMode === "ORIGINAL_COMPOSITE" ? (
+                <>
+                  <div className="indicator-settings-section">Fixed OB / OS Bands</div>
+                  <label>Overbought<input type="number" min={0.25} max={10} step={0.25} value={marketSentimentSettings.overbought} onChange={(event) => updateMarketSentimentSetting("overbought", Number(event.target.value))} /></label>
+                  <label>Oversold<input type="number" min={0} max={9.5} step={0.25} value={marketSentimentSettings.oversold} onChange={(event) => updateMarketSentimentSetting("oversold", Number(event.target.value))} /></label>
+                </>
+              ) : (
+                <>
+                  <div className="indicator-settings-section">Adaptive Statistical Extremes</div>
+                  <label>Calibration Window<input type="number" min={250} max={5000} step={50} value={marketSentimentSettings.adaptiveWindow} onChange={(event) => updateMarketSentimentSetting("adaptiveWindow", Number(event.target.value))} /></label>
+                  <label>Minimum Calibration<input type="number" min={40} max={1000} step={10} value={marketSentimentSettings.minimumCalibrationSamples} onChange={(event) => updateMarketSentimentSetting("minimumCalibrationSamples", Number(event.target.value))} /></label>
+                  <label>Tail Confidence %<input type="number" min={90} max={99.5} step={0.25} value={marketSentimentSettings.tailConfidence} onChange={(event) => updateMarketSentimentSetting("tailConfidence", Number(event.target.value))} /></label>
+                  <label className="indicator-range-row">Trend Expansion<span><input type="range" min={0} max={2.4} step={0.1} value={marketSentimentSettings.trendExpansion} onChange={(event) => updateMarketSentimentSetting("trendExpansion", Number(event.target.value))} /><b>{marketSentimentSettings.trendExpansion.toFixed(1)}%</b></span></label>
+                  <label>Dynamic Bands<input type="checkbox" checked={marketSentimentSettings.showDynamicBands} onChange={(event) => updateMarketSentimentSetting("showDynamicBands", event.target.checked)} /></label>
+                  <label>Show Raw Composite<input type="checkbox" checked={marketSentimentSettings.showRawComposite} onChange={(event) => updateMarketSentimentSetting("showRawComposite", event.target.checked)} /></label>
+                  <div className="indicator-settings-section">Regime & Swing Confirmation</div>
+                  <label>ATR Normalization<input type="number" min={5} max={200} value={marketSentimentSettings.atrLength} onChange={(event) => updateMarketSentimentSetting("atrLength", Number(event.target.value))} /></label>
+                  <label>Macro Regime Length<input type="number" min={20} max={500} value={marketSentimentSettings.regimeLength} onChange={(event) => updateMarketSentimentSetting("regimeLength", Number(event.target.value))} /></label>
+                  <label>Regime Slope Length<input type="number" min={2} max={100} value={marketSentimentSettings.regimeSlopeLength} onChange={(event) => updateMarketSentimentSetting("regimeSlopeLength", Number(event.target.value))} /></label>
+                  <label>Regime Threshold<input type="number" min={0.05} max={2.5} step={0.05} value={marketSentimentSettings.regimeThreshold} onChange={(event) => updateMarketSentimentSetting("regimeThreshold", Number(event.target.value))} /></label>
+                  <label>Minimum Tail Dwell<input type="number" min={1} max={8} value={marketSentimentSettings.minimumTailDwell} onChange={(event) => updateMarketSentimentSetting("minimumTailDwell", Number(event.target.value))} /></label>
+                  <label>Structure Confirmation<input type="checkbox" checked={marketSentimentSettings.requireStructureConfirmation} onChange={(event) => updateMarketSentimentSetting("requireStructureConfirmation", event.target.checked)} /></label>
+                  <label>Structure Length<input type="number" min={2} max={50} disabled={!marketSentimentSettings.requireStructureConfirmation} value={marketSentimentSettings.structureLength} onChange={(event) => updateMarketSentimentSetting("structureLength", Number(event.target.value))} /></label>
+                  <label>Signal Cooldown Bars<input type="number" min={0} max={500} value={marketSentimentSettings.signalCooldownBars} onChange={(event) => updateMarketSentimentSetting("signalCooldownBars", Number(event.target.value))} /></label>
+                  {marketSentimentSettings.calculationMode === "ADAPTIVE_EVT" && (
+                    <>
+                      <div className="indicator-settings-section">Extreme Value Tail Model</div>
+                      <label>POT Threshold %<input type="number" min={80} max={97.5} step={0.5} value={marketSentimentSettings.evtThresholdPercentile} onChange={(event) => updateMarketSentimentSetting("evtThresholdPercentile", Number(event.target.value))} /></label>
+                      <label>Minimum Tail Samples<input type="number" min={12} max={250} value={marketSentimentSettings.evtMinimumTailSamples} onChange={(event) => updateMarketSentimentSetting("evtMinimumTailSamples", Number(event.target.value))} /></label>
+                      <div className="vwap-mode-note">Peaks-over-threshold GPD is used only when the selected regime/window contains enough genuine prior observations. Otherwise BC-MSO remains live on its empirical percentile fallback.</div>
+                    </>
+                  )}
+                </>
+              )}
               <label>Band Fill<input type="checkbox" checked={marketSentimentSettings.showBandFill} onChange={(event) => updateMarketSentimentSetting("showBandFill", event.target.checked)} /></label>
               <label className="indicator-range-row">Band Intensity<span><input type="range" min={0} max={100} value={marketSentimentSettings.bandIntensity} onChange={(event) => updateMarketSentimentSetting("bandIntensity", Number(event.target.value))} /><b>{marketSentimentSettings.bandIntensity}</b></span></label>
               <label className="indicator-range-row">Fill Intensity<span><input type="range" min={0} max={40} value={marketSentimentSettings.bandFillIntensity} onChange={(event) => updateMarketSentimentSetting("bandFillIntensity", Number(event.target.value))} /><b>{marketSentimentSettings.bandFillIntensity}</b></span></label>

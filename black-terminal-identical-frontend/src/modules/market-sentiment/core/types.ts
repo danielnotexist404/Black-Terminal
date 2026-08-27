@@ -2,18 +2,25 @@ import type { Candle } from "../../../chart-engine/types";
 
 export type MarketSentimentZone = "OVERSOLD" | "NEUTRAL" | "OVERBOUGHT" | "INSUFFICIENT";
 
+export type MarketSentimentCalculationMode = "ORIGINAL_COMPOSITE" | "REGIME_PERCENTILE" | "ADAPTIVE_EVT";
+
+export type MarketSentimentRegime = "UPTREND" | "DOWNTREND" | "ROTATION" | "INSUFFICIENT";
+
 export type MarketSentimentAlertEvent =
   | "ENTER_OVERBOUGHT"
   | "EXIT_OVERBOUGHT"
   | "ENTER_OVERSOLD"
-  | "EXIT_OVERSOLD";
+  | "EXIT_OVERSOLD"
+  | "CONFIRMED_ADAPTIVE_LONG"
+  | "CONFIRMED_ADAPTIVE_SHORT";
 
-export type MarketSentimentAlertSelection = MarketSentimentAlertEvent | "ANY_BAND_EVENT";
+export type MarketSentimentAlertSelection = MarketSentimentAlertEvent | "ANY_BAND_EVENT" | "ANY_ADAPTIVE_SIGNAL";
 
 export type MarketSentimentSettings = {
-  schemaVersion: 1;
-  modelVersion: "BC-MSO-PYTHON-V1";
+  schemaVersion: 2;
+  modelVersion: "BC-MSO-PYTHON-V2";
   lookback: number;
+  calculationMode: MarketSentimentCalculationMode;
   candleView: boolean;
   candleTransform: number;
   heikinAshi: boolean;
@@ -31,6 +38,22 @@ export type MarketSentimentSettings = {
   bandIntensity: number;
   showBandFill: boolean;
   bandFillIntensity: number;
+  adaptiveWindow: number;
+  minimumCalibrationSamples: number;
+  tailConfidence: number;
+  evtThresholdPercentile: number;
+  evtMinimumTailSamples: number;
+  atrLength: number;
+  regimeLength: number;
+  regimeSlopeLength: number;
+  regimeThreshold: number;
+  trendExpansion: number;
+  minimumTailDwell: number;
+  structureLength: number;
+  requireStructureConfirmation: boolean;
+  signalCooldownBars: number;
+  showRawComposite: boolean;
+  showDynamicBands: boolean;
 };
 
 export type MarketSentimentEvent = {
@@ -38,6 +61,9 @@ export type MarketSentimentEvent = {
   time: number;
   score: number;
   kind: MarketSentimentAlertEvent;
+  threshold: number;
+  regime: MarketSentimentRegime;
+  tailProbability: number | null;
 };
 
 export type MarketSentimentComponents = {
@@ -55,15 +81,24 @@ export type MarketSentimentComponents = {
 };
 
 export type MarketSentimentSnapshot = {
-  schemaVersion: 1;
-  modelVersion: "BC-MSO-PYTHON-V1";
-  authority: "CAUSAL_OHLCV_COMPOSITE";
+  schemaVersion: 2;
+  modelVersion: "BC-MSO-PYTHON-V2";
+  authority: "CAUSAL_OHLCV_COMPOSITE" | "CAUSAL_REGIME_PERCENTILE" | "CAUSAL_REGIME_EVT";
   inputSize: number;
   sourceOffset: number;
   settings: MarketSentimentSettings;
   series: {
     rawSentiment: Array<number | null>;
+    latentSentiment: Array<number | null>;
+    empiricalPercentile: Array<number | null>;
     sentiment: Array<number | null>;
+    dynamicUpper: Array<number | null>;
+    dynamicLower: Array<number | null>;
+    tailProbability: Array<number | null>;
+    calibrationSamples: number[];
+    evtActive: boolean[];
+    regime: MarketSentimentRegime[];
+    regimeStrength: number[];
     candleOpen: Array<number | null>;
     candleHigh: Array<number | null>;
     candleLow: Array<number | null>;
@@ -74,12 +109,23 @@ export type MarketSentimentSnapshot = {
   events: MarketSentimentEvent[];
   latest: {
     score: number | null;
+    rawScore: number | null;
+    latentScore: number | null;
     zone: MarketSentimentZone;
+    regime: MarketSentimentRegime;
+    regimeStrength: number;
+    dynamicUpper: number | null;
+    dynamicLower: number | null;
+    tailProbability: number | null;
+    calibrationSamples: number;
+    evtActive: boolean;
   };
   integrity: {
     causal: true;
     finalizedBarEventsOnly: true;
     futureBarsConsumed: 0;
+    priorBarsOnlyCalibration: true;
+    historicalValuesFrozen: true;
   };
 };
 

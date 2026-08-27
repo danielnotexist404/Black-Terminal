@@ -39,6 +39,8 @@ const acvdAlerts: StrategyIndicatorAlert[] = [
 ];
 
 const marketSentimentAlerts: StrategyIndicatorAlert[] = [
+  { id: "bc-mso:adaptive-long", name: "Confirmed Adaptive Long", description: "A prior-bar-calibrated lower-tail extreme reverses with optional causal price-structure confirmation.", semantic: "LONG_ENTRY", confirmedBar: true, intrabar: false },
+  { id: "bc-mso:adaptive-short", name: "Confirmed Adaptive Short", description: "A prior-bar-calibrated upper-tail extreme reverses with optional causal price-structure confirmation.", semantic: "SHORT_ENTRY", confirmedBar: true, intrabar: false },
   { id: "bc-mso:enter-oversold", name: "Enter Oversold", description: "Composite sentiment crosses into the oversold band on a confirmed bar.", semantic: "LONG_ENTRY", confirmedBar: true, intrabar: false },
   { id: "bc-mso:exit-oversold", name: "Exit Oversold", description: "Composite sentiment leaves the oversold band on a confirmed bar.", semantic: "LONG_ENTRY", confirmedBar: true, intrabar: false },
   { id: "bc-mso:enter-overbought", name: "Enter Overbought", description: "Composite sentiment crosses into the overbought band on a confirmed bar.", semantic: "SHORT_ENTRY", confirmedBar: true, intrabar: false },
@@ -58,7 +60,7 @@ const manifests: ManifestRow[] = [
   { key: "qalc", name: "BC-QALC — Queue-Aware Liquidity Capture", version: "1", runtimeKind: "external-signals", runtimeStatus: "REQUIRES_CERTIFICATION", warmup: 1_000, alerts: qalcAlerts },
   { key: "adaptiveSwingStrategy", name: "Adaptive Swing Reversal", version: "1", runtimeKind: "builtin-adaptive-swing", runtimeStatus: "CERTIFIED", warmup: 240, alerts: longShortAlerts },
   { key: "acvdOscillator", name: "BC-ACVD — Adaptive Causal Volume Delta", version: "1", runtimeKind: "external-signals", runtimeStatus: "BROWSER_ONLY", warmup: 1_000, alerts: acvdAlerts },
-  { key: "marketSentimentOscillator", name: "BC-MSO — Market Sentiment Oscillator", version: "1", runtimeKind: "python-script", runtimeStatus: "BROWSER_ONLY", warmup: 220, alerts: marketSentimentAlerts },
+  { key: "marketSentimentOscillator", name: "BC-MSO — Market Sentiment Oscillator", version: "2", runtimeKind: "python-script", runtimeStatus: "BROWSER_ONLY", warmup: 1200, alerts: marketSentimentAlerts },
   // BC-RDA is intentionally absent while BC_RDA_LEGACY_REPAINTING is under
   // forensic containment and BC_RDA_CAUSAL_V2 lacks a certified headless VPS
   // runtime. The chart indicator remains available as research visualization.

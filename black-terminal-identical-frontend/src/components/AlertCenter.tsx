@@ -50,6 +50,9 @@ const acvdSignalLabels = Object.fromEntries(acvdSignalOptions.map((option) => [o
 
 const marketSentimentSignalOptions: { value: MarketSentimentAlertSelection; label: string }[] = [
   { value: "ANY_BAND_EVENT", label: "Any Confirmed OB/OS Band Event" },
+  { value: "ANY_ADAPTIVE_SIGNAL", label: "Any Confirmed Adaptive Swing Signal" },
+  { value: "CONFIRMED_ADAPTIVE_LONG", label: "Adaptive Long · Silver/White Dot" },
+  { value: "CONFIRMED_ADAPTIVE_SHORT", label: "Adaptive Short · Blood-Red Dot" },
   { value: "ENTER_OVERBOUGHT", label: "Enter Overbought" },
   { value: "EXIT_OVERBOUGHT", label: "Exit Overbought" },
   { value: "ENTER_OVERSOLD", label: "Enter Oversold" },
@@ -380,7 +383,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
                 )}
                 {draft.indicator === "marketSentiment" && (
                   <label className="alert-field wide">
-                    BC-MSO Band Event
+                    BC-MSO Confirmed Event
                     <select value={draft.marketSentimentSignal ?? "ANY_BAND_EVENT"} onChange={(event) => updateDraft("marketSentimentSignal", event.target.value as MarketSentimentAlertSelection)}>
                       {marketSentimentSignalOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                     </select>

@@ -63,6 +63,7 @@ export type EventAlphaThesis = {
 export type CryptoDriftCandidate = EventAlphaThesis & {
   rank_score: number;
   market_verified: boolean;
+  collapsed_event_count: number;
   event: Pick<EventAlphaEvent, "id" | "symbol" | "asset_id" | "event_family" | "event_time" | "first_actionable_at" | "status" | "safe_summary" | "source_confidence" | "current_revision">;
 };
 

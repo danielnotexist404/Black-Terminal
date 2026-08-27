@@ -44,10 +44,12 @@ assert.equal(new PeadNormalizedSourceAdapter({ url: "http://127.0.0.1/feed", all
 const ranked = rankCryptoCandidates([
   { id:"weak",canonical_event_id:"event-a",confidence:.6,remaining_alpha_bps:20,state:"OBSERVING",updated_at:"2026-08-01T00:00:00Z" },
   { id:"duplicate",canonical_event_id:"event-a",confidence:.2,remaining_alpha_bps:2,state:"DRAFT",updated_at:"2026-07-01T00:00:00Z" },
+  { id:"asset-best",canonical_event_id:"event-c",confidence:.8,remaining_alpha_bps:180,state:"ARMED",updated_at:"2026-08-02T01:00:00Z" },
   { id:"strong",canonical_event_id:"event-b",confidence:.9,remaining_alpha_bps:-300,state:"ARMED",updated_at:"2026-08-02T00:00:00Z" },
   { id:"unverified",canonical_event_id:"missing",confidence:1,remaining_alpha_bps:1000,state:"ARMED",updated_at:"2026-08-03T00:00:00Z" }
-], [{id:"event-a",symbol:"AAVEUSDT"},{id:"event-b",symbol:"BTCUSDT"}], 10);
-assert.deepEqual(ranked.map((row) => row.id), ["strong", "weak"], "ranking excludes unverified events, deduplicates canonical identities and prioritizes confidence/alpha/state");
+], [{id:"event-a",asset_id:"aave",symbol:"AAVEUSDT"},{id:"event-b",asset_id:"bitcoin",symbol:"BTCUSDT"},{id:"event-c",asset_id:"aave",symbol:"AAVEUSDT"}], 10);
+assert.deepEqual(ranked.map((row) => row.id), ["strong", "asset-best"], "ranking excludes unverified events, keeps the strongest thesis and prevents one asset monopolizing discovery");
+assert.equal(ranked.find((row) => row.id === "asset-best").collapsed_event_count, 2, "collapsed event count preserves ranking provenance");
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const migration = fs.readFileSync(path.join(root, "supabase/migrations/202608280001_event_alpha_equity_pead.sql"), "utf8");

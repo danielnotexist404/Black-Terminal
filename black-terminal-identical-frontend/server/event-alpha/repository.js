@@ -330,17 +330,39 @@ export class EventAlphaRepository {
 export function rankCryptoCandidates(theses, events, limit = 50) {
   const eventById = new Map(events.map((row) => [row.id, row]));
   const stateWeight = { PAPER_ACTIVE: 1, TRIGGERED: 0.95, ARMED: 0.85, OBSERVING: 0.65, DRAFT: 0.35, RESOLVED: 0.15 };
-  const seen = new Set();
-  return theses.filter((row) => {
-    if (!eventById.has(row.canonical_event_id) || seen.has(row.canonical_event_id)) return false;
-    seen.add(row.canonical_event_id);
-    return true;
-  }).map((row) => {
+  const eventWinners = new Map();
+  for (const row of theses) {
     const event = eventById.get(row.canonical_event_id);
+    if (!event) continue;
     const score = Number(row.confidence) * 55 + Math.min(1, Math.abs(Number(row.remaining_alpha_bps)) / 500) * 30 + (stateWeight[row.state] || 0) * 15;
-    return { ...row, event, rank_score: score, market_verified: true };
-  }).sort((a, b) => b.rank_score - a.rank_score || Date.parse(b.updated_at) - Date.parse(a.updated_at))
+    const candidate = { ...row, event, rank_score: score, market_verified: true };
+    const previous = eventWinners.get(event.id);
+    if (!previous || compareCryptoRank(candidate, previous) < 0) eventWinners.set(event.id, candidate);
+  }
+
+  // Provider schedules can create hundreds of hourly revisions for the same
+  // protocol. One asset must never monopolize the discovery surface: retain
+  // the strongest causal thesis and expose how many related events collapsed
+  // beneath it for transparent drill-down.
+  const assetWinners = new Map();
+  for (const candidate of eventWinners.values()) {
+    const assetKey = String(candidate.event.asset_id || candidate.event.symbol || candidate.event.id).toUpperCase();
+    const bucket = assetWinners.get(assetKey);
+    if (!bucket) {
+      assetWinners.set(assetKey, { winner: candidate, count: 1 });
+      continue;
+    }
+    bucket.count += 1;
+    if (compareCryptoRank(candidate, bucket.winner) < 0) bucket.winner = candidate;
+  }
+
+  return [...assetWinners.values()].map(({ winner, count }) => ({ ...winner, collapsed_event_count: count }))
+    .sort(compareCryptoRank)
     .slice(0, Math.min(100, Math.max(1, limit)));
+}
+
+function compareCryptoRank(a, b) {
+  return b.rank_score - a.rank_score || Date.parse(b.updated_at) - Date.parse(a.updated_at) || String(a.id).localeCompare(String(b.id));
 }
 
 function infrastructure(error, code) {

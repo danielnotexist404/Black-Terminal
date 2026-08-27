@@ -67,6 +67,7 @@ services:
       target: frontend
       args:
         VITE_SUPABASE_URL: ${BLACK_CLOUD_PUBLIC_URL:?set BLACK_CLOUD_PUBLIC_URL}
+        VITE_SUPABASE_SAME_ORIGIN: ${BLACK_CLOUD_SAME_ORIGIN:-true}
         VITE_SUPABASE_ANON_KEY: ${ANON_KEY:?set ANON_KEY}
         VITE_CLAUDE_API_KEY: ""
         VITE_RESEND_API_KEY: ""

@@ -295,6 +295,10 @@ export function eventAlphaRuntimeConfig(env = process.env) {
   const tokenSupplyEnabled = ingestionEnabled && env.EVENT_ALPHA_TOKEN_SUPPLY_ENABLED === "true";
   const governanceEnabled = ingestionEnabled && env.EVENT_ALPHA_GOVERNANCE_ENABLED === "true";
   const protocolEconomicsEnabled = ingestionEnabled && env.EVENT_ALPHA_PROTOCOL_ECONOMICS_ENABLED === "true";
+  const equityPeadEnabled = ingestionEnabled && env.EVENT_ALPHA_EQUITY_PEAD_ENABLED === "true";
+  const peadProviderConfigured = equityPeadEnabled && Boolean(
+    env.EVENT_ALPHA_PEAD_FEED_URL && env.EVENT_ALPHA_PEAD_ALLOWED_HOST && env.EVENT_ALPHA_PEAD_FEED_TOKEN
+  );
   const strategyKillSwitchEngaged = env.EVENT_ALPHA_STRATEGY_KILL_SWITCH !== "false";
   const globalExecutionKillSwitchEngaged = env.EVENT_ALPHA_GLOBAL_EXECUTION_KILL_SWITCH !== "false";
   const paperRequested = env.EVENT_ALPHA_PAPER_EXECUTION_ENABLED === "true";
@@ -307,6 +311,8 @@ export function eventAlphaRuntimeConfig(env = process.env) {
     tokenSupplyEnabled,
     governanceEnabled,
     protocolEconomicsEnabled,
+    equityPeadEnabled,
+    peadProviderConfigured,
     paperExecutionEnabled,
     paperExecutionConfigurationRejected: paperRequested && (strategyKillSwitchEngaged || globalExecutionKillSwitchEngaged),
     liveExecutionEnabled: false,

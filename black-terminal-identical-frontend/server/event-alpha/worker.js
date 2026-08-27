@@ -5,15 +5,17 @@ import { executePaperJob } from "./service.js";
 import { EventAlphaLiveAssessor } from "./live-assessment.js";
 import { DefiLlamaProtocolEconomicsSourceAdapter, SnapshotGovernanceSourceAdapter, TokenomistUnlockSourceAdapter } from "./live-source-adapters.js";
 import { TokenUnlockSourceAdapter } from "./token-unlock-adapter.js";
+import { PeadNormalizedSourceAdapter } from "./pead-source-adapter.js";
 
 export class EventAlphaWorker {
-  constructor({ supabase, workerId = `event-alpha-${crypto.randomUUID()}`, adapter, adapters, assessor, logger = console }) {
+  constructor({ supabase, workerId = `event-alpha-${crypto.randomUUID()}`, adapter, adapters, peadAdapter, assessor, logger = console }) {
     this.supabase = supabase;
     this.workerId = workerId;
     this.adapters = adapters || (adapter ? [adapter] : defaultAdapters());
     this.logger = logger;
     this.repository = new EventAlphaRepository(supabase);
     this.assessor = assessor || new EventAlphaLiveAssessor({ repository: this.repository });
+    this.peadAdapter = peadAdapter || PeadNormalizedSourceAdapter.fromEnvironment();
     this.running = false;
   }
 
@@ -22,7 +24,9 @@ export class EventAlphaWorker {
     if (!config.engineEnabled) return { status: "DISABLED", polled: 0, claimed: 0 };
     if (config.liveExecutionConfigurationRejected) throw workerError("EVENT_ALPHA_LIVE_FORBIDDEN", "Unsafe live Event Alpha configuration was rejected.");
     if (config.manualApprovalConfigurationRejected) throw workerError("EVENT_ALPHA_MANUAL_APPROVAL_REQUIRED", "Unsafe paper approval configuration was rejected.");
-    const polled = config.ingestionEnabled ? await this.pollLiveSources(config, signal) : 0;
+    const cryptoPolled = config.ingestionEnabled ? await this.pollLiveSources(config, signal) : 0;
+    const peadPolled = config.equityPeadEnabled ? await this.pollPeadSource(signal) : 0;
+    const polled = cryptoPolled + peadPolled;
     const { data: jobs, error } = await this.supabase.rpc("event_alpha_claim_jobs_v1", { p_worker_id: this.workerId, p_limit: 20, p_lease_seconds: 90 });
     if (error) throw workerError("EVENT_ALPHA_JOB_CLAIM_FAILED", "Event Alpha work queue is unavailable.", error);
     let completed = 0;
@@ -126,6 +130,38 @@ export class EventAlphaWorker {
       await this.repository.updateCheckpoint(source.id, checkpoint, { errorCode: error.code || "SOURCE_POLL_FAILED", consecutiveFailures: failures, backoffUntil: new Date(Date.now() + backoffSeconds * 1_000).toISOString() });
       const degraded = await this.supabase.from("event_alpha_sources").update({ health_status: quarantine ? "QUARANTINED" : "DEGRADED", last_error_at: new Date().toISOString(), safe_error_code: String(error.code || "SOURCE_POLL_FAILED").slice(0, 80), updated_at: new Date().toISOString() }).eq("id", source.id);
       if (degraded.error) this.logger.error?.("[event-alpha-source-health-write]", degraded.error.code || "unknown");
+      throw error;
+    }
+  }
+
+  async pollPeadSource(signal) {
+    const adapter = this.peadAdapter;
+    const adapterHealth = adapter.health();
+    const provider = await this.repository.ensurePeadProvider({
+      providerKey: adapter.sourceKey,
+      displayName: "Normalized Equity Earnings Evidence",
+      adapterVersion: "BC_PEAD_CAUSAL_V1",
+      enabled: adapterHealth.status === "READY",
+      configurationFingerprint: sha256({ sourceKey: adapter.sourceKey, configured: adapterHealth.status === "READY" })
+    });
+    if (adapterHealth.status !== "READY") {
+      const disabled = await this.supabase.from("event_alpha_pead_providers").update({ health_status: adapterHealth.status, safe_error_code: adapterHealth.reasonCode, updated_at: new Date().toISOString() }).eq("id", provider.id);
+      if (disabled.error) throw workerError("EVENT_ALPHA_PEAD_HEALTH_WRITE_FAILED", "PEAD provider health could not be persisted.", disabled.error);
+      return 0;
+    }
+    if (provider.last_success_at && Date.now() - Date.parse(provider.last_success_at) < 300_000) return 0;
+    try {
+      const result = await adapter.poll({ cursorValue: provider.cursor_value }, signal);
+      for (const assessment of result.assessments) await this.repository.ingestPeadAssessment(provider.id, assessment);
+      const healthy = await this.supabase.from("event_alpha_pead_providers").update({
+        health_status: "HEALTHY", last_success_at: new Date().toISOString(), safe_error_code: null,
+        cursor_value: result.checkpoint.cursorValue || provider.cursor_value || null, updated_at: new Date().toISOString()
+      }).eq("id", provider.id);
+      if (healthy.error) throw workerError("EVENT_ALPHA_PEAD_HEALTH_WRITE_FAILED", "PEAD provider health could not be persisted.", healthy.error);
+      return result.assessments.length;
+    } catch (error) {
+      const degraded = await this.supabase.from("event_alpha_pead_providers").update({ health_status: "DEGRADED", last_error_at: new Date().toISOString(), safe_error_code: String(error.code || "PEAD_SOURCE_POLL_FAILED").slice(0, 80), updated_at: new Date().toISOString() }).eq("id", provider.id);
+      if (degraded.error) this.logger.error?.("[event-alpha-pead-health-write]", degraded.error.code || "unknown");
       throw error;
     }
   }

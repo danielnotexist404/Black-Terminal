@@ -16,6 +16,7 @@ import {
   forecastEventResponse
 } from "./engine.js";
 import { EventAlphaRepository } from "./repository.js";
+import { PEAD_SIGNAL_STATES, assessPeadEvidence } from "./pead-engine.js";
 
 export async function handleEventAlphaRequest(req, res, security, path) {
   const repository = new EventAlphaRepository(security.supabase);
@@ -23,9 +24,12 @@ export async function handleEventAlphaRequest(req, res, security, path) {
   const [resource, identifier, action] = path;
   if (req.method === "GET" && resource === "config") return res.status(200).json({ config: publicConfig(config) });
   if (req.method === "GET" && resource === "feed") return res.status(200).json({ events: await repository.listFeed(queryFilters(req.query)) });
+  if (req.method === "GET" && resource === "crypto-ranked") return res.status(200).json({ candidates: await repository.rankedCrypto(cryptoRankFilters(req.query)) });
   if (req.method === "GET" && resource === "events" && identifier) return res.status(200).json(await repository.eventDetail(assertUuid(identifier)));
   if (req.method === "GET" && resource === "theses") return res.status(200).json({ theses: await repository.listTheses({ limit: boundedLimit(req.query?.limit, 100), state: optionalEnum(req.query?.state, ["DRAFT","OBSERVING","ARMED","TRIGGERED","PAPER_ACTIVE","RESOLVED","EXPIRED","INVALIDATED","REJECTED"]) }) });
   if (req.method === "GET" && resource === "health") return res.status(200).json({ config: publicConfig(config), ...(await repository.health()) });
+  if (req.method === "GET" && resource === "pead" && identifier === "signals" && !action) return res.status(200).json({ signals: await repository.listPeadSignals(peadFilters(req.query)) });
+  if (req.method === "GET" && resource === "pead" && identifier === "signals" && action) return res.status(200).json(await repository.peadSignalDetail(assertUuid(action)));
   if (req.method === "GET" && resource === "audit") return res.status(200).json({ records: await repository.audit({ limit: boundedLimit(req.query?.limit, 100), eventId: optionalUuid(req.query?.eventId), thesisId: optionalUuid(req.query?.thesisId) }) });
   if (req.method === "GET" && resource === "paper-state") {
     requireAdmin(security.identity);
@@ -38,11 +42,40 @@ export async function handleEventAlphaRequest(req, res, security, path) {
     if (!config.ingestionEnabled || !config.tokenSupplyEnabled) throw httpError(403, "Token-supply ingestion is disabled by rollout policy.", "EVENT_ALPHA_INGESTION_DISABLED");
     return ingestTokenUnlock(req, res, repository, security);
   }
+  if (req.method === "POST" && resource === "pead" && identifier === "ingest") {
+    if (!config.ingestionEnabled || !config.equityPeadEnabled) throw httpError(403, "Equity PEAD ingestion is disabled by rollout policy.", "EVENT_ALPHA_PEAD_DISABLED");
+    return ingestPead(req, res, repository, security);
+  }
   if (req.method === "POST" && resource === "events" && identifier && action === "assess") return assessEvent(req, res, repository, security, assertUuid(identifier));
   if (req.method === "POST" && resource === "theses" && identifier && action === "transition") return transitionThesis(req, res, repository, security, assertUuid(identifier));
   if (req.method === "POST" && resource === "paper-intents") return createPaperIntent(req, res, repository, security, config);
   if (req.method === "POST" && resource === "paper-intents" && identifier && action === "approve") return approvePaperIntent(req, res, repository, security, config, assertUuid(identifier));
   throw httpError(404, "Event Alpha route not found.", "EVENT_ALPHA_ROUTE_NOT_FOUND");
+}
+
+async function ingestPead(req, res, repository, security) {
+  const assessment = assessPeadEvidence(req.body?.evidence);
+  const providerKey = `ADMIN_PEAD_${sha256(security.user.id).slice(0, 12)}`;
+  const provider = await repository.ensurePeadProvider({
+    providerKey,
+    displayName: "Administrator verified PEAD evidence",
+    adapterVersion: "ADMIN_PEAD_CAUSAL_V1",
+    enabled: true,
+    configurationFingerprint: sha256({ providerKey, adapterVersion: "ADMIN_PEAD_CAUSAL_V1" })
+  });
+  const result = await repository.ingestPeadAssessment(provider.id, assessment);
+  await repository.writeAudit({
+    correlationId: result.pead_event_id,
+    decisionType: "PEAD_SOURCE_INGESTION",
+    outcome: result.was_duplicate ? "IDEMPOTENT_REPLAY" : assessment.signal.state,
+    reasonCodes: result.was_duplicate ? ["DUPLICATE_REVISION"] : ["SOURCE_EVIDENCE_ACCEPTED"],
+    modelVersions: { pead: assessment.methodologyVersion },
+    evidenceHash: assessment.evidenceHash,
+    safeMetadata: { peadEventId: result.pead_event_id, signalId: result.signal_id, ticker: assessment.evidence.ticker, revision: result.event_revision },
+    actorType: "ADMIN",
+    actorId: security.user.id
+  });
+  return res.status(result.was_duplicate ? 200 : 202).json({ result, signal: assessment.signal, metrics: assessment.metrics });
 }
 
 async function ingestTokenUnlock(req, res, repository, security) {
@@ -550,6 +583,23 @@ function toEngineThesis(row) {
 
 function queryFilters(query) {
   return { limit: boundedLimit(query?.limit, 50), before: query?.before ? requiredIso(String(query.before), "before") : null, family: optionalEnum(query?.family, ["TOKEN_SUPPLY","GOVERNANCE","PROTOCOL_ECONOMICS"]), symbol: query?.symbol ? String(query.symbol).replace(/[^A-Za-z0-9]/g, "").toUpperCase() : null };
+}
+
+function cryptoRankFilters(query) {
+  return {
+    limit: boundedLimit(query?.limit, 50),
+    family: optionalEnum(query?.family, ["TOKEN_SUPPLY","GOVERNANCE","PROTOCOL_ECONOMICS"]),
+    symbol: query?.symbol ? String(query.symbol).replace(/[^A-Za-z0-9]/g, "").toUpperCase() : null,
+    minimumConfidence: query?.minimumConfidence === undefined ? 0 : boundedNumber(Number(query.minimumConfidence), 0, 1, "minimumConfidence")
+  };
+}
+
+function peadFilters(query) {
+  return {
+    limit: boundedLimit(query?.limit, 100),
+    state: optionalEnum(query?.state, PEAD_SIGNAL_STATES),
+    ticker: query?.ticker ? String(query.ticker).trim().toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 15) : null
+  };
 }
 
 function publicConfig(config) {

@@ -4,14 +4,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
+import { assessPeadEvidence } from "../server/event-alpha/pead-engine.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sql = fs.readFileSync(path.join(root, "supabase/migrations/20260820014838_phase5_event_alpha_engine.sql"), "utf8");
 const liveSql = fs.readFileSync(path.join(root, "supabase/migrations/20260825013000_event_alpha_live_pipeline.sql"), "utf8");
+const peadSql = fs.readFileSync(path.join(root, "supabase/migrations/202608280001_event_alpha_equity_pead.sql"), "utf8");
 const db = new PGlite();
 await db.exec("create role anon; create role authenticated; create role service_role bypassrls;");
 await db.exec(sql);
 await db.exec(liveSql);
+await db.exec(peadSql);
 
 const sourceId = crypto.randomUUID();
 await db.query(`insert into public.event_alpha_sources(id,source_key,display_name,event_family,adapter_version,authority_class,enabled,health_status)
@@ -118,8 +121,29 @@ await assert.rejects(() => db.query("select public.event_alpha_transition_thesis
 await assert.rejects(() => db.query("select public.event_alpha_transition_thesis_v1($1,$2,'INVALIDATED',array['ADMIN_INVALIDATED'],'ADMIN',null,'{}'::jsonb)", [thesisId,active.rows[0].version]), /VERSION_CONFLICT/i, "stale transition version cannot overwrite newer state");
 
 await assert.rejects(() => db.query("update public.event_alpha_raw_events set quarantined=true where id=$1", [first.rows[0].raw_event_id]), /IMMUTABLE/i);
+
+const peadProviderId = crypto.randomUUID();
+await db.query(`insert into public.event_alpha_pead_providers(id,provider_key,display_name,adapter_version,enabled,health_status)
+  values($1,'PEAD_TEST','PEAD Test Provider','BC_PEAD_CAUSAL_V1',true,'HEALTHY')`, [peadProviderId]);
+const peadAssessment = assessPeadEvidence({
+  providerEventId:"earnings-1",ticker:"TEST",issuer:"Test Equity",fiscalPeriod:"2026-Q2",
+  announcedAt:"2026-08-01T20:00:00Z",firstActionableAt:"2026-08-01T20:00:00Z",expectationAsOf:"2026-08-01T19:59:00Z",session:"AFTER_HOURS",
+  actuals:{eps:1.5,revenue:120},consensus:{eps:1,revenue:100,contributorCount:12},
+  history:{epsForecastErrors:[-.1,-.08,-.05,0,.05,.08,.1],revenueForecastErrors:[-5,-3,-2,0,2,3,5]},
+  returnObservations:[{observedAt:"2026-08-01T20:01:00Z",price:101,stockReturnBps:50,marketReturnBps:5,sectorReturnBps:2}],
+  beta:1,sectorBeta:.5,sourceConfidence:.95,costs:{roundTripBps:8},sourceManifest:{filing:"SEC",consensus:"TEST"}
+});
+const peadFirst = await db.query("select * from public.event_alpha_ingest_pead_v1($1,$2::jsonb)", [peadProviderId, JSON.stringify(peadAssessment)]);
+assert.equal(peadFirst.rows[0].event_revision, 1);
+assert.equal(peadFirst.rows[0].was_duplicate, false);
+const peadReplay = await db.query("select * from public.event_alpha_ingest_pead_v1($1,$2::jsonb)", [peadProviderId, JSON.stringify(peadAssessment)]);
+assert.equal(peadReplay.rows[0].was_duplicate, true, "identical PEAD evidence is idempotent");
+assert.equal(peadReplay.rows[0].signal_id, peadFirst.rows[0].signal_id);
+assert.equal((await db.query("select count(*)::int as count from public.event_alpha_pead_return_points where signal_id=$1", [peadFirst.rows[0].signal_id])).rows[0].count, 1);
+await assert.rejects(() => db.query("update public.event_alpha_pead_signals set confidence=0 where id=$1", [peadFirst.rows[0].signal_id]), /IMMUTABLE/i);
 await db.exec("set role anon");
 await assert.rejects(() => db.query("select * from public.event_alpha_canonical_events"), /permission denied/i);
+await assert.rejects(() => db.query("select * from public.event_alpha_pead_signals"), /permission denied/i);
 await db.exec("reset role");
 
 await db.query(`insert into public.event_alpha_processing_jobs(job_type,payload,status,attempts,available_at,locked_by,locked_until,idempotency_key)
@@ -128,9 +152,9 @@ const reclaimed = await db.query("select * from public.event_alpha_claim_jobs_v1
 assert.ok(reclaimed.rows.some((row) => row.locked_by === "replacement-worker"), "expired processing lease must be reclaimed");
 
 const tableCount = (await db.query("select count(*)::int as count from pg_catalog.pg_tables where schemaname='public' and tablename like 'event_alpha_%'")).rows[0].count;
-assert.equal(tableCount, 20);
+assert.equal(tableCount, 25);
 await db.close();
-console.log("Event Alpha PostgreSQL tests PASS — migration execution, atomic dedupe/revision, expectation replay, paper lifecycle, RLS, immutability, and lease recovery verified.");
+console.log("Event Alpha PostgreSQL tests PASS — crypto and Equity PEAD migrations, atomic dedupe/revision, expectation replay, paper lifecycle, RLS, immutability, and lease recovery verified.");
 
 function sha(value) {
   return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex");

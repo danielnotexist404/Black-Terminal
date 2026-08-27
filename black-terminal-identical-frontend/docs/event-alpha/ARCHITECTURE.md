@@ -18,6 +18,8 @@ BT-EAE-001 is a server-authoritative, point-in-time event research system. It is
 - `server/event-alpha/engine.js`: robust expectation, surprise, economic impact, remaining-alpha classification, BC-RDA gate, paper risk/fill math.
 - `server/event-alpha/token-unlock-adapter.js`: HTTPS/allowlisted/credentialed provider with checkpoint, timeout, retry and quarantine semantics.
 - `server/event-alpha/live-source-adapters.js`: live Snapshot governance, DefiLlama protocol-revenue, and optional Tokenomist adapters.
+- `server/event-alpha/pead-engine.js`: causal Equity PEAD standardized-surprise, factor-adjusted CAR, costs and remaining-drift classification.
+- `server/event-alpha/pead-source-adapter.js`: exact-host allowlisted normalized earnings provider; credentials remain server-only.
 - `server/event-alpha/market-evidence.js`: public Bybit price/turnover evidence used only for benchmark-adjusted response attribution.
 - `server/event-alpha/live-assessment.js`: automatic causal expectation lookup, surprise/forecast/thesis generation, and explicit `NO_TRADE` audit decisions.
 - `server/event-alpha/repository.js`: bounded projections, immutable ingestion, revisions, work queue and audit.

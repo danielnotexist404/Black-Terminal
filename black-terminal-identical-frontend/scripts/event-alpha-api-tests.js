@@ -12,6 +12,8 @@ assert.deepEqual(eventAlphaRuntimeConfig({}), {
   tokenSupplyEnabled: false,
   governanceEnabled: false,
   protocolEconomicsEnabled: false,
+  equityPeadEnabled: false,
+  peadProviderConfigured: false,
   paperExecutionEnabled: false,
   paperExecutionConfigurationRejected: false,
   liveExecutionEnabled: false,
@@ -33,6 +35,8 @@ assert.equal(eventAlphaRuntimeConfig({ EVENT_ALPHA_ENGINE_ENABLED: "true", EVENT
 assert.equal(eventAlphaRuntimeConfig({ EVENT_ALPHA_ENGINE_ENABLED: "true", EVENT_ALPHA_INGESTION_ENABLED: "true", EVENT_ALPHA_TOKEN_SUPPLY_ENABLED: "true" }).tokenSupplyEnabled, true);
 assert.equal(eventAlphaRuntimeConfig({ EVENT_ALPHA_ENGINE_ENABLED: "true", EVENT_ALPHA_INGESTION_ENABLED: "true", EVENT_ALPHA_GOVERNANCE_ENABLED: "true" }).governanceEnabled, true);
 assert.equal(eventAlphaRuntimeConfig({ EVENT_ALPHA_ENGINE_ENABLED: "true", EVENT_ALPHA_INGESTION_ENABLED: "true", EVENT_ALPHA_PROTOCOL_ECONOMICS_ENABLED: "true" }).protocolEconomicsEnabled, true);
+assert.equal(eventAlphaRuntimeConfig({ EVENT_ALPHA_ENGINE_ENABLED: "true", EVENT_ALPHA_INGESTION_ENABLED: "true", EVENT_ALPHA_EQUITY_PEAD_ENABLED: "true" }).equityPeadEnabled, true);
+assert.equal(eventAlphaRuntimeConfig({ EVENT_ALPHA_ENGINE_ENABLED: "true", EVENT_ALPHA_INGESTION_ENABLED: "true", EVENT_ALPHA_EQUITY_PEAD_ENABLED: "true", EVENT_ALPHA_PEAD_FEED_URL: "https://data.example.test/pead", EVENT_ALPHA_PEAD_ALLOWED_HOST: "data.example.test", EVENT_ALPHA_PEAD_FEED_TOKEN: "test-token" }).peadProviderConfigured, true);
 assert.equal(eventAlphaRuntimeConfig({ EVENT_ALPHA_LIVE_EXECUTION_ENABLED: "true" }).liveExecutionEnabled, false, "live remains structurally unavailable");
 assert.equal(eventAlphaRuntimeConfig({ EVENT_ALPHA_LIVE_EXECUTION_ENABLED: "true" }).liveExecutionConfigurationRejected, true);
 assert.equal(eventAlphaRuntimeConfig({ EVENT_ALPHA_MANUAL_APPROVAL_REQUIRED: "false" }).manualApprovalConfigurationRejected, true, "unsafe approval override is rejected");

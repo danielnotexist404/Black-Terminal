@@ -198,12 +198,87 @@ export class EventAlphaRepository {
     return data || [];
   }
 
+  async rankedCrypto({ limit = 50, family, symbol, minimumConfidence = 0 }) {
+    let thesisQuery = this.supabase.from("event_alpha_theses").select("*")
+      .gte("confidence", minimumConfidence).order("updated_at", { ascending: false }).order("id", { ascending: false }).limit(200);
+    if (family) thesisQuery = thesisQuery.eq("event_family", family);
+    const { data: theses, error: thesisError } = await thesisQuery;
+    if (thesisError) throw infrastructure(thesisError, "EVENT_ALPHA_RANKED_THESES_READ_FAILED");
+    const eventIds = [...new Set((theses || []).map((row) => row.canonical_event_id))];
+    if (!eventIds.length) return [];
+    let eventQuery = this.supabase.from("event_alpha_canonical_events")
+      .select("id,symbol,asset_id,event_family,event_time,first_actionable_at,status,safe_summary,source_confidence,current_revision")
+      .in("id", eventIds);
+    if (symbol) eventQuery = eventQuery.eq("symbol", symbol);
+    const { data: events, error: eventError } = await eventQuery;
+    if (eventError) throw infrastructure(eventError, "EVENT_ALPHA_RANKED_EVENTS_READ_FAILED");
+    return rankCryptoCandidates(theses || [], events || [], limit);
+  }
+
+  async ensurePeadProvider({ providerKey, displayName, adapterVersion, enabled, configurationFingerprint }) {
+    const row = {
+      provider_key: providerKey,
+      display_name: displayName,
+      adapter_version: adapterVersion,
+      enabled,
+      configuration_fingerprint: configurationFingerprint || null,
+      updated_at: new Date().toISOString()
+    };
+    const { data, error } = await this.supabase.from("event_alpha_pead_providers").upsert(row, { onConflict: "provider_key" }).select("*").single();
+    if (error) throw infrastructure(error, "EVENT_ALPHA_PEAD_PROVIDER_WRITE_FAILED");
+    return data;
+  }
+
+  async ingestPeadAssessment(providerId, assessment) {
+    const { data, error } = await this.supabase.rpc("event_alpha_ingest_pead_v1", { p_provider_id: providerId, p_assessment: assessment });
+    if (error) throw infrastructure(error, "EVENT_ALPHA_PEAD_INGEST_FAILED");
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row?.pead_event_id || !row?.signal_id) throw infrastructure(null, "EVENT_ALPHA_PEAD_INGEST_EMPTY");
+    return row;
+  }
+
+  async listPeadSignals({ limit = 100, state, ticker }) {
+    let query = this.supabase.from("event_alpha_pead_signals").select("*")
+      .order("calculated_at", { ascending: false }).order("id", { ascending: false }).limit(Math.min(200, Math.max(1, limit)));
+    if (state) query = query.eq("signal_state", state);
+    const { data: signals, error: signalError } = await query;
+    if (signalError) throw infrastructure(signalError, "EVENT_ALPHA_PEAD_SIGNAL_READ_FAILED");
+    const eventIds = [...new Set((signals || []).map((row) => row.pead_event_id))];
+    if (!eventIds.length) return [];
+    let eventQuery = this.supabase.from("event_alpha_pead_events")
+      .select("id,ticker,issuer,fiscal_period,announced_at,first_actionable_at,expectation_as_of,announcement_session,status,current_revision,source_confidence")
+      .in("id", eventIds);
+    if (ticker) eventQuery = eventQuery.eq("ticker", ticker);
+    const { data: events, error: eventError } = await eventQuery;
+    if (eventError) throw infrastructure(eventError, "EVENT_ALPHA_PEAD_EVENT_READ_FAILED");
+    const eventById = new Map((events || []).map((row) => [row.id, row]));
+    const seen = new Set();
+    return (signals || []).filter((row) => eventById.has(row.pead_event_id) && !seen.has(row.pead_event_id) && seen.add(row.pead_event_id))
+      .map((row) => ({ ...row, event: eventById.get(row.pead_event_id) }))
+      .sort((a, b) => Math.abs(Number(b.remaining_drift_bps)) * Number(b.confidence) - Math.abs(Number(a.remaining_drift_bps)) * Number(a.confidence))
+      .slice(0, Math.min(100, Math.max(1, limit)));
+  }
+
+  async peadSignalDetail(signalId) {
+    const { data: signal, error: signalError } = await this.supabase.from("event_alpha_pead_signals").select("*").eq("id", signalId).single();
+    if (signalError) throw infrastructure(signalError, "EVENT_ALPHA_PEAD_SIGNAL_DETAIL_FAILED");
+    const [eventResult, evidenceResult, returnResult] = await Promise.all([
+      this.supabase.from("event_alpha_pead_events").select("*").eq("id", signal.pead_event_id).single(),
+      this.supabase.from("event_alpha_pead_evidence").select("id,revision,evidence_hash,expectation_as_of,first_actionable_at,immutable_evidence,source_manifest,filing_url,consensus_source_url,price_source_url,known_at").eq("id", signal.evidence_id).single(),
+      this.supabase.from("event_alpha_pead_return_points").select("point_index,observed_at,price,stock_return_bps,market_return_bps,sector_return_bps,abnormal_return_bps,cumulative_abnormal_return_bps").eq("signal_id", signalId).order("point_index", { ascending: true })
+    ]);
+    for (const result of [eventResult, evidenceResult, returnResult]) if (result.error) throw infrastructure(result.error, "EVENT_ALPHA_PEAD_DETAIL_READ_FAILED");
+    return { event: eventResult.data, evidence: evidenceResult.data, signal, returnPath: returnResult.data || [] };
+  }
+
   async health() {
     const { data: sources, error: sourceError } = await this.supabase.from("event_alpha_sources").select("source_key,event_family,enabled,health_status,last_success_at,last_error_at,safe_error_code,updated_at").order("source_key");
     if (sourceError) throw infrastructure(sourceError, "EVENT_ALPHA_HEALTH_READ_FAILED");
     const { count, error: queueError } = await this.supabase.from("event_alpha_processing_jobs").select("id", { count: "exact", head: true }).in("status", ["QUEUED", "PROCESSING"]);
     if (queueError) throw infrastructure(queueError, "EVENT_ALPHA_QUEUE_HEALTH_FAILED");
-    return { sources: sources || [], pendingJobs: count || 0 };
+    const peadResult = await this.supabase.from("event_alpha_pead_providers").select("provider_key,display_name,enabled,health_status,last_success_at,last_error_at,safe_error_code,updated_at").order("provider_key");
+    if (peadResult.error && !["42P01", "PGRST205"].includes(peadResult.error.code)) throw infrastructure(peadResult.error, "EVENT_ALPHA_PEAD_HEALTH_READ_FAILED");
+    return { sources: sources || [], peadProviders: peadResult.data || [], pendingJobs: count || 0 };
   }
 
   async audit({ limit = 100, eventId, thesisId }) {
@@ -250,6 +325,22 @@ export class EventAlphaRepository {
     });
     if (error && error.code !== "23505") throw infrastructure(error, "EVENT_ALPHA_AUDIT_WRITE_FAILED");
   }
+}
+
+export function rankCryptoCandidates(theses, events, limit = 50) {
+  const eventById = new Map(events.map((row) => [row.id, row]));
+  const stateWeight = { PAPER_ACTIVE: 1, TRIGGERED: 0.95, ARMED: 0.85, OBSERVING: 0.65, DRAFT: 0.35, RESOLVED: 0.15 };
+  const seen = new Set();
+  return theses.filter((row) => {
+    if (!eventById.has(row.canonical_event_id) || seen.has(row.canonical_event_id)) return false;
+    seen.add(row.canonical_event_id);
+    return true;
+  }).map((row) => {
+    const event = eventById.get(row.canonical_event_id);
+    const score = Number(row.confidence) * 55 + Math.min(1, Math.abs(Number(row.remaining_alpha_bps)) / 500) * 30 + (stateWeight[row.state] || 0) * 15;
+    return { ...row, event, rank_score: score, market_verified: true };
+  }).sort((a, b) => b.rank_score - a.rank_score || Date.parse(b.updated_at) - Date.parse(a.updated_at))
+    .slice(0, Math.min(100, Math.max(1, limit)));
 }
 
 function infrastructure(error, code) {

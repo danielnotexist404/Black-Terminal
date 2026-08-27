@@ -7,7 +7,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const files = [
   "api/event-alpha/[...path].js",
   "server/event-alpha/domain.js",
-  "server/event-alpha/engine.js",
+    "server/event-alpha/engine.js",
+    "server/event-alpha/pead-engine.js",
+    "server/event-alpha/pead-source-adapter.js",
   "server/event-alpha/repository.js",
   "server/event-alpha/service.js",
   "server/event-alpha/token-unlock-adapter.js",

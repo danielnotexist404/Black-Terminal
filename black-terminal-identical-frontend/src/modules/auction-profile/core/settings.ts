@@ -366,12 +366,13 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
     if (typeof n.prominence !== "number" || Math.abs(result.nodeDetection.prominence - 0.42) < 1e-9) {
       result.nodeDetection.prominence = 0.36;
     }
-    const retainedRestrainedDefaults = result.rendering.structuralDetail === "MINIMAL"
-      && result.rendering.maximumVisibleLvns === 2
+    const retainedRestrainedCapacity = result.rendering.maximumVisibleLvns === 2
       && result.rendering.maximumVisibleHvns === 1
       && result.rendering.maximumVisibleStructuralZones === 2;
-    if (retainedRestrainedDefaults) {
+    if (result.rendering.structuralDetail === "MINIMAL" || typeof r.structuralDetail !== "string") {
       result.rendering.structuralDetail = "STANDARD";
+    }
+    if (retainedRestrainedCapacity) {
       result.rendering.maximumVisibleLvns = 6;
       result.rendering.maximumVisibleHvns = 2;
       result.rendering.maximumVisibleStructuralZones = 8;

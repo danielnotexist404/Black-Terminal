@@ -5,7 +5,7 @@ import { parseSymbols } from "../server/liquidation-intelligence/collector/runti
 import { isBclifTradeTopicFresh } from "../server/liquidation-intelligence/collector/topicFreshness.ts";
 import { deriveMeaningfulClusterPredictions } from "../server/liquidation-intelligence/model/calibrationRuntime.ts";
 import { buildCanonicalFrame, consumeOpenInterestObservation } from "../server/liquidation-intelligence/normalization/canonicalFrame.ts";
-import { BclifCalibrationRepository } from "../server/liquidation-intelligence/state/calibrationRepository.ts";
+import { BCLIF_MAX_OUTCOME_IDS_PER_QUERY, BclifCalibrationRepository } from "../server/liquidation-intelligence/state/calibrationRepository.ts";
 import { assertBclifCoverageCutoffCoherent, BCLIF_MAX_COVERAGE_INTERVALS_PER_SOURCE, BclifCoverageTracker } from "../server/liquidation-intelligence/state/coverageRepository.ts";
 import { BCLIF_MAX_DEDUP_KEYS_PER_QUERY, BclifEventDeduplicator } from "../server/liquidation-intelligence/state/eventDeduplication.ts";
 import { BclifSourceRepository } from "../server/liquidation-intelligence/state/sourceRepository.ts";
@@ -261,6 +261,7 @@ assert.throws(() => assertBclifCoverageCutoffCoherent({
 const predictionPage = Array.from({ length: 500 }, (_, index) => predictionRow(`evaluated-${index}`, index));
 const laterPrediction = predictionRow("pending-500", 500);
 const paginationLog: Array<{ table: string; method: string; args: unknown[] }> = [];
+const outcomeLookupSizes: number[] = [];
 class CalibrationPagingQuery {
   private start = 0;
   private ids: string[] = [];
@@ -270,7 +271,11 @@ class CalibrationPagingQuery {
   eq() { return this; }
   order(...args: unknown[]) { paginationLog.push({ table: this.table, method: "order", args }); return this; }
   range(start: number, end: number) { this.start = start; paginationLog.push({ table: this.table, method: "range", args: [start, end] }); return this; }
-  in(_column: string, ids: string[]) { this.ids = ids; return this; }
+  in(_column: string, ids: string[]) {
+    this.ids = ids;
+    if (this.table === "bclif_cluster_outcomes") outcomeLookupSizes.push(ids.length);
+    return this;
+  }
   then(resolve: (value: any) => unknown, reject?: (reason: unknown) => unknown) {
     const response = this.table === "bclif_cluster_predictions"
       ? { data: this.start === 0 ? predictionPage : this.start === 500 ? [laterPrediction] : [], error: null }
@@ -288,6 +293,11 @@ const pagedCalibration = new BclifCalibrationRepository({
 assert.deepEqual((await pagedCalibration.loadUnevaluated(1)).map((prediction) => prediction.id), [laterPrediction.id]);
 assert.ok(paginationLog.some((entry) => entry.method === "range" && entry.args[0] === 500 && entry.args[1] === 999), "calibration must page beyond evaluated predictions");
 assert.ok(paginationLog.some((entry) => entry.method === "order" && entry.args[0] === "id"), "calibration paging must use a deterministic ID tiebreaker");
+assert.deepEqual(outcomeLookupSizes, [
+  ...Array(500 / BCLIF_MAX_OUTCOME_IDS_PER_QUERY).fill(BCLIF_MAX_OUTCOME_IDS_PER_QUERY),
+  1
+], "calibration outcome reconciliation must batch every prediction page below the gateway URI limit");
+assert.ok(outcomeLookupSizes.every((size) => size <= 50), "calibration outcome lookups must remain below the gateway URI limit");
 
 const adoptionPredicates: Array<[string, unknown]> = [];
 const adoptionUpdates: Array<Record<string, unknown>> = [];

@@ -74,6 +74,11 @@ export interface BclifCalibrationObservedEvent {
   notional: number;
 }
 
+// Keep PostgREST `in(...)` filters below the gateway request-line limit. A full
+// prediction page contains UUIDs, so sending all 500 IDs in one URL can be
+// rejected with HTTP 414 before the database sees the query.
+export const BCLIF_MAX_OUTCOME_IDS_PER_QUERY = 50;
+
 /** Predictions and outcomes are append-only; future evidence never mutates a forecast. */
 export class BclifCalibrationRepository {
   private readonly supabase: any;
@@ -212,11 +217,15 @@ export class BclifCalibrationRepository {
       if (predictions.error) throw predictions.error;
       const rows = predictions.data || [];
       if (!rows.length) return pending;
-      const outcomes = await this.supabase.from("bclif_cluster_outcomes")
-        .select("prediction_id")
-        .in("prediction_id", rows.map((row: any) => row.id));
-      if (outcomes.error) throw outcomes.error;
-      const evaluated = new Set<string>((outcomes.data || []).map((outcome: any) => String(outcome.prediction_id)));
+      const evaluated = new Set<string>();
+      const predictionIds = rows.map((row: any) => String(row.id));
+      for (let index = 0; index < predictionIds.length; index += BCLIF_MAX_OUTCOME_IDS_PER_QUERY) {
+        const outcomes = await this.supabase.from("bclif_cluster_outcomes")
+          .select("prediction_id")
+          .in("prediction_id", predictionIds.slice(index, index + BCLIF_MAX_OUTCOME_IDS_PER_QUERY));
+        if (outcomes.error) throw outcomes.error;
+        for (const outcome of outcomes.data || []) evaluated.add(String(outcome.prediction_id));
+      }
       for (const row of rows) {
         if (evaluated.has(String(row.id))) continue;
         pending.push(mapPendingPrediction(row));

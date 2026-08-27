@@ -1,12 +1,14 @@
 import type { Candle } from "../chart-engine/types";
 
-export const BLACK_TERMINAL_PYTHON_RUNTIME_VERSION = "bt-python-vector-v1";
+export const BLACK_TERMINAL_PYTHON_RUNTIME_VERSION = "bt-python-vector-v2";
 
 export type CompiledPlot = {
   name: string;
   values: (number | null)[];
   color: string;
   width: number;
+  pane: "price" | "oscillator";
+  visible: boolean;
 };
 
 export type CompiledMarker = {
@@ -134,6 +136,17 @@ function broadcast(value: RuntimeValue, length: number): SeriesScalar[] {
   }
   if (typeof value === "string") throw new Error("Text cannot be used as a numeric or boolean series");
   return Array.from({ length }, () => value);
+}
+
+function inferredTimeframeSeconds(candles: readonly Candle[]) {
+  const differences: number[] = [];
+  for (let index = 1; index < candles.length; index += 1) {
+    const difference = candles[index].time - candles[index - 1].time;
+    if (Number.isFinite(difference) && difference > 0) differences.push(difference);
+  }
+  if (differences.length === 0) return 0;
+  differences.sort((left, right) => left - right);
+  return differences[Math.floor(differences.length / 2)]!;
 }
 
 function mapUnary(value: RuntimeValue, length: number, operation: (entry: SeriesScalar) => SeriesScalar): RuntimeValue {
@@ -418,11 +431,12 @@ class ScriptRuntime {
     this.env.set("hl2", candles.map((candle) => (candle.high + candle.low) / 2));
     this.env.set("hlc3", candles.map((candle) => (candle.high + candle.low + candle.close) / 3));
     this.env.set("ohlc4", candles.map((candle) => (candle.open + candle.high + candle.low + candle.close) / 4));
+    this.env.set("timeframe_seconds", inferredTimeframeSeconds(candles));
   }
 
   assign(name: string, value: RuntimeValue) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`Invalid variable name '${name}'`);
-    if (["open", "high", "low", "close", "volume", "hl2", "hlc3", "ohlc4"].includes(name)) throw new Error(`Built-in series '${name}' is read-only`);
+    if (["open", "high", "low", "close", "volume", "hl2", "hlc3", "ohlc4", "timeframe_seconds"].includes(name)) throw new Error(`Built-in series '${name}' is read-only`);
     this.env.set(name, value);
   }
 
@@ -473,11 +487,17 @@ class ScriptRuntime {
     }
     if (name === "ta.sma") return this.rolling(args, "sma");
     if (name === "ta.ema") return this.ema(args);
+    if (name === "ta.wma") return this.wma(args);
+    if (name === "ta.rma") return this.rma(args);
+    if (name === "ta.hma") return this.hma(args);
+    if (name === "ta.cum") return this.cumulative(args);
     if (name === "ta.rsi") return this.rsi(args);
     if (name === "ta.atr") return this.atr(args);
     if (name === "ta.stdev") return this.rolling(args, "stdev");
     if (name === "ta.highest") return this.rolling(args, "highest");
     if (name === "ta.lowest") return this.rolling(args, "lowest");
+    if (name === "ta.percentile_linear_interpolation") return this.percentileLinearInterpolation(args);
+    if (name === "ta.shift") return this.shift(args);
     if (name === "ta.change") return this.change(args);
     if (name === "ta.crossover") return this.cross(args, "over");
     if (name === "ta.crossunder") return this.cross(args, "under");
@@ -485,6 +505,34 @@ class ScriptRuntime {
       const numeric = numberValue(entry);
       return numeric === null ? null : Math.abs(numeric);
     });
+    if (name === "math.sqrt") return mapUnary(args.positional[0] ?? null, this.candles.length, (entry) => {
+      const numeric = numberValue(entry);
+      return numeric === null || numeric < 0 ? null : Math.sqrt(numeric);
+    });
+    if (name === "math.max" || name === "math.min") {
+      if (args.positional.length < 2) throw new Error(`${name} requires at least two values`);
+      return args.positional.slice(1).reduce<RuntimeValue>((result, value) => mapBinary(
+        result,
+        value,
+        this.candles.length,
+        (left, right) => {
+          const leftNumber = numberValue(left);
+          const rightNumber = numberValue(right);
+          if (leftNumber === null || rightNumber === null) return null;
+          return name === "math.max" ? Math.max(leftNumber, rightNumber) : Math.min(leftNumber, rightNumber);
+        }
+      ), args.positional[0]!);
+    }
+    if (name === "select") {
+      const condition = args.positional[0] ?? false;
+      const whenTrue = args.positional[1] ?? null;
+      const whenFalse = args.positional[2] ?? null;
+      if (!isSeries(condition)) return booleanValue(condition) ? whenTrue : whenFalse;
+      const conditions = broadcast(condition, this.candles.length);
+      const truthy = broadcast(whenTrue, this.candles.length);
+      const falsy = broadcast(whenFalse, this.candles.length);
+      return conditions.map((entry, index) => booleanValue(entry) ? truthy[index] : falsy[index]);
+    }
     if (name === "nz") return this.nz(args);
     if (name === "plot") return this.plot(args);
     if (name === "plotshape") return this.plotShape(args);
@@ -543,6 +591,102 @@ class ScriptRuntime {
       previous = previous === null ? value : value * alpha + previous * (1 - alpha);
       return previous;
     });
+  }
+
+  private weightedMovingAverage(source: (number | null)[], period: number) {
+    const denominator = period * (period + 1) / 2;
+    return source.map((_value, index) => {
+      if (index < period - 1) return null;
+      let weighted = 0;
+      for (let cursor = 0; cursor < period; cursor += 1) {
+        const value = source[index - period + 1 + cursor];
+        if (value === null) return null;
+        weighted += value * (cursor + 1);
+      }
+      return weighted / denominator;
+    });
+  }
+
+  private wma(args: CallArguments): RuntimeValue {
+    const source = this.numericSeries(args.positional[0] ?? null, "source");
+    const period = positivePeriod(args.positional[1] ?? 14);
+    return this.weightedMovingAverage(source, period);
+  }
+
+  private rma(args: CallArguments): RuntimeValue {
+    const source = this.numericSeries(args.positional[0] ?? null, "source");
+    const period = positivePeriod(args.positional[1] ?? 14);
+    const output: (number | null)[] = Array(source.length).fill(null);
+    let seed = 0;
+    let seedCount = 0;
+    let previous: number | null = null;
+    for (let index = 0; index < source.length; index += 1) {
+      const value = source[index];
+      if (value === null) {
+        seed = 0;
+        seedCount = 0;
+        previous = null;
+        continue;
+      }
+      if (previous === null) {
+        seed += value;
+        seedCount += 1;
+        if (seedCount < period) continue;
+        previous = seed / period;
+      } else {
+        previous = (previous * (period - 1) + value) / period;
+      }
+      output[index] = previous;
+    }
+    return output;
+  }
+
+  private hma(args: CallArguments): RuntimeValue {
+    const source = this.numericSeries(args.positional[0] ?? null, "source");
+    const period = positivePeriod(args.positional[1] ?? 14);
+    const half = Math.max(1, Math.round(period / 2));
+    const root = Math.max(1, Math.round(Math.sqrt(period)));
+    const halfWma = this.weightedMovingAverage(source, half);
+    const fullWma = this.weightedMovingAverage(source, period);
+    const difference = source.map((_value, index) => halfWma[index] === null || fullWma[index] === null
+      ? null
+      : 2 * halfWma[index]! - fullWma[index]!);
+    return this.weightedMovingAverage(difference, root);
+  }
+
+  private cumulative(args: CallArguments): RuntimeValue {
+    const source = this.numericSeries(args.positional[0] ?? null, "source");
+    let total = 0;
+    let started = false;
+    return source.map((value) => {
+      if (value === null) return started ? total : null;
+      total += value;
+      started = true;
+      return total;
+    });
+  }
+
+  private percentileLinearInterpolation(args: CallArguments): RuntimeValue {
+    const source = this.numericSeries(args.positional[0] ?? null, "source");
+    const period = positivePeriod(args.positional[1] ?? 100);
+    const percentile = Math.max(0, Math.min(100, finiteNumber(args.positional[2] ?? 50, "percentile")));
+    const rank = percentile / 100 * (period - 1);
+    const lowerIndex = Math.floor(rank);
+    const upperIndex = Math.ceil(rank);
+    const fraction = rank - lowerIndex;
+    return source.map((_value, index) => {
+      if (index < period - 1) return null;
+      const window = source.slice(index - period + 1, index + 1);
+      if (window.some((value) => value === null)) return null;
+      const sorted = (window as number[]).slice().sort((left, right) => left - right);
+      return sorted[lowerIndex]! + (sorted[upperIndex]! - sorted[lowerIndex]!) * fraction;
+    });
+  }
+
+  private shift(args: CallArguments): RuntimeValue {
+    const source = this.numericSeries(args.positional[0] ?? null, "source");
+    const periods = positivePeriod(args.positional[1] ?? 1, "periods");
+    return source.map((_value, index) => index < periods ? null : source[index - periods]);
   }
 
   private rsi(args: CallArguments): RuntimeValue {
@@ -618,7 +762,10 @@ class ScriptRuntime {
     const title = textValue(args.named.title ?? args.positional[1], `Series ${this.plots.length + 1}`);
     const color = textValue(args.named.color, "#f4f4f5");
     const width = Math.max(1, Math.min(8, Math.round(typeof args.named.width === "number" ? args.named.width : 1)));
-    this.plots.push({ name: title, values: source, color, width });
+    const pane = textValue(args.named.pane, "price").toLowerCase() === "oscillator" ? "oscillator" : "price";
+    const visibleArgument = args.named.visible ?? true;
+    const visible = isSeries(visibleArgument) ? true : booleanValue(visibleArgument);
+    this.plots.push({ name: title, values: source, color, width, pane, visible });
     return source;
   }
 

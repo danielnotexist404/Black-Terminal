@@ -1687,7 +1687,9 @@ export class BlackChartEngine {
   }
 
   private getOscillatorPaneHeight() {
-    return this.oscillatorStackLayout().reservedHeight;
+    const nativeReservedHeight = this.oscillatorStackLayout().reservedHeight;
+    const customReservedHeight = this.customPlots.some((plot) => plot.pane === "oscillator" && plot.visible !== false) ? 190 : 0;
+    return nativeReservedHeight + customReservedHeight;
   }
 
   private oscillatorStackLayout() {
@@ -2944,7 +2946,8 @@ export class BlackChartEngine {
 
   private drawOscillatorPanes(data: Candle[]) {
     const stack = this.oscillatorStackLayout();
-    if (stack.panes.length === 0) return;
+    const customOscillatorPlots = this.customPlots.filter((plot) => plot.pane === "oscillator" && plot.visible !== false);
+    if (stack.panes.length === 0 && customOscillatorPlots.length === 0) return;
 
     const g = this.indicatorLayer;
     const plotWidth = this.view.width - this.view.rightAxisWidth;
@@ -3127,6 +3130,73 @@ export class BlackChartEngine {
             alpha: item.alphaOverride ?? visual.alpha * 0.78
           });
         labelX += item.label.length * 6 + 22;
+      }
+    }
+
+    if (customOscillatorPlots.length > 0) {
+      const paneHeight = 170;
+      const paneBottom = basePaneBottom - stack.reservedHeight;
+      const paneTop = paneBottom - paneHeight;
+      const visibleValues: number[] = [];
+      for (const plot of customOscillatorPlots) {
+        const sourceOffset = Math.max(0, data.length - plot.values.length);
+        for (let index = this.view.firstIndex; index <= this.view.lastIndex; index += 1) {
+          const value = plot.values[index - sourceOffset];
+          if (Number.isFinite(value)) visibleValues.push(value!);
+        }
+      }
+      let domainMinimum = visibleValues.length ? Number.POSITIVE_INFINITY : -1;
+      let domainMaximum = visibleValues.length ? Number.NEGATIVE_INFINITY : 1;
+      for (const value of visibleValues) {
+        domainMinimum = Math.min(domainMinimum, value);
+        domainMaximum = Math.max(domainMaximum, value);
+      }
+      if (domainMinimum === domainMaximum) {
+        const expansion = Math.abs(domainMinimum) * 0.05 || 1;
+        domainMinimum -= expansion;
+        domainMaximum += expansion;
+      }
+      const domainPadding = (domainMaximum - domainMinimum) * 0.08;
+      domainMinimum -= domainPadding;
+      domainMaximum += domainPadding;
+      const yForCustomOscillator = (value: number) => paneBottom - (value - domainMinimum) / Math.max(1e-12, domainMaximum - domainMinimum) * paneHeight;
+
+      g.rect(0, paneTop, plotWidth, paneHeight)
+        .fill({ color: backgroundColor, alpha: Math.max(0.72, backgroundAlpha) })
+        .stroke({ width: 1, color: theme.red, alpha: 0.18 });
+      if (domainMinimum <= 0 && domainMaximum >= 0) {
+        const zeroY = yForCustomOscillator(0);
+        g.moveTo(0, zeroY).lineTo(plotWidth, zeroY).stroke({ width: 1, color: genericZeroColor, alpha: zeroLineAlpha });
+      }
+
+      for (const plot of customOscillatorPlots) {
+        const color = this.hexColor(plot.color, theme.silverBright);
+        const sourceOffset = Math.max(0, data.length - plot.values.length);
+        let started = false;
+        for (const index of this.renderIndices(1)) {
+          const value = plot.values[index - sourceOffset];
+          if (!Number.isFinite(value)) {
+            started = false;
+            continue;
+          }
+          const x = this.xForIndex(index);
+          const y = yForCustomOscillator(value!);
+          if (!started) {
+            g.moveTo(x, y);
+            started = true;
+          } else {
+            g.lineTo(x, y);
+          }
+        }
+        if (started) g.stroke({ width: plot.width || 1, color, alpha: 0.94 });
+      }
+
+      let labelX = 10;
+      for (const plot of customOscillatorPlots) {
+        const color = this.hexColor(plot.color, theme.silverBright);
+        const label = plot.name.includes(":") ? plot.name.slice(plot.name.indexOf(":") + 1) : plot.name;
+        g.rect(labelX, paneTop + 9, Math.max(18, label.length * 5.6), 2).fill({ color, alpha: 0.8 });
+        labelX += label.length * 6 + 22;
       }
     }
   }
@@ -4219,6 +4289,7 @@ export class BlackChartEngine {
     
     // Draw custom compiled script indicator plots
     for (const plot of this.customPlots) {
+      if (plot.pane === "oscillator" || plot.visible === false) continue;
       const color = this.hexColor(plot.color, 0x00ffcc);
       const sourceOffset = Math.max(0, data.length - plot.values.length);
       let started = false;

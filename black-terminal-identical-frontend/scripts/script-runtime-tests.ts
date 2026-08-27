@@ -50,6 +50,54 @@ const overriddenIndicatorResult = compileAndRunScript(indicator, candles, { Fast
 assert.equal(overriddenIndicatorResult.success, true, JSON.stringify(overriddenIndicatorResult.errors));
 assert.notDeepEqual(overriddenIndicatorResult.plots[0].values, indicatorResult.plots[0].values, "saved custom inputs must alter the deterministic runtime output");
 
+const cvdRuntimeCoverage = `delta = close - open
+cvd = ta.cum(delta)
+wma = ta.wma(cvd, 3)
+rma = ta.rma(cvd, 3)
+hma = ta.hma(cvd, 4)
+root = math.sqrt(math.max(math.abs(delta), 0))
+floor = math.min(root, 2)
+p95 = ta.percentile_linear_interpolation(cvd, 5, 95)
+previous = ta.shift(cvd, 2)
+frame_probe = cvd + timeframe_seconds
+show_hidden = input.bool(False, "Show Hidden")
+plot(cvd, title="CVD", color="#f4f4f5", width=2, pane="oscillator")
+plot(wma, title="WMA", color="#c40024", width=1, pane="oscillator")
+plot(rma, title="RMA", color="#8d8d92", width=1, pane="oscillator")
+plot(hma, title="HMA", color="#d7d7da", width=1, pane="oscillator")
+plot(p95, title="P95", color="#730019", width=1, pane="oscillator")
+plot(floor, title="Hidden", color="#730019", width=1, pane="oscillator", visible=show_hidden)
+plot(previous, title="Previous", color="#730019", width=1, pane="oscillator", visible=show_hidden)
+plot(frame_probe, title="Frame Probe", color="#730019", width=1, pane="oscillator", visible=show_hidden)`;
+const cvdRuntimeResult = compileAndRunScript(cvdRuntimeCoverage, candles);
+assert.equal(cvdRuntimeResult.success, true, JSON.stringify(cvdRuntimeResult.errors));
+assert.equal(cvdRuntimeResult.plots.length, 8);
+assert.ok(cvdRuntimeResult.plots.every((plot) => plot.pane === "oscillator"), "CVD-family plots must remain isolated from the price domain");
+assert.equal(cvdRuntimeResult.plots.at(-1)?.visible, false, "plot visibility must honor a scalar settings toggle");
+const expectedCumulative: number[] = [];
+let cumulative = 0;
+for (const candle of candles) {
+  cumulative += candle.close - candle.open;
+  expectedCumulative.push(cumulative);
+}
+assert.deepEqual(cvdRuntimeResult.plots[0].values, expectedCumulative, "ta.cum must produce deterministic append-only cumulative delta");
+assert.deepEqual(cvdRuntimeResult.plots[6].values.slice(2), expectedCumulative.slice(0, -2), "ta.shift must expose only past values");
+assert.deepEqual(cvdRuntimeResult.plots[7].values, expectedCumulative.map((value) => value + 60), "timeframe_seconds must match the authoritative candle interval");
+for (const plot of cvdRuntimeResult.plots.slice(1)) assert.equal(plot.values.length, candles.length);
+const cvdPrefixResult = compileAndRunScript(cvdRuntimeCoverage, candles.slice(0, -4));
+assert.equal(cvdPrefixResult.success, true, JSON.stringify(cvdPrefixResult.errors));
+for (let plotIndex = 0; plotIndex < cvdPrefixResult.plots.length; plotIndex += 1) {
+  assert.deepEqual(cvdRuntimeResult.plots[plotIndex].values.slice(0, -4), cvdPrefixResult.plots[plotIndex].values, `extended vector plot ${plotIndex} repainted after future append`);
+}
+
+const convertedCvdMaSource = readFileSync(new URL("../docs/indicators/cvd-ma-black-terminal.py", import.meta.url), "utf8");
+const convertedCvdMaResult = compileAndRunScript(convertedCvdMaSource, candles);
+assert.equal(convertedCvdMaResult.success, true, JSON.stringify(convertedCvdMaResult.errors));
+assert.equal(convertedCvdMaResult.plots.length, 15, "the complete non-divergence CVD-MA conversion must expose every configured line and channel boundary");
+assert.equal(convertedCvdMaResult.alertConditions.length, 14, "the CVD-MA conversion must preserve all non-divergence state alerts");
+assert.ok(convertedCvdMaResult.plots.every((plot) => plot.pane === "oscillator"), "the converted CVD-MA must never contaminate the price scale");
+assert.doesNotMatch(convertedCvdMaSource, /show_divergence|pivot_memory|swing_atr_mult/, "the requested conversion must omit the Pine divergence subsystem");
+
 const strategy = `${indicator}
 strategy.entry("Long Entry", strategy.long, when=long_signal)
 strategy.entry("Short Entry", strategy.short, when=short_signal)
@@ -151,6 +199,9 @@ assert.match(chartSource, /replayActiveRef\.current/, "Replay must not emit cust
 assert.match(chartSource, /alertSettingsRef\.current\.enabled/, "custom external delivery must honor the alert master switch");
 assert.match(engineSource, /marker\.signalPrice/, "the chart must render markers at their finalized signal price");
 assert.match(engineSource, /0x39ff88/, "the chart must render the phosphor-green signal-price micro-tick");
+assert.match(engineSource, /plot\.pane === "oscillator"/, "custom oscillator plots must be excluded from the price-scale renderer");
+assert.match(engineSource, /customOscillatorPlots/, "custom oscillator plots must render in an isolated pane");
+assert.match(engineSource, /plot\.visible !== false/, "hidden custom plots must not reserve or render a chart pane");
 assert.match(strategyAdapterSource, /not wired yet|not available/i, "uncertified headless Python automation must remain fail closed");
 
 console.log("Black Terminal Python indicator/strategy/alert runtime: PASS");

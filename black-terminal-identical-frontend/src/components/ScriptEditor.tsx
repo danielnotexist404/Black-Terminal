@@ -251,7 +251,7 @@ export function ScriptEditor({
   // Basic regex highlighters for the editor overlay
   const renderHighlightedCode = () => {
     const keywords = /\b(def|if|else|elif|and|or|not|in|for|while|return)\b/g;
-    const builtins = /\b(plotshape|plot|alertcondition|alert|ta\.ema|ta\.sma|ta\.rsi|ta\.atr|ta\.stdev|ta\.highest|ta\.lowest|ta\.change|ta\.crossover|ta\.crossunder|strategy\.entry|strategy\.exit|input\.int|input\.float|input\.bool|input\.string|math\.abs|nz)\b/g;
+    const builtins = /\b(plotshape|plot|alertcondition|alert|select|ta\.ema|ta\.sma|ta\.wma|ta\.rma|ta\.hma|ta\.cum|ta\.rsi|ta\.atr|ta\.stdev|ta\.highest|ta\.lowest|ta\.percentile_linear_interpolation|ta\.shift|ta\.change|ta\.crossover|ta\.crossunder|strategy\.entry|strategy\.exit|input\.int|input\.float|input\.bool|input\.string|math\.abs|math\.sqrt|math\.max|math\.min|nz)\b/g;
     const strings = /(["'])(?:(?=(\\?))\2.)*?\1/g;
     const comments = /(#.*)/g;
     const numbers = /\b(\d+(?:\.\d+)?)\b/g;

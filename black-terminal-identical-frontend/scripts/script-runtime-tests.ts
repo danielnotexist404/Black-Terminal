@@ -11,6 +11,7 @@ import type { Candle } from "../src/chart-engine/types.ts";
 import {
   mergeCustomScriptOutput,
   mountCustomScript,
+  nextCustomScriptProjectionRevision,
   unmountCustomScript
 } from "../src/scripts/customScriptLifecycle.ts";
 
@@ -168,6 +169,17 @@ assert.equal(mounted.length, 2, "hiding a custom script must not unload its save
 mounted = unmountCustomScript(mounted, activation.id);
 assert.deepEqual(mounted.map(({ activation: item }) => item.id), [secondActivation.id], "closing one script must preserve every other mounted script");
 
+let projectionRevision = 0;
+for (const engineLocalRevision of [1, 1, 1]) {
+  void engineLocalRevision;
+  projectionRevision = nextCustomScriptProjectionRevision(projectionRevision);
+}
+assert.equal(
+  projectionRevision,
+  3,
+  "identical feed revisions from replacement timeframe engines must each trigger a custom-script projection"
+);
+
 const editorSource = readFileSync(new URL("../src/components/ScriptEditor.tsx", import.meta.url), "utf8");
 const chartSource = readFileSync(new URL("../src/components/PixiBlackChart.tsx", import.meta.url), "utf8");
 const librarySource = readFileSync(new URL("../src/components/IndicatorLibrary.tsx", import.meta.url), "utf8");
@@ -183,6 +195,7 @@ assert.match(editorSource, /Run \/ Add to chart/, "Run must be the explicit char
 assert.match(chartSource, /custom-script-row/, "mounted user scripts must have an independent chart-list row");
 assert.match(chartSource, /onRemoveCustomScript/, "mounted user scripts must be removable without deleting saved source");
 assert.match(chartSource, /onToggleCustomScriptVisibility/, "mounted user scripts must have an independent hide control");
+assert.match(chartSource, /setCustomScriptFeedRevision\(nextCustomScriptProjectionRevision\)/, "timeframe engine replacement must advance an app-scoped custom-script projection revision");
 assert.match(chartSource, /CustomScriptSettingsPanel/, "mounted user scripts must expose native-style settings");
 assert.match(chartSource, /extractScriptInputs/, "custom settings must be derived from deterministic input declarations");
 assert.match(librarySource, /dbGetCurrentUserScripts/, "My Indicators must load from authenticated owner storage");

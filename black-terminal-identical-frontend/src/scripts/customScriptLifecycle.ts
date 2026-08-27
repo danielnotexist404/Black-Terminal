@@ -10,6 +10,16 @@ export type MountedCustomScript = {
   result: CompileResult;
 };
 
+/**
+ * Produces an application-scoped projection revision. Chart engines are
+ * replaced when the market or timeframe changes and their own feed revision
+ * counters restart from zero, so those engine-local values cannot safely be
+ * stored directly in React state.
+ */
+export function nextCustomScriptProjectionRevision(current: number): number {
+  return current >= Number.MAX_SAFE_INTEGER ? 1 : current + 1;
+}
+
 export function mountCustomScript(
   mounted: readonly MountedCustomScript[],
   next: MountedCustomScript

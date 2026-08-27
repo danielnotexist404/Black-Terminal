@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, SetStateAction } from "react";
 import { Bell, Brush, Columns3, Copy, Eye, EyeOff, Minus, Play, Plus, SlidersHorizontal, Square, TrendingUp, Type, X } from "lucide-react";
 import { BlackChartEngine } from "../chart-engine/BlackChartEngine";
@@ -60,7 +60,10 @@ import {
   type CompiledScriptActivation,
   type ScriptInputValue
 } from "./ScriptCompiler";
-import { mergeCustomScriptOutput } from "../scripts/customScriptLifecycle";
+import {
+  mergeCustomScriptOutput,
+  nextCustomScriptProjectionRevision
+} from "../scripts/customScriptLifecycle";
 import { getMarketDataEngineAdapter } from "../market-data/engine/marketDataEngine";
 import { ExchangeId, MarketDataAdapter, MarketDataSubscription, MarketSymbol, Timeframe } from "../market-data/types";
 import {
@@ -523,6 +526,9 @@ export function PixiBlackChart({
   const [lastPrice, setLastPrice] = useState(66678.1);
   const [lastCandle, setLastCandle] = useState<Candle | null>(null);
   const [customScriptFeedRevision, setCustomScriptFeedRevision] = useState(0);
+  const handleCustomScriptFeedChange = useCallback(() => {
+    setCustomScriptFeedRevision(nextCustomScriptProjectionRevision);
+  }, []);
   const [aifPriceTransform, setAifPriceTransform] = useState<ChartPriceTransformSnapshot | null>(null);
   const [kioseffSnapshot, setKioseffSnapshot] = useState<KioseffSnapshot | null>(null);
   const [ddaProSnapshot, setDDAProSnapshot] = useState<DDAProSnapshot | null>(null);
@@ -1465,7 +1471,7 @@ export function PixiBlackChart({
         pendingUiCandle = candle;
         scheduleChartUiState();
       },
-      onScriptFeedChange: setCustomScriptFeedRevision,
+      onScriptFeedChange: handleCustomScriptFeedChange,
       onPriceTransformChange: (transform) => {
         if (aifActiveRef.current || qalcActiveRef.current || liquidationFieldActiveRef.current) setAifPriceTransform(transform);
         priceTransformCallbackRef.current?.(transform);

@@ -1,13 +1,24 @@
 import { createClient } from "@supabase/supabase-js";
+import { BLACK_TERMINAL_AUTH_STORAGE_KEY, prepareSupabaseAuthStorage } from "../auth/supabaseAuthStorage";
 import type { ProductTier, TerminalCapability } from "../core/permissions/capabilities";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
+const configuredSupabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
+const supabaseUrl = configuredSupabaseUrl;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
 
 export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
 
+prepareSupabaseAuthStorage(configuredSupabaseUrl, supabaseUrl);
+
 export const supabase = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        storageKey: BLACK_TERMINAL_AUTH_STORAGE_KEY,
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    })
   : null;
 
 const GOOGLE_OAUTH_INTENT_KEY = "bt_google_oauth_intent";
@@ -473,7 +484,10 @@ export async function dbUpdateUser(username: string, patch: Partial<DBUser> & { 
  */
 export async function dbGetCurrentUserScripts(): Promise<any[]> {
   if (!isSupabaseConfigured || !supabase) return [];
-  const { data: authData, error: authError } = await supabase.auth.getUser();
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
+  if (!accessToken) throw new Error("Your secure session is unavailable. Sign in again; your editor draft has been kept open.");
+  const { data: authData, error: authError } = await supabase.auth.getUser(accessToken);
   if (authError) throw authError;
   if (!authData.user) throw new Error("Authenticated script storage session is unavailable.");
 
@@ -492,7 +506,10 @@ export async function dbSaveCurrentUserScripts(scripts: any[]): Promise<void> {
   if (!isSupabaseConfigured || !supabase) {
     throw new Error("VPS-backed script storage is unavailable.");
   }
-  const { data: authData, error: authError } = await supabase.auth.getUser();
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
+  if (!accessToken) throw new Error("Your secure session is unavailable. Sign in again; your editor draft has been kept open.");
+  const { data: authData, error: authError } = await supabase.auth.getUser(accessToken);
   if (authError) throw authError;
   if (!authData.user) throw new Error("Authenticated script storage session is unavailable.");
 

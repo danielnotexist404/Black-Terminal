@@ -90,7 +90,7 @@ for (let plotIndex = 0; plotIndex < cvdPrefixResult.plots.length; plotIndex += 1
   assert.deepEqual(cvdRuntimeResult.plots[plotIndex].values.slice(0, -4), cvdPrefixResult.plots[plotIndex].values, `extended vector plot ${plotIndex} repainted after future append`);
 }
 
-const convertedCvdMaSource = readFileSync(new URL("../docs/indicators/cvd-ma-black-terminal.py", import.meta.url), "utf8");
+const convertedCvdMaSource = readFileSync(new URL("./examples/cvd-ma-black-terminal.py", import.meta.url), "utf8");
 const convertedCvdMaResult = compileAndRunScript(convertedCvdMaSource, candles);
 assert.equal(convertedCvdMaResult.success, true, JSON.stringify(convertedCvdMaResult.errors));
 assert.equal(convertedCvdMaResult.plots.length, 15, "the complete non-divergence CVD-MA conversion must expose every configured line and channel boundary");

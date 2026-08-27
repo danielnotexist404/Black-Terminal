@@ -4,6 +4,10 @@ import type { AuctionProfileSettings, AuctionScopeWindow } from "./types.ts";
 const DAY_SECONDS = 86_400;
 const formatterCache = new Map<string, Intl.DateTimeFormat>();
 
+export function auctionScopeUsesSessionControls(scopeMode: AuctionProfileSettings["scopeMode"]) {
+  return scopeMode === "SESSION";
+}
+
 function formatterFor(timeZone: string) {
   const cached = formatterCache.get(timeZone);
   if (cached) return cached;

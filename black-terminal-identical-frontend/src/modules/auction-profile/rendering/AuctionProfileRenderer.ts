@@ -37,6 +37,16 @@ function labelVisible(mode: AuctionProfileSettings["rendering"]["rowLabelMode"],
   return width >= 28 && height >= 9;
 }
 
+export function auctionLvnFillOpacity(prominence: number, settings: AuctionProfileSettings["rendering"]) {
+  const base = Math.max(0, Math.min(1, settings.lvnFillOpacity));
+  const strong = Math.max(base, Math.min(1, settings.lvnStrongFillOpacity));
+  const threshold = Math.max(0.05, Math.min(1, settings.lvnFullColorProminence));
+  const strength = Math.max(0, Math.min(1, prominence / threshold));
+  return prominence >= threshold
+    ? strong
+    : base + (strong - base) * Math.pow(strength, 1.45);
+}
+
 export function auctionProfileDrawSignature(
   snapshots: readonly AuctionProfileSnapshot[],
   settings: AuctionProfileSettings,
@@ -233,7 +243,7 @@ export class AuctionProfileRenderer {
         });
       }
     }
-    const minimumProminence = Math.max(settings.nodeDetection.prominence, settings.rendering.structuralDetail === "MINIMAL" ? 0.42 : 0.3);
+    const minimumProminence = settings.nodeDetection.prominence;
     const ranked = structureVisible
       ? [...snapshot.nodes]
         .filter(node => node.prominence >= minimumProminence && (node.type === "LVN" || node.normalizedScore >= 0.55))
@@ -249,7 +259,14 @@ export class AuctionProfileRenderer {
       const height = Math.max(2, Math.abs(bottom - top));
       if (y + height < transform.top || y > transform.bottom) continue;
       const color = auctionColorNumber(node.type === "LVN" ? settings.rendering.lvnColor : settings.rendering.hvnColor);
-      this.nodes.rect(range.left, y, range.width, height).stroke({ color, width: node.type === "LVN" ? 0.75 : 1, alpha: node.type === "LVN" ? 0.58 : 0.76 });
+      const zone = this.nodes.rect(range.left, y, range.width, height);
+      if (node.type === "LVN") {
+        zone.fill({
+          color,
+          alpha: auctionBrightnessAlpha(auctionLvnFillOpacity(node.prominence, settings.rendering), settings.rendering.brightness)
+        });
+      }
+      zone.stroke({ color, width: node.type === "LVN" ? 0.9 : 1, alpha: node.type === "LVN" ? 0.9 : 0.76 });
       if (settings.rendering.showNodeLabels && this.activeTextKeys.size < settings.rendering.maximumVisibleLabels) {
         const labelAtLeft = settings.rendering.profileSide === "LEFT";
         this.text(

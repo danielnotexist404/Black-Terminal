@@ -56,7 +56,10 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
     method: "HYBRID",
     sensitivityPercentile: 10,
     neighborhood: 5,
-    prominence: 0.42,
+    prominence: 0.36,
+    lvnGapAware: true,
+    lvnMaximumActivityRatio: 0.35,
+    lvnRequireTwoSidedAcceptance: true,
     minimumWidthRows: 1,
     maximumGapRows: 1,
     mergeContiguousRows: true,
@@ -77,7 +80,7 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
     displayStyle: "COMBINED",
     presentationMode: "AGGREGATE_HISTOGRAM",
     visualizationType: "AUCTION_PROFILE",
-    profileLayoutRevision: 3,
+    profileLayoutRevision: 4,
     profileBodyStyle: "HDLX_CVD_BLOCKS",
     profileBlockValueMode: "CUMULATIVE_CVD",
     profileBlockPixelWidth: 24,
@@ -114,10 +117,10 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
     maximumVisibleColumns: 500,
     maximumVisibleRows: 300,
     maximumVisibleLabels: 3000,
-    structuralDetail: "MINIMAL",
-    maximumVisibleLvns: 2,
-    maximumVisibleHvns: 1,
-    maximumVisibleStructuralZones: 2,
+    structuralDetail: "STANDARD",
+    maximumVisibleLvns: 6,
+    maximumVisibleHvns: 2,
+    maximumVisibleStructuralZones: 8,
     zoneExtensionMode: "PROFILE_ONLY",
     fixedExtensionBars: 100,
     positiveColor: "#e2e3e5",
@@ -128,6 +131,9 @@ export const AUCTION_PROFILE_DEFAULT_SETTINGS: AuctionProfileSettings = {
     valueAreaFillOpacity: 0.1,
     pocColor: "#ff1738",
     lvnColor: "#4f555d",
+    lvnFillOpacity: 0.22,
+    lvnStrongFillOpacity: 0.72,
+    lvnFullColorProminence: 0.7,
     hvnColor: "#8e0014"
   },
   offChartMetrics: ["CVD_DELTA", "CVD_ACCELERATION", "CVD_EFFICIENCY", "CVD_PERSISTENCE"],
@@ -225,6 +231,9 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
       sensitivityPercentile: finite(n.sensitivityPercentile, d.nodeDetection.sensitivityPercentile, 1, 99),
       neighborhood: integer(n.neighborhood, d.nodeDetection.neighborhood, 1, 50),
       prominence: finite(n.prominence, d.nodeDetection.prominence, 0, 1),
+      lvnGapAware: bool(n.lvnGapAware, d.nodeDetection.lvnGapAware),
+      lvnMaximumActivityRatio: finite(n.lvnMaximumActivityRatio, d.nodeDetection.lvnMaximumActivityRatio, 0.01, 1),
+      lvnRequireTwoSidedAcceptance: bool(n.lvnRequireTwoSidedAcceptance, d.nodeDetection.lvnRequireTwoSidedAcceptance),
       minimumWidthRows: integer(n.minimumWidthRows, d.nodeDetection.minimumWidthRows, 1, 100),
       maximumGapRows: integer(n.maximumGapRows, d.nodeDetection.maximumGapRows, 0, 50),
       mergeContiguousRows: bool(n.mergeContiguousRows, d.nodeDetection.mergeContiguousRows),
@@ -296,6 +305,9 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
       valueAreaFillOpacity: finite(r.valueAreaFillOpacity, d.rendering.valueAreaFillOpacity, 0, 0.6),
       pocColor: color(r.pocColor, d.rendering.pocColor),
       lvnColor: color(r.lvnColor, d.rendering.lvnColor),
+      lvnFillOpacity: finite(r.lvnFillOpacity, d.rendering.lvnFillOpacity, 0, 1),
+      lvnStrongFillOpacity: finite(r.lvnStrongFillOpacity, d.rendering.lvnStrongFillOpacity, 0, 1),
+      lvnFullColorProminence: finite(r.lvnFullColorProminence, d.rendering.lvnFullColorProminence, 0.05, 1),
       hvnColor: color(r.hvnColor, d.rendering.hvnColor)
     },
     offChartMetrics: Array.isArray(s.offChartMetrics) ? s.offChartMetrics as AuctionProfileSettings["offChartMetrics"] : d.offChartMetrics,
@@ -323,10 +335,11 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
     result.rendering.cellTextMode = "ALWAYS";
     result.rendering.maximumVisibleLabels = Math.max(result.rendering.maximumVisibleLabels, 3000);
   }
-  // Revision 3 introduces a frameless, side-selectable matrix profile with
+  // Revision 3 introduced a frameless, side-selectable matrix profile with
   // independently adjustable horizontal length and a configurable value-area
   // wash. This migration runs once; later user choices remain untouched.
-  if (r.profileLayoutRevision !== 3) {
+  const storedProfileLayoutRevision = integer(r.profileLayoutRevision, 0, 0, 1000);
+  if (storedProfileLayoutRevision < 3) {
     result.rendering.profileLayoutRevision = 3;
     if (result.rendering.profileBodyStyle === "HDLX_CVD_BLOCKS") {
       result.rendering.widthPercent = 30;
@@ -341,6 +354,27 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
       result.rendering.maximumVisibleLvns = Math.min(2, result.rendering.maximumVisibleLvns);
       result.rendering.maximumVisibleHvns = Math.min(1, result.rendering.maximumVisibleHvns);
       result.rendering.maximumVisibleStructuralZones = Math.min(2, result.rendering.maximumVisibleStructuralZones);
+    }
+  }
+  // Revision 4 makes wide, low-activity auction gaps first-class LVN zones
+  // and renders the strongest gaps as filled structure instead of outlines.
+  if (storedProfileLayoutRevision < 4) {
+    result.rendering.profileLayoutRevision = 4;
+    result.nodeDetection.lvnGapAware = true;
+    result.nodeDetection.lvnMaximumActivityRatio = 0.35;
+    result.nodeDetection.lvnRequireTwoSidedAcceptance = true;
+    if (typeof n.prominence !== "number" || Math.abs(result.nodeDetection.prominence - 0.42) < 1e-9) {
+      result.nodeDetection.prominence = 0.36;
+    }
+    const retainedRestrainedDefaults = result.rendering.structuralDetail === "MINIMAL"
+      && result.rendering.maximumVisibleLvns === 2
+      && result.rendering.maximumVisibleHvns === 1
+      && result.rendering.maximumVisibleStructuralZones === 2;
+    if (retainedRestrainedDefaults) {
+      result.rendering.structuralDetail = "STANDARD";
+      result.rendering.maximumVisibleLvns = 6;
+      result.rendering.maximumVisibleHvns = 2;
+      result.rendering.maximumVisibleStructuralZones = 8;
     }
   }
   if (result.implementationMode === "PINE_COMPATIBILITY") {

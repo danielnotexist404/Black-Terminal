@@ -1,6 +1,7 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { AUCTION_PROFILE_DEFAULT_SETTINGS, AUCTION_PROFILE_LOOKBACK_OPTIONS } from "../core/settings.ts";
 import { RADAP_DISPLAY_NAME } from "../core/identity.ts";
+import { auctionScopeUsesSessionControls } from "../core/scope.ts";
 import type { AuctionProfileSettings } from "../core/types.ts";
 
 const OFF_CHART_METRICS: Array<{ value: AuctionProfileSettings["offChartMetrics"][number]; label: string }> = [
@@ -31,6 +32,7 @@ type Props = {
 
 export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Props) {
   const [tab, setTab] = useState<"engine" | "scope" | "grid" | "nodes" | "style" | "quality">("engine");
+  const sessionControlsVisible = auctionScopeUsesSessionControls(settings.scopeMode);
   const patch = (value: Partial<AuctionProfileSettings>) => onChange(current => ({ ...current, ...value }));
   const patchRendering = (value: Partial<AuctionProfileSettings["rendering"]>) => onChange(current => ({ ...current, rendering: { ...current.rendering, ...value } }));
   const patchNodes = (value: Partial<AuctionProfileSettings["nodeDetection"]>) => onChange(current => ({ ...current, nodeDetection: { ...current.nodeDetection, ...value } }));
@@ -96,7 +98,10 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
       next.rendering.profileLengthPercent = 75;
       next.nodeDetection.showLvns = true;
       next.nodeDetection.showHvns = true;
-      next.rendering.structuralDetail = "MINIMAL";
+      next.nodeDetection.lvnGapAware = true;
+      next.rendering.structuralDetail = "STANDARD";
+      next.rendering.maximumVisibleLvns = Math.max(6, next.rendering.maximumVisibleLvns);
+      next.rendering.maximumVisibleStructuralZones = Math.max(8, next.rendering.maximumVisibleStructuralZones);
     } else if (preset === "DEEP_MACRO") {
       next.implementationMode = "BLACK_CORE_NATIVE";
       next.scopeMode = "MACRO_COMPOSITE";
@@ -115,7 +120,10 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
       next.rendering.profileLengthPercent = 75;
       next.nodeDetection.showLvns = true;
       next.nodeDetection.showHvns = true;
-      next.rendering.structuralDetail = "STANDARD";
+      next.nodeDetection.lvnGapAware = true;
+      next.rendering.structuralDetail = "DETAILED";
+      next.rendering.maximumVisibleLvns = Math.max(12, next.rendering.maximumVisibleLvns);
+      next.rendering.maximumVisibleStructuralZones = Math.max(16, next.rendering.maximumVisibleStructuralZones);
     } else {
       next.implementationMode = "BLACK_CORE_NATIVE";
       next.scopeMode = "ROLLING";
@@ -167,9 +175,14 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
         {settings.blockResolution === "CUSTOM" && <label>Custom Block (minutes)<input type="number" min={1} max={525600} value={settings.customBlockMinutes} onChange={event => patch({ customBlockMinutes: Number(event.target.value) })} /></label>}
         <label>Developing Block Live<input type="checkbox" checked={settings.updateDevelopingBlock} onChange={event => patch({ updateDevelopingBlock: event.target.checked })} /></label>
         <label>Maximum Matrix Blocks<input type="number" min={16} max={20000} value={settings.maximumTimeBlocks} onChange={event => patch({ maximumTimeBlocks: Number(event.target.value) })} /></label>
-        <label>Session<select value={settings.sessionTemplate} onChange={event => patch({ sessionTemplate: event.target.value as AuctionProfileSettings["sessionTemplate"] })}><option value="UTC_DAY">UTC Day</option><option value="EXCHANGE_DAY">Exchange Day</option><option value="ASIA">Asia</option><option value="LONDON">London</option><option value="NEW_YORK">New York</option><option value="WEEK">Week</option><option value="MONTH">Month</option><option value="CUSTOM">Custom</option></select></label>
-        <label>Session Timezone<input type="text" value={settings.sessionTimezone} onChange={event => patch({ sessionTimezone: event.target.value })} /></label>
-        <label>Initial Balance (minutes)<input type="number" min={1} max={1440} value={settings.initialBalanceMinutes} onChange={event => patch({ initialBalanceMinutes: Number(event.target.value) })} /></label>
+        {sessionControlsVisible && <>
+          <b>Session Definition</b>
+          <label>Session<select value={settings.sessionTemplate} onChange={event => patch({ sessionTemplate: event.target.value as AuctionProfileSettings["sessionTemplate"] })}><option value="UTC_DAY">UTC Day</option><option value="EXCHANGE_DAY">Exchange Day</option><option value="ASIA">Asia</option><option value="LONDON">London</option><option value="NEW_YORK">New York</option><option value="WEEK">Week</option><option value="MONTH">Month</option><option value="CUSTOM">Custom</option></select></label>
+          <label>Session Timezone<input type="text" value={settings.sessionTimezone} onChange={event => patch({ sessionTimezone: event.target.value })} /></label>
+          <label>Initial Balance (minutes)<input type="number" min={1} max={1440} value={settings.initialBalanceMinutes} onChange={event => patch({ initialBalanceMinutes: Number(event.target.value) })} /></label>
+          {settings.sessionTemplate === "CUSTOM" && <><label>Custom Start Minute<input type="number" min={0} max={1439} value={settings.customSessionStartMinute} onChange={event => patch({ customSessionStartMinute: Number(event.target.value) })} /></label><label>Custom End Minute<input type="number" min={1} max={1440} value={settings.customSessionEndMinute} onChange={event => patch({ customSessionEndMinute: Number(event.target.value) })} /></label></>}
+        </>}
+        {!sessionControlsVisible && <small>Continuous and anchored profiles do not reset on a session boundary. Session timezone and Initial Balance are therefore excluded from their calculation.</small>}
         {(settings.scopeMode === "FIXED_START" || settings.scopeMode === "MANUAL_RANGE") && <label>Start Time<input type="datetime-local" value={toDateTimeLocal(settings.fixedStartTime)} onChange={event => patchTime("fixedStartTime", event.target.value)} /></label>}
         {settings.scopeMode === "MANUAL_RANGE" && <label>End Time<input type="datetime-local" value={toDateTimeLocal(settings.fixedEndTime)} onChange={event => patchTime("fixedEndTime", event.target.value)} /></label>}
         {settings.scopeMode === "PERIODIC_COMPOSITE" && <>
@@ -177,7 +190,6 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
           {settings.periodicity === "CUSTOM_BARS" && <label>Period Bars<input type="number" min={1} max={20000} value={settings.periodicBars} onChange={event => patch({ periodicBars: Number(event.target.value) })} /></label>}
           {settings.periodicity === "CUSTOM_HOURS" && <label>Period Hours<input type="number" min={1} max={8784} value={settings.periodicHours} onChange={event => patch({ periodicHours: Number(event.target.value) })} /></label>}
         </>}
-        {settings.sessionTemplate === "CUSTOM" && <><label>Custom Start Minute<input type="number" min={0} max={1439} value={settings.customSessionStartMinute} onChange={event => patch({ customSessionStartMinute: Number(event.target.value) })} /></label><label>Custom End Minute<input type="number" min={1} max={1440} value={settings.customSessionEndMinute} onChange={event => patch({ customSessionEndMinute: Number(event.target.value) })} /></label></>}
         <label>Lock Composite<input type="checkbox" checked={settings.compositeLocked} onChange={event => patch({ compositeLocked: event.target.checked })} /></label>
         <small>Only Visible Range and Visible Pixel Adaptive rows depend on the camera. Other grids do not change when the chart is zoomed.</small>
       </div>}
@@ -205,6 +217,12 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
         <label>Sensitivity ({settings.nodeDetection.sensitivityPercentile}%)<input type="range" min={1} max={49} value={settings.nodeDetection.sensitivityPercentile} onChange={event => patchNodes({ sensitivityPercentile: Number(event.target.value) })} /></label>
         <label>Prominence ({Math.round(settings.nodeDetection.prominence * 100)}%)<input type="range" min={0} max={80} value={settings.nodeDetection.prominence * 100} onChange={event => patchNodes({ prominence: Number(event.target.value) / 100 })} /></label>
         <label>Neighborhood<input type="number" min={1} max={50} value={settings.nodeDetection.neighborhood} onChange={event => patchNodes({ neighborhood: Number(event.target.value) })} /></label>
+        <label>Gap-Aware LVN Zones<input type="checkbox" checked={settings.nodeDetection.lvnGapAware} onChange={event => patchNodes({ lvnGapAware: event.target.checked })} /></label>
+        {settings.nodeDetection.lvnGapAware && <>
+          <label>Maximum Valley Activity ({Math.round(settings.nodeDetection.lvnMaximumActivityRatio * 100)}%)<input type="range" min={1} max={100} value={settings.nodeDetection.lvnMaximumActivityRatio * 100} onChange={event => patchNodes({ lvnMaximumActivityRatio: Number(event.target.value) / 100 })} /></label>
+          <label>Require Acceptance Above + Below<input type="checkbox" checked={settings.nodeDetection.lvnRequireTwoSidedAcceptance} onChange={event => patchNodes({ lvnRequireTwoSidedAcceptance: event.target.checked })} /></label>
+          <small>Wide low-activity rows are evaluated as one auction gap against acceptance immediately above and below the complete valley.</small>
+        </>}
         <label>Minimum Width Rows<input type="number" min={1} max={100} value={settings.nodeDetection.minimumWidthRows} onChange={event => patchNodes({ minimumWidthRows: Number(event.target.value) })} /></label>
         <label>Maximum Gap Rows<input type="number" min={0} max={50} value={settings.nodeDetection.maximumGapRows} onChange={event => patchNodes({ maximumGapRows: Number(event.target.value) })} /></label>
         <label>Merge Contiguous Rows<input type="checkbox" checked={settings.nodeDetection.mergeContiguousRows} onChange={event => patchNodes({ mergeContiguousRows: event.target.checked })} /></label>
@@ -261,8 +279,11 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
         <label>Value Area Background<input type="color" value={settings.rendering.valueAreaFillColor} onChange={event => patchRendering({ valueAreaFillColor: event.target.value })} /></label>
         <label>Value Area Intensity ({Math.round(settings.rendering.valueAreaFillOpacity * 100)}%)<input type="range" min={0} max={60} step={1} value={settings.rendering.valueAreaFillOpacity * 100} onChange={event => patchRendering({ valueAreaFillOpacity: Number(event.target.value) / 100 })} /></label>
         <label>LVN<input type="color" value={settings.rendering.lvnColor} onChange={event => patchRendering({ lvnColor: event.target.value })} /></label><label>HVN<input type="color" value={settings.rendering.hvnColor} onChange={event => patchRendering({ hvnColor: event.target.value })} /></label>
+        <label>LVN Fill Intensity ({Math.round(settings.rendering.lvnFillOpacity * 100)}%)<input type="range" min={0} max={100} step={1} value={settings.rendering.lvnFillOpacity * 100} onChange={event => patchRendering({ lvnFillOpacity: Number(event.target.value) / 100 })} /></label>
+        <label>Strong LVN Intensity ({Math.round(settings.rendering.lvnStrongFillOpacity * 100)}%)<input type="range" min={0} max={100} step={1} value={settings.rendering.lvnStrongFillOpacity * 100} onChange={event => patchRendering({ lvnStrongFillOpacity: Number(event.target.value) / 100 })} /></label>
+        <label>Full-Color Prominence ({Math.round(settings.rendering.lvnFullColorProminence * 100)}%)<input type="range" min={5} max={100} step={1} value={settings.rendering.lvnFullColorProminence * 100} onChange={event => patchRendering({ lvnFullColorProminence: Number(event.target.value) / 100 })} /></label>
         <label>Show Values<input type="checkbox" checked={settings.rendering.showText} onChange={event => patchRendering({ showText: event.target.checked })} /></label><label>Show Key Levels<input type="checkbox" checked={settings.rendering.showKeyLevels} onChange={event => patchRendering({ showKeyLevels: event.target.checked })} /></label><label>Show Node Labels<input type="checkbox" checked={settings.rendering.showNodeLabels} onChange={event => patchRendering({ showNodeLabels: event.target.checked })} /></label>
-        <label>Show Value Area<input type="checkbox" checked={settings.rendering.showValueArea} onChange={event => patchRendering({ showValueArea: event.target.checked })} /></label><label>Show Initial Balance<input type="checkbox" checked={settings.rendering.showInitialBalance} onChange={event => patchRendering({ showInitialBalance: event.target.checked })} /></label><label>Show Off-Chart Panel<input type="checkbox" checked={settings.rendering.showOffChart} onChange={event => patchRendering({ showOffChart: event.target.checked })} /></label>
+        <label>Show Value Area<input type="checkbox" checked={settings.rendering.showValueArea} onChange={event => patchRendering({ showValueArea: event.target.checked })} /></label>{sessionControlsVisible && <label>Show Initial Balance<input type="checkbox" checked={settings.rendering.showInitialBalance} onChange={event => patchRendering({ showInitialBalance: event.target.checked })} /></label>}<label>Show Off-Chart Panel<input type="checkbox" checked={settings.rendering.showOffChart} onChange={event => patchRendering({ showOffChart: event.target.checked })} /></label>
         {settings.rendering.showOffChart && <>{OFF_CHART_METRICS.map(metric => <label key={metric.value}>{metric.label}<input type="checkbox" checked={settings.offChartMetrics.includes(metric.value)} onChange={event => toggleOffChartMetric(metric.value, event.target.checked)} /></label>)}</>}
       </div>}
 

@@ -5,13 +5,14 @@ import { stableHash } from "../src/modules/auction-profile/core/canonical.ts";
 import { RADAP_DISPLAY_NAME, RADAP_FULL_NAME, RADAP_SHORT_NAME } from "../src/modules/auction-profile/core/identity.ts";
 import { retainCertifiedRadapSnapshots } from "../src/modules/auction-profile/core/stability.ts";
 import { resolveAuctionProfileReplayWindow } from "../src/modules/auction-profile/core/replay.ts";
+import { detectAuctionNodes } from "../src/modules/auction-profile/core/nodes.ts";
 import { createAuctionProfileGrid } from "../src/modules/auction-profile/core/profileGrid.ts";
-import { resolveAuctionScopeWindows } from "../src/modules/auction-profile/core/scope.ts";
+import { auctionScopeUsesSessionControls, resolveAuctionScopeWindows } from "../src/modules/auction-profile/core/scope.ts";
 import { auctionHistogramWidth, auctionProfileHorizontalBounds, auctionProfileStartX } from "../src/modules/auction-profile/rendering/histogram.ts";
 import { auctionCellRenderStrides, downsampleAuctionCells } from "../src/modules/auction-profile/rendering/cells.ts";
 import { auctionCellTextVisible, formatAuctionCellMetric } from "../src/modules/auction-profile/rendering/labels.ts";
 import { CVD_FOOTPRINT_RENDERER_KIND, auctionCellColor } from "../src/modules/auction-profile/rendering/footprint/CvdFootprintRenderer.ts";
-import { auctionProfileDrawSignature } from "../src/modules/auction-profile/rendering/AuctionProfileRenderer.ts";
+import { auctionLvnFillOpacity, auctionProfileDrawSignature } from "../src/modules/auction-profile/rendering/AuctionProfileRenderer.ts";
 import { AUCTION_PROFILE_RENDERER_KIND, auctionProfileBarSpans, auctionProfileEffectiveWidthPercent, buildAuctionProfileRows, compressAuctionProfileSegments, resolveAuctionProfilePlacement, resolveAuctionProfileRangeBounds } from "../src/modules/auction-profile/core/profileGeometry.ts";
 import { resolveAuctionVisualizationLayers } from "../src/modules/auction-profile/rendering/visualization.ts";
 import { validateAuctionProfileInvariants } from "../src/modules/auction-profile/testing/nativeValidation.ts";
@@ -24,7 +25,7 @@ import { auctionProfileSettingsForDevice, RADAP_TABLET_RENDER_BUDGET } from "../
 import { isIpadClassDevice, resolveChartDeviceCapabilities } from "../src/chart-engine/deviceCapabilities.ts";
 import { canUseIndicator } from "../src/features/premium.ts";
 import type { Candle } from "../src/chart-engine/types.ts";
-import type { CanonicalTrade } from "../src/modules/auction-profile/core/types.ts";
+import type { AuctionProfileRow, CanonicalTrade } from "../src/modules/auction-profile/core/types.ts";
 import type { AuctionProfileWorkerResponse } from "../src/modules/auction-profile/worker/protocol.ts";
 
 const bars: Candle[] = Array.from({ length: 12 }, (_, index) => ({
@@ -168,7 +169,7 @@ assert.equal(settings.rendering.profileBlockValueMode, "CUMULATIVE_CVD");
 assert.equal(settings.rendering.profileGeometry, "SINGLE_SIDED_RIGHT");
 assert.equal(settings.rendering.profilePlacement, "RANGE_START");
 assert.equal(settings.rendering.profileWidthMetric, "CVD_ACTIVITY");
-assert.equal(settings.rendering.profileLayoutRevision, 3);
+assert.equal(settings.rendering.profileLayoutRevision, 4);
 assert.equal(settings.rendering.widthPercent, 30);
 assert.equal(settings.rendering.profileSide, "LEFT");
 assert.equal(settings.rendering.profileLengthPercent, 75);
@@ -192,16 +193,79 @@ assert.notEqual(
 assert.equal(settings.rendering.timeSegmentsMode, "STACKED", "the profile silhouette must be built from chronological CVD cells");
 assert.equal(settings.nodeDetection.showLvns, true, "restrained LVN context is enabled by default");
 assert.equal(settings.nodeDetection.showHvns, true, "restrained HVN context is enabled by default");
-assert.equal(settings.rendering.maximumVisibleLvns, 2);
-assert.equal(settings.rendering.maximumVisibleHvns, 1);
-assert.ok(settings.nodeDetection.prominence >= 0.42);
+assert.equal(settings.nodeDetection.lvnGapAware, true);
+assert.equal(settings.nodeDetection.lvnMaximumActivityRatio, 0.35);
+assert.equal(settings.nodeDetection.lvnRequireTwoSidedAcceptance, true);
+assert.equal(settings.rendering.maximumVisibleLvns, 6);
+assert.equal(settings.rendering.maximumVisibleHvns, 2);
+assert.equal(settings.rendering.maximumVisibleStructuralZones, 8);
+assert.equal(settings.nodeDetection.prominence, 0.36);
 assert.equal(settings.nodeDetection.sensitivityPercentile, 10);
 assert.equal(settings.rendering.showNodeLabels, false);
 assert.equal(settings.rendering.showMidpoint, false);
 assert.equal(settings.rendering.showStructuralSr, false);
 assert.equal(settings.rendering.showHistoricalExtensions, false);
-assert.equal(settings.rendering.structuralDetail, "MINIMAL");
+assert.equal(settings.rendering.structuralDetail, "STANDARD");
 assert.equal(settings.rendering.zoneExtensionMode, "PROFILE_ONLY");
+assert.equal(settings.rendering.lvnFillOpacity, 0.22);
+assert.equal(settings.rendering.lvnStrongFillOpacity, 0.72);
+assert.equal(settings.rendering.lvnFullColorProminence, 0.7);
+assert.equal(auctionLvnFillOpacity(0.8, settings.rendering), 0.72, "high-prominence LVNs must receive configured full-color intensity");
+assert.ok(auctionLvnFillOpacity(0.2, settings.rendering) > settings.rendering.lvnFillOpacity, "developing LVNs must interpolate above base fill intensity");
+
+const gapActivity = [100, 120, 110, 4, 2, 3, 100, 130, 110];
+const gapRows: AuctionProfileRow[] = gapActivity.map((totalQuantity, index) => ({
+  index,
+  low: 100 + index,
+  high: 101 + index,
+  center: 100.5 + index,
+  value: totalQuantity,
+  buyQuantity: totalQuantity * 0.55,
+  sellQuantity: totalQuantity * 0.45,
+  unknownQuantity: 0,
+  totalQuantity,
+  buyNotional: totalQuantity * 100,
+  sellNotional: totalQuantity * 100,
+  unknownNotional: 0,
+  tradeCount: totalQuantity,
+  averageTradeSize: 1,
+  maximumTradeSize: 1,
+  tpoCount: totalQuantity,
+  realizedVariance: 0,
+  parkinsonVariance: 0,
+  garmanKlassVariance: 0,
+  rangeExpansion: 0,
+  cvdEfficiency: 0.1,
+  cvdPersistence: 0,
+  hybridScore: totalQuantity,
+  inValueArea: false
+}));
+const gapSettings = migrateAuctionProfileSettings({
+  ...settings,
+  nodeDetection: {
+    ...settings.nodeDetection,
+    source: "VOLUME",
+    method: "HYBRID",
+    sensitivityPercentile: 30,
+    neighborhood: 2,
+    prominence: 0.5,
+    minimumWidthRows: 2,
+    maximumGapRows: 0,
+    lvnGapAware: true,
+    lvnMaximumActivityRatio: 0.1,
+    lvnRequireTwoSidedAcceptance: true
+  }
+});
+const wideGap = detectAuctionNodes(gapRows, gapSettings, input.now, "wide-gap-v1").find(node => node.type === "LVN");
+assert.ok(wideGap, "a wide low-activity auction gap must be detected as one LVN zone");
+assert.deepEqual(wideGap.componentRowIndices, [3, 4, 5]);
+assert.equal(wideGap.widthRows, 3);
+assert.ok(wideGap.prominence > 0.95, "wide-gap prominence must compare the valley with acceptance outside it");
+const isolatedMinima = detectAuctionNodes(gapRows, migrateAuctionProfileSettings({
+  ...gapSettings,
+  nodeDetection: { ...gapSettings.nodeDetection, lvnGapAware: false }
+}), input.now, "isolated-minima-v1").filter(node => node.type === "LVN");
+assert.equal(isolatedMinima.length, 0, "isolated-minimum mode must not misrepresent a multi-row valley when its minimum width is unmet");
 assert.equal(snapshot.engineVersion, "bc-meap-2.0.0");
 assert.ok(snapshot.matrix.blocks.length > 0);
 assert.ok(snapshot.matrix.cells.length > 0);
@@ -550,6 +614,11 @@ assert.ok(macroA && macroB);
 assert.equal(macroA.profileVersion, macroB.profileVersion, "Macro profile hash must be camera-independent");
 assert.deepEqual(macroA.rows, macroB.rows, "zoom and pan ranges must not alter Macro aggregate rows");
 assert.equal(macroA.diagnostics.viewportAffectsCalculation, false);
+assert.equal(macroA.keyLevels.ibHigh, null, "Macro Composite must not calculate a synthetic Initial Balance");
+assert.equal(macroA.keyLevels.ibLow, null, "Macro Composite must not calculate a synthetic Initial Balance");
+assert.equal(auctionScopeUsesSessionControls("SESSION"), true);
+assert.equal(auctionScopeUsesSessionControls("COMPOSITE"), false);
+assert.equal(auctionScopeUsesSessionControls("MACRO_COMPOSITE"), false);
 
 const composite = calculateAuctionProfiles({
   ...input,
@@ -559,6 +628,18 @@ const composite = calculateAuctionProfiles({
 });
 assert.equal(composite.length, 1, "Composite mode must emit one combined range profile");
 assert.equal(composite[0]!.range.loadedBars, 48);
+assert.equal(composite[0]!.keyLevels.ibHigh, null, "Composite must not expose session-only Initial Balance levels");
+assert.equal(composite[0]!.keyLevels.ibLow, null, "Composite must not expose session-only Initial Balance levels");
+
+const sessionProfiles = calculateAuctionProfiles({
+  ...input,
+  bars: scopeBars,
+  trades: [],
+  settings: migrateAuctionProfileSettings({ ...settings, scopeMode: "SESSION", lookbackBars: 48, dataSource: "CHART_BARS" })
+});
+assert.ok(sessionProfiles.length > 0);
+assert.notEqual(sessionProfiles.at(-1)!.keyLevels.ibHigh, null, "Session mode must retain its Initial Balance calculation");
+assert.notEqual(sessionProfiles.at(-1)!.keyLevels.ibLow, null, "Session mode must retain its Initial Balance calculation");
 
 const independentModes = [
   ["MACRO_COMPOSITE", "DYNAMIC_BLOCKS"],

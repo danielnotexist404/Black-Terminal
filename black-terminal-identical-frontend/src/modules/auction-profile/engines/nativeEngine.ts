@@ -4,7 +4,7 @@ import { appendTradesToAuctionMatrix, buildAuctionBlockMatrix } from "../core/bl
 import { auctionProfileVersion, stableHash } from "../core/canonical.ts";
 import { detectAuctionNodes } from "../core/nodes.ts";
 import { auctionRowIndex, createAuctionProfileGrid } from "../core/profileGrid.ts";
-import { resolveAuctionScopeWindows, scopeBars } from "../core/scope.ts";
+import { auctionScopeUsesSessionControls, resolveAuctionScopeWindows, scopeBars } from "../core/scope.ts";
 import { AUCTION_PROFILE_ENGINE_VERSION } from "../core/types.ts";
 import type {
   AuctionOffChartPoint,
@@ -241,8 +241,12 @@ function buildScope(
   }
 
   const ibEnd = scope.start + input.settings.initialBalanceMinutes * 60;
-  const ibBars = bars.filter(bar => bar.time <= ibEnd);
-  const initialBalance = ibBars.length ? { high: Math.max(...ibBars.map(bar => bar.high)), low: Math.min(...ibBars.map(bar => bar.low)) } : undefined;
+  const ibBars = auctionScopeUsesSessionControls(input.settings.scopeMode)
+    ? bars.filter(bar => bar.time <= ibEnd)
+    : [];
+  const initialBalance = ibBars.length
+    ? { high: Math.max(...ibBars.map(bar => bar.high)), low: Math.min(...ibBars.map(bar => bar.low)) }
+    : undefined;
   const dataHash = stableHash({
     bars: bars.map(bar => [bar.time, bar.open, bar.high, bar.low, bar.close, bar.volume]),
     trades: trades.map(trade => [trade.timestamp, trade.tradeId, trade.price, trade.quantity, trade.aggressorSide, trade.source])

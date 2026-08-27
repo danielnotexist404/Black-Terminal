@@ -235,6 +235,9 @@ export interface NodeDetectionSettings {
   sensitivityPercentile: number;
   neighborhood: number;
   prominence: number;
+  lvnGapAware: boolean;
+  lvnMaximumActivityRatio: number;
+  lvnRequireTwoSidedAcceptance: boolean;
   minimumWidthRows: number;
   maximumGapRows: number;
   mergeContiguousRows: boolean;
@@ -297,6 +300,9 @@ export interface AuctionProfileRenderingSettings {
   valueAreaFillOpacity: number;
   pocColor: string;
   lvnColor: string;
+  lvnFillOpacity: number;
+  lvnStrongFillOpacity: number;
+  lvnFullColorProminence: number;
   hvnColor: string;
 }
 

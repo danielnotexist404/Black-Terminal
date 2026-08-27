@@ -34,6 +34,14 @@ function mergeCandidates(candidates: number[], maximumGap: number) {
   return groups;
 }
 
+function average(values: readonly number[]) {
+  return values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+}
+
+function inclusiveIndices(first: number, last: number) {
+  return Array.from({ length: last - first + 1 }, (_, offset) => first + offset);
+}
+
 export function detectAuctionNodes(
   rows: readonly AuctionProfileRow[],
   settings: AuctionProfileSettings,
@@ -58,25 +66,49 @@ export function detectAuctionNodes(
     if ((type === "LVN" && !settings.nodeDetection.showLvns) || (type === "HVN" && !settings.nodeDetection.showHvns)) continue;
     const candidates = values
       .map((value, index) => ({ value, index }))
-      .filter(({ value, index }) => hasCompleteNeighborhood(index) && (type === "LVN" ? value <= lowThreshold : value >= highThreshold) && local(index, type))
+      .filter(({ value, index }) => hasCompleteNeighborhood(index)
+        && (type === "LVN" ? value <= lowThreshold : value >= highThreshold)
+        && (type === "LVN" && settings.nodeDetection.lvnGapAware ? true : local(index, type)))
       .map(({ index }) => index);
     const groups = settings.nodeDetection.mergeContiguousRows ? mergeCandidates(candidates, settings.nodeDetection.maximumGapRows) : candidates.map(index => [index]);
-    for (const group of groups.filter(item => item.length >= settings.nodeDetection.minimumWidthRows)) {
-      const first = rows[group[0]!]!;
-      const last = rows[group[group.length - 1]!]!;
-      const rawScore = group.reduce((sum, index) => sum + values[index]!, 0) / group.length;
+    for (const group of groups) {
+      const firstIndex = group[0]!;
+      const lastIndex = group[group.length - 1]!;
+      const componentRowIndices = inclusiveIndices(firstIndex, lastIndex);
+      if (componentRowIndices.length < settings.nodeDetection.minimumWidthRows) continue;
+      const first = rows[firstIndex]!;
+      const last = rows[lastIndex]!;
+      const rawScore = average(componentRowIndices.map(index => values[index]!));
       const maximum = Math.max(...values, Number.EPSILON);
       const normalizedScore = rawScore / maximum;
-      const neighborValues = values.slice(Math.max(0, group[0]! - neighborhood), Math.min(values.length, group[group.length - 1]! + neighborhood + 1));
-      const neighborAverage = neighborValues.reduce((sum, value) => sum + value, 0) / Math.max(1, neighborValues.length);
-      const prominence = type === "LVN" ? (neighborAverage - rawScore) / Math.max(neighborAverage, Number.EPSILON) : (rawScore - neighborAverage) / Math.max(rawScore, Number.EPSILON);
+      const leftAcceptance = values.slice(Math.max(0, firstIndex - neighborhood), firstIndex);
+      const rightAcceptance = values.slice(lastIndex + 1, Math.min(values.length, lastIndex + neighborhood + 1));
+      const neighborValues = [...leftAcceptance, ...rightAcceptance];
+      const neighborAverage = average(neighborValues);
+      let prominence = type === "LVN"
+        ? (neighborAverage - rawScore) / Math.max(neighborAverage, Number.EPSILON)
+        : (rawScore - neighborAverage) / Math.max(rawScore, Number.EPSILON);
+      if (type === "LVN" && settings.nodeDetection.lvnGapAware) {
+        const hasLeftAcceptance = leftAcceptance.length > 0;
+        const hasRightAcceptance = rightAcceptance.length > 0;
+        if (settings.nodeDetection.lvnRequireTwoSidedAcceptance && (!hasLeftAcceptance || !hasRightAcceptance)) continue;
+        const leftAverage = average(leftAcceptance);
+        const rightAverage = average(rightAcceptance);
+        const acceptanceReference = settings.nodeDetection.lvnRequireTwoSidedAcceptance
+          ? Math.min(leftAverage, rightAverage)
+          : Math.max(leftAverage, rightAverage);
+        if (acceptanceReference <= Number.EPSILON) continue;
+        const activityRatio = rawScore / acceptanceReference;
+        if (activityRatio > settings.nodeDetection.lvnMaximumActivityRatio) continue;
+        prominence = Math.max(0, 1 - activityRatio);
+      }
       if (prominence < settings.nodeDetection.prominence && settings.nodeDetection.method !== "PERCENTILE") continue;
-      const weight = group.reduce((sum, index) => sum + Math.max(values[index]!, Number.EPSILON), 0);
-      const weightedCenter = group.reduce((sum, index) => sum + rows[index]!.center * Math.max(values[index]!, Number.EPSILON), 0) / weight;
-      const directional = group.reduce((sum, index) => sum + rows[index]!.buyQuantity - rows[index]!.sellQuantity, 0);
+      const weight = componentRowIndices.reduce((sum, index) => sum + Math.max(values[index]!, Number.EPSILON), 0);
+      const weightedCenter = componentRowIndices.reduce((sum, index) => sum + rows[index]!.center * Math.max(values[index]!, Number.EPSILON), 0) / weight;
+      const directional = componentRowIndices.reduce((sum, index) => sum + rows[index]!.buyQuantity - rows[index]!.sellQuantity, 0);
       const classification = type === "LVN"
         ? settings.nodeDetection.source === "TPO" ? "TPO_SINGLE_PRINT_ZONE" : settings.nodeDetection.source.includes("CVD") ? "CVD_LVN" : "DIRECTIONAL_INEFFICIENCY"
-        : Math.abs(directional) < group.reduce((sum, index) => sum + rows[index]!.totalQuantity, 0) * 0.1 ? "BALANCED_ACCEPTANCE_NODE"
+        : Math.abs(directional) < componentRowIndices.reduce((sum, index) => sum + rows[index]!.totalQuantity, 0) * 0.1 ? "BALANCED_ACCEPTANCE_NODE"
           : directional > 0 ? "BUY_DOMINANT_HVN" : "SELL_DOMINANT_HVN";
       nodes.push({
         id: type.toLowerCase() + ":" + first.index + ":" + last.index,
@@ -87,8 +119,8 @@ export function detectAuctionNodes(
         high: last.high,
         center: (first.low + last.high) / 2,
         weightedCenter,
-        componentRowIndices: group,
-        widthRows: group.length,
+        componentRowIndices,
+        widthRows: componentRowIndices.length,
         rawScore,
         normalizedScore,
         prominence,

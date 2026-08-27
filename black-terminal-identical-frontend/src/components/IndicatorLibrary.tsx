@@ -1,9 +1,13 @@
-import { Activity, Check, Code2, Download, Eye, EyeOff, Globe2, Lock, Plus, Search, ShieldCheck, Star, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Activity, Check, Code2, Download, Eye, EyeOff, Globe2, Lock, Plus, Search, Send, ShieldCheck, Star, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { IndicatorPeriods, VisibleIndicators } from "../chart-engine/types";
 import { canUseIndicator } from "../features/premium";
 import type { StrategyRuntimeKind } from "../modules/strategy-lab/types/strategy.types";
+import type { CompiledScriptActivation } from "./ScriptCompiler";
+import { dbGetCurrentUserScripts, dbListPublicScriptAssets, dbSaveCurrentUserScripts, isSupabaseConfigured, type PublicScriptAsset } from "../lib/supabase";
+import { professionalNetworkApi } from "../modules/professional-network/networkApi";
+import { normalizeUserScripts, type UserScript } from "../scripts/userScriptLibrary";
 
 type IndicatorKey = keyof VisibleIndicators;
 type IndicatorPeriodKey = keyof IndicatorPeriods;
@@ -18,6 +22,9 @@ type IndicatorLibraryProps = {
   onAddCommunityStrategy?: (strategyKind: StrategyRuntimeKind) => void;
   onClose: () => void;
   onOpenScriptEditor: () => void;
+  currentUser: { username: string; role: "admin" | "user" } | null;
+  activeCustomScripts: readonly CompiledScriptActivation[];
+  onAddUserScript: (script: UserScript) => { success: boolean; message?: string };
   allowedIndicators: string[];
 };
 
@@ -36,6 +43,7 @@ type BuiltInIndicator = {
 };
 
 type CommunityScript = {
+  id?: string;
   title: string;
   author: string;
   category: string;
@@ -44,6 +52,7 @@ type CommunityScript = {
   summary: string;
   verified?: boolean;
   strategyKind?: StrategyRuntimeKind;
+  publishedAsset?: boolean;
 };
 
 const builtInIndicators: BuiltInIndicator[] = [
@@ -249,6 +258,20 @@ const tabs: { id: IndicatorTab; label: string }[] = [
   { id: "communityStrategies", label: "Community Strategies" }
 ];
 
+function publishedAssetToCommunityScript(asset: PublicScriptAsset, kind: "indicator" | "strategy"): CommunityScript {
+  const category = typeof asset.metadata?.category === "string" ? asset.metadata.category : "User Published";
+  return {
+    id: `${kind}:${asset.id}`,
+    title: asset.name,
+    author: "Black Terminal Community",
+    category,
+    rating: "NEW",
+    installs: "SOURCE PROTECTED",
+    summary: asset.description || `Public ${kind} publication.`,
+    publishedAsset: true
+  };
+}
+
 export function IndicatorLibrary({
   visibleIndicators,
   indicatorPeriods,
@@ -258,11 +281,20 @@ export function IndicatorLibrary({
   onAddCommunityStrategy,
   onClose,
   onOpenScriptEditor,
+  currentUser,
+  activeCustomScripts,
+  onAddUserScript,
   allowedIndicators
 }: IndicatorLibraryProps) {
   const [activeTab, setActiveTab] = useState<IndicatorTab>("builtins");
   const [query, setQuery] = useState("");
-  const activeCount = builtInIndicators.filter((indicator) => visibleIndicators[indicator.key]).length;
+  const [userScripts, setUserScripts] = useState<UserScript[]>([]);
+  const [publicAssets, setPublicAssets] = useState<{ indicators: PublicScriptAsset[]; strategies: PublicScriptAsset[] }>({ indicators: [], strategies: [] });
+  const [libraryStatus, setLibraryStatus] = useState("");
+  const [publishingScriptId, setPublishingScriptId] = useState<string | null>(null);
+  const activeCount = builtInIndicators.filter((indicator) => visibleIndicators[indicator.key]).length
+    + activeCustomScripts.filter((script) => script.visible !== false).length;
+  const localStorageKey = currentUser ? `bt_user_scripts:${currentUser.username}` : "bt_user_scripts:anonymous";
   const searchPlaceholder = activeTab === "builtins"
     ? "Search built-in indicators"
     : activeTab === "communityIndicators"
@@ -283,15 +315,46 @@ export function IndicatorLibrary({
     );
   }, [allowedIndicators, query]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const stored = currentUser && isSupabaseConfigured
+          ? normalizeUserScripts(await dbGetCurrentUserScripts())
+          : normalizeUserScripts(JSON.parse(localStorage.getItem(localStorageKey) || "[]"));
+        const community = await dbListPublicScriptAssets();
+        if (cancelled) return;
+        setUserScripts(stored);
+        setPublicAssets(community);
+        setLibraryStatus("");
+      } catch (error) {
+        if (!cancelled) setLibraryStatus(error instanceof Error ? error.message : "Script library could not be loaded.");
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [currentUser, localStorageKey]);
+
+  const publicCommunityIndicators = useMemo(
+    () => publicAssets.indicators.map((asset) => publishedAssetToCommunityScript(asset, "indicator")),
+    [publicAssets.indicators]
+  );
+  const publicCommunityStrategies = useMemo(
+    () => publicAssets.strategies.map((asset) => publishedAssetToCommunityScript(asset, "strategy")),
+    [publicAssets.strategies]
+  );
+
   const filteredCommunityIndicators = useMemo(
-    () => filterCommunityScripts(communityIndicators, query),
-    [query]
+    () => filterCommunityScripts([...publicCommunityIndicators, ...communityIndicators], query),
+    [publicCommunityIndicators, query]
   );
 
   const filteredCommunityStrategies = useMemo(
-    () => filterCommunityScripts(communityStrategies, query),
-    [query]
+    () => filterCommunityScripts([...publicCommunityStrategies, ...communityStrategies], query),
+    [publicCommunityStrategies, query]
   );
+  const filteredUserIndicators = useMemo(() => filterUserScripts(userScripts.filter((script) => script.kind === "indicator"), query), [query, userScripts]);
+  const filteredUserStrategies = useMemo(() => filterUserScripts(userScripts.filter((script) => script.kind === "strategy"), query), [query, userScripts]);
   const adaptiveSwingInstalled = activeStrategyKind === "builtin-adaptive-swing";
 
   const toggleIndicator = (key: IndicatorKey) => {
@@ -306,6 +369,110 @@ export function IndicatorLibrary({
     }));
   };
 
+  const persistUserScripts = async (next: UserScript[]) => {
+    if (currentUser && isSupabaseConfigured) await dbSaveCurrentUserScripts(next);
+    else localStorage.setItem(localStorageKey, JSON.stringify(next));
+    setUserScripts(next);
+  };
+
+  const addUserScript = (script: UserScript) => {
+    const result = onAddUserScript(script);
+    setLibraryStatus(result.success ? `Loaded ${script.name} from your private library.` : result.message || `Could not load ${script.name}.`);
+    if (result.success) onClose();
+  };
+
+  const publishUserScript = async (script: UserScript) => {
+    if (script.publication || publishingScriptId) return;
+    setPublishingScriptId(script.id);
+    setLibraryStatus("");
+    try {
+      const response = await professionalNetworkApi.publishAsset(script.kind, {
+        name: script.name,
+        description: `Black Terminal user-authored ${script.kind}. Published explicitly by its owner; source code remains protected.`,
+        version: "1.0.0",
+        market: "Crypto",
+        timeframe: "Multiple",
+        riskProfile: "custom",
+        visibility: "public",
+        metadata: { category: "User Script", backtest_status: "owner-published", risk_note: "Independent community research asset." }
+      });
+      const assetId = String(response.asset.id || "");
+      if (!assetId) throw new Error("The publication service returned no asset identity.");
+      const next = userScripts.map((candidate) => candidate.id === script.id
+        ? { ...candidate, publication: { assetId, visibility: "public" as const, publishedAt: Date.now() } }
+        : candidate);
+      await persistUserScripts(next);
+      const refreshed = await dbListPublicScriptAssets();
+      setPublicAssets(refreshed);
+      setLibraryStatus(`${script.name} is now public in Community ${script.kind === "indicator" ? "Indicators" : "Strategies"}.`);
+    } catch (error) {
+      setLibraryStatus(error instanceof Error ? error.message : "Publication failed.");
+    } finally {
+      setPublishingScriptId(null);
+    }
+  };
+
+  const renderUserScripts = (items: UserScript[], kind: "indicator" | "strategy") => (
+    <div className="user-script-library">
+      <div className="user-script-library-head">
+        <div>
+          <Lock size={14} />
+          <span>PRIVATE {kind === "indicator" ? "INDICATORS" : "STRATEGIES"}</span>
+        </div>
+        <b>{items.length} SAVED / {items.filter((script) => script.publication?.visibility === "public").length} PUBLISHED</b>
+      </div>
+      {libraryStatus && <div className="user-script-library-status" role="status">{libraryStatus}</div>}
+      <div className="user-script-list">
+        {items.map((script) => {
+          const active = activeCustomScripts.some((activation) => activation.id === script.id);
+          const published = script.publication?.visibility === "public";
+          const signalCount = (script.source.match(/\b(?:alertcondition|strategy\.(?:entry|exit|close))\s*\(/g) || []).length;
+          return (
+            <div className={active ? "user-script-row active" : "user-script-row"} key={script.id}>
+              <div className="user-script-row-main">
+                <span className="user-script-lock">{published ? <Globe2 size={14} /> : <Lock size={14} />}</span>
+                <span>
+                  <strong>{script.name}</strong>
+                  <em>{published ? "OWNER PUBLISHED / SOURCE PROTECTED" : "OWNER ONLY / PRIVATE SOURCE"} · PYTHON</em>
+                </span>
+              </div>
+              <span className="user-script-signal">{signalCount > 0 ? `${signalCount} mapped event${signalCount === 1 ? "" : "s"}` : "No mapped alerts"}</span>
+              <div className="user-script-actions">
+                <button
+                  type="button"
+                  className={published ? "published" : "publish"}
+                  disabled={published || publishingScriptId !== null}
+                  onClick={() => void publishUserScript(script)}
+                  title={published ? "This script is listed in the public community catalog; source code remains protected." : "Explicitly publish this script to the Community catalog."}
+                >
+                  {published ? <Globe2 size={12} /> : <Send size={12} />}
+                  {published ? "PUBLISHED" : publishingScriptId === script.id ? "PUBLISHING" : "PUBLISH"}
+                </button>
+                <button type="button" className={active ? "active" : ""} onClick={() => addUserScript(script)}>
+                  {active ? <Check size={12} /> : <Plus size={12} />}
+                  {active ? "ON" : "ADD"}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+        {items.length === 0 && (
+          <div className="script-library-empty">
+            <Code2 size={18} />
+            <strong>No saved {kind === "indicator" ? "indicators" : "strategies"}</strong>
+            <span>Scripts saved by another account are never shown here.</span>
+            <button type="button" onClick={onOpenScriptEditor}>NEW {kind.toUpperCase()}</button>
+          </div>
+        )}
+      </div>
+      {items.length > 0 && (
+        <button type="button" className="user-script-new" onClick={onOpenScriptEditor}>
+          <Plus size={12} /> NEW {kind.toUpperCase()}
+        </button>
+      )}
+    </div>
+  );
+
   const renderCommunityScripts = (items: CommunityScript[], kind: "indicator" | "strategy") => (
     <div className="community-library">
       <div className="community-library-head">
@@ -319,7 +486,7 @@ export function IndicatorLibrary({
           const activeStrategy = installableStrategy && item.strategyKind === activeStrategyKind;
 
           return (
-            <div className={activeStrategy ? "community-row active-strategy" : "community-row"} key={item.title}>
+            <div className={activeStrategy ? "community-row active-strategy" : "community-row"} key={item.id ?? item.title}>
               <div className="community-row-main">
                 <div>
                   <strong>{item.title}</strong>
@@ -345,7 +512,7 @@ export function IndicatorLibrary({
                     onAddCommunityStrategy?.(item.strategyKind);
                   }}
                 >
-                  {activeStrategy ? "ADDED" : installableStrategy ? "ADD" : "INSTALL SOON"}
+                  {activeStrategy ? "ADDED" : installableStrategy ? "ADD" : item.publishedAsset ? "SOURCE PROTECTED" : "INSTALL SOON"}
                 </button>
               </div>
             </div>
@@ -491,18 +658,12 @@ export function IndicatorLibrary({
       )}
 
       {activeTab === "myIndicators" && (
-        <div className="script-library">
-          <div className="script-library-empty">
-            <Code2 size={18} />
-            <strong>Python Indicators</strong>
-            <span>0 LOCAL / 0 PUBLISHED</span>
-            <button type="button" onClick={onOpenScriptEditor}>NEW INDICATOR</button>
-          </div>
-        </div>
+        renderUserScripts(filteredUserIndicators, "indicator")
       )}
 
       {activeTab === "myStrategies" && (
-        adaptiveSwingInstalled ? (
+        <div className="my-strategies-library">
+        {adaptiveSwingInstalled ? (
           <div className="library-list">
             {(() => {
               const locked = !canUseIndicator("adaptiveSwingStrategy", { allowedIndicators });
@@ -535,16 +696,9 @@ export function IndicatorLibrary({
               );
             })()}
           </div>
-        ) : (
-          <div className="script-library">
-            <div className="script-library-empty">
-              <Code2 size={18} />
-              <strong>Python Strategies</strong>
-              <span>0 LOCAL / 0 DEPLOYED</span>
-              <button type="button" onClick={onOpenScriptEditor}>NEW STRATEGY</button>
-            </div>
-          </div>
-        )
+        ) : null}
+        {renderUserScripts(filteredUserStrategies, "strategy")}
+        </div>
       )}
 
       {activeTab === "communityIndicators" && renderCommunityScripts(filteredCommunityIndicators, "indicator")}
@@ -574,4 +728,10 @@ function filterCommunityScripts(items: CommunityScript[], query: string) {
       item.verified ? "verified" : ""
     ].some((value) => value.toLowerCase().includes(needle))
   );
+}
+
+function filterUserScripts(items: UserScript[], query: string) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return items;
+  return items.filter((script) => [script.name, script.kind, script.source].some((value) => value.toLowerCase().includes(needle)));
 }

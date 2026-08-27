@@ -52,11 +52,13 @@ import { canUseIndicator } from "../features/premium";
 import { sendIndicatorAlert, sendWebhook } from "../lib/tauri";
 import {
   compileAndRunScript,
+  extractScriptInputs,
   finalizedScriptResult,
   newlyConfirmedScriptEvents,
   type CompiledMarker,
   type CompiledPlot,
-  type CompiledScriptActivation
+  type CompiledScriptActivation,
+  type ScriptInputValue
 } from "./ScriptCompiler";
 import { mergeCustomScriptOutput } from "../scripts/customScriptLifecycle";
 import { getMarketDataEngineAdapter } from "../market-data/engine/marketDataEngine";
@@ -201,6 +203,8 @@ type PixiBlackChartProps = {
   customMarkers?: CompiledMarker[];
   activeCustomScripts?: readonly CompiledScriptActivation[];
   onRemoveCustomScript?: (scriptId: string) => void;
+  onToggleCustomScriptVisibility?: (scriptId: string) => void;
+  onUpdateCustomScriptInputs?: (scriptId: string, values: Record<string, ScriptInputValue>) => { success: boolean; message?: string };
   onCandleReaderChange?: (reader: (() => Candle[]) | null) => void;
   onAlertFired?: (symbol: string, message: string) => void;
   priceLineColor?: string;
@@ -482,6 +486,8 @@ export function PixiBlackChart({
   customMarkers,
   activeCustomScripts = [],
   onRemoveCustomScript,
+  onToggleCustomScriptVisibility,
+  onUpdateCustomScriptInputs,
   onCandleReaderChange,
   onAlertFired,
   priceLineColor,
@@ -594,6 +600,7 @@ export function PixiBlackChart({
     "loading" | "ready" | "unavailable"
   >("loading");
   const [activeIndicator, setActiveIndicator] = useState<IndicatorKey | null>(null);
+  const [activeCustomScriptSettingsId, setActiveCustomScriptSettingsId] = useState<string | null>(null);
   const [volumeProfileSettingsTab, setVolumeProfileSettingsTab] = useState<VolumeProfileSettingsTab>("inputs");
   const [adaptiveSwingSettingsTab, setAdaptiveSwingSettingsTab] = useState<AdaptiveSwingSettingsTab>("signals");
   const [historyDepth, setHistoryDepth] = useState<HistoryDepth>(() => {
@@ -3747,7 +3754,8 @@ export function PixiBlackChart({
     }
     const latestConfirmedTime = candles.at(-2)?.time ?? Number.NEGATIVE_INFINITY;
     const mounted = activeCustomScripts.flatMap((activation) => {
-      const compiled = compileAndRunScript(activation.source, candles);
+      if (activation.visible === false) return [];
+      const compiled = compileAndRunScript(activation.source, candles, activation.inputValues);
       if (!compiled.success) return [];
       return [{ activation, result: finalizedScriptResult(compiled, latestConfirmedTime) }];
     });
@@ -3772,7 +3780,8 @@ export function PixiBlackChart({
     const activeRuntimeKeys = new Set<string>();
 
     for (const activeCustomScript of activeCustomScripts) {
-      const runtimeKey = `${activeCustomScript.id}:${activeCustomScript.sourceHash}:${inputFeed}:${marketSymbol.exchange}:${marketSymbol.rawSymbol}:${timeframe}`;
+      const inputFingerprint = JSON.stringify(activeCustomScript.inputValues ?? {});
+      const runtimeKey = `${activeCustomScript.id}:${activeCustomScript.sourceHash}:${inputFingerprint}:${inputFeed}:${marketSymbol.exchange}:${marketSymbol.rawSymbol}:${timeframe}`;
       activeRuntimeKeys.add(runtimeKey);
       let currentRuntime = runtimes.get(runtimeKey);
       if (!currentRuntime) {
@@ -3787,7 +3796,7 @@ export function PixiBlackChart({
       }
       if (lastOpenTime <= currentRuntime.lastOpenTime) continue;
 
-      const compiled = compileAndRunScript(activeCustomScript.source, candles);
+      const compiled = compileAndRunScript(activeCustomScript.source, candles, activeCustomScript.inputValues);
       if (!compiled.success) continue;
       const finalized = finalizedScriptResult(compiled, latestConfirmedTime);
       const alerts = newlyConfirmedScriptEvents({
@@ -5320,6 +5329,7 @@ export function PixiBlackChart({
 
   const chartInteractionIsolated = Boolean(
     activeIndicator ||
+    activeCustomScriptSettingsId ||
     chartContextMenu ||
     orderContextMenu ||
     editingChartAlert ||
@@ -5451,9 +5461,27 @@ export function PixiBlackChart({
             </div>
           ))}
           {activeCustomScripts.map((script) => (
-            <div key={script.id} className="indicator-row custom-script-row" data-custom-script-id={script.id}>
+            <div key={script.id} className={script.visible === false ? "indicator-row custom-script-row hidden" : "indicator-row custom-script-row"} data-custom-script-id={script.id}>
               <span>{script.name}</span>
               <b>{script.kind === "strategy" ? "USER STRATEGY" : "USER INDICATOR"} · {script.inputFeed === "CAUSAL_RENKO" ? "RENKO" : "OHLCV"}</b>
+              <button
+                type="button"
+                className="indicator-action"
+                aria-label={script.visible === false ? `Show custom script ${script.name}` : `Hide custom script ${script.name}`}
+                title={script.visible === false ? "Show custom script" : "Hide custom script"}
+                onClick={() => onToggleCustomScriptVisibility?.(script.id)}
+              >
+                {script.visible === false ? <EyeOff size={12} /> : <Eye size={12} />}
+              </button>
+              <button
+                type="button"
+                className="indicator-action"
+                aria-label={`Open custom script ${script.name} settings`}
+                title="Custom script settings"
+                onClick={() => setActiveCustomScriptSettingsId(script.id)}
+              >
+                <SlidersHorizontal size={12} />
+              </button>
               <button
                 type="button"
                 className="indicator-action remove"
@@ -5469,6 +5497,18 @@ export function PixiBlackChart({
       )}
 
       {chartInteractionIsolated && <InteractionShield variant="dialog" testId="chart-dialog-interaction-shield" />}
+
+      {activeCustomScriptSettingsId && (() => {
+        const script = activeCustomScripts.find((candidate) => candidate.id === activeCustomScriptSettingsId);
+        return script ? (
+          <CustomScriptSettingsPanel
+            key={script.id}
+            script={script}
+            onClose={() => setActiveCustomScriptSettingsId(null)}
+            onApply={(values) => onUpdateCustomScriptInputs?.(script.id, values) ?? { success: false, message: "Settings updates are unavailable." }}
+          />
+        ) : null;
+      })()}
 
       {activeIndicator === "volumeProfile" && renderVolumeProfileSettings()}
       {activeIndicator === "adaptiveSwingStrategy" && renderAdaptiveSwingSettings()}
@@ -7090,6 +7130,89 @@ export function PixiBlackChart({
         chartEngine={engineRef.current}
         priceTransform={aifPriceTransform}
       />
+    </div>
+  );
+}
+
+function CustomScriptSettingsPanel({
+  script,
+  onClose,
+  onApply
+}: {
+  script: CompiledScriptActivation;
+  onClose: () => void;
+  onApply: (values: Record<string, ScriptInputValue>) => { success: boolean; message?: string };
+}) {
+  const inputs = useMemo(() => extractScriptInputs(script.source), [script.source]);
+  const defaults = useMemo(
+    () => Object.fromEntries(inputs.map((input) => [input.key, input.defaultValue])) as Record<string, ScriptInputValue>,
+    [inputs]
+  );
+  const [values, setValues] = useState<Record<string, ScriptInputValue>>(() => ({ ...defaults, ...script.inputValues }));
+  const [status, setStatus] = useState("");
+
+  const apply = () => {
+    const result = onApply(values);
+    if (result.success) onClose();
+    else setStatus(result.message || "The custom script settings could not be applied.");
+  };
+
+  return (
+    <div className="indicator-settings profile-settings custom-script-settings" role="dialog" aria-modal="true" aria-label={`${script.name} settings`}>
+      <div className="indicator-settings-title">
+        <div>
+          <span>USER {script.kind.toUpperCase()}</span>
+          <strong>{script.name}</strong>
+        </div>
+        <button type="button" aria-label="Close custom script settings" onClick={onClose}><X size={14} /></button>
+      </div>
+      <div className="custom-script-settings-runtime">
+        <b>{script.inputFeed === "CAUSAL_RENKO" ? "CAUSAL RENKO" : "SOURCE OHLCV"}</b>
+        <span>PRIVATE OWNER RUNTIME · SAVED INPUTS</span>
+      </div>
+      <div className="indicator-settings-section custom-script-inputs">
+        {inputs.map((input) => (
+          <label key={input.key}>
+            <span>{input.label}</span>
+            {input.type === "bool" ? (
+              <input
+                type="checkbox"
+                checked={Boolean(values[input.key])}
+                onChange={(event) => setValues((current) => ({ ...current, [input.key]: event.target.checked }))}
+              />
+            ) : input.type === "string" ? (
+              <input
+                type="text"
+                value={String(values[input.key] ?? "")}
+                onChange={(event) => setValues((current) => ({ ...current, [input.key]: event.target.value }))}
+              />
+            ) : (
+              <input
+                type="number"
+                step={input.type === "int" ? 1 : "any"}
+                value={Number(values[input.key] ?? input.defaultValue)}
+                onChange={(event) => {
+                  const numeric = Number(event.target.value);
+                  if (!Number.isFinite(numeric)) return;
+                  setValues((current) => ({ ...current, [input.key]: input.type === "int" ? Math.round(numeric) : numeric }));
+                }}
+              />
+            )}
+          </label>
+        ))}
+        {inputs.length === 0 && (
+          <div className="custom-script-no-inputs">
+            This script has no literal input.int, input.float, input.bool, or input.string declarations. Its source can still be hidden or removed from the indicator legend.
+          </div>
+        )}
+      </div>
+      {status && <div className="custom-script-settings-status" role="alert">{status}</div>}
+      <div className="tv-settings-footer">
+        <button type="button" className="tv-defaults" disabled={inputs.length === 0} onClick={() => setValues(defaults)}>Defaults</button>
+        <span />
+        <button type="button" className="tv-cancel" onClick={onClose}>Cancel</button>
+        <button type="button" className="tv-ok" onClick={apply}>Apply</button>
+      </div>
     </div>
   );
 }

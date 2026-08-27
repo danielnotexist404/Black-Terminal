@@ -47,6 +47,18 @@ export type CompiledScriptActivation = {
   source: string;
   sourceHash: string;
   inputFeed: "SOURCE_OHLCV" | "CAUSAL_RENKO";
+  inputValues?: Record<string, ScriptInputValue>;
+  visible?: boolean;
+};
+
+export type ScriptInputValue = number | boolean | string;
+
+export type CompiledScriptInput = {
+  key: string;
+  variable: string;
+  label: string;
+  type: "int" | "float" | "bool" | "string";
+  defaultValue: ScriptInputValue;
 };
 
 export type CompileResult = {
@@ -392,10 +404,12 @@ class ScriptRuntime {
   private readonly env = new Map<string, RuntimeValue>();
   private readonly candles: Candle[];
   private readonly sourceHash: string;
+  private readonly inputValues: Readonly<Record<string, ScriptInputValue>>;
 
-  constructor(candles: Candle[], sourceHash: string) {
+  constructor(candles: Candle[], sourceHash: string, inputValues: Readonly<Record<string, ScriptInputValue>>) {
     this.candles = candles;
     this.sourceHash = sourceHash;
+    this.inputValues = inputValues;
     this.env.set("open", candles.map((candle) => candle.open));
     this.env.set("high", candles.map((candle) => candle.high));
     this.env.set("low", candles.map((candle) => candle.low));
@@ -454,9 +468,9 @@ class ScriptRuntime {
   }
 
   call(name: string, args: CallArguments, line: number): RuntimeValue {
-    if (name === "input.int" || name === "input.float") return args.positional[0] ?? 0;
-    if (name === "input.bool") return Boolean(args.positional[0] ?? false);
-    if (name === "input.string") return textValue(args.positional[0], "");
+    if (name === "input.int" || name === "input.float" || name === "input.bool" || name === "input.string") {
+      return this.input(name.slice("input.".length) as CompiledScriptInput["type"], args);
+    }
     if (name === "ta.sma") return this.rolling(args, "sma");
     if (name === "ta.ema") return this.ema(args);
     if (name === "ta.rsi") return this.rsi(args);
@@ -479,6 +493,20 @@ class ScriptRuntime {
     if (name === "strategy.entry") return this.strategyEntry(args, line);
     if (name === "strategy.exit") return this.strategyExit(args, line);
     throw new Error(`Function '${name}' is not available in ${BLACK_TERMINAL_PYTHON_RUNTIME_VERSION}`);
+  }
+
+  private input(type: CompiledScriptInput["type"], args: CallArguments): RuntimeValue {
+    const label = textValue(args.positional[1] ?? args.named.title, "");
+    const configured = label ? this.inputValues[label] : undefined;
+    const value = configured === undefined ? args.positional[0] : configured;
+    if (type === "string") return typeof value === "string" ? value : textValue(args.positional[0], "");
+    if (type === "bool") return typeof value === "boolean" ? value : Boolean(value ?? false);
+    const numeric = typeof value === "number" && Number.isFinite(value)
+      ? value
+      : typeof args.positional[0] === "number" && Number.isFinite(args.positional[0])
+        ? args.positional[0]
+        : 0;
+    return type === "int" ? Math.round(numeric) : numeric;
   }
 
   private numericSeries(value: RuntimeValue, _label: string) {
@@ -693,7 +721,11 @@ function parseExpression(runtime: ScriptRuntime, expression: string, line: numbe
   return new ExpressionParser(runtime, new Tokenizer(expression).all(), line).parse();
 }
 
-export function compileAndRunScript(script: string, candles: Candle[]): CompileResult {
+export function compileAndRunScript(
+  script: string,
+  candles: Candle[],
+  inputValues: Readonly<Record<string, ScriptInputValue>> = {}
+): CompileResult {
   const sourceHash = stableHash(script);
   const result: CompileResult = {
     success: false,
@@ -714,7 +746,7 @@ export function compileAndRunScript(script: string, candles: Candle[]): CompileR
     return result;
   }
 
-  const runtime = new ScriptRuntime(candles, sourceHash);
+  const runtime = new ScriptRuntime(candles, sourceHash, inputValues);
   const lines = script.replaceAll("\r\n", "\n").split("\n");
   for (let index = 0; index < lines.length; index += 1) {
     const lineNumber = index + 1;
@@ -748,6 +780,76 @@ export function compileAndRunScript(script: string, candles: Candle[]): CompileR
     runtimeVersion: BLACK_TERMINAL_PYTHON_RUNTIME_VERSION,
     sourceHash
   };
+}
+
+/**
+ * Extract the deterministic input declarations that can be safely exposed in
+ * a native-style custom-script settings panel. Only literal defaults are
+ * accepted by the vector runtime, so this parser never evaluates source text.
+ */
+export function extractScriptInputs(script: string): CompiledScriptInput[] {
+  const inputs: CompiledScriptInput[] = [];
+  const seen = new Set<string>();
+  const declaration = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*input\.(int|float|bool|string)\s*\((.*)\)\s*(?:#.*)?$/;
+
+  for (const line of script.replaceAll("\r\n", "\n").split("\n")) {
+    const match = line.match(declaration);
+    if (!match) continue;
+    const [, variable, typeValue, rawArguments] = match;
+    const argumentsList = splitLiteralInputArguments(rawArguments);
+    const rawDefault = argumentsList[0]?.trim();
+    if (!rawDefault) continue;
+    const type = typeValue as CompiledScriptInput["type"];
+    const titleArgument = argumentsList.find((argument, index) => index > 0 && /^title\s*=/.test(argument.trim()));
+    const rawLabel = titleArgument?.replace(/^\s*title\s*=\s*/, "") ?? argumentsList[1];
+    const explicitLabel = rawLabel && /^(["']).*\1$/.test(rawLabel.trim()) ? rawLabel.trim().slice(1, -1) : "";
+    const label = explicitLabel.replace(/\\([\\"'])/g, "$1").trim() || variable;
+    if (seen.has(label)) continue;
+    let defaultValue: ScriptInputValue;
+    if (type === "bool") {
+      if (!/^(?:true|false)$/i.test(rawDefault)) continue;
+      defaultValue = rawDefault.toLowerCase() === "true";
+    } else if (type === "string") {
+      if (!/^(["']).*\1$/.test(rawDefault)) continue;
+      defaultValue = rawDefault.slice(1, -1).replace(/\\([\\"'])/g, "$1");
+    }
+    else {
+      const numeric = Number(rawDefault);
+      if (!Number.isFinite(numeric)) continue;
+      defaultValue = type === "int" ? Math.round(numeric) : numeric;
+    }
+    seen.add(label);
+    inputs.push({ key: label, variable, label, type, defaultValue });
+  }
+  return inputs;
+}
+
+function splitLiteralInputArguments(source: string): string[] {
+  const values: string[] = [];
+  let quote = "";
+  let escaped = false;
+  let start = 0;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quote) {
+      escaped = true;
+      continue;
+    }
+    if (character === "\"" || character === "'") {
+      quote = quote === character ? "" : quote || character;
+      continue;
+    }
+    if (character === "," && !quote) {
+      values.push(source.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  values.push(source.slice(start).trim());
+  return values;
 }
 
 export function newlyConfirmedScriptEvents(input: {

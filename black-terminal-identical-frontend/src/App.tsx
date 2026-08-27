@@ -52,6 +52,7 @@ import { OrderBook } from "./components/OrderBook";
 import { PixiBlackChart } from "./components/PixiBlackChart";
 import { InteractionShield } from "./components/InteractionShield";
 import { ScriptEditor } from "./components/ScriptEditor";
+import { compileAndRunScript, finalizedScriptResult, type ScriptInputValue } from "./components/ScriptCompiler";
 import { TradesTape } from "./components/TradesTape";
 import { InstitutionalFlowIntelligence } from "./components/InstitutionalFlowIntelligence";
 import LandingPage from "./components/LandingPage";
@@ -62,6 +63,7 @@ import {
   unmountCustomScript,
   type MountedCustomScript
 } from "./scripts/customScriptLifecycle";
+import { normalizeUserScripts, type UserScript } from "./scripts/userScriptLibrary";
 import AdminPanel from "./components/AdminPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import UpgradePanel from "./components/UpgradePanel";
@@ -107,7 +109,16 @@ import type {
   VisibleIndicators
 } from "./chart-engine/types";
 import { defaultIndicatorAdvancedSettings } from "./chart-engine/profile/volumeProfileDefaults";
-import { clearSupabaseAuthSession, dbGetUsers, dbUpdateUser, dbAddAuditLog, supabase } from "./lib/supabase";
+import {
+  clearSupabaseAuthSession,
+  dbAddAuditLog,
+  dbGetCurrentUserScripts,
+  dbGetUsers,
+  dbSaveCurrentUserScripts,
+  dbUpdateUser,
+  isSupabaseConfigured,
+  supabase
+} from "./lib/supabase";
 import { getMarketDataEngineAdapter } from "./market-data/engine/marketDataEngine";
 import { ExchangeOption, MarketSymbolOption, getExchangeOption, marketCatalog } from "./market-data/marketCatalog";
 import type { ExchangeId, MarketSymbol, Timeframe } from "./market-data/types";
@@ -929,6 +940,64 @@ export default function App() {
     chartCandleReaderRef.current = reader ?? (() => []);
   }, []);
   const readChartCandles = useCallback(() => chartCandleReaderRef.current(), []);
+  const persistCustomScriptInputs = useCallback(async (scriptId: string, inputValues: Record<string, ScriptInputValue>) => {
+    if (!currentUser) return;
+    if (isSupabaseConfigured) {
+      const scripts = normalizeUserScripts(await dbGetCurrentUserScripts());
+      await dbSaveCurrentUserScripts(scripts.map((script) => script.id === scriptId ? { ...script, inputValues, updatedAt: Date.now() } : script));
+      return;
+    }
+    const storageKey = `bt_user_scripts:${currentUser.username}`;
+    const scripts = normalizeUserScripts(JSON.parse(localStorage.getItem(storageKey) || "[]"));
+    localStorage.setItem(storageKey, JSON.stringify(scripts.map((script) => script.id === scriptId ? { ...script, inputValues, updatedAt: Date.now() } : script)));
+  }, [currentUser]);
+  const loadUserScriptFromLibrary = useCallback((script: UserScript) => {
+    const candles = readChartCandles().slice(-20_000);
+    const compiled = compileAndRunScript(script.source, candles, script.inputValues);
+    if (!compiled.success) {
+      const firstError = compiled.errors[0];
+      return { success: false, message: firstError ? `Line ${firstError.line}: ${firstError.message}` : "Compilation failed." };
+    }
+    const latestConfirmedTime = candles.at(-2)?.time ?? Number.NEGATIVE_INFINITY;
+    setMountedCustomScripts((current) => mountCustomScript(current, {
+      activation: {
+        id: script.id,
+        name: script.name,
+        kind: script.kind,
+        source: script.source,
+        sourceHash: compiled.sourceHash,
+        inputFeed: chartType === "renko" ? "CAUSAL_RENKO" : "SOURCE_OHLCV",
+        inputValues: script.inputValues,
+        visible: true
+      },
+      result: finalizedScriptResult(compiled, latestConfirmedTime)
+    }));
+    return { success: true };
+  }, [chartType, readChartCandles]);
+  const toggleCustomScriptVisibility = useCallback((scriptId: string) => {
+    setMountedCustomScripts((current) => current.map((script) => script.activation.id === scriptId
+      ? { ...script, activation: { ...script.activation, visible: script.activation.visible === false } }
+      : script));
+  }, []);
+  const updateCustomScriptInputs = useCallback((scriptId: string, inputValues: Record<string, ScriptInputValue>) => {
+    const mounted = mountedCustomScripts.find((script) => script.activation.id === scriptId);
+    if (!mounted) return { success: false, message: "This custom script is no longer mounted." };
+    const candles = readChartCandles().slice(-20_000);
+    const compiled = compileAndRunScript(mounted.activation.source, candles, inputValues);
+    if (!compiled.success) {
+      const firstError = compiled.errors[0];
+      return { success: false, message: firstError ? `Line ${firstError.line}: ${firstError.message}` : "Compilation failed." };
+    }
+    const latestConfirmedTime = candles.at(-2)?.time ?? Number.NEGATIVE_INFINITY;
+    setMountedCustomScripts((current) => current.map((script) => script.activation.id === scriptId
+      ? {
+          activation: { ...script.activation, sourceHash: compiled.sourceHash, inputValues },
+          result: finalizedScriptResult(compiled, latestConfirmedTime)
+        }
+      : script));
+    void persistCustomScriptInputs(scriptId, inputValues).catch((error) => console.error("Custom script settings could not be persisted", error));
+    return { success: true };
+  }, [mountedCustomScripts, persistCustomScriptInputs, readChartCandles]);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; symbol: string } | null>(null);
   const [portfolioPositions, setPortfolioPositions] = useState<PortfolioPosition[]>([]);
   const [portfolioOrders, setPortfolioOrders] = useState<PortfolioSnapshot["orders"]>([]);
@@ -2488,6 +2557,8 @@ export default function App() {
             customMarkers={customScriptOutput.markers}
             activeCustomScripts={customScriptActivations}
             onRemoveCustomScript={(scriptId) => setMountedCustomScripts((current) => unmountCustomScript(current, scriptId))}
+            onToggleCustomScriptVisibility={toggleCustomScriptVisibility}
+            onUpdateCustomScriptInputs={updateCustomScriptInputs}
             onCandleReaderChange={handleCandleReaderChange}
             onAlertFired={handleAlertFired}
             priceLineColor={terminalSettings.priceLineColor}
@@ -2556,6 +2627,9 @@ export default function App() {
               onAddCommunityStrategy={addCommunityStrategy}
               onClose={() => setActiveNav("CHART")}
               onOpenScriptEditor={() => setActiveNav("SCRIPT EDITOR")}
+              currentUser={currentUser}
+              activeCustomScripts={customScriptActivations}
+              onAddUserScript={loadUserScriptFromLibrary}
               allowedIndicators={effectiveAllowedIndicators}
             />
           )}

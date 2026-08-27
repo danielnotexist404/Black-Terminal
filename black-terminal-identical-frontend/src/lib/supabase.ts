@@ -506,6 +506,51 @@ export async function dbSaveCurrentUserScripts(scripts: any[]): Promise<void> {
   if (!data) throw new Error("Custom scripts were not persisted to the authenticated account.");
 }
 
+export type PublicScriptAsset = {
+  id: string;
+  user_id: string;
+  name: string;
+  description: string;
+  visibility: "public";
+  metadata: Record<string, unknown>;
+  updated_at: string;
+  version?: string;
+  market?: string | null;
+  timeframe?: string | null;
+  risk_profile?: string;
+};
+
+/**
+ * Community discovery is sourced only from explicitly public publication
+ * tables. The private bt_users.scripts JSONB collection is never queried.
+ */
+export async function dbListPublicScriptAssets(): Promise<{
+  indicators: PublicScriptAsset[];
+  strategies: PublicScriptAsset[];
+}> {
+  if (!isSupabaseConfigured || !supabase) return { indicators: [], strategies: [] };
+  const [indicatorResult, strategyResult] = await Promise.all([
+    supabase
+      .from("published_indicators")
+      .select("id,user_id,name,description,version,visibility,metadata,updated_at")
+      .eq("visibility", "public")
+      .order("updated_at", { ascending: false })
+      .limit(100),
+    supabase
+      .from("published_strategies")
+      .select("id,user_id,name,description,market,timeframe,risk_profile,visibility,metadata,updated_at")
+      .eq("visibility", "public")
+      .order("updated_at", { ascending: false })
+      .limit(100)
+  ]);
+  if (indicatorResult.error) throw indicatorResult.error;
+  if (strategyResult.error) throw strategyResult.error;
+  return {
+    indicators: (indicatorResult.data || []) as PublicScriptAsset[],
+    strategies: (strategyResult.data || []) as PublicScriptAsset[]
+  };
+}
+
 // Helper: Delete user
 export async function dbDeleteUser(username: string): Promise<void> {
   if (isSupabaseConfigured && supabase) {

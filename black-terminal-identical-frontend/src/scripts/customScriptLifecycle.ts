@@ -33,6 +33,7 @@ export function mergeCustomScriptOutput(
 ): { plots: CompiledPlot[]; markers: CompiledMarker[] } {
   return mounted.reduce<{ plots: CompiledPlot[]; markers: CompiledMarker[] }>(
     (combined, script) => {
+      if (script.activation.visible === false) return combined;
       combined.plots.push(...script.result.plots.map((plot) => ({
         ...plot,
         name: `${script.activation.id}:${plot.name}`

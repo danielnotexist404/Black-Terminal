@@ -5,6 +5,7 @@ import type { CompileResult, CompiledScriptActivation } from "./ScriptCompiler";
 import type { Candle } from "../chart-engine/types";
 import type { ChartDisplayType } from "../chart-engine/types";
 import { dbGetCurrentUserScripts, dbSaveCurrentUserScripts, isSupabaseConfigured } from "../lib/supabase";
+import { normalizeUserScripts, type UserScript } from "../scripts/userScriptLibrary";
 
 type ScriptEditorProps = {
   symbol: string;
@@ -16,15 +17,6 @@ type ScriptEditorProps = {
   loadedScriptIds: readonly string[];
   onClose: () => void;
   currentUser: { username: string; role: "admin" | "user" } | null;
-};
-
-export type UserScript = {
-  id: string;
-  name: string;
-  kind: "indicator" | "strategy";
-  source: string;
-  createdAt: number;
-  updatedAt?: number;
 };
 
 const templates = {
@@ -93,7 +85,7 @@ export function ScriptEditor({
       let stored: UserScript[] = [];
       if (currentUser && isSupabaseConfigured) {
         try {
-          stored = await dbGetCurrentUserScripts() as UserScript[];
+          stored = normalizeUserScripts(await dbGetCurrentUserScripts());
         } catch (e) {
           setConsoleLogs([{ type: "error", text: `VPS script storage could not be loaded: ${e instanceof Error ? e.message : "Unknown storage error"}` }]);
           return;
@@ -101,7 +93,7 @@ export function ScriptEditor({
       } else {
         const local = localStorage.getItem(localStorageKey);
         if (local) {
-          try { stored = JSON.parse(local); } catch (e) {}
+          try { stored = normalizeUserScripts(JSON.parse(local)); } catch (e) {}
         }
       }
 
@@ -150,7 +142,9 @@ export function ScriptEditor({
       kind,
       source,
       createdAt: previous?.createdAt ?? Date.now(),
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      inputValues: previous?.inputValues,
+      publication: previous?.publication
     };
 
     let nextScripts: UserScript[];
@@ -211,7 +205,8 @@ export function ScriptEditor({
     const candles = getCandles().slice(-20_000);
     const inputFeed = chartType === "renko" ? "CAUSAL_RENKO" : "SOURCE_OHLCV";
 
-    const compiled = compileAndRunScript(source, candles);
+    const selectedInputs = scripts.find((script) => script.id === selectedScriptId)?.inputValues;
+    const compiled = compileAndRunScript(source, candles, selectedInputs);
     const latestConfirmedTime = candles.at(-2)?.time ?? Number.NEGATIVE_INFINITY;
     const result = finalizedScriptResult(compiled, latestConfirmedTime);
     if (result.success) {
@@ -244,7 +239,9 @@ export function ScriptEditor({
         kind: savedScript.kind,
         source: savedScript.source,
         sourceHash: result.sourceHash,
-        inputFeed: chartType === "renko" ? "CAUSAL_RENKO" : "SOURCE_OHLCV"
+        inputFeed: chartType === "renko" ? "CAUSAL_RENKO" : "SOURCE_OHLCV",
+        inputValues: savedScript.inputValues,
+        visible: true
       };
       onRunScript(activation, result);
       onClose();

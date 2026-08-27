@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   BLACK_TERMINAL_PYTHON_RUNTIME_VERSION,
   compileAndRunScript,
+  extractScriptInputs,
   finalizedScriptResult,
   newlyConfirmedScriptEvents
 } from "../src/components/ScriptCompiler.ts";
@@ -44,6 +45,10 @@ assert.deepEqual(indicatorResult.plots.map((plot) => plot.name), ["Fast EMA", "S
 assert.equal(indicatorResult.alertConditions.length, 2);
 assert.ok(indicatorResult.events.some((event) => event.direction === "long"));
 assert.ok(indicatorResult.events.some((event) => event.direction === "short"));
+assert.deepEqual(extractScriptInputs(indicator), [{ key: "Fast", variable: "length", label: "Fast", type: "int", defaultValue: 2 }]);
+const overriddenIndicatorResult = compileAndRunScript(indicator, candles, { Fast: 5 });
+assert.equal(overriddenIndicatorResult.success, true, JSON.stringify(overriddenIndicatorResult.errors));
+assert.notDeepEqual(overriddenIndicatorResult.plots[0].values, indicatorResult.plots[0].values, "saved custom inputs must alter the deterministic runtime output");
 
 const strategy = `${indicator}
 strategy.entry("Long Entry", strategy.long, when=long_signal)
@@ -107,11 +112,18 @@ assert.equal(mounted.length, 2, "independent saved scripts must coexist on the c
 const mergedOutput = mergeCustomScriptOutput(mounted);
 assert.ok(mergedOutput.plots.every((plot) => plot.name.startsWith("saved-script-")), "custom plot identities must be namespaced by saved script");
 assert.equal(new Set(mergedOutput.markers.map((marker) => marker.id)).size, mergedOutput.markers.length, "custom marker identities must remain unique across scripts");
+const hiddenOutput = mergeCustomScriptOutput(mounted.map((item) => item.activation.id === activation.id
+  ? { ...item, activation: { ...item.activation, visible: false } }
+  : item));
+assert.ok(hiddenOutput.plots.every((plot) => !plot.name.startsWith(`${activation.id}:`)), "hiding one custom script must remove only its visual output");
+assert.equal(mounted.length, 2, "hiding a custom script must not unload its saved runtime");
 mounted = unmountCustomScript(mounted, activation.id);
 assert.deepEqual(mounted.map(({ activation: item }) => item.id), [secondActivation.id], "closing one script must preserve every other mounted script");
 
 const editorSource = readFileSync(new URL("../src/components/ScriptEditor.tsx", import.meta.url), "utf8");
 const chartSource = readFileSync(new URL("../src/components/PixiBlackChart.tsx", import.meta.url), "utf8");
+const librarySource = readFileSync(new URL("../src/components/IndicatorLibrary.tsx", import.meta.url), "utf8");
+const databaseSource = readFileSync(new URL("../src/lib/supabase.ts", import.meta.url), "utf8");
 const engineSource = readFileSync(new URL("../src/chart-engine/BlackChartEngine.ts", import.meta.url), "utf8");
 const strategyAdapterSource = readFileSync(new URL("../src/modules/strategy-lab/adapters/pythonStrategyAdapter.ts", import.meta.url), "utf8");
 assert.match(editorSource, /getCandles\(\)\.slice\(-20_000\)/, "the editor must compile against the active chart candle reader");
@@ -122,6 +134,17 @@ assert.match(editorSource, /dbSaveCurrentUserScripts/, "production script Save m
 assert.match(editorSource, /Run \/ Add to chart/, "Run must be the explicit chart activation action");
 assert.match(chartSource, /custom-script-row/, "mounted user scripts must have an independent chart-list row");
 assert.match(chartSource, /onRemoveCustomScript/, "mounted user scripts must be removable without deleting saved source");
+assert.match(chartSource, /onToggleCustomScriptVisibility/, "mounted user scripts must have an independent hide control");
+assert.match(chartSource, /CustomScriptSettingsPanel/, "mounted user scripts must expose native-style settings");
+assert.match(chartSource, /extractScriptInputs/, "custom settings must be derived from deterministic input declarations");
+assert.match(librarySource, /dbGetCurrentUserScripts/, "My Indicators must load from authenticated owner storage");
+assert.match(librarySource, /OWNER ONLY \/ PRIVATE SOURCE/, "private scripts must be visibly distinguished from published catalog entries");
+assert.match(librarySource, /publishUserScript/, "publication must remain a separate explicit owner action");
+assert.doesNotMatch(librarySource, /0 LOCAL \/ 0 PUBLISHED/, "My Indicators must not remain a placeholder");
+const publicAssetQuery = databaseSource.slice(databaseSource.indexOf("export async function dbListPublicScriptAssets"), databaseSource.indexOf("export async function", databaseSource.indexOf("export async function dbListPublicScriptAssets") + 30));
+assert.match(publicAssetQuery, /published_indicators/, "Community Indicators must read only the public publication table");
+assert.match(publicAssetQuery, /published_strategies/, "Community Strategies must read only the public publication table");
+assert.doesNotMatch(publicAssetQuery, /bt_users/, "Community catalogs must never query private user script storage");
 assert.match(chartSource, /latestConfirmedTime = candles\.at\(-2\)!\.time/, "custom alerts must use the latest closed candle");
 assert.match(chartSource, /newlyConfirmedScriptEvents/, "custom alerts must pass the historical replay guard");
 assert.match(chartSource, /replayActiveRef\.current/, "Replay must not emit custom live alerts");

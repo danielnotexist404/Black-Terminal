@@ -192,11 +192,15 @@ const saveLifecycleSource = editorSource.slice(editorSource.indexOf("const saveC
 assert.doesNotMatch(saveLifecycleSource, /onRunScript/, "Save must persist source without mounting a chart runtime");
 assert.match(editorSource, /dbSaveCurrentUserScripts/, "production script Save must use authenticated VPS-backed storage");
 assert.match(editorSource, /Run \/ Add to chart/, "Run must be the explicit chart activation action");
+assert.match(editorSource, /INDICATOR NAME/, "the Script Editor must expose an explicit indicator-name field");
+assert.match(editorSource, /Name this \$\{kind\} before saving it/, "unnamed scripts must not silently save under an ambiguous fallback title");
 assert.match(chartSource, /custom-script-row/, "mounted user scripts must have an independent chart-list row");
 assert.match(chartSource, /onRemoveCustomScript/, "mounted user scripts must be removable without deleting saved source");
 assert.match(chartSource, /onToggleCustomScriptVisibility/, "mounted user scripts must have an independent hide control");
 assert.match(chartSource, /setCustomScriptFeedRevision\(nextCustomScriptProjectionRevision\)/, "timeframe engine replacement must advance an app-scoped custom-script projection revision");
 assert.match(chartSource, /CustomScriptSettingsPanel/, "mounted user scripts must expose native-style settings");
+assert.match(chartSource, /custom-oscillator-pane-resizer/, "custom oscillators must use the shared draggable pane divider");
+assert.match(chartSource, /updateCustomOscillatorPaneHeight/, "custom oscillator heights must update through persisted pane settings");
 assert.match(chartSource, /extractScriptInputs/, "custom settings must be derived from deterministic input declarations");
 assert.match(librarySource, /dbGetCurrentUserScripts/, "My Indicators must load from authenticated owner storage");
 assert.match(librarySource, /OWNER ONLY \/ PRIVATE SOURCE/, "private scripts must be visibly distinguished from published catalog entries");
@@ -214,6 +218,7 @@ assert.match(engineSource, /marker\.signalPrice/, "the chart must render markers
 assert.match(engineSource, /0x39ff88/, "the chart must render the phosphor-green signal-price micro-tick");
 assert.match(engineSource, /plot\.pane === "oscillator"/, "custom oscillator plots must be excluded from the price-scale renderer");
 assert.match(engineSource, /customOscillatorPlots/, "custom oscillator plots must render in an isolated pane");
+assert.match(engineSource, /stack\.customPanes/, "custom oscillators must be laid out by the unified oscillator stack");
 assert.match(engineSource, /plot\.visible !== false/, "hidden custom plots must not reserve or render a chart pane");
 assert.match(strategyAdapterSource, /not wired yet|not available/i, "uncertified headless Python automation must remain fail closed");
 

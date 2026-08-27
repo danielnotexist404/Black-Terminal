@@ -343,6 +343,7 @@ export type OscillatorIndicatorKey =
 export type OscillatorPaneSettings = {
   height: number;
   paneHeights: Record<OscillatorIndicatorKey, number>;
+  customPaneHeights: Record<string, number>;
   order: OscillatorIndicatorKey[];
   backgroundColor: string;
   backgroundIntensity: number;

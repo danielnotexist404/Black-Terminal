@@ -114,6 +114,52 @@ const waveOnly = resolveOscillatorStack(
 assert.equal(waveOnly.injectionTarget, undefined, "WaveTrend keeps a pane when no primary oscillator exists");
 assert.deepEqual(waveOnly.panes.map((pane) => pane.key), ["waveTrendOscillator"]);
 
+const customOnly = resolveOscillatorStack(
+  hidden,
+  defaultOscillatorPaneSettings,
+  defaultWaveTrendOscillatorSettings,
+  900,
+  58,
+  38,
+  ["saved-cvd"]
+);
+assert.equal(customOnly.panes.length, 0);
+assert.deepEqual(customOnly.customPanes.map((pane) => pane.scriptId), ["saved-cvd"]);
+assert.equal(customOnly.customPanes[0]?.height, 170, "custom oscillators receive the platform default pane height");
+assert.equal(customOnly.reservedHeight, 190, "the custom pane and its padding reserve price-chart space exactly once");
+
+const resizedCustom = resolveOscillatorStack(
+  { ...hidden, zScoreOscillator: true },
+  {
+    ...defaultOscillatorPaneSettings,
+    customPaneHeights: { "saved-cvd": 286 }
+  },
+  defaultWaveTrendOscillatorSettings,
+  900,
+  58,
+  38,
+  ["saved-cvd"]
+);
+assert.equal(resizedCustom.panes[0]?.bottomOffset, 0);
+assert.equal(resizedCustom.customPanes[0]?.bottomOffset, 136, "custom panes stack above native panes with the shared gap");
+assert.equal(resizedCustom.customPanes[0]?.height, 286, "each saved oscillator uses its persisted custom height");
+assert.equal(resizedCustom.reservedHeight, 442);
+
+const independentCustomPanes = resolveOscillatorStack(
+  hidden,
+  {
+    ...defaultOscillatorPaneSettings,
+    customPaneHeights: { "saved-cvd": 210, "saved-sentiment": 120 }
+  },
+  defaultWaveTrendOscillatorSettings,
+  900,
+  58,
+  38,
+  ["saved-cvd", "saved-sentiment", "saved-cvd"]
+);
+assert.deepEqual(independentCustomPanes.customPanes.map((pane) => pane.height), [210, 120]);
+assert.equal(independentCustomPanes.customPanes[1]?.bottomOffset, 218, "custom scripts retain independent pane boundaries");
+
 const compact = resolveOscillatorStack(
   { ...hidden, openInterestOscillator: true, zScoreOscillator: true, waveTrendOscillator: true },
   {

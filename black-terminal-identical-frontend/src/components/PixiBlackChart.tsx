@@ -45,7 +45,12 @@ import {
 } from "../modules/dda-pro/core/engineShared";
 import { BC_RDA_CAUSAL_V2, BC_RDA_LEGACY_REPAINTING, type DDAProPreset, type DDAProSettings, type DDAProSignalIntelligenceMode, type DDAProSnapshot } from "../modules/dda-pro/core/types";
 import { BC_RDA_ALERTS_ELIGIBLE } from "../modules/dda-pro/core/certification";
-import { OSCILLATOR_KEYS, resolveOscillatorStack } from "../chart-engine/indicators/oscillatorLayout";
+import {
+  DEFAULT_CUSTOM_OSCILLATOR_PANE_HEIGHT,
+  OSCILLATOR_KEYS,
+  customOscillatorScriptIds,
+  resolveOscillatorStack
+} from "../chart-engine/indicators/oscillatorLayout";
 import { createMockCandles } from "../data/mockMarket";
 import type { AlertCondition, AlertIndicatorTarget, IndicatorAlertDefinition } from "../automation/alerts";
 import { canUseIndicator } from "../features/premium";
@@ -221,6 +226,9 @@ type PixiBlackChartProps = {
 };
 
 type IndicatorKey = keyof VisibleIndicators;
+type OscillatorResizeTarget =
+  | { kind: "native"; key: OscillatorIndicatorKey }
+  | { kind: "custom"; scriptId: string };
 type HistoryDepth = 1000 | 2500 | 5000 | 10000 | 20000;
 type VolumeProfileSettingsTab = "inputs" | "style" | "visibility";
 type AdaptiveSwingSettingsTab = "signals" | "engine" | "optimization" | "alerts";
@@ -505,7 +513,7 @@ export function PixiBlackChart({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<BlackChartEngine | null>(null);
   const oscillatorResizeRef = useRef<{
-    key: OscillatorIndicatorKey;
+    target: OscillatorResizeTarget;
     pointerId: number;
     startY: number;
     startHeight: number;
@@ -3968,6 +3976,10 @@ export function PixiBlackChart({
       ...defaultOscillatorPaneSettings.paneHeights,
       ...(indicatorAdvancedSettings.oscillatorPane?.paneHeights ?? {})
     },
+    customPaneHeights: {
+      ...defaultOscillatorPaneSettings.customPaneHeights,
+      ...(indicatorAdvancedSettings.oscillatorPane?.customPaneHeights ?? {})
+    },
     order: indicatorAdvancedSettings.oscillatorPane?.order ?? defaultOscillatorPaneSettings.order
   };
   const zScoreSettings: ZScoreOscillatorSettings = {
@@ -3992,15 +4004,17 @@ export function PixiBlackChart({
     ...indicatorAdvancedSettings.acvdOscillator,
     lookback: indicatorPeriods.acvdOscillator
   });
+  const customOscillatorIds = customOscillatorScriptIds(customPlots ?? []);
   const oscillatorStack = resolveOscillatorStack(
     visibleIndicators,
     oscillatorPaneSettings,
     waveTrendSettings,
     oscillatorHostHeight,
     58,
-    38
+    38,
+    customOscillatorIds
   );
-  const oscillatorPaneVisible = oscillatorStack.panes.length > 0;
+  const oscillatorPaneVisible = oscillatorStack.panes.length > 0 || oscillatorStack.customPanes.length > 0;
   const activeIndicatorVisual = activeIndicator
     ? indicatorVisualSettings[activeIndicator] ?? { color: "red" as IndicatorColorKey, intensity: 80 }
     : null;
@@ -4056,6 +4070,27 @@ export function PixiBlackChart({
         },
         order: current.oscillatorPane?.order ?? defaultOscillatorPaneSettings.order,
         height
+      }
+    }));
+  };
+
+  const updateCustomOscillatorPaneHeight = (scriptId: string, value: number) => {
+    const height = clampNumber(Math.round(value), 82, 420);
+    onIndicatorAdvancedSettingsChange((current) => ({
+      ...current,
+      oscillatorPane: {
+        ...defaultOscillatorPaneSettings,
+        ...current.oscillatorPane,
+        paneHeights: {
+          ...defaultOscillatorPaneSettings.paneHeights,
+          ...(current.oscillatorPane?.paneHeights ?? {})
+        },
+        customPaneHeights: {
+          ...defaultOscillatorPaneSettings.customPaneHeights,
+          ...(current.oscillatorPane?.customPaneHeights ?? {}),
+          [scriptId]: height
+        },
+        order: current.oscillatorPane?.order ?? defaultOscillatorPaneSettings.order
       }
     }));
   };
@@ -4209,15 +4244,16 @@ export function PixiBlackChart({
 
   const beginOscillatorResize = (
     event: ReactPointerEvent<HTMLDivElement>,
-    key: OscillatorIndicatorKey
+    target: OscillatorResizeTarget,
+    configuredHeight: number
   ) => {
     if (event.button !== 0) return;
     const hostHeight = hostRef.current?.clientHeight ?? 0;
     oscillatorResizeRef.current = {
-      key,
+      target,
       pointerId: event.pointerId,
       startY: event.clientY,
-      startHeight: oscillatorPaneSettings.paneHeights[key],
+      startHeight: configuredHeight,
       maximumHeight: Math.max(82, Math.min(420, hostHeight - 140))
     };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -4233,7 +4269,8 @@ export function PixiBlackChart({
       82,
       resize.maximumHeight
     );
-    updateOscillatorPaneHeight(resize.key, nextHeight);
+    if (resize.target.kind === "native") updateOscillatorPaneHeight(resize.target.key, nextHeight);
+    else updateCustomOscillatorPaneHeight(resize.target.scriptId, nextHeight);
     event.preventDefault();
     event.stopPropagation();
   };
@@ -5510,8 +5547,12 @@ export function PixiBlackChart({
           <CustomScriptSettingsPanel
             key={script.id}
             script={script}
+            oscillatorPaneHeight={customOscillatorIds.includes(script.id)
+              ? oscillatorPaneSettings.customPaneHeights[script.id] ?? DEFAULT_CUSTOM_OSCILLATOR_PANE_HEIGHT
+              : undefined}
             onClose={() => setActiveCustomScriptSettingsId(null)}
             onApply={(values) => onUpdateCustomScriptInputs?.(script.id, values) ?? { success: false, message: "Settings updates are unavailable." }}
+            onOscillatorPaneHeightChange={(height) => updateCustomOscillatorPaneHeight(script.id, height)}
           />
         ) : null;
       })()}
@@ -7070,7 +7111,11 @@ export function PixiBlackChart({
           role="separator"
           aria-label={`Resize ${pane.key === "acvdOscillator" ? "BC-ACVD" : pane.key === "ddaProOscillator" ? "BC-RDA" : pane.key === "zScoreOscillator" ? "Z-Score" : pane.key === "waveTrendOscillator" ? "WaveTrend" : "OI Osc"} pane`}
           aria-orientation="horizontal"
-          onPointerDown={(event) => beginOscillatorResize(event, pane.key)}
+          onPointerDown={(event) => beginOscillatorResize(
+            event,
+            { kind: "native", key: pane.key },
+            oscillatorPaneSettings.paneHeights[pane.key]
+          )}
           onPointerMove={resizeOscillatorPane}
           onPointerUp={finishOscillatorResize}
           onPointerCancel={finishOscillatorResize}
@@ -7083,6 +7128,39 @@ export function PixiBlackChart({
           <span />
         </div>
       ))}
+      {oscillatorPaneVisible && oscillatorStack.customPanes.map((pane) => {
+        const scriptName = activeCustomScripts.find((script) => script.id === pane.scriptId)?.name ?? "custom oscillator";
+        const configuredHeight = oscillatorPaneSettings.customPaneHeights[pane.scriptId]
+          ?? DEFAULT_CUSTOM_OSCILLATOR_PANE_HEIGHT;
+        return (
+          <div
+            key={`custom:${pane.scriptId}`}
+            className="oscillator-pane-resizer custom-oscillator-pane-resizer"
+            style={{ bottom: `min(${74 + pane.topOffset}px, calc(100% - 110px))` }}
+            role="separator"
+            aria-label={`Resize ${scriptName} pane`}
+            aria-orientation="horizontal"
+            onPointerDown={(event) => beginOscillatorResize(
+              event,
+              { kind: "custom", scriptId: pane.scriptId },
+              configuredHeight
+            )}
+            onPointerMove={resizeOscillatorPane}
+            onPointerUp={finishOscillatorResize}
+            onPointerCancel={finishOscillatorResize}
+            onDoubleClick={() => updateCustomOscillatorPaneHeight(
+              pane.scriptId,
+              DEFAULT_CUSTOM_OSCILLATOR_PANE_HEIGHT
+            )}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          >
+            <span />
+          </div>
+        );
+      })}
       {auctionDataRequired && <>
         <AuctionProfileLegend snapshot={auctionProfileSnapshot} settings={normalizedAuctionProfileSettings} chartType={chartType} />
         {normalizedAuctionProfileSettings.diagnosticsVisible && <AuctionProfileDiagnostics snapshot={auctionProfileSnapshot} />}
@@ -7142,12 +7220,16 @@ export function PixiBlackChart({
 
 function CustomScriptSettingsPanel({
   script,
+  oscillatorPaneHeight,
   onClose,
-  onApply
+  onApply,
+  onOscillatorPaneHeightChange
 }: {
   script: CompiledScriptActivation;
+  oscillatorPaneHeight?: number;
   onClose: () => void;
   onApply: (values: Record<string, ScriptInputValue>) => { success: boolean; message?: string };
+  onOscillatorPaneHeightChange: (height: number) => void;
 }) {
   const inputs = useMemo(() => extractScriptInputs(script.source), [script.source]);
   const defaults = useMemo(
@@ -7176,6 +7258,22 @@ function CustomScriptSettingsPanel({
         <b>{script.inputFeed === "CAUSAL_RENKO" ? "CAUSAL RENKO" : "SOURCE OHLCV"}</b>
         <span>PRIVATE OWNER RUNTIME · SAVED INPUTS</span>
       </div>
+      {oscillatorPaneHeight !== undefined && (
+        <div className="indicator-settings-section custom-script-pane-settings">
+          <label>
+            <span>Oscillator Pane Height</span>
+            <input
+              type="range"
+              min={82}
+              max={420}
+              value={oscillatorPaneHeight}
+              onChange={(event) => onOscillatorPaneHeightChange(Number(event.target.value))}
+            />
+            <b>{oscillatorPaneHeight}px</b>
+          </label>
+          <small>Drag the pane divider directly on the chart, or use this control. Double-click the divider to restore the default height.</small>
+        </div>
+      )}
       <div className="indicator-settings-section custom-script-inputs">
         {inputs.map((input) => (
           <label key={input.key}>

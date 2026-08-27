@@ -58,5 +58,6 @@ const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8
 assert.match(appSource, /snapshots\[workspace\] = captureWorkspaceSnapshot\(\)/, "indicator edits must update the active local workspace snapshot");
 assert.match(appSource, /Failed to persist indicator settings/, "indicator edits must be synchronized to the authenticated workspace backend");
 assert.match(appSource, /mergeNewestWorkspaceSnapshots\(localSnapshots, remoteSnapshots\)/, "reload hydration must resolve local and remote settings by timestamp");
+assert.match(appSource, /customPaneHeights:[\s\S]*value\?\.oscillatorPane\?\.customPaneHeights/, "custom oscillator pane heights must survive workspace migration and reload");
 
 console.log("Indicator settings reload, removal, re-add, and timestamp reconciliation tests passed.");

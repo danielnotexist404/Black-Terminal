@@ -499,6 +499,10 @@ function migrateIndicatorAdvancedSettings(value: Partial<IndicatorAdvancedSettin
         ...defaultIndicatorAdvancedSettings.oscillatorPane.paneHeights,
         ...(value?.oscillatorPane?.paneHeights ?? {})
       },
+      customPaneHeights: {
+        ...defaultIndicatorAdvancedSettings.oscillatorPane.customPaneHeights,
+        ...(value?.oscillatorPane?.customPaneHeights ?? {})
+      },
       order: Array.isArray(value?.oscillatorPane?.order)
         ? value.oscillatorPane.order
         : defaultIndicatorAdvancedSettings.oscillatorPane.order

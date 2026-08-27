@@ -143,6 +143,7 @@ export const defaultOscillatorPaneSettings: OscillatorPaneSettings = {
     ddaProOscillator: 176,
     acvdOscillator: 176
   },
+  customPaneHeights: {},
   order: [],
   backgroundColor: "#000000",
   backgroundIntensity: 62,

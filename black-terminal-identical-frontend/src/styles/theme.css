@@ -3746,6 +3746,37 @@ body.resizing-layout * {
 .custom-script-settings-runtime b { color: var(--green); }
 .custom-script-settings-runtime span { color: #747b85; }
 
+.custom-script-pane-settings {
+  display: grid;
+  gap: 7px;
+  border-top-color: rgba(255, 0, 0, 0.18);
+}
+
+.custom-script-pane-settings label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px 44px;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.custom-script-pane-settings label > span {
+  color: #b9bec6;
+  font: 700 9px "IBM Plex Mono", monospace;
+}
+
+.custom-script-pane-settings label > b {
+  color: #f1f2f4;
+  font: 700 9px "IBM Plex Mono", monospace;
+  text-align: right;
+}
+
+.custom-script-pane-settings small {
+  color: #737a84;
+  font: 600 8px/1.45 "IBM Plex Mono", monospace;
+  text-transform: none;
+}
+
 .custom-script-inputs { border-top-color: rgba(255, 0, 0, 0.18); }
 .custom-script-inputs label { min-height: 36px; }
 

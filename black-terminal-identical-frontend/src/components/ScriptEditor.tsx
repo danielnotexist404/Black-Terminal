@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Play, Save, TerminalSquare, Trash2, Plus, FileCode, CheckCircle, AlertTriangle, X } from "lucide-react";
 import { compileAndRunScript, finalizedScriptResult } from "./ScriptCompiler";
 import type { CompileResult, CompiledScriptActivation } from "./ScriptCompiler";
@@ -76,6 +76,7 @@ export function ScriptEditor({
   const [consoleLogs, setConsoleLogs] = useState<{ type: "success" | "error"; text: string; line?: number }[]>([]);
   const [highlightedLine, setHighlightedLine] = useState<number | null>(null);
   const [storageBusy, setStorageBusy] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
 
   const localStorageKey = currentUser ? `bt_user_scripts:${currentUser.username}` : "bt_user_scripts:anonymous";
 
@@ -126,19 +127,26 @@ export function ScriptEditor({
 
   const createNewScript = () => {
     setSelectedScriptId(null);
-    setName("Untitled Script");
+    setName("");
     setKind("indicator");
     setSource(templates.indicator);
     setConsoleLogs([]);
     setHighlightedLine(null);
+    window.requestAnimationFrame(() => nameInputRef.current?.focus());
   };
 
   const saveCurrentScript = async (quiet = false): Promise<UserScript | null> => {
+    const scriptName = name.trim();
+    if (!scriptName) {
+      setConsoleLogs([{ type: "error", text: `Name this ${kind} before saving it.` }]);
+      nameInputRef.current?.focus();
+      return null;
+    }
     const id = selectedScriptId || `script-${Date.now()}`;
     const previous = scripts.find((script) => script.id === id);
     const newScript: UserScript = {
       id,
-      name: name.trim() || "Untitled Script",
+      name: scriptName,
       kind,
       source,
       createdAt: previous?.createdAt ?? Date.now(),
@@ -409,24 +417,43 @@ export function ScriptEditor({
           background: "rgba(3, 4, 5, 0.98)"
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Script Name"
-              style={{
-                background: "transparent",
-                border: 0,
-                borderBottom: "1px solid transparent",
-                color: "var(--strong)",
-                fontSize: "13px",
+            <label className="script-name-field" style={{
+              display: "grid",
+              gap: "3px",
+              minWidth: "220px"
+            }}>
+              <span style={{
+                color: "#d00024",
                 fontFamily: "var(--font-mono)",
-                fontWeight: 600,
-                width: "150px",
-                padding: "2px 0"
-              }}
-              onFocus={(e) => (e.currentTarget.style.borderBottomColor = "var(--red-hot)")}
-              onBlur={(e) => (e.currentTarget.style.borderBottomColor = "transparent")}
-            />
+                fontSize: "7px",
+                fontWeight: 800,
+                letterSpacing: "0.11em"
+              }}>
+                {kind === "indicator" ? "INDICATOR NAME" : "STRATEGY NAME"}
+              </span>
+              <input
+                ref={nameInputRef}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={kind === "indicator" ? "Name this indicator" : "Name this strategy"}
+                aria-label={kind === "indicator" ? "Indicator name" : "Strategy name"}
+                maxLength={80}
+                style={{
+                  background: "rgba(0,0,0,0.72)",
+                  border: "1px solid rgba(208,0,36,0.5)",
+                  borderRadius: "3px",
+                  color: "var(--strong)",
+                  fontSize: "12px",
+                  fontFamily: "var(--font-mono)",
+                  fontWeight: 600,
+                  width: "220px",
+                  padding: "5px 7px",
+                  outline: "none"
+                }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = "var(--red-hot)")}
+                onBlur={(e) => (e.currentTarget.style.borderColor = "rgba(208,0,36,0.5)")}
+              />
+            </label>
             <span style={{ fontSize: "9px", fontFamily: "var(--font-mono)", color: "var(--muted)" }}>
               {exchange} / {symbol}
             </span>

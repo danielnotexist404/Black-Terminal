@@ -19,7 +19,11 @@ import {
   type InstitutionalVwapPoint,
   type InstitutionalVwapResult
 } from "./indicators/institutionalVwap";
-import { resolveOscillatorStack } from "./indicators/oscillatorLayout";
+import {
+  customOscillatorScriptId,
+  customOscillatorScriptIds,
+  resolveOscillatorStack
+} from "./indicators/oscillatorLayout";
 import type { IndicatorAlertDefinition } from "../automation/alerts";
 import type { CompiledMarker, CompiledPlot } from "../components/ScriptCompiler";
 import { createAdaptiveSwingSignals } from "../modules/strategy-lab/adapters/signalAdapter";
@@ -1687,9 +1691,7 @@ export class BlackChartEngine {
   }
 
   private getOscillatorPaneHeight() {
-    const nativeReservedHeight = this.oscillatorStackLayout().reservedHeight;
-    const customReservedHeight = this.customPlots.some((plot) => plot.pane === "oscillator" && plot.visible !== false) ? 190 : 0;
-    return nativeReservedHeight + customReservedHeight;
+    return this.oscillatorStackLayout().reservedHeight;
   }
 
   private oscillatorStackLayout() {
@@ -1703,6 +1705,10 @@ export class BlackChartEngine {
           ...defaultOscillatorPaneSettings.paneHeights,
           ...(configuredPane?.paneHeights ?? {})
         },
+        customPaneHeights: {
+          ...defaultOscillatorPaneSettings.customPaneHeights,
+          ...(configuredPane?.customPaneHeights ?? {})
+        },
         order: configuredPane?.order ?? defaultOscillatorPaneSettings.order
       },
       {
@@ -1711,7 +1717,8 @@ export class BlackChartEngine {
       },
       this.view.height,
       this.view.bottomAxisHeight,
-      this.view.topPadding
+      this.view.topPadding,
+      customOscillatorScriptIds(this.customPlots)
     );
   }
 
@@ -2947,7 +2954,7 @@ export class BlackChartEngine {
   private drawOscillatorPanes(data: Candle[]) {
     const stack = this.oscillatorStackLayout();
     const customOscillatorPlots = this.customPlots.filter((plot) => plot.pane === "oscillator" && plot.visible !== false);
-    if (stack.panes.length === 0 && customOscillatorPlots.length === 0) return;
+    if (stack.panes.length === 0 && stack.customPanes.length === 0) return;
 
     const g = this.indicatorLayer;
     const plotWidth = this.view.width - this.view.rightAxisWidth;
@@ -3133,12 +3140,16 @@ export class BlackChartEngine {
       }
     }
 
-    if (customOscillatorPlots.length > 0) {
-      const paneHeight = 170;
-      const paneBottom = basePaneBottom - stack.reservedHeight;
+    for (const customPane of stack.customPanes) {
+      const scriptPlots = customOscillatorPlots.filter(
+        (plot) => customOscillatorScriptId(plot.name) === customPane.scriptId
+      );
+      if (scriptPlots.length === 0) continue;
+      const paneHeight = customPane.height;
+      const paneBottom = basePaneBottom - customPane.bottomOffset;
       const paneTop = paneBottom - paneHeight;
       const visibleValues: number[] = [];
-      for (const plot of customOscillatorPlots) {
+      for (const plot of scriptPlots) {
         const sourceOffset = Math.max(0, data.length - plot.values.length);
         for (let index = this.view.firstIndex; index <= this.view.lastIndex; index += 1) {
           const value = plot.values[index - sourceOffset];
@@ -3169,7 +3180,7 @@ export class BlackChartEngine {
         g.moveTo(0, zeroY).lineTo(plotWidth, zeroY).stroke({ width: 1, color: genericZeroColor, alpha: zeroLineAlpha });
       }
 
-      for (const plot of customOscillatorPlots) {
+      for (const plot of scriptPlots) {
         const color = this.hexColor(plot.color, theme.silverBright);
         const sourceOffset = Math.max(0, data.length - plot.values.length);
         let started = false;
@@ -3192,7 +3203,7 @@ export class BlackChartEngine {
       }
 
       let labelX = 10;
-      for (const plot of customOscillatorPlots) {
+      for (const plot of scriptPlots) {
         const color = this.hexColor(plot.color, theme.silverBright);
         const label = plot.name.includes(":") ? plot.name.slice(plot.name.indexOf(":") + 1) : plot.name;
         g.rect(labelX, paneTop + 9, Math.max(18, label.length * 5.6), 2).fill({ color, alpha: 0.8 });

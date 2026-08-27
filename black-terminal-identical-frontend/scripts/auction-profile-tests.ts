@@ -4,6 +4,7 @@ import { AUCTION_PROFILE_DEFAULT_SETTINGS, auctionProfileCalculationSettingsHash
 import { stableHash } from "../src/modules/auction-profile/core/canonical.ts";
 import { RADAP_DISPLAY_NAME, RADAP_FULL_NAME, RADAP_SHORT_NAME } from "../src/modules/auction-profile/core/identity.ts";
 import { retainCertifiedRadapSnapshots } from "../src/modules/auction-profile/core/stability.ts";
+import { resolveAuctionProfileReplayWindow } from "../src/modules/auction-profile/core/replay.ts";
 import { createAuctionProfileGrid } from "../src/modules/auction-profile/core/profileGrid.ts";
 import { resolveAuctionScopeWindows } from "../src/modules/auction-profile/core/scope.ts";
 import { auctionHistogramWidth, auctionProfileHorizontalBounds, auctionProfileStartX } from "../src/modules/auction-profile/rendering/histogram.ts";
@@ -113,6 +114,37 @@ assert.equal(tabletSettings.rendering.cellTextMode, "AUTO");
 assert.equal(auctionProfileSettingsForDevice(settings, false), settings, "desktop RADAP rendering must remain unchanged");
 assert.deepEqual(retainCertifiedRadapSnapshots([snapshot], []), [snapshot], "an empty rebuild must retain the last certified RADAP snapshot");
 assert.deepEqual(retainCertifiedRadapSnapshots([], [snapshot]), [snapshot], "a certified rebuild must replace an empty display");
+const replayWindow = resolveAuctionProfileReplayWindow(bars, 5, { enabled: true, selecting: false, cursor: 7 }, 3600);
+assert.deepEqual(replayWindow.bars.map(bar => bar.time), bars.slice(3, 8).map(bar => bar.time), "Replay RADAP must observe only the causal prefix ending at its cursor");
+assert.equal(replayWindow.sourceEndIndex, 7);
+assert.equal(replayWindow.cutoffEnd, bars[7]!.time + 3600 - 1);
+assert.equal(replayWindow.replayBounded, true);
+const replaySelectionWindow = resolveAuctionProfileReplayWindow(bars, 5, { enabled: true, selecting: true, cursor: 2 }, 3600);
+assert.deepEqual(replaySelectionWindow.bars.map(bar => bar.time), bars.slice(-5).map(bar => bar.time), "Replay start selection may inspect the retained source before a cursor owns the calculation");
+assert.equal(replaySelectionWindow.replayBounded, false);
+assert.deepEqual(
+  retainCertifiedRadapSnapshots([snapshot], [], replayWindow.cutoffEnd!),
+  [],
+  "a full-history RADAP snapshot must never survive behind an earlier replay cutoff"
+);
+const replayProfileEarly = calculateAuctionProfile({
+  ...input,
+  bars: replayWindow.bars,
+  trades: trades.filter(trade => trade.timestamp <= replayWindow.cutoffEnd!),
+  sourceRevision: "replay:7",
+  now: replayWindow.cutoffEnd! * 1_000
+});
+const replayWindowLater = resolveAuctionProfileReplayWindow(bars, 5, { enabled: true, selecting: false, cursor: 9 }, 3600);
+const replayProfileLater = calculateAuctionProfile({
+  ...input,
+  bars: replayWindowLater.bars,
+  trades: trades.filter(trade => trade.timestamp <= replayWindowLater.cutoffEnd!),
+  sourceRevision: "replay:9",
+  now: replayWindowLater.cutoffEnd! * 1_000
+});
+assert.ok(replayProfileEarly && replayProfileLater);
+assert.notEqual(replayProfileEarly.profileVersion, replayProfileLater.profileVersion, "RADAP must mutate as Replay advances to a new causal prefix");
+assert.ok(replayProfileEarly.range.end < replayProfileLater.range.end, "RADAP range must advance with the Replay cursor");
 assert.equal(snapshot.quality.quality, "EXACT");
 assert.equal(snapshot.quality.exactTradeCoveragePercent, 100);
 assert.equal(snapshot.diagnostics.viewportAffectsCalculation, false);

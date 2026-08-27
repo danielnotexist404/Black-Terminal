@@ -132,6 +132,7 @@ import { AuctionProfileSettingsPanel } from "../modules/auction-profile/componen
 import { AuctionProfileDiagnostics } from "../modules/auction-profile/components/AuctionProfileDiagnostics";
 import { AuctionProfileLegend } from "../modules/auction-profile/components/AuctionProfileLegend";
 import { auctionProfileCalculationSettingsHash, migrateAuctionProfileSettings } from "../modules/auction-profile/core/settings";
+import { resolveAuctionProfileReplayWindow } from "../modules/auction-profile/core/replay";
 import type { AuctionProfileSettings, AuctionProfileSnapshot, CanonicalTrade } from "../modules/auction-profile/core/types";
 import { retainCertifiedRadapSnapshots } from "../modules/auction-profile/core/stability";
 import { canonicalCvdService, normalizeCanonicalTrade } from "../modules/auction-profile/data/tradeSource";
@@ -595,6 +596,7 @@ export function PixiBlackChart({
   const liquidationFieldControllerRef = useRef<LiquidationFieldController | null>(null);
   const liquidationFieldSnapshotStoreRef = useRef(new InMemoryBclifSnapshotStore());
   const [auctionProfileSourceRevision, setAuctionProfileSourceRevision] = useState(0);
+  const [auctionProfileReplayCursor, setAuctionProfileReplayCursor] = useState<number | null>(null);
   const [ddaProSourceRevision, setDDAProSourceRevision] = useState(0);
   const [kioseffUnavailable, setKioseffUnavailable] = useState<KioseffUnavailableDiagnostic | null>(null);
   const [kioseffLoadState, setKioseffLoadState] = useState<KioseffLoadState>({ stage: "idle" });
@@ -632,9 +634,14 @@ export function PixiBlackChart({
   ).dataRequired;
   const auctionProfileCalculationVersion = auctionProfileCalculationSettingsHash(normalizedAuctionProfileSettings);
   const debouncedAuctionProfileCalculationVersion = useDebouncedValue(auctionProfileCalculationVersion, 220);
+  const auctionProfileReplayRevision = replayControls.enabled
+    ? replayControls.selecting
+      ? "replay-selecting"
+      : `replay-${auctionProfileReplayCursor ?? "pending"}`
+    : "live";
   const auctionProfileDataRevision = normalizedAuctionProfileSettings.compositeLocked
     ? "locked:" + debouncedAuctionProfileCalculationVersion
-    : "chart:" + auctionProfileSourceRevision;
+    : `chart:${auctionProfileSourceRevision}:${auctionProfileReplayRevision}`;
   const [dataStatus, setDataStatus] = useState("CONNECTING");
   const [chartHistoryState, setChartHistoryState] = useState<
     "loading" | "ready" | "unavailable"
@@ -684,6 +691,8 @@ export function PixiBlackChart({
   const auctionTradeHistoryRef = useRef<CanonicalTrade[]>([]);
   const auctionTradeBufferRef = useRef<CanonicalTrade[]>([]);
   const auctionTradeFlushTimerRef = useRef<number | undefined>(undefined);
+  const auctionReplayRefreshTimerRef = useRef<number | undefined>(undefined);
+  const pendingAuctionReplayCursorRef = useRef<number | null>(null);
   const ddaFlowRefreshTimerRef = useRef<number | undefined>(undefined);
   const ddaFlowCaptureRef = useRef<DDAProFlowCaptureState>({
     venue: marketSymbol.exchange,
@@ -853,6 +862,27 @@ export function PixiBlackChart({
     });
   };
 
+  const publishAuctionProfileReplayCursor = (cursor: number | null, immediate = false) => {
+    pendingAuctionReplayCursorRef.current = cursor;
+    if (!auctionDataRequired) return;
+    const publish = () => {
+      auctionReplayRefreshTimerRef.current = undefined;
+      const pending = pendingAuctionReplayCursorRef.current;
+      setAuctionProfileReplayCursor(current => current === pending ? current : pending);
+    };
+    if (immediate) {
+      if (auctionReplayRefreshTimerRef.current) window.clearTimeout(auctionReplayRefreshTimerRef.current);
+      publish();
+      return;
+    }
+    if (!auctionReplayRefreshTimerRef.current) {
+      // Replay can advance at 20x. Coalesce cursor changes so the worker sees
+      // the newest causal prefix at a bounded cadence instead of spawning a
+      // rebuild for every intermediate frame.
+      auctionReplayRefreshTimerRef.current = window.setTimeout(publish, 250);
+    }
+  };
+
   const computeReplayStartIndex = () => {
     const source = replaySourceRef.current;
     if (source.length === 0) return 0;
@@ -862,7 +892,7 @@ export function PixiBlackChart({
     return clampNumber(Math.round((source.length - 1) * (startPercent / 100)), 0, source.length - 1);
   };
 
-  const applyReplayCursor = (index: number, resetView = false) => {
+  const applyReplayCursor = (index: number, resetView = false, refreshRadapImmediately = false) => {
     const engine = engineRef.current;
     const source = replaySourceRef.current;
     if (!engine || source.length === 0) {
@@ -872,6 +902,7 @@ export function PixiBlackChart({
 
     const cursor = clampNumber(index, 0, source.length - 1);
     replayCursorRef.current = cursor;
+    publishAuctionProfileReplayCursor(cursor, refreshRadapImmediately);
     engine.setCandles(source.slice(0, cursor + 1), {
       preserveView: !resetView,
       heatmapSource: source,
@@ -897,7 +928,7 @@ export function PixiBlackChart({
         return;
       }
       replayStartIndexRef.current = computeReplayStartIndex();
-      applyReplayCursor(replayStartIndexRef.current, true);
+      applyReplayCursor(replayStartIndexRef.current, true, true);
     } else {
       emitReplayStatus(false, false);
     }
@@ -1245,14 +1276,14 @@ export function PixiBlackChart({
         if (overflow > 0) auctionHistory.splice(0, Math.min(auctionHistory.length, Math.max(overflow, 4_096)));
         auctionHistory.push(...canonicalTrades);
       }
-      if (auctionDataRequired && !normalizedAuctionProfileSettings.compositeLocked && auctionWorkerRef.current && canonicalTrades.length) {
+      if (auctionDataRequired && !replayActiveRef.current && !normalizedAuctionProfileSettings.compositeLocked && auctionWorkerRef.current && canonicalTrades.length) {
         auctionTradeBufferRef.current.push(...canonicalTrades);
         if (!auctionTradeFlushTimerRef.current) {
           auctionTradeFlushTimerRef.current = window.setTimeout(() => {
             auctionTradeFlushTimerRef.current = undefined;
             const buffered = auctionTradeBufferRef.current.splice(0);
             const client = auctionWorkerRef.current;
-            if (!client || !buffered.length) return;
+            if (replayActiveRef.current || !client || !buffered.length) return;
             void client.appendTrades(buffered, "live:" + Date.now()).then((snapshots) => {
               const previousFingerprint = auctionProfileSnapshotsRef.current.map(snapshot => snapshot.profileVersion).join("|");
               const nextFingerprint = snapshots.map(snapshot => snapshot.profileVersion).join("|");
@@ -1679,6 +1710,11 @@ export function PixiBlackChart({
         window.clearTimeout(ddaFlowRefreshTimerRef.current);
         ddaFlowRefreshTimerRef.current = undefined;
       }
+      if (auctionReplayRefreshTimerRef.current) {
+        window.clearTimeout(auctionReplayRefreshTimerRef.current);
+        auctionReplayRefreshTimerRef.current = undefined;
+      }
+      pendingAuctionReplayCursorRef.current = null;
       const capture = ddaFlowCaptureRef.current;
       if (capture.venue === marketSymbol.exchange && capture.symbol === marketSymbol.rawSymbol) {
         ddaFlowCaptureRef.current = { ...capture, captureStartedAt: null, streamHealthy: false };
@@ -2243,10 +2279,20 @@ export function PixiBlackChart({
     auctionWorkerRef.current = client;
     setAuctionProfileLoading(auctionProfileSnapshotsRef.current.length === 0);
     setAuctionProfileError(null);
-    const bars = replaySourceRef.current.slice(-normalizedAuctionProfileSettings.lookbackBars);
+    const replayWindow = resolveAuctionProfileReplayWindow(
+      replaySourceRef.current,
+      normalizedAuctionProfileSettings.lookbackBars,
+      {
+        enabled: replayControls.enabled,
+        selecting: replayControls.selecting,
+        cursor: auctionProfileReplayCursor ?? replayCursorRef.current
+      },
+      timeframeSeconds[timeframe]
+    );
+    const bars = replayWindow.bars;
     const start = bars[0]?.time ?? 0;
     const interval = bars.length > 1 ? Math.max(1, bars[bars.length - 1]!.time - bars[bars.length - 2]!.time) : timeframeSeconds[timeframe];
-    const end = (bars[bars.length - 1]?.time ?? 0) + interval;
+    const end = replayWindow.cutoffEnd ?? (bars[bars.length - 1]?.time ?? 0) + interval - 1;
     const trades = auctionTradeHistoryRef.current.filter(trade =>
       trade.venue === marketSymbol.exchange &&
       trade.symbol === marketSymbol.rawSymbol &&
@@ -2262,10 +2308,17 @@ export function PixiBlackChart({
       bars,
       trades,
       settings: normalizedAuctionProfileSettings,
-      sourceRevision: auctionProfileDataRevision
+      sourceRevision: auctionProfileDataRevision,
+      now: replayWindow.replayBounded && replayWindow.cutoffEnd !== null
+        ? replayWindow.cutoffEnd * 1_000
+        : Date.now()
     }).then(snapshots => {
       if (disposed) return;
-      const retained = retainCertifiedRadapSnapshots(auctionProfileSnapshotsRef.current, snapshots);
+      const retained = retainCertifiedRadapSnapshots(
+        auctionProfileSnapshotsRef.current,
+        snapshots,
+        replayWindow.replayBounded ? replayWindow.cutoffEnd ?? undefined : undefined
+      );
       auctionProfileSnapshotsRef.current = retained;
       setAuctionProfileSnapshots(retained);
       setAuctionProfileLoading(false);
@@ -2320,6 +2373,7 @@ export function PixiBlackChart({
     const source = replaySourceRef.current;
 
     if (!replayControls.enabled) {
+      publishAuctionProfileReplayCursor(null, true);
       replayAppliedRef.current = false;
       replayCommandIdRef.current = replayControls.commandId;
       if (engine && source.length > 0) {
@@ -2340,6 +2394,7 @@ export function PixiBlackChart({
     }
 
     if (replayControls.selecting) {
+      publishAuctionProfileReplayCursor(null, true);
       replayAppliedRef.current = false;
       replayCommandIdRef.current = replayControls.commandId;
       engine.setCandles(source, {
@@ -2356,11 +2411,11 @@ export function PixiBlackChart({
       replayCommandIdRef.current = replayControls.commandId;
       if (replayControls.command === "rewind" || replayControls.command === "start" || !replayAppliedRef.current) {
         replayStartIndexRef.current = computeReplayStartIndex();
-        applyReplayCursor(replayStartIndexRef.current, true);
+        applyReplayCursor(replayStartIndexRef.current, true, true);
       }
       replayAppliedRef.current = true;
     } else {
-      applyReplayCursor(replayCursorRef.current);
+      applyReplayCursor(replayCursorRef.current, false, true);
     }
 
     if (replayControls.playing) {

@@ -7,8 +7,12 @@ import type { AuctionProfileSnapshot } from "./types.ts";
  */
 export function retainCertifiedRadapSnapshots(
   current: readonly AuctionProfileSnapshot[],
-  candidate: readonly AuctionProfileSnapshot[]
+  candidate: readonly AuctionProfileSnapshot[],
+  causalCutoffEnd?: number
 ) {
-  return candidate.length ? [...candidate] : [...current];
+  const withinCausalCutoff = (snapshot: AuctionProfileSnapshot) =>
+    causalCutoffEnd === undefined || snapshot.range.end <= causalCutoffEnd;
+  const certifiedCandidate = candidate.filter(withinCausalCutoff);
+  if (certifiedCandidate.length) return [...certifiedCandidate];
+  return current.filter(withinCausalCutoff);
 }
-

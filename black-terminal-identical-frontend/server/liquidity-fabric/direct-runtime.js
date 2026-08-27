@@ -5,6 +5,9 @@ const MAX_BOOKS = 8;
 const SESSION_STALE_MS = 15_000;
 const SNAPSHOT_SORT_THROTTLE_MS = 700;
 const BUNDLE_IDLE_MS = 120_000;
+const SOCKET_WATCHDOG_INTERVAL_MS = 5_000;
+const SOCKET_INITIALIZATION_TIMEOUT_MS = 20_000;
+const SESSION_RECOVERY_COOLDOWN_MS = 20_000;
 
 export class DirectLiquidityFabricRuntime {
   constructor({ WebSocketCtor = WebSocket, fetchImpl = globalThis.fetch, now = () => Date.now(), logger = console } = {}) {
@@ -19,7 +22,8 @@ export class DirectLiquidityFabricRuntime {
     const baseAsset = normalizeBaseAsset(input.baseAsset);
     const bundle = this.ensureBundle(baseAsset);
     bundle.lastRequestedAt = this.now();
-    await waitForReady(bundle, 8_000);
+    const recoveringWideCarrier = recoverStaleDepthCarrier(bundle, this.now());
+    await waitForReady(bundle, 8_000, recoveringWideCarrier ? "bybit" : null);
     const key = viewportKey(input);
     const previousRows = bundle.previousFrames.get(key) ?? null;
     const result = projectLiquidityViewport({
@@ -80,6 +84,9 @@ export class VenueBookSession {
     this.socket = null;
     this.timer = null;
     this.reconnectNow = null;
+    this.watchdogTimer = null;
+    this.connectedAt = null;
+    this.lastRecoveryAt = null;
     this.stopped = false;
     this.now = now;
     this.snapshotCache = null;
@@ -153,10 +160,13 @@ export class VenueBookSession {
 
   requestReconnect(reason) {
     if (this.stopped) return false;
+    if (typeof this.reconnectNow !== "function") return false;
+    const now = this.now();
+    if (Number.isFinite(this.lastRecoveryAt) && now - this.lastRecoveryAt < SESSION_RECOVERY_COOLDOWN_MS) return false;
+    this.lastRecoveryAt = now;
     this.status = "RECOVERING";
     this.lastError = String(reason || `${this.venue} liquidity session requires recovery`);
     this.snapshotDirty = true;
-    if (typeof this.reconnectNow !== "function") return false;
     this.reconnectNow(this.lastError);
     return true;
   }
@@ -164,6 +174,7 @@ export class VenueBookSession {
   stop() {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
+    if (this.watchdogTimer) clearInterval(this.watchdogTimer);
     this.reconnectNow = null;
     try { this.socket?.close(); } catch { /* best effort */ }
   }
@@ -181,6 +192,7 @@ function createBundle(runtime, baseAsset) {
   const kraken = add(new VenueBookSession({ ...common, venue: "kraken", marketKind: "spot", exchangeSymbol: krakenSymbol, quoteAsset: "USD", transport: "REST_L500_SNAPSHOT" }));
   const bundle = {
     baseAsset,
+    now: runtime.now,
     sessions,
     previousFrames: new Map(),
     lastRequestedAt: runtime.now(),
@@ -350,6 +362,10 @@ function connectSocket(runtime, session, url, onOpen, onPayload) {
   const scheduleReconnect = () => {
     if (session.stopped || reconnectScheduled) return;
     reconnectScheduled = true;
+    if (session.watchdogTimer) {
+      clearInterval(session.watchdogTimer);
+      session.watchdogTimer = null;
+    }
     if (session.socket === socket) session.socket = null;
     session.reconnectNow = null;
     session.status = "DISCONNECTED";
@@ -372,7 +388,19 @@ function connectSocket(runtime, session, url, onOpen, onPayload) {
       scheduleReconnect();
     }
   };
-  socket.on("open", () => onOpen(socket));
+  socket.on("open", () => {
+    session.connectedAt = runtime.now();
+    onOpen(socket);
+    session.watchdogTimer = setInterval(() => {
+      if (session.stopped || reconnectScheduled || session.socket !== socket) return;
+      const now = runtime.now();
+      const freshnessAnchor = Number.isFinite(session.receivedAt) ? session.receivedAt : session.connectedAt;
+      const maximumSilenceMs = Number.isFinite(session.receivedAt) ? SESSION_STALE_MS : SOCKET_INITIALIZATION_TIMEOUT_MS;
+      if (Number.isFinite(freshnessAnchor) && now - freshnessAnchor > maximumSilenceMs) {
+        session.requestReconnect(`${session.venue} public depth stopped producing authoritative updates`);
+      }
+    }, SOCKET_WATCHDOG_INTERVAL_MS);
+  });
   socket.on("message", (raw) => {
     try { onPayload(JSON.parse(String(raw))); }
     catch (error) { session.lastError = error instanceof Error ? error.message : String(error); }
@@ -427,12 +455,12 @@ async function fetchKraken(runtime, session) {
   session.replace({ bids: book.bids, asks: book.asks, sourceTimestamp: Date.now(), sequence: Date.now() });
 }
 
-function waitForReady(bundle, timeoutMs) {
-  if (bundleReady(bundle)) return Promise.resolve();
+function waitForReady(bundle, timeoutMs, requiredVenue = null) {
+  if (bundleReady(bundle, requiredVenue)) return Promise.resolve();
   return new Promise((resolve) => {
     const started = Date.now();
     const timer = setInterval(() => {
-      if (bundleReady(bundle) || Date.now() - started >= timeoutMs) {
+      if (bundleReady(bundle, requiredVenue) || Date.now() - started >= timeoutMs) {
         clearInterval(timer);
         resolve();
       }
@@ -440,10 +468,34 @@ function waitForReady(bundle, timeoutMs) {
   });
 }
 
-function bundleReady(bundle) {
+function bundleReady(bundle, requiredVenue = null) {
   const sessions = [...bundle.sessions.values()];
-  const healthy = sessions.filter((session) => session.status === "HEALTHY");
-  return sessions.find((session) => session.venue === "coinbase")?.status === "HEALTHY" || healthy.length >= 3;
+  const now = typeof bundle.now === "function" ? bundle.now() : Date.now();
+  const healthy = sessions.filter((session) => isSessionFresh(session, now));
+  if (requiredVenue && !healthy.some((session) => session.venue === requiredVenue)) return false;
+  return healthy.some((session) => session.venue === "coinbase") || healthy.length >= 3;
+}
+
+export function isSessionFresh(session, now = Date.now(), maximumAgeMs = SESSION_STALE_MS) {
+  const receivedAt = session?.receivedAt === null || session?.receivedAt === undefined ? Number.NaN : Number(session.receivedAt);
+  return session?.status === "HEALTHY"
+    && Number.isFinite(receivedAt)
+    && Number(now) - receivedAt <= maximumAgeMs
+    && session?.bids?.size > 0
+    && session?.asks?.size > 0;
+}
+
+export function recoverStaleDepthCarrier(bundle, now = Date.now()) {
+  const carrier = bundle?.sessions?.get?.("bybit");
+  if (!carrier || isSessionFresh(carrier, now)) return false;
+  const receivedAt = carrier.receivedAt === null || carrier.receivedAt === undefined ? Number.NaN : Number(carrier.receivedAt);
+  const connectedAt = carrier.connectedAt === null || carrier.connectedAt === undefined ? Number.NaN : Number(carrier.connectedAt);
+  const staleAuthoritativeBook = Number.isFinite(receivedAt) && Number(now) - receivedAt > SESSION_STALE_MS;
+  const stuckInitialization = Number.isFinite(connectedAt)
+    && Number(now) - connectedAt > SOCKET_INITIALIZATION_TIMEOUT_MS
+    && carrier.status !== "HEALTHY";
+  if (!staleAuthoritativeBook && !stuckInitialization) return false;
+  return carrier.requestReconnect("Bybit full-depth carrier became stale; recycling the public depth session");
 }
 
 function levelMap(levels) {

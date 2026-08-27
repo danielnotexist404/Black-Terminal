@@ -6,7 +6,7 @@ import { CanonicalOrderBookReconstructor } from "../server/liquidity-fabric/orde
 import { assessBookQuality } from "../server/liquidity-fabric/quality.js";
 import { venueDepthPolicies } from "../server/liquidity-fabric/venue-policies.js";
 import { projectLiquidityViewport } from "../server/liquidity-fabric/viewport-compositor.js";
-import { VenueBookSession } from "../server/liquidity-fabric/direct-runtime.js";
+import { VenueBookSession, isSessionFresh, recoverStaleDepthCarrier } from "../server/liquidity-fabric/direct-runtime.js";
 
 const NOW = 1_787_508_800_000;
 const direct = (venue) => ({
@@ -169,6 +169,43 @@ function snapshot(reconstructor, venue, sequence = 100, overrides = {}) {
   assert.equal(session.reconnects, 0, "a recovered authoritative snapshot resets socket backoff");
   session.stop();
   assert.equal(session.requestReconnect("ignored after stop"), false, "a stopped session cannot create a reconnect loop");
+}
+
+{
+  let now = NOW;
+  const carrier = new VenueBookSession({ venue: "bybit", marketKind: "perpetual", exchangeSymbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", transport: "TEST", now: () => now });
+  let reconnects = 0;
+  carrier.reconnectNow = () => { reconnects += 1; };
+  carrier.connectedAt = now;
+  carrier.replace({ bids: [[50_000, 2]], asks: [[105_000, 3]], sourceTimestamp: now, sequence: 1 });
+  const bundle = { sessions: new Map([["bybit", carrier]]) };
+  assert.equal(isSessionFresh(carrier, now), true, "a newly received authoritative full-depth book is fresh");
+  assert.equal(recoverStaleDepthCarrier(bundle, now), false, "a fresh wide carrier must never be recycled");
+
+  now += 16_000;
+  assert.equal(isSessionFresh(carrier, now), false, "status alone cannot make an expired book authoritative");
+  assert.equal(recoverStaleDepthCarrier(bundle, now), true, "a stale Bybit carrier must trigger a real socket recycle");
+  assert.equal(reconnects, 1);
+  assert.equal(recoverStaleDepthCarrier(bundle, now), false, "concurrent requests cannot create a reconnect storm");
+
+  now += 21_000;
+  carrier.status = "HEALTHY";
+  assert.equal(recoverStaleDepthCarrier(bundle, now), true, "a still-stale carrier can retry after the bounded cooldown");
+  assert.equal(reconnects, 2);
+}
+
+{
+  let now = NOW;
+  const carrier = new VenueBookSession({ venue: "bybit", marketKind: "perpetual", exchangeSymbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", transport: "TEST", now: () => now });
+  let reconnects = 0;
+  carrier.reconnectNow = () => { reconnects += 1; };
+  carrier.connectedAt = now;
+  const bundle = { sessions: new Map([["bybit", carrier]]) };
+  now += 19_000;
+  assert.equal(recoverStaleDepthCarrier(bundle, now), false, "normal initial full-book synchronization receives its complete grace period");
+  now += 2_000;
+  assert.equal(recoverStaleDepthCarrier(bundle, now), true, "a stuck full-book initialization is recycled after the bounded grace period");
+  assert.equal(reconnects, 1);
 }
 
 {
@@ -365,6 +402,8 @@ function snapshot(reconstructor, venue, sequence = 100, overrides = {}) {
   assert.match(runtime, /orderbook\.full\./, "Bybit must use the official full-depth delta stream rather than the legacy narrow ladder feed");
   assert.match(runtime, /full_orderbook\?category=linear/, "Bybit full-depth reconstruction must be initialized by its official REST snapshot");
   assert.match(runtime, /session\.requestReconnect\("Bybit full-depth synchronization exhausted/, "an exhausted Bybit bootstrap must recycle the public socket instead of buffering forever");
+  assert.match(runtime, /public depth stopped producing authoritative updates/, "public WebSocket books must have a freshness watchdog");
+  assert.match(runtime, /recoverStaleDepthCarrier\(bundle/, "each viewport request must audit the authoritative wide-depth carrier");
   assert.match(runtime, /canonical:\$\{priceStep\.toPrecision\(8\)\}/, "canonical price grids must reconcile overlapping rows across viewport pans");
 }
 

@@ -126,6 +126,7 @@ function emptySnapshot(input: AcvdCalculationInput, warning: string): AcvdSnapsh
     marketIdentity: input.marketIdentity ?? "unknown",
     settingsHash: acvdSettingsHash(settings),
     dataHash: stableHash(input.candles.map((candle) => [candle.time, candle.close])),
+    barTimes: input.candles.map((candle) => candle.time),
     series: blankSeries(inputSize),
     signals: [],
     latest: {
@@ -379,6 +380,7 @@ export function calculateAcvd(input: AcvdCalculationInput): AcvdSnapshot {
     marketIdentity: input.marketIdentity ?? "unknown",
     settingsHash: acvdSettingsHash(settings),
     dataHash,
+    barTimes: candles.map((candle) => candle.time),
     series,
     signals,
     latest: {

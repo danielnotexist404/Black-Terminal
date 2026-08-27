@@ -129,6 +129,8 @@ export type AcvdSnapshot = {
   marketIdentity: string;
   settingsHash: string;
   dataHash: string;
+  /** Candle open times aligned one-to-one with every value in `series`. */
+  barTimes: number[];
   series: AcvdSeries;
   signals: AcvdSignal[];
   latest: {

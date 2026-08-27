@@ -1,12 +1,15 @@
 import type { Candle } from "../../../chart-engine/types";
+import type { AcvdSnapshot } from "../../acvd/core/types";
 
 export type CvdOscillatorMaType = "EMA" | "SMA" | "WMA" | "RMA";
-export type CvdOscillatorMarketState = "LONG" | "SHORT" | "SIDEWAYS";
+export type CvdOscillatorMarketState = "LONG" | "SHORT" | "SIDEWAYS" | "UNAVAILABLE";
+export type CvdOscillatorAuthority = "OHLCV_CANDLE_SIGNED_ESTIMATE" | "EXACT_AGGRESSOR_TRADES" | "UNAVAILABLE";
 
 export type CvdOscillatorSettings = {
   schemaVersion: 1;
   modelVersion: "BC_CVD_OSC_V1";
   parametersMode: "Auto" | "Custom";
+  useAuthenticAggressorFlow: boolean;
   useVolumeIntegration: boolean;
   lookback: number;
   fastLength: number;
@@ -32,7 +35,9 @@ export type CvdOscillatorSettings = {
 };
 
 export type CvdOscillatorSnapshot = {
-  authority: "OHLCV_CANDLE_SIGNED_ESTIMATE";
+  authority: CvdOscillatorAuthority;
+  warning: string | null;
+  coveragePercent: number;
   modelVersion: "BC_CVD_OSC_V1";
   inputSize: number;
   validFrom: number;
@@ -59,4 +64,5 @@ export type CvdOscillatorInput = {
   candles: readonly Candle[];
   settings: CvdOscillatorSettings;
   timeframeSeconds: number;
+  authenticSnapshot?: AcvdSnapshot | null;
 };

@@ -559,6 +559,16 @@ export function PixiBlackChart({
   const acvdDispatchedSignalsRef = useRef(new Set<string>());
   const acvdConfiguredSignalsRef = useRef(new Set<string>());
   const acvdSignalAlertArmedAtRef = useRef(new Map<string, number>());
+  const cvdAuthenticFlowRequested = visibleIndicators.cvdOscillator
+    && migrateCvdOscillatorSettings({
+      ...indicatorAdvancedSettings.cvdOscillator,
+      lookback: indicatorPeriods.cvdOscillator
+    }).useAuthenticAggressorFlow;
+  const acvdRuntimeRequested = visibleIndicators.acvdOscillator || cvdAuthenticFlowRequested;
+  const acvdRuntimeLookback = Math.max(
+    visibleIndicators.acvdOscillator ? indicatorPeriods.acvdOscillator : 0,
+    cvdAuthenticFlowRequested ? indicatorPeriods.cvdOscillator : 0
+  );
   const [auctionProfileSnapshots, setAuctionProfileSnapshots] = useState<AuctionProfileSnapshot[]>([]);
   const auctionProfileSnapshotsRef = useRef<AuctionProfileSnapshot[]>([]);
   const auctionProfileSnapshot = auctionProfileSnapshots.at(-1) ?? null;
@@ -2403,13 +2413,13 @@ export function PixiBlackChart({
   useEffect(() => {
     const engine = engineRef.current;
     const timeframeDuration = timeframeSeconds[timeframe];
-    if (!visibleIndicators.acvdOscillator || !engine || marketSymbol.exchange.toLowerCase() !== "bybit" || timeframeDuration < 60 || timeframeDuration % 60 !== 0) {
+    if (!acvdRuntimeRequested || !engine || marketSymbol.exchange.toLowerCase() !== "bybit" || timeframeDuration < 60 || timeframeDuration % 60 !== 0) {
       acvdPersistentRequestRef.current = "";
       setAcvdPersistentFlow(null);
       setAcvdPersistentFlowError(null);
       return;
     }
-    const lookback = migrateAcvdSettings({ ...indicatorAdvancedSettings.acvdOscillator, lookback: indicatorPeriods.acvdOscillator }).lookback;
+    const lookback = migrateAcvdSettings({ ...indicatorAdvancedSettings.acvdOscillator, lookback: acvdRuntimeLookback }).lookback;
     const source = engine.getSourceCandles().slice(-lookback);
     if (source.length < 2) return;
     const end = source.at(-1)!.time + timeframeDuration;
@@ -2447,7 +2457,8 @@ export function PixiBlackChart({
       controller.abort();
     };
   }, [
-    visibleIndicators.acvdOscillator,
+    acvdRuntimeRequested,
+    acvdRuntimeLookback,
     indicatorPeriods.acvdOscillator,
     indicatorAdvancedSettings.acvdOscillator,
     marketSymbol.exchange,
@@ -2458,7 +2469,7 @@ export function PixiBlackChart({
 
   useEffect(() => {
     const engine = engineRef.current;
-    if (!visibleIndicators.acvdOscillator || !engine) {
+    if (!acvdRuntimeRequested || !engine) {
       acvdCalculationIdentityRef.current = "";
       setAcvdSnapshot(null);
       setAcvdStatus("IDLE");
@@ -2468,7 +2479,8 @@ export function PixiBlackChart({
     const timer = window.setTimeout(() => {
       const settings = migrateAcvdSettings({
         ...indicatorAdvancedSettings.acvdOscillator,
-        lookback: indicatorPeriods.acvdOscillator
+        lookback: acvdRuntimeLookback,
+        realtimeMode: cvdAuthenticFlowRequested ? "DEVELOPING_PREVIEW" : indicatorAdvancedSettings.acvdOscillator.realtimeMode
       });
       const timeframeDuration = timeframeSeconds[timeframe];
       const available = engine.getSourceCandles().slice(-settings.lookback);
@@ -2539,6 +2551,7 @@ export function PixiBlackChart({
         engineRef.current?.setAcvdState(snapshot);
         const nowSeconds = Date.now() / 1000;
         const freshSignalWindow = Math.max(5, Math.min(60, timeframeDuration * 0.1));
+        if (!visibleIndicators.acvdOscillator) return;
         for (const signal of snapshot.signals) {
           if (!signal.finalized || acvdDispatchedSignalsRef.current.has(signal.id)) continue;
           acvdDispatchedSignalsRef.current.add(signal.id);
@@ -2555,8 +2568,10 @@ export function PixiBlackChart({
     }, 180);
     return () => window.clearTimeout(timer);
   }, [
+    acvdRuntimeRequested,
+    acvdRuntimeLookback,
+    cvdAuthenticFlowRequested,
     visibleIndicators.acvdOscillator,
-    indicatorPeriods.acvdOscillator,
     indicatorAdvancedSettings.acvdOscillator,
     marketSymbol.exchange,
     marketSymbol.rawSymbol,
@@ -3668,7 +3683,7 @@ export function PixiBlackChart({
   }, [ddaProSnapshot, alertDefinitions, displaySymbol, exchangeLabel, timeframe, indicatorAdvancedSettings.ddaProOscillator]);
 
   useEffect(() => {
-    if (replayActiveRef.current || !acvdSnapshot || acvdSnapshot.authority !== "EXACT_AGGRESSOR_TRADES") return;
+    if (replayActiveRef.current || !visibleIndicators.acvdOscillator || !acvdSnapshot || acvdSnapshot.authority !== "EXACT_AGGRESSOR_TRADES") return;
     const definitions = alertDefinitions.filter((definition) =>
       definition.enabled && definition.indicator === "acvd" && definition.symbol === displaySymbol
       && definition.exchange === exchangeLabel && definition.timeframe === timeframe
@@ -3714,7 +3729,7 @@ export function PixiBlackChart({
         });
       }
     }
-  }, [acvdSnapshot, alertDefinitions, displaySymbol, exchangeLabel, timeframe]);
+  }, [visibleIndicators.acvdOscillator, acvdSnapshot, alertDefinitions, displaySymbol, exchangeLabel, timeframe]);
 
   useEffect(() => {
     if (replayActiveRef.current || alertDefinitions.length === 0) return;
@@ -3900,7 +3915,7 @@ export function PixiBlackChart({
     { key: "bollinger", label: "Bollinger", value: String(indicatorPeriods.bollinger) },
     { key: "ddaProOscillator", label: "BC-RDA", value: `${indicatorAdvancedSettings.ddaProOscillator.engineMode === "pine-compatibility" ? "PINE" : "NATIVE"} · ${ddaProStatus.toLowerCase()}` },
     { key: "acvdOscillator", label: "BC-ACVD", value: `${acvdSnapshot?.latest.regime ?? "AUTHENTIC FLOW"} · ${acvdStatus.toLowerCase()}` },
-    { key: "cvdOscillator", label: "BC-CVD-OSC", value: "NATIVE · MARKET STATE" },
+    { key: "cvdOscillator", label: "BC-CVD-OSC", value: cvdAuthenticFlowRequested ? `AGGRESSOR · ${acvdStatus.toLowerCase()}` : "OHLCV · MARKET STATE" },
     { key: "openInterestOscillator", label: "OI Osc", value: String(indicatorPeriods.openInterestOscillator) },
     { key: "zScoreOscillator", label: "Z-Score", value: String(indicatorPeriods.zScoreOscillator) },
     { key: "waveTrendOscillator", label: "WaveTrend", value: String(indicatorPeriods.waveTrendOscillator) },
@@ -6302,9 +6317,10 @@ export function PixiBlackChart({
           {activeIndicator === "cvdOscillator" && (
             <>
               <div className="indicator-settings-section">BC-CVD-OSC Engine</div>
-              <div className="vwap-mode-note">Native candle-signed OHLCV CVD. This estimates directional volume from each candle; BC-ACVD remains the authentic exchange-classified aggressor-flow engine.</div>
+              <div className="vwap-mode-note">Defaults to candle-signed OHLCV. Authentic mode reuses the certified BC-ACVD aggressor-flow runtime and never substitutes estimated data when exact coverage is unavailable.</div>
+              <label>Authentic Aggressor CVD<input type="checkbox" checked={cvdOscillatorSettings.useAuthenticAggressorFlow} onChange={(event) => updateCvdOscillatorSetting("useAuthenticAggressorFlow", event.target.checked)} /></label>
               <label>Parameters<select value={cvdOscillatorSettings.parametersMode} onChange={(event) => updateCvdOscillatorSetting("parametersMode", event.target.value as CvdOscillatorSettings["parametersMode"])}><option value="Auto">Auto by Timeframe</option><option value="Custom">Custom</option></select></label>
-              <label>Volume Model<select value={cvdOscillatorSettings.useVolumeIntegration ? "integrated" : "normalized"} onChange={(event) => updateCvdOscillatorSetting("useVolumeIntegration", event.target.value === "integrated")}><option value="normalized">Range-Normalized Signed Volume</option><option value="integrated">Integrated Signed Volume</option></select></label>
+              <label>OHLCV Volume Model<select disabled={cvdOscillatorSettings.useAuthenticAggressorFlow} value={cvdOscillatorSettings.useVolumeIntegration ? "integrated" : "normalized"} onChange={(event) => updateCvdOscillatorSetting("useVolumeIntegration", event.target.value === "integrated")}><option value="normalized">Range-Normalized Signed Volume</option><option value="integrated">Integrated Signed Volume</option></select></label>
               {cvdOscillatorSettings.parametersMode === "Custom" && <>
                 <label>Fast Length<input type="number" min={2} max={1000} value={cvdOscillatorSettings.fastLength} onChange={(event) => updateCvdOscillatorSetting("fastLength", Number(event.target.value))} /></label>
                 <label>Fast Method<select value={cvdOscillatorSettings.fastMaType} onChange={(event) => updateCvdOscillatorSetting("fastMaType", event.target.value as CvdOscillatorSettings["fastMaType"])}>{["EMA", "SMA", "WMA", "RMA"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
@@ -6319,12 +6335,16 @@ export function PixiBlackChart({
               <label className="indicator-color-setting">Color<input type="color" value={cvdOscillatorSettings.slowWaveColor} onChange={(event) => updateCvdOscillatorSetting("slowWaveColor", event.target.value)} /></label>
               <label className="indicator-range-row">Thickness<span><input type="range" min={0.5} max={5} step={0.25} value={cvdOscillatorSettings.slowWaveWidth} onChange={(event) => updateCvdOscillatorSetting("slowWaveWidth", Number(event.target.value))} /><b>{cvdOscillatorSettings.slowWaveWidth.toFixed(2)}</b></span></label>
               <label className="indicator-range-row">Intensity<span><input type="range" min={0} max={100} value={cvdOscillatorSettings.slowWaveIntensity} onChange={(event) => updateCvdOscillatorSetting("slowWaveIntensity", Number(event.target.value))} /><b>{cvdOscillatorSettings.slowWaveIntensity}</b></span></label>
+              <div className="indicator-settings-section">CVD Price Line</div>
+              <label className="indicator-color-setting">Color<input type="color" value={cvdOscillatorSettings.rawCvdColor} onChange={(event) => updateCvdOscillatorSetting("rawCvdColor", event.target.value)} /></label>
+              <label className="indicator-range-row">Intensity<span><input type="range" min={0} max={100} value={cvdOscillatorSettings.rawCvdIntensity} onChange={(event) => updateCvdOscillatorSetting("rawCvdIntensity", Number(event.target.value))} /><b>{cvdOscillatorSettings.rawCvdIntensity}</b></span></label>
               <div className="indicator-settings-section">Display</div>
-              <label>Raw CVD<input type="checkbox" checked={cvdOscillatorSettings.showRawCvd} onChange={(event) => updateCvdOscillatorSetting("showRawCvd", event.target.checked)} /></label>
+              <label>CVD Price Line<input type="checkbox" checked={cvdOscillatorSettings.showRawCvd} onChange={(event) => updateCvdOscillatorSetting("showRawCvd", event.target.checked)} /></label>
               <label>Dynamic Cloud<input type="checkbox" checked={cvdOscillatorSettings.showClouds} onChange={(event) => updateCvdOscillatorSetting("showClouds", event.target.checked)} /></label>
               <label>Market Status Panel<input type="checkbox" checked={cvdOscillatorSettings.showStatusPanel} onChange={(event) => updateCvdOscillatorSetting("showStatusPanel", event.target.checked)} /></label>
               <label>Shift Candles Left<input type="checkbox" checked={cvdOscillatorSettings.reserveRightGutter} onChange={(event) => updateCvdOscillatorSetting("reserveRightGutter", event.target.checked)} /></label>
               <label className="indicator-range-row">Panel Width<span><input type="range" min={170} max={300} value={cvdOscillatorSettings.statusPanelWidth} onChange={(event) => updateCvdOscillatorSetting("statusPanelWidth", Number(event.target.value))} /><b>{cvdOscillatorSettings.statusPanelWidth}px</b></span></label>
+              {cvdOscillatorSettings.useAuthenticAggressorFlow && <div className="vwap-mode-note">{acvdStatus} · {acvdSnapshot?.authority ?? "AWAITING EXACT FLOW"}{acvdSnapshot?.authority === "EXACT_AGGRESSOR_TRADES" ? ` · ${acvdSnapshot.latest.coveragePercent.toFixed(0)}% latest coverage` : " · no OHLCV fallback"}</div>}
               <button type="button" className="tv-defaults" onClick={() => { onIndicatorAdvancedSettingsChange((current) => ({ ...current, cvdOscillator: DEFAULT_CVD_OSCILLATOR_SETTINGS })); onIndicatorPeriodsChange((current) => ({ ...current, cvdOscillator: DEFAULT_CVD_OSCILLATOR_SETTINGS.lookback })); }}>Defaults</button>
             </>
           )}

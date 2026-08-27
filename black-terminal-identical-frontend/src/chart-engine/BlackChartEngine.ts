@@ -935,6 +935,7 @@ export class BlackChartEngine {
 
   setAcvdState(snapshot: AcvdSnapshot | null) {
     this.acvdSnapshot = snapshot;
+    this.cvdOscillatorCache = undefined;
     this.queueDraw();
   }
 
@@ -2857,9 +2858,17 @@ export class BlackChartEngine {
     const timeframeSeconds = data.length >= 2
       ? Math.max(1, Math.round(data[data.length - 1]!.time - data[data.length - 2]!.time))
       : 60;
-    const key = `${this.volumeProfileDataVersion}:${timeframeSeconds}:${JSON.stringify(settings)}`;
+    const authenticRevision = settings.useAuthenticAggressorFlow
+      ? `${this.acvdSnapshot?.authority ?? "NONE"}:${this.acvdSnapshot?.dataHash ?? "NONE"}`
+      : "OHLCV";
+    const key = `${this.volumeProfileDataVersion}:${timeframeSeconds}:${authenticRevision}:${JSON.stringify(settings)}`;
     if (this.cvdOscillatorCache?.key === key) return this.cvdOscillatorCache.snapshot;
-    const snapshot = calculateCvdOscillator({ candles: data, settings, timeframeSeconds });
+    const snapshot = calculateCvdOscillator({
+      candles: data,
+      settings,
+      timeframeSeconds,
+      authenticSnapshot: settings.useAuthenticAggressorFlow ? this.acvdSnapshot : null
+    });
     this.cvdOscillatorCache = { key, snapshot };
     return snapshot;
   }
@@ -2886,6 +2895,12 @@ export class BlackChartEngine {
     g.rect(0, paneTop, plotWidth, paneHeight)
       .fill({ color: 0x010102, alpha: 0.99 })
       .stroke({ width: 1, color: 0xffffff, alpha: 0.07 });
+
+    if (snapshot.authority === "UNAVAILABLE") {
+      this.addProfileText("BC-CVD-OSC · AUTHENTIC AGGRESSOR FLOW UNAVAILABLE", 12, paneTop + 9, theme.redBright, 9, "700", true);
+      this.addProfileText(snapshot.warning ?? "Waiting for certified venue-matched aggressor trades. OHLCV fallback was not substituted.", 12, paneTop + 25, theme.muted, 8, "500");
+      return;
+    }
 
     const sourceIndex = (chartIndex: number) => chartIndex - offset;
     const aligned = (values: readonly number[], chartIndex: number) => values[sourceIndex(chartIndex)] ?? Number.NaN;
@@ -2949,8 +2964,9 @@ export class BlackChartEngine {
     drawLine(snapshot.series.fast, fastColor, settings.fastWaveWidth + 1.5, settings.fastWaveIntensity / 100 * 0.18);
     drawLine(snapshot.series.fast, fastColor, settings.fastWaveWidth, settings.fastWaveIntensity / 100);
 
-    this.addProfileText("BC-CVD-OSC · CANDLE-SIGNED CVD MARKET STATE", 12, paneTop + 7, theme.silverBright, 9, "700", true);
-    this.addProfileText(`FAST ${snapshot.lengths.fast} · SLOW ${snapshot.lengths.slow} · OHLCV ESTIMATE`, 12, paneTop + 21, theme.muted, 8, "600", true);
+    const authentic = snapshot.authority === "EXACT_AGGRESSOR_TRADES";
+    this.addProfileText(`BC-CVD-OSC · ${authentic ? "AUTHENTIC AGGRESSOR" : "CANDLE-SIGNED"} CVD MARKET STATE`, 12, paneTop + 7, theme.silverBright, 9, "700", true);
+    this.addProfileText(`FAST ${snapshot.lengths.fast} · SLOW ${snapshot.lengths.slow} · ${authentic ? `EXACT FLOW · COV ${snapshot.coveragePercent.toFixed(0)}%` : "OHLCV ESTIMATE"}`, 12, paneTop + 21, theme.muted, 8, "600", true);
 
     if (settings.showStatusPanel) {
       const panelWidth = Math.min(settings.statusPanelWidth, Math.max(170, plotWidth - 24));
@@ -2962,7 +2978,7 @@ export class BlackChartEngine {
       g.rect(panelX, panelY + 1, 3, 47).fill({ color: statusColor, alpha: 0.92 });
       this.addProfileText("MARKET STATUS", panelX + 11, panelY + 7, theme.muted, 8, "700", true);
       this.addProfileText(snapshot.latest.state, panelX + 11, panelY + 22, statusColor, 12, "700", true);
-      this.addProfileText("OHLCV-SIGNED CVD", panelX + panelWidth - 96, panelY + 25, theme.muted, 7, "600", true);
+      this.addProfileText(authentic ? "EXACT AGGRESSOR CVD" : "OHLCV-SIGNED CVD", panelX + panelWidth - (authentic ? 112 : 96), panelY + 25, theme.muted, 7, "600", true);
     }
   }
 

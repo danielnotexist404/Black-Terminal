@@ -38,10 +38,11 @@ function rma(values: readonly number[], length: number) {
 function sma(values: readonly number[], length: number) {
   const result = Array<number>(values.length).fill(Number.NaN);
   let sum = 0;
+  let valid = 0;
   for (let index = 0; index < values.length; index++) {
-    sum += finite(values[index]!);
-    if (index >= length) sum -= finite(values[index - length]!);
-    if (index >= length - 1) result[index] = sum / length;
+    if (Number.isFinite(values[index])) { sum += values[index]!; valid += 1; }
+    if (index >= length && Number.isFinite(values[index - length])) { sum -= values[index - length]!; valid -= 1; }
+    if (index >= length - 1 && valid === length) result[index] = sum / length;
   }
   return result;
 }
@@ -51,8 +52,13 @@ function wma(values: readonly number[], length: number) {
   const denominator = length * (length + 1) / 2;
   for (let index = length - 1; index < values.length; index++) {
     let sum = 0;
-    for (let offset = 0; offset < length; offset++) sum += finite(values[index - offset]!) * (length - offset);
-    result[index] = sum / denominator;
+    let valid = true;
+    for (let offset = 0; offset < length; offset++) {
+      const value = values[index - offset]!;
+      if (!Number.isFinite(value)) { valid = false; break; }
+      sum += value * (length - offset);
+    }
+    if (valid) result[index] = sum / denominator;
   }
   return result;
 }
@@ -69,11 +75,14 @@ function rollingDeviation(values: readonly number[], length: number) {
   for (let index = length - 1; index < values.length; index++) {
     let sum = 0;
     let sumSquares = 0;
+    let valid = true;
     for (let offset = 0; offset < length; offset++) {
-      const value = finite(values[index - offset]!);
+      const value = values[index - offset]!;
+      if (!Number.isFinite(value)) { valid = false; break; }
       sum += value;
       sumSquares += value * value;
     }
+    if (!valid) continue;
     const mean = sum / length;
     result[index] = Math.sqrt(Math.max(0, sumSquares / length - mean * mean));
   }
@@ -94,14 +103,58 @@ export function calculateCvdOscillator(input: CvdOscillatorInput): CvdOscillator
   const auto = resolveCvdOscillatorAutoLengths(input.timeframeSeconds);
   const fastLength = settings.parametersMode === "Auto" ? auto.fast : settings.fastLength;
   const slowLength = settings.parametersMode === "Auto" ? auto.slow : settings.slowLength;
-  const delta = source.map((candle) => {
-    const range = Math.max(Math.abs(candle.high - candle.low), 1e-12);
-    return settings.useVolumeIntegration
-      ? finite(candle.volume) * (finite(candle.close) - finite(candle.open))
-      : finite(candle.volume) * (finite(candle.close) - finite(candle.open)) / range;
-  });
-  const cvd = Array<number>(source.length).fill(0);
-  for (let index = 0; index < delta.length; index++) cvd[index] = (index > 0 ? cvd[index - 1]! : 0) + finite(delta[index]!);
+  let authority: CvdOscillatorSnapshot["authority"] = "OHLCV_CANDLE_SIGNED_ESTIMATE";
+  let warning: string | null = null;
+  let coveragePercent = 100;
+  let delta: number[];
+  let cvd: number[];
+
+  if (settings.useAuthenticAggressorFlow) {
+    const authentic = input.authenticSnapshot;
+    if (!authentic || authentic.authority !== "EXACT_AGGRESSOR_TRADES") {
+      authority = "UNAVAILABLE";
+      warning = authentic?.warning ?? "Certified venue-matched aggressor flow is unavailable. OHLCV fallback was not substituted.";
+      delta = Array<number>(source.length).fill(Number.NaN);
+      cvd = Array<number>(source.length).fill(Number.NaN);
+      coveragePercent = 0;
+    } else {
+      const sourceByTime = new Map<number, { cvd: number; coverage: number }>();
+      for (let index = 0; index < authentic.barTimes.length; index++) {
+        sourceByTime.set(authentic.barTimes[index]!, {
+          cvd: authentic.series.cumulativeDelta[index] ?? Number.NaN,
+          coverage: authentic.series.coveragePercent[index] ?? 0
+        });
+      }
+      cvd = source.map((candle) => sourceByTime.get(candle.time)?.cvd ?? Number.NaN);
+      const coverage = source.map((candle) => sourceByTime.get(candle.time)?.coverage ?? 0);
+      const coveredBars = coverage.filter((value, index) => value > 0 && Number.isFinite(cvd[index]));
+      coveragePercent = source.length ? coveredBars.reduce((sum, value) => sum + value, 0) / source.length : 0;
+      delta = Array<number>(source.length).fill(Number.NaN);
+      let priorCvd = Number.NaN;
+      for (let index = 0; index < cvd.length; index++) {
+        const value = cvd[index]!;
+        if (!Number.isFinite(value)) continue;
+        delta[index] = Number.isFinite(priorCvd) ? value - priorCvd : value;
+        priorCvd = value;
+      }
+      if (!cvd.some(Number.isFinite)) {
+        authority = "UNAVAILABLE";
+        warning = authentic.warning ?? "No certified aggressor-flow bars overlap the active chart history. OHLCV fallback was not substituted.";
+      } else {
+        authority = "EXACT_AGGRESSOR_TRADES";
+        warning = authentic.warning;
+      }
+    }
+  } else {
+    delta = source.map((candle) => {
+      const range = Math.max(Math.abs(candle.high - candle.low), 1e-12);
+      return settings.useVolumeIntegration
+        ? finite(candle.volume) * (finite(candle.close) - finite(candle.open))
+        : finite(candle.volume) * (finite(candle.close) - finite(candle.open)) / range;
+    });
+    cvd = Array<number>(source.length).fill(0);
+    for (let index = 0; index < delta.length; index++) cvd[index] = (index > 0 ? cvd[index - 1]! : 0) + finite(delta[index]!);
+  }
   const fast = movingAverage(cvd, fastLength, settings.fastMaType);
   const slow = movingAverage(cvd, slowLength, settings.slowMaType);
   const deviation = rollingDeviation(cvd, settings.cloudLength);
@@ -110,14 +163,20 @@ export function calculateCvdOscillator(input: CvdOscillatorInput): CvdOscillator
   const state = cvd.map<CvdOscillatorMarketState>((value, index) => {
     const fastValue = fast[index]!;
     const slowValue = slow[index]!;
+    if (!Number.isFinite(value)) return settings.useAuthenticAggressorFlow ? "UNAVAILABLE" : "SIDEWAYS";
     if (!Number.isFinite(fastValue) || !Number.isFinite(slowValue)) return "SIDEWAYS";
     if (value > fastValue && value > slowValue) return "LONG";
     if (value < fastValue && value < slowValue) return "SHORT";
     return "SIDEWAYS";
   });
-  const last = Math.max(0, source.length - 1);
+  let last = Math.max(0, source.length - 1);
+  if (settings.useAuthenticAggressorFlow) {
+    while (last > 0 && !Number.isFinite(cvd[last])) last -= 1;
+  }
   return {
-    authority: "OHLCV_CANDLE_SIGNED_ESTIMATE",
+    authority,
+    warning,
+    coveragePercent,
     modelVersion: "BC_CVD_OSC_V1",
     inputSize: source.length,
     validFrom: Math.max(fastLength, slowLength, settings.cloudLength) - 1,

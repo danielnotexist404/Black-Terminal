@@ -38,6 +38,13 @@ const acvdAlerts: StrategyIndicatorAlert[] = [
   { id: "bc-acvd:short", name: "BC-ACVD Short", description: "Final closed-bar buying-exhaustion and upper-structure confirmation.", semantic: "SHORT_ENTRY", confirmedBar: true, intrabar: false },
 ];
 
+const marketSentimentAlerts: StrategyIndicatorAlert[] = [
+  { id: "bc-mso:enter-oversold", name: "Enter Oversold", description: "Composite sentiment crosses into the oversold band on a confirmed bar.", semantic: "LONG_ENTRY", confirmedBar: true, intrabar: false },
+  { id: "bc-mso:exit-oversold", name: "Exit Oversold", description: "Composite sentiment leaves the oversold band on a confirmed bar.", semantic: "LONG_ENTRY", confirmedBar: true, intrabar: false },
+  { id: "bc-mso:enter-overbought", name: "Enter Overbought", description: "Composite sentiment crosses into the overbought band on a confirmed bar.", semantic: "SHORT_ENTRY", confirmedBar: true, intrabar: false },
+  { id: "bc-mso:exit-overbought", name: "Exit Overbought", description: "Composite sentiment leaves the overbought band on a confirmed bar.", semantic: "SHORT_ENTRY", confirmedBar: true, intrabar: false },
+];
+
 const qalcAlerts: StrategyIndicatorAlert[] = [
   { id: "qalc:candidate-long", name: "Candidate Long", description: "Canonical event-time BC-QALC passive-bid candidate.", semantic: "LONG_ENTRY", confirmedBar: false, intrabar: true },
   { id: "qalc:candidate-short", name: "Candidate Short", description: "Canonical event-time BC-QALC passive-ask candidate.", semantic: "SHORT_ENTRY", confirmedBar: false, intrabar: true },
@@ -51,6 +58,7 @@ const manifests: ManifestRow[] = [
   { key: "qalc", name: "BC-QALC — Queue-Aware Liquidity Capture", version: "1", runtimeKind: "external-signals", runtimeStatus: "REQUIRES_CERTIFICATION", warmup: 1_000, alerts: qalcAlerts },
   { key: "adaptiveSwingStrategy", name: "Adaptive Swing Reversal", version: "1", runtimeKind: "builtin-adaptive-swing", runtimeStatus: "CERTIFIED", warmup: 240, alerts: longShortAlerts },
   { key: "acvdOscillator", name: "BC-ACVD — Adaptive Causal Volume Delta", version: "1", runtimeKind: "external-signals", runtimeStatus: "BROWSER_ONLY", warmup: 1_000, alerts: acvdAlerts },
+  { key: "marketSentimentOscillator", name: "BC-MSO — Market Sentiment Oscillator", version: "1", runtimeKind: "python-script", runtimeStatus: "BROWSER_ONLY", warmup: 220, alerts: marketSentimentAlerts },
   // BC-RDA is intentionally absent while BC_RDA_LEGACY_REPAINTING is under
   // forensic containment and BC_RDA_CAUSAL_V2 lacks a certified headless VPS
   // runtime. The chart indicator remains available as research visualization.
@@ -167,6 +175,7 @@ function settingsFor(key: keyof VisibleIndicators, periods: IndicatorPeriods, ad
   if (key === "adaptiveSwingStrategy") return structuredClone(advanced.adaptiveSwingStrategy) as unknown as Record<string, unknown>;
   if (key === "ddaProOscillator") return structuredClone(advanced.ddaProOscillator) as unknown as Record<string, unknown>;
   if (key === "acvdOscillator") return structuredClone(advanced.acvdOscillator) as unknown as Record<string, unknown>;
+  if (key === "marketSentimentOscillator") return structuredClone(advanced.marketSentimentOscillator) as unknown as Record<string, unknown>;
   if (key === "vwap") return structuredClone(advanced.vwap) as unknown as Record<string, unknown>;
   const period = periods[key as keyof IndicatorPeriods];
   return typeof period === "number" ? { period } : {};
@@ -184,6 +193,7 @@ function alertTargetFor(key: keyof VisibleIndicators) {
   if (key === "volumeProfile") return "hdlxProfile";
   if (key === "ddaProOscillator") return "ddaPro";
   if (key === "acvdOscillator") return "acvd";
+  if (key === "marketSentimentOscillator") return "marketSentiment";
   return "price";
 }
 

@@ -141,6 +141,9 @@ import { DEFAULT_ACVD_SETTINGS, migrateAcvdSettings, stableHash as acvdStableHas
 import type { AcvdSettings, AcvdSnapshot } from "../modules/acvd/core/types";
 import { DEFAULT_CVD_OSCILLATOR_SETTINGS, migrateCvdOscillatorSettings } from "../modules/cvd-oscillator/core/settings";
 import type { CvdOscillatorSettings } from "../modules/cvd-oscillator/core/types";
+import { calculateMarketSentiment } from "../modules/market-sentiment/core/engine";
+import { DEFAULT_MARKET_SENTIMENT_SETTINGS, migrateMarketSentimentSettings } from "../modules/market-sentiment/core/settings";
+import type { MarketSentimentSettings } from "../modules/market-sentiment/core/types";
 import { fetchPersistentAuthenticFlow, type PersistentFlowSnapshot } from "../modules/acvd/data/persistentFlowClient";
 import { authenticFlowRevision, mergePersistentAndLiveFlow } from "../modules/acvd/data/flowMerge";
 import { AuctionProfileWorkerClient } from "../modules/auction-profile/worker/AuctionProfileWorkerClient";
@@ -366,7 +369,8 @@ const configuredAlertIndicatorLabels: Record<AlertIndicatorTarget, string> = {
   ema50: "EMA 50",
   ema200: "EMA 200",
   ddaPro: "BC-RDA",
-  acvd: "BC-ACVD"
+  acvd: "BC-ACVD",
+  marketSentiment: "BC-MSO"
 };
 
 const configuredAlertConditionLabels: Record<AlertCondition, string> = {
@@ -526,6 +530,7 @@ export function PixiBlackChart({
     ddaProOscillator: visibleIndicators.ddaProOscillator,
     acvdOscillator: visibleIndicators.acvdOscillator,
     cvdOscillator: visibleIndicators.cvdOscillator,
+    marketSentimentOscillator: visibleIndicators.marketSentimentOscillator,
     zScoreOscillator: visibleIndicators.zScoreOscillator,
     waveTrendOscillator: visibleIndicators.waveTrendOscillator
   });
@@ -559,6 +564,14 @@ export function PixiBlackChart({
   const acvdDispatchedSignalsRef = useRef(new Set<string>());
   const acvdConfiguredSignalsRef = useRef(new Set<string>());
   const acvdSignalAlertArmedAtRef = useRef(new Map<string, number>());
+  const marketSentimentConfiguredEventsRef = useRef(new Set<string>());
+  const marketSentimentAlertArmedAtRef = useRef(new Map<string, number>());
+  const marketSentimentSettings = migrateMarketSentimentSettings({
+    ...DEFAULT_MARKET_SENTIMENT_SETTINGS,
+    ...indicatorAdvancedSettings.marketSentimentOscillator,
+    lookback: indicatorPeriods.marketSentimentOscillator
+  });
+  const marketSentimentSettingsKey = JSON.stringify(marketSentimentSettings);
   const cvdAuthenticFlowRequested = visibleIndicators.cvdOscillator
     && migrateCvdOscillatorSettings({
       ...indicatorAdvancedSettings.cvdOscillator,
@@ -2698,6 +2711,8 @@ export function PixiBlackChart({
     acvdDispatchedSignalsRef.current.clear();
     acvdConfiguredSignalsRef.current.clear();
     acvdSignalAlertArmedAtRef.current.clear();
+    marketSentimentConfiguredEventsRef.current.clear();
+    marketSentimentAlertArmedAtRef.current.clear();
   }, [marketSymbol.exchange, marketSymbol.rawSymbol, timeframe]);
 
   useEffect(() => {
@@ -2867,6 +2882,7 @@ export function PixiBlackChart({
       ddaProOscillator: visibleIndicators.ddaProOscillator,
       acvdOscillator: visibleIndicators.acvdOscillator,
       cvdOscillator: visibleIndicators.cvdOscillator,
+      marketSentimentOscillator: visibleIndicators.marketSentimentOscillator,
       zScoreOscillator: visibleIndicators.zScoreOscillator,
       waveTrendOscillator: visibleIndicators.waveTrendOscillator
     };
@@ -2876,6 +2892,7 @@ export function PixiBlackChart({
     visibleIndicators.ddaProOscillator,
     visibleIndicators.acvdOscillator,
     visibleIndicators.cvdOscillator,
+    visibleIndicators.marketSentimentOscillator,
     visibleIndicators.zScoreOscillator,
     visibleIndicators.waveTrendOscillator
   ]);
@@ -3732,12 +3749,55 @@ export function PixiBlackChart({
   }, [visibleIndicators.acvdOscillator, acvdSnapshot, alertDefinitions, displaySymbol, exchangeLabel, timeframe]);
 
   useEffect(() => {
+    if (replayActiveRef.current || !visibleIndicators.marketSentimentOscillator) return;
+    const definitions = alertDefinitions.filter((definition) =>
+      definition.enabled && definition.indicator === "marketSentiment" && definition.symbol === displaySymbol
+      && definition.exchange === exchangeLabel && definition.timeframe === timeframe
+    );
+    if (!definitions.length) return;
+    const sourceCandles = engineRef.current?.getSourceCandles().slice(-marketSentimentSettings.lookback) ?? [];
+    if (sourceCandles.length < 202) return;
+    const latestConfirmedTime = sourceCandles.at(-2)?.time ?? 0;
+    const snapshot = calculateMarketSentiment({ candles: sourceCandles, settings: marketSentimentSettings, lastBarConfirmed: false });
+    const activeKeys = new Set(definitions.map((definition) => `${definition.id}:${definition.marketSentimentSignal ?? "ANY_BAND_EVENT"}`));
+    for (const key of marketSentimentAlertArmedAtRef.current.keys()) if (!activeKeys.has(key)) marketSentimentAlertArmedAtRef.current.delete(key);
+    for (const definition of definitions) {
+      const target = definition.marketSentimentSignal ?? "ANY_BAND_EVENT";
+      const armKey = `${definition.id}:${target}`;
+      const armedAfter = marketSentimentAlertArmedAtRef.current.get(armKey);
+      if (armedAfter === undefined) {
+        marketSentimentAlertArmedAtRef.current.set(armKey, latestConfirmedTime);
+        continue;
+      }
+      for (const bandEvent of snapshot.events) {
+        if (bandEvent.time <= armedAfter || (target !== "ANY_BAND_EVENT" && target !== bandEvent.kind)) continue;
+        const current = sourceCandles.find((candle) => candle.time === bandEvent.time);
+        if (!current) continue;
+        const eventKey = `${definition.id}:${bandEvent.time}:${bandEvent.kind}`;
+        if (marketSentimentConfiguredEventsRef.current.has(eventKey)) continue;
+        marketSentimentConfiguredEventsRef.current.add(eventKey);
+        dispatchConfiguredAlert(definition, current, {
+          indicator: "BC-MSO",
+          event: bandEvent.kind,
+          score: bandEvent.score,
+          overbought: marketSentimentSettings.overbought,
+          oversold: marketSentimentSettings.oversold,
+          sourceAuthority: snapshot.authority,
+          closedBarConfirmed: true
+        });
+      }
+      marketSentimentAlertArmedAtRef.current.set(armKey, Math.max(armedAfter, ...snapshot.events.map((event) => event.time)));
+    }
+  }, [alertDefinitions, displaySymbol, exchangeLabel, timeframe, visibleIndicators.marketSentimentOscillator, lastCandle?.time, marketSentimentSettingsKey]);
+
+  useEffect(() => {
     if (replayActiveRef.current || alertDefinitions.length === 0) return;
 
     const scopedAlerts = alertDefinitions.filter((definition) =>
       definition.enabled &&
       definition.indicator !== "ddaPro" &&
       definition.indicator !== "acvd" &&
+      definition.indicator !== "marketSentiment" &&
       definition.symbol === displaySymbol &&
       definition.exchange === exchangeLabel &&
       (definition.indicator === "price" || definition.timeframe === timeframe)
@@ -3916,6 +3976,7 @@ export function PixiBlackChart({
     { key: "ddaProOscillator", label: "BC-RDA", value: `${indicatorAdvancedSettings.ddaProOscillator.engineMode === "pine-compatibility" ? "PINE" : "NATIVE"} · ${ddaProStatus.toLowerCase()}` },
     { key: "acvdOscillator", label: "BC-ACVD", value: `${acvdSnapshot?.latest.regime ?? "AUTHENTIC FLOW"} · ${acvdStatus.toLowerCase()}` },
     { key: "cvdOscillator", label: "BC-CVD-OSC", value: cvdAuthenticFlowRequested ? `AGGRESSOR · ${acvdStatus.toLowerCase()}` : "OHLCV · MARKET STATE" },
+    { key: "marketSentimentOscillator", label: "BC-MSO", value: "PYTHON · 0–10 COMPOSITE" },
     { key: "openInterestOscillator", label: "OI Osc", value: String(indicatorPeriods.openInterestOscillator) },
     { key: "zScoreOscillator", label: "Z-Score", value: String(indicatorPeriods.zScoreOscillator) },
     { key: "waveTrendOscillator", label: "WaveTrend", value: String(indicatorPeriods.waveTrendOscillator) },
@@ -3939,8 +4000,8 @@ export function PixiBlackChart({
   };
 
   const updateIndicatorPeriod = (key: keyof IndicatorPeriods, value: number) => {
-    const max = key === "volumeProfile" || key === "ddaProOscillator" || key === "acvdOscillator" || key === "cvdOscillator" ? 20000 : 500;
-    const min = key === "ddaProOscillator" || key === "acvdOscillator" || key === "cvdOscillator" ? 100 : 2;
+    const max = key === "volumeProfile" || key === "ddaProOscillator" || key === "acvdOscillator" || key === "cvdOscillator" || key === "marketSentimentOscillator" ? 20000 : 500;
+    const min = key === "marketSentimentOscillator" ? 250 : key === "ddaProOscillator" || key === "acvdOscillator" || key === "cvdOscillator" ? 100 : 2;
     const nextValue = Math.max(min, Math.min(max, Number.isFinite(value) ? value : indicatorPeriods[key]));
     onIndicatorPeriodsChange((current) => ({
       ...current,
@@ -3965,6 +4026,12 @@ export function PixiBlackChart({
       onIndicatorAdvancedSettingsChange((current) => ({
         ...current,
         cvdOscillator: migrateCvdOscillatorSettings({ ...current.cvdOscillator, lookback: nextValue })
+      }));
+    }
+    if (key === "marketSentimentOscillator") {
+      onIndicatorAdvancedSettingsChange((current) => ({
+        ...current,
+        marketSentimentOscillator: migrateMarketSentimentSettings({ ...current.marketSentimentOscillator, lookback: nextValue })
       }));
     }
   };
@@ -4055,6 +4122,7 @@ export function PixiBlackChart({
     activeIndicator === "ddaProOscillator" ||
     activeIndicator === "acvdOscillator" ||
     activeIndicator === "cvdOscillator" ||
+    activeIndicator === "marketSentimentOscillator" ||
     activeIndicator === "zScoreOscillator" ||
     activeIndicator === "waveTrendOscillator";
   const activeOscillatorKey = oscillatorSettingsOpen
@@ -4175,6 +4243,12 @@ export function PixiBlackChart({
     const next = migrateCvdOscillatorSettings({ ...cvdOscillatorSettings, [key]: value });
     onIndicatorAdvancedSettingsChange((current) => ({ ...current, cvdOscillator: next }));
     if (key === "lookback") onIndicatorPeriodsChange((current) => ({ ...current, cvdOscillator: next.lookback }));
+  };
+
+  const updateMarketSentimentSetting = <Key extends keyof MarketSentimentSettings>(key: Key, value: MarketSentimentSettings[Key]) => {
+    const next = migrateMarketSentimentSettings({ ...marketSentimentSettings, [key]: value });
+    onIndicatorAdvancedSettingsChange((current) => ({ ...current, marketSentimentOscillator: next }));
+    if (key === "lookback") onIndicatorPeriodsChange((current) => ({ ...current, marketSentimentOscillator: next.lookback }));
   };
 
   const selectDDAProPreset = (preset: DDAProPreset) => {
@@ -5660,6 +5734,8 @@ export function PixiBlackChart({
                 ? "indicator-settings profile-settings oscillator-settings dda-pro-settings"
               : activeIndicator === "cvdOscillator"
                 ? "indicator-settings profile-settings oscillator-settings dda-pro-settings"
+              : activeIndicator === "marketSentimentOscillator"
+                ? "indicator-settings profile-settings oscillator-settings dda-pro-settings"
               : activeIndicator === "vwap"
                 ? "indicator-settings profile-settings vwap-settings"
                 : activeIndicator === "liquidationHeatmap"
@@ -5684,8 +5760,8 @@ export function PixiBlackChart({
               Length
               <input
                 type="number"
-                min={activeIndicator === "ddaProOscillator" || activeIndicator === "acvdOscillator" || activeIndicator === "cvdOscillator" ? 100 : 2}
-                max={activeIndicator === "ddaProOscillator" || activeIndicator === "acvdOscillator" || activeIndicator === "cvdOscillator" ? 20000 : 500}
+                min={activeIndicator === "marketSentimentOscillator" ? 250 : activeIndicator === "ddaProOscillator" || activeIndicator === "acvdOscillator" || activeIndicator === "cvdOscillator" ? 100 : 2}
+                max={activeIndicator === "ddaProOscillator" || activeIndicator === "acvdOscillator" || activeIndicator === "cvdOscillator" || activeIndicator === "marketSentimentOscillator" ? 20000 : 500}
                 value={indicatorPeriods[activeIndicator as keyof IndicatorPeriods]}
                 onChange={(event) => updateIndicatorPeriod(activeIndicator as keyof IndicatorPeriods, Number(event.target.value))}
               />
@@ -6346,6 +6422,32 @@ export function PixiBlackChart({
               <label className="indicator-range-row">Panel Width<span><input type="range" min={170} max={300} value={cvdOscillatorSettings.statusPanelWidth} onChange={(event) => updateCvdOscillatorSetting("statusPanelWidth", Number(event.target.value))} /><b>{cvdOscillatorSettings.statusPanelWidth}px</b></span></label>
               {cvdOscillatorSettings.useAuthenticAggressorFlow && <div className="vwap-mode-note">{acvdStatus} · {acvdSnapshot?.authority ?? "AWAITING EXACT FLOW"}{acvdSnapshot?.authority === "EXACT_AGGRESSOR_TRADES" ? ` · ${acvdSnapshot.latest.coveragePercent.toFixed(0)}% latest coverage` : " · no OHLCV fallback"}</div>}
               <button type="button" className="tv-defaults" onClick={() => { onIndicatorAdvancedSettingsChange((current) => ({ ...current, cvdOscillator: DEFAULT_CVD_OSCILLATOR_SETTINGS })); onIndicatorPeriodsChange((current) => ({ ...current, cvdOscillator: DEFAULT_CVD_OSCILLATOR_SETTINGS.lookback })); }}>Defaults</button>
+            </>
+          )}
+          {activeIndicator === "marketSentimentOscillator" && (
+            <>
+              <div className="indicator-settings-section">BC-MSO Python Engine</div>
+              <div className="vwap-mode-note">Causal 0–10 composite of HA direction, EMA velocity/regime, SMA regime, RSI, MACD, histogram, stochastic, MA200, MFI and CCI. Alerts fire only on confirmed crossings into or out of the configured bands.</div>
+              <label>Candle View<input type="checkbox" checked={marketSentimentSettings.candleView} onChange={(event) => updateMarketSentimentSetting("candleView", event.target.checked)} /></label>
+              <label>Heikin Ashi Transform<input type="checkbox" checked={marketSentimentSettings.heikinAshi} onChange={(event) => updateMarketSentimentSetting("heikinAshi", event.target.checked)} /></label>
+              <label>Candle Transform<input type="number" min={1} max={100} value={marketSentimentSettings.candleTransform} onChange={(event) => updateMarketSentimentSetting("candleTransform", Number(event.target.value))} /></label>
+              <label>Smoothing<input type="checkbox" checked={marketSentimentSettings.smoothingEnabled} onChange={(event) => updateMarketSentimentSetting("smoothingEnabled", event.target.checked)} /></label>
+              <label>Smoothing Length<input type="number" min={1} max={100} disabled={!marketSentimentSettings.smoothingEnabled} value={marketSentimentSettings.smoothingLength} onChange={(event) => updateMarketSentimentSetting("smoothingLength", Number(event.target.value))} /></label>
+              <div className="indicator-settings-section">OB / OS Bands</div>
+              <label>Overbought<input type="number" min={0.25} max={10} step={0.25} value={marketSentimentSettings.overbought} onChange={(event) => updateMarketSentimentSetting("overbought", Number(event.target.value))} /></label>
+              <label>Oversold<input type="number" min={0} max={9.5} step={0.25} value={marketSentimentSettings.oversold} onChange={(event) => updateMarketSentimentSetting("oversold", Number(event.target.value))} /></label>
+              <label>Band Fill<input type="checkbox" checked={marketSentimentSettings.showBandFill} onChange={(event) => updateMarketSentimentSetting("showBandFill", event.target.checked)} /></label>
+              <label className="indicator-range-row">Band Intensity<span><input type="range" min={0} max={100} value={marketSentimentSettings.bandIntensity} onChange={(event) => updateMarketSentimentSetting("bandIntensity", Number(event.target.value))} /><b>{marketSentimentSettings.bandIntensity}</b></span></label>
+              <label className="indicator-range-row">Fill Intensity<span><input type="range" min={0} max={40} value={marketSentimentSettings.bandFillIntensity} onChange={(event) => updateMarketSentimentSetting("bandFillIntensity", Number(event.target.value))} /><b>{marketSentimentSettings.bandFillIntensity}</b></span></label>
+              <div className="indicator-settings-section">Black Terminal Theme</div>
+              <label className="indicator-color-setting">Bullish / OS<input type="color" value={marketSentimentSettings.bullishColor} onChange={(event) => updateMarketSentimentSetting("bullishColor", event.target.value)} /></label>
+              <label className="indicator-color-setting">Bearish / OB<input type="color" value={marketSentimentSettings.bearishColor} onChange={(event) => updateMarketSentimentSetting("bearishColor", event.target.value)} /></label>
+              <label className="indicator-color-setting">Neutral<input type="color" value={marketSentimentSettings.neutralColor} onChange={(event) => updateMarketSentimentSetting("neutralColor", event.target.value)} /></label>
+              <label className="indicator-color-setting">Line View<input type="color" value={marketSentimentSettings.lineColor} onChange={(event) => updateMarketSentimentSetting("lineColor", event.target.value)} /></label>
+              <label className="indicator-range-row">Candle Intensity<span><input type="range" min={0} max={100} value={marketSentimentSettings.candleIntensity} onChange={(event) => updateMarketSentimentSetting("candleIntensity", Number(event.target.value))} /><b>{marketSentimentSettings.candleIntensity}</b></span></label>
+              <label className="indicator-range-row">Line Thickness<span><input type="range" min={0.5} max={5} step={0.25} value={marketSentimentSettings.lineWidth} onChange={(event) => updateMarketSentimentSetting("lineWidth", Number(event.target.value))} /><b>{marketSentimentSettings.lineWidth.toFixed(2)}</b></span></label>
+              <label className="indicator-range-row">Line Intensity<span><input type="range" min={0} max={100} value={marketSentimentSettings.lineIntensity} onChange={(event) => updateMarketSentimentSetting("lineIntensity", Number(event.target.value))} /><b>{marketSentimentSettings.lineIntensity}</b></span></label>
+              <button type="button" className="tv-defaults" onClick={() => { onIndicatorAdvancedSettingsChange((current) => ({ ...current, marketSentimentOscillator: DEFAULT_MARKET_SENTIMENT_SETTINGS })); onIndicatorPeriodsChange((current) => ({ ...current, marketSentimentOscillator: DEFAULT_MARKET_SENTIMENT_SETTINGS.lookback })); }}>Defaults</button>
             </>
           )}
           {activeIndicator === "ddaProOscillator" && (
@@ -7184,7 +7286,7 @@ export function PixiBlackChart({
           className="oscillator-pane-resizer"
           style={{ bottom: `min(${74 + pane.topOffset}px, calc(100% - 110px))` }}
           role="separator"
-          aria-label={`Resize ${pane.key === "cvdOscillator" ? "BC-CVD-OSC" : pane.key === "acvdOscillator" ? "BC-ACVD" : pane.key === "ddaProOscillator" ? "BC-RDA" : pane.key === "zScoreOscillator" ? "Z-Score" : pane.key === "waveTrendOscillator" ? "WaveTrend" : "OI Osc"} pane`}
+          aria-label={`Resize ${pane.key === "marketSentimentOscillator" ? "BC-MSO" : pane.key === "cvdOscillator" ? "BC-CVD-OSC" : pane.key === "acvdOscillator" ? "BC-ACVD" : pane.key === "ddaProOscillator" ? "BC-RDA" : pane.key === "zScoreOscillator" ? "Z-Score" : pane.key === "waveTrendOscillator" ? "WaveTrend" : "OI Osc"} pane`}
           aria-orientation="horizontal"
           onPointerDown={(event) => beginOscillatorResize(
             event,

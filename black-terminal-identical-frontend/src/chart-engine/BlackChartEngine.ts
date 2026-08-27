@@ -55,6 +55,9 @@ import type { AcvdSnapshot } from "../modules/acvd/core/types";
 import { calculateCvdOscillator } from "../modules/cvd-oscillator/core/engine";
 import { migrateCvdOscillatorSettings } from "../modules/cvd-oscillator/core/settings";
 import type { CvdOscillatorSnapshot } from "../modules/cvd-oscillator/core/types";
+import { calculateMarketSentiment } from "../modules/market-sentiment/core/engine";
+import { migrateMarketSentimentSettings } from "../modules/market-sentiment/core/settings";
+import type { MarketSentimentSnapshot } from "../modules/market-sentiment/core/types";
 import { acvdContiguousFiniteSegments } from "../modules/acvd/rendering/segments";
 import {
   ddaProDomain,
@@ -249,6 +252,7 @@ export class BlackChartEngine {
     ddaProOscillator: false,
     acvdOscillator: false,
     cvdOscillator: false,
+    marketSentimentOscillator: false,
     volume: true
   };
   private indicatorPeriods: IndicatorPeriods = {
@@ -265,7 +269,8 @@ export class BlackChartEngine {
     waveTrendOscillator: 10,
     ddaProOscillator: 500,
     acvdOscillator: 1000,
-    cvdOscillator: 5000
+    cvdOscillator: 5000,
+    marketSentimentOscillator: 5000
   };
   private indicatorVisualSettings: IndicatorVisualSettings = {
     qalc: { color: "white", intensity: 92 },
@@ -288,11 +293,13 @@ export class BlackChartEngine {
     ddaProOscillator: { color: "red", intensity: 92 },
     acvdOscillator: { color: "white", intensity: 92 },
     cvdOscillator: { color: "white", intensity: 100 },
+    marketSentimentOscillator: { color: "white", intensity: 94 },
     volume: { color: "red", intensity: 62 }
   };
   private indicatorAdvancedSettings: IndicatorAdvancedSettings = defaultIndicatorAdvancedSettings;
   private institutionalVwapCache?: { key: string; result: InstitutionalVwapResult };
   private cvdOscillatorCache?: { key: string; snapshot: CvdOscillatorSnapshot };
+  private marketSentimentCache?: { key: string; snapshot: MarketSentimentSnapshot };
 
   private rootLayer = new Container();
   private gridLayer = new Graphics();
@@ -936,6 +943,7 @@ export class BlackChartEngine {
   setAcvdState(snapshot: AcvdSnapshot | null) {
     this.acvdSnapshot = snapshot;
     this.cvdOscillatorCache = undefined;
+    this.marketSentimentCache = undefined;
     this.queueDraw();
   }
 
@@ -2982,6 +2990,101 @@ export class BlackChartEngine {
     }
   }
 
+  private marketSentimentSnapshotFor(data: Candle[]) {
+    const settings = migrateMarketSentimentSettings({
+      ...this.indicatorAdvancedSettings.marketSentimentOscillator,
+      lookback: this.indicatorPeriods.marketSentimentOscillator
+    });
+    const key = `${this.volumeProfileDataVersion}:${JSON.stringify(settings)}`;
+    if (this.marketSentimentCache?.key === key) return this.marketSentimentCache.snapshot;
+    const snapshot = calculateMarketSentiment({ candles: data, settings, lastBarConfirmed: true });
+    this.marketSentimentCache = { key, snapshot };
+    return snapshot;
+  }
+
+  private drawMarketSentimentPane(data: Candle[], paneTop: number, paneBottom: number, plotWidth: number) {
+    const snapshot = this.marketSentimentSnapshotFor(data);
+    const settings = snapshot.settings;
+    const g = this.indicatorLayer;
+    const paneHeight = paneBottom - paneTop;
+    const offset = Math.max(0, data.length - snapshot.inputSize);
+    const indices = this.renderIndices(1).filter((index) => index >= offset);
+    const bullish = this.hexColor(settings.bullishColor, theme.silverBright);
+    const bearish = this.hexColor(settings.bearishColor, theme.redBright);
+    const neutral = this.hexColor(settings.neutralColor, theme.muted);
+    const lineColor = this.hexColor(settings.lineColor, theme.silverBright);
+    const chartIndexToSource = (index: number) => index - offset;
+    const aligned = (values: readonly (number | null)[], index: number) => values[chartIndexToSource(index)] ?? null;
+    const yFor = (value: number) => paneBottom - 11 - clampNumber(value / 10, 0, 1) * Math.max(1, paneHeight - 29);
+
+    g.rect(0, paneTop, plotWidth, paneHeight)
+      .fill({ color: 0x010102, alpha: 0.99 })
+      .stroke({ width: 1, color: 0xffffff, alpha: 0.07 });
+
+    if (settings.showBandFill) {
+      g.rect(0, yFor(10), plotWidth, Math.max(1, yFor(settings.overbought) - yFor(10)))
+        .fill({ color: bearish, alpha: clampNumber(settings.bandFillIntensity / 100, 0, 0.4) });
+      g.rect(0, yFor(settings.oversold), plotWidth, Math.max(1, yFor(0) - yFor(settings.oversold)))
+        .fill({ color: bullish, alpha: clampNumber(settings.bandFillIntensity / 100, 0, 0.3) });
+    }
+    for (const [value, color, alpha] of [
+      [10, neutral, 0.22],
+      [settings.overbought, bearish, settings.bandIntensity / 100],
+      [5, neutral, 0.36],
+      [settings.oversold, bullish, settings.bandIntensity / 100],
+      [0, neutral, 0.22]
+    ] as const) {
+      g.moveTo(0, yFor(value)).lineTo(plotWidth, yFor(value)).stroke({ width: 1, color, alpha });
+    }
+
+    if (settings.candleView) {
+      const bodyWidth = Math.max(1, Math.min(7, this.timeStep() * 0.68));
+      const alpha = settings.candleIntensity / 100;
+      for (const chartIndex of indices) {
+        const sourceIndex = chartIndexToSource(chartIndex);
+        const open = aligned(snapshot.series.candleOpen, chartIndex);
+        const high = aligned(snapshot.series.candleHigh, chartIndex);
+        const low = aligned(snapshot.series.candleLow, chartIndex);
+        const close = aligned(snapshot.series.candleClose, chartIndex);
+        if (![open, high, low, close].every((value) => typeof value === "number" && Number.isFinite(value))) continue;
+        const color = snapshot.series.candleDirection[sourceIndex] < 0 ? bearish : bullish;
+        const x = this.xForIndex(chartIndex);
+        const top = Math.min(yFor(open!), yFor(close!));
+        const bottom = Math.max(yFor(open!), yFor(close!));
+        g.moveTo(x, yFor(high!)).lineTo(x, yFor(low!)).stroke({ width: 0.8, color, alpha: alpha * 0.82 });
+        g.rect(x - bodyWidth / 2, top, bodyWidth, Math.max(1, bottom - top)).fill({ color, alpha });
+      }
+    } else {
+      let active = false;
+      for (const chartIndex of indices) {
+        const value = aligned(snapshot.series.sentiment, chartIndex);
+        if (typeof value !== "number" || !Number.isFinite(value)) { active = false; continue; }
+        const x = this.xForIndex(chartIndex);
+        const y = yFor(value);
+        if (!active) { g.moveTo(x, y); active = true; } else g.lineTo(x, y);
+      }
+      if (active) g.stroke({ width: settings.lineWidth, color: lineColor, alpha: settings.lineIntensity / 100 });
+    }
+
+    for (const event of snapshot.events) {
+      const chartIndex = offset + event.index;
+      if (chartIndex < this.view.firstIndex || chartIndex > this.view.lastIndex) continue;
+      const isOverbought = event.kind.includes("OVERBOUGHT");
+      const isEntry = event.kind.startsWith("ENTER");
+      const color = isOverbought ? bearish : bullish;
+      const y = yFor(event.score);
+      const x = this.xForIndex(chartIndex);
+      if (isEntry) g.circle(x, y, 2.7).fill({ color, alpha: 0.98 });
+      else g.circle(x, y, 2.5).stroke({ width: 1, color, alpha: 0.88 });
+    }
+
+    this.addProfileText("BC-MSO · PYTHON COMPOSITE SENTIMENT", 12, paneTop + 7, theme.silverBright, 9, "700", true);
+    const latestScore = snapshot.latest.score;
+    const statusColor = snapshot.latest.zone === "OVERBOUGHT" ? bearish : snapshot.latest.zone === "OVERSOLD" ? bullish : neutral;
+    const status = latestScore === null ? "WARMING UP" : `${snapshot.latest.zone} · ${latestScore.toFixed(2)} / 10`;
+    this.addProfileText(status, Math.max(12, plotWidth - 142), paneTop + 7, statusColor, 8, "700", true);
+  }
+
   private drawAcvdPane(data: Candle[], paneTop: number, paneBottom: number, plotWidth: number) {
     const snapshot = this.acvdSnapshot;
     const settings = this.indicatorAdvancedSettings.acvdOscillator;
@@ -3145,6 +3248,10 @@ export class BlackChartEngine {
         this.drawCvdOscillatorPane(data, paneTop, paneBottom, plotWidth);
         continue;
       }
+      if (pane.key === "marketSentimentOscillator") {
+        this.drawMarketSentimentPane(data, paneTop, paneBottom, plotWidth);
+        continue;
+      }
       const isZScorePane = pane.key === "zScoreOscillator";
       const zeroLineColor = isZScorePane
         ? this.hexColor(zSettings?.midlineColor ?? "#8a8a90", theme.muted)
@@ -3160,7 +3267,7 @@ export class BlackChartEngine {
       });
 
       const series: Array<{
-        key: "openInterestOscillator" | "zScoreOscillator" | "waveTrendOscillator" | "ddaProOscillator" | "acvdOscillator" | "cvdOscillator";
+        key: "openInterestOscillator" | "zScoreOscillator" | "waveTrendOscillator" | "ddaProOscillator" | "acvdOscillator" | "cvdOscillator" | "marketSentimentOscillator";
         label: string;
         values: number[];
         fallbackColor: IndicatorColorKey;

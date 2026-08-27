@@ -123,6 +123,18 @@ const builtInIndicators: BuiltInIndicator[] = [
   { key: "sma50", title: "SMA 50", group: "Trend", type: "Overlay", signal: "Medium simple average", periodKey: "sma50", min: 2, max: 500 },
   { key: "bollinger", title: "Bollinger Bands", group: "Volatility", type: "Bands", signal: "2 sigma envelope", periodKey: "bollinger", min: 5, max: 300 },
   {
+    key: "marketSentimentOscillator",
+    stableId: "black-core-market-sentiment",
+    title: "BC-MSO — Market Sentiment Oscillator",
+    group: "Black Core / Composite Sentiment",
+    type: "Oscillator + Confirmed Band Alerts",
+    signal: "Causal 0–10 composite sentiment with overbought/oversold entry and exit events",
+    runtime: "Python",
+    periodKey: "marketSentimentOscillator",
+    min: 250,
+    max: 20000
+  },
+  {
     key: "cvdOscillator",
     stableId: "black-core-cvd-osc",
     title: "BC-CVD-OSC — CVD Market State Oscillator",

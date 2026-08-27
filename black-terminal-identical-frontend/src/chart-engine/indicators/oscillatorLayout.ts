@@ -7,6 +7,7 @@ import type {
 
 export const OSCILLATOR_KEYS: readonly OscillatorIndicatorKey[] = [
   "cvdOscillator",
+  "marketSentimentOscillator",
   "acvdOscillator",
   "ddaProOscillator",
   "zScoreOscillator",

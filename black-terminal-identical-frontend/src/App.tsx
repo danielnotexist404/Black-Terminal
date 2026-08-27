@@ -110,6 +110,7 @@ import type {
 } from "./chart-engine/types";
 import { defaultIndicatorAdvancedSettings } from "./chart-engine/profile/volumeProfileDefaults";
 import { migrateCvdOscillatorSettings } from "./modules/cvd-oscillator/core/settings";
+import { migrateMarketSentimentSettings } from "./modules/market-sentiment/core/settings";
 import {
   clearSupabaseAuthSession,
   dbAddAuditLog,
@@ -256,6 +257,7 @@ const defaultVisibleIndicators: VisibleIndicators = {
   ddaProOscillator: false,
   acvdOscillator: false,
   cvdOscillator: false,
+  marketSentimentOscillator: false,
   volume: false
 };
 
@@ -288,7 +290,8 @@ const defaultIndicatorPeriods: IndicatorPeriods = {
   waveTrendOscillator: 10,
   ddaProOscillator: 500,
   acvdOscillator: 1000,
-  cvdOscillator: 5000
+  cvdOscillator: 5000,
+  marketSentimentOscillator: 5000
 };
 
 const defaultIndicatorVisualSettings: IndicatorVisualSettings = {
@@ -312,6 +315,7 @@ const defaultIndicatorVisualSettings: IndicatorVisualSettings = {
   ddaProOscillator: { color: "red", intensity: 92 },
   acvdOscillator: { color: "white", intensity: 92 },
   cvdOscillator: { color: "white", intensity: 100 },
+  marketSentimentOscillator: { color: "white", intensity: 94 },
   volume: { color: "red", intensity: 62 }
 };
 
@@ -522,6 +526,7 @@ function migrateIndicatorAdvancedSettings(value: Partial<IndicatorAdvancedSettin
     ddaProOscillator: migrateDDAProSettings(value?.ddaProOscillator),
     acvdOscillator: migrateAcvdSettings(value?.acvdOscillator),
     cvdOscillator: migrateCvdOscillatorSettings(value?.cvdOscillator),
+    marketSentimentOscillator: migrateMarketSentimentSettings(value?.marketSentimentOscillator),
     vwap: {
       ...defaultIndicatorAdvancedSettings.vwap,
       ...(value?.vwap ?? {})
@@ -546,6 +551,7 @@ function migrateIndicatorPeriods(value: Partial<IndicatorPeriods> | null | undef
   migrated.ddaProOscillator = Math.max(100, Math.min(20_000, Math.round(migrated.ddaProOscillator)));
   migrated.acvdOscillator = Math.max(100, Math.min(20_000, Math.round(migrated.acvdOscillator)));
   migrated.cvdOscillator = Math.max(100, Math.min(20_000, Math.round(migrated.cvdOscillator)));
+  migrated.marketSentimentOscillator = Math.max(250, Math.min(20_000, Math.round(migrated.marketSentimentOscillator)));
   return migrated;
 }
 

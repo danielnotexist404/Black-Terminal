@@ -10,6 +10,7 @@ import type {
   IndicatorAlertDefinition
 } from "../automation/alerts";
 import type { AcvdSignalKind } from "../modules/acvd/core/types";
+import type { MarketSentimentAlertSelection } from "../modules/market-sentiment/core/types";
 import type { Timeframe } from "../market-data/types";
 
 type AlertEventLog = {
@@ -36,6 +37,7 @@ const indicatorOptions: { value: AlertIndicatorTarget; label: string; disabled?:
   { value: "ema50", label: "EMA 50" },
   { value: "ema200", label: "EMA 200" },
   { value: "acvd", label: "BC-ACVD — Adaptive Causal Volume Delta" },
+  { value: "marketSentiment", label: "BC-MSO — Market Sentiment Oscillator" },
   { value: "ddaPro", label: "BC-RDA — BLOCKED: REPAINT AUDIT", disabled: true }
 ];
 
@@ -45,6 +47,15 @@ const acvdSignalOptions: { value: AcvdSignalKind; label: string }[] = [
   { value: "BC_ACVD_SHORT_SIGNAL", label: "Short · Blood-Red Dot" }
 ];
 const acvdSignalLabels = Object.fromEntries(acvdSignalOptions.map((option) => [option.value, option.label])) as Record<AcvdSignalKind, string>;
+
+const marketSentimentSignalOptions: { value: MarketSentimentAlertSelection; label: string }[] = [
+  { value: "ANY_BAND_EVENT", label: "Any Confirmed OB/OS Band Event" },
+  { value: "ENTER_OVERBOUGHT", label: "Enter Overbought" },
+  { value: "EXIT_OVERBOUGHT", label: "Exit Overbought" },
+  { value: "ENTER_OVERSOLD", label: "Enter Oversold" },
+  { value: "EXIT_OVERSOLD", label: "Exit Oversold" }
+];
+const marketSentimentSignalLabels = Object.fromEntries(marketSentimentSignalOptions.map((option) => [option.value, option.label])) as Record<MarketSentimentAlertSelection, string>;
 
 const ddaSignalOptions: { value: DDAProAlertSignal; label: string }[] = [
   { value: "BC_RDA_ANY_SIGNAL", label: "Any BC-RDA Signal Dot" },
@@ -117,6 +128,7 @@ function createAlertDraft(symbol: string, exchange: string, timeframe: Timeframe
     levelTarget: "any",
     ddaSignal: "DDA_RISK_SCORE_CROSSED_75",
     acvdSignal: undefined,
+    marketSentimentSignal: undefined,
     targetPrice: undefined,
     color: "#ffffff",
     condition: "crossingAbove",
@@ -174,6 +186,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
       levelTarget: draft.indicator === "hdlxProfile" ? draft.levelTarget ?? "any" : undefined,
       ddaSignal: undefined,
       acvdSignal: draft.indicator === "acvd" ? draft.acvdSignal ?? "BC_ACVD_ANY_SIGNAL" : undefined,
+      marketSentimentSignal: draft.indicator === "marketSentiment" ? draft.marketSentimentSignal ?? "ANY_BAND_EVENT" : undefined,
       targetPrice: draft.indicator === "price" && Number.isFinite(draft.targetPrice) ? draft.targetPrice : undefined,
       color: draft.indicator === "price" ? draft.color || "#ffffff" : draft.color,
       cooldownSeconds: clampNumber(Math.round(draft.cooldownSeconds), 5, 86400),
@@ -245,7 +258,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
                     {alert.indicator === "hdlxProfile" && alert.levelTarget ? ` ${levelLabels[alert.levelTarget]}` : ""}
                     {alert.indicator === "price" && Number.isFinite(alert.targetPrice) ? ` ${alert.targetPrice?.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : ""}
                     {" / "}
-                    {alert.indicator === "ddaPro" ? ddaSignalLabels[alert.ddaSignal ?? "DDA_RISK_SCORE_CROSSED_75"] : alert.indicator === "acvd" ? acvdSignalLabels[alert.acvdSignal ?? "BC_ACVD_ANY_SIGNAL"] : conditionLabels[alert.condition]}
+                    {alert.indicator === "ddaPro" ? ddaSignalLabels[alert.ddaSignal ?? "DDA_RISK_SCORE_CROSSED_75"] : alert.indicator === "acvd" ? acvdSignalLabels[alert.acvdSignal ?? "BC_ACVD_ANY_SIGNAL"] : alert.indicator === "marketSentiment" ? marketSentimentSignalLabels[alert.marketSentimentSignal ?? "ANY_BAND_EVENT"] : conditionLabels[alert.condition]}
                   </span>
                 </button>
                 <div className="alert-row-actions">
@@ -306,6 +319,7 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
                         levelTarget: indicator === "hdlxProfile" ? current.levelTarget ?? "any" : undefined,
                         ddaSignal: indicator === "ddaPro" ? current.ddaSignal ?? "DDA_RISK_SCORE_CROSSED_75" : undefined,
                         acvdSignal: indicator === "acvd" ? current.acvdSignal ?? "BC_ACVD_ANY_SIGNAL" : undefined,
+                        marketSentimentSignal: indicator === "marketSentiment" ? current.marketSentimentSignal ?? "ANY_BAND_EVENT" : undefined,
                         targetPrice: indicator === "price" ? current.targetPrice : undefined
                       } : current);
                     }}
@@ -364,9 +378,17 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
                     </select>
                   </label>
                 )}
+                {draft.indicator === "marketSentiment" && (
+                  <label className="alert-field wide">
+                    BC-MSO Band Event
+                    <select value={draft.marketSentimentSignal ?? "ANY_BAND_EVENT"} onChange={(event) => updateDraft("marketSentimentSignal", event.target.value as MarketSentimentAlertSelection)}>
+                      {marketSentimentSignalOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                )}
                 <label className="alert-field">
                   Condition
-                  <select value={draft.condition} disabled={draft.indicator === "ddaPro" || draft.indicator === "acvd"} onChange={(event) => updateDraft("condition", event.target.value as AlertCondition)}>
+                  <select value={draft.condition} disabled={draft.indicator === "ddaPro" || draft.indicator === "acvd" || draft.indicator === "marketSentiment"} onChange={(event) => updateDraft("condition", event.target.value as AlertCondition)}>
                     {conditionOptions.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
                     ))}

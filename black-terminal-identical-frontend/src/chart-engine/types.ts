@@ -8,6 +8,7 @@ import type { BclifRendererMetrics } from "../modules/liquidation-field/renderin
 import type { DDAProSettings, DDAProSnapshot } from "../modules/dda-pro/core/types";
 import type { AcvdSettings, AcvdSnapshot } from "../modules/acvd/core/types";
 import type { CvdOscillatorSettings } from "../modules/cvd-oscillator/core/types";
+import type { MarketSentimentSettings } from "../modules/market-sentiment/core/types";
 
 
 export type Candle = {
@@ -153,6 +154,7 @@ export type VisibleIndicators = {
   ddaProOscillator: boolean;
   acvdOscillator: boolean;
   cvdOscillator: boolean;
+  marketSentimentOscillator: boolean;
   volume: boolean;
 };
 
@@ -171,6 +173,7 @@ export type IndicatorPeriods = {
   ddaProOscillator: number;
   acvdOscillator: number;
   cvdOscillator: number;
+  marketSentimentOscillator: number;
 };
 
 export type IndicatorColorKey = "red" | "white" | "silver" | "gray" | "green" | "orange";
@@ -342,7 +345,8 @@ export type OscillatorIndicatorKey =
   | "waveTrendOscillator"
   | "ddaProOscillator"
   | "acvdOscillator"
-  | "cvdOscillator";
+  | "cvdOscillator"
+  | "marketSentimentOscillator";
 
 export type OscillatorPaneSettings = {
   height: number;
@@ -468,6 +472,7 @@ export type IndicatorAdvancedSettings = {
   ddaProOscillator: DDAProSettings;
   acvdOscillator: AcvdSettings;
   cvdOscillator: CvdOscillatorSettings;
+  marketSentimentOscillator: MarketSentimentSettings;
   vwap: VwapSettings;
 };
 

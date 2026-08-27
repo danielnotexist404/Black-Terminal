@@ -25,6 +25,7 @@ export const DEFAULT_ALLOWED_INDICATORS = [
   "ddaProOscillator",
   "acvdOscillator",
   "cvdOscillator",
+  "marketSentimentOscillator",
   "openInterestOscillator",
   "zScoreOscillator",
   "waveTrendOscillator",

@@ -79,6 +79,7 @@
     "test:dda-pro-all": "npm run test:dda-pro && npm run test:dda-pro-invariants && npm run test:dda-pro-worker && npm run test:dda-pro-python-parity && npm run test:dda-pro-signal-intelligence && npm run test:dda-pro-flow-pressure && npm run test:dda-pro-no-repaint",
     "test:acvd": "node --experimental-strip-types scripts/acvd-tests.ts && node --experimental-strip-types scripts/authentic-cvd-archive-tests.ts && node scripts/acvd-public-archive-postgres-tests.js && npm run test:oscillator-layout",
     "test:cvd-oscillator": "node --experimental-strip-types scripts/cvd-oscillator-tests.ts && npm run test:oscillator-layout",
+    "test:market-sentiment": "node --experimental-strip-types scripts/market-sentiment-tests.ts && node --experimental-strip-types scripts/market-sentiment-python-parity-tests.ts && npm run test:oscillator-layout",
     "acvd:backfill-flow": "node scripts/acvd-authentic-flow-backfill.js",
     "acvd:backfill-bybit-archive": "node scripts/acvd-bybit-public-archive-backfill.js",
     "event-alpha:worker": "node scripts/event-alpha-worker.js",

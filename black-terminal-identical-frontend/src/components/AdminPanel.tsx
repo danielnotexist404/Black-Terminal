@@ -58,6 +58,7 @@ const ALL_INDICATORS_METADATA = [
   { key: "bollinger", name: "Bollinger Bands", desc: "Volatility deviation channels" },
   { key: "ddaProOscillator", name: "BC-RDA — Risk Distribution Analysis", desc: "Worker-isolated drawdown, tail-risk, duration and recovery analytics" },
   { key: "acvdOscillator", name: "BC-ACVD — Adaptive Causal Volume Delta", desc: "Authentic aggressor CVD exhaustion with causal structure confirmation" },
+  { key: "marketSentimentOscillator", name: "BC-MSO — Market Sentiment Oscillator", desc: "Causal multi-factor sentiment candles with finalized OB/OS band events" },
   { key: "openInterestOscillator", name: "Open Interest Oscillator", desc: "OI derivative pressure" },
   { key: "zScoreOscillator", name: "Z-Score Oscillator", desc: "Standard deviation distance" },
   { key: "waveTrendOscillator", name: "WaveTrend Oscillator", desc: "Momentum oscillator" },

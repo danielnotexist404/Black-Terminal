@@ -170,6 +170,7 @@ export function ScriptEditor({
       createdAt: previous?.createdAt ?? Date.now(),
       updatedAt: Date.now(),
       inputValues: previous?.inputValues,
+      chartActivation: previous?.chartActivation,
       publication: previous?.publication
     };
 

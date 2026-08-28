@@ -14,6 +14,10 @@ export type UserScript = {
   createdAt: number;
   updatedAt?: number;
   inputValues?: Record<string, ScriptInputValue>;
+  chartActivation?: {
+    active: boolean;
+    visible: boolean;
+  };
   publication?: UserScriptPublication;
 };
 
@@ -33,6 +37,14 @@ export function normalizeUserScripts(value: unknown): UserScript[] {
       && Number.isFinite(row.publication.publishedAt)
       ? row.publication
       : undefined;
+    const chartActivation = row.chartActivation
+      && typeof row.chartActivation === "object"
+      && typeof row.chartActivation.active === "boolean"
+      ? {
+          active: row.chartActivation.active,
+          visible: row.chartActivation.visible !== false,
+        }
+      : undefined;
     return [{
       id: row.id,
       name: typeof row.name === "string" && row.name.trim() ? row.name.trim() : "Untitled Script",
@@ -41,6 +53,7 @@ export function normalizeUserScripts(value: unknown): UserScript[] {
       createdAt: Number.isFinite(row.createdAt) ? Number(row.createdAt) : Date.now(),
       updatedAt: Number.isFinite(row.updatedAt) ? Number(row.updatedAt) : undefined,
       inputValues,
+      chartActivation,
       publication
     }];
   });

@@ -60,7 +60,10 @@ import { MarketOverview } from "./components/MarketOverview";
 import {
   mergeCustomScriptOutput,
   mountCustomScript,
+  restoreMountedCustomScripts,
   unmountCustomScript,
+  updateScriptChartActivation,
+  updateScriptInputs,
   type MountedCustomScript
 } from "./scripts/customScriptLifecycle";
 import { normalizeUserScripts, type UserScript } from "./scripts/userScriptLibrary";
@@ -933,6 +936,22 @@ export default function App() {
     return stored ? JSON.parse(stored) : [];
   });
   const [mountedCustomScripts, setMountedCustomScripts] = useState<MountedCustomScript[]>([]);
+  const customScriptStorageQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const updateStoredCustomScripts = useCallback((update: (scripts: UserScript[]) => UserScript[]) => {
+    const username = currentUser?.username;
+    const task = customScriptStorageQueueRef.current.catch(() => undefined).then(async () => {
+      if (username && isSupabaseConfigured) {
+        const scripts = normalizeUserScripts(await dbGetCurrentUserScripts());
+        await dbSaveCurrentUserScripts(update(scripts));
+        return;
+      }
+      const storageKey = username ? `bt_user_scripts:${username}` : "bt_user_scripts:anonymous";
+      const scripts = normalizeUserScripts(JSON.parse(localStorage.getItem(storageKey) || "[]"));
+      localStorage.setItem(storageKey, JSON.stringify(update(scripts)));
+    });
+    customScriptStorageQueueRef.current = task;
+    return task;
+  }, [currentUser?.username]);
   useEffect(() => {
     const inputFeed = chartType === "renko" ? "CAUSAL_RENKO" : "SOURCE_OHLCV";
     setMountedCustomScripts((current) => current.map((script) => script.activation.inputFeed !== inputFeed
@@ -956,17 +975,32 @@ export default function App() {
     chartCandleReaderRef.current = reader ?? (() => []);
   }, []);
   const readChartCandles = useCallback(() => chartCandleReaderRef.current(), []);
-  const persistCustomScriptInputs = useCallback(async (scriptId: string, inputValues: Record<string, ScriptInputValue>) => {
-    if (!currentUser) return;
-    if (isSupabaseConfigured) {
-      const scripts = normalizeUserScripts(await dbGetCurrentUserScripts());
-      await dbSaveCurrentUserScripts(scripts.map((script) => script.id === scriptId ? { ...script, inputValues, updatedAt: Date.now() } : script));
-      return;
-    }
-    const storageKey = `bt_user_scripts:${currentUser.username}`;
-    const scripts = normalizeUserScripts(JSON.parse(localStorage.getItem(storageKey) || "[]"));
-    localStorage.setItem(storageKey, JSON.stringify(scripts.map((script) => script.id === scriptId ? { ...script, inputValues, updatedAt: Date.now() } : script)));
-  }, [currentUser]);
+  useEffect(() => {
+    let cancelled = false;
+    setMountedCustomScripts([]);
+    const restore = async () => {
+      try {
+        const username = currentUser?.username;
+        const scripts = username && isSupabaseConfigured
+          ? normalizeUserScripts(await dbGetCurrentUserScripts())
+          : normalizeUserScripts(JSON.parse(localStorage.getItem(username ? `bt_user_scripts:${username}` : "bt_user_scripts:anonymous") || "[]"));
+        if (cancelled) return;
+        setMountedCustomScripts(restoreMountedCustomScripts(
+          scripts,
+          readChartCandles(),
+          chartType === "renko" ? "CAUSAL_RENKO" : "SOURCE_OHLCV",
+        ));
+      } catch (restoreError) {
+        if (!cancelled) console.error("Active custom scripts could not be restored", restoreError);
+      }
+    };
+    void restore();
+    return () => { cancelled = true; };
+  }, [currentUser?.username]);
+  const persistCustomScriptInputs = useCallback((scriptId: string, inputValues: Record<string, ScriptInputValue>) =>
+    updateStoredCustomScripts((scripts) => updateScriptInputs(scripts, scriptId, inputValues)), [updateStoredCustomScripts]);
+  const persistCustomScriptChartActivation = useCallback((scriptId: string, active: boolean, visible: boolean) =>
+    updateStoredCustomScripts((scripts) => updateScriptChartActivation(scripts, scriptId, { active, visible })), [updateStoredCustomScripts]);
   const loadUserScriptFromLibrary = useCallback((script: UserScript) => {
     const candles = readChartCandles().slice(-20_000);
     const compiled = compileAndRunScript(script.source, candles, script.inputValues);
@@ -988,13 +1022,21 @@ export default function App() {
       },
       result: finalizedScriptResult(compiled, latestConfirmedTime)
     }));
+    void persistCustomScriptChartActivation(script.id, true, true).catch((error) => console.error("Custom script chart activation could not be persisted", error));
     return { success: true };
-  }, [chartType, readChartCandles]);
+  }, [chartType, persistCustomScriptChartActivation, readChartCandles]);
   const toggleCustomScriptVisibility = useCallback((scriptId: string) => {
-    setMountedCustomScripts((current) => current.map((script) => script.activation.id === scriptId
-      ? { ...script, activation: { ...script.activation, visible: script.activation.visible === false } }
-      : script));
-  }, []);
+    setMountedCustomScripts((current) => current.map((script) => {
+      if (script.activation.id !== scriptId) return script;
+      const visible = script.activation.visible === false;
+      void persistCustomScriptChartActivation(scriptId, true, visible).catch((error) => console.error("Custom script visibility could not be persisted", error));
+      return { ...script, activation: { ...script.activation, visible } };
+    }));
+  }, [persistCustomScriptChartActivation]);
+  const removeCustomScriptFromChart = useCallback((scriptId: string) => {
+    setMountedCustomScripts((current) => unmountCustomScript(current, scriptId));
+    void persistCustomScriptChartActivation(scriptId, false, false).catch((error) => console.error("Custom script removal could not be persisted", error));
+  }, [persistCustomScriptChartActivation]);
   const updateCustomScriptInputs = useCallback((scriptId: string, inputValues: Record<string, ScriptInputValue>) => {
     const mounted = mountedCustomScripts.find((script) => script.activation.id === scriptId);
     if (!mounted) return { success: false, message: "This custom script is no longer mounted." };
@@ -2572,7 +2614,7 @@ export default function App() {
             customPlots={customScriptOutput.plots}
             customMarkers={customScriptOutput.markers}
             activeCustomScripts={customScriptActivations}
-            onRemoveCustomScript={(scriptId) => setMountedCustomScripts((current) => unmountCustomScript(current, scriptId))}
+            onRemoveCustomScript={removeCustomScriptFromChart}
             onToggleCustomScriptVisibility={toggleCustomScriptVisibility}
             onUpdateCustomScriptInputs={updateCustomScriptInputs}
             onCandleReaderChange={handleCandleReaderChange}
@@ -2740,6 +2782,7 @@ export default function App() {
               getCandles={readChartCandles}
               onRunScript={(activation, result) => {
                 setMountedCustomScripts((current) => mountCustomScript(current, { activation, result }));
+                void persistCustomScriptChartActivation(activation.id, true, activation.visible !== false).catch((error) => console.error("Custom script chart activation could not be persisted", error));
                 setActiveNav("CHART");
               }}
               onUnloadScript={(scriptId) => setMountedCustomScripts((current) => unmountCustomScript(current, scriptId))}

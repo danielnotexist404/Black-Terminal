@@ -12,8 +12,10 @@ import {
   mergeCustomScriptOutput,
   mountCustomScript,
   nextCustomScriptProjectionRevision,
+  restoreMountedCustomScripts,
   unmountCustomScript
 } from "../src/scripts/customScriptLifecycle.ts";
+import { normalizeUserScripts } from "../src/scripts/userScriptLibrary.ts";
 
 const closes = [10, 9, 8, 7, 6, 7, 8, 9, 10, 9, 8, 7, 8, 9, 10, 11, 10, 9, 8, 9, 10];
 const candles: Candle[] = closes.map((close, index) => ({
@@ -168,6 +170,34 @@ assert.ok(hiddenOutput.plots.every((plot) => !plot.name.startsWith(`${activation
 assert.equal(mounted.length, 2, "hiding a custom script must not unload its saved runtime");
 mounted = unmountCustomScript(mounted, activation.id);
 assert.deepEqual(mounted.map(({ activation: item }) => item.id), [secondActivation.id], "closing one script must preserve every other mounted script");
+
+const restoredBeforeFeedReady = restoreMountedCustomScripts([{
+  id: activation.id,
+  name: activation.name,
+  kind: activation.kind,
+  source: activation.source,
+  createdAt: 1,
+  chartActivation: { active: true, visible: true },
+}], [], "SOURCE_OHLCV");
+assert.equal(restoredBeforeFeedReady.length, 1, "a mounted script must survive refresh before chart history becomes ready");
+assert.equal(restoredBeforeFeedReady[0]?.result.success, true, "cold-start restoration uses a safe pending projection");
+assert.equal(restoredBeforeFeedReady[0]?.activation.visible, true);
+assert.equal(restoreMountedCustomScripts([{
+  id: "inactive",
+  name: "Inactive",
+  kind: "indicator",
+  source: indicator,
+  createdAt: 1,
+  chartActivation: { active: false, visible: false },
+}], candles, "SOURCE_OHLCV").length, 0, "explicitly closed scripts must stay closed after refresh");
+assert.deepEqual(normalizeUserScripts([{
+  id: "persisted",
+  name: "Persisted Strategy",
+  kind: "strategy",
+  source: indicator,
+  createdAt: 1,
+  chartActivation: { active: true, visible: false },
+}])[0]?.chartActivation, { active: true, visible: false }, "normalization must retain the authenticated chart activation state");
 
 let projectionRevision = 0;
 for (const engineLocalRevision of [1, 1, 1]) {

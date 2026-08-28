@@ -9,6 +9,7 @@ import type { DDAProSettings, DDAProSnapshot } from "../modules/dda-pro/core/typ
 import type { AcvdSettings, AcvdSnapshot } from "../modules/acvd/core/types";
 import type { CvdOscillatorSettings } from "../modules/cvd-oscillator/core/types";
 import type { MarketSentimentSettings } from "../modules/market-sentiment/core/types";
+import type { HorizonCandleMode } from "../modules/horizon-candles/core/types";
 
 
 export type Candle = {
@@ -18,6 +19,10 @@ export type Candle = {
   low: number;
   close: number;
   volume: number;
+  /** Exact signed aggressor volume when the source provides classified trades. */
+  delta?: number;
+  buyVolume?: number;
+  sellVolume?: number;
 };
 
 export type ChartDisplayType =
@@ -25,6 +30,7 @@ export type ChartDisplayType =
   | "heikinAshi"
   | "volumeFootprint"
   | "renko"
+  | "horizon"
   | "hollow"
   | "line";
 
@@ -105,6 +111,7 @@ export type ChartEngineOptions = {
   host: HTMLDivElement;
   candles: Candle[];
   chartType?: ChartDisplayType;
+  horizonSettings?: HorizonCandleMode;
   snapToLatest?: boolean;
   visibleIndicators?: VisibleIndicators;
   indicatorPeriods?: IndicatorPeriods;

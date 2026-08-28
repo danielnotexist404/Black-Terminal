@@ -98,6 +98,7 @@ import { AUCTION_PROFILE_DEFAULT_SETTINGS, migrateAuctionProfileSettings } from 
 import type { AuctionProfileSettings } from "./modules/auction-profile/core/types";
 import { migrateDDAProSettings } from "./modules/dda-pro/core/settings";
 import { migrateAcvdSettings } from "./modules/acvd/core/settings";
+import { blackHorizonCandlesEnabled } from "./modules/horizon-candles/core/settings";
 import type {
   Candle,
   ChartDisplayType,
@@ -324,6 +325,9 @@ const defaultIndicatorVisualSettings: IndicatorVisualSettings = {
 
 const chartTypes: { label: string; value: ChartDisplayType; description: string }[] = [
   { label: "Candlesticks", value: "candlesticks", description: "OHLC candles" },
+  ...(blackHorizonCandlesEnabled()
+    ? [{ label: "Black Horizon Candles", value: "horizon" as const, description: "True 1s source across an independent macro horizon" }]
+    : []),
   { label: "Heikin Ashi", value: "heikinAshi", description: "Smoothed OHLC transform" },
   { label: "CVD Footprint", value: "volumeFootprint", description: "Time × price CVD cells from canonical trade flow" },
   { label: "Renko", value: "renko", description: "Causal frozen-size price bricks" },
@@ -839,7 +843,11 @@ export default function App() {
   });
   const [availableSymbols, setAvailableSymbols] = useState<MarketSymbolOption[]>(initialExchange.symbols);
   const [timeframe, setTimeframe] = useState<Timeframe>(() => (localStorage.getItem("bt_last_timeframe") as Timeframe) || "15m");
-  const [chartType, setChartType] = useState<ChartDisplayType>(() => (localStorage.getItem("bt_last_chart_type") as ChartDisplayType) || "candlesticks");
+  const [chartType, setChartType] = useState<ChartDisplayType>(() => {
+    const stored = localStorage.getItem("bt_last_chart_type") as ChartDisplayType | null;
+    if (stored === "horizon" && !blackHorizonCandlesEnabled()) return "candlesticks";
+    return stored || "candlesticks";
+  });
   const initialWorkspaceState = useMemo(() => {
     const name = loadActiveWorkspaceName();
     return { name, snapshot: loadWorkspaceSnapshots()[name] ?? null };

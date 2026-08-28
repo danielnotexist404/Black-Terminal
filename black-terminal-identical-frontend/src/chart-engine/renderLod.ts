@@ -45,12 +45,26 @@ export function aggregateCandleRenderBuckets(
     let high = Number.NEGATIVE_INFINITY;
     let low = Number.POSITIVE_INFINITY;
     let volume = 0;
+    let delta = 0;
+    let buyVolume = 0;
+    let sellVolume = 0;
+    let hasDelta = false;
+    let hasBuySell = false;
     for (let index = startIndex; index <= endIndex; index++) {
       const candle = candles[index];
       if (!candle) continue;
       high = Math.max(high, candle.high);
       low = Math.min(low, candle.low);
       volume += candle.volume;
+      if (Number.isFinite(candle.delta)) {
+        delta += candle.delta!;
+        hasDelta = true;
+      }
+      if (Number.isFinite(candle.buyVolume) || Number.isFinite(candle.sellVolume)) {
+        buyVolume += candle.buyVolume ?? 0;
+        sellVolume += candle.sellVolume ?? 0;
+        hasBuySell = true;
+      }
     }
 
     buckets.push({
@@ -63,7 +77,9 @@ export function aggregateCandleRenderBuckets(
         high: Number.isFinite(high) ? high : Math.max(opening.open, closing.close),
         low: Number.isFinite(low) ? low : Math.min(opening.open, closing.close),
         close: closing.close,
-        volume
+        volume,
+        ...(hasDelta ? { delta } : {}),
+        ...(hasBuySell ? { buyVolume, sellVolume } : {})
       }
     });
   }

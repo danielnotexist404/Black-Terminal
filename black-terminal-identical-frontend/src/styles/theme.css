@@ -3368,6 +3368,7 @@ body.resizing-layout * {
 }
 
 .chart-wrap.interaction-isolated .indicator-settings,
+.chart-wrap.interaction-isolated .horizon-settings-panel,
 .chart-wrap.interaction-isolated .chart-context-menu,
 .chart-wrap.interaction-isolated .chart-alert-editor,
 .chart-wrap.interaction-isolated .protection-change-dialog,
@@ -7700,6 +7701,95 @@ body.resizing-layout * {
 
 .bclif-quick-intensity input { width: 72px; accent-color: #d00024; }
 .bclif-quick-intensity b { min-width: 20px; color: #f3f4f6; font-size: 7px; }
+
+.horizon-chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0 8px;
+  padding: 3px 5px;
+  border: 1px solid rgba(223, 219, 222, 0.14);
+  border-radius: 7px;
+  background: rgba(3, 3, 3, 0.92);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
+  color: #a4a0a3;
+  font: 700 7px "IBM Plex Mono", monospace;
+}
+
+.horizon-chart-controls > b { color: #f2eff1; font-size: 8px; letter-spacing: .08em; white-space: nowrap; }
+.horizon-source-lock { color: #bcb8bb; white-space: nowrap; }
+.horizon-chart-controls select {
+  height: 24px;
+  border: 1px solid #292629;
+  border-radius: 4px;
+  background: #070707;
+  color: #ddd9dc;
+  font: 700 8px "IBM Plex Mono", monospace;
+}
+.horizon-chart-controls > label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.horizon-chart-controls input[type="range"] { width: 58px; accent-color: #bd0b2b; }
+.horizon-chart-controls em { min-width: 30px; color: #d6d2d5; font-style: normal; }
+.horizon-chart-controls > button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #2c292c;
+  border-radius: 4px;
+  background: #080808;
+  color: #bdb9bc;
+}
+.horizon-chart-controls > button.active { border-color: #b30824; color: #fff; background: rgba(179, 8, 36, .18); }
+.horizon-quality { padding: 3px 5px; border: 1px solid #3b373a; border-radius: 3px; color: #aaa5a8; font-style: normal; white-space: nowrap; }
+.horizon-quality.native-trades,
+.horizon-quality.native-1s { border-color: rgba(238, 233, 236, .32); color: #f0ecef; }
+.horizon-quality.synthetic-1s { border-color: rgba(177, 124, 18, .55); color: #d9a83d; }
+.horizon-quality.degraded { border-color: rgba(205, 11, 45, .48); color: #e31b3e; }
+
+.horizon-settings-panel {
+  position: absolute;
+  z-index: 120;
+  top: 50px;
+  right: 116px;
+  width: min(360px, calc(100% - 24px));
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(188, 11, 43, .68);
+  border-radius: 9px;
+  background: rgba(5, 5, 6, .985);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .84), inset 0 1px 0 rgba(255, 255, 255, .035);
+  color: #a29da1;
+  font: 8px "IBM Plex Mono", monospace;
+  pointer-events: auto;
+}
+.horizon-settings-panel > header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 7px; border-bottom: 1px solid #242124; }
+.horizon-settings-panel > header div { display: grid; gap: 2px; }
+.horizon-settings-panel > header b { color: #fff; letter-spacing: .08em; }
+.horizon-settings-panel > header span { color: #6f696d; font-size: 7px; }
+.horizon-settings-panel > header button { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid #302c2f; background: #090909; color: #aaa; }
+.horizon-settings-panel > label { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(145px, 1fr); align-items: center; gap: 8px; }
+.horizon-settings-panel select { height: 28px; border: 1px solid #302c2f; background: #080808; color: #d6d1d4; font: 8px "IBM Plex Mono", monospace; }
+.horizon-settings-panel label.horizon-toggle { grid-template-columns: 1fr auto; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,.04); }
+.horizon-toggle > span { display: grid; gap: 2px; color: #d4cfd2; }
+.horizon-toggle small { color: #6f696d; font-size: 7px; }
+.horizon-toggle input { accent-color: #bd0b2b; }
+.horizon-settings-panel > p { margin: 2px 0 0; padding: 7px; border-left: 2px solid #a60826; background: rgba(166, 8, 38, .07); color: #7e777b; line-height: 1.5; }
+
+@media (max-width: 1180px) {
+  .horizon-chart-controls > b,
+  .horizon-chart-controls > label { display: none; }
+  .horizon-settings-panel { right: 10px; }
+}
+
+@media (max-width: 820px) {
+  .horizon-chart-controls { margin: 0 2px; gap: 3px; }
+  .horizon-source-lock,
+  .horizon-quality { display: none; }
+  .horizon-chart-controls select { max-width: 92px; }
+}
 
 .indicator-settings.bclif-settings-shell {
   top: 52px;

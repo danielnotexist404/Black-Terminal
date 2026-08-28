@@ -75,6 +75,9 @@ export class CandleAggregationEngine {
     const bucketTime = Math.floor(tradeTime / seconds) * seconds;
     const key = `${trade.exchange}:${trade.symbol}:${timeframe}`;
     const current = this.buckets.get(key);
+    const signedQuantity = trade.side === "buy" ? trade.quantity : trade.side === "sell" ? -trade.quantity : 0;
+    const buyQuantity = trade.side === "buy" ? trade.quantity : 0;
+    const sellQuantity = trade.side === "sell" ? trade.quantity : 0;
 
     if (!current || current.time !== bucketTime) {
       const candle: Candle = {
@@ -83,7 +86,10 @@ export class CandleAggregationEngine {
         high: trade.price,
         low: trade.price,
         close: trade.price,
-        volume: trade.quantity
+        volume: trade.quantity,
+        delta: signedQuantity,
+        buyVolume: buyQuantity,
+        sellVolume: sellQuantity
       };
       this.buckets.set(key, candle);
       return { candle, closed: current };
@@ -94,7 +100,10 @@ export class CandleAggregationEngine {
       high: Math.max(current.high, trade.price),
       low: Math.min(current.low, trade.price),
       close: trade.price,
-      volume: current.volume + trade.quantity
+      volume: current.volume + trade.quantity,
+      delta: (current.delta ?? 0) + signedQuantity,
+      buyVolume: (current.buyVolume ?? 0) + buyQuantity,
+      sellVolume: (current.sellVolume ?? 0) + sellQuantity
     };
     this.buckets.set(key, next);
     return { candle: next };
@@ -116,7 +125,10 @@ export class CandleAggregationEngine {
         high: trade.price,
         low: trade.price,
         close: trade.price,
-        volume: trade.quantity
+        volume: trade.quantity,
+        delta: trade.side === "buy" ? trade.quantity : trade.side === "sell" ? -trade.quantity : 0,
+        buyVolume: trade.side === "buy" ? trade.quantity : 0,
+        sellVolume: trade.side === "sell" ? trade.quantity : 0
       };
       this.tickBuckets.set(key, { candle, count: 1 });
       return { candle, closed: current?.candle };
@@ -127,7 +139,10 @@ export class CandleAggregationEngine {
       high: Math.max(current.candle.high, trade.price),
       low: Math.min(current.candle.low, trade.price),
       close: trade.price,
-      volume: current.candle.volume + trade.quantity
+      volume: current.candle.volume + trade.quantity,
+      delta: (current.candle.delta ?? 0) + (trade.side === "buy" ? trade.quantity : trade.side === "sell" ? -trade.quantity : 0),
+      buyVolume: (current.candle.buyVolume ?? 0) + (trade.side === "buy" ? trade.quantity : 0),
+      sellVolume: (current.candle.sellVolume ?? 0) + (trade.side === "sell" ? trade.quantity : 0)
     };
     this.tickBuckets.set(key, { candle, count: current.count + 1 });
     return { candle };
@@ -169,7 +184,16 @@ export function aggregateCandlesToTimeframe(candles: readonly Candle[], timefram
       high: Math.max(current.high, candle.high),
       low: Math.min(current.low, candle.low),
       close: candle.close,
-      volume: current.volume + candle.volume
+      volume: current.volume + candle.volume,
+      delta: Number.isFinite(current.delta) || Number.isFinite(candle.delta)
+        ? (current.delta ?? 0) + (candle.delta ?? 0)
+        : undefined,
+      buyVolume: Number.isFinite(current.buyVolume) || Number.isFinite(candle.buyVolume)
+        ? (current.buyVolume ?? 0) + (candle.buyVolume ?? 0)
+        : undefined,
+      sellVolume: Number.isFinite(current.sellVolume) || Number.isFinite(candle.sellVolume)
+        ? (current.sellVolume ?? 0) + (candle.sellVolume ?? 0)
+        : undefined
     } : { ...candle, time: bucketTime });
   }
   return [...buckets.values()].sort((left, right) => left.time - right.time);

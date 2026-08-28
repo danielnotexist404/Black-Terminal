@@ -166,6 +166,15 @@ import {
   applyBclifVisualFixtureSettings,
   createBclifVisualChartCandles
 } from "../modules/liquidation-field/testing/fixtures";
+import {
+  horizonLabel,
+  horizonQualityLabel,
+  loadHorizonCandleMode,
+  migrateHorizonCandleMode,
+  persistHorizonCandleMode
+} from "../modules/horizon-candles/core/settings";
+import type { HorizonCandleMode, HorizonDataQuality } from "../modules/horizon-candles/core/types";
+import { createHorizonVisualFixture, isHorizonVisualFixtureEnabled } from "../modules/horizon-candles/testing/fixtures";
 
 function useDebouncedValue<T>(value: T, delayMs: number) {
   const [debounced, setDebounced] = useState(value);
@@ -646,6 +655,18 @@ export function PixiBlackChart({
   const [chartHistoryState, setChartHistoryState] = useState<
     "loading" | "ready" | "unavailable"
   >("loading");
+  const [horizonPreferences, setHorizonPreferences] = useState<HorizonCandleMode>(loadHorizonCandleMode);
+  const [horizonDataQuality, setHorizonDataQuality] = useState<HorizonDataQuality>("degraded");
+  const [horizonCoverageRatio, setHorizonCoverageRatio] = useState(0);
+  const [horizonSettingsOpen, setHorizonSettingsOpen] = useState(false);
+  const horizonSourceQualityRef = useRef<HorizonDataQuality>("degraded");
+  const horizonSettings = useMemo(() => migrateHorizonCandleMode({
+    ...horizonPreferences,
+    enabled: chartType === "horizon",
+    dataQuality: horizonDataQuality
+  }), [chartType, horizonDataQuality, horizonPreferences]);
+  const sourceTimeframe: Timeframe = chartType === "horizon" ? "1s" : timeframe;
+  const horizonExpectedSamples = Math.min(100_000, Math.round(horizonSettings.displayHorizonMs / 1000));
   const [activeIndicator, setActiveIndicator] = useState<IndicatorKey | null>(null);
   const [activeCustomScriptSettingsId, setActiveCustomScriptSettingsId] = useState<string | null>(null);
   const [volumeProfileSettingsTab, setVolumeProfileSettingsTab] = useState<VolumeProfileSettingsTab>("inputs");
@@ -656,8 +677,10 @@ export function PixiBlackChart({
     if (configuredDepth >= 10000) return 10000;
     return 5000;
   });
-  const marketHistoryTarget = Math.min(20000, Math.max(
+  const maxRetainedChartBars = chartType === "horizon" ? 100_000 : MAX_RETAINED_CHART_BARS;
+  const marketHistoryTarget = Math.min(maxRetainedChartBars, Math.max(
     historyDepth,
+    chartType === "horizon" ? horizonExpectedSamples : 0,
     visibleIndicators.volatilityHeatmap ? kioseffSettings.historyLookbackBars : 0,
     auctionDataRequired ? normalizedAuctionProfileSettings.lookbackBars : 0
   ));
@@ -913,7 +936,13 @@ export function PixiBlackChart({
   };
 
   const setReplaySource = (candles: Candle[]) => {
-    replaySourceRef.current = uniqueSortedCandles(candles).slice(-MAX_RETAINED_CHART_BARS);
+    replaySourceRef.current = uniqueSortedCandles(candles).slice(-maxRetainedChartBars);
+    if (chartType === "horizon") {
+      const coverage = Math.min(1, replaySourceRef.current.length / Math.max(1, horizonExpectedSamples));
+      setHorizonCoverageRatio(coverage);
+      const sourceQuality = horizonSourceQualityRef.current;
+      setHorizonDataQuality(sourceQuality === "native-trades" && coverage < 0.995 ? "degraded" : sourceQuality);
+    }
     setKioseffSourceRevision((revision) => revision + 1);
     setAuctionProfileSourceRevision((revision) => revision + 1);
     setDDAProSourceRevision((revision) => revision + 1);
@@ -944,8 +973,13 @@ export function PixiBlackChart({
       source[source.length - 1] = candle;
     } else {
       source.push(candle);
-      const overflow = source.length - MAX_RETAINED_CHART_BARS;
+      const overflow = source.length - maxRetainedChartBars;
       if (overflow > 0) source.splice(0, overflow);
+    }
+    if (chartType === "horizon" && horizonSourceQualityRef.current === "native-trades") {
+      const coverage = Math.min(1, source.length / Math.max(1, horizonExpectedSamples));
+      setHorizonCoverageRatio(coverage);
+      setHorizonDataQuality(coverage >= 0.995 ? "native-trades" : "degraded");
     }
     if (
       historyAdvanced &&
@@ -972,7 +1006,7 @@ export function PixiBlackChart({
     const last = source[source.length - 1];
     if (!last) return;
 
-    const bucket = Math.floor(time / timeframeSeconds[timeframe]) * timeframeSeconds[timeframe];
+    const bucket = Math.floor(time / timeframeSeconds[sourceTimeframe]) * timeframeSeconds[sourceTimeframe];
     if (bucket < last.time) return;
 
     if (bucket === last.time) {
@@ -1039,8 +1073,8 @@ export function PixiBlackChart({
     const seenTrades = new Set<string>();
     const seenTradeOrder: string[] = [];
     const tradeCandleBuilder = new CandleAggregationEngine();
-    const tradeBuiltTimeframe = isTradeBuiltTimeframe(timeframe);
-    const tradeSynthesizedTimeframe = requiresTradeSynthesis(timeframe);
+    const tradeBuiltTimeframe = isTradeBuiltTimeframe(sourceTimeframe);
+    const tradeSynthesizedTimeframe = requiresTradeSynthesis(sourceTimeframe);
     const host = hostRef.current;
     if (!host) return;
     const flushChartUiState = () => {
@@ -1064,10 +1098,16 @@ export function PixiBlackChart({
       chartUiPublishTimer = window.setTimeout(flushChartUiState, 50);
     };
     const bclifVisualFixture = isBclifVisualFixtureEnabled();
-    const adapter = bclifVisualFixture ? undefined : getMarketDataEngineAdapter(marketSymbol.exchange);
+    const horizonVisualFixture = chartType === "horizon" && isHorizonVisualFixtureEnabled();
+    const adapter = bclifVisualFixture || horizonVisualFixture ? undefined : getMarketDataEngineAdapter(marketSymbol.exchange);
     const allowSimulatedFallback =
       bclifVisualFixture || marketSymbol.exchange === "mock" || import.meta.env.VITE_ALLOW_SIMULATED_MARKET_FALLBACK === "true";
     replaySourceRef.current = [];
+    if (chartType === "horizon") {
+      horizonSourceQualityRef.current = "degraded";
+      setHorizonDataQuality("degraded");
+      setHorizonCoverageRatio(0);
+    }
     ddaFlowCaptureRef.current = {
       venue: marketSymbol.exchange,
       symbol: marketSymbol.rawSymbol,
@@ -1089,7 +1129,7 @@ export function PixiBlackChart({
     const chartQuery = {
       exchange: marketSymbol.exchange,
       symbol: marketSymbol.rawSymbol,
-      timeframe,
+      timeframe: sourceTimeframe,
       marketKind: marketSymbol.marketKind
     } as const;
     const pageLimit = pageLimitFor(marketSymbol.exchange);
@@ -1114,7 +1154,7 @@ export function PixiBlackChart({
         const candles = await sourceAdapter.getHistoricalCandles({
           exchange: sourceExchange,
           symbol: sourceSymbol,
-          timeframe,
+          timeframe: sourceTimeframe,
           marketKind: marketSymbol.marketKind,
           limit: Math.min(sourcePageLimit, remaining),
           to: cursor ? cursor - 1 : undefined
@@ -1193,7 +1233,7 @@ export function PixiBlackChart({
         .getHistoricalCandles({
           exchange: historyExchange,
           symbol: historySymbol,
-          timeframe,
+          timeframe: sourceTimeframe,
           marketKind: marketSymbol.marketKind,
           limit: pageLimitFor(historyExchange),
           to: oldestTime - 1
@@ -1210,7 +1250,7 @@ export function PixiBlackChart({
           replaySourceRef.current = uniqueSortedCandles([
             ...olderCandles,
             ...replaySourceRef.current
-          ]).slice(-MAX_RETAINED_CHART_BARS);
+          ]).slice(-maxRetainedChartBars);
           if (replayActiveRef.current) {
             setDataStatus("REPLAY HISTORY EXTENDED");
             return;
@@ -1308,7 +1348,7 @@ export function PixiBlackChart({
         lastTradeAt = Date.now();
         engineRef.current?.ingestCausalRenkoTrade(trade.price, trade.quantity, trade.time, trade.tradeId);
         if (tradeBuiltTimeframe) {
-          const aggregated = tradeCandleBuilder.ingestTrade(trade, timeframe);
+          const aggregated = tradeCandleBuilder.ingestTrade(trade, sourceTimeframe);
           if (!aggregated) continue;
           upsertReplaySourceCandle(aggregated.candle);
           if (replayActiveRef.current) continue;
@@ -1318,7 +1358,7 @@ export function PixiBlackChart({
         if (synthesizeCandlesFromTrades || candleStreamIsStale()) {
           ingestTradeIntoReplaySource(trade.price, trade.quantity, trade.time);
           if (replayActiveRef.current) continue;
-          engineRef.current?.ingestTrade(trade.price, trade.quantity, trade.time, timeframeSeconds[timeframe]);
+          engineRef.current?.ingestTrade(trade.price, trade.quantity, trade.time, timeframeSeconds[sourceTimeframe]);
         } else {
           if (replayActiveRef.current) continue;
           engineRef.current?.updateLastPrice(trade.price);
@@ -1354,7 +1394,7 @@ export function PixiBlackChart({
       }
       ingestTradeIntoReplaySource(price, 0, time);
       if (replayActiveRef.current) return;
-      engineRef.current?.ingestTrade(price, 0, time, timeframeSeconds[timeframe]);
+      engineRef.current?.ingestTrade(price, 0, time, timeframeSeconds[sourceTimeframe]);
     };
 
     const pollTickerHeartbeat = () => {
@@ -1387,14 +1427,18 @@ export function PixiBlackChart({
 
     const startMockFallback = (anchorPrice?: number, onEvent?: (event: FeedEvent) => void) => {
       synthesizeCandlesFromTrades = true;
+      if (chartType === "horizon") {
+        horizonSourceQualityRef.current = "synthetic-1s";
+        setHorizonDataQuality("synthetic-1s");
+      }
       mockSeedPrice = safeAnchorPrice(anchorPrice);
       setDataStatus("MOCK FALLBACK");
-      const mockCandles = createMockCandles(historyDepth, timeframeSeconds[timeframe], mockSeedPrice);
+      const mockCandles = createMockCandles(historyDepth, timeframeSeconds[sourceTimeframe], mockSeedPrice);
       chartSourceVenueRef.current = "mock";
       setReplaySource(mockCandles);
       if (!replayActiveRef.current) {
         engine.setCandles(mockCandles);
-        engine.startMockFeed(timeframeSeconds[timeframe], onEvent);
+        engine.startMockFeed(timeframeSeconds[sourceTimeframe], onEvent);
       }
 
       if (adapter?.subscribeTrades && !liveTrades) {
@@ -1403,7 +1447,7 @@ export function PixiBlackChart({
           const driftFromSeed = mockSeedPrice ? Math.abs(trade.price - mockSeedPrice) / mockSeedPrice : 0;
           if (driftFromSeed > 0.035) {
             mockSeedPrice = trade.price;
-            const nextMockCandles = createMockCandles(historyDepth, timeframeSeconds[timeframe], mockSeedPrice);
+            const nextMockCandles = createMockCandles(historyDepth, timeframeSeconds[sourceTimeframe], mockSeedPrice);
             setReplaySource(nextMockCandles);
             if (!replayActiveRef.current) engine.setCandles(nextMockCandles);
           }
@@ -1472,7 +1516,7 @@ export function PixiBlackChart({
     const loadTradeBuiltHistory = async () => {
       if (!adapter?.getRecentTrades) throw new Error(`${adapter?.label ?? "Market"} does not provide public trades`);
       const trades = await adapter.getRecentTrades(marketSymbol, 1_000);
-      const candles = buildCandlesFromTrades(trades, timeframe, tradeCandleBuilder);
+      const candles = buildCandlesFromTrades(trades, sourceTimeframe, tradeCandleBuilder);
       const canonicalTrades = trades.map(normalizeCanonicalTrade);
       canonicalCvdService.ingest(canonicalTrades);
       auctionTradeHistoryRef.current.push(...canonicalTrades);
@@ -1491,7 +1535,7 @@ export function PixiBlackChart({
       if (!ticker?.lastPrice) throw new Error(`${adapter.label} returned no recent trades or ticker seed`);
       const seedTime = Number(ticker.time || Math.floor(Date.now() / 1000));
       return [{
-        time: tradeBuiltTimeframe ? seedTime : Math.floor(seedTime / timeframeSeconds[timeframe]) * timeframeSeconds[timeframe],
+        time: tradeBuiltTimeframe ? seedTime : Math.floor(seedTime / timeframeSeconds[sourceTimeframe]) * timeframeSeconds[sourceTimeframe],
         open: ticker.lastPrice,
         high: ticker.lastPrice,
         low: ticker.lastPrice,
@@ -1502,12 +1546,15 @@ export function PixiBlackChart({
 
     const engine = new BlackChartEngine({
       host,
-      candles: !adapter && allowSimulatedFallback
+      candles: horizonVisualFixture
+        ? createHorizonVisualFixture(horizonExpectedSamples)
+        : !adapter && allowSimulatedFallback
         ? bclifVisualFixture
-          ? createBclifVisualChartCandles(marketHistoryTarget, timeframeSeconds[timeframe])
-          : createMockCandles(historyDepth, timeframeSeconds[timeframe], lastPrice)
+          ? createBclifVisualChartCandles(marketHistoryTarget, timeframeSeconds[sourceTimeframe])
+          : createMockCandles(historyDepth, timeframeSeconds[sourceTimeframe], lastPrice)
         : [],
       chartType,
+      horizonSettings,
       snapToLatest,
       visibleIndicators,
       indicatorPeriods,
@@ -1569,8 +1616,21 @@ export function PixiBlackChart({
           );
         });
 
+        if (horizonVisualFixture) {
+          horizonSourceQualityRef.current = "synthetic-1s";
+          const candles = createHorizonVisualFixture(horizonExpectedSamples);
+          chartSourceVenueRef.current = "mock";
+          setReplaySource(candles);
+          setHorizonDataQuality("synthetic-1s");
+          setChartHistoryState("ready");
+          if (!replayActiveRef.current) engine.setCandles(candles);
+          setDataStatus(`HORIZON VISUAL FIXTURE - ${candles.length.toLocaleString()} TRUE 1S SAMPLES`);
+          return;
+        }
+
         if (bclifVisualFixture) {
-          const candles = createBclifVisualChartCandles(marketHistoryTarget, timeframeSeconds[timeframe]);
+          if (chartType === "horizon") horizonSourceQualityRef.current = "synthetic-1s";
+          const candles = createBclifVisualChartCandles(marketHistoryTarget, timeframeSeconds[sourceTimeframe]);
           chartSourceVenueRef.current = marketSymbol.exchange;
           setReplaySource(candles);
           setChartHistoryState("ready");
@@ -1581,6 +1641,10 @@ export function PixiBlackChart({
         if (!adapter) {
           if (allowSimulatedFallback) startMockFallback();
           else {
+            if (chartType === "horizon") {
+              horizonSourceQualityRef.current = "degraded";
+              setHorizonDataQuality("degraded");
+            }
             setDataStatus("MARKET DATA UNAVAILABLE - NO ADAPTER");
             setChartHistoryState("unavailable");
           }
@@ -1593,6 +1657,7 @@ export function PixiBlackChart({
           return loadTradeBuiltHistory()
             .then((candles) => {
               if (disposed) return;
+              if (chartType === "horizon") horizonSourceQualityRef.current = "native-trades";
               chartSourceVenueRef.current = marketSymbol.exchange;
               setReplaySource(candles);
               setChartHistoryState("ready");
@@ -1602,6 +1667,10 @@ export function PixiBlackChart({
             })
             .catch((err: unknown) => {
               console.error(`${adapter.label} trade-built history failed`, err);
+              if (chartType === "horizon") {
+                horizonSourceQualityRef.current = "degraded";
+                setHorizonDataQuality("degraded");
+              }
               setDataStatus(`${adapter.label.toUpperCase()} LIVE - TRADE HISTORY UNAVAILABLE`);
               setChartHistoryState("unavailable");
               startPrimaryLiveFeeds();
@@ -1730,6 +1799,9 @@ export function PixiBlackChart({
     marketSymbol.quoteAsset,
     displaySymbol,
     timeframe,
+    sourceTimeframe,
+    chartType,
+    horizonSettings.displayHorizonMs,
     historyDepth,
     marketHistoryTarget,
     visibleIndicators.volatilityHeatmap,
@@ -2444,6 +2516,14 @@ export function PixiBlackChart({
   useEffect(() => {
     engineRef.current?.setChartType(chartType);
   }, [chartType]);
+
+  useEffect(() => {
+    persistHorizonCandleMode(horizonPreferences);
+  }, [horizonPreferences]);
+
+  useEffect(() => {
+    engineRef.current?.setHorizonSettings(horizonSettings);
+  }, [horizonSettings]);
 
   useEffect(() => {
     engineRef.current?.setSnapToLatest(snapToLatest);
@@ -5551,6 +5631,7 @@ export function PixiBlackChart({
   const chartInteractionIsolated = Boolean(
     activeIndicator ||
     activeCustomScriptSettingsId ||
+    horizonSettingsOpen ||
     chartContextMenu ||
     orderContextMenu ||
     editingChartAlert ||
@@ -5562,7 +5643,7 @@ export function PixiBlackChart({
     <div className={chartInteractionIsolated ? "chart-wrap interaction-isolated" : "chart-wrap"}>
       <div className="chart-header">
         <div>
-          <span className="pair">{displaySymbol} PERP - {timeframeLabel} - {exchangeLabel.toUpperCase()}</span>
+          <span className="pair">{displaySymbol} PERP - {chartType === "horizon" ? `1s SOURCE / ${horizonLabel(horizonSettings.displayHorizonMs)} HORIZON` : timeframeLabel} - {exchangeLabel.toUpperCase()}</span>
           <span className="status-dot" />
           <span className="ohlc">
             O {displayCandle.open.toLocaleString(undefined, { maximumFractionDigits: 1 })}&nbsp;&nbsp;
@@ -5605,6 +5686,37 @@ export function PixiBlackChart({
             <option value="BLACK_TERMINAL_BLOOD">Black Terminal Blood</option>
           </select>
         </div>}
+        {chartType === "horizon" && <div className="horizon-chart-controls" role="group" aria-label="Black Horizon Candles controls">
+          <b>BLACK HORIZON CANDLES</b>
+          <span className="horizon-source-lock">1s SOURCE</span>
+          <select
+            aria-label="Black Horizon display horizon"
+            value={horizonSettings.displayHorizonMs}
+            onChange={(event) => setHorizonPreferences((current) => migrateHorizonCandleMode({ ...current, displayHorizonMs: Number(event.target.value) }))}
+          >
+            <option value={15 * 60_000}>15m Horizon</option>
+            <option value={60 * 60_000}>1H Horizon</option>
+            <option value={4 * 60 * 60_000}>4H Horizon</option>
+            <option value={24 * 60 * 60_000}>1D Horizon</option>
+          </select>
+          <label title="Controls horizon traversal scale without changing the 1-second source">
+            <span>SPEED</span>
+            <input
+              aria-label="Black Horizon speed scale"
+              type="range"
+              min={0.5}
+              max={2}
+              step={0.05}
+              value={horizonSettings.horizonScale}
+              onChange={(event) => setHorizonPreferences((current) => migrateHorizonCandleMode({ ...current, horizonScale: Number(event.target.value) }))}
+            />
+            <em>{horizonSettings.horizonScale.toFixed(2)}x</em>
+          </label>
+          {horizonSettings.showDataQualityBadge && <i className={`horizon-quality ${horizonDataQuality}`}>{horizonQualityLabel(horizonDataQuality)} · {(horizonCoverageRatio * 100).toFixed(horizonCoverageRatio < 0.1 ? 1 : 0)}%</i>}
+          <button type="button" aria-label="Black Horizon settings" className={horizonSettingsOpen ? "active" : ""} onClick={() => setHorizonSettingsOpen((open) => !open)}>
+            <SlidersHorizontal size={13} />
+          </button>
+        </div>}
         <div className="chart-metrics">
           <span>{dataStatus}</span>
           <select
@@ -5624,6 +5736,18 @@ export function PixiBlackChart({
           </select>
         </div>
       </div>
+
+      {chartType === "horizon" && horizonSettingsOpen && <div className="horizon-settings-panel" role="dialog" aria-label="Black Horizon Candles settings">
+        <header><div><b>BLACK HORIZON CANDLES</b><span>RESOLUTION / HORIZON DECOUPLING</span></div><button type="button" onClick={() => setHorizonSettingsOpen(false)}><X size={13} /></button></header>
+        <label>Source Resolution<select value="1s" disabled><option value="1s">1 second · source truth</option></select></label>
+        <label>Level of Detail<select value={horizonSettings.lodMode} onChange={(event) => setHorizonPreferences((current) => migrateHorizonCandleMode({ ...current, lodMode: event.target.value as HorizonCandleMode["lodMode"] }))}><option value="auto">Auto</option><option value="candles">1s Candles</option><option value="clusters">Micro Clusters</option><option value="wave">Wave Envelope</option></select></label>
+        <label className="horizon-toggle"><span>Wave Envelope<small>Macro acceptance boundary</small></span><input type="checkbox" checked={horizonSettings.showWaveEnvelope} onChange={(event) => setHorizonPreferences((current) => migrateHorizonCandleMode({ ...current, showWaveEnvelope: event.target.checked }))} /></label>
+        <label className="horizon-toggle"><span>Micro Candles<small>True source detail at close LOD</small></span><input type="checkbox" checked={horizonSettings.showMicroCandles} onChange={(event) => setHorizonPreferences((current) => migrateHorizonCandleMode({ ...current, showMicroCandles: event.target.checked }))} /></label>
+        <label className="horizon-toggle"><span>Directional Pressure<small>Silver buy / blood-red sell field</small></span><input type="checkbox" checked={horizonSettings.showDirectionalPressure} onChange={(event) => setHorizonPreferences((current) => migrateHorizonCandleMode({ ...current, showDirectionalPressure: event.target.checked }))} /></label>
+        <label className="horizon-toggle"><span>Rejection Heat<small>Upper and lower wick rejection</small></span><input type="checkbox" checked={horizonSettings.showRejectionHeat} onChange={(event) => setHorizonPreferences((current) => migrateHorizonCandleMode({ ...current, showRejectionHeat: event.target.checked }))} /></label>
+        <label className="horizon-toggle"><span>Data Quality Badge<small>Never hide source degradation</small></span><input type="checkbox" checked={horizonSettings.showDataQualityBadge} onChange={(event) => setHorizonPreferences((current) => migrateHorizonCandleMode({ ...current, showDataQualityBadge: event.target.checked }))} /></label>
+        <p>Black Horizon is not a timeframe and does not smooth price. Every crosshair sample resolves to its original 1-second OHLCV candle.</p>
+      </div>}
 
       {!indicatorsCollapsed && (
         <div className="indicator-stack">

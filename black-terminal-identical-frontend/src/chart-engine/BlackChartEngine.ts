@@ -59,6 +59,10 @@ import { calculateMarketSentiment } from "../modules/market-sentiment/core/engin
 import { migrateMarketSentimentSettings } from "../modules/market-sentiment/core/settings";
 import type { MarketSentimentSnapshot } from "../modules/market-sentiment/core/types";
 import { acvdContiguousFiniteSegments } from "../modules/acvd/rendering/segments";
+import { HorizonWaveEngine } from "../modules/horizon-candles/core/HorizonWaveEngine";
+import { BLACK_HORIZON_DEFAULTS, migrateHorizonCandleMode } from "../modules/horizon-candles/core/settings";
+import type { HorizonCandleMode } from "../modules/horizon-candles/core/types";
+import { HorizonCandleRenderer } from "../modules/horizon-candles/rendering/HorizonCandleRenderer";
 import {
   ddaProDomain,
   ddaProValueToY,
@@ -198,6 +202,9 @@ export class BlackChartEngine {
   private kioseffSettings: KioseffSettingsV1 = structuredClone(KIOSEFF_DEFAULT_SETTINGS);
   private auctionProfileRenderer = new AuctionProfileRenderer();
   private cvdFootprintRenderer = new CvdFootprintRenderer();
+  private horizonWaveEngine = new HorizonWaveEngine();
+  private horizonRenderer = new HorizonCandleRenderer(this.horizonWaveEngine);
+  private horizonSettings: HorizonCandleMode = structuredClone(BLACK_HORIZON_DEFAULTS);
   private auctionProfileSnapshots: AuctionProfileSnapshot[] = [];
   private ddaProSnapshot: DDAProSnapshot | null = null;
   private acvdSnapshot: AcvdSnapshot | null = null;
@@ -395,6 +402,7 @@ export class BlackChartEngine {
     this.candles = new CandleBuffer(options.candles);
     this.causalRenko.resetFromCandles(options.candles);
     if (options.chartType) this.chartType = options.chartType;
+    if (options.horizonSettings) this.horizonSettings = migrateHorizonCandleMode(options.horizonSettings);
     if (options.snapToLatest !== undefined) this.snapToLatest = options.snapToLatest;
     if (options.visibleIndicators) this.visibleIndicators = options.visibleIndicators;
     if (options.indicatorPeriods) this.indicatorPeriods = options.indicatorPeriods;
@@ -459,6 +467,7 @@ export class BlackChartEngine {
       this.heatmapLayer,
       this.kioseffRenderer.container,
       this.volumeLayer,
+      this.horizonRenderer.container,
       this.candleLayer,
       this.cvdFootprintRenderer.container,
       this.auctionProfileRenderer.container,
@@ -685,7 +694,7 @@ export class BlackChartEngine {
       let emittedCandle = next;
       if (shouldRollCandle) {
         this.causalRenko.ingestSourceCandleClose(last);
-        this.candles.push(next);
+        this.candles.push(next, this.maxRetainedCandles());
       } else {
         emittedCandle = {
           ...last,
@@ -737,7 +746,7 @@ export class BlackChartEngine {
   }
 
   prependCandles(candles: Candle[]) {
-    const added = this.candles.prepend(candles);
+    const added = this.candles.prepend(candles, this.maxRetainedCandles());
     if (added > 0) {
       this.volumeProfileDataVersion += 1;
       this.setHeatmapSource(this.candles.all());
@@ -753,7 +762,7 @@ export class BlackChartEngine {
       this.candles.updateLast(candle);
     } else {
       if (last) completedRenkoBrick = this.causalRenko.ingestSourceCandleClose(last);
-      this.candles.push(candle);
+      this.candles.push(candle, this.maxRetainedCandles());
     }
     this.causalRenko.observeSourceCandle(candle);
     this.causalRenkoRevision += 1;
@@ -1012,9 +1021,16 @@ export class BlackChartEngine {
   setChartType(chartType: ChartDisplayType) {
     if (this.chartType === chartType) return;
     this.chartType = chartType;
+    if (chartType !== "horizon") this.horizonRenderer.clear();
     this.displayedCandles = [];
     this.manualPriceRange = undefined;
     this.draw();
+  }
+
+  setHorizonSettings(settings: HorizonCandleMode) {
+    this.horizonSettings = migrateHorizonCandleMode(settings);
+    this.horizonWaveEngine.clear();
+    if (this.chartType === "horizon") this.draw();
   }
 
   setSnapToLatest(enabled: boolean) {
@@ -1092,7 +1108,7 @@ export class BlackChartEngine {
         volume: quantity
       };
       const completedRenkoBrick = this.causalRenko.ingestSourceCandleClose(last);
-      this.candles.push(next);
+      this.candles.push(next, this.maxRetainedCandles());
       this.causalRenko.observeSourceCandle(next);
       this.causalRenkoRevision += 1;
       if (completedRenkoBrick) this.onScriptFeedChange?.(this.causalRenkoRevision);
@@ -1155,12 +1171,14 @@ export class BlackChartEngine {
       this.kioseffRenderer.container,
       this.liquidationFieldRenderer.container,
       this.auctionProfileRenderer.container,
-      this.cvdFootprintRenderer.container
+      this.cvdFootprintRenderer.container,
+      this.horizonRenderer.container
     );
     this.kioseffRenderer.dispose();
     this.liquidationFieldRenderer.dispose();
     this.auctionProfileRenderer.dispose();
     this.cvdFootprintRenderer.dispose();
+    this.horizonRenderer.dispose();
     // PIXI's canvas-text TexturePool is process-global. Passing boolean `true`
     // as renderer options also releases that global pool, leaving still-active
     // text keys from a neighbouring/remounting Application without a bucket.
@@ -1508,7 +1526,18 @@ export class BlackChartEngine {
   }
 
   private timeStep() {
+    if (this.chartType === "horizon") {
+      const plotWidth = Math.max(1, this.view.width - this.view.rightAxisWidth - this.rightAnalysisGutter());
+      const expectedSamples = Math.max(1, Math.round(this.horizonSettings.displayHorizonMs / 1000));
+      const fitStep = plotWidth / expectedSamples;
+      const zoom = Math.max(0.04, (this.view.candleWidth + this.view.gap) / (4.8 + 2.2));
+      return Math.max(0.0125, fitStep * zoom * this.horizonSettings.horizonScale);
+    }
     return Math.max(0.05, this.view.candleWidth + this.view.gap);
+  }
+
+  private maxRetainedCandles() {
+    return this.chartType === "horizon" ? 100_000 : 20_000;
   }
 
   private renderStride(minimumPixelSpacing = 1) {
@@ -4810,7 +4839,26 @@ export class BlackChartEngine {
     const g = this.candleLayer;
     g.clear();
     const data = this.getDisplayCandles();
-    if (data.length === 0) return;
+    if (data.length === 0) {
+      this.horizonRenderer.clear();
+      return;
+    }
+    if (this.chartType === "horizon") {
+      const transform = this.getPriceTransformSnapshot();
+      this.horizonRenderer.draw({
+        candles: data,
+        firstIndex: this.view.firstIndex,
+        lastIndex: this.view.lastIndex,
+        pixelsPerCandle: this.timeStep(),
+        plotTop: transform.plotTop,
+        plotBottom: transform.plotBottom,
+        xForIndex: (index) => this.xForIndex(index),
+        yForPrice: (price) => this.yForPrice(price),
+        settings: this.horizonSettings
+      });
+      return;
+    }
+    this.horizonRenderer.clear();
     if (this.chartType === "line") {
       this.drawLineSeries(g, data);
       return;
@@ -5520,6 +5568,28 @@ export class BlackChartEngine {
     const timeLabel = this.timeLabelForX(this.pointer.x);
     g.rect(this.pointer.x - 54, plotHeight + 3, 108, 22).fill({ color: theme.red, alpha: 0.95 });
     this.addCrosshairText(timeLabel, this.pointer.x - 49, plotHeight + 7);
+
+    if (this.chartType === "horizon") {
+      const source = this.horizonRenderer.crosshair.resolve(
+        this.horizonWaveEngine,
+        this.getDisplayCandles(),
+        this.horizonRenderer.currentProjection(),
+        this.indexForX(this.pointer.x)
+      );
+      if (source) {
+        const tooltipWidth = 282;
+        const tooltipX = Math.max(8, Math.min(plotWidth - tooltipWidth - 8, this.pointer.x + 14));
+        const tooltipY = Math.max(this.view.topPadding + 6, Math.min(plotHeight - 66, this.pointer.y + 12));
+        const delta = Number.isFinite(source.candle.delta) ? source.candle.delta!.toFixed(4) : "--";
+        const score = source.bucket?.directionScore;
+        g.roundRect(tooltipX, tooltipY, tooltipWidth, 58, 4)
+          .fill({ color: 0x030303, alpha: 0.97 })
+          .stroke({ width: 1, color: score !== undefined && score < -0.075 ? theme.red : theme.silver, alpha: 0.68 });
+        this.addCrosshairText(`BLACK HORIZON · TRUE 1S · ${new Date(source.candle.time * 1000).toISOString().slice(11, 19)} UTC`, tooltipX + 8, tooltipY + 6);
+        this.addCrosshairText(`O ${source.candle.open.toFixed(2)}  H ${source.candle.high.toFixed(2)}  L ${source.candle.low.toFixed(2)}  C ${source.candle.close.toFixed(2)}`, tooltipX + 8, tooltipY + 21);
+        this.addCrosshairText(`VOL ${source.candle.volume.toFixed(4)}  DELTA ${delta}  PRESSURE ${score === undefined ? "--" : score.toFixed(3)}`, tooltipX + 8, tooltipY + 36);
+      }
+    }
 
     const ddaSnapshot = this.visibleIndicators.ddaProOscillator ? this.ddaProSnapshot : null;
     const ddaPane = this.oscillatorStackLayout().panes.find((pane) => pane.key === "ddaProOscillator");

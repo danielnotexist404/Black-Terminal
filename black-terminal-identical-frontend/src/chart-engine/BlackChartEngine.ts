@@ -4075,6 +4075,28 @@ export class BlackChartEngine {
     return true;
   }
 
+  private drawStackedStrategyLabel(
+    g: Graphics,
+    text: string,
+    x: number,
+    preferredY: number,
+    color: number,
+    lane: "above" | "below",
+    labels: { x: number; y: number; width: number; height: number }[]
+  ) {
+    const size = 8;
+    const step = size + 10;
+    const primaryDirection = lane === "above" ? -1 : 1;
+    for (const direction of [primaryDirection, -primaryDirection]) {
+      for (let row = direction === primaryDirection ? 0 : 1; row < 14; row += 1) {
+        if (this.drawStrategyLabel(g, text, x, preferredY + direction * row * step, color, size, labels)) return;
+      }
+    }
+    // At an exceptionally dense chart edge, retaining the label is more
+    // important than suppressing it. The compact fallback may overlap.
+    this.drawStrategyLabel(g, text, x, preferredY, color, size);
+  }
+
   private buildAdaptiveSwingTradeEvents(data: Candle[], signals: StrategySignal[]) {
     const signalByIndex = new Map<number, StrategySignal[]>();
     const indexByTime = new Map<number, number>();
@@ -4632,6 +4654,7 @@ export class BlackChartEngine {
 
     if (this.customMarkers.length > 0) {
       const indexByTime = new Map(data.map((candle, index) => [candle.time, index]));
+      const strategyLabels: { x: number; y: number; width: number; height: number }[] = [];
       for (const marker of this.customMarkers) {
         const index = indexByTime.get(marker.time);
         if (index === undefined || index < this.view.firstIndex || index > this.view.lastIndex) continue;
@@ -4652,7 +4675,39 @@ export class BlackChartEngine {
           .lineTo(x + signalHalfWidth, signalY)
           .stroke({ width: 1, color: 0x39ff88, alpha: 0.98 });
 
-        if (marker.direction === "long") {
+        const isStrategyFill = marker.kind === "entry" || marker.kind === "exit";
+        const isLong = marker.direction === "long";
+        let markerY = priceY;
+        let labelLane: "above" | "below" = isLong ? "below" : "above";
+
+        if (marker.kind === "entry") {
+          markerY = priceY + (isLong ? 8 : -8);
+          labelLane = isLong ? "below" : "above";
+          const y = markerY;
+          g.circle(x, y, 6).fill({ color, alpha: isLong ? 0.08 : 0.1 });
+          g.poly(isLong
+            ? [x, y - 5, x - 4, y + 3, x + 4, y + 3]
+            : [x, y + 5, x - 4, y - 3, x + 4, y - 3]
+          ).fill({ color, alpha: 0.98 }).stroke({ width: 0.8, color: 0x050506, alpha: 0.9 });
+        } else if (marker.kind === "exit" && marker.strategyRole === "takeProfit") {
+          markerY = priceY + (isLong ? -8 : 8);
+          labelLane = isLong ? "above" : "below";
+          this.drawStrategyDiamond(g, x, markerY, 4.4, color);
+        } else if (marker.kind === "exit" && marker.strategyRole === "stopLoss") {
+          markerY = priceY + (isLong ? 8 : -8);
+          labelLane = isLong ? "below" : "above";
+          g.circle(x, markerY, 4.2)
+            .fill({ color, alpha: 0.92 })
+            .stroke({ width: 1, color: 0x050506, alpha: 0.9 });
+          g.moveTo(x - 2.2, markerY - 2.2).lineTo(x + 2.2, markerY + 2.2).stroke({ width: 1, color: 0xffffff, alpha: 0.86 });
+          g.moveTo(x + 2.2, markerY - 2.2).lineTo(x - 2.2, markerY + 2.2).stroke({ width: 1, color: 0xffffff, alpha: 0.86 });
+        } else if (marker.kind === "exit") {
+          markerY = priceY + (isLong ? -7 : 7);
+          labelLane = isLong ? "above" : "below";
+          g.rect(x - 3.5, markerY - 3.5, 7, 7)
+            .fill({ color, alpha: 0.92 })
+            .stroke({ width: 0.8, color: 0x050506, alpha: 0.9 });
+        } else if (marker.direction === "long") {
           const y = priceY + 8;
           g.circle(x, y, 6).fill({ color, alpha: 0.08 });
           g.poly([x, y - 5, x - 4, y + 3, x + 4, y + 3]).fill({ color, alpha: 0.98 }).stroke({ width: 0.8, color: 0x050506, alpha: 0.9 });
@@ -4662,6 +4717,11 @@ export class BlackChartEngine {
           g.poly([x, y + 5, x - 4, y - 3, x + 4, y - 3]).fill({ color, alpha: 0.98 }).stroke({ width: 0.8, color: 0x050506, alpha: 0.9 });
         } else {
           g.circle(x, priceY, 3.2).fill({ color, alpha: 0.94 }).stroke({ width: 0.8, color: 0x050506, alpha: 0.9 });
+        }
+
+        if (isStrategyFill) {
+          const preferredY = markerY + (labelLane === "above" ? -21 : 7);
+          this.drawStackedStrategyLabel(g, marker.label, x + 6, preferredY, color, labelLane, strategyLabels);
         }
       }
     }

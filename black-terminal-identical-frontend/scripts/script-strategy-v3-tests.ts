@@ -55,6 +55,17 @@ assert.equal(sevenTarget.strategy.trades.length, 7, "partial fills must produce 
 assert.ok(sevenTarget.strategy.trades.every((trade) => Math.abs(trade.quantity - 1) < 1e-10), "each 10% target must close 10% of the original ten-contract position");
 assert.equal(sevenTarget.strategy.openPosition?.quantity, 3, "seven 10% targets must leave exactly 30% open");
 assert.equal(sevenTarget.plots[0].values.length, candles.length, "multiline plot calls must compile without flattening output");
+const sevenTargetFillMarkers = sevenTarget.markers.filter((marker) => marker.kind === "entry" || marker.kind === "exit");
+assert.deepEqual(
+  sevenTargetFillMarkers.map((marker) => marker.label),
+  ["Long", "TP1", "TP2", "TP3", "TP4", "TP5", "TP6", "TP7"],
+  "every actual strategy fill must carry a concise, sequential chart label"
+);
+assert.deepEqual(
+  sevenTargetFillMarkers.map((marker) => marker.strategyRole),
+  ["entry", "takeProfit", "takeProfit", "takeProfit", "takeProfit", "takeProfit", "takeProfit", "takeProfit"]
+);
+assert.ok(sevenTargetFillMarkers.every((marker) => marker.direction === "long"), "partial exits must preserve the side being exited for correct label placement");
 
 const conservativeBracket = `strategy(default_qty_type=strategy.fixed, default_qty_value=1, process_orders_on_close=True)
 enter = close > open
@@ -71,6 +82,11 @@ assert.equal(conservative.success, true, JSON.stringify(conservative.errors));
 assert.equal(conservative.strategy?.trades.length, 1);
 assert.match(conservative.strategy?.trades[0].exitReason ?? "", /STOP$/, "when stop and target touch in one OHLC bar, the simulator must use the documented conservative stop-first path");
 assert.equal(conservative.strategy?.trades[0].exitPrice, 95);
+assert.deepEqual(
+  conservative.markers.filter((marker) => marker.kind === "entry" || marker.kind === "exit").map((marker) => [marker.label, marker.strategyRole]),
+  [["Long", "entry"], ["SL", "stopLoss"], ["Long", "entry"]],
+  "protective fills must be visibly distinct from take profits"
+);
 
 const reversalScript = `strategy(default_qty_type=strategy.fixed, default_qty_value=1, commission_type=strategy.commission.percent, commission_value=1, slippage=1, tick_size=1)
 long_signal = close > open
@@ -90,6 +106,11 @@ assert.equal(reversal.strategy?.openPosition?.side, "short");
 assert.equal(reversal.strategy?.fills[0].price, 101, "entry slippage must be adverse to the buy");
 assert.equal(reversal.strategy?.fills[1].price, 98, "exit slippage must be adverse to the sell");
 assert.ok((reversal.strategy?.totalCommission ?? 0) > 0, "commission must be charged on every fill");
+assert.deepEqual(
+  reversal.markers.filter((marker) => marker.kind === "entry" || marker.kind === "exit").map((marker) => [marker.label, marker.strategyRole]),
+  [["Long", "entry"], ["REV", "reversal"], ["Short", "entry"]],
+  "reversal exits and the new directional entry must be labeled independently"
+);
 
 const nextOpenScript = `strategy(default_qty_type=strategy.fixed, default_qty_value=1, process_orders_on_close=False)
 signal = close > open

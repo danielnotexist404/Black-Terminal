@@ -28,6 +28,7 @@ export type CompiledMarker = {
   label: string;
   direction: "long" | "short" | "neutral";
   kind: "shape" | "entry" | "exit";
+  strategyRole?: "entry" | "takeProfit" | "stopLoss" | "close" | "reversal" | "exit";
   color: string;
 };
 
@@ -1287,9 +1288,46 @@ function strategyStateMatches(left: CompiledStrategyReport, right: CompiledStrat
 }
 
 function registerStrategyFills(runtime: ScriptRuntime, report: CompiledStrategyReport, sourceHash: string, candles: readonly Candle[]) {
+  let signedPosition = 0;
+  let takeProfitSequence = 0;
+
   for (const fill of report.fills) {
     const candle = candles[fill.index];
     if (!candle) continue;
+    const signedQuantity = fill.quantity * (fill.side === "long" ? 1 : -1);
+    let markerLabel: string;
+    let strategyRole: NonNullable<CompiledMarker["strategyRole"]>;
+
+    if (fill.action === "entry") {
+      if (Math.abs(signedPosition) <= 1e-12 || Math.sign(signedPosition) !== Math.sign(signedQuantity)) {
+        takeProfitSequence = 0;
+      }
+      signedPosition += signedQuantity;
+      markerLabel = fill.side === "long" ? "Long" : "Short";
+      strategyRole = "entry";
+    } else {
+      const reason = fill.reason.toUpperCase();
+      if (reason.endsWith(":STOP")) {
+        markerLabel = "SL";
+        strategyRole = "stopLoss";
+      } else if (reason.endsWith(":LIMIT") && fill.realizedPnl > 0) {
+        takeProfitSequence += 1;
+        markerLabel = `TP${takeProfitSequence}`;
+        strategyRole = "takeProfit";
+      } else if (reason.startsWith("REVERSE:")) {
+        markerLabel = "REV";
+        strategyRole = "reversal";
+      } else if (reason.startsWith("CLOSE:")) {
+        markerLabel = "CLOSE";
+        strategyRole = "close";
+      } else {
+        markerLabel = "EXIT";
+        strategyRole = "exit";
+      }
+      signedPosition -= signedQuantity;
+      if (Math.abs(signedPosition) <= 1e-12) signedPosition = 0;
+    }
+
     const title = fill.action === "entry" ? `${fill.instructionId} Filled` : `${fill.instructionId} Exit Filled`;
     const conditionId = `${sourceHash}:strategy-fill:${stableHash(fill.instructionId)}:${fill.action}`;
     if (!runtime.alertConditions.some((condition) => condition.id === conditionId)) {
@@ -1311,11 +1349,18 @@ function registerStrategyFills(runtime: ScriptRuntime, report: CompiledStrategyR
       index: fill.index,
       time: fill.time,
       signalPrice: fill.price,
-      value: fill.side === "short" ? candle.high : candle.low,
-      label: title,
-      direction: fill.action === "entry" ? fill.side : "neutral",
+      value: fill.action === "entry" ? (fill.side === "short" ? candle.high : candle.low) : fill.price,
+      label: markerLabel,
+      direction: fill.side,
       kind: fill.action === "entry" ? "entry" : "exit",
-      color: fill.action === "exit" ? "#a9a3a8" : fill.side === "short" ? "#c40024" : "#f4f4f5"
+      strategyRole,
+      color: strategyRole === "stopLoss"
+        ? "#c40024"
+        : strategyRole === "takeProfit"
+          ? "#f4f4f5"
+          : fill.action === "exit"
+            ? "#a9a3a8"
+            : fill.side === "short" ? "#c40024" : "#f4f4f5"
     });
   }
 }

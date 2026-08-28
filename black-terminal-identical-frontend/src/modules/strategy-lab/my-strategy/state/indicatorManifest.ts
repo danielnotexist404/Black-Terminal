@@ -5,6 +5,7 @@ import type {
   VisibleIndicators,
 } from "../../../../chart-engine/types";
 import type { StrategyRuntimeKind } from "../../types/strategy.types";
+import type { UserScript } from "../../../../scripts/userScriptLibrary";
 import type {
   StrategyIndicatorAlert,
   StrategyIndicatorBinding,
@@ -141,35 +142,33 @@ function buildIndicatorInstances(input: {
     });
 }
 
-export function ownedCustomIndicatorInstances(): StrategyIndicatorInstance[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const rows = JSON.parse(window.localStorage.getItem("bt_user_scripts") || "[]") as Array<{ id?: string; name?: string; kind?: string; source?: string }>;
-    return rows.filter((row) => ["indicator", "strategy"].includes(String(row.kind)) && row.id && row.name).map<StrategyIndicatorInstance>((row) => {
-      const sourceHash = stableHash(row.source || "");
-      const alerts = parseCustomAlertManifest(row.source || "", row.kind === "strategy");
+export function ownedCustomIndicatorInstances(rows: readonly UserScript[]): StrategyIndicatorInstance[] {
+  return rows.map<StrategyIndicatorInstance>((row) => {
+      const sourceHash = stableHash(row.source);
+      const alerts = parseCustomAlertManifest(row.source, row.kind === "strategy");
+      const settings = row.inputValues ? { ...row.inputValues } : {};
+      const label = row.kind === "strategy" ? "Owned Strategy" : "Owned Indicator";
       return {
         indicatorId: `custom:${row.id}`,
         instanceId: `custom:${row.id}`,
-        name: row.name || "Custom Indicator",
-        instanceName: `${row.name || "Custom Indicator"} — Owned Script`,
+        name: row.name,
+        instanceName: `${row.name} — ${label}`,
         version: sourceHash,
-        settingsHash: sourceHash,
-        settingsSummary: `Owned custom ${row.kind === "strategy" ? "strategy" : "indicator"} · runtime certification required`,
+        settingsHash: stableHash(settings),
+        settingsSummary: Object.keys(settings).length
+          ? `${summarizeSettings(settings)} · private ${row.kind}`
+          : `Private ${row.kind} · Black Script v3`,
         alertManifestVersion: `custom:${stableHash(alerts)}`,
-        runtimeVersion: "unavailable",
+        runtimeVersion: "black-script-v3-browser",
         warmupBars: 500,
         runtimeStatus: "REQUIRES_CERTIFICATION" as const,
         useCurrentChartSettings: false,
         alerts,
         source: "CUSTOM" as const,
         runtimeKind: "python-script" as const,
-        settings: {},
+        settings,
       };
     }).filter((instance) => instance.alerts.length > 0);
-  } catch {
-    return [];
-  }
 }
 
 function settingsFor(key: keyof VisibleIndicators, periods: IndicatorPeriods, advanced: IndicatorAdvancedSettings) {
@@ -225,8 +224,30 @@ function parseCustomAlertManifest(source: string, strategyScript = false): Strat
       if (!name || !direction) continue;
       rows.push({ id: `custom-entry:${stableHash(`${name}:${direction}`)}`, name, description: `Owned script ${direction} entry event; VPS certification is required before activation.`, semantic: direction === "long" ? "LONG_ENTRY" : "SHORT_ENTRY", confirmedBar: true, intrabar: false });
     }
+    for (const match of source.matchAll(/strategy\.exit\s*\(\s*["']([^"']+)["']\s*,\s*["']([^"']+)["']/gi)) {
+      const name = match[1]?.trim();
+      const fromEntry = match[2]?.trim();
+      if (!name || !fromEntry) continue;
+      const semantic = inferExitSemantic(`${name} ${fromEntry}`);
+      rows.push({ id: `custom-exit:${stableHash(`${name}:${fromEntry}`)}`, name, description: `Owned script exit from ${fromEntry}; VPS certification is required before activation.`, semantic, confirmedBar: true, intrabar: false });
+    }
+    for (const match of source.matchAll(/strategy\.close\s*\(\s*["']([^"']+)["']/gi)) {
+      const fromEntry = match[1]?.trim();
+      if (!fromEntry) continue;
+      rows.push({ id: `custom-close:${stableHash(fromEntry)}`, name: `Close ${fromEntry}`, description: `Owned script close event for ${fromEntry}; VPS certification is required before activation.`, semantic: inferExitSemantic(fromEntry), confirmedBar: true, intrabar: false });
+    }
+    if (/strategy\.close_all\s*\(/i.test(source)) {
+      rows.push({ id: "custom-close-all", name: "Close All", description: "Owned script global close event; VPS certification is required before activation.", semantic: "NEUTRAL", confirmedBar: true, intrabar: false });
+    }
   }
   return uniqueAlerts(rows);
+}
+
+function inferExitSemantic(name: string): StrategyIndicatorAlert["semantic"] {
+  const normalized = name.toLowerCase();
+  if (normalized.includes("short") || normalized.includes("sell")) return "SHORT_EXIT";
+  if (normalized.includes("long") || normalized.includes("buy")) return "LONG_EXIT";
+  return "NEUTRAL";
 }
 
 function uniqueAlerts(alerts: StrategyIndicatorAlert[]) {

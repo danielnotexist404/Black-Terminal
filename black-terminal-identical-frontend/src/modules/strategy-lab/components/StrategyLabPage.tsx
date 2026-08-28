@@ -3,6 +3,8 @@ import { Bot, Database, FlaskConical, LockKeyhole, X } from "lucide-react";
 import type { IndicatorAlertDefinition } from "../../../automation/alerts";
 import type { AdaptiveSwingStrategySettings, Candle, IndicatorAdvancedSettings, IndicatorPeriods, VisibleIndicators } from "../../../chart-engine/types";
 import type { MarketSymbol, Timeframe } from "../../../market-data/types";
+import { dbGetCurrentUserScripts, isSupabaseConfigured } from "../../../lib/supabase";
+import { normalizeUserScripts, type UserScript } from "../../../scripts/userScriptLibrary";
 import { createAIStrategyReview } from "../ai/aiStrategyReview";
 import { fetchStrategyLabCandles } from "../adapters/marketDataAdapter";
 import { createStrategySignals } from "../adapters/signalAdapter";
@@ -35,6 +37,7 @@ import { StrategyLabTab, StrategyTabs } from "./StrategyTabs";
 import { TradesTable } from "./TradesTable";
 
 type StrategyLabPageProps = {
+  currentUser: { username: string; role: "admin" | "user" } | null;
   marketSymbol: MarketSymbol;
   displaySymbol: string;
   exchangeLabel: string;
@@ -135,6 +138,7 @@ function createConfig(
 }
 
 export function StrategyLabPage({
+  currentUser,
   marketSymbol,
   displaySymbol,
   exchangeLabel,
@@ -162,6 +166,26 @@ export function StrategyLabPage({
   const [walkForward, setWalkForward] = useState<WalkForwardWindow[]>([]);
   const [review, setReview] = useState<AIStrategyReview | undefined>();
   const [codeSuggestions, setCodeSuggestions] = useState<CodeSuggestion[]>([]);
+  const [ownedScripts, setOwnedScripts] = useState<UserScript[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadOwnedScripts = async () => {
+      try {
+        const rows = currentUser && isSupabaseConfigured
+          ? await dbGetCurrentUserScripts()
+          : JSON.parse(window.localStorage.getItem(currentUser ? `bt_user_scripts:${currentUser.username}` : "bt_user_scripts:anonymous") || "[]");
+        if (!cancelled) setOwnedScripts(normalizeUserScripts(rows));
+      } catch (catalogError) {
+        if (!cancelled) {
+          setOwnedScripts([]);
+          setError(`Private script catalog could not be loaded: ${catalogError instanceof Error ? catalogError.message : "Unknown storage error"}`);
+        }
+      }
+    };
+    void loadOwnedScripts();
+    return () => { cancelled = true; };
+  }, [currentUser?.username]);
 
   useEffect(() => {
     setConfig(createConfig(marketSymbol, displaySymbol, exchangeLabel, timeframe, selectedStrategyKind, adaptiveSwingSettings));
@@ -284,7 +308,7 @@ export function StrategyLabPage({
     periods: indicatorPeriods,
     advanced: indicatorAdvancedSettings,
     configuredAlerts: indicatorAlerts,
-  }), ...ownedCustomIndicatorInstances()], [visibleIndicators, indicatorPeriods, indicatorAdvancedSettings, indicatorAlerts]);
+  }), ...ownedCustomIndicatorInstances(ownedScripts)], [visibleIndicators, indicatorPeriods, indicatorAdvancedSettings, indicatorAlerts, ownedScripts]);
 
   const openStrategyBacktest = useCallback((strategy: { symbol: string; timeframe: string; marketType: "SPOT" | "FUTURES" }) => {
     setConfig((current) => ({ ...current, symbol: strategy.symbol, rawSymbol: strategy.symbol, timeframe: strategy.timeframe as Timeframe, marketKind: strategy.marketType === "SPOT" ? "spot" : "perpetual" }));

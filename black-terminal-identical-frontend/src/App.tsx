@@ -2651,6 +2651,7 @@ export default function App() {
           )}
           {activeNav === "STRATEGY LAB" && (
             <StrategyLabPage
+              currentUser={currentUser}
               marketSymbol={symbol}
               displaySymbol={symbol.label}
               exchangeLabel={selectedExchange.label}

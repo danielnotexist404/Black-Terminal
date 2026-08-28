@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ownedCustomIndicatorInstances } from "../src/modules/strategy-lab/my-strategy/state/indicatorManifest.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (file: string) => fs.readFileSync(path.join(root, file), "utf8");
@@ -62,9 +63,41 @@ assert.match(indicator, /\["SPOT", "FUTURES"\]/);
 assert.match(manifest, /source: "ACTIVE_CHART"/);
 assert.match(manifest, /source: "CUSTOM"/);
 assert.match(manifest, /source: active \? "ACTIVE_CHART" : "BUILT_IN"/);
-assert.match(manifest, /\["indicator", "strategy"\]/, "owned Script Editor indicators and strategies are selectable signal sources");
+assert.match(manifest, /readonly UserScript\[\]/, "owned Script Editor indicators and strategies are supplied by the authenticated script catalog");
+assert.doesNotMatch(manifest, /localStorage|getItem\("bt_user_scripts"/, "the Strategy Lab manifest never reads the obsolete browser-global script key");
+assert.match(page, /dbGetCurrentUserScripts/, "Strategy Lab loads the signed-in user's authoritative private script catalog");
+assert.match(page, /bt_user_scripts:\$\{currentUser\.username\}/, "offline script lookup remains scoped to the signed-in username");
+assert.match(manifest, /strategy\\\.exit/, "owned strategy exits are exposed to Signal Mapping");
+assert.match(manifest, /strategy\\\.close/, "owned strategy close events are exposed to Signal Mapping");
 assert.match(manifest, /runtimeStatus: "REQUIRES_CERTIFICATION"/, "owned custom scripts fail closed until server certification exists");
 assert.match(manifest, /configuredAlerts/);
+
+const [ownedSuperAtr] = ownedCustomIndicatorInstances([{
+  id: "superatr-x",
+  name: "SuperATRx (1D TF)",
+  kind: "strategy",
+  source: `
+long_setup = close > open
+short_setup = close < open
+strategy.entry("SuperATR Long", strategy.long, when=long_setup)
+strategy.entry("SuperATR Short", strategy.short, when=short_setup)
+strategy.exit("Long TP1", "SuperATR Long", limit=close * 1.01)
+strategy.exit("Short Stop", "SuperATR Short", stop=close * 1.01)
+strategy.close("SuperATR Long", when=short_setup)
+alertcondition(long_setup, "SuperATR Long Setup", "long")
+alertcondition(short_setup, "SuperATR Short Setup", "short")
+`,
+  createdAt: 1,
+  inputValues: { atrLength: 14, riskPercent: 1.5 },
+}]);
+assert.ok(ownedSuperAtr, "an authenticated saved strategy is selectable");
+assert.equal(ownedSuperAtr.name, "SuperATRx (1D TF)", "the saved strategy name is preserved exactly");
+assert.equal(ownedSuperAtr.instanceName, "SuperATRx (1D TF) — Owned Strategy");
+assert.deepEqual(ownedSuperAtr.settings, { atrLength: 14, riskPercent: 1.5 }, "saved input values reach Strategy Lab");
+assert.ok(ownedSuperAtr.alerts.some((event) => event.semantic === "LONG_ENTRY"));
+assert.ok(ownedSuperAtr.alerts.some((event) => event.semantic === "SHORT_ENTRY"));
+assert.ok(ownedSuperAtr.alerts.some((event) => event.semantic === "LONG_EXIT"));
+assert.ok(ownedSuperAtr.alerts.some((event) => event.semantic === "SHORT_EXIT"));
 
 for (const tab of ["OVERVIEW", "CONFIGURATION", "PAPER", "LIVE TARGETS", "POSITIONS", "TRADES", "PERFORMANCE", "RISK", "LOGS"]) assert.match(cockpit, new RegExp(tab));
 assert.match(cockpit, /rows\.length > 100/, "large Paper tables use windowed rendering");

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Play, Save, TerminalSquare, Trash2, Plus, FileCode, CheckCircle, AlertTriangle, X } from "lucide-react";
-import { compileAndRunScript, finalizedScriptResult } from "./ScriptCompiler";
+import { BLACK_TERMINAL_PYTHON_RUNTIME_VERSION, compileAndRunScript, finalizedScriptResult } from "./ScriptCompiler";
 import type { CompileResult, CompiledScriptActivation } from "./ScriptCompiler";
 import type { Candle } from "../chart-engine/types";
 import type { ChartDisplayType } from "../chart-engine/types";
@@ -20,7 +20,7 @@ type ScriptEditorProps = {
 };
 
 const templates = {
-  indicator: `# Black Terminal Python · deterministic vector runtime
+  indicator: `# Black Script v3 · deterministic indicator runtime
 # Uses the selected chart feed. Renko is append-only and closed-brick confirmed.
 
 length = input.int(21, "EMA Length")
@@ -36,8 +36,19 @@ plot(ema_slow, title="Slow EMA", color="#c40024", width=2)
 alertcondition(long_signal, "EMA Long", "Fast EMA crossed above Slow EMA at {{price}}")
 alertcondition(short_signal, "EMA Short", "Fast EMA crossed below Slow EMA at {{price}}")
 `,
-  strategy: `# Black Terminal Python strategy · deterministic vector runtime
-# Entries render on the chart and arm closed-candle in-terminal alerts.
+  strategy: `# Black Script v3 · stateful deterministic strategy runtime
+# Compiling is simulation-only. It never submits a broker order.
+
+strategy(
+    initial_capital=10000,
+    default_qty_type=strategy.percent_of_equity,
+    default_qty_value=10,
+    commission_type=strategy.commission.percent,
+    commission_value=0.1,
+    slippage=1,
+    pyramiding=1,
+    process_orders_on_close=True
+)
 
 fast_length = input.int(5, "Fast EMA")
 slow_length = input.int(13, "Slow EMA")
@@ -45,11 +56,18 @@ fast = ta.ema(close, fast_length)
 slow = ta.ema(close, slow_length)
 long_signal = ta.crossover(fast, slow)
 short_signal = ta.crossunder(fast, slow)
+atr = ta.atr(14)
+long_target = strategy.position_avg_price + atr * 3
+long_stop = strategy.position_avg_price - atr * 1.5
+short_target = strategy.position_avg_price - atr * 3
+short_stop = strategy.position_avg_price + atr * 1.5
 
 plot(fast, title="Fast EMA", color="#f4f4f5", width=2)
 plot(slow, title="Slow EMA", color="#c40024", width=2)
 strategy.entry("Long Entry", strategy.long, when=long_signal)
 strategy.entry("Short Entry", strategy.short, when=short_signal)
+strategy.exit("Long Bracket", "Long Entry", limit=long_target, stop=long_stop, when=strategy.position_size > 0)
+strategy.exit("Short Bracket", "Short Entry", limit=short_target, stop=short_stop, when=strategy.position_size < 0)
 alertcondition(long_signal, "Long Alert", "Confirmed long signal at {{price}}")
 alertcondition(short_signal, "Short Alert", "Confirmed short signal at {{price}}")
 `
@@ -218,9 +236,14 @@ export function ScriptEditor({
     const latestConfirmedTime = candles.at(-2)?.time ?? Number.NEGATIVE_INFINITY;
     const result = finalizedScriptResult(compiled, latestConfirmedTime);
     if (result.success) {
+      const strategyLogs = result.strategy ? [{
+        type: "success" as const,
+        text: `${result.strategy.totalTrades} simulated trade(s) · net ${result.strategy.realizedNetProfit.toFixed(2)} · win rate ${result.strategy.winRate.toFixed(1)}% · max DD ${result.strategy.maxDrawdown.toFixed(2)}%.`
+      }] : [];
       setConsoleLogs([
         { type: "success", text: `Compilation successful on ${candles.length.toLocaleString()} ${inputFeed === "CAUSAL_RENKO" ? "causal Renko bricks" : "authoritative OHLCV candles"}.` },
-        { type: "success", text: `${result.plots.length} plot(s), ${result.markers.length} historical marker(s), ${result.alertConditions.length} alert condition(s).` }
+        { type: "success", text: `${result.plots.length} plot(s), ${result.markers.length} historical marker(s), ${result.alertConditions.length} alert condition(s).` },
+        ...strategyLogs
       ]);
     } else {
       const logs = result.errors.map(err => ({
@@ -258,8 +281,8 @@ export function ScriptEditor({
 
   // Basic regex highlighters for the editor overlay
   const renderHighlightedCode = () => {
-    const keywords = /\b(def|if|else|elif|and|or|not|in|for|while|return)\b/g;
-    const builtins = /\b(plotshape|plot|alertcondition|alert|select|ta\.ema|ta\.sma|ta\.wma|ta\.rma|ta\.hma|ta\.cum|ta\.rsi|ta\.atr|ta\.stdev|ta\.highest|ta\.lowest|ta\.percentile_linear_interpolation|ta\.shift|ta\.change|ta\.crossover|ta\.crossunder|strategy\.entry|strategy\.exit|input\.int|input\.float|input\.bool|input\.string|math\.abs|math\.sqrt|math\.max|math\.min|nz)\b/g;
+    const keywords = /\b(if|else|and|or|not)\b/g;
+    const builtins = /\b(plotshape|plot|alertcondition|alert|select|ta\.ema|ta\.sma|ta\.wma|ta\.rma|ta\.hma|ta\.vwma|ta\.cum|ta\.rsi|ta\.macd|ta\.stoch|ta\.mfi|ta\.cci|ta\.atr|ta\.stdev|ta\.highest|ta\.lowest|ta\.percentile_linear_interpolation|ta\.shift|ta\.change|ta\.crossover|ta\.crossunder|strategy|strategy\.entry|strategy\.order|strategy\.exit|strategy\.close|strategy\.close_all|strategy\.cancel|strategy\.cancel_all|input\.int|input\.float|input\.bool|input\.string|input\.color|math\.abs|math\.sqrt|math\.round|math\.floor|math\.ceil|math\.sign|math\.log|math\.exp|math\.pow|math\.max|math\.min|nz)\b/g;
     const strings = /(["'])(?:(?=(\\?))\2.)*?\1/g;
     const comments = /(#.*)/g;
     const numbers = /\b(\d+(?:\.\d+)?)\b/g;
@@ -459,8 +482,8 @@ export function ScriptEditor({
             </span>
             <span
               title={chartType === "renko"
-                ? "Deterministic Python-style vector runtime on causal Renko. Historical bricks bootstrap from source-candle closes; new live bricks use canonical public trades and never rewrite after confirmation."
-                : "Deterministic Python-style vector runtime on authoritative OHLCV. Imports, filesystem, network, loops and user-defined functions are intentionally unavailable."}
+                ? "Black Script v3 on causal Renko. Stateful strategy simulation, resting orders and alerts are evaluated on confirmed append-only bricks."
+                : "Black Script v3 on authoritative OHLCV. Stateful strategies are sandboxed locally and compiling never submits broker orders."}
               style={{
                 border: "1px solid rgba(196,0,36,0.55)",
                 borderRadius: "3px",
@@ -472,7 +495,7 @@ export function ScriptEditor({
                 whiteSpace: "nowrap"
               }}
             >
-              {chartType === "renko" ? "CAUSAL RENKO · CLOSED-BRICK ALERTS" : "PYTHON VECTOR · CLOSED-BAR ALERTS"}
+              {chartType === "renko" ? `BLACK SCRIPT V3 · CAUSAL RENKO` : BLACK_TERMINAL_PYTHON_RUNTIME_VERSION.toUpperCase()}
             </span>
           </div>
 

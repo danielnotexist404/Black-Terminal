@@ -1,6 +1,13 @@
 import type { Candle } from "../chart-engine/types";
+import {
+  defaultStrategyRuntimeConfig,
+  simulateStrategy,
+  type CompiledStrategyReport,
+  type StrategyInstruction,
+  type StrategyRuntimeConfig
+} from "./ScriptStrategyEngine.ts";
 
-export const BLACK_TERMINAL_PYTHON_RUNTIME_VERSION = "bt-python-vector-v2";
+export const BLACK_TERMINAL_PYTHON_RUNTIME_VERSION = "black-script-v3";
 
 export type CompiledPlot = {
   name: string;
@@ -59,8 +66,14 @@ export type CompiledScriptInput = {
   key: string;
   variable: string;
   label: string;
-  type: "int" | "float" | "bool" | "string";
+  type: "int" | "float" | "bool" | "string" | "color";
   defaultValue: ScriptInputValue;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: ScriptInputValue[];
+  group?: string;
+  tooltip?: string;
 };
 
 export type CompileResult = {
@@ -70,13 +83,15 @@ export type CompileResult = {
   markers: CompiledMarker[];
   alertConditions: CompiledAlertCondition[];
   events: CompiledScriptEvent[];
+  strategy: CompiledStrategyReport | null;
   runtimeVersion: typeof BLACK_TERMINAL_PYTHON_RUNTIME_VERSION;
   sourceHash: string;
 };
 
 type Scalar = number | boolean | string | null;
 type SeriesScalar = number | boolean | null;
-type RuntimeValue = Scalar | SeriesScalar[];
+type RuntimeTuple = { kind: "tuple"; values: RuntimeValue[] };
+type RuntimeValue = Scalar | SeriesScalar[] | RuntimeTuple;
 type CallArguments = { positional: RuntimeValue[]; named: Record<string, RuntimeValue> };
 
 type Token = {
@@ -85,7 +100,20 @@ type Token = {
 };
 
 const forbiddenStatement = /^(?:async\s+def|def|class|import|from|for|while|if|elif|else|try|except|finally|with|lambda|yield|raise|global|nonlocal|del|assert|match|case)\b/;
-const allowedStandaloneCalls = new Set(["plot", "plotshape", "alertcondition", "alert", "strategy.entry", "strategy.exit"]);
+const allowedStandaloneCalls = new Set([
+  "plot",
+  "plotshape",
+  "alertcondition",
+  "alert",
+  "strategy",
+  "strategy.entry",
+  "strategy.order",
+  "strategy.exit",
+  "strategy.close",
+  "strategy.close_all",
+  "strategy.cancel",
+  "strategy.cancel_all"
+]);
 
 function stableHash(value: string) {
   let hash = 0x811c9dc5;
@@ -98,6 +126,10 @@ function stableHash(value: string) {
 
 function isSeries(value: RuntimeValue): value is SeriesScalar[] {
   return Array.isArray(value);
+}
+
+function isTuple(value: RuntimeValue): value is RuntimeTuple {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value) && "kind" in value && value.kind === "tuple");
 }
 
 function finiteNumber(value: RuntimeValue, label: string): number {
@@ -134,6 +166,7 @@ function broadcast(value: RuntimeValue, length: number): SeriesScalar[] {
     if (value.length !== length) throw new Error(`Series length ${value.length} does not match candle length ${length}`);
     return value;
   }
+  if (isTuple(value)) throw new Error("Tuple values must be destructured before numeric use");
   if (typeof value === "string") throw new Error("Text cannot be used as a numeric or boolean series");
   return Array.from({ length }, () => value);
 }
@@ -150,6 +183,7 @@ function inferredTimeframeSeconds(candles: readonly Candle[]) {
 }
 
 function mapUnary(value: RuntimeValue, length: number, operation: (entry: SeriesScalar) => SeriesScalar): RuntimeValue {
+  if (isTuple(value)) throw new Error("Tuple values cannot be used with unary operators");
   if (!isSeries(value)) return operation(value as SeriesScalar);
   return broadcast(value, length).map(operation);
 }
@@ -160,6 +194,7 @@ function mapBinary(
   length: number,
   operation: (a: SeriesScalar | string, b: SeriesScalar | string) => SeriesScalar
 ): RuntimeValue {
+  if (isTuple(left) || isTuple(right)) throw new Error("Tuple values cannot be used with binary operators");
   if (!isSeries(left) && !isSeries(right)) return operation(left, right);
   const a = broadcast(left, length);
   const b = broadcast(right, length);
@@ -187,6 +222,63 @@ function stripInlineComment(line: string) {
     else if (character === "#") return line.slice(0, index);
   }
   return line;
+}
+
+type LogicalStatement = { line: number; source: string };
+
+/**
+ * Black Script v3 accepts Python-style multiline calls and parenthesized
+ * expressions. Statements are joined before tokenization while retaining the
+ * first physical line for precise compiler diagnostics.
+ */
+function collectLogicalStatements(script: string): { statements: LogicalStatement[]; error?: { line: number; message: string } } {
+  const physicalLines = script.replaceAll("\r\n", "\n").split("\n");
+  const statements: LogicalStatement[] = [];
+  let source = "";
+  let startLine = 1;
+  let depth = 0;
+  let quote = "";
+  let escaped = false;
+
+  for (let index = 0; index < physicalLines.length; index += 1) {
+    const physicalLine = stripInlineComment(physicalLines[index]);
+    const trimmed = physicalLine.trim();
+    if (!source && !trimmed) continue;
+    if (!source) startLine = index + 1;
+    const continued = trimmed.endsWith("\\");
+    const fragment = continued ? trimmed.slice(0, -1).trimEnd() : trimmed;
+    source += `${source ? " " : ""}${fragment}`;
+
+    for (let cursor = 0; cursor < fragment.length; cursor += 1) {
+      const character = fragment[cursor];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (character === "\\" && quote) {
+        escaped = true;
+        continue;
+      }
+      if (quote) {
+        if (character === quote) quote = "";
+        continue;
+      }
+      if (character === '"' || character === "'") quote = character;
+      else if (character === "(" || character === "[") depth += 1;
+      else if (character === ")" || character === "]") depth -= 1;
+      if (depth < 0) return { statements, error: { line: index + 1, message: "Unexpected closing bracket" } };
+    }
+
+    if (depth === 0 && !continued && !quote) {
+      if (source.trim()) statements.push({ line: startLine, source: source.trim() });
+      source = "";
+    }
+  }
+
+  if (quote) return { statements, error: { line: startLine, message: "Unterminated string literal" } };
+  if (depth !== 0) return { statements, error: { line: startLine, message: "Unclosed parenthesized expression" } };
+  if (source.trim()) statements.push({ line: startLine, source: source.trim() });
+  return { statements };
 }
 
 function assignmentIndex(line: string) {
@@ -264,11 +356,11 @@ class Tokenizer {
         this.index += 1;
         while (/[A-Za-z0-9_.]/.test(source[this.index] || "")) this.index += 1;
         const value = source.slice(start, this.index);
-        this.tokens.push({ type: ["and", "or", "not"].includes(value) ? "operator" : "identifier", value });
+        this.tokens.push({ type: ["and", "or", "not", "if", "else"].includes(value) ? "operator" : "identifier", value });
         continue;
       }
       const pair = source.slice(this.index, this.index + 2);
-      if (["==", "!=", "<=", ">="].includes(pair)) {
+      if (["==", "!=", "<=", ">=", "**", "//"].includes(pair)) {
         this.tokens.push({ type: "operator", value: pair });
         this.index += 2;
         continue;
@@ -278,7 +370,7 @@ class Tokenizer {
         this.index += 1;
         continue;
       }
-      if (["(", ")", ","].includes(character)) {
+      if (["(", ")", "[", "]", ","].includes(character)) {
         this.tokens.push({ type: "punctuation", value: character });
         this.index += 1;
         continue;
@@ -306,9 +398,18 @@ class ExpressionParser {
   }
 
   parse() {
-    const value = this.parseOr();
+    const value = this.parseConditional();
     if (this.peek().type !== "eof") throw new Error(`Unexpected token '${this.peek().value}'`);
     return value;
+  }
+
+  private parseConditional(): RuntimeValue {
+    const whenTrue = this.parseOr();
+    if (!this.match("if")) return whenTrue;
+    const condition = this.parseOr();
+    this.consume("else");
+    const whenFalse = this.parseConditional();
+    return this.runtime.call("select", { positional: [condition, whenTrue, whenFalse], named: {} }, this.line);
   }
 
   private peek(offset = 0) {
@@ -360,7 +461,7 @@ class ExpressionParser {
 
   private parseMultiplicative(): RuntimeValue {
     let value = this.parseUnary();
-    while (["*", "/", "%"].includes(this.peek().value)) {
+    while (["*", "/", "//", "%", "**"].includes(this.peek().value)) {
       const operator = this.consume().value;
       value = this.runtime.binary(operator, value, this.parseUnary());
     }
@@ -383,27 +484,45 @@ class ExpressionParser {
     }
     if (token.type === "string") return token.value;
     if (token.type === "identifier") {
+      let value: RuntimeValue;
       if (this.match("(")) {
         const positional: RuntimeValue[] = [];
         const named: Record<string, RuntimeValue> = {};
         if (!this.match(")")) {
-          do {
+          while (true) {
             if (this.peek().type === "identifier" && this.peek(1).value === "=") {
               const name = this.consume().value;
               this.consume("=");
-              named[name] = this.parseOr();
-            } else positional.push(this.parseOr());
-          } while (this.match(","));
+              named[name] = this.parseConditional();
+            } else positional.push(this.parseConditional());
+            if (!this.match(",") || this.peek().value === ")") break;
+          }
           this.consume(")");
         }
-        return this.runtime.call(token.value, { positional, named }, this.line);
+        value = this.runtime.call(token.value, { positional, named }, this.line);
+      } else value = this.runtime.resolve(token.value);
+      while (this.match("[")) {
+        const offset = this.parseConditional();
+        this.consume("]");
+        value = this.runtime.index(value, offset);
       }
-      return this.runtime.resolve(token.value);
+      return value;
     }
     if (token.value === "(") {
-      const value = this.parseOr();
+      const value = this.parseConditional();
       this.consume(")");
       return value;
+    }
+    if (token.value === "[") {
+      const values: RuntimeValue[] = [];
+      if (!this.match("]")) {
+        while (true) {
+          values.push(this.parseConditional());
+          if (!this.match(",") || this.peek().value === "]") break;
+        }
+        this.consume("]");
+      }
+      return { kind: "tuple", values };
     }
     throw new Error(`Unexpected token '${token.value || "end of line"}'`);
   }
@@ -414,12 +533,19 @@ class ScriptRuntime {
   readonly markers: CompiledMarker[] = [];
   readonly alertConditions: CompiledAlertCondition[] = [];
   readonly events: CompiledScriptEvent[] = [];
+  readonly strategyInstructions: StrategyInstruction[] = [];
+  strategyConfig: StrategyRuntimeConfig = { ...defaultStrategyRuntimeConfig };
   private readonly env = new Map<string, RuntimeValue>();
   private readonly candles: Candle[];
   private readonly sourceHash: string;
   private readonly inputValues: Readonly<Record<string, ScriptInputValue>>;
 
-  constructor(candles: Candle[], sourceHash: string, inputValues: Readonly<Record<string, ScriptInputValue>>) {
+  constructor(
+    candles: Candle[],
+    sourceHash: string,
+    inputValues: Readonly<Record<string, ScriptInputValue>>,
+    strategyState?: Pick<CompiledStrategyReport, "positionSize" | "positionAveragePrice" | "equityCurve" | "openProfit" | "netProfit">
+  ) {
     this.candles = candles;
     this.sourceHash = sourceHash;
     this.inputValues = inputValues;
@@ -432,9 +558,22 @@ class ScriptRuntime {
     this.env.set("hlc3", candles.map((candle) => (candle.high + candle.low + candle.close) / 3));
     this.env.set("ohlc4", candles.map((candle) => (candle.open + candle.high + candle.low + candle.close) / 4));
     this.env.set("timeframe_seconds", inferredTimeframeSeconds(candles));
+    this.env.set("strategy.position_size", strategyState?.positionSize ?? Array(candles.length).fill(0));
+    this.env.set("strategy.position_avg_price", strategyState?.positionAveragePrice ?? Array(candles.length).fill(0));
+    this.env.set("strategy.equity", strategyState?.equityCurve ?? Array(candles.length).fill(defaultStrategyRuntimeConfig.initialCapital));
+    this.env.set("strategy.openprofit", strategyState?.openProfit ?? Array(candles.length).fill(0));
+    this.env.set("strategy.netprofit", strategyState?.netProfit ?? Array(candles.length).fill(0));
   }
 
   assign(name: string, value: RuntimeValue) {
+    const tupleMatch = name.match(/^\s*[\[(]\s*([^)\]]+)\s*[\])]\s*$/);
+    if (tupleMatch) {
+      if (!isTuple(value)) throw new Error("Tuple assignment requires a tuple-valued expression");
+      const variables = tupleMatch[1].split(",").map((entry) => entry.trim()).filter(Boolean);
+      if (variables.length !== value.values.length) throw new Error(`Tuple assignment expected ${variables.length} values, received ${value.values.length}`);
+      variables.forEach((variable, index) => this.assign(variable, value.values[index]));
+      return;
+    }
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`Invalid variable name '${name}'`);
     if (["open", "high", "low", "close", "volume", "hl2", "hlc3", "ohlc4", "timeframe_seconds"].includes(name)) throw new Error(`Built-in series '${name}' is read-only`);
     this.env.set(name, value);
@@ -446,6 +585,12 @@ class ScriptRuntime {
     if (name === "None" || name === "none") return null;
     if (name === "strategy.long") return "long";
     if (name === "strategy.short") return "short";
+    if (name === "strategy.fixed") return "fixed";
+    if (name === "strategy.cash") return "cash";
+    if (name === "strategy.percent_of_equity") return "percent_of_equity";
+    if (name === "strategy.commission.percent") return "percent";
+    if (name === "strategy.commission.cash_per_order") return "cash_per_order";
+    if (name === "strategy.commission.cash_per_contract") return "cash_per_contract";
     const value = this.env.get(name);
     if (value === undefined) throw new Error(`Undefined variable '${name}'`);
     return value;
@@ -472,7 +617,12 @@ class ScriptRuntime {
       if (operator === "-") return leftNumber - rightNumber;
       if (operator === "*") return leftNumber * rightNumber;
       if (operator === "/") return rightNumber === 0 ? null : leftNumber / rightNumber;
+      if (operator === "//") return rightNumber === 0 ? null : Math.floor(leftNumber / rightNumber);
       if (operator === "%") return rightNumber === 0 ? null : leftNumber % rightNumber;
+      if (operator === "**") {
+        const output = Math.pow(leftNumber, rightNumber);
+        return Number.isFinite(output) ? output : null;
+      }
       if (operator === "<") return leftNumber < rightNumber;
       if (operator === "<=") return leftNumber <= rightNumber;
       if (operator === ">") return leftNumber > rightNumber;
@@ -481,8 +631,19 @@ class ScriptRuntime {
     });
   }
 
+  index(value: RuntimeValue, offset: RuntimeValue): RuntimeValue {
+    const index = Math.round(finiteNumber(offset, "history offset"));
+    if (index < 0 || index > 100_000) throw new Error("History offset must be between 0 and 100000");
+    if (isTuple(value)) {
+      if (index >= value.values.length) throw new Error(`Tuple index ${index} is outside ${value.values.length} values`);
+      return value.values[index];
+    }
+    if (!isSeries(value)) return value;
+    return value.map((_entry, cursor) => cursor < index ? null : value[cursor - index]);
+  }
+
   call(name: string, args: CallArguments, line: number): RuntimeValue {
-    if (name === "input.int" || name === "input.float" || name === "input.bool" || name === "input.string") {
+    if (name === "input.int" || name === "input.float" || name === "input.bool" || name === "input.string" || name === "input.color") {
       return this.input(name.slice("input.".length) as CompiledScriptInput["type"], args);
     }
     if (name === "ta.sma") return this.rolling(args, "sma");
@@ -492,6 +653,11 @@ class ScriptRuntime {
     if (name === "ta.hma") return this.hma(args);
     if (name === "ta.cum") return this.cumulative(args);
     if (name === "ta.rsi") return this.rsi(args);
+    if (name === "ta.macd") return this.macd(args);
+    if (name === "ta.stoch") return this.stochastic(args);
+    if (name === "ta.mfi") return this.moneyFlowIndex(args);
+    if (name === "ta.cci") return this.commodityChannelIndex(args);
+    if (name === "ta.vwma") return this.volumeWeightedMovingAverage(args);
     if (name === "ta.atr") return this.atr(args);
     if (name === "ta.stdev") return this.rolling(args, "stdev");
     if (name === "ta.highest") return this.rolling(args, "highest");
@@ -508,6 +674,25 @@ class ScriptRuntime {
     if (name === "math.sqrt") return mapUnary(args.positional[0] ?? null, this.candles.length, (entry) => {
       const numeric = numberValue(entry);
       return numeric === null || numeric < 0 ? null : Math.sqrt(numeric);
+    });
+    if (["math.round", "math.floor", "math.ceil", "math.sign", "math.log", "math.exp"].includes(name)) {
+      return mapUnary(args.positional[0] ?? null, this.candles.length, (entry) => {
+        const numeric = numberValue(entry);
+        if (numeric === null || (name === "math.log" && numeric <= 0)) return null;
+        if (name === "math.round") return Math.round(numeric);
+        if (name === "math.floor") return Math.floor(numeric);
+        if (name === "math.ceil") return Math.ceil(numeric);
+        if (name === "math.sign") return Math.sign(numeric);
+        if (name === "math.log") return Math.log(numeric);
+        return Math.exp(numeric);
+      });
+    }
+    if (name === "math.pow") return mapBinary(args.positional[0] ?? null, args.positional[1] ?? null, this.candles.length, (left, right) => {
+      const base = numberValue(left);
+      const exponent = numberValue(right);
+      if (base === null || exponent === null) return null;
+      const output = Math.pow(base, exponent);
+      return Number.isFinite(output) ? output : null;
     });
     if (name === "math.max" || name === "math.min") {
       if (args.positional.length < 2) throw new Error(`${name} requires at least two values`);
@@ -527,6 +712,7 @@ class ScriptRuntime {
       const condition = args.positional[0] ?? false;
       const whenTrue = args.positional[1] ?? null;
       const whenFalse = args.positional[2] ?? null;
+      if (isTuple(condition)) throw new Error("select condition cannot be a tuple");
       if (!isSeries(condition)) return booleanValue(condition) ? whenTrue : whenFalse;
       const conditions = broadcast(condition, this.candles.length);
       const truthy = broadcast(whenTrue, this.candles.length);
@@ -538,8 +724,14 @@ class ScriptRuntime {
     if (name === "plotshape") return this.plotShape(args);
     if (name === "alertcondition") return this.alertCondition(args, line);
     if (name === "alert") return this.alert(args, line);
+    if (name === "strategy") return this.configureStrategy(args);
     if (name === "strategy.entry") return this.strategyEntry(args, line);
+    if (name === "strategy.order") return this.strategyEntry(args, line);
     if (name === "strategy.exit") return this.strategyExit(args, line);
+    if (name === "strategy.close") return this.strategyClose(args, line, false);
+    if (name === "strategy.close_all") return this.strategyClose(args, line, true);
+    if (name === "strategy.cancel") return this.strategyCancel(args, line, false);
+    if (name === "strategy.cancel_all") return this.strategyCancel(args, line, true);
     throw new Error(`Function '${name}' is not available in ${BLACK_TERMINAL_PYTHON_RUNTIME_VERSION}`);
   }
 
@@ -547,14 +739,22 @@ class ScriptRuntime {
     const label = textValue(args.positional[1] ?? args.named.title, "");
     const configured = label ? this.inputValues[label] : undefined;
     const value = configured === undefined ? args.positional[0] : configured;
-    if (type === "string") return typeof value === "string" ? value : textValue(args.positional[0], "");
+    const options = isTuple(args.named.options) ? args.named.options.values.filter((option): option is Scalar => !isSeries(option) && !isTuple(option)) : [];
+    if (type === "string" || type === "color") {
+      const selected = typeof value === "string" ? value : textValue(args.positional[0], "");
+      return options.length && !options.includes(selected) ? textValue(args.positional[0], "") : selected;
+    }
     if (type === "bool") return typeof value === "boolean" ? value : Boolean(value ?? false);
     const numeric = typeof value === "number" && Number.isFinite(value)
       ? value
       : typeof args.positional[0] === "number" && Number.isFinite(args.positional[0])
         ? args.positional[0]
         : 0;
-    return type === "int" ? Math.round(numeric) : numeric;
+    const minimum = typeof args.named.minval === "number" ? args.named.minval : Number.NEGATIVE_INFINITY;
+    const maximum = typeof args.named.maxval === "number" ? args.named.maxval : Number.POSITIVE_INFINITY;
+    const clamped = Math.min(maximum, Math.max(minimum, numeric));
+    const selected = type === "int" ? Math.round(clamped) : clamped;
+    return options.length && !options.includes(selected) ? Number(args.positional[0] ?? 0) : selected;
   }
 
   private numericSeries(value: RuntimeValue, _label: string) {
@@ -713,6 +913,97 @@ class ScriptRuntime {
     return output;
   }
 
+  private macd(args: CallArguments): RuntimeValue {
+    const source = args.positional[0] ?? this.env.get("close") ?? null;
+    const fastLength = positivePeriod(args.positional[1] ?? 12, "fast length");
+    const slowLength = positivePeriod(args.positional[2] ?? 26, "slow length");
+    const signalLength = positivePeriod(args.positional[3] ?? 9, "signal length");
+    const fast = this.ema({ positional: [source, fastLength], named: {} });
+    const slow = this.ema({ positional: [source, slowLength], named: {} });
+    if (!isSeries(fast) || !isSeries(slow)) throw new Error("ta.macd requires a numeric source series");
+    const line = mapBinary(fast, slow, this.candles.length, (left, right) => {
+      const leftNumber = numberValue(left);
+      const rightNumber = numberValue(right);
+      return leftNumber === null || rightNumber === null ? null : leftNumber - rightNumber;
+    });
+    const signal = this.ema({ positional: [line, signalLength], named: {} });
+    const histogram = mapBinary(line, signal, this.candles.length, (left, right) => {
+      const leftNumber = numberValue(left);
+      const rightNumber = numberValue(right);
+      return leftNumber === null || rightNumber === null ? null : leftNumber - rightNumber;
+    });
+    return { kind: "tuple", values: [line, signal, histogram] };
+  }
+
+  private stochastic(args: CallArguments): RuntimeValue {
+    const close = this.numericSeries(args.positional[0] ?? this.env.get("close") ?? null, "close");
+    const high = this.numericSeries(args.positional[1] ?? this.env.get("high") ?? null, "high");
+    const low = this.numericSeries(args.positional[2] ?? this.env.get("low") ?? null, "low");
+    const period = positivePeriod(args.positional[3] ?? 14);
+    return close.map((value, index) => {
+      if (index < period - 1 || value === null) return null;
+      const highs = high.slice(index - period + 1, index + 1);
+      const lows = low.slice(index - period + 1, index + 1);
+      if (highs.some((entry) => entry === null) || lows.some((entry) => entry === null)) return null;
+      const highest = Math.max(...highs as number[]);
+      const lowest = Math.min(...lows as number[]);
+      return highest === lowest ? 50 : (value - lowest) / (highest - lowest) * 100;
+    });
+  }
+
+  private moneyFlowIndex(args: CallArguments): RuntimeValue {
+    const source = this.numericSeries(args.positional[0] ?? this.env.get("hlc3") ?? null, "source");
+    const volume = this.numericSeries(this.env.get("volume") ?? null, "volume");
+    const period = positivePeriod(args.positional[1] ?? 14);
+    return source.map((value, index) => {
+      if (index < period || value === null) return null;
+      let positive = 0;
+      let negative = 0;
+      for (let cursor = index - period + 1; cursor <= index; cursor += 1) {
+        const current = source[cursor];
+        const previous = source[cursor - 1];
+        const currentVolume = volume[cursor];
+        if (current === null || previous === null || currentVolume === null) return null;
+        const flow = current * currentVolume;
+        if (current > previous) positive += flow;
+        else if (current < previous) negative += flow;
+      }
+      if (negative === 0) return positive === 0 ? 50 : 100;
+      return 100 - 100 / (1 + positive / negative);
+    });
+  }
+
+  private commodityChannelIndex(args: CallArguments): RuntimeValue {
+    const source = this.numericSeries(args.positional[0] ?? this.env.get("hlc3") ?? null, "source");
+    const period = positivePeriod(args.positional[1] ?? 20);
+    return source.map((_value, index) => {
+      if (index < period - 1) return null;
+      const window = source.slice(index - period + 1, index + 1);
+      if (window.some((value) => value === null)) return null;
+      const numeric = window as number[];
+      const mean = numeric.reduce((sum, value) => sum + value, 0) / period;
+      const deviation = numeric.reduce((sum, value) => sum + Math.abs(value - mean), 0) / period;
+      return deviation === 0 ? 0 : (numeric.at(-1)! - mean) / (0.015 * deviation);
+    });
+  }
+
+  private volumeWeightedMovingAverage(args: CallArguments): RuntimeValue {
+    const source = this.numericSeries(args.positional[0] ?? this.env.get("close") ?? null, "source");
+    const volume = this.numericSeries(this.env.get("volume") ?? null, "volume");
+    const period = positivePeriod(args.positional[1] ?? 14);
+    return source.map((_value, index) => {
+      if (index < period - 1) return null;
+      let weighted = 0;
+      let totalVolume = 0;
+      for (let cursor = index - period + 1; cursor <= index; cursor += 1) {
+        if (source[cursor] === null || volume[cursor] === null) return null;
+        weighted += source[cursor]! * volume[cursor]!;
+        totalVolume += volume[cursor]!;
+      }
+      return totalVolume === 0 ? null : weighted / totalVolume;
+    });
+  }
+
   private atr(args: CallArguments): RuntimeValue {
     const period = positivePeriod(args.positional[0] ?? 14);
     const ranges = this.candles.map((candle, index) => index === 0
@@ -764,7 +1055,7 @@ class ScriptRuntime {
     const width = Math.max(1, Math.min(8, Math.round(typeof args.named.width === "number" ? args.named.width : 1)));
     const pane = textValue(args.named.pane, "price").toLowerCase() === "oscillator" ? "oscillator" : "price";
     const visibleArgument = args.named.visible ?? true;
-    const visible = isSeries(visibleArgument) ? true : booleanValue(visibleArgument);
+    const visible = isSeries(visibleArgument) || isTuple(visibleArgument) ? true : booleanValue(visibleArgument);
     this.plots.push({ name: title, values: source, color, width, pane, visible });
     return source;
   }
@@ -829,18 +1120,101 @@ class ScriptRuntime {
     return this.registerAlert(args.named.when ?? true, title, message, "alert", "neutral");
   }
 
-  private strategyEntry(args: CallArguments, _line: number): RuntimeValue {
+  private scalarNumber(value: RuntimeValue | undefined, fallback: number) {
+    if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+    return value;
+  }
+
+  private scalarBoolean(value: RuntimeValue | undefined, fallback: boolean) {
+    return value === undefined || isSeries(value) || isTuple(value) ? fallback : booleanValue(value);
+  }
+
+  private optionalNumberSeries(value: RuntimeValue | undefined) {
+    return value === undefined || value === null ? undefined : this.numericSeries(value, "strategy order value");
+  }
+
+  private configureStrategy(args: CallArguments): RuntimeValue {
+    const quantityMode = textValue(args.named.default_qty_type, this.strategyConfig.defaultQuantityMode);
+    const commissionMode = textValue(args.named.commission_type, this.strategyConfig.commissionMode);
+    this.strategyConfig = {
+      initialCapital: Math.max(0.01, this.scalarNumber(args.named.initial_capital, this.strategyConfig.initialCapital)),
+      defaultQuantityMode: quantityMode === "fixed" || quantityMode === "cash" ? quantityMode : "percent_of_equity",
+      defaultQuantityValue: Math.max(0, this.scalarNumber(args.named.default_qty_value, this.strategyConfig.defaultQuantityValue)),
+      commissionMode: commissionMode === "cash_per_order" || commissionMode === "cash_per_contract" ? commissionMode : "percent",
+      commissionValue: Math.max(0, this.scalarNumber(args.named.commission_value, this.strategyConfig.commissionValue)),
+      slippageTicks: Math.max(0, this.scalarNumber(args.named.slippage, this.strategyConfig.slippageTicks)),
+      tickSize: Math.max(1e-12, this.scalarNumber(args.named.tick_size, this.strategyConfig.tickSize)),
+      pyramiding: Math.max(1, Math.round(this.scalarNumber(args.named.pyramiding, this.strategyConfig.pyramiding))),
+      processOrdersOnClose: this.scalarBoolean(args.named.process_orders_on_close, this.strategyConfig.processOrdersOnClose)
+    };
+    return true;
+  }
+
+  private strategyEntry(args: CallArguments, line: number): RuntimeValue {
     const title = textValue(args.positional[0], "Strategy Entry");
     const side = textValue(args.positional[1], "long").toLowerCase() === "short" ? "short" : "long";
-    const condition = this.registerAlert(args.named.when ?? true, title, `${title} at {{price}}`, "entry", side) as boolean[];
-    this.addStrategyMarkers(condition, title, side, "entry");
+    const condition = this.conditionSeries(args.named.when ?? true);
+    this.strategyInstructions.push({
+      kind: "entry",
+      id: title,
+      side,
+      when: condition,
+      line,
+      quantity: this.optionalNumberSeries(args.named.qty),
+      quantityPercent: this.optionalNumberSeries(args.named.qty_percent),
+      limit: this.optionalNumberSeries(args.named.limit),
+      stop: this.optionalNumberSeries(args.named.stop)
+    });
     return condition;
   }
 
-  private strategyExit(args: CallArguments, _line: number): RuntimeValue {
+  private strategyExit(args: CallArguments, line: number): RuntimeValue {
     const title = textValue(args.positional[0], "Strategy Exit");
-    const condition = this.registerAlert(args.named.when ?? true, title, `${title} at {{price}}`, "exit", "neutral") as boolean[];
-    this.addStrategyMarkers(condition, title, "neutral", "exit");
+    const condition = this.conditionSeries(args.named.when ?? true);
+    const fromEntry = textValue(args.positional[1] ?? args.named.from_entry, "") || undefined;
+    this.strategyInstructions.push({
+      kind: "exit",
+      id: title,
+      fromEntry,
+      when: condition,
+      line,
+      quantity: this.optionalNumberSeries(args.named.qty),
+      quantityPercent: this.optionalNumberSeries(args.named.qty_percent),
+      limit: this.optionalNumberSeries(args.named.limit),
+      stop: this.optionalNumberSeries(args.named.stop),
+      profitTicks: this.optionalNumberSeries(args.named.profit),
+      lossTicks: this.optionalNumberSeries(args.named.loss)
+    });
+    return condition;
+  }
+
+  private strategyClose(args: CallArguments, line: number, closeAll: boolean): RuntimeValue {
+    const fromEntry = closeAll ? undefined : textValue(args.positional[0] ?? args.named.id, "") || undefined;
+    const title = closeAll ? "Close All" : fromEntry || "Strategy Close";
+    const condition = this.conditionSeries(args.named.when ?? true);
+    this.strategyInstructions.push({
+      kind: "close",
+      id: title,
+      fromEntry,
+      when: condition,
+      line,
+      quantity: this.optionalNumberSeries(args.named.qty),
+      quantityPercent: this.optionalNumberSeries(args.named.qty_percent)
+    });
+    return condition;
+  }
+
+  private strategyCancel(args: CallArguments, line: number, cancelAll: boolean): RuntimeValue {
+    const targetId = cancelAll ? undefined : textValue(args.positional[0] ?? args.named.id, "") || undefined;
+    const condition = this.conditionSeries(args.named.when ?? true);
+    this.strategyInstructions.push({
+      kind: "cancel",
+      id: cancelAll ? "Cancel All" : targetId || "Strategy Cancel",
+      targetId,
+      cancelAll,
+      when: condition,
+      line
+    });
     return condition;
   }
 
@@ -868,6 +1242,84 @@ function parseExpression(runtime: ScriptRuntime, expression: string, line: numbe
   return new ExpressionParser(runtime, new Tokenizer(expression).all(), line).parse();
 }
 
+function executeScriptPass(input: {
+  script: string;
+  candles: Candle[];
+  sourceHash: string;
+  inputValues: Readonly<Record<string, ScriptInputValue>>;
+  strategyState?: CompiledStrategyReport;
+}) {
+  const runtime = new ScriptRuntime(input.candles, input.sourceHash, input.inputValues, input.strategyState);
+  const errors: { line: number; message: string }[] = [];
+  const collected = collectLogicalStatements(input.script);
+  if (collected.error) errors.push(collected.error);
+
+  for (const statement of collected.statements) {
+    const lineNumber = statement.line;
+    const line = statement.source;
+    try {
+      if (forbiddenStatement.test(line)) throw new Error("Deterministic vector execution does not permit imports, unbounded loops, classes or user-defined code blocks");
+      const assignAt = assignmentIndex(line);
+      if (assignAt >= 0) {
+        const name = line.slice(0, assignAt).trim();
+        const expression = line.slice(assignAt + 1).trim();
+        if (!expression) throw new Error("Assignment requires an expression");
+        runtime.assign(name, parseExpression(runtime, expression, lineNumber));
+        continue;
+      }
+      const callName = line.match(/^([A-Za-z_][A-Za-z0-9_.]*)\s*\(/)?.[1];
+      if (!callName || !allowedStandaloneCalls.has(callName)) throw new Error(`Unsupported statement '${line}'`);
+      parseExpression(runtime, line, lineNumber);
+    } catch (error) {
+      errors.push({ line: lineNumber, message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { runtime, errors };
+}
+
+function strategyStateMatches(left: CompiledStrategyReport, right: CompiledStrategyReport) {
+  if (left.positionSize.length !== right.positionSize.length) return false;
+  for (let index = 0; index < left.positionSize.length; index += 1) {
+    if (Math.abs((left.positionSize[index] ?? 0) - (right.positionSize[index] ?? 0)) > 1e-10) return false;
+    if (Math.abs((left.positionAveragePrice[index] ?? 0) - (right.positionAveragePrice[index] ?? 0)) > 1e-8) return false;
+  }
+  return true;
+}
+
+function registerStrategyFills(runtime: ScriptRuntime, report: CompiledStrategyReport, sourceHash: string, candles: readonly Candle[]) {
+  for (const fill of report.fills) {
+    const candle = candles[fill.index];
+    if (!candle) continue;
+    const title = fill.action === "entry" ? `${fill.instructionId} Filled` : `${fill.instructionId} Exit Filled`;
+    const conditionId = `${sourceHash}:strategy-fill:${stableHash(fill.instructionId)}:${fill.action}`;
+    if (!runtime.alertConditions.some((condition) => condition.id === conditionId)) {
+      runtime.alertConditions.push({ id: conditionId, title, message: `${title} at {{price}}` });
+    }
+    runtime.events.push({
+      id: `${conditionId}:${candle.time}:${fill.id}`,
+      conditionId,
+      index: fill.index,
+      time: fill.time,
+      price: fill.price,
+      title,
+      message: `${title} at ${fill.price.toFixed(2)} · qty ${fill.quantity.toFixed(8)}`,
+      type: fill.action === "entry" ? "entry" : "exit",
+      direction: fill.action === "entry" ? fill.side : "neutral"
+    });
+    runtime.markers.push({
+      id: `${sourceHash}:${fill.action}:${stableHash(fill.instructionId)}:${candle.time}:${fill.id}`,
+      index: fill.index,
+      time: fill.time,
+      signalPrice: fill.price,
+      value: fill.side === "short" ? candle.high : candle.low,
+      label: title,
+      direction: fill.action === "entry" ? fill.side : "neutral",
+      kind: fill.action === "entry" ? "entry" : "exit",
+      color: fill.action === "exit" ? "#a9a3a8" : fill.side === "short" ? "#c40024" : "#f4f4f5"
+    });
+  }
+}
+
 export function compileAndRunScript(
   script: string,
   candles: Candle[],
@@ -881,6 +1333,7 @@ export function compileAndRunScript(
     markers: [],
     alertConditions: [],
     events: [],
+    strategy: null,
     runtimeVersion: BLACK_TERMINAL_PYTHON_RUNTIME_VERSION,
     sourceHash
   };
@@ -893,37 +1346,40 @@ export function compileAndRunScript(
     return result;
   }
 
-  const runtime = new ScriptRuntime(candles, sourceHash, inputValues);
-  const lines = script.replaceAll("\r\n", "\n").split("\n");
-  for (let index = 0; index < lines.length; index += 1) {
-    const lineNumber = index + 1;
-    const line = stripInlineComment(lines[index]).trim();
-    if (!line) continue;
-    try {
-      if (forbiddenStatement.test(line)) throw new Error("Only deterministic vector statements are allowed; blocks, loops, imports and user functions are disabled");
-      const assignAt = assignmentIndex(line);
-      if (assignAt >= 0) {
-        const name = line.slice(0, assignAt).trim();
-        const expression = line.slice(assignAt + 1).trim();
-        if (!expression) throw new Error("Assignment requires an expression");
-        runtime.assign(name, parseExpression(runtime, expression, lineNumber));
-        continue;
+  let pass = executeScriptPass({ script, candles, sourceHash, inputValues });
+  if (pass.errors.length) {
+    result.errors.push(...pass.errors);
+    return result;
+  }
+
+  let runtime = pass.runtime;
+  let strategy: CompiledStrategyReport | null = null;
+  if (runtime.strategyInstructions.length > 0) {
+    strategy = simulateStrategy({ candles, instructions: runtime.strategyInstructions, config: runtime.strategyConfig });
+    const requiresStateResolution = /\bstrategy\.(?:position_size|position_avg_price|equity|openprofit|netprofit)\b/.test(script);
+    for (let iteration = 0; requiresStateResolution && iteration < 4; iteration += 1) {
+      pass = executeScriptPass({ script, candles, sourceHash, inputValues, strategyState: strategy });
+      if (pass.errors.length) {
+        result.errors.push(...pass.errors);
+        return result;
       }
-      const callName = line.match(/^([A-Za-z_][A-Za-z0-9_.]*)\s*\(/)?.[1];
-      if (!callName || !allowedStandaloneCalls.has(callName)) throw new Error(`Unsupported statement '${line}'`);
-      parseExpression(runtime, line, lineNumber);
-    } catch (error) {
-      result.errors.push({ line: lineNumber, message: error instanceof Error ? error.message : String(error) });
+      const nextStrategy = simulateStrategy({ candles, instructions: pass.runtime.strategyInstructions, config: pass.runtime.strategyConfig });
+      runtime = pass.runtime;
+      const converged = strategyStateMatches(strategy, nextStrategy);
+      strategy = nextStrategy;
+      if (converged) break;
     }
+    registerStrategyFills(runtime, strategy, sourceHash, candles);
   }
 
   return {
-    success: result.errors.length === 0,
-    errors: result.errors,
+    success: true,
+    errors: [],
     plots: runtime.plots,
     markers: runtime.markers,
     alertConditions: runtime.alertConditions,
     events: runtime.events,
+    strategy,
     runtimeVersion: BLACK_TERMINAL_PYTHON_RUNTIME_VERSION,
     sourceHash
   };
@@ -937,7 +1393,7 @@ export function compileAndRunScript(
 export function extractScriptInputs(script: string): CompiledScriptInput[] {
   const inputs: CompiledScriptInput[] = [];
   const seen = new Set<string>();
-  const declaration = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*input\.(int|float|bool|string)\s*\((.*)\)\s*(?:#.*)?$/;
+  const declaration = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*input\.(int|float|bool|string|color)\s*\((.*)\)\s*(?:#.*)?$/;
 
   for (const line of script.replaceAll("\r\n", "\n").split("\n")) {
     const match = line.match(declaration);
@@ -956,7 +1412,7 @@ export function extractScriptInputs(script: string): CompiledScriptInput[] {
     if (type === "bool") {
       if (!/^(?:true|false)$/i.test(rawDefault)) continue;
       defaultValue = rawDefault.toLowerCase() === "true";
-    } else if (type === "string") {
+    } else if (type === "string" || type === "color") {
       if (!/^(["']).*\1$/.test(rawDefault)) continue;
       defaultValue = rawDefault.slice(1, -1).replace(/\\([\\"'])/g, "$1");
     }
@@ -966,7 +1422,31 @@ export function extractScriptInputs(script: string): CompiledScriptInput[] {
       defaultValue = type === "int" ? Math.round(numeric) : numeric;
     }
     seen.add(label);
-    inputs.push({ key: label, variable, label, type, defaultValue });
+    const named = Object.fromEntries(argumentsList.slice(1).flatMap((argument) => {
+      const equals = argument.indexOf("=");
+      return equals > 0 ? [[argument.slice(0, equals).trim(), argument.slice(equals + 1).trim()]] : [];
+    }));
+    const parsedOptions = named.options && /^\[.*\]$/.test(named.options)
+      ? splitLiteralInputArguments(named.options.slice(1, -1)).map(parseInputLiteral).filter((value): value is ScriptInputValue => value !== undefined)
+      : undefined;
+    const min = parseInputLiteral(named.minval);
+    const max = parseInputLiteral(named.maxval);
+    const step = parseInputLiteral(named.step);
+    const group = parseInputLiteral(named.group);
+    const tooltip = parseInputLiteral(named.tooltip);
+    inputs.push({
+      key: label,
+      variable,
+      label,
+      type,
+      defaultValue,
+      ...(typeof min === "number" ? { min } : {}),
+      ...(typeof max === "number" ? { max } : {}),
+      ...(typeof step === "number" ? { step } : {}),
+      ...(parsedOptions?.length ? { options: parsedOptions } : {}),
+      ...(typeof group === "string" ? { group } : {}),
+      ...(typeof tooltip === "string" ? { tooltip } : {})
+    });
   }
   return inputs;
 }
@@ -976,6 +1456,7 @@ function splitLiteralInputArguments(source: string): string[] {
   let quote = "";
   let escaped = false;
   let start = 0;
+  let depth = 0;
   for (let index = 0; index < source.length; index += 1) {
     const character = source[index];
     if (escaped) {
@@ -990,13 +1471,24 @@ function splitLiteralInputArguments(source: string): string[] {
       quote = quote === character ? "" : quote || character;
       continue;
     }
-    if (character === "," && !quote) {
+    if (!quote && (character === "(" || character === "[")) depth += 1;
+    else if (!quote && (character === ")" || character === "]")) depth = Math.max(0, depth - 1);
+    if (character === "," && !quote && depth === 0) {
       values.push(source.slice(start, index).trim());
       start = index + 1;
     }
   }
   values.push(source.slice(start).trim());
   return values;
+}
+
+function parseInputLiteral(source: string | undefined): ScriptInputValue | undefined {
+  if (!source) return undefined;
+  const value = source.trim();
+  if (/^(?:true|false)$/i.test(value)) return value.toLowerCase() === "true";
+  if (/^(["']).*\1$/.test(value)) return value.slice(1, -1).replace(/\\([\\"'])/g, "$1");
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : undefined;
 }
 
 export function newlyConfirmedScriptEvents(input: {
@@ -1011,9 +1503,55 @@ export function newlyConfirmedScriptEvents(input: {
 }
 
 export function finalizedScriptResult(result: CompileResult, latestConfirmedTime: number): CompileResult {
+  const strategy = result.strategy ? finalizedStrategyReport(result.strategy, latestConfirmedTime) : null;
   return {
     ...result,
     markers: result.markers.filter((marker) => marker.time <= latestConfirmedTime),
-    events: result.events.filter((event) => event.time <= latestConfirmedTime)
+    events: result.events.filter((event) => event.time <= latestConfirmedTime),
+    strategy
+  };
+}
+
+function finalizedStrategyReport(report: CompiledStrategyReport, latestConfirmedTime: number): CompiledStrategyReport {
+  const fills = report.fills.filter((fill) => fill.time <= latestConfirmedTime);
+  const trades = report.trades.filter((trade) => trade.exitTime <= latestConfirmedTime);
+  let lastIndex = 0;
+  for (let index = report.times.length - 1; index >= 0; index -= 1) {
+    if (report.times[index] > latestConfirmedTime) continue;
+    lastIndex = index;
+    break;
+  }
+  const equityValues = report.equityCurve.slice(0, lastIndex + 1).filter((value): value is number => value !== null);
+  let peak = report.initialCapital;
+  let maxDrawdown = 0;
+  for (const equity of equityValues) {
+    peak = Math.max(peak, equity);
+    if (peak > 0) maxDrawdown = Math.max(maxDrawdown, (peak - equity) / peak * 100);
+  }
+  const position = report.positionSize[lastIndex] ?? 0;
+  const averagePrice = report.positionAveragePrice[lastIndex] ?? 0;
+  const openProfit = report.openProfit[lastIndex] ?? 0;
+  const totalCommission = fills.reduce((sum, fill) => sum + fill.commission, 0);
+  const realizedPnl = fills.reduce((sum, fill) => sum + fill.realizedPnl, 0);
+  const wins = trades.filter((trade) => trade.netPnl > 0).length;
+  const losses = trades.filter((trade) => trade.netPnl < 0).length;
+  return {
+    ...report,
+    fills,
+    trades,
+    endingEquity: equityValues.at(-1) ?? report.initialCapital,
+    realizedNetProfit: realizedPnl - totalCommission,
+    totalCommission,
+    totalTrades: trades.length,
+    winningTrades: wins,
+    losingTrades: losses,
+    winRate: trades.length ? wins / trades.length * 100 : 0,
+    maxDrawdown,
+    openPosition: Math.abs(position) > 1e-12 ? {
+      side: position > 0 ? "long" : "short",
+      quantity: Math.abs(position),
+      averagePrice,
+      unrealizedPnl: openProfit
+    } : null
   };
 }

@@ -3956,7 +3956,10 @@ export function PixiBlackChart({
       if (!compiled.success) continue;
       const finalized = finalizedScriptResult(compiled, latestConfirmedTime);
       const alerts = newlyConfirmedScriptEvents({
-        events: finalized.events.filter((event) => event.type === "alert"),
+        // Black Script v3 strategy events are emitted only after the local
+        // simulator confirms a fill. They share the closed-candle delivery
+        // guard with explicit alertcondition() events and never route orders.
+        events: finalized.events,
         armedAfter: currentRuntime.armedAfter,
         latestConfirmedTime,
         deliveredIds: currentRuntime.delivered
@@ -3968,7 +3971,7 @@ export function PixiBlackChart({
         onAlertFired?.(displaySymbol, message);
         if (alertSettingsRef.current.enabled) {
           dispatchAlert(`${runtimeKey}:${event.id}`, {
-            type: "custom_script_alert",
+            type: event.type === "alert" ? "custom_script_alert" : "custom_script_strategy_fill",
             scriptId: activeCustomScript.id,
             scriptName: activeCustomScript.name,
             runtimeVersion: compiled.runtimeVersion,
@@ -7553,13 +7556,29 @@ function CustomScriptSettingsPanel({
       )}
       <div className="indicator-settings-section custom-script-inputs">
         {inputs.map((input) => (
-          <label key={input.key}>
-            <span>{input.label}</span>
-            {input.type === "bool" ? (
+          <label key={input.key} title={input.tooltip}>
+            <span>{input.group ? `${input.group} / ${input.label}` : input.label}</span>
+            {input.options?.length ? (
+              <select
+                value={String(values[input.key] ?? input.defaultValue)}
+                onChange={(event) => {
+                  const selected = input.options?.find((option) => String(option) === event.target.value) ?? input.defaultValue;
+                  setValues((current) => ({ ...current, [input.key]: selected }));
+                }}
+              >
+                {input.options.map((option) => <option key={String(option)} value={String(option)}>{String(option)}</option>)}
+              </select>
+            ) : input.type === "bool" ? (
               <input
                 type="checkbox"
                 checked={Boolean(values[input.key])}
                 onChange={(event) => setValues((current) => ({ ...current, [input.key]: event.target.checked }))}
+              />
+            ) : input.type === "color" ? (
+              <input
+                type="color"
+                value={String(values[input.key] ?? input.defaultValue)}
+                onChange={(event) => setValues((current) => ({ ...current, [input.key]: event.target.value }))}
               />
             ) : input.type === "string" ? (
               <input
@@ -7570,7 +7589,9 @@ function CustomScriptSettingsPanel({
             ) : (
               <input
                 type="number"
-                step={input.type === "int" ? 1 : "any"}
+                min={input.min}
+                max={input.max}
+                step={input.step ?? (input.type === "int" ? 1 : "any")}
                 value={Number(values[input.key] ?? input.defaultValue)}
                 onChange={(event) => {
                   const numeric = Number(event.target.value);
@@ -7583,7 +7604,7 @@ function CustomScriptSettingsPanel({
         ))}
         {inputs.length === 0 && (
           <div className="custom-script-no-inputs">
-            This script has no literal input.int, input.float, input.bool, or input.string declarations. Its source can still be hidden or removed from the indicator legend.
+            This script has no literal input.int, input.float, input.bool, input.string, or input.color declarations. Its source can still be hidden or removed from the indicator legend.
           </div>
         )}
       </div>

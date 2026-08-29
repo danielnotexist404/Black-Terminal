@@ -19,7 +19,7 @@ import { resolveAuctionVisualizationLayers } from "../src/modules/auction-profil
 import { validateAuctionProfileInvariants } from "../src/modules/auction-profile/testing/nativeValidation.ts";
 import { PINE_CVD_PROFILE_KNOWN_ANOMALIES } from "../src/modules/auction-profile/engines/pineCompatibility.ts";
 import { appendTradesToAuctionProfile, calculateAuctionProfile, calculateAuctionProfiles } from "../src/modules/auction-profile/engines/nativeEngine.ts";
-import { auctionTpoLetters } from "../src/modules/auction-profile/engines/tpo.ts";
+import { auctionTpoLetters, compactAuctionTpoLetters } from "../src/modules/auction-profile/engines/tpo.ts";
 import { InMemoryCanonicalCvdService } from "../src/modules/auction-profile/data/tradeSource.ts";
 import { auctionProfileNeedsLowerHistory, resolveAuctionLowerSourceTimeframe, resolveAuctionTpoSourceTimeframe } from "../src/modules/auction-profile/core/lowerTimeframe.ts";
 import { AuctionProfileWorkerRuntime } from "../src/modules/auction-profile/worker/auctionProfileWorker.ts";
@@ -407,6 +407,11 @@ assert.equal(tpoSettings.nodeDetection.source, "TPO");
 assert.equal(tpoSettings.rendering.profileWidthMetric, "SELECTED_ENGINE");
 assert.equal(tpoSettings.rendering.displayStyle, "LETTERS_TPO");
 assert.equal(tpoSettings.rendering.profileBodyStyle, "SOLID_HISTOGRAM");
+assert.equal(
+  auctionProfileEffectiveWidthPercent(tpoSettings.rendering.widthPercent, tpoSettings.rendering.profileLengthPercent),
+  22.5,
+  "TPO must respect the shared profile-length control instead of occupying the full configured width"
+);
 assert.equal(resolveAuctionTpoSourceTimeframe(30), "30m");
 assert.equal(resolveAuctionTpoSourceTimeframe(45), "15m", "non-native TPO brackets must use the finest exact divisor available");
 assert.equal(resolveAuctionLowerSourceTimeframe(tpoSettings), "30m");
@@ -435,6 +440,12 @@ assert.deepEqual(
   ["A"],
   "the first chronological TPO bracket must render as the authentic A print"
 );
+const denseTpoLetters = Array.from({ length: 5000 }, (_, index) => `A${index + 1}`);
+const compactTpo = compactAuctionTpoLetters(denseTpoLetters, 28);
+assert.ok(compactTpo.text.length <= 28, "large composite TPO text must remain inside its row width");
+assert.ok(compactTpo.hiddenCount > 0, "compaction must disclose omitted historical prints");
+assert.equal(compactTpo.visibleLetters.at(-1), "A5000", "the newest chronological TPO print must remain visible");
+assert.equal(compactAuctionTpoLetters(["A", "B", "C"], 8).text, "ABC", "small TPO profiles must remain unchanged");
 const tpoProfileRows = buildAuctionProfileRows(tpoSnapshot, tpoSettings);
 assert.equal(tpoProfileRows.find(row => row.priceLow <= 63000 && row.priceHigh > 63000)?.rawWidthValue, 1, "TPO profile width must be time-at-price, not CVD activity");
 

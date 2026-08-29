@@ -16,7 +16,7 @@ import { auctionBrightnessAlpha } from "./heatmap.ts";
 import { auctionColorNumber, auctionDirectionalColor } from "./colors.ts";
 import { auctionCellTextVisible, formatAuctionCellMetric, formatAuctionMetric, formatAuctionProfileRowMetric } from "./labels.ts";
 import { auctionProfileSettingsForDevice } from "./deviceBudget.ts";
-import { auctionTpoLetters } from "../engines/tpo.ts";
+import { auctionTpoLetters, compactAuctionTpoLetters } from "../engines/tpo.ts";
 
 export { AUCTION_PROFILE_RENDERER_KIND };
 
@@ -201,7 +201,7 @@ export class AuctionProfileRenderer {
     const baseWidthPercent = settings.rendering.profileWidthAuto
       ? snapshot.scope === "MACRO_COMPOSITE" ? 30 : snapshot.scope === "SESSION" ? 28 : 32
       : settings.rendering.widthPercent;
-    const widthPercent = matrixProfile
+    const widthPercent = matrixProfile || tpoLetterProfile
       ? auctionProfileEffectiveWidthPercent(baseWidthPercent, settings.rendering.profileLengthPercent)
       : baseWidthPercent;
     const bounds = resolveAuctionProfilePlacement(placement, transform.width, rangeLeft, rangeRight, widthPercent);
@@ -216,10 +216,6 @@ export class AuctionProfileRenderer {
     const robustIndex = Math.max(0, Math.min(blockValues.length - 1, Math.floor(blockValues.length * 0.98)));
     const blockMaximum = blockValues[robustIndex] ?? 1;
     const tpoBracketSeconds = Math.max(60, settings.tpoBracketMinutes * 60);
-    const maximumTpoGlyphs = tpoLetterProfile
-      ? Math.max(...visibleRows.map(row => auctionTpoLetters(row.tpoBrackets, snapshot.range.start, tpoBracketSeconds).join("").length), 1)
-      : 1;
-    const tpoFontSize = Math.max(5, Math.min(10, bounds.width / Math.max(1, maximumTpoGlyphs * 0.64)));
     const profileTop = Math.max(transform.top, Math.min(...visibleRows.map(row => transform.yForPrice(row.priceHigh))));
     const profileBottom = Math.min(transform.bottom, Math.max(...visibleRows.map(row => transform.yForPrice(row.priceLow))));
     if (!matrixProfile) {
@@ -301,14 +297,17 @@ export class AuctionProfileRenderer {
           const letters = auctionTpoLetters(row.tpoBrackets, snapshot.range.start, tpoBracketSeconds);
           if (letters.length && this.activeTextKeys.size < settings.rendering.maximumVisibleLabels) {
             const singlePrint = letters.length === 1;
+            const fontSize = Math.max(5, Math.min(9, height - 0.5));
+            const glyphCapacity = Math.max(1, Math.floor((width - 2) / Math.max(1, fontSize * 0.7)));
+            const compactLetters = compactAuctionTpoLetters(letters, glyphCapacity);
             this.text(
               `profile-tpo:${snapshot.profileId}:${row.rowIndex}`,
-              letters.join(""),
+              compactLetters.text,
               span.left + 1,
               y + height / 2,
               singlePrint ? auctionColorNumber(settings.rendering.negativeColor) : row.inValueArea ? 0xf6f7f8 : 0xaeb3ba,
               "left",
-              Math.max(5, Math.min(tpoFontSize, height - 0.5))
+              fontSize
             );
           }
         } else if (matrixProfile) {
@@ -415,12 +414,13 @@ export class AuctionProfileRenderer {
     const tpoLetters = snapshot.engine === "TPO"
       ? auctionTpoLetters(row.tpoBrackets, snapshot.range.start, Math.max(60, this.settings.tpoBracketMinutes * 60))
       : [];
+    const tpoPreview = compactAuctionTpoLetters(tpoLetters, 48);
     this.hoverText.text = [
       `RADAP · ${snapshot.matrix.blocks.at(-1)?.isDeveloping ? "DEVELOPING" : "FINALIZED"}`,
       `Price  ${row.priceLow.toLocaleString()} — ${row.priceHigh.toLocaleString()}`,
       `Engine ${snapshot.engine.replaceAll("_", " ")}`,
       `Metric ${formatAuctionProfileRowMetric(row.rawWidthValue, this.settings.rendering.profileWidthMetric)}`,
-      ...(tpoLetters.length ? [`TPO    ${tpoLetters.length} prints · ${tpoLetters.join("")}`] : []),
+      ...(tpoLetters.length ? [`TPO    ${tpoLetters.length} prints · ${tpoPreview.text}`] : []),
       `CVD    ${formatAuctionMetric(row.netCvd)}`,
       `Buy    ${formatAuctionMetric(row.buyVolume)}`,
       `Sell   ${formatAuctionMetric(row.sellVolume)}`,

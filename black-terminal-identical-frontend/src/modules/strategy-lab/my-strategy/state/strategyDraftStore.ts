@@ -124,6 +124,52 @@ export function defaultWizardPaperPolicy(marketType: StrategyAutomationDefinitio
   };
 }
 
+export function selectStrategyMarket(
+  draft: StrategyWizardDraft,
+  marketType: StrategyAutomationDefinition["marketType"],
+): StrategyWizardDraft {
+  if (draft.definition.marketType === marketType) return draft;
+
+  const paperPolicy = {
+    ...defaultWizardPaperPolicy(marketType),
+    strategyAllocationMode: draft.paperPolicy.strategyAllocationMode,
+    strategyAllocationValue: draft.paperPolicy.strategyAllocationValue,
+    tradeAmountMode: draft.paperPolicy.tradeAmountMode,
+    tradeAmountValue: draft.paperPolicy.tradeAmountValue,
+    maximumPositionPercent: draft.paperPolicy.maximumPositionPercent,
+    maximumExposurePercent: draft.paperPolicy.maximumExposurePercent,
+    maximumDailyLoss: draft.paperPolicy.maximumDailyLoss,
+    maximumDrawdown: draft.paperPolicy.maximumDrawdown,
+    maximumPositions: draft.paperPolicy.maximumPositions,
+    slippageBps: draft.paperPolicy.slippageBps,
+  };
+
+  return {
+    ...draft,
+    paperPolicy,
+    definition: {
+      ...draft.definition,
+      marketType,
+      // Signal identities are market-specific. Never carry a Futures Long/Short
+      // mapping into a Spot Buy/Sell contract (or the reverse).
+      signals: {},
+      paper: {
+        ...draft.definition.paper,
+        modelFunding: marketType === "FUTURES",
+        capitalPolicy: paperPolicy,
+      },
+      execution: {
+        ...draft.definition.execution,
+        // Reversal is meaningful only after Futures Long/Short commands have
+        // been mapped explicitly again.
+        conflictResolution: "CLOSE_ONLY",
+        stopReversalEnabled: false,
+        perpetualSignalReversalEnabled: false,
+      },
+    },
+  };
+}
+
 export function bindIndicator(
   draft: StrategyWizardDraft,
   indicator: StrategyIndicatorBinding,

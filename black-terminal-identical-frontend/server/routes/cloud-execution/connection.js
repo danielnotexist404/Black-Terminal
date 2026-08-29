@@ -24,20 +24,31 @@ export default async function handler(req, res) {
     requireMethod(req, "POST");
     const { supabase, user } = await requireUser(req);
     requireFields(req.body, ["accountId"]);
-    if (process.env.CLOUD_EXECUTION_CONTROL_PLANE_ENABLED !== "true") {
+    const account = await getOwnedAccount(supabase, user.id, req.body.accountId);
+    return res.status(200).json(await activateBlackCloudConnection({
+      supabase,
+      user,
+      account,
+      automation: req.body.automation || {}
+    }));
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+export async function activateBlackCloudConnection({ supabase, user, account, automation = {}, environment = process.env }) {
+    if (environment.CLOUD_EXECUTION_CONTROL_PLANE_ENABLED !== "true") {
       const error = new Error("Black Cloud connection activation is disabled by rollout policy.");
       error.statusCode = 403;
       throw error;
     }
-
-    const account = await getOwnedAccount(supabase, user.id, req.body.accountId);
     if (account.exchange !== "bybit") {
       const error = new Error("Only the Bybit cloud adapter is available in the current certification stage.");
       error.statusCode = 501;
       throw error;
     }
     const executionEnvironment = normalizeBybitExecutionEnvironment(account.execution_environment || account.network);
-    if (!executionEnvironmentEnabled(executionEnvironment)) {
+    if (!executionEnvironmentEnabled(executionEnvironment, environment)) {
       const error = new Error(`Persistent Strategy Lab execution is disabled or not certified for ${executionEnvironment}.`);
       error.statusCode = 403;
       error.code = "BYBIT_STRATEGY_AUTOMATION_DISABLED";
@@ -143,7 +154,7 @@ export default async function handler(req, res) {
       can_manage_margin_mode: true,
       can_execute_while_offline: true,
       can_copy_trade: false,
-      can_receive_group_orders: process.env.INVESTMENT_GROUP_EXECUTION_ENABLED === "true",
+      can_receive_group_orders: environment.INVESTMENT_GROUP_EXECUTION_ENABLED === "true",
       can_withdraw: false,
       can_transfer: false,
       supported_order_types: supportedOrderTypes,
@@ -166,8 +177,8 @@ export default async function handler(req, res) {
     });
     const automationMandate = await createAutomationMandate(supabase, user.id, account, connection, {
       allowStrategyExecution: true,
-      allowInvestmentGroupExecution: process.env.INVESTMENT_GROUP_EXECUTION_ENABLED === "true",
-      ...(req.body.automation || {}), executionEnvironment });
+      allowInvestmentGroupExecution: environment.INVESTMENT_GROUP_EXECUTION_ENABLED === "true",
+      ...automation, executionEnvironment }, environment);
 
     const { error: auditError } = await supabase.from("execution_audit_events").insert({
       user_id: user.id, connection_id: connection.id, event_type: "CONNECTION_CREATED", severity: "INFO",
@@ -187,7 +198,7 @@ export default async function handler(req, res) {
     }, { onConflict: "idempotency_key", ignoreDuplicates: true });
     if (syncQueueError) throw syncQueueError;
 
-    return res.status(200).json({
+    return {
       connection: safeConnection(connection),
       secretReference,
       automationMandate: safeAutomationMandate(automationMandate),
@@ -199,10 +210,7 @@ export default async function handler(req, res) {
         ? ["BYBIT DEMO", "SIMULATED FUNDS", "MAINNET PUBLIC MARKET DATA", "SIMULATED EXECUTION"]
         : ["BYBIT MAINNET LIVE", "REAL FUNDS", "REAL EXECUTION"],
       readinessReason: "Automation is authorized; Black Cloud must complete its first account reconciliation before execution becomes ready."
-    });
-  } catch (error) {
-    return sendError(res, error);
-  }
+    };
 }
 
 function safeConnection(row) {
@@ -226,7 +234,7 @@ function safeConnection(row) {
   };
 }
 
-async function createAutomationMandate(supabase, userId, account, connection, requested) {
+async function createAutomationMandate(supabase, userId, account, connection, requested, environment = process.env) {
   const { data: risk, error: riskError } = await supabase.from("account_risk_controls").select("*").eq("account_id", account.id).maybeSingle();
   if (riskError) throw riskError;
   const { data: latest, error: latestError } = await supabase.from("broker_automation_mandates")
@@ -260,7 +268,7 @@ async function createAutomationMandate(supabase, userId, account, connection, re
     allowModify: true,
     allowStrategyExecution: requested.allowStrategyExecution !== false,
     allowCopyTrading: requested.allowCopyTrading === true,
-    allowInvestmentGroupExecution: requested.allowInvestmentGroupExecution === true && process.env.INVESTMENT_GROUP_EXECUTION_ENABLED === "true",
+    allowInvestmentGroupExecution: requested.allowInvestmentGroupExecution === true && environment.INVESTMENT_GROUP_EXECUTION_ENABLED === "true",
     allowWithdrawals: false,
     executionEnvironment: requested.executionEnvironment,
     maxOrderNotional: nullablePositive(requested.maxOrderNotional),
@@ -341,15 +349,15 @@ function maskAccountReference(value) {
   return text.length <= 6 ? text : `${text.slice(0, 3)}...${text.slice(-3)}`;
 }
 
-function executionEnvironmentEnabled(executionEnvironment) {
-  if (process.env.BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH === "true") return false;
+function executionEnvironmentEnabled(executionEnvironment, environment = process.env) {
+  if (environment.BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH === "true") return false;
   if (executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO) {
-    return process.env.BYBIT_DEMO_ENABLED === "true" && process.env.STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED === "true";
+    return environment.BYBIT_DEMO_ENABLED === "true" && environment.STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED === "true";
   }
   if (executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE) {
-    return process.env.BLACK_CLOUD_MAINNET_ENABLED === "true"
-      && process.env.STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED === "true"
-      && process.env.STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED === "true";
+    return environment.BLACK_CLOUD_MAINNET_ENABLED === "true"
+      && environment.STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED === "true"
+      && environment.STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED === "true";
   }
   return false;
 }

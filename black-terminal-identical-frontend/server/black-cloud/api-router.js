@@ -15,6 +15,7 @@ import qalcHandler from "../../api/qalc/[...path].js";
 import hyperliquidHandler from "../../api/protocols/hyperliquid/[action].js";
 import securityHandler from "../../api/security/[action].js";
 import strategiesHandler from "../../api/strategies/[...path].js";
+import strategyConnectionsHandler from "../../api/strategy-connections/[...path].js";
 
 const EXACT_ROUTES = new Map([
   ["/api/claude", claudeHandler],
@@ -22,7 +23,8 @@ const EXACT_ROUTES = new Map([
   ["/api/imm/status", immStatusHandler],
   ["/api/institutional-flow", institutionalFlowHandler],
   ["/api/portfolio/snapshot", portfolioSnapshotHandler],
-  ["/api/strategies", strategiesHandler]
+  ["/api/strategies", strategiesHandler],
+  ["/api/strategy-connections", strategyConnectionsHandler]
 ]);
 
 const DYNAMIC_ROUTES = [
@@ -37,7 +39,8 @@ const DYNAMIC_ROUTES = [
   route(/^\/api\/network\/([^/]+)\/?$/, networkHandler, ["resource"]),
   route(/^\/api\/protocols\/hyperliquid\/([^/]+)\/?$/, hyperliquidHandler, ["action"]),
   route(/^\/api\/security\/([^/]+)\/?$/, securityHandler, ["action"]),
-  route(/^\/api\/strategies\/(.+)\/?$/, strategiesHandler, ["path"], true)
+  route(/^\/api\/strategies\/(.+)\/?$/, strategiesHandler, ["path"], true),
+  route(/^\/api\/strategy-connections\/(.+)\/?$/, strategyConnectionsHandler, ["path"], true)
 ];
 
 export function resolveApiRoute(pathname) {
@@ -82,6 +85,7 @@ export function apiRouteManifest() {
       "/api/protocols/hyperliquid/:action",
       "/api/security/:action",
       "/api/strategies/:path*",
+      "/api/strategy-connections/:path*",
       "/api/liquidation-intelligence/:action (compatibility rewrite)"
     ]
   });

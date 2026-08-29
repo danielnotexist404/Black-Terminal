@@ -24,6 +24,7 @@ import { normalizeStrategyPath } from "../api/strategies/[...path].js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const migration = read("supabase/migrations/202608220001_black_core_strategy_automation.sql");
+const nineTargetMigration = read("supabase/migrations/202608290001_strategy_lab_nine_target_capacity.sql");
 const containmentMigration = read("supabase/migrations/202608230003_bcrda_signal_integrity_containment.sql");
 const archiveMigration = read("supabase/migrations/202608240001_strategy_automation_archive.sql");
 const executionMigration = read("supabase/migrations/202608240002_strategy_broker_group_execution.sql");
@@ -54,11 +55,11 @@ assert.throws(() => assertCertifiedStrategyDefinition(normalizeStrategyDefinitio
 assert.throws(() => assertCertifiedStrategyDefinition(normalizeStrategyDefinition({ ...mappedDefinition, execution: { stopReversalEnabled: true, maximumReversalChain: 6 } })), /maximum reversal chain/i);
 
 const emptySlots = buildTargetSlots([]);
-assert.equal(emptySlots.length, 10);
-assert.equal(emptySlots.filter((slot) => slot.state === "EMPTY").length, 10);
-const occupied = Array.from({ length: 10 }, (_, index) => ({ slotIndex: index + 1, status: index === 4 ? "DISCONNECTED" : "READY", id: `binding-${index}` }));
+assert.equal(emptySlots.length, 9);
+assert.equal(emptySlots.filter((slot) => slot.state === "EMPTY").length, 9);
+const occupied = Array.from({ length: 9 }, (_, index) => ({ slotIndex: index + 1, status: index === 4 ? "DISCONNECTED" : "READY", id: `binding-${index}` }));
 const occupiedSlots = buildTargetSlots(occupied);
-assert.equal(occupiedSlots.filter((slot) => slot.binding).length, 9);
+assert.equal(occupiedSlots.filter((slot) => slot.binding).length, 8);
 assert.equal(occupiedSlots[4].state, "EMPTY", "disconnect returns the stable fifth slot to empty");
 
 const livePolicy = defaultLiveCapitalPolicy("FUTURES");
@@ -110,6 +111,10 @@ assert.equal(strategySchemas.create.safeParse({ name: "Named strategy", definiti
 assert.deepEqual(normalizeStrategyPath(undefined, { url: "/api/strategies/00000000-0000-4000-8000-000000000001/targets" }), ["00000000-0000-4000-8000-000000000001", "targets"]);
 
 assert.match(migration, /slot_index integer not null check \(slot_index between 1 and 10\)/);
+assert.match(nineTargetMigration, /p_slot_index not between 1 and 9/);
+assert.match(nineTargetMigration, /live target capacity reached/);
+assert.match(nineTargetMigration, />= 9/);
+assert.match(nineTargetMigration, /slot_index = 10/);
 assert.match(migration, /where status <> 'DISCONNECTED'/);
 assert.match(migration, /live target capacity reached/);
 assert.match(migration, /strategy service identity required/g);
@@ -132,7 +137,7 @@ assert.match(migration, /black_core_reorder_strategy_targets/);
 assert.doesNotMatch(`${panel}\n${apiClient}`, /credential_ref|vault_secret/i, "Strategy Lab never requests or renders vault internals");
 assert.doesNotMatch(panel, /percentile/i, "capital UI uses Percentage terminology only");
 assert.equal((panel.match(/setInterval\(/g) || []).length, 1, "one strategy-level snapshot cadence replaces per-target polling");
-assert.match(panel, /Array\.from\(\{ length: 10 \}/);
+assert.match(panel, /Array\.from\(\{ length: 9 \}/);
 assert.match(panel, /NAME STRATEGY BEFORE SAVING/);
 assert.match(panel, /RESET PAPER ACCOUNT/);
 assert.match(panel, /Move target one slot left/);

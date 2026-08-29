@@ -54,8 +54,8 @@ export const strategySchemas = Object.freeze({
   draft: z.object({ name: z.string().trim().min(1).max(80), definition, expectedRevision: z.number().int().nonnegative().optional() }).strict(),
   publish: z.object({ expectedRevision: z.number().int().nonnegative() }).strict(),
   startVersion: z.object({ version: z.number().int().positive() }).strict(),
-  addTarget: z.object({ slotIndex: z.number().int().min(1).max(10), targetType: z.enum(["BROKER_ACCOUNT", "INVESTMENT_GROUP"]), targetId: uuid, marketType: z.enum(["SPOT", "FUTURES"]), capitalPolicy: capitalPolicy.optional() }).strict(),
-  reorderTargets: z.object({ assignments: z.array(z.object({ bindingId: uuid, slotIndex: z.number().int().min(1).max(10), expectedVersion: z.number().int().positive() }).strict()).min(1).max(10) }).strict().superRefine((value, context) => {
+  addTarget: z.object({ slotIndex: z.number().int().min(1).max(9), targetType: z.enum(["BROKER_ACCOUNT", "INVESTMENT_GROUP"]), targetId: uuid, marketType: z.enum(["SPOT", "FUTURES"]), capitalPolicy: capitalPolicy.optional() }).strict(),
+  reorderTargets: z.object({ assignments: z.array(z.object({ bindingId: uuid, slotIndex: z.number().int().min(1).max(9), expectedVersion: z.number().int().positive() }).strict()).min(1).max(9) }).strict().superRefine((value, context) => {
     if (new Set(value.assignments.map((item) => item.bindingId)).size !== value.assignments.length) context.addIssue({ code: z.ZodIssueCode.custom, path: ["assignments"], message: "Binding identifiers must be unique." });
     if (new Set(value.assignments.map((item) => item.slotIndex)).size !== value.assignments.length) context.addIssue({ code: z.ZodIssueCode.custom, path: ["assignments"], message: "Target slots must be unique." });
   }),

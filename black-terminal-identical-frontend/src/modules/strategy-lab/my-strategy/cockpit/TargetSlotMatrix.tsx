@@ -13,8 +13,8 @@ export function TargetSlotMatrix({ bindings, snapshots, selectedId, onSelect, on
   const bySlot = new Map(bindings.filter((item) => item.status !== "DISCONNECTED").map((item) => [item.slotIndex, item]));
   const snapshotById = new Map(snapshots.map((item) => [item.bindingId, item]));
   return <section className="target-matrix-section">
-    <header><div><span>AUTHORIZED DESTINATIONS</span><h2>EXECUTION TARGET MATRIX</h2></div><strong>{bySlot.size} / 10 ALLOCATED</strong></header>
-    <div className="target-slot-matrix">{Array.from({ length: 10 }, (_, index) => {
+    <header><div><span>AUTHORIZED DESTINATIONS</span><h2>EXECUTION TARGET MATRIX</h2></div><strong>{bySlot.size} / 9 ALLOCATED</strong></header>
+    <div className="target-slot-matrix">{Array.from({ length: 9 }, (_, index) => {
       const slot = index + 1;
       const binding = bySlot.get(slot);
       const snapshot = binding ? snapshotById.get(binding.id) : undefined;

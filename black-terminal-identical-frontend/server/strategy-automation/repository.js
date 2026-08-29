@@ -274,6 +274,7 @@ export async function listEligibleTargets(supabase, userId, strategyId, environm
     const validation = validateBrokerEligibility({ connection, account, capability, strategy, conflict: conflicts.has(`BROKER_ACCOUNT:${connection.id}`), environment });
     return {
       targetId: connection.id,
+      accountId: connection.account_id,
       targetType: "BROKER_ACCOUNT",
       provider: String(connection.provider || account?.exchange || "broker").toUpperCase(),
       label: connection.label || account?.account_name || "Broker Account",
@@ -348,7 +349,7 @@ export async function addTarget(supabase, userId, strategyId, body, idempotencyK
   });
   if (error) {
     if (error.code === "23505") throw strategyError(409, "STRATEGY_TARGET_CONFLICT", "The slot or target is already occupied.");
-    if (error.code === "23514") throw strategyError(409, "STRATEGY_TARGET_CAPACITY_REACHED", "All ten live target slots are occupied.");
+    if (error.code === "23514") throw strategyError(409, "STRATEGY_TARGET_CAPACITY_REACHED", "All nine live target slots are occupied.");
     if (error.code === "22023" && String(error.message).includes("idempotency")) throw strategyError(409, "IDEMPOTENCY_PAYLOAD_MISMATCH", "This idempotency key was already used for a different target mutation.");
     throw persistenceError(error);
   }

@@ -101,13 +101,17 @@ assert.ok(ownedSuperAtr.alerts.some((event) => event.semantic === "SHORT_EXIT"))
 
 for (const tab of ["OVERVIEW", "CONFIGURATION", "PAPER", "LIVE TARGETS", "POSITIONS", "TRADES", "PERFORMANCE", "RISK", "LOGS"]) assert.match(cockpit, new RegExp(tab));
 assert.match(cockpit, /rows\.length > 100/, "large Paper tables use windowed rendering");
-assert.match(targetMatrix, /Array\.from\(\{ length: 10 \}/);
+assert.match(targetMatrix, /Array\.from\(\{ length: 9 \}/);
 assert.match(targetMatrix, /No execution destination assigned/);
 assert.match(targetMatrix, /bindings\.filter/, "only occupied bindings create detailed state");
 for (const destination of ["Paper Backtester", "Connected Broker", "Investment Group"]) assert.match(targetsStep, new RegExp(destination));
 assert.match(targetsStep, /AUTHORIZE THIS DESTINATION/);
 assert.match(targetsStep, /ARM AFTER ACTIVATION/);
-assert.doesNotMatch(targetsStep, /apiKey|apiSecret|type="password"/, "Strategy Lab references pre-connected targets and never handles credentials");
+assert.match(experience, /BROKER CONNECTION/);
+assert.match(experience, /INVESTMENT GROUP/);
+assert.match(experience, /type="password"/);
+assert.match(experience, /API Secret is never returned/);
+assert.match(apiClient, /api\/strategy-connections/);
 assert.match(experience, /eligibleTargets/);
 assert.match(experience, /plan\.armOnActivation/);
 assert.match(experience, /strategyAutomationApi\.addTarget/);
@@ -138,4 +142,4 @@ assert.match(compose, /STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED: "true"/);
 assert.match(compose, /STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED: "true"/);
 assert.match(compose, /STRATEGY_AUTOMATION_GROUP_EXECUTION_ENABLED: "true"/);
 
-console.log("My Strategy UX tests PASS — empty strategy library, explicit indicator selection, private activation, ten-step workflow, versioning, cockpit navigation and destination controls verified.");
+console.log("My Strategy UX tests PASS — empty strategy library, explicit indicator selection, private activation, ten-step workflow, nine persistent destinations, versioning and connection controls verified.");

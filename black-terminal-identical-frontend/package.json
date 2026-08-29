@@ -88,7 +88,7 @@
     "qalc:worker": "node --experimental-strip-types scripts/qalc-worker.ts",
     "test:qalc": "node --experimental-strip-types scripts/qalc-tests.ts && node --experimental-strip-types scripts/qalc-chart-integration-tests.ts && node scripts/qalc-security-tests.js",
     "benchmark:qalc": "node --experimental-strip-types scripts/qalc-benchmark.ts",
-    "test:strategy-automation": "node --experimental-strip-types scripts/strategy-definition-builder-tests.ts && node scripts/strategy-automation-tests.js && node scripts/strategy-automation-postgres-tests.js && node --experimental-strip-types scripts/my-strategy-ux-tests.ts",
+    "test:strategy-automation": "node --experimental-strip-types scripts/strategy-definition-builder-tests.ts && node scripts/strategy-automation-tests.js && node scripts/strategy-connection-tests.js && node scripts/strategy-automation-postgres-tests.js && node --experimental-strip-types scripts/my-strategy-ux-tests.ts",
     "test:bybit-demo-strategy": "node scripts/bybit-demo-strategy-execution-tests.js",
     "benchmark:strategy-automation": "node scripts/strategy-automation-performance.js && node scripts/my-strategy-performance.js",
     "test:my-strategy-visual": "node scripts/my-strategy-visual-regression.js",

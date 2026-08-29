@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-export const LIVE_TARGET_LIMIT = 10;
+export const LIVE_TARGET_LIMIT = 9;
 export const TARGET_TYPES = Object.freeze(["BROKER_ACCOUNT", "INVESTMENT_GROUP"]);
 export const MARKET_TYPES = Object.freeze(["SPOT", "FUTURES"]);
 export const CLOSED_CANDLE_TIMEFRAMES = Object.freeze(["1m", "3m", "5m", "15m", "30m", "1h", "2h", "3h", "4h", "6h", "12h", "1d", "1w", "1M"]);
@@ -286,7 +286,7 @@ export function buildTargetSlots(bindings = []) {
 
 export function assertSlotIndex(value) {
   const slot = Number(value);
-  if (!Number.isInteger(slot) || slot < 1 || slot > LIVE_TARGET_LIMIT) throw strategyError(400, "STRATEGY_TARGET_SLOT_INVALID", "Target slot must be between 1 and 10.");
+  if (!Number.isInteger(slot) || slot < 1 || slot > LIVE_TARGET_LIMIT) throw strategyError(400, "STRATEGY_TARGET_SLOT_INVALID", "Target slot must be between 1 and 9.");
   return slot;
 }
 

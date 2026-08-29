@@ -1,6 +1,6 @@
 import { ChevronDown, LockKeyhole, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { StrategyWorkspace } from "../../automation/strategyAutomation.types";
+import type { StrategyTargetBinding, StrategyWorkspace } from "../../automation/strategyAutomation.types";
 import { PaperCockpit } from "../cockpit/PaperCockpit";
 import { RuntimeTimeline } from "../cockpit/RuntimeTimeline";
 import { StrategyHeader } from "../cockpit/StrategyHeader";
@@ -20,6 +20,7 @@ type Props = {
   onRefresh: () => void;
   onPaperAction: (action: "start" | "pause" | "top-up" | "reset", body?: Record<string, unknown>) => void;
   onAddTarget: (slotIndex: number) => void;
+  onModifyTarget: (binding: StrategyTargetBinding) => void;
   onTargetAction: (bindingId: string, action: "arm" | "pause" | "resume") => void;
   onDisconnectTarget: (bindingId: string) => void;
 };
@@ -37,7 +38,7 @@ export function StrategyCockpitPage(props: Props) {
       {activeTab === "overview" ? <StrategyOverview workspace={props.workspace} paperData={props.paperData} onAddTarget={props.onAddTarget} /> : null}
       {activeTab === "configuration" ? <Configuration workspace={props.workspace} onEdit={props.onEdit} /> : null}
       {activeTab === "paper" ? <PaperCockpit paper={props.workspace.paper} data={props.paperData} busy={props.busy} onAction={props.onPaperAction} /> : null}
-      {activeTab === "liveTargets" ? <><TargetSlotMatrix bindings={props.workspace.bindings} snapshots={props.workspace.snapshots} selectedId={selectedTargetId} onSelect={setSelectedTargetId} onAdd={props.onAddTarget} />{selectedTargetId && props.workspace.bindings.find((item) => item.id === selectedTargetId) ? <TargetCockpit binding={props.workspace.bindings.find((item) => item.id === selectedTargetId)!} snapshot={props.workspace.snapshots.find((item) => item.bindingId === selectedTargetId)} busy={props.busy} onAction={(action) => props.onTargetAction(selectedTargetId, action)} onDisconnect={() => props.onDisconnectTarget(selectedTargetId)} /> : <div className="live-certification-banner"><LockKeyhole size={14} /><div><strong>NO EXECUTION DESTINATION ASSIGNED</strong><span>Add an eligible connected broker account or an owned Investment Group, review its risk policy, and arm it explicitly.</span></div></div>}</> : null}
+      {activeTab === "liveTargets" ? <><TargetSlotMatrix bindings={props.workspace.bindings} snapshots={props.workspace.snapshots} selectedId={selectedTargetId} onSelect={setSelectedTargetId} onAdd={props.onAddTarget} />{selectedTargetId && props.workspace.bindings.find((item) => item.id === selectedTargetId) ? <TargetCockpit binding={props.workspace.bindings.find((item) => item.id === selectedTargetId)!} snapshot={props.workspace.snapshots.find((item) => item.bindingId === selectedTargetId)} busy={props.busy} onAction={(action) => props.onTargetAction(selectedTargetId, action)} onModify={() => props.onModifyTarget(props.workspace.bindings.find((item) => item.id === selectedTargetId)!)} onDisconnect={() => props.onDisconnectTarget(selectedTargetId)} /> : <div className="live-certification-banner"><LockKeyhole size={14} /><div><strong>NO EXECUTION DESTINATION ASSIGNED</strong><span>Add an eligible connected broker account or an owned Investment Group, review its risk policy, and arm it explicitly.</span></div></div>}</> : null}
       {activeTab === "positions" ? <DataTable kind="positions" rows={paperRows.positions} /> : null}
       {activeTab === "trades" ? <DataTable kind="trades" rows={paperRows.trades} /> : null}
       {activeTab === "performance" ? <Performance analytics={paperRows.analytics} trades={paperRows.trades} /> : null}
@@ -52,7 +53,7 @@ function Configuration({ workspace, onEdit }: { workspace: StrategyWorkspace; on
   const sections: Array<[string, Array<[string, string]>]> = [
     ["Indicator", [["Instance", definition.indicator?.instanceName || definition.indicator?.name || "—"], ["Version", definition.indicator?.version || "—"], ["Runtime", definition.indicator?.runtimeStatus || "—"], ["Settings", definition.indicator?.settingsSummary || "—"]]],
     ["Market", [["Exchange", definition.exchange.toUpperCase()], ["Symbol", definition.symbol], ["Timeframe", definition.timeframe.toUpperCase()], ["Type", definition.marketType]]],
-    ["Signals", entries(definition.signals)], ["Execution", entries(definition.execution)], ["Risk", entries(workspace.strategy.globalCapitalPolicy)], ["Filters", entries(definition.filters)], ["Exits", entries(definition.exits)], ["Targets", [["Paper", workspace.paper ? workspace.paper.status : "Not created"], ["Live", `${workspace.bindings.length} / 10 · locked`]]],
+    ["Signals", entries(definition.signals)], ["Execution", entries(definition.execution)], ["Risk", entries(workspace.strategy.globalCapitalPolicy)], ["Filters", entries(definition.filters)], ["Exits", entries(definition.exits)], ["Targets", [["Paper", workspace.paper ? workspace.paper.status : "Not created"], ["Live", `${workspace.bindings.length} / 9 · locked`]]],
   ];
   return <div className="configuration-sections"><header><div><span>CURRENT CONFIGURATION</span><h2>Published V{workspace.strategy.publishedVersion || "—"} · Running V{workspace.strategy.runningVersion || "—"}</h2></div><button type="button" onClick={onEdit}>EDIT DRAFT</button></header>{sections.map(([title, rows], index) => <details key={title} open={index < 3}><summary>{title}<span>{rows.length} settings</span></summary><div>{rows.map(([label, value]) => <p key={label}><span>{label}</span><strong>{value}</strong></p>)}</div></details>)}</div>;
 }

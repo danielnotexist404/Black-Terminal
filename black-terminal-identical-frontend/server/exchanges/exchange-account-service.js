@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { encryptCredentialPayload, toCamelAccount } from "../portfolio-api.js";
-import { resolveBybitExecutionPolicy, syncBybitAccountToSupabase, validateBybitCredentials } from "./bybit.js";
+import { getBybitApiKeyInformation, normalizeBybitPermissionReport, resolveBybitExecutionPolicy, syncBybitAccountToSupabase, validateBybitCredentials } from "./bybit.js";
 import { describeSupabaseError } from "./bybit-snapshot-store.js";
 import { BYBIT_EXECUTION_ENVIRONMENTS, resolveBybitEndpointSet } from "./bybit-endpoints.js";
 import { getBrokerAdapterDefinition } from "./broker-adapter-registry.js";
@@ -115,6 +115,130 @@ export async function establishExchangeAccount({
     account: toCamelAccount({ ...account, status: snapshotWarning ? "degraded" : validation.status, api_health: snapshotWarning ? "warning" : validation.apiHealth, latency_ms: validation.latencyMs }, riskResult.data),
     connectionResult
   };
+}
+
+export async function establishDetectedBybitAccount({ supabase, user, input }) {
+  const executionEnvironment = await detectBybitMainnetEnvironment(input);
+  const accountName = String(input.accountName || "").trim() || publicBybitAccountLabel(input.apiKey, executionEnvironment);
+  return establishExchangeAccount({
+    supabase,
+    user,
+    input: { ...input, exchange: "bybit", accountName },
+    executionEnvironment
+  });
+}
+
+export async function rotateDetectedBybitAccount({ supabase, user, account, input }) {
+  if (!account || account.user_id !== user.id || String(account.exchange).toLowerCase() !== "bybit") {
+    throw typedError("BROKER_ACCOUNT_NOT_FOUND", "The owned Bybit connection is unavailable.", 404);
+  }
+  const executionEnvironment = await detectBybitMainnetEnvironment(input);
+  const currentEnvironment = String(account.execution_environment || "").toUpperCase();
+  if (executionEnvironment !== currentEnvironment) {
+    throw typedError("BROKER_ENVIRONMENT_ROTATION_FORBIDDEN", "Credential rotation cannot move a connection between Bybit Mainnet and Bybit Mainnet Demo.", 409);
+  }
+  const endpointSet = resolveBybitEndpointSet({ executionEnvironment, endpointProfile: account.endpoint_profile || "GLOBAL" });
+  const rawCredentials = {
+    exchange: "bybit",
+    apiKey: String(input.apiKey),
+    apiSecret: String(input.apiSecret),
+    createdAt: new Date().toISOString(),
+    network: executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO ? "demo" : "mainnet",
+    executionEnvironment,
+    endpointProfile: endpointSet.region,
+    authorization: { type: "api_credentials" }
+  };
+  const validation = await validateBybitCredentials(rawCredentials);
+  const diagnostics = validation.diagnostics;
+  const permissionReport = normalizeBybitPermissionReport(diagnostics?.apiKeyInfo || {});
+  if (permissionReport.withdrawal) throw typedError("DANGEROUS_WITHDRAWAL_PERMISSION", "Withdrawal-enabled API keys are not accepted. Create a read/trade key with withdrawals disabled.", 403);
+  if (permissionReport.transfer) throw typedError("DANGEROUS_TRANSFER_PERMISSION", "Wallet-transfer-enabled API keys are not accepted.", 403);
+  if (!permissionReport.trading) throw typedError("BROKER_TRADING_PERMISSION_REQUIRED", "The Bybit key must include trading permission.", 403);
+  if (!permissionReport.accountUid || String(account.broker_account_uid || "") !== permissionReport.accountUid) {
+    throw typedError("BROKER_ACCOUNT_UID_MISMATCH", "Credential rotation must authenticate the same Bybit account UID.", 409);
+  }
+
+  const executionPolicy = resolveBybitExecutionPolicy(diagnostics.permissions, { executionEnvironment });
+  const fingerprint = crypto.createHash("sha256").update(rawCredentials.apiKey).digest("hex").slice(0, 32);
+  const credentialRef = `exchange:bybit:${executionEnvironment}:${endpointSet.region}:${user.id}:${fingerprint}`;
+  const encryptedPayload = encryptCredentialPayload(rawCredentials);
+  const { error: credentialError } = await supabase.from("exchange_credentials").upsert({
+    account_id: account.id,
+    encrypted_payload: encryptedPayload,
+    key_version: 1
+  }, { onConflict: "account_id" });
+  if (credentialError) throw credentialError;
+  const { data: updatedAccount, error: accountError } = await supabase.from("exchange_accounts").update({
+    account_name: String(input.accountName || account.account_name || "").trim() || publicBybitAccountLabel(input.apiKey, executionEnvironment),
+    status: validation.status,
+    api_health: validation.apiHealth,
+    latency_ms: validation.latencyMs,
+    permissions: executionPolicy.permissions,
+    is_read_only: !executionPolicy.tradingEnabled,
+    trading_enabled: executionPolicy.tradingEnabled,
+    credential_ref: credentialRef,
+    permission_snapshot: diagnostics.permissionSnapshot || {},
+    permission_verified_at: new Date().toISOString(),
+    last_sync_error: null
+  }).eq("id", account.id).eq("user_id", user.id).select("*").single();
+  if (accountError) throw accountError;
+  const { error: riskError } = await supabase.from("account_risk_controls").update({
+    read_only_mode: !executionPolicy.tradingEnabled,
+    trading_enabled: executionPolicy.tradingEnabled
+  }).eq("account_id", account.id);
+  if (riskError) throw riskError;
+
+  let snapshotWarning = null;
+  try {
+    await syncBybitAccountToSupabase(supabase, updatedAccount, rawCredentials, diagnostics);
+  } catch (error) {
+    snapshotWarning = `Credential rotation succeeded, but account synchronization is degraded: ${describeSupabaseError(error)}`;
+    await supabase.from("exchange_accounts").update({ status: "degraded", api_health: "warning", last_sync_error: snapshotWarning }).eq("id", account.id).eq("user_id", user.id);
+  }
+  await persistInitialConnectionHealth(supabase, user.id, updatedAccount, diagnostics, snapshotWarning);
+  await audit(supabase, {
+    userId: user.id,
+    accountId: account.id,
+    eventType: "broker_credentials_rotated",
+    severity: snapshotWarning ? "warning" : "info",
+    message: "Bybit trade-only credentials were rotated for the existing account identity.",
+    metadata: { executionEnvironment, endpointProfile: endpointSet.region, brokerAccountUidVerified: true, withdrawalPermission: false, transferPermission: false }
+  });
+  return {
+    account: toCamelAccount({ ...updatedAccount, status: snapshotWarning ? "degraded" : validation.status, api_health: snapshotWarning ? "warning" : validation.apiHealth }, null),
+    connectionResult: buildConnectionResult(diagnostics, snapshotWarning, executionPolicy, "api_credentials")
+  };
+}
+
+export async function detectBybitMainnetEnvironment(input) {
+  const apiKey = String(input.apiKey || "").trim();
+  const apiSecret = String(input.apiSecret || "").trim();
+  if (!apiKey || !apiSecret) throw typedError("MISSING_BROKER_CREDENTIALS", "API key and API secret are required.", 400);
+  const mainnetCredentials = { apiKey, apiSecret, executionEnvironment: BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE, endpointProfile: "GLOBAL" };
+  try {
+    await getBybitApiKeyInformation(mainnetCredentials);
+    return BYBIT_EXECUTION_ENVIRONMENTS.MAINNET_LIVE;
+  } catch (error) {
+    if (!isEnvironmentMismatch(error)) throw error;
+  }
+  const demoCredentials = { apiKey, apiSecret, executionEnvironment: BYBIT_EXECUTION_ENVIRONMENTS.DEMO, endpointProfile: "GLOBAL" };
+  try {
+    await getBybitApiKeyInformation(demoCredentials);
+    return BYBIT_EXECUTION_ENVIRONMENTS.DEMO;
+  } catch (error) {
+    if (!isEnvironmentMismatch(error)) throw error;
+    throw typedError("BYBIT_MAINNET_CREDENTIALS_INVALID", "The credentials are not valid on Bybit Mainnet or Bybit Mainnet Demo. Testnet credentials are not accepted.", 401);
+  }
+}
+
+function isEnvironmentMismatch(error) {
+  return error?.code === "INVALID_API_KEY" || (error?.statusCode === 401 && error?.code !== "INVALID_SIGNATURE");
+}
+
+function publicBybitAccountLabel(apiKey, executionEnvironment) {
+  const value = String(apiKey || "").trim();
+  const suffix = value.slice(-6) || "ACCOUNT";
+  return executionEnvironment === BYBIT_EXECUTION_ENVIRONMENTS.DEMO ? `Bybit Demo · ${suffix}` : `Bybit Mainnet · ${suffix}`;
 }
 
 function buildConnectionResult(diagnostics, snapshotWarning, executionPolicy, authorizationType) {

@@ -13,6 +13,7 @@ const demoExecutionMigration = fs.readFileSync(path.join(root, "supabase/migrati
 const bcrdaContainmentMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608230003_bcrda_signal_integrity_containment.sql"), "utf8");
 const archiveMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608240001_strategy_automation_archive.sql"), "utf8");
 const brokerGroupExecutionMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608240002_strategy_broker_group_execution.sql"), "utf8");
+const nineTargetMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608290001_strategy_lab_nine_target_capacity.sql"), "utf8");
 const db = new PGlite();
 
 await db.exec(`
@@ -89,6 +90,7 @@ await db.exec(demoExecutionMigration);
 await db.exec(bcrdaContainmentMigration);
 await db.exec(archiveMigration);
 await db.exec(brokerGroupExecutionMigration);
+await db.exec(nineTargetMigration);
 await db.exec("set request.jwt.claim.role='service_role'");
 
 const ownerId = crypto.randomUUID();
@@ -145,10 +147,10 @@ assert.equal(replay.result.idempotent, true);
 await assert.rejects(() => call("select public.black_core_create_strategy($1,$2,$3::jsonb,$4::jsonb,$5::jsonb,$6,$7)", [ownerId, "Different payload", json(definition), json(globalPolicy), json(paperPolicy), sha("different"), createKey]), /idempotency key payload mismatch/i);
 
 assert.equal((await scalar("select count(*)::int as value from public.strategy_paper_accounts where strategy_id=$1", [strategyId])), 1, "Paper Target is created separately");
-assert.equal((await scalar("select count(*)::int as value from public.strategy_target_bindings where strategy_id=$1", [strategyId])), 0, "ten empty UI slots create zero target rows");
+assert.equal((await scalar("select count(*)::int as value from public.strategy_target_bindings where strategy_id=$1", [strategyId])), 0, "nine empty UI slots create zero target rows");
 
 const connectionIds = [];
-for (let slot = 1; slot <= 10; slot += 1) {
+for (let slot = 1; slot <= 9; slot += 1) {
   const connectionId = crypto.randomUUID();
   const accountId = crypto.randomUUID();
   connectionIds.push(connectionId);
@@ -160,14 +162,14 @@ for (let slot = 1; slot <= 10; slot += 1) {
   const result = await call("select public.black_core_add_strategy_target($1,$2,1,$3,'BROKER_ACCOUNT',$4,$4,$5,null,'FUTURES',$6::jsonb,$7::jsonb,$8,$9,$10) as result", [ownerId, strategyId, slot, connectionId, accountId, json(livePolicy), json({ eligible: true }), policyHash, requestHash, `target-add-test-${slot}`]);
   assert.ok(result.result.bindingId);
 }
-assert.equal(await scalar("select count(*)::int as value from public.strategy_target_bindings where strategy_id=$1 and status<>'DISCONNECTED'", [strategyId]), 10);
+assert.equal(await scalar("select count(*)::int as value from public.strategy_target_bindings where strategy_id=$1 and status<>'DISCONNECTED'", [strategyId]), 9);
 
-const eleventhConnection = crypto.randomUUID();
-const eleventhAccount = crypto.randomUUID();
-await db.query("insert into public.connectivity_connections(id) values($1)", [eleventhConnection]);
-await db.query("insert into public.exchange_accounts(id) values($1)", [eleventhAccount]);
+const tenthConnection = crypto.randomUUID();
+const tenthAccount = crypto.randomUUID();
+await db.query("insert into public.connectivity_connections(id) values($1)", [tenthConnection]);
+await db.query("insert into public.exchange_accounts(id) values($1)", [tenthAccount]);
 const zeroPolicy = policy({ strategyAllocationValue: 0, tradeAmountValue: 0, maximumLeverage: 1, maximumPositionPercent: 0, maximumExposurePercent: 0, maximumDailyLoss: 0, maximumDrawdown: 0, maximumPositions: 1 });
-await assert.rejects(() => call("select public.black_core_add_strategy_target($1,$2,1,1,'BROKER_ACCOUNT',$3,$3,$4,null,'FUTURES',$5::jsonb,'{}'::jsonb,$6,$7,$8)", [ownerId, strategyId, eleventhConnection, eleventhAccount, json(zeroPolicy), sha(zeroPolicy), sha("eleventh"), "target-add-test-11"]), /capacity|constraint/i);
+await assert.rejects(() => call("select public.black_core_add_strategy_target($1,$2,1,1,'BROKER_ACCOUNT',$3,$3,$4,null,'FUTURES',$5::jsonb,'{}'::jsonb,$6,$7,$8)", [ownerId, strategyId, tenthConnection, tenthAccount, json(zeroPolicy), sha(zeroPolicy), sha("tenth"), "target-add-test-10"]), /capacity|constraint/i);
 
 const fifth = await call("select id,row_version from public.strategy_target_bindings where strategy_id=$1 and slot_index=5", [strategyId]);
 const disconnectHash = sha({ action: "DISCONNECT", expectedVersion: Number(fifth.row_version), disconnectPolicy: "DETACH_MANUAL" });
@@ -176,11 +178,11 @@ const disconnect = () => call("select public.black_core_control_strategy_target(
 await disconnect();
 const disconnectReplay = await disconnect();
 assert.equal(disconnectReplay.result.idempotent, true, "disconnect retry remains idempotent after the binding is inactive");
-assert.equal(await scalar("select count(*)::int as value from public.strategy_target_bindings where strategy_id=$1 and status<>'DISCONNECTED'", [strategyId]), 9, "disconnect returns one slot to EMPTY without deleting history");
+assert.equal(await scalar("select count(*)::int as value from public.strategy_target_bindings where strategy_id=$1 and status<>'DISCONNECTED'", [strategyId]), 8, "disconnect returns one slot to EMPTY without deleting history");
 
 const replacementPolicyHash = sha(zeroPolicy);
-await call("select public.black_core_add_strategy_target($1,$2,1,5,'BROKER_ACCOUNT',$3,$3,$4,null,'FUTURES',$5::jsonb,'{}'::jsonb,$6,$7,$8) as result", [ownerId, strategyId, eleventhConnection, eleventhAccount, json(zeroPolicy), replacementPolicyHash, sha("replacement"), "target-add-replacement"]);
-assert.equal(await scalar("select count(*)::int as value from public.strategy_target_bindings where strategy_id=$1 and status<>'DISCONNECTED'", [strategyId]), 10);
+await call("select public.black_core_add_strategy_target($1,$2,1,5,'BROKER_ACCOUNT',$3,$3,$4,null,'FUTURES',$5::jsonb,'{}'::jsonb,$6,$7,$8) as result", [ownerId, strategyId, tenthConnection, tenthAccount, json(zeroPolicy), replacementPolicyHash, sha("replacement"), "target-add-replacement"]);
+assert.equal(await scalar("select count(*)::int as value from public.strategy_target_bindings where strategy_id=$1 and status<>'DISCONNECTED'", [strategyId]), 9);
 
 const beforeReorder = await db.query("select id,slot_index,row_version from public.strategy_target_bindings where strategy_id=$1 and strategy_version=1 and slot_index in (1,2) and status<>'DISCONNECTED' order by slot_index", [strategyId]);
 const reorderAssignments = beforeReorder.rows.map((row) => ({ bindingId: row.id, slotIndex: row.slot_index === 1 ? 2 : 1, expectedVersion: Number(row.row_version) }));
@@ -245,7 +247,7 @@ const savedPaperPolicy = paperPolicy;
 const savedHash = sha({ name: "BC-RDA One Hour", definition: savedDefinition, globalPolicy, paperPolicy: savedPaperPolicy });
 await call("select public.black_core_save_strategy($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7,$8) as result", [ownerId, strategyId, "BC-RDA One Hour", json(savedDefinition), json(globalPolicy), json(savedPaperPolicy), savedHash, "strategy-save-test-0001"]);
 assert.equal(Number(await scalar("select current_version::int as value from public.strategy_automation_strategies where id=$1", [strategyId])), 2);
-assert.equal(await scalar("select count(*)::int as value from public.strategy_target_bindings where strategy_id=$1 and strategy_version=2", [strategyId]), 0, "new immutable version starts with ten empty live slots");
+assert.equal(await scalar("select count(*)::int as value from public.strategy_target_bindings where strategy_id=$1 and strategy_version=2", [strategyId]), 0, "new immutable version starts with nine empty live slots");
 assert.equal(await scalar("select count(*)::int as value from public.strategy_paper_accounts where strategy_id=$1", [strategyId]), 2, "paper history stays version-separated");
 
 await assert.rejects(() => db.query("update public.strategy_automation_versions set name='tampered' where strategy_id=$1 and version=1", [strategyId]), /immutable/i);

@@ -3,7 +3,7 @@ import { performance } from "node:perf_hooks";
 import { buildTargetSlots, calculateCapitalPreview, defaultPaperCapitalPolicy } from "../server/strategy-automation/domain.js";
 
 const samples = [];
-for (const occupiedCount of [0, 1, 3, 5, 10]) {
+for (const occupiedCount of [0, 1, 3, 5, 9]) {
   const bindings = Array.from({ length: occupiedCount }, (_, index) => ({ id: `binding-${index}`, slotIndex: index + 1, status: "READY" }));
   const policy = defaultPaperCapitalPolicy("FUTURES");
   const iterations = 25_000;

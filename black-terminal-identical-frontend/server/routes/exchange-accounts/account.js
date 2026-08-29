@@ -8,11 +8,32 @@ export default async function handler(req, res) {
 
     const { supabase, user } = await requireUser(req);
     const accountId = req.query.accountId;
+    return res.status(200).json(await removeOwnedExchangeAccount({ supabase, user, accountId }));
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+export async function removeOwnedExchangeAccount({ supabase, user, accountId }) {
     const account = await getOwnedAccount(supabase, user.id, accountId);
     const accountIdsToDelete = [account.id];
     const now = new Date().toISOString();
     const { data: cloudConnections } = await supabase.from("connectivity_connections").select("id").eq("user_id", user.id).eq("account_id", account.id);
     const connectionIds = (cloudConnections || []).map((connection) => connection.id);
+    if (connectionIds.length > 0) {
+      const { data: activeBindings, error: bindingError } = await supabase.from("strategy_target_bindings")
+        .select("id,strategy_id,slot_index")
+        .eq("owner_user_id", user.id)
+        .in("connection_id", connectionIds)
+        .neq("status", "DISCONNECTED");
+      if (bindingError) throw bindingError;
+      if (activeBindings?.length) {
+        const error = new Error("Remove this broker from every Strategy Lab target slot before deleting the persistent connection.");
+        error.statusCode = 409;
+        error.code = "BROKER_CONNECTION_IN_ACTIVE_STRATEGY";
+        throw error;
+      }
+    }
     if (connectionIds.length > 0) {
       await Promise.allSettled([
         supabase.from("broker_automation_mandates").update({ status: "REVOKED", revoked_at: now, updated_at: now }).eq("user_id", user.id).in("connection_id", connectionIds),
@@ -41,8 +62,5 @@ export default async function handler(req, res) {
       metadata: { exchange: account.exchange, removedAccountIds: accountIdsToDelete, revokedConnectionIds: connectionIds, brokerNativeOrdersPreserved: true }
     });
 
-    return res.status(200).json({ ok: true, removedAccountIds: accountIdsToDelete });
-  } catch (error) {
-    return sendError(res, error);
-  }
+    return { ok: true, removedAccountIds: accountIdsToDelete, revokedConnectionIds: connectionIds };
 }

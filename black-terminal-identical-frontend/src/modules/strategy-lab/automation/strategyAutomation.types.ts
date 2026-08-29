@@ -274,6 +274,7 @@ export type StrategyWorkspace = {
 
 export type EligibleBrokerTarget = {
   targetId: string;
+  accountId: string;
   targetType: "BROKER_ACCOUNT";
   provider: string;
   label: string;
@@ -286,6 +287,26 @@ export type EligibleBrokerTarget = {
   reconciliationStatus: string;
   maximumLeverage: number;
   validation: { eligible: boolean; reasons: string[] };
+};
+
+export type StrategyBrokerConnection = {
+  id: string;
+  accountId: string;
+  provider: string;
+  label: string;
+  publicApiKey: string;
+  apiSecretDisplay: string;
+  credentialStatus: string;
+  healthStatus: string;
+  lifecycleStatus: string;
+  credentialState: string;
+  workerState: string;
+  synchronizationState: string;
+  executionReadiness: string;
+  executionEnvironment: "DEMO" | "MAINNET_LIVE";
+  endpointProfile: string;
+  lastAuthenticatedAt?: string;
+  persistence: "VPS_MANAGED";
 };
 
 export type EligibleGroupTarget = {

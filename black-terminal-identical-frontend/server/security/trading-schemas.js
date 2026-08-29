@@ -192,7 +192,12 @@ const cloudSchemas = {
   ])
 };
 
-const schemaFamilies = { execution: executionSchemas, exchange: exchangeSchemas, hyperliquid: hyperliquidSchemas, cloud: cloudSchemas };
+const strategyConnectionSchemas = {
+  connect: z.object({ apiKey: secret, apiSecret: secret }).strict(),
+  connection: z.object({ apiKey: secret, apiSecret: secret }).strict()
+};
+
+const schemaFamilies = { execution: executionSchemas, exchange: exchangeSchemas, hyperliquid: hyperliquidSchemas, cloud: cloudSchemas, strategyConnection: strategyConnectionSchemas };
 
 export function validateTradingRequest(req, family, action) {
   if (!["POST", "PUT", "PATCH"].includes(req.method)) return;

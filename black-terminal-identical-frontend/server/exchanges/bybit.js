@@ -1458,7 +1458,11 @@ function bybitRetryAfterMs(response) {
 }
 
 export async function getBybitApiKeyInformation(credentials) {
-  const cacheKey = crypto.createHash("sha256").update(String(credentials.apiKey || "")).digest("hex").slice(0, 16);
+  const endpointSet = resolveBybitEndpointSet(credentials);
+  const cacheKey = crypto.createHash("sha256")
+    .update(`${endpointSet.environment}:${endpointSet.region}:${String(credentials.apiKey || "")}`)
+    .digest("hex")
+    .slice(0, 24);
   const cached = bybitPermissionCache.get(cacheKey);
   if (cached && Date.now() - cached.storedAt < 60_000) return cached.value;
   const value = await bybitRequest(credentials, "GET", "/v5/user/query-api", {});

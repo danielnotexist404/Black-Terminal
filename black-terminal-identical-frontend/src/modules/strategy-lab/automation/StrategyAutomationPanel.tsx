@@ -150,7 +150,7 @@ export function StrategyAutomationPanel({
           setWorkspace(null);
           setStrategyName("");
           setMessage(
-            "Name and save the current model to create its Paper Target and ten empty live slots.",
+            "Name and save the current model to create its Paper Target and nine empty live slots.",
           );
         }
       })
@@ -284,7 +284,7 @@ export function StrategyAutomationPanel({
       setMessage(
         workspace
           ? "Named strategy definition saved."
-          : "Strategy created with Paper active and all ten live targets empty.",
+          : "Strategy created with Paper active and all nine live targets empty.",
       );
     } catch (error) {
       setMessage(
@@ -377,7 +377,7 @@ export function StrategyAutomationPanel({
   ) => {
     if (!workspace) return;
     const slotIndex = binding.slotIndex + direction;
-    if (slotIndex < 1 || slotIndex > 10) return;
+    if (slotIndex < 1 || slotIndex > 9) return;
     const neighbor = bindingBySlot.get(slotIndex);
     const assignments = [
       {
@@ -572,7 +572,7 @@ export function StrategyAutomationPanel({
                   setSelectedBindingId(null);
                   setSelectedPaper(true);
                   setMessage(
-                    "Name the new strategy before creating its Paper Target and ten empty live slots.",
+                    "Name the new strategy before creating its Paper Target and nine empty live slots.",
                   );
                 }}
               >
@@ -663,7 +663,7 @@ export function StrategyAutomationPanel({
             </div>
             <div>
               <span>LIVE CAPACITY</span>
-              <b>{workspace.bindings.length} / 10</b>
+              <b>{workspace.bindings.length} / 9</b>
             </div>
             <div>
               <span>LIVE EXECUTION</span>
@@ -713,7 +713,7 @@ export function StrategyAutomationPanel({
               </button>
             </div>
             <div className="strategy-target-matrix">
-              {Array.from({ length: 10 }, (_, index) => {
+              {Array.from({ length: 9 }, (_, index) => {
                 const slotIndex = index + 1;
                 const binding = bindingBySlot.get(slotIndex);
                 return binding ? (
@@ -868,7 +868,7 @@ function NewStrategyState({
       <Bot size={30} />
       <strong>CREATE A NAMED STRATEGY</strong>
       <span>
-        The saved strategy will begin with one active Paper Target and ten
+        The saved strategy will begin with one active Paper Target and nine
         visibly empty live slots.
       </span>
       <div>

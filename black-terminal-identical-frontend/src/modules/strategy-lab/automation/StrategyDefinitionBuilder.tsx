@@ -233,7 +233,7 @@ export function StrategyDefinitionBuilder({
         <div className="strategy-builder-warning">
           <AlertTriangle size={14} /> Disconnect every live target before changing
           the strategy definition. Saving a new immutable version creates a fresh
-          Paper Target and ten empty live slots.
+          Paper Target and nine empty live slots.
         </div>
       ) : null}
       {issue ? (

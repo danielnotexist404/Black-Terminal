@@ -3,6 +3,7 @@ import type {
   EligibleBrokerTarget,
   EligibleGroupTarget,
   StrategyAutomationDefinition,
+  StrategyBrokerConnection,
   StrategyCapitalPolicy,
   StrategyPaperAccount,
   StrategySummary,
@@ -49,6 +50,32 @@ const mutation = (body: unknown, method = "POST") => ({
   headers: { "Idempotency-Key": crypto.randomUUID() },
   body: JSON.stringify(body),
 });
+
+async function connectionRequest<T>(path = "", options: RequestInit = {}): Promise<T> {
+  if (!supabase) throw new Error("Strategy connections require an authenticated session.");
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Sign in again to manage strategy connections.");
+  const response = await fetch(`/api/strategy-connections${path ? `/${path}` : ""}`, {
+    ...options,
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...options.headers,
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `Strategy connection request failed (${response.status}).`);
+  return payload as T;
+}
+
+export const strategyConnectionApi = {
+  list: () => connectionRequest<{ connections: StrategyBrokerConnection[]; limit: 9; testnetAccepted: false }>(),
+  connect: (apiKey: string, apiSecret: string) => connectionRequest<{ account: { id: string }; cloud: { connection: StrategyBrokerConnection }; publicApiKey: string; apiSecretDisplay: string }>("connect", { method: "POST", body: JSON.stringify({ apiKey, apiSecret }) }),
+  rotate: (connectionId: string, apiKey: string, apiSecret: string) => connectionRequest<{ account: { id: string }; cloud: { connection: StrategyBrokerConnection }; publicApiKey: string; apiSecretDisplay: string }>(encodeURIComponent(connectionId), { method: "PATCH", body: JSON.stringify({ apiKey, apiSecret }) }),
+  remove: (connectionId: string) => connectionRequest<{ ok: true; removedAccountIds: string[]; revokedConnectionIds: string[] }>(encodeURIComponent(connectionId), { method: "DELETE" }),
+};
 
 export const strategyAutomationApi = {
   list: (signal?: AbortSignal) =>

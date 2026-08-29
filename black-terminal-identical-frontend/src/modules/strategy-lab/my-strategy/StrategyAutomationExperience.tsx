@@ -1,14 +1,16 @@
-import { AlertTriangle, LockKeyhole, Trash2, X } from "lucide-react";
+import { AlertTriangle, Building2, KeyRound, Link2, LockKeyhole, Plus, RefreshCw, ShieldCheck, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   EligibleBrokerTarget,
   EligibleGroupTarget,
   StrategyAutomationDefinition,
+  StrategyBrokerConnection,
   StrategyCapitalPolicy,
   StrategySummary,
+  StrategyTargetBinding,
   StrategyWorkspace,
 } from "../automation/strategyAutomation.types";
-import { strategyAutomationApi } from "../automation/strategyAutomationApi";
+import { strategyAutomationApi, strategyConnectionApi } from "../automation/strategyAutomationApi";
 import type { StrategyIndicatorInstance } from "./state/indicatorManifest";
 import { createWizardDraft, defaultWizardPaperPolicy, validateWizardStep, withWorkflowDefaults, type StrategyWizardDraft } from "./state/strategyDraftStore";
 import { StrategyCockpitPage } from "./pages/StrategyCockpitPage";
@@ -42,6 +44,8 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
   const [pendingDelete, setPendingDelete] = useState<StrategySummary | null>(null);
   const [addSlot, setAddSlot] = useState<number | null>(null);
   const [eligible, setEligible] = useState<{ brokerAccounts: EligibleBrokerTarget[]; groups: EligibleGroupTarget[] } | null>(null);
+  const [brokerConnections, setBrokerConnections] = useState<StrategyBrokerConnection[]>([]);
+  const [editingBinding, setEditingBinding] = useState<StrategyTargetBinding | null>(null);
   const [wizardEligible, setWizardEligible] = useState<{ brokerAccounts: EligibleBrokerTarget[]; groups: EligibleGroupTarget[] } | null>(null);
   useEffect(() => {
     const openQalc = () => { consumeQalcStrategyHandoffIntent(); setView("qalc"); };
@@ -332,11 +336,59 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
     finally { setBusy(false); }
   };
 
-  const openTargetPicker = async (slot: number) => {
+  const openTargetPicker = async (slot: number, binding: StrategyTargetBinding | null = null) => {
     if (!workspace) { setMessage("Save the strategy configuration before adding an execution target."); return; }
-    setBusy(true); setAddSlot(slot); setEligible(null);
-    try { const result = await strategyAutomationApi.eligibleTargets(workspace.strategy.id); setEligible({ brokerAccounts: result.brokerAccounts, groups: result.groups }); }
+    setBusy(true); setAddSlot(slot); setEditingBinding(binding); setEligible(null);
+    try {
+      const [result, connections] = await Promise.all([strategyAutomationApi.eligibleTargets(workspace.strategy.id), strategyConnectionApi.list()]);
+      setEligible({ brokerAccounts: result.brokerAccounts, groups: result.groups });
+      setBrokerConnections(connections.connections);
+    }
     catch (error) { setMessage(errorMessage(error, "Eligible targets are unavailable.")); setAddSlot(null); }
+    finally { setBusy(false); }
+  };
+
+  const refreshTargetPicker = async () => {
+    if (!workspace) return null;
+    const [result, connections] = await Promise.all([strategyAutomationApi.eligibleTargets(workspace.strategy.id), strategyConnectionApi.list()]);
+    const next = { brokerAccounts: result.brokerAccounts, groups: result.groups };
+    setEligible(next); setBrokerConnections(connections.connections);
+    return next;
+  };
+
+  const linkBrokerConnection = async (apiKey: string, apiSecret: string, connectionId?: string) => {
+    if (!workspace || addSlot === null) return;
+    setBusy(true);
+    try {
+      const result = connectionId
+        ? await strategyConnectionApi.rotate(connectionId, apiKey, apiSecret)
+        : await strategyConnectionApi.connect(apiKey, apiSecret);
+      const connectedId = result.cloud.connection.id;
+      setMessage(connectionId ? "Credentials rotated. Black Cloud is reconciling the persistent connection." : "Broker authenticated. Black Cloud is reconciling it before target authorization.");
+      let next = await refreshTargetPicker();
+      if (!editingBinding && !connectionId) {
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          const target = next?.brokerAccounts.find((item) => item.targetId === connectedId);
+          if (target?.validation.eligible) { await addTarget(target); return; }
+          await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+          next = await refreshTargetPicker();
+        }
+        setMessage("Connection saved permanently. Black Cloud is still authenticating its private stream; use LINK TO TARGET when it becomes READY.");
+      } else {
+        await loadWorkspace(workspace.strategy.id);
+        setMessage("Connection credentials were modified without changing its strategy slot. Black Cloud is revalidating readiness.");
+      }
+    } catch (error) { setMessage(errorMessage(error, "Broker connection could not be linked.")); throw error; }
+    finally { setBusy(false); }
+  };
+
+  const removeBrokerConnection = async (connectionId: string) => {
+    setBusy(true);
+    try {
+      await strategyConnectionApi.remove(connectionId);
+      await refreshTargetPicker();
+      setMessage("Persistent broker connection removed. Broker-native orders were preserved and no order mutation was submitted.");
+    } catch (error) { setMessage(errorMessage(error, "Broker connection could not be removed.")); throw error; }
     finally { setBusy(false); }
   };
 
@@ -375,8 +427,8 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
     {view === "library" ? <StrategyLibraryPage strategies={strategies} loading={loading} message={message} onCreate={newStrategy} onOpen={(id) => void openStrategy(id)} onModify={(id) => void modifyStrategy(id)} onDelete={setPendingDelete} onBacktest={onOpenBacktest} onPaperAction={(strategy, action) => void libraryPaperAction(strategy, action)} /> : null}
     {view === "qalc" ? <QalcExperience onBack={() => setView("library")} /> : null}
     {view === "wizard" && draft ? <StrategyWizardPage draft={draft} chartTimeframe={chartTimeframe} indicators={indicators} bindings={workspace?.bindings || []} eligibleTargets={wizardEligible} publishedName={workspace?.strategy.name} publishedDefinition={workspace?.strategy.definition} saving={busy} message={message || (dirty ? "Draft changes have not been saved." : undefined)} onChange={(next) => { setDraft(next); setDirty(true); }} onSaveDraft={() => void persistDraft()} onRefreshTargets={prepareWizardTargets} onActivate={() => void activateConfiguredStrategy()} onCancel={() => { setView(workspace?.strategy.publishedVersion ? "cockpit" : "library"); setMessage(undefined); }} /> : null}
-    {view === "cockpit" && workspace ? <StrategyCockpitPage workspace={workspace} paperData={paperData} busy={busy} message={message} onEdit={editStrategy} onRefresh={() => void refreshCockpit()} onPaperAction={(action, body) => void paperAction(action, body)} onAddTarget={(slot) => void openTargetPicker(slot)} onTargetAction={(bindingId, action) => void targetAction(bindingId, action)} onDisconnectTarget={(bindingId) => void disconnectTarget(bindingId)} /> : null}
-    {addSlot !== null ? <TargetPicker slot={addSlot} eligible={eligible} busy={busy} onClose={() => { setAddSlot(null); setEligible(null); }} onSelect={(target) => void addTarget(target)} /> : null}
+    {view === "cockpit" && workspace ? <StrategyCockpitPage workspace={workspace} paperData={paperData} busy={busy} message={message} onEdit={editStrategy} onRefresh={() => void refreshCockpit()} onPaperAction={(action, body) => void paperAction(action, body)} onAddTarget={(slot) => void openTargetPicker(slot)} onModifyTarget={(binding) => void openTargetPicker(binding.slotIndex, binding)} onTargetAction={(bindingId, action) => void targetAction(bindingId, action)} onDisconnectTarget={(bindingId) => void disconnectTarget(bindingId)} /> : null}
+    {addSlot !== null ? <TargetPicker slot={addSlot} existingBinding={editingBinding} eligible={eligible} connections={brokerConnections} busy={busy} onClose={() => { setAddSlot(null); setEditingBinding(null); setEligible(null); }} onRefresh={() => void refreshTargetPicker()} onConnect={linkBrokerConnection} onRemoveConnection={removeBrokerConnection} onSelect={(target) => void addTarget(target)} /> : null}
     {pendingDelete ? <DeleteStrategyDialog strategy={pendingDelete} busy={busy} onCancel={() => setPendingDelete(null)} onConfirm={() => void deleteStrategy()} /> : null}
   </div>;
 }
@@ -405,9 +457,44 @@ function hydrateDraft(workspace: StrategyWorkspace): StrategyWizardDraft {
 
 function isCapitalPolicy(value: unknown): value is StrategyCapitalPolicy { return Boolean(value && typeof value === "object" && "strategyAllocationMode" in value && "tradeAmountMode" in value); }
 
-function TargetPicker({ slot, eligible, busy, onClose, onSelect }: { slot: number; eligible: { brokerAccounts: EligibleBrokerTarget[]; groups: EligibleGroupTarget[] } | null; busy: boolean; onClose: () => void; onSelect: (target: EligibleBrokerTarget | EligibleGroupTarget) => void }) {
-  const targets: Array<EligibleBrokerTarget | EligibleGroupTarget> = [...(eligible?.brokerAccounts || []), ...(eligible?.groups || [])];
-  return <div className="strategy-modal-backdrop" role="presentation"><section className="strategy-target-picker" role="dialog" aria-modal="true" aria-label={`Add target ${slot}`}><header><div><span>TARGET {String(slot).padStart(2, "0")}</span><h2>Add execution destination</h2></div><button type="button" aria-label="Close target picker" onClick={onClose}><X size={16} /></button></header><div className="target-picker-warning"><LockKeyhole size={13} /><span>Only owner-authorized, synchronized broker accounts and Investment Groups with active mandates can be selected.</span></div>{busy && !eligible ? <div className="cockpit-empty-state compact">Checking ownership, private-stream health, mandates and reconciliation…</div> : targets.length ? <div className="eligible-target-list">{targets.map((target) => <button type="button" key={`${target.targetType}:${target.targetId}`} disabled={!target.validation.eligible || busy} onClick={() => onSelect(target)}><span>{target.targetType === "BROKER_ACCOUNT" ? `${target.provider} · ${target.environment}` : "INVESTMENT GROUP"}</span><strong>{target.label}</strong><em>{target.validation.eligible ? "Eligible for explicit strategy authorization" : target.validation.reasons.join(" · ")}</em></button>)}</div> : <div className="cockpit-empty-state"><AlertTriangle size={19} /><strong>No eligible execution destination</strong><span>Connect and synchronize a broker, or activate an Investment Group mandate, then refresh.</span></div>}</section></div>;
+function TargetPicker({ slot, existingBinding, eligible, connections, busy, onClose, onRefresh, onConnect, onRemoveConnection, onSelect }: { slot: number; existingBinding: StrategyTargetBinding | null; eligible: { brokerAccounts: EligibleBrokerTarget[]; groups: EligibleGroupTarget[] } | null; connections: StrategyBrokerConnection[]; busy: boolean; onClose: () => void; onRefresh: () => void; onConnect: (apiKey: string, apiSecret: string, connectionId?: string) => Promise<void>; onRemoveConnection: (connectionId: string) => Promise<void>; onSelect: (target: EligibleBrokerTarget | EligibleGroupTarget) => void }) {
+  const [mode, setMode] = useState<"BROKER" | "GROUP" | null>(existingBinding?.targetType === "BROKER_ACCOUNT" ? "BROKER" : existingBinding?.targetType === "INVESTMENT_GROUP" ? "GROUP" : null);
+  const [apiKey, setApiKey] = useState("");
+  const [apiSecret, setApiSecret] = useState("");
+  const [editingConnectionId, setEditingConnectionId] = useState<string>();
+  const [selectedGroupId, setSelectedGroupId] = useState<string>();
+  const [localError, setLocalError] = useState<string>();
+  const eligibleById = new Map((eligible?.brokerAccounts || []).map((item) => [item.targetId, item]));
+  const editingConnection = existingBinding?.connectionId ? connections.find((item) => item.id === existingBinding.connectionId) : undefined;
+  const startModify = (connection: StrategyBrokerConnection) => { setEditingConnectionId(connection.id); setApiKey(connection.publicApiKey); setApiSecret(""); setLocalError(undefined); };
+  const submitBroker = async () => {
+    if (!apiKey.trim() || !apiSecret.trim()) { setLocalError("Both API and API Secret are required."); return; }
+    setLocalError(undefined);
+    try { await onConnect(apiKey.trim(), apiSecret.trim(), editingConnectionId); setApiSecret(""); }
+    catch (error) { setLocalError(errorMessage(error, "Connection failed.")); }
+  };
+  const removeConnection = async (connectionId: string) => {
+    setLocalError(undefined);
+    try { await onRemoveConnection(connectionId); }
+    catch (error) { setLocalError(errorMessage(error, "Connection removal failed.")); }
+  };
+  return <div className="strategy-modal-backdrop" role="presentation"><section className="strategy-target-picker strategy-connection-picker" role="dialog" aria-modal="true" aria-label={`${existingBinding ? "Modify" : "Add"} target ${slot}`}>
+    <header><div><span>TARGET {String(slot).padStart(2, "0")} · {existingBinding ? "MODIFY" : "NEW CONNECTION"}</span><h2>{existingBinding ? "Connection control" : "Add execution destination"}</h2></div><button type="button" aria-label="Close target picker" onClick={onClose}><X size={16} /></button></header>
+    <div className="target-picker-warning"><LockKeyhole size={13} /><span>Credentials are encrypted on the VPS. API Secret is never returned after submission. Testnet endpoints are rejected; Bybit Mainnet and Mainnet Demo are detected server-side.</span></div>
+    {!mode ? <div className="connection-type-menu"><button type="button" onClick={() => setMode("BROKER")}><KeyRound size={18} /><span>BROKER CONNECTION</span><strong>Direct trade-only API connection</strong></button><button type="button" onClick={() => setMode("GROUP")}><Building2 size={18} /><span>INVESTMENT GROUP</span><strong>Link a group you own or manage</strong></button></div> : null}
+    {mode === "BROKER" ? <div className="broker-connection-flow">
+      <div className="connection-flow-head"><button type="button" onClick={() => existingBinding ? onClose() : setMode(null)}>BACK</button><button type="button" onClick={onRefresh}><RefreshCw size={12} /> REFRESH</button></div>
+      <div className="credential-form"><label><span>API</span><input autoComplete="off" spellCheck={false} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Bybit API key" /></label><label><span>API SECRET</span><input type="password" autoComplete="new-password" value={apiSecret} onChange={(event) => setApiSecret(event.target.value)} placeholder={editingConnectionId ? "Enter the replacement secret" : "Bybit API secret"} /></label><button type="button" className="link-connection-button" disabled={busy} onClick={() => void submitBroker()}><Link2 size={13} /> {editingConnectionId ? "MODIFY CONNECTION" : "LINK CONNECTION"}</button></div>
+      {localError ? <div className="connection-local-error" role="alert"><AlertTriangle size={13} />{localError}</div> : null}
+      <div className="persistent-connection-list">{connections.length ? connections.map((connection) => {
+        const target = eligibleById.get(connection.id);
+        const selected = connection.id === existingBinding?.connectionId;
+        return <article key={connection.id} className={selected ? "selected" : ""}><header><div><span>{connection.provider} · {connection.executionEnvironment === "DEMO" ? "MAINNET DEMO" : "MAINNET REAL"}</span><strong>{connection.label}</strong></div><em>{connection.executionReadiness}</em></header><div className="stored-credential-grid"><label><span>API</span><input readOnly value={connection.publicApiKey || "Reconnect required"} /></label><label><span>API SECRET</span><input readOnly type="password" value={connection.apiSecretDisplay} /></label></div><p>{connection.workerState} · {connection.synchronizationState} · VPS PERSISTENT</p><footer>{!existingBinding ? <button type="button" disabled={busy || !target?.validation.eligible} onClick={() => target && onSelect(target)}><ShieldCheck size={12} /> LINK TO TARGET</button> : null}<button type="button" disabled={busy} onClick={() => startModify(connection)}>MODIFY</button>{!selected ? <button type="button" className="danger" disabled={busy} onClick={() => void removeConnection(connection.id)}>REMOVE</button> : null}</footer>{target && !target.validation.eligible ? <small>{target.validation.reasons.join(" · ")}</small> : null}</article>;
+      }) : <div className="cockpit-empty-state compact"><Plus size={17} /><strong>No broker connection yet</strong><span>Enter a trade-only Bybit Mainnet or Mainnet Demo key above.</span></div>}</div>
+      {editingConnection ? <div className="connection-selected-note"><ShieldCheck size={13} /><span>This strategy slot remains bound to {editingConnection.label} while credentials are rotated and reconciled.</span></div> : null}
+    </div> : null}
+    {mode === "GROUP" ? <div className="group-connection-flow"><div className="connection-flow-head"><button type="button" onClick={() => existingBinding ? onClose() : setMode(null)}>BACK</button><button type="button" onClick={onRefresh}><RefreshCw size={12} /> REFRESH</button></div>{eligible?.groups.length ? <><div className="eligible-target-list">{eligible.groups.map((group) => <label className={`group-toggle-row${group.validation.eligible ? " eligible" : ""}`} key={group.targetId}><input type="radio" name={`target-group-${slot}`} checked={selectedGroupId === group.targetId} disabled={!group.validation.eligible || busy} onChange={() => setSelectedGroupId(group.targetId)} /><span><b>INVESTMENT GROUP</b><strong>{group.label}</strong><em>{group.validation.eligible ? `${group.activeAuthorizedMembers} active authorized members` : group.validation.reasons.join(" · ")}</em></span></label>)}</div><button type="button" className="link-connection-button group-link-button" disabled={busy || !selectedGroupId} onClick={() => { const group = eligible.groups.find((item) => item.targetId === selectedGroupId); if (group) onSelect(group); }}><Link2 size={13} /> LINK CONNECTION</button></> : <div className="cockpit-empty-state"><Building2 size={19} /><strong>No user-created Investment Group</strong><span>Create or manage a group first. Owned and manager-authorized groups will appear here automatically.</span></div>}</div> : null}
+  </section></div>;
 }
 
 function DeleteStrategyDialog({ strategy, busy, onCancel, onConfirm }: { strategy: StrategySummary; busy: boolean; onCancel: () => void; onConfirm: () => void }) {

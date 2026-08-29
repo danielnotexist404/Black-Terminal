@@ -87,7 +87,7 @@ export function StrategyLibraryPage({ strategies, loading, message, onCreate, on
                   <Metric label="NET PNL" value={signedMoney(pnl)} tone={pnl >= 0 ? "positive" : "negative"} />
                   <Metric label="DRAWDOWN" value={`-${(strategy.paperDrawdown || 0).toFixed(2)}%`} tone="negative" />
                   <Metric label="TRADES" value={String(strategy.paperTrades || 0)} />
-                  <Metric label="LIVE TARGETS" value={`${strategy.connectedTargets || 0} / 10`} />
+                  <Metric label="LIVE TARGETS" value={`${strategy.connectedTargets || 0} / 9`} />
                   <Metric label="RUNTIME" value={humanState(strategy.runtimeState || "NOT STARTED")} />
                 </div>
                 <div className="strategy-card-last-signal"><span>Last signal</span><b>{strategy.lastSignalAt ? relativeTime(strategy.lastSignalAt) : "None yet"}</b></div>

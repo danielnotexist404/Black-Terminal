@@ -226,7 +226,7 @@ export function migrateAuctionProfileSettings(value: unknown): AuctionProfileSet
     annualizationPeriods: finite(s.annualizationPeriods, d.annualizationPeriods, 1, 1_000_000),
     unknownSideHandling: choice(s.unknownSideHandling, ["SEPARATE", "EXCLUDE_DIRECTIONAL"], d.unknownSideHandling),
     nodeDetection: {
-      source: choice(n.source, ["NET_CVD", "ABSOLUTE_CVD", "CVD_EFFICIENCY", "BUY_VOLUME", "SELL_VOLUME", "DELTA_IMBALANCE", "TPO", "VOLUME", "VOLATILITY", "PARKINSON", "HYBRID"], d.nodeDetection.source),
+      source: choice(n.source, ["SELECTED_ENGINE", "NET_CVD", "ABSOLUTE_CVD", "CVD_EFFICIENCY", "BUY_VOLUME", "SELL_VOLUME", "DELTA_IMBALANCE", "TPO", "VOLUME", "VOLATILITY", "PARKINSON", "HYBRID"], d.nodeDetection.source),
       method: choice(n.method, ["PERCENTILE", "LOCAL_MINIMA", "PROMINENCE", "Z_SCORE", "ADAPTIVE_VALLEY", "KERNEL_SMOOTHED_VALLEY", "HYBRID"], d.nodeDetection.method),
       sensitivityPercentile: finite(n.sensitivityPercentile, d.nodeDetection.sensitivityPercentile, 1, 99),
       neighborhood: integer(n.neighborhood, d.nodeDetection.neighborhood, 1, 50),

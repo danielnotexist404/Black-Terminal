@@ -13,15 +13,15 @@ export function AuctionProfileLegend({ snapshot, settings, chartType }: { snapsh
   return <div className="auction-profile-legend" aria-label="RADAP legend">
     <b>{title}</b><span>{snapshot.engine.replaceAll("_", " ")}</span>
     <em>Scope · {snapshot.scope.replaceAll("_", " ")}</em>
-    <em>Block · {Math.round(snapshot.matrix.blockDurationSeconds / 60).toLocaleString()}m</em>
+    <em>{snapshot.engine === "TPO" ? "TPO bracket" : "Block"} · {snapshot.engine === "TPO" ? settings.tpoBracketMinutes : Math.round(snapshot.matrix.blockDurationSeconds / 60).toLocaleString()}m</em>
     {forcedFootprint || settings.rendering.visualizationType !== "AUCTION_PROFILE"
       ? <><em>Matrix · {snapshot.matrix.blocks.length.toLocaleString()} × {snapshot.matrix.rows.length.toLocaleString()}</em><em>Cells · {snapshot.matrix.cells.length.toLocaleString()}</em></>
       : <>
         <em>Rows · {snapshot.rows.length.toLocaleString()}</em>
-        <em>Body · {settings.rendering.profileBodyStyle === "HDLX_CVD_BLOCKS" ? "HDLX CVD BLOCKS" : "SOLID HISTOGRAM"}</em>
+        <em>Body · {snapshot.engine === "TPO" && settings.rendering.displayStyle === "LETTERS_TPO" ? "CHRONOLOGICAL TPO LETTERS" : settings.rendering.profileBodyStyle === "HDLX_CVD_BLOCKS" ? "HDLX CVD BLOCKS" : "ENGINE HISTOGRAM"}</em>
         {settings.rendering.profileBodyStyle === "HDLX_CVD_BLOCKS" && <em>Values · {settings.rendering.profileBlockValueMode === "CUMULATIVE_CVD" ? "DEVELOPING CVD" : "BLOCK DELTA"}</em>}
       </>}
-    <em>Data · {snapshot.quality.quality} {snapshot.quality.exactTradeCoveragePercent.toFixed(0)}%</em>
+    <em>Data · {snapshot.quality.quality} · {snapshot.quality.sourceMix.map(source => source.replaceAll("_", " ")).join(" + ")}</em>
     <em>Scale · {snapshot.matrix.normalizationMode.replaceAll("_", " ")}</em>
     <em>POC · {price(snapshot.keyLevels.poc)}</em>
     <em>VAH · {price(snapshot.keyLevels.vah)}</em>

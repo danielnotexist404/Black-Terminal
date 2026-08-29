@@ -137,6 +137,7 @@ import { resolveAuctionProfileReplayWindow } from "../modules/auction-profile/co
 import type { AuctionProfileSettings, AuctionProfileSnapshot, CanonicalTrade } from "../modules/auction-profile/core/types";
 import { retainCertifiedRadapSnapshots } from "../modules/auction-profile/core/stability";
 import { canonicalCvdService, normalizeCanonicalTrade } from "../modules/auction-profile/data/tradeSource";
+import { loadAuctionProfileLowerHistory } from "../modules/auction-profile/data/lowerTimeframeHistory";
 import { buildDDAProFlowInput } from "../modules/dda-pro/data/flowPressureSource";
 import { AcvdWorkerClient } from "../modules/acvd/workers/AcvdWorkerClient";
 import { DEFAULT_ACVD_SETTINGS, migrateAcvdSettings, stableHash as acvdStableHash } from "../modules/acvd/core/settings";
@@ -2521,6 +2522,7 @@ export function PixiBlackChart({
     if (chartHistoryState !== "ready" || replaySourceRef.current.length === 0) return;
 
     let disposed = false;
+    const lowerHistoryAbort = new AbortController();
     const client = new AuctionProfileWorkerClient();
     auctionWorkerRef.current?.dispose();
     auctionWorkerRef.current = client;
@@ -2547,19 +2549,41 @@ export function PixiBlackChart({
       trade.timestamp <= end
     );
 
-    void client.initialize({
-      venue: marketSymbol.exchange,
-      symbol: marketSymbol.rawSymbol,
-      timeframe,
-      metadata: marketSymbol.metadata,
-      bars,
-      trades,
-      settings: normalizedAuctionProfileSettings,
-      sourceRevision: auctionProfileDataRevision,
-      now: replayWindow.replayBounded && replayWindow.cutoffEnd !== null
-        ? replayWindow.cutoffEnd * 1_000
-        : Date.now()
-    }).then(snapshots => {
+    void (async () => {
+      let lowerTimeframeBars: Candle[] = [];
+      const sourceWarnings: string[] = [];
+      try {
+        const lowerHistory = await loadAuctionProfileLowerHistory(
+          marketSymbol,
+          timeframe,
+          bars,
+          normalizedAuctionProfileSettings,
+          lowerHistoryAbort.signal
+        );
+        lowerTimeframeBars = lowerHistory.bars;
+        if (lowerHistory.truncated) {
+          sourceWarnings.push(`Lower-timeframe ${lowerHistory.sourceTimeframe} history is bounded to ${lowerHistory.bars.length.toLocaleString()} of ${lowerHistory.requestedBars.toLocaleString()} required bars; uncovered history remains explicitly chart-bar approximated.`);
+        }
+      } catch (error) {
+        if (lowerHistoryAbort.signal.aborted) throw error;
+        sourceWarnings.push(`Lower-timeframe history unavailable (${error instanceof Error ? error.message : String(error)}); this snapshot uses explicitly labeled chart-bar price allocation.`);
+      }
+      return client.initialize({
+        venue: marketSymbol.exchange,
+        symbol: marketSymbol.rawSymbol,
+        timeframe,
+        metadata: marketSymbol.metadata,
+        bars,
+        lowerTimeframeBars,
+        trades,
+        settings: normalizedAuctionProfileSettings,
+        sourceRevision: auctionProfileDataRevision,
+        sourceWarnings,
+        now: replayWindow.replayBounded && replayWindow.cutoffEnd !== null
+          ? replayWindow.cutoffEnd * 1_000
+          : Date.now()
+      });
+    })().then(snapshots => {
       if (disposed) return;
       const retained = retainCertifiedRadapSnapshots(
         auctionProfileSnapshotsRef.current,
@@ -2582,6 +2606,7 @@ export function PixiBlackChart({
 
     return () => {
       disposed = true;
+      lowerHistoryAbort.abort();
       if (auctionWorkerRef.current === client) auctionWorkerRef.current = null;
       client.dispose();
     };
@@ -2589,6 +2614,7 @@ export function PixiBlackChart({
     auctionDataRequired,
     marketSymbol.exchange,
     marketSymbol.rawSymbol,
+    marketSymbol.marketKind,
     timeframe,
     chartHistoryState,
     debouncedAuctionProfileCalculationVersion,

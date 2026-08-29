@@ -47,6 +47,7 @@ function emptyRows(origin: number, rowSize: number, count: number): AuctionProfi
       averageTradeSize: 0,
       maximumTradeSize: 0,
       tpoCount: 0,
+      tpoBrackets: [],
       realizedVariance: 0,
       parkinsonVariance: 0,
       garmanKlassVariance: 0,
@@ -68,6 +69,13 @@ function barIndexForTime(bars: readonly Candle[], time: number) {
     else high = middle - 1;
   }
   return Math.max(0, Math.min(bars.length - 1, high));
+}
+
+function preferredAllocationBars(bars: readonly Candle[], lowerBars: readonly Candle[]) {
+  if (!lowerBars.length) return [...bars];
+  const coveredChartIndices = new Set(lowerBars.map(bar => barIndexForTime(bars, bar.time)));
+  return [...bars.filter((_bar, index) => !coveredChartIndices.has(index)), ...lowerBars]
+    .sort((left, right) => left.time - right.time);
 }
 
 function allocationWeights(bar: Candle, start: number, end: number, rows: readonly AuctionProfileRow[], mode: string) {
@@ -98,7 +106,6 @@ function allocateBar(
   rows: AuctionProfileRow[],
   grid: Parameters<typeof auctionRowIndex>[0],
   bar: Candle,
-  previousClose: number | undefined,
   mode: string,
   tpoSets: Array<Set<number>>,
   bracketSeconds: number,
@@ -111,9 +118,6 @@ function allocateBar(
   const buyQuantity = "buy" in estimated ? estimated.buy : estimated.buyQuantity;
   const sellQuantity = "sell" in estimated ? estimated.sell : estimated.sellQuantity;
   const unknownQuantity = "unknown" in estimated ? estimated.unknown : estimated.unknownQuantity;
-  const rv = realizedVariance(bar, previousClose);
-  const pv = parkinsonVariance(bar);
-  const gkv = garmanKlassVariance(bar);
   for (let index = start; index <= end; index += 1) {
     const row = rows[index]!;
     const weight = weights[index - start]!;
@@ -127,16 +131,19 @@ function allocateBar(
     row.buyNotional += buy * row.center;
     row.sellNotional += sell * row.center;
     row.unknownNotional += unknown * row.center;
-    row.realizedVariance += rv * weight;
-    row.parkinsonVariance += pv * weight;
-    row.garmanKlassVariance += gkv * weight;
-    row.rangeExpansion += Math.max(0, bar.high - bar.low) * weight;
     tpoSets[index]!.add(Math.floor(bar.time / bracketSeconds));
   }
 }
 
-function allocateTrade(rows: AuctionProfileRow[], grid: Parameters<typeof auctionRowIndex>[0], trade: CanonicalTrade) {
-  const row = rows[auctionRowIndex(grid, trade.price)]!;
+function allocateTrade(
+  rows: AuctionProfileRow[],
+  grid: Parameters<typeof auctionRowIndex>[0],
+  trade: CanonicalTrade,
+  tpoSets: Array<Set<number>>,
+  bracketSeconds: number
+) {
+  const rowIndex = auctionRowIndex(grid, trade.price);
+  const row = rows[rowIndex]!;
   if (trade.aggressorSide === "BUY") {
     row.buyQuantity += trade.quantity;
     row.buyNotional += trade.notional;
@@ -150,6 +157,30 @@ function allocateTrade(rows: AuctionProfileRow[], grid: Parameters<typeof auctio
   row.totalQuantity += trade.quantity;
   row.tradeCount += 1;
   row.maximumTradeSize = Math.max(row.maximumTradeSize, trade.quantity);
+  tpoSets[rowIndex]!.add(Math.floor(trade.timestamp / bracketSeconds));
+}
+
+function allocateBarStatistics(
+  rows: AuctionProfileRow[],
+  grid: Parameters<typeof auctionRowIndex>[0],
+  bar: Candle,
+  previousClose: number | undefined,
+  mode: string
+) {
+  const start = auctionRowIndex(grid, bar.low);
+  const end = auctionRowIndex(grid, bar.high);
+  const weights = allocationWeights(bar, start, end, rows, mode);
+  const rv = realizedVariance(bar, previousClose);
+  const pv = parkinsonVariance(bar);
+  const gkv = garmanKlassVariance(bar);
+  for (let index = start; index <= end; index += 1) {
+    const row = rows[index]!;
+    const weight = weights[index - start]!;
+    row.realizedVariance += rv * weight;
+    row.parkinsonVariance += pv * weight;
+    row.garmanKlassVariance += gkv * weight;
+    row.rangeExpansion += Math.max(0, bar.high - bar.low) * weight;
+  }
 }
 
 function annualization(settings: AuctionProfileCalculationInput["settings"]) {
@@ -224,19 +255,23 @@ function buildScope(
   } else {
     const exactBarIndices = new Set<number>();
     trades.forEach(trade => {
-      allocateTrade(rows, grid, trade);
+      allocateTrade(rows, grid, trade, tpoSets, bracketSeconds);
       exactBarIndices.add(barIndexForTime(bars, trade.timestamp));
     });
+    const preferredBars = preferredAllocationBars(bars, lowerBars);
     const allowFallback = input.settings.dataSource === "HYBRID" || input.settings.dataSource === "LOWER_TIMEFRAME_BARS" || input.settings.dataSource === "CHART_BARS";
     if (allowFallback) {
-      const preferredBars = lowerBars.length ? lowerBars : bars;
-      preferredBars.forEach((bar, index) => {
+      preferredBars.forEach(bar => {
         const chartIndex = barIndexForTime(bars, bar.time);
         if (exactBarIndices.has(chartIndex)) return;
-        allocateBar(rows, grid, bar, preferredBars[index - 1]?.close, input.settings.priceAllocation, tpoSets, bracketSeconds);
+        allocateBar(rows, grid, bar, input.settings.priceAllocation, tpoSets, bracketSeconds);
       });
     }
-    rows.forEach((row, index) => { row.tpoCount = tpoSets[index]!.size; });
+    preferredBars.forEach((bar, index) => allocateBarStatistics(rows, grid, bar, preferredBars[index - 1]?.close, input.settings.priceAllocation));
+    rows.forEach((row, index) => {
+      row.tpoBrackets = [...tpoSets[index]!].sort((left, right) => left - right).map(bracket => bracket * bracketSeconds);
+      row.tpoCount = row.tpoBrackets.length;
+    });
     applySelectedEngine(rows, input);
   }
 
@@ -249,6 +284,7 @@ function buildScope(
     : undefined;
   const dataHash = stableHash({
     bars: bars.map(bar => [bar.time, bar.open, bar.high, bar.low, bar.close, bar.volume]),
+    lowerBars: lowerBars.map(bar => [bar.time, bar.open, bar.high, bar.low, bar.close, bar.volume]),
     trades: trades.map(trade => [trade.timestamp, trade.tradeId, trade.price, trade.quantity, trade.aggressorSide, trade.source])
   });
   const settingsHash = input.settings.settingsVersion;
@@ -268,7 +304,7 @@ function buildScope(
   const keyLevels = calculateAuctionKeyLevels(rows, input.settings, initialBalance);
   keyLevels.dominantLvn = nodes.filter(node => node.type === "LVN").sort((left, right) => right.prominence - left.prominence)[0]?.weightedCenter ?? null;
   keyLevels.dominantHvn = nodes.filter(node => node.type === "HVN").sort((left, right) => right.normalizedScore - left.normalizedScore)[0]?.weightedCenter ?? null;
-  const quality = input.settings.implementationMode === "PINE_COMPATIBILITY"
+  let quality = input.settings.implementationMode === "PINE_COMPATIBILITY"
     ? {
         requestedStart: scope.start,
         requestedEnd: scope.end,
@@ -281,9 +317,28 @@ function buildScope(
         sourceMix: [lowerBars.length ? "LOWER_TIMEFRAME_BARS" as const : "CHART_BARS" as const]
       }
     : calculateProfileDataQuality(scope.start, scope.end, bars, lowerBars, trades);
+  const barDerivedEngine = ["REALIZED_VOLATILITY", "PARKINSON_VOLATILITY", "GARMAN_KLASS_VOLATILITY", "RANGE_EXPANSION"].includes(input.settings.calculationEngine);
+  if (barDerivedEngine && input.settings.implementationMode === "BLACK_CORE_NATIVE") {
+    const barCoverage = calculateProfileDataQuality(scope.start, scope.end, bars, lowerBars, []);
+    quality = {
+      requestedStart: scope.start,
+      requestedEnd: scope.end,
+      exactTradeCoveragePercent: 0,
+      lowerTimeframeCoveragePercent: barCoverage.lowerTimeframeCoveragePercent,
+      chartBarCoveragePercent: barCoverage.chartBarCoveragePercent,
+      unknownAggressorPercent: 0,
+      missingIntervals: [],
+      quality: barCoverage.lowerTimeframeCoveragePercent >= 99 ? "HIGH" : "APPROXIMATE",
+      sourceMix: [
+        ...(barCoverage.lowerTimeframeCoveragePercent > 0 ? ["LOWER_TIMEFRAME_BARS" as const] : []),
+        ...(barCoverage.chartBarCoveragePercent > 0 ? ["CHART_BARS" as const] : [])
+      ]
+    };
+  }
   const warnings = auctionProfileLookbackWarnings(input.settings, bars.length);
+  if (input.sourceWarnings?.length) warnings.push(...input.sourceWarnings);
   if (input.settings.implementationMode === "PINE_COMPATIBILITY") warnings.push(...PINE_CVD_PROFILE_KNOWN_ANOMALIES);
-  if (quality.quality !== "EXACT") warnings.push("Historical CVD contains explicitly labeled " + quality.quality.toLowerCase() + " coverage; it is not represented as exact trade history.");
+  if (quality.quality !== "EXACT") warnings.push(`${input.settings.calculationEngine.replaceAll("_", " ")} contains explicitly labeled ${quality.quality.toLowerCase()} coverage; modeled price allocation is not represented as exact trade-at-price history.`);
   const buildDurationMs = Math.max(0, performance.now() - startedAt);
   return {
     schemaVersion: 1,
@@ -358,7 +413,13 @@ export function appendTradesToAuctionProfile(
   const startedAt = performance.now();
   const accepted = trades.filter(trade => trade.timestamp >= snapshot.range.start && trade.timestamp <= snapshot.range.end && trade.price >= snapshot.grid.priceLow && trade.price <= snapshot.grid.priceHigh);
   if (!accepted.length) return snapshot;
-  accepted.forEach(trade => allocateTrade(snapshot.rows, snapshot.grid, trade));
+  const bracketSeconds = Math.max(60, settings.tpoBracketMinutes * 60);
+  const tpoSets = snapshot.rows.map(row => new Set(row.tpoBrackets.map(bracket => Math.floor(bracket / bracketSeconds))));
+  accepted.forEach(trade => allocateTrade(snapshot.rows, snapshot.grid, trade, tpoSets, bracketSeconds));
+  snapshot.rows.forEach((row, index) => {
+    row.tpoBrackets = [...tpoSets[index]!].sort((left, right) => left - right).map(bracket => bracket * bracketSeconds);
+    row.tpoCount = row.tpoBrackets.length;
+  });
   appendTradesToAuctionMatrix(snapshot.matrix, accepted, snapshot.grid, settings);
   applySelectedEngine(snapshot.rows, { venue: snapshot.venue as AuctionProfileCalculationInput["venue"], symbol: snapshot.symbol, timeframe: snapshot.timeframe, bars: [], trades: [...accepted], settings, sourceRevision: snapshot.profileVersion });
   snapshot.keyLevels = calculateAuctionKeyLevels(snapshot.rows, settings, snapshot.keyLevels.ibHigh !== null && snapshot.keyLevels.ibLow !== null ? { high: snapshot.keyLevels.ibHigh, low: snapshot.keyLevels.ibLow } : undefined);

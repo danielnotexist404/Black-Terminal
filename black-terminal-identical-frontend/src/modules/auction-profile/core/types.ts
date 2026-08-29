@@ -2,7 +2,7 @@ import type { Candle } from "../../../chart-engine/types.ts";
 import type { ExchangeId, SymbolMetadata, Timeframe, TradeTick } from "../../../market-data/types.ts";
 
 export const AUCTION_PROFILE_SCHEMA_VERSION = 1;
-export const AUCTION_PROFILE_ENGINE_VERSION = "bc-meap-2.0.0";
+export const AUCTION_PROFILE_ENGINE_VERSION = "bc-meap-2.1.0";
 
 export type AuctionImplementationMode = "PINE_COMPATIBILITY" | "BLACK_CORE_NATIVE";
 export type AuctionScopeMode =
@@ -100,6 +100,7 @@ export type AuctionPocBasis =
   | "HYBRID";
 
 export type AuctionNodeSource =
+  | "SELECTED_ENGINE"
   | "NET_CVD"
   | "ABSOLUTE_CVD"
   | "CVD_EFFICIENCY"
@@ -386,6 +387,7 @@ export interface AuctionProfileRow {
   averageTradeSize: number;
   maximumTradeSize: number;
   tpoCount: number;
+  tpoBrackets: number[];
   realizedVariance: number;
   parkinsonVariance: number;
   garmanKlassVariance: number;
@@ -422,6 +424,7 @@ export interface AuctionBlockCell {
   notional: number;
   tradeCount: number;
   tpoCount: number;
+  tpoBrackets: number[];
   realizedVariance: number;
   garmanKlassVariance: number;
   parkinsonVariance: number;
@@ -456,6 +459,8 @@ export interface AuctionNodeZone {
     | "DIRECTIONAL_INEFFICIENCY"
     | "VOLATILITY_NODE"
     | "TPO_SINGLE_PRINT_ZONE"
+    | "TPO_LOW_ACCEPTANCE_ZONE"
+    | "TPO_ACCEPTANCE_NODE"
     | "HYBRID_STRUCTURAL_NODE";
   sourceEngine: string;
   low: number;
@@ -574,6 +579,7 @@ export interface AuctionProfileCalculationInput {
   visibleRange?: { start: number; end: number };
   sourceRevision: string;
   now?: number;
+  sourceWarnings?: string[];
 }
 
 export interface AuctionIncrementalUpdate {

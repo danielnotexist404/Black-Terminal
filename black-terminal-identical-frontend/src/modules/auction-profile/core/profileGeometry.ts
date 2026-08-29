@@ -31,6 +31,7 @@ export interface AuctionProfileRowProjection {
   netCvd: number;
   absoluteCvd: number;
   cvdEfficiency: number;
+  tpoBrackets: number[];
   rawWidthValue: number;
   normalizedWidth: number;
   normalizedBuyWidth: number;
@@ -136,6 +137,11 @@ export function buildAuctionProfileRows(snapshot: AuctionProfileSnapshot, settin
     });
     const rowSegments = Number.isFinite(segmentLimit) ? completeSegments.slice(-segmentLimit) : completeSegments;
     const netCvd = row.buyQuantity - row.sellQuantity;
+    const directionalEngine = ["CVD_REAL_TRADES", "CVD_PINE_COMPATIBLE", "DELTA_VOLUME", "IMBALANCE_RATIO"].includes(settings.calculationEngine);
+    const direction = settings.calculationEngine === "BUY_VOLUME" ? "POSITIVE"
+      : settings.calculationEngine === "SELL_VOLUME" ? "NEGATIVE"
+      : directionalEngine ? netCvd > 0 ? "POSITIVE" : netCvd < 0 ? "NEGATIVE" : "NEUTRAL"
+      : "NEUTRAL";
     return {
       rowIndex: row.index,
       priceLow: row.low,
@@ -146,11 +152,12 @@ export function buildAuctionProfileRows(snapshot: AuctionProfileSnapshot, settin
       netCvd,
       absoluteCvd: Math.abs(netCvd),
       cvdEfficiency: row.cvdEfficiency,
+      tpoBrackets: [...row.tpoBrackets],
       rawWidthValue,
       normalizedWidth: normalized(rawWidthValue, maximum, settings),
       normalizedBuyWidth: row.buyQuantity / buyMaximum,
       normalizedSellWidth: row.sellQuantity / sellMaximum,
-      direction: netCvd > 0 ? "POSITIVE" : netCvd < 0 ? "NEGATIVE" : "NEUTRAL",
+      direction,
       inValueArea: row.inValueArea,
       timeSegments: needsCells ? rowSegments : []
     };

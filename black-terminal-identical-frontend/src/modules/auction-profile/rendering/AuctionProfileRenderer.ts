@@ -16,6 +16,7 @@ import { auctionBrightnessAlpha } from "./heatmap.ts";
 import { auctionColorNumber, auctionDirectionalColor } from "./colors.ts";
 import { auctionCellTextVisible, formatAuctionCellMetric, formatAuctionMetric, formatAuctionProfileRowMetric } from "./labels.ts";
 import { auctionProfileSettingsForDevice } from "./deviceBudget.ts";
+import { auctionTpoLetters } from "../engines/tpo.ts";
 
 export { AUCTION_PROFILE_RENDERER_KIND };
 
@@ -188,7 +189,8 @@ export class AuctionProfileRenderer {
     const { left: rangeLeft, right: rangeRight } = range;
     if (rangeRight <= 0 || rangeLeft >= transform.width) return;
     if (snapshot.scope === "SESSION" && snapshotIndex < snapshotCount - 1 && rangeRight - rangeLeft < 18) return;
-    const matrixProfile = settings.rendering.profileBodyStyle === "HDLX_CVD_BLOCKS";
+    const tpoLetterProfile = snapshot.engine === "TPO" && settings.rendering.displayStyle === "LETTERS_TPO";
+    const matrixProfile = !tpoLetterProfile && settings.rendering.profileBodyStyle === "HDLX_CVD_BLOCKS";
     const profileGeometry = matrixProfile
       ? settings.rendering.profileSide === "LEFT" ? "SINGLE_SIDED_RIGHT" : "SINGLE_SIDED_LEFT"
       : settings.rendering.profileGeometry;
@@ -213,6 +215,11 @@ export class AuctionProfileRenderer {
     const blockValues = visibleRows.flatMap(row => row.timeSegments.map(segment => Math.abs(segment.value))).filter(value => value > 0).sort((a, b) => a - b);
     const robustIndex = Math.max(0, Math.min(blockValues.length - 1, Math.floor(blockValues.length * 0.98)));
     const blockMaximum = blockValues[robustIndex] ?? 1;
+    const tpoBracketSeconds = Math.max(60, settings.tpoBracketMinutes * 60);
+    const maximumTpoGlyphs = tpoLetterProfile
+      ? Math.max(...visibleRows.map(row => auctionTpoLetters(row.tpoBrackets, snapshot.range.start, tpoBracketSeconds).join("").length), 1)
+      : 1;
+    const tpoFontSize = Math.max(5, Math.min(10, bounds.width / Math.max(1, maximumTpoGlyphs * 0.64)));
     const profileTop = Math.max(transform.top, Math.min(...visibleRows.map(row => transform.yForPrice(row.priceHigh))));
     const profileBottom = Math.min(transform.bottom, Math.max(...visibleRows.map(row => transform.yForPrice(row.priceLow))));
     if (!matrixProfile) {
@@ -290,11 +297,27 @@ export class AuctionProfileRenderer {
       for (const span of spans) {
         const width = Math.max(0, span.right - span.left);
         if (width < 0.5) continue;
-        if (matrixProfile) {
+        if (tpoLetterProfile) {
+          const letters = auctionTpoLetters(row.tpoBrackets, snapshot.range.start, tpoBracketSeconds);
+          if (letters.length && this.activeTextKeys.size < settings.rendering.maximumVisibleLabels) {
+            const singlePrint = letters.length === 1;
+            this.text(
+              `profile-tpo:${snapshot.profileId}:${row.rowIndex}`,
+              letters.join(""),
+              span.left + 1,
+              y + height / 2,
+              singlePrint ? auctionColorNumber(settings.rendering.negativeColor) : row.inValueArea ? 0xf6f7f8 : 0xaeb3ba,
+              "left",
+              Math.max(5, Math.min(tpoFontSize, height - 0.5))
+            );
+          }
+        } else if (matrixProfile) {
           this.drawSegments(snapshot, row, span, y, height, settings, blockMaximum);
         } else {
           const signedValue = span.role === "NEGATIVE" ? -Math.abs(row.rawWidthValue) : span.role === "POSITIVE" ? Math.abs(row.rawWidthValue) : 0;
-          const color = auctionDirectionalColor(signedValue, row.normalizedWidth, settings.rendering);
+          const color = span.role === "NEUTRAL"
+            ? auctionColorNumber(settings.rendering.positiveColor)
+            : auctionDirectionalColor(signedValue, row.normalizedWidth, settings.rendering);
           this.profiles.rect(span.left, y, width, height)
             .fill({ color, alpha: auctionBrightnessAlpha((0.28 + row.normalizedWidth * 0.66) * settings.rendering.opacity, settings.rendering.brightness) })
             .stroke({ color: 0x080808, width: settings.rendering.cellBorder === "NONE" ? 0 : 0.6, alpha: 0.78 });
@@ -305,7 +328,7 @@ export class AuctionProfileRenderer {
       }
       const widest = spans.reduce((winner, span) => span.right - span.left > winner.right - winner.left ? span : winner, spans[0]!);
       const labelWidth = widest ? widest.right - widest.left : 0;
-      if (!matrixProfile && widest && settings.rendering.showText && this.activeTextKeys.size < settings.rendering.maximumVisibleLabels && labelVisible(settings.rendering.rowLabelMode, labelWidth, height, row.normalizedWidth)) {
+      if (!matrixProfile && !tpoLetterProfile && widest && settings.rendering.showText && this.activeTextKeys.size < settings.rendering.maximumVisibleLabels && labelVisible(settings.rendering.rowLabelMode, labelWidth, height, row.normalizedWidth)) {
         this.text(`profile-row:${snapshot.profileId}:${row.rowIndex}`, formatAuctionProfileRowMetric(row.rawWidthValue, settings.rendering.profileWidthMetric), widest.left + labelWidth / 2, y + height / 2, 0xffffff, "center", Math.max(7, Math.min(10, height - 1)));
       }
       this.metricsState.rows += 1;
@@ -389,10 +412,15 @@ export class AuctionProfileRenderer {
     const hit = [...this.hitRows].reverse().find(candidate => x >= candidate.left && x <= candidate.right && y >= candidate.top && y <= candidate.bottom);
     if (!hit || !this.settings) return this.clearHover();
     const { row, snapshot } = hit;
+    const tpoLetters = snapshot.engine === "TPO"
+      ? auctionTpoLetters(row.tpoBrackets, snapshot.range.start, Math.max(60, this.settings.tpoBracketMinutes * 60))
+      : [];
     this.hoverText.text = [
       `RADAP · ${snapshot.matrix.blocks.at(-1)?.isDeveloping ? "DEVELOPING" : "FINALIZED"}`,
       `Price  ${row.priceLow.toLocaleString()} — ${row.priceHigh.toLocaleString()}`,
-      `Width  ${formatAuctionProfileRowMetric(row.rawWidthValue, this.settings.rendering.profileWidthMetric)}`,
+      `Engine ${snapshot.engine.replaceAll("_", " ")}`,
+      `Metric ${formatAuctionProfileRowMetric(row.rawWidthValue, this.settings.rendering.profileWidthMetric)}`,
+      ...(tpoLetters.length ? [`TPO    ${tpoLetters.length} prints · ${tpoLetters.join("")}`] : []),
       `CVD    ${formatAuctionMetric(row.netCvd)}`,
       `Buy    ${formatAuctionMetric(row.buyVolume)}`,
       `Sell   ${formatAuctionMetric(row.sellVolume)}`,

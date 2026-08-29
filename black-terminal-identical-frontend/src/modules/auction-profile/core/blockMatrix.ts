@@ -48,19 +48,16 @@ type MatrixBuildInput = {
   end: number;
 };
 
-type MutableCell = AuctionBlockCell & { tpoBrackets?: Set<number> };
+type MutableCell = AuctionBlockCell;
 
 const matrixCellIndexes = new WeakMap<AuctionBlockMatrix, Map<string, AuctionBlockCell>>();
-const cellTpoBrackets = new WeakMap<AuctionBlockCell, Set<number>>();
-
 function recordTpo(cell: AuctionBlockCell, time: number, bracketSeconds: number) {
-  let brackets = cellTpoBrackets.get(cell);
-  if (!brackets) {
-    brackets = new Set<number>();
-    cellTpoBrackets.set(cell, brackets);
+  const bracket = Math.floor(time / bracketSeconds) * bracketSeconds;
+  if (!cell.tpoBrackets.includes(bracket)) {
+    cell.tpoBrackets.push(bracket);
+    cell.tpoBrackets.sort((left, right) => left - right);
   }
-  brackets.add(Math.floor(time / bracketSeconds));
-  cell.tpoCount = brackets.size;
+  cell.tpoCount = cell.tpoBrackets.length;
 }
 
 function chartSeconds(timeframe: Timeframe) {
@@ -105,6 +102,12 @@ function barTimeForTrade(bars: readonly Candle[], time: number) {
   return high >= 0 ? bars[high]!.time : undefined;
 }
 
+function preferredAllocationBars(bars: readonly Candle[], lowerBars: readonly Candle[]) {
+  if (!lowerBars.length) return [...bars];
+  const coveredChartBars = new Set(lowerBars.map(bar => barTimeForTrade(bars, bar.time)).filter((time): time is number => time !== undefined));
+  return [...bars.filter(bar => !coveredChartBars.has(bar.time)), ...lowerBars].sort((left, right) => left.time - right.time);
+}
+
 function createBlocks(start: number, end: number, duration: number, developing: boolean) {
   const count = Math.max(1, Math.ceil((end - start + 1) / duration));
   return Array.from({ length: count }, (_, index): AuctionTimeBlock => {
@@ -147,6 +150,7 @@ function emptyCell(row: AuctionProfileRow, block: AuctionTimeBlock, quality: Auc
     notional: 0,
     tradeCount: 0,
     tpoCount: 0,
+    tpoBrackets: [],
     realizedVariance: 0,
     garmanKlassVariance: 0,
     parkinsonVariance: 0,
@@ -306,7 +310,8 @@ export function buildAuctionBlockMatrix(input: MatrixBuildInput): AuctionBlockMa
     });
   }
 
-  const sourceBars = input.lowerBars.length ? input.lowerBars : input.bars;
+  const sourceBars = preferredAllocationBars(input.bars, input.lowerBars);
+  const lowerBarTimes = new Set(input.lowerBars.map(bar => bar.time));
   const allowFallback = input.settings.implementationMode === "PINE_COMPATIBILITY" || ["HYBRID", "LOWER_TIMEFRAME_BARS", "CHART_BARS"].includes(input.settings.dataSource);
   if (allowFallback) {
     let previousClose: number | undefined;
@@ -323,7 +328,7 @@ export function buildAuctionBlockMatrix(input: MatrixBuildInput): AuctionBlockMa
       const priorClose = previousClose;
       const direction = priorClose === undefined ? 0 : Math.sign(bar.close - priorClose);
       previousClose = bar.close;
-      const quality: AuctionBlockCell["dataQuality"] = input.lowerBars.length ? "LOWER_TF_APPROXIMATION" : "CHART_BAR_APPROXIMATION";
+      const quality: AuctionBlockCell["dataQuality"] = lowerBarTimes.has(bar.time) ? "LOWER_TF_APPROXIMATION" : "CHART_BAR_APPROXIMATION";
       for (let rowIndex = startRow; rowIndex <= endRow; rowIndex += 1) {
         const row = input.rows[rowIndex]!;
         const weight = weights[rowIndex - startRow]!;
@@ -348,18 +353,45 @@ export function buildAuctionBlockMatrix(input: MatrixBuildInput): AuctionBlockMa
           allocatedTotal = buy + sell + unknown;
         }
         cell.notional += allocatedTotal * row.center;
-        cell.realizedVariance += realizedVariance(bar, priorClose) * weight;
-        cell.parkinsonVariance += parkinsonVariance(bar) * weight;
-        cell.garmanKlassVariance += garmanKlassVariance(bar) * weight;
-        cell.rangeExpansion += Math.max(0, bar.high - bar.low) * weight;
         recordTpo(cell, bar.time, bracketSeconds);
+      }
+    });
+  }
+
+  const needsBarStatistics = [
+    "REALIZED_VOLATILITY",
+    "PARKINSON_VOLATILITY",
+    "GARMAN_KLASS_VOLATILITY",
+    "RANGE_EXPANSION",
+    "HYBRID_AUCTION_SCORE"
+  ].includes(input.settings.calculationEngine);
+  if (needsBarStatistics) {
+    let previousClose: number | undefined;
+    sourceBars.forEach(bar => {
+      if (bar.time < input.start || bar.time > input.end) return;
+      const block = blocks[blockIndexFor(bar.time, input.start, duration, blocks.length)]!;
+      const startRow = auctionRowIndex(input.grid, bar.low);
+      const endRow = auctionRowIndex(input.grid, bar.high);
+      const weights = allocationWeights(bar, startRow, endRow, input.rows, input.settings.priceAllocation);
+      const quality: AuctionBlockCell["dataQuality"] = lowerBarTimes.has(bar.time) ? "LOWER_TF_APPROXIMATION" : "CHART_BAR_APPROXIMATION";
+      const rv = realizedVariance(bar, previousClose);
+      const pv = parkinsonVariance(bar);
+      const gkv = garmanKlassVariance(bar);
+      previousClose = bar.close;
+      for (let rowIndex = startRow; rowIndex <= endRow; rowIndex += 1) {
+        const row = input.rows[rowIndex]!;
+        const weight = weights[rowIndex - startRow]!;
+        const cell = ensureCell(cells, row, block, quality);
+        cell.realizedVariance += rv * weight;
+        cell.parkinsonVariance += pv * weight;
+        cell.garmanKlassVariance += gkv * weight;
+        cell.rangeExpansion += Math.max(0, bar.high - bar.low) * weight;
       }
     });
   }
 
   const finalizedCells = [...cells.values()].map(cell => {
     cell.rawValue = metricValue(cell, input.settings, pineCvd.get(`${cell.blockIndex}:${cell.rowIndex}`));
-    delete cell.tpoBrackets;
     return cell as AuctionBlockCell;
   }).sort((left, right) => left.blockIndex - right.blockIndex || left.rowIndex - right.rowIndex);
   if (["CVD_REAL_TRADES", "CVD_PINE_COMPATIBLE"].includes(input.settings.calculationEngine) && input.settings.cvdMetric === "CVD_ACCELERATION") {

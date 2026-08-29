@@ -1,5 +1,6 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { AUCTION_PROFILE_DEFAULT_SETTINGS, AUCTION_PROFILE_LOOKBACK_OPTIONS } from "../core/settings.ts";
+import { configureAuctionProfileEngine } from "../core/engineContract.ts";
 import { RADAP_DISPLAY_NAME } from "../core/identity.ts";
 import { auctionScopeUsesSessionControls } from "../core/scope.ts";
 import type { AuctionProfileSettings } from "../core/types.ts";
@@ -42,6 +43,7 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
     ...current,
     offChartMetrics: checked ? [...new Set([...current.offChartMetrics, metric])] : current.offChartMetrics.filter(item => item !== metric)
   }));
+  const selectEngine = (engine: AuctionProfileSettings["calculationEngine"]) => onChange(current => configureAuctionProfileEngine(current, engine));
   const applyPreset = (preset: "PINE" | "SESSION" | "MACRO" | "DEEP_MACRO" | "FOOTPRINT") => onChange(current => {
     const next = structuredClone(current);
     next.rendering.profileWidthAuto = false;
@@ -82,6 +84,8 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
     } else if (preset === "MACRO") {
       next.implementationMode = "BLACK_CORE_NATIVE";
       next.scopeMode = "MACRO_COMPOSITE";
+      next.calculationEngine = "CVD_REAL_TRADES";
+      next.cvdMetric = "NET_CVD";
       next.lookbackBars = 5000;
       next.blockResolution = "ADAPTIVE";
       next.rendering.visualizationType = "AUCTION_PROFILE";
@@ -105,6 +109,8 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
     } else if (preset === "DEEP_MACRO") {
       next.implementationMode = "BLACK_CORE_NATIVE";
       next.scopeMode = "MACRO_COMPOSITE";
+      next.calculationEngine = "CVD_REAL_TRADES";
+      next.cvdMetric = "NET_CVD";
       next.lookbackBars = 20000;
       next.rendering.visualizationType = "AUCTION_PROFILE";
       next.rendering.profileBodyStyle = "HDLX_CVD_BLOCKS";
@@ -133,7 +139,7 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
       next.rendering.cellTextMode = "AUTO";
       next.rendering.cellBorder = "SUBTLE";
     }
-    return next;
+    return configureAuctionProfileEngine(next, next.calculationEngine);
   });
 
   return (
@@ -155,15 +161,16 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
         </div>
         <b>Calculation Engine</b>
         <label>Implementation<select value={settings.implementationMode} onChange={event => patch({ implementationMode: event.target.value as AuctionProfileSettings["implementationMode"] })}><option value="BLACK_CORE_NATIVE">Black Core Native</option><option value="PINE_COMPATIBILITY">Pine Compatibility</option></select></label>
-        <label>Engine<select value={settings.calculationEngine} onChange={event => patch({ calculationEngine: event.target.value as AuctionProfileSettings["calculationEngine"] })}>
+        <label>Engine<select value={settings.calculationEngine} onChange={event => selectEngine(event.target.value as AuctionProfileSettings["calculationEngine"])}>
           <option value="CVD_REAL_TRADES">CVD · Real Trades</option><option value="CVD_PINE_COMPATIBLE">CVD · Pine Compatible</option><option value="VOLUME">Volume</option><option value="BUY_VOLUME">Buy Volume</option><option value="SELL_VOLUME">Sell Volume</option><option value="DELTA_VOLUME">Delta Volume</option><option value="IMBALANCE_RATIO">Imbalance Ratio</option><option value="TPO">TPO</option><option value="ACTIVITY">Activity</option><option value="USD_VOLUME">USD Volume</option><option value="REALIZED_VOLATILITY">Realized Volatility</option><option value="PARKINSON_VOLATILITY">Parkinson Volatility</option><option value="GARMAN_KLASS_VOLATILITY">Garman-Klass Volatility</option><option value="RANGE_EXPANSION">Range Expansion</option><option value="TRADE_COUNT">Trade Count</option><option value="AVERAGE_TRADE_SIZE">Average Trade Size</option><option value="LIQUIDITY_WEIGHTED_ACTIVITY">Liquidity-Weighted Activity</option><option value="HYBRID_AUCTION_SCORE">Hybrid Auction Score</option>
         </select></label>
-        <label>CVD Metric<select value={settings.cvdMetric} onChange={event => patch({ cvdMetric: event.target.value as AuctionProfileSettings["cvdMetric"] })}><option value="NET_CVD">Net CVD</option><option value="ABSOLUTE_CVD">Absolute CVD</option><option value="POSITIVE_CVD">Positive CVD</option><option value="NEGATIVE_CVD">Negative CVD</option><option value="CVD_IMBALANCE_RATIO">CVD Imbalance Ratio</option><option value="CVD_EFFICIENCY">CVD Efficiency</option><option value="CVD_ACCELERATION">CVD Acceleration</option><option value="CVD_PERSISTENCE">CVD Persistence</option><option value="CVD_DIVERGENCE">CVD Divergence</option></select></label>
+        {["CVD_REAL_TRADES", "CVD_PINE_COMPATIBLE"].includes(settings.calculationEngine) && <label>CVD Metric<select value={settings.cvdMetric} onChange={event => patch({ cvdMetric: event.target.value as AuctionProfileSettings["cvdMetric"] })}><option value="NET_CVD">Net CVD</option><option value="ABSOLUTE_CVD">Absolute CVD</option><option value="POSITIVE_CVD">Positive CVD</option><option value="NEGATIVE_CVD">Negative CVD</option><option value="CVD_IMBALANCE_RATIO">CVD Imbalance Ratio</option><option value="CVD_EFFICIENCY">CVD Efficiency</option><option value="CVD_ACCELERATION">CVD Acceleration</option><option value="CVD_PERSISTENCE">CVD Persistence</option><option value="CVD_DIVERGENCE">CVD Divergence</option></select></label>}
+        {settings.calculationEngine === "TPO" && <label>TPO Bracket (minutes)<input type="number" min={1} max={1440} value={settings.tpoBracketMinutes} onChange={event => patch({ tpoBracketMinutes: Number(event.target.value) })} /></label>}
         {settings.calculationEngine === "HYBRID_AUCTION_SCORE" && <>
           <b>Hybrid Weights</b>
           {(Object.keys(settings.hybridWeights) as Array<keyof AuctionProfileSettings["hybridWeights"]>).map(key => <label key={key}>{key.replace(/([A-Z])/g, " $1")} ({settings.hybridWeights[key].toFixed(2)})<input type="range" min={0} max={2} step={0.01} value={settings.hybridWeights[key]} onChange={event => patchWeights({ [key]: Number(event.target.value) })} /></label>)}
         </>}
-        <small>Pine Compatibility preserves the original model and documented anomalies. Native mode uses canonical aggressor-side trades when available.</small>
+        <small>The selected engine now owns profile width, POC, value area and LVN/HVN detection. TPO renders chronological time-bracket letters; Volume builds volume-at-price; volatility engines distribute their own variance estimator by price. Exact and approximated source coverage remain explicitly separated.</small>
       </div>}
 
       {tab === "scope" && <div className="indicator-settings-section">
@@ -212,7 +219,7 @@ export function AuctionProfileSettingsPanel({ settings, onChange, onClose }: Pro
 
       {tab === "nodes" && <div className="indicator-settings-section">
         <b>LVN / HVN Intelligence</b>
-        <label>Source<select value={settings.nodeDetection.source} onChange={event => patchNodes({ source: event.target.value as AuctionProfileSettings["nodeDetection"]["source"] })}><option value="ABSOLUTE_CVD">Absolute CVD</option><option value="NET_CVD">Net CVD</option><option value="CVD_EFFICIENCY">CVD Efficiency</option><option value="BUY_VOLUME">Buy Volume</option><option value="SELL_VOLUME">Sell Volume</option><option value="DELTA_IMBALANCE">Delta Imbalance</option><option value="VOLUME">Volume</option><option value="TPO">TPO</option><option value="VOLATILITY">Volatility</option><option value="PARKINSON">Parkinson</option><option value="HYBRID">Hybrid</option></select></label>
+        <label>Source<select value={settings.nodeDetection.source} onChange={event => patchNodes({ source: event.target.value as AuctionProfileSettings["nodeDetection"]["source"] })}><option value="SELECTED_ENGINE">Selected Engine · Linked</option><option value="ABSOLUTE_CVD">Absolute CVD</option><option value="NET_CVD">Net CVD</option><option value="CVD_EFFICIENCY">CVD Efficiency</option><option value="BUY_VOLUME">Buy Volume</option><option value="SELL_VOLUME">Sell Volume</option><option value="DELTA_IMBALANCE">Delta Imbalance</option><option value="VOLUME">Volume</option><option value="TPO">TPO</option><option value="VOLATILITY">Volatility</option><option value="PARKINSON">Parkinson</option><option value="HYBRID">Hybrid</option></select></label>
         <label>Method<select value={settings.nodeDetection.method} onChange={event => patchNodes({ method: event.target.value as AuctionProfileSettings["nodeDetection"]["method"] })}><option value="HYBRID">Hybrid</option><option value="PERCENTILE">Percentile</option><option value="LOCAL_MINIMA">Local Minima</option><option value="PROMINENCE">Prominence</option><option value="Z_SCORE">Z-Score</option><option value="ADAPTIVE_VALLEY">Adaptive Valley</option><option value="KERNEL_SMOOTHED_VALLEY">Kernel-Smoothed Valley</option></select></label>
         <label>Sensitivity ({settings.nodeDetection.sensitivityPercentile}%)<input type="range" min={1} max={49} value={settings.nodeDetection.sensitivityPercentile} onChange={event => patchNodes({ sensitivityPercentile: Number(event.target.value) })} /></label>
         <label>Prominence ({Math.round(settings.nodeDetection.prominence * 100)}%)<input type="range" min={0} max={80} value={settings.nodeDetection.prominence * 100} onChange={event => patchNodes({ prominence: Number(event.target.value) / 100 })} /></label>

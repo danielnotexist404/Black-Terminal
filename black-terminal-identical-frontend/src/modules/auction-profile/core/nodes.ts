@@ -9,6 +9,7 @@ function percentile(values: readonly number[], percent: number) {
 
 function nodeSource(row: AuctionProfileRow, settings: AuctionProfileSettings) {
   switch (settings.nodeDetection.source) {
+    case "SELECTED_ENGINE": return Math.abs(row.value);
     case "NET_CVD": return Math.abs(row.buyQuantity - row.sellQuantity);
     case "CVD_EFFICIENCY": return Math.abs(row.cvdEfficiency);
     case "BUY_VOLUME": return row.buyQuantity;
@@ -22,6 +23,27 @@ function nodeSource(row: AuctionProfileRow, settings: AuctionProfileSettings) {
     case "ABSOLUTE_CVD":
     default: return Math.abs(row.buyQuantity - row.sellQuantity);
   }
+}
+
+function lvnClassification(
+  settings: AuctionProfileSettings,
+  rows: readonly AuctionProfileRow[],
+  componentRowIndices: readonly number[]
+): AuctionNodeZone["classification"] {
+  const engine = settings.calculationEngine;
+  if (settings.nodeDetection.source === "TPO" || engine === "TPO") {
+    return componentRowIndices.every(index => rows[index]!.tpoCount === 1)
+      ? "TPO_SINGLE_PRINT_ZONE"
+      : "TPO_LOW_ACCEPTANCE_ZONE";
+  }
+  if (settings.nodeDetection.source === "HYBRID" || engine === "HYBRID_AUCTION_SCORE") return "HYBRID_STRUCTURAL_NODE";
+  if (
+    settings.nodeDetection.source === "VOLATILITY"
+    || settings.nodeDetection.source === "PARKINSON"
+    || ["REALIZED_VOLATILITY", "PARKINSON_VOLATILITY", "GARMAN_KLASS_VOLATILITY", "RANGE_EXPANSION"].includes(engine)
+  ) return "VOLATILITY_NODE";
+  if (settings.nodeDetection.source.includes("CVD") || ["CVD_REAL_TRADES", "CVD_PINE_COMPATIBLE", "DELTA_VOLUME", "IMBALANCE_RATIO"].includes(engine)) return "CVD_LVN";
+  return "DIRECTIONAL_INEFFICIENCY";
 }
 
 function mergeCandidates(candidates: number[], maximumGap: number) {
@@ -106,15 +128,17 @@ export function detectAuctionNodes(
       const weight = componentRowIndices.reduce((sum, index) => sum + Math.max(values[index]!, Number.EPSILON), 0);
       const weightedCenter = componentRowIndices.reduce((sum, index) => sum + rows[index]!.center * Math.max(values[index]!, Number.EPSILON), 0) / weight;
       const directional = componentRowIndices.reduce((sum, index) => sum + rows[index]!.buyQuantity - rows[index]!.sellQuantity, 0);
+      const tpoSource = settings.nodeDetection.source === "TPO" || settings.calculationEngine === "TPO";
       const classification = type === "LVN"
-        ? settings.nodeDetection.source === "TPO" ? "TPO_SINGLE_PRINT_ZONE" : settings.nodeDetection.source.includes("CVD") ? "CVD_LVN" : "DIRECTIONAL_INEFFICIENCY"
+        ? lvnClassification(settings, rows, componentRowIndices)
+        : tpoSource ? "TPO_ACCEPTANCE_NODE"
         : Math.abs(directional) < componentRowIndices.reduce((sum, index) => sum + rows[index]!.totalQuantity, 0) * 0.1 ? "BALANCED_ACCEPTANCE_NODE"
           : directional > 0 ? "BUY_DOMINANT_HVN" : "SELL_DOMINANT_HVN";
       nodes.push({
         id: type.toLowerCase() + ":" + first.index + ":" + last.index,
         type,
         classification,
-        sourceEngine: settings.nodeDetection.source,
+        sourceEngine: settings.nodeDetection.source === "SELECTED_ENGINE" ? settings.calculationEngine : settings.nodeDetection.source,
         low: first.low,
         high: last.high,
         center: (first.low + last.high) / 2,

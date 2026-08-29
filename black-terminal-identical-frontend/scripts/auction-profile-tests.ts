@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { AUCTION_PROFILE_DEFAULT_SETTINGS, auctionProfileCalculationSettingsHash, migrateAuctionProfileSettings } from "../src/modules/auction-profile/core/settings.ts";
 import { stableHash } from "../src/modules/auction-profile/core/canonical.ts";
+import { configureAuctionProfileEngine } from "../src/modules/auction-profile/core/engineContract.ts";
 import { RADAP_DISPLAY_NAME, RADAP_FULL_NAME, RADAP_SHORT_NAME } from "../src/modules/auction-profile/core/identity.ts";
 import { retainCertifiedRadapSnapshots } from "../src/modules/auction-profile/core/stability.ts";
 import { resolveAuctionProfileReplayWindow } from "../src/modules/auction-profile/core/replay.ts";
@@ -18,7 +19,9 @@ import { resolveAuctionVisualizationLayers } from "../src/modules/auction-profil
 import { validateAuctionProfileInvariants } from "../src/modules/auction-profile/testing/nativeValidation.ts";
 import { PINE_CVD_PROFILE_KNOWN_ANOMALIES } from "../src/modules/auction-profile/engines/pineCompatibility.ts";
 import { appendTradesToAuctionProfile, calculateAuctionProfile, calculateAuctionProfiles } from "../src/modules/auction-profile/engines/nativeEngine.ts";
+import { auctionTpoLetters } from "../src/modules/auction-profile/engines/tpo.ts";
 import { InMemoryCanonicalCvdService } from "../src/modules/auction-profile/data/tradeSource.ts";
+import { auctionProfileNeedsLowerHistory, resolveAuctionLowerSourceTimeframe, resolveAuctionTpoSourceTimeframe } from "../src/modules/auction-profile/core/lowerTimeframe.ts";
 import { AuctionProfileWorkerRuntime } from "../src/modules/auction-profile/worker/auctionProfileWorker.ts";
 import { AuctionProfileWorkerClient } from "../src/modules/auction-profile/worker/AuctionProfileWorkerClient.ts";
 import { auctionProfileSettingsForDevice, RADAP_TABLET_RENDER_BUDGET } from "../src/modules/auction-profile/rendering/deviceBudget.ts";
@@ -231,6 +234,7 @@ const gapRows: AuctionProfileRow[] = gapActivity.map((totalQuantity, index) => (
   averageTradeSize: 1,
   maximumTradeSize: 1,
   tpoCount: totalQuantity,
+  tpoBrackets: [],
   realizedVariance: 0,
   parkinsonVariance: 0,
   garmanKlassVariance: 0,
@@ -266,7 +270,7 @@ const isolatedMinima = detectAuctionNodes(gapRows, migrateAuctionProfileSettings
   nodeDetection: { ...gapSettings.nodeDetection, lvnGapAware: false }
 }), input.now, "isolated-minima-v1").filter(node => node.type === "LVN");
 assert.equal(isolatedMinima.length, 0, "isolated-minimum mode must not misrepresent a multi-row valley when its minimum width is unmet");
-assert.equal(snapshot.engineVersion, "bc-meap-2.0.0");
+assert.equal(snapshot.engineVersion, "bc-meap-2.1.0");
 assert.ok(snapshot.matrix.blocks.length > 0);
 assert.ok(snapshot.matrix.cells.length > 0);
 assert.deepEqual(validateAuctionProfileInvariants(snapshot), []);
@@ -396,13 +400,25 @@ assert.equal(exactCell(0, 63050)?.rawValue, -4, "aggressive sells must remain ne
 assert.equal(exactCell(1, 63100)?.rawValue, 6, "the live block must preserve its own time column");
 assert.equal(exactCell(0, 63000)?.isFinalized, true);
 assert.equal(exactCell(1, 63100)?.isDeveloping, true);
+const tpoSettings = migrateAuctionProfileSettings(configureAuctionProfileEngine(exactSettings, "TPO"));
+assert.equal(tpoSettings.valueAreaBasis, "TPO");
+assert.equal(tpoSettings.pocBasis, "MAXIMUM_TPO");
+assert.equal(tpoSettings.nodeDetection.source, "TPO");
+assert.equal(tpoSettings.rendering.profileWidthMetric, "SELECTED_ENGINE");
+assert.equal(tpoSettings.rendering.displayStyle, "LETTERS_TPO");
+assert.equal(tpoSettings.rendering.profileBodyStyle, "SOLID_HISTOGRAM");
+assert.equal(resolveAuctionTpoSourceTimeframe(30), "30m");
+assert.equal(resolveAuctionTpoSourceTimeframe(45), "15m", "non-native TPO brackets must use the finest exact divisor available");
+assert.equal(resolveAuctionLowerSourceTimeframe(tpoSettings), "30m");
+assert.equal(auctionProfileNeedsLowerHistory("4h", tpoSettings), true, "higher-timeframe TPO must request bracket-scale history");
+assert.equal(auctionProfileNeedsLowerHistory("15m", tpoSettings), false, "a chart already finer than the TPO bracket needs no duplicate history request");
 const tpoSnapshot = calculateAuctionProfile({
   venue: "bybit",
   symbol: "BTCUSDT",
   timeframe: "1m",
   bars: exactBars,
   trades: exactTrades,
-  settings: migrateAuctionProfileSettings({ ...exactSettings, calculationEngine: "TPO" }),
+  settings: tpoSettings,
   sourceRevision: "matrix-tpo-fixture-v1"
 });
 assert.ok(tpoSnapshot);
@@ -411,6 +427,51 @@ assert.equal(
   1,
   "multiple prints in one row and TPO bracket must remain one TPO observation"
 );
+const tpoRow63000 = tpoSnapshot.rows.find(row => row.low <= 63000 && row.high > 63000);
+assert.equal(tpoRow63000?.tpoCount, 1, "aggregate TPO must deduplicate repeated exact trades in one price/bracket");
+assert.equal(tpoRow63000?.tpoBrackets.length, 1, "TPO must retain the real bracket identity required for letter rendering");
+assert.deepEqual(
+  auctionTpoLetters(tpoRow63000?.tpoBrackets ?? [], tpoSnapshot.range.start, tpoSettings.tpoBracketMinutes * 60),
+  ["A"],
+  "the first chronological TPO bracket must render as the authentic A print"
+);
+const tpoProfileRows = buildAuctionProfileRows(tpoSnapshot, tpoSettings);
+assert.equal(tpoProfileRows.find(row => row.priceLow <= 63000 && row.priceHigh > 63000)?.rawWidthValue, 1, "TPO profile width must be time-at-price, not CVD activity");
+
+const volumeSettings = migrateAuctionProfileSettings(configureAuctionProfileEngine(exactSettings, "VOLUME"));
+assert.equal(volumeSettings.valueAreaBasis, "TOTAL_VOLUME");
+assert.equal(volumeSettings.pocBasis, "MAXIMUM_TOTAL_VOLUME");
+assert.equal(volumeSettings.nodeDetection.source, "SELECTED_ENGINE");
+assert.equal(volumeSettings.rendering.profileWidthMetric, "SELECTED_ENGINE");
+const volumeSnapshot = calculateAuctionProfile({
+  venue: "bybit",
+  symbol: "BTCUSDT",
+  timeframe: "1m",
+  bars: exactBars,
+  trades: exactTrades,
+  settings: volumeSettings,
+  sourceRevision: "matrix-volume-fixture-v1"
+});
+assert.ok(volumeSnapshot);
+assert.equal(volumeSnapshot.rows.find(row => row.low <= 63000 && row.high > 63000)?.value, 3, "volume profile must use exact executed quantity at price");
+assert.equal(volumeSnapshot.rows.find(row => row.low <= 63050 && row.high > 63050)?.value, 4);
+assert.equal(volumeSnapshot.rows.find(row => row.low <= 63100 && row.high > 63100)?.value, 6);
+assert.notEqual(volumeSnapshot.keyLevels.poc, tpoSnapshot.keyLevels.poc, "volume POC and time-at-price POC must derive independently when their distributions differ");
+
+const volatilitySettings = migrateAuctionProfileSettings(configureAuctionProfileEngine(exactSettings, "PARKINSON_VOLATILITY"));
+const volatilitySnapshot = calculateAuctionProfile({
+  venue: "bybit",
+  symbol: "BTCUSDT",
+  timeframe: "1m",
+  bars: exactBars,
+  trades: exactTrades,
+  settings: volatilitySettings,
+  sourceRevision: "matrix-volatility-fixture-v1"
+});
+assert.ok(volatilitySnapshot);
+assert.ok(volatilitySnapshot.rows.some(row => row.value > 0), "volatility-at-price must be populated from OHLC range estimators even when exact trades cover the bars");
+assert.equal(volatilitySnapshot.quality.exactTradeCoveragePercent, 0, "bar-derived volatility must never claim exact trade-at-price coverage");
+assert.equal(volatilitySnapshot.quality.chartBarCoveragePercent, 100);
 const frozenValue = exactCell(0, 63000)!.rawValue;
 const developingBefore = exactCell(1, 63100)!.rawValue;
 appendTradesToAuctionProfile(exactSnapshot, [{

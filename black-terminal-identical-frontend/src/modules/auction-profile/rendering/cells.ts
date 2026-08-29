@@ -15,7 +15,7 @@ export function downsampleAuctionCells(cells: readonly AuctionBlockCell[], colum
     const key = `${blockIndex}:${rowIndex}`;
     const current = groups.get(key);
     if (!current) {
-      groups.set(key, { ...cell, id: `render-cell:${key}`, blockIndex, rowIndex });
+      groups.set(key, { ...cell, tpoBrackets: [...cell.tpoBrackets], id: `render-cell:${key}`, blockIndex, rowIndex });
       continue;
     }
     current.priceLow = Math.min(current.priceLow, cell.priceLow);
@@ -29,7 +29,8 @@ export function downsampleAuctionCells(cells: readonly AuctionBlockCell[], colum
     current.totalValue += cell.totalValue;
     current.notional += cell.notional;
     current.tradeCount += cell.tradeCount;
-    current.tpoCount += cell.tpoCount;
+    current.tpoBrackets = [...new Set([...current.tpoBrackets, ...cell.tpoBrackets])].sort((left, right) => left - right);
+    current.tpoCount = current.tpoBrackets.length;
     current.garmanKlassVariance += cell.garmanKlassVariance;
     current.realizedVariance += cell.realizedVariance;
     current.parkinsonVariance += cell.parkinsonVariance;

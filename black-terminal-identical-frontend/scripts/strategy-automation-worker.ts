@@ -135,9 +135,9 @@ async function tick() {
 }
 
 async function processStrategy(strategy: JsonRow) {
-  const runningVersion = Number(
-    strategy.running_version ?? strategy.current_version ?? 0,
-  );
+  // Never execute a published-but-not-started version. running_version is set
+  // only by the explicit, audited version-start transition.
+  const runningVersion = Number(strategy.running_version ?? 0);
   if (!Number.isInteger(runningVersion) || runningVersion < 1)
     return heartbeat(strategy, "PAUSED", "NO_RUNNING_VERSION");
   const { data: version, error: versionError } = await supabase

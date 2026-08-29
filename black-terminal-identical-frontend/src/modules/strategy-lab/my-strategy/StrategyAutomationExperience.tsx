@@ -549,7 +549,12 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
 }
 
 function persistedDefinition(draft: StrategyWizardDraft): StrategyAutomationDefinition {
-  return { ...draft.definition, metadata: { ...draft.definition.metadata, description: draft.description, tags: draft.tags }, paper: { ...draft.definition.paper, capitalPolicy: draft.paperPolicy } };
+  const base = { ...draft.definition, metadata: { ...draft.definition.metadata, description: draft.description, tags: draft.tags }, paper: { ...draft.definition.paper, capitalPolicy: draft.paperPolicy } };
+  if (base.runtimeKind !== "builtin-superatr-seven-step") return base;
+  // Script Editor input keys can be variable names or their human-facing Pine
+  // labels. Normalize both forms into the immutable native SuperATR contract
+  // before the VPS worker ever evaluates a bar.
+  return applyStrategyControlPanel(base, draft.paperPolicy, readStrategyControlPanel(base, draft.paperPolicy)).definition;
 }
 
 function hydrateDraft(workspace: StrategyWorkspace): StrategyWizardDraft {

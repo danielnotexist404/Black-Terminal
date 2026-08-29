@@ -134,6 +134,7 @@ assert.match(apiClient, /api\/strategy-connections/);
 assert.match(experience, /eligibleTargets/);
 assert.match(experience, /plan\.armOnActivation/);
 assert.match(experience, /strategyAutomationApi\.addTarget/);
+assert.match(experience, /applyStrategyControlPanel\(base, draft\.paperPolicy, readStrategyControlPanel\(base, draft\.paperPolicy\)\)/, "SuperATR Script Editor inputs are normalized before immutable activation");
 assert.match(draftStore, /perpetualSignalReversalEnabled: false/);
 assert.match(draftStore, /stopReversalEnabled: false/);
 assert.match(reviewStep, /Activate Strategy &amp; Save Configuration/);

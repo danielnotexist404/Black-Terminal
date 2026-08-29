@@ -5,6 +5,7 @@ import {
   buildExecutionDeskMetrics,
   executionDeskData,
   executionMarkers,
+  strategySignalMarkers,
 } from "../src/modules/strategy-lab/execution-desk/executionDeskModel.ts";
 import { applyStrategyControlPanel, readStrategyControlPanel, superAtrTakeProfitAllocation } from "../src/modules/strategy-lab/execution-desk/strategyControlPanelModel.ts";
 import { createSuperAtrSevenStepSignals } from "../src/modules/strategy-lab/adapters/signalAdapter.ts";
@@ -65,6 +66,21 @@ const marker = executionMarkers(actions.filter((action) => action.action === "TP
 assert.equal(marker?.label, "TP7");
 assert.equal(marker?.strategyRole, "takeProfit");
 
+const signalCandles = [
+  { time: 1_000, open: 99, high: 102, low: 98, close: 101, volume: 10 },
+  { time: 1_300, open: 101, high: 103, low: 100, close: 102, volume: 10 },
+  { time: 1_600, open: 102, high: 103, low: 99, close: 100, volume: 10 },
+  { time: 1_900, open: 100, high: 104, low: 99, close: 103, volume: 10 },
+];
+const historicalMarkers = strategySignalMarkers([
+  { timestamp: 1_000, symbol: "BTCUSDT", direction: "long", entry: true },
+  { timestamp: 1_300, symbol: "BTCUSDT", direction: "long", entry: true },
+  { timestamp: 1_600, symbol: "BTCUSDT", direction: "short", entry: true },
+  { timestamp: 1_900, symbol: "BTCUSDT", direction: "long", entry: true },
+], signalCandles, 300);
+assert.deepEqual(historicalMarkers.map((item) => item.label), ["LONG SIGNAL", "SHORT SIGNAL", "LONG SIGNAL"], "consecutive same-state bars collapse into one confirmed historical signal marker");
+assert.equal(historicalMarkers[0]?.signalPrice, 101, "historical signals anchor to the confirmed candle close");
+
 const baseDefinition = {
   runtimeKind: "builtin-superatr-seven-step" as const,
   symbol: "BTCUSDT",
@@ -89,6 +105,24 @@ const policy = {
   slippageBps: 5,
   marginMode: "CROSS" as const,
 };
+const labelledPanel = readStrategyControlPanel({
+  ...baseDefinition,
+  settings: {
+    ...baseDefinition.settings,
+    "Short Period": 30,
+    "Long Period": 70,
+    "Momentum Period": 9,
+    "Trend Strength Threshold": 3.1,
+    "ATR Multiplier for TP Level 1": 100,
+    "Fixed TP Level 3 (%)": 75,
+  },
+}, policy, 5_000);
+assert.equal(labelledPanel.inputs.shortPeriod, 30, "saved Script Editor labels hydrate native SuperATR inputs");
+assert.equal(labelledPanel.inputs.longPeriod, 70);
+assert.equal(labelledPanel.inputs.momentumPeriod, 9);
+assert.equal(labelledPanel.inputs.trendStrengthThreshold, 3.1);
+assert.equal(labelledPanel.inputs.atrMultipliers[0], 100);
+assert.equal(labelledPanel.inputs.fixedTakeProfitPercentages[2], 75);
 const panel = readStrategyControlPanel(baseDefinition, policy, 5_000);
 panel.properties = { ...panel.properties, orderSizeMode: "PERCENT_EQUITY", orderSizeValue: 35, longLeverage: 25, shortLeverage: 15 };
 panel.inputs = { ...panel.inputs, shortPeriod: 3, longPeriod: 8, trendStrengthThreshold: 0.05, atrExitPercent: 10, fixedExitPercent: 10 };
@@ -112,12 +146,17 @@ const settingsSource = fs.readFileSync(new URL("../src/modules/strategy-lab/exec
 const serviceSource = fs.readFileSync(new URL("../server/strategy-automation/service.js", import.meta.url), "utf8");
 const repositorySource = fs.readFileSync(new URL("../server/strategy-automation/repository.js", import.meta.url), "utf8");
 const adapterSource = fs.readFileSync(new URL("../src/modules/strategy-lab/adapters/signalAdapter.ts", import.meta.url), "utf8");
+const workerSource = fs.readFileSync(new URL("../scripts/strategy-automation-worker.ts", import.meta.url), "utf8");
 assert.match(cockpitSource, /\["executionDesk", "EXECUTION DESK"\]/);
 assert.match(deskSource, /This chart is owned by the strategy runtime\. It never mounts the strategy onto the default discretionary chart\./);
 assert.doesNotMatch(deskSource, /onDefinitionChange|onVisibleIndicatorsChange|setActiveNav/);
+assert.match(deskSource, /preferredExecutionSource\(workspace\)/, "a configured broker or group is selected instead of silently defaulting to Paper");
+assert.match(deskSource, /historicalSignalMarkers\(strategy\.definition, candles\)/, "the dedicated chart renders confirmed historical strategy signals before the first broker fill");
 for (const label of ["INPUTS", "PROPERTIES", "STYLE", "VISIBILITY", "Default order size", "Long leverage", "Short leverage", "Percentage to Exit at Each ATR TP Level"]) assert.match(settingsSource, new RegExp(label, "i"));
 assert.match(serviceSource, /clean\[0\] === "group-execution-desks"/);
 assert.match(repositorySource, /Join this Investment Group before opening its Strategy Execution Desk/);
+assert.doesNotMatch(repositorySource, /row\.running_version\s*\?\?[\s\S]{0,100}row\.current_version/, "published versions never masquerade as explicitly started runtime versions");
+assert.match(workerSource, /Number\(strategy\.running_version \?\? 0\)/, "the VPS worker leases only an explicitly started version");
 assert.match(repositorySource, /definition:\s*\{[\s\S]*settings: \{\},[\s\S]*execution: \{\}/);
 assert.match(adapterSource, /rollingStdev\(closes, momentumPeriod\)/, "SuperATR normalizes momentum with the Pine close-series deviation");
 assert.match(adapterSource, /sma\(atrMultiple, momentumPeriod\)/, "SuperATR trend strength uses the Pine momentum-period average");

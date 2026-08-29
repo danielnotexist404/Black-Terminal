@@ -6,6 +6,7 @@ import type { CompiledPlot } from "../../../components/ScriptCompiler";
 import { getMarketDataEngineAdapter } from "../../../market-data/engine/marketDataEngine";
 import { exchangeRegistry } from "../../../market-data/exchangeRegistry";
 import type { ExchangeId, MarketDataSubscription, Timeframe } from "../../../market-data/types";
+import { createStrategySignals } from "../adapters/signalAdapter";
 import { strategyAutomationApi } from "../automation/strategyAutomationApi";
 import type {
   StrategyAutomationDefinition,
@@ -23,6 +24,7 @@ import {
   equityCurve,
   executionDeskData,
   executionMarkers,
+  strategySignalMarkers,
   type ExecutionDeskAction,
   type ExecutionDeskData,
   type ExecutionDeskMetrics,
@@ -55,7 +57,8 @@ type DeskStrategy = {
 const timeframeSet = new Set<Timeframe>(["1s", "10s", "30s", "1m", "3m", "5m", "15m", "30m", "1h", "2h", "3h", "4h", "6h", "8h", "12h", "1d", "1w", "1M", "1t", "10t", "100t"]);
 
 export function StrategyExecutionDesk({ workspace, paperData, busy = false, onApplyConfiguration }: { workspace: StrategyWorkspace; paperData: Record<string, unknown> | null; busy?: boolean; onApplyConfiguration?: (definition: StrategyAutomationDefinition, policy: StrategyCapitalPolicy, sourceKey: string, panel: StrategyControlPanel) => Promise<void> }) {
-  const [selectedKey, setSelectedKey] = useState("paper");
+  const preferredKey = preferredExecutionSource(workspace);
+  const [selectedKey, setSelectedKey] = useState(preferredKey);
   const [targetData, setTargetData] = useState<Record<string, ExecutionDeskData>>({});
   const [targetError, setTargetError] = useState<string>();
   const selectedBinding = workspace.bindings.find((binding) => binding.id === selectedKey);
@@ -88,6 +91,14 @@ export function StrategyExecutionDesk({ workspace, paperData, busy = false, onAp
   useEffect(() => {
     if (selectedKey !== "paper" && !workspace.bindings.some((binding) => binding.id === selectedKey)) setSelectedKey("paper");
   }, [selectedKey, workspace.bindings]);
+
+  useEffect(() => {
+    setSelectedKey(preferredExecutionSource(workspace));
+  }, [workspace.strategy.id]);
+
+  useEffect(() => {
+    if (selectedKey === "paper" && preferredKey !== "paper") setSelectedKey(preferredKey);
+  }, [preferredKey, selectedKey]);
 
   const options = useMemo<SourceOption[]>(() => [
     {
@@ -202,7 +213,12 @@ function ExecutionDeskSurface({
   const { candles, state: feedState, message: feedMessage } = useExecutionDeskCandles(strategy.definition);
   const actions = useMemo(() => buildExecutionDeskActions(selected.data, selected.mode), [selected.data, selected.mode]);
   const metrics = useMemo(() => buildExecutionDeskMetrics(selected.data, selected.paper, selected.snapshot), [selected.data, selected.paper, selected.snapshot]);
-  const markers = useMemo(() => executionMarkers(actions, candles.map((candle) => candle.time)), [actions, candles]);
+  const markers = useMemo(() => {
+    const executed = executionMarkers(actions, candles.map((candle) => candle.time));
+    const preview = historicalSignalMarkers(strategy.definition, candles);
+    const executedKeys = new Set(executed.map((marker) => `${marker.index}:${marker.direction}`));
+    return [...preview.filter((marker) => !executedKeys.has(`${marker.index}:${marker.direction}`)), ...executed];
+  }, [actions, candles, strategy.definition]);
   const curve = useMemo(() => equityCurve(selected.data.trades), [selected.data.trades]);
   const latestAction = actions[0];
   const superAtrControlsAvailable = strategy.definition.runtimeKind === "builtin-superatr-seven-step" || /superatr/i.test(`${strategy.name} ${strategy.definition.indicator?.name || ""}`);
@@ -304,6 +320,19 @@ function strategyPlots(definition: StrategyAutomationDefinition, candles: Candle
     { name: "Short MA", values: movingAverage(closes, panel.inputs.shortPeriod), color: panel.style.shortMaColor, width: panel.style.shortMaWidth, pane: "price", visible: panel.style.shortMaVisible },
     { name: "Long MA", values: movingAverage(closes, panel.inputs.longPeriod), color: panel.style.longMaColor, width: panel.style.longMaWidth, pane: "price", visible: panel.style.longMaVisible },
   ];
+}
+
+function historicalSignalMarkers(definition: StrategyAutomationDefinition, candles: Candle[]) {
+  if (!candles.length || !["builtin-ema-cross", "builtin-adaptive-swing", "builtin-superatr-seven-step"].includes(definition.runtimeKind)) return [];
+  const intervalSeconds = timeframeSeconds(definition.timeframe);
+  const now = Date.now() / 1000;
+  const confirmedCandles = candles.filter((candle) => candle.time + intervalSeconds <= now);
+  try {
+    const signals = createStrategySignals(definition.runtimeKind, confirmedCandles, definition.symbol, definition.settings);
+    return strategySignalMarkers(signals, confirmedCandles, intervalSeconds);
+  } catch {
+    return [];
+  }
 }
 
 function movingAverage(values: number[], period: number) {
@@ -446,6 +475,24 @@ function normalizeExchange(value: string): ExchangeId {
   return exchangeRegistry.some((item) => item.id === normalized) ? normalized as ExchangeId : "bybit";
 }
 function normalizeTimeframe(value: string): Timeframe { const normalized = String(value || "").trim() as Timeframe; return timeframeSet.has(normalized) ? normalized : "1h"; }
+function timeframeSeconds(value: string) {
+  const normalized = String(value || "").trim();
+  const match = normalized.match(/^(\d+)([smhdwM])$/);
+  if (!match) return 3600;
+  const amount = Math.max(1, Number(match[1]));
+  const unit = match[2];
+  return amount * (unit === "s" ? 1 : unit === "m" ? 60 : unit === "h" ? 3600 : unit === "d" ? 86400 : unit === "w" ? 604800 : 2592000);
+}
+function preferredExecutionSource(workspace: StrategyWorkspace) {
+  const plan = workspace.strategy.definition.deployment;
+  if (plan && plan.targetType !== "PAPER") {
+    const planned = workspace.bindings.find((binding) => binding.targetId === plan.targetId && binding.status !== "DISCONNECTED");
+    if (planned) return planned.id;
+    const live = workspace.bindings.find((binding) => binding.status === "LIVE");
+    if (live) return live.id;
+  }
+  return "paper";
+}
 function uniqueCandles(rows: Candle[]) { return [...new Map(rows.filter((row) => Number.isFinite(row.time) && row.close > 0).map((row) => [row.time, row])).values()].sort((a, b) => a.time - b.time); }
 function money(value: number) { return `$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 function signedMoney(value: number) { return `${value >= 0 ? "+" : "-"}${money(value)}`; }

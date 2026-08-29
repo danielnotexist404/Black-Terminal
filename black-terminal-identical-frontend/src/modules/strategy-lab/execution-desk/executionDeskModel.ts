@@ -1,4 +1,6 @@
 import type { CompiledMarker } from "../../../components/ScriptCompiler";
+import type { Candle } from "../../../chart-engine/types";
+import type { StrategySignal } from "../types/strategy.types";
 import type { StrategyPaperAccount, StrategyTargetSnapshot } from "../automation/strategyAutomation.types";
 
 export type ExecutionDeskData = {
@@ -159,6 +161,53 @@ export function executionMarkers(actions: readonly ExecutionDeskAction[], candle
       color: actionColor(action),
     }];
   });
+}
+
+/**
+ * Closed-bar strategy signals are research/runtime decisions, not broker
+ * fills. They are therefore rendered on the dedicated chart but deliberately
+ * excluded from the authoritative action tape and performance statistics.
+ */
+export function strategySignalMarkers(
+  signals: readonly StrategySignal[],
+  candles: readonly Candle[],
+  intervalSeconds: number,
+): CompiledMarker[] {
+  if (!candles.length) return [];
+  const candleTimes = candles.map((candle) => candle.time);
+  const ordered = [...signals]
+    .filter((signal) => signal.entry)
+    .sort((left, right) => left.timestamp - right.timestamp);
+  const markers: CompiledMarker[] = [];
+  let previous: StrategySignal | undefined;
+  for (const signal of ordered) {
+    const direction = signal.direction;
+    if (direction !== "long" && direction !== "short") continue;
+    // SuperATR can remain true for several consecutive bars. A signal marker
+    // denotes the first confirmed bar in that run, not every bar in the same
+    // unchanged state.
+    if (previous && previous.direction === direction && signal.timestamp - previous.timestamp <= intervalSeconds * 1.5) {
+      previous = signal;
+      continue;
+    }
+    const index = nearestCandleIndex(candleTimes, signal.timestamp);
+    if (index < 0) continue;
+    const candle = candles[index]!;
+    markers.push({
+      id: `strategy-signal:${direction}:${signal.timestamp}`,
+      index,
+      time: candle.time,
+      signalPrice: candle.close,
+      value: candle.close,
+      label: direction === "long" ? "LONG SIGNAL" : "SHORT SIGNAL",
+      direction,
+      kind: "entry",
+      strategyRole: "entry",
+      color: direction === "long" ? "#42f59b" : "#ff174a",
+    });
+    previous = signal;
+  }
+  return markers;
 }
 
 export function buildExecutionDeskMetrics(

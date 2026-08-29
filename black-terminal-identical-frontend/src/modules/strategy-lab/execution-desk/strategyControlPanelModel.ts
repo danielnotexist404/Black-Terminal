@@ -51,20 +51,21 @@ export function readStrategyControlPanel(definition: StrategyAutomationDefinitio
   const leverage = policy?.requestedLeverage || 1;
   const orderSizeMode = policy?.tradeAmountMode === "FIXED_USDT" ? "FIXED_USDT" : policy?.tradeAmountMode === "FIXED_QUANTITY" ? "FIXED_QUANTITY" : "PERCENT_EQUITY";
   const at = (values: unknown, index: number, fallback: number) => Array.isArray(values) ? finite(values[index], fallback) : fallback;
+  const setting = (...keys: string[]) => keys.map((key) => settings[key]).find((value) => value !== undefined);
   return {
     schemaVersion: 1,
     inputs: {
-      shortPeriod: Math.round(bounded(input?.shortPeriod ?? settings.superAtrShortPeriod ?? settings.short_period, defaultSuperAtrInputs.shortPeriod, 1, 10_000)),
-      longPeriod: Math.round(bounded(input?.longPeriod ?? settings.superAtrLongPeriod ?? settings.long_period, defaultSuperAtrInputs.longPeriod, 1, 10_000)),
-      momentumPeriod: Math.round(bounded(input?.momentumPeriod ?? settings.superAtrMomentumPeriod ?? settings.momentum_period, defaultSuperAtrInputs.momentumPeriod, 1, 10_000)),
-      atrConfirmationPeriod: Math.round(bounded(input?.atrConfirmationPeriod ?? settings.superAtrConfirmationPeriod ?? settings.atr_sma_period, defaultSuperAtrInputs.atrConfirmationPeriod, 1, 10_000)),
-      trendStrengthThreshold: bounded(input?.trendStrengthThreshold ?? settings.superAtrTrendStrengthThreshold ?? settings.trend_strength_threshold, defaultSuperAtrInputs.trendStrengthThreshold, 0, 1_000),
-      multiStepTakeProfit: bool(input?.multiStepTakeProfit ?? settings.superAtrMultiStepTakeProfit ?? settings.useMultiStepTP, defaultSuperAtrInputs.multiStepTakeProfit),
-      takeProfitAtrLength: Math.round(bounded(input?.takeProfitAtrLength ?? settings.superAtrTakeProfitAtrLength ?? settings.atrLengthTP, defaultSuperAtrInputs.takeProfitAtrLength, 1, 10_000)),
-      atrMultipliers: [0, 1, 2, 3].map((index) => bounded(input?.atrMultipliers?.[index] ?? at(settings.superAtrAtrMultipliers, index, defaultSuperAtrInputs.atrMultipliers[index]), defaultSuperAtrInputs.atrMultipliers[index], 0.001, 100_000)) as [number, number, number, number],
-      fixedTakeProfitPercentages: [0, 1, 2].map((index) => bounded(input?.fixedTakeProfitPercentages?.[index] ?? at(settings.superAtrFixedPercentages, index, defaultSuperAtrInputs.fixedTakeProfitPercentages[index]), defaultSuperAtrInputs.fixedTakeProfitPercentages[index], 0.001, 100_000)) as [number, number, number],
-      atrExitPercent: bounded(input?.atrExitPercent ?? settings.superAtrAtrExitPercent ?? settings.tp_percent_atr, defaultSuperAtrInputs.atrExitPercent, 0.1, 100),
-      fixedExitPercent: bounded(input?.fixedExitPercent ?? settings.superAtrFixedExitPercent ?? settings.tp_percent_fixed, defaultSuperAtrInputs.fixedExitPercent, 0.1, 100),
+      shortPeriod: Math.round(bounded(input?.shortPeriod ?? setting("superAtrShortPeriod", "short_period", "Short Period"), defaultSuperAtrInputs.shortPeriod, 1, 10_000)),
+      longPeriod: Math.round(bounded(input?.longPeriod ?? setting("superAtrLongPeriod", "long_period", "Long Period"), defaultSuperAtrInputs.longPeriod, 1, 10_000)),
+      momentumPeriod: Math.round(bounded(input?.momentumPeriod ?? setting("superAtrMomentumPeriod", "momentum_period", "Momentum Period"), defaultSuperAtrInputs.momentumPeriod, 1, 10_000)),
+      atrConfirmationPeriod: Math.round(bounded(input?.atrConfirmationPeriod ?? setting("superAtrConfirmationPeriod", "atr_sma_period", "ATR SMA Period for Confirmation"), defaultSuperAtrInputs.atrConfirmationPeriod, 1, 10_000)),
+      trendStrengthThreshold: bounded(input?.trendStrengthThreshold ?? setting("superAtrTrendStrengthThreshold", "trend_strength_threshold", "Trend Strength Threshold"), defaultSuperAtrInputs.trendStrengthThreshold, 0, 1_000),
+      multiStepTakeProfit: bool(input?.multiStepTakeProfit ?? setting("superAtrMultiStepTakeProfit", "useMultiStepTP", "Enable Multi-Step Take Profit"), defaultSuperAtrInputs.multiStepTakeProfit),
+      takeProfitAtrLength: Math.round(bounded(input?.takeProfitAtrLength ?? setting("superAtrTakeProfitAtrLength", "atrLengthTP", "ATR Length for Take Profit"), defaultSuperAtrInputs.takeProfitAtrLength, 1, 10_000)),
+      atrMultipliers: [0, 1, 2, 3].map((index) => bounded(input?.atrMultipliers?.[index] ?? at(settings.superAtrAtrMultipliers, index, finite(setting(`ATR Multiplier for TP Level ${index + 1}`), defaultSuperAtrInputs.atrMultipliers[index])), defaultSuperAtrInputs.atrMultipliers[index], 0.001, 100_000)) as [number, number, number, number],
+      fixedTakeProfitPercentages: [0, 1, 2].map((index) => bounded(input?.fixedTakeProfitPercentages?.[index] ?? at(settings.superAtrFixedPercentages, index, finite(setting(`Fixed TP Level ${index + 1} (%)`), defaultSuperAtrInputs.fixedTakeProfitPercentages[index])), defaultSuperAtrInputs.fixedTakeProfitPercentages[index], 0.001, 100_000)) as [number, number, number],
+      atrExitPercent: bounded(input?.atrExitPercent ?? setting("superAtrAtrExitPercent", "tp_percent_atr", "Percentage to Exit at Each ATR TP Level"), defaultSuperAtrInputs.atrExitPercent, 0.1, 100),
+      fixedExitPercent: bounded(input?.fixedExitPercent ?? setting("superAtrFixedExitPercent", "tp_percent_fixed", "Percentage to Exit at Each Fixed TP Level"), defaultSuperAtrInputs.fixedExitPercent, 0.1, 100),
     },
     properties: {
       initialCapital: bounded(properties?.initialCapital ?? initialCapital, defaultStrategyProperties.initialCapital, 1, 1_000_000_000),

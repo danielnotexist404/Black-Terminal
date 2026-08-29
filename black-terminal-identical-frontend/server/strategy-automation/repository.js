@@ -898,8 +898,12 @@ async function ownedBindingAny(supabase, userId, strategyId, bindingId) {
 }
 
 function safeStrategySummary(row) {
-  const publishedVersion = row.published_version ?? (row.status === "DRAFT" ? null : row.current_version ?? null);
-  const runningVersion = row.running_version ?? (row.status === "DRAFT" ? null : row.current_version ?? null);
+  // These columns are authoritative lifecycle state. Falling back to
+  // current_version makes a merely published version look started and causes
+  // the client to skip black_core_start_strategy_version, leaving no runtime
+  // row for the VPS worker to lease.
+  const publishedVersion = row.published_version ?? null;
+  const runningVersion = row.running_version ?? null;
   return {
     id: row.id,
     name: row.name,

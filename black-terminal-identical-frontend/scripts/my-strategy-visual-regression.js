@@ -30,6 +30,10 @@ for (const [width, height] of sizes) {
 
   await open(page, "cockpit");
   await capture(page, `cockpit-overview-${width}x${height}`);
+  await page.getByLabel("Strategy cockpit sections").getByRole("button", { name: "EXECUTION DESK", exact: true }).click({ force: true });
+  await page.waitForTimeout(1_200);
+  await page.locator(".execution-desk").waitFor({ state: "visible", timeout: 10_000 });
+  await capture(page, `cockpit-execution-desk-${width}x${height}`);
   for (const [label, name] of [["CONFIGURATION", "cockpit-configuration"], ["PAPER", "cockpit-paper"], ["LIVE TARGETS", "cockpit-live-targets"], ["POSITIONS", "cockpit-positions"], ["PERFORMANCE", "cockpit-performance"]]) {
     await page.getByLabel("Strategy cockpit sections").getByRole("button", { name: label, exact: true }).click({ force: true });
     await page.waitForTimeout(80);

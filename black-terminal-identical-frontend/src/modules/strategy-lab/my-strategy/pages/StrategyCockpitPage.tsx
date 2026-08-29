@@ -7,9 +7,10 @@ import { StrategyHeader } from "../cockpit/StrategyHeader";
 import { StrategyOverview } from "../cockpit/StrategyOverview";
 import { TargetSlotMatrix } from "../cockpit/TargetSlotMatrix";
 import { TargetCockpit } from "../cockpit/TargetCockpit";
+import { StrategyExecutionDesk } from "../../execution-desk/StrategyExecutionDesk";
 
-export type CockpitTab = "overview" | "configuration" | "paper" | "liveTargets" | "positions" | "trades" | "performance" | "risk" | "logs";
-const tabs: Array<[CockpitTab, string]> = [["overview", "OVERVIEW"], ["configuration", "CONFIGURATION"], ["paper", "PAPER"], ["liveTargets", "LIVE TARGETS"], ["positions", "POSITIONS"], ["trades", "TRADES"], ["performance", "PERFORMANCE"], ["risk", "RISK"], ["logs", "LOGS"]];
+export type CockpitTab = "overview" | "executionDesk" | "configuration" | "paper" | "liveTargets" | "positions" | "trades" | "performance" | "risk" | "logs";
+const tabs: Array<[CockpitTab, string]> = [["overview", "OVERVIEW"], ["executionDesk", "EXECUTION DESK"], ["configuration", "CONFIGURATION"], ["paper", "PAPER"], ["liveTargets", "LIVE TARGETS"], ["positions", "POSITIONS"], ["trades", "TRADES"], ["performance", "PERFORMANCE"], ["risk", "RISK"], ["logs", "LOGS"]];
 
 type Props = {
   workspace: StrategyWorkspace;
@@ -36,6 +37,7 @@ export function StrategyCockpitPage(props: Props) {
     {props.message ? <div className="strategy-cockpit-message" role="status">{props.message}</div> : null}
     <div className="strategy-cockpit-body">
       {activeTab === "overview" ? <StrategyOverview workspace={props.workspace} paperData={props.paperData} onAddTarget={props.onAddTarget} /> : null}
+      {activeTab === "executionDesk" ? <StrategyExecutionDesk workspace={props.workspace} paperData={props.paperData} /> : null}
       {activeTab === "configuration" ? <Configuration workspace={props.workspace} onEdit={props.onEdit} /> : null}
       {activeTab === "paper" ? <PaperCockpit paper={props.workspace.paper} data={props.paperData} busy={props.busy} onAction={props.onPaperAction} /> : null}
       {activeTab === "liveTargets" ? <><TargetSlotMatrix bindings={props.workspace.bindings} snapshots={props.workspace.snapshots} selectedId={selectedTargetId} onSelect={setSelectedTargetId} onAdd={props.onAddTarget} />{selectedTargetId && props.workspace.bindings.find((item) => item.id === selectedTargetId) ? <TargetCockpit binding={props.workspace.bindings.find((item) => item.id === selectedTargetId)!} snapshot={props.workspace.snapshots.find((item) => item.bindingId === selectedTargetId)} busy={props.busy} onAction={(action) => props.onTargetAction(selectedTargetId, action)} onModify={() => props.onModifyTarget(props.workspace.bindings.find((item) => item.id === selectedTargetId)!)} onDisconnect={() => props.onDisconnectTarget(selectedTargetId)} /> : <div className="live-certification-banner"><LockKeyhole size={14} /><div><strong>NO EXECUTION DESTINATION ASSIGNED</strong><span>Add an eligible connected broker account or an owned Investment Group, review its risk policy, and arm it explicitly.</span></div></div>}</> : null}

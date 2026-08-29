@@ -45,6 +45,8 @@ import type {
   TradingRoomChannel
 } from "../../profile/types";
 import { investmentGroupsApi } from "../investmentGroupsApi";
+import { strategyAutomationApi } from "../../strategy-lab/automation/strategyAutomationApi";
+import { InvestmentGroupStrategyExecutionDesk } from "../../strategy-lab/execution-desk/StrategyExecutionDesk";
 
 type InvestmentGroupsPageProps = {
   currentUser: CapabilityUser;
@@ -54,6 +56,7 @@ type InvestmentGroupsPageProps = {
 
 type GroupTab =
   | "Overview"
+  | "Strategy Execution Desk"
   | "Performance"
   | "Drawdown"
   | "Positions Visibility"
@@ -66,6 +69,7 @@ type GroupTab =
 
 const groupTabs: GroupTab[] = [
   "Overview",
+  "Strategy Execution Desk",
   "Performance",
   "Drawdown",
   "Positions Visibility",
@@ -133,12 +137,14 @@ export function InvestmentGroupsPage({ currentUser, onClose, onOpenProfile }: In
   const [roomChannel, setRoomChannel] = useState<TradingRoomChannel>("general");
   const [roomMessage, setRoomMessage] = useState("");
   const [status, setStatus] = useState("");
+  const [strategyDeskAvailable, setStrategyDeskAvailable] = useState(false);
   const canCreate = canCreateInvestmentGroup(currentUser);
   const currentUserId = userIdFromUsername(currentUser.username);
   const selectedCanManage = selectedGroup ? canManageInvestmentGroup(currentUser, selectedGroup) : false;
   const selectedCanModerate = selectedGroup ? canModerateInvestmentGroup(currentUser, selectedGroup) : false;
   const selectedIsMember = selectedGroup ? isInvestmentGroupMember(currentUser, selectedGroup.id) : false;
   const visibleTabs = selectedGroup ? groupTabs.filter((tab) => {
+    if (tab === "Strategy Execution Desk") return strategyDeskAvailable;
     if (tab === "Settings" || tab === "Requests") return selectedCanManage;
     const publicSection = publicSectionByTab.get(tab);
     return !publicSection || selectedIsMember || selectedCanModerate || isInvestmentGroupSectionPublic(selectedGroup, publicSection);
@@ -147,6 +153,18 @@ export function InvestmentGroupsPage({ currentUser, onClose, onOpenProfile }: In
   useEffect(() => {
     if (!visibleTabs.includes(activeTab)) setActiveTab("Overview");
   }, [activeTab, visibleTabs]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setStrategyDeskAvailable(false);
+    if (!selectedGroup?.id) return () => controller.abort();
+    const discover = () => strategyAutomationApi.groupExecutionDesks(selectedGroup.id, controller.signal)
+      .then((result) => { if (!controller.signal.aborted) setStrategyDeskAvailable(result.desks.length > 0); })
+      .catch(() => { if (!controller.signal.aborted) setStrategyDeskAvailable(false); });
+    void discover();
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void discover(); }, 10_000);
+    return () => { controller.abort(); window.clearInterval(timer); };
+  }, [selectedGroup?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -467,6 +485,10 @@ function GroupTabContent({
         ))}
       </section>
     );
+  }
+
+  if (tab === "Strategy Execution Desk") {
+    return <InvestmentGroupStrategyExecutionDesk groupId={group.id} />;
   }
 
   if (tab === "Trading Room") {

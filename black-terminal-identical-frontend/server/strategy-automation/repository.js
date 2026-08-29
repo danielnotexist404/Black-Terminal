@@ -90,6 +90,54 @@ export async function getStrategySnapshot(supabase, userId, strategyId) {
   };
 }
 
+export async function getGroupExecutionDesks(supabase, userId, groupId) {
+  const [group, membership] = await Promise.all([
+    oneOrNone(supabase.from("investment_groups").select("id,owner_user_id,status").eq("id", groupId).maybeSingle()),
+    oneOrNone(supabase.from("investment_group_members").select("id,role,status").eq("group_id", groupId).eq("user_id", userId).eq("status", "active").maybeSingle())
+  ]);
+  if (!group) throw strategyError(404, "INVESTMENT_GROUP_NOT_FOUND", "Investment Group not found.");
+  if (group.owner_user_id !== userId && !membership) throw strategyError(403, "INVESTMENT_GROUP_DESK_FORBIDDEN", "Join this Investment Group before opening its Strategy Execution Desk.");
+
+  const bindings = await many(supabase.from("strategy_target_bindings")
+    .select("*")
+    .eq("group_id", groupId)
+    .eq("target_type", "INVESTMENT_GROUP")
+    .neq("status", "DISCONNECTED")
+    .order("updated_at", { ascending: false }));
+  if (!bindings.length) return { groupId, desks: [] };
+  const strategyIds = [...new Set(bindings.map((binding) => binding.strategy_id))];
+  const bindingIds = bindings.map((binding) => binding.id);
+  const [strategies, snapshotRows] = await Promise.all([
+    many(supabase.from("strategy_automation_strategies").select("*").in("id", strategyIds).is("archived_at", null)),
+    many(supabase.from("strategy_target_snapshots").select("binding_id,freshness,snapshot,captured_at").in("binding_id", bindingIds))
+  ]);
+  const strategyById = new Map(strategies.map((strategy) => [strategy.id, strategy]));
+  const snapshotByBinding = new Map(snapshotRows.map((row) => [row.binding_id, {
+    value: { ...(row.snapshot || {}), freshness: row.freshness, timestamp: Date.parse(row.captured_at) },
+    capturedAt: Date.parse(row.captured_at)
+  }]));
+  const desks = await mapWithConcurrency(bindings.filter((binding) => strategyById.has(binding.strategy_id)), 3, async (binding) => {
+    const cachedSnapshot = snapshotByBinding.get(binding.id);
+    const snapshotPromise = cachedSnapshot && Date.now() - cachedSnapshot.capturedAt < 5_000
+      ? Promise.resolve(cachedSnapshot.value)
+      : buildGroupSnapshot(supabase, binding.owner_user_id, binding);
+    const [positions, orders, executions, trades, snapshot] = await Promise.all([
+      many(supabase.from("account_positions").select("id,symbol,direction,quantity,average_price,current_price,unrealized_pnl,realized_pnl,margin,leverage,liquidation_price,stop_loss,take_profit,opened_at,updated_at").eq("strategy_target_binding_id", binding.id).order("updated_at", { ascending: false }).limit(500)),
+      many(supabase.from("execution_orders").select("id,exchange,symbol,side,order_type,quantity,limit_price,stop_price,take_profit,stop_loss,status,filled_quantity,estimated_fees,created_at,updated_at").eq("strategy_target_binding_id", binding.id).order("created_at", { ascending: false }).limit(500)),
+      many(supabase.from("execution_fills").select("id,exchange,symbol,side,price,quantity,fee,fee_asset,liquidity,filled_at").eq("strategy_target_binding_id", binding.id).order("filled_at", { ascending: false }).limit(500)),
+      many(supabase.from("strategy_automation_trades").select("id,mode,symbol,side,quantity,entry_price,exit_price,gross_pnl,fees,funding,net_pnl,entry_signal_key,exit_reason,opened_at,closed_at").eq("binding_id", binding.id).order("closed_at", { ascending: false }).limit(5000)),
+      snapshotPromise
+    ]);
+    return {
+      strategy: safeGroupDeskStrategy(strategyById.get(binding.strategy_id)),
+      binding: safeBinding(binding),
+      snapshot,
+      data: { positions, orders, executions, trades, analytics: calculateTradeAnalytics([...trades].reverse()) }
+    };
+  });
+  return { groupId, desks };
+}
+
 export async function createStrategyDraft(supabase, userId, body, idempotencyKey) {
   const name = normalizeStrategyName(body.name);
   const definition = normalizeStrategyDefinition(body.definition);
@@ -864,6 +912,42 @@ function safeStrategy(row) {
     draftDefinition: row.draft_definition || row.definition,
     draftName: row.draft_name || row.name,
     draftBaseVersion: row.draft_base_version ?? row.published_version ?? null,
+    globalCapitalPolicy: row.global_capital_policy
+  };
+}
+
+function safeGroupDeskStrategy(row) {
+  const definition = row.definition || {};
+  const indicator = definition.indicator && typeof definition.indicator === "object"
+    ? {
+        indicatorId: definition.indicator.indicatorId,
+        instanceId: definition.indicator.instanceId,
+        name: definition.indicator.name,
+        instanceName: definition.indicator.instanceName,
+        version: definition.indicator.version,
+        settingsHash: definition.indicator.settingsHash,
+        settingsSummary: definition.indicator.settingsSummary,
+        alertManifestVersion: definition.indicator.alertManifestVersion,
+        runtimeVersion: definition.indicator.runtimeVersion,
+        warmupBars: definition.indicator.warmupBars,
+        runtimeStatus: definition.indicator.runtimeStatus,
+        useCurrentChartSettings: false,
+        alerts: []
+      }
+    : undefined;
+  return {
+    ...safeStrategySummary(row),
+    definition: {
+      runtimeKind: definition.runtimeKind || row.runtime_kind,
+      symbol: row.symbol,
+      timeframe: row.timeframe,
+      marketType: row.market_type,
+      exchange: row.exchange,
+      settings: {},
+      execution: {},
+      indicator,
+      metadata: { description: "Investment Group automated strategy execution projection." }
+    },
     globalCapitalPolicy: row.global_capital_policy
   };
 }

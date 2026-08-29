@@ -272,6 +272,19 @@ export type StrategyWorkspace = {
   }>;
 };
 
+export type StrategyGroupExecutionDesk = {
+  strategy: StrategyWorkspace["strategy"];
+  binding: StrategyTargetBinding;
+  snapshot: StrategyTargetSnapshot | null;
+  data: {
+    positions: Array<Record<string, unknown>>;
+    orders: Array<Record<string, unknown>>;
+    executions: Array<Record<string, unknown>>;
+    trades: Array<Record<string, unknown>>;
+    analytics: Record<string, unknown>;
+  };
+};
+
 export type EligibleBrokerTarget = {
   targetId: string;
   accountId: string;

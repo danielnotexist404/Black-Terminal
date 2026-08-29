@@ -5,6 +5,7 @@ import type {
   StrategyAutomationDefinition,
   StrategyBrokerConnection,
   StrategyCapitalPolicy,
+  StrategyGroupExecutionDesk,
   StrategyPaperAccount,
   StrategySummary,
   StrategyTargetBinding,
@@ -80,6 +81,12 @@ export const strategyConnectionApi = {
 export const strategyAutomationApi = {
   list: (signal?: AbortSignal) =>
     request<{ strategies: StrategySummary[] }>("", {}, signal),
+  groupExecutionDesks: (groupId: string, signal?: AbortSignal) =>
+    request<{ groupId: string; desks: StrategyGroupExecutionDesk[] }>(
+      `group-execution-desks/${encodeURIComponent(groupId)}`,
+      {},
+      signal,
+    ),
   get: (strategyId: string, signal?: AbortSignal) =>
     request<StrategyWorkspace>(encodeURIComponent(strategyId), {}, signal),
   create: (name: string, definition: StrategyAutomationDefinition) =>

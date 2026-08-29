@@ -8,6 +8,7 @@ import {
   disconnectTarget,
   getBinding,
   getBindingData,
+  getGroupExecutionDesks,
   getPaperData,
   getStrategySnapshot,
   getStrategyWorkspace,
@@ -27,6 +28,10 @@ import { parseStrategyBody, strategySchemas } from "./schemas.js";
 export async function handleStrategyAutomationRequest(req, res, security, path) {
   const clean = path.map((item) => String(item)).filter(Boolean);
   if (clean.length === 0) return root(req, res, security);
+  if (clean[0] === "group-execution-desks" && clean.length === 2 && req.method === "GET") {
+    if (!isUuid(clean[1])) throw strategyError(400, "INVESTMENT_GROUP_ID_INVALID", "Investment Group identifier is invalid.");
+    return res.status(200).json(await getGroupExecutionDesks(security.supabase, security.user.id, clean[1]));
+  }
   if (clean.length === 1 && clean[0] === "drafts" && req.method === "POST") {
     const body = parseStrategyBody(strategySchemas.create, req.body);
     return res.status(201).json(await createStrategyDraft(security.supabase, security.user.id, body, requireIdempotencyKey(req)));

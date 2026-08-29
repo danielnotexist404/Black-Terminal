@@ -39,8 +39,15 @@ async function request<T>(
     const reason = Array.isArray(payload.details?.reasons)
       ? ` ${payload.details.reasons.join(" ")}`
       : "";
-    throw new Error(
-      `${payload.error || `Strategy request failed (${response.status}).`}${reason}`,
+    throw Object.assign(
+      new Error(
+        `${payload.error || `Strategy request failed (${response.status}).`}${reason}`,
+      ),
+      {
+        code: typeof payload.code === "string" ? payload.code : "STRATEGY_REQUEST_FAILED",
+        status: response.status,
+        details: payload.details,
+      },
     );
   }
   return payload as T;

@@ -48,7 +48,12 @@ assert.doesNotMatch(library, /BC-QALC|START FROM TEMPLATE|qalc-template-card/, "
 assert.match(experience, /Modifying the saved draft/);
 assert.match(experience, /DeleteStrategyDialog/);
 assert.match(experience, /No broker order is placed, changed or cancelled/);
+assert.match(experience, /DELETION_PAUSABLE_TARGET_STATES/);
+assert.match(experience, /strategyAutomationApi\.targetAction\(authoritative\.strategy\.id, binding, "pause"\)/, "Delete explicitly pauses execution targets before archive");
+assert.match(experience, /STRATEGY_DELETE_REQUIRES_SAFE_STATE/, "Delete waits for already-claimed execution commands to settle");
+assert.match(experience, /Promise\.allSettled/, "all active target slots are quiesced before archive");
 assert.match(apiClient, /mutation\(\{ expectedName: strategy\.name, expectedRevision: strategy\.draftRevision \|\| 0 \}, "DELETE"\)/);
+assert.match(apiClient, /code: typeof payload\.code === "string"/, "Strategy API preserves authoritative error codes for lifecycle recovery");
 assert.match(service, /req\.method === "DELETE"[\s\S]*archiveStrategy/);
 assert.doesNotMatch(library, /StrategyDefinitionBuilder|NAME STRATEGY BEFORE SAVING/);
 assert.equal((wizard.match(/step === \d/g) || []).length, 4, "simplified wizard renders only the active step");

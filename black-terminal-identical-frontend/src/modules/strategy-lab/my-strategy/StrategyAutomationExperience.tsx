@@ -163,12 +163,54 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
   const deleteStrategy = async () => {
     if (!pendingDelete || busy) return;
     const selected = pendingDelete;
+    let pausedTargetCount = 0;
     setBusy(true);
     try {
       if (fixtureMode) {
         setStrategies((current) => current.filter((strategy) => strategy.id !== selected.id));
       } else {
-        await strategyAutomationApi.remove(selected);
+        let authoritative = await strategyAutomationApi.get(selected.id);
+        // Delete is an explicit request to retire the strategy, so quiesce every
+        // target that can still admit new signals before asking the atomic archive
+        // transaction to disconnect it. This never submits, changes or cancels a
+        // broker order and never closes a broker position.
+        for (let pass = 0; pass < 3; pass += 1) {
+          const pausable = authoritative.bindings.filter((binding) => DELETION_PAUSABLE_TARGET_STATES.has(binding.status));
+          if (!pausable.length) break;
+          const results = await Promise.allSettled(
+            pausable.map((binding) => strategyAutomationApi.targetAction(authoritative.strategy.id, binding, "pause")),
+          );
+          const nonConflictFailure = results.find((result) => result.status === "rejected" && strategyApiErrorCode(result.reason) !== "STRATEGY_TARGET_VERSION_CONFLICT");
+          if (nonConflictFailure?.status === "rejected") throw nonConflictFailure.reason;
+          pausedTargetCount += results.filter((result) => result.status === "fulfilled").length;
+          authoritative = await strategyAutomationApi.get(selected.id);
+        }
+
+        // A command may already have been claimed immediately before the pause.
+        // Preserve the fail-closed archive contract and briefly wait for that
+        // authoritative command to settle instead of making the user manually
+        // repeat Delete. A still-running command remains protected and visible.
+        let archived = false;
+        let lastSafeStateError: unknown;
+        for (let attempt = 0; attempt < DELETE_SETTLEMENT_ATTEMPTS; attempt += 1) {
+          try {
+            await strategyAutomationApi.remove(authoritative.strategy);
+            archived = true;
+            break;
+          } catch (error) {
+            if (strategyApiErrorCode(error) !== "STRATEGY_DELETE_REQUIRES_SAFE_STATE") throw error;
+            lastSafeStateError = error;
+            await waitForDeleteSettlement(DELETE_SETTLEMENT_INTERVAL_MS);
+            authoritative = await strategyAutomationApi.get(selected.id);
+            const newlyActive = authoritative.bindings.filter((binding) => DELETION_PAUSABLE_TARGET_STATES.has(binding.status));
+            for (const binding of newlyActive) {
+              await strategyAutomationApi.targetAction(authoritative.strategy.id, binding, "pause");
+              pausedTargetCount += 1;
+            }
+            if (newlyActive.length) authoritative = await strategyAutomationApi.get(selected.id);
+          }
+        }
+        if (!archived) throw lastSafeStateError || new Error("Strategy deletion is waiting for an in-flight broker command to settle. Try Delete again shortly.");
         await loadList();
       }
       if (workspace?.strategy.id === selected.id) {
@@ -179,7 +221,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
       }
       setPendingDelete(null);
       setView("library");
-      setMessage(`“${selected.name}” was deleted from My Strategy. Its runtime was stopped and immutable audit history was retained.`);
+      setMessage(`“${selected.name}” was deleted from My Strategy.${pausedTargetCount ? ` ${pausedTargetCount} active execution target${pausedTargetCount === 1 ? " was" : "s were"} paused and disconnected.` : ""} Its runtime was stopped and immutable audit history was retained.`);
     } catch (error) { setPendingDelete(null); setMessage(errorMessage(error, "Strategy deletion failed.")); }
     finally { setBusy(false); }
   };
@@ -639,8 +681,8 @@ function DeleteStrategyDialog({ strategy, busy, onCancel, onConfirm }: { strateg
       <header><div><Trash2 size={15} /><span>DELETE STRATEGY</span></div><button type="button" aria-label="Close delete strategy confirmation" disabled={busy} onClick={onCancel}><X size={15} /></button></header>
       <div className="strategy-delete-dialog-body">
         <h2 id="delete-strategy-title">Delete “{strategy.name}”?</h2>
-        <p>This removes the strategy from My Strategy and stops its Paper runtime. Inactive targets are disconnected; immutable versions, trades and audit history remain retained.</p>
-        <div><AlertTriangle size={15} /><span>Any active target must be paused and disconnected, and pending execution commands must settle, before deletion is allowed. No broker order is placed, changed or cancelled by this action.</span></div>
+        <p>This removes the strategy from My Strategy, stops its Paper runtime, pauses active targets and disconnects them after any in-flight command settles. Immutable versions, trades and audit history remain retained.</p>
+        <div><AlertTriangle size={15} /><span>No broker order is placed, changed or cancelled and no broker position is closed by deletion. Any existing broker exposure remains at the venue under its current protection.</span></div>
       </div>
       <footer><button type="button" disabled={busy} onClick={onCancel}>CANCEL</button><button type="button" className="danger" disabled={busy} onClick={onConfirm}><Trash2 size={13} /> {busy ? "DELETING…" : "DELETE STRATEGY"}</button></footer>
     </section>
@@ -648,6 +690,18 @@ function DeleteStrategyDialog({ strategy, busy, onCancel, onConfirm }: { strateg
 }
 
 function errorMessage(error: unknown, fallback: string) { return error instanceof Error ? error.message : fallback; }
+
+const DELETION_PAUSABLE_TARGET_STATES = new Set<StrategyTargetBinding["status"]>(["READY", "LIVE", "DEGRADED", "RISK_SUSPENDED"]);
+const DELETE_SETTLEMENT_ATTEMPTS = 20;
+const DELETE_SETTLEMENT_INTERVAL_MS = 750;
+
+function strategyApiErrorCode(error: unknown) {
+  return typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code || "") : "";
+}
+
+function waitForDeleteSettlement(milliseconds: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
+}
 
 function fixtureWorkspace(base: StrategyAutomationDefinition, indicator?: StrategyIndicatorInstance): StrategyWorkspace {
   const now = new Date().toISOString();

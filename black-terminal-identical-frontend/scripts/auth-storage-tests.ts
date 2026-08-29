@@ -4,7 +4,7 @@ import {
   legacySupabaseAuthStorageKeys,
   migrateSupabaseAuthStorage
 } from "../src/auth/supabaseAuthStorage.ts";
-import { resolveSupabaseEndpoint } from "../src/auth/supabaseEndpoint.ts";
+import { resolveSupabaseEndpoint, resolveSupabaseFlowType } from "../src/auth/supabaseEndpoint.ts";
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
@@ -33,6 +33,13 @@ assert.equal(
   resolveSupabaseEndpoint("https://vps-preview.black-terminal.live", true, undefined),
   "https://vps-preview.black-terminal.live",
   "server-side builds without a browser origin must retain their configured endpoint"
+);
+assert.equal(resolveSupabaseFlowType(""), "pkce");
+assert.equal(resolveSupabaseFlowType("#code=one-time-code"), "pkce");
+assert.equal(
+  resolveSupabaseFlowType("#access_token=legacy-access&refresh_token=legacy-refresh&token_type=bearer"),
+  "implicit",
+  "an in-flight callback from the previous frontend must remain recoverable"
 );
 
 {

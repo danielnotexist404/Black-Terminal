@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { BLACK_TERMINAL_AUTH_STORAGE_KEY, prepareSupabaseAuthStorage } from "../auth/supabaseAuthStorage";
-import { resolveSupabaseEndpoint } from "../auth/supabaseEndpoint";
+import { resolveSupabaseEndpoint, resolveSupabaseFlowType } from "../auth/supabaseEndpoint";
 import { resolveAuthenticatedSession } from "../auth/authenticatedSession";
 import type { ProductTier, TerminalCapability } from "../core/permissions/capabilities";
 
@@ -23,7 +23,7 @@ export const supabase = isSupabaseConfigured
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
-        flowType: "pkce"
+        flowType: resolveSupabaseFlowType(typeof window === "undefined" ? undefined : window.location.hash)
       }
     })
   : null;

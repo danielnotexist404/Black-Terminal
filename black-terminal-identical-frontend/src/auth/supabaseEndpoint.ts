@@ -24,3 +24,13 @@ export function resolveSupabaseEndpoint(
     return configured;
   }
 }
+
+/**
+ * Accept an implicit callback created by the previously deployed client once,
+ * then default every new OAuth attempt to PKCE. URL fragments never leave the
+ * browser and are removed by Supabase after successful recovery.
+ */
+export function resolveSupabaseFlowType(locationHash?: string): "implicit" | "pkce" {
+  const fragment = new URLSearchParams((locationHash || "").replace(/^#/, ""));
+  return fragment.has("access_token") && fragment.has("refresh_token") ? "implicit" : "pkce";
+}

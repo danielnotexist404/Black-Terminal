@@ -14,6 +14,7 @@ const bcrdaContainmentMigration = fs.readFileSync(path.join(root, "supabase/migr
 const archiveMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608240001_strategy_automation_archive.sql"), "utf8");
 const brokerGroupExecutionMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608240002_strategy_broker_group_execution.sql"), "utf8");
 const nineTargetMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608290001_strategy_lab_nine_target_capacity.sql"), "utf8");
+const superAtrRuntimeMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608290003_strategy_superatr_runtime_kind.sql"), "utf8");
 const db = new PGlite();
 
 await db.exec(`
@@ -91,6 +92,7 @@ await db.exec(bcrdaContainmentMigration);
 await db.exec(archiveMigration);
 await db.exec(brokerGroupExecutionMigration);
 await db.exec(nineTargetMigration);
+await db.exec(superAtrRuntimeMigration);
 await db.exec("set request.jwt.claim.role='service_role'");
 
 const ownerId = crypto.randomUUID();
@@ -264,6 +266,15 @@ const guidedId = guided.result.strategyId;
 assert.equal(await scalar("select published_version is null as value from public.strategy_automation_strategies where id=$1", [guidedId]), true, "draft creation does not publish");
 assert.equal(await scalar("select running_version is null as value from public.strategy_automation_strategies where id=$1", [guidedId]), true, "draft creation does not start a runtime");
 assert.equal(await scalar("select count(*)::int as value from public.strategy_paper_accounts where strategy_id=$1", [guidedId]), 0, "draft creation does not create a Paper runtime");
+
+const superAtrDefinition = { ...guidedDefinition, runtimeKind: "builtin-superatr-seven-step" };
+const superAtrHash = sha({ name: "SuperATR Draft", definition: superAtrDefinition, globalPolicy, state: "DRAFT" });
+const superAtrDraft = await call("select public.black_core_create_strategy_draft($1,$2,$3::jsonb,$4::jsonb,$5,$6) as result", [ownerId, "SuperATR Draft", json(superAtrDefinition), json(globalPolicy), superAtrHash, "superatr-draft-create-1"]);
+assert.equal(
+  await scalar("select runtime_kind as value from public.strategy_automation_strategies where id=$1", [superAtrDraft.result.strategyId]),
+  "builtin-superatr-seven-step",
+  "the production runtime allowlist accepts SuperATR Strategy Lab drafts"
+);
 
 const guidedOneHour = { ...guidedDefinition, timeframe: "1h" };
 await call("select public.black_core_save_strategy_draft($1,$2,$3,$4::jsonb,1) as result", [ownerId, guidedId, "Guided Strategy", json(guidedOneHour)]);

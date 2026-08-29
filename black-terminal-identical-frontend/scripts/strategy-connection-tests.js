@@ -46,17 +46,23 @@ const migration = read("supabase/migrations/202608290001_strategy_lab_nine_targe
 assert.match(route, /decryptCredentialPayload/);
 assert.match(route, /publicApiKey/);
 assert.match(route, /apiSecretDisplay: "••••••••••••"/);
+assert.match(route, /assertConnectionCapacity/);
+assert.match(route, /STRATEGY_CONNECTION_LIMIT_REACHED/);
 assert.doesNotMatch(route, /apiSecret:\s*payload|apiSecret:\s*credentials/, "stored API Secret is never serialized to Strategy Lab");
 assert.match(route, /removeOwnedExchangeAccount/);
 assert.match(account, /BROKER_CONNECTION_IN_ACTIVE_STRATEGY/);
 assert.match(cloud, /storeBrokerCredential/);
 assert.match(cloud, /withdrawalPermission: "NONE"/);
 assert.match(cloud, /transferPermission: "NONE"/);
+assert.match(cloud, /assertStrategyConnectionCapacity/);
 assert.match(client, /Strategy connections require an authenticated session/);
 assert.match(matrix, /\/ 9 ALLOCATED/);
 assert.match(experience, /MODIFY/);
 assert.match(experience, /REMOVE/);
 assert.match(experience, /LINK CONNECTION/);
+assert.match(experience, /ENABLE FOR STRATEGY LAB/);
+assert.match(experience, /connections\.length} \/ 9/);
+assert.match(experience, /activateBlackCloudConnectionViaApi/);
 assert.match(migration, /not between 1 and 9/);
 assert.match(migration, />= 9/);
 

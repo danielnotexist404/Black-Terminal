@@ -121,6 +121,11 @@ assert.match(targetMatrix, /bindings\.filter/, "only occupied bindings create de
 for (const destination of ["Paper Backtester", "Connected Broker", "Investment Group"]) assert.match(targetsStep, new RegExp(destination));
 assert.match(targetsStep, /AUTHORIZE THIS DESTINATION/);
 assert.match(targetsStep, /ARM AFTER ACTIVATION/);
+assert.match(targetsStep, /void onRefreshTargets\(nextDraft\)/, "selecting a live destination automatically saves and discovers targets using the exact selected draft");
+assert.match(targetsStep, /Add or manage up to 9 broker connections/);
+assert.match(experience, /persistDraft = async \(sourceDraft:/, "target discovery can persist the exact draft passed by the destination card without a React state race");
+assert.match(experience, /openWizardTargetManager/);
+assert.match(experience, /ENABLE FOR STRATEGY LAB/);
 assert.match(experience, /BROKER CONNECTION/);
 assert.match(experience, /INVESTMENT GROUP/);
 assert.match(experience, /type="password"/);

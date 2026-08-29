@@ -27,7 +27,8 @@ type Props = {
   message?: string;
   onChange: (draft: StrategyWizardDraft) => void;
   onSaveDraft: () => void;
-  onRefreshTargets: () => Promise<void>;
+  onRefreshTargets: (draft?: StrategyWizardDraft) => Promise<void>;
+  onManageTargets: (targetType: "BROKER_ACCOUNT" | "INVESTMENT_GROUP", draft: StrategyWizardDraft) => Promise<void>;
   onActivate: () => void;
   onCancel: () => void;
 };
@@ -61,7 +62,7 @@ export function StrategyWizardPage(props: Props) {
         {step === 5 ? <FiltersStep draft={props.draft} onChange={props.onChange} /> : null}
         {step === 6 ? <ExitsStep draft={props.draft} onChange={props.onChange} /> : null}
         {step === 7 ? <PaperStep draft={props.draft} onChange={props.onChange} /> : null}
-        {step === 8 ? <TargetsStep draft={props.draft} bindings={props.bindings} eligible={props.eligibleTargets} busy={props.saving} onRefreshTargets={props.onRefreshTargets} onChange={props.onChange} /> : null}
+        {step === 8 ? <TargetsStep draft={props.draft} bindings={props.bindings} eligible={props.eligibleTargets} busy={props.saving} onRefreshTargets={props.onRefreshTargets} onManageTargets={props.onManageTargets} onChange={props.onChange} /> : null}
         {step === 9 ? <ReviewStep draft={props.draft} publishedName={props.publishedName} publishedDefinition={props.publishedDefinition} saving={props.saving} onSaveDraft={props.onSaveDraft} onActivate={props.onActivate} /> : null}
         {issues.length ? <div className="wizard-inline-errors">{issues.map((issue) => <span key={issue}>{issue}</span>)}</div> : null}
         {props.message ? <div className="wizard-save-state" role="status">{props.message}</div> : null}

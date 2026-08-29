@@ -54,6 +54,7 @@ export async function activateBlackCloudConnection({ supabase, user, account, au
       error.code = "BYBIT_STRATEGY_AUTOMATION_DISABLED";
       throw error;
     }
+    await assertStrategyConnectionCapacity(supabase, user.id, account.id);
     const endpointSet = resolveBybitEndpointSet({ executionEnvironment, endpointProfile: "GLOBAL" });
     const { data: legacyCredential, error: credentialError } = await supabase
       .from("exchange_credentials")
@@ -211,6 +212,29 @@ export async function activateBlackCloudConnection({ supabase, user, account, au
         : ["BYBIT MAINNET LIVE", "REAL FUNDS", "REAL EXECUTION"],
       readinessReason: "Automation is authorized; Black Cloud must complete its first account reconciliation before execution becomes ready."
     };
+}
+
+async function assertStrategyConnectionCapacity(supabase, userId, accountId) {
+  const { data: existing, error: existingError } = await supabase.from("connectivity_connections")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("account_id", accountId)
+    .is("revoked_at", null)
+    .is("disabled_at", null)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existing) return;
+  const { count, error } = await supabase.from("connectivity_connections")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .is("revoked_at", null)
+    .is("disabled_at", null);
+  if (error) throw error;
+  if (Number(count || 0) < 9) return;
+  const limit = new Error("The maximum of 9 persistent Strategy Lab broker connections is active. Modify or remove one before adding another.");
+  limit.statusCode = 409;
+  limit.code = "STRATEGY_CONNECTION_LIMIT_REACHED";
+  throw limit;
 }
 
 function safeConnection(row) {

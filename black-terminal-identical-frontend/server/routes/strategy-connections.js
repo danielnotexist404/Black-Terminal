@@ -10,6 +10,7 @@ export async function handleStrategyConnectionRequest(req, res, security, path) 
     return res.status(200).json(await listOwnedStrategyConnections(security.supabase, security.user.id));
   }
   if (clean.length === 1 && clean[0] === "connect" && req.method === "POST") {
+    await assertConnectionCapacity(security.supabase, security.user.id);
     const established = await establishDetectedBybitAccount({ supabase: security.supabase, user: security.user, input: req.body });
     const account = await getOwnedAccount(security.supabase, security.user.id, established.account.id);
     const cloud = await activateBlackCloudConnection({ supabase: security.supabase, user: security.user, account });
@@ -43,6 +44,20 @@ export async function handleStrategyConnectionRequest(req, res, security, path) 
   error.statusCode = 404;
   error.code = "STRATEGY_CONNECTION_ROUTE_NOT_FOUND";
   throw error;
+}
+
+async function assertConnectionCapacity(supabase, userId) {
+  const { count, error } = await supabase.from("connectivity_connections")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .is("revoked_at", null)
+    .is("disabled_at", null);
+  if (error) throw error;
+  if (Number(count || 0) < 9) return;
+  const limit = new Error("The maximum of 9 persistent Strategy Lab broker connections is active. Modify or remove one before adding another.");
+  limit.statusCode = 409;
+  limit.code = "STRATEGY_CONNECTION_LIMIT_REACHED";
+  throw limit;
 }
 
 async function listOwnedStrategyConnections(supabase, userId) {

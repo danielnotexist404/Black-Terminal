@@ -536,8 +536,11 @@ const overlaysSource = readFileSync(overlaysPath, "utf8");
 assert.match(overlaysSource, /<summary>Parity Diagnostics<\/summary>/);
 assert.match(overlaysSource, /settings\.style\.showSummaryTable/);
 assert.match(overlaysSource, /settings\.showClusterRatioMeter/);
-assert.match(overlaysSource, /kioseff-energy-loader/);
-assert.match(overlaysSource, /loadState\.stage !== "degraded"/);
+assert.doesNotMatch(
+  overlaysSource,
+  /kioseff-energy-loader/,
+  "initial and live-tail calculation must not cover the chart with a loading screen"
+);
 assert.match(overlaysSource, /Market Maker Activity Dashboard/);
 assert.match(overlaysSource, /Nearest Buy Wall/);
 assert.match(overlaysSource, /Nearest Sell Wall/);
@@ -569,6 +572,14 @@ assert.match(chartSource, /targetChartBars: availableChartBarTarget/);
 assert.match(chartSource, /The setting is a maximum ceiling/);
 assert.match(chartSource, /calculateBatchChunked/);
 assert.match(chartSource, /certifiedKioseffInputTail/);
+assert.match(chartSource, /selectKioseffLiveUpdateBars/);
+assert.match(chartSource, /workerStatus: "live"/);
+assert.match(chartSource, /live-update-deferred/);
+assert.doesNotMatch(
+  chartSource,
+  /kioseffCalculationVersion,\s*kioseffSourceRevision,\s*historyDepth,\s*chartHistoryState/,
+  "closed candles must not tear down and rebuild the full heatmap effect"
+);
 assert.match(chartSource, /Certified partial warmup retained/);
 assert.match(chartSource, /canUseIndicator\(key, \{ allowedIndicators \}\)/);
 const appSource = readFileSync(

@@ -17,6 +17,7 @@ import {
 } from "../src/modules/kioseff-stop-loss-clustering/data/historyCoordinator.ts";
 import { utcBucketStart } from "../src/modules/kioseff-stop-loss-clustering/data/timeframes.ts";
 import type { KioseffHistoryResult } from "../src/modules/kioseff-stop-loss-clustering/data/types.ts";
+import { selectKioseffLiveUpdateBars } from "../src/modules/kioseff-stop-loss-clustering/data/liveUpdate.ts";
 
 const minute = 60;
 const base = 1_704_067_200; // 2024-01-01 00:00:00 UTC
@@ -29,8 +30,64 @@ assert.equal(
 assert.equal(
   shouldRefreshKioseffHistory(base, base + minute),
   true,
-  "a newly opened chart candle refreshes intrabar history"
+  "a newly opened chart candle schedules a causal intrabar tail update"
 );
+
+const liveHistory = Array.from({ length: 10 }, (_, index) => ({
+  time: base + index * minute,
+  open: 100 + index,
+  high: 101 + index,
+  low: 99 + index,
+  close: 100.5 + index,
+  volume: 10 + index
+}));
+assert.deepEqual(
+  selectKioseffLiveUpdateBars(liveHistory, {
+    committedThrough: base + 8 * minute,
+    lastProcessedBarTime: base + 9 * minute
+  }),
+  [],
+  "repeated snapshots of the current open bar are idempotent"
+);
+const nextLiveBar = {
+  time: base + 10 * minute,
+  open: 110,
+  high: 111,
+  low: 109,
+  close: 110.5,
+  volume: 20
+};
+assert.deepEqual(
+  selectKioseffLiveUpdateBars([...liveHistory, nextLiveBar], {
+    committedThrough: base + 8 * minute,
+    lastProcessedBarTime: base + 9 * minute
+  }).map((bar) => bar.time),
+  [base + 9 * minute, base + 10 * minute],
+  "a new candle advances the warmed worker with only the formerly provisional and new provisional bars"
+);
+const rollingHistory = [...liveHistory];
+const rollingCursor = {
+  committedThrough: base + 8 * minute,
+  lastProcessedBarTime: base + 9 * minute
+};
+for (let index = 10; index < 20; index += 1) {
+  rollingHistory.push({
+    time: base + index * minute,
+    open: 100 + index,
+    high: 101 + index,
+    low: 99 + index,
+    close: 100.5 + index,
+    volume: 10 + index
+  });
+  const tail = selectKioseffLiveUpdateBars(rollingHistory, rollingCursor);
+  assert.deepEqual(
+    tail.map((bar) => bar.time),
+    [base + (index - 1) * minute, base + index * minute],
+    "successive live candles must stay on the two-bar incremental path"
+  );
+  rollingCursor.committedThrough = base + (index - 1) * minute;
+  rollingCursor.lastProcessedBarTime = base + index * minute;
+}
 
 function candles(count: number, start = base): Candle[] {
   return Array.from({ length: count }, (_, index) => {

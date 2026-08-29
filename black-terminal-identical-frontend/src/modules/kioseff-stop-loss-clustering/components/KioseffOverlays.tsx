@@ -5,7 +5,6 @@ import type {
   KioseffLoadState,
   KioseffRuntimeDiagnostics
 } from "../data/loadState";
-import { kioseffLoadProgress } from "../data/loadProgress";
 import { buildMarketMakerActivityDashboard } from "./marketMakerDashboardModel";
 
 type Props = {
@@ -39,66 +38,6 @@ function formatEventTime(value: number | null | undefined) {
     hour: "2-digit",
     minute: "2-digit"
   });
-}
-
-function loadLabel(state: KioseffLoadState) {
-  switch (state.stage) {
-    case "idle":
-      return "Waiting to start…";
-    case "requesting-symbol-metadata":
-      return "Requesting authoritative symbol metadata…";
-    case "fetching-chart-history":
-      return `Fetching chart history — ${state.loaded.toLocaleString()} of ${state.target.toLocaleString()} bars`;
-    case "fetching-intrabar-history":
-      return `Fetching ordered intrabars — ${state.loaded.toLocaleString()}${state.target === undefined ? "" : ` of ${state.target.toLocaleString()}`}`;
-    case "grouping-intrabars":
-      return `Grouping ${state.intrabars.toLocaleString()} intrabars into ${state.bars.toLocaleString()} chart bars…`;
-    case "validating":
-      return `Validating ${state.intrabars.toLocaleString()} ordered intrabars across ${state.bars.toLocaleString()} chart bars…`;
-    case "starting-worker":
-      return "Starting versioned calculation worker…";
-    case "rebuilding":
-      return `Rebuilding clean Pine state from ${state.bars.toLocaleString()} chronological bars and ${state.intrabars.toLocaleString()} intrabars…`;
-    case "calculating":
-      return `Calculating ${(state.processedBars ?? state.bars).toLocaleString()} of ${state.bars.toLocaleString()} bars from ${(state.processedIntrabars ?? state.intrabars).toLocaleString()} of ${state.intrabars.toLocaleString()} intrabars…`;
-    case "rendering":
-      return `Building visible market-maker geometry for ${state.clusters.toLocaleString()} zones…`;
-    case "warming":
-      return `Warming up — calculated from ${state.completedBars.toLocaleString()} of ${state.targetBars.toLocaleString()} chart bars`;
-    case "ready":
-      return "Ready";
-    case "degraded":
-      return `Degraded — ${state.message}`;
-    case "unavailable":
-      return `Unavailable — ${state.reason}`;
-    case "error":
-      return `Error — ${state.message}`;
-  }
-}
-
-function KioseffEnergyLoader({ state }: { state: KioseffLoadState }) {
-  const progress = kioseffLoadProgress(state);
-  return (
-    <aside className="kioseff-energy-loader" data-testid="kioseff-load-state" role="status" aria-live="polite">
-      <div className="kioseff-energy-heading">
-        <b>Market Maker Heatmap</b>
-        <strong>{Math.round(progress)}%</strong>
-      </div>
-      <div
-        className="kioseff-energy-track"
-        role="progressbar"
-        aria-label="Market Maker Heatmap loading progress"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(progress)}
-      >
-        <span className="kioseff-energy-fill" style={{ width: `${progress}%` }} />
-        <i className="kioseff-energy-grid" />
-      </div>
-      <span>{loadLabel(state)}</span>
-      <small>HIGH-RESOLUTION ORDERED INTRABAR RECONSTRUCTION</small>
-    </aside>
-  );
 }
 
 export function KioseffOverlays({
@@ -170,7 +109,6 @@ export function KioseffOverlays({
   if (!snapshot) {
     return (
       <>
-        <KioseffEnergyLoader state={loadState} />
         {parityPanel}
         {inspector}
       </>
@@ -188,9 +126,6 @@ export function KioseffOverlays({
         : `${dashboard.dominantPressure === "buy-wall" ? "Buy wall" : "Sell wall"} ${dashboard.dominantPressurePercent?.toFixed(0) ?? "—"}%`;
   return (
     <>
-      {loadState.stage !== "ready" &&
-        loadState.stage !== "degraded" &&
-        <KioseffEnergyLoader state={loadState} />}
       {loadState.stage === "degraded" && (
         <aside className="kioseff-warming" role="status">
           {loadState.message}

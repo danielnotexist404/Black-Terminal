@@ -5,7 +5,9 @@ import type { CompileResult, CompiledScriptActivation } from "./ScriptCompiler";
 import type { Candle } from "../chart-engine/types";
 import type { ChartDisplayType } from "../chart-engine/types";
 import { dbGetCurrentUserScripts, dbSaveCurrentUserScripts, isSupabaseConfigured } from "../lib/supabase";
+import { isSecureSessionUnavailableError } from "../auth/authenticatedSession";
 import { normalizeUserScripts, type UserScript } from "../scripts/userScriptLibrary";
+import { clearScriptEditorRecovery, readScriptEditorRecovery, writeScriptEditorRecovery } from "../scripts/scriptEditorRecovery";
 
 type ScriptEditorProps = {
   symbol: string;
@@ -16,6 +18,7 @@ type ScriptEditorProps = {
   onUnloadScript: (scriptId: string) => void;
   loadedScriptIds: readonly string[];
   onClose: () => void;
+  onRequireAuthentication?: () => void;
   currentUser: { username: string; role: "admin" | "user" } | null;
 };
 
@@ -82,18 +85,23 @@ export function ScriptEditor({
   onUnloadScript,
   loadedScriptIds,
   onClose,
+  onRequireAuthentication,
   currentUser
 }: ScriptEditorProps) {
+  const recoveryOwner = currentUser?.username || "anonymous";
+  const initialRecovery = useRef(typeof window === "undefined" ? null : readScriptEditorRecovery(window.sessionStorage, recoveryOwner));
   const [scripts, setScripts] = useState<UserScript[]>([]);
-  const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null);
-  const [name, setName] = useState("My Indicator");
-  const [kind, setKind] = useState<"indicator" | "strategy">("indicator");
-  const [source, setSource] = useState(templates.indicator);
+  const [selectedScriptId, setSelectedScriptId] = useState<string | null>(() => initialRecovery.current?.selectedScriptId ?? null);
+  const [name, setName] = useState(() => initialRecovery.current?.name ?? "My Indicator");
+  const [kind, setKind] = useState<"indicator" | "strategy">(() => initialRecovery.current?.kind ?? "indicator");
+  const [source, setSource] = useState(() => initialRecovery.current?.source ?? templates.indicator);
   
   // Compiler state
-  const [consoleLogs, setConsoleLogs] = useState<{ type: "success" | "error"; text: string; line?: number }[]>([]);
+  const [consoleLogs, setConsoleLogs] = useState<{ type: "success" | "error"; text: string; line?: number }[]>(() => initialRecovery.current ? [{ type: "success", text: "Recovered the unsaved Script Editor draft from this browser session." }] : []);
   const [highlightedLine, setHighlightedLine] = useState<number | null>(null);
   const [storageBusy, setStorageBusy] = useState(false);
+  const [authenticationRequired, setAuthenticationRequired] = useState(false);
+  const suppressRecoveryWrite = useRef(false);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
 
   const localStorageKey = currentUser ? `bt_user_scripts:${currentUser.username}` : "bt_user_scripts:anonymous";
@@ -106,6 +114,7 @@ export function ScriptEditor({
         try {
           stored = normalizeUserScripts(await dbGetCurrentUserScripts());
         } catch (e) {
+          if (isSecureSessionUnavailableError(e)) setAuthenticationRequired(true);
           setConsoleLogs([{ type: "error", text: `VPS script storage could not be loaded: ${e instanceof Error ? e.message : "Unknown storage error"}` }]);
           return;
         }
@@ -117,12 +126,22 @@ export function ScriptEditor({
       }
 
       setScripts(stored);
-      if (stored.length > 0) {
+      if (stored.length > 0 && !initialRecovery.current) {
         loadScriptIntoEditor(stored[0]);
       }
     };
     loadScripts();
-  }, [currentUser, localStorageKey]);
+  }, [currentUser?.username, localStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (suppressRecoveryWrite.current) {
+      suppressRecoveryWrite.current = false;
+      clearScriptEditorRecovery(window.sessionStorage, recoveryOwner);
+      return;
+    }
+    writeScriptEditorRecovery(window.sessionStorage, recoveryOwner, { selectedScriptId, name, kind, source });
+  }, [kind, name, recoveryOwner, selectedScriptId, source]);
 
   // Save scripts to local/Supabase
   const saveScriptsCollection = async (updated: UserScript[]) => {
@@ -184,11 +203,17 @@ export function ScriptEditor({
     try {
       await saveScriptsCollection(nextScripts);
       setSelectedScriptId(id);
+      setAuthenticationRequired(false);
+      if (typeof window !== "undefined") {
+        suppressRecoveryWrite.current = true;
+        clearScriptEditorRecovery(window.sessionStorage, recoveryOwner);
+      }
       if (!quiet) {
         setConsoleLogs([{ type: "success", text: `Script "${newScript.name}" saved to ${isSupabaseConfigured ? "authenticated VPS storage" : "local development storage"}. It was not added to the chart.` }]);
       }
       return newScript;
     } catch (error) {
+      if (isSecureSessionUnavailableError(error)) setAuthenticationRequired(true);
       setConsoleLogs([{ type: "error", text: `Save failed: ${error instanceof Error ? error.message : "Unknown storage error"}` }]);
       return null;
     } finally {
@@ -210,6 +235,7 @@ export function ScriptEditor({
       await saveScriptsCollection(updated);
       onUnloadScript(id);
     } catch (error) {
+      if (isSecureSessionUnavailableError(error)) setAuthenticationRequired(true);
       setConsoleLogs([{ type: "error", text: `Delete failed: ${error instanceof Error ? error.message : "Unknown storage error"}` }]);
       setStorageBusy(false);
       return;
@@ -710,6 +736,28 @@ export function ScriptEditor({
                 </div>
               ))
             )}
+            {authenticationRequired && onRequireAuthentication ? (
+              <button
+                type="button"
+                onClick={onRequireAuthentication}
+                style={{
+                  alignSelf: "flex-start",
+                  background: "rgba(196,0,36,0.18)",
+                  border: "1px solid rgba(255,23,74,0.72)",
+                  borderRadius: "3px",
+                  color: "#f4f4f5",
+                  cursor: "pointer",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: "9px",
+                  fontWeight: 800,
+                  letterSpacing: "0.08em",
+                  marginTop: "6px",
+                  padding: "7px 10px"
+                }}
+              >
+                RE-AUTHENTICATE WITHOUT LOSING DRAFT
+              </button>
+            ) : null}
           </div>
         </div>
       </div>

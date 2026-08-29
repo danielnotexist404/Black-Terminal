@@ -30,7 +30,7 @@
     "test:horizon-candles": "node --experimental-strip-types scripts/horizon-candle-tests.ts",
     "test:chart-visibility-recovery": "node --experimental-strip-types scripts/chart-visibility-recovery-tests.ts",
     "test:timeframes": "node --experimental-strip-types scripts/timeframe-support-tests.ts",
-    "test:script-runtime": "node --experimental-strip-types scripts/script-runtime-tests.ts && node --experimental-strip-types scripts/script-strategy-v3-tests.ts",
+    "test:script-runtime": "node --experimental-strip-types scripts/auth-session-tests.ts && node --experimental-strip-types scripts/script-runtime-tests.ts && node --experimental-strip-types scripts/script-strategy-v3-tests.ts",
     "test:causal-renko": "node --experimental-strip-types scripts/causal-renko-tests.ts",
     "test:chart-csp": "node scripts/chart-csp-regression.js",
     "test:liquidation-heatmap": "node --experimental-strip-types scripts/liquidation-heatmap-tests.ts",

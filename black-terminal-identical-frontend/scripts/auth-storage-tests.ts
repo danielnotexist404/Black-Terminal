@@ -3,7 +3,7 @@ import {
   BLACK_TERMINAL_AUTH_STORAGE_KEY,
   legacySupabaseAuthStorageKeys,
   migrateSupabaseAuthStorage
-} from "../src/auth/supabaseAuthStorage";
+} from "../src/auth/supabaseAuthStorage.ts";
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();

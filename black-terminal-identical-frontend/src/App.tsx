@@ -118,6 +118,7 @@ import { migrateMarketSentimentSettings } from "./modules/market-sentiment/core/
 import {
   clearSupabaseAuthSession,
   dbAddAuditLog,
+  dbGetCurrentUserProfile,
   dbGetCurrentUserScripts,
   dbGetUsers,
   dbSaveCurrentUserScripts,
@@ -630,6 +631,8 @@ export default function App() {
     }
     return null;
   });
+  const authBootstrapBypassed = isLocalUiPreview || isLocalAuthPreview || !isSupabaseConfigured || !supabase;
+  const [authBootstrapReady, setAuthBootstrapReady] = useState(authBootstrapBypassed);
 
   useEffect(() => {
     if (currentUser) {
@@ -638,6 +641,69 @@ export default function App() {
       localStorage.removeItem("bt_current_user");
     }
   }, [currentUser]);
+
+  useEffect(() => {
+    if (authBootstrapBypassed || !supabase) {
+      setAuthBootstrapReady(true);
+      return;
+    }
+    const authClient = supabase;
+    let disposed = false;
+    const hydrateAuthoritativeSession = async () => {
+      const { data, error } = await authClient.auth.getSession();
+      if (disposed) return;
+      if (error || !data.session?.user) {
+        setCurrentUser(null);
+        setAuthBootstrapReady(true);
+        return;
+      }
+      try {
+        const profile = await dbGetCurrentUserProfile({ retries: 2 });
+        if (disposed) return;
+        if (!profile) {
+          setCurrentUser(null);
+        } else {
+          setCurrentUser({
+            username: profile.username,
+            displayName: profile.displayName,
+            email: profile.email,
+            emailVerified: profile.emailVerified,
+            authSessionReady: true,
+            role: profile.role,
+            allowedIndicators: profile.allowedIndicators,
+            productTier: profile.productTier,
+            permissions: profile.permissions,
+            aiMessagesCount: profile.aiMessagesCount,
+            aiLastMessageTimestamp: profile.aiLastMessageTimestamp,
+          });
+        }
+      } catch (error) {
+        if (!disposed) {
+          setCurrentUser((existing) => existing ? {
+            ...existing,
+            authSessionReady: true,
+            authSessionWarning: error instanceof Error ? error.message : "Secure profile refresh is temporarily unavailable."
+          } : null);
+        }
+      } finally {
+        if (!disposed) setAuthBootstrapReady(true);
+      }
+    };
+    void hydrateAuthoritativeSession();
+    const { data: listener } = authClient.auth.onAuthStateChange((event, session) => {
+      if (disposed) return;
+      if (event === "SIGNED_OUT" || !session) {
+        setCurrentUser(null);
+        setAuthBootstrapReady(true);
+      } else if (event === "TOKEN_REFRESHED" || event === "SIGNED_IN") {
+        setCurrentUser((existing) => existing ? { ...existing, authSessionReady: true, authSessionWarning: undefined } : existing);
+      }
+    });
+    return () => {
+      disposed = true;
+      listener.subscription.unsubscribe();
+    };
+  }, [authBootstrapBypassed]);
   const [activeNav, setActiveNav] = useState(() => localStorage.getItem("bt_active_nav") || "CHART");
   const brokerPositionsDefaultAppliedRef = useRef(false);
   const [selectedProfessionalUsername, setSelectedProfessionalUsername] = useState<string | null>(null);
@@ -829,6 +895,14 @@ export default function App() {
     invalidatePortfolioSnapshot();
     setCurrentUser(null);
     setActiveNav("CHART");
+  };
+
+  const handleRequireAuthentication = async () => {
+    try { await clearSupabaseAuthSession(); } catch { /* Landing will establish a fresh authoritative session. */ }
+    blackCoreConnectionManager.clearSession();
+    blackCoreOrderSyncService.clear();
+    invalidatePortfolioSnapshot();
+    setCurrentUser(null);
   };
 
   const initialExchange = isBclifVisualFixture ? getExchangeOption("bybit") : marketCatalog[0];
@@ -1947,6 +2021,10 @@ export default function App() {
     return () => underlay.removeAttribute("inert");
   }, [chartWorkspaceIsolated]);
 
+  if (!authBootstrapReady) {
+    return <div style={{ minHeight: "100vh", background: "#020304", color: "#d8d8dc", display: "grid", placeItems: "center", fontFamily: "var(--font-mono)", fontSize: "11px", letterSpacing: "0.12em" }}>RESTORING SECURE SESSION…</div>;
+  }
+
   if (!currentUser) {
     return (
       <LandingPage
@@ -2796,6 +2874,7 @@ export default function App() {
               onUnloadScript={(scriptId) => setMountedCustomScripts((current) => unmountCustomScript(current, scriptId))}
               loadedScriptIds={mountedCustomScriptIds}
               onClose={() => setActiveNav("CHART")}
+              onRequireAuthentication={() => void handleRequireAuthentication()}
               currentUser={currentUser}
             />
           ) : activeNav === "ALERTS" ? (

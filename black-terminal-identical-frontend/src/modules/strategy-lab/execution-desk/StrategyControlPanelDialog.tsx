@@ -1,0 +1,124 @@
+import { AlertTriangle, Check, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import type { ChangeEvent, ReactNode } from "react";
+import { createPortal } from "react-dom";
+import type { StrategyControlPanel } from "../automation/strategyAutomation.types";
+
+type Tab = "inputs" | "properties" | "style" | "visibility";
+
+export function StrategyControlPanelDialog({
+  name,
+  accountLabel,
+  initial,
+  busy,
+  onCancel,
+  onApply,
+}: {
+  name: string;
+  accountLabel: string;
+  initial: StrategyControlPanel;
+  busy: boolean;
+  onCancel: () => void;
+  onApply: (value: StrategyControlPanel) => Promise<void>;
+}) {
+  const [tab, setTab] = useState<Tab>("inputs");
+  const [value, setValue] = useState(() => structuredClone(initial));
+  const [error, setError] = useState<string>();
+  useEffect(() => setValue(structuredClone(initial)), [initial]);
+  const patchInputs = (patch: Partial<StrategyControlPanel["inputs"]>) => setValue((current) => ({ ...current, inputs: { ...current.inputs, ...patch } }));
+  const patchProperties = (patch: Partial<StrategyControlPanel["properties"]>) => setValue((current) => ({ ...current, properties: { ...current.properties, ...patch } }));
+  const patchStyle = (patch: Partial<StrategyControlPanel["style"]>) => setValue((current) => ({ ...current, style: { ...current.style, ...patch } }));
+  const patchVisibility = (patch: Partial<StrategyControlPanel["visibility"]>) => setValue((current) => ({ ...current, visibility: { ...current.visibility, ...patch } }));
+  const submit = async () => {
+    const total = value.inputs.multiStepTakeProfit ? value.inputs.atrExitPercent * 4 + value.inputs.fixedExitPercent * 3 : 0;
+    if (value.inputs.shortPeriod >= value.inputs.longPeriod) { setError("Short Period must be smaller than Long Period."); return; }
+    if (total > 100) { setError(`TP allocations total ${total.toFixed(2)}%. Reduce them to 100% or less.`); return; }
+    setError(undefined);
+    try { await onApply(value); }
+    catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Strategy configuration could not be saved."); }
+  };
+  const dialog = <div className="strategy-control-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
+    <section className="strategy-control-dialog" role="dialog" aria-modal="true" aria-label={`${name} settings`}>
+      <header><h2>{name}</h2><button type="button" aria-label="Close strategy settings" disabled={busy} onClick={onCancel}><X size={18} /></button></header>
+      <nav aria-label="Strategy settings sections">{(["inputs", "properties", "style", "visibility"] as Tab[]).map((item) => <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item.toUpperCase()}</button>)}</nav>
+      <div className="strategy-control-scroll">
+        {tab === "inputs" ? <Inputs value={value} patch={patchInputs} /> : null}
+        {tab === "properties" ? <Properties value={value} patch={patchProperties} accountLabel={accountLabel} /> : null}
+        {tab === "style" ? <Style value={value} patch={patchStyle} /> : null}
+        {tab === "visibility" ? <Visibility value={value} patch={patchVisibility} /> : null}
+      </div>
+      {error ? <div className="strategy-control-error"><AlertTriangle size={13} />{error}</div> : null}
+      <footer><select aria-label="Strategy defaults"><option>Defaults</option><option>SuperATR Pine defaults</option></select><div><button type="button" disabled={busy} onClick={onCancel}>Cancel</button><button type="button" className="primary" disabled={busy} onClick={() => void submit()}>{busy ? "Applying…" : <><Check size={13} />Ok</>}</button></div></footer>
+    </section>
+  </div>;
+  return typeof document === "undefined" ? dialog : createPortal(dialog, document.body);
+}
+
+function Inputs({ value, patch }: { value: StrategyControlPanel; patch: (value: Partial<StrategyControlPanel["inputs"]>) => void }) {
+  const input = value.inputs;
+  const atr = [...input.atrMultipliers] as [number, number, number, number];
+  const fixed = [...input.fixedTakeProfitPercentages] as [number, number, number];
+  return <div className="strategy-control-form">
+    <NumberRow label="Short Period" value={input.shortPeriod} min={1} onChange={(shortPeriod) => patch({ shortPeriod })} />
+    <NumberRow label="Long Period" value={input.longPeriod} min={1} onChange={(longPeriod) => patch({ longPeriod })} />
+    <NumberRow label="Momentum Period" value={input.momentumPeriod} min={1} onChange={(momentumPeriod) => patch({ momentumPeriod })} />
+    <NumberRow label="ATR SMA Period for Confirmation" value={input.atrConfirmationPeriod} min={1} onChange={(atrConfirmationPeriod) => patch({ atrConfirmationPeriod })} />
+    <NumberRow label="Trend Strength Threshold" value={input.trendStrengthThreshold} min={0} step={0.1} onChange={(trendStrengthThreshold) => patch({ trendStrengthThreshold })} />
+    <CheckRow label="Enable Multi-Step Take Profit" checked={input.multiStepTakeProfit} onChange={(multiStepTakeProfit) => patch({ multiStepTakeProfit })} />
+    <NumberRow label="ATR Length for Take Profit" value={input.takeProfitAtrLength} min={1} disabled={!input.multiStepTakeProfit} onChange={(takeProfitAtrLength) => patch({ takeProfitAtrLength })} />
+    {atr.map((item, index) => <NumberRow key={index} label={`ATR Multiplier for TP Level ${index + 1}`} value={item} min={0.001} disabled={!input.multiStepTakeProfit} onChange={(next) => { atr[index] = next; patch({ atrMultipliers: atr }); }} />)}
+    {fixed.map((item, index) => <NumberRow key={index} label={`Fixed TP Level ${index + 1} (%)`} value={item} min={0.001} disabled={!input.multiStepTakeProfit} onChange={(next) => { fixed[index] = next; patch({ fixedTakeProfitPercentages: fixed }); }} />)}
+    <NumberRow label="Percentage to Exit at Each ATR TP Level" value={input.atrExitPercent} min={0.1} max={100} disabled={!input.multiStepTakeProfit} onChange={(atrExitPercent) => patch({ atrExitPercent })} />
+    <NumberRow label="Percentage to Exit at Each Fixed TP Level" value={input.fixedExitPercent} min={0.1} max={100} disabled={!input.multiStepTakeProfit} onChange={(fixedExitPercent) => patch({ fixedExitPercent })} />
+  </div>;
+}
+
+function Properties({ value, patch, accountLabel }: { value: StrategyControlPanel; patch: (value: Partial<StrategyControlPanel["properties"]>) => void; accountLabel: string }) {
+  const item = value.properties;
+  return <div className="strategy-control-form properties">
+    <h3>GENERAL</h3>
+    <ChoiceRow label="Initial capital"><input type="number" min="1" value={item.initialCapital} onChange={(event) => patch({ initialCapital: numeric(event, item.initialCapital) })} /><select value={item.currency} onChange={(event) => patch({ currency: event.target.value as typeof item.currency })}><option>USD</option><option>USDT</option></select></ChoiceRow>
+    <ChoiceRow label="Default order size"><input type="number" min="0.00000001" value={item.orderSizeValue} onChange={(event) => patch({ orderSizeValue: numeric(event, item.orderSizeValue) })} /><select value={item.orderSizeMode} onChange={(event) => patch({ orderSizeMode: event.target.value as typeof item.orderSizeMode })}><option value="PERCENT_EQUITY">% of equity</option><option value="FIXED_USDT">USDT balance</option><option value="FIXED_QUANTITY">Raw quantity</option></select></ChoiceRow>
+    <NumberRow label="Pyramiding" value={item.pyramiding} min={1} max={100} onChange={(pyramiding) => patch({ pyramiding })} />
+    <h3>DETAILIZATION AND EXECUTION</h3>
+    <SelectRow label="Bar detailization" value={item.barDetailization} onChange={(barDetailization) => patch({ barDetailization: barDetailization as typeof item.barDetailization })}><option value="DEFAULT_4_TICKS">Default (4 ticks per bar)</option><option value="CLOSED_BAR">Closed bar OHLC</option></SelectRow>
+    <SelectRow label="Script execution" value={item.executionCadence} onChange={(executionCadence) => patch({ executionCadence: executionCadence as typeof item.executionCadence })}><option value="BAR_CLOSE_AND_REALTIME">On bar close, On realtime bar tick</option><option value="BAR_CLOSE">On bar close</option></SelectRow>
+    <h3>BROKER EMULATOR · {accountLabel.toUpperCase()}</h3>
+    <ChoiceRow label="Commission"><input type="number" min="0" step="0.01" value={item.commissionValue} onChange={(event) => patch({ commissionValue: numeric(event, item.commissionValue) })} /><select value={item.commissionMode} onChange={(event) => patch({ commissionMode: event.target.value as typeof item.commissionMode })}><option value="PERCENT">Percent</option><option value="USDT_PER_ORDER">USDT per order</option></select></ChoiceRow>
+    <NumberRow label="Long leverage" value={item.longLeverage} min={1} max={1000} suffix="x" onChange={(longLeverage) => patch({ longLeverage })} />
+    <NumberRow label="Short leverage" value={item.shortLeverage} min={1} max={1000} suffix="x" onChange={(shortLeverage) => patch({ shortLeverage })} />
+    <NumberRow label="Slippage" value={item.slippageTicks} min={0} suffix="ticks" onChange={(slippageTicks) => patch({ slippageTicks })} />
+    <SelectRow label="Limit order execution" value={item.limitExecution} onChange={(limitExecution) => patch({ limitExecution: limitExecution as typeof item.limitExecution })}><option value="REQUESTED_PRICE">Requested price</option><option value="TOUCH">Price touch</option></SelectRow>
+    <SelectRow label="Order execution delay" value={item.executionDelay} onChange={(executionDelay) => patch({ executionDelay: executionDelay as typeof item.executionDelay })}><option value="ONE_TICK">One tick</option><option value="NONE">None</option></SelectRow>
+    <p className="strategy-control-authority">Equity/USDT sizing and side leverage are enforced server-side against this selected destination, its available balance, Bybit instrument limits, account caps, and Strategy Lab risk ceilings.</p>
+  </div>;
+}
+
+function Style({ value, patch }: { value: StrategyControlPanel; patch: (value: Partial<StrategyControlPanel["style"]>) => void }) {
+  const style = value.style;
+  return <div className="strategy-control-form style">
+    <VisualRow label="Short MA" checked={style.shortMaVisible} color={style.shortMaColor} width={style.shortMaWidth} onCheck={(shortMaVisible) => patch({ shortMaVisible })} onColor={(shortMaColor) => patch({ shortMaColor })} onWidth={(shortMaWidth) => patch({ shortMaWidth })} />
+    <VisualRow label="Long MA" checked={style.longMaVisible} color={style.longMaColor} width={style.longMaWidth} onCheck={(longMaVisible) => patch({ longMaVisible })} onColor={(longMaColor) => patch({ longMaColor })} onWidth={(longMaWidth) => patch({ longMaWidth })} />
+    <CheckRow label="Trades on chart" checked={style.tradesOnChart} onChange={(tradesOnChart) => patch({ tradesOnChart })} />
+    <CheckRow label="Signal labels" checked={style.signalLabels} onChange={(signalLabels) => patch({ signalLabels })} />
+    <CheckRow label="Quantity" checked={style.quantity} onChange={(quantity) => patch({ quantity })} />
+    <h3>OUTPUT VALUES</h3>
+    <SelectRow label="Precision" value={style.precision} onChange={(precision) => patch({ precision: precision as typeof style.precision })}><option value="DEFAULT">Default</option>{[0,1,2,3,4,5,6,7,8].map((number) => <option key={number} value={String(number)}>{number}</option>)}</SelectRow>
+    <CheckRow label="Labels on price scale" checked={style.labelsOnPriceScale} onChange={(labelsOnPriceScale) => patch({ labelsOnPriceScale })} />
+    <CheckRow label="Values in status line" checked={style.valuesInStatusLine} onChange={(valuesInStatusLine) => patch({ valuesInStatusLine })} />
+    <h3>INPUT VALUES</h3>
+    <CheckRow label="Inputs in status line" checked={style.inputsInStatusLine} onChange={(inputsInStatusLine) => patch({ inputsInStatusLine })} />
+  </div>;
+}
+
+function Visibility({ value, patch }: { value: StrategyControlPanel; patch: (value: Partial<StrategyControlPanel["visibility"]>) => void }) {
+  const visibility = value.visibility;
+  return <div className="strategy-control-form visibility"><p>Choose the dedicated Execution Desk timeframes that display the strategy plots and trade labels. The headless strategy remains active on its configured runtime timeframe.</p><CheckRow label="All timeframes" checked={visibility.allTimeframes} onChange={(allTimeframes) => patch({ allTimeframes })} />{(["seconds", "minutes", "hours", "days", "weeks", "months"] as const).map((key) => <CheckRow key={key} label={key[0]!.toUpperCase() + key.slice(1)} checked={visibility[key]} disabled={visibility.allTimeframes} onChange={(checked) => patch({ [key]: checked })} />)}</div>;
+}
+
+function NumberRow({ label, value, min, max, step, suffix, disabled, onChange }: { label: string; value: number; min?: number; max?: number; step?: number; suffix?: string; disabled?: boolean; onChange: (value: number) => void }) { return <label className="strategy-control-row"><span>{label}</span><span className="strategy-control-number"><input type="number" value={value} min={min} max={max} step={step || 1} disabled={disabled} onChange={(event) => onChange(numeric(event, value))} />{suffix ? <em>{suffix}</em> : null}</span></label>; }
+function CheckRow({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (value: boolean) => void }) { return <label className="strategy-control-check"><input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} /><span>{label}</span></label>; }
+function SelectRow({ label, value, children, onChange }: { label: string; value: string; children: ReactNode; onChange: (value: string) => void }) { return <label className="strategy-control-row"><span>{label}</span><select value={value} onChange={(event) => onChange(event.target.value)}>{children}</select></label>; }
+function ChoiceRow({ label, children }: { label: string; children: ReactNode }) { return <label className="strategy-control-row choice"><span>{label}</span><span>{children}</span></label>; }
+function VisualRow({ label, checked, color, width, onCheck, onColor, onWidth }: { label: string; checked: boolean; color: string; width: number; onCheck: (value: boolean) => void; onColor: (value: string) => void; onWidth: (value: number) => void }) { return <div className="strategy-control-visual"><label><input type="checkbox" checked={checked} onChange={(event) => onCheck(event.target.checked)} />{label}</label><input type="color" value={color} onChange={(event) => onColor(event.target.value)} /><span className="line" style={{ color, height: Math.max(1, width) }} /><select value={width} onChange={(event) => onWidth(Number(event.target.value))}>{[1,2,3,4,5].map((item) => <option key={item}>{item}</option>)}</select></div>; }
+function numeric(event: ChangeEvent<HTMLInputElement>, fallback: number) { const value = Number(event.target.value); return Number.isFinite(value) ? value : fallback; }

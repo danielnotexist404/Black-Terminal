@@ -453,6 +453,23 @@ export async function updateTargetPolicy(supabase, userId, strategyId, bindingId
   return getBinding(supabase, userId, strategyId, bindingId);
 }
 
+export async function updateGlobalCapitalPolicy(supabase, userId, strategyId, body, idempotencyKey) {
+  const strategy = await ownedStrategy(supabase, userId, strategyId);
+  if (Number(strategy.draft_revision || 0) !== Number(body.expectedRevision)) throw strategyError(409, "STRATEGY_DRAFT_CONFLICT", "This strategy changed elsewhere. Refresh it before updating execution limits.");
+  const policy = normalizeGlobalPolicy(body.capitalPolicy, strategy.market_type);
+  const requestHash = canonicalRequestHash({ action: "UPDATE_GLOBAL_POLICY", expectedRevision: body.expectedRevision, policy });
+  const { data: prior, error: priorError } = await supabase.from("strategy_automation_audit_events").select("id,safe_metadata").eq("strategy_id", strategyId).eq("owner_user_id", userId).eq("event_type", "STRATEGY_GLOBAL_POLICY_UPDATED").contains("safe_metadata", { idempotencyKey }).maybeSingle();
+  if (priorError) throw persistenceError(priorError);
+  if (!prior) {
+    const { data, error } = await supabase.from("strategy_automation_strategies").update({ global_capital_policy: policy, updated_at: new Date().toISOString() }).eq("id", strategyId).eq("owner_user_id", userId).eq("draft_revision", body.expectedRevision).select("id").maybeSingle();
+    if (error) throw persistenceError(error);
+    if (!data) throw strategyError(409, "STRATEGY_DRAFT_CONFLICT", "This strategy changed elsewhere. Refresh it before updating execution limits.");
+    const { error: auditError } = await supabase.from("strategy_automation_audit_events").insert({ owner_user_id: userId, strategy_id: strategyId, event_type: "STRATEGY_GLOBAL_POLICY_UPDATED", severity: "WARNING", message: "The owner explicitly updated global Strategy Lab execution ceilings from the Execution Desk.", safe_metadata: { idempotencyKey, requestHash, maximumLeverage: policy.maximumLeverage, maximumPositions: policy.maximumPositions } });
+    if (auditError) throw persistenceError(auditError);
+  }
+  return getStrategyWorkspace(supabase, userId, strategyId);
+}
+
 export async function setTargetState(supabase, userId, strategyId, bindingId, action, expectedVersion, idempotencyKey, environment = process.env) {
   const binding = await ownedBinding(supabase, userId, strategyId, bindingId);
   let validation = {};
@@ -955,6 +972,7 @@ function safeGroupDeskStrategy(row) {
 function runtimeLabel(kind) {
   if (kind === "builtin-ema-cross") return "EMA Cross Baseline";
   if (kind === "builtin-adaptive-swing") return "Hidden Distribution Swing";
+  if (kind === "builtin-superatr-seven-step") return "SuperATR 7-Step Profit";
   if (kind === "python-script") return "Python Indicator";
   return "External Indicator";
 }

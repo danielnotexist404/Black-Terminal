@@ -108,6 +108,11 @@ export const strategyAutomationApi = {
       `${encodeURIComponent(strategyId)}/publish`,
       mutation({ expectedRevision }),
     ),
+  updateGlobalPolicy: (strategyId: string, expectedRevision: number, capitalPolicy: StrategyCapitalPolicy) =>
+    request<StrategyWorkspace>(
+      `${encodeURIComponent(strategyId)}/global-policy`,
+      mutation({ expectedRevision, capitalPolicy }, "PATCH"),
+    ),
   startVersion: (strategyId: string, version: number) =>
     request<StrategyWorkspace>(
       `${encodeURIComponent(strategyId)}/versions/${version}/start`,

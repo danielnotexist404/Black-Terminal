@@ -6,6 +6,7 @@ import type {
   StrategyAutomationDefinition,
   StrategyBrokerConnection,
   StrategyCapitalPolicy,
+  StrategyControlPanel,
   StrategySummary,
   StrategyTargetBinding,
   StrategyWorkspace,
@@ -18,6 +19,7 @@ import { StrategyLibraryPage } from "./pages/StrategyLibraryPage";
 import { StrategyWizardPage } from "./pages/StrategyWizardPage";
 import { QalcExperience } from "../qalc/QalcExperience";
 import { consumeQalcStrategyHandoffIntent } from "../../qalc-indicator/config";
+import { applyStrategyControlPanel, readStrategyControlPanel } from "../execution-desk/strategyControlPanelModel";
 
 type View = "library" | "wizard" | "cockpit" | "qalc";
 type Props = {
@@ -423,11 +425,56 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
     finally { setBusy(false); }
   };
 
+  const applyExecutionConfiguration = async (baseDefinition: StrategyAutomationDefinition, basePolicy: StrategyCapitalPolicy, sourceKey: string, panel: StrategyControlPanel) => {
+    if (!workspace || busy) return;
+    setBusy(true);
+    setMessage("Applying the SuperATR execution contract to the selected destination…");
+    try {
+      const configured = applyStrategyControlPanel(baseDefinition, basePolicy, panel);
+      const nextDefinition: StrategyAutomationDefinition = {
+        ...configured.definition,
+        paper: { ...configured.definition.paper, capitalPolicy: sourceKey === "paper" ? configured.capitalPolicy : configured.definition.paper?.capitalPolicy },
+      };
+      let next = await strategyAutomationApi.saveDraft(workspace.strategy.id, workspace.strategy.name, nextDefinition, workspace.strategy.draftRevision || 0);
+      next = await strategyAutomationApi.updateGlobalPolicy(next.strategy.id, next.strategy.draftRevision || 0, expandedGlobalPolicy(workspace.strategy.globalCapitalPolicy, configured.capitalPolicy));
+      if (sourceKey === "paper") {
+        const openPaperPositions = Array.isArray(paperData?.positions) ? paperData.positions.length : 0;
+        if (!openPaperPositions && workspace.bindings.length === 0) {
+          next = await strategyAutomationApi.publishDraft(next.strategy.id, next.strategy.draftRevision || 0);
+          if (!next.strategy.publishedVersion) throw new Error("The immutable SuperATR version was not created.");
+          next = await strategyAutomationApi.startVersion(next.strategy.id, next.strategy.publishedVersion);
+          if (next.paper && Math.abs(next.paper.demoEquity - panel.properties.initialCapital) > 0.005) {
+            const reset = await strategyAutomationApi.paperAction(next.strategy.id, "reset", next.paper.rowVersion, { demoEquity: panel.properties.initialCapital });
+            next = { ...next, paper: reset.paper };
+          }
+          setMessage(`SuperATR V${next.strategy.runningVersion} is active. Paper sizing now uses ${panel.properties.orderSizeValue}${panel.properties.orderSizeMode === "PERCENT_EQUITY" ? "% of account equity" : panel.properties.orderSizeMode === "FIXED_USDT" ? " USDT" : " units"}.`);
+        } else {
+          if (workspace.paper) await strategyAutomationApi.configurePaper(workspace.strategy.id, workspace.paper.rowVersion, configured.capitalPolicy);
+          setMessage("Sizing and leverage were applied to the current Paper account. Signal/TP input changes are saved as the next immutable draft and will activate after current positions and live bindings are flat or migrated.");
+        }
+      } else {
+        const binding = workspace.bindings.find((item) => item.id === sourceKey);
+        if (!binding) throw new Error("The selected execution destination is no longer attached.");
+        await strategyAutomationApi.updateTarget(workspace.strategy.id, binding, configured.capitalPolicy);
+        setMessage(`${binding.targetLabel || binding.targetProvider || "Execution target"} now enforces the selected equity/USDT sizing and side leverage. Signal/TP inputs are saved as the next immutable strategy draft.`);
+      }
+      onDefinitionChange(nextDefinition);
+      const refreshed = await strategyAutomationApi.get(workspace.strategy.id);
+      setWorkspace(refreshed);
+      setDraft(hydrateDraft(refreshed));
+      setDirty(false);
+      await loadList();
+    } catch (error) {
+      setMessage(errorMessage(error, "SuperATR execution settings could not be applied."));
+      throw error;
+    } finally { setBusy(false); }
+  };
+
   return <div className="my-strategy-experience">
     {view === "library" ? <StrategyLibraryPage strategies={strategies} loading={loading} message={message} onCreate={newStrategy} onOpen={(id) => void openStrategy(id)} onModify={(id) => void modifyStrategy(id)} onDelete={setPendingDelete} onBacktest={onOpenBacktest} onPaperAction={(strategy, action) => void libraryPaperAction(strategy, action)} /> : null}
     {view === "qalc" ? <QalcExperience onBack={() => setView("library")} /> : null}
     {view === "wizard" && draft ? <StrategyWizardPage draft={draft} chartTimeframe={chartTimeframe} indicators={indicators} bindings={workspace?.bindings || []} eligibleTargets={wizardEligible} publishedName={workspace?.strategy.name} publishedDefinition={workspace?.strategy.definition} saving={busy} message={message || (dirty ? "Draft changes have not been saved." : undefined)} onChange={(next) => { setDraft(next); setDirty(true); }} onSaveDraft={() => void persistDraft()} onRefreshTargets={prepareWizardTargets} onActivate={() => void activateConfiguredStrategy()} onCancel={() => { setView(workspace?.strategy.publishedVersion ? "cockpit" : "library"); setMessage(undefined); }} /> : null}
-    {view === "cockpit" && workspace ? <StrategyCockpitPage workspace={workspace} paperData={paperData} busy={busy} message={message} onEdit={editStrategy} onRefresh={() => void refreshCockpit()} onPaperAction={(action, body) => void paperAction(action, body)} onAddTarget={(slot) => void openTargetPicker(slot)} onModifyTarget={(binding) => void openTargetPicker(binding.slotIndex, binding)} onTargetAction={(bindingId, action) => void targetAction(bindingId, action)} onDisconnectTarget={(bindingId) => void disconnectTarget(bindingId)} /> : null}
+    {view === "cockpit" && workspace ? <StrategyCockpitPage workspace={workspace} paperData={paperData} busy={busy} message={message} onEdit={editStrategy} onRefresh={() => void refreshCockpit()} onPaperAction={(action, body) => void paperAction(action, body)} onAddTarget={(slot) => void openTargetPicker(slot)} onModifyTarget={(binding) => void openTargetPicker(binding.slotIndex, binding)} onTargetAction={(bindingId, action) => void targetAction(bindingId, action)} onDisconnectTarget={(bindingId) => void disconnectTarget(bindingId)} onApplyExecutionConfiguration={applyExecutionConfiguration} /> : null}
     {addSlot !== null ? <TargetPicker slot={addSlot} existingBinding={editingBinding} eligible={eligible} connections={brokerConnections} busy={busy} onClose={() => { setAddSlot(null); setEditingBinding(null); setEligible(null); }} onRefresh={() => void refreshTargetPicker()} onConnect={linkBrokerConnection} onRemoveConnection={removeBrokerConnection} onSelect={(target) => void addTarget(target)} /> : null}
     {pendingDelete ? <DeleteStrategyDialog strategy={pendingDelete} busy={busy} onCancel={() => setPendingDelete(null)} onConfirm={() => void deleteStrategy()} /> : null}
   </div>;
@@ -456,6 +503,22 @@ function hydrateDraft(workspace: StrategyWorkspace): StrategyWizardDraft {
 }
 
 function isCapitalPolicy(value: unknown): value is StrategyCapitalPolicy { return Boolean(value && typeof value === "object" && "strategyAllocationMode" in value && "tradeAmountMode" in value); }
+
+function expandedGlobalPolicy(globalPolicy: StrategyCapitalPolicy, targetPolicy: StrategyCapitalPolicy): StrategyCapitalPolicy {
+  return {
+    ...globalPolicy,
+    strategyAllocationValue: globalPolicy.strategyAllocationMode === targetPolicy.strategyAllocationMode ? Math.max(globalPolicy.strategyAllocationValue, targetPolicy.strategyAllocationValue) : globalPolicy.strategyAllocationValue,
+    tradeAmountValue: globalPolicy.tradeAmountMode === targetPolicy.tradeAmountMode ? Math.max(globalPolicy.tradeAmountValue, targetPolicy.tradeAmountValue) : globalPolicy.tradeAmountValue,
+    requestedLeverage: Math.max(globalPolicy.requestedLeverage || 1, targetPolicy.requestedLeverage || 1),
+    maximumLeverage: Math.max(globalPolicy.maximumLeverage || 1, targetPolicy.maximumLeverage || 1),
+    maximumPositionPercent: Math.max(globalPolicy.maximumPositionPercent, targetPolicy.maximumPositionPercent),
+    maximumExposurePercent: Math.max(globalPolicy.maximumExposurePercent, targetPolicy.maximumExposurePercent),
+    maximumDailyLoss: Math.max(globalPolicy.maximumDailyLoss, targetPolicy.maximumDailyLoss),
+    maximumDrawdown: Math.max(globalPolicy.maximumDrawdown, targetPolicy.maximumDrawdown),
+    maximumPositions: Math.max(globalPolicy.maximumPositions, targetPolicy.maximumPositions),
+    slippageBps: Math.max(globalPolicy.slippageBps, targetPolicy.slippageBps),
+  };
+}
 
 function TargetPicker({ slot, existingBinding, eligible, connections, busy, onClose, onRefresh, onConnect, onRemoveConnection, onSelect }: { slot: number; existingBinding: StrategyTargetBinding | null; eligible: { brokerAccounts: EligibleBrokerTarget[]; groups: EligibleGroupTarget[] } | null; connections: StrategyBrokerConnection[]; busy: boolean; onClose: () => void; onRefresh: () => void; onConnect: (apiKey: string, apiSecret: string, connectionId?: string) => Promise<void>; onRemoveConnection: (connectionId: string) => Promise<void>; onSelect: (target: EligibleBrokerTarget | EligibleGroupTarget) => void }) {
   const [mode, setMode] = useState<"BROKER" | "GROUP" | null>(existingBinding?.targetType === "BROKER_ACCOUNT" ? "BROKER" : existingBinding?.targetType === "INVESTMENT_GROUP" ? "GROUP" : null);
@@ -515,11 +578,21 @@ function errorMessage(error: unknown, fallback: string) { return error instanceo
 
 function fixtureWorkspace(base: StrategyAutomationDefinition, indicator?: StrategyIndicatorInstance): StrategyWorkspace {
   const now = new Date().toISOString();
-  const bound = indicator ? { ...withWorkflowDefaults(base), runtimeKind: indicator.runtimeKind, indicator, settings: { ...base.settings, ...indicator.settings }, signals: { longEntry: indicator.alerts[0]?.id || "long-entry", shortEntry: indicator.alerts[1]?.id || indicator.alerts[0]?.id || "short-entry" }, paper: { demoEquity: 25_000, capitalPolicy: defaultWizardPaperPolicy("FUTURES") } } : withWorkflowDefaults(base);
-  const policy = defaultWizardPaperPolicy(bound.marketType);
+  let bound = indicator ? { ...withWorkflowDefaults(base), runtimeKind: indicator.runtimeKind, indicator, settings: { ...base.settings, ...indicator.settings }, signals: { longEntry: indicator.alerts[0]?.id || "long-entry", shortEntry: indicator.alerts[1]?.id || indicator.alerts[0]?.id || "short-entry" }, paper: { demoEquity: 25_000, capitalPolicy: defaultWizardPaperPolicy("FUTURES") } } : withWorkflowDefaults(base);
+  let policy = defaultWizardPaperPolicy(bound.marketType);
+  const controlPreview = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("strategyControlPreview") === "1";
+  if (controlPreview) {
+    const panel = readStrategyControlPanel(bound, policy, 5_000);
+    panel.inputs = { ...panel.inputs, shortPeriod: 30, longPeriod: 70, trendStrengthThreshold: 3.1, takeProfitAtrLength: 100, atrMultipliers: [100, 70, 120, 300], fixedTakeProfitPercentages: [21, 21, 75], atrExitPercent: 10, fixedExitPercent: 10 };
+    panel.properties = { ...panel.properties, initialCapital: 5_000, orderSizeValue: 35, commissionValue: 0.1, longLeverage: 25, shortLeverage: 25, slippageTicks: 1 };
+    const configured = applyStrategyControlPanel(bound, policy, panel);
+    bound = configured.definition;
+    policy = configured.capitalPolicy;
+  }
+  const strategyName = controlPreview ? "SuperATR 7-Step Profit - Strategy [presentTrading]" : "Hidden Distribution Swing";
   return {
-    strategy: { id: "preview-strategy-1", name: "Hidden Distribution Swing", runtimeKind: bound.runtimeKind, symbol: bound.symbol || "BTCUSDT", timeframe: "4h", marketType: bound.marketType, exchange: "bybit", currentVersion: 3, publishedVersion: 3, runningVersion: 3, draftRevision: 7, draftUpdatedAt: now, hasDraftChanges: false, status: "PAPER_ACTIVE", createdAt: now, updatedAt: now, definition: bound, draftDefinition: bound, draftName: "Hidden Distribution Swing", draftBaseVersion: 3, globalCapitalPolicy: policy },
-    versions: [{ version: 3, name: "Hidden Distribution Swing", definition: bound, status: "PUBLISHED", createdAt: now }],
+    strategy: { id: "preview-strategy-1", name: strategyName, runtimeKind: bound.runtimeKind, symbol: bound.symbol || "BTCUSDT", timeframe: "4h", marketType: bound.marketType, exchange: "bybit", currentVersion: 3, publishedVersion: 3, runningVersion: 3, draftRevision: 7, draftUpdatedAt: now, hasDraftChanges: false, status: "PAPER_ACTIVE", createdAt: now, updatedAt: now, definition: bound, draftDefinition: bound, draftName: strategyName, draftBaseVersion: 3, globalCapitalPolicy: policy },
+    versions: [{ version: 3, name: strategyName, definition: bound, status: "PUBLISHED", createdAt: now }],
     paper: { id: "paper-preview-1", strategyId: "preview-strategy-1", strategyVersion: 3, marketType: bound.marketType, status: "ACTIVE", demoEquity: 25_000, availableBalance: 23_840, usedStrategyCapital: 1_160, realizedPnl: 1_284.42, unrealizedPnl: 164.18, fees: 82.4, funding: 11.6, capitalPolicyVersion: 2, rowVersion: 9, capitalPolicy: policy, maximumDrawdownPercent: 4.81, preview: { allocatedStrategyCapital: 25_000, entryCapital: 2_500, requestedLeverage: 1, effectiveLeverage: 1, estimatedNotional: 2_500, estimatedMargin: 2_500, remainingReserve: 22_500 }, updatedAt: now },
     bindings: [], snapshots: [], runtime: { state: "RUNNING", lastClosedCandleAt: now, lastSignalAt: now, lastHeartbeatAt: now },
     audit: Array.from({ length: 8 }, (_, index) => ({ id: index + 1, event_type: index % 3 === 0 ? "SIGNAL_ACCEPTED" : index % 3 === 1 ? "PAPER_FILL" : "WORKER_CHECKPOINT", severity: "INFO", message: index % 3 === 0 ? "Confirmed-bar signal accepted by Paper risk policy." : index % 3 === 1 ? "Paper fill recorded with modeled fees and slippage." : "Black Cloud worker state checkpoint completed.", safe_metadata: {}, created_at: new Date(Date.now() - index * 90_000).toISOString() })),

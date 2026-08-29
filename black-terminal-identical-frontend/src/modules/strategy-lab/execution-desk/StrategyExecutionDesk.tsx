@@ -1,13 +1,16 @@
-import { Activity, BarChart3, Cloud, Crosshair, RefreshCw, ShieldCheck, TrendingDown, TrendingUp, Wifi, WifiOff } from "lucide-react";
+import { Activity, BarChart3, Cloud, Crosshair, RefreshCw, Settings2, ShieldCheck, TrendingDown, TrendingUp, Wifi, WifiOff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BlackChartEngine } from "../../../chart-engine/BlackChartEngine";
 import type { Candle, VisibleIndicators } from "../../../chart-engine/types";
+import type { CompiledPlot } from "../../../components/ScriptCompiler";
 import { getMarketDataEngineAdapter } from "../../../market-data/engine/marketDataEngine";
 import { exchangeRegistry } from "../../../market-data/exchangeRegistry";
 import type { ExchangeId, MarketDataSubscription, Timeframe } from "../../../market-data/types";
 import { strategyAutomationApi } from "../automation/strategyAutomationApi";
 import type {
   StrategyAutomationDefinition,
+  StrategyCapitalPolicy,
+  StrategyControlPanel,
   StrategyGroupExecutionDesk,
   StrategyPaperAccount,
   StrategyTargetBinding,
@@ -24,6 +27,8 @@ import {
   type ExecutionDeskData,
   type ExecutionDeskMetrics,
 } from "./executionDeskModel";
+import { StrategyControlPanelDialog } from "./StrategyControlPanelDialog";
+import { readStrategyControlPanel } from "./strategyControlPanelModel";
 
 type SourceOption = {
   key: string;
@@ -49,7 +54,7 @@ type DeskStrategy = {
 
 const timeframeSet = new Set<Timeframe>(["1s", "10s", "30s", "1m", "3m", "5m", "15m", "30m", "1h", "2h", "3h", "4h", "6h", "8h", "12h", "1d", "1w", "1M", "1t", "10t", "100t"]);
 
-export function StrategyExecutionDesk({ workspace, paperData }: { workspace: StrategyWorkspace; paperData: Record<string, unknown> | null }) {
+export function StrategyExecutionDesk({ workspace, paperData, busy = false, onApplyConfiguration }: { workspace: StrategyWorkspace; paperData: Record<string, unknown> | null; busy?: boolean; onApplyConfiguration?: (definition: StrategyAutomationDefinition, policy: StrategyCapitalPolicy, sourceKey: string, panel: StrategyControlPanel) => Promise<void> }) {
   const [selectedKey, setSelectedKey] = useState("paper");
   const [targetData, setTargetData] = useState<Record<string, ExecutionDeskData>>({});
   const [targetError, setTargetError] = useState<string>();
@@ -112,6 +117,8 @@ export function StrategyExecutionDesk({ workspace, paperData }: { workspace: Str
     onSelect={setSelectedKey}
     error={selectedKey === "paper" ? undefined : targetError}
     onRefresh={() => selected.binding ? void loadTarget(selected.binding) : undefined}
+    busy={busy}
+    onApplyConfiguration={onApplyConfiguration}
   />;
 }
 
@@ -176,6 +183,8 @@ function ExecutionDeskSurface({
   strategyChoices,
   selectedStrategyId,
   onStrategySelect,
+  busy = false,
+  onApplyConfiguration,
 }: {
   strategy: DeskStrategy;
   options: SourceOption[];
@@ -186,13 +195,19 @@ function ExecutionDeskSurface({
   strategyChoices?: Array<{ id: string; label: string }>;
   selectedStrategyId?: string;
   onStrategySelect?: (id: string) => void;
+  busy?: boolean;
+  onApplyConfiguration?: (definition: StrategyAutomationDefinition, policy: StrategyCapitalPolicy, sourceKey: string, panel: StrategyControlPanel) => Promise<void>;
 }) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const { candles, state: feedState, message: feedMessage } = useExecutionDeskCandles(strategy.definition);
   const actions = useMemo(() => buildExecutionDeskActions(selected.data, selected.mode), [selected.data, selected.mode]);
   const metrics = useMemo(() => buildExecutionDeskMetrics(selected.data, selected.paper, selected.snapshot), [selected.data, selected.paper, selected.snapshot]);
   const markers = useMemo(() => executionMarkers(actions, candles.map((candle) => candle.time)), [actions, candles]);
   const curve = useMemo(() => equityCurve(selected.data.trades), [selected.data.trades]);
   const latestAction = actions[0];
+  const superAtrControlsAvailable = strategy.definition.runtimeKind === "builtin-superatr-seven-step" || /superatr/i.test(`${strategy.name} ${strategy.definition.indicator?.name || ""}`);
+  const selectedPolicy = selected.binding?.capitalPolicy || selected.paper?.capitalPolicy;
+  const controlPanel = useMemo(() => readStrategyControlPanel(strategy.definition, selectedPolicy, selected.paper?.demoEquity), [selected.paper?.demoEquity, selectedPolicy, strategy.definition]);
   return <section className="execution-desk">
     <header className="execution-desk-head">
       <div className="execution-desk-identity"><Crosshair size={16} /><span>STRATEGY EXECUTION DESK</span><strong>{strategy.name}</strong><em>V{strategy.runningVersion || "—"} · {strategy.exchange.toUpperCase()} {strategy.symbol} · {strategy.timeframe.toUpperCase()} · {strategy.marketType}</em></div>
@@ -200,6 +215,7 @@ function ExecutionDeskSurface({
         {strategyChoices?.length ? <label><span>STRATEGY</span><select value={selectedStrategyId} onChange={(event) => onStrategySelect?.(event.target.value)}>{strategyChoices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}</select></label> : null}
         {options.length > 1 ? <label><span>EXECUTION ACCOUNT</span><select value={selected.key} onChange={(event) => onSelect?.(event.target.value)}>{options.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</select></label> : <div className="execution-desk-fixed-source"><span>EXECUTION ACCOUNT</span><strong>{selected.label}</strong></div>}
         <button type="button" aria-label="Refresh Execution Desk" onClick={onRefresh}><RefreshCw size={13} /></button>
+        {onApplyConfiguration && superAtrControlsAvailable ? <button type="button" aria-label="Open strategy execution settings" onClick={() => setSettingsOpen(true)}><Settings2 size={13} /></button> : null}
       </div>
       <div className={`execution-desk-authority ${selected.freshness.toLowerCase()}`}><ShieldCheck size={13} /><span>{selected.mode === "PAPER" ? "ISOLATED PAPER" : "AUTHORITATIVE LIVE"}</span><strong>{selected.freshness}</strong></div>
     </header>
@@ -214,6 +230,7 @@ function ExecutionDeskSurface({
     <ActionMatrix actions={actions} />
     <MetricDeck metrics={metrics} curve={curve} />
     <div className="execution-desk-separation"><Cloud size={13} /><span>This chart is owned by the strategy runtime. It never mounts the strategy onto the default discretionary chart.</span></div>
+    {settingsOpen && selectedPolicy && onApplyConfiguration && superAtrControlsAvailable ? <StrategyControlPanelDialog name={strategy.name} accountLabel={selected.label} initial={controlPanel} busy={busy} onCancel={() => setSettingsOpen(false)} onApply={async (panel) => { await onApplyConfiguration(strategy.definition, selectedPolicy, selected.key, panel); setSettingsOpen(false); }} /> : null}
   </section>;
 }
 
@@ -224,8 +241,11 @@ function DedicatedStrategyChart({ definition, candles, markers }: { definition: 
   const firstDataset = useRef(true);
   const candlesRef = useRef(candles);
   const markerRef = useRef(markers);
+  const plotRef = useRef<CompiledPlot[]>([]);
   candlesRef.current = candles;
-  markerRef.current = markers;
+  const style = readStrategyControlPanel(definition).style;
+  markerRef.current = style.tradesOnChart ? markers.map((marker) => style.signalLabels ? marker : { ...marker, label: "" }) : [];
+  plotRef.current = strategyPlots(definition, candles);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -238,6 +258,7 @@ function DedicatedStrategyChart({ definition, candles, markers }: { definition: 
       chartType: "candlesticks",
       snapToLatest: true,
       visibleIndicators: executionDeskIndicators(definition),
+      customPlots: plotRef.current,
       customMarkers: markerRef.current,
       priceLineColor: "#ff174a",
       priceLineIntensity: 92,
@@ -249,7 +270,7 @@ function DedicatedStrategyChart({ definition, candles, markers }: { definition: 
       engineReadyRef.current = true;
       if (candlesRef.current.length) {
         engine.setCandles(candlesRef.current);
-        engine.setCustomScriptOutput([], markerRef.current);
+        engine.setCustomScriptOutput(plotRef.current, markerRef.current);
         firstDataset.current = false;
       }
     }).catch(() => undefined);
@@ -268,11 +289,43 @@ function DedicatedStrategyChart({ definition, candles, markers }: { definition: 
     const engine = engineRef.current;
     if (!engine || !engineReadyRef.current || !candles.length) return;
     engine.setCandles(candles, { preserveView: !firstDataset.current });
-    engine.setCustomScriptOutput([], markers);
+    engine.setCustomScriptOutput(strategyPlots(definition, candles), markerRef.current);
     firstDataset.current = false;
   }, [candles, markers]);
 
   return <div ref={hostRef} className="execution-desk-chart" aria-label="Dedicated strategy execution chart" />;
+}
+
+function strategyPlots(definition: StrategyAutomationDefinition, candles: Candle[]): CompiledPlot[] {
+  if (definition.runtimeKind !== "builtin-superatr-seven-step" || !candles.length || !strategyVisibleOnTimeframe(definition)) return [];
+  const panel = readStrategyControlPanel(definition);
+  const closes = candles.map((candle) => candle.close);
+  return [
+    { name: "Short MA", values: movingAverage(closes, panel.inputs.shortPeriod), color: panel.style.shortMaColor, width: panel.style.shortMaWidth, pane: "price", visible: panel.style.shortMaVisible },
+    { name: "Long MA", values: movingAverage(closes, panel.inputs.longPeriod), color: panel.style.longMaColor, width: panel.style.longMaWidth, pane: "price", visible: panel.style.longMaVisible },
+  ];
+}
+
+function movingAverage(values: number[], period: number) {
+  const length = Math.max(1, Math.round(period));
+  let sum = 0;
+  return values.map((value, index) => {
+    sum += value;
+    if (index >= length) sum -= values[index - length]!;
+    return sum / Math.min(index + 1, length);
+  });
+}
+
+function strategyVisibleOnTimeframe(definition: StrategyAutomationDefinition) {
+  const visibility = readStrategyControlPanel(definition).visibility;
+  if (visibility.allTimeframes) return true;
+  const timeframe = definition.timeframe;
+  if (timeframe.endsWith("s") || timeframe.endsWith("t")) return visibility.seconds;
+  if (timeframe.endsWith("m")) return visibility.minutes;
+  if (timeframe.endsWith("h")) return visibility.hours;
+  if (timeframe.endsWith("d")) return visibility.days;
+  if (timeframe.endsWith("w")) return visibility.weeks;
+  return visibility.months;
 }
 
 function ActionMatrix({ actions }: { actions: ExecutionDeskAction[] }) {

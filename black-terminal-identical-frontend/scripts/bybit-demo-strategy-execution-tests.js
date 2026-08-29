@@ -64,6 +64,7 @@ const connectionSupervisor = read("server/cloud-execution/connection-supervisor.
 const migration = read("supabase/migrations/202608230002_bybit_demo_strategy_execution.sql");
 const executionMigration = read("supabase/migrations/202608240002_strategy_broker_group_execution.sql");
 const nodeIdentityMigration = read("supabase/migrations/202608240003_black_cloud_execution_node_identities.sql");
+const partialExitMigration = read("supabase/migrations/202608290002_strategy_superatr_partial_exits.sql");
 const schema = read("server/security/trading-schemas.js");
 
 assert.match(connectRoute, /executionEnvironment:\s*BYBIT_EXECUTION_ENVIRONMENTS\.DEMO/, "the server, not the browser, chooses demo execution");
@@ -82,6 +83,11 @@ assert.match(signalWorker, /deterministic_client_order_id/);
 assert.match(signalWorker, /conflictResolution/);
 assert.match(signalWorker, /"REVERSE"/, "close-then-reverse is represented as one durable state-machine command");
 assert.match(signalWorker, /ACCOUNT_SYMBOL_OCCUPIED_BY_UNOWNED_POSITION/, "manual positions block strategy mutation instead of being adopted");
+assert.match(signalWorker, /action:\s*"TAKE_PROFIT"/);
+assert.match(signalWorker, /signal\.takeProfits\.slice\(0, 7\)/, "the signal evaluator durably queues all seven target orders");
+assert.match(signalWorker, /quantityPercent:\s*Number\(target\?\.quantityPercent\)/, "each take-profit preserves its independent exit allocation");
+assert.match(signalWorker, /sideSpecificLeverage\(strategy\.definition, signal\.direction, binding\)/, "long and short leverage are selected from the saved strategy properties");
+assert.match(signalWorker, /slippageTicks:\s*Number\(strategy\.definition\?\.execution\?\.slippageTicks/, "the saved execution-delay tolerance reaches the broker command");
 assert.doesNotMatch(signalWorker, /placeBybitOrder|placeOrder\s*\(|cancelBybitOrder|modifyBybitOrder/, "the signal evaluator only emits durable commands");
 assert.match(brokerWorker, /credentialEnvironment !== workerEnvironment/);
 assert.doesNotMatch(brokerWorker, /REAL_FUNDS_STRATEGY_EXECUTION_FORBIDDEN/);
@@ -92,6 +98,11 @@ assert.match(brokerWorker, /deterministicStrategyLegId/, "reversal close and ent
 assert.match(brokerWorker, /STRATEGY_MAX_DAILY_LOSS/);
 assert.match(brokerWorker, /venueValidation\.normalized\.quantity/);
 assert.match(brokerWorker, /STRATEGY_POSITION_OWNERSHIP_REQUIRED/);
+assert.match(brokerWorker, /takeProfitOrder \? "limit" : "market"/, "SuperATR exits are native reduce-only limit orders");
+assert.match(brokerWorker, /quantity = position\.quantity \* percentage \/ 100/, "direct Bybit targets close only their configured position fraction");
+assert.match(brokerWorker, /executionIntent\.reduce_only = true/, "investment-group targets are also reduce-only");
+assert.match(brokerWorker, /slippageTolerancePercent/, "market-entry slippage ticks are converted using authoritative venue metadata");
+assert.match(brokerWorker, /requested:\s*nullablePositive\(payload\.requestedLeverage\)/, "server-side allocation consumes the side-specific leverage request");
 assert.match(connectionSupervisor, /latestStrategyOrder/);
 assert.match(connectionSupervisor, /strategy_target_binding_id/, "position attribution requires a preceding strategy order");
 
@@ -107,5 +118,8 @@ assert.match(executionMigration, /ACTIVATE_BYBIT_MAINNET_STRATEGY_EXECUTION/);
 assert.match(executionMigration, /allow_strategy_execution,[\s\S]*allow_withdrawals/);
 assert.match(nodeIdentityMigration, /\^BLACK_CLOUD_\(DEMO_\|MAINNET_\)\?NODE_\[0-9\]\{2\}\$/);
 assert.match(nodeIdentityMigration, /drop constraint if exists black_cloud_nodes_node_id_check/);
+assert.match(partialExitMigration, /black_core_paper_partial_close_position/, "paper execution has an atomic partial-close ledger path");
+assert.match(partialExitMigration, /PAPER_PARTIAL_TAKE_PROFIT_FILLED/, "paper TP fills are independently audited");
+assert.match(partialExitMigration, /coalesce\(auth\.role\(\),''\) <> 'service_role'/, "only the server worker may write paper partial fills");
 
 console.log("Bybit strategy execution tests PASS — official Demo/Mainnet endpoint isolation, server-owned routing, certified arming, environment-partitioned durable commands, fenced REST submission, risk ceilings and withdrawal/transfer prohibition verified without placing an order.");

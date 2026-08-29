@@ -10,13 +10,14 @@ export type StrategySignal = {
   exit?: boolean;
   stopLoss?: number;
   takeProfit?: number;
+  takeProfits?: Array<{ id: string; price: number; quantityPercent: number }>;
   confidence?: number;
   reason?: string;
   signalName?: string;
   metadata?: Record<string, unknown>;
 };
 
-export type StrategyRuntimeKind = "builtin-ema-cross" | "builtin-adaptive-swing" | "python-script" | "external-signals";
+export type StrategyRuntimeKind = "builtin-ema-cross" | "builtin-adaptive-swing" | "builtin-superatr-seven-step" | "python-script" | "external-signals";
 
 export type StrategySettings = {
   emaFastLength: number;
@@ -41,6 +42,17 @@ export type StrategySettings = {
   sessionStartHour?: number;
   sessionEndHour?: number;
   minVolumeMultiplier?: number;
+  superAtrShortPeriod?: number;
+  superAtrLongPeriod?: number;
+  superAtrMomentumPeriod?: number;
+  superAtrConfirmationPeriod?: number;
+  superAtrTrendStrengthThreshold?: number;
+  superAtrMultiStepTakeProfit?: boolean;
+  superAtrTakeProfitAtrLength?: number;
+  superAtrAtrMultipliers?: number[];
+  superAtrFixedPercentages?: number[];
+  superAtrAtrExitPercent?: number;
+  superAtrFixedExitPercent?: number;
 };
 
 export type StrategyScriptDefinition = {

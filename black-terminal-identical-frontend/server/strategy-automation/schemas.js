@@ -11,6 +11,8 @@ const capitalPolicy = z.object({
   tradeAmountMode: z.enum(["PERCENT_ACCOUNT_EQUITY", "PERCENT_STRATEGY_ALLOCATION", "RISK_PERCENT", "FIXED_USDT", "FIXED_QUANTITY", "VOLATILITY_TARGET"]),
   tradeAmountValue: nonNegative,
   requestedLeverage: positive.max(1000).optional(),
+  requestedLongLeverage: positive.max(1000).optional(),
+  requestedShortLeverage: positive.max(1000).optional(),
   maximumLeverage: positive.max(1000).optional(),
   maximumPositionPercent: nonNegative.max(100),
   maximumExposurePercent: nonNegative.max(100),
@@ -24,7 +26,7 @@ const capitalPolicy = z.object({
 }).strict();
 
 const definition = z.object({
-  runtimeKind: z.enum(["builtin-ema-cross", "builtin-adaptive-swing", "python-script", "external-signals"]),
+  runtimeKind: z.enum(["builtin-ema-cross", "builtin-adaptive-swing", "builtin-superatr-seven-step", "python-script", "external-signals"]),
   symbol: z.string().trim().min(2).max(40),
   timeframe: z.string().trim().min(1).max(12),
   marketType: z.enum(["SPOT", "FUTURES"]),
@@ -44,6 +46,7 @@ const definition = z.object({
     authorizationAccepted: z.boolean(),
     armOnActivation: z.boolean()
   }).strict().optional(),
+  controlPanel: z.record(z.unknown()).optional(),
   metadata: z.record(z.unknown()).optional()
 }).strict();
 
@@ -53,6 +56,7 @@ export const strategySchemas = Object.freeze({
   archive: z.object({ expectedName: z.string().trim().min(1).max(80), expectedRevision: z.number().int().nonnegative() }).strict(),
   draft: z.object({ name: z.string().trim().min(1).max(80), definition, expectedRevision: z.number().int().nonnegative().optional() }).strict(),
   publish: z.object({ expectedRevision: z.number().int().nonnegative() }).strict(),
+  globalPolicy: z.object({ expectedRevision: z.number().int().nonnegative(), capitalPolicy }).strict(),
   startVersion: z.object({ version: z.number().int().positive() }).strict(),
   addTarget: z.object({ slotIndex: z.number().int().min(1).max(9), targetType: z.enum(["BROKER_ACCOUNT", "INVESTMENT_GROUP"]), targetId: uuid, marketType: z.enum(["SPOT", "FUTURES"]), capitalPolicy: capitalPolicy.optional() }).strict(),
   reorderTargets: z.object({ assignments: z.array(z.object({ bindingId: uuid, slotIndex: z.number().int().min(1).max(9), expectedVersion: z.number().int().positive() }).strict()).min(1).max(9) }).strict().superRefine((value, context) => {

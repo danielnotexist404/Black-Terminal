@@ -1,6 +1,6 @@
 import { ChevronDown, LockKeyhole, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { StrategyTargetBinding, StrategyWorkspace } from "../../automation/strategyAutomation.types";
+import type { StrategyAutomationDefinition, StrategyCapitalPolicy, StrategyControlPanel, StrategyTargetBinding, StrategyWorkspace } from "../../automation/strategyAutomation.types";
 import { PaperCockpit } from "../cockpit/PaperCockpit";
 import { RuntimeTimeline } from "../cockpit/RuntimeTimeline";
 import { StrategyHeader } from "../cockpit/StrategyHeader";
@@ -24,6 +24,7 @@ type Props = {
   onModifyTarget: (binding: StrategyTargetBinding) => void;
   onTargetAction: (bindingId: string, action: "arm" | "pause" | "resume") => void;
   onDisconnectTarget: (bindingId: string) => void;
+  onApplyExecutionConfiguration: (definition: StrategyAutomationDefinition, policy: StrategyCapitalPolicy, sourceKey: string, panel: StrategyControlPanel) => Promise<void>;
 };
 
 export function StrategyCockpitPage(props: Props) {
@@ -37,7 +38,7 @@ export function StrategyCockpitPage(props: Props) {
     {props.message ? <div className="strategy-cockpit-message" role="status">{props.message}</div> : null}
     <div className="strategy-cockpit-body">
       {activeTab === "overview" ? <StrategyOverview workspace={props.workspace} paperData={props.paperData} onAddTarget={props.onAddTarget} /> : null}
-      {activeTab === "executionDesk" ? <StrategyExecutionDesk workspace={props.workspace} paperData={props.paperData} /> : null}
+      {activeTab === "executionDesk" ? <StrategyExecutionDesk workspace={props.workspace} paperData={props.paperData} busy={props.busy} onApplyConfiguration={props.onApplyExecutionConfiguration} /> : null}
       {activeTab === "configuration" ? <Configuration workspace={props.workspace} onEdit={props.onEdit} /> : null}
       {activeTab === "paper" ? <PaperCockpit paper={props.workspace.paper} data={props.paperData} busy={props.busy} onAction={props.onPaperAction} /> : null}
       {activeTab === "liveTargets" ? <><TargetSlotMatrix bindings={props.workspace.bindings} snapshots={props.workspace.snapshots} selectedId={selectedTargetId} onSelect={setSelectedTargetId} onAdd={props.onAddTarget} />{selectedTargetId && props.workspace.bindings.find((item) => item.id === selectedTargetId) ? <TargetCockpit binding={props.workspace.bindings.find((item) => item.id === selectedTargetId)!} snapshot={props.workspace.snapshots.find((item) => item.bindingId === selectedTargetId)} busy={props.busy} onAction={(action) => props.onTargetAction(selectedTargetId, action)} onModify={() => props.onModifyTarget(props.workspace.bindings.find((item) => item.id === selectedTargetId)!)} onDisconnect={() => props.onDisconnectTarget(selectedTargetId)} /> : <div className="live-certification-banner"><LockKeyhole size={14} /><div><strong>NO EXECUTION DESTINATION ASSIGNED</strong><span>Add an eligible connected broker account or an owned Investment Group, review its risk policy, and arm it explicitly.</span></div></div>}</> : null}

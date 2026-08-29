@@ -16,6 +16,7 @@ function updateNumber(value: string, fallback: number) {
 }
 
 const strategyOptions: { value: StrategyRuntimeKind; label: string }[] = [
+  { value: "builtin-superatr-seven-step", label: "SuperATR 7-Step Profit" },
   { value: "builtin-adaptive-swing", label: "Adaptive Swing Reversal" },
   { value: "builtin-ema-cross", label: "EMA Cross Baseline" }
 ];

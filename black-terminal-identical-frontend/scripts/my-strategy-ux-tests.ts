@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ownedCustomIndicatorInstances } from "../src/modules/strategy-lab/my-strategy/state/indicatorManifest.ts";
+import { isCertifiedSuperAtrSevenStepSource, ownedCustomIndicatorInstances } from "../src/modules/strategy-lab/my-strategy/state/indicatorManifest.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (file: string) => fs.readFileSync(path.join(root, file), "utf8");
@@ -98,6 +98,20 @@ assert.ok(ownedSuperAtr.alerts.some((event) => event.semantic === "LONG_ENTRY"))
 assert.ok(ownedSuperAtr.alerts.some((event) => event.semantic === "SHORT_ENTRY"));
 assert.ok(ownedSuperAtr.alerts.some((event) => event.semantic === "LONG_EXIT"));
 assert.ok(ownedSuperAtr.alerts.some((event) => event.semantic === "SHORT_EXIT"));
+const certifiedSuperAtrSource = `
+# SuperATR 7-Step Profit
+short_period = input.int(3, "Short Period")
+long_period = input.int(7, "Long Period")
+momentum_period = input.int(7, "Momentum Period")
+adaptive_atr = close
+trend_strength = close
+useMultiStepTP = input.bool(True, "Enable Multi-Step Take Profit")
+strategy.entry("SuperATR Long", strategy.long, when=close > open)
+strategy.entry("SuperATR Short", strategy.short, when=close < open)
+${Array.from({ length: 7 }, (_, index) => `strategy.exit("TP${index + 1}", "SuperATR Long", limit=close + ${index + 1})`).join("\n")}
+`;
+assert.equal(isCertifiedSuperAtrSevenStepSource(certifiedSuperAtrSource), true, "the structurally pinned seven-step source is eligible for the native adapter");
+assert.equal(isCertifiedSuperAtrSevenStepSource(certifiedSuperAtrSource.replace("adaptive_atr", "other_atr")), false, "lookalike scripts fail closed");
 
 for (const tab of ["OVERVIEW", "CONFIGURATION", "PAPER", "LIVE TARGETS", "POSITIONS", "TRADES", "PERFORMANCE", "RISK", "LOGS"]) assert.match(cockpit, new RegExp(tab));
 assert.match(cockpit, /rows\.length > 100/, "large Paper tables use windowed rendering");

@@ -12,6 +12,28 @@ function ema(values: number[], period: number) {
   return output;
 }
 
+function sma(values: number[], period: number) {
+  const length = Math.max(1, Math.round(period));
+  const output: number[] = [];
+  let sum = 0;
+  for (let index = 0; index < values.length; index++) {
+    sum += Number(values[index] || 0);
+    if (index >= length) sum -= Number(values[index - length] || 0);
+    output.push(sum / Math.min(index + 1, length));
+  }
+  return output;
+}
+
+function rollingStdev(values: number[], period: number) {
+  const length = Math.max(1, Math.round(period));
+  return values.map((_, index) => {
+    const start = Math.max(0, index - length + 1);
+    const window = values.slice(start, index + 1);
+    const average = window.reduce((sum, value) => sum + value, 0) / Math.max(1, window.length);
+    return Math.sqrt(window.reduce((sum, value) => sum + (value - average) ** 2, 0) / Math.max(1, window.length));
+  });
+}
+
 function trueRange(candle: Candle, previous?: Candle) {
   if (!previous) return candle.high - candle.low;
   return Math.max(
@@ -302,6 +324,81 @@ export function createAdaptiveSwingSignals(candles: Candle[], symbol: string, se
   return signals;
 }
 
+export function createSuperAtrSevenStepSignals(candles: Candle[], symbol: string, settings: StrategySettings): StrategySignal[] {
+  const shortPeriod = Math.max(1, Math.round(settings.superAtrShortPeriod ?? 3));
+  const longPeriod = Math.max(1, Math.round(settings.superAtrLongPeriod ?? 7));
+  const momentumPeriod = Math.max(1, Math.round(settings.superAtrMomentumPeriod ?? 7));
+  const confirmationPeriod = Math.max(1, Math.round(settings.superAtrConfirmationPeriod ?? 7));
+  const threshold = Math.max(0, settings.superAtrTrendStrengthThreshold ?? 1.618);
+  const takeProfitAtrLength = Math.max(1, Math.round(settings.superAtrTakeProfitAtrLength ?? 14));
+  const atrMultipliers = normalizeNumberList(settings.superAtrAtrMultipliers, [2.618, 5, 10, 13.82], 4);
+  const fixedPercentages = normalizeNumberList(settings.superAtrFixedPercentages, [3, 8, 17], 3);
+  const atrExitPercent = Math.max(0.1, Math.min(100, settings.superAtrAtrExitPercent ?? 10));
+  const fixedExitPercent = Math.max(0.1, Math.min(100, settings.superAtrFixedExitPercent ?? 10));
+  const multiStep = settings.superAtrMultiStepTakeProfit !== false;
+  const warmup = Math.max(shortPeriod, longPeriod, momentumPeriod, confirmationPeriod, takeProfitAtrLength) * 3;
+  if (candles.length < warmup + 2) return [];
+
+  const closes = candles.map((candle) => candle.close);
+  const ranges = candles.map((candle, index) => trueRange(candle, candles[index - 1]));
+  const shortAtr = sma(ranges, shortPeriod);
+  const longAtr = sma(ranges, longPeriod);
+  // Pine's ta.atr uses Wilder's RMA, while the strategy's short/long ATR inputs
+  // deliberately use ta.sma(true_range). Keep those two smoothing contracts distinct.
+  const takeProfitAtr = atr(candles, takeProfitAtrLength);
+  const momentum = closes.map((value, index) => index >= momentumPeriod ? value - closes[index - momentumPeriod]! : 0);
+  const momentumDeviation = rollingStdev(closes, momentumPeriod);
+  const momentumFactor = momentum.map((value, index) => Math.abs(value / Math.max(momentumDeviation[index] || 0, 1e-12)));
+  const adaptiveAtr = ranges.map((_, index) => (shortAtr[index]! * momentumFactor[index]! + longAtr[index]!) / (1 + momentumFactor[index]!));
+  const atrMultiple = momentum.map((priceChange, index) => priceChange / Math.max(adaptiveAtr[index] || 0, 1e-12));
+  const trendStrength = sma(atrMultiple, momentumPeriod);
+  const shortMa = sma(closes, shortPeriod);
+  const longMa = sma(closes, longPeriod);
+  const adaptiveAtrConfirmation = sma(adaptiveAtr, confirmationPeriod);
+  const signals: StrategySignal[] = [];
+
+  for (let index = warmup; index < candles.length; index++) {
+    const candle = candles[index]!;
+    if (!inConfiguredSession(candle, settings)) continue;
+    const longSetup = shortMa[index]! > longMa[index]!
+      && trendStrength[index]! > threshold
+      && candle.close > shortMa[index]!
+      && adaptiveAtr[index]! > adaptiveAtrConfirmation[index]!;
+    const shortSetup = shortMa[index]! < longMa[index]!
+      && trendStrength[index]! < -threshold
+      && candle.close < shortMa[index]!
+      && adaptiveAtr[index]! > adaptiveAtrConfirmation[index]!;
+    if (!longSetup && !shortSetup) continue;
+    const direction = longSetup ? "long" as const : "short" as const;
+    const sign = direction === "long" ? 1 : -1;
+    const takeProfits = multiStep ? [
+      ...atrMultipliers.map((multiplier, targetIndex) => ({ id: `TP${targetIndex + 1}`, price: candle.close + sign * takeProfitAtr[index]! * multiplier, quantityPercent: atrExitPercent })),
+      ...fixedPercentages.map((percentage, targetIndex) => ({ id: `TP${targetIndex + 5}`, price: candle.close * (1 + sign * percentage / 100), quantityPercent: fixedExitPercent })),
+    ] : [];
+    signals.push({
+      timestamp: candle.time,
+      symbol,
+      direction,
+      entry: true,
+      takeProfit: takeProfits[0]?.price,
+      takeProfits,
+      confidence: Math.min(1, Math.abs(trendStrength[index]!) / Math.max(threshold * 2, 1e-12)),
+      signalName: direction === "long" ? "SuperATR Long" : "SuperATR Short",
+      reason: `Adaptive ATR trend strength ${trendStrength[index]!.toFixed(3)} confirmed by price structure`,
+      metadata: { shortMa: shortMa[index], longMa: longMa[index], adaptiveAtr: adaptiveAtr[index], trendStrength: trendStrength[index], takeProfitAtr: takeProfitAtr[index] },
+    });
+  }
+  return signals;
+}
+
+function normalizeNumberList(value: unknown, fallback: number[], length: number) {
+  const source = Array.isArray(value) ? value : fallback;
+  return Array.from({ length }, (_, index) => {
+    const parsed = Number(source[index] ?? fallback[index] ?? 1);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : Number(fallback[index] || 1);
+  });
+}
+
 export function createStrategySignals(
   strategyKind: StrategyRuntimeKind,
   candles: Candle[],
@@ -313,6 +410,9 @@ export function createStrategySignals(
   }
   if (strategyKind === "builtin-ema-cross") {
     return createEmaCrossSignals(candles, symbol, settings);
+  }
+  if (strategyKind === "builtin-superatr-seven-step") {
+    return createSuperAtrSevenStepSignals(candles, symbol, settings);
   }
   throw new Error(
     `${strategyKind} does not have a certified Strategy Lab signal adapter.`,

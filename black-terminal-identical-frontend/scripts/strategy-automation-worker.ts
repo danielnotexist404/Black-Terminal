@@ -189,7 +189,7 @@ async function processStrategy(strategy: JsonRow) {
   if (!activePaper && activeBrokerBindings.length === 0 && groupBindings.length === 0)
     return heartbeat(strategy, "PAUSED", null);
   if (
-    !["builtin-ema-cross", "builtin-adaptive-swing"].includes(
+    !["builtin-ema-cross", "builtin-adaptive-swing", "builtin-superatr-seven-step"].includes(
       strategy.runtime_kind,
     )
   ) {
@@ -365,6 +365,9 @@ async function enqueueBrokerStrategySignal(
       positionDirection: opposite?.direction || null,
       stopLoss: signal.stopLoss || null,
       takeProfit: signal.takeProfit || null,
+      takeProfits: Array.isArray(signal.takeProfits) ? signal.takeProfits : [],
+      requestedLeverage: sideSpecificLeverage(strategy.definition, signal.direction, binding),
+      slippageTicks: Number(strategy.definition?.execution?.slippageTicks || 0),
       candleTime: signal.timestamp,
       strategyVersion: strategy.current_version,
       executionEnvironment,
@@ -374,6 +377,40 @@ async function enqueueBrokerStrategySignal(
     priority: action === "CLOSE" ? 20 : 50
   }, { onConflict: "idempotency_key", ignoreDuplicates: true });
   if (error) throw error;
+  if (action === "ENTRY" && Array.isArray(signal.takeProfits)) {
+    for (const [index, target] of signal.takeProfits.slice(0, 7).entries()) {
+      const targetId = String(target?.id || `TP${index + 1}`).toUpperCase();
+      const targetSignalKey = `${signalKey}:${binding.id}:${targetId.toLowerCase()}`;
+      const targetIdempotencyKey = crypto.createHash("sha256").update(targetSignalKey).digest("hex");
+      const { error: targetError } = await supabase.from("execution_commands").upsert({
+        command_type: "PLACE_ORDER",
+        user_id: strategy.owner_user_id,
+        connection_id: binding.connection_id,
+        strategy_automation_id: strategy.id,
+        strategy_target_binding_id: binding.id,
+        strategy_signal_key: targetSignalKey,
+        idempotency_key: targetIdempotencyKey,
+        deterministic_client_order_id: `bt-tp-${targetIdempotencyKey.slice(0, 29)}`,
+        payload: {
+          action: "TAKE_PROFIT",
+          symbol: strategy.symbol,
+          marketType: strategy.market_type,
+          direction: signal.direction,
+          positionDirection: signal.direction,
+          targetId,
+          targetPrice: Number(target?.price),
+          quantityPercent: Number(target?.quantityPercent),
+          candleTime: signal.timestamp,
+          strategyVersion: strategy.current_version,
+          executionEnvironment,
+          simulatedFunds: executionEnvironment === "DEMO",
+        },
+        status: "QUEUED",
+        priority: 70 + index,
+      }, { onConflict: "idempotency_key", ignoreDuplicates: true });
+      if (targetError) throw targetError;
+    }
+  }
   await supabase.from("strategy_automation_audit_events").insert({
     owner_user_id: strategy.owner_user_id,
     strategy_id: strategy.id,
@@ -443,7 +480,7 @@ async function enqueueGroupStrategySignal(
     order_type: "MARKET",
     quantity_model: "MANDATE_ALLOCATION",
     quantity_value: 1,
-    leverage: binding.market_type === "SPOT" ? null : policy.requestedLeverage,
+    leverage: binding.market_type === "SPOT" ? null : sideSpecificLeverage(strategy.definition, signal.direction, binding),
     margin_mode: binding.market_type === "SPOT" ? null : String(policy.marginMode || "CROSS").toUpperCase(),
     time_in_force: "IOC",
     reduce_only: false,
@@ -464,6 +501,9 @@ async function enqueueGroupStrategySignal(
       stopReversalEnabled: strategy.definition?.execution?.stopReversalEnabled === true,
       strategyVersion: strategy.current_version,
       candleTime: signal.timestamp,
+      takeProfits: Array.isArray(signal.takeProfits) ? signal.takeProfits : [],
+      requestedLeverage: sideSpecificLeverage(strategy.definition, signal.direction, binding),
+      slippageTicks: Number(strategy.definition?.execution?.slippageTicks || 0),
     },
   };
   const envelope = intentSigningPayload(row);
@@ -498,6 +538,39 @@ async function enqueueGroupStrategySignal(
     priority: 20,
   }, { onConflict: "idempotency_key", ignoreDuplicates: true });
   if (commandError) throw commandError;
+  if (Array.isArray(signal.takeProfits)) {
+    for (const [index, target] of signal.takeProfits.slice(0, 7).entries()) {
+      const targetId = String(target?.id || `TP${index + 1}`).toUpperCase();
+      const targetClientIntentId = `strategy:${hashCanonicalPayload({ signalKey, bindingId: binding.id, targetId }).slice(0, 48)}`;
+      const targetIdempotencyKey = hashCanonicalPayload({ groupId: binding.group_id, clientIntentId: targetClientIntentId });
+      const targetRow: JsonRow = {
+        ...row,
+        id: crypto.randomUUID(),
+        client_intent_id: targetClientIntentId,
+        side: signal.direction === "short" ? "BUY" : "SELL",
+        order_type: "LIMIT",
+        limit_price: Number(target?.price),
+        leverage: null,
+        reduce_only: true,
+        take_profit: null,
+        stop_loss: null,
+        strategy_action: "TAKE_PROFIT",
+        strategy_execution_policy: { strategyVersion: strategy.current_version, candleTime: signal.timestamp, targetId, quantityPercent: Number(target?.quantityPercent) },
+        idempotency_key: targetIdempotencyKey,
+      };
+      const targetEnvelope = intentSigningPayload(targetRow);
+      targetRow.canonical_hash = hashCanonicalPayload(targetEnvelope);
+      targetRow.service_signature = signCanonicalPayload(targetEnvelope);
+      const { data: targetIntent, error: targetIntentError } = await supabase.from("group_trade_intents").upsert(targetRow, { onConflict: "group_id,client_intent_id", ignoreDuplicates: true }).select("id").maybeSingle();
+      if (targetIntentError) throw targetIntentError;
+      const targetIntentId = targetIntent?.id || (await existingGroupIntent(binding.group_id, targetClientIntentId));
+      if (!targetIntentId) continue;
+      const { error: targetVersionError } = await supabase.from("group_trade_intent_versions").upsert({ group_intent_id: targetIntentId, version: 1, canonical_payload: targetEnvelope, canonical_hash: targetRow.canonical_hash, service_signature: targetRow.service_signature, created_by: strategy.owner_user_id }, { onConflict: "group_intent_id,version", ignoreDuplicates: true });
+      if (targetVersionError) throw targetVersionError;
+      const { error: targetCommandError } = await supabase.from("execution_commands").upsert({ command_type: "EXPAND_GROUP_INTENT", group_intent_id: targetIntentId, strategy_automation_id: strategy.id, strategy_target_binding_id: binding.id, strategy_signal_key: `${signalKey}:${binding.id}:group:${targetId.toLowerCase()}`, idempotency_key: `expand:${targetIdempotencyKey}`, payload: { groupIntentId: targetIntentId }, status: "QUEUED", priority: 40 + index }, { onConflict: "idempotency_key", ignoreDuplicates: true });
+      if (targetCommandError) throw targetCommandError;
+    }
+  }
   await supabase.from("strategy_automation_audit_events").insert({
     owner_user_id: strategy.owner_user_id,
     strategy_id: strategy.id,
@@ -550,6 +623,14 @@ function nullablePositiveValue(value: unknown) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function sideSpecificLeverage(definition: JsonRow, direction: unknown, target: JsonRow) {
+  const execution = definition?.execution || {};
+  const selected = String(direction).toLowerCase() === "short" ? execution.shortLeverage : execution.longLeverage;
+  const fallback = target?.requested_leverage ?? target?.capital_policy?.requestedLeverage ?? 1;
+  const leverage = Number(selected ?? fallback);
+  return Number.isFinite(leverage) && leverage >= 1 ? Math.min(1_000, leverage) : 1;
+}
+
 async function openPaperPosition(
   strategy: JsonRow,
   paper: JsonRow,
@@ -588,7 +669,7 @@ async function openPaperPosition(
     paper.market_type === "SPOT"
       ? 1
       : calculateEffectiveLeverage({
-          requested: policy.requestedLeverage,
+          requested: sideSpecificLeverage(strategy.definition, signal.direction, paper) || policy.requestedLeverage,
           targetMaximum: policy.maximumLeverage,
         });
   const preview = calculateCapitalPreview({
@@ -648,7 +729,9 @@ async function openPaperPosition(
   );
   const notional = quantity * entryPrice;
   const margin = paper.market_type === "SPOT" ? notional : notional / leverage;
-  const entryFee = notional * feeRate;
+  const entryFee = String(strategy.definition?.execution?.commissionMode || "PERCENT") === "USDT_PER_ORDER"
+    ? boundedNumber(strategy.definition?.execution?.commissionValue, 0, 0, 1_000_000)
+    : notional * feeRate;
   if (
     !Number.isFinite(quantity) ||
     quantity <= 0 ||
@@ -680,13 +763,24 @@ async function openPaperPosition(
     p_margin_used: margin,
     p_liquidation_price: liquidationPrice,
     p_stop_loss: signal.stopLoss || null,
-    p_take_profit: signal.takeProfit || null,
+    p_take_profit: Array.isArray(signal.takeProfits) && signal.takeProfits.length ? null : signal.takeProfit || null,
     p_entry_fee: entryFee,
     p_opened_at: new Date(
       candle.time * 1000 + timeframeMilliseconds(strategy.timeframe),
     ).toISOString(),
   });
   if (error) throw error;
+  if (data === true && Array.isArray(signal.takeProfits) && signal.takeProfits.length) {
+    const { error: planError } = await supabase.from("strategy_paper_positions").update({
+      initial_quantity: quantity,
+      take_profit_plan: signal.takeProfits.slice(0, 7).map((target: JsonRow, index: number) => ({
+        id: String(target.id || `TP${index + 1}`).slice(0, 16),
+        price: Number(target.price),
+        quantityPercent: Math.max(0.1, Math.min(100, Number(target.quantityPercent || 0))),
+      })),
+    }).eq("paper_account_id", paper.id).eq("signal_key", signalKey).is("closed_at", null);
+    if (planError) throw planError;
+  }
   return data === true;
 }
 
@@ -715,6 +809,9 @@ async function managePaperPosition(
     },
   );
   if (markError) throw markError;
+  const partialResult = await fillPaperTakeProfitPlan(strategy, paper, position, candle, candleClosedAt);
+  if (partialResult.closed) return partialResult;
+  if (partialResult.filled) return { closed: false, reason: partialResult.reason };
   let reason: string | null = null;
   let reference = candle.close;
   if (
@@ -758,9 +855,9 @@ async function managePaperPosition(
   const exitPrice =
     reference * (position.side === "LONG" ? 1 - slippage : 1 + slippage);
   const notional = Math.abs(exitPrice * Number(position.quantity));
-  const exitFee =
-    notional *
-    boundedNumber(strategy.definition?.execution?.feeRate, 0.0006, 0, 0.02);
+  const exitFee = String(strategy.definition?.execution?.commissionMode || "PERCENT") === "USDT_PER_ORDER"
+    ? boundedNumber(strategy.definition?.execution?.commissionValue, 0, 0, 1_000_000)
+    : notional * boundedNumber(strategy.definition?.execution?.feeRate, 0.0006, 0, 0.02);
   const days =
     Math.max(0, candle.time * 1000 - Date.parse(position.opened_at)) /
     86_400_000;
@@ -789,6 +886,55 @@ async function managePaperPosition(
   );
   if (error) throw error;
   return { closed: data === true, reason: data === true ? reason : null };
+}
+
+async function fillPaperTakeProfitPlan(strategy: JsonRow, paper: JsonRow, position: JsonRow, candle: Candle, candleClosedAt: number) {
+  const plan = Array.isArray(position.take_profit_plan) ? position.take_profit_plan : [];
+  if (!plan.length) return { filled: false, closed: false, reason: null as string | null };
+  const filled = new Set(Array.isArray(position.filled_take_profit_ids) ? position.filled_take_profit_ids.map(String) : []);
+  const initialQuantity = Math.max(Number(position.initial_quantity || position.quantity), Number(position.quantity));
+  let remaining = Number(position.quantity);
+  let anyFilled = false;
+  let lastReason: string | null = null;
+  const policy = normalizeCapitalPolicy(paper.capital_policy, paper.market_type, { allowZeroAllocation: false });
+  const slippage = Math.max(0, Number(policy.slippageBps || 0)) / 10_000;
+  const feeRate = boundedNumber(strategy.definition?.execution?.feeRate, 0.0006, 0, 0.02);
+  for (const [index, target] of plan.entries()) {
+    const id = String(target?.id || `TP${index + 1}`).slice(0, 16);
+    const targetPrice = Number(target?.price);
+    if (filled.has(id) || !Number.isFinite(targetPrice) || targetPrice <= 0 || remaining <= 0) continue;
+    const reached = position.side === "LONG" ? candle.high >= targetPrice : candle.low <= targetPrice;
+    if (!reached) continue;
+    const requested = initialQuantity * Math.max(0.1, Math.min(100, Number(target?.quantityPercent || 0))) / 100;
+    const quantity = Math.min(remaining, requested);
+    if (quantity <= 0) continue;
+    const exitPrice = targetPrice * (position.side === "LONG" ? 1 - slippage : 1 + slippage);
+    const exitFee = String(strategy.definition?.execution?.commissionMode || "PERCENT") === "USDT_PER_ORDER"
+      ? boundedNumber(strategy.definition?.execution?.commissionValue, 0, 0, 1_000_000)
+      : Math.abs(exitPrice * quantity) * feeRate;
+    const reason = id.toUpperCase().startsWith("TP") ? id.toUpperCase() : `TP${index + 1}`;
+    const signalKey = `${position.signal_key}:exit:${candle.time}:${reason}`;
+    const { data, error } = await supabase.rpc("black_core_paper_partial_close_position", {
+      p_position_id: position.id,
+      p_owner_user_id: strategy.owner_user_id,
+      p_exit_price: exitPrice,
+      p_exit_quantity: quantity,
+      p_exit_fee: exitFee,
+      p_funding: 0,
+      p_exit_reason: reason,
+      p_exit_signal_key: signalKey,
+      p_take_profit_id: id,
+      p_closed_at: new Date(candleClosedAt).toISOString(),
+    });
+    if (error) throw error;
+    if (data === true) {
+      anyFilled = true;
+      filled.add(id);
+      remaining = Math.max(0, remaining - quantity);
+      lastReason = reason;
+    }
+  }
+  return { filled: anyFilled, closed: remaining <= 1e-12, reason: lastReason };
 }
 
 async function openPaperRevengePosition(strategy: JsonRow, paper: JsonRow, stoppedPosition: JsonRow, candles: Candle[], candle: Candle) {

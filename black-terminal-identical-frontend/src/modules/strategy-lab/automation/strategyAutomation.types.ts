@@ -47,11 +47,77 @@ export type StrategyAutomationDefinition = {
   schedule?: Record<string, unknown>;
   paper?: Record<string, unknown>;
   deployment?: StrategyDeploymentPlan;
+  controlPanel?: StrategyControlPanel;
   metadata?: {
     description?: string;
     tags?: string[];
     templateId?: string;
   };
+};
+
+export type SuperAtrInputConfiguration = {
+  shortPeriod: number;
+  longPeriod: number;
+  momentumPeriod: number;
+  atrConfirmationPeriod: number;
+  trendStrengthThreshold: number;
+  multiStepTakeProfit: boolean;
+  takeProfitAtrLength: number;
+  atrMultipliers: [number, number, number, number];
+  fixedTakeProfitPercentages: [number, number, number];
+  atrExitPercent: number;
+  fixedExitPercent: number;
+};
+
+export type StrategyPropertyConfiguration = {
+  initialCapital: number;
+  currency: "USD" | "USDT";
+  orderSizeValue: number;
+  orderSizeMode: "PERCENT_EQUITY" | "FIXED_USDT" | "FIXED_QUANTITY";
+  pyramiding: number;
+  barDetailization: "DEFAULT_4_TICKS" | "CLOSED_BAR";
+  executionCadence: "BAR_CLOSE_AND_REALTIME" | "BAR_CLOSE";
+  commissionValue: number;
+  commissionMode: "PERCENT" | "USDT_PER_ORDER";
+  longLeverage: number;
+  shortLeverage: number;
+  slippageTicks: number;
+  limitExecution: "REQUESTED_PRICE" | "TOUCH";
+  executionDelay: "ONE_TICK" | "NONE";
+};
+
+export type StrategyStyleConfiguration = {
+  shortMaVisible: boolean;
+  shortMaColor: string;
+  shortMaWidth: number;
+  longMaVisible: boolean;
+  longMaColor: string;
+  longMaWidth: number;
+  tradesOnChart: boolean;
+  signalLabels: boolean;
+  quantity: boolean;
+  precision: "DEFAULT" | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8";
+  labelsOnPriceScale: boolean;
+  valuesInStatusLine: boolean;
+  inputsInStatusLine: boolean;
+};
+
+export type StrategyVisibilityConfiguration = {
+  allTimeframes: boolean;
+  seconds: boolean;
+  minutes: boolean;
+  hours: boolean;
+  days: boolean;
+  weeks: boolean;
+  months: boolean;
+};
+
+export type StrategyControlPanel = {
+  schemaVersion: 1;
+  inputs: SuperAtrInputConfiguration;
+  properties: StrategyPropertyConfiguration;
+  style: StrategyStyleConfiguration;
+  visibility: StrategyVisibilityConfiguration;
 };
 
 export type StrategyRuntimeCertification =
@@ -99,6 +165,8 @@ export type StrategyCapitalPolicy = {
   tradeAmountMode: StrategyTradeAmountMode;
   tradeAmountValue: number;
   requestedLeverage?: number;
+  requestedLongLeverage?: number;
+  requestedShortLeverage?: number;
   maximumLeverage?: number;
   maximumPositionPercent: number;
   maximumExposurePercent: number;

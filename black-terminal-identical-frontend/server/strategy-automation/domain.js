@@ -40,7 +40,7 @@ export function normalizeStrategyName(value) {
 
 export function normalizeStrategyDefinition(value = {}) {
   const runtimeKind = String(value.runtimeKind || "builtin-adaptive-swing");
-  if (!["builtin-ema-cross", "builtin-adaptive-swing", "python-script", "external-signals"].includes(runtimeKind)) {
+  if (!["builtin-ema-cross", "builtin-adaptive-swing", "builtin-superatr-seven-step", "python-script", "external-signals"].includes(runtimeKind)) {
     throw strategyError(400, "STRATEGY_RUNTIME_UNSUPPORTED", "The selected strategy runtime is not supported.");
   }
   const symbol = String(value.symbol || "").replace(/[^A-Za-z0-9:_/.-]/g, "").toUpperCase();
@@ -64,6 +64,7 @@ export function normalizeStrategyDefinition(value = {}) {
     schedule: plainObject(value.schedule),
     paper: plainObject(value.paper),
     deployment: normalizeDeploymentPlan(value.deployment),
+    controlPanel: plainObject(value.controlPanel),
     metadata: normalizeStrategyMetadata(value.metadata)
   };
 }
@@ -87,11 +88,20 @@ export function assertCertifiedStrategyDefinition(definition) {
   if (indicatorId === "black-core-dda-pro" || indicatorId.includes("ddapro") || indicatorName.includes("bc-rda") || indicatorName.includes("risk distribution analysis")) {
     throw strategyError(409, "BC_RDA_SIGNAL_INTEGRITY_BLOCKED", "BC-RDA is blocked from Strategy Lab while causal replay and headless runtime certification are incomplete.");
   }
-  if (!["builtin-ema-cross", "builtin-adaptive-swing"].includes(definition.runtimeKind)) {
+  if (!["builtin-ema-cross", "builtin-adaptive-swing", "builtin-superatr-seven-step"].includes(definition.runtimeKind)) {
     throw strategyError(409, "STRATEGY_RUNTIME_NOT_CERTIFIED", "This indicator does not yet have a certified VPS strategy runtime.");
   }
   if (definition.indicator && definition.indicator.runtimeStatus !== "CERTIFIED") {
     throw strategyError(409, "STRATEGY_INDICATOR_NOT_CERTIFIED", "The selected indicator is visible on the chart but is not certified for Black Cloud automation.");
+  }
+  if (definition.runtimeKind === "builtin-superatr-seven-step") {
+    const settings = definition.settings || {};
+    const shortPeriod = bounded(settings.superAtrShortPeriod ?? 3, 1, 10_000, "SuperATR short period");
+    const longPeriod = bounded(settings.superAtrLongPeriod ?? 7, 1, 10_000, "SuperATR long period");
+    if (shortPeriod >= longPeriod) throw strategyError(409, "SUPERATR_PERIODS_INVALID", "SuperATR Short Period must be smaller than Long Period.");
+    const atrExit = bounded(settings.superAtrAtrExitPercent ?? 10, 0.1, 100, "SuperATR ATR exit allocation");
+    const fixedExit = bounded(settings.superAtrFixedExitPercent ?? 10, 0.1, 100, "SuperATR fixed exit allocation");
+    if (settings.superAtrMultiStepTakeProfit !== false && atrExit * 4 + fixedExit * 3 > 100) throw strategyError(409, "SUPERATR_EXIT_ALLOCATION_INVALID", "SuperATR TP1–TP7 allocations cannot exceed 100 percent.");
   }
   const required = definition.marketType === "SPOT"
     ? [definition.signals?.buyEntry, definition.signals?.sellExit]

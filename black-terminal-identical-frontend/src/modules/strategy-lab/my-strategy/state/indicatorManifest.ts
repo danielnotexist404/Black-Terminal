@@ -148,6 +148,7 @@ export function ownedCustomIndicatorInstances(rows: readonly UserScript[]): Stra
       const alerts = parseCustomAlertManifest(row.source, row.kind === "strategy");
       const settings = row.inputValues ? { ...row.inputValues } : {};
       const label = row.kind === "strategy" ? "Owned Strategy" : "Owned Indicator";
+      const certifiedSuperAtr = row.kind === "strategy" && isCertifiedSuperAtrSevenStepSource(row.source);
       return {
         indicatorId: `custom:${row.id}`,
         instanceId: `custom:${row.id}`,
@@ -159,16 +160,35 @@ export function ownedCustomIndicatorInstances(rows: readonly UserScript[]): Stra
           ? `${summarizeSettings(settings)} · private ${row.kind}`
           : `Private ${row.kind} · Black Script v3`,
         alertManifestVersion: `custom:${stableHash(alerts)}`,
-        runtimeVersion: "black-script-v3-browser",
+        runtimeVersion: certifiedSuperAtr ? "black-cloud-superatr-v1" : "black-script-v3-browser",
         warmupBars: 500,
-        runtimeStatus: "REQUIRES_CERTIFICATION" as const,
+        runtimeStatus: certifiedSuperAtr ? "CERTIFIED" as const : "REQUIRES_CERTIFICATION" as const,
         useCurrentChartSettings: false,
         alerts,
         source: "CUSTOM" as const,
-        runtimeKind: "python-script" as const,
+        runtimeKind: certifiedSuperAtr ? "builtin-superatr-seven-step" as const : "python-script" as const,
         settings,
       };
     }).filter((instance) => instance.alerts.length > 0);
+}
+
+export function isCertifiedSuperAtrSevenStepSource(source: string) {
+  const normalized = String(source || "").replace(/\s+/g, " ").toLowerCase();
+  const required = [
+    "superatr 7-step profit",
+    "short_period",
+    "long_period",
+    "momentum_period",
+    "adaptive_atr",
+    "trend_strength",
+    "usemultisteptp",
+    "strategy.entry",
+    "strategy.exit",
+  ];
+  return required.every((token) => normalized.includes(token))
+    && /strategy\.entry\s*\([^)]*strategy\.long/i.test(source)
+    && /strategy\.entry\s*\([^)]*strategy\.short/i.test(source)
+    && (source.match(/strategy\.exit\s*\(/gi) || []).length >= 7;
 }
 
 function settingsFor(key: keyof VisibleIndicators, periods: IndicatorPeriods, advanced: IndicatorAdvancedSettings) {

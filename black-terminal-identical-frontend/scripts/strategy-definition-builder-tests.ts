@@ -97,10 +97,10 @@ assert.deepEqual(
   },
 );
 
-assert.equal(certifiedStrategyEngines.length, 2);
+assert.equal(certifiedStrategyEngines.length, 3);
 assert.deepEqual(
   certifiedStrategyEngines.map((item) => item.value),
-  ["builtin-adaptive-swing", "builtin-ema-cross"],
+  ["builtin-superatr-seven-step", "builtin-adaptive-swing", "builtin-ema-cross"],
 );
 assert.ok(automationTimeframes.includes("4h"));
 assert.ok(automationTimeframes.includes("1d"));

@@ -37,3 +37,6 @@
 20260825013000|event_alpha_live_pipeline
 20260825143000|acvd_authentic_flow_cache
 20260825184500|acvd_bybit_public_trade_archive
+202608280001|event_alpha_equity_pead
+202608290001|strategy_lab_nine_target_capacity
+202608290002|strategy_superatr_partial_exits

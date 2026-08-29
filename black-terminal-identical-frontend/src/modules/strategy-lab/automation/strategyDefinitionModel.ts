@@ -8,10 +8,15 @@ import {
 import type { StrategyAutomationDefinition } from "./strategyAutomation.types";
 
 export const certifiedStrategyEngines: ReadonlyArray<{
-  value: Extract<StrategyRuntimeKind, "builtin-adaptive-swing" | "builtin-ema-cross">;
+  value: Extract<StrategyRuntimeKind, "builtin-adaptive-swing" | "builtin-ema-cross" | "builtin-superatr-seven-step">;
   label: string;
   description: string;
 }> = [
+  {
+    value: "builtin-superatr-seven-step",
+    label: "SuperATR 7-Step Profit",
+    description: "Certified closed-candle adaptive ATR trend engine with four ATR and three fixed-percentage exits.",
+  },
   {
     value: "builtin-adaptive-swing",
     label: "Hidden Distribution Swing",

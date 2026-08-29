@@ -20,7 +20,8 @@ import {
   setTargetState,
   saveStrategyDraft,
   startStrategyVersion,
-  updateTargetPolicy
+  updateTargetPolicy,
+  updateGlobalCapitalPolicy
 } from "./repository.js";
 import { assertSlotIndex, normalizeMarketType, normalizeTargetType, strategyError } from "./domain.js";
 import { parseStrategyBody, strategySchemas } from "./schemas.js";
@@ -50,6 +51,9 @@ export async function handleStrategyAutomationRequest(req, res, security, path) 
   if (clean[1] === "publish" && clean.length === 2 && req.method === "POST") {
     requireIdempotencyKey(req);
     return res.status(200).json(await publishStrategyDraft(security.supabase, security.user.id, strategyId, parseStrategyBody(strategySchemas.publish, req.body)));
+  }
+  if (clean[1] === "global-policy" && clean.length === 2 && req.method === "PATCH") {
+    return res.status(200).json(await updateGlobalCapitalPolicy(security.supabase, security.user.id, strategyId, parseStrategyBody(strategySchemas.globalPolicy, req.body), requireIdempotencyKey(req)));
   }
   if (clean[1] === "versions" && clean.length === 4 && clean[3] === "start" && req.method === "POST") {
     requireIdempotencyKey(req);

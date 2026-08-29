@@ -413,6 +413,21 @@ export class BlackCloudExecutionWorker {
     let strategyReverseClose = false;
     let strategyPositionIdx = 0;
     let strategyCloseQuantity = null;
+    if (intent.strategy_action === "TAKE_PROFIT" && intent.strategy_target_binding_id) {
+      const desiredDirection = String(intent.strategy_direction || "").toLowerCase();
+      const position = venuePositions.find((item) => Number(item.quantity) > 0 && item.direction === desiredDirection);
+      if (!position) throw retryableError("STRATEGY_GROUP_TAKE_PROFIT_WAITING_FOR_POSITION", "The follower entry is not visible on Bybit yet; the reduce-only take-profit will retry.", 2);
+      const owned = await rows(this.supabase.from("account_positions").select("position_idx,direction,strategy_target_binding_id").eq("account_id", account.id).eq("symbol", intent.symbol).gt("quantity", 0));
+      const positionOwned = owned.some((item) => Number(item.position_idx) === Number(position.positionIdx) && item.direction === position.direction && item.strategy_target_binding_id === intent.strategy_target_binding_id);
+      if (!positionOwned) throw terminalError("STRATEGY_POSITION_OWNERSHIP_REQUIRED", "Black Cloud refused to protect a follower position that is not attributed to this strategy target.");
+      const quantityPercent = Math.max(0.1, Math.min(100, Number(intent.strategy_execution_policy?.quantityPercent || 0)));
+      executionIntent.side = position.direction === "long" ? "SELL" : "BUY";
+      executionIntent.reduce_only = true;
+      executionIntent.take_profit = null;
+      executionIntent.stop_loss = null;
+      strategyPositionIdx = Number(position.positionIdx || 0);
+      strategyCloseQuantity = Number(position.quantity) * quantityPercent / 100;
+    }
     if (intent.strategy_action === "SYNC_DIRECTION" && intent.strategy_target_binding_id) {
       const desiredDirection = String(intent.strategy_direction || "").toLowerCase();
       const openVenuePositions = venuePositions.filter((position) => Number(position.quantity) > 0 && position.direction !== "flat");
@@ -520,6 +535,7 @@ export class BlackCloudExecutionWorker {
       clientOrderId,
       source: "investment-group-cloud"
     };
+    if (intent.strategy_action === "TAKE_PROFIT" && Number(instrument.tickSize) > 0) orderDraft.limitPrice = alignVenueStep(orderDraft.limitPrice, Number(instrument.tickSize));
     const venueValidation = await validateBybitOrderDraft(credentials, orderDraft);
     if (!venueValidation.ok) throw terminalError("VENUE_VALIDATION_REJECTED", venueValidation.reasons.join(" "));
 
@@ -637,6 +653,7 @@ export class BlackCloudExecutionWorker {
     if (requestedAction === "REVERSE" && sameDirectionPosition && oppositeDirectionPositions.length > 0) {
       throw terminalError("STRATEGY_HEDGE_STATE_AMBIGUOUS", "The Bybit account has both hedge legs open; automated reversal is blocked until the account is reconciled manually.");
     }
+    const takeProfitOrder = requestedAction === "TAKE_PROFIT";
     const reversingClose = requestedAction === "REVERSE" && oppositeDirectionPositions.length > 0;
     const action = requestedAction === "REVERSE" ? (reversingClose ? "CLOSE" : "ENTRY") : requestedAction;
     let side;
@@ -647,7 +664,20 @@ export class BlackCloudExecutionWorker {
     let effectiveLeverage = 1;
     let estimatedMargin = 0;
     let estimatedNotional = 0;
-    if (action === "CLOSE") {
+    if (takeProfitOrder) {
+      const position = openPositions.find((item) => item.direction === desiredDirection);
+      if (!position) throw retryableError("STRATEGY_TAKE_PROFIT_WAITING_FOR_POSITION", "The entry is not visible on Bybit yet; the reduce-only take-profit will retry after reconciliation.", 2);
+      if (!strategyOwnedKeys.has(`${position.positionIdx}:${position.direction}`)) {
+        throw terminalError("STRATEGY_POSITION_OWNERSHIP_REQUIRED", "Black Cloud refused to protect a Bybit position that is not attributed to this strategy target.");
+      }
+      const percentage = Math.max(0.1, Math.min(100, Number(payload.quantityPercent || 0)));
+      side = position.direction === "long" ? "sell" : "buy";
+      quantity = position.quantity * percentage / 100;
+      reduceOnly = true;
+      positionIdx = position.positionIdx;
+      estimatedNotional = Math.abs(quantity * referencePrice);
+      estimatedMargin = 0;
+    } else if (action === "CLOSE") {
       const requestedDirection = reversingClose ? oppositeDirectionPositions[0]?.direction : String(payload.positionDirection || "").toLowerCase();
       const position = openPositions.find((item) => !requestedDirection || item.direction === requestedDirection);
       if (!position) return { skipped: true, reason: "POSITION_ALREADY_FLAT" };
@@ -674,7 +704,7 @@ export class BlackCloudExecutionWorker {
         throw terminalError("STRATEGY_MAX_DAILY_LOSS", "The Bybit account reached the configured daily-loss ceiling.");
       }
       effectiveLeverage = binding.market_type === "SPOT" ? 1 : calculateEffectiveLeverage({
-        requested: policy.requestedLeverage,
+        requested: nullablePositive(payload.requestedLeverage) || policy.requestedLeverage,
         targetMaximum: policy.maximumLeverage,
         accountRiskCap: riskControl?.max_leverage,
         emsRiskCap: automationMandate.max_leverage,
@@ -708,22 +738,27 @@ export class BlackCloudExecutionWorker {
       symbol,
       marketKind,
       side,
-      orderType: "market",
+      orderType: takeProfitOrder ? "limit" : "market",
       quantity,
       quantityMode: "quantity",
       referencePrice,
-      takeProfit: reduceOnly ? undefined : nullablePositive(payload.takeProfit),
+      limitPrice: takeProfitOrder ? nullablePositive(payload.targetPrice) : undefined,
+      takeProfit: reduceOnly || Array.isArray(payload.takeProfits) && payload.takeProfits.length ? undefined : nullablePositive(payload.takeProfit),
       stopLoss: reduceOnly ? undefined : nullablePositive(payload.stopLoss),
       leverage: effectiveLeverage,
       marginMode: String(policy?.marginMode || "CROSS").toLowerCase(),
       reduceOnly,
       positionIdx,
-      timeInForce: "ioc",
+      timeInForce: takeProfitOrder ? "gtc" : "ioc",
       clientOrderId: requestedAction === "REVERSE"
         ? deterministicStrategyLegId(command.deterministic_client_order_id, reversingClose ? "c" : "e")
         : command.deterministic_client_order_id,
       source: credentialEnvironment === "DEMO" ? "strategy-automation-demo" : "strategy-automation-mainnet"
     };
+    if (!reduceOnly && orderDraft.orderType === "market" && Number(payload.slippageTicks) > 0 && Number(instrument.tickSize) > 0) {
+      orderDraft.slippageTolerancePercent = Math.max(0.01, Math.min(10, Number(payload.slippageTicks) * Number(instrument.tickSize) / referencePrice * 100));
+    }
+    if (takeProfitOrder && Number(instrument.tickSize) > 0) orderDraft.limitPrice = alignVenueStep(orderDraft.limitPrice, Number(instrument.tickSize));
     const venueValidation = await validateBybitOrderDraft(credentials, orderDraft);
     if (!venueValidation.ok) throw terminalError("VENUE_VALIDATION_REJECTED", venueValidation.reasons.join(" "));
     orderDraft.quantity = venueValidation.normalized.quantity;
@@ -774,13 +809,14 @@ export class BlackCloudExecutionWorker {
         exchange: "bybit",
         symbol: orderDraft.symbol,
         side: orderDraft.side,
-        order_type: "market",
+        order_type: orderDraft.orderType,
         quantity: orderDraft.quantity,
         quantity_mode: "quantity",
+        limit_price: orderDraft.limitPrice || null,
         take_profit: orderDraft.takeProfit || null,
         stop_loss: orderDraft.stopLoss || null,
         reduce_only: orderDraft.reduceOnly,
-        time_in_force: "ioc",
+        time_in_force: orderDraft.timeInForce,
         status: normalizeInternalStatus(venueReport.status),
         exchange_order_id: venueOrderId,
         client_order_id: orderDraft.clientOrderId,
@@ -1163,6 +1199,13 @@ function policyFromStrategyBinding(row) {
 function nullablePositive(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function alignVenueStep(value, step) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0 || !Number.isFinite(step) || step <= 0) return parsed;
+  const precision = Math.max(0, Math.min(12, String(step).includes("e-") ? Number(String(step).split("e-")[1]) : (String(step).split(".")[1] || "").length));
+  return Number((Math.round(parsed / step) * step).toFixed(precision));
 }
 
 async function insertSingle(query, payload) {

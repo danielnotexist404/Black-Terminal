@@ -1,8 +1,8 @@
-import { AlertTriangle, CheckCircle2, Save, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ShieldCheck } from "lucide-react";
 import type { StrategyWizardDraft } from "../state/strategyDraftStore";
 import { draftChanges, validateWizardStep } from "../state/strategyDraftStore";
 
-export function ReviewStep({ draft, publishedName, publishedDefinition, saving, onSaveDraft, onActivate }: { draft: StrategyWizardDraft; publishedName?: string; publishedDefinition?: StrategyWizardDraft["definition"] | null; saving: boolean; onSaveDraft: () => void; onActivate: () => void }) {
+export function ReviewStep({ draft, publishedName, publishedDefinition }: { draft: StrategyWizardDraft; publishedName?: string; publishedDefinition?: StrategyWizardDraft["definition"] | null }) {
   const issues = validateWizardStep(draft, 3);
   const changes = draftChanges(draft, publishedName, publishedDefinition);
   const published = draft.publishedVersion;
@@ -13,7 +13,6 @@ export function ReviewStep({ draft, publishedName, publishedDefinition, saving, 
     <div className="review-summary-grid"><Summary label="STRATEGY" value={draft.name || "—"} /><Summary label="SIGNAL SOURCE" value={draft.definition.indicator?.name || "—"} /><Summary label="CURRENCY" value={draft.definition.symbol} /><Summary label="TIMEFRAME" value={draft.definition.timeframe.toUpperCase()} /><Summary label="MARKET" value={draft.definition.marketType} /><Summary label="ENTRY MAPPINGS" value={mappingSummary(draft)} /><Summary label="STOP OVERRIDE" value={draft.definition.execution.stopLossEnabled === true ? `${String(draft.definition.execution.longStopMode || "PRICE_PERCENT")} · ${String(draft.definition.execution.longStopValue || "—")}` : "SCRIPT NATIVE"} /><Summary label="REVERSAL" value={`${draft.definition.execution.stopReversalEnabled === true ? "REVENGE ON" : "REVENGE OFF"} · ${draft.definition.execution.perpetualSignalReversalEnabled === true ? "PERPETUAL ON" : "PERPETUAL OFF"}`} /></div>
     <section className="version-diff"><h3>{changes.length} DRAFT CHANGES</h3>{changes.map((change) => <div key={change.label}><strong>{change.label}</strong><span>{display(change.before)}</span><b>→</b><span>{display(change.after)}</span></div>)}</section>
     <section className="validation-summary"><h3>SAVE VALIDATION</h3>{issues.length ? issues.map((issue) => <div className="blocked" key={issue}><AlertTriangle size={13} /><span>{issue}</span></div>) : <><div className="ready"><CheckCircle2 size={14} /><span>Strategy selection, currency, timeframe and signal mapping are complete.</span></div><div className="ready"><ShieldCheck size={14} /><span>No broker or Investment Group is connected by this wizard. Live execution remains unarmed until you add and approve it from LIVE TARGETS.</span></div>{!certified ? <div className="blocked"><AlertTriangle size={13} /><span>The strategy will be saved with its native settings, but Paper and live execution remain locked until its VPS runtime is certified.</span></div> : null}</>}</section>
-    <div className="review-actions"><button type="button" disabled={saving} onClick={onSaveDraft}><Save size={14} /> SAVE DRAFT ONLY</button><button type="button" className="primary" disabled={saving || issues.length > 0} onClick={onActivate}><Save size={14} /> SAVE STRATEGY</button></div>
   </div>;
 }
 

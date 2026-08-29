@@ -1,10 +1,15 @@
 import { createClient } from "@supabase/supabase-js";
 import { BLACK_TERMINAL_AUTH_STORAGE_KEY, prepareSupabaseAuthStorage } from "../auth/supabaseAuthStorage";
+import { resolveSupabaseEndpoint } from "../auth/supabaseEndpoint";
 import { resolveAuthenticatedSession } from "../auth/authenticatedSession";
 import type { ProductTier, TerminalCapability } from "../core/permissions/capabilities";
 
 const configuredSupabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
-const supabaseUrl = configuredSupabaseUrl;
+const supabaseUrl = resolveSupabaseEndpoint(
+  configuredSupabaseUrl,
+  import.meta.env.VITE_SUPABASE_SAME_ORIGIN,
+  typeof window === "undefined" ? undefined : window.location.origin
+);
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
 
 export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
@@ -17,7 +22,8 @@ export const supabase = isSupabaseConfigured
         storageKey: BLACK_TERMINAL_AUTH_STORAGE_KEY,
         persistSession: true,
         autoRefreshToken: true,
-        detectSessionInUrl: true
+        detectSessionInUrl: true,
+        flowType: "pkce"
       }
     })
   : null;

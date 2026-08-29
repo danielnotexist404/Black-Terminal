@@ -4,6 +4,7 @@ import {
   legacySupabaseAuthStorageKeys,
   migrateSupabaseAuthStorage
 } from "../src/auth/supabaseAuthStorage.ts";
+import { resolveSupabaseEndpoint } from "../src/auth/supabaseEndpoint.ts";
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
@@ -17,6 +18,22 @@ const session = (expiresAt: number) => JSON.stringify({
   refresh_token: `refresh-${expiresAt}`,
   expires_at: expiresAt
 });
+
+assert.equal(
+  resolveSupabaseEndpoint("https://vps-preview.black-terminal.live", "true", "https://black-terminal.live"),
+  "https://black-terminal.live",
+  "production auth must use the browser origin when same-origin routing is enabled"
+);
+assert.equal(
+  resolveSupabaseEndpoint("https://vps-preview.black-terminal.live/", "false", "https://black-terminal.live"),
+  "https://vps-preview.black-terminal.live",
+  "explicit cross-origin deployments must retain their configured endpoint"
+);
+assert.equal(
+  resolveSupabaseEndpoint("https://vps-preview.black-terminal.live", true, undefined),
+  "https://vps-preview.black-terminal.live",
+  "server-side builds without a browser origin must retain their configured endpoint"
+);
 
 {
   const keys = legacySupabaseAuthStorageKeys("https://project-ref.supabase.co", "https://black-terminal.live");

@@ -9,6 +9,10 @@ import {
   readScriptEditorRecovery,
   writeScriptEditorRecovery,
 } from "../src/scripts/scriptEditorRecovery.ts";
+import {
+  AuthBootstrapTimeoutError,
+  withAuthBootstrapTimeout,
+} from "../src/auth/authBootstrap.ts";
 
 function authClient(input: { current?: string | null; refreshed?: string | null; valid?: string[] }) {
   let refreshes = 0;
@@ -19,6 +23,13 @@ function authClient(input: { current?: string | null; refreshed?: string | null;
   };
   return { client, refreshes: () => refreshes };
 }
+
+assert.equal(await withAuthBootstrapTimeout(Promise.resolve("ready"), 20), "ready");
+await assert.rejects(
+  () => withAuthBootstrapTimeout(new Promise<never>(() => undefined), 10),
+  AuthBootstrapTimeoutError,
+  "a stalled auth client must release the full-screen bootstrap"
+);
 
 {
   const auth = authClient({ current: "valid-current", refreshed: "unused", valid: ["valid-current"] });

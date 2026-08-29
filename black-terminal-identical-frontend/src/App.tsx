@@ -126,6 +126,7 @@ import {
   isSupabaseConfigured,
   supabase
 } from "./lib/supabase";
+import { withAuthBootstrapTimeout } from "./auth/authBootstrap";
 import { getMarketDataEngineAdapter } from "./market-data/engine/marketDataEngine";
 import { ExchangeOption, MarketSymbolOption, getExchangeOption, marketCatalog } from "./market-data/marketCatalog";
 import type { ExchangeId, MarketSymbol, Timeframe } from "./market-data/types";
@@ -649,20 +650,24 @@ export default function App() {
     }
     const authClient = supabase;
     let disposed = false;
+    let bootstrapExpired = false;
     const hydrateAuthoritativeSession = async () => {
-      const { data, error } = await authClient.auth.getSession();
-      if (disposed) return;
-      if (error || !data.session?.user) {
-        setCurrentUser(null);
-        setAuthBootstrapReady(true);
-        return;
-      }
       try {
-        const profile = await dbGetCurrentUserProfile({ retries: 2 });
-        if (disposed) return;
-        if (!profile) {
-          setCurrentUser(null);
-        } else {
+        await withAuthBootstrapTimeout((async () => {
+          const { data, error } = await authClient.auth.getSession();
+          if (disposed || bootstrapExpired) return;
+          if (error || !data.session?.user) {
+            setCurrentUser(null);
+            return;
+          }
+
+          const profile = await dbGetCurrentUserProfile({ retries: 2 });
+          if (disposed || bootstrapExpired) return;
+          if (!profile) {
+            setCurrentUser(null);
+            return;
+          }
+
           setCurrentUser({
             username: profile.username,
             displayName: profile.displayName,
@@ -676,14 +681,12 @@ export default function App() {
             aiMessagesCount: profile.aiMessagesCount,
             aiLastMessageTimestamp: profile.aiLastMessageTimestamp,
           });
-        }
+        })());
       } catch (error) {
+        bootstrapExpired = true;
         if (!disposed) {
-          setCurrentUser((existing) => existing ? {
-            ...existing,
-            authSessionReady: true,
-            authSessionWarning: error instanceof Error ? error.message : "Secure profile refresh is temporarily unavailable."
-          } : null);
+          setCurrentUser(null);
+          console.warn("Secure session bootstrap was released to sign-in.", error);
         }
       } finally {
         if (!disposed) setAuthBootstrapReady(true);

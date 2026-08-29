@@ -15,6 +15,8 @@ const draftStore = read("src/modules/strategy-lab/my-strategy/state/strategyDraf
 const indicator = read("src/modules/strategy-lab/my-strategy/wizard/IndicatorMarketStep.tsx");
 const manifest = read("src/modules/strategy-lab/my-strategy/state/indicatorManifest.ts");
 const cockpit = read("src/modules/strategy-lab/my-strategy/pages/StrategyCockpitPage.tsx");
+const controlPanel = read("src/modules/strategy-lab/execution-desk/StrategyControlPanelDialog.tsx");
+const theme = read("src/styles/theme.css");
 const targetMatrix = read("src/modules/strategy-lab/my-strategy/cockpit/TargetSlotMatrix.tsx");
 const reviewStep = read("src/modules/strategy-lab/my-strategy/wizard/ReviewStep.tsx");
 const repository = read("server/strategy-automation/repository.js");
@@ -128,6 +130,12 @@ assert.match(targetMatrix, /bindings\.filter/, "only occupied bindings create de
 assert.match(cockpit, /NO EXECUTION DESTINATION ASSIGNED/);
 assert.match(cockpit, /StrategyControlPanelDialog embedded/, "saved strategies expose an embedded dynamic Strategy Settings surface");
 assert.match(cockpit, /__nativeInputs/, "custom script settings are reconstructed from their literal private manifest");
+assert.match(controlPanel, /className="strategy-control-scroll" tabIndex=\{0\}/, "every strategy settings tab has a keyboard and wheel scroll surface");
+assert.match(controlPanel, /key=\{tab\}/, "switching settings tabs resets the scroll viewport instead of preserving an invisible offset");
+assert.match(theme, /\.my-strategy-experience\s*\{[\s\S]*?height:\s*100%;[\s\S]*?overflow-y:\s*auto;/, "My Strategy owns a contained vertical viewport instead of being clipped by Strategy Lab");
+assert.match(theme, /\.strategy-control-scroll\s*\{[^}]*overflow-y:\s*scroll;/, "Inputs, Properties, Style and Visibility expose a persistent vertical scrollbar");
+assert.match(theme, /\.strategy-control-dialog\s*\{[^}]*background:\s*linear-gradient\([^;]*#010203/, "strategy settings use the Black Terminal black surface rather than the TradingView charcoal surface");
+assert.match(theme, /\.strategy-control-dialog > nav button\.active::after[^}]*background:\s*#e31342/, "settings tabs use the Black Terminal phosphor-red active state");
 assert.match(experience, /ENABLE FOR STRATEGY LAB/);
 assert.match(experience, /BROKER CONNECTION/);
 assert.match(experience, /INVESTMENT GROUP/);

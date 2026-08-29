@@ -50,7 +50,7 @@ export function StrategyControlPanelDialog({
   const panel = <section className={`strategy-control-dialog${embedded ? " embedded" : ""}`} role={embedded ? "region" : "dialog"} aria-modal={embedded ? undefined : true} aria-label={`${name} settings`}>
       <header><div><span>STRATEGY SETTINGS</span><h2>{name}</h2><em>{nativeInputs.length ? `${nativeInputs.length} SCRIPT-NATIVE INPUTS` : "CERTIFIED NATIVE CONTROL CONTRACT"}</em></div>{!embedded ? <button type="button" aria-label="Close strategy settings" disabled={busy} onClick={onCancel}><X size={18} /></button> : null}</header>
       <nav aria-label="Strategy settings sections">{(["inputs", "properties", "style", "visibility"] as Tab[]).map((item) => <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item.toUpperCase()}</button>)}</nav>
-      <div className="strategy-control-scroll">
+      <div key={tab} className="strategy-control-scroll" tabIndex={0} aria-label={`${tab} strategy settings controls`}>
         {tab === "inputs" ? nativeInputs.length ? <NativeInputs inputs={nativeInputs} settings={settings} onChange={(key, next) => setSettings((current) => ({ ...current, [key]: next }))} /> : <Inputs value={value} patch={patchInputs} /> : null}
         {tab === "properties" ? <Properties value={value} patch={patchProperties} accountLabel={accountLabel} /> : null}
         {tab === "style" ? <Style value={value} patch={patchStyle} /> : null}

@@ -1,5 +1,6 @@
 import { ChevronDown, LockKeyhole, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
+import type { CompiledScriptInput, ScriptInputValue } from "../../../../components/ScriptCompiler";
 import type { StrategyAutomationDefinition, StrategyCapitalPolicy, StrategyControlPanel, StrategyTargetBinding, StrategyWorkspace } from "../../automation/strategyAutomation.types";
 import { PaperCockpit } from "../cockpit/PaperCockpit";
 import { RuntimeTimeline } from "../cockpit/RuntimeTimeline";
@@ -8,9 +9,11 @@ import { StrategyOverview } from "../cockpit/StrategyOverview";
 import { TargetSlotMatrix } from "../cockpit/TargetSlotMatrix";
 import { TargetCockpit } from "../cockpit/TargetCockpit";
 import { StrategyExecutionDesk } from "../../execution-desk/StrategyExecutionDesk";
+import { StrategyControlPanelDialog } from "../../execution-desk/StrategyControlPanelDialog";
+import { readStrategyControlPanel } from "../../execution-desk/strategyControlPanelModel";
 
-export type CockpitTab = "overview" | "executionDesk" | "configuration" | "paper" | "liveTargets" | "positions" | "trades" | "performance" | "risk" | "logs";
-const tabs: Array<[CockpitTab, string]> = [["overview", "OVERVIEW"], ["executionDesk", "EXECUTION DESK"], ["configuration", "CONFIGURATION"], ["paper", "PAPER"], ["liveTargets", "LIVE TARGETS"], ["positions", "POSITIONS"], ["trades", "TRADES"], ["performance", "PERFORMANCE"], ["risk", "RISK"], ["logs", "LOGS"]];
+export type CockpitTab = "overview" | "executionDesk" | "strategySettings" | "configuration" | "paper" | "liveTargets" | "positions" | "trades" | "performance" | "risk" | "logs";
+const tabs: Array<[CockpitTab, string]> = [["overview", "OVERVIEW"], ["executionDesk", "EXECUTION DESK"], ["strategySettings", "STRATEGY SETTINGS"], ["configuration", "CONFIGURATION"], ["paper", "PAPER"], ["liveTargets", "LIVE TARGETS"], ["positions", "POSITIONS"], ["trades", "TRADES"], ["performance", "PERFORMANCE"], ["risk", "RISK"], ["logs", "LOGS"]];
 
 type Props = {
   workspace: StrategyWorkspace;
@@ -24,7 +27,7 @@ type Props = {
   onModifyTarget: (binding: StrategyTargetBinding) => void;
   onTargetAction: (bindingId: string, action: "arm" | "pause" | "resume") => void;
   onDisconnectTarget: (bindingId: string) => void;
-  onApplyExecutionConfiguration: (definition: StrategyAutomationDefinition, policy: StrategyCapitalPolicy, sourceKey: string, panel: StrategyControlPanel) => Promise<void>;
+  onApplyExecutionConfiguration: (definition: StrategyAutomationDefinition, policy: StrategyCapitalPolicy, sourceKey: string, panel: StrategyControlPanel, nativeSettings?: Record<string, unknown>) => Promise<void>;
 };
 
 export function StrategyCockpitPage(props: Props) {
@@ -39,6 +42,7 @@ export function StrategyCockpitPage(props: Props) {
     <div className="strategy-cockpit-body">
       {activeTab === "overview" ? <StrategyOverview workspace={props.workspace} paperData={props.paperData} onAddTarget={props.onAddTarget} /> : null}
       {activeTab === "executionDesk" ? <StrategyExecutionDesk workspace={props.workspace} paperData={props.paperData} busy={props.busy} onApplyConfiguration={props.onApplyExecutionConfiguration} /> : null}
+      {activeTab === "strategySettings" ? <StrategySettings workspace={props.workspace} busy={props.busy} onApply={props.onApplyExecutionConfiguration} /> : null}
       {activeTab === "configuration" ? <Configuration workspace={props.workspace} onEdit={props.onEdit} /> : null}
       {activeTab === "paper" ? <PaperCockpit paper={props.workspace.paper} data={props.paperData} busy={props.busy} onAction={props.onPaperAction} /> : null}
       {activeTab === "liveTargets" ? <><TargetSlotMatrix bindings={props.workspace.bindings} snapshots={props.workspace.snapshots} selectedId={selectedTargetId} onSelect={setSelectedTargetId} onAdd={props.onAddTarget} />{selectedTargetId && props.workspace.bindings.find((item) => item.id === selectedTargetId) ? <TargetCockpit binding={props.workspace.bindings.find((item) => item.id === selectedTargetId)!} snapshot={props.workspace.snapshots.find((item) => item.bindingId === selectedTargetId)} busy={props.busy} onAction={(action) => props.onTargetAction(selectedTargetId, action)} onModify={() => props.onModifyTarget(props.workspace.bindings.find((item) => item.id === selectedTargetId)!)} onDisconnect={() => props.onDisconnectTarget(selectedTargetId)} /> : <div className="live-certification-banner"><LockKeyhole size={14} /><div><strong>NO EXECUTION DESTINATION ASSIGNED</strong><span>Add an eligible connected broker account or an owned Investment Group, review its risk policy, and arm it explicitly.</span></div></div>}</> : null}
@@ -50,6 +54,40 @@ export function StrategyCockpitPage(props: Props) {
     </div>
   </section>;
 }
+
+function StrategySettings({ workspace, busy, onApply }: { workspace: StrategyWorkspace; busy: boolean; onApply: Props["onApplyExecutionConfiguration"] }) {
+  const definition = workspace.strategy.draftDefinition || workspace.strategy.definition;
+  const policy = workspace.paper?.capitalPolicy || workspace.strategy.globalCapitalPolicy;
+  const nativeInputs = definition.runtimeKind === "builtin-superatr-seven-step" ? [] : strategyNativeInputs(definition);
+  const panel = readStrategyControlPanel(definition, policy, workspace.paper?.demoEquity);
+  return <section className="strategy-settings-page">
+    <header><div><span>DYNAMIC SCRIPT CONTRACT</span><h2>{definition.indicator?.name || workspace.strategy.name}</h2><p>Inputs come from this strategy's own script declaration. Properties control the default sizing and execution policy used by Paper and by newly linked targets; Style and Visibility affect only the dedicated algorithmic chart.</p></div><strong>{workspace.strategy.hasDraftChanges ? "DRAFT CHANGES PENDING" : `SAVED V${workspace.strategy.publishedVersion || "—"}`}</strong></header>
+    <StrategyControlPanelDialog embedded name={workspace.strategy.name} accountLabel="Default strategy policy / Paper" initial={panel} initialSettings={definition.settings as Record<string, unknown>} nativeInputs={nativeInputs} busy={busy} onCancel={() => undefined} onApply={(nextPanel, nativeSettings) => onApply(definition, policy, "paper", nextPanel, nativeSettings)} />
+    <div className="strategy-settings-isolation"><LockKeyhole size={13} /><span>Saving here never loads the strategy onto the discretionary chart and never arms a broker. Existing live targets keep their currently approved immutable version until explicitly migrated.</span></div>
+  </section>;
+}
+
+function strategyNativeInputs(definition: StrategyAutomationDefinition): CompiledScriptInput[] {
+  const settings = definition.settings as Record<string, unknown>;
+  const stored = settings.__nativeInputs;
+  if (Array.isArray(stored)) {
+    const parsed = stored.flatMap((value): CompiledScriptInput[] => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      const row = value as Partial<CompiledScriptInput>;
+      if (typeof row.key !== "string" || typeof row.variable !== "string" || typeof row.label !== "string" || !["int", "float", "bool", "string", "color"].includes(String(row.type))) return [];
+      if (!["number", "boolean", "string"].includes(typeof row.defaultValue)) return [];
+      return [{ ...row, type: row.type as CompiledScriptInput["type"], defaultValue: row.defaultValue as ScriptInputValue } as CompiledScriptInput];
+    });
+    if (parsed.length) return parsed;
+  }
+  return Object.entries(settings).flatMap(([key, value]): CompiledScriptInput[] => {
+    if (key.startsWith("__") || !["number", "boolean", "string"].includes(typeof value)) return [];
+    const type = typeof value === "boolean" ? "bool" : typeof value === "number" ? (Number.isInteger(value) ? "int" : "float") : /^#[0-9a-f]{6}$/i.test(String(value)) ? "color" : "string";
+    return [{ key, variable: key, label: humanizeSetting(key), type, defaultValue: value as ScriptInputValue }];
+  });
+}
+
+function humanizeSetting(value: string) { return value.replace(/([a-z])([A-Z])/g, "$1 $2").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
 
 function Configuration({ workspace, onEdit }: { workspace: StrategyWorkspace; onEdit: () => void }) {
   const definition = workspace.strategy.definition;

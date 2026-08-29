@@ -6,6 +6,7 @@ import type {
 } from "../../../../chart-engine/types";
 import type { StrategyRuntimeKind } from "../../types/strategy.types";
 import type { UserScript } from "../../../../scripts/userScriptLibrary";
+import { extractScriptInputs } from "../../../../components/ScriptCompiler.ts";
 import type {
   StrategyIndicatorAlert,
   StrategyIndicatorBinding,
@@ -146,7 +147,13 @@ export function ownedCustomIndicatorInstances(rows: readonly UserScript[]): Stra
   return rows.map<StrategyIndicatorInstance>((row) => {
       const sourceHash = stableHash(row.source);
       const alerts = parseCustomAlertManifest(row.source, row.kind === "strategy");
-      const settings = row.inputValues ? { ...row.inputValues } : {};
+      // Keep the literal input manifest with the private strategy definition.
+      // The server stores this as inert JSON; Strategy Settings uses it to
+      // reconstruct each script's own controls without evaluating source.
+      const settings: Record<string, unknown> = {
+        ...(row.inputValues ? { ...row.inputValues } : {}),
+        __nativeInputs: extractScriptInputs(row.source),
+      };
       const label = row.kind === "strategy" ? "Owned Strategy" : "Owned Indicator";
       const certifiedSuperAtr = row.kind === "strategy" && isCertifiedSuperAtrSevenStepSource(row.source);
       return {

@@ -19,7 +19,7 @@ import { StrategyLibraryPage } from "./pages/StrategyLibraryPage";
 import { StrategyWizardPage } from "./pages/StrategyWizardPage";
 import { QalcExperience } from "../qalc/QalcExperience";
 import { consumeQalcStrategyHandoffIntent } from "../../qalc-indicator/config";
-import { applyStrategyControlPanel, readStrategyControlPanel } from "../execution-desk/strategyControlPanelModel";
+import { applySharedStrategyControlPanel, applyStrategyControlPanel, readStrategyControlPanel } from "../execution-desk/strategyControlPanelModel";
 import { activateBlackCloudConnectionViaApi, listPersistedExchangeConnectionsViaApi, type PersistedExchangeConnection } from "../../../portfolio/portfolioApiClient";
 
 type View = "library" | "wizard" | "cockpit" | "qalc";
@@ -131,12 +131,10 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
     try {
       const next = await loadWorkspace(strategyId);
       if (!next) return;
-      if (!next.strategy.publishedVersion) {
-        setDraft(hydrateDraft(next)); setDirty(false); setView("wizard");
-        setMessage("Draft restored from the VPS. No published runtime was changed.");
-      } else {
-        setView("cockpit"); setMessage("Strategy cockpit restored from authoritative VPS state.");
-      }
+      setDraft(hydrateDraft(next)); setDirty(false); setView("cockpit");
+      setMessage(next.strategy.publishedVersion
+        ? "Strategy cockpit restored from authoritative VPS state."
+        : "Saved strategy restored. Its settings are available; Paper and live execution remain locked until runtime certification.");
     } catch (error) { setMessage(errorMessage(error, "Strategy could not be opened.")); }
     finally { setBusy(false); }
   };
@@ -209,7 +207,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
 
   const publish = async () => {
     if (!draft) return;
-    const issues = validateWizardStep(draft, 9);
+    const issues = validateWizardStep(draft, 3);
     if (issues.length) { setMessage(issues.join(" ")); return; }
     const saved = dirty || !draft.strategyId ? await persistDraft() : workspace;
     if (!saved) return;
@@ -253,39 +251,25 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
 
   const activateConfiguredStrategy = async () => {
     if (!draft || busy) return;
-    const issues = validateWizardStep(draft, 9);
+    const issues = validateWizardStep(draft, 3);
     if (issues.length) { setMessage(issues.join(" ")); return; }
     setBusy(true);
-    setMessage("Saving the private configuration and validating its selected execution destination…");
+    setMessage("Saving the private strategy and preparing its isolated Strategy Lab cockpit…");
     try {
       const definitionWithPolicy = persistedDefinition(draft);
       let next = draft.strategyId
         ? await strategyAutomationApi.saveDraft(draft.strategyId, draft.name.trim(), definitionWithPolicy, draft.draftRevision)
         : await strategyAutomationApi.createDraft(draft.name.trim(), definitionWithPolicy);
       onDefinitionChange(definitionWithPolicy);
-      if (!next.strategy.publishedVersion || next.strategy.hasDraftChanges) {
+      const certified = definitionWithPolicy.indicator?.runtimeStatus === "CERTIFIED";
+      if (certified && (!next.strategy.publishedVersion || next.strategy.hasDraftChanges)) {
         next = await strategyAutomationApi.publishDraft(next.strategy.id, next.strategy.draftRevision || 0);
       }
       const version = next.strategy.publishedVersion;
-      if (!version) throw new Error("The immutable strategy configuration was not created.");
-      if (next.strategy.runningVersion !== version) next = await strategyAutomationApi.startVersion(next.strategy.id, version);
-
-      const plan = definitionWithPolicy.deployment;
-      let activationMessage = `Strategy V${version} is active in the isolated Paper Backtester.`;
-      if (plan && plan.targetType !== "PAPER") {
-        if (!plan.targetId || !plan.authorizationAccepted) throw new Error("The execution destination is not explicitly authorized.");
-        const targets = await strategyAutomationApi.eligibleTargets(next.strategy.id);
-        const candidates: Array<EligibleBrokerTarget | EligibleGroupTarget> = plan.targetType === "INVESTMENT_GROUP" ? targets.groups : targets.brokerAccounts;
-        const candidate = candidates.find((item) => item.targetId === plan.targetId);
-        if (!candidate) throw new Error("The selected execution destination is no longer available.");
-        if (!candidate.validation.eligible) throw new Error(`${candidate.label} is not ready: ${candidate.validation.reasons.join(" ")}`);
-        let binding = next.bindings.find((item) => item.targetType === plan.targetType && item.targetId === plan.targetId && item.strategyVersion === version && item.status !== "DISCONNECTED");
-        if (!binding) binding = (await strategyAutomationApi.addTarget(next.strategy.id, 1, plan.targetType, plan.targetId, next.strategy.marketType, draft.paperPolicy)).binding;
-        if (plan.armOnActivation && binding.status === "READY") binding = (await strategyAutomationApi.targetAction(next.strategy.id, binding, "arm")).binding;
-        activationMessage = plan.armOnActivation
-          ? `Strategy V${version} is active and ${candidate.label} is armed after server-side validation.`
-          : `Strategy V${version} is active; ${candidate.label} is bound in ${binding.status} state and remains manually armable.`;
-      }
+      if (certified && version && next.strategy.runningVersion !== version) next = await strategyAutomationApi.startVersion(next.strategy.id, version);
+      const activationMessage = certified && version
+        ? `Strategy V${version} is saved and active only in its isolated Paper account. Add brokers or Investment Groups from LIVE TARGETS when you are ready.`
+        : "Strategy saved with its native settings. Paper and live arming remain locked until this script receives a certified VPS runtime.";
       next = await strategyAutomationApi.get(next.strategy.id);
       setWorkspace(next);
       setDraft(hydrateDraft(next));
@@ -493,12 +477,14 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
     finally { setBusy(false); }
   };
 
-  const applyExecutionConfiguration = async (baseDefinition: StrategyAutomationDefinition, basePolicy: StrategyCapitalPolicy, sourceKey: string, panel: StrategyControlPanel) => {
+  const applyExecutionConfiguration = async (baseDefinition: StrategyAutomationDefinition, basePolicy: StrategyCapitalPolicy, sourceKey: string, panel: StrategyControlPanel, nativeSettings?: Record<string, unknown>) => {
     if (!workspace || busy) return;
     setBusy(true);
-    setMessage("Applying the SuperATR execution contract to the selected destination…");
+    setMessage("Saving the strategy-native inputs and execution properties…");
     try {
-      const configured = applyStrategyControlPanel(baseDefinition, basePolicy, panel);
+      const configured = baseDefinition.runtimeKind === "builtin-superatr-seven-step"
+        ? applyStrategyControlPanel(baseDefinition, basePolicy, panel)
+        : applySharedStrategyControlPanel(baseDefinition, basePolicy, panel, nativeSettings);
       const nextDefinition: StrategyAutomationDefinition = {
         ...configured.definition,
         paper: { ...configured.definition.paper, capitalPolicy: sourceKey === "paper" ? configured.capitalPolicy : configured.definition.paper?.capitalPolicy },
@@ -507,18 +493,21 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
       next = await strategyAutomationApi.updateGlobalPolicy(next.strategy.id, next.strategy.draftRevision || 0, expandedGlobalPolicy(workspace.strategy.globalCapitalPolicy, configured.capitalPolicy));
       if (sourceKey === "paper") {
         const openPaperPositions = Array.isArray(paperData?.positions) ? paperData.positions.length : 0;
-        if (!openPaperPositions && workspace.bindings.length === 0) {
+        const certified = nextDefinition.indicator?.runtimeStatus === "CERTIFIED";
+        if (certified && !openPaperPositions && workspace.bindings.length === 0) {
           next = await strategyAutomationApi.publishDraft(next.strategy.id, next.strategy.draftRevision || 0);
-          if (!next.strategy.publishedVersion) throw new Error("The immutable SuperATR version was not created.");
+          if (!next.strategy.publishedVersion) throw new Error("The immutable strategy version was not created.");
           next = await strategyAutomationApi.startVersion(next.strategy.id, next.strategy.publishedVersion);
           if (next.paper && Math.abs(next.paper.demoEquity - panel.properties.initialCapital) > 0.005) {
             const reset = await strategyAutomationApi.paperAction(next.strategy.id, "reset", next.paper.rowVersion, { demoEquity: panel.properties.initialCapital });
             next = { ...next, paper: reset.paper };
           }
-          setMessage(`SuperATR V${next.strategy.runningVersion} is active. Paper sizing now uses ${panel.properties.orderSizeValue}${panel.properties.orderSizeMode === "PERCENT_EQUITY" ? "% of account equity" : panel.properties.orderSizeMode === "FIXED_USDT" ? " USDT" : " units"}.`);
-        } else {
+          setMessage(`Strategy V${next.strategy.runningVersion} is active. Paper sizing now uses ${panel.properties.orderSizeValue}${panel.properties.orderSizeMode === "PERCENT_EQUITY" ? "% of account equity" : panel.properties.orderSizeMode === "FIXED_USDT" ? " USDT" : " units"}.`);
+        } else if (certified) {
           if (workspace.paper) await strategyAutomationApi.configurePaper(workspace.strategy.id, workspace.paper.rowVersion, configured.capitalPolicy);
           setMessage("Sizing and leverage were applied to the current Paper account. Signal/TP input changes are saved as the next immutable draft and will activate after current positions and live bindings are flat or migrated.");
+        } else {
+          setMessage("Native script inputs and strategy properties were saved. Paper and live execution remain locked until this script receives a certified VPS runtime.");
         }
       } else {
         const binding = workspace.bindings.find((item) => item.id === sourceKey);
@@ -533,7 +522,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
       setDirty(false);
       await loadList();
     } catch (error) {
-      setMessage(errorMessage(error, "SuperATR execution settings could not be applied."));
+      setMessage(errorMessage(error, "Strategy settings could not be applied."));
       throw error;
     } finally { setBusy(false); }
   };
@@ -541,7 +530,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
   return <div className="my-strategy-experience">
     {view === "library" ? <StrategyLibraryPage strategies={strategies} loading={loading} message={message} onCreate={newStrategy} onOpen={(id) => void openStrategy(id)} onModify={(id) => void modifyStrategy(id)} onDelete={setPendingDelete} onBacktest={onOpenBacktest} onPaperAction={(strategy, action) => void libraryPaperAction(strategy, action)} /> : null}
     {view === "qalc" ? <QalcExperience onBack={() => setView("library")} /> : null}
-    {view === "wizard" && draft ? <StrategyWizardPage draft={draft} chartTimeframe={chartTimeframe} indicators={indicators} bindings={workspace?.bindings || []} eligibleTargets={wizardEligible} publishedName={workspace?.strategy.name} publishedDefinition={workspace?.strategy.definition} saving={busy} message={message || (dirty ? "Draft changes have not been saved." : undefined)} onChange={(next) => { setDraft(next); setDirty(true); }} onSaveDraft={() => void persistDraft()} onRefreshTargets={prepareWizardTargets} onManageTargets={openWizardTargetManager} onActivate={() => void activateConfiguredStrategy()} onCancel={() => { setView(workspace?.strategy.publishedVersion ? "cockpit" : "library"); setMessage(undefined); }} /> : null}
+    {view === "wizard" && draft ? <StrategyWizardPage draft={draft} chartTimeframe={chartTimeframe} indicators={indicators} publishedName={workspace?.strategy.name} publishedDefinition={workspace?.strategy.definition} saving={busy} message={message || (dirty ? "Draft changes have not been saved." : undefined)} onChange={(next) => { setDraft(next); setDirty(true); }} onSaveDraft={() => void persistDraft()} onActivate={() => void activateConfiguredStrategy()} onCancel={() => { setView(workspace?.strategy.id ? "cockpit" : "library"); setMessage(undefined); }} /> : null}
     {view === "cockpit" && workspace ? <StrategyCockpitPage workspace={workspace} paperData={paperData} busy={busy} message={message} onEdit={editStrategy} onRefresh={() => void refreshCockpit()} onPaperAction={(action, body) => void paperAction(action, body)} onAddTarget={(slot) => void openTargetPicker(slot)} onModifyTarget={(binding) => void openTargetPicker(binding.slotIndex, binding)} onTargetAction={(bindingId, action) => void targetAction(bindingId, action)} onDisconnectTarget={(bindingId) => void disconnectTarget(bindingId)} onApplyExecutionConfiguration={applyExecutionConfiguration} /> : null}
     {addSlot !== null || wizardTargetPickerMode ? <TargetPicker slot={addSlot ?? 1} initialMode={wizardTargetPickerMode} existingBinding={wizardTargetPickerMode ? null : editingBinding} eligible={eligible} connections={brokerConnections} existingAccounts={existingExchangeConnections} busy={busy} onClose={() => { setAddSlot(null); setEditingBinding(null); setWizardTargetPickerMode(null); setEligible(null); }} onRefresh={() => void refreshTargetPicker()} onConnect={linkBrokerConnection} onActivateExisting={activateExistingBrokerConnection} onRemoveConnection={removeBrokerConnection} onSelect={(target) => wizardTargetPickerMode ? selectWizardTarget(target) : void addTarget(target)} /> : null}
     {pendingDelete ? <DeleteStrategyDialog strategy={pendingDelete} busy={busy} onCancel={() => setPendingDelete(null)} onConfirm={() => void deleteStrategy()} /> : null}
@@ -549,7 +538,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
 }
 
 function persistedDefinition(draft: StrategyWizardDraft): StrategyAutomationDefinition {
-  const base = { ...draft.definition, metadata: { ...draft.definition.metadata, description: draft.description, tags: draft.tags }, paper: { ...draft.definition.paper, capitalPolicy: draft.paperPolicy } };
+  const base = { ...draft.definition, deployment: { targetType: "PAPER" as const, authorizationAccepted: false, armOnActivation: false }, metadata: { ...draft.definition.metadata, description: draft.description, tags: draft.tags }, paper: { ...draft.definition.paper, capitalPolicy: draft.paperPolicy } };
   if (base.runtimeKind !== "builtin-superatr-seven-step") return base;
   // Script Editor input keys can be variable names or their human-facing Pine
   // labels. Normalize both forms into the immutable native SuperATR contract

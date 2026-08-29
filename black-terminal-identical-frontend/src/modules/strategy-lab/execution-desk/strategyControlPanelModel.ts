@@ -112,9 +112,9 @@ export function readStrategyControlPanel(definition: StrategyAutomationDefinitio
 
 export function applyStrategyControlPanel(definition: StrategyAutomationDefinition, policy: StrategyCapitalPolicy, panel: StrategyControlPanel) {
   const inputs = panel.inputs;
-  const properties = panel.properties;
+  const shared = applySharedStrategyControlPanel(definition, policy, panel);
   const nextDefinition: StrategyAutomationDefinition = {
-    ...definition,
+    ...shared.definition,
     runtimeKind: "builtin-superatr-seven-step",
     indicator: definition.indicator ? { ...definition.indicator, runtimeStatus: "CERTIFIED", runtimeVersion: "black-cloud-superatr-v1", warmupBars: Math.max(definition.indicator.warmupBars || 0, inputs.longPeriod * 3, inputs.takeProfitAtrLength * 3) } : definition.indicator,
     controlPanel: structuredClone(panel),
@@ -132,6 +132,23 @@ export function applyStrategyControlPanel(definition: StrategyAutomationDefiniti
       superAtrAtrExitPercent: inputs.atrExitPercent,
       superAtrFixedExitPercent: inputs.fixedExitPercent,
     },
+  };
+  return { definition: nextDefinition, capitalPolicy: shared.capitalPolicy };
+}
+
+/** Applies the common Properties, Style and Visibility contract without
+ * changing which runtime owns the strategy's native signal calculations. */
+export function applySharedStrategyControlPanel(
+  definition: StrategyAutomationDefinition,
+  policy: StrategyCapitalPolicy,
+  panel: StrategyControlPanel,
+  nativeSettings?: Record<string, unknown>,
+) {
+  const properties = panel.properties;
+  const nextDefinition: StrategyAutomationDefinition = {
+    ...definition,
+    controlPanel: structuredClone(panel),
+    settings: { ...definition.settings, ...(nativeSettings || {}) },
     execution: {
       ...definition.execution,
       pyramiding: properties.pyramiding,

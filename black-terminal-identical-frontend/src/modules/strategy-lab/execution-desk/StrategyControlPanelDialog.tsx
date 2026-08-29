@@ -2,6 +2,7 @@ import { AlertTriangle, Check, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
+import type { CompiledScriptInput, ScriptInputValue } from "../../../components/ScriptCompiler";
 import type { StrategyControlPanel } from "../automation/strategyAutomation.types";
 
 type Tab = "inputs" | "properties" | "style" | "visibility";
@@ -10,6 +11,9 @@ export function StrategyControlPanelDialog({
   name,
   accountLabel,
   initial,
+  initialSettings = {},
+  nativeInputs = [],
+  embedded = false,
   busy,
   onCancel,
   onApply,
@@ -17,42 +21,64 @@ export function StrategyControlPanelDialog({
   name: string;
   accountLabel: string;
   initial: StrategyControlPanel;
+  initialSettings?: Record<string, unknown>;
+  nativeInputs?: CompiledScriptInput[];
+  embedded?: boolean;
   busy: boolean;
   onCancel: () => void;
-  onApply: (value: StrategyControlPanel) => Promise<void>;
+  onApply: (value: StrategyControlPanel, nativeSettings?: Record<string, unknown>) => Promise<void>;
 }) {
   const [tab, setTab] = useState<Tab>("inputs");
   const [value, setValue] = useState(() => structuredClone(initial));
+  const [settings, setSettings] = useState<Record<string, unknown>>(() => initialNativeSettings(nativeInputs, initialSettings));
   const [error, setError] = useState<string>();
   useEffect(() => setValue(structuredClone(initial)), [initial]);
+  useEffect(() => setSettings(initialNativeSettings(nativeInputs, initialSettings)), [initialSettings, nativeInputs]);
   const patchInputs = (patch: Partial<StrategyControlPanel["inputs"]>) => setValue((current) => ({ ...current, inputs: { ...current.inputs, ...patch } }));
   const patchProperties = (patch: Partial<StrategyControlPanel["properties"]>) => setValue((current) => ({ ...current, properties: { ...current.properties, ...patch } }));
   const patchStyle = (patch: Partial<StrategyControlPanel["style"]>) => setValue((current) => ({ ...current, style: { ...current.style, ...patch } }));
   const patchVisibility = (patch: Partial<StrategyControlPanel["visibility"]>) => setValue((current) => ({ ...current, visibility: { ...current.visibility, ...patch } }));
+  const reset = () => { setValue(structuredClone(initial)); setSettings(initialNativeSettings(nativeInputs, initialSettings)); setError(undefined); if (!embedded) onCancel(); };
   const submit = async () => {
     const total = value.inputs.multiStepTakeProfit ? value.inputs.atrExitPercent * 4 + value.inputs.fixedExitPercent * 3 : 0;
-    if (value.inputs.shortPeriod >= value.inputs.longPeriod) { setError("Short Period must be smaller than Long Period."); return; }
-    if (total > 100) { setError(`TP allocations total ${total.toFixed(2)}%. Reduce them to 100% or less.`); return; }
+    if (!nativeInputs.length && value.inputs.shortPeriod >= value.inputs.longPeriod) { setError("Short Period must be smaller than Long Period."); return; }
+    if (!nativeInputs.length && total > 100) { setError(`TP allocations total ${total.toFixed(2)}%. Reduce them to 100% or less.`); return; }
     setError(undefined);
-    try { await onApply(value); }
+    try { await onApply(value, nativeInputs.length ? settings : undefined); }
     catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Strategy configuration could not be saved."); }
   };
-  const dialog = <div className="strategy-control-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
-    <section className="strategy-control-dialog" role="dialog" aria-modal="true" aria-label={`${name} settings`}>
-      <header><h2>{name}</h2><button type="button" aria-label="Close strategy settings" disabled={busy} onClick={onCancel}><X size={18} /></button></header>
+  const panel = <section className={`strategy-control-dialog${embedded ? " embedded" : ""}`} role={embedded ? "region" : "dialog"} aria-modal={embedded ? undefined : true} aria-label={`${name} settings`}>
+      <header><div><span>STRATEGY SETTINGS</span><h2>{name}</h2><em>{nativeInputs.length ? `${nativeInputs.length} SCRIPT-NATIVE INPUTS` : "CERTIFIED NATIVE CONTROL CONTRACT"}</em></div>{!embedded ? <button type="button" aria-label="Close strategy settings" disabled={busy} onClick={onCancel}><X size={18} /></button> : null}</header>
       <nav aria-label="Strategy settings sections">{(["inputs", "properties", "style", "visibility"] as Tab[]).map((item) => <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item.toUpperCase()}</button>)}</nav>
       <div className="strategy-control-scroll">
-        {tab === "inputs" ? <Inputs value={value} patch={patchInputs} /> : null}
+        {tab === "inputs" ? nativeInputs.length ? <NativeInputs inputs={nativeInputs} settings={settings} onChange={(key, next) => setSettings((current) => ({ ...current, [key]: next }))} /> : <Inputs value={value} patch={patchInputs} /> : null}
         {tab === "properties" ? <Properties value={value} patch={patchProperties} accountLabel={accountLabel} /> : null}
         {tab === "style" ? <Style value={value} patch={patchStyle} /> : null}
         {tab === "visibility" ? <Visibility value={value} patch={patchVisibility} /> : null}
       </div>
       {error ? <div className="strategy-control-error"><AlertTriangle size={13} />{error}</div> : null}
-      <footer><select aria-label="Strategy defaults"><option>Defaults</option><option>SuperATR Pine defaults</option></select><div><button type="button" disabled={busy} onClick={onCancel}>Cancel</button><button type="button" className="primary" disabled={busy} onClick={() => void submit()}>{busy ? "Applying…" : <><Check size={13} />Ok</>}</button></div></footer>
-    </section>
-  </div>;
+      <footer><select aria-label="Strategy defaults"><option>Current saved values</option><option>{nativeInputs.length ? "Script defaults" : "SuperATR Pine defaults"}</option></select><div><button type="button" disabled={busy} onClick={reset}>Cancel</button><button type="button" className="primary" disabled={busy} onClick={() => void submit()}>{busy ? "Applying…" : <><Check size={13} />Save</>}</button></div></footer>
+    </section>;
+  if (embedded) return <div className="strategy-settings-embedded">{panel}</div>;
+  const dialog = <div className="strategy-control-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>{panel}</div>;
   return typeof document === "undefined" ? dialog : createPortal(dialog, document.body);
 }
+
+function NativeInputs({ inputs, settings, onChange }: { inputs: CompiledScriptInput[]; settings: Record<string, unknown>; onChange: (key: string, value: ScriptInputValue) => void }) {
+  let group = "";
+  return <div className="strategy-control-form native-inputs">{inputs.map((input) => {
+    const groupChanged = input.group && input.group !== group;
+    if (input.group) group = input.group;
+    const current = nativeValue(input, settings[input.key]);
+    return <div className="native-input-block" key={`${input.variable}:${input.key}`}>{groupChanged ? <h3>{input.group!.toUpperCase()}</h3> : null}{input.type === "bool" ? <CheckRow label={input.label} checked={Boolean(current)} onChange={(next) => onChange(input.key, next)} /> : input.options?.length ? <SelectRow label={input.label} value={String(current)} onChange={(next) => onChange(input.key, typedOption(input, next))}>{input.options.map((option) => <option key={String(option)} value={String(option)}>{String(option)}</option>)}</SelectRow> : input.type === "color" ? <label className="strategy-control-row native-color"><span>{input.label}</span><input type="color" value={String(current)} onChange={(event) => onChange(input.key, event.target.value)} /></label> : input.type === "string" ? <label className="strategy-control-row"><span>{input.label}</span><input value={String(current)} onChange={(event) => onChange(input.key, event.target.value)} /></label> : <NumberRow label={input.label} value={Number(current)} min={input.min} max={input.max} step={input.step || (input.type === "int" ? 1 : 0.01)} onChange={(next) => onChange(input.key, input.type === "int" ? Math.round(next) : next)} />}{input.tooltip ? <p className="native-input-tooltip">{input.tooltip}</p> : null}</div>;
+  })}</div>;
+}
+
+function initialNativeSettings(inputs: CompiledScriptInput[], settings: Record<string, unknown>) {
+  return inputs.reduce<Record<string, unknown>>((output, input) => { output[input.key] = nativeValue(input, settings[input.key]); return output; }, {});
+}
+function nativeValue(input: CompiledScriptInput, value: unknown): ScriptInputValue { return ["number", "boolean", "string"].includes(typeof value) ? value as ScriptInputValue : input.defaultValue; }
+function typedOption(input: CompiledScriptInput, value: string): ScriptInputValue { return input.options?.find((option) => String(option) === value) ?? value; }
 
 function Inputs({ value, patch }: { value: StrategyControlPanel; patch: (value: Partial<StrategyControlPanel["inputs"]>) => void }) {
   const input = value.inputs;

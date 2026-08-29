@@ -26,6 +26,8 @@ export type CompiledMarker = {
   signalPrice: number;
   value: number;
   label: string;
+  /** Optional strategy-label text size in chart pixels. */
+  labelSize?: number;
   direction: "long" | "short" | "neutral";
   kind: "shape" | "entry" | "exit";
   strategyRole?: "entry" | "takeProfit" | "stopLoss" | "close" | "reversal" | "exit";

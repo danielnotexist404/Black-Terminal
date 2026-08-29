@@ -1,34 +1,23 @@
 import { ArrowLeft, ArrowRight, Check, Save, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { StrategyAutomationDefinition, StrategyTargetBinding } from "../../automation/strategyAutomation.types";
-import type { EligibleBrokerTarget, EligibleGroupTarget } from "../../automation/strategyAutomation.types";
+import type { StrategyAutomationDefinition } from "../../automation/strategyAutomation.types";
 import type { StrategyIndicatorInstance } from "../state/indicatorManifest";
 import { validateWizardStep, wizardSteps, type StrategyWizardDraft } from "../state/strategyDraftStore";
 import { ExecutionStep } from "../wizard/ExecutionStep";
-import { ExitsStep } from "../wizard/ExitsStep";
-import { FiltersStep } from "../wizard/FiltersStep";
-import { IdentityStep } from "../wizard/IdentityStep";
 import { IndicatorMarketStep } from "../wizard/IndicatorMarketStep";
-import { PaperStep } from "../wizard/PaperStep";
 import { ReviewStep } from "../wizard/ReviewStep";
-import { RiskStep } from "../wizard/RiskStep";
 import { SignalMappingStep } from "../wizard/SignalMappingStep";
-import { TargetsStep } from "../wizard/TargetsStep";
 
 type Props = {
   draft: StrategyWizardDraft;
   chartTimeframe: string;
   indicators: StrategyIndicatorInstance[];
-  bindings: StrategyTargetBinding[];
-  eligibleTargets: { brokerAccounts: EligibleBrokerTarget[]; groups: EligibleGroupTarget[] } | null;
   publishedName?: string;
   publishedDefinition?: StrategyAutomationDefinition | null;
   saving: boolean;
   message?: string;
   onChange: (draft: StrategyWizardDraft) => void;
   onSaveDraft: () => void;
-  onRefreshTargets: (draft?: StrategyWizardDraft) => Promise<void>;
-  onManageTargets: (targetType: "BROKER_ACCOUNT" | "INVESTMENT_GROUP", draft: StrategyWizardDraft) => Promise<void>;
   onActivate: () => void;
   onCancel: () => void;
 };
@@ -54,24 +43,17 @@ export function StrategyWizardPage(props: Props) {
     <div className="strategy-wizard-layout">
       <nav className="strategy-wizard-stepper" aria-label="Strategy wizard steps">{wizardSteps.map((label, index) => <button type="button" key={label} className={`${index === step ? "active" : ""}${index < step ? " complete" : ""}`} onClick={() => go(index)}><span>{index < step ? <Check size={12} /> : String(index + 1).padStart(2, "0")}</span><strong>{label}</strong></button>)}</nav>
       <main className="strategy-wizard-main">
-        {step === 0 ? <IdentityStep draft={props.draft} onChange={props.onChange} /> : null}
-        {step === 1 ? <IndicatorMarketStep draft={props.draft} chartTimeframe={props.chartTimeframe} indicators={props.indicators} onChange={props.onChange} /> : null}
-        {step === 2 ? <SignalMappingStep draft={props.draft} onChange={props.onChange} /> : null}
-        {step === 3 ? <ExecutionStep draft={props.draft} onChange={props.onChange} /> : null}
-        {step === 4 ? <RiskStep draft={props.draft} onChange={props.onChange} /> : null}
-        {step === 5 ? <FiltersStep draft={props.draft} onChange={props.onChange} /> : null}
-        {step === 6 ? <ExitsStep draft={props.draft} onChange={props.onChange} /> : null}
-        {step === 7 ? <PaperStep draft={props.draft} onChange={props.onChange} /> : null}
-        {step === 8 ? <TargetsStep draft={props.draft} bindings={props.bindings} eligible={props.eligibleTargets} busy={props.saving} onRefreshTargets={props.onRefreshTargets} onManageTargets={props.onManageTargets} onChange={props.onChange} /> : null}
-        {step === 9 ? <ReviewStep draft={props.draft} publishedName={props.publishedName} publishedDefinition={props.publishedDefinition} saving={props.saving} onSaveDraft={props.onSaveDraft} onActivate={props.onActivate} /> : null}
+        {step === 0 ? <IndicatorMarketStep draft={props.draft} chartTimeframe={props.chartTimeframe} indicators={props.indicators} onChange={props.onChange} /> : null}
+        {step === 1 ? <SignalMappingStep draft={props.draft} onChange={props.onChange} /> : null}
+        {step === 2 ? <ExecutionStep draft={props.draft} onChange={props.onChange} /> : null}
+        {step === 3 ? <ReviewStep draft={props.draft} publishedName={props.publishedName} publishedDefinition={props.publishedDefinition} saving={props.saving} onSaveDraft={props.onSaveDraft} onActivate={props.onActivate} /> : null}
         {issues.length ? <div className="wizard-inline-errors">{issues.map((issue) => <span key={issue}>{issue}</span>)}</div> : null}
         {props.message ? <div className="wizard-save-state" role="status">{props.message}</div> : null}
         <footer><button type="button" onClick={props.onCancel}>CANCEL</button><button type="button" disabled={props.saving} onClick={props.onSaveDraft}><Save size={13} /> SAVE DRAFT</button><span />{step > 0 ? <button type="button" onClick={() => go(step - 1)}><ArrowLeft size={13} /> BACK</button> : null}{step < wizardSteps.length - 1 ? <button type="button" className="primary" onClick={() => go(step + 1)}>CONTINUE <ArrowRight size={13} /></button> : null}</footer>
       </main>
-      <aside className="strategy-wizard-summary"><span>STRATEGY SUMMARY</span><Summary label="Name" value={props.draft.name || "Untitled"} /><Summary label="Indicator" value={props.draft.definition.indicator?.name || "Not selected"} /><Summary label="Signal market" value={`Bybit ${props.draft.definition.symbol}`} /><Summary label="Runtime TF" value={props.draft.definition.timeframe.toUpperCase()} /><Summary label="Market" value={props.draft.definition.marketType} /><Summary label="Strategy allocation" value={`${props.draft.paperPolicy.strategyAllocationValue}${props.draft.paperPolicy.strategyAllocationMode === "FIXED_USDT" ? " USDT" : "%"}`} /><Summary label="Destination" value={props.draft.definition.deployment?.targetLabel || destinationLabel(props.draft.definition.deployment?.targetType)} /><div className="wizard-version-summary"><strong>Configuration V{props.draft.publishedVersion ? props.draft.publishedVersion + 1 : 1}</strong><span>Saved {props.draft.publishedVersion ? `V${props.draft.publishedVersion}` : "—"}</span><span>Active {props.draft.runningVersion ? `V${props.draft.runningVersion}` : "—"}</span></div></aside>
+      <aside className="strategy-wizard-summary"><span>STRATEGY SUMMARY</span><Summary label="Name" value={props.draft.name || "Selected script name"} /><Summary label="Signal source" value={props.draft.definition.indicator?.name || "Not selected"} /><Summary label="Currency" value={`Bybit ${props.draft.definition.symbol}`} /><Summary label="Runtime TF" value={props.draft.definition.timeframe.toUpperCase()} /><Summary label="Market" value={props.draft.definition.marketType} /><Summary label="Execution" value="Not connected · configure after save" /><div className="wizard-version-summary"><strong>Configuration V{props.draft.publishedVersion ? props.draft.publishedVersion + 1 : 1}</strong><span>Saved {props.draft.publishedVersion ? `V${props.draft.publishedVersion}` : "—"}</span><span>Active {props.draft.runningVersion ? `V${props.draft.runningVersion}` : "—"}</span></div></aside>
     </div>
   </section>;
 }
 
 function Summary({ label, value }: { label: string; value: string }) { return <div><span>{label}</span><strong>{value}</strong></div>; }
-function destinationLabel(value?: string) { return value === "BROKER_ACCOUNT" ? "Broker Account" : value === "INVESTMENT_GROUP" ? "Investment Group" : "Paper Backtester"; }

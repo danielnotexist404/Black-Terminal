@@ -4111,9 +4111,10 @@ export class BlackChartEngine {
     preferredY: number,
     color: number,
     lane: "above" | "below",
-    labels: { x: number; y: number; width: number; height: number }[]
+    labels: { x: number; y: number; width: number; height: number }[],
+    requestedSize = 8,
   ) {
-    const size = 8;
+    const size = Math.max(8, Math.min(14, requestedSize));
     const step = size + 10;
     const primaryDirection = lane === "above" ? -1 : 1;
     for (const direction of [primaryDirection, -primaryDirection]) {
@@ -4750,7 +4751,7 @@ export class BlackChartEngine {
 
         if (isStrategyFill) {
           const preferredY = markerY + (labelLane === "above" ? -21 : 7);
-          this.drawStackedStrategyLabel(g, marker.label, x + 6, preferredY, color, labelLane, strategyLabels);
+          this.drawStackedStrategyLabel(g, marker.label, x + 6, preferredY, color, labelLane, strategyLabels, marker.labelSize);
         }
       }
     }

@@ -20,16 +20,10 @@ export type StrategyWizardDraft = {
 };
 
 export const wizardSteps = [
-  "Identity",
-  "Indicator and Market",
+  "Strategy and Market",
   "Signal Mapping",
-  "Execution Behavior",
-  "Risk Management",
-  "Filters and Schedule",
-  "Take Profits and Exits",
-  "Paper Account",
-  "Execution Destination",
-  "Activate Strategy & Save Configuration",
+  "Optional Trade Behavior",
+  "Save Strategy",
 ] as const;
 
 export function createWizardDraft(definition: StrategyAutomationDefinition): StrategyWizardDraft {
@@ -150,17 +144,17 @@ export function bindIndicator(
 
 export function validateWizardStep(draft: StrategyWizardDraft, step: number): string[] {
   const issues: string[] = [];
-  if (step === 0 || step === 9) {
+  if (step === 0 || step === 3) {
     const name = draft.name.trim();
     if (name.length < 2) issues.push("Strategy name must contain at least 2 characters.");
     if (name.length > 80) issues.push("Strategy name cannot exceed 80 characters.");
   }
-  if (step === 1 || step === 9) {
+  if (step === 0 || step === 3) {
     if (!draft.definition.indicator) issues.push("Select an existing Black Terminal indicator or one of your saved scripts.");
     if (!draft.definition.symbol) issues.push("Select a signal-market instrument.");
     if (!draft.definition.timeframe) issues.push("Select a strategy timeframe.");
   }
-  if (step === 2 || step === 9) {
+  if (step === 1 || step === 3) {
     const signals = draft.definition.signals || {};
     if (draft.definition.marketType === "FUTURES") {
       if (!signals.longEntry) issues.push("Select a Long Trigger Entry alert.");
@@ -170,33 +164,8 @@ export function validateWizardStep(draft: StrategyWizardDraft, step: number): st
       if (!signals.sellExit) issues.push("Select a Sell Trigger Entry alert.");
     }
   }
-  if (step === 4 || step === 9) {
-    const execution = draft.definition.execution;
-    const requested = numberValue(execution.requestedLeverage, draft.paperPolicy.requestedLeverage || 1);
-    const maximum = numberValue(execution.maxLeverage, draft.paperPolicy.maximumLeverage || 1);
-    if (draft.definition.marketType === "FUTURES" && requested > maximum) issues.push("Maximum leverage must be at least requested leverage.");
-    if (numberValue(execution.maxDailyLoss, 0) <= 0) issues.push("Maximum daily loss must be greater than zero.");
-    if (numberValue(execution.maxDrawdown, 0) <= 0) issues.push("Maximum strategy drawdown must be greater than zero.");
-  }
-  if (step === 6 || step === 9) {
-    const targets = Array.isArray(draft.definition.exits?.takeProfits) ? draft.definition.exits?.takeProfits as Array<Record<string, unknown>> : [];
-    const total = targets.reduce((sum, target) => sum + numberValue(target.closePercent, 0), 0);
-    if (total > 100) issues.push(`Take-profit allocations total ${total.toFixed(0)}%. Reduce them to 100% or less.`);
-    for (const [index, target] of targets.entries()) {
-      const mode = String(target.mode || (target.alertId ? "ALERT" : "R_MULTIPLE"));
-      if (mode === "ALERT" && !target.alertId) issues.push(`TP${index + 1} requires an indicator alert event.`);
-      if (mode !== "ALERT" && numberValue(target.value, 0) <= 0) issues.push(`TP${index + 1} requires a positive trigger value.`);
-      if (numberValue(target.closePercent, 0) <= 0) issues.push(`TP${index + 1} must close a positive percentage.`);
-    }
-  }
-  if (step === 8 || step === 9) {
-    const deployment = draft.definition.deployment;
-    if (!deployment?.targetType) issues.push("Choose Paper, a broker account, or an Investment Group as the execution destination.");
-    if (deployment?.targetType !== "PAPER" && !deployment?.targetId) issues.push("Select an eligible execution target.");
-    if (deployment?.targetType !== "PAPER" && deployment?.authorizationAccepted !== true) issues.push("Explicitly approve the selected execution destination.");
-  }
-  if (step === 9 && draft.definition.indicator?.runtimeStatus !== "CERTIFIED") {
-    issues.push("This indicator has no certified VPS runtime. Save the draft or choose a certified indicator before publishing.");
+  if ((step === 2 || step === 3) && draft.definition.execution.stopLossEnabled === true) {
+    if (numberValue(draft.definition.execution.longStopValue, 0) <= 0) issues.push("Optional stop loss must use a positive value.");
   }
   return [...new Set(issues)];
 }

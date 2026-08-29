@@ -8,7 +8,7 @@ export function SignalMappingStep({ draft, onChange }: { draft: StrategyWizardDr
   const setMapping = (key: keyof StrategySignalMappings, value: string) => onChange({ ...draft, definition: { ...draft.definition, signals: { ...mappings, [key]: value || undefined } } });
   const futures = draft.definition.marketType === "FUTURES";
   return <div className="strategy-wizard-section">
-    <header><span>03</span><div><h2>Signal mapping</h2><p>Choose the pinned alert IDs that create and close positions. Labels never become runtime identities.</p></div></header>
+    <header><span>02</span><div><h2>Signal mapping</h2><p>Map the strategy's native events to long, short and optional close actions. Labels never become runtime identities.</p></div></header>
     {!draft.definition.indicator ? <State icon={<AlertTriangle size={18} />} title="Select an indicator first" text="Return to Indicator and Market to load its alert manifest." /> : alerts.length === 0 ? <State icon={<AlertTriangle size={18} />} title="No strategy alerts available" text="This indicator has no alert manifest and cannot be published for automation." /> : <>
       <div className="strategy-form-grid signal-map-grid">
         {futures ? <>
@@ -21,7 +21,7 @@ export function SignalMappingStep({ draft, onChange }: { draft: StrategyWizardDr
           <AlertSelect label="SELL TRIGGER ENTRY" required semantic="SHORT_ENTRY" value={mappings.sellExit} alerts={alerts} onChange={(value) => setMapping("sellExit", value)} />
         </>}
       </div>
-      <div className={`runtime-readiness ${draft.definition.indicator.runtimeStatus === "CERTIFIED" ? "ready" : "blocked"}`}>{draft.definition.indicator.runtimeStatus === "CERTIFIED" ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}<div><strong>{draft.definition.indicator.runtimeStatus === "CERTIFIED" ? "Confirmed-bar runtime compatible" : "VPS certification required"}</strong><span>{draft.definition.indicator.runtimeStatus === "CERTIFIED" ? `Manifest ${draft.definition.indicator.alertManifestVersion} will be pinned to the published version.` : "You may save this draft, but publishing and Paper execution remain blocked."}</span></div></div>
+      <div className={`runtime-readiness ${draft.definition.indicator.runtimeStatus === "CERTIFIED" ? "ready" : "blocked"}`}>{draft.definition.indicator.runtimeStatus === "CERTIFIED" ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}<div><strong>{draft.definition.indicator.runtimeStatus === "CERTIFIED" ? "Confirmed-bar runtime compatible" : "Saved strategy · runtime certification pending"}</strong><span>{draft.definition.indicator.runtimeStatus === "CERTIFIED" ? `Manifest ${draft.definition.indicator.alertManifestVersion} will be pinned to the published version.` : "The strategy and its native settings can be saved now; Paper and live arming remain unavailable until its VPS runtime is certified."}</span></div></div>
     </>}
   </div>;
 }

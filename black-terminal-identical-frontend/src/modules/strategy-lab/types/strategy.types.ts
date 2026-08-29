@@ -20,6 +20,7 @@ export type StrategySignal = {
 export type StrategyRuntimeKind = "builtin-ema-cross" | "builtin-adaptive-swing" | "builtin-superatr-seven-step" | "python-script" | "external-signals";
 
 export type StrategySettings = {
+  [key: string]: unknown;
   emaFastLength: number;
   emaSlowLength: number;
   stopLossPercent: number;

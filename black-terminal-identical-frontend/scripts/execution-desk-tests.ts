@@ -123,9 +123,51 @@ assert.equal(labelledPanel.inputs.momentumPeriod, 9);
 assert.equal(labelledPanel.inputs.trendStrengthThreshold, 3.1);
 assert.equal(labelledPanel.inputs.atrMultipliers[0], 100);
 assert.equal(labelledPanel.inputs.fixedTakeProfitPercentages[2], 75);
+const migratedLegacyPanel = readStrategyControlPanel({
+  ...baseDefinition,
+  settings: {
+    superAtrShortPeriod: 3,
+    superAtrLongPeriod: 7,
+    superAtrMomentumPeriod: 7,
+    superAtrConfirmationPeriod: 7,
+    superAtrTrendStrengthThreshold: 1.618,
+    superAtrMultiStepTakeProfit: true,
+    superAtrTakeProfitAtrLength: 14,
+    superAtrAtrMultipliers: [2.618, 5, 10, 13.82],
+    superAtrFixedPercentages: [3, 8, 17],
+    superAtrAtrExitPercent: 10,
+    superAtrFixedExitPercent: 10,
+  },
+}, policy, 5_000);
+assert.deepEqual(migratedLegacyPanel.inputs, {
+  shortPeriod: 30,
+  longPeriod: 70,
+  momentumPeriod: 7,
+  atrConfirmationPeriod: 7,
+  trendStrengthThreshold: 3.1,
+  multiStepTakeProfit: true,
+  takeProfitAtrLength: 100,
+  atrMultipliers: [100, 70, 120, 300],
+  fixedTakeProfitPercentages: [21, 21, 75],
+  atrExitPercent: 10,
+  fixedExitPercent: 10,
+}, "the exact legacy seed upgrades to the user's tuned SuperATR preset");
+const largeValuePanel = readStrategyControlPanel({
+  ...baseDefinition,
+  settings: {
+    "Short Period": 30_000,
+    "Long Period": 70_000,
+    "ATR Multiplier for TP Level 1": 200_000,
+    "Fixed TP Level 3 (%)": 175_000,
+  },
+}, policy, 5_000);
+assert.equal(largeValuePanel.inputs.shortPeriod, 30_000, "Strategy Lab does not invent a period ceiling");
+assert.equal(largeValuePanel.inputs.longPeriod, 70_000);
+assert.equal(largeValuePanel.inputs.atrMultipliers[0], 200_000, "Strategy Lab does not invent a take-profit multiplier ceiling");
+assert.equal(largeValuePanel.inputs.fixedTakeProfitPercentages[2], 175_000);
 const panel = readStrategyControlPanel(baseDefinition, policy, 5_000);
 panel.properties = { ...panel.properties, orderSizeMode: "PERCENT_EQUITY", orderSizeValue: 35, longLeverage: 25, shortLeverage: 15 };
-panel.inputs = { ...panel.inputs, shortPeriod: 3, longPeriod: 8, trendStrengthThreshold: 0.05, atrExitPercent: 10, fixedExitPercent: 10 };
+panel.inputs = { ...panel.inputs, shortPeriod: 3, longPeriod: 8, trendStrengthThreshold: 0.05, takeProfitAtrLength: 14, atrMultipliers: [2.618, 5, 10, 13.82], fixedTakeProfitPercentages: [3, 8, 17], atrExitPercent: 10, fixedExitPercent: 10 };
 const configured = applyStrategyControlPanel(baseDefinition, policy, panel);
 assert.equal(configured.capitalPolicy.tradeAmountMode, "PERCENT_ACCOUNT_EQUITY");
 assert.equal(configured.capitalPolicy.tradeAmountValue, 35);

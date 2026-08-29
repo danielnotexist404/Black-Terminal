@@ -96,12 +96,16 @@ export function assertCertifiedStrategyDefinition(definition) {
   }
   if (definition.runtimeKind === "builtin-superatr-seven-step") {
     const settings = definition.settings || {};
-    const shortPeriod = bounded(settings.superAtrShortPeriod ?? 3, 1, 10_000, "SuperATR short period");
-    const longPeriod = bounded(settings.superAtrLongPeriod ?? 7, 1, 10_000, "SuperATR long period");
-    if (shortPeriod >= longPeriod) throw strategyError(409, "SUPERATR_PERIODS_INVALID", "SuperATR Short Period must be smaller than Long Period.");
-    const atrExit = bounded(settings.superAtrAtrExitPercent ?? 10, 0.1, 100, "SuperATR ATR exit allocation");
-    const fixedExit = bounded(settings.superAtrFixedExitPercent ?? 10, 0.1, 100, "SuperATR fixed exit allocation");
-    if (settings.superAtrMultiStepTakeProfit !== false && atrExit * 4 + fixedExit * 3 > 100) throw strategyError(409, "SUPERATR_EXIT_ALLOCATION_INVALID", "SuperATR TP1–TP7 allocations cannot exceed 100 percent.");
+    minimum(settings.superAtrShortPeriod ?? 30, 1, "SuperATR short period");
+    minimum(settings.superAtrLongPeriod ?? 70, 1, "SuperATR long period");
+    minimum(settings.superAtrMomentumPeriod ?? 7, 1, "SuperATR momentum period");
+    minimum(settings.superAtrConfirmationPeriod ?? 7, 1, "SuperATR confirmation period");
+    minimum(settings.superAtrTrendStrengthThreshold ?? 3.1, 0, "SuperATR trend strength threshold");
+    minimum(settings.superAtrTakeProfitAtrLength ?? 100, 1, "SuperATR take-profit ATR length");
+    for (const [index, value] of numberList(settings.superAtrAtrMultipliers, [100, 70, 120, 300], 4, "SuperATR ATR multipliers").entries()) minimum(value, 0.1, `SuperATR ATR multiplier ${index + 1}`);
+    for (const [index, value] of numberList(settings.superAtrFixedPercentages, [21, 21, 75], 3, "SuperATR fixed take-profits").entries()) minimum(value, 0.1, `SuperATR fixed take-profit ${index + 1}`);
+    bounded(settings.superAtrAtrExitPercent ?? 10, 0.1, 100, "SuperATR ATR exit allocation");
+    bounded(settings.superAtrFixedExitPercent ?? 10, 0.1, 100, "SuperATR fixed exit allocation");
   }
   const required = definition.marketType === "SPOT"
     ? [definition.signals?.buyEntry, definition.signals?.sellExit]
@@ -408,6 +412,18 @@ function bounded(value, minimum, maximum, label) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < minimum || parsed > maximum) throw strategyError(400, "STRATEGY_POLICY_INVALID", `${label} must be between ${minimum} and ${maximum}.`);
   return parsed;
+}
+
+function minimum(value, lowerBound, label) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < lowerBound) throw strategyError(400, "STRATEGY_POLICY_INVALID", `${label} must be ${lowerBound} or greater.`);
+  return parsed;
+}
+
+function numberList(value, fallback, length, label) {
+  if (value === undefined) return fallback;
+  if (!Array.isArray(value) || value.length !== length) throw strategyError(400, "STRATEGY_POLICY_INVALID", `${label} must contain exactly ${length} values.`);
+  return value;
 }
 
 function finite(value) {

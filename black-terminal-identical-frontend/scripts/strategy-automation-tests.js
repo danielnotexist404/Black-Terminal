@@ -48,6 +48,24 @@ const certifiedIndicator = { indicatorId: "adaptiveSwingStrategy", instanceId: "
 ] };
 const mappedDefinition = normalizeStrategyDefinition({ ...definition, indicator: certifiedIndicator, signals: { longEntry: "long-entry", shortEntry: "short-entry" }, deployment: { targetType: "PAPER", authorizationAccepted: false, armOnActivation: false } });
 assert.doesNotThrow(() => assertCertifiedStrategyDefinition(mappedDefinition));
+const tunedSuperAtrDefinition = normalizeStrategyDefinition({
+  ...mappedDefinition,
+  runtimeKind: "builtin-superatr-seven-step",
+  settings: {
+    superAtrShortPeriod: 30_000,
+    superAtrLongPeriod: 20_000,
+    superAtrMomentumPeriod: 7,
+    superAtrConfirmationPeriod: 7,
+    superAtrTrendStrengthThreshold: 3.1,
+    superAtrTakeProfitAtrLength: 100,
+    superAtrAtrMultipliers: [100, 70, 120, 300_000],
+    superAtrFixedPercentages: [21, 21, 175_000],
+    superAtrAtrExitPercent: 20,
+    superAtrFixedExitPercent: 20,
+  },
+});
+assert.doesNotThrow(() => assertCertifiedStrategyDefinition(tunedSuperAtrDefinition), "the backend preserves script-declared values without invented period, multiplier, ordering, or aggregate-allocation caps");
+assert.throws(() => assertCertifiedStrategyDefinition(normalizeStrategyDefinition({ ...tunedSuperAtrDefinition, settings: { ...tunedSuperAtrDefinition.settings, superAtrShortPeriod: 0 } })), /1 or greater/i, "the Pine-declared lower bound remains enforced");
 assert.throws(() => assertCertifiedStrategyDefinition(normalizeStrategyDefinition({ ...mappedDefinition, signals: { longEntry: "forged-alert", shortEntry: "short-entry" } })), /pinned indicator alert manifest/i);
 assert.throws(() => assertCertifiedStrategyDefinition(normalizeStrategyDefinition({ ...mappedDefinition, exits: { takeProfits: [{ id: "tp1", mode: "ALERT", alertId: "missing", closePercent: 50 }] } })), /take-profit alert/i);
 assert.throws(() => assertCertifiedStrategyDefinition(normalizeStrategyDefinition({ ...mappedDefinition, exits: { takeProfits: [{ id: "tp1", mode: "R_MULTIPLE", value: 2, closePercent: 60 }, { id: "tp2", mode: "R_MULTIPLE", value: 3, closePercent: 60 }] } })), /cannot exceed 100/i);

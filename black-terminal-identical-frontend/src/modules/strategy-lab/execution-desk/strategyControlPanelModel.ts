@@ -8,19 +8,20 @@ import type {
 
 const finite = (value: unknown, fallback: number) => typeof value === "number" && Number.isFinite(value) ? value : fallback;
 const bounded = (value: unknown, fallback: number, minimum: number, maximum: number) => Math.max(minimum, Math.min(maximum, finite(value, fallback)));
+const atLeast = (value: unknown, fallback: number, minimum: number) => Math.max(minimum, finite(value, fallback));
 const bool = (value: unknown, fallback: boolean) => typeof value === "boolean" ? value : fallback;
 const color = (value: unknown, fallback: string) => /^#[0-9a-f]{6}$/i.test(String(value || "")) ? String(value) : fallback;
 
 export const defaultSuperAtrInputs: SuperAtrInputConfiguration = {
-  shortPeriod: 3,
-  longPeriod: 7,
+  shortPeriod: 30,
+  longPeriod: 70,
   momentumPeriod: 7,
   atrConfirmationPeriod: 7,
-  trendStrengthThreshold: 1.618,
+  trendStrengthThreshold: 3.1,
   multiStepTakeProfit: true,
-  takeProfitAtrLength: 14,
-  atrMultipliers: [2.618, 5, 10, 13.82],
-  fixedTakeProfitPercentages: [3, 8, 17],
+  takeProfitAtrLength: 100,
+  atrMultipliers: [100, 70, 120, 300],
+  fixedTakeProfitPercentages: [21, 21, 75],
   atrExitPercent: 10,
   fixedExitPercent: 10,
 };
@@ -46,24 +47,29 @@ export function readStrategyControlPanel(definition: StrategyAutomationDefinitio
   const stored = definition.controlPanel;
   const settings = definition.settings as Record<string, unknown>;
   const execution = definition.execution || {};
-  const input = stored?.inputs;
+  // V1 was seeded from the raw Pine declarations even when the user saved the
+  // tuned SuperATR preset shown in the original strategy menu. Upgrade only
+  // that exact legacy seed; every non-default/user-edited value is preserved.
+  const legacySeed = stored?.schemaVersion !== 2 && isLegacySuperAtrSeed(stored?.inputs, settings);
+  const input = legacySeed ? undefined : stored?.inputs;
   const properties = stored?.properties;
   const leverage = policy?.requestedLeverage || 1;
   const orderSizeMode = policy?.tradeAmountMode === "FIXED_USDT" ? "FIXED_USDT" : policy?.tradeAmountMode === "FIXED_QUANTITY" ? "FIXED_QUANTITY" : "PERCENT_EQUITY";
   const at = (values: unknown, index: number, fallback: number) => Array.isArray(values) ? finite(values[index], fallback) : fallback;
-  const setting = (...keys: string[]) => keys.map((key) => settings[key]).find((value) => value !== undefined);
+  const setting = (...keys: string[]) => legacySeed ? undefined : keys.map((key) => settings[key]).find((value) => value !== undefined);
+  const arraySetting = (key: string) => legacySeed ? undefined : settings[key];
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     inputs: {
-      shortPeriod: Math.round(bounded(input?.shortPeriod ?? setting("superAtrShortPeriod", "short_period", "Short Period"), defaultSuperAtrInputs.shortPeriod, 1, 10_000)),
-      longPeriod: Math.round(bounded(input?.longPeriod ?? setting("superAtrLongPeriod", "long_period", "Long Period"), defaultSuperAtrInputs.longPeriod, 1, 10_000)),
-      momentumPeriod: Math.round(bounded(input?.momentumPeriod ?? setting("superAtrMomentumPeriod", "momentum_period", "Momentum Period"), defaultSuperAtrInputs.momentumPeriod, 1, 10_000)),
-      atrConfirmationPeriod: Math.round(bounded(input?.atrConfirmationPeriod ?? setting("superAtrConfirmationPeriod", "atr_sma_period", "ATR SMA Period for Confirmation"), defaultSuperAtrInputs.atrConfirmationPeriod, 1, 10_000)),
-      trendStrengthThreshold: bounded(input?.trendStrengthThreshold ?? setting("superAtrTrendStrengthThreshold", "trend_strength_threshold", "Trend Strength Threshold"), defaultSuperAtrInputs.trendStrengthThreshold, 0, 1_000),
+      shortPeriod: Math.round(atLeast(input?.shortPeriod ?? setting("superAtrShortPeriod", "short_period", "Short Period"), defaultSuperAtrInputs.shortPeriod, 1)),
+      longPeriod: Math.round(atLeast(input?.longPeriod ?? setting("superAtrLongPeriod", "long_period", "Long Period"), defaultSuperAtrInputs.longPeriod, 1)),
+      momentumPeriod: Math.round(atLeast(input?.momentumPeriod ?? setting("superAtrMomentumPeriod", "momentum_period", "Momentum Period"), defaultSuperAtrInputs.momentumPeriod, 1)),
+      atrConfirmationPeriod: Math.round(atLeast(input?.atrConfirmationPeriod ?? setting("superAtrConfirmationPeriod", "atr_sma_period", "ATR SMA Period for Confirmation"), defaultSuperAtrInputs.atrConfirmationPeriod, 1)),
+      trendStrengthThreshold: atLeast(input?.trendStrengthThreshold ?? setting("superAtrTrendStrengthThreshold", "trend_strength_threshold", "Trend Strength Threshold"), defaultSuperAtrInputs.trendStrengthThreshold, 0),
       multiStepTakeProfit: bool(input?.multiStepTakeProfit ?? setting("superAtrMultiStepTakeProfit", "useMultiStepTP", "Enable Multi-Step Take Profit"), defaultSuperAtrInputs.multiStepTakeProfit),
-      takeProfitAtrLength: Math.round(bounded(input?.takeProfitAtrLength ?? setting("superAtrTakeProfitAtrLength", "atrLengthTP", "ATR Length for Take Profit"), defaultSuperAtrInputs.takeProfitAtrLength, 1, 10_000)),
-      atrMultipliers: [0, 1, 2, 3].map((index) => bounded(input?.atrMultipliers?.[index] ?? at(settings.superAtrAtrMultipliers, index, finite(setting(`ATR Multiplier for TP Level ${index + 1}`), defaultSuperAtrInputs.atrMultipliers[index])), defaultSuperAtrInputs.atrMultipliers[index], 0.001, 100_000)) as [number, number, number, number],
-      fixedTakeProfitPercentages: [0, 1, 2].map((index) => bounded(input?.fixedTakeProfitPercentages?.[index] ?? at(settings.superAtrFixedPercentages, index, finite(setting(`Fixed TP Level ${index + 1} (%)`), defaultSuperAtrInputs.fixedTakeProfitPercentages[index])), defaultSuperAtrInputs.fixedTakeProfitPercentages[index], 0.001, 100_000)) as [number, number, number],
+      takeProfitAtrLength: Math.round(atLeast(input?.takeProfitAtrLength ?? setting("superAtrTakeProfitAtrLength", "atrLengthTP", "ATR Length for Take Profit"), defaultSuperAtrInputs.takeProfitAtrLength, 1)),
+      atrMultipliers: [0, 1, 2, 3].map((index) => atLeast(input?.atrMultipliers?.[index] ?? at(arraySetting("superAtrAtrMultipliers"), index, finite(setting(`ATR Multiplier for TP Level ${index + 1}`), defaultSuperAtrInputs.atrMultipliers[index])), defaultSuperAtrInputs.atrMultipliers[index], 0.1)) as [number, number, number, number],
+      fixedTakeProfitPercentages: [0, 1, 2].map((index) => atLeast(input?.fixedTakeProfitPercentages?.[index] ?? at(arraySetting("superAtrFixedPercentages"), index, finite(setting(`Fixed TP Level ${index + 1} (%)`), defaultSuperAtrInputs.fixedTakeProfitPercentages[index])), defaultSuperAtrInputs.fixedTakeProfitPercentages[index], 0.1)) as [number, number, number],
       atrExitPercent: bounded(input?.atrExitPercent ?? setting("superAtrAtrExitPercent", "tp_percent_atr", "Percentage to Exit at Each ATR TP Level"), defaultSuperAtrInputs.atrExitPercent, 0.1, 100),
       fixedExitPercent: bounded(input?.fixedExitPercent ?? setting("superAtrFixedExitPercent", "tp_percent_fixed", "Percentage to Exit at Each Fixed TP Level"), defaultSuperAtrInputs.fixedExitPercent, 0.1, 100),
     },
@@ -108,6 +114,51 @@ export function readStrategyControlPanel(definition: StrategyAutomationDefinitio
       months: bool(stored?.visibility?.months, true),
     },
   };
+}
+
+const legacySuperAtrSeed: SuperAtrInputConfiguration = {
+  shortPeriod: 3,
+  longPeriod: 7,
+  momentumPeriod: 7,
+  atrConfirmationPeriod: 7,
+  trendStrengthThreshold: 1.618,
+  multiStepTakeProfit: true,
+  takeProfitAtrLength: 14,
+  atrMultipliers: [2.618, 5, 10, 13.82],
+  fixedTakeProfitPercentages: [3, 8, 17],
+  atrExitPercent: 10,
+  fixedExitPercent: 10,
+};
+
+function isLegacySuperAtrSeed(input: SuperAtrInputConfiguration | undefined, settings: Record<string, unknown>) {
+  const value = input || {
+    shortPeriod: finite(settings.superAtrShortPeriod ?? settings["Short Period"], Number.NaN),
+    longPeriod: finite(settings.superAtrLongPeriod ?? settings["Long Period"], Number.NaN),
+    momentumPeriod: finite(settings.superAtrMomentumPeriod ?? settings["Momentum Period"], Number.NaN),
+    atrConfirmationPeriod: finite(settings.superAtrConfirmationPeriod ?? settings["ATR SMA Period for Confirmation"], Number.NaN),
+    trendStrengthThreshold: finite(settings.superAtrTrendStrengthThreshold ?? settings["Trend Strength Threshold"], Number.NaN),
+    multiStepTakeProfit: settings.superAtrMultiStepTakeProfit ?? settings["Enable Multi-Step Take Profit"],
+    takeProfitAtrLength: finite(settings.superAtrTakeProfitAtrLength ?? settings["ATR Length for Take Profit"], Number.NaN),
+    atrMultipliers: Array.isArray(settings.superAtrAtrMultipliers) ? settings.superAtrAtrMultipliers : [1, 2, 3, 4].map((index) => settings[`ATR Multiplier for TP Level ${index}`]),
+    fixedTakeProfitPercentages: Array.isArray(settings.superAtrFixedPercentages) ? settings.superAtrFixedPercentages : [1, 2, 3].map((index) => settings[`Fixed TP Level ${index} (%)`]),
+    atrExitPercent: finite(settings.superAtrAtrExitPercent ?? settings["Percentage to Exit at Each ATR TP Level"], Number.NaN),
+    fixedExitPercent: finite(settings.superAtrFixedExitPercent ?? settings["Percentage to Exit at Each Fixed TP Level"], Number.NaN),
+  } as SuperAtrInputConfiguration;
+  return value.shortPeriod === legacySuperAtrSeed.shortPeriod
+    && value.longPeriod === legacySuperAtrSeed.longPeriod
+    && value.momentumPeriod === legacySuperAtrSeed.momentumPeriod
+    && value.atrConfirmationPeriod === legacySuperAtrSeed.atrConfirmationPeriod
+    && value.trendStrengthThreshold === legacySuperAtrSeed.trendStrengthThreshold
+    && value.multiStepTakeProfit === legacySuperAtrSeed.multiStepTakeProfit
+    && value.takeProfitAtrLength === legacySuperAtrSeed.takeProfitAtrLength
+    && Array.isArray(value.atrMultipliers)
+    && value.atrMultipliers.length === legacySuperAtrSeed.atrMultipliers.length
+    && value.atrMultipliers.every((item, index) => item === legacySuperAtrSeed.atrMultipliers[index])
+    && Array.isArray(value.fixedTakeProfitPercentages)
+    && value.fixedTakeProfitPercentages.length === legacySuperAtrSeed.fixedTakeProfitPercentages.length
+    && value.fixedTakeProfitPercentages.every((item, index) => item === legacySuperAtrSeed.fixedTakeProfitPercentages[index])
+    && value.atrExitPercent === legacySuperAtrSeed.atrExitPercent
+    && value.fixedExitPercent === legacySuperAtrSeed.fixedExitPercent;
 }
 
 export function applyStrategyControlPanel(definition: StrategyAutomationDefinition, policy: StrategyCapitalPolicy, panel: StrategyControlPanel) {

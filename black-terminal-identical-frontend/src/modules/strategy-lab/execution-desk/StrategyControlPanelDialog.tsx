@@ -40,9 +40,6 @@ export function StrategyControlPanelDialog({
   const patchVisibility = (patch: Partial<StrategyControlPanel["visibility"]>) => setValue((current) => ({ ...current, visibility: { ...current.visibility, ...patch } }));
   const reset = () => { setValue(structuredClone(initial)); setSettings(initialNativeSettings(nativeInputs, initialSettings)); setError(undefined); if (!embedded) onCancel(); };
   const submit = async () => {
-    const total = value.inputs.multiStepTakeProfit ? value.inputs.atrExitPercent * 4 + value.inputs.fixedExitPercent * 3 : 0;
-    if (!nativeInputs.length && value.inputs.shortPeriod >= value.inputs.longPeriod) { setError("Short Period must be smaller than Long Period."); return; }
-    if (!nativeInputs.length && total > 100) { setError(`TP allocations total ${total.toFixed(2)}%. Reduce them to 100% or less.`); return; }
     setError(undefined);
     try { await onApply(value, nativeInputs.length ? settings : undefined); }
     catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Strategy configuration could not be saved."); }
@@ -92,8 +89,8 @@ function Inputs({ value, patch }: { value: StrategyControlPanel; patch: (value: 
     <NumberRow label="Trend Strength Threshold" value={input.trendStrengthThreshold} min={0} step={0.1} onChange={(trendStrengthThreshold) => patch({ trendStrengthThreshold })} />
     <CheckRow label="Enable Multi-Step Take Profit" checked={input.multiStepTakeProfit} onChange={(multiStepTakeProfit) => patch({ multiStepTakeProfit })} />
     <NumberRow label="ATR Length for Take Profit" value={input.takeProfitAtrLength} min={1} disabled={!input.multiStepTakeProfit} onChange={(takeProfitAtrLength) => patch({ takeProfitAtrLength })} />
-    {atr.map((item, index) => <NumberRow key={index} label={`ATR Multiplier for TP Level ${index + 1}`} value={item} min={0.001} disabled={!input.multiStepTakeProfit} onChange={(next) => { atr[index] = next; patch({ atrMultipliers: atr }); }} />)}
-    {fixed.map((item, index) => <NumberRow key={index} label={`Fixed TP Level ${index + 1} (%)`} value={item} min={0.001} disabled={!input.multiStepTakeProfit} onChange={(next) => { fixed[index] = next; patch({ fixedTakeProfitPercentages: fixed }); }} />)}
+    {atr.map((item, index) => <NumberRow key={index} label={`ATR Multiplier for TP Level ${index + 1}`} value={item} min={0.1} step={0.1} disabled={!input.multiStepTakeProfit} onChange={(next) => { atr[index] = next; patch({ atrMultipliers: atr }); }} />)}
+    {fixed.map((item, index) => <NumberRow key={index} label={`Fixed TP Level ${index + 1} (%)`} value={item} min={0.1} step={0.1} disabled={!input.multiStepTakeProfit} onChange={(next) => { fixed[index] = next; patch({ fixedTakeProfitPercentages: fixed }); }} />)}
     <NumberRow label="Percentage to Exit at Each ATR TP Level" value={input.atrExitPercent} min={0.1} max={100} disabled={!input.multiStepTakeProfit} onChange={(atrExitPercent) => patch({ atrExitPercent })} />
     <NumberRow label="Percentage to Exit at Each Fixed TP Level" value={input.fixedExitPercent} min={0.1} max={100} disabled={!input.multiStepTakeProfit} onChange={(fixedExitPercent) => patch({ fixedExitPercent })} />
   </div>;

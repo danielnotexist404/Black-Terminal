@@ -325,14 +325,14 @@ export function createAdaptiveSwingSignals(candles: Candle[], symbol: string, se
 }
 
 export function createSuperAtrSevenStepSignals(candles: Candle[], symbol: string, settings: StrategySettings): StrategySignal[] {
-  const shortPeriod = Math.max(1, Math.round(settings.superAtrShortPeriod ?? 3));
-  const longPeriod = Math.max(1, Math.round(settings.superAtrLongPeriod ?? 7));
+  const shortPeriod = Math.max(1, Math.round(settings.superAtrShortPeriod ?? 30));
+  const longPeriod = Math.max(1, Math.round(settings.superAtrLongPeriod ?? 70));
   const momentumPeriod = Math.max(1, Math.round(settings.superAtrMomentumPeriod ?? 7));
   const confirmationPeriod = Math.max(1, Math.round(settings.superAtrConfirmationPeriod ?? 7));
-  const threshold = Math.max(0, settings.superAtrTrendStrengthThreshold ?? 1.618);
-  const takeProfitAtrLength = Math.max(1, Math.round(settings.superAtrTakeProfitAtrLength ?? 14));
-  const atrMultipliers = normalizeNumberList(settings.superAtrAtrMultipliers, [2.618, 5, 10, 13.82], 4);
-  const fixedPercentages = normalizeNumberList(settings.superAtrFixedPercentages, [3, 8, 17], 3);
+  const threshold = Math.max(0, settings.superAtrTrendStrengthThreshold ?? 3.1);
+  const takeProfitAtrLength = Math.max(1, Math.round(settings.superAtrTakeProfitAtrLength ?? 100));
+  const atrMultipliers = normalizeNumberList(settings.superAtrAtrMultipliers, [100, 70, 120, 300], 4);
+  const fixedPercentages = normalizeNumberList(settings.superAtrFixedPercentages, [21, 21, 75], 3);
   const atrExitPercent = Math.max(0.1, Math.min(100, settings.superAtrAtrExitPercent ?? 10));
   const fixedExitPercent = Math.max(0.1, Math.min(100, settings.superAtrFixedExitPercent ?? 10));
   const multiStep = settings.superAtrMultiStepTakeProfit !== false;

@@ -113,7 +113,7 @@ export type StrategyVisibilityConfiguration = {
 };
 
 export type StrategyControlPanel = {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   inputs: SuperAtrInputConfiguration;
   properties: StrategyPropertyConfiguration;
   style: StrategyStyleConfiguration;

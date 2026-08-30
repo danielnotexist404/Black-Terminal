@@ -1378,7 +1378,7 @@ export class BlackCloudExecutionWorker {
     if (venuePricesEqual(venueOrder.price, desiredPrice, Number(instrument.tickSize))) {
       await updateOrThrow(this.supabase.from("execution_orders").update({
         limit_price: desiredPrice,
-        venue_updated_at: new Date(Number(venueOrder.updatedTime || Date.now())).toISOString(),
+        venue_updated_at: Number(venueOrder.updatedTime || Date.now()),
       }).eq("id", order.id));
       await this.repository.audit({
         userId: command.user_id,

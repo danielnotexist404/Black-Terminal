@@ -109,6 +109,7 @@ assert.match(brokerWorker, /takeProfitOrder \? "limit" : "market"/, "SuperATR ex
 assert.match(brokerWorker, /quantity = calculateStrategyTakeProfitQuantity\(originalEntryQuantity, percentage, position\.quantity\)/, "direct Bybit targets reserve their configured fraction of the original fill and cap it by the remaining position");
 assert.match(brokerWorker, /executionIntent\.reduce_only = true/, "investment-group targets are also reduce-only");
 assert.match(brokerWorker, /slippageToleranceTicks/, "market-entry slippage ticks reach Bybit through its integer TickSize contract");
+assert.match(brokerWorker, /venue_updated_at:\s*Number\(venueOrder\.updatedTime/, "confirmed take-profit amendments persist Bybit's millisecond version in the bigint venue clock column");
 assert.match(brokerWorker, /requested:\s*nullablePositive\(payload\.requestedLeverage\)/, "server-side allocation consumes the side-specific leverage request");
 assert.match(brokerWorker, /policy:\s*\{ \.\.\.policy, requestedLeverage: effectiveLeverage \}/, "live order notional is calculated with the exact capped side leverage sent to Bybit");
 assert.match(brokerWorker, /configureLeverage\(leverageConfiguration\)/, "a direct strategy entry sets the capped directional leverage at Bybit before order creation");

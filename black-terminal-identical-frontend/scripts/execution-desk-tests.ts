@@ -294,6 +294,8 @@ assert.match(cockpitSource, /snapshot\?\.equity/, "the selected destination's AP
 assert.match(cockpitSource, /snapshot\?\.availableBalance/, "the selected destination's current available funds constrain fixed-USDT sizing");
 assert.match(settingsSource, /authoritativeDestination \? liveEquity \?\? "" : item\.initialCapital/, "a connected broker never falls back to the script's 10,000 initial-capital seed while equity is unavailable");
 assert.match(settingsSource, /BROKER EQUITY IS SYNCHRONIZING/, "missing broker equity is reported as synchronization state instead of a fictional balance");
+assert.match(settingsSource, /authoritativeFreshness === "LIVE"/, "only a live authoritative broker snapshot unlocks equity sizing");
+assert.match(settingsSource, /authoritativeFreshness !== "LIVE"/, "saving remains fail-closed when the broker snapshot is stale or degraded");
 assert.match(settingsSource, /Refresh or restore broker reconciliation before saving live sizing/, "live sizing remains fail-closed until positive broker equity is authoritative");
 assert.match(serviceSource, /clean\[0\] === "group-execution-desks"/);
 assert.match(repositorySource, /Join this Investment Group before opening its Strategy Execution Desk/);

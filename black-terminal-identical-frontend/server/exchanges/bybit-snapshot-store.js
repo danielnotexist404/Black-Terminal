@@ -18,6 +18,66 @@ export async function replaceBybitBalances(supabase, accountId, balances) {
   if (error) throw snapshotStorageError("insert account balances", error);
 }
 
+export async function upsertBybitAccountEquitySnapshot(supabase, {
+  accountId,
+  userId,
+  executionEnvironment,
+  accountMetrics,
+  capturedAt = new Date().toISOString()
+}) {
+  const snapshot = normalizeBybitAccountEquitySnapshot(accountMetrics, capturedAt);
+  const { error } = await supabase.from("broker_account_equity_snapshots").upsert({
+    account_id: accountId,
+    user_id: userId,
+    provider: "bybit",
+    execution_environment: executionEnvironment,
+    account_type: snapshot.accountType,
+    wallet_balance_usd: snapshot.walletBalanceUsd,
+    equity_usd: snapshot.equityUsd,
+    margin_balance_usd: snapshot.marginBalanceUsd,
+    available_balance_usd: snapshot.availableBalanceUsd,
+    initial_margin_usd: snapshot.initialMarginUsd,
+    maintenance_margin_usd: snapshot.maintenanceMarginUsd,
+    unrealized_pnl_usd: snapshot.unrealizedPnlUsd,
+    account_im_rate: snapshot.accountImRate,
+    account_mm_rate: snapshot.accountMmRate,
+    observed_at: snapshot.observedAt,
+    captured_at: capturedAt
+  }, { onConflict: "account_id" });
+  if (error) throw snapshotStorageError("upsert authoritative broker account equity", error);
+  return snapshot;
+}
+
+export function normalizeBybitAccountEquitySnapshot(accountMetrics, capturedAt = new Date().toISOString()) {
+  if (!accountMetrics || typeof accountMetrics !== "object") {
+    throw snapshotStorageError("normalize authoritative broker account equity", new Error("Bybit account metrics are missing."));
+  }
+  const finite = (key, fallback = null) => {
+    const value = Number(accountMetrics[key]);
+    if (Number.isFinite(value)) return value;
+    if (fallback !== null) return fallback;
+    throw snapshotStorageError("normalize authoritative broker account equity", new Error(`Bybit account metric ${key} is invalid.`));
+  };
+  const observedAtMs = Number(accountMetrics.updatedAt);
+  const observedAt = new Date(Number.isFinite(observedAtMs) && observedAtMs > 0 ? observedAtMs : Date.parse(capturedAt));
+  if (!Number.isFinite(observedAt.getTime())) {
+    throw snapshotStorageError("normalize authoritative broker account equity", new Error("Bybit account metric observation time is invalid."));
+  }
+  return {
+    accountType: String(accountMetrics.accountType || "UNIFIED"),
+    walletBalanceUsd: finite("walletBalanceUsd"),
+    equityUsd: finite("equityUsd"),
+    marginBalanceUsd: finite("marginBalanceUsd"),
+    availableBalanceUsd: Math.max(0, finite("availableBalanceUsd")),
+    initialMarginUsd: Math.max(0, finite("initialMarginUsd", 0)),
+    maintenanceMarginUsd: Math.max(0, finite("maintenanceMarginUsd", 0)),
+    unrealizedPnlUsd: finite("unrealizedPnlUsd", 0),
+    accountImRate: nullableFinite(accountMetrics.accountImRate),
+    accountMmRate: nullableFinite(accountMetrics.accountMmRate),
+    observedAt: observedAt.toISOString()
+  };
+}
+
 export async function replaceBybitPositions(supabase, accountId, positions, snapshotStartedAt = Date.now()) {
   const canonical = canonicalizeBybitPositions(positions, accountId);
   const rows = canonical.map((position) => ({
@@ -75,4 +135,10 @@ function snapshotStorageError(operation, error) {
     supabaseHint: error?.hint || null
   };
   return wrapped;
+}
+
+function nullableFinite(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }

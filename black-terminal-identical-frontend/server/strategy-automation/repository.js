@@ -16,6 +16,7 @@ import {
 } from "./domain.js";
 
 const ACTIVE_ORDER_STATUSES = ["created", "pending", "open", "working", "partially-filled", "partially_filled", "triggered"];
+const ACCOUNT_EQUITY_STALE_MS = 90_000;
 
 export async function listStrategies(supabase, userId) {
   const { data, error } = await supabase.from("strategy_automation_strategies")
@@ -299,9 +300,9 @@ export async function listEligibleTargets(supabase, userId, strategyId, environm
   const accountIds = accounts.length ? accounts.map((item) => item.id) : ["00000000-0000-0000-0000-000000000000"];
   const managedGroupIds = [...new Set([...ownerGroups.map((item) => item.id), ...managedMemberships.map((item) => item.group_id)])];
   const scopedGroupIds = managedGroupIds.length ? managedGroupIds : ["00000000-0000-0000-0000-000000000000"];
-  const [risks, balances, managedGroups, groupStats, mandates] = await Promise.all([
+  const [risks, accountEquities, managedGroups, groupStats, mandates] = await Promise.all([
     many(supabase.from("account_risk_controls").select("*").in("account_id", accountIds)),
-    many(supabase.from("account_balances").select("account_id,asset,free,locked,total,usd_value").in("account_id", accountIds)),
+    many(supabase.from("broker_account_equity_snapshots").select("account_id,equity_usd,available_balance_usd,observed_at,captured_at").in("account_id", accountIds)),
     many(supabase.from("investment_groups").select("id,firm_name,status").in("id", scopedGroupIds)),
     many(supabase.from("investment_group_stats").select("*").in("group_id", scopedGroupIds)),
     many(supabase.from("group_execution_mandates").select("id,group_id,status,broker_connection_id,allocation_method,allocation_value,max_leverage,paused_at,expires_at").in("group_id", scopedGroupIds))
@@ -309,7 +310,7 @@ export async function listEligibleTargets(supabase, userId, strategyId, environm
   const accountMap = new Map(accounts.map((item) => [item.id, item]));
   const capabilityMap = new Map(capabilities.map((item) => [item.connection_id, item]));
   const riskMap = new Map(risks.map((item) => [item.account_id, item]));
-  const balanceMap = groupBy(balances, "account_id");
+  const accountEquityMap = new Map(accountEquities.map((item) => [item.account_id, item]));
   let existingQuery = supabase.from("strategy_target_bindings").select("id,target_type,target_id,status").eq("strategy_id", strategyId).eq("strategy_version", operationalVersion(strategy)).neq("status", "DISCONNECTED");
   if (excludeBindingId) existingQuery = existingQuery.neq("id", excludeBindingId);
   const existing = await many(existingQuery);
@@ -318,7 +319,7 @@ export async function listEligibleTargets(supabase, userId, strategyId, environm
     const account = accountMap.get(connection.account_id);
     const capability = capabilityMap.get(connection.id);
     const risk = riskMap.get(connection.account_id);
-    const amounts = summarizeBalances(balanceMap.get(connection.account_id) || []);
+    const amounts = authoritativeAccountMoney(accountEquityMap.get(connection.account_id));
     const validation = validateBrokerEligibility({ connection, account, capability, strategy, conflict: conflicts.has(`BROKER_ACCOUNT:${connection.id}`), environment });
     return {
       targetId: connection.id,
@@ -629,25 +630,27 @@ async function buildStrategySnapshots(supabase, userId, strategy, bindings) {
 
 async function buildBindingSnapshot(supabase, userId, binding) {
   if (binding.target_type === "INVESTMENT_GROUP") return buildGroupSnapshot(supabase, userId, binding);
-  const [balances, positions, orders, trades, risk, health] = await Promise.all([
-    many(supabase.from("account_balances").select("asset,free,locked,total,usd_value,updated_at").eq("account_id", binding.account_id)),
+  const [accountEquity, positions, orders, trades, risk, health] = await Promise.all([
+    oneOrNone(supabase.from("broker_account_equity_snapshots").select("equity_usd,available_balance_usd,observed_at,captured_at").eq("account_id", binding.account_id).eq("user_id", userId).maybeSingle()),
     many(supabase.from("account_positions").select("unrealized_pnl,realized_pnl,margin,updated_at").eq("strategy_target_binding_id", binding.id)),
     many(supabase.from("execution_orders").select("status,updated_at").eq("strategy_target_binding_id", binding.id)),
     many(supabase.from("strategy_automation_trades").select("gross_pnl,net_pnl,fees,funding,closed_at").eq("binding_id", binding.id).eq("owner_user_id", userId).order("closed_at", { ascending: true }).limit(5000)),
     oneOrNone(supabase.from("account_risk_controls").select("max_leverage,max_daily_loss_usd,max_portfolio_exposure_usd,emergency_stop").eq("account_id", binding.account_id).maybeSingle()),
     oneOrNone(supabase.from("broker_connection_health").select("health_status,private_stream_status,reconciliation_status,last_private_event_at,last_reconciled_at,stale_after,captured_at").eq("connection_id", binding.connection_id).order("captured_at", { ascending: false }).limit(1).maybeSingle())
   ]);
-  const money = summarizeBalances(balances);
+  const money = authoritativeAccountMoney(accountEquity);
   const policy = policyFromBinding(binding);
   const effectiveLeverage = binding.market_type === "SPOT" ? 1 : calculateEffectiveLeverage({ requested: policy.requestedLeverage, targetMaximum: policy.maximumLeverage, accountRiskCap: risk?.max_leverage });
   const capital = calculateCapitalPreview({ equity: money.equity, availableBalance: money.available, policy, marketType: binding.market_type, caps: { accountRiskCap: risk?.max_leverage } });
   const analytics = calculateTradeAnalytics(trades);
   const unrealized = positions.reduce((sum, item) => sum + Number(item.unrealized_pnl || 0), 0);
-  const freshness = resolveFreshness(health?.stale_after, health?.health_status, health?.reconciliation_status);
+  const connectionFreshness = resolveFreshness(health?.stale_after, health?.health_status, health?.reconciliation_status, health?.last_reconciled_at);
+  const equityFreshness = resolveAccountEquityFreshness(accountEquity);
+  const freshness = mergeFreshness(connectionFreshness, equityFreshness);
   const snapshot = {
     bindingId: binding.id,
     slotIndex: binding.slot_index,
-    timestamp: Date.now(),
+    timestamp: money.timestamp,
     freshness,
     equity: money.equity,
     availableBalance: money.available,
@@ -695,18 +698,24 @@ async function buildGroupSnapshot(supabase, userId, binding) {
   const connectionIds = active.map((item) => item.broker_connection_id);
   const connections = connectionIds.length ? await many(supabase.from("connectivity_connections").select("id,account_id,worker_state,synchronization_state,execution_readiness,health_status").in("id", connectionIds)) : [];
   const accountIds = connections.map((item) => item.account_id).filter(Boolean);
-  const balances = accountIds.length ? await many(supabase.from("account_balances").select("account_id,free,total,usd_value").in("account_id", accountIds)) : [];
-  const moneyByAccount = new Map(accountIds.map((accountId) => [accountId, summarizeBalances(balances.filter((item) => item.account_id === accountId))]));
+  const accountEquities = accountIds.length ? await many(supabase.from("broker_account_equity_snapshots").select("account_id,equity_usd,available_balance_usd,observed_at,captured_at").in("account_id", accountIds)) : [];
+  const moneyByAccount = new Map(accountIds.map((accountId) => [accountId, authoritativeAccountMoney(accountEquities.find((item) => item.account_id === accountId))]));
   const connectionMap = new Map(connections.map((item) => [item.id, item]));
   let connectedAllocatedEquity = 0;
   const leverageCaps = [];
+  const sourceTimestamps = [];
+  const accountFreshness = [];
   for (const mandate of active) {
     const connection = connectionMap.get(mandate.broker_connection_id);
     const money = moneyByAccount.get(connection?.account_id) || { equity: 0 };
     connectedAllocatedEquity += mandate.allocation_method === "FIXED_NOTIONAL" ? Math.min(money.equity, Number(mandate.allocation_value)) : money.equity * Number(mandate.allocation_value) / 100;
     leverageCaps.push(Number(mandate.max_leverage || 1));
+    if (Number.isFinite(money.timestamp)) sourceTimestamps.push(money.timestamp);
+    accountFreshness.push(resolveAccountEquityFreshness(accountEquities.find((item) => item.account_id === connection?.account_id)));
   }
   const degraded = connections.filter((item) => item.worker_state !== "LIVE" || item.synchronization_state !== "SYNCHRONIZED" || item.execution_readiness !== "READY").length;
+  const groupConnectionFreshness = active.length && degraded === 0 ? "LIVE" : active.length ? "DEGRADED" : "UNAVAILABLE";
+  const freshness = accountFreshness.reduce((current, item) => mergeFreshness(current, item), groupConnectionFreshness);
   const policy = policyFromBinding(binding);
   const analytics = calculateTradeAnalytics(trades);
   const unrealized = positions.reduce((sum, item) => sum + Number(item.unrealized_pnl || 0), 0);
@@ -715,8 +724,8 @@ async function buildGroupSnapshot(supabase, userId, binding) {
   const snapshot = {
     bindingId: binding.id,
     slotIndex: binding.slot_index,
-    timestamp: Date.now(),
-    freshness: active.length && degraded === 0 ? "LIVE" : active.length ? "DEGRADED" : "UNAVAILABLE",
+    timestamp: sourceTimestamps.length ? Math.min(...sourceTimestamps) : null,
+    freshness,
     equity: connectedAllocatedEquity,
     availableBalance: connectedAllocatedEquity,
     allocatedStrategyCapital,
@@ -753,7 +762,7 @@ async function buildGroupSnapshot(supabase, userId, binding) {
     connectionHealth: active.length ? (degraded ? "DEGRADED" : "LIVE") : "UNAVAILABLE",
     protectionHealth: active.length ? "MANDATE_BOUNDED" : "UNAVAILABLE"
   };
-  await persistSnapshot(supabase, userId, binding, snapshot, snapshot.freshness);
+  await persistSnapshot(supabase, userId, binding, snapshot, freshness);
   return snapshot;
 }
 
@@ -1053,17 +1062,19 @@ function safeRuntime(row) {
   return { state: row.runtime_state, stateVersion: Number(row.state_version), lastClosedCandleAt: row.last_closed_candle_at, lastSignalAt: row.last_signal_at, lastHeartbeatAt: row.last_heartbeat_at, safeErrorCode: row.safe_error_code, updatedAt: row.updated_at };
 }
 
-function summarizeBalances(rows) {
-  let equity = 0;
-  let available = 0;
-  for (const row of rows) {
-    const totalUsd = row.usd_value == null ? (String(row.asset).toUpperCase() === "USDT" || String(row.asset).toUpperCase() === "USDC" ? Number(row.total || 0) : 0) : Number(row.usd_value || 0);
-    const total = Number(row.total || 0);
-    const free = Number(row.free || 0);
-    equity += totalUsd;
-    available += total > 0 ? totalUsd * Math.max(0, Math.min(1, free / total)) : 0;
+export function authoritativeAccountMoney(row) {
+  if (!row) return { equity: 0, available: 0, timestamp: null };
+  const equity = Number(row.equity_usd);
+  const available = Number(row.available_balance_usd);
+  const timestamp = Date.parse(row.observed_at || row.captured_at || "");
+  if (!Number.isFinite(equity) || !Number.isFinite(available) || !Number.isFinite(timestamp)) {
+    return { equity: 0, available: 0, timestamp: null };
   }
-  return { equity, available };
+  return {
+    equity: Math.max(0, equity),
+    available: Math.max(0, available),
+    timestamp
+  };
 }
 
 function calculateTradeAnalytics(rows) {
@@ -1106,10 +1117,23 @@ function calculateTradeAnalytics(rows) {
   };
 }
 
-function resolveFreshness(staleAfter, healthStatus, reconciliationStatus) {
+export function resolveAccountEquityFreshness(row, now = Date.now()) {
+  const money = authoritativeAccountMoney(row);
+  if (!Number.isFinite(money.timestamp)) return "UNAVAILABLE";
+  const age = now - money.timestamp;
+  return age < -30_000 || age > ACCOUNT_EQUITY_STALE_MS ? "STALE" : "LIVE";
+}
+
+export function mergeFreshness(left, right) {
+  const rank = { LIVE: 0, DEGRADED: 1, STALE: 2, UNAVAILABLE: 3 };
+  return (rank[right] ?? rank.UNAVAILABLE) > (rank[left] ?? rank.UNAVAILABLE) ? right : left;
+}
+
+function resolveFreshness(staleAfter, healthStatus, reconciliationStatus, lastReconciledAt) {
   if (!healthStatus) return "UNAVAILABLE";
   if (staleAfter && Date.parse(staleAfter) < Date.now()) return "STALE";
-  if (healthStatus !== "CONNECTED_CLOUD" || reconciliationStatus !== "SYNCHRONIZED") return "DEGRADED";
+  const reconciled = ["SYNCHRONIZED", "IDLE"].includes(String(reconciliationStatus || "")) && Number.isFinite(Date.parse(lastReconciledAt || ""));
+  if (healthStatus !== "CONNECTED_CLOUD" || !reconciled) return "DEGRADED";
   return "LIVE";
 }
 

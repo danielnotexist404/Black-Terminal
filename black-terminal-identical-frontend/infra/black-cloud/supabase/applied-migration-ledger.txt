@@ -42,3 +42,4 @@
 202608290002|strategy_superatr_partial_exits
 202608290003|strategy_superatr_runtime_kind
 202608300001|strategy_target_side_leverage
+202608300002|authoritative_broker_account_equity

@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { getBybitPrivateStreamRuntimeDiagnostics } from "./bybit-private-stream.js";
-import { replaceBybitBalances, replaceBybitPositions } from "./bybit-snapshot-store.js";
+import { replaceBybitBalances, replaceBybitPositions, upsertBybitAccountEquitySnapshot } from "./bybit-snapshot-store.js";
 import {
   BYBIT_EXECUTION_ENVIRONMENTS,
   normalizeBybitExecutionEnvironment,
@@ -575,28 +575,44 @@ export async function getBybitDiagnostics(credentials, { symbol = "BTCUSDT" } = 
 
 export async function syncBybitAccountToSupabase(supabase, account, credentials, snapshot = {}) {
   const snapshotStartedAt = Date.now();
-  const balances = Array.isArray(snapshot.balances) ? snapshot.balances : await getBybitBalances(credentials);
+  const suppliedWallet = Array.isArray(snapshot.balances) && snapshot.accountMetrics
+    ? { balances: snapshot.balances, accountMetrics: snapshot.accountMetrics }
+    : null;
+  const walletSnapshot = suppliedWallet || await getBybitWalletSnapshot(credentials);
+  const balances = Array.isArray(snapshot.balances) ? snapshot.balances : walletSnapshot.balances;
+  const accountMetrics = snapshot.accountMetrics || walletSnapshot.accountMetrics;
   const positions = Array.isArray(snapshot.positions) ? snapshot.positions : await getBybitPositions(credentials);
+  const synchronizedAt = new Date().toISOString();
+  const executionEnvironment = normalizeBybitExecutionEnvironment(credentials.executionEnvironment || account.execution_environment || credentials.network || account.network);
 
   await replaceBybitBalances(supabase, account.id, balances);
+  await upsertBybitAccountEquitySnapshot(supabase, {
+    accountId: account.id,
+    userId: account.user_id,
+    executionEnvironment,
+    accountMetrics,
+    capturedAt: synchronizedAt
+  });
   await replaceBybitPositions(supabase, account.id, positions, snapshotStartedAt);
 
-  const equityUsd = balances.reduce((sum, balance) => sum + balance.usdValue, 0);
+  const equityUsd = Number(accountMetrics.equityUsd);
   const marginUsed = positions.reduce((sum, position) => sum + position.margin, 0);
 
-  await supabase
+  const { error: accountUpdateError } = await supabase
     .from("exchange_accounts")
     .update({
       status: "connected",
       api_health: "healthy",
       latency_ms: 0,
-      last_synced_at: new Date().toISOString(),
+      last_synced_at: synchronizedAt,
       last_sync_error: null
     })
     .eq("id", account.id);
+  if (accountUpdateError) throw accountUpdateError;
 
   return {
     balances,
+    accountMetrics,
     positions,
     equityUsd,
     marginUsed

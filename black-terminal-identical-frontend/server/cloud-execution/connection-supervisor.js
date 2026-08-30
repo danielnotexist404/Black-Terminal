@@ -390,7 +390,7 @@ export class BrokerConnectionManager {
       health_status: healthStatus,
       worker_id: this.workerId,
       private_stream_status: diagnostics.status,
-      reconciliation_status: runtime.reconciling ? "RUNNING" : "IDLE",
+      reconciliation_status: runtime.reconciling ? "RUNNING" : synchronizationState,
       reconnect_count: diagnostics.reconnectCount,
       last_private_event_at: diagnostics.lastMessageAt ? new Date(Number(diagnostics.lastMessageAt)).toISOString() : null,
       last_reconciled_at: runtime.connection.last_reconciled_at,

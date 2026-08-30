@@ -14,6 +14,7 @@ const REQUIRED_TABLES = [
   "exchange_credentials",
   "account_risk_controls",
   "account_balances",
+  "broker_account_equity_snapshots",
   "account_positions",
   "execution_orders"
 ];
@@ -38,6 +39,7 @@ const MIGRATION_HINTS = {
   exchange_credentials: "Portfolio Manager / execution baseline tables",
   account_risk_controls: "Portfolio Manager / execution baseline tables",
   account_balances: "Portfolio Manager / execution baseline tables",
+  broker_account_equity_snapshots: "202608300002_authoritative_broker_account_equity.sql",
   account_positions: "Portfolio Manager / execution baseline tables",
   execution_orders: "Portfolio Manager / execution baseline tables"
 };

@@ -72,7 +72,7 @@ export function StrategyControlPanelDialog({
   const reset = () => { dirty.current = false; setValue(structuredClone(initial)); setSettings(initialNativeSettings(nativeInputs, initialSettings)); setError(undefined); if (!embedded) onCancel(); };
   const submit = async () => {
     setError(undefined);
-    const sizingError = validateOrderSize(value, authoritativeEquity, authoritativeAvailableBalance, authoritativeDestination, authoritativeEquityTimestamp);
+    const sizingError = validateOrderSize(value, authoritativeEquity, authoritativeAvailableBalance, authoritativeDestination, authoritativeEquityTimestamp, authoritativeFreshness);
     if (sizingError) { setError(sizingError); return; }
     const submitted = authoritativeDestination && Number.isFinite(authoritativeEquity) && Number(authoritativeEquity) > 0
       ? { ...value, properties: { ...value.properties, initialCapital: Number(authoritativeEquity), currency: "USDT" as const } }
@@ -148,7 +148,8 @@ function Properties({ value, patch, accountLabel, authoritativeEquity, authorita
     && typeof authoritativeEquity === "number"
     && Number.isFinite(authoritativeEquity)
     && typeof authoritativeEquityTimestamp === "number"
-    && Number.isFinite(authoritativeEquityTimestamp);
+    && Number.isFinite(authoritativeEquityTimestamp)
+    && authoritativeFreshness === "LIVE";
   const liveEquity = equitySynchronized ? Math.max(0, authoritativeEquity) : undefined;
   const available = authoritativeAvailableBalance !== undefined && Number.isFinite(authoritativeAvailableBalance) ? Math.max(0, authoritativeAvailableBalance) : undefined;
   const fixedUsdtLimit = !equitySynchronized || liveEquity === undefined ? undefined : Math.min(liveEquity, available ?? liveEquity);
@@ -202,8 +203,8 @@ function NumberRow({ label, value, min, max, step, suffix, disabled, onChange }:
 function CheckRow({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (value: boolean) => void }) { return <label className="strategy-control-check"><input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} /><span>{label}</span></label>; }
 function SelectRow({ label, value, children, onChange }: { label: string; value: string; children: ReactNode; onChange: (value: string) => void }) { return <label className="strategy-control-row"><span>{label}</span><select value={value} onChange={(event) => onChange(event.target.value)}>{children}</select></label>; }
 function ChoiceRow({ label, children }: { label: string; children: ReactNode }) { return <label className="strategy-control-row choice"><span>{label}</span><span>{children}</span></label>; }
-function validateOrderSize(value: StrategyControlPanel, authoritativeEquity?: number, authoritativeAvailableBalance?: number, authoritativeDestination = false, authoritativeEquityTimestamp?: number) {
-  if (authoritativeDestination && (!Number.isFinite(authoritativeEquity) || !Number.isFinite(authoritativeEquityTimestamp) || Number(authoritativeEquity) <= 0)) {
+function validateOrderSize(value: StrategyControlPanel, authoritativeEquity?: number, authoritativeAvailableBalance?: number, authoritativeDestination = false, authoritativeEquityTimestamp?: number, authoritativeFreshness?: string) {
+  if (authoritativeDestination && (authoritativeFreshness !== "LIVE" || !Number.isFinite(authoritativeEquity) || !Number.isFinite(authoritativeEquityTimestamp) || Number(authoritativeEquity) <= 0)) {
     return "The selected broker has not supplied a positive authoritative equity snapshot yet. Refresh or restore broker reconciliation before saving live sizing.";
   }
   const amount = Number(value.properties.orderSizeValue);

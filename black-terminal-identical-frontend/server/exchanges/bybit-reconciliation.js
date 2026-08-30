@@ -13,7 +13,7 @@ import {
   resolveBybitExecutionPolicy
 } from "./bybit.js";
 import { bybitPositionKey, canonicalizeBybitPositions } from "./bybit-position-identity.js";
-import { replaceBybitBalances, replaceBybitPositions } from "./bybit-snapshot-store.js";
+import { replaceBybitBalances, replaceBybitPositions, upsertBybitAccountEquitySnapshot } from "./bybit-snapshot-store.js";
 import { settleSupabaseQuery } from "../supabase-query.js";
 
 const ACTIVE_ORDER_STATUSES = ["pending", "accepted", "working", "partially-filled"];
@@ -97,6 +97,13 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
   const changes = [];
 
   await upsertBalances(supabase, account.id, balances);
+  await upsertBybitAccountEquitySnapshot(supabase, {
+    accountId: account.id,
+    userId,
+    executionEnvironment,
+    accountMetrics: walletSnapshot.accountMetrics,
+    capturedAt: new Date().toISOString()
+  });
   await upsertPositions(supabase, account.id, positions, startedAt);
   await updateKnownOrders(supabase, userId, account.id, openOrders);
 
@@ -116,7 +123,9 @@ export async function syncBybitSnapshotAndReconcile(supabase, userId, account, c
     permissions: executionState.permissions,
     broker_account_uid: venueAccountId,
     permission_snapshot: permissionReport.snapshot,
-    permission_verified_at: new Date(permissionReport.snapshot.verifiedAt).toISOString()
+    permission_verified_at: new Date(permissionReport.snapshot.verifiedAt).toISOString(),
+    last_synced_at: new Date().toISOString(),
+    last_sync_error: null
   };
   const riskPatch = {
     read_only_mode: executionState.readOnly,

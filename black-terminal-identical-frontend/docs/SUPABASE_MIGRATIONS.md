@@ -2203,3 +2203,11 @@ Migration: `supabase/migrations/202608300001_strategy_target_side_leverage.sql`.
 This additive migration persists independently capped long and short leverage for each Strategy Lab execution destination. It updates the service-only target create/update functions, versions every policy change, and automatically returns a target to `READY` when leverage is increased so the account must be explicitly re-approved before execution resumes. The generic leverage column remains as a backward-compatible ceiling for older reports and workers.
 
 The migration was executed successfully in the local PostgreSQL integration harness. Application to a linked production database is not recorded by this task; deploy it only through the checksum-verified repository migration runner before restarting Strategy Automation and Black Cloud execution workers.
+
+# 2026-08-30 - Authoritative broker account equity
+
+Migration: `supabase/migrations/202608300002_authoritative_broker_account_equity.sql`.
+
+This additive migration stores one current, environment-tagged Bybit account-equity snapshot per exchange account. Strategy Lab uses the broker's account-level `totalEquity` and `totalAvailableBalance`, together with their observation time, instead of reconstructing funds from per-coin balances. Browser roles may read only their own rows; only the service role may write them.
+
+Apply this migration after `202608300001_strategy_target_side_leverage.sql` and before restarting the API, Strategy Automation worker, or either isolated Demo/Mainnet execution worker. Until each execution worker completes a successful post-deployment reconciliation, connected-account sizing intentionally remains `SYNCING`. Application to the production VPS database is not recorded by this task.

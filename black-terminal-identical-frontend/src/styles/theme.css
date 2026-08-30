@@ -11837,6 +11837,7 @@ body.resizing-orders-panel .positions-stack-resizer::after {
 .strategy-control-row.choice > span:last-child { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .strategy-control-row input.authoritative { color: #63e9b2; border-color: #255c49; background: #07110e; }
 .strategy-control-equity-source { margin: -7px 0 2px min(222px, 42%); color: #57b991; font-size: 8px; line-height: 1.45; }
+.strategy-control-field-limit { margin: -9px 0 1px min(222px, 42%); color: #b7bdc7; font: 700 8px "IBM Plex Mono", monospace; letter-spacing: .04em; }
 .strategy-control-authority { margin: 8px 0 0; padding: 10px 12px; border: 1px solid #30373b; border-left: 2px solid #2bd791; color: #89918e; background: #101413; font-size: 9px; line-height: 1.55; }
 .strategy-control-visual { display: grid; grid-template-columns: minmax(115px, 1fr) 34px 75px 55px; align-items: center; gap: 8px; }
 .strategy-control-visual > label { display: flex; align-items: center; gap: 8px; font-size: 10px; }

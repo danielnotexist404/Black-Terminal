@@ -21,6 +21,7 @@ import type {
 import {
   buildExecutionDeskActions,
   buildExecutionDeskMetrics,
+  confirmedStrategyCandles,
   equityCurve,
   executionDeskData,
   executionMarkers,
@@ -248,7 +249,7 @@ function ExecutionDeskSurface({
     <ActionMatrix actions={actions} />
     <MetricDeck metrics={metrics} curve={curve} />
     <div className="execution-desk-separation"><Cloud size={13} /><span>This chart is owned by the strategy runtime. It never mounts the strategy onto the default discretionary chart.</span></div>
-    {settingsOpen && selectedPolicy && onApplyConfiguration && superAtrControlsAvailable ? <StrategyControlPanelDialog name={strategy.name} accountLabel={selected.label} initial={controlPanel} sourceKey={selected.key} authoritativeEquity={selected.binding ? selected.snapshot?.equity : undefined} busy={busy} onCancel={() => setSettingsOpen(false)} onApply={async (panel) => { await onApplyConfiguration(strategy.definition, selectedPolicy, selected.key, panel); setSettingsOpen(false); }} /> : null}
+    {settingsOpen && selectedPolicy && onApplyConfiguration && superAtrControlsAvailable ? <StrategyControlPanelDialog name={strategy.name} accountLabel={selected.label} initial={controlPanel} sourceKey={selected.key} authoritativeEquity={selected.binding ? selected.snapshot?.equity : undefined} authoritativeAvailableBalance={selected.binding ? selected.snapshot?.availableBalance : undefined} authoritativeEquityTimestamp={selected.binding ? selected.snapshot?.timestamp : undefined} authoritativeFreshness={selected.binding ? selected.snapshot?.freshness : undefined} busy={busy} onCancel={() => setSettingsOpen(false)} onApply={async (panel) => { await onApplyConfiguration(strategy.definition, selectedPolicy, selected.key, panel); setSettingsOpen(false); }} /> : null}
   </section>;
 }
 
@@ -327,8 +328,7 @@ function strategyPlots(definition: StrategyAutomationDefinition, candles: Candle
 function historicalSignalMarkers(definition: StrategyAutomationDefinition, calculationCandles: Candle[], visibleCandles: Candle[]) {
   if (!calculationCandles.length || !visibleCandles.length || !["builtin-ema-cross", "builtin-adaptive-swing", "builtin-superatr-seven-step"].includes(definition.runtimeKind)) return [];
   const intervalSeconds = timeframeSeconds(definition.timeframe);
-  const now = Date.now() / 1000;
-  const confirmedCandles = calculationCandles.filter((candle) => candle.time + intervalSeconds <= now);
+  const confirmedCandles = confirmedStrategyCandles(calculationCandles, intervalSeconds);
   try {
     const signals = createStrategySignals(definition.runtimeKind, confirmedCandles, definition.symbol, definition.settings);
     const panel = readStrategyControlPanel(definition);
@@ -511,7 +511,11 @@ function executionDeskIndicators(definition: StrategyAutomationDefinition): Visi
   const key = String(definition.indicator?.indicatorId || "").replace(/^library:/, "").replace(/^chart:/, "");
   return {
     qalc: false, liquidationHeatmap: false, auctionProfile: false, volatilityHeatmap: false, volumeProfile: false, aif: false,
-    adaptiveSwingStrategy: key === "adaptiveSwingStrategy" || definition.runtimeKind === "builtin-adaptive-swing",
+    // Strategy markers are produced only by the certified, confirmed-bar
+    // adapter above. Enabling this chart-native overlay starts a second
+    // intrabar signal engine and can draw a provisional duplicate that later
+    // disappears when the live candle changes.
+    adaptiveSwingStrategy: false,
     vwap: key === "vwap",
     ema20: key === "ema20" || definition.runtimeKind === "builtin-ema-cross",
     ema50: key === "ema50" || definition.runtimeKind === "builtin-ema-cross",

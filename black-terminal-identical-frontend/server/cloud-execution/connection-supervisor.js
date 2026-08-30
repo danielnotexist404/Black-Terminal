@@ -279,7 +279,11 @@ export class BrokerConnectionManager {
       if (String(result.brokerAccountUid || "") !== String(runtime.connection.broker_account_uid || "")) {
         throw typedError("BROKER_ACCOUNT_UID_MISMATCH", "The reconciled Bybit UID no longer matches this connection.");
       }
-      if (runtime.connection.execution_environment === "DEMO") await this.attributeDemoStrategyState(runtime);
+      // Position ownership is required before any reduce-only TP or reversal is
+      // allowed. Attribute both Demo and Mainnet positions, but only when an
+      // accepted non-reduce strategy order for the exact live binding, symbol,
+      // and direction precedes the reconciled venue position.
+      await this.attributeStrategyState(runtime);
       await updateOrThrow(this.supabase.from("connectivity_connections").update({
         status: "connected",
         health_status: "CONNECTED_CLOUD",
@@ -312,7 +316,7 @@ export class BrokerConnectionManager {
     }
   }
 
-  async attributeDemoStrategyState(runtime) {
+  async attributeStrategyState(runtime) {
     const { data: binding, error: bindingError } = await this.supabase.from("strategy_target_bindings")
       .select("id,strategy_id")
       .eq("account_id", runtime.account.id)
@@ -327,18 +331,20 @@ export class BrokerConnectionManager {
     if (strategyError) throw strategyError;
     if (!strategy?.symbol) return;
     const { data: latestStrategyOrder, error: orderError } = await this.supabase.from("execution_orders")
-      .select("id,reduce_only,status,created_at")
+      .select("id,side,status,created_at,strategy_automation_id,strategy_target_binding_id")
       .eq("strategy_target_binding_id", binding.id)
       .eq("symbol", strategy.symbol)
+      .eq("reduce_only", false)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     if (orderError) throw orderError;
-    if (!latestStrategyOrder || latestStrategyOrder.reduce_only === true || ["rejected", "cancelled", "canceled", "failed"].includes(String(latestStrategyOrder.status || "").toLowerCase())) return;
+    if (!latestStrategyOrder || latestStrategyOrder.strategy_automation_id !== binding.strategy_id || latestStrategyOrder.strategy_target_binding_id !== binding.id || ["rejected", "cancelled", "canceled", "failed"].includes(String(latestStrategyOrder.status || "").toLowerCase())) return;
+    const direction = String(latestStrategyOrder.side || "").toLowerCase() === "sell" ? "short" : "long";
     await updateOrThrow(this.supabase.from("account_positions").update({
       strategy_automation_id: binding.strategy_id,
       strategy_target_binding_id: binding.id
-    }).eq("account_id", runtime.account.id).eq("symbol", strategy.symbol).gt("quantity", 0));
+    }).eq("account_id", runtime.account.id).eq("symbol", strategy.symbol).eq("direction", direction).is("strategy_target_binding_id", null).gt("quantity", 0));
   }
 
   async writeHealth(runtime) {

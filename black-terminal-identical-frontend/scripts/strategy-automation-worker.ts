@@ -5,7 +5,7 @@ import {
   calculateEffectiveLeverage,
   normalizeCapitalPolicy,
 } from "../server/strategy-automation/domain.js";
-import { createStrategySignals, superAtrTakeProfitPlan } from "../src/modules/strategy-lab/adapters/signalAdapter.ts";
+import { createStrategySignals, positionAwareStrategyEntries, superAtrTakeProfitPlan } from "../src/modules/strategy-lab/adapters/signalAdapter.ts";
 import {
   hashCanonicalPayload,
   intentSigningPayload,
@@ -239,9 +239,22 @@ async function processStrategy(strategy: JsonRow) {
     strategy.symbol,
     strategy.definition?.settings || {},
   );
-  const signal = [...signals]
+  // Pine evaluates the setup on every bar, but strategy.entry with
+  // pyramiding=1 ignores a same-direction call while that virtual position is
+  // already open. Reconstruct those position transitions before looking at the
+  // current bar; otherwise a newly armed flat broker can receive a duplicate
+  // mid-trend entry that TradingView correctly suppresses.
+  const transitions = positionAwareStrategyEntries(
+    signals,
+    Number(strategy.definition?.execution?.pyramiding || 1),
+  );
+  const candidateSignal = [...transitions]
     .reverse()
     .find((item) => item.entry && Number(item.timestamp) === candle.time);
+  const persistedDirection = strategyDirectionFromSignalKey(runtime?.last_signal_key);
+  const signal = candidateSignal && candidateSignal.direction !== persistedDirection
+    ? candidateSignal
+    : undefined;
   let closeResult: { closed: boolean; reason: string | null } = { closed: false, reason: null };
   const nextTickReference = marketWindow.current?.time === candle.time + timeframeMilliseconds(strategy.timeframe) / 1000
     ? marketWindow.current.open
@@ -296,6 +309,11 @@ async function processStrategy(strategy: JsonRow) {
       { onConflict: "strategy_id" },
     );
   if (updateError) throw updateError;
+}
+
+function strategyDirectionFromSignalKey(value: unknown): "long" | "short" | null {
+  const match = String(value || "").match(/:(long|short)$/i);
+  return match ? match[1]!.toLowerCase() as "long" | "short" : null;
 }
 
 function isBcrdaDefinition(definition: JsonRow) {
@@ -1093,7 +1111,7 @@ async function fetchBybitCandleWindow(
       .toUpperCase(),
   );
   url.searchParams.set("interval", interval.value);
-  url.searchParams.set("limit", "500");
+  url.searchParams.set("limit", "1000");
   const response = await fetch(url, {
     signal: AbortSignal.timeout(8_000),
     headers: { accept: "application/json" },
@@ -1108,7 +1126,11 @@ async function fetchBybitCandleWindow(
       new Error("Bybit public candle payload was rejected."),
       { code: "MARKET_DATA_PAYLOAD_INVALID" },
     );
-  const now = Date.now();
+  // Bybit is the authority for its candle boundary. A VPS clock that is a few
+  // seconds fast must never promote the still-forming row into an executable
+  // closed-candle signal.
+  const venueTimestamp = Number(payload.time);
+  const now = Number.isFinite(venueTimestamp) && venueTimestamp > 0 ? venueTimestamp : Date.now();
   const candles = payload.result.list
     .map((row: string[]) => ({
       time: Math.floor(Number(row[0]) / 1000),

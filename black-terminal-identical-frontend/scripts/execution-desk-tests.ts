@@ -3,6 +3,7 @@ import fs from "node:fs";
 import {
   buildExecutionDeskActions,
   buildExecutionDeskMetrics,
+  confirmedStrategyCandles,
   executionDeskData,
   executionMarkers,
   strategySignalMarkers,
@@ -74,6 +75,11 @@ const signalCandles = [
   { time: 1_600, open: 102, high: 103, low: 99, close: 100, volume: 10 },
   { time: 1_900, open: 100, high: 104, low: 99, close: 103, volume: 10 },
 ];
+const confirmedBeforeAppend = confirmedStrategyCandles(signalCandles.slice(0, 3), 300, 10_000);
+assert.deepEqual(confirmedBeforeAppend.map((candle) => candle.time), [1_000, 1_300], "the newest REST candle remains provisional even when the browser clock is ahead");
+const confirmedAfterAppend = confirmedStrategyCandles(signalCandles, 300, 10_000);
+assert.deepEqual(confirmedAfterAppend.map((candle) => candle.time), [1_000, 1_300, 1_600], "a candle becomes immutable only after its successor is present");
+assert.deepEqual(confirmedAfterAppend.slice(0, confirmedBeforeAppend.length), confirmedBeforeAppend, "confirmed strategy history is append-only across feed refreshes");
 const historicalMarkers = strategySignalMarkers([
   { timestamp: 1_000, symbol: "BTCUSDT", direction: "long", entry: true },
   { timestamp: 1_300, symbol: "BTCUSDT", direction: "long", entry: true },
@@ -281,12 +287,20 @@ assert.match(deskSource, /const visibleBarCount = 9_000/, "the dedicated chart e
 for (const label of ["INPUTS", "PROPERTIES", "STYLE", "VISIBILITY", "Default order size", "Long leverage", "Short leverage", "Percentage to Exit at Each ATR TP Level"]) assert.match(settingsSource, new RegExp(label, "i"));
 assert.match(settingsSource, /Full account equity · API/, "connected-account equity is identified as authoritative broker data");
 assert.match(settingsSource, /if \(!dirty\.current\)/, "workspace refreshes cannot overwrite unsaved numeric edits");
+assert.match(settingsSource, /setValue\(structuredClone\(submitted\)\)/, "a successful save retains the submitted form instead of restoring its stale pre-save snapshot");
+assert.match(settingsSource, /cannot exceed the broker's current available funds/, "fixed-USDT sizing is bounded by authoritative broker funds in the settings surface");
 assert.match(cockpitSource, /SETTINGS DESTINATION/, "the settings tab explicitly selects Paper or one of the connected destinations");
 assert.match(cockpitSource, /snapshot\?\.equity/, "the selected destination's API equity is supplied to the settings panel");
+assert.match(cockpitSource, /snapshot\?\.availableBalance/, "the selected destination's current available funds constrain fixed-USDT sizing");
 assert.match(serviceSource, /clean\[0\] === "group-execution-desks"/);
 assert.match(repositorySource, /Join this Investment Group before opening its Strategy Execution Desk/);
 assert.doesNotMatch(repositorySource, /row\.running_version\s*\?\?[\s\S]{0,100}row\.current_version/, "published versions never masquerade as explicitly started runtime versions");
 assert.match(workerSource, /Number\(strategy\.running_version \?\? 0\)/, "the VPS worker leases only an explicitly started version");
+assert.match(workerSource, /const venueTimestamp = Number\(payload\.time\)/, "Bybit server time, not VPS clock drift, certifies a candle boundary");
+assert.match(workerSource, /positionAwareStrategyEntries\([\s\S]*signals,[\s\S]*pyramiding/, "the VPS accepts only Pine position transitions, never a repeated same-direction setup on a newly armed account");
+assert.match(workerSource, /candidateSignal\.direction !== persistedDirection/, "persisted Pine direction survives rolling candle windows and suppresses restart duplicates");
+assert.match(deskSource, /adaptiveSwingStrategy: false/, "the dedicated chart never starts a second intrabar signal engine beside its certified markers");
+assert.match(repositorySource, /STRATEGY_TRADE_AMOUNT_EXCEEDS_AVAILABLE_FUNDS/, "the server rejects a fixed order amount above synchronized broker funds");
 assert.match(workerSource, /nextTickReference/, "paper reversals use the next available tick rather than the already-closed signal price");
 assert.match(workerSource, /refreshPaperTakeProfitPlan/, "the paper runtime updates Pine-style dynamic ATR targets after each completed candle");
 assert.match(repositorySource, /definition:\s*\{[\s\S]*settings: \{\},[\s\S]*execution: \{\}/);

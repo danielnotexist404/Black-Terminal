@@ -15,6 +15,9 @@ export function StrategyControlPanelDialog({
   nativeInputs = [],
   sourceKey = "default",
   authoritativeEquity,
+  authoritativeAvailableBalance,
+  authoritativeEquityTimestamp,
+  authoritativeFreshness,
   embedded = false,
   busy,
   onCancel,
@@ -27,6 +30,9 @@ export function StrategyControlPanelDialog({
   nativeInputs?: CompiledScriptInput[];
   sourceKey?: string;
   authoritativeEquity?: number;
+  authoritativeAvailableBalance?: number;
+  authoritativeEquityTimestamp?: number;
+  authoritativeFreshness?: string;
   embedded?: boolean;
   busy: boolean;
   onCancel: () => void;
@@ -37,12 +43,6 @@ export function StrategyControlPanelDialog({
   const [settings, setSettings] = useState<Record<string, unknown>>(() => initialNativeSettings(nativeInputs, initialSettings));
   const [error, setError] = useState<string>();
   const dirty = useRef(false);
-  const latestInitial = useRef(initial);
-  const latestInitialSettings = useRef(initialSettings);
-  const latestNativeInputs = useRef(nativeInputs);
-  latestInitial.current = initial;
-  latestInitialSettings.current = initialSettings;
-  latestNativeInputs.current = nativeInputs;
   // Cockpit snapshots refresh every few seconds and reconstruct equivalent
   // objects. Depending on object identity here reset in-progress edits on each
   // refresh, making the controls appear locked. Reset only when the persisted
@@ -70,14 +70,21 @@ export function StrategyControlPanelDialog({
   const reset = () => { dirty.current = false; setValue(structuredClone(initial)); setSettings(initialNativeSettings(nativeInputs, initialSettings)); setError(undefined); if (!embedded) onCancel(); };
   const submit = async () => {
     setError(undefined);
+    const sizingError = validateOrderSize(value, authoritativeEquity, authoritativeAvailableBalance);
+    if (sizingError) { setError(sizingError); return; }
     const submitted = authoritativeEquity && authoritativeEquity > 0
       ? { ...value, properties: { ...value.properties, initialCapital: authoritativeEquity, currency: "USDT" as const } }
       : value;
+    const submittedSettings = nativeInputs.length ? structuredClone(settings) : undefined;
     try {
-      await onApply(submitted, nativeInputs.length ? settings : undefined);
+      await onApply(submitted, submittedSettings);
+      // Keep the exact successfully submitted values in the form. React may not
+      // have committed the parent's refreshed VPS snapshot yet when onApply
+      // resolves; restoring `initial` here used to visibly roll every field back
+      // to the pre-save values.
       dirty.current = false;
-      setValue(structuredClone(latestInitial.current));
-      setSettings(initialNativeSettings(latestNativeInputs.current, latestInitialSettings.current));
+      setValue(structuredClone(submitted));
+      if (submittedSettings) setSettings(submittedSettings);
     }
     catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Strategy configuration could not be saved."); }
   };
@@ -86,7 +93,7 @@ export function StrategyControlPanelDialog({
       <nav aria-label="Strategy settings sections">{(["inputs", "properties", "style", "visibility"] as Tab[]).map((item) => <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item.toUpperCase()}</button>)}</nav>
       <div key={tab} className="strategy-control-scroll" tabIndex={0} aria-label={`${tab} strategy settings controls`}>
         {tab === "inputs" ? nativeInputs.length ? <NativeInputs inputs={nativeInputs} settings={settings} onChange={(key, next) => { markDirty(); setSettings((current) => ({ ...current, [key]: next })); }} /> : <Inputs value={value} patch={patchInputs} /> : null}
-        {tab === "properties" ? <Properties value={value} patch={patchProperties} accountLabel={accountLabel} authoritativeEquity={authoritativeEquity} /> : null}
+        {tab === "properties" ? <Properties value={value} patch={patchProperties} accountLabel={accountLabel} authoritativeEquity={authoritativeEquity} authoritativeAvailableBalance={authoritativeAvailableBalance} authoritativeEquityTimestamp={authoritativeEquityTimestamp} authoritativeFreshness={authoritativeFreshness} /> : null}
         {tab === "style" ? <Style value={value} patch={patchStyle} /> : null}
         {tab === "visibility" ? <Visibility value={value} patch={patchVisibility} /> : null}
       </div>
@@ -133,14 +140,19 @@ function Inputs({ value, patch }: { value: StrategyControlPanel; patch: (value: 
   </div>;
 }
 
-function Properties({ value, patch, accountLabel, authoritativeEquity }: { value: StrategyControlPanel; patch: (value: Partial<StrategyControlPanel["properties"]>) => void; accountLabel: string; authoritativeEquity?: number }) {
+function Properties({ value, patch, accountLabel, authoritativeEquity, authoritativeAvailableBalance, authoritativeEquityTimestamp, authoritativeFreshness }: { value: StrategyControlPanel; patch: (value: Partial<StrategyControlPanel["properties"]>) => void; accountLabel: string; authoritativeEquity?: number; authoritativeAvailableBalance?: number; authoritativeEquityTimestamp?: number; authoritativeFreshness?: string }) {
   const item = value.properties;
   const liveEquity = authoritativeEquity && authoritativeEquity > 0 ? authoritativeEquity : undefined;
+  const available = authoritativeAvailableBalance !== undefined && Number.isFinite(authoritativeAvailableBalance) ? Math.max(0, authoritativeAvailableBalance) : undefined;
+  const fixedUsdtLimit = liveEquity === undefined ? undefined : Math.min(liveEquity, available ?? liveEquity);
+  const orderSizeMaximum = item.orderSizeMode === "PERCENT_EQUITY" ? 100 : item.orderSizeMode === "FIXED_USDT" ? fixedUsdtLimit : undefined;
+  const syncLabel = authoritativeEquityTimestamp ? new Date(authoritativeEquityTimestamp).toLocaleTimeString() : "awaiting timestamp";
   return <div className="strategy-control-form properties">
     <h3>GENERAL</h3>
     <ChoiceRow label={liveEquity ? "Full account equity · API" : "Initial capital"}><input className={liveEquity ? "authoritative" : undefined} type="number" min="1" readOnly={Boolean(liveEquity)} value={liveEquity ?? item.initialCapital} onChange={(event) => patch({ initialCapital: numeric(event, item.initialCapital) })} /><select disabled={Boolean(liveEquity)} value={liveEquity ? "USDT" : item.currency} onChange={(event) => patch({ currency: event.target.value as typeof item.currency })}><option>USD</option><option>USDT</option></select></ChoiceRow>
-    {liveEquity ? <p className="strategy-control-equity-source">LIVE BROKER EQUITY · refreshed from the selected account; percentage sizing uses the server's latest balance again when the alert executes.</p> : null}
-    <ChoiceRow label="Default order size"><input type="number" min="0.00000001" value={item.orderSizeValue} onChange={(event) => patch({ orderSizeValue: numeric(event, item.orderSizeValue) })} /><select value={item.orderSizeMode} onChange={(event) => patch({ orderSizeMode: event.target.value as typeof item.orderSizeMode })}><option value="PERCENT_EQUITY">% of equity</option><option value="FIXED_USDT">USDT balance</option><option value="FIXED_QUANTITY">Raw quantity</option></select></ChoiceRow>
+    {liveEquity ? <p className="strategy-control-equity-source">LIVE BROKER EQUITY · {authoritativeFreshness || "SYNCED"} · {syncLabel}{available !== undefined ? ` · ${available.toLocaleString(undefined, { maximumFractionDigits: 8 })} USDT available` : ""}. The field is broker-owned and updates automatically; execution reads Bybit again when an alert fires.</p> : null}
+    <ChoiceRow label="Default order size"><input type="number" min="0.00000001" max={orderSizeMaximum} value={item.orderSizeValue} onChange={(event) => patch({ orderSizeValue: numeric(event, item.orderSizeValue) })} /><select value={item.orderSizeMode} onChange={(event) => patch({ orderSizeMode: event.target.value as typeof item.orderSizeMode })}><option value="PERCENT_EQUITY">% of equity</option><option value="FIXED_USDT">USDT balance</option><option value="FIXED_QUANTITY">Raw quantity</option></select></ChoiceRow>
+    {fixedUsdtLimit !== undefined && item.orderSizeMode === "FIXED_USDT" ? <p className="strategy-control-field-limit">CURRENT MAXIMUM · {fixedUsdtLimit.toLocaleString(undefined, { maximumFractionDigits: 8 })} USDT</p> : null}
     <NumberRow label="Pyramiding" value={item.pyramiding} min={1} max={100} onChange={(pyramiding) => patch({ pyramiding })} />
     <h3>DETAILIZATION AND EXECUTION</h3>
     <SelectRow label="Bar detailization" value={item.barDetailization} onChange={(barDetailization) => patch({ barDetailization: barDetailization as typeof item.barDetailization })}><option value="DEFAULT_4_TICKS">Default (4 ticks per bar)</option><option value="CLOSED_BAR">Closed bar OHLC</option></SelectRow>
@@ -182,5 +194,16 @@ function NumberRow({ label, value, min, max, step, suffix, disabled, onChange }:
 function CheckRow({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (value: boolean) => void }) { return <label className="strategy-control-check"><input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} /><span>{label}</span></label>; }
 function SelectRow({ label, value, children, onChange }: { label: string; value: string; children: ReactNode; onChange: (value: string) => void }) { return <label className="strategy-control-row"><span>{label}</span><select value={value} onChange={(event) => onChange(event.target.value)}>{children}</select></label>; }
 function ChoiceRow({ label, children }: { label: string; children: ReactNode }) { return <label className="strategy-control-row choice"><span>{label}</span><span>{children}</span></label>; }
+function validateOrderSize(value: StrategyControlPanel, authoritativeEquity?: number, authoritativeAvailableBalance?: number) {
+  const amount = Number(value.properties.orderSizeValue);
+  if (!Number.isFinite(amount) || amount <= 0) return "Default order size must be greater than zero.";
+  if (value.properties.orderSizeMode === "PERCENT_EQUITY" && amount > 100) return "Default order size cannot exceed 100% of the selected account equity.";
+  if (value.properties.orderSizeMode === "FIXED_USDT" && authoritativeEquity !== undefined && authoritativeEquity > 0) {
+    const available = authoritativeAvailableBalance !== undefined && Number.isFinite(authoritativeAvailableBalance) ? Math.max(0, authoritativeAvailableBalance) : authoritativeEquity;
+    const limit = Math.min(authoritativeEquity, available);
+    if (amount > limit + 1e-8) return `Default order size cannot exceed the broker's current available funds (${limit.toLocaleString(undefined, { maximumFractionDigits: 8 })} USDT).`;
+  }
+  return undefined;
+}
 function VisualRow({ label, checked, color, width, onCheck, onColor, onWidth }: { label: string; checked: boolean; color: string; width: number; onCheck: (value: boolean) => void; onColor: (value: string) => void; onWidth: (value: number) => void }) { return <div className="strategy-control-visual"><label><input type="checkbox" checked={checked} onChange={(event) => onCheck(event.target.checked)} />{label}</label><input type="color" value={color} onChange={(event) => onColor(event.target.value)} /><span className="line" style={{ color, height: Math.max(1, width) }} /><select value={width} onChange={(event) => onWidth(Number(event.target.value))}>{[1,2,3,4,5].map((item) => <option key={item}>{item}</option>)}</select></div>; }
 function numeric(event: ChangeEvent<HTMLInputElement>, fallback: number) { const value = Number(event.target.value); return Number.isFinite(value) ? value : fallback; }

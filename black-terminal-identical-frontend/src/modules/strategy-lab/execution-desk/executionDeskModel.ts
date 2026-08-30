@@ -170,6 +170,16 @@ export function executionMarkers(actions: readonly ExecutionDeskAction[], candle
 }
 
 /**
+ * The final market-data row is always treated as provisional. A browser clock
+ * may be ahead of the exchange, so elapsed wall time alone cannot certify that
+ * row. It becomes eligible only after the feed has appended its successor.
+ */
+export function confirmedStrategyCandles(candles: readonly Candle[], intervalSeconds: number, nowSeconds = Date.now() / 1000) {
+  if (candles.length < 2) return [];
+  return candles.slice(0, -1).filter((candle) => candle.time + intervalSeconds <= nowSeconds);
+}
+
+/**
  * Closed-bar strategy signals are research/runtime decisions, not broker
  * fills. They are therefore rendered on the dedicated chart but deliberately
  * excluded from the authoritative action tape and performance statistics.

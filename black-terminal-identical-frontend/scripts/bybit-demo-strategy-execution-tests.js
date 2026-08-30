@@ -80,6 +80,9 @@ assert.match(cloudRoute, /allow_strategy_execution/);
 assert.doesNotMatch(cloudRoute, /prompt\s*\(|window\.prompt|ENABLE OFFLINE CLOUD EXECUTION/, "demo delegation has no phrase-entry gate");
 
 assert.match(signalWorker, /execution_commands/);
+assert.match(signalWorker, /const venueTimestamp = Number\(payload\.time\)/, "closed-candle execution uses Bybit server time instead of a potentially fast VPS clock");
+assert.match(signalWorker, /positionAwareStrategyEntries\([\s\S]*signals,[\s\S]*pyramiding/, "the live worker suppresses Pine same-direction setup repeats before any durable broker command is emitted");
+assert.match(signalWorker, /candidateSignal\.direction !== persistedDirection/, "the last persisted Pine direction prevents duplicate entry after worker restart or a rolling-history boundary");
 assert.match(signalWorker, /strategy_signal_key/);
 assert.match(signalWorker, /deterministic_client_order_id/);
 assert.match(signalWorker, /conflictResolution/);
@@ -112,6 +115,9 @@ assert.match(brokerWorker, /if \(!reduceOnly && leverageConfiguration\)/, "take-
 assert.match(bybitAdapter, /configureLeverage\(request\)[\s\S]*setBybitLeverage/, "the certified adapter uses Bybit's dedicated position leverage endpoint");
 assert.match(connectionSupervisor, /latestStrategyOrder/);
 assert.match(connectionSupervisor, /strategy_target_binding_id/, "position attribution requires a preceding strategy order");
+assert.match(connectionSupervisor, /await this\.attributeStrategyState\(runtime\)/, "Demo and Mainnet strategy fills receive the same ownership reconciliation");
+assert.match(connectionSupervisor, /\.eq\("reduce_only", false\)/, "a reduce-only exit can never establish strategy ownership of a venue position");
+assert.match(connectionSupervisor, /\.eq\("direction", direction\)\.is\("strategy_target_binding_id", null\)/, "ownership is assigned only to the exact still-unowned strategy direction");
 
 assert.match(migration, /idx_execution_commands_strategy_signal/);
 assert.match(migration, /idx_strategy_target_one_live_per_account/);

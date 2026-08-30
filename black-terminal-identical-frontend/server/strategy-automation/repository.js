@@ -432,6 +432,13 @@ export async function updateTargetPolicy(supabase, userId, strategyId, bindingId
   const binding = await ownedBinding(supabase, userId, strategyId, bindingId);
   const nextPolicy = normalizeCapitalPolicy(body.capitalPolicy, binding.market_type, { allowZeroAllocation: true });
   assertPolicyWithinGlobal(nextPolicy, strategy.global_capital_policy, binding.market_type);
+  if (binding.target_type === "BROKER_ACCOUNT" && nextPolicy.tradeAmountMode === "FIXED_USDT") {
+    const snapshot = await buildBindingSnapshot(supabase, userId, binding);
+    const currentLimit = Math.max(0, Math.min(Number(snapshot.equity || 0), Number(snapshot.availableBalance || 0)));
+    if (nextPolicy.tradeAmountValue > currentLimit + 1e-8) {
+      throw strategyError(400, "STRATEGY_TRADE_AMOUNT_EXCEEDS_AVAILABLE_FUNDS", "The fixed per-trade amount exceeds the broker account's current available funds.", { requested: nextPolicy.tradeAmountValue, available: currentLimit, equity: snapshot.equity });
+    }
+  }
   const increased = riskIncrease(policyFromBinding(binding), nextPolicy, binding.market_type);
   const requestHash = canonicalRequestHash({ action: "UPDATE_POLICY", expectedVersion: Number(body.expectedVersion), policy: nextPolicy });
   const { error } = await supabase.rpc("black_core_update_strategy_target_policy", {

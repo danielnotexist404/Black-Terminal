@@ -292,7 +292,10 @@ export function calculateCapitalPreview({ equity, availableBalance, policy, mark
 
 export function calculateEffectiveLeverage(values = {}) {
   const caps = [values.requested, values.targetMaximum, values.accountRiskCap, values.groupMandateCap, values.emsRiskCap, values.providerCap]
-    .filter((value) => value !== undefined && value !== null)
+    // Account and mandate rows use zero as the explicit "limit disabled"
+    // sentinel for every optional risk ceiling. Treating zero as a 1x cap
+    // silently discarded the strategy's saved leverage request.
+    .filter((value) => value !== undefined && value !== null && finite(value) > 0)
     .map((value) => Math.max(1, finite(value)));
   return caps.length ? Math.min(...caps) : 1;
 }

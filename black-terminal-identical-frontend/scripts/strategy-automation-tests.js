@@ -125,6 +125,7 @@ assert.equal(twentyPercentAtFiveX.entryCapital, 2_000, "20% of the latest accoun
 assert.equal(twentyPercentAtFiveX.estimatedNotional, 10_000, "20% equity at 5x produces 100% equity notional before risk and venue caps");
 
 assert.equal(calculateEffectiveLeverage({ requested: 20, targetMaximum: 15, accountRiskCap: 10, groupMandateCap: 8, emsRiskCap: 6, providerCap: 12 }), 6);
+assert.equal(calculateEffectiveLeverage({ requested: 5, targetMaximum: 10, accountRiskCap: 0, emsRiskCap: null }), 5, "a zero optional risk cap means disabled and must not force strategy leverage back to 1x");
 const spotPolicy = defaultPaperCapitalPolicy("SPOT");
 assert.equal(spotPolicy.requestedLeverage, undefined);
 assert.equal(spotPolicy.maximumLeverage, undefined);

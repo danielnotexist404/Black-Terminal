@@ -46,3 +46,4 @@
 202608300003|strategy_superatr_group_take_profits
 202608300004|strategy_execution_lease_retry_safety
 202608300005|strategy_superatr_live_repricing
+202608300006|strategy_target_resume_activation

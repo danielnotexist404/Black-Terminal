@@ -20,6 +20,7 @@ const authoritativeEquityMigration = fs.readFileSync(path.join(root, "supabase/m
 const superAtrGroupTakeProfitMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608300003_strategy_superatr_group_take_profits.sql"), "utf8");
 const executionLeaseRetrySafetyMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608300004_strategy_execution_lease_retry_safety.sql"), "utf8");
 const superAtrLiveRepricingMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608300005_strategy_superatr_live_repricing.sql"), "utf8");
+const strategyTargetResumeActivationMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608300006_strategy_target_resume_activation.sql"), "utf8");
 const db = new PGlite();
 
 await db.exec(`
@@ -109,6 +110,7 @@ await db.exec(authoritativeEquityMigration);
 await db.exec(superAtrGroupTakeProfitMigration);
 await db.exec(executionLeaseRetrySafetyMigration);
 await db.exec(superAtrLiveRepricingMigration);
+await db.exec(strategyTargetResumeActivationMigration);
 await db.exec("set request.jwt.claim.role='service_role'");
 
 const ownerId = crypto.randomUUID();
@@ -270,6 +272,16 @@ const armExpectedVersion = resumeExpectedVersion + 1;
 const armHash = sha({ action: "ARM", expectedVersion: armExpectedVersion, disconnectPolicy: null });
 const arm = await call("select public.black_core_control_strategy_target($1,$2,$3,$4,'ARM',$5::jsonb,null,$6,$7) as result", [ownerId, strategyId, firstBinding.id, armExpectedVersion, json({ eligible: true, checkedAt: "test" }), armHash, "target-arm-demo-test-0001"]);
 assert.equal(arm.result.status, "LIVE", "a funded, eligible demo target can be armed by the service boundary");
+assert.equal(await scalar("select status as value from public.strategy_automation_strategies where id=$1", [strategyId]), "LIVE_ACTIVE", "arming activates the parent VPS evaluator");
+const armedPauseExpectedVersion = armExpectedVersion + 1;
+const armedPauseHash = sha({ action: "PAUSE", expectedVersion: armedPauseExpectedVersion, disconnectPolicy: null });
+await call("select public.black_core_control_strategy_target($1,$2,$3,$4,'PAUSE','{}'::jsonb,null,$5,$6) as result", [ownerId, strategyId, firstBinding.id, armedPauseExpectedVersion, armedPauseHash, "target-armed-pause-test-0001"]);
+await db.query("update public.strategy_automation_strategies set status='PAPER_PAUSED' where id=$1", [strategyId]);
+const armedResumeExpectedVersion = armedPauseExpectedVersion + 1;
+const armedResumeHash = sha({ action: "RESUME", expectedVersion: armedResumeExpectedVersion, disconnectPolicy: null });
+const armedResume = await call("select public.black_core_control_strategy_target($1,$2,$3,$4,'RESUME',$5::jsonb,null,$6,$7) as result", [ownerId, strategyId, firstBinding.id, armedResumeExpectedVersion, json({ eligible: true, checkedAt: "test" }), armedResumeHash, "target-armed-resume-test-0001"]);
+assert.equal(armedResume.result.status, "LIVE", "an armed target resumes directly to live execution");
+assert.equal(await scalar("select status as value from public.strategy_automation_strategies where id=$1", [strategyId]), "LIVE_ACTIVE", "resuming an armed target reactivates the parent VPS evaluator");
 const secondBinding = await call("select id from public.strategy_target_bindings where strategy_id=$1 and id<>$2 and status<>'DISCONNECTED' limit 1", [strategyId, firstBinding.id]);
 const armedAccountId = await scalar("select account_id as value from public.strategy_target_bindings where id=$1", [firstBinding.id]);
 await assert.rejects(() => db.query("update public.strategy_target_bindings set account_id=$1,status='LIVE' where id=$2", [armedAccountId, secondBinding.id]), /idx_strategy_target_one_live_per_account|unique/i, "one demo account cannot be armed by two strategies or bindings");

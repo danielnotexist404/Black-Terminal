@@ -32,8 +32,14 @@ export function StrategyControlPanelDialog({
   const [value, setValue] = useState(() => structuredClone(initial));
   const [settings, setSettings] = useState<Record<string, unknown>>(() => initialNativeSettings(nativeInputs, initialSettings));
   const [error, setError] = useState<string>();
-  useEffect(() => setValue(structuredClone(initial)), [initial]);
-  useEffect(() => setSettings(initialNativeSettings(nativeInputs, initialSettings)), [initialSettings, nativeInputs]);
+  // Cockpit snapshots refresh every few seconds and reconstruct equivalent
+  // objects. Depending on object identity here reset in-progress edits on each
+  // refresh, making the controls appear locked. Reset only when the persisted
+  // configuration values actually change.
+  const initialSignature = JSON.stringify(initial);
+  const nativeSettingsSignature = JSON.stringify([nativeInputs, initialSettings]);
+  useEffect(() => setValue(structuredClone(initial)), [initialSignature]);
+  useEffect(() => setSettings(initialNativeSettings(nativeInputs, initialSettings)), [nativeSettingsSignature]);
   const patchInputs = (patch: Partial<StrategyControlPanel["inputs"]>) => setValue((current) => ({ ...current, inputs: { ...current.inputs, ...patch } }));
   const patchProperties = (patch: Partial<StrategyControlPanel["properties"]>) => setValue((current) => ({ ...current, properties: { ...current.properties, ...patch } }));
   const patchStyle = (patch: Partial<StrategyControlPanel["style"]>) => setValue((current) => ({ ...current, style: { ...current.style, ...patch } }));

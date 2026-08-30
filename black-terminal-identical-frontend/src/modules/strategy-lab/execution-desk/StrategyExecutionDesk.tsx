@@ -25,6 +25,7 @@ import {
   executionDeskData,
   executionMarkers,
   strategySignalMarkers,
+  superAtrHistoricalStrategyMarkers,
   type ExecutionDeskAction,
   type ExecutionDeskData,
   type ExecutionDeskMetrics,
@@ -238,7 +239,7 @@ function ExecutionDeskSurface({
 
     {error ? <div className="execution-desk-warning"><WifiOff size={13} />{error} Last-known authoritative data remains visible.</div> : null}
     <div className="execution-desk-chart-shell">
-      <div className="execution-desk-chart-toolbar"><div><span>DEDICATED ALGORITHMIC CHART</span><strong>{strategy.symbol} · {strategy.timeframe.toUpperCase()}</strong></div><div className={`execution-desk-feed ${feedState}`}><Wifi size={11} /><span>{feedMessage}</span></div><div><span>STRATEGY SOURCE</span><strong>{strategy.definition.indicator?.instanceName || strategy.definition.indicator?.name || strategy.definition.runtimeKind}</strong></div><div><span>LATEST ACTION</span><strong className={latestAction?.direction || "neutral"}>{latestAction?.action || "AWAITING SIGNAL"}</strong></div></div>
+      <div className="execution-desk-chart-toolbar"><div><span>DEDICATED ALGORITHMIC CHART</span><strong>{strategy.symbol} · {strategy.timeframe.toUpperCase()}</strong></div><div className={`execution-desk-feed ${feedState}`}><Wifi size={11} /><span>{feedMessage}</span></div><div><span>STRATEGY SOURCE</span><strong>{strategy.definition.indicator?.instanceName || strategy.definition.indicator?.name || strategy.definition.runtimeKind}{superAtrControlsAvailable ? ` · TP1–TP7 ${controlPanel.inputs.multiStepTakeProfit ? "ACTIVE" : "OFF"}` : ""}</strong></div><div><span>LATEST ACTION</span><strong className={latestAction?.direction || "neutral"}>{latestAction?.action || "AWAITING SIGNAL"}</strong></div></div>
       <DedicatedStrategyChart definition={strategy.definition} candles={candles} markers={markers} />
       {!candles.length ? <div className="execution-desk-chart-empty"><Activity size={20} /><strong>LOADING {strategy.exchange.toUpperCase()} {strategy.symbol}</strong><span>The dedicated strategy feed is independent from the discretionary chart.</span></div> : null}
     </div>
@@ -334,10 +335,13 @@ function historicalSignalMarkers(definition: StrategyAutomationDefinition, calcu
     // available tick (the following bar's open in a historical OHLC backtest).
     const processOrdersOnClose = definition.execution?.executionDelay === "NONE"
       && definition.execution?.processOrdersOnClose === true;
-    return strategySignalMarkers(signals, visibleCandles, intervalSeconds, {
+    const options = {
       pyramiding: panel.properties.pyramiding,
       processOrdersOnClose,
-    });
+    };
+    return definition.runtimeKind === "builtin-superatr-seven-step"
+      ? superAtrHistoricalStrategyMarkers(signals, confirmedCandles, visibleCandles, intervalSeconds, definition.settings, options)
+      : strategySignalMarkers(signals, visibleCandles, intervalSeconds, options);
   } catch {
     return [];
   }

@@ -1,7 +1,11 @@
 import type { CompiledMarker } from "../../../components/ScriptCompiler";
 import type { Candle } from "../../../chart-engine/types";
-import type { StrategySignal } from "../types/strategy.types";
-import { positionAwareStrategyEntries } from "../adapters/signalAdapter.ts";
+import type { StrategySettings, StrategySignal } from "../types/strategy.types";
+import {
+  positionAwareStrategyEntries,
+  superAtrTakeProfitAtrSeries,
+  superAtrTakeProfitPlanFromAtr,
+} from "../adapters/signalAdapter.ts";
 import type { StrategyPaperAccount, StrategyTargetSnapshot } from "../automation/strategyAutomation.types";
 
 export type ExecutionDeskData = {
@@ -220,6 +224,131 @@ export function strategySignalMarkers(
     });
   }
   return markers;
+}
+
+/**
+ * Replays SuperATR's seven strategy.exit limit orders one candle at a time.
+ * Orders calculated at a bar close are eligible only from the following bar,
+ * ATR exits are repriced after every completed candle, and each exit ID can
+ * fill only once for a position. These markers remain research projections;
+ * authoritative broker/paper fills still come from the execution ledger.
+ */
+export function superAtrHistoricalStrategyMarkers(
+  signals: readonly StrategySignal[],
+  calculationCandles: readonly Candle[],
+  visibleCandles: readonly Candle[],
+  intervalSeconds: number,
+  settings: StrategySettings,
+  options: { pyramiding?: number; processOrdersOnClose?: boolean } = {},
+): CompiledMarker[] {
+  const entryMarkers = strategySignalMarkers(signals, visibleCandles, intervalSeconds, options);
+  if (!calculationCandles.length || !visibleCandles.length || settings.superAtrMultiStepTakeProfit === false) return entryMarkers;
+
+  type Target = { id: string; price: number; quantityPercent: number };
+  type Position = {
+    direction: "long" | "short";
+    entryPrice: number;
+    entryTime: number;
+    filled: Set<string>;
+    filledPercent: number;
+    activeTargets: Target[];
+  };
+
+  const orderedCandles = [...calculationCandles].sort((left, right) => left.time - right.time);
+  const transitionsByTime = new Map<number, StrategySignal>();
+  for (const signal of positionAwareStrategyEntries(signals, options.pyramiding)) {
+    const fillTime = signal.timestamp + (options.processOrdersOnClose === false ? intervalSeconds : 0);
+    transitionsByTime.set(fillTime, signal);
+  }
+  const atrSeries = superAtrTakeProfitAtrSeries(orderedCandles, settings);
+  const projected: Array<{ id: string; time: number; price: number; direction: "long" | "short"; target: string }> = [];
+  let position: Position | null = null;
+
+  const openPosition = (signal: StrategySignal, candle: Candle, price: number): Position | null => {
+    if (signal.direction !== "long" && signal.direction !== "short") return null;
+    return {
+      direction: signal.direction,
+      entryPrice: price,
+      entryTime: candle.time,
+      filled: new Set<string>(),
+      filledPercent: 0,
+      activeTargets: [],
+    };
+  };
+
+  for (let index = 0; index < orderedCandles.length; index += 1) {
+    const candle = orderedCandles[index]!;
+    const transition = transitionsByTime.get(candle.time);
+    let openedAtClose = false;
+
+    // TradingView's default market fill happens at the next bar open. The
+    // reversal closes the previous entry and cancels its remaining exits
+    // before the new position's intrabar range is evaluated.
+    if (transition && options.processOrdersOnClose === false) position = openPosition(transition, candle, candle.open);
+
+    if (position) {
+      for (const target of position.activeTargets) {
+        if (position.filled.has(target.id) || position.filledPercent >= 100) continue;
+        const touched = position.direction === "long" ? candle.high >= target.price : candle.low <= target.price;
+        if (!touched) continue;
+        const fillPrice = position.direction === "long"
+          ? candle.open >= target.price ? candle.open : target.price
+          : candle.open <= target.price ? candle.open : target.price;
+        const filledPercent = Math.min(target.quantityPercent, 100 - position.filledPercent);
+        if (!(filledPercent > 0)) continue;
+        position.filled.add(target.id);
+        position.filledPercent += filledPercent;
+        projected.push({
+          id: `strategy-tp:${position.entryTime}:${target.id}`,
+          time: candle.time,
+          price: fillPrice,
+          direction: position.direction,
+          target: target.id,
+        });
+      }
+    }
+
+    // With process_orders_on_close enabled, current-bar limit orders had the
+    // intrabar opportunity above; the market reversal then fills at close.
+    if (transition && options.processOrdersOnClose !== false) {
+      position = openPosition(transition, candle, candle.close);
+      openedAtClose = true;
+    }
+
+    if (position && !openedAtClose) {
+      const plan = superAtrTakeProfitPlanFromAtr(position.direction, position.entryPrice, atrSeries[index], settings);
+      let reserved = position.filledPercent;
+      position.activeTargets = plan.flatMap((target) => {
+        if (position!.filled.has(target.id) || reserved >= 100) return [];
+        const quantityPercent = Math.min(target.quantityPercent, 100 - reserved);
+        reserved += quantityPercent;
+        return quantityPercent > 0 ? [{ ...target, quantityPercent }] : [];
+      });
+    }
+  }
+
+  const firstVisible = visibleCandles[0]!.time;
+  const lastVisible = visibleCandles[visibleCandles.length - 1]!.time;
+  const visibleTimes = visibleCandles.map((candle) => candle.time);
+  const takeProfitMarkers = projected.flatMap((fill): CompiledMarker[] => {
+    if (fill.time < firstVisible || fill.time > lastVisible) return [];
+    const index = nearestCandleIndex(visibleTimes, fill.time);
+    if (index < 0) return [];
+    return [{
+      id: fill.id,
+      index,
+      time: visibleCandles[index]!.time,
+      signalPrice: fill.price,
+      value: fill.price,
+      label: fill.target,
+      labelSize: 12,
+      direction: fill.direction,
+      kind: "exit",
+      strategyRole: "takeProfit",
+      color: "#ffd166",
+    }];
+  });
+  return [...entryMarkers, ...takeProfitMarkers].sort((left, right) => left.index - right.index || left.label.localeCompare(right.label));
 }
 
 export function buildExecutionDeskMetrics(

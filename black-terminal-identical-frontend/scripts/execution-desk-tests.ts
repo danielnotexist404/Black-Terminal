@@ -6,6 +6,7 @@ import {
   executionDeskData,
   executionMarkers,
   strategySignalMarkers,
+  superAtrHistoricalStrategyMarkers,
 } from "../src/modules/strategy-lab/execution-desk/executionDeskModel.ts";
 import { applyStrategyControlPanel, readStrategyControlPanel, superAtrTakeProfitAllocation } from "../src/modules/strategy-lab/execution-desk/strategyControlPanelModel.ts";
 import { createSuperAtrSevenStepSignals, positionAwareStrategyEntries, superAtrTakeProfitPlan } from "../src/modules/strategy-lab/adapters/signalAdapter.ts";
@@ -88,6 +89,30 @@ const nextTickMarkers = strategySignalMarkers([
 assert.deepEqual(nextTickMarkers.map((item) => item.label), ["LONG ENTRY"], "a separated repeat in the already-open direction is not a second trade");
 assert.equal(nextTickMarkers[0]?.time, 1_300, "the default Pine one-tick delay fills at the following bar");
 assert.equal(nextTickMarkers[0]?.signalPrice, 101, "a delayed historical market entry uses the following bar open");
+
+const takeProfitCandles = [
+  { time: 1_000, open: 99, high: 101, low: 98, close: 100, volume: 10 },
+  { time: 1_300, open: 100, high: 102, low: 98, close: 100, volume: 10 },
+  { time: 1_600, open: 100, high: 111, low: 99, close: 105, volume: 10 },
+  { time: 1_900, open: 105, high: 115, low: 104, close: 110, volume: 10 },
+];
+const projectedTakeProfits = superAtrHistoricalStrategyMarkers([
+  { timestamp: 1_000, symbol: "BTCUSDT", direction: "long", entry: true },
+], takeProfitCandles, takeProfitCandles, 300, {
+  superAtrMultiStepTakeProfit: true,
+  superAtrTakeProfitAtrLength: 1,
+  superAtrAtrMultipliers: [1, 2, 3, 4],
+  superAtrFixedPercentages: [10, 20, 30],
+  superAtrAtrExitPercent: 10,
+  superAtrFixedExitPercent: 10,
+}, { pyramiding: 1, processOrdersOnClose: false });
+assert.deepEqual(
+  projectedTakeProfits.filter((marker) => marker.strategyRole === "takeProfit").map((marker) => `${marker.label}:${marker.time}`),
+  ["TP1:1600", "TP2:1600", "TP5:1600"],
+  "the chart replays next-bar eligible ATR and fixed partial exits without look-ahead",
+);
+assert.equal(projectedTakeProfits.find((marker) => marker.label === "TP1")?.signalPrice, 104, "a touched limit fills at its limit price");
+assert.equal(projectedTakeProfits.filter((marker) => marker.label === "TP1").length, 1, "one Pine strategy.exit ID fills only once per position");
 
 const baseDefinition = {
   runtimeKind: "builtin-superatr-seven-step" as const,

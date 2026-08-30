@@ -139,6 +139,8 @@ assert.match(cockpit, /StrategyControlPanelDialog embedded/, "saved strategies e
 assert.match(cockpit, /__nativeInputs/, "custom script settings are reconstructed from their literal private manifest");
 assert.match(controlPanel, /className="strategy-control-scroll" tabIndex=\{0\}/, "every strategy settings tab has a keyboard and wheel scroll surface");
 assert.match(controlPanel, /key=\{tab\}/, "switching settings tabs resets the scroll viewport instead of preserving an invisible offset");
+assert.match(controlPanel, /const initialSignature = JSON\.stringify\(initial\)/, "authoritative snapshot polling does not reset in-progress strategy settings edits by object identity");
+assert.doesNotMatch(controlPanel, /setValue\(structuredClone\(initial\)\), \[initial\]/, "equivalent refreshed objects cannot make settings appear hard locked");
 assert.match(theme, /\.my-strategy-experience\s*\{[\s\S]*?height:\s*100%;[\s\S]*?overflow-y:\s*auto;/, "My Strategy owns a contained vertical viewport instead of being clipped by Strategy Lab");
 assert.match(theme, /\.strategy-control-scroll\s*\{[^}]*overflow-y:\s*scroll;/, "Inputs, Properties, Style and Visibility expose a persistent vertical scrollbar");
 assert.match(theme, /\.strategy-control-dialog\s*\{[^}]*background:\s*linear-gradient\([^;]*#010203/, "strategy settings use the Black Terminal black surface rather than the TradingView charcoal surface");

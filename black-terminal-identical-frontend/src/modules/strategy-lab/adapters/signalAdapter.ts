@@ -442,9 +442,24 @@ export function superAtrTakeProfitPlan(
   settings: StrategySettings,
 ) {
   if (settings.superAtrMultiStepTakeProfit === false || !candles.length || !(entryPrice > 0)) return [];
+  const takeProfitAtr = superAtrTakeProfitAtrSeries(candles, settings).at(-1);
+  return superAtrTakeProfitPlanFromAtr(direction, entryPrice, takeProfitAtr, settings);
+}
+
+/** Precomputes Pine ta.atr() once for historical order emulation. */
+export function superAtrTakeProfitAtrSeries(candles: Candle[], settings: StrategySettings) {
   const takeProfitAtrLength = Math.max(1, Math.round(settings.superAtrTakeProfitAtrLength ?? 100));
-  const takeProfitAtr = pineAtr(candles, takeProfitAtrLength).at(-1);
-  if (!Number.isFinite(takeProfitAtr)) return [];
+  return pineAtr(candles, takeProfitAtrLength);
+}
+
+/** Builds the seven Pine strategy.exit prices from the ATR known at bar close. */
+export function superAtrTakeProfitPlanFromAtr(
+  direction: "long" | "short",
+  entryPrice: number,
+  takeProfitAtr: number | undefined,
+  settings: StrategySettings,
+) {
+  if (settings.superAtrMultiStepTakeProfit === false || !(entryPrice > 0) || !Number.isFinite(takeProfitAtr)) return [];
   const atrMultipliers = normalizeNumberList(settings.superAtrAtrMultipliers, [100, 70, 120, 300], 4);
   const fixedPercentages = normalizeNumberList(settings.superAtrFixedPercentages, [21, 21, 75], 3);
   const atrExitPercent = Math.max(0.1, Math.min(100, settings.superAtrAtrExitPercent ?? 10));

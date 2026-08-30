@@ -614,6 +614,8 @@ function expandedGlobalPolicy(globalPolicy: StrategyCapitalPolicy, targetPolicy:
     strategyAllocationValue: globalPolicy.strategyAllocationMode === targetPolicy.strategyAllocationMode ? Math.max(globalPolicy.strategyAllocationValue, targetPolicy.strategyAllocationValue) : globalPolicy.strategyAllocationValue,
     tradeAmountValue: globalPolicy.tradeAmountMode === targetPolicy.tradeAmountMode ? Math.max(globalPolicy.tradeAmountValue, targetPolicy.tradeAmountValue) : globalPolicy.tradeAmountValue,
     requestedLeverage: Math.max(globalPolicy.requestedLeverage || 1, targetPolicy.requestedLeverage || 1),
+    requestedLongLeverage: Math.max(globalPolicy.requestedLongLeverage || globalPolicy.requestedLeverage || 1, targetPolicy.requestedLongLeverage || targetPolicy.requestedLeverage || 1),
+    requestedShortLeverage: Math.max(globalPolicy.requestedShortLeverage || globalPolicy.requestedLeverage || 1, targetPolicy.requestedShortLeverage || targetPolicy.requestedLeverage || 1),
     maximumLeverage: Math.max(globalPolicy.maximumLeverage || 1, targetPolicy.maximumLeverage || 1),
     maximumPositionPercent: Math.max(globalPolicy.maximumPositionPercent, targetPolicy.maximumPositionPercent),
     maximumExposurePercent: Math.max(globalPolicy.maximumExposurePercent, targetPolicy.maximumExposurePercent),

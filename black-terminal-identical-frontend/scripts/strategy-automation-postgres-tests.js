@@ -15,6 +15,7 @@ const archiveMigration = fs.readFileSync(path.join(root, "supabase/migrations/20
 const brokerGroupExecutionMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608240002_strategy_broker_group_execution.sql"), "utf8");
 const nineTargetMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608290001_strategy_lab_nine_target_capacity.sql"), "utf8");
 const superAtrRuntimeMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608290003_strategy_superatr_runtime_kind.sql"), "utf8");
+const sideLeverageMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608300001_strategy_target_side_leverage.sql"), "utf8");
 const db = new PGlite();
 
 await db.exec(`
@@ -93,6 +94,7 @@ await db.exec(archiveMigration);
 await db.exec(brokerGroupExecutionMigration);
 await db.exec(nineTargetMigration);
 await db.exec(superAtrRuntimeMigration);
+await db.exec(sideLeverageMigration);
 await db.exec("set request.jwt.claim.role='service_role'");
 
 const ownerId = crypto.randomUUID();
@@ -196,7 +198,7 @@ assert.equal((await reorder()).result.idempotent, true, "slot reorder retry is i
 assert.equal(await scalar("select slot_index::int as value from public.strategy_target_bindings where id=$1", [beforeReorder.rows[0].id]), 2, "reorder preserves binding identity while changing display slot");
 
 const firstBinding = await call("select * from public.strategy_target_bindings where strategy_id=$1 and slot_index=1 and status<>'DISCONNECTED'", [strategyId]);
-const fundedPolicy = policy({ strategyAllocationValue: 20, tradeAmountValue: 10, maximumLeverage: 3, maximumPositionPercent: 20, maximumExposurePercent: 40, maximumDailyLoss: 250, maximumDrawdown: 10, maximumPositions: 2 });
+const fundedPolicy = policy({ strategyAllocationValue: 20, tradeAmountValue: 10, requestedLongLeverage: 5, requestedShortLeverage: 3, maximumLeverage: 5, maximumPositionPercent: 20, maximumExposurePercent: 40, maximumDailyLoss: 250, maximumDrawdown: 10, maximumPositions: 2 });
 const policyExpectedVersion = Number(firstBinding.row_version);
 const policyRequestHash = sha({ action: "UPDATE_POLICY", expectedVersion: policyExpectedVersion, policy: fundedPolicy });
 const policyKey = "target-policy-test-0001";
@@ -204,6 +206,8 @@ await call("select public.black_core_update_strategy_target_policy($1,$2,$3,$4,$
 const policyReplay = await call("select public.black_core_update_strategy_target_policy($1,$2,$3,$4,$5::jsonb,$6,true,$7,$8) as result", [ownerId, strategyId, firstBinding.id, policyExpectedVersion, json(fundedPolicy), sha(fundedPolicy), policyRequestHash, policyKey]);
 assert.equal(policyReplay.result.idempotent, true, "same optimistic policy replay is idempotent");
 assert.equal(await scalar("select count(*)::int as value from public.strategy_target_policy_versions where binding_id=$1", [firstBinding.id]), 2);
+assert.equal(Number(await scalar("select requested_long_leverage as value from public.strategy_target_bindings where id=$1", [firstBinding.id])), 5, "long leverage persists in the selected execution destination");
+assert.equal(Number(await scalar("select requested_short_leverage as value from public.strategy_target_bindings where id=$1", [firstBinding.id])), 3, "short leverage persists in the selected execution destination");
 
 const pauseExpectedVersion = policyExpectedVersion + 1;
 const pauseHash = sha({ action: "PAUSE", expectedVersion: pauseExpectedVersion, disconnectPolicy: null });

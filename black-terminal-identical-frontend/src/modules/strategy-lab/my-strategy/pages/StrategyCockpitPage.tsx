@@ -1,5 +1,5 @@
 import { ChevronDown, LockKeyhole, RefreshCw } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CompiledScriptInput, ScriptInputValue } from "../../../../components/ScriptCompiler";
 import type { StrategyAutomationDefinition, StrategyCapitalPolicy, StrategyControlPanel, StrategyTargetBinding, StrategyWorkspace } from "../../automation/strategyAutomation.types";
 import { PaperCockpit } from "../cockpit/PaperCockpit";
@@ -57,12 +57,20 @@ export function StrategyCockpitPage(props: Props) {
 
 function StrategySettings({ workspace, busy, onApply }: { workspace: StrategyWorkspace; busy: boolean; onApply: Props["onApplyExecutionConfiguration"] }) {
   const definition = workspace.strategy.draftDefinition || workspace.strategy.definition;
-  const policy = workspace.paper?.capitalPolicy || workspace.strategy.globalCapitalPolicy;
+  const [sourceKey, setSourceKey] = useState(workspace.bindings[0]?.id || "paper");
+  useEffect(() => {
+    if (sourceKey !== "paper" && !workspace.bindings.some((binding) => binding.id === sourceKey)) setSourceKey(workspace.bindings[0]?.id || "paper");
+  }, [sourceKey, workspace.bindings]);
+  const binding = workspace.bindings.find((item) => item.id === sourceKey);
+  const snapshot = binding ? workspace.snapshots.find((item) => item.bindingId === binding.id) : undefined;
+  const policy = binding?.capitalPolicy || workspace.paper?.capitalPolicy || workspace.strategy.globalCapitalPolicy;
+  const accountLabel = binding ? `${String(binding.slotIndex).padStart(2, "0")} · ${binding.targetLabel || binding.targetProvider || binding.targetType}` : "Default strategy policy / Paper";
+  const accountEquity = binding ? snapshot?.equity : workspace.paper?.demoEquity;
   const nativeInputs = definition.runtimeKind === "builtin-superatr-seven-step" ? [] : strategyNativeInputs(definition);
-  const panel = readStrategyControlPanel(definition, policy, workspace.paper?.demoEquity);
+  const panel = readStrategyControlPanel(definition, policy, accountEquity, true);
   return <section className="strategy-settings-page">
-    <header><div><span>DYNAMIC SCRIPT CONTRACT</span><h2>{definition.indicator?.name || workspace.strategy.name}</h2><p>Inputs come from this strategy's own script declaration. Properties control the default sizing and execution policy used by Paper and by newly linked targets; Style and Visibility affect only the dedicated algorithmic chart.</p></div><strong>{workspace.strategy.hasDraftChanges ? "DRAFT CHANGES PENDING" : `SAVED V${workspace.strategy.publishedVersion || "—"}`}</strong></header>
-    <StrategyControlPanelDialog embedded name={workspace.strategy.name} accountLabel="Default strategy policy / Paper" initial={panel} initialSettings={definition.settings as Record<string, unknown>} nativeInputs={nativeInputs} busy={busy} onCancel={() => undefined} onApply={(nextPanel, nativeSettings) => onApply(definition, policy, "paper", nextPanel, nativeSettings)} />
+    <header><div><span>DYNAMIC SCRIPT CONTRACT</span><h2>{definition.indicator?.name || workspace.strategy.name}</h2><p>Inputs come from this strategy's own script declaration. Select a destination to edit the percentage sizing and leverage that its execution worker will enforce.</p><label className="strategy-settings-source"><b>SETTINGS DESTINATION</b><select value={sourceKey} onChange={(event) => setSourceKey(event.target.value)}><option value="paper">PAPER TRADE ACCOUNT</option>{workspace.bindings.map((item) => <option key={item.id} value={item.id}>{String(item.slotIndex).padStart(2, "0")} · {item.targetLabel || item.targetProvider || item.targetType}</option>)}</select></label></div><strong>{workspace.strategy.hasDraftChanges ? "DRAFT CHANGES PENDING" : `SAVED V${workspace.strategy.publishedVersion || "—"}`}</strong></header>
+    <StrategyControlPanelDialog embedded name={workspace.strategy.name} accountLabel={accountLabel} initial={panel} initialSettings={definition.settings as Record<string, unknown>} nativeInputs={nativeInputs} sourceKey={sourceKey} authoritativeEquity={binding ? snapshot?.equity : undefined} busy={busy} onCancel={() => undefined} onApply={(nextPanel, nativeSettings) => onApply(definition, policy, sourceKey, nextPanel, nativeSettings)} />
     <div className="strategy-settings-isolation"><LockKeyhole size={13} /><span>Saving here never loads the strategy onto the discretionary chart and never arms a broker. Existing live targets keep their currently approved immutable version until explicitly migrated.</span></div>
   </section>;
 }

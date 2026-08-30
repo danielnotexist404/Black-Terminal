@@ -1,6 +1,6 @@
 export const PERSISTENT_ADAPTER_OPERATIONS = Object.freeze([
   "verifyCredentials", "connect", "disconnect", "synchronizeAccount",
-  "placeOrder", "modifyOrder", "cancelOrder", "cancelAll",
+  "configureLeverage", "placeOrder", "modifyOrder", "cancelOrder", "cancelAll",
   "fetchOpenOrders", "fetchPositions", "fetchBalances", "fetchExecutions",
   "subscribeAccountEvents", "getHealth", "getCapabilities"
 ]);
@@ -22,6 +22,7 @@ export class ExchangeAdapter {
   connect() { return this.unsupported("connect"); }
   disconnect() { return this.unsupported("disconnect"); }
   synchronizeAccount() { return this.unsupported("synchronizeAccount"); }
+  configureLeverage() { return this.unsupported("configureLeverage"); }
   placeOrder() { return this.unsupported("placeOrder"); }
   placeStrategyOrder() { return this.unsupported("placeStrategyOrder"); }
   modifyOrder() { return this.unsupported("modifyOrder"); }

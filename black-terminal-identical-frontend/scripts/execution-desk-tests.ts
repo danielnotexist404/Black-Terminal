@@ -204,7 +204,19 @@ panel.inputs = { ...panel.inputs, shortPeriod: 3, longPeriod: 8, trendStrengthTh
 const configured = applyStrategyControlPanel(baseDefinition, policy, panel);
 assert.equal(configured.capitalPolicy.tradeAmountMode, "PERCENT_ACCOUNT_EQUITY");
 assert.equal(configured.capitalPolicy.tradeAmountValue, 35);
+assert.equal(configured.capitalPolicy.requestedLongLeverage, 25);
+assert.equal(configured.capitalPolicy.requestedShortLeverage, 15);
 assert.equal(configured.definition.execution.longLeverage, 25);
+const targetSpecificPanel = readStrategyControlPanel(
+  { ...baseDefinition, controlPanel: panel },
+  { ...policy, tradeAmountValue: 20, requestedLongLeverage: 5, requestedShortLeverage: 3 },
+  189_696.35,
+  true,
+);
+assert.equal(targetSpecificPanel.properties.initialCapital, 189_696.35, "the selected broker snapshot supplies full account equity");
+assert.equal(targetSpecificPanel.properties.orderSizeValue, 20, "destination sizing overrides stale definition properties");
+assert.equal(targetSpecificPanel.properties.longLeverage, 5, "destination long leverage overrides stale definition properties");
+assert.equal(targetSpecificPanel.properties.shortLeverage, 3, "destination short leverage overrides stale definition properties");
 assert.deepEqual(superAtrTakeProfitAllocation(panel), [10, 10, 10, 10, 10, 10, 10]);
 const trendingCandles = Array.from({ length: 180 }, (_, index) => {
   const close = 20_000 + index * 40 + index * index * 0.15;
@@ -267,6 +279,10 @@ assert.match(deskSource, /historicalSignalMarkers\(strategy\.definition, calcula
 assert.match(deskSource, /to: oldest - 1/, "the dedicated chart paginates authoritative candles behind the visible window instead of starting flat at the viewport edge");
 assert.match(deskSource, /const visibleBarCount = 9_000/, "the dedicated chart exposes the maximum safe paginated history while retaining a hidden state seed");
 for (const label of ["INPUTS", "PROPERTIES", "STYLE", "VISIBILITY", "Default order size", "Long leverage", "Short leverage", "Percentage to Exit at Each ATR TP Level"]) assert.match(settingsSource, new RegExp(label, "i"));
+assert.match(settingsSource, /Full account equity · API/, "connected-account equity is identified as authoritative broker data");
+assert.match(settingsSource, /if \(!dirty\.current\)/, "workspace refreshes cannot overwrite unsaved numeric edits");
+assert.match(cockpitSource, /SETTINGS DESTINATION/, "the settings tab explicitly selects Paper or one of the connected destinations");
+assert.match(cockpitSource, /snapshot\?\.equity/, "the selected destination's API equity is supplied to the settings panel");
 assert.match(serviceSource, /clean\[0\] === "group-execution-desks"/);
 assert.match(repositorySource, /Join this Investment Group before opening its Strategy Execution Desk/);
 assert.doesNotMatch(repositorySource, /row\.running_version\s*\?\?[\s\S]{0,100}row\.current_version/, "published versions never masquerade as explicitly started runtime versions");

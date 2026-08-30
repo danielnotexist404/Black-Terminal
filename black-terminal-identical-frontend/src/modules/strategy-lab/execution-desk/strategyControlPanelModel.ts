@@ -43,7 +43,7 @@ export const defaultStrategyProperties: StrategyPropertyConfiguration = {
   executionDelay: "ONE_TICK",
 };
 
-export function readStrategyControlPanel(definition: StrategyAutomationDefinition, policy?: StrategyCapitalPolicy | null, initialCapital?: number): StrategyControlPanel {
+export function readStrategyControlPanel(definition: StrategyAutomationDefinition, policy?: StrategyCapitalPolicy | null, initialCapital?: number, preferPolicy = false): StrategyControlPanel {
   const stored = definition.controlPanel;
   const settings = definition.settings as Record<string, unknown>;
   const execution = definition.execution || {};
@@ -74,17 +74,17 @@ export function readStrategyControlPanel(definition: StrategyAutomationDefinitio
       fixedExitPercent: bounded(input?.fixedExitPercent ?? setting("superAtrFixedExitPercent", "tp_percent_fixed", "Percentage to Exit at Each Fixed TP Level"), defaultSuperAtrInputs.fixedExitPercent, 0.1, 100),
     },
     properties: {
-      initialCapital: bounded(properties?.initialCapital ?? initialCapital, defaultStrategyProperties.initialCapital, 1, 1_000_000_000),
+      initialCapital: bounded(initialCapital ?? properties?.initialCapital, defaultStrategyProperties.initialCapital, 1, 1_000_000_000),
       currency: properties?.currency === "USDT" ? "USDT" : "USD",
-      orderSizeValue: bounded(properties?.orderSizeValue ?? policy?.tradeAmountValue, defaultStrategyProperties.orderSizeValue, 0.00000001, 1_000_000_000),
-      orderSizeMode: properties?.orderSizeMode || orderSizeMode,
+      orderSizeValue: bounded(preferPolicy ? policy?.tradeAmountValue ?? properties?.orderSizeValue : properties?.orderSizeValue ?? policy?.tradeAmountValue, defaultStrategyProperties.orderSizeValue, 0.00000001, 1_000_000_000),
+      orderSizeMode: preferPolicy ? orderSizeMode : properties?.orderSizeMode || orderSizeMode,
       pyramiding: Math.round(bounded(properties?.pyramiding ?? execution.pyramiding, 1, 1, 100)),
       barDetailization: properties?.barDetailization || "DEFAULT_4_TICKS",
       executionCadence: properties?.executionCadence || "BAR_CLOSE_AND_REALTIME",
       commissionValue: bounded(properties?.commissionValue ?? finite(execution.feeRate, 0.001) * 100, defaultStrategyProperties.commissionValue, 0, 100),
       commissionMode: properties?.commissionMode || "PERCENT",
-      longLeverage: bounded(properties?.longLeverage ?? execution.longLeverage ?? policy?.requestedLongLeverage ?? leverage, 1, 1, 1_000),
-      shortLeverage: bounded(properties?.shortLeverage ?? execution.shortLeverage ?? policy?.requestedShortLeverage ?? leverage, 1, 1, 1_000),
+      longLeverage: bounded(preferPolicy ? policy?.requestedLongLeverage ?? policy?.requestedLeverage ?? properties?.longLeverage ?? execution.longLeverage : properties?.longLeverage ?? execution.longLeverage ?? policy?.requestedLongLeverage ?? leverage, 1, 1, 1_000),
+      shortLeverage: bounded(preferPolicy ? policy?.requestedShortLeverage ?? policy?.requestedLeverage ?? properties?.shortLeverage ?? execution.shortLeverage : properties?.shortLeverage ?? execution.shortLeverage ?? policy?.requestedShortLeverage ?? leverage, 1, 1, 1_000),
       slippageTicks: Math.round(bounded(properties?.slippageTicks ?? execution.slippageTicks, 1, 0, 100_000)),
       limitExecution: properties?.limitExecution || "REQUESTED_PRICE",
       executionDelay: properties?.executionDelay || "ONE_TICK",

@@ -863,6 +863,8 @@ function policyFromBinding(row) {
     tradeAmountMode: row.trade_amount_mode,
     tradeAmountValue: Number(row.trade_amount_value),
     requestedLeverage: row.requested_leverage == null ? undefined : Number(row.requested_leverage),
+    requestedLongLeverage: row.requested_long_leverage == null ? (row.requested_leverage == null ? undefined : Number(row.requested_leverage)) : Number(row.requested_long_leverage),
+    requestedShortLeverage: row.requested_short_leverage == null ? (row.requested_leverage == null ? undefined : Number(row.requested_leverage)) : Number(row.requested_short_leverage),
     maximumLeverage: row.maximum_leverage == null ? undefined : Number(row.maximum_leverage),
     maximumPositionPercent: Number(row.maximum_position_percent),
     maximumExposurePercent: Number(row.maximum_exposure_percent),

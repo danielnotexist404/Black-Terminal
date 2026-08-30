@@ -224,7 +224,8 @@ function ExecutionDeskSurface({
   const latestAction = actions[0];
   const superAtrControlsAvailable = strategy.definition.runtimeKind === "builtin-superatr-seven-step" || /superatr/i.test(`${strategy.name} ${strategy.definition.indicator?.name || ""}`);
   const selectedPolicy = selected.binding?.capitalPolicy || selected.paper?.capitalPolicy;
-  const controlPanel = useMemo(() => readStrategyControlPanel(strategy.definition, selectedPolicy, selected.paper?.demoEquity), [selected.paper?.demoEquity, selectedPolicy, strategy.definition]);
+  const selectedEquity = selected.snapshot?.equity ?? selected.paper?.demoEquity;
+  const controlPanel = useMemo(() => readStrategyControlPanel(strategy.definition, selectedPolicy, selectedEquity, true), [selectedEquity, selectedPolicy, strategy.definition]);
   return <section className="execution-desk">
     <header className="execution-desk-head">
       <div className="execution-desk-identity"><Crosshair size={16} /><span>STRATEGY EXECUTION DESK</span><strong>{strategy.name}</strong><em>V{strategy.runningVersion || "—"} · {strategy.exchange.toUpperCase()} {strategy.symbol} · {strategy.timeframe.toUpperCase()} · {strategy.marketType}</em></div>
@@ -247,7 +248,7 @@ function ExecutionDeskSurface({
     <ActionMatrix actions={actions} />
     <MetricDeck metrics={metrics} curve={curve} />
     <div className="execution-desk-separation"><Cloud size={13} /><span>This chart is owned by the strategy runtime. It never mounts the strategy onto the default discretionary chart.</span></div>
-    {settingsOpen && selectedPolicy && onApplyConfiguration && superAtrControlsAvailable ? <StrategyControlPanelDialog name={strategy.name} accountLabel={selected.label} initial={controlPanel} busy={busy} onCancel={() => setSettingsOpen(false)} onApply={async (panel) => { await onApplyConfiguration(strategy.definition, selectedPolicy, selected.key, panel); setSettingsOpen(false); }} /> : null}
+    {settingsOpen && selectedPolicy && onApplyConfiguration && superAtrControlsAvailable ? <StrategyControlPanelDialog name={strategy.name} accountLabel={selected.label} initial={controlPanel} sourceKey={selected.key} authoritativeEquity={selected.binding ? selected.snapshot?.equity : undefined} busy={busy} onCancel={() => setSettingsOpen(false)} onApply={async (panel) => { await onApplyConfiguration(strategy.definition, selectedPolicy, selected.key, panel); setSettingsOpen(false); }} /> : null}
   </section>;
 }
 

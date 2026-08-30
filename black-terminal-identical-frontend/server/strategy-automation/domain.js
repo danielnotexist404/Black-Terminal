@@ -234,6 +234,8 @@ export function normalizeCapitalPolicy(value = {}, marketType = "FUTURES", optio
   const tradeAmountValue = bounded(value.tradeAmountValue, 0, ["PERCENT_ACCOUNT_EQUITY", "PERCENT_STRATEGY_ALLOCATION", "RISK_PERCENT"].includes(tradeAmountMode) ? 100 : 1_000_000_000, "per-trade amount");
   if (!options.allowZeroAllocation && strategyAllocationValue <= 0) throw strategyError(400, "STRATEGY_ALLOCATION_REQUIRED", "Strategy allocation must be greater than zero.");
   const requestedLeverage = market === "FUTURES" ? bounded(value.requestedLeverage ?? 1, 1, 1000, "requested leverage") : undefined;
+  const requestedLongLeverage = market === "FUTURES" ? bounded(value.requestedLongLeverage ?? requestedLeverage ?? 1, 1, 1000, "requested long leverage") : undefined;
+  const requestedShortLeverage = market === "FUTURES" ? bounded(value.requestedShortLeverage ?? requestedLeverage ?? 1, 1, 1000, "requested short leverage") : undefined;
   const maximumLeverage = market === "FUTURES" ? bounded(value.maximumLeverage ?? requestedLeverage ?? 1, 1, 1000, "maximum leverage") : undefined;
   return {
     strategyAllocationMode: allocationMode,
@@ -241,6 +243,8 @@ export function normalizeCapitalPolicy(value = {}, marketType = "FUTURES", optio
     tradeAmountMode,
     tradeAmountValue,
     requestedLeverage,
+    requestedLongLeverage,
+    requestedShortLeverage,
     maximumLeverage,
     maximumPositionPercent: bounded(value.maximumPositionPercent ?? 100, 0, 100, "maximum position percentage"),
     maximumExposurePercent: bounded(value.maximumExposurePercent ?? 100, 0, 100, "maximum exposure percentage"),
@@ -382,6 +386,8 @@ export function riskIncrease(previous, next, marketType) {
   const after = normalizeCapitalPolicy(next, marketType, { allowZeroAllocation: true });
   return after.strategyAllocationValue > before.strategyAllocationValue
     || after.tradeAmountValue > before.tradeAmountValue
+    || (after.requestedLongLeverage || 1) > (before.requestedLongLeverage || 1)
+    || (after.requestedShortLeverage || 1) > (before.requestedShortLeverage || 1)
     || (after.maximumLeverage || 1) > (before.maximumLeverage || 1)
     || after.maximumExposurePercent > before.maximumExposurePercent
     || after.maximumPositionPercent > before.maximumPositionPercent

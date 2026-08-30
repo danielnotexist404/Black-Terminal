@@ -552,6 +552,9 @@ export class BlackCloudExecutionWorker {
         endpointProfile: credentials.endpointProfile || connection.endpoint_profile || "GLOBAL",
         connectionId: connection.id
       });
+      if (marketKind !== "spot" && !orderDraft.reduceOnly) {
+        await adapter.configureLeverage({ category, symbol: intent.symbol, leverage: allocation.leverage });
+      }
       venueReport = await adapter.placeOrder(orderDraft, venueValidation);
       this.metricsCounters.ordersSubmitted += 1;
     } catch (error) {
@@ -662,6 +665,7 @@ export class BlackCloudExecutionWorker {
     let positionIdx = 0;
     let policy;
     let effectiveLeverage = 1;
+    let leverageConfiguration = null;
     let estimatedMargin = 0;
     let estimatedNotional = 0;
     if (takeProfitOrder) {
@@ -703,17 +707,28 @@ export class BlackCloudExecutionWorker {
       if (Number.isFinite(dailyLossLimit) && currentAccountPnl <= -dailyLossLimit) {
         throw terminalError("STRATEGY_MAX_DAILY_LOSS", "The Bybit account reached the configured daily-loss ceiling.");
       }
-      effectiveLeverage = binding.market_type === "SPOT" ? 1 : calculateEffectiveLeverage({
-        requested: nullablePositive(payload.requestedLeverage) || policy.requestedLeverage,
+      const leverageCaps = {
         targetMaximum: policy.maximumLeverage,
         accountRiskCap: riskControl?.max_leverage,
         emsRiskCap: automationMandate.max_leverage,
         providerCap: instrument.leverageLimits?.max
+      };
+      effectiveLeverage = binding.market_type === "SPOT" ? 1 : calculateEffectiveLeverage({
+        requested: nullablePositive(payload.requestedLeverage) || policy.requestedLeverage,
+        ...leverageCaps
       });
+      if (binding.market_type !== "SPOT") {
+        const hedgeMode = venuePositions.some((item) => item.positionIdx === 1 || item.positionIdx === 2);
+        const longLeverage = calculateEffectiveLeverage({ requested: policy.requestedLongLeverage || policy.requestedLeverage, ...leverageCaps });
+        const shortLeverage = calculateEffectiveLeverage({ requested: policy.requestedShortLeverage || policy.requestedLeverage, ...leverageCaps });
+        leverageConfiguration = hedgeMode
+          ? { category, symbol, buyLeverage: longLeverage, sellLeverage: shortLeverage }
+          : { category, symbol, leverage: effectiveLeverage };
+      }
       const preview = calculateCapitalPreview({
         equity: wallet.accountMetrics.equityUsd,
         availableBalance: wallet.accountMetrics.availableBalanceUsd,
-        policy,
+        policy: { ...policy, requestedLeverage: effectiveLeverage },
         marketType: binding.market_type,
         caps: { accountRiskCap: riskControl?.max_leverage, emsRiskCap: automationMandate.max_leverage, providerCap: instrument.leverageLimits?.max }
       });
@@ -779,6 +794,7 @@ export class BlackCloudExecutionWorker {
       await this.repository.assertFencingToken(connection.id, fencingToken);
       this.assertSubmissionClockSafe();
       const adapter = createCloudExchangeAdapter("bybit", { credentials, executionEnvironment: credentialEnvironment, endpointProfile: credentials.endpointProfile || "GLOBAL", connectionId: connection.id });
+      if (!reduceOnly && leverageConfiguration) await adapter.configureLeverage(leverageConfiguration);
       venueReport = await adapter.placeOrder(orderDraft, venueValidation);
       this.metricsCounters.ordersSubmitted += 1;
     } catch (error) {
@@ -1183,6 +1199,8 @@ function policyFromStrategyBinding(row) {
     tradeAmountMode: row.trade_amount_mode,
     tradeAmountValue: Number(row.trade_amount_value),
     requestedLeverage: row.requested_leverage == null ? undefined : Number(row.requested_leverage),
+    requestedLongLeverage: row.requested_long_leverage == null ? (row.requested_leverage == null ? undefined : Number(row.requested_leverage)) : Number(row.requested_long_leverage),
+    requestedShortLeverage: row.requested_short_leverage == null ? (row.requested_leverage == null ? undefined : Number(row.requested_leverage)) : Number(row.requested_short_leverage),
     maximumLeverage: row.maximum_leverage == null ? undefined : Number(row.maximum_leverage),
     maximumPositionPercent: Number(row.maximum_position_percent),
     maximumExposurePercent: Number(row.maximum_exposure_percent),

@@ -60,11 +60,13 @@ const accountService = read("server/exchanges/exchange-account-service.js");
 const cloudRoute = read("server/routes/cloud-execution/connection.js");
 const signalWorker = read("scripts/strategy-automation-worker.ts");
 const brokerWorker = read("server/cloud-execution/worker.js");
+const bybitAdapter = read("server/cloud-execution/adapters/bybit-cloud-adapter.js");
 const connectionSupervisor = read("server/cloud-execution/connection-supervisor.js");
 const migration = read("supabase/migrations/202608230002_bybit_demo_strategy_execution.sql");
 const executionMigration = read("supabase/migrations/202608240002_strategy_broker_group_execution.sql");
 const nodeIdentityMigration = read("supabase/migrations/202608240003_black_cloud_execution_node_identities.sql");
 const partialExitMigration = read("supabase/migrations/202608290002_strategy_superatr_partial_exits.sql");
+const sideLeverageMigration = read("supabase/migrations/202608300001_strategy_target_side_leverage.sql");
 const schema = read("server/security/trading-schemas.js");
 
 assert.match(connectRoute, /executionEnvironment:\s*BYBIT_EXECUTION_ENVIRONMENTS\.DEMO/, "the server, not the browser, chooses demo execution");
@@ -87,6 +89,7 @@ assert.match(signalWorker, /action:\s*"TAKE_PROFIT"/);
 assert.match(signalWorker, /signal\.takeProfits\.slice\(0, 7\)/, "the signal evaluator durably queues all seven target orders");
 assert.match(signalWorker, /quantityPercent:\s*Number\(target\?\.quantityPercent\)/, "each take-profit preserves its independent exit allocation");
 assert.match(signalWorker, /sideSpecificLeverage\(strategy\.definition, signal\.direction, binding\)/, "long and short leverage are selected from the saved strategy properties");
+assert.match(signalWorker, /requested_short_leverage[\s\S]*requested_long_leverage/, "the signal worker prefers the selected target's persisted directional leverage");
 assert.match(signalWorker, /slippageTicks:\s*Number\(strategy\.definition\?\.execution\?\.slippageTicks/, "the saved execution-delay tolerance reaches the broker command");
 assert.doesNotMatch(signalWorker, /placeBybitOrder|placeOrder\s*\(|cancelBybitOrder|modifyBybitOrder/, "the signal evaluator only emits durable commands");
 assert.match(brokerWorker, /credentialEnvironment !== workerEnvironment/);
@@ -103,6 +106,10 @@ assert.match(brokerWorker, /quantity = position\.quantity \* percentage \/ 100/,
 assert.match(brokerWorker, /executionIntent\.reduce_only = true/, "investment-group targets are also reduce-only");
 assert.match(brokerWorker, /slippageTolerancePercent/, "market-entry slippage ticks are converted using authoritative venue metadata");
 assert.match(brokerWorker, /requested:\s*nullablePositive\(payload\.requestedLeverage\)/, "server-side allocation consumes the side-specific leverage request");
+assert.match(brokerWorker, /policy:\s*\{ \.\.\.policy, requestedLeverage: effectiveLeverage \}/, "live order notional is calculated with the exact capped side leverage sent to Bybit");
+assert.match(brokerWorker, /configureLeverage\(leverageConfiguration\)/, "a direct strategy entry sets the capped directional leverage at Bybit before order creation");
+assert.match(brokerWorker, /if \(!reduceOnly && leverageConfiguration\)/, "take-profit and close orders never change venue leverage");
+assert.match(bybitAdapter, /configureLeverage\(request\)[\s\S]*setBybitLeverage/, "the certified adapter uses Bybit's dedicated position leverage endpoint");
 assert.match(connectionSupervisor, /latestStrategyOrder/);
 assert.match(connectionSupervisor, /strategy_target_binding_id/, "position attribution requires a preceding strategy order");
 
@@ -121,5 +128,9 @@ assert.match(nodeIdentityMigration, /drop constraint if exists black_cloud_nodes
 assert.match(partialExitMigration, /black_core_paper_partial_close_position/, "paper execution has an atomic partial-close ledger path");
 assert.match(partialExitMigration, /PAPER_PARTIAL_TAKE_PROFIT_FILLED/, "paper TP fills are independently audited");
 assert.match(partialExitMigration, /coalesce\(auth\.role\(\),''\) <> 'service_role'/, "only the server worker may write paper partial fills");
+assert.match(sideLeverageMigration, /requested_long_leverage=numeric|requested_long_leverage numeric/);
+assert.match(sideLeverageMigration, /requested_short_leverage=numeric|requested_short_leverage numeric/);
+assert.match(sideLeverageMigration, /coalesce\(nullif\(p_policy->>'requestedLongLeverage'/);
+assert.match(sideLeverageMigration, /coalesce\(nullif\(p_policy->>'requestedShortLeverage'/);
 
 console.log("Bybit strategy execution tests PASS — official Demo/Mainnet endpoint isolation, server-owned routing, certified arming, environment-partitioned durable commands, fenced REST submission, risk ceilings and withdrawal/transfer prohibition verified without placing an order.");

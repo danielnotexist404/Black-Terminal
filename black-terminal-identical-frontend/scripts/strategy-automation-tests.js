@@ -28,6 +28,7 @@ const nineTargetMigration = read("supabase/migrations/202608290001_strategy_lab_
 const containmentMigration = read("supabase/migrations/202608230003_bcrda_signal_integrity_containment.sql");
 const archiveMigration = read("supabase/migrations/202608240001_strategy_automation_archive.sql");
 const executionMigration = read("supabase/migrations/202608240002_strategy_broker_group_execution.sql");
+const sideLeverageMigration = read("supabase/migrations/202608300001_strategy_target_side_leverage.sql");
 const panel = read("src/modules/strategy-lab/automation/StrategyAutomationPanel.tsx");
 const apiClient = read("src/modules/strategy-lab/automation/strategyAutomationApi.ts");
 const worker = read("scripts/strategy-automation-worker.ts");
@@ -108,6 +109,21 @@ assert.equal(fixedPreview.allocatedStrategyCapital, 2_500);
 assert.equal(fixedPreview.entryCapital, 500);
 assert.equal(fixedPreview.estimatedNotional, 1_500);
 
+const directionalPolicy = normalizeCapitalPolicy({
+  ...paperPolicy,
+  tradeAmountMode: "PERCENT_ACCOUNT_EQUITY",
+  tradeAmountValue: 20,
+  requestedLeverage: 5,
+  requestedLongLeverage: 5,
+  requestedShortLeverage: 3,
+  maximumLeverage: 10,
+}, "FUTURES");
+assert.equal(directionalPolicy.requestedLongLeverage, 5, "the target policy preserves long-side leverage");
+assert.equal(directionalPolicy.requestedShortLeverage, 3, "the target policy preserves short-side leverage");
+const twentyPercentAtFiveX = calculateCapitalPreview({ equity: 10_000, availableBalance: 10_000, policy: directionalPolicy, marketType: "FUTURES" });
+assert.equal(twentyPercentAtFiveX.entryCapital, 2_000, "20% of the latest account equity is reserved as entry margin");
+assert.equal(twentyPercentAtFiveX.estimatedNotional, 10_000, "20% equity at 5x produces 100% equity notional before risk and venue caps");
+
 assert.equal(calculateEffectiveLeverage({ requested: 20, targetMaximum: 15, accountRiskCap: 10, groupMandateCap: 8, emsRiskCap: 6, providerCap: 12 }), 6);
 const spotPolicy = defaultPaperCapitalPolicy("SPOT");
 assert.equal(spotPolicy.requestedLeverage, undefined);
@@ -120,6 +136,7 @@ assert.equal(spotPreview.maximumBaseAssetExposure, 9_000);
 
 assert.equal(riskIncrease(livePolicy, { ...livePolicy, strategyAllocationValue: 10 }, "FUTURES"), true);
 assert.equal(riskIncrease({ ...paperPolicy, requestedLeverage: 3 }, { ...paperPolicy, requestedLeverage: 2 }, "FUTURES"), false);
+assert.equal(riskIncrease({ ...directionalPolicy, requestedShortLeverage: 2 }, directionalPolicy, "FUTURES"), true, "raising either side's leverage requires target re-approval");
 
 assert.equal(strategySchemas.create.safeParse({ definition }).success, false, "strategy name is required before save");
 assert.equal(strategySchemas.create.safeParse({ name: "Named strategy", definition }).success, true);
@@ -179,6 +196,10 @@ assert.match(executionMigration, /drop function if exists public\.black_cloud_cl
 assert.match(executionMigration, /execution_environment=p_execution_environment/);
 assert.match(executionMigration, /ACTIVATE_BYBIT_MAINNET_STRATEGY_EXECUTION/);
 assert.doesNotMatch(executionMigration, /allow_withdrawals[^\n]*true/i);
+assert.match(sideLeverageMigration, /requested_long_leverage/);
+assert.match(sideLeverageMigration, /requested_short_leverage/);
+assert.match(sideLeverageMigration, /black_core_update_strategy_target_policy/);
+assert.match(sideLeverageMigration, /status=case when p_risk_increased then 'READY'/, "a leverage increase safely de-arms the target until it is explicitly re-approved");
 
 console.log("Strategy automation domain and security tests PASS — naming, sizing, isolated Demo/Mainnet/group arming, signed durable command emission and no-look-ahead contracts verified.");
 

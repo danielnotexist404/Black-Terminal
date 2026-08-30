@@ -612,6 +612,8 @@ function bindingPolicy(binding: JsonRow) {
     tradeAmountMode: binding.trade_amount_mode,
     tradeAmountValue: binding.trade_amount_value,
     requestedLeverage: binding.requested_leverage,
+    requestedLongLeverage: binding.requested_long_leverage ?? binding.requested_leverage,
+    requestedShortLeverage: binding.requested_short_leverage ?? binding.requested_leverage,
     maximumLeverage: binding.maximum_leverage,
     maximumPositionPercent: binding.maximum_position_percent,
     maximumExposurePercent: binding.maximum_exposure_percent,
@@ -630,9 +632,14 @@ function nullablePositiveValue(value: unknown) {
 
 function sideSpecificLeverage(definition: JsonRow, direction: unknown, target: JsonRow) {
   const execution = definition?.execution || {};
-  const selected = String(direction).toLowerCase() === "short" ? execution.shortLeverage : execution.longLeverage;
-  const fallback = target?.requested_leverage ?? target?.capital_policy?.requestedLeverage ?? 1;
-  const leverage = Number(selected ?? fallback);
+  const policy = target?.capital_policy || target?.capitalPolicy || {};
+  const short = String(direction).toLowerCase() === "short";
+  const targetSelected = short
+    ? target?.requested_short_leverage ?? policy.requestedShortLeverage
+    : target?.requested_long_leverage ?? policy.requestedLongLeverage;
+  const definitionSelected = short ? execution.shortLeverage : execution.longLeverage;
+  const fallback = target?.requested_leverage ?? policy.requestedLeverage ?? definitionSelected ?? 1;
+  const leverage = Number(targetSelected ?? fallback);
   return Number.isFinite(leverage) && leverage >= 1 ? Math.min(1_000, leverage) : 1;
 }
 
@@ -681,7 +688,7 @@ async function openPaperPosition(
   const preview = calculateCapitalPreview({
     equity: Number(paper.demo_equity) + Number(paper.unrealized_pnl || 0),
     availableBalance: Number(paper.available_balance),
-    policy,
+    policy: { ...policy, requestedLeverage: leverage },
     marketType: paper.market_type,
   });
   const slippage = Math.max(0, Number(policy.slippageBps || 0)) / 10_000;

@@ -2195,3 +2195,11 @@ This migration replaces the existing `black_terminal_create_profile` trigger fun
 Migration: `supabase/migrations/202608230003_bcrda_signal_integrity_containment.sql`.
 
 This unapplied migration identifies persisted BC-RDA definitions, pauses active Paper/target/runtime state without mutating broker orders, records one critical audit event, labels signal/statistics integrity, and installs database triggers that reject later Paper, Demo or live activation. It preserves strategy definitions and trade history for audit. Apply only through the approved migration workflow after reviewing affected strategy IDs; this chapter did not deploy it.
+
+# 2026-08-30 - Strategy target directional leverage
+
+Migration: `supabase/migrations/202608300001_strategy_target_side_leverage.sql`.
+
+This additive migration persists independently capped long and short leverage for each Strategy Lab execution destination. It updates the service-only target create/update functions, versions every policy change, and automatically returns a target to `READY` when leverage is increased so the account must be explicitly re-approved before execution resumes. The generic leverage column remains as a backward-compatible ceiling for older reports and workers.
+
+The migration was executed successfully in the local PostgreSQL integration harness. Application to a linked production database is not recorded by this task; deploy it only through the checksum-verified repository migration runner before restarting Strategy Automation and Black Cloud execution workers.

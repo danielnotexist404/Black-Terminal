@@ -1,5 +1,5 @@
 import { AlertTriangle, Check, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { CompiledScriptInput, ScriptInputValue } from "../../../components/ScriptCompiler";
@@ -13,6 +13,8 @@ export function StrategyControlPanelDialog({
   initial,
   initialSettings = {},
   nativeInputs = [],
+  sourceKey = "default",
+  authoritativeEquity,
   embedded = false,
   busy,
   onCancel,
@@ -23,6 +25,8 @@ export function StrategyControlPanelDialog({
   initial: StrategyControlPanel;
   initialSettings?: Record<string, unknown>;
   nativeInputs?: CompiledScriptInput[];
+  sourceKey?: string;
+  authoritativeEquity?: number;
   embedded?: boolean;
   busy: boolean;
   onCancel: () => void;
@@ -32,30 +36,57 @@ export function StrategyControlPanelDialog({
   const [value, setValue] = useState(() => structuredClone(initial));
   const [settings, setSettings] = useState<Record<string, unknown>>(() => initialNativeSettings(nativeInputs, initialSettings));
   const [error, setError] = useState<string>();
+  const dirty = useRef(false);
+  const latestInitial = useRef(initial);
+  const latestInitialSettings = useRef(initialSettings);
+  const latestNativeInputs = useRef(nativeInputs);
+  latestInitial.current = initial;
+  latestInitialSettings.current = initialSettings;
+  latestNativeInputs.current = nativeInputs;
   // Cockpit snapshots refresh every few seconds and reconstruct equivalent
   // objects. Depending on object identity here reset in-progress edits on each
   // refresh, making the controls appear locked. Reset only when the persisted
   // configuration values actually change.
   const initialSignature = JSON.stringify(initial);
   const nativeSettingsSignature = JSON.stringify([nativeInputs, initialSettings]);
-  useEffect(() => setValue(structuredClone(initial)), [initialSignature]);
-  useEffect(() => setSettings(initialNativeSettings(nativeInputs, initialSettings)), [nativeSettingsSignature]);
-  const patchInputs = (patch: Partial<StrategyControlPanel["inputs"]>) => setValue((current) => ({ ...current, inputs: { ...current.inputs, ...patch } }));
-  const patchProperties = (patch: Partial<StrategyControlPanel["properties"]>) => setValue((current) => ({ ...current, properties: { ...current.properties, ...patch } }));
-  const patchStyle = (patch: Partial<StrategyControlPanel["style"]>) => setValue((current) => ({ ...current, style: { ...current.style, ...patch } }));
-  const patchVisibility = (patch: Partial<StrategyControlPanel["visibility"]>) => setValue((current) => ({ ...current, visibility: { ...current.visibility, ...patch } }));
-  const reset = () => { setValue(structuredClone(initial)); setSettings(initialNativeSettings(nativeInputs, initialSettings)); setError(undefined); if (!embedded) onCancel(); };
+  const lastSourceKey = useRef(sourceKey);
+  useEffect(() => {
+    if (lastSourceKey.current !== sourceKey) {
+      lastSourceKey.current = sourceKey;
+      dirty.current = false;
+      setValue(structuredClone(initial));
+      setSettings(initialNativeSettings(nativeInputs, initialSettings));
+      setError(undefined);
+      return;
+    }
+    if (!dirty.current) setValue(structuredClone(initial));
+  }, [initialSignature, sourceKey]);
+  useEffect(() => { if (!dirty.current) setSettings(initialNativeSettings(nativeInputs, initialSettings)); }, [nativeSettingsSignature, sourceKey]);
+  const markDirty = () => { dirty.current = true; };
+  const patchInputs = (patch: Partial<StrategyControlPanel["inputs"]>) => { markDirty(); setValue((current) => ({ ...current, inputs: { ...current.inputs, ...patch } })); };
+  const patchProperties = (patch: Partial<StrategyControlPanel["properties"]>) => { markDirty(); setValue((current) => ({ ...current, properties: { ...current.properties, ...patch } })); };
+  const patchStyle = (patch: Partial<StrategyControlPanel["style"]>) => { markDirty(); setValue((current) => ({ ...current, style: { ...current.style, ...patch } })); };
+  const patchVisibility = (patch: Partial<StrategyControlPanel["visibility"]>) => { markDirty(); setValue((current) => ({ ...current, visibility: { ...current.visibility, ...patch } })); };
+  const reset = () => { dirty.current = false; setValue(structuredClone(initial)); setSettings(initialNativeSettings(nativeInputs, initialSettings)); setError(undefined); if (!embedded) onCancel(); };
   const submit = async () => {
     setError(undefined);
-    try { await onApply(value, nativeInputs.length ? settings : undefined); }
+    const submitted = authoritativeEquity && authoritativeEquity > 0
+      ? { ...value, properties: { ...value.properties, initialCapital: authoritativeEquity, currency: "USDT" as const } }
+      : value;
+    try {
+      await onApply(submitted, nativeInputs.length ? settings : undefined);
+      dirty.current = false;
+      setValue(structuredClone(latestInitial.current));
+      setSettings(initialNativeSettings(latestNativeInputs.current, latestInitialSettings.current));
+    }
     catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Strategy configuration could not be saved."); }
   };
   const panel = <section className={`strategy-control-dialog${embedded ? " embedded" : ""}`} role={embedded ? "region" : "dialog"} aria-modal={embedded ? undefined : true} aria-label={`${name} settings`}>
       <header><div><span>STRATEGY SETTINGS</span><h2>{name}</h2><em>{nativeInputs.length ? `${nativeInputs.length} SCRIPT-NATIVE INPUTS` : "CERTIFIED NATIVE CONTROL CONTRACT"}</em></div>{!embedded ? <button type="button" aria-label="Close strategy settings" disabled={busy} onClick={onCancel}><X size={18} /></button> : null}</header>
       <nav aria-label="Strategy settings sections">{(["inputs", "properties", "style", "visibility"] as Tab[]).map((item) => <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item.toUpperCase()}</button>)}</nav>
       <div key={tab} className="strategy-control-scroll" tabIndex={0} aria-label={`${tab} strategy settings controls`}>
-        {tab === "inputs" ? nativeInputs.length ? <NativeInputs inputs={nativeInputs} settings={settings} onChange={(key, next) => setSettings((current) => ({ ...current, [key]: next }))} /> : <Inputs value={value} patch={patchInputs} /> : null}
-        {tab === "properties" ? <Properties value={value} patch={patchProperties} accountLabel={accountLabel} /> : null}
+        {tab === "inputs" ? nativeInputs.length ? <NativeInputs inputs={nativeInputs} settings={settings} onChange={(key, next) => { markDirty(); setSettings((current) => ({ ...current, [key]: next })); }} /> : <Inputs value={value} patch={patchInputs} /> : null}
+        {tab === "properties" ? <Properties value={value} patch={patchProperties} accountLabel={accountLabel} authoritativeEquity={authoritativeEquity} /> : null}
         {tab === "style" ? <Style value={value} patch={patchStyle} /> : null}
         {tab === "visibility" ? <Visibility value={value} patch={patchVisibility} /> : null}
       </div>
@@ -102,11 +133,13 @@ function Inputs({ value, patch }: { value: StrategyControlPanel; patch: (value: 
   </div>;
 }
 
-function Properties({ value, patch, accountLabel }: { value: StrategyControlPanel; patch: (value: Partial<StrategyControlPanel["properties"]>) => void; accountLabel: string }) {
+function Properties({ value, patch, accountLabel, authoritativeEquity }: { value: StrategyControlPanel; patch: (value: Partial<StrategyControlPanel["properties"]>) => void; accountLabel: string; authoritativeEquity?: number }) {
   const item = value.properties;
+  const liveEquity = authoritativeEquity && authoritativeEquity > 0 ? authoritativeEquity : undefined;
   return <div className="strategy-control-form properties">
     <h3>GENERAL</h3>
-    <ChoiceRow label="Initial capital"><input type="number" min="1" value={item.initialCapital} onChange={(event) => patch({ initialCapital: numeric(event, item.initialCapital) })} /><select value={item.currency} onChange={(event) => patch({ currency: event.target.value as typeof item.currency })}><option>USD</option><option>USDT</option></select></ChoiceRow>
+    <ChoiceRow label={liveEquity ? "Full account equity · API" : "Initial capital"}><input className={liveEquity ? "authoritative" : undefined} type="number" min="1" readOnly={Boolean(liveEquity)} value={liveEquity ?? item.initialCapital} onChange={(event) => patch({ initialCapital: numeric(event, item.initialCapital) })} /><select disabled={Boolean(liveEquity)} value={liveEquity ? "USDT" : item.currency} onChange={(event) => patch({ currency: event.target.value as typeof item.currency })}><option>USD</option><option>USDT</option></select></ChoiceRow>
+    {liveEquity ? <p className="strategy-control-equity-source">LIVE BROKER EQUITY · refreshed from the selected account; percentage sizing uses the server's latest balance again when the alert executes.</p> : null}
     <ChoiceRow label="Default order size"><input type="number" min="0.00000001" value={item.orderSizeValue} onChange={(event) => patch({ orderSizeValue: numeric(event, item.orderSizeValue) })} /><select value={item.orderSizeMode} onChange={(event) => patch({ orderSizeMode: event.target.value as typeof item.orderSizeMode })}><option value="PERCENT_EQUITY">% of equity</option><option value="FIXED_USDT">USDT balance</option><option value="FIXED_QUANTITY">Raw quantity</option></select></ChoiceRow>
     <NumberRow label="Pyramiding" value={item.pyramiding} min={1} max={100} onChange={(pyramiding) => patch({ pyramiding })} />
     <h3>DETAILIZATION AND EXECUTION</h3>
@@ -114,8 +147,8 @@ function Properties({ value, patch, accountLabel }: { value: StrategyControlPane
     <SelectRow label="Script execution" value={item.executionCadence} onChange={(executionCadence) => patch({ executionCadence: executionCadence as typeof item.executionCadence })}><option value="BAR_CLOSE_AND_REALTIME">On bar close, On realtime bar tick</option><option value="BAR_CLOSE">On bar close</option></SelectRow>
     <h3>BROKER EMULATOR · {accountLabel.toUpperCase()}</h3>
     <ChoiceRow label="Commission"><input type="number" min="0" step="0.01" value={item.commissionValue} onChange={(event) => patch({ commissionValue: numeric(event, item.commissionValue) })} /><select value={item.commissionMode} onChange={(event) => patch({ commissionMode: event.target.value as typeof item.commissionMode })}><option value="PERCENT">Percent</option><option value="USDT_PER_ORDER">USDT per order</option></select></ChoiceRow>
-    <NumberRow label="Long leverage" value={item.longLeverage} min={1} max={1000} suffix="x" onChange={(longLeverage) => patch({ longLeverage })} />
-    <NumberRow label="Short leverage" value={item.shortLeverage} min={1} max={1000} suffix="x" onChange={(shortLeverage) => patch({ shortLeverage })} />
+    <NumberRow label="Long leverage per trade" value={item.longLeverage} min={1} max={1000} suffix="x" onChange={(longLeverage) => patch({ longLeverage })} />
+    <NumberRow label="Short leverage per trade" value={item.shortLeverage} min={1} max={1000} suffix="x" onChange={(shortLeverage) => patch({ shortLeverage })} />
     <NumberRow label="Slippage" value={item.slippageTicks} min={0} suffix="ticks" onChange={(slippageTicks) => patch({ slippageTicks })} />
     <SelectRow label="Limit order execution" value={item.limitExecution} onChange={(limitExecution) => patch({ limitExecution: limitExecution as typeof item.limitExecution })}><option value="REQUESTED_PRICE">Requested price</option><option value="TOUCH">Price touch</option></SelectRow>
     <SelectRow label="Order execution delay" value={item.executionDelay} onChange={(executionDelay) => patch({ executionDelay: executionDelay as typeof item.executionDelay })}><option value="ONE_TICK">One tick</option><option value="NONE">None</option></SelectRow>

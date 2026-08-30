@@ -1091,8 +1091,8 @@ export class BlackCloudExecutionWorker {
       clientOrderId: strategyExecutionClientOrderId,
       source
     };
-    if (!reduceOnly && orderDraft.orderType === "market" && Number(payload.slippageTicks) > 0 && Number(instrument.tickSize) > 0) {
-      orderDraft.slippageTolerancePercent = Math.max(0.01, Math.min(10, Number(payload.slippageTicks) * Number(instrument.tickSize) / referencePrice * 100));
+    if (!reduceOnly && orderDraft.orderType === "market" && Number(payload.slippageTicks) > 0) {
+      orderDraft.slippageToleranceTicks = Math.max(1, Math.min(10_000, Math.floor(Number(payload.slippageTicks))));
     }
     if (takeProfitOrder && Number(instrument.tickSize) > 0) orderDraft.limitPrice = alignVenueStep(orderDraft.limitPrice, Number(instrument.tickSize));
     const venueValidation = await validateBybitOrderDraft(credentials, orderDraft);

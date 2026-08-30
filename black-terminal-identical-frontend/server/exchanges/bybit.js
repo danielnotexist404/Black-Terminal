@@ -658,9 +658,13 @@ export function buildBybitOrderRequestBody(order, validation) {
     orderLinkId: order.clientOrderId || order.internalOrderId || createBybitClientOrderId()
   };
   if (category === "spot" && orderType === "Market") body.marketUnit = "baseCoin";
-  if (orderType === "Market" && Number(order.slippageTolerancePercent) > 0) {
+  if (orderType === "Market" && Number(order.slippageToleranceTicks) > 0) {
+    body.slippageToleranceType = "TickSize";
+    body.slippageTolerance = String(Math.max(1, Math.min(10_000, Math.floor(Number(order.slippageToleranceTicks)))));
+  } else if (orderType === "Market" && Number(order.slippageTolerancePercent) > 0) {
+    const boundedPercent = Math.max(0.01, Math.min(10, Math.floor(Number(order.slippageTolerancePercent) * 100 + 1e-9) / 100));
     body.slippageToleranceType = "Percent";
-    body.slippageTolerance = String(order.slippageTolerancePercent);
+    body.slippageTolerance = boundedPercent.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
   }
 
   if (orderType === "Limit" && order.limitPrice) {
@@ -1167,6 +1171,12 @@ export function evaluateBybitOrderDraftAgainstMetadata(metadata, order, context 
   if (order.slippageTolerancePercent !== undefined && (Number(order.slippageTolerancePercent) < 0.01 || Number(order.slippageTolerancePercent) > 10)) {
     reasons.push("Bybit market-order slippage tolerance must be between 0.01% and 10%.");
   }
+  if (order.slippageToleranceTicks !== undefined && (!Number.isInteger(Number(order.slippageToleranceTicks)) || Number(order.slippageToleranceTicks) < 1 || Number(order.slippageToleranceTicks) > 10_000)) {
+    reasons.push("Bybit tick-size slippage tolerance must be an integer between 1 and 10000.");
+  }
+  if (order.slippageToleranceTicks !== undefined && order.slippageTolerancePercent !== undefined) {
+    reasons.push("Choose either tick-size or percent slippage tolerance, not both.");
+  }
 
   return {
     ok: reasons.length === 0,
@@ -1472,14 +1482,14 @@ async function waitForBybitRequestSlot(credentials) {
   if (bybitRequestStartGates.get(key) === gate) bybitRequestStartGates.delete(key);
 }
 
-function normalizeBybitError(code, message, httpStatus) {
+export function normalizeBybitError(code, message, httpStatus) {
   const numericCode = Number(code);
   const text = String(message || "").toLowerCase();
   if (numericCode === 10003) return { code: "INVALID_API_KEY", statusCode: 401 };
   if (numericCode === 10004) return { code: "INVALID_SIGNATURE", statusCode: 401 };
   if (numericCode === 10005) return { code: "INSUFFICIENT_PERMISSIONS", statusCode: 403 };
   if (numericCode === 10006 || httpStatus === 429) return { code: "RATE_LIMITED", statusCode: 429 };
-  if (numericCode === 10010 || text.includes("ip")) return { code: "IP_RESTRICTION", statusCode: 403 };
+  if (numericCode === 10010 || text.includes("unmatched ip") || /\bip (?:address|restriction|allowlist)\b/.test(text)) return { code: "IP_RESTRICTION", statusCode: 403 };
   if (text.includes("expired")) return { code: "TOKEN_EXPIRED", statusCode: 401 };
   if (httpStatus === 403) return { code: "BROKER_REGION_RESTRICTED", statusCode: 503 };
   return { code: "BROKER_UNAVAILABLE", statusCode: httpStatus === 401 ? 401 : 502 };

@@ -11,6 +11,7 @@ import { calculateFollowerAllocation, evaluateFollowerRisk, floorToStep } from "
 import { redactObject, sanitizeError } from "../server/cloud-execution/repository.js";
 import { createCloudExchangeAdapter, listCloudExchangeAdapters } from "../server/cloud-execution/adapters/registry.js";
 import { mandateListAllows } from "../server/cloud-execution/worker.js";
+import { buildBybitOrderRequestBody, normalizeBybitError } from "../server/exchanges/bybit.js";
 
 process.env.BLACK_CLOUD_INTENT_SIGNING_KEY = "black-terminal-test-signing-key-32-bytes-minimum";
 
@@ -135,6 +136,27 @@ test("automation mandate lists honor empty allow-all, wildcard, exact, and case-
   assert.equal(mandateListAllows(["*"], "XRPUSDT"), true);
   assert.equal(mandateListAllows(["btcusdt"], "BTCUSDT"), true);
   assert.equal(mandateListAllows(["BTCUSDT"], "XRPUSDT"), false);
+});
+
+test("strategy slippage ticks use Bybit's integer TickSize contract", () => {
+  const body = buildBybitOrderRequestBody({
+    marketKind: "perpetual",
+    symbol: "XRPUSDT",
+    side: "buy",
+    orderType: "market",
+    quantity: 80,
+    timeInForce: "ioc",
+    positionIdx: 0,
+    clientOrderId: "bt-test-slippage",
+    slippageToleranceTicks: 2,
+  }, { normalized: { quantity: 80 }, metadata: { quantityPrecision: 1 } });
+  assert.equal(body.slippageToleranceType, "TickSize");
+  assert.equal(body.slippageTolerance, "2");
+});
+
+test("slippage errors are not misclassified as IP restrictions", () => {
+  assert.equal(normalizeBybitError(10001, "max slippage invalid", 400).code, "BROKER_UNAVAILABLE");
+  assert.equal(normalizeBybitError(10010, "Unmatched IP", 403).code, "IP_RESTRICTION");
 });
 
 for (const item of cases) {

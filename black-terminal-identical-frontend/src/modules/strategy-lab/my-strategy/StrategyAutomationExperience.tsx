@@ -102,14 +102,15 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
       if (inFlight || document.visibilityState !== "visible") return;
       inFlight = true;
       try {
-        const [snapshot, nextPaperData] = await Promise.all([
+        const [snapshotResult, paperResult] = await Promise.allSettled([
           strategyAutomationApi.snapshot(workspace.strategy.id, controller.signal),
           strategyAutomationApi.paperData(workspace.strategy.id, controller.signal),
         ]);
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && snapshotResult.status === "fulfilled") {
+          const snapshot = snapshotResult.value;
           setWorkspace((current) => current ? { ...current, paper: snapshot.paper, snapshots: snapshot.targets, runtime: snapshot.runtime } : current);
-          setPaperData(nextPaperData);
         }
+        if (!controller.signal.aborted && paperResult.status === "fulfilled") setPaperData(paperResult.value);
       } catch { /* A transient snapshot failure must preserve last-known authoritative state. */ }
       finally { inFlight = false; }
     };

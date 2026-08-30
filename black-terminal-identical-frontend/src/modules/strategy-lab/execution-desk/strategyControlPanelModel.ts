@@ -182,6 +182,25 @@ export function applyStrategyControlPanel(definition: StrategyAutomationDefiniti
       superAtrFixedPercentages: [...inputs.fixedTakeProfitPercentages],
       superAtrAtrExitPercent: inputs.atrExitPercent,
       superAtrFixedExitPercent: inputs.fixedExitPercent,
+      // Keep the script-native names synchronized with the certified adapter
+      // names. Two conflicting parameter sets were previously persisted and
+      // made the Script Editor menu disagree with the VPS runtime.
+      "Short Period": inputs.shortPeriod,
+      "Long Period": inputs.longPeriod,
+      "Momentum Period": inputs.momentumPeriod,
+      "ATR SMA Period for Confirmation": inputs.atrConfirmationPeriod,
+      "Trend Strength Threshold": inputs.trendStrengthThreshold,
+      "Enable Multi-Step Take Profit": inputs.multiStepTakeProfit,
+      "ATR Length for Take Profit": inputs.takeProfitAtrLength,
+      "ATR Multiplier for TP Level 1": inputs.atrMultipliers[0],
+      "ATR Multiplier for TP Level 2": inputs.atrMultipliers[1],
+      "ATR Multiplier for TP Level 3": inputs.atrMultipliers[2],
+      "ATR Multiplier for TP Level 4": inputs.atrMultipliers[3],
+      "Fixed TP Level 1 (%)": inputs.fixedTakeProfitPercentages[0],
+      "Fixed TP Level 2 (%)": inputs.fixedTakeProfitPercentages[1],
+      "Fixed TP Level 3 (%)": inputs.fixedTakeProfitPercentages[2],
+      "Percentage to Exit at Each ATR TP Level": inputs.atrExitPercent,
+      "Percentage to Exit at Each Fixed TP Level": inputs.fixedExitPercent,
     },
   };
   return { definition: nextDefinition, capitalPolicy: shared.capitalPolicy };
@@ -203,7 +222,7 @@ export function applySharedStrategyControlPanel(
     execution: {
       ...definition.execution,
       pyramiding: properties.pyramiding,
-      processOrdersOnClose: true,
+      processOrdersOnClose: properties.executionDelay === "NONE",
       realtimeEvaluation: properties.executionCadence === "BAR_CLOSE_AND_REALTIME",
       barDetailization: properties.barDetailization,
       feeRate: properties.commissionMode === "PERCENT" ? properties.commissionValue / 100 : 0,

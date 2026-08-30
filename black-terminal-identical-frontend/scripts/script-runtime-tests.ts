@@ -111,7 +111,8 @@ assert.equal(strategyResult.success, true, JSON.stringify(strategyResult.errors)
 assert.ok(strategyResult.markers.some((marker) => marker.kind === "entry" && marker.direction === "long"));
 assert.ok(strategyResult.markers.some((marker) => marker.kind === "entry" && marker.direction === "short"));
 assert.ok(strategyResult.markers.some((marker) => marker.kind === "shape"));
-assert.ok(strategyResult.markers.every((marker) => marker.signalPrice === candles[marker.index].close), "signal ticks must use the finalized candle price");
+assert.ok(strategyResult.markers.filter((marker) => marker.kind === "shape").every((marker) => marker.signalPrice === candles[marker.index].close), "indicator signal ticks must use the finalized candle price");
+assert.ok(strategyResult.markers.filter((marker) => marker.kind === "entry").every((marker) => marker.signalPrice === candles[marker.index].open), "default Pine strategy market orders must fill at the following bar open");
 
 const finalized = finalizedScriptResult(strategyResult, candles.at(-2)!.time);
 assert.ok(finalized.events.every((event) => event.time <= candles.at(-2)!.time));

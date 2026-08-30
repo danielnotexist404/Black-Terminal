@@ -25,7 +25,9 @@ export const defaultStrategyRuntimeConfig: StrategyRuntimeConfig = {
   slippageTicks: 0,
   tickSize: 0.01,
   pyramiding: 1,
-  processOrdersOnClose: true
+  // Pine strategies apply a one-tick delay by default. On historical OHLC
+  // bars this fills a market order at the following bar's open.
+  processOrdersOnClose: false
 };
 
 export type StrategyNumberSeries = (number | null)[];

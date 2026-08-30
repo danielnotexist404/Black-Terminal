@@ -18,7 +18,9 @@ strategy(
     commission_value=0.1,
     slippage=1,
     pyramiding=1,
-    process_orders_on_close=True
+    # The supplied Pine declaration leaves process_orders_on_close at its
+    # TradingView default: one-tick delay / following-bar open historically.
+    process_orders_on_close=False
 )
 
 # -----------------------------------------------------------------------------

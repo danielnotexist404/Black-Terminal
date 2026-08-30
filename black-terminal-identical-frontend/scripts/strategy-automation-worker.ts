@@ -5,7 +5,7 @@ import {
   calculateEffectiveLeverage,
   normalizeCapitalPolicy,
 } from "../server/strategy-automation/domain.js";
-import { createStrategySignals } from "../src/modules/strategy-lab/adapters/signalAdapter.ts";
+import { createStrategySignals, superAtrTakeProfitPlan } from "../src/modules/strategy-lab/adapters/signalAdapter.ts";
 import {
   hashCanonicalPayload,
   intentSigningPayload,
@@ -202,11 +202,12 @@ async function processStrategy(strategy: JsonRow) {
   if (String(strategy.exchange).toLowerCase() !== "bybit")
     return heartbeat(strategy, "DEGRADED", "PROVIDER_ADAPTER_UNAVAILABLE");
 
-  const candles = await fetchBybitClosedCandles(
+  const marketWindow = await fetchBybitCandleWindow(
     strategy.symbol,
     strategy.timeframe,
     strategy.market_type,
   );
+  const candles = marketWindow.closed;
   const candle = candles.at(-1);
   if (!candle)
     return heartbeat(strategy, "DEGRADED", "MARKET_DATA_UNAVAILABLE");
@@ -242,7 +243,10 @@ async function processStrategy(strategy: JsonRow) {
     .reverse()
     .find((item) => item.entry && Number(item.timestamp) === candle.time);
   let closeResult: { closed: boolean; reason: string | null } = { closed: false, reason: null };
-  if (position) closeResult = await managePaperPosition(strategy, activePaper, position, candle, signal || null);
+  const nextTickReference = marketWindow.current?.time === candle.time + timeframeMilliseconds(strategy.timeframe) / 1000
+    ? marketWindow.current.open
+    : candle.close;
+  if (position) closeResult = await managePaperPosition(strategy, activePaper, position, candles, candle, signal || null, nextTickReference);
   if (signal) {
     signalKey = `${strategy.id}:${strategy.current_version}:${strategy.symbol}:${strategy.timeframe}:${candle.time}:${signal.direction}`;
     signalAt = candleAt;
@@ -255,6 +259,7 @@ async function processStrategy(strategy: JsonRow) {
         candle,
         signal,
         signalKey,
+        nextTickReference,
       );
     }
     for (const binding of activeBrokerBindings) {
@@ -638,6 +643,7 @@ async function openPaperPosition(
   candle: Candle,
   signal: JsonRow,
   signalKey: string,
+  marketReferencePrice = candle.close,
 ) {
   const policy = normalizeCapitalPolicy(
     paper.capital_policy,
@@ -680,7 +686,7 @@ async function openPaperPosition(
   });
   const slippage = Math.max(0, Number(policy.slippageBps || 0)) / 10_000;
   const entryPrice =
-    candle.close * (signal.direction === "long" ? 1 + slippage : 1 - slippage);
+    marketReferencePrice * (signal.direction === "long" ? 1 + slippage : 1 - slippage);
   const feeRate = boundedNumber(
     strategy.definition?.execution?.feeRate,
     0.0006,
@@ -763,21 +769,20 @@ async function openPaperPosition(
     p_margin_used: margin,
     p_liquidation_price: liquidationPrice,
     p_stop_loss: signal.stopLoss || null,
-    p_take_profit: Array.isArray(signal.takeProfits) && signal.takeProfits.length ? null : signal.takeProfit || null,
+    p_take_profit: null,
     p_entry_fee: entryFee,
     p_opened_at: new Date(
       candle.time * 1000 + timeframeMilliseconds(strategy.timeframe),
     ).toISOString(),
   });
   if (error) throw error;
-  if (data === true && Array.isArray(signal.takeProfits) && signal.takeProfits.length) {
+  if (data === true) {
     const { error: planError } = await supabase.from("strategy_paper_positions").update({
       initial_quantity: quantity,
-      take_profit_plan: signal.takeProfits.slice(0, 7).map((target: JsonRow, index: number) => ({
-        id: String(target.id || `TP${index + 1}`).slice(0, 16),
-        price: Number(target.price),
-        quantityPercent: Math.max(0.1, Math.min(100, Number(target.quantityPercent || 0))),
-      })),
+      // Pine creates/updates the seven strategy.exit orders only after the
+      // entry fill is visible to the following strategy calculation.
+      take_profit_plan: [],
+      filled_take_profit_ids: [],
     }).eq("paper_account_id", paper.id).eq("signal_key", signalKey).is("closed_at", null);
     if (planError) throw planError;
   }
@@ -788,8 +793,10 @@ async function managePaperPosition(
   strategy: JsonRow,
   paper: JsonRow,
   position: JsonRow,
+  candles: Candle[],
   candle: Candle,
   signal: JsonRow | null,
+  nextTickReference: number,
 ) {
   const candleClosedAt =
     candle.time * 1000 + timeframeMilliseconds(strategy.timeframe);
@@ -811,7 +818,10 @@ async function managePaperPosition(
   if (markError) throw markError;
   const partialResult = await fillPaperTakeProfitPlan(strategy, paper, position, candle, candleClosedAt);
   if (partialResult.closed) return partialResult;
-  if (partialResult.filled) return { closed: false, reason: partialResult.reason };
+  if (partialResult.filled) {
+    await refreshPaperTakeProfitPlan(strategy, paper, position, candles);
+    return { closed: false, reason: partialResult.reason };
+  }
   let reason: string | null = null;
   let reference = candle.close;
   if (
@@ -843,9 +853,15 @@ async function managePaperPosition(
     const conflictResolution = strategy.definition?.execution?.perpetualSignalReversalEnabled === true
       ? "CLOSE_THEN_REVERSE"
       : String(strategy.definition?.execution?.conflictResolution || "CLOSE_ONLY").toUpperCase();
-    if (conflictResolution !== "IGNORE") reason = "OPPOSITE_SIGNAL";
+    if (conflictResolution !== "IGNORE") {
+      reason = "OPPOSITE_SIGNAL";
+      reference = nextTickReference;
+    }
   }
-  if (!reason) return { closed: false, reason: null };
+  if (!reason) {
+    await refreshPaperTakeProfitPlan(strategy, paper, position, candles);
+    return { closed: false, reason: null };
+  }
   const policy = normalizeCapitalPolicy(
     paper.capital_policy,
     paper.market_type,
@@ -934,7 +950,26 @@ async function fillPaperTakeProfitPlan(strategy: JsonRow, paper: JsonRow, positi
       lastReason = reason;
     }
   }
+  position.filled_take_profit_ids = [...filled];
+  position.quantity = remaining;
   return { filled: anyFilled, closed: remaining <= 1e-12, reason: lastReason };
+}
+
+async function refreshPaperTakeProfitPlan(strategy: JsonRow, paper: JsonRow, position: JsonRow, candles: Candle[]) {
+  if (strategy.runtime_kind !== "builtin-superatr-seven-step") return;
+  const direction = position.side === "LONG" ? "long" : "short";
+  const targets = superAtrTakeProfitPlan(
+    candles,
+    direction,
+    Number(position.entry_price),
+    strategy.definition?.settings || {},
+  );
+  const filled = new Set(Array.isArray(position.filled_take_profit_ids) ? position.filled_take_profit_ids.map(String) : []);
+  const plan = targets.filter((target) => !filled.has(target.id));
+  const { error } = await supabase.from("strategy_paper_positions").update({
+    take_profit_plan: plan,
+  }).eq("id", position.id).eq("paper_account_id", paper.id).is("closed_at", null);
+  if (error) throw error;
 }
 
 async function openPaperRevengePosition(strategy: JsonRow, paper: JsonRow, stoppedPosition: JsonRow, candles: Candle[], candle: Candle) {
@@ -1035,11 +1070,11 @@ async function markFailure(strategy: JsonRow, error: unknown) {
   await heartbeat(strategy, "ERROR", code).catch(() => undefined);
 }
 
-async function fetchBybitClosedCandles(
+async function fetchBybitCandleWindow(
   symbol: string,
   timeframe: string,
   marketType: string,
-): Promise<Candle[]> {
+): Promise<{ closed: Candle[]; current: Candle | null }> {
   const interval = bybitInterval(timeframe);
   const category = marketType === "SPOT" ? "spot" : "linear";
   const url = new URL("https://api.bybit.com/v5/market/kline");
@@ -1067,7 +1102,7 @@ async function fetchBybitClosedCandles(
       { code: "MARKET_DATA_PAYLOAD_INVALID" },
     );
   const now = Date.now();
-  return payload.result.list
+  const candles = payload.result.list
     .map((row: string[]) => ({
       time: Math.floor(Number(row[0]) / 1000),
       open: Number(row[1]),
@@ -1076,12 +1111,12 @@ async function fetchBybitClosedCandles(
       close: Number(row[4]),
       volume: Number(row[5]),
     }))
-    .filter(
-      (candle: Candle) =>
-        Number.isFinite(candle.close) &&
-        candle.time * 1000 + interval.milliseconds <= now,
-    )
+    .filter((candle: Candle) => Number.isFinite(candle.close))
     .sort((a: Candle, b: Candle) => a.time - b.time);
+  return {
+    closed: candles.filter((candle: Candle) => candle.time * 1000 + interval.milliseconds <= now),
+    current: candles.find((candle: Candle) => candle.time * 1000 <= now && candle.time * 1000 + interval.milliseconds > now) || null,
+  };
 }
 
 function bybitInterval(timeframe: string) {

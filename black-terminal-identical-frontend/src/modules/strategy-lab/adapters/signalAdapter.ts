@@ -34,6 +34,66 @@ function rollingStdev(values: number[], period: number) {
   });
 }
 
+/**
+ * Pine-compatible rolling primitives used by certified strategy adapters.
+ * Unlike the chart helpers above, these do not emit partial-window values.
+ * TradingView keeps the series `na` until the requested lookback is present;
+ * emitting partial values changes the first position carried into a visible
+ * chart window and therefore changes every later reversal marker.
+ */
+function pineSma(values: number[], period: number) {
+  const length = Math.max(1, Math.round(period));
+  return values.map((_, index) => {
+    if (index < length - 1) return Number.NaN;
+    let sum = 0;
+    for (let cursor = index - length + 1; cursor <= index; cursor += 1) {
+      const value = values[cursor];
+      if (!Number.isFinite(value)) return Number.NaN;
+      sum += value;
+    }
+    return sum / length;
+  });
+}
+
+function pineStdev(values: number[], period: number) {
+  const length = Math.max(1, Math.round(period));
+  return values.map((_, index) => {
+    if (index < length - 1) return Number.NaN;
+    const start = index - length + 1;
+    let sum = 0;
+    for (let cursor = start; cursor <= index; cursor += 1) {
+      const value = values[cursor];
+      if (!Number.isFinite(value)) return Number.NaN;
+      sum += value;
+    }
+    const average = sum / length;
+    let squared = 0;
+    for (let cursor = start; cursor <= index; cursor += 1) squared += (values[cursor]! - average) ** 2;
+    // ta.stdev(source, length) is biased by default.
+    return Math.sqrt(squared / length);
+  });
+}
+
+function pineRma(values: number[], period: number) {
+  const length = Math.max(1, Math.round(period));
+  const output = Array<number>(values.length).fill(Number.NaN);
+  const seed: number[] = [];
+  let current = Number.NaN;
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index];
+    if (!Number.isFinite(value)) continue;
+    if (!Number.isFinite(current)) {
+      seed.push(value);
+      if (seed.length < length) continue;
+      current = seed.slice(-length).reduce((sum, item) => sum + item, 0) / length;
+    } else {
+      current = (current * (length - 1) + value) / length;
+    }
+    output[index] = current;
+  }
+  return output;
+}
+
 function trueRange(candle: Candle, previous?: Candle) {
   if (!previous) return candle.high - candle.low;
   return Math.max(
@@ -52,6 +112,13 @@ function atr(candles: Candle[], period: number) {
     output.push(current);
   }
   return output;
+}
+
+function pineAtr(candles: Candle[], period: number) {
+  const ranges = candles.map((candle, index) => index === 0
+    ? candle.high - candle.low
+    : trueRange(candle, candles[index - 1]));
+  return pineRma(ranges, period);
 }
 
 function rsi(values: number[], period: number) {
@@ -324,6 +391,71 @@ export function createAdaptiveSwingSignals(candles: Candle[], symbol: string, se
   return signals;
 }
 
+export function superAtrRequiredSeedBars(settings: StrategySettings) {
+  const shortPeriod = Math.max(1, Math.round(settings.superAtrShortPeriod ?? 30));
+  const longPeriod = Math.max(1, Math.round(settings.superAtrLongPeriod ?? 70));
+  const momentumPeriod = Math.max(1, Math.round(settings.superAtrMomentumPeriod ?? 7));
+  const confirmationPeriod = Math.max(1, Math.round(settings.superAtrConfirmationPeriod ?? 7));
+  const takeProfitAtrLength = Math.max(1, Math.round(settings.superAtrTakeProfitAtrLength ?? 100));
+  const signalReady = Math.max(shortPeriod, longPeriod, momentumPeriod + 1)
+    + Math.max(momentumPeriod, confirmationPeriod);
+  return Math.max(signalReady + 2, takeProfitAtrLength + 2);
+}
+
+/**
+ * Applies TradingView's strategy.entry position contract to closed-bar setup
+ * events. With pyramiding=1, repeated calls in the already-open direction do
+ * not create trades; an opposite call closes and reverses the position.
+ */
+export function positionAwareStrategyEntries(signals: readonly StrategySignal[], pyramiding = 1) {
+  const maximumEntries = Math.max(1, Math.round(pyramiding));
+  const transitions: StrategySignal[] = [];
+  let direction: "long" | "short" | null = null;
+  let openEntries = 0;
+  for (const signal of [...signals].filter((item) => item.entry).sort((left, right) => left.timestamp - right.timestamp)) {
+    if (signal.direction !== "long" && signal.direction !== "short") continue;
+    if (signal.direction === direction) {
+      if (openEntries >= maximumEntries) continue;
+      openEntries += 1;
+      transitions.push({ ...signal, metadata: { ...signal.metadata, previousDirection: direction, positionTransition: "PYRAMID" } });
+      continue;
+    }
+    const previousDirection = direction;
+    direction = signal.direction;
+    openEntries = 1;
+    transitions.push({
+      ...signal,
+      metadata: {
+        ...signal.metadata,
+        previousDirection: previousDirection || "flat",
+        positionTransition: previousDirection ? "REVERSE" : "ENTRY",
+      },
+    });
+  }
+  return transitions;
+}
+
+export function superAtrTakeProfitPlan(
+  candles: Candle[],
+  direction: "long" | "short",
+  entryPrice: number,
+  settings: StrategySettings,
+) {
+  if (settings.superAtrMultiStepTakeProfit === false || !candles.length || !(entryPrice > 0)) return [];
+  const takeProfitAtrLength = Math.max(1, Math.round(settings.superAtrTakeProfitAtrLength ?? 100));
+  const takeProfitAtr = pineAtr(candles, takeProfitAtrLength).at(-1);
+  if (!Number.isFinite(takeProfitAtr)) return [];
+  const atrMultipliers = normalizeNumberList(settings.superAtrAtrMultipliers, [100, 70, 120, 300], 4);
+  const fixedPercentages = normalizeNumberList(settings.superAtrFixedPercentages, [21, 21, 75], 3);
+  const atrExitPercent = Math.max(0.1, Math.min(100, settings.superAtrAtrExitPercent ?? 10));
+  const fixedExitPercent = Math.max(0.1, Math.min(100, settings.superAtrFixedExitPercent ?? 10));
+  const sign = direction === "long" ? 1 : -1;
+  return [
+    ...atrMultipliers.map((multiplier, targetIndex) => ({ id: `TP${targetIndex + 1}`, price: entryPrice + sign * takeProfitAtr! * multiplier, quantityPercent: atrExitPercent })),
+    ...fixedPercentages.map((percentage, targetIndex) => ({ id: `TP${targetIndex + 5}`, price: entryPrice * (1 + sign * percentage / 100), quantityPercent: fixedExitPercent })),
+  ];
+}
+
 export function createSuperAtrSevenStepSignals(candles: Candle[], symbol: string, settings: StrategySettings): StrategySignal[] {
   const shortPeriod = Math.max(1, Math.round(settings.superAtrShortPeriod ?? 30));
   const longPeriod = Math.max(1, Math.round(settings.superAtrLongPeriod ?? 70));
@@ -336,30 +468,42 @@ export function createSuperAtrSevenStepSignals(candles: Candle[], symbol: string
   const atrExitPercent = Math.max(0.1, Math.min(100, settings.superAtrAtrExitPercent ?? 10));
   const fixedExitPercent = Math.max(0.1, Math.min(100, settings.superAtrFixedExitPercent ?? 10));
   const multiStep = settings.superAtrMultiStepTakeProfit !== false;
-  const warmup = Math.max(shortPeriod, longPeriod, momentumPeriod, confirmationPeriod, takeProfitAtrLength) * 3;
-  if (candles.length < warmup + 2) return [];
+  if (candles.length < 2) return [];
 
   const closes = candles.map((candle) => candle.close);
-  const ranges = candles.map((candle, index) => trueRange(candle, candles[index - 1]));
-  const shortAtr = sma(ranges, shortPeriod);
-  const longAtr = sma(ranges, longPeriod);
+  // The Pine source explicitly uses close[1], so its custom true-range series
+  // is `na` on the first candle. Do not replace it with high-low here.
+  const ranges = candles.map((candle, index) => index === 0 ? Number.NaN : trueRange(candle, candles[index - 1]));
+  const shortAtr = pineSma(ranges, shortPeriod);
+  const longAtr = pineSma(ranges, longPeriod);
   // Pine's ta.atr uses Wilder's RMA, while the strategy's short/long ATR inputs
   // deliberately use ta.sma(true_range). Keep those two smoothing contracts distinct.
-  const takeProfitAtr = atr(candles, takeProfitAtrLength);
-  const momentum = closes.map((value, index) => index >= momentumPeriod ? value - closes[index - momentumPeriod]! : 0);
-  const momentumDeviation = rollingStdev(closes, momentumPeriod);
-  const momentumFactor = momentum.map((value, index) => Math.abs(value / Math.max(momentumDeviation[index] || 0, 1e-12)));
-  const adaptiveAtr = ranges.map((_, index) => (shortAtr[index]! * momentumFactor[index]! + longAtr[index]!) / (1 + momentumFactor[index]!));
-  const atrMultiple = momentum.map((priceChange, index) => priceChange / Math.max(adaptiveAtr[index] || 0, 1e-12));
-  const trendStrength = sma(atrMultiple, momentumPeriod);
-  const shortMa = sma(closes, shortPeriod);
-  const longMa = sma(closes, longPeriod);
-  const adaptiveAtrConfirmation = sma(adaptiveAtr, confirmationPeriod);
+  const takeProfitAtr = pineAtr(candles, takeProfitAtrLength);
+  const momentum = closes.map((value, index) => index >= momentumPeriod ? value - closes[index - momentumPeriod]! : Number.NaN);
+  const momentumDeviation = pineStdev(closes, momentumPeriod);
+  const momentumFactor = momentum.map((value, index) => {
+    const deviation = momentumDeviation[index];
+    if (!Number.isFinite(value) || !Number.isFinite(deviation)) return Number.NaN;
+    return deviation === 0 ? 0 : Math.abs(value / deviation);
+  });
+  const adaptiveAtr = ranges.map((_, index) => {
+    if (![shortAtr[index], longAtr[index], momentumFactor[index]].every(Number.isFinite)) return Number.NaN;
+    return (shortAtr[index]! * momentumFactor[index]! + longAtr[index]!) / (1 + momentumFactor[index]!);
+  });
+  const atrMultiple = momentum.map((priceChange, index) => {
+    if (!Number.isFinite(priceChange) || !Number.isFinite(adaptiveAtr[index])) return Number.NaN;
+    return adaptiveAtr[index] === 0 ? 0 : priceChange / adaptiveAtr[index]!;
+  });
+  const trendStrength = pineSma(atrMultiple, momentumPeriod);
+  const shortMa = pineSma(closes, shortPeriod);
+  const longMa = pineSma(closes, longPeriod);
+  const adaptiveAtrConfirmation = pineSma(adaptiveAtr, confirmationPeriod);
   const signals: StrategySignal[] = [];
 
-  for (let index = warmup; index < candles.length; index++) {
+  for (let index = 0; index < candles.length; index++) {
     const candle = candles[index]!;
     if (!inConfiguredSession(candle, settings)) continue;
+    if (![shortMa[index], longMa[index], trendStrength[index], adaptiveAtr[index], adaptiveAtrConfirmation[index]].every(Number.isFinite)) continue;
     const longSetup = shortMa[index]! > longMa[index]!
       && trendStrength[index]! > threshold
       && candle.close > shortMa[index]!
@@ -371,7 +515,7 @@ export function createSuperAtrSevenStepSignals(candles: Candle[], symbol: string
     if (!longSetup && !shortSetup) continue;
     const direction = longSetup ? "long" as const : "short" as const;
     const sign = direction === "long" ? 1 : -1;
-    const takeProfits = multiStep ? [
+    const takeProfits = multiStep && Number.isFinite(takeProfitAtr[index]) ? [
       ...atrMultipliers.map((multiplier, targetIndex) => ({ id: `TP${targetIndex + 1}`, price: candle.close + sign * takeProfitAtr[index]! * multiplier, quantityPercent: atrExitPercent })),
       ...fixedPercentages.map((percentage, targetIndex) => ({ id: `TP${targetIndex + 5}`, price: candle.close * (1 + sign * percentage / 100), quantityPercent: fixedExitPercent })),
     ] : [];

@@ -6,7 +6,7 @@ import type { CompiledPlot } from "../../../components/ScriptCompiler";
 import { getMarketDataEngineAdapter } from "../../../market-data/engine/marketDataEngine";
 import { exchangeRegistry } from "../../../market-data/exchangeRegistry";
 import type { ExchangeId, MarketDataSubscription, Timeframe } from "../../../market-data/types";
-import { createStrategySignals } from "../adapters/signalAdapter";
+import { createStrategySignals, superAtrRequiredSeedBars } from "../adapters/signalAdapter";
 import { strategyAutomationApi } from "../automation/strategyAutomationApi";
 import type {
   StrategyAutomationDefinition,
@@ -210,15 +210,15 @@ function ExecutionDeskSurface({
   onApplyConfiguration?: (definition: StrategyAutomationDefinition, policy: StrategyCapitalPolicy, sourceKey: string, panel: StrategyControlPanel) => Promise<void>;
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const { candles, state: feedState, message: feedMessage } = useExecutionDeskCandles(strategy.definition);
+  const { candles, calculationCandles, state: feedState, message: feedMessage } = useExecutionDeskCandles(strategy.definition);
   const actions = useMemo(() => buildExecutionDeskActions(selected.data, selected.mode), [selected.data, selected.mode]);
   const metrics = useMemo(() => buildExecutionDeskMetrics(selected.data, selected.paper, selected.snapshot), [selected.data, selected.paper, selected.snapshot]);
   const markers = useMemo(() => {
     const executed = executionMarkers(actions, candles.map((candle) => candle.time));
-    const preview = historicalSignalMarkers(strategy.definition, candles);
+    const preview = historicalSignalMarkers(strategy.definition, calculationCandles, candles);
     const executedKeys = new Set(executed.map((marker) => `${marker.index}:${marker.direction}`));
     return [...preview.filter((marker) => !executedKeys.has(`${marker.index}:${marker.direction}`)), ...executed];
-  }, [actions, candles, strategy.definition]);
+  }, [actions, calculationCandles, candles, strategy.definition]);
   const curve = useMemo(() => equityCurve(selected.data.trades), [selected.data.trades]);
   const latestAction = actions[0];
   const superAtrControlsAvailable = strategy.definition.runtimeKind === "builtin-superatr-seven-step" || /superatr/i.test(`${strategy.name} ${strategy.definition.indicator?.name || ""}`);
@@ -322,14 +322,22 @@ function strategyPlots(definition: StrategyAutomationDefinition, candles: Candle
   ];
 }
 
-function historicalSignalMarkers(definition: StrategyAutomationDefinition, candles: Candle[]) {
-  if (!candles.length || !["builtin-ema-cross", "builtin-adaptive-swing", "builtin-superatr-seven-step"].includes(definition.runtimeKind)) return [];
+function historicalSignalMarkers(definition: StrategyAutomationDefinition, calculationCandles: Candle[], visibleCandles: Candle[]) {
+  if (!calculationCandles.length || !visibleCandles.length || !["builtin-ema-cross", "builtin-adaptive-swing", "builtin-superatr-seven-step"].includes(definition.runtimeKind)) return [];
   const intervalSeconds = timeframeSeconds(definition.timeframe);
   const now = Date.now() / 1000;
-  const confirmedCandles = candles.filter((candle) => candle.time + intervalSeconds <= now);
+  const confirmedCandles = calculationCandles.filter((candle) => candle.time + intervalSeconds <= now);
   try {
     const signals = createStrategySignals(definition.runtimeKind, confirmedCandles, definition.symbol, definition.settings);
-    return strategySignalMarkers(signals, confirmedCandles, intervalSeconds);
+    const panel = readStrategyControlPanel(definition);
+    // TradingView's "One tick" order delay fills a market order at the next
+    // available tick (the following bar's open in a historical OHLC backtest).
+    const processOrdersOnClose = definition.execution?.executionDelay === "NONE"
+      && definition.execution?.processOrdersOnClose === true;
+    return strategySignalMarkers(signals, visibleCandles, intervalSeconds, {
+      pyramiding: panel.properties.pyramiding,
+      processOrdersOnClose,
+    });
   } catch {
     return [];
   }
@@ -396,9 +404,12 @@ function EquitySparkline({ points }: { points: Array<{ time: number; value: numb
 function SmallMetric({ label, value }: { label: string; value: string }) { return <div><span>{label}</span><strong>{value}</strong></div>; }
 
 function useExecutionDeskCandles(definition: StrategyAutomationDefinition) {
-  const [candles, setCandles] = useState<Candle[]>([]);
+  const [calculationCandles, setCalculationCandles] = useState<Candle[]>([]);
   const [state, setState] = useState<"loading" | "live" | "degraded">("loading");
   const [message, setMessage] = useState("DEDICATED FEED CONNECTING");
+  const visibleBarCount = 1_000;
+  const calculationBarCount = executionDeskCalculationBarCount(definition, visibleBarCount);
+  const candles = useMemo(() => calculationCandles.slice(-visibleBarCount), [calculationCandles]);
 
   useEffect(() => {
     const exchange = normalizeExchange(definition.exchange);
@@ -409,6 +420,8 @@ function useExecutionDeskCandles(definition: StrategyAutomationDefinition) {
     let subscription: MarketDataSubscription<Candle> | undefined;
     let refreshTimer: number | undefined;
     let adapter: ReturnType<typeof getMarketDataEngineAdapter>;
+    setCalculationCandles([]);
+    setState("loading");
     try { adapter = getMarketDataEngineAdapter(exchange); }
     catch (error) {
       setState("degraded");
@@ -416,14 +429,34 @@ function useExecutionDeskCandles(definition: StrategyAutomationDefinition) {
       return () => controller.abort();
     }
     const symbol = adapter.normalizeSymbol(definition.symbol.replace(/[^A-Za-z0-9]/g, ""), marketKind);
-    const merge = (incoming: Candle[]) => setCandles((current) => uniqueCandles([...current, ...incoming]).slice(-1_200));
+    const merge = (incoming: Candle[]) => setCalculationCandles((current) => uniqueCandles([...current, ...incoming]).slice(-calculationBarCount));
     const fetchHistory = async (initial = false) => {
       try {
-        const rows = await adapter.getHistoricalCandles({ exchange, symbol, timeframe, marketKind, limit: initial ? 1_000 : 8, signal: controller.signal });
+        let rows = await adapter.getHistoricalCandles({ exchange, symbol, timeframe, marketKind, limit: initial ? visibleBarCount : 8, signal: controller.signal });
+        if (initial && rows.length) {
+          let oldest = rows[0]!.time;
+          while (rows.length < calculationBarCount) {
+            const requested = Math.min(1_000, calculationBarCount - rows.length);
+            const older = await adapter.getHistoricalCandles({
+              exchange,
+              symbol,
+              timeframe,
+              marketKind,
+              limit: requested,
+              to: oldest - 1,
+              signal: controller.signal,
+            });
+            if (!older.length) break;
+            const merged = uniqueCandles([...older, ...rows]);
+            if (merged.length === rows.length) break;
+            rows = merged;
+            oldest = rows[0]!.time;
+          }
+        }
         if (disposed) return;
         merge(rows);
         setState("live");
-        setMessage(`${adapter.label.toUpperCase()} LIVE · ${rows.length ? "AUTHORITATIVE OHLCV" : "WAITING FOR BAR"}`);
+        setMessage(`${adapter.label.toUpperCase()} LIVE · ${rows.length ? `${Math.min(rows.length, calculationBarCount)}-BAR SEEDED OHLCV` : "WAITING FOR BAR"}`);
       } catch (error) {
         if (!disposed && !controller.signal.aborted) {
           setState((current) => current === "live" ? "live" : "degraded");
@@ -451,8 +484,18 @@ function useExecutionDeskCandles(definition: StrategyAutomationDefinition) {
       if (refreshTimer) window.clearInterval(refreshTimer);
       document.removeEventListener("visibilitychange", restore);
     };
-  }, [definition.exchange, definition.marketType, definition.symbol, definition.timeframe]);
-  return { candles, state, message };
+  }, [calculationBarCount, definition.exchange, definition.marketType, definition.symbol, definition.timeframe, visibleBarCount]);
+  return { candles, calculationCandles, state, message };
+}
+
+function executionDeskCalculationBarCount(definition: StrategyAutomationDefinition, visibleBarCount: number) {
+  const required = definition.runtimeKind === "builtin-superatr-seven-step"
+    ? superAtrRequiredSeedBars(definition.settings)
+    : Math.max(1, Number(definition.indicator?.warmupBars || 0));
+  // Keep at least one complete hidden page so the position at the visible
+  // boundary comes from prior strategy history rather than an artificial flat.
+  const hidden = Math.max(1_000, required * 2);
+  return Math.min(10_000, visibleBarCount + hidden);
 }
 
 function executionDeskIndicators(definition: StrategyAutomationDefinition): VisibleIndicators {

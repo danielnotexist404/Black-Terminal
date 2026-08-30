@@ -95,7 +95,8 @@ strategy.entry("Long", strategy.long, when=long_signal)
 strategy.entry("Short", strategy.short, when=short_signal)`;
 const reversalCandles: Candle[] = [
   { time: 1_820_000_000, open: 99, high: 101, low: 98, close: 100, volume: 100 },
-  { time: 1_820_000_060, open: 101, high: 102, low: 98, close: 99, volume: 100 }
+  { time: 1_820_000_060, open: 101, high: 102, low: 98, close: 99, volume: 100 },
+  { time: 1_820_000_120, open: 98, high: 99, low: 96, close: 97, volume: 100 }
 ];
 const reversal = compileAndRunScript(reversalScript, reversalCandles);
 assert.equal(reversal.success, true, JSON.stringify(reversal.errors));
@@ -103,8 +104,8 @@ assert.equal(reversal.strategy?.fills.length, 3, "opposite entry must close the 
 assert.equal(reversal.strategy?.trades.length, 1);
 assert.equal(reversal.strategy?.trades[0].exitReason, "REVERSE:Short");
 assert.equal(reversal.strategy?.openPosition?.side, "short");
-assert.equal(reversal.strategy?.fills[0].price, 101, "entry slippage must be adverse to the buy");
-assert.equal(reversal.strategy?.fills[1].price, 98, "exit slippage must be adverse to the sell");
+assert.equal(reversal.strategy?.fills[0].price, 102, "the default one-tick-delayed entry fills at the next open with adverse buy slippage");
+assert.equal(reversal.strategy?.fills[1].price, 97, "the delayed reversal exit fills at the following open with adverse sell slippage");
 assert.ok((reversal.strategy?.totalCommission ?? 0) > 0, "commission must be charged on every fill");
 assert.deepEqual(
   reversal.markers.filter((marker) => marker.kind === "entry" || marker.kind === "exit").map((marker) => [marker.label, marker.strategyRole]),

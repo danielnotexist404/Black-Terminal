@@ -1,6 +1,7 @@
 import type { CompiledMarker } from "../../../components/ScriptCompiler";
 import type { Candle } from "../../../chart-engine/types";
 import type { StrategySignal } from "../types/strategy.types";
+import { positionAwareStrategyEntries } from "../adapters/signalAdapter.ts";
 import type { StrategyPaperAccount, StrategyTargetSnapshot } from "../automation/strategyAutomation.types";
 
 export type ExecutionDeskData = {
@@ -173,41 +174,50 @@ export function strategySignalMarkers(
   signals: readonly StrategySignal[],
   candles: readonly Candle[],
   intervalSeconds: number,
+  options: { pyramiding?: number; processOrdersOnClose?: boolean } = {},
 ): CompiledMarker[] {
   if (!candles.length) return [];
   const candleTimes = candles.map((candle) => candle.time);
-  const ordered = [...signals]
-    .filter((signal) => signal.entry)
-    .sort((left, right) => left.timestamp - right.timestamp);
+  const ordered = positionAwareStrategyEntries(signals, options.pyramiding);
   const markers: CompiledMarker[] = [];
-  let previous: StrategySignal | undefined;
   for (const signal of ordered) {
     const direction = signal.direction;
     if (direction !== "long" && direction !== "short") continue;
-    // SuperATR can remain true for several consecutive bars. A signal marker
-    // denotes the first confirmed bar in that run, not every bar in the same
-    // unchanged state.
-    if (previous && previous.direction === direction && signal.timestamp - previous.timestamp <= intervalSeconds * 1.5) {
-      previous = signal;
-      continue;
-    }
-    const index = nearestCandleIndex(candleTimes, signal.timestamp);
-    if (index < 0) continue;
+    const fillTime = signal.timestamp + (options.processOrdersOnClose === false ? intervalSeconds : 0);
+    if (fillTime < candleTimes[0]! || fillTime > candleTimes[candleTimes.length - 1]!) continue;
+    const index = nearestCandleIndex(candleTimes, fillTime);
+    if (index < 0 || index >= candles.length) continue;
     const candle = candles[index]!;
+    const signalPrice = options.processOrdersOnClose === false ? candle.open : candle.close;
+    const previousDirection = signal.metadata?.previousDirection;
+    if (previousDirection === "long" || previousDirection === "short") {
+      markers.push({
+        id: `strategy-close:${previousDirection}:${signal.timestamp}`,
+        index,
+        time: candle.time,
+        signalPrice,
+        value: signalPrice,
+        label: previousDirection === "long" ? "CLOSE POSITION LONG" : "CLOSE POSITION SHORT",
+        labelSize: 12,
+        direction: previousDirection,
+        kind: "exit",
+        strategyRole: "reversal",
+        color: "#a1a1aa",
+      });
+    }
     markers.push({
       id: `strategy-signal:${direction}:${signal.timestamp}`,
       index,
       time: candle.time,
-      signalPrice: candle.close,
-      value: candle.close,
-      label: direction === "long" ? "LONG SIGNAL" : "SHORT SIGNAL",
-      labelSize: 10,
+      signalPrice,
+      value: signalPrice,
+      label: direction === "long" ? "LONG ENTRY" : "SHORT ENTRY",
+      labelSize: 12,
       direction,
       kind: "entry",
       strategyRole: "entry",
       color: direction === "long" ? "#42f59b" : "#ff174a",
     });
-    previous = signal;
   }
   return markers;
 }

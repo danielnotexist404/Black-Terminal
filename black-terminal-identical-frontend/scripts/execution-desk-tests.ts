@@ -8,7 +8,8 @@ import {
   strategySignalMarkers,
 } from "../src/modules/strategy-lab/execution-desk/executionDeskModel.ts";
 import { applyStrategyControlPanel, readStrategyControlPanel, superAtrTakeProfitAllocation } from "../src/modules/strategy-lab/execution-desk/strategyControlPanelModel.ts";
-import { createSuperAtrSevenStepSignals } from "../src/modules/strategy-lab/adapters/signalAdapter.ts";
+import { createSuperAtrSevenStepSignals, positionAwareStrategyEntries, superAtrTakeProfitPlan } from "../src/modules/strategy-lab/adapters/signalAdapter.ts";
+import { compileAndRunScript } from "../src/components/ScriptCompiler.ts";
 
 const data = executionDeskData({
   positions: [{ id: "open", unrealized_pnl: 125 }],
@@ -78,8 +79,15 @@ const historicalMarkers = strategySignalMarkers([
   { timestamp: 1_600, symbol: "BTCUSDT", direction: "short", entry: true },
   { timestamp: 1_900, symbol: "BTCUSDT", direction: "long", entry: true },
 ], signalCandles, 300);
-assert.deepEqual(historicalMarkers.map((item) => item.label), ["LONG SIGNAL", "SHORT SIGNAL", "LONG SIGNAL"], "consecutive same-state bars collapse into one confirmed historical signal marker");
+assert.deepEqual(historicalMarkers.map((item) => item.label), ["LONG ENTRY", "CLOSE POSITION LONG", "SHORT ENTRY", "CLOSE POSITION SHORT", "LONG ENTRY"], "historical markers follow position-aware TradingView entries and reversals");
 assert.equal(historicalMarkers[0]?.signalPrice, 101, "historical signals anchor to the confirmed candle close");
+const nextTickMarkers = strategySignalMarkers([
+  { timestamp: 1_000, symbol: "BTCUSDT", direction: "long", entry: true },
+  { timestamp: 1_600, symbol: "BTCUSDT", direction: "long", entry: true },
+], signalCandles, 300, { pyramiding: 1, processOrdersOnClose: false });
+assert.deepEqual(nextTickMarkers.map((item) => item.label), ["LONG ENTRY"], "a separated repeat in the already-open direction is not a second trade");
+assert.equal(nextTickMarkers[0]?.time, 1_300, "the default Pine one-tick delay fills at the following bar");
+assert.equal(nextTickMarkers[0]?.signalPrice, 101, "a delayed historical market entry uses the following bar open");
 
 const baseDefinition = {
   runtimeKind: "builtin-superatr-seven-step" as const,
@@ -182,6 +190,43 @@ assert.ok(superAtrSignals.length > 0, "the native SuperATR adapter produces conf
 assert.equal(superAtrSignals.at(-1)?.takeProfits?.length, 7, "the adapter emits all seven independently sized exits");
 assert.ok(superAtrSignals.at(-1)?.takeProfits?.every((target) => Number.isFinite(target.price) && target.price > 0), "take-profit plan contains finite venue prices");
 
+const parityCandles = Array.from({ length: 1_200 }, (_, index) => {
+  const cycle = Math.sin(index / 27) * 900 + Math.sin(index / 7) * 120;
+  const drift = Math.floor(index / 180) % 2 === 0 ? index % 180 * 7 : (180 - index % 180) * 7;
+  const close = 30_000 + cycle + drift;
+  const prior = index ? 30_000 + Math.sin((index - 1) / 27) * 900 + Math.sin((index - 1) / 7) * 120 : close;
+  return { time: 1_720_000_000 + index * 300, open: prior, high: Math.max(prior, close) + 80, low: Math.min(prior, close) - 80, close, volume: 1_000 + index };
+});
+const paritySettings = {
+  ...baseDefinition.settings,
+  superAtrShortPeriod: 3,
+  superAtrLongPeriod: 7,
+  superAtrMomentumPeriod: 7,
+  superAtrConfirmationPeriod: 7,
+  superAtrTrendStrengthThreshold: 1.618,
+  superAtrMultiStepTakeProfit: true,
+  superAtrTakeProfitAtrLength: 14,
+  superAtrAtrMultipliers: [2.618, 5, 10, 13.82],
+  superAtrFixedPercentages: [3, 8, 17],
+  superAtrAtrExitPercent: 10,
+  superAtrFixedExitPercent: 10,
+};
+const nativeParityEntries = positionAwareStrategyEntries(createSuperAtrSevenStepSignals(parityCandles, "BTCUSDT", paritySettings), 1)
+  .map((signal) => signal.timestamp + 300);
+const paritySource = fs.readFileSync(new URL("./examples/superatr-seven-step-black-terminal.py", import.meta.url), "utf8");
+const compiledParity = compileAndRunScript(paritySource, parityCandles);
+assert.equal(compiledParity.success, true, JSON.stringify(compiledParity.errors));
+const scriptParityEntries = compiledParity.strategy?.fills.filter((fill) => fill.action === "entry").map((fill) => fill.time) || [];
+assert.deepEqual(nativeParityEntries, scriptParityEntries, "the certified VPS adapter and the saved SuperATR script must produce identical next-open entries candle by candle");
+const firstPlan = superAtrTakeProfitPlan(parityCandles.slice(0, 600), "long", 30_000, paritySettings);
+const expandedPlan = superAtrTakeProfitPlan([
+  ...parityCandles.slice(0, 600),
+  { ...parityCandles[600]!, high: parityCandles[600]!.high + 5_000, low: parityCandles[600]!.low - 5_000 },
+], "long", 30_000, paritySettings);
+assert.equal(firstPlan.length, 7);
+assert.notEqual(firstPlan[0]?.price, expandedPlan[0]?.price, "ATR take-profit orders must be repriced from the latest completed candle like repeated Pine strategy.exit calls");
+assert.equal(firstPlan[4]?.price, expandedPlan[4]?.price, "fixed-percentage take-profit levels stay anchored to the actual entry average");
+
 const cockpitSource = fs.readFileSync(new URL("../src/modules/strategy-lab/my-strategy/pages/StrategyCockpitPage.tsx", import.meta.url), "utf8");
 const deskSource = fs.readFileSync(new URL("../src/modules/strategy-lab/execution-desk/StrategyExecutionDesk.tsx", import.meta.url), "utf8");
 const settingsSource = fs.readFileSync(new URL("../src/modules/strategy-lab/execution-desk/StrategyControlPanelDialog.tsx", import.meta.url), "utf8");
@@ -193,15 +238,18 @@ assert.match(cockpitSource, /\["executionDesk", "EXECUTION DESK"\]/);
 assert.match(deskSource, /This chart is owned by the strategy runtime\. It never mounts the strategy onto the default discretionary chart\./);
 assert.doesNotMatch(deskSource, /onDefinitionChange|onVisibleIndicatorsChange|setActiveNav/);
 assert.match(deskSource, /preferredExecutionSource\(workspace\)/, "a configured broker or group is selected instead of silently defaulting to Paper");
-assert.match(deskSource, /historicalSignalMarkers\(strategy\.definition, candles\)/, "the dedicated chart renders confirmed historical strategy signals before the first broker fill");
+assert.match(deskSource, /historicalSignalMarkers\(strategy\.definition, calculationCandles, candles\)/, "the dedicated chart calculates position-aware signals from hidden seed history before the first broker fill");
+assert.match(deskSource, /to: oldest - 1/, "the dedicated chart paginates authoritative candles behind the visible window instead of starting flat at the viewport edge");
 for (const label of ["INPUTS", "PROPERTIES", "STYLE", "VISIBILITY", "Default order size", "Long leverage", "Short leverage", "Percentage to Exit at Each ATR TP Level"]) assert.match(settingsSource, new RegExp(label, "i"));
 assert.match(serviceSource, /clean\[0\] === "group-execution-desks"/);
 assert.match(repositorySource, /Join this Investment Group before opening its Strategy Execution Desk/);
 assert.doesNotMatch(repositorySource, /row\.running_version\s*\?\?[\s\S]{0,100}row\.current_version/, "published versions never masquerade as explicitly started runtime versions");
 assert.match(workerSource, /Number\(strategy\.running_version \?\? 0\)/, "the VPS worker leases only an explicitly started version");
+assert.match(workerSource, /nextTickReference/, "paper reversals use the next available tick rather than the already-closed signal price");
+assert.match(workerSource, /refreshPaperTakeProfitPlan/, "the paper runtime updates Pine-style dynamic ATR targets after each completed candle");
 assert.match(repositorySource, /definition:\s*\{[\s\S]*settings: \{\},[\s\S]*execution: \{\}/);
-assert.match(adapterSource, /rollingStdev\(closes, momentumPeriod\)/, "SuperATR normalizes momentum with the Pine close-series deviation");
-assert.match(adapterSource, /sma\(atrMultiple, momentumPeriod\)/, "SuperATR trend strength uses the Pine momentum-period average");
-assert.match(adapterSource, /takeProfitAtr = atr\(candles, takeProfitAtrLength\)/, "SuperATR exits use Pine-compatible Wilder ATR rather than the signal ATR SMA");
+assert.match(adapterSource, /pineStdev\(closes, momentumPeriod\)/, "SuperATR normalizes momentum with the Pine close-series deviation");
+assert.match(adapterSource, /pineSma\(atrMultiple, momentumPeriod\)/, "SuperATR trend strength uses the Pine momentum-period average without partial windows");
+assert.match(adapterSource, /takeProfitAtr = pineAtr\(candles, takeProfitAtrLength\)/, "SuperATR exits use Pine-compatible Wilder ATR rather than the signal ATR SMA");
 
 console.log("Strategy Execution Desk model tests passed.");

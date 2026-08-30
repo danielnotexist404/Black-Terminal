@@ -240,6 +240,7 @@ assert.doesNotMatch(deskSource, /onDefinitionChange|onVisibleIndicatorsChange|se
 assert.match(deskSource, /preferredExecutionSource\(workspace\)/, "a configured broker or group is selected instead of silently defaulting to Paper");
 assert.match(deskSource, /historicalSignalMarkers\(strategy\.definition, calculationCandles, candles\)/, "the dedicated chart calculates position-aware signals from hidden seed history before the first broker fill");
 assert.match(deskSource, /to: oldest - 1/, "the dedicated chart paginates authoritative candles behind the visible window instead of starting flat at the viewport edge");
+assert.match(deskSource, /const visibleBarCount = 9_000/, "the dedicated chart exposes the maximum safe paginated history while retaining a hidden state seed");
 for (const label of ["INPUTS", "PROPERTIES", "STYLE", "VISIBILITY", "Default order size", "Long leverage", "Short leverage", "Percentage to Exit at Each ATR TP Level"]) assert.match(settingsSource, new RegExp(label, "i"));
 assert.match(serviceSource, /clean\[0\] === "group-execution-desks"/);
 assert.match(repositorySource, /Join this Investment Group before opening its Strategy Execution Desk/);

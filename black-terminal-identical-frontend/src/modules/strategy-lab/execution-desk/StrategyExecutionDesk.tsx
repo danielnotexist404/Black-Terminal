@@ -407,7 +407,11 @@ function useExecutionDeskCandles(definition: StrategyAutomationDefinition) {
   const [calculationCandles, setCalculationCandles] = useState<Candle[]>([]);
   const [state, setState] = useState<"loading" | "live" | "degraded">("loading");
   const [message, setMessage] = useState("DEDICATED FEED CONNECTING");
-  const visibleBarCount = 1_000;
+  // Keep the full paginated research window on the dedicated strategy chart.
+  // The first 1,000+ bars remain calculation seed, so the user can inspect up
+  // to 9,000 authoritative fills without flattening indicator state at the
+  // left edge of the visible chart.
+  const visibleBarCount = 9_000;
   const calculationBarCount = executionDeskCalculationBarCount(definition, visibleBarCount);
   const candles = useMemo(() => calculationCandles.slice(-visibleBarCount), [calculationCandles]);
 

@@ -10,6 +10,7 @@ import {
 import { calculateFollowerAllocation, evaluateFollowerRisk, floorToStep } from "../server/cloud-execution/allocation-risk.js";
 import { redactObject, sanitizeError } from "../server/cloud-execution/repository.js";
 import { createCloudExchangeAdapter, listCloudExchangeAdapters } from "../server/cloud-execution/adapters/registry.js";
+import { mandateListAllows } from "../server/cloud-execution/worker.js";
 
 process.env.BLACK_CLOUD_INTENT_SIGNING_KEY = "black-terminal-test-signing-key-32-bytes-minimum";
 
@@ -127,6 +128,13 @@ test("hash is stable and does not expose payload", () => {
   const hash = hashCanonicalPayload({ secret: "never-log-me" });
   assert.match(hash, /^[a-f0-9]{64}$/);
   assert.equal(hash.includes("never-log-me"), false);
+});
+
+test("automation mandate lists honor empty allow-all, wildcard, exact, and case-normalized values", () => {
+  assert.equal(mandateListAllows([], "XRPUSDT"), true);
+  assert.equal(mandateListAllows(["*"], "XRPUSDT"), true);
+  assert.equal(mandateListAllows(["btcusdt"], "BTCUSDT"), true);
+  assert.equal(mandateListAllows(["BTCUSDT"], "XRPUSDT"), false);
 });
 
 for (const item of cases) {

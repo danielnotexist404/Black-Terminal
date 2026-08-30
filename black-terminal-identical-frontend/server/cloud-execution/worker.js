@@ -913,10 +913,10 @@ export class BlackCloudExecutionWorker {
     if (automationMandate.execution_environment !== connectionEnvironment) throw terminalError("STRATEGY_ENVIRONMENT_MISMATCH", "The broker automation mandate belongs to a different execution environment.");
     if (!account.trading_enabled || account.is_read_only) throw terminalError("ACCOUNT_READ_ONLY", "The Bybit account is not trade enabled.");
     if (riskControl?.emergency_stop) throw terminalError("ACCOUNT_EMERGENCY_STOP", "The account emergency stop is active.");
-    if (Array.isArray(automationMandate.allowed_strategies) && automationMandate.allowed_strategies.length && !automationMandate.allowed_strategies.includes(strategy.id)) {
+    if (!mandateListAllows(automationMandate.allowed_strategies, strategy.id)) {
       throw terminalError("MANDATE_STRATEGY_REJECTED", "The automation mandate does not permit this strategy.");
     }
-    if (Array.isArray(automationMandate.allowed_symbols) && automationMandate.allowed_symbols.length && !automationMandate.allowed_symbols.includes(symbol)) {
+    if (!mandateListAllows(automationMandate.allowed_symbols, symbol)) {
       throw terminalError("MANDATE_SYMBOL_REJECTED", "The automation mandate does not permit this symbol.");
     }
 
@@ -1714,6 +1714,15 @@ export function isTerminalUnfilledVenueOrder(order) {
 
 export function isTerminalVenueOrder(order) {
   return ["filled", "cancelled", "canceled", "expired", "rejected", "failed"].includes(String(order?.status || "").toLowerCase());
+}
+
+export function mandateListAllows(values, requestedValue) {
+  if (!Array.isArray(values) || values.length === 0) return true;
+  const requested = String(requestedValue || "").trim().toUpperCase();
+  return values.some((value) => {
+    const normalized = String(value || "").trim().toUpperCase();
+    return normalized === "*" || normalized === requested;
+  });
 }
 
 export function recoveredStrategyOrderDraft(order, defaults) {

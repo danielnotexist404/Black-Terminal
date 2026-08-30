@@ -27,6 +27,7 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run build
+      - run: npm run test:strategy-lab-release
       - run: npm run test:black-cloud-api-router
       - run: npm run test:black-cloud-storage-transfer
       - run: npm run test:black-cloud-infrastructure

@@ -522,6 +522,10 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
 
   const applyExecutionConfiguration = async (baseDefinition: StrategyAutomationDefinition, basePolicy: StrategyCapitalPolicy, sourceKey: string, panel: StrategyControlPanel, nativeSettings?: Record<string, unknown>) => {
     if (!workspace || busy) return;
+    const strategyId = workspace.strategy.id;
+    type SettingsMutationStage = "SAVE_DRAFT" | "UPDATE_GLOBAL_POLICY" | "APPLY_DESTINATION";
+    let mutationStage: SettingsMutationStage = "SAVE_DRAFT";
+    let completedMutationStages = 0;
     setBusy(true);
     setMessage("Saving the strategy-native inputs and execution properties…");
     try {
@@ -533,7 +537,12 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
         paper: { ...configured.definition.paper, capitalPolicy: sourceKey === "paper" ? configured.capitalPolicy : configured.definition.paper?.capitalPolicy },
       };
       let next = await strategyAutomationApi.saveDraft(workspace.strategy.id, workspace.strategy.name, nextDefinition, workspace.strategy.draftRevision || 0);
+      completedMutationStages = 1;
+      mutationStage = "UPDATE_GLOBAL_POLICY";
       next = await strategyAutomationApi.updateGlobalPolicy(next.strategy.id, next.strategy.draftRevision || 0, expandedGlobalPolicy(workspace.strategy.globalCapitalPolicy, configured.capitalPolicy));
+      completedMutationStages = 2;
+      mutationStage = "APPLY_DESTINATION";
+      let successMessage: string;
       if (sourceKey === "paper") {
         const openPaperPositions = Array.isArray(paperData?.positions) ? paperData.positions.length : 0;
         const certified = nextDefinition.indicator?.runtimeStatus === "CERTIFIED";
@@ -545,28 +554,66 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
             const reset = await strategyAutomationApi.paperAction(next.strategy.id, "reset", next.paper.rowVersion, { demoEquity: panel.properties.initialCapital });
             next = { ...next, paper: reset.paper };
           }
-          setMessage(`Strategy V${next.strategy.runningVersion} is active. Paper sizing now uses ${panel.properties.orderSizeValue}${panel.properties.orderSizeMode === "PERCENT_EQUITY" ? "% of account equity" : panel.properties.orderSizeMode === "FIXED_USDT" ? " USDT" : " units"}.`);
+          successMessage = `Strategy V${next.strategy.runningVersion} is active. Paper sizing now uses ${panel.properties.orderSizeValue}${panel.properties.orderSizeMode === "PERCENT_EQUITY" ? "% of account equity" : panel.properties.orderSizeMode === "FIXED_USDT" ? " USDT" : " units"}.`;
         } else if (certified) {
           if (workspace.paper) await strategyAutomationApi.configurePaper(workspace.strategy.id, workspace.paper.rowVersion, configured.capitalPolicy);
-          setMessage("Sizing and leverage were applied to the current Paper account. Signal/TP input changes are saved as the next immutable draft and will activate after current positions and live bindings are flat or migrated.");
+          successMessage = "Sizing and leverage were applied to the current Paper account. Signal/TP input changes are saved as the next immutable draft and will activate after current positions and live bindings are flat or migrated.";
         } else {
-          setMessage("Native script inputs and strategy properties were saved. Paper and live execution remain locked until this script receives a certified VPS runtime.");
+          successMessage = "Native script inputs and strategy properties were saved. Paper and live execution remain locked until this script receives a certified VPS runtime.";
         }
       } else {
         const binding = workspace.bindings.find((item) => item.id === sourceKey);
         if (!binding) throw new Error("The selected execution destination is no longer attached.");
         await strategyAutomationApi.updateTarget(workspace.strategy.id, binding, configured.capitalPolicy);
-        setMessage(`${binding.targetLabel || binding.targetProvider || "Execution target"} now enforces the selected equity/USDT sizing and side leverage. Signal/TP inputs are saved as the next immutable strategy draft.`);
+        successMessage = `${binding.targetLabel || binding.targetProvider || "Execution target"} now enforces the selected equity/USDT sizing and side leverage. Signal/TP inputs are saved as the next immutable strategy draft.`;
       }
+      completedMutationStages = 3;
       onDefinitionChange(nextDefinition);
       const refreshed = await strategyAutomationApi.get(workspace.strategy.id);
       setWorkspace(refreshed);
       setDraft(hydrateDraft(refreshed));
       setDirty(false);
       await loadList();
+      setMessage(successMessage);
     } catch (error) {
-      setMessage(errorMessage(error, "Strategy settings could not be applied."));
-      throw error;
+      const failedStage = settingsMutationStageLabel(mutationStage);
+      const failure = errorMessage(error, "Strategy settings could not be applied.");
+
+      // A response can fail after its mutation committed. Immediately unmount
+      // the settings form and discard its optimistic revision so the same stale
+      // payload can never be submitted a second time while recovery is running.
+      setWorkspace(null);
+      setDraft(null);
+      setPaperData(null);
+      setDirty(false);
+
+      try {
+        const authoritative = await strategyAutomationApi.get(strategyId);
+        setWorkspace(authoritative);
+        setDraft(hydrateDraft(authoritative));
+        setDirty(false);
+        onDefinitionChange(authoritative.strategy.draftDefinition || authoritative.strategy.definition);
+        await loadList().catch(() => undefined);
+        const recoveryMessage = `PARTIAL SAVE RECOVERED · ${failedStage} failed after ${completedMutationStages}/3 mutation stages. The cockpit and draft were reloaded from authoritative VPS state, and the stale revision was discarded. Review the recovered values, then Save again; retry is safe. ${failure}`;
+        setMessage(recoveryMessage);
+        const retrySafeError = new Error(recoveryMessage) as Error & { cause?: unknown };
+        retrySafeError.cause = error;
+        throw retrySafeError;
+      } catch (recoveryError) {
+        if (recoveryError instanceof Error && recoveryError.message.startsWith("PARTIAL SAVE RECOVERED")) throw recoveryError;
+        setWorkspace(null);
+        setDraft(null);
+        setPaperData(null);
+        setDirty(false);
+        setView("library");
+        await loadList().catch(() => undefined);
+        const recoveryFailure = errorMessage(recoveryError, "Authoritative VPS reload failed.");
+        const recoveryMessage = `PARTIAL SAVE REQUIRES RELOAD · ${failedStage} failed after ${completedMutationStages}/3 mutation stages. Authoritative recovery also failed, so the stale revision was discarded and the settings editor was closed. Reopen the strategy before retrying; do not repeat Save from the old form. ${failure} ${recoveryFailure}`;
+        setMessage(recoveryMessage);
+        const retrySafeError = new Error(recoveryMessage) as Error & { cause?: unknown };
+        retrySafeError.cause = error;
+        throw retrySafeError;
+      }
     } finally { setBusy(false); }
   };
 
@@ -587,6 +634,12 @@ function persistedDefinition(draft: StrategyWizardDraft): StrategyAutomationDefi
   // labels. Normalize both forms into the immutable native SuperATR contract
   // before the VPS worker ever evaluates a bar.
   return applyStrategyControlPanel(base, draft.paperPolicy, readStrategyControlPanel(base, draft.paperPolicy)).definition;
+}
+
+function settingsMutationStageLabel(stage: "SAVE_DRAFT" | "UPDATE_GLOBAL_POLICY" | "APPLY_DESTINATION") {
+  if (stage === "SAVE_DRAFT") return "strategy draft";
+  if (stage === "UPDATE_GLOBAL_POLICY") return "global risk policy";
+  return "selected execution destination";
 }
 
 function hydrateDraft(workspace: StrategyWorkspace): StrategyWizardDraft {

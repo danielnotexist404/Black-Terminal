@@ -629,6 +629,23 @@ export async function placeBybitOrder(credentials, order, prevalidated = null) {
     throw error;
   }
 
+  const body = buildBybitOrderRequestBody(order, validation);
+
+  const response = await bybitRequest(credentials, "POST", "/v5/order/create", {}, body);
+  return normalizeBybitExecutionReport({
+    accountId: order.accountId,
+    exchange: "bybit",
+    symbol: order.symbol,
+    status: "accepted",
+    orderId: response?.orderId,
+    clientOrderId: response?.orderLinkId || body.orderLinkId,
+    filledQuantity: 0,
+    raw: response
+  });
+}
+
+/** Pure request builder used by offline execution certification. */
+export function buildBybitOrderRequestBody(order, validation) {
   const category = order.marketKind === "spot" ? "spot" : "linear";
   const orderType = normalizeBybitOrderType(order.orderType);
   const body = {
@@ -677,17 +694,7 @@ export async function placeBybitOrder(credentials, order, prevalidated = null) {
     body.tpslMode = order.tpslMode === "partial" ? "Partial" : "Full";
   }
 
-  const response = await bybitRequest(credentials, "POST", "/v5/order/create", {}, body);
-  return normalizeBybitExecutionReport({
-    accountId: order.accountId,
-    exchange: "bybit",
-    symbol: order.symbol,
-    status: "accepted",
-    orderId: response?.orderId,
-    clientOrderId: response?.orderLinkId || body.orderLinkId,
-    filledQuantity: 0,
-    raw: response
-  });
+  return body;
 }
 
 export async function placeBybitStrategyOrder(credentials, order, prevalidated = null) {
@@ -976,16 +983,12 @@ export function buildBybitTradingStopBody(patch) {
 export async function setBybitLeverage(credentials, { category = "linear", symbol, leverage, buyLeverage, sellLeverage }) {
   if (!symbol) throw new Error("Bybit leverage update requires a symbol.");
   if (!leverage && !buyLeverage && !sellLeverage) throw new Error("Bybit leverage update requires leverage.");
-  const nextBuyLeverage = String(buyLeverage || leverage);
-  const nextSellLeverage = String(sellLeverage || leverage);
+  const body = buildBybitLeverageRequestBody({ category, symbol, leverage, buyLeverage, sellLeverage });
+  const nextBuyLeverage = body.buyLeverage;
+  const nextSellLeverage = body.sellLeverage;
   let response;
   try {
-    response = await bybitRequest(credentials, "POST", "/v5/position/set-leverage", {}, {
-      category,
-      symbol,
-      buyLeverage: nextBuyLeverage,
-      sellLeverage: nextSellLeverage
-    });
+    response = await bybitRequest(credentials, "POST", "/v5/position/set-leverage", {}, body);
   } catch (error) {
     // Bybit retCode 110043 is an idempotent no-op: the requested leverage is
     // already active. It is not a broker outage and must not block trading.
@@ -1005,6 +1008,18 @@ export async function setBybitLeverage(credentials, { category = "linear", symbo
     buyLeverage: Number(nextBuyLeverage),
     sellLeverage: Number(nextSellLeverage),
     raw: response
+  };
+}
+
+/** Pure request builder used by offline execution certification. */
+export function buildBybitLeverageRequestBody({ category = "linear", symbol, leverage, buyLeverage, sellLeverage }) {
+  if (!symbol) throw new Error("Bybit leverage update requires a symbol.");
+  if (!leverage && !buyLeverage && !sellLeverage) throw new Error("Bybit leverage update requires leverage.");
+  return {
+    category,
+    symbol,
+    buyLeverage: String(buyLeverage || leverage),
+    sellLeverage: String(sellLeverage || leverage)
   };
 }
 
@@ -1764,6 +1779,11 @@ export function precisionFromStep(value) {
 
 export function normalizeBybitOrderStatus(status) {
   const value = String(status || "").replace(/[^a-zA-Z]/g, "").toLowerCase();
+  // Bybit reports an IOC that received a partial fill and then expired as
+  // `PartiallyFilledCanceled`.  It is terminal: treating it as the generic
+  // non-terminal `PartiallyFilled` state leaves dependent TP commands waiting
+  // forever even though the final cumulative fill is already known.
+  if (value.includes("partiallyfilled") && value.includes("cancel")) return "cancelled";
   if (value.includes("partiallyfilled")) return "partially-filled";
   if (value.includes("filled")) return "filled";
   if (value.includes("cancel")) return "cancelled";

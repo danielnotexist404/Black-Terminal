@@ -10,7 +10,14 @@ export type StrategySignal = {
   exit?: boolean;
   stopLoss?: number;
   takeProfit?: number;
-  takeProfits?: Array<{ id: string; price: number; quantityPercent: number }>;
+  takeProfits?: Array<{
+    id: string;
+    price: number;
+    quantityPercent: number;
+    basis?: "ATR" | "PERCENT";
+    value?: number;
+    atrValue?: number;
+  }>;
   confidence?: number;
   reason?: string;
   signalName?: string;

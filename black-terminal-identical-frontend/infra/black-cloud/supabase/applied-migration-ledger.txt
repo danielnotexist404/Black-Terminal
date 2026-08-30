@@ -43,3 +43,5 @@
 202608290003|strategy_superatr_runtime_kind
 202608300001|strategy_target_side_leverage
 202608300002|authoritative_broker_account_equity
+202608300003|strategy_superatr_group_take_profits
+202608300004|strategy_execution_lease_retry_safety

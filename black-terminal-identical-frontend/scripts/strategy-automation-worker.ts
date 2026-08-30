@@ -11,6 +11,10 @@ import {
   intentSigningPayload,
   signCanonicalPayload,
 } from "../server/cloud-execution/canonical.js";
+import {
+  reserveStrategyTakeProfits,
+  shouldQueueStrategyTakeProfits,
+} from "../server/strategy-automation/superatr-execution.js";
 import type { Candle } from "../src/chart-engine/types.ts";
 
 type JsonRow = Record<string, any>;
@@ -368,6 +372,7 @@ async function enqueueBrokerStrategySignal(
     return;
   }
   const action = opposite ? (conflictResolution === "CLOSE_ONLY" ? "CLOSE" : "REVERSE") : "ENTRY";
+  const takeProfitPlan = reserveStrategyTakeProfits(signal.takeProfits);
   const commandSignalKey = `${signalKey}:${binding.id}:${action.toLowerCase()}`;
   const idempotencyKey = crypto.createHash("sha256").update(commandSignalKey).digest("hex");
   const deterministicClientOrderId = `bt-str-${idempotencyKey.slice(0, 28)}`;
@@ -388,7 +393,7 @@ async function enqueueBrokerStrategySignal(
       positionDirection: opposite?.direction || null,
       stopLoss: signal.stopLoss || null,
       takeProfit: signal.takeProfit || null,
-      takeProfits: Array.isArray(signal.takeProfits) ? signal.takeProfits : [],
+      takeProfits: takeProfitPlan,
       requestedLeverage: sideSpecificLeverage(strategy.definition, signal.direction, binding),
       slippageTicks: Number(strategy.definition?.execution?.slippageTicks || 0),
       candleTime: signal.timestamp,
@@ -397,11 +402,12 @@ async function enqueueBrokerStrategySignal(
       simulatedFunds: executionEnvironment === "DEMO"
     },
     status: "QUEUED",
-    priority: action === "CLOSE" ? 20 : 50
+    priority: action === "CLOSE" ? 20 : 50,
+    max_attempts: action === "REVERSE" ? 100 : 8,
   }, { onConflict: "idempotency_key", ignoreDuplicates: true });
   if (error) throw error;
-  if (action === "ENTRY" && Array.isArray(signal.takeProfits)) {
-    for (const [index, target] of signal.takeProfits.slice(0, 7).entries()) {
+  if (shouldQueueStrategyTakeProfits(action)) {
+    for (const [index, target] of takeProfitPlan.slice(0, 7).entries()) {
       const targetId = String(target?.id || `TP${index + 1}`).toUpperCase();
       const targetSignalKey = `${signalKey}:${binding.id}:${targetId.toLowerCase()}`;
       const targetIdempotencyKey = crypto.createHash("sha256").update(targetSignalKey).digest("hex");
@@ -422,7 +428,12 @@ async function enqueueBrokerStrategySignal(
           positionDirection: signal.direction,
           targetId,
           targetPrice: Number(target?.price),
+          targetBasis: target?.basis || null,
+          targetValue: Number(target?.value),
+          targetAtrValue: Number(target?.atrValue),
           quantityPercent: Number(target?.quantityPercent),
+          parentEntryIdempotencyKey: idempotencyKey,
+          parentStrategySignalKey: commandSignalKey,
           candleTime: signal.timestamp,
           strategyVersion: strategy.current_version,
           executionEnvironment,
@@ -430,6 +441,7 @@ async function enqueueBrokerStrategySignal(
         },
         status: "QUEUED",
         priority: 70 + index,
+        max_attempts: 100,
       }, { onConflict: "idempotency_key", ignoreDuplicates: true });
       if (targetError) throw targetError;
     }
@@ -490,6 +502,7 @@ async function enqueueGroupStrategySignal(
   const now = new Date();
   const expiresAt = new Date(now.getTime() + Math.max(60_000, timeframeMilliseconds(strategy.timeframe))).toISOString();
   const policy = normalizeCapitalPolicy(bindingPolicy(binding), binding.market_type, { allowZeroAllocation: false });
+  const takeProfitPlan = reserveStrategyTakeProfits(signal.takeProfits);
   const row: JsonRow = {
     id: crypto.randomUUID(),
     group_id: binding.group_id,
@@ -524,7 +537,7 @@ async function enqueueGroupStrategySignal(
       stopReversalEnabled: strategy.definition?.execution?.stopReversalEnabled === true,
       strategyVersion: strategy.current_version,
       candleTime: signal.timestamp,
-      takeProfits: Array.isArray(signal.takeProfits) ? signal.takeProfits : [],
+      takeProfits: takeProfitPlan,
       requestedLeverage: sideSpecificLeverage(strategy.definition, signal.direction, binding),
       slippageTicks: Number(strategy.definition?.execution?.slippageTicks || 0),
     },
@@ -561,8 +574,8 @@ async function enqueueGroupStrategySignal(
     priority: 20,
   }, { onConflict: "idempotency_key", ignoreDuplicates: true });
   if (commandError) throw commandError;
-  if (Array.isArray(signal.takeProfits)) {
-    for (const [index, target] of signal.takeProfits.slice(0, 7).entries()) {
+  if (takeProfitPlan.length) {
+    for (const [index, target] of takeProfitPlan.slice(0, 7).entries()) {
       const targetId = String(target?.id || `TP${index + 1}`).toUpperCase();
       const targetClientIntentId = `strategy:${hashCanonicalPayload({ signalKey, bindingId: binding.id, targetId }).slice(0, 48)}`;
       const targetIdempotencyKey = hashCanonicalPayload({ groupId: binding.group_id, clientIntentId: targetClientIntentId });
@@ -578,7 +591,16 @@ async function enqueueGroupStrategySignal(
         take_profit: null,
         stop_loss: null,
         strategy_action: "TAKE_PROFIT",
-        strategy_execution_policy: { strategyVersion: strategy.current_version, candleTime: signal.timestamp, targetId, quantityPercent: Number(target?.quantityPercent) },
+        strategy_execution_policy: {
+          strategyVersion: strategy.current_version,
+          candleTime: signal.timestamp,
+          parentGroupIntentId: intentId,
+          targetId,
+          targetBasis: target?.basis || null,
+          targetValue: Number(target?.value),
+          targetAtrValue: Number(target?.atrValue),
+          quantityPercent: Number(target?.quantityPercent),
+        },
         idempotency_key: targetIdempotencyKey,
       };
       const targetEnvelope = intentSigningPayload(targetRow);
@@ -590,7 +612,7 @@ async function enqueueGroupStrategySignal(
       if (!targetIntentId) continue;
       const { error: targetVersionError } = await supabase.from("group_trade_intent_versions").upsert({ group_intent_id: targetIntentId, version: 1, canonical_payload: targetEnvelope, canonical_hash: targetRow.canonical_hash, service_signature: targetRow.service_signature, created_by: strategy.owner_user_id }, { onConflict: "group_intent_id,version", ignoreDuplicates: true });
       if (targetVersionError) throw targetVersionError;
-      const { error: targetCommandError } = await supabase.from("execution_commands").upsert({ command_type: "EXPAND_GROUP_INTENT", group_intent_id: targetIntentId, strategy_automation_id: strategy.id, strategy_target_binding_id: binding.id, strategy_signal_key: `${signalKey}:${binding.id}:group:${targetId.toLowerCase()}`, idempotency_key: `expand:${targetIdempotencyKey}`, payload: { groupIntentId: targetIntentId }, status: "QUEUED", priority: 40 + index }, { onConflict: "idempotency_key", ignoreDuplicates: true });
+      const { error: targetCommandError } = await supabase.from("execution_commands").upsert({ command_type: "EXPAND_GROUP_INTENT", group_intent_id: targetIntentId, strategy_automation_id: strategy.id, strategy_target_binding_id: binding.id, strategy_signal_key: `${signalKey}:${binding.id}:group:${targetId.toLowerCase()}`, idempotency_key: `expand:${targetIdempotencyKey}`, payload: { groupIntentId: targetIntentId }, status: "QUEUED", priority: 40 + index, max_attempts: 100 }, { onConflict: "idempotency_key", ignoreDuplicates: true });
       if (targetCommandError) throw targetCommandError;
     }
   }

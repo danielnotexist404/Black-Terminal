@@ -10,6 +10,7 @@ import {
   superAtrHistoricalStrategyMarkers,
 } from "../src/modules/strategy-lab/execution-desk/executionDeskModel.ts";
 import { applyStrategyControlPanel, readStrategyControlPanel, superAtrTakeProfitAllocation } from "../src/modules/strategy-lab/execution-desk/strategyControlPanelModel.ts";
+import { paperStrategyDestinationKey, preferredStrategyDestination, resolveStrategyDestination, selectableStrategyBindings } from "../src/modules/strategy-lab/execution-desk/strategyDestinationModel.ts";
 import { createSuperAtrSevenStepSignals, positionAwareStrategyEntries, superAtrTakeProfitPlan } from "../src/modules/strategy-lab/adapters/signalAdapter.ts";
 import { compileAndRunScript } from "../src/components/ScriptCompiler.ts";
 
@@ -144,6 +145,34 @@ const policy = {
   slippageBps: 5,
   marginMode: "CROSS" as const,
 };
+const targetBinding = (overrides: Record<string, unknown> = {}) => ({
+  id: "mainnet-binding",
+  strategyId: "strategy",
+  strategyVersion: 1,
+  slotIndex: 2,
+  targetType: "BROKER_ACCOUNT" as const,
+  targetId: "mainnet-account",
+  targetLabel: "Bybit Mainnet",
+  marketType: "FUTURES" as const,
+  status: "LIVE" as const,
+  capitalPolicyVersion: 1,
+  capitalPolicy: policy,
+  validation: { eligible: true },
+  rowVersion: 1,
+  createdAt: "2026-08-30T00:00:00Z",
+  updatedAt: "2026-08-30T00:00:00Z",
+  ...overrides,
+});
+const liveBinding = targetBinding();
+const disconnectedBinding = targetBinding({ id: "old-binding", targetId: "old-account", status: "DISCONNECTED" as const });
+assert.equal(
+  preferredStrategyDestination([disconnectedBinding, liveBinding], { targetType: "PAPER", authorizationAccepted: false, armOnActivation: false }),
+  liveBinding.id,
+  "attaching a live broker after Paper setup automatically makes it the settings destination",
+);
+assert.deepEqual(selectableStrategyBindings([disconnectedBinding, liveBinding]).map((binding) => binding.id), [liveBinding.id], "disconnected audit rows never become settings destinations");
+assert.equal(resolveStrategyDestination(liveBinding.id, [liveBinding]).mode, "AUTHORITATIVE", "a selected broker always enters authoritative-equity mode");
+assert.equal(resolveStrategyDestination(paperStrategyDestinationKey, [liveBinding]).mode, "PAPER", "only an explicit Paper selection displays initial capital");
 const labelledPanel = readStrategyControlPanel({
   ...baseDefinition,
   settings: {
@@ -280,11 +309,12 @@ const workerSource = fs.readFileSync(new URL("../scripts/strategy-automation-wor
 assert.match(cockpitSource, /\["executionDesk", "EXECUTION DESK"\]/);
 assert.match(deskSource, /This chart is owned by the strategy runtime\. It never mounts the strategy onto the default discretionary chart\./);
 assert.doesNotMatch(deskSource, /onDefinitionChange|onVisibleIndicatorsChange|setActiveNav/);
-assert.match(deskSource, /preferredExecutionSource\(workspace\)/, "a configured broker or group is selected instead of silently defaulting to Paper");
+assert.match(deskSource, /preferredStrategyDestination\(connectedBindings, workspace\.strategy\.definition\.deployment\)/, "a configured broker or group is selected instead of silently defaulting to Paper");
+assert.match(deskSource, /manuallySelectedSource\.current = true/, "an explicit Paper selection remains available after a live destination is attached");
 assert.match(deskSource, /historicalSignalMarkers\(strategy\.definition, calculationCandles, candles\)/, "the dedicated chart calculates position-aware signals from hidden seed history before the first broker fill");
 assert.match(deskSource, /to: oldest - 1/, "the dedicated chart paginates authoritative candles behind the visible window instead of starting flat at the viewport edge");
 assert.match(deskSource, /const visibleBarCount = 9_000/, "the dedicated chart exposes the maximum safe paginated history while retaining a hidden state seed");
-for (const label of ["INPUTS", "PROPERTIES", "STYLE", "VISIBILITY", "Default order size", "Long leverage", "Short leverage", "Percentage to Exit at Each ATR TP Level"]) assert.match(settingsSource, new RegExp(label, "i"));
+for (const label of ["INPUTS", "PROPERTIES", "STYLE", "VISIBILITY", "Default order size", "Long entry leverage · per trade", "Short entry leverage · per trade", "Percentage to Exit at Each ATR TP Level"]) assert.match(settingsSource, new RegExp(label, "i"));
 assert.match(settingsSource, /Full account equity · API/, "connected-account equity is identified as authoritative broker data");
 assert.match(settingsSource, /if \(!dirty\.current\)/, "workspace refreshes cannot overwrite unsaved numeric edits");
 assert.match(settingsSource, /setValue\(structuredClone\(submitted\)\)/, "a successful save retains the submitted form instead of restoring its stale pre-save snapshot");
@@ -292,7 +322,8 @@ assert.match(settingsSource, /cannot exceed the broker's current available funds
 assert.match(cockpitSource, /SETTINGS DESTINATION/, "the settings tab explicitly selects Paper or one of the connected destinations");
 assert.match(cockpitSource, /snapshot\?\.equity/, "the selected destination's API equity is supplied to the settings panel");
 assert.match(cockpitSource, /snapshot\?\.availableBalance/, "the selected destination's current available funds constrain fixed-USDT sizing");
-assert.match(settingsSource, /authoritativeDestination \? liveEquity \?\? "" : item\.initialCapital/, "a connected broker never falls back to the script's 10,000 initial-capital seed while equity is unavailable");
+assert.match(settingsSource, /authoritativeDestination \? displayedEquity \?\? "" : item\.initialCapital/, "a connected broker never falls back to the script's 10,000 initial-capital seed while equity is unavailable");
+assert.match(settingsSource, /LAST-KNOWN BROKER EQUITY/, "degraded broker equity remains visibly diagnostic while live sizing stays locked");
 assert.match(settingsSource, /BROKER EQUITY IS SYNCHRONIZING/, "missing broker equity is reported as synchronization state instead of a fictional balance");
 assert.match(settingsSource, /authoritativeFreshness === "LIVE"/, "only a live authoritative broker snapshot unlocks equity sizing");
 assert.match(settingsSource, /authoritativeFreshness !== "LIVE"/, "saving remains fail-closed when the broker snapshot is stale or degraded");

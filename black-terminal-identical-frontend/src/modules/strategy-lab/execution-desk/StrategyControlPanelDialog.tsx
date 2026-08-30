@@ -144,32 +144,33 @@ function Inputs({ value, patch }: { value: StrategyControlPanel; patch: (value: 
 
 function Properties({ value, patch, accountLabel, authoritativeEquity, authoritativeAvailableBalance, authoritativeEquityTimestamp, authoritativeFreshness, authoritativeDestination }: { value: StrategyControlPanel; patch: (value: Partial<StrategyControlPanel["properties"]>) => void; accountLabel: string; authoritativeEquity?: number; authoritativeAvailableBalance?: number; authoritativeEquityTimestamp?: number; authoritativeFreshness?: string; authoritativeDestination: boolean }) {
   const item = value.properties;
-  const equitySynchronized = authoritativeDestination
+  const hasAuthoritativeSnapshot = authoritativeDestination
     && typeof authoritativeEquity === "number"
     && Number.isFinite(authoritativeEquity)
     && typeof authoritativeEquityTimestamp === "number"
-    && Number.isFinite(authoritativeEquityTimestamp)
-    && authoritativeFreshness === "LIVE";
-  const liveEquity = equitySynchronized ? Math.max(0, authoritativeEquity) : undefined;
+    && Number.isFinite(authoritativeEquityTimestamp);
+  const equitySynchronized = hasAuthoritativeSnapshot && authoritativeFreshness === "LIVE";
+  const displayedEquity = hasAuthoritativeSnapshot ? Math.max(0, authoritativeEquity) : undefined;
   const available = authoritativeAvailableBalance !== undefined && Number.isFinite(authoritativeAvailableBalance) ? Math.max(0, authoritativeAvailableBalance) : undefined;
-  const fixedUsdtLimit = !equitySynchronized || liveEquity === undefined ? undefined : Math.min(liveEquity, available ?? liveEquity);
+  const fixedUsdtLimit = !equitySynchronized || displayedEquity === undefined ? undefined : Math.min(displayedEquity, available ?? displayedEquity);
   const orderSizeMaximum = item.orderSizeMode === "PERCENT_EQUITY" ? 100 : item.orderSizeMode === "FIXED_USDT" ? fixedUsdtLimit : undefined;
   const syncLabel = authoritativeEquityTimestamp ? new Date(authoritativeEquityTimestamp).toLocaleTimeString() : "awaiting timestamp";
   return <div className="strategy-control-form properties">
     <h3>GENERAL</h3>
-    <ChoiceRow label={authoritativeDestination ? "Full account equity · API" : "Initial capital"}><input className={authoritativeDestination ? "authoritative" : undefined} type="number" min="0" readOnly={authoritativeDestination} disabled={authoritativeDestination && !equitySynchronized} placeholder={authoritativeDestination && !equitySynchronized ? "SYNCING" : undefined} value={authoritativeDestination ? liveEquity ?? "" : item.initialCapital} onChange={(event) => patch({ initialCapital: numeric(event, item.initialCapital) })} /><select disabled={authoritativeDestination} value={authoritativeDestination ? "USDT" : item.currency} onChange={(event) => patch({ currency: event.target.value as typeof item.currency })}><option>USD</option><option>USDT</option></select></ChoiceRow>
+    <ChoiceRow label={authoritativeDestination ? "Full account equity · API" : "Initial capital"}><input className={authoritativeDestination ? "authoritative" : undefined} type="number" min="0" readOnly={authoritativeDestination} disabled={authoritativeDestination && !equitySynchronized} placeholder={authoritativeDestination && !hasAuthoritativeSnapshot ? "SYNCING" : undefined} value={authoritativeDestination ? displayedEquity ?? "" : item.initialCapital} onChange={(event) => patch({ initialCapital: numeric(event, item.initialCapital) })} /><select disabled={authoritativeDestination} value={authoritativeDestination ? "USDT" : item.currency} onChange={(event) => patch({ currency: event.target.value as typeof item.currency })}><option>USD</option><option>USDT</option></select></ChoiceRow>
     {equitySynchronized ? <p className="strategy-control-equity-source">LIVE BROKER EQUITY · {authoritativeFreshness || "SYNCED"} · {syncLabel}{available !== undefined ? ` · ${available.toLocaleString(undefined, { maximumFractionDigits: 8 })} USDT available` : ""}. The field is broker-owned and updates automatically; execution reads Bybit again when an alert fires.</p> : null}
-    {authoritativeDestination && !equitySynchronized ? <p className="strategy-control-equity-source unavailable"><AlertTriangle size={12} />BROKER EQUITY IS SYNCHRONIZING. The script default is intentionally hidden and saving live sizing is locked until the authoritative account snapshot arrives.</p> : null}
+    {authoritativeDestination && hasAuthoritativeSnapshot && !equitySynchronized ? <p className="strategy-control-equity-source unavailable"><AlertTriangle size={12} />LAST-KNOWN BROKER EQUITY · {authoritativeFreshness || "UNAVAILABLE"} · {syncLabel}. It remains visible for diagnosis, but saving live sizing is locked until reconciliation marks it LIVE.</p> : null}
+    {authoritativeDestination && !hasAuthoritativeSnapshot ? <p className="strategy-control-equity-source unavailable"><AlertTriangle size={12} />BROKER EQUITY IS SYNCHRONIZING. The script default is intentionally hidden and saving live sizing is locked until the authoritative account snapshot arrives.</p> : null}
     <ChoiceRow label="Default order size"><input type="number" min="0.00000001" max={orderSizeMaximum} value={item.orderSizeValue} onChange={(event) => patch({ orderSizeValue: numeric(event, item.orderSizeValue) })} /><select value={item.orderSizeMode} onChange={(event) => patch({ orderSizeMode: event.target.value as typeof item.orderSizeMode })}><option value="PERCENT_EQUITY">% of equity</option><option value="FIXED_USDT">USDT balance</option><option value="FIXED_QUANTITY">Raw quantity</option></select></ChoiceRow>
     {fixedUsdtLimit !== undefined && item.orderSizeMode === "FIXED_USDT" ? <p className="strategy-control-field-limit">CURRENT MAXIMUM · {fixedUsdtLimit.toLocaleString(undefined, { maximumFractionDigits: 8 })} USDT</p> : null}
+    <NumberRow label="Long entry leverage · per trade" value={item.longLeverage} min={1} max={1000} suffix="x" onChange={(longLeverage) => patch({ longLeverage })} />
+    <NumberRow label="Short entry leverage · per trade" value={item.shortLeverage} min={1} max={1000} suffix="x" onChange={(shortLeverage) => patch({ shortLeverage })} />
     <NumberRow label="Pyramiding" value={item.pyramiding} min={1} max={100} onChange={(pyramiding) => patch({ pyramiding })} />
     <h3>DETAILIZATION AND EXECUTION</h3>
     <SelectRow label="Bar detailization" value={item.barDetailization} onChange={(barDetailization) => patch({ barDetailization: barDetailization as typeof item.barDetailization })}><option value="DEFAULT_4_TICKS">Default (4 ticks per bar)</option><option value="CLOSED_BAR">Closed bar OHLC</option></SelectRow>
     <SelectRow label="Script execution" value={item.executionCadence} onChange={(executionCadence) => patch({ executionCadence: executionCadence as typeof item.executionCadence })}><option value="BAR_CLOSE_AND_REALTIME">On bar close, On realtime bar tick</option><option value="BAR_CLOSE">On bar close</option></SelectRow>
     <h3>BROKER EMULATOR · {accountLabel.toUpperCase()}</h3>
     <ChoiceRow label="Commission"><input type="number" min="0" step="0.01" value={item.commissionValue} onChange={(event) => patch({ commissionValue: numeric(event, item.commissionValue) })} /><select value={item.commissionMode} onChange={(event) => patch({ commissionMode: event.target.value as typeof item.commissionMode })}><option value="PERCENT">Percent</option><option value="USDT_PER_ORDER">USDT per order</option></select></ChoiceRow>
-    <NumberRow label="Long leverage per trade" value={item.longLeverage} min={1} max={1000} suffix="x" onChange={(longLeverage) => patch({ longLeverage })} />
-    <NumberRow label="Short leverage per trade" value={item.shortLeverage} min={1} max={1000} suffix="x" onChange={(shortLeverage) => patch({ shortLeverage })} />
     <NumberRow label="Slippage" value={item.slippageTicks} min={0} suffix="ticks" onChange={(slippageTicks) => patch({ slippageTicks })} />
     <SelectRow label="Limit order execution" value={item.limitExecution} onChange={(limitExecution) => patch({ limitExecution: limitExecution as typeof item.limitExecution })}><option value="REQUESTED_PRICE">Requested price</option><option value="TOUCH">Price touch</option></SelectRow>
     <SelectRow label="Order execution delay" value={item.executionDelay} onChange={(executionDelay) => patch({ executionDelay: executionDelay as typeof item.executionDelay })}><option value="ONE_TICK">One tick</option><option value="NONE">None</option></SelectRow>

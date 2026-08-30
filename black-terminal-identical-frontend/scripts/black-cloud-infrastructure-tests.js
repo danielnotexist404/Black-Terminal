@@ -4,6 +4,7 @@ import fs from "node:fs";
 const compose = fs.readFileSync("infra/black-cloud/docker-compose.yml", "utf8");
 const stagingCompose = fs.readFileSync("infra/black-cloud/docker-compose.staging.yml", "utf8");
 const productionCompose = fs.readFileSync("infra/black-cloud/docker-compose.production.yml", "utf8");
+const releaseCompose = fs.readFileSync("infra/black-cloud/docker-compose.release.yml", "utf8");
 const staging = fs.readFileSync("infra/black-cloud/Caddyfile.staging", "utf8");
 const production = fs.readFileSync("infra/black-cloud/Caddyfile.production", "utf8");
 const runtimeExample = fs.readFileSync("infra/black-cloud/secrets/runtime.env.example", "utf8");
@@ -21,6 +22,16 @@ const supabaseOverride = fs.readFileSync("infra/black-cloud/supabase.override.ym
 assert.doesNotMatch(compose, /image:\s*\S+:latest\b/i, "mutable latest image tags are forbidden");
 assert.match(compose, /profiles:\s*\["live-execution"\]/, "real-funds workers must be isolated behind a Compose profile");
 assert.match(compose, /BLACK_CLOUD_DEPLOYMENT_COMMIT:\s*\$\{BLACK_CLOUD_DEPLOYMENT_COMMIT\}/, "the central API must report its immutable release identity");
+assert.match(releaseCompose, /frontend:[\s\S]*?image: \$\{BLACK_CLOUD_FRONTEND_IMAGE:\?/, "frontend release image must be supplied explicitly");
+assert.match(releaseCompose, /api:[\s\S]*?image: \$\{BLACK_CLOUD_API_IMAGE:\?/, "API release image must be supplied explicitly");
+for (const service of ["strategy-automation-worker", "black-cloud-demo-execution-worker", "black-cloud-execution-worker"]) {
+  assert.match(releaseCompose, new RegExp(`\\n  ${service}:[\\s\\S]*?image: \\$\\{BLACK_CLOUD_RUNTIME_IMAGE:\\?`), `${service} must consume the explicitly selected immutable runtime image`);
+}
+assert.doesNotMatch(releaseCompose, /image: black-terminal-(?:frontend|api|runtime):/, "the release overlay must not silently derive mutable local tags");
+assert.equal((releaseCompose.match(/^\s+BLACK_CLOUD_DEPLOYMENT_COMMIT:/gm) || []).length, 4, "API and all execution runtimes must report the release identity");
+assert.equal((releaseCompose.match(/^\s+BLACK_CLOUD_IMAGE_REFERENCE:/gm) || []).length, 3, "all execution runtimes must report the immutable runtime image reference");
+assert.equal((releaseCompose.match(/^\s+BLACK_CLOUD_IMAGE_DIGEST:/gm) || []).length, 3, "all execution runtimes must report Docker's verified runtime image digest");
+assert.equal((releaseCompose.match(/BLACK_CLOUD_IMAGE_REFERENCE: \$\{BLACK_CLOUD_RUNTIME_IMAGE\}/g) || []).length, 3, "runtime telemetry must report the exact Compose image selection");
 assert.match(runtimeExample, /BLACK_CLOUD_MAINNET_ENABLED=false/);
 assert.match(runtimeExample, /EVENT_ALPHA_LIVE_EXECUTION_ENABLED=false/);
 assert.match(runtimeExample, /IMM_ENABLED=false/);

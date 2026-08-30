@@ -30,6 +30,15 @@ export class BlackCloudRepository {
     return Array.isArray(value) ? value[0] || null : value;
   }
 
+  async releaseLeaseContention(commandId, retryAfterSeconds = 2) {
+    const value = await this.rpc("black_cloud_release_execution_command_lease_contention", {
+      p_command_id: commandId,
+      p_worker_id: this.workerId,
+      p_retry_after_seconds: retryAfterSeconds
+    });
+    return Array.isArray(value) ? value[0] || null : value;
+  }
+
   async finishCommand(commandId, fencingToken, status, options = {}) {
     const value = await this.rpc("black_cloud_finish_execution_command", {
       p_command_id: commandId,

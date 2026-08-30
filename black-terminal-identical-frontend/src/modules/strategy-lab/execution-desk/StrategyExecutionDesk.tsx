@@ -33,6 +33,7 @@ import {
 } from "./executionDeskModel";
 import { StrategyControlPanelDialog } from "./StrategyControlPanelDialog";
 import { readStrategyControlPanel } from "./strategyControlPanelModel";
+import { preferredStrategyDestination, selectableStrategyBindings } from "./strategyDestinationModel";
 
 type SourceOption = {
   key: string;
@@ -59,11 +60,13 @@ type DeskStrategy = {
 const timeframeSet = new Set<Timeframe>(["1s", "10s", "30s", "1m", "3m", "5m", "15m", "30m", "1h", "2h", "3h", "4h", "6h", "8h", "12h", "1d", "1w", "1M", "1t", "10t", "100t"]);
 
 export function StrategyExecutionDesk({ workspace, paperData, busy = false, onApplyConfiguration }: { workspace: StrategyWorkspace; paperData: Record<string, unknown> | null; busy?: boolean; onApplyConfiguration?: (definition: StrategyAutomationDefinition, policy: StrategyCapitalPolicy, sourceKey: string, panel: StrategyControlPanel) => Promise<void> }) {
-  const preferredKey = preferredExecutionSource(workspace);
+  const connectedBindings = useMemo(() => selectableStrategyBindings(workspace.bindings), [workspace.bindings]);
+  const preferredKey = preferredStrategyDestination(connectedBindings, workspace.strategy.definition.deployment);
   const [selectedKey, setSelectedKey] = useState(preferredKey);
   const [targetData, setTargetData] = useState<Record<string, ExecutionDeskData>>({});
   const [targetError, setTargetError] = useState<string>();
-  const selectedBinding = workspace.bindings.find((binding) => binding.id === selectedKey);
+  const manuallySelectedSource = useRef(false);
+  const selectedBinding = connectedBindings.find((binding) => binding.id === selectedKey);
 
   const loadTarget = useCallback(async (binding: StrategyTargetBinding, signal?: AbortSignal) => {
     const resources = ["positions", "orders", "executions", "trades", "analytics"] as const;
@@ -91,15 +94,19 @@ export function StrategyExecutionDesk({ workspace, paperData, busy = false, onAp
   }, [loadTarget, selectedBinding]);
 
   useEffect(() => {
-    if (selectedKey !== "paper" && !workspace.bindings.some((binding) => binding.id === selectedKey)) setSelectedKey("paper");
-  }, [selectedKey, workspace.bindings]);
+    if (selectedKey !== "paper" && !connectedBindings.some((binding) => binding.id === selectedKey)) {
+      manuallySelectedSource.current = false;
+      setSelectedKey(preferredKey);
+    }
+  }, [connectedBindings, preferredKey, selectedKey]);
 
   useEffect(() => {
-    setSelectedKey(preferredExecutionSource(workspace));
+    manuallySelectedSource.current = false;
+    setSelectedKey(preferredStrategyDestination(connectedBindings, workspace.strategy.definition.deployment));
   }, [workspace.strategy.id]);
 
   useEffect(() => {
-    if (selectedKey === "paper" && preferredKey !== "paper") setSelectedKey(preferredKey);
+    if (!manuallySelectedSource.current && selectedKey === "paper" && preferredKey !== "paper") setSelectedKey(preferredKey);
   }, [preferredKey, selectedKey]);
 
   const options = useMemo<SourceOption[]>(() => [
@@ -111,7 +118,7 @@ export function StrategyExecutionDesk({ workspace, paperData, busy = false, onAp
       data: executionDeskData(paperData),
       freshness: workspace.paper ? workspace.paper.status : "UNAVAILABLE",
     },
-    ...workspace.bindings.map((binding) => ({
+    ...connectedBindings.map((binding) => ({
       key: binding.id,
       label: `${String(binding.slotIndex).padStart(2, "0")} · ${binding.targetLabel || binding.targetProvider || binding.targetType.replaceAll("_", " ")}`,
       mode: "LIVE" as const,
@@ -120,14 +127,14 @@ export function StrategyExecutionDesk({ workspace, paperData, busy = false, onAp
       data: targetData[binding.id] || executionDeskData(null),
       freshness: workspace.snapshots.find((snapshot) => snapshot.bindingId === binding.id)?.freshness || "UNAVAILABLE",
     })),
-  ], [paperData, targetData, workspace.bindings, workspace.paper, workspace.snapshots]);
+  ], [connectedBindings, paperData, targetData, workspace.paper, workspace.snapshots]);
   const selected = options.find((option) => option.key === selectedKey) || options[0]!;
 
   return <ExecutionDeskSurface
     strategy={workspace.strategy}
     options={options}
     selected={selected}
-    onSelect={setSelectedKey}
+    onSelect={(key) => { manuallySelectedSource.current = true; setSelectedKey(key); }}
     error={selectedKey === "paper" ? undefined : targetError}
     onRefresh={() => selected.binding ? void loadTarget(selected.binding) : undefined}
     busy={busy}
@@ -538,16 +545,6 @@ function timeframeSeconds(value: string) {
   const amount = Math.max(1, Number(match[1]));
   const unit = match[2];
   return amount * (unit === "s" ? 1 : unit === "m" ? 60 : unit === "h" ? 3600 : unit === "d" ? 86400 : unit === "w" ? 604800 : 2592000);
-}
-function preferredExecutionSource(workspace: StrategyWorkspace) {
-  const plan = workspace.strategy.definition.deployment;
-  if (plan && plan.targetType !== "PAPER") {
-    const planned = workspace.bindings.find((binding) => binding.targetId === plan.targetId && binding.status !== "DISCONNECTED");
-    if (planned) return planned.id;
-    const live = workspace.bindings.find((binding) => binding.status === "LIVE");
-    if (live) return live.id;
-  }
-  return "paper";
 }
 function uniqueCandles(rows: Candle[]) { return [...new Map(rows.filter((row) => Number.isFinite(row.time) && row.close > 0).map((row) => [row.time, row])).values()].sort((a, b) => a.time - b.time); }
 function money(value: number) { return `$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }

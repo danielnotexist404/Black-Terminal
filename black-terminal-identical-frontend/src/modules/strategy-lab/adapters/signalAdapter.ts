@@ -466,8 +466,21 @@ export function superAtrTakeProfitPlanFromAtr(
   const fixedExitPercent = Math.max(0.1, Math.min(100, settings.superAtrFixedExitPercent ?? 10));
   const sign = direction === "long" ? 1 : -1;
   return [
-    ...atrMultipliers.map((multiplier, targetIndex) => ({ id: `TP${targetIndex + 1}`, price: entryPrice + sign * takeProfitAtr! * multiplier, quantityPercent: atrExitPercent })),
-    ...fixedPercentages.map((percentage, targetIndex) => ({ id: `TP${targetIndex + 5}`, price: entryPrice * (1 + sign * percentage / 100), quantityPercent: fixedExitPercent })),
+    ...atrMultipliers.map((multiplier, targetIndex) => ({
+      id: `TP${targetIndex + 1}`,
+      price: entryPrice + sign * takeProfitAtr! * multiplier,
+      quantityPercent: atrExitPercent,
+      basis: "ATR" as const,
+      value: multiplier,
+      atrValue: takeProfitAtr!,
+    })),
+    ...fixedPercentages.map((percentage, targetIndex) => ({
+      id: `TP${targetIndex + 5}`,
+      price: entryPrice * (1 + sign * percentage / 100),
+      quantityPercent: fixedExitPercent,
+      basis: "PERCENT" as const,
+      value: percentage,
+    })),
   ];
 }
 
@@ -531,8 +544,21 @@ export function createSuperAtrSevenStepSignals(candles: Candle[], symbol: string
     const direction = longSetup ? "long" as const : "short" as const;
     const sign = direction === "long" ? 1 : -1;
     const takeProfits = multiStep && Number.isFinite(takeProfitAtr[index]) ? [
-      ...atrMultipliers.map((multiplier, targetIndex) => ({ id: `TP${targetIndex + 1}`, price: candle.close + sign * takeProfitAtr[index]! * multiplier, quantityPercent: atrExitPercent })),
-      ...fixedPercentages.map((percentage, targetIndex) => ({ id: `TP${targetIndex + 5}`, price: candle.close * (1 + sign * percentage / 100), quantityPercent: fixedExitPercent })),
+      ...atrMultipliers.map((multiplier, targetIndex) => ({
+        id: `TP${targetIndex + 1}`,
+        price: candle.close + sign * takeProfitAtr[index]! * multiplier,
+        quantityPercent: atrExitPercent,
+        basis: "ATR" as const,
+        value: multiplier,
+        atrValue: takeProfitAtr[index]!,
+      })),
+      ...fixedPercentages.map((percentage, targetIndex) => ({
+        id: `TP${targetIndex + 5}`,
+        price: candle.close * (1 + sign * percentage / 100),
+        quantityPercent: fixedExitPercent,
+        basis: "PERCENT" as const,
+        value: percentage,
+      })),
     ] : [];
     signals.push({
       timestamp: candle.time,

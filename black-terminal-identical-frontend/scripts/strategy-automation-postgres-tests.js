@@ -16,6 +16,9 @@ const brokerGroupExecutionMigration = fs.readFileSync(path.join(root, "supabase/
 const nineTargetMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608290001_strategy_lab_nine_target_capacity.sql"), "utf8");
 const superAtrRuntimeMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608290003_strategy_superatr_runtime_kind.sql"), "utf8");
 const sideLeverageMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608300001_strategy_target_side_leverage.sql"), "utf8");
+const authoritativeEquityMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608300002_authoritative_broker_account_equity.sql"), "utf8");
+const superAtrGroupTakeProfitMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608300003_strategy_superatr_group_take_profits.sql"), "utf8");
+const executionLeaseRetrySafetyMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608300004_strategy_execution_lease_retry_safety.sql"), "utf8");
 const db = new PGlite();
 
 await db.exec(`
@@ -25,6 +28,7 @@ await db.exec(`
   create schema auth;
   create table auth.users(id uuid primary key);
   create function auth.role() returns text language sql stable as $$ select coalesce(current_setting('request.jwt.claim.role',true),'') $$;
+  create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
   create table public.connectivity_connections(id uuid primary key);
   create table public.exchange_accounts(id uuid primary key);
   create table public.investment_groups(id uuid primary key);
@@ -55,6 +59,10 @@ await db.exec(`
     locked_until timestamptz,
     attempt_count integer not null default 0,
     max_attempts integer not null default 5,
+    fencing_token bigint,
+    last_error_code text,
+    last_error_message text,
+    completed_at timestamptz,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   );
@@ -95,10 +103,18 @@ await db.exec(brokerGroupExecutionMigration);
 await db.exec(nineTargetMigration);
 await db.exec(superAtrRuntimeMigration);
 await db.exec(sideLeverageMigration);
+await db.exec(authoritativeEquityMigration);
+await db.exec(superAtrGroupTakeProfitMigration);
+await db.exec(executionLeaseRetrySafetyMigration);
 await db.exec("set request.jwt.claim.role='service_role'");
 
 const ownerId = crypto.randomUUID();
 await db.query("insert into auth.users(id) values($1)", [ownerId]);
+assert.equal(
+  await scalar("select relrowsecurity as value from pg_class where oid='public.broker_account_equity_snapshots'::regclass"),
+  true,
+  "authoritative broker-equity snapshots are protected by row-level security",
+);
 const blockedBcrdaDefinition = { runtimeKind: "external-signals", symbol: "BTCUSDT", timeframe: "4h", marketType: "FUTURES", exchange: "bybit", indicator: { indicatorId: "black-core-dda-pro", name: "BC-RDA", runtimeStatus: "CERTIFIED" }, settings: { signalModelVersion: "BC_RDA_CAUSAL_V2" } };
 await assert.rejects(
   () => db.query("insert into public.strategy_automation_strategies(owner_user_id,name,runtime_kind,symbol,timeframe,market_type,definition,status,request_hash) values($1,'Blocked BC-RDA','external-signals','BTCUSDT','4h','FUTURES',$2::jsonb,'PAPER_ACTIVE',$3)", [ownerId, json(blockedBcrdaDefinition), sha(blockedBcrdaDefinition)]),
@@ -136,6 +152,28 @@ const demoClaims = await db.query("select idempotency_key from public.black_clou
 assert.deepEqual(demoClaims.rows.map((row) => row.idempotency_key), ["claim-demo"], "the Demo worker claims only Demo-bound commands");
 const mainnetClaims = await db.query("select idempotency_key from public.black_cloud_claim_execution_commands('mainnet-worker',10,45,'MAINNET_LIVE',true)");
 assert.deepEqual(mainnetClaims.rows.map((row) => row.idempotency_key), ["claim-mainnet"], "the Mainnet worker claims only Mainnet-bound commands when no global command exists");
+
+const leaseContentionCommandId = crypto.randomUUID();
+await db.query("insert into public.execution_commands(id,connection_id,command_type,idempotency_key,max_attempts) values($1,$2,'SYNC_ACCOUNT','lease-contention-mainnet',8)", [leaseContentionCommandId, mainnetMandateConnectionId]);
+for (let attempt = 0; attempt < 12; attempt += 1) {
+  const claim = await call("select id,attempt_count from public.black_cloud_claim_execution_commands($1,1,45,'MAINNET_LIVE',false)", [`contending-worker-${attempt}`]);
+  assert.equal(claim.id, leaseContentionCommandId, "the waiting worker can reclaim the command after lease contention");
+  assert.equal(Number(claim.attempt_count), 1, "the queue claim provisionally increments the attempt counter");
+  assert.deepEqual(
+    await call("select status,locked_by from public.execution_commands where id=$1", [leaseContentionCommandId]),
+    { status: "PROCESSING", locked_by: `contending-worker-${attempt}` },
+    "the contending worker owns the provisional queue claim",
+  );
+  await call("select released.id from public.black_cloud_release_execution_command_lease_contention($1,$2,0) as released", [leaseContentionCommandId, `contending-worker-${attempt}`]);
+  assert.equal(Number(await scalar("select attempt_count::int as value from public.execution_commands where id=$1", [leaseContentionCommandId])), 0, "lease contention is not a broker execution attempt");
+}
+assert.equal(await scalar("select status as value from public.execution_commands where id=$1", [leaseContentionCommandId]), "RETRY", "rolling-worker contention leaves the command retryable");
+
+const exhaustedRetryCommandId = crypto.randomUUID();
+await db.query("insert into public.execution_commands(id,connection_id,command_type,idempotency_key,status,attempt_count,max_attempts) values($1,$2,'SYNC_ACCOUNT','exhausted-mainnet','RETRY',3,3)", [exhaustedRetryCommandId, mainnetMandateConnectionId]);
+await db.query("select id from public.black_cloud_claim_execution_commands('dead-letter-sweeper',10,45,'MAINNET_LIVE',false)");
+assert.equal(await scalar("select status as value from public.execution_commands where id=$1", [exhaustedRetryCommandId]), "DEAD_LETTER", "an actually exhausted retry is terminal instead of permanently unclaimable");
+assert.equal(await scalar("select completed_at is not null as value from public.execution_commands where id=$1", [exhaustedRetryCommandId]), true, "dead-letter exhaustion records terminal completion time");
 const definition = { runtimeKind: "builtin-adaptive-swing", symbol: "BTCUSDT", timeframe: "4h", marketType: "FUTURES", exchange: "bybit", settings: {}, execution: {} };
 const globalPolicy = policy({ strategyAllocationValue: 100, tradeAmountValue: 100, maximumLeverage: 10, maximumPositionPercent: 100, maximumExposurePercent: 100, maximumDailyLoss: 1000000, maximumDrawdown: 100, maximumPositions: 100 });
 const paperPolicy = policy({ strategyAllocationValue: 100, tradeAmountValue: 10, maximumLeverage: 3, maximumPositionPercent: 25, maximumExposurePercent: 100, maximumDailyLoss: 500, maximumDrawdown: 20, maximumPositions: 1 });
@@ -236,6 +274,12 @@ await assert.rejects(() => db.query("update public.strategy_target_bindings set 
 await db.query("insert into public.execution_commands(command_type,idempotency_key,strategy_automation_id,strategy_target_binding_id,strategy_signal_key) values('PLACE_ORDER',$1,$2,$3,$4)", ["demo-command-1", strategyId, firstBinding.id, "closed-candle:btc:4h:1000:long"]);
 await assert.rejects(() => db.query("insert into public.execution_commands(command_type,idempotency_key,strategy_automation_id,strategy_target_binding_id,strategy_signal_key) values('PLACE_ORDER',$1,$2,$3,$4)", ["demo-command-2", strategyId, firstBinding.id, "closed-candle:btc:4h:1000:long"]), /idx_execution_commands_strategy_signal|unique/i, "a confirmed strategy signal is queued once per target");
 await assert.rejects(() => db.query("insert into public.execution_commands(command_type,idempotency_key,strategy_automation_id,strategy_target_binding_id,strategy_signal_key) values('SYNC_ACCOUNT',$1,$2,$3,$4)", ["demo-command-invalid", strategyId, firstBinding.id, "closed-candle:btc:4h:2000:long"]), /execution_commands_strategy_shape_check|check constraint/i, "strategy execution metadata cannot be attached to a non-order command");
+await db.query("insert into public.group_trade_intents(client_intent_id,strategy_automation_id,strategy_target_binding_id,strategy_action,strategy_direction) values($1,$2,$3,'TAKE_PROFIT','long')", ["superatr-group-tp1", strategyId, firstBinding.id]);
+await assert.rejects(
+  () => db.query("insert into public.group_trade_intents(client_intent_id,strategy_automation_id,strategy_target_binding_id,strategy_action,strategy_direction) values($1,$2,$3,'UNBOUNDED_ACTION','long')", ["superatr-group-invalid", strategyId, firstBinding.id]),
+  /group_trade_intents_strategy_action|check constraint/i,
+  "the group strategy envelope admits signed TP intents but rejects arbitrary actions",
+);
 await db.query("update public.strategy_target_bindings set status='PAUSED' where id=$1", [firstBinding.id]);
 await db.query("update public.strategy_automation_strategies set status='PAPER_ACTIVE' where id=$1", [strategyId]);
 

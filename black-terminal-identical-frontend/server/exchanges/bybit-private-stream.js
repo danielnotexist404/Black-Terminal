@@ -507,6 +507,7 @@ function normalizeBybitStrategyEvent(row, time) {
 
 function normalizeBybitOrderStatus(status) {
   const value = String(status || "").replace(/[^a-zA-Z]/g, "").toLowerCase();
+  if (value.includes("partiallyfilled") && value.includes("cancel")) return "cancelled";
   if (value.includes("partiallyfilled")) return "partially-filled";
   if (value.includes("filled")) return "filled";
   if (value.includes("cancel")) return "cancelled";

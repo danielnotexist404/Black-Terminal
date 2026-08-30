@@ -154,7 +154,7 @@
     "test:professional-network": "node --experimental-strip-types scripts/professional-network-tests.ts",
     "test:investment-group-persistence": "node scripts/investment-group-persistence-tests.js",
     "test:black-cloud": "node scripts/black-cloud-execution-tests.js",
-    "test:broker-connectivity": "node scripts/broker-connectivity-tests.js",
+    "test:broker-connectivity": "node scripts/broker-connectivity-tests.js && node --experimental-strip-types scripts/connection-workspace-scope-tests.ts",
     "test:broker-production": "node scripts/broker-production-readiness-tests.js && node --experimental-strip-types scripts/manual-trading-access-tests.ts && npm run test:position-interactions",
     "test:investor-execution": "node scripts/investor-execution-tests.js",
     "test:mandates": "node scripts/mandate-tests.js",

@@ -34,6 +34,7 @@ export default async function handler(req, res) {
       const cloudConnection = cloud.get(account.id) || null;
       return {
         account: toCamelAccount(account, risks.get(account.id) || null),
+        workspaceScope: cloudConnection ? "STRATEGY_LAB" : "PERSONAL",
         lifecycle: derivePersistedConnectionLifecycle(account, latestHealth, cloudConnection),
         health: sanitizeHealth(latestHealth),
         cloud: sanitizeCloud(cloudConnection)

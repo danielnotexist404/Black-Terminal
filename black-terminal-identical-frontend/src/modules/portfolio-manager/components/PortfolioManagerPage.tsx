@@ -563,8 +563,8 @@ export function PositionsWorkspace({
 
   useEffect(() => {
     if (!activeVenueId && executionVenues[0]) setActiveVenueId(executionVenues[0].id);
-    if (activeVenueId && executionVenues.length > 0 && !executionVenues.some((venue) => venue.id === activeVenueId)) {
-      setActiveVenueId(executionVenues[0].id);
+    if (activeVenueId && !executionVenues.some((venue) => venue.id === activeVenueId)) {
+      setActiveVenueId(executionVenues[0]?.id ?? null);
     }
   }, [activeVenueId, executionVenues]);
 

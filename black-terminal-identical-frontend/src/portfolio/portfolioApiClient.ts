@@ -8,6 +8,7 @@ import { defaultRiskControls } from "../risk/types";
 import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } from "./types";
 import { deduplicateCanonicalPositions } from "../positions/canonicalPosition";
 import { blackCorePerformanceMonitor } from "../performance/performanceMonitor";
+import type { BrokerWorkspaceScope } from "../connectivity/connectionWorkspaceScope";
 
 type ApiAccount = {
   id: string;
@@ -39,6 +40,7 @@ export type BrokerAdapterDescriptor = {
 };
 
 export type PersistedExchangeConnection = {
+  workspaceScope: BrokerWorkspaceScope;
   account: PortfolioAccount & {
     network?: string | null;
     executionEnvironment?: string | null;

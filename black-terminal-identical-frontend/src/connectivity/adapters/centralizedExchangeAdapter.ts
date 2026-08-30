@@ -7,6 +7,7 @@ import type { ConnectionAdapter, ConnectionLifecycleState, ConnectionRecord, Con
 import { defaultConnectionHealth, defaultPermissionReport } from "../types";
 import { getVenueCertification } from "../venueRegistry";
 import { allowsManualExchangeTrading, isCloudExecutionReady } from "../manualTradingAccess";
+import { isPersonalWorkspaceBroker } from "../connectionWorkspaceScope";
 
 export function createCentralizedExchangeConnectionAdapter(exchange: ExchangeId, label: string): ConnectionAdapter {
   const certification = getVenueCertification(exchange);
@@ -130,7 +131,7 @@ export function createCentralizedExchangeConnectionAdapter(exchange: ExchangeId,
 export async function restoreCentralizedExchangeConnections(): Promise<ConnectionRecord[]> {
   const payload = await listPersistedExchangeConnectionsViaApi();
   if (!payload) return [];
-  return payload.connections.map((item) => {
+  return payload.connections.filter(isPersonalWorkspaceBroker).map((item) => {
     const account = item.account;
     const certification = getVenueCertification(account.exchange);
     const descriptor = payload.adapters.find((adapter) => adapter.id === account.exchange);

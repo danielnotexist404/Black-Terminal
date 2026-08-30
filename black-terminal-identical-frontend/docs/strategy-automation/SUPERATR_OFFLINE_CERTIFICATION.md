@@ -1,15 +1,18 @@
-# SuperATR 7-Step Offline Audit (Partial Certification)
+# SuperATR 7-Step Audit (Offline + Bybit Demo Execution Certification)
 
 Date: 2026-08-30
 
 Scope: supplied PresentTrading Pine v5 source, the saved Black Script v3/Python
 conversion, Strategy Lab's certified closed-candle adapter, durable strategy
-commands, Investment Group intents, and the Bybit request builders. No Demo or
-Mainnet broker order was submitted by this certification.
+commands, Investment Group intents, the Bybit request builders, and an
+authenticated bounded Bybit Demo lifecycle. No Mainnet broker order was
+submitted by this certification.
 
-Result: the setup formulas and control path below are certified offline. Exact
-live TradingView strategy equivalence is **not** certified because the ATR-exit
-timing/repricing gaps listed below remain open.
+Result: the setup formulas are certified offline and the durable Bybit Demo
+execution lifecycle is certified for entry, leverage, seven partial targets,
+target amendments, reversal, and final flattening. Exact live TradingView
+strategy equivalence is **not** certified because the signed-golden and
+intrabar gaps listed below remain open.
 
 ## Source authority
 
@@ -37,6 +40,9 @@ timing/repricing gaps listed below remain open.
   order.
 - Entry and reversal actions both create a target plan for the newly opened
   side.
+- Every confirmed closed bar can emit generation-fenced TP1-TP4 repricing
+  commands. Working orders are amended by immutable parent identity and the
+  command completes only after Bybit exposes the new price.
 - Every target names its immutable parent entry/direction intent. It waits for
   that entry command and its terminal venue fill, so concurrent queue claims
   cannot bind a reversal target to the old close leg.
@@ -54,6 +60,40 @@ timing/repricing gaps listed below remain open.
 - Deterministic client IDs, command idempotency, connection leases, fencing,
   position ownership checks, environment isolation, and ambiguous-response
   reconciliation remain in the execution path.
+- SQL composite-null leases are rejected; an expired orphaned command enters
+  deterministic reconciliation instead of remaining permanently
+  `PROCESSING` or being blindly resubmitted.
+- Reversal uses bounded deterministic residual close legs (`-c`, `-c2`,
+  `-c3`, `-c4`) and never opens the opposite side until Bybit reports flat.
+
+## Authenticated Bybit Demo evidence
+
+- Production runtime: `fdff7af191efe5cfe2d44dbd78e5d73824033bae`
+- Certification run: `mtg5ahup`
+- Immutable audit event: `104`
+
+- Long entry: 80 XRPUSDT at 5× leverage.
+- Seven reduce-only Long targets were accepted.
+- TP1 was repriced from a passive price to a marketable price and reduced the
+  position from 80 to 72.
+- Reversal closed Long first and opened Short 80 only after flat confirmation;
+  the reversal command reconciled in two durable attempts.
+- Seven reduce-only Short targets were accepted.
+- Short TP1 was repriced and reduced the position from 80 to 72.
+- Final close completed; direct venue verification reported no position and no
+  canary order.
+- Every temporary target was disconnected and the temporary strategy was
+  archived during cleanup.
+- Demo and strategy workers were restarted under `unless-stopped`; the private
+  stream reauthenticated without a browser, and the same full certification
+  passed after readiness returned.
+- An attempt during the brief reconciliation window failed closed before a
+  strategy or venue order was created.
+
+This canary drove the real durable execution-command path for a temporary
+certified strategy. It proves order lifecycle and restart behavior; it did not
+wait for a naturally occurring Super7 signal and therefore is not a golden
+TradingView signal-parity result.
 
 ## Defects corrected by this audit
 
@@ -73,36 +113,47 @@ timing/repricing gaps listed below remain open.
    position instead of the original entry fill.
 8. Group reversal close and entry legs shared one persisted OMS client ID;
    they now use deterministic `-c` and `-e` identities.
+9. Confirmed-bar ATR targets were not amended after entry; durable TP repricing
+   now follows the running generation and reconciles the venue update.
+10. A Bybit amendment timestamp was persisted as ISO text into a bigint column;
+    it now stores the venue millisecond epoch.
+11. Strategy slippage ticks were incorrectly converted to a percentage;
+    market entries now use Bybit's integer `TickSize` contract.
+12. `allowed_symbols=["*"]` was interpreted as a literal symbol rather than an
+    allow-all mandate.
+13. After a restart, a PostgreSQL composite null could become fencing token
+    zero and leave a timed-out command permanently `PROCESSING`; invalid leases
+    are rejected and orphaned work is recovered through reconciliation.
 
 ## Remaining certification gaps
 
 These gaps prohibit a claim of exact live TradingView equivalence today:
 
-1. Pine recreates/updates ATR-based `strategy.exit` prices on every strategy
-   calculation after the entry fill. Direct and follower Bybit targets still
-   use the ATR value carried by the confirmed signal command; the new code
-   correctly re-anchors that distance to the venue fill, but it does not amend
-   working TP1-TP4 after every later closed candle.
-2. Pine first sees `strategy.position_avg_price` on the calculation following
+1. Pine first sees `strategy.position_avg_price` on the calculation following
    the default next-tick fill. Broker targets are queued with the entry command
    and retry until the position is reconciled. This is safe and idempotent, but
    activation timing is not yet a tick-for-tick TradingView emulator.
-3. The adapter reconstructs position direction from a rolling 1,000-candle
+2. The adapter reconstructs position direction from a rolling 1,000-candle
    window. It preserves the persisted last direction, but a complete durable
    Pine state checkpoint is still needed for same-direction re-entry after a
    user config closes 100% through partial exits without an opposite setup.
-4. Script certification is structural/token-based, not an immutable source
+3. Script certification is structural/token-based, not an immutable source
    hash or signed compiler artifact. A lookalike edited script can still be
    mapped to the built-in adapter even when its private source is no longer
    semantically identical.
-5. TradingView bar magnifier/intrabar fill ordering cannot be certified from
+4. TradingView bar magnifier/intrabar fill ordering cannot be certified from
    OHLC candles alone. Same-bar target ordering uses the documented local
    conservative model, not TradingView's unavailable proprietary emulator
    state.
-6. A real authenticated Demo canary is still required to prove venue
-   acknowledgement, fill, reconciliation, seven working reduce-only orders,
-   partial fills, reversal, and post-restart recovery. Mainnet should remain
-   paused until the Demo canary and deployment-version checks pass.
+5. No signed TradingView export has yet been replayed as the golden authority
+   for every closed-bar signal and target amendment across multiple symbols and
+   timeframes.
+6. Mainnet order mutation has not been certified. A tiny Mainnet canary needs a
+   separate explicit authorization at execution time; Demo authorization does
+   not extend to real funds.
+7. A several-day naturally occurring Demo signal soak is still required to
+   compare chart labels, evaluator signals, durable commands, private fills,
+   and TradingView in one timeline.
 
 ## Test commands
 
@@ -112,5 +163,7 @@ npm run test:execution-desk
 npm run test:bybit-demo-strategy
 npm run test:bybit-certification
 node scripts/strategy-automation-postgres-tests.js
+npm run test:black-cloud
+npm run test:strategy-lab-release
 npm run typecheck
 ```

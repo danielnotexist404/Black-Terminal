@@ -1570,11 +1570,11 @@ function classifyExecutionError(error, command) {
 }
 
 function isRetryableTransportError(error) {
-  return /timeout|timed out|econnreset|econnrefused|fetch failed|rate limit|temporar|service unavailable|502|503|504/i.test(String(error?.message || error));
+  return /timeout|timed out|timing out|econnreset|econnrefused|fetch failed|rate limit|temporar|service unavailable|502|503|504/i.test(String(error?.message || error));
 }
 
-function isAmbiguousTransportError(error) {
-  return /timeout|timed out|econnreset|socket hang up|fetch failed|502|503|504/i.test(String(error?.message || error));
+export function isAmbiguousTransportError(error) {
+  return /timeout|timed out|timing out|econnreset|socket hang up|fetch failed|502|503|504/i.test(String(error?.message || error));
 }
 
 function terminalError(code, message) {

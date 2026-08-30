@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import {
   canonicalize,
   createDeterministicClientOrderId,
@@ -8,9 +9,9 @@ import {
   verifyCanonicalSignature
 } from "../server/cloud-execution/canonical.js";
 import { calculateFollowerAllocation, evaluateFollowerRisk, floorToStep } from "../server/cloud-execution/allocation-risk.js";
-import { redactObject, sanitizeError } from "../server/cloud-execution/repository.js";
+import { BlackCloudRepository, redactObject, sanitizeError } from "../server/cloud-execution/repository.js";
 import { createCloudExchangeAdapter, listCloudExchangeAdapters } from "../server/cloud-execution/adapters/registry.js";
-import { mandateListAllows } from "../server/cloud-execution/worker.js";
+import { isAmbiguousTransportError, mandateListAllows } from "../server/cloud-execution/worker.js";
 import { buildBybitOrderRequestBody, normalizeBybitError } from "../server/exchanges/bybit.js";
 
 process.env.BLACK_CLOUD_INTENT_SIGNING_KEY = "black-terminal-test-signing-key-32-bytes-minimum";
@@ -157,6 +158,36 @@ test("strategy slippage ticks use Bybit's integer TickSize contract", () => {
 test("slippage errors are not misclassified as IP restrictions", () => {
   assert.equal(normalizeBybitError(10001, "max slippage invalid", 400).code, "BROKER_UNAVAILABLE");
   assert.equal(normalizeBybitError(10010, "Unmatched IP", 403).code, "IP_RESTRICTION");
+});
+
+test("composite SQL null leases cannot become fencing token zero", async () => {
+  const calls = [];
+  const supabase = {
+    rpc: async (name, parameters) => {
+      calls.push({ name, parameters });
+      if (name === "black_cloud_acquire_worker_lease") return {
+        data: { lease_key: null, worker_id: null, fencing_token: null },
+        error: null,
+      };
+      return { data: [], error: null };
+    },
+  };
+  const repository = new BlackCloudRepository(supabase, "worker-1", "DEMO", false);
+  assert.equal(await repository.acquireLease("connection-1", 30), null);
+  await repository.claimCommands();
+  assert.equal(calls.at(-1).parameters.p_lock_seconds, 300);
+});
+
+test("Bybit server timing-out responses enter deterministic reconciliation", () => {
+  assert.equal(isAmbiguousTransportError(new Error("The upstream server is timing out")), true);
+});
+
+test("expired processing work is recovered through deterministic reconciliation", () => {
+  const sql = fs.readFileSync(new URL("../supabase/migrations/202608300007_black_cloud_processing_recovery.sql", import.meta.url), "utf8");
+  assert.match(sql, /c\.status='PROCESSING'/);
+  assert.match(sql, /then 'SUBMISSION_UNKNOWN' else 'RETRY'/);
+  assert.match(sql, /a\.fencing_token=l\.fencing_token/);
+  assert.match(sql, /p_lock_seconds integer default 300/);
 });
 
 for (const item of cases) {

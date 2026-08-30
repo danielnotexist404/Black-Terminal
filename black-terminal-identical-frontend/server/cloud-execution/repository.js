@@ -9,7 +9,7 @@ export class BlackCloudRepository {
     this.claimGlobalCommands = claimGlobalCommands;
   }
 
-  async claimCommands(limit = 10, lockSeconds = 45) {
+  async claimCommands(limit = 10, lockSeconds = 300) {
     return this.rpc("black_cloud_claim_execution_commands", {
       p_worker_id: this.workerId,
       p_limit: limit,
@@ -27,7 +27,16 @@ export class BlackCloudRepository {
       p_worker_id: this.workerId,
       p_ttl_seconds: ttlSeconds
     });
-    return Array.isArray(value) ? value[0] || null : value;
+    const lease = Array.isArray(value) ? value[0] || null : value;
+    const fencingToken = Number(lease?.fencing_token);
+    // PostgreSQL composite-returning functions can serialize a SQL NULL as an
+    // object whose every field is null. Treat that shape as lease contention;
+    // Number(null) is 0 and must never become an execution fencing token.
+    if (!lease?.lease_key
+      || lease.worker_id !== this.workerId
+      || !Number.isSafeInteger(fencingToken)
+      || fencingToken <= 0) return null;
+    return lease;
   }
 
   async releaseLeaseContention(commandId, retryAfterSeconds = 2) {

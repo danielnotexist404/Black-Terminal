@@ -847,8 +847,20 @@ export async function cancelAllBybitOrders(credentials, { marketKind = "perpetua
 
 export async function modifyBybitOrder(credentials, patch) {
   if (!patch.orderId && !patch.clientOrderId) throw new Error("Bybit modify requires orderId or clientOrderId.");
+  const body = buildBybitModifyOrderRequestBody(patch);
+  const response = await bybitRequest(credentials, "POST", "/v5/order/amend", {}, body);
+  return normalizeBybitExecutionReport({
+    exchange: "bybit",
+    symbol: patch.symbol,
+    status: "working",
+    orderId: response?.orderId || patch.orderId,
+    clientOrderId: response?.orderLinkId || patch.clientOrderId
+  });
+}
+
+export function buildBybitModifyOrderRequestBody(patch) {
   const category = patch.category === "inverse" ? "inverse" : patch.marketKind === "spot" ? "spot" : "linear";
-  const body = {
+  return {
     category,
     symbol: patch.symbol,
     orderId: patch.orderId,
@@ -859,14 +871,6 @@ export async function modifyBybitOrder(credentials, patch) {
     takeProfit: patch.takeProfit ? String(patch.takeProfit) : undefined,
     stopLoss: patch.stopLoss ? String(patch.stopLoss) : undefined
   };
-  const response = await bybitRequest(credentials, "POST", "/v5/order/amend", {}, body);
-  return normalizeBybitExecutionReport({
-    exchange: "bybit",
-    symbol: patch.symbol,
-    status: "working",
-    orderId: response?.orderId || patch.orderId,
-    clientOrderId: response?.orderLinkId || patch.clientOrderId
-  });
 }
 
 export async function closeBybitPosition(credentials, { marketKind = "perpetual", symbol, direction, quantity, positionIdx, clientOrderId }) {

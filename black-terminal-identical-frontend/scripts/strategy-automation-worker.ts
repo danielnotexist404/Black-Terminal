@@ -5,7 +5,12 @@ import {
   calculateEffectiveLeverage,
   normalizeCapitalPolicy,
 } from "../server/strategy-automation/domain.js";
-import { createStrategySignals, positionAwareStrategyEntries, superAtrTakeProfitPlan } from "../src/modules/strategy-lab/adapters/signalAdapter.ts";
+import {
+  createStrategySignals,
+  positionAwareStrategyEntries,
+  superAtrRequiredSeedBars,
+  superAtrTakeProfitPlan,
+} from "../src/modules/strategy-lab/adapters/signalAdapter.ts";
 import {
   hashCanonicalPayload,
   intentSigningPayload,
@@ -56,6 +61,7 @@ const groupExecutionEnabled =
   process.env.STRATEGY_AUTOMATION_GROUP_EXECUTION_ENABLED === "true" &&
   process.env.INVESTMENT_GROUP_EXECUTION_ENABLED === "true" &&
   process.env.BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH !== "true";
+const ACTIVE_EXECUTION_ORDER_STATUSES = ["pending", "accepted", "working", "partially-filled"];
 let running = true;
 let ticking = false;
 
@@ -286,6 +292,14 @@ async function processStrategy(strategy: JsonRow) {
       await enqueueGroupStrategySignal(strategy, binding, signal, signalKey);
     }
   }
+  if (strategy.runtime_kind === "builtin-superatr-seven-step") {
+    for (const binding of activeBrokerBindings) {
+      await enqueueBrokerTakeProfitReprices(strategy, binding, candles, candle);
+    }
+    for (const binding of groupBindings) {
+      await enqueueGroupTakeProfitReprices(strategy, binding, candles, candle);
+    }
+  }
   if (activePaper && position && closeResult.closed && closeResult.reason === "STOP_LOSS" && strategy.definition?.execution?.stopReversalEnabled === true) {
     await openPaperRevengePosition(strategy, activePaper, position, candles, candle);
   }
@@ -302,6 +316,11 @@ async function processStrategy(strategy: JsonRow) {
         last_closed_candle_at: candleAt,
         last_signal_key: signalKey || runtime?.last_signal_key || null,
         last_signal_at: signalAt || runtime?.last_signal_at || null,
+        pine_checkpoint: strategy.runtime_kind === "builtin-superatr-seven-step"
+          ? buildSuperAtrCheckpoint(strategy, runtime, candles, candle, transitions)
+          : runtime?.pine_checkpoint || {},
+        source_sha256: strategySourceFingerprint(strategy),
+        settings_sha256: hashCanonicalPayload(strategy.definition),
         last_heartbeat_at: new Date().toISOString(),
         worker_id: workerId,
         lease_owner: workerId,
@@ -625,6 +644,302 @@ async function enqueueGroupStrategySignal(
     message: "A confirmed closed-candle signal queued one signed, idempotent Investment Group intent.",
     safe_metadata: { signalKey, groupId: binding.group_id, symbol: row.symbol, direction: signal.direction, authorizedMandates: Number(count || 0) },
   });
+}
+
+async function enqueueBrokerTakeProfitReprices(
+  strategy: JsonRow,
+  binding: JsonRow,
+  candles: Candle[],
+  candle: Candle,
+) {
+  if (!binding.connection_id || !binding.account_id || strategy.market_type === "SPOT") return;
+  const [{ data: positions, error: positionError }, { data: orders, error: orderError }, { data: entries, error: entryError }] = await Promise.all([
+    supabase.from("account_positions")
+      .select("account_id,direction,quantity,average_price,position_idx,strategy_target_binding_id")
+      .eq("account_id", binding.account_id)
+      .eq("strategy_target_binding_id", binding.id)
+      .eq("symbol", strategy.symbol)
+      .gt("quantity", 0),
+    supabase.from("execution_orders")
+      .select("id,user_id,account_id,client_order_id,limit_price,status,created_at")
+      .eq("strategy_target_binding_id", binding.id)
+      .eq("symbol", strategy.symbol)
+      .eq("reduce_only", true)
+      .in("status", ACTIVE_EXECUTION_ORDER_STATUSES)
+      .order("created_at", { ascending: false })
+      .limit(32),
+    supabase.from("execution_orders")
+      .select("id,side,status,filled_quantity,created_at")
+      .eq("strategy_target_binding_id", binding.id)
+      .eq("symbol", strategy.symbol)
+      .eq("reduce_only", false)
+      .order("created_at", { ascending: false })
+      .limit(20),
+  ]);
+  if (positionError) throw positionError;
+  if (orderError) throw orderError;
+  if (entryError) throw entryError;
+  if (!positions?.length || !orders?.length) return;
+
+  const orderIds = orders.map((order) => order.id);
+  const { data: targetCommands, error: targetCommandError } = await supabase.from("execution_commands")
+    .select("execution_order_id,payload,created_at")
+    .eq("strategy_target_binding_id", binding.id)
+    .eq("command_type", "PLACE_ORDER")
+    .in("execution_order_id", orderIds)
+    .order("created_at", { ascending: false });
+  if (targetCommandError) throw targetCommandError;
+  const parentKeys = [...new Set((targetCommands || [])
+    .map((command) => String(command.payload?.parentEntryIdempotencyKey || ""))
+    .filter(Boolean))];
+  if (!parentKeys.length) return;
+  const { data: parentCommands, error: parentError } = await supabase.from("execution_commands")
+    .select("idempotency_key,execution_order_id,status")
+    .in("idempotency_key", parentKeys);
+  if (parentError) throw parentError;
+
+  const orderById = new Map(orders.map((order) => [String(order.id), order]));
+  const targetCommandByOrder = new Map<string, JsonRow>();
+  for (const command of targetCommands || []) {
+    const orderId = String(command.execution_order_id || "");
+    if (orderId && !targetCommandByOrder.has(orderId)) targetCommandByOrder.set(orderId, command);
+  }
+  const parentByKey = new Map((parentCommands || []).map((command) => [String(command.idempotency_key), command]));
+
+  for (const position of positions) {
+    const direction = String(position.direction || "").toLowerCase();
+    if (direction !== "long" && direction !== "short") continue;
+    const expectedEntrySide = direction === "long" ? "buy" : "sell";
+    const latestEntry = (entries || []).find((entry) => String(entry.side).toLowerCase() === expectedEntrySide && isExecutedEntryOrder(entry));
+    if (!latestEntry) continue;
+    const plan = reserveStrategyTakeProfits(superAtrTakeProfitPlan(
+      candles,
+      direction,
+      Number(position.average_price),
+      strategy.definition?.settings || {},
+    ));
+    const planById = new Map(plan.map((target) => [String(target.id).toUpperCase(), target]));
+    for (const [orderId, targetCommand] of targetCommandByOrder) {
+      const order = orderById.get(orderId);
+      if (!order?.client_order_id) continue;
+      const payload = targetCommand.payload || {};
+      if (String(payload.direction || "").toLowerCase() !== direction) continue;
+      const parent = parentByKey.get(String(payload.parentEntryIdempotencyKey || ""));
+      if (!parent || String(parent.execution_order_id || "") !== String(latestEntry.id)) continue;
+      const targetId = String(payload.targetId || "").toUpperCase();
+      const target = planById.get(targetId);
+      if (!target || target.basis !== "ATR") continue;
+      await enqueueTakeProfitReprice({
+        strategy,
+        binding,
+        userId: strategy.owner_user_id,
+        connectionId: binding.connection_id,
+        executionOrder: order,
+        target,
+        targetId,
+        direction,
+        sourceCandleTime: candle.time,
+        expectedEntryOrderId: latestEntry.id,
+      });
+    }
+  }
+}
+
+async function enqueueGroupTakeProfitReprices(
+  strategy: JsonRow,
+  binding: JsonRow,
+  candles: Candle[],
+  candle: Candle,
+) {
+  if (!binding.group_id || strategy.market_type === "SPOT") return;
+  const [{ data: positions, error: positionError }, { data: orders, error: orderError }, { data: entries, error: entryError }] = await Promise.all([
+    supabase.from("account_positions")
+      .select("account_id,direction,quantity,average_price,position_idx,strategy_target_binding_id")
+      .eq("strategy_target_binding_id", binding.id)
+      .eq("symbol", strategy.symbol)
+      .gt("quantity", 0),
+    supabase.from("execution_orders")
+      .select("id,user_id,account_id,client_order_id,limit_price,status,group_intent_id,created_at")
+      .eq("strategy_target_binding_id", binding.id)
+      .eq("symbol", strategy.symbol)
+      .eq("origin", "INVESTMENT_GROUP")
+      .eq("reduce_only", true)
+      .in("status", ACTIVE_EXECUTION_ORDER_STATUSES)
+      .order("created_at", { ascending: false })
+      .limit(128),
+    supabase.from("execution_orders")
+      .select("id,account_id,side,status,filled_quantity,group_intent_id,created_at")
+      .eq("strategy_target_binding_id", binding.id)
+      .eq("symbol", strategy.symbol)
+      .eq("origin", "INVESTMENT_GROUP")
+      .eq("reduce_only", false)
+      .order("created_at", { ascending: false })
+      .limit(128),
+  ]);
+  if (positionError) throw positionError;
+  if (orderError) throw orderError;
+  if (entryError) throw entryError;
+  if (!positions?.length || !orders?.length) return;
+
+  const orderIds = orders.map((order) => order.id);
+  const intentIds = [...new Set(orders.map((order) => String(order.group_intent_id || "")).filter(Boolean))];
+  const [{ data: intents, error: intentError }, { data: plans, error: planError }] = await Promise.all([
+    supabase.from("group_trade_intents")
+      .select("id,strategy_direction,strategy_execution_policy")
+      .in("id", intentIds),
+    supabase.from("follower_execution_plans")
+      .select("id,execution_order_id,group_intent_id,follower_user_id,broker_connection_id")
+      .in("execution_order_id", orderIds),
+  ]);
+  if (intentError) throw intentError;
+  if (planError) throw planError;
+  const intentById = new Map((intents || []).map((intent) => [String(intent.id), intent]));
+  const planByOrderId = new Map((plans || []).map((plan) => [String(plan.execution_order_id), plan]));
+  const positionByAccountDirection = new Map((positions || []).map((position) => [
+    `${position.account_id}:${String(position.direction).toLowerCase()}`,
+    position,
+  ]));
+
+  for (const order of orders) {
+    if (!order.client_order_id || !order.group_intent_id) continue;
+    const intent = intentById.get(String(order.group_intent_id));
+    const followerPlan = planByOrderId.get(String(order.id));
+    if (!intent || !followerPlan?.broker_connection_id) continue;
+    const direction = String(intent.strategy_direction || "").toLowerCase();
+    if (direction !== "long" && direction !== "short") continue;
+    const targetId = String(intent.strategy_execution_policy?.targetId || "").toUpperCase();
+    const parentGroupIntentId = String(intent.strategy_execution_policy?.parentGroupIntentId || "");
+    if (!targetId || !parentGroupIntentId) continue;
+    const position = positionByAccountDirection.get(`${order.account_id}:${direction}`);
+    if (!position) continue;
+    const expectedEntrySide = direction === "long" ? "buy" : "sell";
+    const latestEntry = (entries || []).find((entry) =>
+      String(entry.account_id) === String(order.account_id)
+      && String(entry.side).toLowerCase() === expectedEntrySide
+      && isExecutedEntryOrder(entry));
+    if (!latestEntry || String(latestEntry.group_intent_id || "") !== parentGroupIntentId) continue;
+    const target = reserveStrategyTakeProfits(superAtrTakeProfitPlan(
+      candles,
+      direction,
+      Number(position.average_price),
+      strategy.definition?.settings || {},
+    )).find((candidate) => String(candidate.id).toUpperCase() === targetId);
+    if (!target || target.basis !== "ATR") continue;
+    await enqueueTakeProfitReprice({
+      strategy,
+      binding,
+      userId: followerPlan.follower_user_id,
+      connectionId: followerPlan.broker_connection_id,
+      executionOrder: order,
+      target,
+      targetId,
+      direction,
+      sourceCandleTime: candle.time,
+      expectedEntryOrderId: latestEntry.id,
+      groupIntentId: order.group_intent_id,
+      followerPlanId: followerPlan.id,
+    });
+  }
+}
+
+async function enqueueTakeProfitReprice({
+  strategy,
+  binding,
+  userId,
+  connectionId,
+  executionOrder,
+  target,
+  targetId,
+  direction,
+  sourceCandleTime,
+  expectedEntryOrderId,
+  groupIntentId = null,
+  followerPlanId = null,
+}: JsonRow) {
+  const desiredPrice = Number(target?.price);
+  if (!connectionId || !executionOrder?.id || !executionOrder?.client_order_id || !Number.isFinite(desiredPrice) || desiredPrice <= 0) return;
+  const signalKey = `${strategy.id}:${strategy.current_version}:${binding.id}:${executionOrder.id}:${targetId.toLowerCase()}:reprice:${sourceCandleTime}`;
+  const idempotencyKey = crypto.createHash("sha256").update(signalKey).digest("hex");
+  const { error } = await supabase.from("execution_commands").upsert({
+    command_type: "MODIFY_ORDER",
+    user_id: userId,
+    connection_id: connectionId,
+    group_intent_id: groupIntentId,
+    follower_plan_id: followerPlanId,
+    execution_order_id: executionOrder.id,
+    strategy_automation_id: strategy.id,
+    strategy_target_binding_id: binding.id,
+    strategy_signal_key: signalKey,
+    idempotency_key: idempotencyKey,
+    payload: {
+      strategyAction: "TAKE_PROFIT_REPRICE",
+      request: {
+        marketKind: strategy.market_type === "SPOT" ? "spot" : "perpetual",
+        symbol: strategy.symbol,
+        clientOrderId: executionOrder.client_order_id,
+        limitPrice: desiredPrice,
+      },
+      targetId,
+      direction,
+      targetBasis: target.basis,
+      targetValue: Number(target.value),
+      targetAtrValue: Number(target.atrValue),
+      desiredPrice,
+      priorPersistedPrice: Number(executionOrder.limit_price || 0) || null,
+      sourceCandleTime,
+      strategyVersion: strategy.current_version,
+      expectedEntryOrderId,
+    },
+    status: "QUEUED",
+    priority: 60,
+    max_attempts: 20,
+  }, { onConflict: "idempotency_key", ignoreDuplicates: true });
+  if (error) throw error;
+}
+
+function isExecutedEntryOrder(order: JsonRow) {
+  const status = String(order?.status || "").toLowerCase();
+  const filledQuantity = Number(order?.filled_quantity || 0);
+  if (status === "cancelled") return filledQuantity > 0;
+  return filledQuantity > 0
+    || ["accepted", "working", "partially-filled", "filled"].includes(status);
+}
+
+function strategySourceFingerprint(strategy: JsonRow) {
+  return hashCanonicalPayload({
+    runtimeKind: strategy.runtime_kind,
+    indicatorId: strategy.definition?.indicator?.indicatorId || null,
+    sourceVersion: strategy.definition?.indicator?.version || null,
+    runtimeVersion: strategy.definition?.indicator?.runtimeVersion || null,
+  });
+}
+
+function buildSuperAtrCheckpoint(
+  strategy: JsonRow,
+  runtime: JsonRow | null,
+  candles: Candle[],
+  candle: Candle,
+  transitions: JsonRow[],
+) {
+  const sourceSha256 = strategySourceFingerprint(strategy);
+  const settingsSha256 = hashCanonicalPayload(strategy.definition);
+  const latestTransition = transitions.at(-1);
+  const previous = runtime?.pine_checkpoint && typeof runtime.pine_checkpoint === "object"
+    ? runtime.pine_checkpoint
+    : {};
+  return {
+    schemaVersion: 1,
+    runtimeKind: "builtin-superatr-seven-step",
+    sourceSha256,
+    settingsSha256,
+    virtualDirection: latestTransition?.direction || previous.virtualDirection || strategyDirectionFromSignalKey(runtime?.last_signal_key),
+    lastTransitionCandleTime: latestTransition?.timestamp || previous.lastTransitionCandleTime || null,
+    lastClosedCandleTime: candle.time,
+    seedFirstCandleTime: candles.at(0)?.time || null,
+    seedCandleCount: candles.length,
+    requiredSeedBars: superAtrRequiredSeedBars(strategy.definition?.settings || {}),
+    warmupComplete: candles.length >= superAtrRequiredSeedBars(strategy.definition?.settings || {}),
+  };
 }
 
 async function existingGroupIntent(groupId: string, clientIntentId: string) {

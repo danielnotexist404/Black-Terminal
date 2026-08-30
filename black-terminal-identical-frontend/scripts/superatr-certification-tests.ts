@@ -15,6 +15,7 @@ import {
 } from "../server/strategy-automation/superatr-execution.js";
 import {
   buildBybitLeverageRequestBody,
+  buildBybitModifyOrderRequestBody,
   buildBybitOrderRequestBody,
   normalizeBybitOrderStatus,
 } from "../server/exchanges/bybit.js";
@@ -26,7 +27,9 @@ import {
   recoveredFollowerAllocation,
   recoveredGroupIntentFromVenue,
   recoveredStrategyOrderDraft,
+  reversalCloseLegName,
   summarizeTakeProfitLadderFailure,
+  venuePricesEqual,
 } from "../server/cloud-execution/worker.js";
 import { compileAndRunScript } from "../src/components/ScriptCompiler.ts";
 import type { Candle } from "../src/chart-engine/types.ts";
@@ -239,10 +242,18 @@ assert.deepEqual(buildBybitLeverageRequestBody({ category: "linear", symbol: "BT
 assert.deepEqual(buildBybitLeverageRequestBody({ category: "linear", symbol: "BTCUSDT", buyLeverage: 7, sellLeverage: 3 }), {
   category: "linear", symbol: "BTCUSDT", buyLeverage: "7", sellLeverage: "3",
 });
+assert.deepEqual(buildBybitModifyOrderRequestBody({ marketKind: "perpetual", symbol: "BTCUSDT", clientOrderId: "bt-tp1", limitPrice: 65_200.5 }), {
+  category: "linear", symbol: "BTCUSDT", orderId: undefined, orderLinkId: "bt-tp1", qty: undefined,
+  price: "65200.5", triggerPrice: undefined, takeProfit: undefined, stopLoss: undefined,
+});
+assert.equal(venuePricesEqual(65_200.49, 65_200.5, 0.1), true, "venue confirmation tolerates only sub-half-tick representation noise");
+assert.equal(venuePricesEqual(65_200.4, 65_200.5, 0.1), false, "a full-tick difference still requires an amend");
+assert.deepEqual([1, 2, 3, 4].map(reversalCloseLegName), ["c", "c2", "c3", "c4"], "residual reversals use bounded deterministic client-order legs");
 
 const signalWorker = fs.readFileSync(new URL("./strategy-automation-worker.ts", import.meta.url), "utf8");
 const brokerWorker = fs.readFileSync(new URL("../server/cloud-execution/worker.js", import.meta.url), "utf8");
 const groupMigration = fs.readFileSync(new URL("../supabase/migrations/202608300003_strategy_superatr_group_take_profits.sql", import.meta.url), "utf8");
+const repriceMigration = fs.readFileSync(new URL("../supabase/migrations/202608300005_strategy_superatr_live_repricing.sql", import.meta.url), "utf8");
 assert.match(signalWorker, /shouldQueueStrategyTakeProfits\(action\)/, "direct targets queue TP1-TP7 after entries and reversals");
 assert.match(signalWorker, /targetBasis:[\s\S]*targetValue:[\s\S]*targetAtrValue:/, "durable commands retain the Pine target formula");
 assert.match(signalWorker, /parentEntryIdempotencyKey: idempotencyKey/, "direct TP commands name their immutable parent entry");
@@ -251,12 +262,18 @@ assert.match(brokerWorker, /resolveStrategyTakeProfitPrice\(payload, position\)/
 assert.match(brokerWorker, /parentCommand\.status !== "SUCCEEDED"[\s\S]*STRATEGY_TAKE_PROFIT_WAITING_FOR_PARENT_ENTRY/, "direct targets cannot pass the parent-entry completion barrier");
 assert.match(brokerWorker, /parentOrder\.reduce_only === true[\s\S]*STRATEGY_GROUP_TAKE_PROFIT_WAITING_FOR_PARENT_ENTRY/, "group reversal targets cannot attach to the old reduce-only close leg");
 assert.match(brokerWorker, /settledStrategyEntryQuantity\(parentVenueOrder\)[\s\S]*calculateStrategyTakeProfitQuantity\(originalEntryQuantity/, "late TP retries size from the parent's final filled quantity");
-assert.match(brokerWorker, /deterministicStrategyLegId\(command\.deterministic_client_order_id, "c"\)[\s\S]*deterministicStrategyLegId\(command\.deterministic_client_order_id, "e"\)/, "group reversal close and entry legs keep separate venue and OMS identities");
+assert.match(brokerWorker, /reversalCloseLegName\(legNumber\)[\s\S]*deterministicStrategyLegId\(command\.deterministic_client_order_id, "e"\)/, "group reversal close and entry legs keep separate venue and OMS identities");
 assert.match(brokerWorker, /reduceOnly = true[\s\S]*positionIdx = position\.positionIdx/, "partial exits are position-specific reduce-only orders");
 assert.match(brokerWorker, /configureLeverage\(leverageConfiguration\)[\s\S]*placeOrder\(orderDraft, venueValidation\)/, "Bybit leverage is configured before the entry request");
+assert.match(signalWorker, /command_type: "MODIFY_ORDER"[\s\S]*strategyAction: "TAKE_PROFIT_REPRICE"/, "every confirmed candle can enqueue a durable ATR take-profit amendment");
+assert.match(brokerWorker, /TAKE_PROFIT_REPRICE_SUPERSEDED[\s\S]*adapter\.modifyOrder/, "a stale reprice cannot overwrite a newer closed-candle target");
+assert.match(brokerWorker, /STRATEGY_TP_REPRICE_WAITING_FOR_CONFIRMATION/, "Bybit's asynchronous amend acknowledgement is reconciled before command completion");
+assert.match(brokerWorker, /MAX_STRATEGY_REVERSAL_CLOSE_LEGS[\s\S]*STRATEGY_REVERSE_RESIDUAL_CLOSE_EXHAUSTED/, "partial reversal closes continue through deterministic residual legs and still fail closed at a hard bound");
 assert.match(groupMigration, /strategy_action in \('SYNC_DIRECTION','TAKE_PROFIT'\)/, "Investment Group TP intents are admitted by the database contract");
+assert.match(repriceMigration, /command_type in \('PLACE_ORDER','EXPAND_GROUP_INTENT','MODIFY_ORDER','CANCEL_ORDER'\)/, "the database admits only explicitly strategy-owned mutation commands");
+assert.match(repriceMigration, /pine_checkpoint jsonb/, "confirmed-bar strategy state survives browser and worker restarts");
 
-console.log("SuperATR offline audit PASS — setup-formula parity, prefix no-repaint, duplicate suppression, reversal TP dependency barriers, original-fill partial reservations, venue-fill anchoring, reduce-only API shape, and leverage mapping verified without broker mutation. Dynamic Pine ATR-exit repricing remains outside this certification.");
+console.log("SuperATR offline audit PASS — setup parity, prefix no-repaint, duplicate suppression, durable ATR repricing, bounded residual reversal continuation, final-fill TP reservations, venue-fill anchoring, reduce-only API shape, and leverage mapping verified without broker mutation.");
 
 function signal(timestamp: number, direction: "long" | "short") {
   return { timestamp, symbol: "BTCUSDT", direction, entry: true } as const;

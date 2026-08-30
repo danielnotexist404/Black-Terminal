@@ -226,6 +226,7 @@ async function updateKnownOrders(supabase, userId, accountId, openOrders) {
       .from("execution_orders")
       .update({
         status: order.status,
+        limit_price: order.price,
         filled_quantity: order.filledQuantity,
         average_fill_price: order.averageFillPrice,
         client_order_id: order.clientOrderId || null,

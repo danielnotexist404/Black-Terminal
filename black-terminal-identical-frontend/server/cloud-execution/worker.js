@@ -34,6 +34,7 @@ import {
 import fs from "node:fs";
 
 const BLACK_CLOUD_SOFTWARE_VERSION = readPackageVersion();
+const MAX_STRATEGY_REVERSAL_CLOSE_LEGS = 4;
 
 export const WORKER_STARTUP_PHASES = Object.freeze({
   PROCESS_STARTING: "PROCESS_STARTING",
@@ -260,6 +261,7 @@ export class BlackCloudExecutionWorker {
       if (command.command_type === "EXPAND_GROUP_INTENT") result = await this.expandGroupIntent(command);
       else if (command.command_type === "PLACE_ORDER" && command.strategy_target_binding_id) result = await this.placeStrategyOrder(command, fencingToken);
       else if (command.command_type === "PLACE_ORDER") result = await this.placeFollowerOrder(command, fencingToken);
+      else if (command.command_type === "MODIFY_ORDER" && command.strategy_target_binding_id) result = await this.modifyStrategyTakeProfitOrder(command, fencingToken);
       else if (command.command_type === "MODIFY_ORDER") result = await this.executeBrokerMutation(command, fencingToken, "modify");
       else if (command.command_type === "CANCEL_ORDER") result = await this.executeBrokerMutation(command, fencingToken, "cancel");
       else if (command.command_type === "CANCEL_ALL") result = await this.executeBrokerMutation(command, fencingToken, "cancel-all");
@@ -413,15 +415,16 @@ export class BlackCloudExecutionWorker {
     const groupRecoveryPositionIdx = (direction) => venuePositions.some((item) => item.positionIdx === 1 || item.positionIdx === 2)
       ? (direction === "long" ? 1 : 2)
       : 0;
-    const adoptRecoveredGroupOrder = async (venueOrder, clientOrderId, expected) => {
+    const adoptRecoveredGroupOrder = async (venueOrder, clientOrderId, expected, options = {}) => {
       assertRecoveredVenueOrderShape(venueOrder, expected);
       const recoveredIntent = recoveredGroupIntentFromVenue(intent, venueOrder);
       const allocation = recoveredFollowerAllocation(venueOrder, wallet.accountMetrics, referencePrice);
       const adopted = await this.adoptVenueOrder({ command, plan, intent: recoveredIntent, account, allocation, existingVenueOrder: venueOrder, clientOrderId });
-      if (isTerminalUnfilledVenueOrder(venueOrder)) throw terminalError("STRATEGY_ORDER_UNFILLED", "Bybit terminated the recovered follower strategy order without a fill.");
+      if (isTerminalUnfilledVenueOrder(venueOrder) && options.allowTerminalUnfilled !== true) throw terminalError("STRATEGY_ORDER_UNFILLED", "Bybit terminated the recovered follower strategy order without a fill.");
       return adopted;
     };
     let recoveredGroupReverseClose = null;
+    let groupReverseCloseLeg = "c";
     if (intent.strategy_action === "TAKE_PROFIT") {
       const recoveredTarget = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol: intent.symbol, clientOrderId: command.deterministic_client_order_id });
       if (recoveredTarget) {
@@ -450,25 +453,35 @@ export class BlackCloudExecutionWorker {
             orderType: "market",
           });
         }
-        const closeClientOrderId = deterministicStrategyLegId(command.deterministic_client_order_id, "c");
-        recoveredGroupReverseClose = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol: intent.symbol, clientOrderId: closeClientOrderId });
-        if (recoveredGroupReverseClose) {
-          const closeDirection = groupDesiredDirection === "long" ? "short" : "long";
-          await adoptRecoveredGroupOrder(recoveredGroupReverseClose, closeClientOrderId, {
+        const closeDirection = groupDesiredDirection === "long" ? "short" : "long";
+        const closeStillOpen = venuePositions.some((position) => Number(position.quantity) > 0 && position.direction === closeDirection);
+        for (let legNumber = 1; legNumber <= MAX_STRATEGY_REVERSAL_CLOSE_LEGS; legNumber += 1) {
+          const leg = reversalCloseLegName(legNumber);
+          const closeClientOrderId = deterministicStrategyLegId(command.deterministic_client_order_id, leg);
+          const recoveredCloseLeg = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol: intent.symbol, clientOrderId: closeClientOrderId });
+          if (!recoveredCloseLeg) {
+            groupReverseCloseLeg = leg;
+            recoveredGroupReverseClose = null;
+            break;
+          }
+          recoveredGroupReverseClose = recoveredCloseLeg;
+          await adoptRecoveredGroupOrder(recoveredCloseLeg, closeClientOrderId, {
             category,
             symbol: intent.symbol,
             side: groupDesiredDirection === "short" ? "sell" : "buy",
             reduceOnly: true,
             positionIdx: groupRecoveryPositionIdx(closeDirection),
             orderType: "market",
-          });
-          const closeStillOpen = venuePositions.some((position) => Number(position.quantity) > 0 && position.direction === closeDirection);
-          if (isTerminalVenueOrder(recoveredGroupReverseClose) && closeStillOpen) {
-            throw terminalError("STRATEGY_REVERSE_RESIDUAL_POSITION_REQUIRES_MANUAL_RECONCILIATION", "The recovered follower reversal close ended with a residual position. Automatic entry is blocked; reconcile the residual position before rearming this target.");
-          }
-          if (!isTerminalVenueOrder(recoveredGroupReverseClose)) {
+          }, { allowTerminalUnfilled: true });
+          if (!isTerminalVenueOrder(recoveredCloseLeg)) {
             throw retryableError("STRATEGY_REVERSE_WAITING_FOR_FLAT", "The recovered follower close leg is still settling; the reverse entry remains blocked until Bybit confirms the prior position is flat.", 2);
           }
+          if (!closeStillOpen) break;
+          if (legNumber === MAX_STRATEGY_REVERSAL_CLOSE_LEGS) {
+            throw terminalError("STRATEGY_REVERSE_RESIDUAL_CLOSE_EXHAUSTED", "Four deterministic follower close legs completed but Bybit still reports residual exposure. Reverse entry remains blocked for manual reconciliation.");
+          }
+          groupReverseCloseLeg = reversalCloseLegName(legNumber + 1);
+          recoveredGroupReverseClose = null;
         }
       } else {
         const recoveredPrimary = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol: intent.symbol, clientOrderId: command.deterministic_client_order_id });
@@ -657,7 +670,7 @@ export class BlackCloudExecutionWorker {
     });
 
     const clientOrderId = strategyReverseClose
-      ? deterministicStrategyLegId(command.deterministic_client_order_id, "c")
+      ? deterministicStrategyLegId(command.deterministic_client_order_id, groupReverseCloseLeg)
       : strategyReverseIntent
         ? deterministicStrategyLegId(command.deterministic_client_order_id, "e")
         : command.deterministic_client_order_id;
@@ -788,7 +801,7 @@ export class BlackCloudExecutionWorker {
     const recoveryPositionIdx = (direction) => venuePositions.some((item) => item.positionIdx === 1 || item.positionIdx === 2)
       ? (direction === "long" ? 1 : 2)
       : 0;
-    const adoptRecoveredOrder = async (venueOrder, clientOrderId, expected) => {
+    const adoptRecoveredOrder = async (venueOrder, clientOrderId, expected, options = {}) => {
       assertRecoveredVenueOrderShape(venueOrder, expected);
       const orderDraft = recoveredStrategyOrderDraft(venueOrder, {
         accountId: account.id,
@@ -810,11 +823,12 @@ export class BlackCloudExecutionWorker {
         estimatedNotional: recoveredNotional,
         recovered: true,
       });
-      if (isTerminalUnfilledVenueOrder(venueOrder)) throw terminalError("STRATEGY_ORDER_UNFILLED", "Bybit terminated the recovered strategy order without a fill.");
+      if (isTerminalUnfilledVenueOrder(venueOrder) && options.allowTerminalUnfilled !== true) throw terminalError("STRATEGY_ORDER_UNFILLED", "Bybit terminated the recovered strategy order without a fill.");
       return persisted;
     };
 
     let recoveredReverseClose = null;
+    let reverseCloseLeg = "c";
     if (requestedAction === "REVERSE") {
       const entryClientOrderId = deterministicStrategyLegId(command.deterministic_client_order_id, "e");
       const recoveredEntry = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol, clientOrderId: entryClientOrderId });
@@ -829,24 +843,34 @@ export class BlackCloudExecutionWorker {
         });
       }
       const closeDirection = String(payload.positionDirection || oppositeDirectionPositions[0]?.direction || "").toLowerCase();
-      const closeClientOrderId = deterministicStrategyLegId(command.deterministic_client_order_id, "c");
-      recoveredReverseClose = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol, clientOrderId: closeClientOrderId });
-      if (recoveredReverseClose) {
-        await adoptRecoveredOrder(recoveredReverseClose, closeClientOrderId, {
+      const closeStillOpen = openPositions.some((position) => position.direction === closeDirection && Number(position.quantity) > 0);
+      for (let legNumber = 1; legNumber <= MAX_STRATEGY_REVERSAL_CLOSE_LEGS; legNumber += 1) {
+        const leg = reversalCloseLegName(legNumber);
+        const closeClientOrderId = deterministicStrategyLegId(command.deterministic_client_order_id, leg);
+        const recoveredCloseLeg = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol, clientOrderId: closeClientOrderId });
+        if (!recoveredCloseLeg) {
+          reverseCloseLeg = leg;
+          recoveredReverseClose = null;
+          break;
+        }
+        recoveredReverseClose = recoveredCloseLeg;
+        await adoptRecoveredOrder(recoveredCloseLeg, closeClientOrderId, {
           category,
           symbol,
           side: closeDirection === "long" ? "sell" : "buy",
           reduceOnly: true,
           positionIdx: recoveryPositionIdx(closeDirection),
           orderType: "market",
-        });
-        const closeStillOpen = openPositions.some((position) => position.direction === closeDirection && Number(position.quantity) > 0);
-        if (isTerminalVenueOrder(recoveredReverseClose) && closeStillOpen) {
-          throw terminalError("STRATEGY_REVERSE_RESIDUAL_POSITION_REQUIRES_MANUAL_RECONCILIATION", "The recovered reversal close ended with a residual position. Automatic reverse entry is blocked; reconcile the residual position before rearming this target.");
-        }
-        if (!isTerminalVenueOrder(recoveredReverseClose)) {
+        }, { allowTerminalUnfilled: true });
+        if (!isTerminalVenueOrder(recoveredCloseLeg)) {
           throw retryableError("STRATEGY_REVERSE_WAITING_FOR_FLAT", "The recovered close leg is still settling; the reverse entry remains blocked until Bybit confirms the prior position is flat.", 2);
         }
+        if (!closeStillOpen) break;
+        if (legNumber === MAX_STRATEGY_REVERSAL_CLOSE_LEGS) {
+          throw terminalError("STRATEGY_REVERSE_RESIDUAL_CLOSE_EXHAUSTED", "Four deterministic reduce-only close legs completed but Bybit still reports residual exposure. Reverse entry remains blocked for manual reconciliation.");
+        }
+        reverseCloseLeg = reversalCloseLegName(legNumber + 1);
+        recoveredReverseClose = null;
       }
     } else {
       const clientOrderId = command.deterministic_client_order_id;
@@ -898,7 +922,7 @@ export class BlackCloudExecutionWorker {
 
     const reversingClose = requestedAction === "REVERSE" && oppositeDirectionPositions.length > 0;
     const strategyExecutionClientOrderId = requestedAction === "REVERSE"
-      ? deterministicStrategyLegId(command.deterministic_client_order_id, reversingClose ? "c" : "e")
+      ? deterministicStrategyLegId(command.deterministic_client_order_id, reversingClose ? reverseCloseLeg : "e")
       : command.deterministic_client_order_id;
     if (requestedAction === "REVERSE" && sameDirectionPosition && oppositeDirectionPositions.length === 0 && !recoveredReverseClose) {
       return { skipped: true, reason: "DESIRED_POSITION_ALREADY_OPEN", simulatedFunds: credentialEnvironment === "DEMO" };
@@ -1287,6 +1311,130 @@ export class BlackCloudExecutionWorker {
     return adapter.cancelAll(command.payload.request || command.payload);
   }
 
+  async modifyStrategyTakeProfitOrder(command, fencingToken) {
+    if (String(command.payload?.strategyAction || "").toUpperCase() !== "TAKE_PROFIT_REPRICE") {
+      throw terminalError("STRATEGY_ORDER_MUTATION_INVALID", "Only a certified take-profit reprice may use a strategy-owned modify command.");
+    }
+    const [binding, strategy, connection, capabilities, order] = await Promise.all([
+      single(this.supabase.from("strategy_target_bindings").select("*").eq("id", command.strategy_target_binding_id)),
+      single(this.supabase.from("strategy_automation_strategies").select("*").eq("id", command.strategy_automation_id)),
+      single(this.supabase.from("connectivity_connections").select("*").eq("id", command.connection_id)),
+      single(this.supabase.from("broker_connection_capabilities").select("*").eq("connection_id", command.connection_id)),
+      single(this.supabase.from("execution_orders").select("*").eq("id", command.execution_order_id)),
+    ]);
+    if (binding.strategy_id !== strategy.id || order.strategy_target_binding_id !== binding.id || order.strategy_automation_id !== strategy.id) {
+      throw terminalError("STRATEGY_ORDER_MUTATION_OWNERSHIP_MISMATCH", "The take-profit order is not owned by the requested strategy generation.");
+    }
+    if (order.account_id !== connection.account_id || order.client_order_id !== command.payload?.request?.clientOrderId) {
+      throw terminalError("STRATEGY_ORDER_MUTATION_ACCOUNT_MISMATCH", "The take-profit mutation does not match its immutable broker account or client order ID.");
+    }
+    if (order.reduce_only !== true) throw terminalError("STRATEGY_ORDER_MUTATION_REDUCE_ONLY_REQUIRED", "Black Cloud refused to amend a non-reduce strategy order through the take-profit path.");
+    if (!["pending", "accepted", "working", "partially-filled"].includes(String(order.status || "").toLowerCase())) {
+      return { skipped: true, reason: "TAKE_PROFIT_ORDER_ALREADY_TERMINAL" };
+    }
+    const { data: newerCommands, error: newerError } = await this.supabase.from("execution_commands")
+      .select("id")
+      .eq("execution_order_id", order.id)
+      .eq("command_type", "MODIFY_ORDER")
+      .gt("created_at", command.created_at)
+      .neq("status", "CANCELLED")
+      .limit(1);
+    if (newerError) throw newerError;
+    if (newerCommands?.length) return { skipped: true, reason: "TAKE_PROFIT_REPRICE_SUPERSEDED" };
+
+    const secretReference = await single(this.supabase.from("broker_secret_references")
+      .select("id")
+      .eq("connection_id", connection.id)
+      .eq("status", "ACTIVE"));
+    const credentials = await this.repository.readBrokerSecret(secretReference.id, "strategy_take_profit_reprice");
+    assertWorkerEnvironment(connection, credentials);
+    const marketKind = String(command.payload?.request?.marketKind || "perpetual").toLowerCase() === "spot" ? "spot" : "perpetual";
+    const category = marketKind === "spot" ? "spot" : "linear";
+    const symbol = String(command.payload?.request?.symbol || order.symbol || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    const [instrumentRows, venueOrder] = await Promise.all([
+      getBybitInstrumentMetadata({ category, symbol, executionEnvironment: credentials.executionEnvironment || connection.execution_environment, endpointProfile: credentials.endpointProfile || connection.endpoint_profile }),
+      findBybitOrderByClientOrderId(credentials, { marketKind, symbol, clientOrderId: order.client_order_id }),
+    ]);
+    const instrument = instrumentRows[0];
+    if (!instrument || !(Number(instrument.tickSize) > 0)) throw terminalError("STRATEGY_TP_REPRICE_TICK_SIZE_REQUIRED", "The venue tick size is unavailable for a safe take-profit amendment.");
+    if (!venueOrder) throw retryableError("STRATEGY_TP_REPRICE_WAITING_FOR_ORDER", "The working take-profit is not visible at Bybit yet; repricing will retry after reconciliation.", 2);
+    assertRecoveredVenueOrderShape(venueOrder, {
+      category,
+      symbol,
+      side: String(command.payload?.direction || "").toLowerCase() === "long" ? "sell" : "buy",
+      reduceOnly: true,
+      positionIdx: Number(venueOrder.positionIdx || 0),
+      orderType: "limit",
+    });
+    if (isTerminalVenueOrder(venueOrder)) {
+      await updateOrThrow(this.supabase.from("execution_orders").update({
+        status: normalizeInternalStatus(venueOrder.status),
+        filled_quantity: Number(venueOrder.filledQuantity || 0),
+      }).eq("id", order.id));
+      return { skipped: true, reason: "TAKE_PROFIT_ORDER_TERMINAL_AT_VENUE" };
+    }
+    const desiredPrice = alignVenueStep(Number(command.payload?.desiredPrice || command.payload?.request?.limitPrice), Number(instrument.tickSize));
+    if (!(desiredPrice > 0)) throw terminalError("STRATEGY_TP_REPRICE_PRICE_INVALID", "The confirmed-bar take-profit amendment did not resolve to a positive venue price.");
+    if (venuePricesEqual(venueOrder.price, desiredPrice, Number(instrument.tickSize))) {
+      await updateOrThrow(this.supabase.from("execution_orders").update({
+        limit_price: desiredPrice,
+        venue_updated_at: new Date(Number(venueOrder.updatedTime || Date.now())).toISOString(),
+      }).eq("id", order.id));
+      await this.repository.audit({
+        userId: command.user_id,
+        connectionId: connection.id,
+        groupIntentId: command.group_intent_id,
+        followerPlanId: command.follower_plan_id,
+        commandId: command.id,
+        eventType: "STRATEGY_TAKE_PROFIT_REPRICE_CONFIRMED",
+        purpose: "strategy_take_profit_reprice",
+        message: "Bybit confirmed the latest closed-candle SuperATR take-profit price.",
+        metadata: { strategyId: strategy.id, bindingId: binding.id, targetId: command.payload?.targetId, symbol, desiredPrice, sourceCandleTime: command.payload?.sourceCandleTime }
+      });
+      return { amended: true, confirmed: true, venueOrderId: venueOrder.orderId, desiredPrice };
+    }
+
+    this.assertSubmissionClockSafe();
+    if (binding.status !== "LIVE") throw terminalError("STRATEGY_TARGET_NOT_LIVE", "The Strategy Lab target is not armed for take-profit repricing.");
+    if (Number(binding.strategy_version) !== Number(strategy.running_version) || Number(command.payload?.strategyVersion) !== Number(strategy.running_version)) {
+      throw terminalError("STRATEGY_VERSION_NOT_RUNNING", "The take-profit amendment belongs to an inactive strategy version.");
+    }
+    if (connection.control_state !== "ACTIVE" || connection.execution_readiness !== "READY") throw terminalError("CONNECTION_NOT_READY", "The Bybit connection is not ready for take-profit repricing.");
+    if (capabilities.can_modify_orders !== true || capabilities.can_withdraw || capabilities.can_transfer) {
+      throw terminalError("BROKER_CAPABILITY_REJECTED", "The broker capability set does not permit a safe strategy take-profit amendment.");
+    }
+    const environmentEnabled = normalizeBybitExecutionEnvironment(connection.execution_environment) === "DEMO"
+      ? process.env.STRATEGY_AUTOMATION_DEMO_EXECUTION_ENABLED === "true"
+      : process.env.STRATEGY_AUTOMATION_LIVE_EXECUTION_ENABLED === "true" && process.env.STRATEGY_AUTOMATION_LIVE_EXECUTION_CERTIFIED === "true";
+    if (!environmentEnabled || process.env.BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH === "true") {
+      throw terminalError("STRATEGY_ENVIRONMENT_DISABLED", "Strategy take-profit repricing is disabled for this execution environment.");
+    }
+    await this.repository.requireAutomationMandate(connection.id, "modify");
+    const ownedPositions = await rows(this.supabase.from("account_positions")
+      .select("direction,strategy_target_binding_id,quantity")
+      .eq("account_id", connection.account_id)
+      .eq("symbol", symbol)
+      .eq("direction", String(command.payload?.direction || "").toLowerCase())
+      .gt("quantity", 0));
+    if (!ownedPositions.some((position) => position.strategy_target_binding_id === binding.id)) {
+      return { skipped: true, reason: "TAKE_PROFIT_POSITION_ALREADY_FLAT" };
+    }
+    await this.repository.assertFencingToken(connection.id, fencingToken);
+    const adapter = createCloudExchangeAdapter(connection.provider, {
+      credentials,
+      executionEnvironment: credentials.executionEnvironment || connection.execution_environment,
+      endpointProfile: credentials.endpointProfile || connection.endpoint_profile || "GLOBAL",
+      connectionId: connection.id,
+    });
+    try {
+      await adapter.modifyOrder({ marketKind, symbol, clientOrderId: order.client_order_id, limitPrice: desiredPrice });
+    } catch (error) {
+      if (!isAmbiguousTransportError(error)) throw error;
+      throw ambiguousError("Bybit take-profit amendment acknowledgement was ambiguous. The deterministic order ID will be reconciled before retry.");
+    }
+    throw retryableError("STRATEGY_TP_REPRICE_WAITING_FOR_CONFIRMATION", "Bybit accepted the take-profit amendment; the worker will confirm the asynchronous venue state before completing it.", 1);
+  }
+
   async releaseForRetry(command, delay, code, message) {
     await updateOrThrow(this.supabase.from("execution_commands").update({
       status: "RETRY",
@@ -1445,6 +1593,19 @@ function retryableError(code, message, retryAfterSeconds) {
 function deterministicStrategyLegId(baseId, leg) {
   const safeBase = String(baseId || "bt-strategy").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 33);
   return `${safeBase}-${leg}`.slice(0, 36);
+}
+
+export function reversalCloseLegName(number) {
+  const normalized = Math.max(1, Math.min(MAX_STRATEGY_REVERSAL_CLOSE_LEGS, Math.floor(Number(number) || 1)));
+  return normalized === 1 ? "c" : `c${normalized}`;
+}
+
+export function venuePricesEqual(left, right, tickSize) {
+  const first = Number(left);
+  const second = Number(right);
+  const tick = Number(tickSize);
+  if (![first, second, tick].every(Number.isFinite) || tick <= 0) return false;
+  return Math.abs(first - second) < tick / 2 + 1e-12;
 }
 
 function ambiguousError(message) {

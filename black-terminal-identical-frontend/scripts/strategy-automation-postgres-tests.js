@@ -19,6 +19,7 @@ const sideLeverageMigration = fs.readFileSync(path.join(root, "supabase/migratio
 const authoritativeEquityMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608300002_authoritative_broker_account_equity.sql"), "utf8");
 const superAtrGroupTakeProfitMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608300003_strategy_superatr_group_take_profits.sql"), "utf8");
 const executionLeaseRetrySafetyMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608300004_strategy_execution_lease_retry_safety.sql"), "utf8");
+const superAtrLiveRepricingMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608300005_strategy_superatr_live_repricing.sql"), "utf8");
 const db = new PGlite();
 
 await db.exec(`
@@ -50,6 +51,7 @@ await db.exec(`
   create table public.execution_commands(
     id uuid primary key default gen_random_uuid(),
     connection_id uuid references public.connectivity_connections(id),
+    execution_order_id uuid references public.execution_orders(id),
     command_type text not null,
     idempotency_key text not null unique,
     status text not null default 'QUEUED',
@@ -106,6 +108,7 @@ await db.exec(sideLeverageMigration);
 await db.exec(authoritativeEquityMigration);
 await db.exec(superAtrGroupTakeProfitMigration);
 await db.exec(executionLeaseRetrySafetyMigration);
+await db.exec(superAtrLiveRepricingMigration);
 await db.exec("set request.jwt.claim.role='service_role'");
 
 const ownerId = crypto.randomUUID();
@@ -274,6 +277,9 @@ await assert.rejects(() => db.query("update public.strategy_target_bindings set 
 await db.query("insert into public.execution_commands(command_type,idempotency_key,strategy_automation_id,strategy_target_binding_id,strategy_signal_key) values('PLACE_ORDER',$1,$2,$3,$4)", ["demo-command-1", strategyId, firstBinding.id, "closed-candle:btc:4h:1000:long"]);
 await assert.rejects(() => db.query("insert into public.execution_commands(command_type,idempotency_key,strategy_automation_id,strategy_target_binding_id,strategy_signal_key) values('PLACE_ORDER',$1,$2,$3,$4)", ["demo-command-2", strategyId, firstBinding.id, "closed-candle:btc:4h:1000:long"]), /idx_execution_commands_strategy_signal|unique/i, "a confirmed strategy signal is queued once per target");
 await assert.rejects(() => db.query("insert into public.execution_commands(command_type,idempotency_key,strategy_automation_id,strategy_target_binding_id,strategy_signal_key) values('SYNC_ACCOUNT',$1,$2,$3,$4)", ["demo-command-invalid", strategyId, firstBinding.id, "closed-candle:btc:4h:2000:long"]), /execution_commands_strategy_shape_check|check constraint/i, "strategy execution metadata cannot be attached to a non-order command");
+await db.query("insert into public.execution_commands(command_type,idempotency_key,strategy_automation_id,strategy_target_binding_id,strategy_signal_key) values('MODIFY_ORDER',$1,$2,$3,$4)", ["demo-command-reprice", strategyId, firstBinding.id, "closed-candle:btc:4h:2000:tp1:reprice"]);
+assert.equal(await scalar("select count(*)::int as value from public.execution_commands where idempotency_key='demo-command-reprice'"), 1, "a strategy-owned take-profit amendment is admitted by the database boundary");
+assert.equal(await scalar("select pine_checkpoint='{}'::jsonb as value from public.strategy_automation_runtime_state where strategy_id=$1", [strategyId]), true, "durable Pine checkpoint storage is initialized server-side");
 await db.query("insert into public.group_trade_intents(client_intent_id,strategy_automation_id,strategy_target_binding_id,strategy_action,strategy_direction) values($1,$2,$3,'TAKE_PROFIT','long')", ["superatr-group-tp1", strategyId, firstBinding.id]);
 await assert.rejects(
   () => db.query("insert into public.group_trade_intents(client_intent_id,strategy_automation_id,strategy_target_binding_id,strategy_action,strategy_direction) values($1,$2,$3,'UNBOUNDED_ACTION','long')", ["superatr-group-invalid", strategyId, firstBinding.id]),

@@ -21,6 +21,7 @@ const superAtrGroupTakeProfitMigration = fs.readFileSync(path.join(root, "supaba
 const executionLeaseRetrySafetyMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608300004_strategy_execution_lease_retry_safety.sql"), "utf8");
 const superAtrLiveRepricingMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608300005_strategy_superatr_live_repricing.sql"), "utf8");
 const strategyTargetResumeActivationMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608300006_strategy_target_resume_activation.sql"), "utf8");
+const liveStrategyPolicyMigration = fs.readFileSync(path.join(root, "supabase/migrations/202608310004_live_strategy_policy_updates.sql"), "utf8");
 const db = new PGlite();
 
 await db.exec(`
@@ -111,6 +112,7 @@ await db.exec(superAtrGroupTakeProfitMigration);
 await db.exec(executionLeaseRetrySafetyMigration);
 await db.exec(superAtrLiveRepricingMigration);
 await db.exec(strategyTargetResumeActivationMigration);
+await db.exec(liveStrategyPolicyMigration);
 await db.exec("set request.jwt.claim.role='service_role'");
 
 const ownerId = crypto.randomUUID();
@@ -245,12 +247,13 @@ const fundedPolicy = policy({ strategyAllocationValue: 20, tradeAmountValue: 10,
 const policyExpectedVersion = Number(firstBinding.row_version);
 const policyRequestHash = sha({ action: "UPDATE_POLICY", expectedVersion: policyExpectedVersion, policy: fundedPolicy });
 const policyKey = "target-policy-test-0001";
-await call("select public.black_core_update_strategy_target_policy($1,$2,$3,$4,$5::jsonb,$6,true,$7,$8) as result", [ownerId, strategyId, firstBinding.id, policyExpectedVersion, json(fundedPolicy), sha(fundedPolicy), policyRequestHash, policyKey]);
-const policyReplay = await call("select public.black_core_update_strategy_target_policy($1,$2,$3,$4,$5::jsonb,$6,true,$7,$8) as result", [ownerId, strategyId, firstBinding.id, policyExpectedVersion, json(fundedPolicy), sha(fundedPolicy), policyRequestHash, policyKey]);
+await call("select public.black_core_update_strategy_target_policy_v2($1,$2,$3,$4,$5::jsonb,$6,true,'{}'::jsonb,$7,$8) as result", [ownerId, strategyId, firstBinding.id, policyExpectedVersion, json(fundedPolicy), sha(fundedPolicy), policyRequestHash, policyKey]);
+const policyReplay = await call("select public.black_core_update_strategy_target_policy_v2($1,$2,$3,$4,$5::jsonb,$6,true,'{}'::jsonb,$7,$8) as result", [ownerId, strategyId, firstBinding.id, policyExpectedVersion, json(fundedPolicy), sha(fundedPolicy), policyRequestHash, policyKey]);
 assert.equal(policyReplay.result.idempotent, true, "same optimistic policy replay is idempotent");
 assert.equal(await scalar("select count(*)::int as value from public.strategy_target_policy_versions where binding_id=$1", [firstBinding.id]), 2);
 assert.equal(Number(await scalar("select requested_long_leverage as value from public.strategy_target_bindings where id=$1", [firstBinding.id])), 5, "long leverage persists in the selected execution destination");
 assert.equal(Number(await scalar("select requested_short_leverage as value from public.strategy_target_bindings where id=$1", [firstBinding.id])), 3, "short leverage persists in the selected execution destination");
+assert.equal(await scalar("select status as value from public.strategy_target_bindings where id=$1", [firstBinding.id]), "READY", "a ready target stays ready after a policy save");
 
 const pauseExpectedVersion = policyExpectedVersion + 1;
 const pauseHash = sha({ action: "PAUSE", expectedVersion: pauseExpectedVersion, disconnectPolicy: null });
@@ -282,6 +285,52 @@ const armedResumeHash = sha({ action: "RESUME", expectedVersion: armedResumeExpe
 const armedResume = await call("select public.black_core_control_strategy_target($1,$2,$3,$4,'RESUME',$5::jsonb,null,$6,$7) as result", [ownerId, strategyId, firstBinding.id, armedResumeExpectedVersion, json({ eligible: true, checkedAt: "test" }), armedResumeHash, "target-armed-resume-test-0001"]);
 assert.equal(armedResume.result.status, "LIVE", "an armed target resumes directly to live execution");
 assert.equal(await scalar("select status as value from public.strategy_automation_strategies where id=$1", [strategyId]), "LIVE_ACTIVE", "resuming an armed target reactivates the parent VPS evaluator");
+
+const liveBeforePolicySave = await call("select row_version,armed_at,capital_policy_version from public.strategy_target_bindings where id=$1", [firstBinding.id]);
+const increasedLivePolicy = policy({ ...fundedPolicy, tradeAmountValue: 12, requestedLongLeverage: 6, requestedShortLeverage: 4, maximumLeverage: 6 });
+const increasedLivePolicyHash = sha(increasedLivePolicy);
+const livePolicyRequestHash = sha({ action: "UPDATE_POLICY", expectedVersion: Number(liveBeforePolicySave.row_version), policy: increasedLivePolicy });
+const livePolicyCheckedAt = new Date().toISOString();
+const livePolicyValidation = {
+  eligible: true,
+  policyCanonicalHash: increasedLivePolicyHash,
+  validatedAt: livePolicyCheckedAt,
+  executionPreflightRequired: true,
+  executionPreflight: {
+    ok: true,
+    checkedAt: livePolicyCheckedAt,
+    strategyVersion: 1,
+    reasons: [],
+  },
+};
+const livePolicySave = await call("select public.black_core_update_strategy_target_policy_v2($1,$2,$3,$4,$5::jsonb,$6,true,$7::jsonb,$8,$9) as result", [ownerId, strategyId, firstBinding.id, Number(liveBeforePolicySave.row_version), json(increasedLivePolicy), increasedLivePolicyHash, json(livePolicyValidation), livePolicyRequestHash, "target-policy-live-test-0001"]);
+assert.equal(livePolicySave.result.status, "LIVE", "a valid explicit risk increase remains live");
+const liveAfterPolicySave = await call("select row_version,status,armed_at,capital_policy_version,trade_amount_value,requested_long_leverage from public.strategy_target_bindings where id=$1", [firstBinding.id]);
+assert.equal(liveAfterPolicySave.status, "LIVE", "the database never silently de-arms a successfully validated live policy save");
+assert.equal(new Date(liveAfterPolicySave.armed_at).toISOString(), new Date(liveBeforePolicySave.armed_at).toISOString(), "a policy save preserves the original armed timestamp");
+assert.equal(Number(liveAfterPolicySave.capital_policy_version), Number(liveBeforePolicySave.capital_policy_version) + 1, "the accepted live policy receives one immutable version");
+assert.equal(Number(liveAfterPolicySave.trade_amount_value), 12);
+assert.equal(Number(liveAfterPolicySave.requested_long_leverage), 6);
+assert.equal(await scalar("select (safe_metadata->>'targetStayedLive')::boolean as value from public.strategy_automation_audit_events where binding_id=$1 and event_type='STRATEGY_TARGET_CAPITAL_POLICY_CHANGED' order by id desc limit 1", [firstBinding.id]), true, "the audit trail records that the target remained live");
+
+const rejectedLivePolicy = policy({ ...increasedLivePolicy, tradeAmountValue: 13 });
+const rejectedLivePolicyHash = sha(rejectedLivePolicy);
+const rejectedRequestHash = sha({ action: "UPDATE_POLICY", expectedVersion: Number(liveAfterPolicySave.row_version), policy: rejectedLivePolicy });
+await assert.rejects(
+  () => call("select public.black_core_update_strategy_target_policy($1,$2,$3,$4,$5::jsonb,$6,true,$7,$8) as result", [ownerId, strategyId, firstBinding.id, Number(liveAfterPolicySave.row_version), json(rejectedLivePolicy), rejectedLivePolicyHash, rejectedRequestHash, "target-policy-legacy-live-reject-0001"]),
+  /live strategy target policy validation failed/i,
+  "a rolling-deploy or rollback API cannot invoke the historical auto-disarm behavior",
+);
+await assert.rejects(
+  () => call("select public.black_core_update_strategy_target_policy_v2($1,$2,$3,$4,$5::jsonb,$6,true,'{}'::jsonb,$7,$8) as result", [ownerId, strategyId, firstBinding.id, Number(liveAfterPolicySave.row_version), json(rejectedLivePolicy), rejectedLivePolicyHash, rejectedRequestHash, "target-policy-live-reject-0001"]),
+  /live strategy target policy validation failed/i,
+  "a live risk save without a policy-bound preflight is rejected atomically",
+);
+const liveAfterRejectedSave = await call("select row_version,status,armed_at,trade_amount_value from public.strategy_target_bindings where id=$1", [firstBinding.id]);
+assert.equal(Number(liveAfterRejectedSave.row_version), Number(liveAfterPolicySave.row_version), "a rejected live save does not mutate the target version");
+assert.equal(liveAfterRejectedSave.status, "LIVE", "a rejected live save does not deactivate the target");
+assert.equal(Number(liveAfterRejectedSave.trade_amount_value), 12, "a rejected live save preserves the last valid policy");
+assert.equal(new Date(liveAfterRejectedSave.armed_at).toISOString(), new Date(liveAfterPolicySave.armed_at).toISOString());
 const secondBinding = await call("select id from public.strategy_target_bindings where strategy_id=$1 and id<>$2 and status<>'DISCONNECTED' limit 1", [strategyId, firstBinding.id]);
 const armedAccountId = await scalar("select account_id as value from public.strategy_target_bindings where id=$1", [firstBinding.id]);
 await assert.rejects(() => db.query("update public.strategy_target_bindings set account_id=$1,status='LIVE' where id=$2", [armedAccountId, secondBinding.id]), /idx_strategy_target_one_live_per_account|unique/i, "one demo account cannot be armed by two strategies or bindings");

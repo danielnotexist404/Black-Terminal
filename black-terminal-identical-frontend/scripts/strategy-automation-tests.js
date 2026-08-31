@@ -29,8 +29,10 @@ const containmentMigration = read("supabase/migrations/202608230003_bcrda_signal
 const archiveMigration = read("supabase/migrations/202608240001_strategy_automation_archive.sql");
 const executionMigration = read("supabase/migrations/202608240002_strategy_broker_group_execution.sql");
 const sideLeverageMigration = read("supabase/migrations/202608300001_strategy_target_side_leverage.sql");
+const livePolicyMigration = read("supabase/migrations/202608310004_live_strategy_policy_updates.sql");
 const panel = read("src/modules/strategy-lab/automation/StrategyAutomationPanel.tsx");
 const apiClient = read("src/modules/strategy-lab/automation/strategyAutomationApi.ts");
+const repository = read("server/strategy-automation/repository.js");
 const worker = read("scripts/strategy-automation-worker.ts");
 const compose = read("infra/black-cloud/docker-compose.yml");
 
@@ -200,9 +202,15 @@ assert.doesNotMatch(executionMigration, /allow_withdrawals[^\n]*true/i);
 assert.match(sideLeverageMigration, /requested_long_leverage/);
 assert.match(sideLeverageMigration, /requested_short_leverage/);
 assert.match(sideLeverageMigration, /black_core_update_strategy_target_policy/);
-assert.match(sideLeverageMigration, /status=case when p_risk_increased then 'READY'/, "a leverage increase safely de-arms the target until it is explicitly re-approved");
+assert.match(livePolicyMigration, /black_core_update_strategy_target_policy_v2/);
+assert.match(livePolicyMigration, /targetStayedLive[\s\S]*binding\.status='LIVE'/, "a validated policy save records that an armed target stayed live");
+assert.match(livePolicyMigration, /p_validation_snapshot->'executionPreflight'->>'ok' is distinct from 'true'/, "live Futures policy saves fail closed without a successful fresh execution preflight");
+assert.doesNotMatch(livePolicyMigration, /status\s*=\s*case when p_risk_increased then 'READY'/, "a policy save never silently de-arms its target");
+assert.match(livePolicyMigration, /create or replace function public\.black_core_update_strategy_target_policy\([\s\S]*return public\.black_core_update_strategy_target_policy_v2/, "rolling deploys and API rollbacks cannot reach the historical auto-disarm function");
+assert.match(repository, /black_core_update_strategy_target_policy_v2[\s\S]*p_validation_snapshot: liveValidation \|\| \{\}/, "the API atomically submits the policy-bound live preflight to the state-preserving RPC");
+assert.match(panel, /The target remains armed/, "the owner receives an explicit live-state confirmation after a validated save");
 
-console.log("Strategy automation domain and security tests PASS — naming, sizing, isolated Demo/Mainnet/group arming, signed durable command emission and no-look-ahead contracts verified.");
+console.log("Strategy automation domain and security tests PASS — naming, sizing, isolated Demo/Mainnet/group arming, state-preserving live risk saves, signed durable command emission and no-look-ahead contracts verified.");
 
 function paperPolicyForArm() { return { ...defaultPaperCapitalPolicy("FUTURES"), maximumDailyLoss: 500, maximumDrawdown: 20 }; }
 

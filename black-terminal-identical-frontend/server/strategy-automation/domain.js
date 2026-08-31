@@ -346,7 +346,7 @@ export function groupAutomationEnabled(environment = process.env) {
     && environment.BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH !== "true";
 }
 
-export function assertCanArmStrategyTarget({ policy, marketType, validation, executionEnvironment, environment = process.env }) {
+export function assertCanArmStrategyTarget({ policy, marketType, validation, executionEnvironment, environment = process.env, operation = "arm" }) {
   const reasons = [];
   const normalized = normalizeCapitalPolicy(policy, marketType, { allowZeroAllocation: true });
   if (normalized.strategyAllocationValue <= 0) reasons.push("A non-zero strategy allocation is required.");
@@ -365,7 +365,10 @@ export function assertCanArmStrategyTarget({ policy, marketType, validation, exe
   } else {
     reasons.push("The target execution environment is unavailable or unsupported.");
   }
-  if (reasons.length) throw strategyError(403, "STRATEGY_TARGET_NOT_ARMABLE", `This target cannot be armed: ${reasons.join(" ")}`, { reasons });
+  if (reasons.length) {
+    const action = operation === "remain-live" ? "remain live with the requested policy" : "be armed";
+    throw strategyError(403, "STRATEGY_TARGET_NOT_ARMABLE", `This target cannot ${action}: ${reasons.join(" ")}`, { reasons });
+  }
   return normalized;
 }
 

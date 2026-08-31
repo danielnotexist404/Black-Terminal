@@ -177,6 +177,38 @@ const cappedLeverage = preflightInvestmentGroupFollowerExecution({
 assert.equal(cappedLeverage.ok, false, "requested leverage above one follower mandate cap blocks the whole follower report");
 assert.match(cappedLeverage.reasons.join(" "), /5x leverage exceeds.*3x/i);
 
+const policyOverride = preflightInvestmentGroupFollowerExecution({
+  checkedAt,
+  binding,
+  definition: {},
+  symbol: "BTCUSDT",
+  mandate: { ...mandate, id: "mandate-policy-override", max_leverage: 3 },
+  connection,
+  capability,
+  automationMandate,
+  account,
+  accountEquity,
+  riskControl: { account_id: "account-1", max_leverage: 20, emergency_stop: false },
+  positions: [],
+  marketSnapshot: { ...marketSnapshot, takeProfitPricing: null },
+  takeProfitPercentages: [],
+  policyOverride: {
+    ...binding,
+    requestedLeverage: 2,
+    requestedLongLeverage: 2,
+    requestedShortLeverage: 2,
+    maximumLeverage: 3,
+    maximumDailyLoss: 100,
+    maximumDrawdown: 20,
+    maximumPositions: 1,
+    slippageBps: 5,
+    marginMode: "CROSS",
+  },
+});
+assert.equal(policyOverride.ok, true, "a live Investment Group save preflights the replacement policy rather than stale binding values");
+assert.equal(policyOverride.directions.long.effectiveLeverage, 2);
+assert.equal(policyOverride.directions.short.effectiveLeverage, 2);
+
 const staleEquity = preflightInvestmentGroupFollowerExecution({
   checkedAt,
   binding,
@@ -233,6 +265,7 @@ assert.equal(acknowledgedPlaceFailure.latestExecutionVenueOrderSubmitted, true, 
 
 const repositorySource = fs.readFileSync(new URL("../server/strategy-automation/repository.js", import.meta.url), "utf8");
 assert.match(repositorySource, /buildInvestmentGroupExecutionPreflight[\s\S]*executionPreflightRequired: true/, "group arm and resume use mandatory follower preflight");
+assert.match(repositorySource, /buildInvestmentGroupExecutionPreflight\(supabase, userId, binding, policyOverride\)/, "live group policy changes preflight the replacement policy for every follower");
 assert.match(repositorySource, /groupExecutionPreflight:[\s\S]*followerPreflightFailures:/, "group snapshots surface persisted follower failures without exposing secrets");
 assert.match(repositorySource, /command_type[^\n]*PLACE_ORDER[^\n]*execution_order_id/, "venue-submitted telemetry requires the failed command's own place-order acknowledgement");
 

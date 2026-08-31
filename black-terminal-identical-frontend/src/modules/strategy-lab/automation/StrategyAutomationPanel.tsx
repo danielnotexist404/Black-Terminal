@@ -460,7 +460,9 @@ export function StrategyAutomationPanel({
       setMessage(
         capitalEditor.kind === "paper"
           ? "Paper capital policy saved."
-          : "Live target policy version saved. Risk increases require revalidation and re-arming.",
+          : capitalEditor.binding.status === "LIVE"
+            ? "Live target policy saved after broker execution preflight. The target remains armed."
+            : "Target policy version saved. Its lifecycle state was not changed.",
       );
     } catch (error) {
       setMessage(

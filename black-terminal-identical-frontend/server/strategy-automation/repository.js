@@ -435,6 +435,7 @@ export async function updateTargetPolicy(supabase, userId, strategyId, bindingId
   const strategy = await ownedStrategy(supabase, userId, strategyId);
   const binding = await ownedBinding(supabase, userId, strategyId, bindingId);
   const nextPolicy = normalizeCapitalPolicy(body.capitalPolicy, binding.market_type, { allowZeroAllocation: true });
+  const canonicalPolicyHash = canonicalRequestHash(nextPolicy);
   assertPolicyWithinGlobal(nextPolicy, strategy.global_capital_policy, binding.market_type);
   if (binding.target_type === "BROKER_ACCOUNT" && nextPolicy.tradeAmountMode === "FIXED_USDT") {
     const snapshot = await buildBindingSnapshot(supabase, userId, binding);
@@ -443,30 +444,41 @@ export async function updateTargetPolicy(supabase, userId, strategyId, bindingId
       throw strategyError(400, "STRATEGY_TRADE_AMOUNT_EXCEEDS_AVAILABLE_FUNDS", "The fixed per-trade amount exceeds the broker account's current available funds.", { requested: nextPolicy.tradeAmountValue, available: currentLimit, equity: snapshot.equity });
     }
   }
-  if (binding.target_type === "BROKER_ACCOUNT" && binding.market_type === "FUTURES" && binding.status === "LIVE") {
-    const connection = await oneOrNone(supabase.from("connectivity_connections")
-      .select("id,provider,account_id,execution_environment,endpoint_profile")
-      .eq("id", binding.connection_id)
-      .eq("user_id", userId)
-      .maybeSingle());
-    const executionPreflight = await buildBrokerExecutionPreflight(supabase, userId, binding, connection, nextPolicy);
-    assertExecutionPreflight({ executionPreflight });
+  let liveValidation = null;
+  if (binding.status === "LIVE") {
+    const armability = await validateArmableBinding(supabase, userId, strategyId, binding, process.env, nextPolicy);
+    liveValidation = {
+      ...armability.validation,
+      policyCanonicalHash: canonicalPolicyHash,
+      validatedAt: new Date().toISOString()
+    };
+    assertExecutionPreflight(liveValidation);
+    assertCanArmStrategyTarget({
+      policy: nextPolicy,
+      marketType: binding.market_type,
+      validation: liveValidation,
+      executionEnvironment: armability.executionEnvironment,
+      environment: process.env,
+      operation: "remain-live"
+    });
   }
   const increased = riskIncrease(policyFromBinding(binding), nextPolicy, binding.market_type);
   const requestHash = canonicalRequestHash({ action: "UPDATE_POLICY", expectedVersion: Number(body.expectedVersion), policy: nextPolicy });
-  const { error } = await supabase.rpc("black_core_update_strategy_target_policy", {
+  const { error } = await supabase.rpc("black_core_update_strategy_target_policy_v2", {
     p_owner_user_id: userId,
     p_strategy_id: strategyId,
     p_binding_id: bindingId,
     p_expected_row_version: Number(body.expectedVersion),
     p_policy: nextPolicy,
-    p_canonical_hash: canonicalRequestHash(nextPolicy),
+    p_canonical_hash: canonicalPolicyHash,
     p_risk_increased: increased,
+    p_validation_snapshot: liveValidation || {},
     p_request_hash: requestHash,
     p_idempotency_key: idempotencyKey
   });
   if (error) {
     if (error.code === "40001") throw strategyError(409, "STRATEGY_TARGET_VERSION_CONFLICT", "Target settings changed elsewhere. Refresh and try again.");
+    if (error.code === "55000") throw strategyError(409, "STRATEGY_TARGET_LIVE_REVALIDATION_REQUIRED", "The new policy was not saved because the live target could not be revalidated. Its previous policy and live state were preserved.");
     if (error.code === "22023" && String(error.message).includes("idempotency")) throw strategyError(409, "IDEMPOTENCY_PAYLOAD_MISMATCH", "This idempotency key was already used for a different target mutation.");
     throw persistenceError(error);
   }
@@ -817,7 +829,7 @@ async function validateExistingBinding(supabase, userId, strategyId, binding, en
   return candidate?.validation || { eligible: false, reasons: ["Target is no longer available."] };
 }
 
-async function validateArmableBinding(supabase, userId, strategyId, binding, environment) {
+async function validateArmableBinding(supabase, userId, strategyId, binding, environment, policyOverride = null) {
   const validation = await validateExistingBinding(supabase, userId, strategyId, binding, environment);
   if (validation.eligible && binding.market_type === "SPOT") {
     const version = await oneOrNone(supabase.from("strategy_automation_versions")
@@ -847,7 +859,7 @@ async function validateArmableBinding(supabase, userId, strategyId, binding, env
     if (!validation.eligible || binding.market_type !== "FUTURES") {
       return { validation, executionEnvironment: "INVESTMENT_GROUP" };
     }
-    const executionPreflight = await buildInvestmentGroupExecutionPreflight(supabase, userId, binding);
+    const executionPreflight = await buildInvestmentGroupExecutionPreflight(supabase, userId, binding, policyOverride);
     return {
       executionEnvironment: "INVESTMENT_GROUP",
       validation: {
@@ -868,7 +880,7 @@ async function validateArmableBinding(supabase, userId, strategyId, binding, env
   if (!validation.eligible || binding.market_type !== "FUTURES") {
     return { validation, executionEnvironment };
   }
-  const executionPreflight = await buildBrokerExecutionPreflight(supabase, userId, binding, connection);
+  const executionPreflight = await buildBrokerExecutionPreflight(supabase, userId, binding, connection, policyOverride);
   return {
     executionEnvironment,
     validation: {
@@ -1015,7 +1027,7 @@ async function buildBrokerExecutionPreflight(supabase, userId, binding, connecti
   }
 }
 
-async function buildInvestmentGroupExecutionPreflight(supabase, userId, binding) {
+async function buildInvestmentGroupExecutionPreflight(supabase, userId, binding, policyOverride = null) {
   const checkedAt = new Date().toISOString();
   const [version, mandates] = await Promise.all([
     oneOrNone(supabase.from("strategy_automation_versions")
@@ -1116,7 +1128,8 @@ async function buildInvestmentGroupExecutionPreflight(supabase, userId, binding)
       positions: account?.id ? positionsByAccount.get(account.id) || [] : [],
       marketSnapshot,
       marketError,
-      takeProfitPercentages
+      takeProfitPercentages,
+      policyOverride
     });
   });
   const reasons = followers.flatMap((report, index) => report.ok
@@ -1167,7 +1180,7 @@ export function preflightInvestmentGroupFollowerExecution(input = {}) {
   const {
     checkedAt = new Date().toISOString(), binding = {}, definition = {}, symbol = "", mandate = {}, connection,
     capability, automationMandate, account, accountEquity, riskControl, positions = [], marketSnapshot,
-    marketError, takeProfitPercentages = []
+    marketError, takeProfitPercentages = [], policyOverride = null
   } = input;
   const reasons = [];
   const reject = (message) => { if (message && !reasons.includes(message)) reasons.push(message); };
@@ -1215,7 +1228,7 @@ export function preflightInvestmentGroupFollowerExecution(input = {}) {
   if (marketError) reject(marketError);
   if (!marketSnapshot?.instrument || !(Number(marketSnapshot?.referencePrice) > 0)) reject(`Current Bybit instrument rules and price are unavailable for ${symbol || "the strategy symbol"}.`);
 
-  const policy = policyFromBinding(binding);
+  const policy = policyOverride || policyFromBinding(binding);
   const currentExposure = positions.reduce((sum, row) => sum + Math.abs(Number(row.margin || 0)), 0);
   const directionReports = {};
   if (reasons.length === 0) {

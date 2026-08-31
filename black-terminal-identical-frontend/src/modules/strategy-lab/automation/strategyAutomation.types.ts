@@ -302,6 +302,13 @@ export type StrategyTargetSnapshot = {
   strategyState: string;
   connectionHealth: string;
   protectionHealth: string;
+  latestExecutionStatus?: string;
+  latestExecutionAction?: string;
+  latestExecutionDirection?: string;
+  latestExecutionAt?: number | string;
+  latestExecutionErrorCode?: string;
+  latestExecutionErrorMessage?: string;
+  latestExecutionVenueOrderSubmitted?: boolean;
 };
 
 export type StrategyWorkspace = {

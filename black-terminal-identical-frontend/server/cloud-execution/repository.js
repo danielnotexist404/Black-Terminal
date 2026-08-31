@@ -147,9 +147,15 @@ export class BlackCloudRepository {
       head(this.supabase.from("worker_leases").select("lease_key", { head: true, count: "exact" })),
       head(this.supabase.from("execution_inbox").select("id", { head: true, count: "exact" })),
       head(this.supabase.from("black_cloud_nodes").select("node_id", { head: true, count: "exact" })),
-      head(this.supabase.from("strategy_deployments").select("id", { head: true, count: "exact" }))
+      head(this.supabase.from("strategy_deployments").select("id", { head: true, count: "exact" })),
+      // This column and the atomic order-state RPC are installed by the same
+      // single-transaction migration. Refuse worker startup when that release
+      // boundary is absent so a venue acknowledgement can never precede the
+      // persistence primitive required to reconcile and protect its fill.
+      head(this.supabase.from("execution_orders").select("venue_cumulative_updated_at", { head: true, count: "exact" })),
+      head(this.supabase.from("execution_commands").select("reconciliation_policy_version", { head: true, count: "exact" }))
     ]);
-    const names = ["queue", "credentialVault", "leaseSubsystem", "eventInbox", "nodeRegistry", "strategyRuntime"];
+    const names = ["queue", "credentialVault", "leaseSubsystem", "eventInbox", "nodeRegistry", "strategyRuntime", "atomicOrderState", "reconciliationLiveness"];
     const dependencies = Object.fromEntries(checks.map((result, index) => [names[index], result.status === "fulfilled"]));
     const telemetry = await this.getNodeTelemetry().catch(() => ({ queueDepth: null, oldestQueueAgeMs: null, activeStrategyCount: null }));
     return { ready: Object.values(dependencies).every(Boolean) && Boolean(this.workerId), workerIdentity: Boolean(this.workerId), dependencies, ...telemetry };
@@ -244,11 +250,56 @@ export class BlackCloudRepository {
     if (error) throw error;
   }
 
+  async applyExecutionOrderState({
+    orderId,
+    accountId,
+    status = null,
+    cumulativeFilledQuantity = null,
+    fillDelta = null,
+    exchangeOrderId = null,
+    averageFillPrice = null,
+    actualFeeDelta = null,
+    rejectionReason = null,
+    venueUpdatedAt = 0,
+    followerPlanId = null
+  }) {
+    const value = await this.rpc("black_cloud_apply_execution_order_state_v1", {
+      p_order_id: orderId,
+      p_account_id: accountId,
+      p_reported_status: status || null,
+      p_cumulative_filled_quantity: finiteNumberOrNull(cumulativeFilledQuantity),
+      p_fill_delta: finiteNumberOrNull(fillDelta),
+      p_exchange_order_id: exchangeOrderId || null,
+      p_average_fill_price: positiveFiniteNumberOrNull(averageFillPrice),
+      p_actual_fee_delta: finiteNumberOrNull(actualFeeDelta),
+      p_rejection_reason: sanitizeError(rejectionReason),
+      p_venue_updated_at: nonNegativeIntegerOrZero(venueUpdatedAt),
+      p_follower_plan_id: followerPlanId || null
+    });
+    return Array.isArray(value) ? value[0] || null : value;
+  }
+
   async rpc(name, parameters) {
     const { data, error } = await this.supabase.rpc(name, parameters);
     if (error) throw error;
     return data;
   }
+}
+
+function finiteNumberOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function positiveFiniteNumberOrNull(value) {
+  const numeric = finiteNumberOrNull(value);
+  return numeric !== null && numeric > 0 ? numeric : null;
+}
+
+function nonNegativeIntegerOrZero(value) {
+  const numeric = Number(value);
+  return Number.isSafeInteger(numeric) && numeric >= 0 ? numeric : 0;
 }
 
 const SENSITIVE_KEY = /(secret|private.?key|api.?key|signature|authorization|token|password|seed|mnemonic|credential|encrypted|cipher|nonce|tag)/i;

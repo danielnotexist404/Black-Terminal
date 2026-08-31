@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { sanitizeError } from "./repository.js";
 import { createCloudExchangeAdapter } from "./adapters/registry.js";
 import { ReconciliationWorker } from "./reconciliation-worker.js";
@@ -22,7 +23,9 @@ export class BrokerConnectionManager {
       reconciliationDurationMs: 0,
       privateEvents: 0,
       orderEvents: 0,
-      executionEvents: 0
+      executionEvents: 0,
+      protectionRepairsQueued: 0,
+      groupProtectionIncidents: 0
     };
   }
 
@@ -228,35 +231,354 @@ export class BrokerConnectionManager {
 
   async applyOrderEvent(runtime, report) {
     if (!report?.clientOrderId?.startsWith("bt-")) return;
-    const { data: order } = await this.supabase.from("execution_orders").select("id").eq("account_id", runtime.account.id).eq("client_order_id", report.clientOrderId).maybeSingle();
+    const { data: order, error } = await this.supabase.from("execution_orders").select("id").eq("account_id", runtime.account.id).eq("client_order_id", report.clientOrderId).maybeSingle();
+    if (error) throw error;
     if (!order) return;
-    await updateOrThrow(this.supabase.from("execution_orders").update({
-      status: normalizeOrderStatus(report.status),
-      exchange_order_id: report.exchangeOrderId || report.orderId,
-      filled_quantity: report.filledQuantity || 0,
-      average_fill_price: report.averageFillPrice,
-      rejection_reason: report.rejectReason || null
-    }).eq("id", order.id));
-    await updateOrThrow(this.supabase.from("follower_execution_plans").update({
-      execution_status: normalizePlanStatus(report.status)
-    }).eq("execution_order_id", order.id));
+    await this.repository.applyExecutionOrderState({
+      orderId: order.id,
+      accountId: runtime.account.id,
+      status: report.status,
+      cumulativeFilledQuantity: report.filledQuantity ?? report.cumulativeFilledQuantity ?? 0,
+      exchangeOrderId: report.exchangeOrderId || report.orderId,
+      averageFillPrice: report.averageFillPrice,
+      rejectionReason: report.rejectReason,
+      venueUpdatedAt: report.updatedTime ?? report.updatedAt ?? report.time ?? 0
+    });
+    const { data: settledOrder, error: settledError } = await this.supabase.from("execution_orders")
+      .select("id,user_id,account_id,client_order_id,symbol,side,order_type,quantity,filled_quantity,status,reduce_only,origin,strategy_automation_id,strategy_target_binding_id,group_intent_id,mandate_id,created_at")
+      .eq("id", order.id)
+      .eq("account_id", runtime.account.id)
+      .maybeSingle();
+    if (settledError) throw settledError;
+    if (settledOrder) await this.monitorStrategyTakeProfitProtection(runtime, settledOrder, report);
+  }
+
+  async monitorStrategyTakeProfitProtection(runtime, order, report) {
+    if (!strategyProtectionLossCandidate(order)) return { monitored: false, reason: "NOT_PROTECTION_LOSS" };
+    if (order.account_id !== runtime.account.id || runtime.connection.account_id !== runtime.account.id) {
+      throw typedError("STRATEGY_PROTECTION_ACCOUNT_MISMATCH", "A terminal strategy target event did not belong to this persistent connection account.");
+    }
+    const [{ data: sourceCommands, error: sourceError }, { data: mutationCommands, error: mutationError }] = await Promise.all([
+      this.supabase.from("execution_commands")
+        .select("id,idempotency_key,command_type,status,payload,created_at,execution_order_id,group_intent_id,follower_plan_id,strategy_automation_id,strategy_target_binding_id,connection_id,user_id")
+        .eq("execution_order_id", order.id)
+        .eq("command_type", "PLACE_ORDER")
+        .order("created_at", { ascending: true })
+        .limit(20),
+      this.supabase.from("execution_commands")
+        .select("id,idempotency_key,command_type,status,payload,created_at,execution_order_id,group_intent_id,follower_plan_id,strategy_automation_id,strategy_target_binding_id,connection_id,user_id")
+        .eq("execution_order_id", order.id)
+        .in("command_type", ["MODIFY_ORDER", "CANCEL_ORDER"])
+        .order("created_at", { ascending: false })
+        .limit(100)
+    ]);
+    if (sourceError) throw sourceError;
+    if (mutationError) throw mutationError;
+    const linkedCommands = [...(sourceCommands || []), ...(mutationCommands || [])];
+    const directTakeProfit = (linkedCommands || []).find((command) => command.command_type === "PLACE_ORDER"
+      && !command.group_intent_id
+      && !command.follower_plan_id
+      && String(command.payload?.action || "").toUpperCase() === "TAKE_PROFIT"
+      && command.strategy_automation_id === order.strategy_automation_id
+      && command.strategy_target_binding_id === order.strategy_target_binding_id);
+    if (directTakeProfit) {
+      return this.repairDirectStrategyTakeProfit(runtime, order, report, directTakeProfit, linkedCommands || []);
+    }
+    if (!order.group_intent_id) return { monitored: false, reason: "NOT_CERTIFIED_TAKE_PROFIT" };
+    const { data: groupIntent, error: groupError } = await this.supabase.from("group_trade_intents")
+      .select("id,group_id,created_by,symbol,strategy_action,strategy_direction,strategy_automation_id,strategy_target_binding_id,strategy_execution_policy")
+      .eq("id", order.group_intent_id)
+      .maybeSingle();
+    if (groupError) throw groupError;
+    if (!groupIntent
+      || groupIntent.strategy_action !== "TAKE_PROFIT"
+      || groupIntent.strategy_automation_id !== order.strategy_automation_id
+      || groupIntent.strategy_target_binding_id !== order.strategy_target_binding_id) {
+      return { monitored: false, reason: "NOT_CERTIFIED_TAKE_PROFIT" };
+    }
+    return this.markGroupStrategyProtectionIncident(runtime, order, report, groupIntent, linkedCommands || []);
+  }
+
+  async repairDirectStrategyTakeProfit(runtime, order, report, sourceCommand, linkedCommands) {
+    const parentEntryIdempotencyKey = String(sourceCommand.payload?.parentEntryIdempotencyKey || "");
+    const [{ data: binding, error: bindingError }, { data: strategy, error: strategyError }, { data: strategyCommands, error: commandsError }, { data: parentCommand, error: parentError }] = await Promise.all([
+      this.supabase.from("strategy_target_bindings")
+        .select("id,strategy_id,strategy_version,owner_user_id,target_type,connection_id,account_id,market_type,status")
+        .eq("id", order.strategy_target_binding_id)
+        .maybeSingle(),
+      this.supabase.from("strategy_automation_strategies")
+        .select("id,owner_user_id,symbol,running_version")
+        .eq("id", order.strategy_automation_id)
+        .maybeSingle(),
+      this.supabase.from("execution_commands")
+        .select("id,idempotency_key,command_type,status,payload,created_at,execution_order_id,strategy_automation_id,strategy_target_binding_id")
+        .eq("strategy_target_binding_id", order.strategy_target_binding_id)
+        .eq("strategy_automation_id", order.strategy_automation_id)
+        .eq("command_type", "PLACE_ORDER")
+        .order("created_at", { ascending: false })
+        .limit(100),
+      parentEntryIdempotencyKey
+        ? this.supabase.from("execution_commands")
+          .select("id,idempotency_key,command_type,status,payload,created_at,execution_order_id,strategy_automation_id,strategy_target_binding_id")
+          .eq("idempotency_key", parentEntryIdempotencyKey)
+          .eq("strategy_target_binding_id", order.strategy_target_binding_id)
+          .maybeSingle()
+        : Promise.resolve({ data: null, error: null })
+    ]);
+    if (bindingError) throw bindingError;
+    if (strategyError) throw strategyError;
+    if (commandsError) throw commandsError;
+    if (parentError) throw parentError;
+    const executionEnvironment = normalizeBybitExecutionEnvironment(runtime.connection.execution_environment);
+    const expectedOrigin = executionEnvironment === "DEMO" ? "STRATEGY_AUTOMATION_DEMO" : "STRATEGY_AUTOMATION_LIVE";
+    const symbol = normalizedSymbol(order.symbol);
+    const direction = strategyTakeProfitDirection(sourceCommand, order);
+    const ownershipValid = binding
+      && strategy
+      && binding.target_type === "BROKER_ACCOUNT"
+      && binding.connection_id === runtime.connection.id
+      && binding.account_id === runtime.account.id
+      && binding.owner_user_id === order.user_id
+      && binding.strategy_id === strategy.id
+      && strategy.owner_user_id === order.user_id
+      && normalizedSymbol(strategy.symbol) === symbol
+      && sourceCommand.connection_id === runtime.connection.id
+      && sourceCommand.user_id === order.user_id
+      && order.origin === expectedOrigin;
+    if (!ownershipValid || !direction) {
+      throw typedError("STRATEGY_PROTECTION_OWNERSHIP_MISMATCH", "Black Cloud refused to repair a terminal target whose strategy, binding, account, symbol, direction, or execution environment was not exact.");
+    }
+    const relatedCommands = [...(strategyCommands || []), ...(linkedCommands || []), ...(parentCommand ? [parentCommand] : [])];
+    const suppression = strategyProtectionRepairSuppression({ sourceCommand, relatedCommands });
+    if (suppression) return { monitored: true, repaired: false, reason: suppression };
+    if (!parentEntryIdempotencyKey) {
+      throw typedError("STRATEGY_PROTECTION_PARENT_REQUIRED", "A terminal take-profit was missing its immutable parent generation and could not be auto-repaired safely.");
+    }
+    const repairCommand = buildStrategyProtectionRepairCommand({
+      order,
+      report,
+      binding,
+      strategy,
+      sourceCommand,
+      connection: runtime.connection,
+      executionEnvironment,
+      direction,
+      parentEntryIdempotencyKey,
+      expectedEntryOrderId: parentCommand?.execution_order_id || null
+    });
+    if (!repairCommand) return { monitored: true, repaired: false, reason: "NO_RESIDUAL_EXPOSURE_POSSIBLE" };
+    const persisted = await persistStrategyProtectionRepairCommand(this.supabase, repairCommand);
+    if (!persisted.inserted) return { monitored: true, repaired: true, idempotent: true, commandId: persisted.id || null };
+    this.metrics.protectionRepairsQueued += 1;
+    await this.repository.audit({
+      userId: order.user_id,
+      connectionId: runtime.connection.id,
+      commandId: persisted.id,
+      eventType: "STRATEGY_TP_PROTECTION_REPAIR_QUEUED",
+      severity: "CRITICAL",
+      purpose: "strategy_take_profit_protection_repair",
+      message: "A strategy-owned Bybit take-profit became terminal before fully closing its position. Black Cloud queued a deterministic, generation-guarded reduce-only close-all repair; the execution worker will confirm ownership and no-op if flat or superseded.",
+      metadata: {
+        strategyId: strategy.id,
+        bindingId: binding.id,
+        executionOrderId: order.id,
+        sourceCommandId: sourceCommand.id,
+        expectedEntryOrderId: parentCommand?.execution_order_id || null,
+        symbol,
+        direction,
+        terminalStatus: order.status,
+        filledQuantity: Number(order.filled_quantity || 0),
+        orderQuantity: Number(order.quantity || 0),
+        executionEnvironment,
+        venueOrderSubmittedBySupervisor: false
+      }
+    });
+    const { error: strategyAuditError } = await this.supabase.from("strategy_automation_audit_events").insert({
+      owner_user_id: order.user_id,
+      strategy_id: strategy.id,
+      binding_id: binding.id,
+      event_type: "STRATEGY_TP_PROTECTION_REPAIR_QUEUED",
+      severity: "CRITICAL",
+      message: "A terminal Bybit take-profit left possible residual strategy exposure. A deterministic generation-guarded safety-close command was queued for Black Cloud execution.",
+      safe_metadata: {
+        commandId: persisted.id,
+        executionOrderId: order.id,
+        expectedEntryOrderId: parentCommand?.execution_order_id || null,
+        symbol,
+        direction,
+        terminalStatus: order.status,
+        executionEnvironment,
+        venueOrderSubmittedBySupervisor: false
+      }
+    });
+    if (strategyAuditError) throw strategyAuditError;
+    return { monitored: true, repaired: true, idempotent: false, commandId: persisted.id };
+  }
+
+  async markGroupStrategyProtectionIncident(runtime, order, report, groupIntent, linkedCommands) {
+    const sourceCommand = (linkedCommands || []).find((command) => command.command_type === "PLACE_ORDER" && command.group_intent_id === groupIntent.id && command.follower_plan_id)
+      || (linkedCommands || []).find((command) => command.command_type === "PLACE_ORDER" && command.follower_plan_id);
+    const mutationSuppression = sourceCommand
+      ? strategyProtectionRepairSuppression({ sourceCommand, relatedCommands: linkedCommands || [] })
+      : null;
+    if (mutationSuppression) return { monitored: true, repaired: false, reason: mutationSuppression };
+    let plan = null;
+    let planError = null;
+    if (sourceCommand?.follower_plan_id) {
+      const result = await this.supabase.from("follower_execution_plans")
+        .select("id,group_intent_id,mandate_id,follower_user_id,broker_connection_id,execution_order_id,execution_status,safe_result")
+        .eq("id", sourceCommand.follower_plan_id)
+        .eq("broker_connection_id", runtime.connection.id)
+        .maybeSingle();
+      plan = result.data;
+      planError = result.error;
+    } else {
+      const result = await this.supabase.from("follower_execution_plans")
+        .select("id,group_intent_id,mandate_id,follower_user_id,broker_connection_id,execution_order_id,execution_status,safe_result")
+        .eq("execution_order_id", order.id)
+        .eq("broker_connection_id", runtime.connection.id)
+        .maybeSingle();
+      plan = result.data;
+      planError = result.error;
+    }
+    if (planError) throw planError;
+    const direction = strategyGroupTakeProfitDirection(groupIntent, order);
+    const { data: binding, error: bindingError } = await this.supabase.from("strategy_target_bindings")
+      .select("id,strategy_id,owner_user_id,target_type,group_id,market_type,strategy_version")
+      .eq("id", groupIntent.strategy_target_binding_id)
+      .maybeSingle();
+    if (bindingError) throw bindingError;
+    const ownershipValid = binding
+      && binding.target_type === "INVESTMENT_GROUP"
+      && binding.strategy_id === groupIntent.strategy_automation_id
+      && binding.owner_user_id === groupIntent.created_by
+      && binding.group_id === groupIntent.group_id
+      && order.origin === "INVESTMENT_GROUP"
+      && order.account_id === runtime.account.id
+      && plan?.follower_user_id === order.user_id
+      && plan?.broker_connection_id === runtime.connection.id
+      && plan?.group_intent_id === groupIntent.id
+      && plan?.execution_order_id === order.id
+      && plan?.mandate_id === order.mandate_id
+      && sourceCommand?.connection_id === runtime.connection.id
+      && sourceCommand?.user_id === order.user_id
+      && sourceCommand?.strategy_automation_id === groupIntent.strategy_automation_id
+      && sourceCommand?.strategy_target_binding_id === groupIntent.strategy_target_binding_id;
+    if (!ownershipValid || !direction || normalizedSymbol(groupIntent.symbol) !== normalizedSymbol(order.symbol)) {
+      throw typedError("STRATEGY_GROUP_PROTECTION_OWNERSHIP_MISMATCH", "A terminal follower target did not match its immutable group strategy direction or symbol.");
+    }
+    const parentGroupIntentId = String(groupIntent.strategy_execution_policy?.parentGroupIntentId || "");
+    let expectedEntryOrderId = null;
+    if (parentGroupIntentId && plan?.mandate_id) {
+      const { data: parentPlan, error: parentPlanError } = await this.supabase.from("follower_execution_plans")
+        .select("execution_order_id")
+        .eq("group_intent_id", parentGroupIntentId)
+        .eq("mandate_id", plan.mandate_id)
+        .maybeSingle();
+      if (parentPlanError) throw parentPlanError;
+      expectedEntryOrderId = parentPlan?.execution_order_id || null;
+    }
+    const executionEnvironment = normalizeBybitExecutionEnvironment(runtime.connection.execution_environment);
+    const repairCommand = buildGroupStrategyProtectionRepairCommand({
+      order,
+      report,
+      binding,
+      groupIntent,
+      sourceCommand,
+      plan,
+      connection: runtime.connection,
+      executionEnvironment,
+      direction,
+      parentGroupIntentId,
+      expectedEntryOrderId
+    });
+    const persisted = repairCommand
+      ? await persistStrategyProtectionRepairCommand(this.supabase, repairCommand)
+      : { inserted: false, id: null };
+    const incidentMarker = {
+      executionOrderId: order.id,
+      terminalStatus: order.status,
+      symbol: normalizedSymbol(order.symbol),
+      direction,
+      observedAt: venueEventIso(report),
+      requiresReconciliation: true,
+      requiresManualRepair: !repairCommand,
+      automaticRepairAvailable: Boolean(repairCommand),
+      repairCommandId: persisted.id || null,
+      expectedEntryOrderId
+    };
+    const alreadyMarked = plan?.safe_result?.takeProfitProtectionIncident?.executionOrderId === order.id
+      && plan.safe_result.takeProfitProtectionIncident.terminalStatus === order.status;
+    if (alreadyMarked && !persisted.inserted) {
+      return { monitored: true, repaired: Boolean(repairCommand), idempotent: true, commandId: persisted.id || null };
+    }
+    if (plan) {
+      const preservesPositiveFill = Number(order.filled_quantity || 0) > 0
+        || ["PARTIALLY_FILLED", "FILLED"].includes(String(plan.execution_status || "").toUpperCase());
+      const patch = {
+        safe_result: { ...(plan.safe_result || {}), takeProfitProtectionIncident: incidentMarker }
+      };
+      if (!preservesPositiveFill) patch.execution_status = "RECONCILIATION_REQUIRED";
+      await updateOrThrow(this.supabase.from("follower_execution_plans").update(patch).eq("id", plan.id));
+    }
+    this.metrics.groupProtectionIncidents += 1;
+    const { error: strategyAuditError } = await this.supabase.from("strategy_automation_audit_events").insert({
+      owner_user_id: groupIntent.created_by,
+      strategy_id: groupIntent.strategy_automation_id,
+      binding_id: groupIntent.strategy_target_binding_id,
+      event_type: "STRATEGY_GROUP_TP_PROTECTION_LOST",
+      severity: "CRITICAL",
+      message: repairCommand
+        ? "An Investment Group follower take-profit became terminal with possible residual exposure. Black Cloud queued a deterministic generation-guarded follower safety flatten."
+        : "An Investment Group follower take-profit became terminal but its immutable parent generation was unavailable; the follower plan requires reconciliation.",
+      safe_metadata: {
+        executionOrderId: order.id,
+        groupIntentId: groupIntent.id,
+        followerPlanId: plan?.id || null,
+        connectionId: runtime.connection.id,
+        ...incidentMarker
+      }
+    });
+    if (strategyAuditError) throw strategyAuditError;
+    await this.repository.audit({
+      userId: order.user_id,
+      connectionId: runtime.connection.id,
+      groupIntentId: groupIntent.id,
+      followerPlanId: plan?.id || null,
+      commandId: sourceCommand?.id || null,
+      eventType: "STRATEGY_GROUP_TP_PROTECTION_LOST",
+      severity: "CRITICAL",
+      purpose: "strategy_group_take_profit_protection_monitor",
+      message: repairCommand
+        ? "A follower target lost native take-profit protection. The private-stream supervisor queued durable repair work without directly submitting a broker order."
+        : "A follower target lost native take-profit protection and requires operator reconciliation; no direct broker order was submitted by the private-stream supervisor.",
+      metadata: { ...incidentMarker, venueOrderSubmittedBySupervisor: false, repairQueued: Boolean(repairCommand) }
+    });
+    if (persisted.inserted) this.metrics.protectionRepairsQueued += 1;
+    return {
+      monitored: true,
+      repaired: Boolean(repairCommand),
+      idempotent: !persisted.inserted,
+      commandId: persisted.id || null,
+      reason: repairCommand ? "GROUP_FAIL_SAFE_REPAIR_QUEUED" : "GROUP_MANUAL_RECONCILIATION_REQUIRED"
+    };
   }
 
   async applyFillEvent(runtime, fill) {
     if (!fill?.clientOrderId?.startsWith("bt-")) return;
-    const { data: order } = await this.supabase.from("execution_orders").select("id,filled_quantity,quantity").eq("account_id", runtime.account.id).eq("client_order_id", fill.clientOrderId).maybeSingle();
+    const { data: order, error } = await this.supabase.from("execution_orders").select("id").eq("account_id", runtime.account.id).eq("client_order_id", fill.clientOrderId).maybeSingle();
+    if (error) throw error;
     if (!order) return;
-    const cumulative = Number(order.filled_quantity || 0) + Number(fill.quantity || 0);
-    const filled = cumulative + 1e-12 >= Number(order.quantity || 0);
-    await updateOrThrow(this.supabase.from("execution_orders").update({
-      status: filled ? "filled" : "partially-filled",
-      filled_quantity: cumulative,
-      average_fill_price: fill.price,
-      actual_fees: fill.fee
-    }).eq("id", order.id));
-    await updateOrThrow(this.supabase.from("follower_execution_plans").update({
-      execution_status: filled ? "FILLED" : "PARTIALLY_FILLED"
-    }).eq("execution_order_id", order.id));
+    await this.repository.applyExecutionOrderState({
+      orderId: order.id,
+      accountId: runtime.account.id,
+      status: "partially-filled",
+      fillDelta: fill.quantity,
+      exchangeOrderId: fill.orderId,
+      averageFillPrice: fill.price,
+      actualFeeDelta: fill.fee,
+      venueUpdatedAt: fill.time ?? 0
+    });
   }
 
   scheduleReconciliation(runtime, triggerType) {
@@ -511,18 +833,209 @@ function safeEventMetadata(event) {
   return { type: event.type };
 }
 
-function normalizeOrderStatus(value) {
-  if (value === "partially-filled") return "partially-filled";
-  if (["filled", "cancelled", "rejected", "expired"].includes(value)) return value;
-  return "accepted";
+export function strategyProtectionLossCandidate(order) {
+  const status = String(order?.status || "").trim().toLowerCase().replaceAll("_", "-");
+  const quantity = Number(order?.quantity || 0);
+  const filledQuantity = Number(order?.filled_quantity ?? order?.filledQuantity ?? 0);
+  return Boolean(order?.strategy_automation_id)
+    && Boolean(order?.strategy_target_binding_id)
+    && order?.reduce_only === true
+    && String(order?.order_type || "").toLowerCase() === "limit"
+    && ["cancelled", "canceled", "rejected", "failed"].includes(status)
+    && Number.isFinite(quantity)
+    && quantity > 0
+    && Number.isFinite(filledQuantity)
+    && filledQuantity >= 0
+    && filledQuantity + 1e-12 < quantity;
 }
 
-function normalizePlanStatus(value) {
-  if (value === "partially-filled") return "PARTIALLY_FILLED";
-  if (value === "filled") return "FILLED";
-  if (value === "cancelled") return "CANCELLED";
-  if (value === "rejected") return "VENUE_REJECTED";
-  return "WORKING";
+export function strategyProtectionRepairSuppression({ sourceCommand, relatedCommands = [] }) {
+  const sourceCreatedAt = Date.parse(sourceCommand?.created_at || "") || 0;
+  const parentKey = String(sourceCommand?.payload?.parentEntryIdempotencyKey || "");
+  const targetId = String(sourceCommand?.payload?.targetId || "").toUpperCase();
+  const direction = String(sourceCommand?.payload?.direction || "").toLowerCase();
+  const parentCommand = relatedCommands.find((command) => command.idempotency_key === parentKey);
+  const generationCreatedAt = Date.parse(parentCommand?.created_at || "") || sourceCreatedAt;
+  for (const command of relatedCommands) {
+    if (command.id === sourceCommand?.id) continue;
+    const action = String(command.payload?.action || "").toUpperCase();
+    const status = String(command.status || "").toUpperCase();
+    const commandCreatedAt = Date.parse(command.created_at || "") || 0;
+    const acknowledged = Boolean(command.execution_order_id)
+      && !["FAILED", "DEAD_LETTER", "CANCELLED"].includes(status);
+    if (acknowledged
+      && ["ENTRY", "REVERSE"].includes(action)
+      && commandCreatedAt > generationCreatedAt) {
+      return "SUPERSEDED_POSITION_GENERATION";
+    }
+    if (acknowledged
+      && action === "TAKE_PROFIT"
+      && commandCreatedAt > sourceCreatedAt
+      && String(command.payload?.parentEntryIdempotencyKey || "") === parentKey
+      && String(command.payload?.targetId || "").toUpperCase() === targetId
+      && String(command.payload?.direction || "").toLowerCase() === direction
+      && command.execution_order_id !== sourceCommand?.execution_order_id) {
+      return "SUPERSEDED_TAKE_PROFIT_ORDER";
+    }
+    if (["MODIFY_ORDER", "CANCEL_ORDER"].includes(command.command_type)
+      && command.execution_order_id === sourceCommand?.execution_order_id
+      && explicitlyIntentionalProtectionReplacement(command.payload)
+      && !["FAILED", "DEAD_LETTER", "CANCELLED"].includes(status)) {
+      return "INTENTIONAL_TAKE_PROFIT_REPLACEMENT";
+    }
+  }
+  return null;
+}
+
+export function buildStrategyProtectionRepairCommand({
+  order,
+  report,
+  binding,
+  strategy,
+  sourceCommand,
+  connection,
+  executionEnvironment,
+  direction,
+  parentEntryIdempotencyKey,
+  expectedEntryOrderId
+}) {
+  if (!strategyProtectionLossCandidate(order)) return null;
+  if (!parentEntryIdempotencyKey) return null;
+  const stableIdentity = `strategy-tp-protection-repair:${binding.id}:${parentEntryIdempotencyKey}:${direction}`;
+  const idempotencyKey = crypto.createHash("sha256").update(stableIdentity).digest("hex");
+  const signalKey = `protection-repair:${parentEntryIdempotencyKey}:${direction}`;
+  return {
+    command_type: "PLACE_ORDER",
+    user_id: order.user_id,
+    connection_id: connection.id,
+    strategy_automation_id: strategy.id,
+    strategy_target_binding_id: binding.id,
+    strategy_signal_key: signalKey,
+    idempotency_key: idempotencyKey,
+    deterministic_client_order_id: `bt-safe-${idempotencyKey.slice(0, 28)}`,
+    execution_environment: executionEnvironment,
+    payload: {
+      action: "TAKE_PROFIT",
+      forceProtectionFailSafeFlatten: true,
+      symbol: normalizedSymbol(order.symbol),
+      marketType: binding.market_type,
+      direction,
+      positionDirection: direction,
+      parentEntryIdempotencyKey,
+      expectedEntryOrderId: expectedEntryOrderId || null,
+      strategyVersion: binding.strategy_version,
+      executionEnvironment,
+      protectionRepair: {
+        reason: "TERMINAL_TAKE_PROFIT_WITH_RESIDUAL_POSSIBLE",
+        executionOrderId: order.id,
+        sourceCommandId: sourceCommand.id,
+        targetId: String(sourceCommand.payload?.targetId || "").toUpperCase() || null,
+        terminalStatus: String(order.status || "").toLowerCase(),
+        venueUpdatedAt: Number(report?.updatedTime ?? report?.updatedAt ?? report?.time ?? 0) || null
+      }
+    },
+    status: "QUEUED",
+    priority: 5,
+    max_attempts: 100
+  };
+}
+
+export function buildGroupStrategyProtectionRepairCommand({
+  order,
+  report,
+  binding,
+  groupIntent,
+  sourceCommand,
+  plan,
+  connection,
+  executionEnvironment,
+  direction,
+  parentGroupIntentId,
+  expectedEntryOrderId
+}) {
+  if (!strategyProtectionLossCandidate(order)
+    || !sourceCommand?.id
+    || !plan?.id
+    || !plan?.mandate_id
+    || !parentGroupIntentId) return null;
+  const stableIdentity = `strategy-group-tp-protection-repair:${binding.id}:${parentGroupIntentId}:${plan.mandate_id}:${direction}`;
+  const idempotencyKey = crypto.createHash("sha256").update(stableIdentity).digest("hex");
+  return {
+    command_type: "PLACE_ORDER",
+    user_id: order.user_id,
+    connection_id: connection.id,
+    group_intent_id: groupIntent.id,
+    follower_plan_id: plan.id,
+    strategy_automation_id: groupIntent.strategy_automation_id,
+    strategy_target_binding_id: binding.id,
+    strategy_signal_key: `protection-repair:${parentGroupIntentId}:${plan.mandate_id}:${direction}`,
+    idempotency_key: idempotencyKey,
+    deterministic_client_order_id: `bt-safe-${idempotencyKey.slice(0, 28)}`,
+    execution_environment: executionEnvironment,
+    payload: {
+      ...(sourceCommand.payload || {}),
+      forceProtectionFailSafeFlatten: true,
+      expectedEntryOrderId: expectedEntryOrderId || null,
+      protectionRepair: {
+        reason: "TERMINAL_TAKE_PROFIT_WITH_RESIDUAL_POSSIBLE",
+        executionOrderId: order.id,
+        sourceCommandId: sourceCommand.id,
+        parentGroupIntentId,
+        terminalStatus: String(order.status || "").toLowerCase(),
+        venueUpdatedAt: Number(report?.updatedTime ?? report?.updatedAt ?? report?.time ?? 0) || null
+      }
+    },
+    status: "QUEUED",
+    priority: 5,
+    max_attempts: 100
+  };
+}
+
+export async function persistStrategyProtectionRepairCommand(supabase, command) {
+  const { data, error } = await supabase.from("execution_commands")
+    .upsert(command, { onConflict: "idempotency_key", ignoreDuplicates: true })
+    .select("id")
+    .maybeSingle();
+  if (error) throw error;
+  if (data?.id) return { inserted: true, id: data.id };
+  const { data: existing, error: existingError } = await supabase.from("execution_commands")
+    .select("id")
+    .eq("idempotency_key", command.idempotency_key)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  return { inserted: false, id: existing?.id || null };
+}
+
+function explicitlyIntentionalProtectionReplacement(payload = {}) {
+  const replacementReason = String(payload.cancellationReason || payload.cancelReason || payload.replacementReason || "").toUpperCase();
+  return payload.intentionalProtectionReplacement === true
+    || payload.cancelBeforeReplace === true
+    || Boolean(payload.replacementExecutionOrderId)
+    || Boolean(payload.replacementClientOrderId)
+    || /(SUPERSEDE|REPLACE|REPRICE)/.test(replacementReason);
+}
+
+function strategyTakeProfitDirection(sourceCommand, order) {
+  const direction = String(sourceCommand?.payload?.direction || sourceCommand?.payload?.positionDirection || "").toLowerCase();
+  if (!['long', 'short'].includes(direction)) return null;
+  const expectedSide = direction === "long" ? "sell" : "buy";
+  return String(order?.side || "").toLowerCase() === expectedSide ? direction : null;
+}
+
+function strategyGroupTakeProfitDirection(groupIntent, order) {
+  const direction = String(groupIntent?.strategy_direction || "").toLowerCase();
+  if (!['long', 'short'].includes(direction)) return null;
+  const expectedSide = direction === "long" ? "sell" : "buy";
+  return String(order?.side || "").toLowerCase() === expectedSide ? direction : null;
+}
+
+function normalizedSymbol(value) {
+  return String(value || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+}
+
+function venueEventIso(report) {
+  const milliseconds = Number(report?.updatedTime ?? report?.updatedAt ?? report?.time ?? Date.now());
+  return new Date(Number.isFinite(milliseconds) && milliseconds > 0 ? milliseconds : Date.now()).toISOString();
 }
 
 async function single(query) {

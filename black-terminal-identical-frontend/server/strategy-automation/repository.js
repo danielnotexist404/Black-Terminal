@@ -14,6 +14,9 @@ import {
   riskIncrease,
   strategyError
 } from "./domain.js";
+import { getBybitClosedKlines, getBybitInstrumentMetadata, getBybitTicker, validateBybitClosedKlineSnapshot } from "../exchanges/bybit.js";
+import { preflightTargetExecution } from "./target-execution-preflight.js";
+import { calculateFollowerAllocation } from "../cloud-execution/allocation-risk.js";
 
 const ACTIVE_ORDER_STATUSES = ["created", "pending", "open", "working", "partially-filled", "partially_filled", "triggered"];
 const ACCOUNT_EQUITY_STALE_MS = 90_000;
@@ -440,6 +443,15 @@ export async function updateTargetPolicy(supabase, userId, strategyId, bindingId
       throw strategyError(400, "STRATEGY_TRADE_AMOUNT_EXCEEDS_AVAILABLE_FUNDS", "The fixed per-trade amount exceeds the broker account's current available funds.", { requested: nextPolicy.tradeAmountValue, available: currentLimit, equity: snapshot.equity });
     }
   }
+  if (binding.target_type === "BROKER_ACCOUNT" && binding.market_type === "FUTURES" && binding.status === "LIVE") {
+    const connection = await oneOrNone(supabase.from("connectivity_connections")
+      .select("id,provider,account_id,execution_environment,endpoint_profile")
+      .eq("id", binding.connection_id)
+      .eq("user_id", userId)
+      .maybeSingle());
+    const executionPreflight = await buildBrokerExecutionPreflight(supabase, userId, binding, connection, nextPolicy);
+    assertExecutionPreflight({ executionPreflight });
+  }
   const increased = riskIncrease(policyFromBinding(binding), nextPolicy, binding.market_type);
   const requestHash = canonicalRequestHash({ action: "UPDATE_POLICY", expectedVersion: Number(body.expectedVersion), policy: nextPolicy });
   const { error } = await supabase.rpc("black_core_update_strategy_target_policy", {
@@ -484,23 +496,30 @@ export async function setTargetState(supabase, userId, strategyId, bindingId, ac
   if (action === "arm") {
     if (Number(expectedVersion) === Number(binding.row_version)) {
       if (binding.status !== "READY") throw strategyError(409, "STRATEGY_TARGET_STATE_CONFLICT", "Only a ready target can be activated.");
-      validation = await validateExistingBinding(supabase, userId, strategyId, binding, environment);
-      const connection = binding.target_type === "BROKER_ACCOUNT"
-        ? await oneOrNone(supabase.from("connectivity_connections").select("execution_environment").eq("id", binding.connection_id).eq("user_id", userId).maybeSingle())
-        : null;
+      const armability = await validateArmableBinding(supabase, userId, strategyId, binding, environment);
+      validation = armability.validation;
+      assertExecutionPreflight(validation);
       assertCanArmStrategyTarget({
         policy: policyFromBinding(binding),
         marketType: binding.market_type,
         validation,
-        executionEnvironment: binding.target_type === "INVESTMENT_GROUP" ? "INVESTMENT_GROUP" : connection?.execution_environment,
+        executionEnvironment: armability.executionEnvironment,
         environment
       });
     }
   } else if (action === "resume") {
     if (Number(expectedVersion) === Number(binding.row_version)) {
       if (binding.status !== "PAUSED") throw strategyError(409, "STRATEGY_TARGET_STATE_CONFLICT", "Only a paused target can be resumed.");
-      validation = await validateExistingBinding(supabase, userId, strategyId, binding, environment);
-      if (!validation.eligible) throw strategyError(409, "STRATEGY_TARGET_VALIDATION_FAILED", "The target cannot resume until validation succeeds.", { reasons: validation.reasons });
+      const armability = await validateArmableBinding(supabase, userId, strategyId, binding, environment);
+      validation = armability.validation;
+      assertExecutionPreflight(validation);
+      assertCanArmStrategyTarget({
+        policy: policyFromBinding(binding),
+        marketType: binding.market_type,
+        validation,
+        executionEnvironment: armability.executionEnvironment,
+        environment
+      });
     }
   } else if (action !== "pause") {
     throw strategyError(400, "STRATEGY_TARGET_ACTION_INVALID", "Unsupported target action.");
@@ -630,13 +649,14 @@ async function buildStrategySnapshots(supabase, userId, strategy, bindings) {
 
 async function buildBindingSnapshot(supabase, userId, binding) {
   if (binding.target_type === "INVESTMENT_GROUP") return buildGroupSnapshot(supabase, userId, binding);
-  const [accountEquity, positions, orders, trades, risk, health] = await Promise.all([
+  const [accountEquity, positions, orders, trades, risk, health, commandHistory] = await Promise.all([
     oneOrNone(supabase.from("broker_account_equity_snapshots").select("equity_usd,available_balance_usd,observed_at,captured_at").eq("account_id", binding.account_id).eq("user_id", userId).maybeSingle()),
     many(supabase.from("account_positions").select("unrealized_pnl,realized_pnl,margin,updated_at").eq("strategy_target_binding_id", binding.id)),
     many(supabase.from("execution_orders").select("status,updated_at").eq("strategy_target_binding_id", binding.id)),
     many(supabase.from("strategy_automation_trades").select("gross_pnl,net_pnl,fees,funding,closed_at").eq("binding_id", binding.id).eq("owner_user_id", userId).order("closed_at", { ascending: true }).limit(5000)),
     oneOrNone(supabase.from("account_risk_controls").select("max_leverage,max_daily_loss_usd,max_portfolio_exposure_usd,emergency_stop").eq("account_id", binding.account_id).maybeSingle()),
-    oneOrNone(supabase.from("broker_connection_health").select("health_status,private_stream_status,reconciliation_status,last_private_event_at,last_reconciled_at,stale_after,captured_at").eq("connection_id", binding.connection_id).order("captured_at", { ascending: false }).limit(1).maybeSingle())
+    oneOrNone(supabase.from("broker_connection_health").select("health_status,private_stream_status,reconciliation_status,last_private_event_at,last_reconciled_at,stale_after,captured_at").eq("connection_id", binding.connection_id).order("captured_at", { ascending: false }).limit(1).maybeSingle()),
+    bindingExecutionCommandHistory(supabase, userId, binding.id)
   ]);
   const money = authoritativeAccountMoney(accountEquity);
   const policy = policyFromBinding(binding);
@@ -647,6 +667,7 @@ async function buildBindingSnapshot(supabase, userId, binding) {
   const connectionFreshness = resolveFreshness(health?.stale_after, health?.health_status, health?.reconciliation_status, health?.last_reconciled_at);
   const equityFreshness = resolveAccountEquityFreshness(accountEquity);
   const freshness = mergeFreshness(connectionFreshness, equityFreshness);
+  const latestExecution = latestBindingExecutionTelemetry(commandHistory, binding);
   const snapshot = {
     bindingId: binding.id,
     slotIndex: binding.slot_index,
@@ -681,7 +702,8 @@ async function buildBindingSnapshot(supabase, userId, binding) {
     calmar: analytics.calmar,
     strategyState: binding.status,
     connectionHealth: health?.health_status || "UNAVAILABLE",
-    protectionHealth: risk?.emergency_stop ? "EMERGENCY_STOP" : "MONITORED"
+    protectionHealth: risk?.emergency_stop ? "EMERGENCY_STOP" : "MONITORED",
+    ...latestExecution
   };
   await persistSnapshot(supabase, userId, binding, snapshot, freshness);
   return snapshot;
@@ -760,10 +782,27 @@ async function buildGroupSnapshot(supabase, userId, binding) {
     calmar: analytics.calmar,
     strategyState: binding.status,
     connectionHealth: active.length ? (degraded ? "DEGRADED" : "LIVE") : "UNAVAILABLE",
-    protectionHealth: active.length ? "MANDATE_BOUNDED" : "UNAVAILABLE"
+    protectionHealth: active.length ? "MANDATE_BOUNDED" : "UNAVAILABLE",
+    groupExecutionPreflight: binding.validation_snapshot?.executionPreflight?.targetType === "INVESTMENT_GROUP"
+      ? binding.validation_snapshot.executionPreflight
+      : null,
+    followerPreflightFailures: Array.isArray(binding.validation_snapshot?.executionPreflight?.followers)
+      ? binding.validation_snapshot.executionPreflight.followers
+        .filter((report) => report?.ok === false)
+        .map((report) => ({ mandateId: report.mandateId, connectionId: report.connectionId, reasons: report.reasons || [] }))
+      : []
   };
   await persistSnapshot(supabase, userId, binding, snapshot, freshness);
   return snapshot;
+}
+
+async function bindingExecutionCommandHistory(supabase, userId, bindingId) {
+  const columns = "id,command_type,status,last_error_code,last_error_message,execution_order_id,strategy_signal_key,payload,created_at,updated_at";
+  const [placeOrders, terminalFailures] = await Promise.all([
+    many(supabase.from("execution_commands").select(columns).eq("strategy_target_binding_id", bindingId).eq("user_id", userId).eq("command_type", "PLACE_ORDER").order("created_at", { ascending: false }).limit(50)),
+    many(supabase.from("execution_commands").select(columns).eq("strategy_target_binding_id", bindingId).eq("user_id", userId).in("status", ["FAILED", "REJECTED", "DEAD_LETTER", "CANCELLED"]).order("updated_at", { ascending: false }).limit(50))
+  ]);
+  return [...new Map([...placeOrders, ...terminalFailures].map((command) => [command.id, command])).values()];
 }
 
 async function persistSnapshot(supabase, userId, binding, snapshot, freshness) {
@@ -776,6 +815,782 @@ async function validateExistingBinding(supabase, userId, strategyId, binding, en
   const list = binding.target_type === "BROKER_ACCOUNT" ? eligible.brokerAccounts : eligible.groups;
   const candidate = list.find((item) => item.targetId === binding.target_id);
   return candidate?.validation || { eligible: false, reasons: ["Target is no longer available."] };
+}
+
+async function validateArmableBinding(supabase, userId, strategyId, binding, environment) {
+  const validation = await validateExistingBinding(supabase, userId, strategyId, binding, environment);
+  if (validation.eligible && binding.market_type === "SPOT") {
+    const version = await oneOrNone(supabase.from("strategy_automation_versions")
+      .select("definition")
+      .eq("strategy_id", strategyId)
+      .eq("owner_user_id", userId)
+      .eq("version", binding.strategy_version)
+      .maybeSingle());
+    if (!version?.definition) {
+      return {
+        validation: { ...validation, eligible: false, reasons: [...(validation.reasons || []), "The immutable running strategy version is unavailable for Spot protection validation."] },
+        executionEnvironment: binding.target_type === "INVESTMENT_GROUP" ? "INVESTMENT_GROUP" : null
+      };
+    }
+    if (strategyTakeProfitPercentages(version.definition).length) {
+      return {
+        validation: {
+          ...validation,
+          eligible: false,
+          reasons: [...(validation.reasons || []), "Spot automation with strategy take-profits is blocked until balance-owned partial exits and a certified fail-safe close are available."]
+        },
+        executionEnvironment: binding.target_type === "INVESTMENT_GROUP" ? "INVESTMENT_GROUP" : null
+      };
+    }
+  }
+  if (binding.target_type === "INVESTMENT_GROUP") {
+    if (!validation.eligible || binding.market_type !== "FUTURES") {
+      return { validation, executionEnvironment: "INVESTMENT_GROUP" };
+    }
+    const executionPreflight = await buildInvestmentGroupExecutionPreflight(supabase, userId, binding);
+    return {
+      executionEnvironment: "INVESTMENT_GROUP",
+      validation: {
+        ...validation,
+        executionPreflightRequired: true,
+        eligible: validation.eligible && executionPreflight.ok,
+        reasons: [...(validation.reasons || []), ...executionPreflight.reasons],
+        executionPreflight
+      }
+    };
+  }
+  const connection = await oneOrNone(supabase.from("connectivity_connections")
+    .select("id,provider,account_id,execution_environment,endpoint_profile")
+    .eq("id", binding.connection_id)
+    .eq("user_id", userId)
+    .maybeSingle());
+  const executionEnvironment = connection?.execution_environment;
+  if (!validation.eligible || binding.market_type !== "FUTURES") {
+    return { validation, executionEnvironment };
+  }
+  const executionPreflight = await buildBrokerExecutionPreflight(supabase, userId, binding, connection);
+  return {
+    executionEnvironment,
+    validation: {
+      ...validation,
+      executionPreflightRequired: true,
+      eligible: validation.eligible && executionPreflight.ok,
+      reasons: [...(validation.reasons || []), ...executionPreflight.reasons],
+      executionPreflight
+    }
+  };
+}
+
+async function buildBrokerExecutionPreflight(supabase, userId, binding, connection, policyOverride = null) {
+  const checkedAt = new Date().toISOString();
+  const provider = String(connection?.provider || "").toLowerCase();
+  if (!connection || provider !== "bybit") {
+    return failedExecutionPreflight(checkedAt, provider || "unknown", "A certified venue sizing preflight is unavailable for this broker.");
+  }
+  const [version, accountEquity, riskControl, mandate] = await Promise.all([
+    oneOrNone(supabase.from("strategy_automation_versions").select("definition").eq("strategy_id", binding.strategy_id).eq("owner_user_id", userId).eq("version", binding.strategy_version).maybeSingle()),
+    oneOrNone(supabase.from("broker_account_equity_snapshots").select("equity_usd,available_balance_usd,observed_at,captured_at").eq("account_id", binding.account_id).eq("user_id", userId).maybeSingle()),
+    oneOrNone(supabase.from("account_risk_controls").select("max_leverage,max_position_usd,emergency_stop").eq("account_id", binding.account_id).maybeSingle()),
+    oneOrNone(supabase.from("broker_automation_mandates").select("allow_strategy_execution,allow_withdrawals,max_order_notional,max_leverage,allowed_strategies,allowed_symbols,status,expires_at").eq("connection_id", binding.connection_id).eq("user_id", userId).eq("status", "ACTIVE").maybeSingle())
+  ]);
+  const definition = version?.definition;
+  const symbol = String(definition?.symbol || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  const money = authoritativeAccountMoney(accountEquity);
+  const unavailableReasons = [];
+  if (!definition) unavailableReasons.push("The immutable running strategy version is unavailable.");
+  if (!symbol) unavailableReasons.push("The running strategy symbol is unavailable.");
+  if (resolveAccountEquityFreshness(accountEquity) !== "LIVE") unavailableReasons.push("A fresh authoritative broker equity snapshot is required before activation.");
+  if (!mandate) unavailableReasons.push("An active broker automation mandate is required.");
+  if (mandate && mandate.allow_strategy_execution !== true) unavailableReasons.push("The broker mandate does not permit strategy execution.");
+  if (mandate?.allow_withdrawals === true) unavailableReasons.push("Withdrawal-enabled broker credentials are forbidden.");
+  if (mandate?.expires_at && Date.parse(mandate.expires_at) <= Date.now()) unavailableReasons.push("The broker automation mandate has expired.");
+  if (mandate && !listAllowsMandateValue(mandate.allowed_strategies, binding.strategy_id)) unavailableReasons.push("The broker mandate does not permit this strategy.");
+  if (mandate && !listAllowsMandateValue(mandate.allowed_symbols, symbol)) unavailableReasons.push(`The broker mandate does not permit ${symbol}.`);
+  if (riskControl?.emergency_stop) unavailableReasons.push("The broker account emergency stop is active.");
+  if (unavailableReasons.length) return failedExecutionPreflight(checkedAt, provider, ...unavailableReasons);
+
+  try {
+    const routing = {
+      category: "linear",
+      symbol,
+      executionEnvironment: connection.execution_environment,
+      endpointProfile: connection.endpoint_profile || "GLOBAL"
+    };
+    const [ticker, instruments] = await Promise.all([
+      getBybitTicker(routing),
+      getBybitInstrumentMetadata(routing)
+    ]);
+    const instrument = instruments.find((item) => String(item.nativeSymbol).toUpperCase() === symbol);
+    const referencePrice = Number(ticker.markPrice || ticker.lastPrice);
+    if (!instrument || !(referencePrice > 0)) {
+      return failedExecutionPreflight(checkedAt, provider, `Bybit did not return current execution rules and a reference price for ${symbol}.`);
+    }
+    if (String(instrument.tradingStatus || "").toLowerCase() !== "trading") {
+      return failedExecutionPreflight(checkedAt, provider, `${symbol} is not currently tradable on Bybit (${instrument.tradingStatus || "unknown status"}).`);
+    }
+    const policy = policyOverride || policyFromBinding(binding);
+    const commonCaps = {
+      targetMaximum: policy.maximumLeverage,
+      accountRiskCap: riskControl?.max_leverage,
+      emsRiskCap: mandate.max_leverage,
+      providerCap: instrument.leverageLimits?.max
+    };
+    const takeProfitPercentages = strategyTakeProfitPercentages(definition);
+    let takeProfitPricing = null;
+    if (takeProfitPercentages.length && definition.runtimeKind === "builtin-superatr-seven-step") {
+      const atrLength = Math.max(1, Math.round(Number(definition.settings?.superAtrTakeProfitAtrLength ?? 100)));
+      if (atrLength > 999) {
+        return failedExecutionPreflight(checkedAt, provider, `SuperATR take-profit ATR length ${atrLength} exceeds the certified 1,000-candle VPS runtime window; activation is blocked until the runtime and preflight can seed the same history.`);
+      }
+      const candleSnapshot = await getBybitClosedKlines({
+        ...routing,
+        timeframe: definition.timeframe,
+        // Match the certified VPS signal runtime's complete Bybit seed window;
+        // Wilder RMA depends on every post-seed candle, not only ATR length.
+        limit: 1000
+      });
+      takeProfitPricing = superAtrTakeProfitPreflightPrices(definition, referencePrice, candleSnapshot);
+      if (!takeProfitPricing.ok) return failedExecutionPreflight(checkedAt, provider, ...takeProfitPricing.reasons);
+    }
+    const reports = {};
+    for (const direction of ["long", "short"]) {
+      const directionPolicy = policyWithAbsoluteNotionalCaps({
+        policy,
+        direction,
+        equity: money.equity,
+        availableBalance: money.available,
+        caps: commonCaps,
+        absoluteNotionalCap: minimumPositiveNumber(mandate.max_order_notional, riskControl?.max_position_usd)
+      });
+      reports[direction] = preflightTargetExecution({
+        equity: money.equity,
+        availableBalance: money.available,
+        capitalPolicy: directionPolicy,
+        direction,
+        directionSpecificLeverageCaps: { [direction]: commonCaps },
+        referencePrice,
+        ...(takeProfitPricing ? {
+          takeProfitReferencePrices: takeProfitPricing.directions[direction].prices,
+          takeProfitPriceBasis: takeProfitPricing.basis
+        } : {}),
+        venue: {
+          quantityStep: instrument.quantityStep,
+          quantityPrecision: instrument.quantityPrecision,
+          minQuantity: instrument.minQuantity,
+          minNotional: instrument.minNotional,
+          maxQuantity: instrument.maxQuantity,
+          maxMarketQuantity: instrument.maxMarketQuantity
+        },
+        takeProfitPercentages
+      });
+    }
+    const reasons = Object.entries(reports).flatMap(([direction, report]) => report.ok ? [] : summarizeDirectionPreflight(direction, symbol, report));
+    return {
+      ok: reasons.length === 0,
+      checkedAt,
+      provider,
+      executionEnvironment: connection.execution_environment,
+      strategyVersion: binding.strategy_version,
+      symbol,
+      referencePrice,
+      venue: {
+        quantityStep: instrument.quantityStep,
+        minQuantity: instrument.minQuantity,
+        minNotional: instrument.minNotional,
+        maxQuantity: instrument.maxQuantity,
+        maxMarketQuantity: instrument.maxMarketQuantity,
+        maximumLeverage: instrument.leverageLimits?.max || null
+      },
+      takeProfitPercentages,
+      takeProfitPricing: takeProfitPricing ? {
+        basis: takeProfitPricing.basis,
+        atrValue: takeProfitPricing.atrValue,
+        closedCandleAt: takeProfitPricing.closedCandleAt
+      } : null,
+      directions: Object.fromEntries(Object.entries(reports).map(([direction, report]) => [direction, safeExecutionPreflightReport(report)])),
+      reasons
+    };
+  } catch (error) {
+    return failedExecutionPreflight(checkedAt, provider, `Bybit execution rules could not be verified: ${String(error?.message || "public venue metadata is unavailable").slice(0, 300)}`);
+  }
+}
+
+async function buildInvestmentGroupExecutionPreflight(supabase, userId, binding) {
+  const checkedAt = new Date().toISOString();
+  const [version, mandates] = await Promise.all([
+    oneOrNone(supabase.from("strategy_automation_versions")
+      .select("definition")
+      .eq("strategy_id", binding.strategy_id)
+      .eq("owner_user_id", userId)
+      .eq("version", binding.strategy_version)
+      .maybeSingle()),
+    many(supabase.from("group_execution_mandates")
+      .select("id,group_id,follower_user_id,broker_connection_id,status,execution_mode,allocation_method,allocation_value,max_order_notional,max_total_exposure,max_daily_loss,max_drawdown,max_leverage,allowed_symbols,allowed_market_types,allowed_order_types,allow_reduce_only,allow_position_reversal,protective_orders_required,allow_open_positions,allow_close_positions,allow_modify_protection,expires_at,paused_at,accepted_at")
+      .eq("group_id", binding.group_id)
+      .eq("status", "ACTIVE"))
+  ]);
+  const definition = version?.definition;
+  const symbol = String(definition?.symbol || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  const unavailableReasons = [];
+  if (!definition) unavailableReasons.push("The immutable running strategy version is unavailable for Investment Group preflight.");
+  if (!symbol) unavailableReasons.push("The running strategy symbol is unavailable for Investment Group preflight.");
+  if (!mandates.length) unavailableReasons.push("No active Investment Group follower mandate is available for execution preflight.");
+  if (unavailableReasons.length) {
+    return {
+      ...failedExecutionPreflight(checkedAt, "investment-group", ...unavailableReasons),
+      targetType: "INVESTMENT_GROUP",
+      strategyVersion: binding.strategy_version,
+      symbol: symbol || null,
+      followerCount: mandates.length,
+      followers: []
+    };
+  }
+
+  const connectionIds = [...new Set(mandates.map((item) => item.broker_connection_id).filter(Boolean))];
+  const [connections, capabilities, automationMandates] = await Promise.all([
+    many(supabase.from("connectivity_connections")
+      .select("id,user_id,provider,account_id,connection_mode,health_status,credential_state,worker_state,synchronization_state,execution_readiness,execution_environment,endpoint_profile,control_state,revoked_at,disabled_at")
+      .in("id", connectionIds)),
+    many(supabase.from("broker_connection_capabilities")
+      .select("connection_id,user_id,can_execute_while_offline,can_receive_group_orders,can_withdraw,can_transfer,supported_order_types")
+      .in("connection_id", connectionIds)),
+    many(supabase.from("broker_automation_mandates")
+      .select("id,user_id,connection_id,status,allow_strategy_execution,allow_investment_group_execution,allow_withdrawals,max_order_notional,max_position_notional,max_leverage,allowed_strategies,allowed_symbols,execution_environment,expires_at")
+      .in("connection_id", connectionIds)
+      .eq("status", "ACTIVE"))
+  ]);
+  const accountIds = [...new Set(connections.map((item) => item.account_id).filter(Boolean))];
+  const [accounts, accountEquities, riskControls, positions] = accountIds.length ? await Promise.all([
+    many(supabase.from("exchange_accounts")
+      .select("id,user_id,status,api_health,is_read_only,trading_enabled,execution_environment")
+      .in("id", accountIds)),
+    many(supabase.from("broker_account_equity_snapshots")
+      .select("account_id,user_id,equity_usd,available_balance_usd,observed_at,captured_at")
+      .in("account_id", accountIds)),
+    many(supabase.from("account_risk_controls")
+      .select("account_id,max_leverage,max_position_usd,emergency_stop")
+      .in("account_id", accountIds)),
+    many(supabase.from("account_positions")
+      .select("account_id,quantity,margin")
+      .in("account_id", accountIds))
+  ]) : [[], [], [], []];
+
+  const connectionMap = new Map(connections.map((item) => [item.id, item]));
+  const capabilityMap = new Map(capabilities.map((item) => [item.connection_id, item]));
+  const accountMap = new Map(accounts.map((item) => [item.id, item]));
+  const riskMap = new Map(riskControls.map((item) => [item.account_id, item]));
+  const automationMap = new Map(automationMandates.map((item) => [item.connection_id, item]));
+  const positionsByAccount = groupBy(positions, "account_id");
+  const equityByAccount = latestRowsByKey(accountEquities, "account_id");
+  const marketCache = new Map();
+  const takeProfitPercentages = strategyTakeProfitPercentages(definition);
+
+  const followers = await mapWithConcurrency(mandates, 3, async (mandate) => {
+    const connection = connectionMap.get(mandate.broker_connection_id) || null;
+    const account = connection?.account_id ? accountMap.get(connection.account_id) || null : null;
+    let marketSnapshot = null;
+    let marketError = null;
+    if (connection && String(connection.provider || "").toLowerCase() === "bybit" && symbol) {
+      const cacheKey = [connection.execution_environment || "", connection.endpoint_profile || "GLOBAL", symbol, definition.timeframe || ""].join(":");
+      if (!marketCache.has(cacheKey)) {
+        marketCache.set(cacheKey, loadGroupFollowerMarketSnapshot({ connection, definition, symbol, takeProfitPercentages }));
+      }
+      try {
+        marketSnapshot = await marketCache.get(cacheKey);
+      } catch (error) {
+        marketError = `Bybit execution rules could not be verified: ${String(error?.message || "public venue metadata is unavailable").slice(0, 300)}`;
+      }
+    }
+    return preflightInvestmentGroupFollowerExecution({
+      checkedAt,
+      binding,
+      definition,
+      symbol,
+      mandate,
+      connection,
+      capability: capabilityMap.get(mandate.broker_connection_id) || null,
+      automationMandate: automationMap.get(mandate.broker_connection_id) || null,
+      account,
+      accountEquity: account?.id ? equityByAccount.get(account.id) || null : null,
+      riskControl: account?.id ? riskMap.get(account.id) || null : null,
+      positions: account?.id ? positionsByAccount.get(account.id) || [] : [],
+      marketSnapshot,
+      marketError,
+      takeProfitPercentages
+    });
+  });
+  const reasons = followers.flatMap((report, index) => report.ok
+    ? []
+    : report.reasons.map((reason) => `Follower ${index + 1} (${report.mandateId || "unknown mandate"}): ${reason}`));
+  return {
+    ok: reasons.length === 0 && followers.length === mandates.length,
+    checkedAt,
+    provider: "investment-group",
+    targetType: "INVESTMENT_GROUP",
+    strategyVersion: binding.strategy_version,
+    symbol,
+    followerCount: mandates.length,
+    passedFollowerCount: followers.filter((item) => item.ok).length,
+    takeProfitPercentages,
+    followers,
+    reasons
+  };
+}
+
+async function loadGroupFollowerMarketSnapshot({ connection, definition, symbol, takeProfitPercentages }) {
+  const routing = {
+    category: "linear",
+    symbol,
+    executionEnvironment: connection.execution_environment,
+    endpointProfile: connection.endpoint_profile || "GLOBAL"
+  };
+  const [ticker, instruments] = await Promise.all([
+    getBybitTicker(routing),
+    getBybitInstrumentMetadata(routing)
+  ]);
+  const instrument = instruments.find((item) => String(item.nativeSymbol).toUpperCase() === symbol);
+  const referencePrice = Number(ticker.markPrice || ticker.lastPrice);
+  if (!instrument || !(referencePrice > 0)) throw new Error(`Bybit did not return current execution rules and a reference price for ${symbol}.`);
+  if (String(instrument.tradingStatus || "").toLowerCase() !== "trading") throw new Error(`${symbol} is not currently tradable on Bybit (${instrument.tradingStatus || "unknown status"}).`);
+  let takeProfitPricing = null;
+  if (takeProfitPercentages.length && definition.runtimeKind === "builtin-superatr-seven-step") {
+    const atrLength = Math.max(1, Math.round(Number(definition.settings?.superAtrTakeProfitAtrLength ?? 100)));
+    if (atrLength > 999) throw new Error(`SuperATR take-profit ATR length ${atrLength} exceeds the certified 1,000-candle VPS runtime window.`);
+    const candles = await getBybitClosedKlines({ ...routing, timeframe: definition.timeframe, limit: 1000 });
+    takeProfitPricing = superAtrTakeProfitPreflightPrices(definition, referencePrice, candles);
+    if (!takeProfitPricing.ok) throw new Error(takeProfitPricing.reasons.join(" "));
+  }
+  return { instrument, referencePrice, takeProfitPricing };
+}
+
+export function preflightInvestmentGroupFollowerExecution(input = {}) {
+  const {
+    checkedAt = new Date().toISOString(), binding = {}, definition = {}, symbol = "", mandate = {}, connection,
+    capability, automationMandate, account, accountEquity, riskControl, positions = [], marketSnapshot,
+    marketError, takeProfitPercentages = []
+  } = input;
+  const reasons = [];
+  const reject = (message) => { if (message && !reasons.includes(message)) reasons.push(message); };
+  const followerUserId = String(mandate.follower_user_id || "");
+  const now = Date.parse(checkedAt) || Date.now();
+  if (String(mandate.status || "").toUpperCase() !== "ACTIVE") reject("The follower mandate is not active.");
+  if (mandate.expires_at && Date.parse(mandate.expires_at) <= now) reject("The follower mandate has expired.");
+  if (!connection) reject("The follower broker connection is unavailable.");
+  if (connection && String(connection.user_id || "") !== followerUserId) reject("The follower mandate does not own its broker connection.");
+  if (connection && String(connection.provider || "").toLowerCase() !== "bybit") reject("A certified venue sizing preflight is unavailable for this follower broker.");
+  if (connection && !["CLOUD_DELEGATED", "HYBRID"].includes(String(connection.connection_mode || "").toUpperCase())) reject("The follower broker connection is not enabled for unattended cloud execution.");
+  if (connection && !["CONNECTED_CLOUD", "CONNECTED_HYBRID"].includes(String(connection.health_status || "").toUpperCase())) reject("The follower broker connection is not cloud-healthy.");
+  if (connection && String(connection.credential_state || "").toUpperCase() !== "AUTHENTICATED") reject("The follower broker credentials are not authenticated.");
+  if (connection && String(connection.worker_state || "").toUpperCase() !== "LIVE") reject("The follower private broker worker is not live.");
+  if (connection && String(connection.synchronization_state || "").toUpperCase() !== "SYNCHRONIZED") reject("The follower broker account is not synchronized.");
+  if (connection && String(connection.execution_readiness || "").toUpperCase() !== "READY") reject("The follower broker account is not ready for execution.");
+  if (connection && String(connection.control_state || "ACTIVE").toUpperCase() !== "ACTIVE") reject("The follower broker execution control is paused.");
+  if (connection?.revoked_at || connection?.disabled_at) reject("The follower broker connection is disabled or revoked.");
+  if (!account) reject("The follower exchange account is unavailable.");
+  if (account && String(account.user_id || "") !== followerUserId) reject("The follower mandate does not own its exchange account.");
+  if (account?.is_read_only === true || account?.trading_enabled !== true) reject("The follower exchange account is not approved for trading.");
+  if (account?.execution_environment && connection?.execution_environment && account.execution_environment !== connection.execution_environment) reject("The follower account and broker connection execution environments differ.");
+  if (!capability?.can_execute_while_offline || !capability?.can_receive_group_orders) reject("The follower connection lacks certified offline Investment Group execution capability.");
+  if (capability?.can_withdraw === true || capability?.can_transfer === true) reject("Withdrawal- or transfer-capable follower credentials are forbidden.");
+  if (!groupListAllows(capability?.supported_order_types, "MARKET") || (takeProfitPercentages.length && !groupListAllows(capability?.supported_order_types, "LIMIT"))) reject("The follower adapter does not support every required entry and take-profit order type.");
+  if (!automationMandate) reject("An active follower broker automation mandate is required.");
+  if (automationMandate && String(automationMandate.user_id || "") !== followerUserId) reject("The follower does not own the active broker automation mandate.");
+  if (automationMandate?.allow_investment_group_execution !== true) reject("The broker automation mandate does not permit Investment Group execution.");
+  if (automationMandate?.allow_strategy_execution !== true) reject("The broker automation mandate does not permit strategy execution.");
+  if (automationMandate?.allow_withdrawals === true) reject("Withdrawal-enabled follower broker credentials are forbidden.");
+  if (automationMandate?.expires_at && Date.parse(automationMandate.expires_at) <= now) reject("The follower broker automation mandate has expired.");
+  if (automationMandate?.execution_environment && connection?.execution_environment && automationMandate.execution_environment !== connection.execution_environment) reject("The follower broker mandate and connection execution environments differ.");
+  if (automationMandate && !listAllowsMandateValue(automationMandate.allowed_strategies, binding.strategy_id)) reject("The follower broker mandate does not permit this strategy.");
+  if (automationMandate && !listAllowsMandateValue(automationMandate.allowed_symbols, symbol)) reject(`The follower broker mandate does not permit ${symbol}.`);
+  if (!groupListAllows(mandate.allowed_symbols, symbol)) reject(`The Investment Group mandate does not permit ${symbol}.`);
+  if (!groupListAllows(mandate.allowed_market_types, "PERPETUAL") && !groupListAllows(mandate.allowed_market_types, "FUTURES")) reject("The Investment Group mandate does not permit perpetual futures.");
+  if (!groupListAllows(mandate.allowed_order_types, "MARKET") || (takeProfitPercentages.length && !groupListAllows(mandate.allowed_order_types, "LIMIT"))) reject("The Investment Group mandate does not permit every required entry and take-profit order type.");
+  if (mandate.allow_open_positions === false) reject("The Investment Group mandate does not permit opening positions.");
+  if (takeProfitPercentages.length && (mandate.allow_close_positions === false || mandate.allow_reduce_only === false)) reject("The Investment Group mandate does not permit reduce-only partial take-profits.");
+  if (riskControl?.emergency_stop) reject("The follower account emergency stop is active.");
+  if (accountEquity && String(accountEquity.user_id || "") !== followerUserId) reject("The authoritative follower equity snapshot belongs to a different user.");
+  if (resolveAccountEquityFreshness(accountEquity, now) !== "LIVE") reject("A fresh authoritative follower equity and available-balance snapshot is required before activation.");
+  const money = authoritativeAccountMoney(accountEquity);
+  if (!(money.equity > 0) || !(money.available > 0)) reject("The follower account has no positive synchronized equity and available balance.");
+  if (marketError) reject(marketError);
+  if (!marketSnapshot?.instrument || !(Number(marketSnapshot?.referencePrice) > 0)) reject(`Current Bybit instrument rules and price are unavailable for ${symbol || "the strategy symbol"}.`);
+
+  const policy = policyFromBinding(binding);
+  const currentExposure = positions.reduce((sum, row) => sum + Math.abs(Number(row.margin || 0)), 0);
+  const directionReports = {};
+  if (reasons.length === 0) {
+    for (const direction of ["long", "short"]) {
+      const requestedLeverage = direction === "short"
+        ? Number(policy.requestedShortLeverage || policy.requestedLeverage || 1)
+        : Number(policy.requestedLongLeverage || policy.requestedLeverage || 1);
+      const leverageLimit = minimumPositiveNumber(
+        policy.maximumLeverage,
+        mandate.max_leverage,
+        automationMandate.max_leverage,
+        riskControl?.max_leverage,
+        marketSnapshot.instrument.leverageLimits?.max
+      );
+      const leverageReasons = [];
+      if (leverageLimit && requestedLeverage > leverageLimit + 1e-12) {
+        leverageReasons.push(`${direction.toUpperCase()}: requested ${formatQuantity(requestedLeverage)}x leverage exceeds the follower's ${formatQuantity(leverageLimit)}x effective limit.`);
+      }
+      let allocation;
+      try {
+        allocation = calculateFollowerAllocation({
+          intent: { leverage: requestedLeverage, quantity_model: "MANDATE_ALLOCATION", quantity_value: 1 },
+          mandate: {
+            ...mandate,
+            max_order_notional: minimumPositiveNumber(mandate.max_order_notional, automationMandate.max_order_notional, automationMandate.max_position_notional, riskControl?.max_position_usd) || mandate.max_order_notional
+          },
+          account: { equityUsd: money.equity, availableBalanceUsd: money.available },
+          instrument: marketSnapshot.instrument,
+          referencePrice: marketSnapshot.referencePrice,
+          currentExposure
+        });
+      } catch (error) {
+        allocation = null;
+        leverageReasons.push(`${direction.toUpperCase()}: follower allocation is invalid (${String(error?.message || "unknown allocation error")}).`);
+      }
+      const fixedQuantityPolicy = {
+        strategyAllocationMode: "PERCENT_ACCOUNT_EQUITY",
+        strategyAllocationValue: 100,
+        tradeAmountMode: "FIXED_QUANTITY",
+        tradeAmountValue: Number(allocation?.roundedQuantity || 0),
+        requestedLeverage,
+        requestedLongLeverage: requestedLeverage,
+        requestedShortLeverage: requestedLeverage,
+        maximumLeverage: requestedLeverage,
+        maximumPositionPercent: 100,
+        maximumExposurePercent: 100,
+        maximumDailyLoss: Math.max(1, Number(policy.maximumDailyLoss || 1)),
+        maximumDrawdown: Math.max(1, Number(policy.maximumDrawdown || 1)),
+        maximumPositions: Math.max(1, Number(policy.maximumPositions || 1)),
+        slippageBps: Math.max(0, Number(policy.slippageBps || 0)),
+        marginMode: policy.marginMode || "CROSS"
+      };
+      const report = preflightTargetExecution({
+        equity: money.equity,
+        availableBalance: money.available,
+        capitalPolicy: fixedQuantityPolicy,
+        direction,
+        directionSpecificLeverageCaps: { [direction]: { targetMaximum: requestedLeverage, groupMandateCap: leverageLimit, providerCap: marketSnapshot.instrument.leverageLimits?.max } },
+        referencePrice: marketSnapshot.referencePrice,
+        ...(marketSnapshot.takeProfitPricing ? {
+          takeProfitReferencePrices: marketSnapshot.takeProfitPricing.directions[direction].prices,
+          takeProfitPriceBasis: marketSnapshot.takeProfitPricing.basis
+        } : {}),
+        venue: {
+          quantityStep: marketSnapshot.instrument.quantityStep,
+          quantityPrecision: marketSnapshot.instrument.quantityPrecision,
+          minQuantity: marketSnapshot.instrument.minQuantity,
+          minNotional: marketSnapshot.instrument.minNotional,
+          maxQuantity: marketSnapshot.instrument.maxQuantity,
+          maxMarketQuantity: marketSnapshot.instrument.maxMarketQuantity
+        },
+        takeProfitPercentages
+      });
+      const reportReasons = [...report.reasons, ...leverageReasons];
+      directionReports[direction] = {
+        ...safeExecutionPreflightReport(report),
+        ok: report.ok && leverageReasons.length === 0,
+        allocation: allocation ? {
+          calculatedEquity: allocation.calculatedEquity,
+          calculatedAvailableMargin: allocation.calculatedAvailableMargin,
+          requestedNotional: allocation.requestedNotional,
+          targetNotional: allocation.targetNotional,
+          roundedQuantity: allocation.roundedQuantity,
+          estimatedMargin: allocation.estimatedMargin,
+          constrained: allocation.constrained
+        } : null,
+        reasons: reportReasons
+      };
+    }
+  }
+  const directionReasons = Object.values(directionReports).flatMap((report) => report.ok ? [] : report.reasons);
+  const allReasons = [...new Set([...reasons, ...directionReasons])];
+  return {
+    ok: allReasons.length === 0 && ["long", "short"].every((direction) => directionReports[direction]?.ok === true),
+    checkedAt,
+    mandateId: mandate.id || null,
+    connectionId: connection?.id || mandate.broker_connection_id || null,
+    executionEnvironment: connection?.execution_environment || null,
+    equity: money.equity,
+    availableBalance: money.available,
+    venue: marketSnapshot?.instrument ? {
+      quantityStep: marketSnapshot.instrument.quantityStep,
+      minQuantity: marketSnapshot.instrument.minQuantity,
+      minNotional: marketSnapshot.instrument.minNotional,
+      maxQuantity: marketSnapshot.instrument.maxQuantity,
+      maxMarketQuantity: marketSnapshot.instrument.maxMarketQuantity,
+      maximumLeverage: marketSnapshot.instrument.leverageLimits?.max || null
+    } : null,
+    directions: directionReports,
+    reasons: allReasons
+  };
+}
+
+export function superAtrTakeProfitPreflightPrices(definition, referencePrice, candleSnapshot = {}) {
+  const settings = definition?.settings || {};
+  const atrLength = Math.max(1, Math.round(Number(settings.superAtrTakeProfitAtrLength ?? 100)));
+  const candles = Array.isArray(candleSnapshot.candles) ? candleSnapshot.candles : [];
+  const integrity = validateBybitClosedKlineSnapshot(candleSnapshot);
+  if (!integrity.ok) {
+    return { ok: false, reasons: integrity.reasons.map((reason) => `SuperATR closed-candle integrity failed: ${reason}`), integrity };
+  }
+  const atrValue = latestPineAtr(candles, atrLength);
+  const closedCandle = candles.at(-1);
+  if (!(Number(referencePrice) > 0)) return { ok: false, reasons: ["SuperATR take-profit pricing requires a positive current Bybit reference price."] };
+  if (!(atrValue > 0) || !closedCandle) {
+    return { ok: false, reasons: [`SuperATR take-profit ATR(${atrLength}) is unavailable from the latest authoritative closed-candle window; activation is blocked.`] };
+  }
+  const atrMultipliers = normalizedPositiveList(settings.superAtrAtrMultipliers, [100, 70, 120, 300], 4);
+  const fixedPercentages = normalizedPositiveList(settings.superAtrFixedPercentages, [21, 21, 75], 3);
+  const directions = {};
+  for (const direction of ["long", "short"]) {
+    const sign = direction === "long" ? 1 : -1;
+    const prices = [
+      ...atrMultipliers.map((multiplier) => Number(referencePrice) + sign * atrValue * multiplier),
+      ...fixedPercentages.map((percentage) => Number(referencePrice) * (1 + sign * percentage / 100))
+    ];
+    const invalidIndex = prices.findIndex((price) => !Number.isFinite(price) || price <= 0);
+    if (invalidIndex >= 0) {
+      return { ok: false, reasons: [`${direction.toUpperCase()}: ${direction === "short" ? "A short" : "A long"} TP${invalidIndex + 1} formula resolves to a non-positive or invalid price under the latest closed-candle ATR snapshot; activation is blocked.`] };
+    }
+    directions[direction] = { prices };
+  }
+  return {
+    ok: true,
+    basis: "SUPERATR_LATEST_CLOSED_CANDLE_FORMULAS",
+    atrValue,
+    atrLength,
+    closedCandleAt: integrity.latestClosedCandleAt,
+    closedCandleOpenAt: new Date(Number(closedCandle.time)).toISOString(),
+    integrity,
+    directions,
+    reasons: []
+  };
+}
+
+function latestPineAtr(candles, period) {
+  if (!Array.isArray(candles) || candles.length < period || !(period > 0)) return null;
+  const ranges = candles.map((candle, index) => index === 0
+    ? Number(candle.high) - Number(candle.low)
+    : Math.max(
+      Number(candle.high) - Number(candle.low),
+      Math.abs(Number(candle.high) - Number(candles[index - 1].close)),
+      Math.abs(Number(candle.low) - Number(candles[index - 1].close))
+    ));
+  if (ranges.some((value) => !Number.isFinite(value) || value < 0)) return null;
+  let current = ranges.slice(0, period).reduce((sum, value) => sum + value, 0) / period;
+  for (let index = period; index < ranges.length; index += 1) current = (current * (period - 1) + ranges[index]) / period;
+  return Number.isFinite(current) && current > 0 ? current : null;
+}
+
+function normalizedPositiveList(value, fallback, length) {
+  const source = Array.isArray(value) ? value : fallback;
+  return Array.from({ length }, (_, index) => {
+    const parsed = Number(source[index] ?? fallback[index] ?? 1);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : Number(fallback[index] || 1);
+  });
+}
+
+function assertExecutionPreflight(validation) {
+  const required = validation?.executionPreflightRequired === true
+    || (validation && Object.prototype.hasOwnProperty.call(validation, "executionPreflight"));
+  if (!required) return;
+  const preflight = validation?.executionPreflight;
+  const malformed = !preflight
+    || typeof preflight !== "object"
+    || Array.isArray(preflight)
+    || typeof preflight.ok !== "boolean"
+    || !Array.isArray(preflight.reasons)
+    || preflight.reasons.some((reason) => typeof reason !== "string");
+  if (malformed) {
+    throw strategyError(409, "STRATEGY_TARGET_EXECUTION_PREFLIGHT_UNAVAILABLE", "This target cannot be armed because a complete certified execution preflight is unavailable.", {
+      reasons: ["A complete certified execution preflight is required before broker activation."]
+    });
+  }
+  if (preflight.ok !== false) return;
+  throw strategyError(409, "STRATEGY_TARGET_EXECUTION_PREFLIGHT_FAILED", `This target cannot execute the running strategy: ${preflight.reasons.join(" ")}`, {
+    reasons: preflight.reasons,
+    executionPreflight: preflight
+  });
+}
+
+export function strategyTakeProfitPercentages(definition = {}) {
+  const settings = definition.settings || {};
+  if (definition.runtimeKind === "builtin-superatr-seven-step") {
+    if (settings.superAtrMultiStepTakeProfit === false) return [];
+    const atrPercent = boundedPercent(settings.superAtrAtrExitPercent ?? 10, 10);
+    const fixedPercent = boundedPercent(settings.superAtrFixedExitPercent ?? 10, 10);
+    return [atrPercent, atrPercent, atrPercent, atrPercent, fixedPercent, fixedPercent, fixedPercent];
+  }
+  return (Array.isArray(definition.exits?.takeProfits) ? definition.exits.takeProfits : [])
+    .map((target) => boundedPercent(target?.closePercent, 0))
+    .filter((value) => value > 0)
+    .slice(0, 7);
+}
+
+function policyWithAbsoluteNotionalCaps({ policy, direction, equity, availableBalance, caps, absoluteNotionalCap }) {
+  if (!(absoluteNotionalCap > 0)) return policy;
+  const requested = direction === "short"
+    ? policy.requestedShortLeverage || policy.requestedLeverage
+    : policy.requestedLongLeverage || policy.requestedLeverage;
+  const effectiveLeverage = calculateEffectiveLeverage({ requested, ...caps });
+  const preview = calculateCapitalPreview({ equity, availableBalance, policy: { ...policy, requestedLeverage: effectiveLeverage }, marketType: "FUTURES" });
+  if (!(preview.allocatedStrategyCapital > 0) || !(effectiveLeverage > 0)) return policy;
+  const absoluteCapPercent = absoluteNotionalCap / (preview.allocatedStrategyCapital * effectiveLeverage) * 100;
+  return {
+    ...policy,
+    maximumPositionPercent: Math.min(policy.maximumPositionPercent, absoluteCapPercent),
+    maximumExposurePercent: Math.min(policy.maximumExposurePercent, absoluteCapPercent)
+  };
+}
+
+function safeExecutionPreflightReport(report) {
+  return {
+    ok: report.ok,
+    effectiveLeverage: report.effectiveLeverage,
+    pricing: report.pricing,
+    estimated: report.estimated,
+    fullLadder: {
+      configured: report.fullLadder.configured,
+      feasible: report.fullLadder.feasible,
+      priceBasis: report.fullLadder.priceBasis,
+      referencePrice: report.fullLadder.referencePrice,
+      requestedPercentages: report.fullLadder.requestedPercentages,
+      effectivePercentages: report.fullLadder.effectivePercentages,
+      reasons: report.fullLadder.reasons
+    },
+    minimumExecutable: report.minimumExecutable,
+    reasons: report.reasons,
+    reasonDetails: report.reasonDetails
+  };
+}
+
+function summarizeDirectionPreflight(direction, symbol, report) {
+  const label = direction.toUpperCase();
+  const primary = report.reasons.slice(0, 2).join(" ") || "The configured entry is not executable.";
+  const minimum = report.minimumExecutable;
+  const minimumText = minimum?.available
+    ? `Minimum complete ladder: ${formatQuantity(minimum.entryQuantity)} ${symbol}, approximately ${formatMoney(minimum.entryMargin)} USDT margin at ${formatQuantity(report.effectiveLeverage)}x${Number.isFinite(minimum.tradePercent) ? ` (${formatQuantity(minimum.tradePercent)}% ${String(minimum.tradePercentBasis || "capital").toLowerCase().replaceAll("_", " ")})` : ""}.`
+    : "";
+  return [`${label}: ${primary} ${minimumText}`.trim()];
+}
+
+function failedExecutionPreflight(checkedAt, provider, ...reasons) {
+  return { ok: false, checkedAt, provider, reasons: reasons.filter(Boolean) };
+}
+
+export function latestBindingExecutionTelemetry(commandHistory = [], binding = {}) {
+  const lifecycleResetAt = maximumTimestamp(binding.armed_at, binding.updated_at);
+  const createdOrder = [...commandHistory].sort((left, right) => timestampOf(right.created_at) - timestampOf(left.created_at));
+  const latestPrimary = createdOrder.find((command) => ["ENTRY", "REVERSE", "CLOSE"].includes(String(command.payload?.action || "").toUpperCase()));
+  if (!latestPrimary) return {};
+  const primarySignalKey = String(latestPrimary.strategy_signal_key || "");
+  const primaryExecutionOrderId = String(latestPrimary.execution_order_id || "");
+  const generation = commandHistory.filter((command) => command === latestPrimary
+    || (primarySignalKey && String(command.payload?.parentStrategySignalKey || "") === primarySignalKey)
+    || (primaryExecutionOrderId
+      && String(command.payload?.strategyAction || "").toUpperCase() === "TAKE_PROFIT_REPRICE"
+      && String(command.payload?.expectedEntryOrderId || "") === primaryExecutionOrderId));
+  const latestFailure = generation
+    .filter(isProminentExecutionFailure)
+    .sort((left, right) => timestampOf(right.updated_at || right.created_at) - timestampOf(left.updated_at || left.created_at))[0];
+  if (!latestFailure) return {};
+  const failureAt = timestampOf(latestFailure.updated_at || latestFailure.created_at);
+  if (Number.isFinite(lifecycleResetAt) && (!Number.isFinite(failureAt) || lifecycleResetAt > failureAt)) return {};
+  const code = String(latestFailure.last_error_code || "EXECUTION_FAILED").toUpperCase();
+  return {
+    latestExecutionStatus: String(latestFailure.status || "FAILED").toUpperCase(),
+    latestExecutionAction: String(latestFailure.payload?.action || latestFailure.payload?.strategyAction || "UNKNOWN").toUpperCase(),
+    latestExecutionDirection: String(latestFailure.payload?.direction || latestFailure.payload?.positionDirection || "UNKNOWN").toUpperCase(),
+    latestExecutionAt: latestFailure.updated_at || latestFailure.created_at || null,
+    latestExecutionErrorCode: code,
+    latestExecutionErrorMessage: latestFailure.last_error_message || "The broker execution command failed.",
+    latestExecutionVenueOrderSubmitted: failedCommandVenueSubmission(latestFailure, code)
+  };
+}
+
+function failedCommandVenueSubmission(command, code) {
+  // execution_order_id on CANCEL/MODIFY identifies the pre-existing order being
+  // mutated; it is not proof that the failed mutation reached Bybit. Only a
+  // PLACE_ORDER command's own durable OMS acknowledgement proves submission.
+  if (String(command?.command_type || "").toUpperCase() === "PLACE_ORDER" && command?.execution_order_id) return true;
+  if (knownPreSubmissionFailure(code)) return false;
+  return undefined;
+}
+
+function isProminentExecutionFailure(command) {
+  const status = String(command?.status || "").toUpperCase();
+  if (["FAILED", "REJECTED", "DEAD_LETTER"].includes(status)) return true;
+  const code = String(command?.last_error_code || "").toUpperCase();
+  return status === "CANCELLED" && [
+    "PARENT_ENTRY_FAILED",
+    "PARENT_ENTRY_UNFILLED",
+    "PARENT_GROUP_ENTRY_FAILED",
+    "PARENT_GROUP_ENTRY_UNFILLED"
+  ].includes(code);
+}
+
+function maximumTimestamp(...values) {
+  const timestamps = values.map(timestampOf).filter(Number.isFinite);
+  return timestamps.length ? Math.max(...timestamps) : Number.NaN;
+}
+
+function timestampOf(value) {
+  const parsed = Date.parse(value || "");
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function knownPreSubmissionFailure(code) {
+  return [
+    "STRATEGY_QUANTITY_BELOW_VENUE_STEP",
+    "STRATEGY_TP_LADDER_BELOW_VENUE_MINIMUM",
+    "VENUE_VALIDATION_REJECTED",
+    "STRATEGY_TARGET_EXECUTION_PREFLIGHT_FAILED",
+    "TP_REPRICE_REJECTED"
+  ].includes(String(code || "").toUpperCase());
+}
+
+function listAllowsMandateValue(values, requestedValue) {
+  if (!Array.isArray(values) || values.length === 0) return true;
+  const requested = String(requestedValue || "").trim().toUpperCase();
+  return values.some((value) => {
+    const normalized = String(value || "").trim().toUpperCase();
+    return normalized === "*" || normalized === requested;
+  });
+}
+
+function groupListAllows(values, requestedValue) {
+  if (!Array.isArray(values)) return false;
+  const requested = String(requestedValue || "").trim().toUpperCase();
+  return values.some((value) => {
+    const normalized = String(value || "").trim().toUpperCase();
+    return normalized === "*" || normalized === requested;
+  });
+}
+
+function minimumPositiveNumber(...values) {
+  const positive = values.map(Number).filter((value) => Number.isFinite(value) && value > 0);
+  return positive.length ? Math.min(...positive) : null;
+}
+
+function boundedPercent(value, fallback) {
+  const parsed = Number(value);
+  return Math.max(0, Math.min(100, Number.isFinite(parsed) ? parsed : fallback));
+}
+
+function formatQuantity(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "unavailable";
+  return parsed.toLocaleString("en-US", { maximumFractionDigits: 8, useGrouping: false });
+}
+
+function formatMoney(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "unavailable";
+  return parsed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false });
 }
 
 async function controlTarget(supabase, userId, strategyId, bindingId, expectedVersion, action, validation, disconnectPolicy, idempotencyKey) {
@@ -1146,6 +1961,17 @@ function includesMarket(value, market) {
 function groupBy(rows, key) {
   const result = new Map();
   for (const row of rows) result.set(row[key], [...(result.get(row[key]) || []), row]);
+  return result;
+}
+
+export function latestRowsByKey(rows, key) {
+  const result = new Map();
+  for (const row of rows) {
+    const existing = result.get(row[key]);
+    const rowTimestamp = timestampOf(row.observed_at || row.captured_at);
+    const existingTimestamp = timestampOf(existing?.observed_at || existing?.captured_at);
+    if (!existing || (!Number.isFinite(existingTimestamp) || rowTimestamp > existingTimestamp)) result.set(row[key], row);
+  }
   return result;
 }
 

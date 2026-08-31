@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isCertifiedSuperAtrSevenStepSource, ownedCustomIndicatorInstances } from "../src/modules/strategy-lab/my-strategy/state/indicatorManifest.ts";
+import { formatExecutionTime, targetExecutionFailure } from "../src/modules/strategy-lab/my-strategy/cockpit/targetExecutionPresentation.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (file: string) => fs.readFileSync(path.join(root, file), "utf8");
@@ -18,6 +19,8 @@ const cockpit = read("src/modules/strategy-lab/my-strategy/pages/StrategyCockpit
 const controlPanel = read("src/modules/strategy-lab/execution-desk/StrategyControlPanelDialog.tsx");
 const theme = read("src/styles/theme.css");
 const targetMatrix = read("src/modules/strategy-lab/my-strategy/cockpit/TargetSlotMatrix.tsx");
+const targetCockpit = read("src/modules/strategy-lab/my-strategy/cockpit/TargetCockpit.tsx");
+const automationTypes = read("src/modules/strategy-lab/automation/strategyAutomation.types.ts");
 const reviewStep = read("src/modules/strategy-lab/my-strategy/wizard/ReviewStep.tsx");
 const repository = read("server/strategy-automation/repository.js");
 const service = read("server/strategy-automation/service.js");
@@ -134,6 +137,27 @@ assert.match(cockpit, /rows\.length > 100/, "large Paper tables use windowed ren
 assert.match(targetMatrix, /Array\.from\(\{ length: 9 \}/);
 assert.match(targetMatrix, /No execution destination assigned/);
 assert.match(targetMatrix, /bindings\.filter/, "only occupied bindings create detailed state");
+assert.match(targetMatrix, /EXECUTION FAILED/, "a failed target is unmistakable in the nine-slot matrix");
+assert.match(targetCockpit, /target-execution-failure[^]*role="alert"/, "the target cockpit exposes broker execution failures as an operator alert");
+assert.match(targetCockpit, /executionFailure\.errorMessage/, "the exact broker-preflight message remains visible");
+assert.match(targetCockpit, /NO VENUE ORDER WAS SUBMITTED/, "pre-submission failures explicitly distinguish broker rejection from a venue order");
+for (const field of ["latestExecutionStatus", "latestExecutionAction", "latestExecutionDirection", "latestExecutionAt", "latestExecutionErrorCode", "latestExecutionErrorMessage"]) assert.match(automationTypes, new RegExp(`${field}\\?:`), `${field} is optional target snapshot telemetry`);
+assert.match(theme, /\.target-slot\.execution-failed/);
+assert.match(theme, /\.target-execution-failure/);
+const rejectedBeforeVenue = targetExecutionFailure({
+  latestExecutionStatus: "FAILED",
+  latestExecutionAction: "ENTRY",
+  latestExecutionDirection: "SHORT",
+  latestExecutionAt: "2026-08-30T23:45:00.000Z",
+  latestExecutionErrorCode: "STRATEGY_QUANTITY_BELOW_VENUE_STEP",
+  latestExecutionErrorMessage: "The risk-bounded strategy quantity is zero after applying the Bybit quantity step.",
+} as Parameters<typeof targetExecutionFailure>[0]);
+assert.equal(rejectedBeforeVenue?.errorMessage, "The risk-bounded strategy quantity is zero after applying the Bybit quantity step.", "broker-preflight messages are not rewritten");
+assert.equal(rejectedBeforeVenue?.noVenueOrderSubmitted, true, "known venue-step preflight failures cannot be presented as submitted orders");
+assert.equal(targetExecutionFailure({ latestExecutionStatus: "DEAD_LETTER" } as Parameters<typeof targetExecutionFailure>[0])?.status, "DEAD_LETTER", "retry-exhausted terminal commands remain visible as execution failures");
+assert.equal(targetExecutionFailure({ latestExecutionStatus: "CANCELLED" } as Parameters<typeof targetExecutionFailure>[0])?.status, "CANCELLED", "dependency-cancelled protection commands remain visible as execution failures");
+assert.equal(formatExecutionTime(1_788_133_500), "2026-08-30 23:45:00 UTC", "epoch seconds are normalized to an operator-readable UTC time");
+assert.equal(targetExecutionFailure({ latestExecutionStatus: "SUCCEEDED" } as Parameters<typeof targetExecutionFailure>[0]), null, "successful execution does not leave a failure banner behind");
 assert.match(cockpit, /NO EXECUTION DESTINATION ASSIGNED/);
 assert.match(cockpit, /StrategyControlPanelDialog embedded/, "saved strategies expose an embedded dynamic Strategy Settings surface");
 assert.match(cockpit, /__nativeInputs/, "custom script settings are reconstructed from their literal private manifest");

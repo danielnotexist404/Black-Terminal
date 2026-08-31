@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import ts from "typescript";
 import {
   createSuperAtrSevenStepSignals,
   positionAwareStrategyEntries,
@@ -8,6 +9,7 @@ import {
   calculateStrategyTakeProfitQuantity,
   evaluateStrategyTakeProfitLadder,
   floorStrategyVenueQuantity,
+  planStrategyTakeProfitProtection,
   reserveStrategyTakeProfits,
   resolveStrategyTakeProfitPrice,
   settledStrategyEntryQuantity,
@@ -27,6 +29,7 @@ import {
   recoveredFollowerAllocation,
   recoveredGroupIntentFromVenue,
   recoveredStrategyOrderDraft,
+  requireTerminalStrategyEntryFill,
   reversalCloseLegName,
   summarizeTakeProfitLadderFailure,
   venuePricesEqual,
@@ -139,6 +142,9 @@ assert.doesNotThrow(() => assertRecoveredVenueOrderShape(recoveredEntryOrder, { 
 assert.throws(() => assertRecoveredVenueOrderShape(recoveredEntryOrder, { symbol: "ETHUSDT", category: "linear", side: "buy", orderType: "market", reduceOnly: false, positionIdx: 0 }), /unexpected symbol, category, side, type, position index, or reduce-only contract/i);
 assert.equal(isTerminalUnfilledVenueOrder({ status: "cancelled", filledQuantity: 0 }), true);
 assert.equal(isTerminalUnfilledVenueOrder({ status: "cancelled", filledQuantity: 0.01 }), false, "a terminal partially filled IOC remains an accepted entry generation");
+assert.throws(() => requireTerminalStrategyEntryFill({ status: "accepted", filledQuantity: 0 }), (error: unknown) => (error as { code?: string; retryable?: boolean }).code === "STRATEGY_ENTRY_WAITING_FOR_FINAL_FILL" && (error as { retryable?: boolean }).retryable === true, "an acknowledgement alone cannot mark a strategy entry successful");
+assert.throws(() => requireTerminalStrategyEntryFill({ status: "cancelled", filledQuantity: 0 }), (error: unknown) => (error as { code?: string }).code === "STRATEGY_ENTRY_UNFILLED", "a terminal zero-fill entry fails prominently");
+assert.equal(requireTerminalStrategyEntryFill({ status: "cancelled", filledQuantity: 0.009 }), 0.009, "a terminal partial fill returns its authoritative cumulative quantity");
 assert.equal(isTerminalVenueOrder(recoveredEntryOrder), true);
 assert.equal(isTerminalVenueOrder({ status: "working" }), false);
 assert.deepEqual(recoveredStrategyOrderDraft(recoveredEntryOrder, { accountId: "account", symbol: "BTCUSDT", marketKind: "perpetual", clientOrderId: "bt-recovered", source: "strategy-automation-demo", referencePrice: 60_000 }), {
@@ -152,6 +158,21 @@ assert.equal(isPotentialPositionGeneration({ status: "rejected", filled_quantity
 assert.equal(isPotentialPositionGeneration({ status: "cancelled", filled_quantity: 0.01 }), true, "a terminal partial fill remains the authoritative position generation");
 assert.match(summarizeTakeProfitLadderFailure({ reasons: [{ targetId: "TP1", message: "below minimum" }] }), /TP1: below minimum/);
 assert.equal(settledStrategyEntryQuantity({ status: "expired", filledQuantity: 4 }), 4, "an expired IOC is terminal and preserves its final cumulative fill");
+
+const btcVenue = { quantityStep: 0.001, quantityPrecision: 3, minQuantity: 0.001, minNotional: 5 };
+const btcTargets = Array.from({ length: 7 }, (_, index) => ({ id: `TP${index + 1}`, quantityPercent: 10, price: 78_000 + index * 100 }));
+const completeProtection = planStrategyTakeProfitProtection({ entryQuantity: 0.01, remainingQuantity: 0.01, targets: btcTargets, venue: btcVenue });
+assert.equal(completeProtection.mode, "FULL_LADDER");
+assert.equal(completeProtection.fullLadder.legs.length, 7, "a complete 0.010 BTC fill retains all seven independent targets");
+const partialProtection = planStrategyTakeProfitProtection({ entryQuantity: 0.009, remainingQuantity: 0.009, targets: btcTargets, venue: btcVenue });
+assert.equal(partialProtection.mode, "AGGREGATED_TP1", "a terminal partial fill too small for seven legs receives one all-or-nothing protective TP1");
+assert.equal(partialProtection.target?.quantity, 0.009);
+assert.equal(partialProtection.target?.quantityPercent, 100);
+const reducedRemainderProtection = planStrategyTakeProfitProtection({ entryQuantity: 0.01, remainingQuantity: 0.002, targets: btcTargets, venue: btcVenue });
+assert.equal(reducedRemainderProtection.mode, "AGGREGATED_TP1", "the full ladder cannot reserve more than the currently owned remainder");
+assert.equal(reducedRemainderProtection.target?.quantity, 0.002);
+const impossibleProtection = planStrategyTakeProfitProtection({ entryQuantity: 0.0009, remainingQuantity: 0.0009, targets: btcTargets, venue: btcVenue });
+assert.equal(impossibleProtection.mode, "UNPROTECTABLE", "venue dust is surfaced instead of pretending a protective order can be submitted");
 
 assert.equal(floorStrategyVenueQuantity(1.2399, { quantityStep: 0.005, quantityPrecision: 3 }), 1.235);
 assert.equal(floorStrategyVenueQuantity(1.2349, { quantityPrecision: 3 }), 1.234);
@@ -254,11 +275,25 @@ const signalWorker = fs.readFileSync(new URL("./strategy-automation-worker.ts", 
 const brokerWorker = fs.readFileSync(new URL("../server/cloud-execution/worker.js", import.meta.url), "utf8");
 const groupMigration = fs.readFileSync(new URL("../supabase/migrations/202608300003_strategy_superatr_group_take_profits.sql", import.meta.url), "utf8");
 const repriceMigration = fs.readFileSync(new URL("../supabase/migrations/202608300005_strategy_superatr_live_repricing.sql", import.meta.url), "utf8");
+const generationMigration = fs.readFileSync(new URL("../supabase/migrations/202608310003_strategy_generation_release_barrier.sql", import.meta.url), "utf8");
 assert.match(signalWorker, /shouldQueueStrategyTakeProfits\(action\)/, "direct targets queue TP1-TP7 after entries and reversals");
 assert.match(signalWorker, /targetBasis:[\s\S]*targetValue:[\s\S]*targetAtrValue:/, "durable commands retain the Pine target formula");
 assert.match(signalWorker, /parentEntryIdempotencyKey: idempotencyKey/, "direct TP commands name their immutable parent entry");
 assert.match(signalWorker, /parentGroupIntentId: intentId/, "group TP intents name their immutable parent direction intent");
-assert.match(brokerWorker, /resolveStrategyTakeProfitPrice\(payload, position\)/, "direct target prices anchor to authoritative Bybit average fill");
+assert.match(signalWorker, /black_cloud_enqueue_strategy_generation_v1[\s\S]*p_parent_command:[\s\S]*p_child_commands:/, "one database RPC receives the complete parent and child generation");
+assert.equal((signalWorker.match(/from\("execution_commands"\)\.upsert/g) || []).length, 1, "the only remaining direct command upsert is the independent TP reprice path");
+assert.match(generationMigration, /black_cloud_enqueue_strategy_generation_v1[\s\S]*for v_command in[\s\S]*on conflict \(idempotency_key\) do nothing[\s\S]*return v_expected/, "the database atomically inserts and validates a complete idempotent generation");
+assert.match(generationMigration, /v_parent_action='CLOSE'[\s\S]*v_expected_children := 0/, "a zero-child close is admitted through the same atomic enqueue boundary");
+assert.match(signalWorker, /binding\.market_type === "SPOT" && shouldQueueStrategyTakeProfits\(action\) && takeProfitPlan\.length/, "the uncertified Spot TP block applies to ENTRY and REVERSE, never a reduce-only CLOSE");
+assert.ok((signalWorker.match(/SPOT_TP_PROTECTION_UNCERTIFIED/g) || []).length >= 2, "direct and group Spot entries with uncertified TP protection are blocked before broker fanout");
+assert.match(signalWorker, /targetActionKey = `\$\{idempotencyKey\}:TAKE_PROFIT:\$\{targetId\}`[\s\S]*update\(targetActionKey\)/, "every direct TP child derives from the immutable parent/action identity");
+assert.match(signalWorker, /if \(!intentId\) throw new Error\("The signed strategy parent intent/, "a missing idempotent group parent fails the generation instead of silently dropping it");
+assert.match(signalWorker, /latestUnprocessedStrategyTransition\([\s\S]*signalCandleTime = Number\(signal\.timestamp\)[\s\S]*:\$\{signalCandleTime\}:\$\{signal\.direction\}/, "a crash catch-up keys replay by the original transition candle, not the newer polling candle");
+assert.match(signalWorker, /strategyGenerationRecoveryWindowMs\(strategy\.timeframe\)/, "signed group generations use the bounded crash-replay validity window");
+assert.match(signalWorker, /"3h": \["180", 10_800_000\]/, "the live strategy worker supports the same 3h interval admitted by arm-time preflight");
+assert.match(signalWorker, /interval\.value !== "M"[\s\S]*setUTCMonth/, "monthly strategy candles use UTC calendar-month closure instead of a fixed 28-day duration");
+assert.match(generationMigration, /c\.payload @> \(manifest\.item->'payload'\)/, "worker-appended reconciliation metadata cannot invalidate an idempotent enqueue retry");
+assert.match(brokerWorker, /resolveStrategyTakeProfitPrice\(effectiveTarget, position\)/, "direct target prices anchor to authoritative Bybit average fill");
 assert.match(brokerWorker, /parentCommand\.status !== "SUCCEEDED"[\s\S]*STRATEGY_TAKE_PROFIT_WAITING_FOR_PARENT_ENTRY/, "direct targets cannot pass the parent-entry completion barrier");
 assert.match(brokerWorker, /parentOrder\.reduce_only === true[\s\S]*STRATEGY_GROUP_TAKE_PROFIT_WAITING_FOR_PARENT_ENTRY/, "group reversal targets cannot attach to the old reduce-only close leg");
 assert.match(brokerWorker, /settledStrategyEntryQuantity\(parentVenueOrder\)[\s\S]*calculateStrategyTakeProfitQuantity\(originalEntryQuantity/, "late TP retries size from the parent's final filled quantity");
@@ -272,6 +307,113 @@ assert.match(brokerWorker, /MAX_STRATEGY_REVERSAL_CLOSE_LEGS[\s\S]*STRATEGY_REVE
 assert.match(groupMigration, /strategy_action in \('SYNC_DIRECTION','TAKE_PROFIT'\)/, "Investment Group TP intents are admitted by the database contract");
 assert.match(repriceMigration, /command_type in \('PLACE_ORDER','EXPAND_GROUP_INTENT','MODIFY_ORDER','CANCEL_ORDER'\)/, "the database admits only explicitly strategy-owned mutation commands");
 assert.match(repriceMigration, /pine_checkpoint jsonb/, "confirmed-bar strategy state survives browser and worker restarts");
+
+// Execute the exact pure catch-up helpers extracted from the production worker.
+// This catches semantic regressions while avoiding startup of the long-running
+// worker or any network/database mutation in the offline certification suite.
+const catchUpSource = signalWorker.match(/function latestUnprocessedStrategyTransition[\s\S]*?(?=function isBcrdaDefinition)/)?.[0];
+assert.ok(catchUpSource, "production crash catch-up helpers are present");
+const catchUpJavascript = ts.transpileModule(`${catchUpSource}\nconst __catchUp = { latestUnprocessedStrategyTransition, runtimeCheckpointCandleTime };`, {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
+}).outputText;
+const catchUp = new Function("timeframeMilliseconds", "previousCandleOpenTimeSeconds", `${catchUpJavascript}\nreturn __catchUp;`)(
+  () => 300_000,
+  (closedAtMs: number) => Math.floor((closedAtMs - 300_000) / 1000),
+) as {
+  latestUnprocessedStrategyTransition: (items: Array<Record<string, unknown>>, runtime: Record<string, unknown> | null, latest: number, timeframe: string) => Record<string, unknown> | undefined;
+};
+const checkpointBase = 1_720_000_000;
+const crashTransitions = [signal(checkpointBase, "long"), signal(checkpointBase + 300, "short")];
+const checkpointClosedAt = new Date((checkpointBase + 300) * 1000).toISOString();
+assert.equal(
+  catchUp.latestUnprocessedStrategyTransition(crashTransitions, { last_closed_candle_at: checkpointClosedAt, pine_checkpoint: { lastClosedCandleTime: checkpointBase } }, checkpointBase + 600, "5m")?.timestamp,
+  checkpointBase + 300,
+  "a signal produced after the durable checkpoint is replayed even after the market advances another candle",
+);
+assert.equal(
+  catchUp.latestUnprocessedStrategyTransition(crashTransitions, null, checkpointBase + 600, "5m"),
+  undefined,
+  "a brand-new strategy never replays arbitrary seed-window history",
+);
+assert.equal(
+  catchUp.latestUnprocessedStrategyTransition([...crashTransitions, signal(checkpointBase + 600, "long")], null, checkpointBase + 600, "5m")?.timestamp,
+  checkpointBase + 600,
+  "a brand-new strategy may execute only the latest confirmed transition",
+);
+assert.equal(
+  catchUp.latestUnprocessedStrategyTransition(crashTransitions, { pine_checkpoint: { lastClosedCandleTime: checkpointBase } }, checkpointBase + 600, "5m"),
+  undefined,
+  "an orphaned prior-version Pine checkpoint is ignored after version activation clears last_closed_candle_at",
+);
+const fallbackClosedAt = new Date((checkpointBase + 300) * 1000).toISOString();
+assert.equal(
+  catchUp.latestUnprocessedStrategyTransition(crashTransitions, { last_closed_candle_at: fallbackClosedAt }, checkpointBase + 600, "5m")?.timestamp,
+  checkpointBase + 300,
+  "legacy runtime rows derive the open-candle checkpoint from last_closed_candle_at",
+);
+const parentActionKey = "a".repeat(64);
+const tp1ActionKey = `${parentActionKey}:TAKE_PROFIT:TP1`;
+assert.equal(tp1ActionKey, `${parentActionKey}:TAKE_PROFIT:TP1`);
+assert.notEqual(tp1ActionKey, `${parentActionKey}:TAKE_PROFIT:TP2`, "target action identity is stable per immutable parent and TP action");
+const recoverySource = signalWorker.match(/function strategyGenerationRecoveryWindowMs[\s\S]*?(?=async function enqueueStrategyGeneration)/)?.[0];
+assert.ok(recoverySource, "production group generation recovery-window helper is present");
+const recoveryJavascript = ts.transpileModule(`${recoverySource}\nconst __recoveryWindow = strategyGenerationRecoveryWindowMs;`, {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
+}).outputText;
+const recoveryWindow = new Function(
+  "bybitInterval",
+  "MAX_STRATEGY_GENERATION_RECOVERY_MS",
+  `${recoveryJavascript}\nreturn __recoveryWindow;`,
+)(
+  (timeframe: string) => ({ value: timeframe === "1M" ? "M" : timeframe, milliseconds: timeframe === "5m" ? 300_000 : 14_400_000 }),
+  7 * 24 * 60 * 60 * 1000,
+) as (timeframe: string) => number;
+assert.equal(recoveryWindow("5m"), 300_000 * 1_000, "a 5m signed group intent survives the complete 1,000-candle crash-replay horizon");
+assert.equal(recoveryWindow("4h"), 7 * 24 * 60 * 60 * 1000, "long timeframes are bounded to seven days instead of authorizing an indefinitely stale intent");
+
+const timeframeSource = signalWorker.match(/function bybitInterval[\s\S]*?(?=function averageTrueRange)/)?.[0];
+assert.ok(timeframeSource, "production timeframe and candle-integrity helpers are present");
+const timeframeJavascript = ts.transpileModule(`${timeframeSource}\nconst __timeframe = { bybitInterval, candleCloseTimeMs, previousCandleOpenTimeSeconds, assertBybitCandleWindowIntegrity };`, {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
+}).outputText;
+const timeframeContract = new Function(`${timeframeJavascript}\nreturn __timeframe;`)() as {
+  bybitInterval: (timeframe: string) => { value: string; milliseconds: number | null };
+  candleCloseTimeMs: (openTimeSeconds: number, timeframe: string) => number;
+  previousCandleOpenTimeSeconds: (closedAtMs: number, timeframe: string) => number;
+  assertBybitCandleWindowIntegrity: (candles: Candle[], interval: { value: string; milliseconds: number | null }, serverTimeMs: number) => void;
+};
+assert.equal(timeframeContract.bybitInterval("3h").value, "180", "3h runs on Bybit interval 180");
+assert.equal(
+  timeframeContract.candleCloseTimeMs(Date.UTC(2024, 0, 1) / 1000, "1M"),
+  Date.UTC(2024, 1, 1),
+  "the worker closes January at the February UTC boundary",
+);
+assert.equal(
+  timeframeContract.candleCloseTimeMs(Date.UTC(2024, 1, 1) / 1000, "1M"),
+  Date.UTC(2024, 2, 1),
+  "the worker preserves leap-February calendar closure",
+);
+assert.equal(
+  timeframeContract.previousCandleOpenTimeSeconds(Date.UTC(2024, 2, 1), "1M"),
+  Date.UTC(2024, 1, 1) / 1000,
+  "monthly runtime checkpoints recover the actual previous calendar candle open",
+);
+assert.throws(
+  () => timeframeContract.assertBybitCandleWindowIntegrity([
+    { time: Date.UTC(2026, 7, 31, 0, 0) / 1000, open: 1, high: 2, low: 1, close: 2, volume: 1 },
+    { time: Date.UTC(2026, 7, 31, 0, 10) / 1000, open: 2, high: 3, low: 2, close: 3, volume: 1 },
+  ], timeframeContract.bybitInterval("5m"), Date.UTC(2026, 7, 31, 0, 12)),
+  (error: any) => error?.code === "MARKET_DATA_CANDLE_GAP",
+  "the signal worker fails closed on a missing candle interval",
+);
+assert.throws(
+  () => timeframeContract.assertBybitCandleWindowIntegrity([
+    { time: Date.UTC(2026, 7, 31, 0, 0) / 1000, open: 1, high: 2, low: 1, close: 2, volume: 1 },
+    { time: Date.UTC(2026, 7, 31, 0, 5) / 1000, open: 2, high: 3, low: 2, close: 3, volume: 1 },
+  ], timeframeContract.bybitInterval("5m"), Date.UTC(2026, 7, 31, 0, 16)),
+  (error: any) => error?.code === "MARKET_DATA_STALE",
+  "the signal worker fails closed when the latest closed candle is stale versus Bybit server time",
+);
 
 console.log("SuperATR offline audit PASS — setup parity, prefix no-repaint, duplicate suppression, durable ATR repricing, bounded residual reversal continuation, final-fill TP reservations, venue-fill anchoring, reduce-only API shape, and leverage mapping verified without broker mutation.");
 

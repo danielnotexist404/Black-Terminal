@@ -85,6 +85,196 @@ export async function getBybitTicker({ category = "linear", symbol = "BTCUSDT", 
   };
 }
 
+export async function getBybitClosedKlines({
+  category = "linear",
+  symbol = "BTCUSDT",
+  timeframe = "5m",
+  limit = 200,
+  network,
+  executionEnvironment,
+  endpointProfile
+} = {}) {
+  const interval = resolveBybitKlineInterval(timeframe);
+  const boundedLimit = Math.max(1, Math.min(1000, Math.trunc(Number(limit) || 200)));
+  const routing = { network, executionEnvironment, endpointProfile };
+  const { serverTimeMs } = await getBybitServerTime(routing);
+  const response = await bybitPublicRequest("/v5/market/kline", {
+    category,
+    symbol,
+    interval: interval.value,
+    end: serverTimeMs,
+    limit: boundedLimit
+  }, routing);
+  const candles = (Array.isArray(response?.list) ? response.list : [])
+    .map((row) => ({
+      time: Number(row?.[0]),
+      open: Number(row?.[1]),
+      high: Number(row?.[2]),
+      low: Number(row?.[3]),
+      close: Number(row?.[4]),
+      volume: Number(row?.[5])
+    }))
+    .filter((candle) => [candle.time, candle.open, candle.high, candle.low, candle.close].every(Number.isFinite))
+    .filter((candle) => bybitKlineClosedAt(candle.time, interval, serverTimeMs))
+    .sort((left, right) => left.time - right.time);
+  const snapshot = {
+    candles,
+    serverTimeMs,
+    timeframe: String(timeframe),
+    interval: interval.value,
+    intervalMilliseconds: interval.milliseconds,
+  };
+  const integrity = validateBybitClosedKlineSnapshot(snapshot);
+  if (!integrity.ok) {
+    const error = new Error(`Bybit closed-candle history is not execution-safe: ${integrity.reasons.join(" ")}`);
+    error.code = "BYBIT_CLOSED_KLINE_WINDOW_INVALID";
+    error.publicDetails = integrity;
+    throw error;
+  }
+  return { ...snapshot, integrity };
+}
+
+export function resolveBybitKlineInterval(timeframe) {
+  const normalized = String(timeframe || "").trim();
+  const intervals = {
+    "1m": ["1", 60_000],
+    "3m": ["3", 180_000],
+    "5m": ["5", 300_000],
+    "15m": ["15", 900_000],
+    "30m": ["30", 1_800_000],
+    "1h": ["60", 3_600_000],
+    "2h": ["120", 7_200_000],
+    "3h": ["180", 10_800_000],
+    "4h": ["240", 14_400_000],
+    "6h": ["360", 21_600_000],
+    "12h": ["720", 43_200_000],
+    "1d": ["D", 86_400_000],
+    "1w": ["W", 604_800_000],
+    "1M": ["M", null]
+  };
+  const selected = intervals[normalized];
+  if (!selected) {
+    const error = new Error(`Bybit does not support the closed-candle timeframe ${normalized || "(empty)"}.`);
+    error.code = "BYBIT_KLINE_TIMEFRAME_UNSUPPORTED";
+    throw error;
+  }
+  return { value: selected[0], milliseconds: selected[1] };
+}
+
+/**
+ * Fail-closed integrity contract shared by arm-time SuperATR pricing and
+ * focused offline tests. Candle `time` values are Bybit open timestamps in
+ * milliseconds; `latestClosedCandleAt` is deliberately the close boundary.
+ */
+export function validateBybitClosedKlineSnapshot(snapshot = {}) {
+  const candles = Array.isArray(snapshot?.candles) ? snapshot.candles : [];
+  const serverTimeMs = Number(snapshot?.serverTimeMs);
+  let interval;
+  try {
+    interval = snapshot?.timeframe
+      ? resolveBybitKlineInterval(snapshot.timeframe)
+      : normalizeBybitSnapshotInterval(snapshot);
+  } catch (error) {
+    return invalidKlineSnapshot(error instanceof Error ? error.message : "The candle interval is invalid.");
+  }
+  if (!Number.isFinite(serverTimeMs) || serverTimeMs <= 0) {
+    return invalidKlineSnapshot("An authoritative positive Bybit server timestamp is required.");
+  }
+  if (!candles.length) return invalidKlineSnapshot("At least one authoritative closed candle is required.");
+
+  const reasons = [];
+  let previous = null;
+  for (const candle of candles) {
+    const startTimeMs = Number(candle?.time);
+    if (!Number.isFinite(startTimeMs) || startTimeMs < 0) {
+      reasons.push("Every candle requires a finite non-negative open timestamp.");
+      break;
+    }
+    if (previous !== null) {
+      const expectedStartTimeMs = bybitKlineCloseTimeMs(previous, interval);
+      if (startTimeMs !== expectedStartTimeMs) {
+        reasons.push(`Closed-candle history is gapped or duplicated: expected ${new Date(expectedStartTimeMs).toISOString()}, received ${new Date(startTimeMs).toISOString()}.`);
+        break;
+      }
+    }
+    const closeTimeMs = bybitKlineCloseTimeMs(startTimeMs, interval);
+    if (closeTimeMs > serverTimeMs) {
+      reasons.push(`The candle opening ${new Date(startTimeMs).toISOString()} is not closed at the authoritative Bybit server time.`);
+      break;
+    }
+    previous = startTimeMs;
+  }
+
+  const latest = candles.at(-1);
+  const latestOpenTimeMs = Number(latest?.time);
+  const latestCloseTimeMs = Number.isFinite(latestOpenTimeMs)
+    ? bybitKlineCloseTimeMs(latestOpenTimeMs, interval)
+    : null;
+  const nextCloseTimeMs = latestCloseTimeMs === null
+    ? null
+    : bybitKlineCloseTimeMs(latestCloseTimeMs, interval);
+  if (latestCloseTimeMs !== null && nextCloseTimeMs !== null && serverTimeMs >= nextCloseTimeMs) {
+    reasons.push(`The latest closed candle is stale: it closed at ${new Date(latestCloseTimeMs).toISOString()} but Bybit server time is ${new Date(serverTimeMs).toISOString()}.`);
+  }
+
+  return {
+    ok: reasons.length === 0,
+    reasons,
+    timeframe: snapshot?.timeframe || null,
+    interval: interval.value,
+    intervalMilliseconds: interval.milliseconds,
+    serverTimeMs,
+    candleCount: candles.length,
+    latestClosedCandleOpenTimeMs: Number.isFinite(latestOpenTimeMs) ? latestOpenTimeMs : null,
+    latestClosedCandleCloseTimeMs: latestCloseTimeMs,
+    latestClosedCandleAt: latestCloseTimeMs === null ? null : new Date(latestCloseTimeMs).toISOString(),
+  };
+}
+
+export function bybitKlineCloseTimeMs(startTimeMs, intervalOrTimeframe) {
+  const interval = typeof intervalOrTimeframe === "string"
+    ? resolveBybitKlineInterval(intervalOrTimeframe)
+    : intervalOrTimeframe;
+  const start = Number(startTimeMs);
+  if (!Number.isFinite(start) || start < 0 || !interval?.value) {
+    throw new Error("A valid candle open timestamp and Bybit interval are required.");
+  }
+  if (interval.value !== "M") return start + interval.milliseconds;
+  const nextMonth = new Date(start);
+  nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1, 1);
+  nextMonth.setUTCHours(0, 0, 0, 0);
+  return nextMonth.getTime();
+}
+
+function bybitKlineClosedAt(startTimeMs, interval, serverTimeMs) {
+  return bybitKlineCloseTimeMs(startTimeMs, interval) <= serverTimeMs;
+}
+
+function normalizeBybitSnapshotInterval(snapshot) {
+  const value = String(snapshot?.interval || "").trim();
+  if (value === "M") return { value, milliseconds: null };
+  const milliseconds = Number(snapshot?.intervalMilliseconds);
+  if (!value || !Number.isFinite(milliseconds) || milliseconds <= 0) {
+    throw new Error("A supported Bybit candle interval and positive interval duration are required.");
+  }
+  return { value, milliseconds };
+}
+
+function invalidKlineSnapshot(reason) {
+  return {
+    ok: false,
+    reasons: [reason],
+    timeframe: null,
+    interval: null,
+    intervalMilliseconds: null,
+    serverTimeMs: null,
+    candleCount: 0,
+    latestClosedCandleOpenTimeMs: null,
+    latestClosedCandleCloseTimeMs: null,
+    latestClosedCandleAt: null,
+  };
+}
+
 export async function getBybitInstrumentMetadata({ category = "linear", symbol = "BTCUSDT", network, executionEnvironment, endpointProfile } = {}) {
   const cacheKey = `instrument:${executionEnvironment || network || "default"}:${endpointProfile || "GLOBAL"}:${category}:${symbol}`;
   const cached = readBybitPublicCache(cacheKey);
@@ -690,6 +880,9 @@ export function buildBybitOrderRequestBody(order, validation) {
   if (category !== "spot" && order.reduceOnly) {
     body.reduceOnly = true;
   }
+  if (isBybitDerivativesCloseAllOrder(order, category, orderType)) {
+    body.closeOnTrigger = true;
+  }
 
   if (category !== "spot" && order.positionIdx !== undefined) {
     body.positionIdx = Number(order.positionIdx);
@@ -1123,13 +1316,18 @@ export function evaluateBybitOrderDraftAgainstMetadata(metadata, order, context 
   const referencePrice = Number(order.referencePrice || order.limitPrice || order.stopPrice || 0);
   const notional = Math.abs(quantity * referencePrice);
   const orderType = normalizeBybitOrderType(order.orderType);
+  const closeAll = isBybitDerivativesCloseAllOrder(order, category, orderType);
 
   if (!metadata) reasons.push(`Bybit metadata is unavailable for ${symbol}.`);
   if (metadata?.tradingStatus && !["Trading", "trading"].includes(String(metadata.tradingStatus))) {
     reasons.push(`${symbol} is not trading on Bybit (${metadata.tradingStatus}).`);
   }
-  if (!quantity || quantity <= 0) reasons.push("Quantity must be greater than zero.");
-  if (metadata?.minQuantity && quantity < metadata.minQuantity) {
+  if ((!quantity || quantity <= 0) && !closeAll) reasons.push("Quantity must be greater than zero.");
+  if (order.closeOnTrigger === true && !closeAll) {
+    reasons.push("Bybit close-all requires a derivatives market order with quantity 0, reduceOnly=true and closeOnTrigger=true.");
+    codes.push("BYBIT_CLOSE_ALL_CONTRACT_INVALID");
+  }
+  if (!closeAll && metadata?.minQuantity && quantity < metadata.minQuantity) {
     reasons.push(`Quantity is below Bybit minimum ${metadata.minQuantity}.`);
   }
   if (metadata?.maxQuantity && quantity > metadata.maxQuantity) {
@@ -1140,7 +1338,7 @@ export function evaluateBybitOrderDraftAgainstMetadata(metadata, order, context 
     reasons.push(`Market quantity exceeds Bybit current maximum ${metadata.maxMarketQuantity}. Source: Bybit instrument metadata.`);
     codes.push("ORDER_ABOVE_EXCHANGE_MARKET_MAXIMUM");
   }
-  if (metadata?.quantityStep && !isStepAligned(quantity, metadata.quantityStep)) {
+  if (!closeAll && metadata?.quantityStep && !isStepAligned(quantity, metadata.quantityStep)) {
     reasons.push(`Quantity must align to Bybit quantity step ${metadata.quantityStep}.`);
   }
   if (orderType === "Limit") {
@@ -1152,7 +1350,7 @@ export function evaluateBybitOrderDraftAgainstMetadata(metadata, order, context 
   if (order.stopPrice && metadata?.tickSize && !isStepAligned(Number(order.stopPrice), metadata.tickSize)) {
     reasons.push(`Stop price must align to Bybit tick size ${metadata.tickSize}.`);
   }
-  if (metadata?.minNotional && referencePrice > 0 && notional < metadata.minNotional) {
+  if (!closeAll && metadata?.minNotional && referencePrice > 0 && notional < metadata.minNotional) {
     reasons.push(`ORDER_BELOW_EXCHANGE_MINIMUM — Requested notional: $${notional.toFixed(2)}. Current minimum: $${Number(metadata.minNotional).toFixed(2)}. Source: Bybit instrument metadata.`);
     codes.push("ORDER_BELOW_EXCHANGE_MINIMUM");
   }
@@ -1193,6 +1391,16 @@ export function evaluateBybitOrderDraftAgainstMetadata(metadata, order, context 
       notional
     }
   };
+}
+
+export function isBybitDerivativesCloseAllOrder(order, category = null, normalizedOrderType = null) {
+  const resolvedCategory = category || (order?.marketKind === "spot" ? "spot" : "linear");
+  const orderType = normalizedOrderType || normalizeBybitOrderType(order?.orderType);
+  return resolvedCategory !== "spot"
+    && orderType === "Market"
+    && Number(order?.quantity ?? NaN) === 0
+    && order?.reduceOnly === true
+    && order?.closeOnTrigger === true;
 }
 
 export function validateBybitMainnetValidationRequest({ account, order, risk, validation }) {

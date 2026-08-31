@@ -62,6 +62,7 @@ const groupExecutionEnabled =
   process.env.INVESTMENT_GROUP_EXECUTION_ENABLED === "true" &&
   process.env.BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH !== "true";
 const ACTIVE_EXECUTION_ORDER_STATUSES = ["pending", "accepted", "working", "partially-filled"];
+const MAX_STRATEGY_GENERATION_RECOVERY_MS = 7 * 24 * 60 * 60 * 1000;
 let running = true;
 let ticking = false;
 
@@ -228,7 +229,7 @@ async function processStrategy(strategy: JsonRow) {
     .maybeSingle();
   if (runtimeError) throw runtimeError;
   const candleAt = new Date(
-    candle.time * 1000 + timeframeMilliseconds(strategy.timeframe),
+    candleCloseTimeMs(candle.time, strategy.timeframe),
   ).toISOString();
   if (
     runtime?.last_closed_candle_at &&
@@ -258,21 +259,34 @@ async function processStrategy(strategy: JsonRow) {
     signals,
     Number(strategy.definition?.execution?.pyramiding || 1),
   );
-  const candidateSignal = [...transitions]
-    .reverse()
-    .find((item) => item.entry && Number(item.timestamp) === candle.time);
+  // The checkpoint is advanced only after every target generation is durable.
+  // If the worker dies before the atomic enqueue RPC, the next candle may have
+  // advanced; replay the latest transition after the prior checkpoint instead
+  // of considering only the newest candle and silently losing that signal.
+  const candidateSignal = latestUnprocessedStrategyTransition(
+    transitions,
+    runtime,
+    candle.time,
+    strategy.timeframe,
+  );
+  // A rolling 1,000-bar seed can forget the virtual Pine position that began
+  // before the window and reconstruct a same-direction transition inside the
+  // new window. The durable last signal is the authoritative virtual side: a
+  // catch-up transition is executable only when it changes that side. This
+  // also makes a restart after an atomic enqueue idempotent at strategy level.
   const persistedDirection = strategyDirectionFromSignalKey(runtime?.last_signal_key);
   const signal = candidateSignal && candidateSignal.direction !== persistedDirection
     ? candidateSignal
     : undefined;
   let closeResult: { closed: boolean; reason: string | null } = { closed: false, reason: null };
-  const nextTickReference = marketWindow.current?.time === candle.time + timeframeMilliseconds(strategy.timeframe) / 1000
+  const nextTickReference = marketWindow.current?.time === nextCandleOpenTimeSeconds(candle.time, strategy.timeframe)
     ? marketWindow.current.open
     : candle.close;
   if (position) closeResult = await managePaperPosition(strategy, activePaper, position, candles, candle, signal || null, nextTickReference);
   if (signal) {
-    signalKey = `${strategy.id}:${strategy.current_version}:${strategy.symbol}:${strategy.timeframe}:${candle.time}:${signal.direction}`;
-    signalAt = candleAt;
+    const signalCandleTime = Number(signal.timestamp);
+    signalKey = `${strategy.id}:${strategy.current_version}:${strategy.symbol}:${strategy.timeframe}:${signalCandleTime}:${signal.direction}`;
+    signalAt = new Date(candleCloseTimeMs(signalCandleTime, strategy.timeframe)).toISOString();
     const reverseAfterOpposite = closeResult.closed && closeResult.reason === "OPPOSITE_SIGNAL" && strategy.definition?.execution?.perpetualSignalReversalEnabled === true;
     if (activePaper && (!position || reverseAfterOpposite)) {
       await openPaperPosition(
@@ -339,6 +353,38 @@ function strategyDirectionFromSignalKey(value: unknown): "long" | "short" | null
   return match ? match[1]!.toLowerCase() as "long" | "short" : null;
 }
 
+function latestUnprocessedStrategyTransition(
+  transitions: JsonRow[],
+  runtime: JsonRow | null,
+  latestClosedCandleTime: number,
+  timeframe: string,
+) {
+  const checkpointCandleTime = runtimeCheckpointCandleTime(runtime, timeframe);
+  return [...transitions].reverse().find((item) => {
+    const transitionTime = Number(item?.timestamp);
+    if (!item?.entry || !Number.isFinite(transitionTime) || transitionTime > latestClosedCandleTime) return false;
+    // A brand-new runtime starts at the latest closed bar; it must not replay
+    // an arbitrary historical position transition merely because seed data was
+    // fetched. Catch-up is enabled only after a durable runtime checkpoint.
+    return checkpointCandleTime === null
+      ? transitionTime === latestClosedCandleTime
+      : transitionTime > checkpointCandleTime;
+  });
+}
+
+function runtimeCheckpointCandleTime(runtime: JsonRow | null, timeframe: string) {
+  const closedAt = Date.parse(String(runtime?.last_closed_candle_at || ""));
+  // Version activation clears last_closed_candle_at. Older activation RPCs did
+  // not know about pine_checkpoint, so an orphaned checkpoint from the prior
+  // version must never trigger historical execution for the new version.
+  if (!Number.isFinite(closedAt)) return null;
+  const derived = previousCandleOpenTimeSeconds(closedAt, timeframe);
+  const explicit = Number(runtime?.pine_checkpoint?.lastClosedCandleTime);
+  return Number.isFinite(explicit) && explicit > 0
+    ? Math.max(explicit, derived)
+    : derived;
+}
+
 function isBcrdaDefinition(definition: JsonRow) {
   const indicatorId = String(definition?.indicator?.indicatorId || "").toLowerCase();
   const indicatorName = String(definition?.indicator?.name || "").toLowerCase();
@@ -392,18 +438,21 @@ async function enqueueBrokerStrategySignal(
   }
   const action = opposite ? (conflictResolution === "CLOSE_ONLY" ? "CLOSE" : "REVERSE") : "ENTRY";
   const takeProfitPlan = reserveStrategyTakeProfits(signal.takeProfits);
+  if (binding.market_type === "SPOT" && shouldQueueStrategyTakeProfits(action) && takeProfitPlan.length) {
+    await auditBrokerSignalBlocked(strategy, binding, signalKey, "SPOT_TP_PROTECTION_UNCERTIFIED", executionEnvironment);
+    return;
+  }
   const commandSignalKey = `${signalKey}:${binding.id}:${action.toLowerCase()}`;
   const idempotencyKey = crypto.createHash("sha256").update(commandSignalKey).digest("hex");
   const deterministicClientOrderId = `bt-str-${idempotencyKey.slice(0, 28)}`;
-  const { error } = await supabase.from("execution_commands").upsert({
-    command_type: "PLACE_ORDER",
-    user_id: strategy.owner_user_id,
-    connection_id: binding.connection_id,
-    strategy_automation_id: strategy.id,
-    strategy_target_binding_id: binding.id,
-    strategy_signal_key: commandSignalKey,
-    idempotency_key: idempotencyKey,
-    deterministic_client_order_id: deterministicClientOrderId,
+  const parentCommand = {
+    commandType: "PLACE_ORDER",
+    userId: strategy.owner_user_id,
+    connectionId: binding.connection_id,
+    groupIntentId: null,
+    strategySignalKey: commandSignalKey,
+    idempotencyKey,
+    deterministicClientOrderId,
     payload: {
       action,
       symbol: strategy.symbol,
@@ -420,25 +469,23 @@ async function enqueueBrokerStrategySignal(
       executionEnvironment,
       simulatedFunds: executionEnvironment === "DEMO"
     },
-    status: "QUEUED",
     priority: action === "CLOSE" ? 20 : 50,
-    max_attempts: action === "REVERSE" ? 100 : 8,
-  }, { onConflict: "idempotency_key", ignoreDuplicates: true });
-  if (error) throw error;
+    maxAttempts: action === "ENTRY" || action === "REVERSE" ? 100 : 8,
+  };
+  const childCommands: JsonRow[] = [];
   if (shouldQueueStrategyTakeProfits(action)) {
     for (const [index, target] of takeProfitPlan.slice(0, 7).entries()) {
       const targetId = String(target?.id || `TP${index + 1}`).toUpperCase();
-      const targetSignalKey = `${signalKey}:${binding.id}:${targetId.toLowerCase()}`;
-      const targetIdempotencyKey = crypto.createHash("sha256").update(targetSignalKey).digest("hex");
-      const { error: targetError } = await supabase.from("execution_commands").upsert({
-        command_type: "PLACE_ORDER",
-        user_id: strategy.owner_user_id,
-        connection_id: binding.connection_id,
-        strategy_automation_id: strategy.id,
-        strategy_target_binding_id: binding.id,
-        strategy_signal_key: targetSignalKey,
-        idempotency_key: targetIdempotencyKey,
-        deterministic_client_order_id: `bt-tp-${targetIdempotencyKey.slice(0, 29)}`,
+      const targetActionKey = `${idempotencyKey}:TAKE_PROFIT:${targetId}`;
+      const targetIdempotencyKey = crypto.createHash("sha256").update(targetActionKey).digest("hex");
+      childCommands.push({
+        commandType: "PLACE_ORDER",
+        userId: strategy.owner_user_id,
+        connectionId: binding.connection_id,
+        groupIntentId: null,
+        strategySignalKey: `${commandSignalKey}:${targetId.toLowerCase()}`,
+        idempotencyKey: targetIdempotencyKey,
+        deterministicClientOrderId: `bt-tp-${targetIdempotencyKey.slice(0, 29)}`,
         payload: {
           action: "TAKE_PROFIT",
           symbol: strategy.symbol,
@@ -458,13 +505,12 @@ async function enqueueBrokerStrategySignal(
           executionEnvironment,
           simulatedFunds: executionEnvironment === "DEMO",
         },
-        status: "QUEUED",
         priority: 70 + index,
-        max_attempts: 100,
-      }, { onConflict: "idempotency_key", ignoreDuplicates: true });
-      if (targetError) throw targetError;
+        maxAttempts: 100,
+      });
     }
   }
+  await enqueueStrategyGeneration(strategy.id, binding.id, parentCommand, childCommands);
   await supabase.from("strategy_automation_audit_events").insert({
     owner_user_id: strategy.owner_user_id,
     strategy_id: strategy.id,
@@ -519,9 +565,13 @@ async function enqueueGroupStrategySignal(
   const clientIntentId = `strategy:${hashCanonicalPayload({ signalKey, bindingId: binding.id }).slice(0, 48)}`;
   const idempotencyKey = hashCanonicalPayload({ groupId: binding.group_id, clientIntentId });
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + Math.max(60_000, timeframeMilliseconds(strategy.timeframe))).toISOString();
+  const expiresAt = new Date(now.getTime() + strategyGenerationRecoveryWindowMs(strategy.timeframe)).toISOString();
   const policy = normalizeCapitalPolicy(bindingPolicy(binding), binding.market_type, { allowZeroAllocation: false });
   const takeProfitPlan = reserveStrategyTakeProfits(signal.takeProfits);
+  if (binding.market_type === "SPOT" && takeProfitPlan.length) {
+    await auditGroupSignalBlocked(strategy, binding, signalKey, "SPOT_TP_PROTECTION_UNCERTIFIED");
+    return;
+  }
   const row: JsonRow = {
     id: crypto.randomUUID(),
     group_id: binding.group_id,
@@ -571,7 +621,7 @@ async function enqueueGroupStrategySignal(
     .maybeSingle();
   if (intentError) throw intentError;
   const intentId = intent?.id || (await existingGroupIntent(binding.group_id, clientIntentId));
-  if (!intentId) return;
+  if (!intentId) throw new Error("The signed strategy parent intent could not be recovered after its idempotent insert.");
   const { error: versionError } = await supabase.from("group_trade_intent_versions").upsert({
     group_intent_id: intentId,
     version: 1,
@@ -581,18 +631,20 @@ async function enqueueGroupStrategySignal(
     created_by: strategy.owner_user_id,
   }, { onConflict: "group_intent_id,version", ignoreDuplicates: true });
   if (versionError) throw versionError;
-  const { error: commandError } = await supabase.from("execution_commands").upsert({
-    command_type: "EXPAND_GROUP_INTENT",
-    group_intent_id: intentId,
-    strategy_automation_id: strategy.id,
-    strategy_target_binding_id: binding.id,
-    strategy_signal_key: `${signalKey}:${binding.id}:group`,
-    idempotency_key: `expand:${idempotencyKey}`,
+  const parentCommandIdempotencyKey = `expand:${idempotencyKey}`;
+  const parentCommand = {
+    commandType: "EXPAND_GROUP_INTENT",
+    userId: null,
+    connectionId: null,
+    groupIntentId: intentId,
+    strategySignalKey: `${signalKey}:${binding.id}:group`,
+    idempotencyKey: parentCommandIdempotencyKey,
+    deterministicClientOrderId: null,
     payload: { groupIntentId: intentId },
-    status: "QUEUED",
     priority: 20,
-  }, { onConflict: "idempotency_key", ignoreDuplicates: true });
-  if (commandError) throw commandError;
+    maxAttempts: 100,
+  };
+  const childCommands: JsonRow[] = [];
   if (takeProfitPlan.length) {
     for (const [index, target] of takeProfitPlan.slice(0, 7).entries()) {
       const targetId = String(target?.id || `TP${index + 1}`).toUpperCase();
@@ -628,13 +680,25 @@ async function enqueueGroupStrategySignal(
       const { data: targetIntent, error: targetIntentError } = await supabase.from("group_trade_intents").upsert(targetRow, { onConflict: "group_id,client_intent_id", ignoreDuplicates: true }).select("id").maybeSingle();
       if (targetIntentError) throw targetIntentError;
       const targetIntentId = targetIntent?.id || (await existingGroupIntent(binding.group_id, targetClientIntentId));
-      if (!targetIntentId) continue;
+      if (!targetIntentId) throw new Error("The signed strategy TP intent could not be recovered after its idempotent insert.");
       const { error: targetVersionError } = await supabase.from("group_trade_intent_versions").upsert({ group_intent_id: targetIntentId, version: 1, canonical_payload: targetEnvelope, canonical_hash: targetRow.canonical_hash, service_signature: targetRow.service_signature, created_by: strategy.owner_user_id }, { onConflict: "group_intent_id,version", ignoreDuplicates: true });
       if (targetVersionError) throw targetVersionError;
-      const { error: targetCommandError } = await supabase.from("execution_commands").upsert({ command_type: "EXPAND_GROUP_INTENT", group_intent_id: targetIntentId, strategy_automation_id: strategy.id, strategy_target_binding_id: binding.id, strategy_signal_key: `${signalKey}:${binding.id}:group:${targetId.toLowerCase()}`, idempotency_key: `expand:${targetIdempotencyKey}`, payload: { groupIntentId: targetIntentId }, status: "QUEUED", priority: 40 + index, max_attempts: 100 }, { onConflict: "idempotency_key", ignoreDuplicates: true });
-      if (targetCommandError) throw targetCommandError;
+      const targetCommandIdempotencyKey = `expand:${targetIdempotencyKey}`;
+      childCommands.push({
+        commandType: "EXPAND_GROUP_INTENT",
+        userId: null,
+        connectionId: null,
+        groupIntentId: targetIntentId,
+        strategySignalKey: `${signalKey}:${binding.id}:group:${targetId.toLowerCase()}`,
+        idempotencyKey: targetCommandIdempotencyKey,
+        deterministicClientOrderId: null,
+        payload: { groupIntentId: targetIntentId },
+        priority: 40 + index,
+        maxAttempts: 100,
+      });
     }
   }
+  await enqueueStrategyGeneration(strategy.id, binding.id, parentCommand, childCommands);
   await supabase.from("strategy_automation_audit_events").insert({
     owner_user_id: strategy.owner_user_id,
     strategy_id: strategy.id,
@@ -948,6 +1012,40 @@ async function existingGroupIntent(groupId: string, clientIntentId: string) {
   return data?.id || null;
 }
 
+function strategyGenerationRecoveryWindowMs(timeframe: string) {
+  // The public candle worker retains at most 1,000 bars. Preserve a signed
+  // group generation for that complete replay horizon, but never longer than
+  // seven days, so a crash before atomic command enqueue can recover without
+  // authorizing an indefinitely stale market intent.
+  const interval = bybitInterval(timeframe);
+  const retainedCandleHorizon = interval.value === "M"
+    ? MAX_STRATEGY_GENERATION_RECOVERY_MS
+    : Math.max(60_000, Number(interval.milliseconds) * 1_000);
+  return Math.min(
+    MAX_STRATEGY_GENERATION_RECOVERY_MS,
+    retainedCandleHorizon,
+  );
+}
+
+async function enqueueStrategyGeneration(
+  strategyId: string,
+  bindingId: string,
+  parentCommand: JsonRow,
+  childCommands: JsonRow[],
+) {
+  const { data, error } = await supabase.rpc("black_cloud_enqueue_strategy_generation_v1", {
+    p_strategy_id: strategyId,
+    p_binding_id: bindingId,
+    p_parent_command: parentCommand,
+    p_child_commands: childCommands,
+  });
+  if (error) throw error;
+  const expected = 1 + childCommands.length;
+  if (Number(data) !== expected) {
+    throw new Error(`The atomic strategy generation enqueue expected ${expected} durable commands.`);
+  }
+}
+
 async function auditGroupSignalBlocked(strategy: JsonRow, binding: JsonRow, signalKey: string, reason: string) {
   await supabase.from("strategy_automation_audit_events").insert({
     owner_user_id: strategy.owner_user_id,
@@ -1134,7 +1232,7 @@ async function openPaperPosition(
     p_take_profit: null,
     p_entry_fee: entryFee,
     p_opened_at: new Date(
-      candle.time * 1000 + timeframeMilliseconds(strategy.timeframe),
+      candleCloseTimeMs(candle.time, strategy.timeframe),
     ).toISOString(),
   });
   if (error) throw error;
@@ -1161,7 +1259,7 @@ async function managePaperPosition(
   nextTickReference: number,
 ) {
   const candleClosedAt =
-    candle.time * 1000 + timeframeMilliseconds(strategy.timeframe);
+    candleCloseTimeMs(candle.time, strategy.timeframe);
   if (candleClosedAt <= Date.parse(position.opened_at)) return { closed: false, reason: null };
   const direction = position.side === "LONG" ? 1 : -1;
   const unrealized =
@@ -1467,7 +1565,12 @@ async function fetchBybitCandleWindow(
   // seconds fast must never promote the still-forming row into an executable
   // closed-candle signal.
   const venueTimestamp = Number(payload.time);
-  const now = Number.isFinite(venueTimestamp) && venueTimestamp > 0 ? venueTimestamp : Date.now();
+  if (!Number.isFinite(venueTimestamp) || venueTimestamp <= 0) {
+    throw Object.assign(new Error("Bybit did not provide an authoritative server timestamp for candle closure."), {
+      code: "MARKET_DATA_SERVER_TIME_INVALID",
+    });
+  }
+  const now = venueTimestamp;
   const candles = payload.result.list
     .map((row: string[]) => ({
       time: Math.floor(Number(row[0]) / 1000),
@@ -1477,17 +1580,19 @@ async function fetchBybitCandleWindow(
       close: Number(row[4]),
       volume: Number(row[5]),
     }))
-    .filter((candle: Candle) => Number.isFinite(candle.close))
+    .filter((candle: Candle) => [candle.time, candle.open, candle.high, candle.low, candle.close].every(Number.isFinite))
     .sort((a: Candle, b: Candle) => a.time - b.time);
+  const closed = candles.filter((candle: Candle) => candleCloseTimeMsForInterval(candle.time, interval) <= now);
+  assertBybitCandleWindowIntegrity(closed, interval, now);
   return {
-    closed: candles.filter((candle: Candle) => candle.time * 1000 + interval.milliseconds <= now),
-    current: candles.find((candle: Candle) => candle.time * 1000 <= now && candle.time * 1000 + interval.milliseconds > now) || null,
+    closed,
+    current: candles.find((candle: Candle) => candle.time * 1000 <= now && candleCloseTimeMsForInterval(candle.time, interval) > now) || null,
   };
 }
 
-function bybitInterval(timeframe: string) {
+function bybitInterval(timeframe: string): { value: string; milliseconds: number | null } {
   const normalized = String(timeframe).trim();
-  const direct: Record<string, [string, number]> = {
+  const direct: Record<string, [string, number | null]> = {
     "1m": ["1", 60_000],
     "3m": ["3", 180_000],
     "5m": ["5", 300_000],
@@ -1495,6 +1600,7 @@ function bybitInterval(timeframe: string) {
     "30m": ["30", 1_800_000],
     "1h": ["60", 3_600_000],
     "2h": ["120", 7_200_000],
+    "3h": ["180", 10_800_000],
     "4h": ["240", 14_400_000],
     "6h": ["360", 21_600_000],
     "12h": ["720", 43_200_000],
@@ -1502,7 +1608,7 @@ function bybitInterval(timeframe: string) {
     "1D": ["D", 86_400_000],
     "1w": ["W", 604_800_000],
     "1W": ["W", 604_800_000],
-    "1M": ["M", 2_419_200_000],
+    "1M": ["M", null],
   };
   const match = direct[normalized];
   if (!match)
@@ -1512,8 +1618,62 @@ function bybitInterval(timeframe: string) {
   return { value: match[0], milliseconds: match[1] };
 }
 
-function timeframeMilliseconds(timeframe: string) {
-  return bybitInterval(timeframe).milliseconds;
+function candleCloseTimeMs(candleOpenTimeSeconds: number, timeframe: string) {
+  return candleCloseTimeMsForInterval(candleOpenTimeSeconds, bybitInterval(timeframe));
+}
+
+function candleCloseTimeMsForInterval(
+  candleOpenTimeSeconds: number,
+  interval: { value: string; milliseconds: number | null },
+) {
+  const openTimeMs = Number(candleOpenTimeSeconds) * 1000;
+  if (interval.value !== "M") {
+    if (!(Number(interval.milliseconds) > 0)) throw new Error("A positive fixed candle interval is required.");
+    return openTimeMs + Number(interval.milliseconds);
+  }
+  const nextMonth = new Date(openTimeMs);
+  nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1, 1);
+  nextMonth.setUTCHours(0, 0, 0, 0);
+  return nextMonth.getTime();
+}
+
+function nextCandleOpenTimeSeconds(candleOpenTimeSeconds: number, timeframe: string) {
+  return Math.floor(candleCloseTimeMs(candleOpenTimeSeconds, timeframe) / 1000);
+}
+
+function previousCandleOpenTimeSeconds(closedAtMs: number, timeframe: string) {
+  const interval = bybitInterval(timeframe);
+  if (interval.value !== "M") {
+    if (!(Number(interval.milliseconds) > 0)) throw new Error("A positive fixed candle interval is required.");
+    return Math.floor((closedAtMs - Number(interval.milliseconds)) / 1000);
+  }
+  const previousMonth = new Date(closedAtMs);
+  previousMonth.setUTCMonth(previousMonth.getUTCMonth() - 1, 1);
+  previousMonth.setUTCHours(0, 0, 0, 0);
+  return Math.floor(previousMonth.getTime() / 1000);
+}
+
+function assertBybitCandleWindowIntegrity(
+  candles: Candle[],
+  interval: { value: string; milliseconds: number | null },
+  serverTimeMs: number,
+) {
+  if (!candles.length) return;
+  for (let index = 1; index < candles.length; index += 1) {
+    const expectedOpenTime = candleCloseTimeMsForInterval(candles[index - 1]!.time, interval) / 1000;
+    if (candles[index]!.time !== expectedOpenTime) {
+      throw Object.assign(new Error("Bybit closed-candle history is gapped or duplicated."), {
+        code: "MARKET_DATA_CANDLE_GAP",
+      });
+    }
+  }
+  const latestCloseTime = candleCloseTimeMsForInterval(candles.at(-1)!.time, interval);
+  const followingCloseTime = candleCloseTimeMsForInterval(latestCloseTime / 1000, interval);
+  if (serverTimeMs >= followingCloseTime) {
+    throw Object.assign(new Error("The latest Bybit closed candle is stale."), {
+      code: "MARKET_DATA_STALE",
+    });
+  }
 }
 
 function averageTrueRange(candles: Candle[], length: number) {

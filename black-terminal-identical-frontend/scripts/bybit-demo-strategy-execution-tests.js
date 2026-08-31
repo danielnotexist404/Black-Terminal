@@ -79,12 +79,13 @@ assert.match(cloudRoute, /permissionReport\.transfer/);
 assert.match(cloudRoute, /allow_strategy_execution/);
 assert.doesNotMatch(cloudRoute, /prompt\s*\(|window\.prompt|ENABLE OFFLINE CLOUD EXECUTION/, "demo delegation has no phrase-entry gate");
 
-assert.match(signalWorker, /execution_commands/);
+assert.match(signalWorker, /black_cloud_enqueue_strategy_generation_v1/, "entry plus TP children cross one atomic database enqueue boundary");
 assert.match(signalWorker, /const venueTimestamp = Number\(payload\.time\)/, "closed-candle execution uses Bybit server time instead of a potentially fast VPS clock");
 assert.match(signalWorker, /positionAwareStrategyEntries\([\s\S]*signals,[\s\S]*pyramiding/, "the live worker suppresses Pine same-direction setup repeats before any durable broker command is emitted");
-assert.match(signalWorker, /candidateSignal\.direction !== persistedDirection/, "the last persisted Pine direction prevents duplicate entry after worker restart or a rolling-history boundary");
-assert.match(signalWorker, /strategy_signal_key/);
-assert.match(signalWorker, /deterministic_client_order_id/);
+assert.match(signalWorker, /latestUnprocessedStrategyTransition\([\s\S]*transitionTime > checkpointCandleTime/, "restart recovery selects only a real Pine transition after the durable closed-candle checkpoint");
+assert.match(signalWorker, /signalCandleTime = Number\(signal\.timestamp\)[\s\S]*:\$\{signalCandleTime\}:\$\{signal\.direction\}/, "a caught-up transition retains its original idempotent candle identity when the market has advanced");
+assert.match(signalWorker, /strategySignalKey/);
+assert.match(signalWorker, /deterministicClientOrderId/);
 assert.match(signalWorker, /conflictResolution/);
 assert.match(signalWorker, /"REVERSE"/, "close-then-reverse is represented as one durable state-machine command");
 assert.match(signalWorker, /ACCOUNT_SYMBOL_OCCUPIED_BY_UNOWNED_POSITION/, "manual positions block strategy mutation instead of being adopted");

@@ -64,6 +64,7 @@ function toPrometheus(state) {
     gauge("black_cloud_oldest_queue_age_ms", "Age of the oldest waiting execution command.", state.readiness?.oldestQueueAgeMs),
     gauge("black_cloud_commands_claimed_total", "Durable execution commands claimed.", counters.commandsClaimed, "counter"),
     gauge("black_cloud_commands_succeeded_total", "Durable execution commands completed successfully.", counters.commandsSucceeded, "counter"),
+    gauge("black_cloud_commands_cancelled_total", "Durable execution commands cancelled because a required dependency could not execute.", counters.commandsCancelled, "counter"),
     gauge("black_cloud_commands_failed_total", "Durable execution commands that failed.", counters.commandsFailed, "counter"),
     gauge("black_cloud_lease_contention_total", "Connection lease acquisitions rejected because another worker owns the lease.", counters.leaseContention, "counter"),
     gauge("black_cloud_fencing_rejections_total", "Broker mutations rejected by stale fencing ownership.", counters.fencingRejections, "counter"),

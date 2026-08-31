@@ -28,6 +28,8 @@ import {
   calculateStrategyTakeProfitQuantity,
   evaluateStrategyTakeProfitLadder,
   floorStrategyVenueQuantity,
+  planStrategyTakeProfitProtection,
+  reserveStrategyTakeProfits,
   resolveStrategyTakeProfitPrice,
   settledStrategyEntryQuantity
 } from "../strategy-automation/superatr-execution.js";
@@ -35,6 +37,23 @@ import fs from "node:fs";
 
 const BLACK_CLOUD_SOFTWARE_VERSION = readPackageVersion();
 const MAX_STRATEGY_REVERSAL_CLOSE_LEGS = 4;
+const STRATEGY_DEPENDENCY_CANCELLATION_REASONS = new Set([
+  "PARENT_ENTRY_FAILED",
+  "PARENT_ENTRY_UNFILLED",
+  "PARENT_GROUP_ENTRY_FAILED",
+  "PARENT_GROUP_ENTRY_UNFILLED"
+]);
+const TERMINAL_FOLLOWER_PLAN_REJECTION_STATUSES = new Set([
+  "RISK_REJECTED",
+  "CONNECTION_UNHEALTHY",
+  "AUTH_EXPIRED",
+  "INSUFFICIENT_MARGIN",
+  "SYMBOL_NOT_ALLOWED",
+  "MANDATE_PAUSED",
+  "VENUE_REJECTED",
+  "RECONCILIATION_REQUIRED",
+  "CANCELLED"
+]);
 
 export const WORKER_STARTUP_PHASES = Object.freeze({
   PROCESS_STARTING: "PROCESS_STARTING",
@@ -91,6 +110,7 @@ export class BlackCloudExecutionWorker {
     this.metricsCounters = {
       commandsClaimed: 0,
       commandsSucceeded: 0,
+      commandsCancelled: 0,
       commandsFailed: 0,
       leaseContention: 0,
       unknownSubmissionOutcomes: 0,
@@ -124,7 +144,7 @@ export class BlackCloudExecutionWorker {
       this.lastReadinessAt = new Date().toISOString();
       const dependencies = this.lastReadiness.dependencies || {};
       if (!Object.values(dependencies).some(Boolean)) throw terminalError("DATABASE_UNAVAILABLE", "Black Cloud database is unavailable.");
-      if (["credentialVault", "eventInbox", "nodeRegistry", "strategyRuntime"].some((name) => !dependencies[name])) throw terminalError("SCHEMA_MISMATCH", "Black Cloud required schema is unavailable; verify the Phase V Chapter II migrations.");
+      if (["credentialVault", "eventInbox", "nodeRegistry", "strategyRuntime", "atomicOrderState", "reconciliationLiveness"].some((name) => !dependencies[name])) throw terminalError("SCHEMA_MISMATCH", "Black Cloud required schema is unavailable; verify the Phase V Chapter II migrations.");
       this.setStartupPhase(WORKER_STARTUP_PHASES.SCHEMA_VALIDATING);
       if (!this.lastReadiness.dependencies?.leaseSubsystem) throw terminalError("LEASE_UNAVAILABLE", "Black Cloud lease subsystem is unavailable.");
       this.setStartupPhase(WORKER_STARTUP_PHASES.LEASE_SUBSYSTEM_READY);
@@ -256,9 +276,13 @@ export class BlackCloudExecutionWorker {
 
     const fencingToken = Number(lease.fencing_token);
     const attemptId = await this.repository.startAttempt(command, fencingToken);
+    const strategyFailSafeRecoveryDispatch = command.command_type === "PLACE_ORDER"
+      && (command.payload?.forceProtectionFailSafeFlatten === true || command.payload?.failSafeProtectionRecovery?.rescueStarted === true);
     try {
       let result;
       if (command.command_type === "EXPAND_GROUP_INTENT") result = await this.expandGroupIntent(command);
+      else if (command.command_type === "PLACE_ORDER" && (command.payload?.forceProtectionFailSafeFlatten === true || command.payload?.failSafeProtectionRecovery?.rescueStarted === true)) result = await this.executeStrategyTakeProfitFailSafeRepair(command, fencingToken);
+      else if (command.command_type === "PLACE_ORDER" && command.follower_plan_id) result = await this.placeFollowerOrder(command, fencingToken);
       else if (command.command_type === "PLACE_ORDER" && command.strategy_target_binding_id) result = await this.placeStrategyOrder(command, fencingToken);
       else if (command.command_type === "PLACE_ORDER") result = await this.placeFollowerOrder(command, fencingToken);
       else if (command.command_type === "MODIFY_ORDER" && command.strategy_target_binding_id) result = await this.modifyStrategyTakeProfitOrder(command, fencingToken);
@@ -268,6 +292,35 @@ export class BlackCloudExecutionWorker {
       else if (command.command_type === "SYNC_ACCOUNT") result = await this.syncAccount(command);
       else throw terminalError("UNSUPPORTED_COMMAND", `Unsupported Black Cloud command: ${command.command_type}`);
 
+      const dependencyCancellation = strategyDependencyCancellation(result);
+      if (dependencyCancellation) {
+        const message = strategyDependencyCancellationMessage(dependencyCancellation);
+        await this.repository.finishAttempt(attemptId, "FAILED", {
+          errorCode: dependencyCancellation,
+          errorMessage: message,
+          safeDetails: { skipped: true, dependencyCancelled: true, reason: dependencyCancellation }
+        });
+        await this.repository.finishCommand(command.id, fencingToken, "CANCELLED", {
+          errorCode: dependencyCancellation,
+          errorMessage: message
+        });
+        this.metricsCounters.commandsCancelled += 1;
+        await this.recordCommandAudits(command, {
+          executionEventType: "STRATEGY_DEPENDENCY_CANCELLED",
+          strategyEventType: "STRATEGY_EXECUTION_DEPENDENCY_CANCELLED",
+          severity: "WARNING",
+          purpose: "strategy_command_dependency",
+          message,
+          metadata: strategyCommandAuditMetadata(command, {
+            code: dependencyCancellation,
+            commandStatus: "CANCELLED",
+            retryable: false,
+            ambiguous: false
+          })
+        });
+        return;
+      }
+
       await this.repository.finishAttempt(attemptId, "SUCCEEDED", {
         venueOrderId: result?.venueOrderId,
         safeDetails: result || {}
@@ -275,36 +328,395 @@ export class BlackCloudExecutionWorker {
       await this.repository.finishCommand(command.id, fencingToken, "SUCCEEDED");
       this.metricsCounters.commandsSucceeded += 1;
     } catch (error) {
-      const classification = classifyExecutionError(error, command);
+      let effectiveError = error;
+      if (!strategyFailSafeRecoveryDispatch) {
+        try {
+          await this.handleTerminalTakeProfitProtectionFailure(command, fencingToken, error);
+        } catch (safetyError) {
+          effectiveError = safetyError;
+        }
+      }
+      const classification = classifyExecutionError(effectiveError, command);
+      const commandWillRetry = ["RETRY", "SUBMISSION_UNKNOWN", "RECONCILING"].includes(classification.commandStatus);
       this.metricsCounters.commandsFailed += 1;
-      if (/fencing|stale worker/i.test(String(error?.message || error))) this.metricsCounters.fencingRejections += 1;
+      if (/fencing|stale worker/i.test(String(effectiveError?.message || effectiveError))) this.metricsCounters.fencingRejections += 1;
       if (command.command_type === "PLACE_ORDER" && !classification.ambiguous && classification.code !== "STRATEGY_REVERSE_WAITING_FOR_FLAT") this.metricsCounters.ordersRejected += 1;
       if (classification.ambiguous) this.metricsCounters.unknownSubmissionOutcomes += 1;
       await this.repository.finishAttempt(attemptId, classification.attemptOutcome, {
         errorCode: classification.code,
-        errorMessage: error?.message,
+        errorMessage: effectiveError?.message,
         safeDetails: { retryable: classification.retryable, ambiguous: classification.ambiguous }
       });
+      if (command.follower_plan_id && !commandWillRetry) {
+        await this.terminalizeFollowerPlanFailure(command, classification, effectiveError);
+      }
       await this.repository.finishCommand(command.id, fencingToken, classification.commandStatus, {
         errorCode: classification.code,
-        errorMessage: error?.message,
+        errorMessage: effectiveError?.message,
         retryAfterSeconds: classification.retryAfterSeconds
       });
-      await this.repository.audit({
-        userId: command.user_id,
-        connectionId: command.connection_id,
-        groupIntentId: command.group_intent_id,
-        followerPlanId: command.follower_plan_id,
-        commandId: command.id,
-        eventType: classification.ambiguous ? "ORDER_SUBMISSION_AMBIGUOUS" : "EXECUTION_COMMAND_FAILED",
-        severity: classification.ambiguous ? "ERROR" : classification.retryable ? "WARNING" : "ERROR",
+      const message = classification.ambiguous
+        ? "Order acknowledgement was ambiguous; reconciliation is required before any retry."
+        : sanitizeError(effectiveError?.message || "Execution command failed.");
+      const mirrorStrategyAudit = !commandWillRetry || Number(command.attempt_count || 0) <= 1;
+      await this.recordCommandAudits(command, {
+        executionEventType: classification.ambiguous ? "ORDER_SUBMISSION_AMBIGUOUS" : "EXECUTION_COMMAND_FAILED",
+        strategyEventType: classification.ambiguous && commandWillRetry
+          ? "STRATEGY_EXECUTION_COMMAND_RECONCILING"
+          : commandWillRetry
+            ? "STRATEGY_EXECUTION_COMMAND_RETRY"
+            : "STRATEGY_EXECUTION_COMMAND_FAILED",
+        severity: commandWillRetry && !classification.ambiguous ? "WARNING" : "ERROR",
         purpose: "command_execution",
-        message: classification.ambiguous
-          ? "Order acknowledgement was ambiguous; reconciliation is required before any retry."
-          : sanitizeError(error?.message || "Execution command failed."),
-        metadata: { code: classification.code, retryable: classification.retryable }
+        message,
+        metadata: strategyCommandAuditMetadata(command, {
+          code: classification.code,
+          commandStatus: classification.commandStatus,
+          retryable: classification.retryable,
+          ambiguous: classification.ambiguous
+        }),
+        mirrorStrategyAudit
       });
     }
+  }
+
+  async terminalizeFollowerPlanFailure(command, classification, error) {
+    const status = followerPlanStatusForExecutionFailure(classification.code);
+    const current = await oneOrNull(this.supabase.from("follower_execution_plans")
+      .select("execution_status,execution_order_id,safe_result")
+      .eq("id", command.follower_plan_id)
+      .maybeSingle());
+    const linkedOrder = current?.execution_order_id ? await oneOrNull(this.supabase.from("execution_orders")
+      .select("id,account_id,status,quantity,filled_quantity,exchange_order_id,average_fill_price,rejection_reason,venue_updated_at")
+      .eq("id", current.execution_order_id)
+      .maybeSingle()) : null;
+    const hasPositiveFill = hasPositiveFollowerPlanFill(current, linkedOrder);
+    if (hasPositiveFill) {
+      if (linkedOrder) {
+        await this.repository.applyExecutionOrderState({
+          orderId: linkedOrder.id,
+          accountId: linkedOrder.account_id,
+          status: linkedOrder.status,
+          cumulativeFilledQuantity: linkedOrder.filled_quantity,
+          exchangeOrderId: linkedOrder.exchange_order_id,
+          averageFillPrice: linkedOrder.average_fill_price,
+          rejectionReason: linkedOrder.rejection_reason,
+          venueUpdatedAt: linkedOrder.venue_updated_at,
+          followerPlanId: command.follower_plan_id
+        });
+      }
+      await updateOrThrow(this.supabase.from("follower_execution_plans").update({
+        safe_result: {
+          ...(current?.safe_result || {}),
+          postFillCommandFailure: {
+            commandId: command.id,
+            code: classification.code,
+            commandStatus: classification.commandStatus,
+            retryable: false
+          },
+          failSafeFlattened: String(classification.code || "").includes("FAIL_SAFE_FLATTENED") || current?.safe_result?.failSafeFlattened === true
+        }
+      }).eq("id", command.follower_plan_id));
+      return;
+    }
+    await updateOrThrow(this.supabase.from("follower_execution_plans").update({
+      execution_status: status,
+      rejection_reason: sanitizeError(error?.message || "The follower execution command failed."),
+      safe_result: {
+        ...(current?.safe_result || {}),
+        commandId: command.id,
+        code: classification.code,
+        commandStatus: classification.commandStatus,
+        retryable: false
+      }
+    }).eq("id", command.follower_plan_id));
+  }
+
+  async executeStrategyTakeProfitFailSafeRepair(command, fencingToken) {
+    const triggerCode = command.payload?.failSafeProtectionRecovery?.triggerCode || "STRATEGY_TP_ORDER_TERMINATED_AT_VENUE";
+    const trigger = terminalError(triggerCode, "A strategy take-profit could not maintain protective coverage while its owned position could still be open.");
+    const handled = await this.handleTerminalTakeProfitProtectionFailure(command, fencingToken, trigger);
+    return handled === false
+      ? { skipped: true, reason: "TAKE_PROFIT_REPAIR_POSITION_FLAT_OR_STALE" }
+      : handled;
+  }
+
+  async handleTerminalTakeProfitProtectionFailure(command, fencingToken, error) {
+    const forcedRecovery = command.payload?.forceProtectionFailSafeFlatten === true || command.payload?.failSafeProtectionRecovery?.rescueStarted === true;
+    if (command.command_type !== "PLACE_ORDER" || !forcedRecovery && !isTerminalTakeProfitProtectionFailure(error)) return false;
+    if (command.follower_plan_id) {
+      const [plan, intent, connection] = await Promise.all([
+        single(this.supabase.from("follower_execution_plans").select("*").eq("id", command.follower_plan_id)),
+        single(this.supabase.from("group_trade_intents").select("*").eq("id", command.group_intent_id)),
+        single(this.supabase.from("connectivity_connections").select("*").eq("id", command.connection_id))
+      ]);
+      if (String(intent.strategy_action || "").toUpperCase() !== "TAKE_PROFIT") return false;
+      assertIntentIntegrity(intent);
+      const [account, secretReference, mandate] = await Promise.all([
+        single(this.supabase.from("exchange_accounts").select("*").eq("id", connection.account_id)),
+        single(this.supabase.from("broker_secret_references").select("id,status").eq("connection_id", connection.id).eq("status", "ACTIVE")),
+        single(this.supabase.from("group_execution_mandates").select("*").eq("id", plan.mandate_id))
+      ]);
+      const credentials = await this.repository.readBrokerSecret(secretReference.id, "group_take_profit_fail_safe_flatten");
+      const credentialEnvironment = assertWorkerEnvironment(connection, credentials);
+      const marketKind = intent.market_type === "SPOT" ? "spot" : "perpetual";
+      const category = marketKind === "spot" ? "spot" : "linear";
+      const [ticker, venuePositions] = await Promise.all([
+        getBybitTicker({ category, symbol: intent.symbol, executionEnvironment: credentialEnvironment, endpointProfile: credentials.endpointProfile }),
+        marketKind === "spot" ? Promise.resolve([]) : getBybitPositions(credentials, { category, symbol: intent.symbol, includeEmpty: true })
+      ]);
+      const direction = String(intent.strategy_direction || "").toLowerCase();
+      const position = venuePositions.find((item) => Number(item.quantity) > 0 && item.direction === direction);
+      const parentGroupIntentId = String(intent.strategy_execution_policy?.parentGroupIntentId || "");
+      const parentPlan = parentGroupIntentId ? await oneOrNull(this.supabase.from("follower_execution_plans")
+        .select("execution_order_id")
+        .eq("group_intent_id", parentGroupIntentId)
+        .eq("mandate_id", plan.mandate_id)
+        .maybeSingle()) : null;
+      const parentOrder = parentPlan?.execution_order_id ? await oneOrNull(this.supabase.from("execution_orders")
+        .select("id,client_order_id,side,reduce_only,status,filled_quantity")
+        .eq("id", parentPlan.execution_order_id)
+        .maybeSingle()) : null;
+      const expectedEntrySide = direction === "short" ? "sell" : "buy";
+      const matchingEntries = await rows(this.supabase.from("execution_orders")
+        .select("id,status,filled_quantity")
+        .eq("account_id", account.id)
+        .eq("strategy_target_binding_id", intent.strategy_target_binding_id)
+        .eq("symbol", intent.symbol)
+        .eq("side", expectedEntrySide)
+        .eq("reduce_only", false)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(20));
+      const latestEntry = matchingEntries.find(isPotentialPositionGeneration);
+      if (!parentOrder || parentOrder.reduce_only === true || parentOrder.side !== expectedEntrySide
+        || !latestEntry || latestEntry.id !== parentOrder.id
+        || command.payload?.expectedEntryOrderId && command.payload.expectedEntryOrderId !== parentOrder.id) return false;
+      const priorRecovery = command.payload?.failSafeProtectionRecovery;
+      if (!position && !(priorRecovery?.baseClientOrderId && priorRecovery?.rescueStarted === true)) return false;
+      if (position) {
+        const owned = await oneOrNull(this.supabase.from("account_positions")
+          .select("strategy_target_binding_id")
+          .eq("account_id", account.id)
+          .eq("symbol", intent.symbol)
+          .eq("direction", direction)
+          .eq("position_idx", Number(position.positionIdx))
+          .gt("quantity", 0)
+          .maybeSingle());
+        if (!owned) throw reconciliationError("STRATEGY_TP_PROTECTION_OWNERSHIP_RECONCILING", "The live follower position is awaiting immutable ownership before Black Cloud may execute its safety flatten.", 2);
+        if (owned.strategy_target_binding_id !== intent.strategy_target_binding_id) return false;
+      }
+      const recovery = await this.persistStrategyFailSafeRecoveryContext(command, {
+        baseClientOrderId: priorRecovery?.baseClientOrderId || strategyRootClientOrderId(parentOrder?.client_order_id || command.deterministic_client_order_id),
+        positionIdx: Number(position?.positionIdx ?? priorRecovery?.positionIdx ?? 0),
+        direction,
+        symbol: intent.symbol,
+        triggerCode: error?.code || priorRecovery?.triggerCode || "TP_PROTECTION_FAILED",
+        rescueStarted: true,
+        lastKnownQuantity: Number(position?.quantity ?? priorRecovery?.lastKnownQuantity ?? 0)
+      });
+      const referencePrice = Number(ticker.markPrice || ticker.lastPrice);
+      const persistRescueOrder = ({ venueReport, orderDraft, recovered }) => this.persistAcceptedOrder({
+        command,
+        plan,
+        intent: { ...intent, side: orderDraft.side === "sell" ? "SELL" : "BUY", order_type: "MARKET", reduce_only: true, take_profit: null, stop_loss: null, time_in_force: "IOC", strategy_action: "FAIL_SAFE_FLATTEN" },
+        account,
+        allocation: { calculatedEquity: 0, calculatedAvailableMargin: 0, allocationPercent: null, targetNotional: recovery.lastKnownQuantity * referencePrice, roundedQuantity: recovery.lastKnownQuantity, estimatedMargin: 0, leverage: 1 },
+        venueReport,
+        clientOrderId: orderDraft.clientOrderId,
+        linkPlan: false,
+        recovered
+      });
+      return this.ensureStrategyFailSafeFlatten({
+        command, fencingToken, connection, account, credentials, credentialEnvironment, marketKind, category,
+        symbol: intent.symbol, direction, position, positionIdx: recovery.positionIdx, referencePrice,
+        ownerUserId: intent.created_by, orderUserId: plan.follower_user_id, strategyId: intent.strategy_automation_id,
+        bindingId: intent.strategy_target_binding_id, source: "investment-group-cloud",
+        baseClientOrderId: recovery.baseClientOrderId,
+        persistRescueOrder,
+        authorize: async () => {
+          if (String(mandate.status || "").toUpperCase() !== "ACTIVE") throw terminalError("MANDATE_PAUSED", "The Investment Group follower mandate is no longer active.");
+          await this.repository.requireAutomationMandate(connection.id, "group");
+          if (!account.trading_enabled || account.is_read_only) throw terminalError("ACCOUNT_READ_ONLY", "The venue account is not approved for a safety flatten.");
+        },
+        reasons: [{ message: sanitizeError(error?.message || error) }],
+        triggerCode: recovery.triggerCode,
+        flatIsSafe: true
+      });
+    }
+
+    if (String(command.payload?.action || "").toUpperCase() !== "TAKE_PROFIT" || !command.strategy_target_binding_id) return false;
+    const [binding, strategy, connection] = await Promise.all([
+      single(this.supabase.from("strategy_target_bindings").select("*").eq("id", command.strategy_target_binding_id)),
+      single(this.supabase.from("strategy_automation_strategies").select("*").eq("id", command.strategy_automation_id)),
+      single(this.supabase.from("connectivity_connections").select("*").eq("id", command.connection_id))
+    ]);
+    const [account, secretReference] = await Promise.all([
+      single(this.supabase.from("exchange_accounts").select("*").eq("id", connection.account_id)),
+      single(this.supabase.from("broker_secret_references").select("id,status").eq("connection_id", connection.id).eq("status", "ACTIVE"))
+    ]);
+    const credentials = await this.repository.readBrokerSecret(secretReference.id, "strategy_take_profit_fail_safe_flatten");
+    const credentialEnvironment = assertWorkerEnvironment(connection, credentials);
+    const marketKind = binding.market_type === "SPOT" ? "spot" : "perpetual";
+    const category = marketKind === "spot" ? "spot" : "linear";
+    const symbol = String(command.payload.symbol || strategy.symbol || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    const [ticker, venuePositions] = await Promise.all([
+      getBybitTicker({ category, symbol, executionEnvironment: credentialEnvironment, endpointProfile: credentials.endpointProfile }),
+      marketKind === "spot" ? Promise.resolve([]) : getBybitPositions(credentials, { category, symbol, includeEmpty: true })
+    ]);
+    const direction = String(command.payload.direction || "").toLowerCase();
+    const position = venuePositions.find((item) => Number(item.quantity) > 0 && item.direction === direction);
+    const parentCommand = command.payload.parentEntryIdempotencyKey ? await oneOrNull(this.supabase.from("execution_commands")
+      .select("execution_order_id")
+      .eq("idempotency_key", command.payload.parentEntryIdempotencyKey)
+      .eq("strategy_target_binding_id", binding.id)
+      .maybeSingle()) : null;
+    const parentOrder = parentCommand?.execution_order_id ? await oneOrNull(this.supabase.from("execution_orders")
+      .select("id,client_order_id,side,reduce_only,status,filled_quantity,strategy_target_binding_id")
+      .eq("id", parentCommand.execution_order_id)
+      .maybeSingle()) : null;
+    const expectedEntrySide = direction === "short" ? "sell" : "buy";
+    const matchingEntries = await rows(this.supabase.from("execution_orders")
+      .select("id,status,filled_quantity")
+      .eq("account_id", account.id)
+      .eq("strategy_target_binding_id", binding.id)
+      .eq("symbol", symbol)
+      .eq("side", expectedEntrySide)
+      .eq("reduce_only", false)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(20));
+    const latestEntry = matchingEntries.find(isPotentialPositionGeneration);
+    if (!parentOrder || parentOrder.reduce_only === true || parentOrder.side !== expectedEntrySide
+      || parentOrder.strategy_target_binding_id !== binding.id || !latestEntry || latestEntry.id !== parentOrder.id
+      || command.payload?.expectedEntryOrderId && command.payload.expectedEntryOrderId !== parentOrder.id) return false;
+    const priorRecovery = command.payload?.failSafeProtectionRecovery;
+    if (!position && !(priorRecovery?.baseClientOrderId && priorRecovery?.rescueStarted === true)) return false;
+    if (position) {
+      const owned = await oneOrNull(this.supabase.from("account_positions")
+        .select("strategy_target_binding_id")
+        .eq("account_id", account.id)
+        .eq("symbol", symbol)
+        .eq("direction", direction)
+        .eq("position_idx", Number(position.positionIdx))
+        .gt("quantity", 0)
+        .maybeSingle());
+      if (!owned) throw reconciliationError("STRATEGY_TP_PROTECTION_OWNERSHIP_RECONCILING", "The live strategy position is awaiting immutable ownership before Black Cloud may execute its safety flatten.", 2);
+      if (owned.strategy_target_binding_id !== binding.id) return false;
+    }
+    const recovery = await this.persistStrategyFailSafeRecoveryContext(command, {
+      baseClientOrderId: priorRecovery?.baseClientOrderId || strategyRootClientOrderId(parentOrder?.client_order_id || command.deterministic_client_order_id),
+      positionIdx: Number(position?.positionIdx ?? priorRecovery?.positionIdx ?? 0),
+      direction,
+      symbol,
+      triggerCode: error?.code || priorRecovery?.triggerCode || "TP_PROTECTION_FAILED",
+      rescueStarted: true,
+      lastKnownQuantity: Number(position?.quantity ?? priorRecovery?.lastKnownQuantity ?? 0)
+    });
+    const referencePrice = Number(ticker.markPrice || ticker.lastPrice);
+    const source = credentialEnvironment === "DEMO" ? "strategy-automation-demo" : "strategy-automation-mainnet";
+    const persistRescueOrder = ({ venueReport, orderDraft, recovered }) => this.persistStrategyAcceptedOrder({
+      command, binding, strategy, account, orderDraft: { ...orderDraft, quantity: recovery.lastKnownQuantity }, venueReport, estimatedMargin: 0,
+      estimatedNotional: recovery.lastKnownQuantity * referencePrice, recovered, linkCommand: false
+    });
+    return this.ensureStrategyFailSafeFlatten({
+      command, fencingToken, connection, account, credentials, credentialEnvironment, marketKind, category,
+      symbol, direction, position, positionIdx: recovery.positionIdx, referencePrice,
+      ownerUserId: command.user_id, orderUserId: command.user_id, strategyId: strategy.id, bindingId: binding.id, source,
+      baseClientOrderId: recovery.baseClientOrderId,
+      persistRescueOrder,
+      authorize: async () => {
+        await this.repository.requireAutomationMandate(connection.id, "strategy");
+        if (!account.trading_enabled || account.is_read_only) throw terminalError("ACCOUNT_READ_ONLY", "The Bybit account is not trade enabled for a safety flatten.");
+      },
+      reasons: [{ message: sanitizeError(error?.message || error) }],
+      triggerCode: recovery.triggerCode,
+      flatIsSafe: true
+    });
+  }
+
+  async persistStrategyFailSafeRecoveryContext(command, context) {
+    const recovery = {
+      baseClientOrderId: String(context.baseClientOrderId || ""),
+      positionIdx: Number(context.positionIdx || 0),
+      direction: String(context.direction || "").toLowerCase(),
+      symbol: String(context.symbol || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase(),
+      triggerCode: String(context.triggerCode || "TP_PROTECTION_FAILED"),
+      rescueStarted: context.rescueStarted === true,
+      lastKnownQuantity: Number(context.lastKnownQuantity || 0)
+    };
+    const payload = { ...(command.payload || {}), failSafeProtectionRecovery: recovery };
+    await updateOrThrow(this.supabase.from("execution_commands").update({ payload }).eq("id", command.id));
+    command.payload = payload;
+    return recovery;
+  }
+
+  async recordCommandAudits(command, descriptor) {
+    const writes = [this.repository.audit({
+      userId: command.user_id,
+      connectionId: command.connection_id,
+      groupIntentId: command.group_intent_id,
+      followerPlanId: command.follower_plan_id,
+      commandId: command.id,
+      eventType: descriptor.executionEventType,
+      severity: descriptor.severity,
+      purpose: descriptor.purpose,
+      message: descriptor.message,
+      metadata: descriptor.metadata
+    })];
+    if (descriptor.mirrorStrategyAudit !== false && command.strategy_automation_id && command.strategy_target_binding_id) {
+      writes.push(this.mirrorStrategyCommandAudit(command, descriptor));
+    }
+    const outcomes = await Promise.allSettled(writes);
+    for (const outcome of outcomes) {
+      if (outcome.status === "rejected") {
+        console.error(JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: "ERROR",
+          event: "strategy_command_audit_write_failed",
+          nodeId: this.nodeId,
+          error: sanitizeError(outcome.reason?.message || outcome.reason)
+        }));
+      }
+    }
+  }
+
+  async mirrorStrategyCommandAudit(command, descriptor) {
+    const safeMetadata = await this.resolveStrategyCommandAuditMetadata(command, descriptor.metadata);
+    const { error } = await this.supabase.from("strategy_automation_audit_events").insert({
+      owner_user_id: command.user_id,
+      strategy_id: command.strategy_automation_id,
+      binding_id: command.strategy_target_binding_id,
+      event_type: descriptor.strategyEventType,
+      severity: descriptor.severity,
+      message: descriptor.message,
+      safe_metadata: safeMetadata
+    });
+    if (error) throw error;
+  }
+
+  async resolveStrategyCommandAuditMetadata(command, metadata) {
+    const resolved = { ...metadata };
+    const missingAction = !resolved.action || resolved.action === "UNKNOWN";
+    const missingDirection = !resolved.direction || resolved.direction === "unknown";
+    const missingSymbol = !resolved.symbol || resolved.symbol === "UNKNOWN";
+    if ((missingAction || missingDirection || missingSymbol) && command.group_intent_id) {
+      const { data } = await this.supabase.from("group_trade_intents")
+        .select("strategy_action,strategy_direction,symbol")
+        .eq("id", command.group_intent_id)
+        .maybeSingle();
+      if (missingAction && data?.strategy_action) resolved.action = String(data.strategy_action).toUpperCase();
+      if (missingDirection && data?.strategy_direction) resolved.direction = String(data.strategy_direction).toLowerCase();
+      if (missingSymbol && data?.symbol) resolved.symbol = String(data.symbol).replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    }
+    if ((!resolved.symbol || resolved.symbol === "UNKNOWN") && command.strategy_automation_id) {
+      const { data } = await this.supabase.from("strategy_automation_strategies")
+        .select("symbol")
+        .eq("id", command.strategy_automation_id)
+        .maybeSingle();
+      if (data?.symbol) resolved.symbol = String(data.symbol).replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    }
+    return resolved;
   }
 
   async expandGroupIntent(command) {
@@ -387,7 +799,7 @@ export class BlackCloudExecutionWorker {
     const [account, secretReference, positions] = await Promise.all([
       single(this.supabase.from("exchange_accounts").select("*").eq("id", connection.account_id)),
       single(this.supabase.from("broker_secret_references").select("id,status").eq("connection_id", connection.id).eq("status", "ACTIVE")),
-      rows(this.supabase.from("account_positions").select("margin,unrealized_pnl").eq("account_id", connection.account_id))
+      rows(this.supabase.from("account_positions").select("symbol,direction,quantity,position_idx,strategy_target_binding_id,margin,unrealized_pnl").eq("account_id", connection.account_id))
     ]);
 
     const credentials = await this.repository.readBrokerSecret(secretReference.id, "group_order_execution");
@@ -415,12 +827,98 @@ export class BlackCloudExecutionWorker {
     const groupRecoveryPositionIdx = (direction) => venuePositions.some((item) => item.positionIdx === 1 || item.positionIdx === 2)
       ? (direction === "long" ? 1 : 2)
       : 0;
+    const requireProtectedGroupEntryFill = async (venueOrder) => {
+      const finalFill = requireTerminalStrategyEntryFill(venueOrder);
+      const configuredTargets = reserveStrategyTakeProfits(intent.strategy_execution_policy?.takeProfits);
+      if (!configuredTargets.length) return { finalFill, protectionPlan: null };
+      const position = venuePositions.find((item) => Number(item.quantity) > 0 && item.direction === groupDesiredDirection);
+      const persistRescueOrder = async ({ venueReport, orderDraft, recovered }) => {
+        const rescueIntent = {
+          ...intent,
+          side: orderDraft.side === "sell" ? "SELL" : "BUY",
+          order_type: "MARKET",
+          reduce_only: true,
+          take_profit: null,
+          stop_loss: null,
+          time_in_force: "IOC",
+          strategy_action: "FAIL_SAFE_FLATTEN"
+        };
+        const rescueAllocation = {
+          calculatedEquity: Number(wallet.accountMetrics?.equityUsd || 0),
+          calculatedAvailableMargin: Number(wallet.accountMetrics?.availableBalanceUsd || 0),
+          allocationPercent: null,
+          targetNotional: Number(position?.quantity || 0) * referencePrice,
+          roundedQuantity: Number(position?.quantity || finalFill),
+          estimatedMargin: 0,
+          leverage: 1
+        };
+        return this.persistAcceptedOrder({
+          command,
+          plan,
+          intent: rescueIntent,
+          account,
+          allocation: rescueAllocation,
+          venueReport,
+          clientOrderId: orderDraft.clientOrderId,
+          linkPlan: false,
+          recovered
+        });
+      };
+      const failSafeContext = {
+        command,
+        fencingToken,
+        connection,
+        account,
+        credentials,
+        credentialEnvironment,
+        marketKind,
+        category,
+        symbol: intent.symbol,
+        direction: groupDesiredDirection,
+        position,
+        positionIdx: Number(position?.positionIdx ?? venueOrder?.positionIdx ?? groupRecoveryPositionIdx(groupDesiredDirection)),
+        referencePrice,
+        ownerUserId: intent.created_by,
+        orderUserId: plan.follower_user_id,
+        strategyId: intent.strategy_automation_id,
+        bindingId: intent.strategy_target_binding_id,
+        source: "investment-group-cloud",
+        persistRescueOrder,
+        authorize: async () => {
+          if (String(mandate.status || "").toUpperCase() !== "ACTIVE") throw terminalError("MANDATE_PAUSED", "The Investment Group follower mandate is no longer active.");
+          await this.repository.requireAutomationMandate(connection.id, "group");
+          if (!account.trading_enabled || account.is_read_only) throw terminalError("ACCOUNT_READ_ONLY", "The venue account is not approved for a safety flatten.");
+        }
+      };
+      if (!position) return this.ensureStrategyFailSafeFlatten({ ...failSafeContext, waitingForPositionOnly: true });
+      const persistedPosition = positions.find((item) => String(item.symbol || "").toUpperCase() === String(intent.symbol).toUpperCase()
+        && Number(item.position_idx) === Number(position.positionIdx)
+        && item.direction === position.direction);
+      if (!persistedPosition) throw reconciliationError("STRATEGY_POSITION_OWNERSHIP_PENDING", "The follower entry is visible at Bybit but its immutable strategy ownership is still reconciling.", 2);
+      if (persistedPosition.strategy_target_binding_id !== intent.strategy_target_binding_id) throw terminalError("STRATEGY_POSITION_OWNERSHIP_REQUIRED", "Black Cloud refused to safety-flatten a follower position attributed to a different strategy target.");
+      const resolvedTargets = configuredTargets.map((target) => ({
+        ...target,
+        price: resolveStrategyTakeProfitPrice({ ...target, direction: groupDesiredDirection }, position)
+      }));
+      const protectionPlan = planStrategyTakeProfitProtection({
+        entryQuantity: finalFill,
+        remainingQuantity: finalFill,
+        targets: resolvedTargets,
+        venue: instrument
+      });
+      await this.recordStrategyProtectionDecision({ command, plan, protectionPlan, terminalEntryQuantity: finalFill });
+      if (protectionPlan.mode === "UNPROTECTABLE") {
+        return this.ensureStrategyFailSafeFlatten({ ...failSafeContext, reasons: protectionPlan.reasons });
+      }
+      return { finalFill, protectionPlan };
+    };
     const adoptRecoveredGroupOrder = async (venueOrder, clientOrderId, expected, options = {}) => {
       assertRecoveredVenueOrderShape(venueOrder, expected);
       const recoveredIntent = recoveredGroupIntentFromVenue(intent, venueOrder);
       const allocation = recoveredFollowerAllocation(venueOrder, wallet.accountMetrics, referencePrice);
-      const adopted = await this.adoptVenueOrder({ command, plan, intent: recoveredIntent, account, allocation, existingVenueOrder: venueOrder, clientOrderId });
-      if (isTerminalUnfilledVenueOrder(venueOrder) && options.allowTerminalUnfilled !== true) throw terminalError("STRATEGY_ORDER_UNFILLED", "Bybit terminated the recovered follower strategy order without a fill.");
+      const adopted = await this.adoptVenueOrder({ command, plan, intent: recoveredIntent, account, allocation, existingVenueOrder: venueOrder, clientOrderId, linkPlan: options.linkPlan !== false });
+      if (options.requireTerminalEntryFill === true) await requireProtectedGroupEntryFill(venueOrder);
+      else if (isTerminalUnfilledVenueOrder(venueOrder) && options.allowTerminalUnfilled !== true) throw terminalError("STRATEGY_ORDER_UNFILLED", "Bybit terminated the recovered follower strategy order without a fill.");
       return adopted;
     };
     let recoveredGroupReverseClose = null;
@@ -451,7 +949,7 @@ export class BlackCloudExecutionWorker {
             reduceOnly: false,
             positionIdx: groupRecoveryPositionIdx(groupDesiredDirection),
             orderType: "market",
-          });
+          }, { requireTerminalEntryFill: true });
         }
         const closeDirection = groupDesiredDirection === "long" ? "short" : "long";
         const closeStillOpen = venuePositions.some((position) => Number(position.quantity) > 0 && position.direction === closeDirection);
@@ -472,7 +970,7 @@ export class BlackCloudExecutionWorker {
             reduceOnly: true,
             positionIdx: groupRecoveryPositionIdx(closeDirection),
             orderType: "market",
-          }, { allowTerminalUnfilled: true });
+          }, { allowTerminalUnfilled: true, linkPlan: false });
           if (!isTerminalVenueOrder(recoveredCloseLeg)) {
             throw retryableError("STRATEGY_REVERSE_WAITING_FOR_FLAT", "The recovered follower close leg is still settling; the reverse entry remains blocked until Bybit confirms the prior position is flat.", 2);
           }
@@ -497,7 +995,7 @@ export class BlackCloudExecutionWorker {
             reduceOnly: recoveredReduceOnly,
             positionIdx: groupRecoveryPositionIdx(recoveredDirection),
             orderType: "market",
-          });
+          }, { requireTerminalEntryFill: !recoveredReduceOnly });
         }
       }
     }
@@ -507,6 +1005,10 @@ export class BlackCloudExecutionWorker {
     // before that control-plane change must still be adopted into the ledger.
     // Every mutable authorization is re-evaluated here before any new order can
     // be submitted.
+    if (marketKind === "spot" && intent.strategy_action === "SYNC_DIRECTION"
+      && reserveStrategyTakeProfits(intent.strategy_execution_policy?.takeProfits).length) {
+      throw terminalError("STRATEGY_SPOT_TP_PROTECTION_UNSUPPORTED", "Spot strategy entries with partial take-profit protection are blocked before submission until balance-owned protective execution is certified.");
+    }
     this.assertSubmissionClockSafe();
     if (process.env.INVESTMENT_GROUP_EXECUTION_ENABLED !== "true") throw terminalError("INVESTMENT_GROUP_EXECUTION_DISABLED", "Investment Group execution is disabled on this worker.");
     if (process.env.BYBIT_CLOUD_EXECUTION_ENABLED !== "true") throw terminalError("BYBIT_CLOUD_DISABLED", "Bybit Cloud execution is disabled.");
@@ -525,20 +1027,31 @@ export class BlackCloudExecutionWorker {
       const desiredDirection = String(intent.strategy_direction || "").toLowerCase();
       const parentGroupIntentId = String(intent.strategy_execution_policy?.parentGroupIntentId || "");
       if (!parentGroupIntentId) throw terminalError("STRATEGY_GROUP_TAKE_PROFIT_PARENT_REQUIRED", "A follower target without an immutable parent direction intent is unsafe.");
-      const parentPlan = await oneOrNull(this.supabase.from("follower_execution_plans")
-        .select("id,execution_order_id,execution_status")
-        .eq("group_intent_id", parentGroupIntentId)
-        .eq("mandate_id", mandate.id)
-        .maybeSingle());
+      const [parentPlan, parentGroupIntent] = await Promise.all([
+        oneOrNull(this.supabase.from("follower_execution_plans")
+          .select("id,execution_order_id,execution_status,safe_result")
+          .eq("group_intent_id", parentGroupIntentId)
+          .eq("mandate_id", mandate.id)
+          .maybeSingle()),
+        oneOrNull(this.supabase.from("group_trade_intents")
+          .select("id,strategy_execution_policy")
+          .eq("id", parentGroupIntentId)
+          .maybeSingle())
+      ]);
+      if (parentPlan?.safe_result?.failSafeFlattened === true || isTerminalFollowerPlanRejection(parentPlan?.execution_status)) return { skipped: true, reason: "PARENT_GROUP_ENTRY_FAILED" };
       if (!parentPlan?.execution_order_id) {
-        if (["REJECTED", "FAILED", "CANCELLED"].includes(String(parentPlan?.execution_status || "").toUpperCase())) return { skipped: true, reason: "PARENT_GROUP_ENTRY_FAILED" };
         throw retryableError("STRATEGY_GROUP_TAKE_PROFIT_WAITING_FOR_PARENT_ENTRY", "The follower parent entry has not completed; this target will retry.", 2);
       }
       const parentOrder = await oneOrNull(this.supabase.from("execution_orders")
-        .select("id,client_order_id,side,quantity,reduce_only,group_intent_id,mandate_id,strategy_target_binding_id")
+        .select("id,client_order_id,side,quantity,reduce_only,status,filled_quantity,group_intent_id,mandate_id,strategy_target_binding_id")
         .eq("id", parentPlan.execution_order_id)
         .maybeSingle());
       const expectedEntrySide = desiredDirection === "short" ? "sell" : "buy";
+      const parentConflictResolution = String(parentGroupIntent?.strategy_execution_policy?.conflictResolution || "CLOSE_ONLY").toUpperCase();
+      if (parentOrder?.reduce_only === true && parentConflictResolution !== "CLOSE_THEN_REVERSE"
+        && isTerminalInternalOrderStatus(parentOrder.status)) {
+        return { skipped: true, reason: "PARENT_GROUP_ENTRY_UNFILLED" };
+      }
       if (!parentOrder || parentOrder.reduce_only === true || parentOrder.group_intent_id !== parentGroupIntentId || parentOrder.mandate_id !== mandate.id || parentOrder.strategy_target_binding_id !== intent.strategy_target_binding_id || parentOrder.side !== expectedEntrySide) {
         throw retryableError("STRATEGY_GROUP_TAKE_PROFIT_WAITING_FOR_PARENT_ENTRY", "The follower reversal is still on its close leg; this target will not attach to the old position.", 2);
       }
@@ -556,6 +1069,24 @@ export class BlackCloudExecutionWorker {
       if (!latestMatchingEntry || latestMatchingEntry.id !== parentOrder.id) {
         return { skipped: true, reason: "STALE_STRATEGY_TP_GENERATION" };
       }
+      const requestedTargetId = String(intent.strategy_execution_policy?.targetId || "").toUpperCase();
+      const frozenProtectionDecision = parentPlan?.safe_result?.takeProfitProtectionDecision;
+      if (isAggregatedTargetSuppressed(frozenProtectionDecision, requestedTargetId)) {
+        await updateOrThrow(this.supabase.from("follower_execution_plans").update({
+          risk_result: "PASSED",
+          rejection_reason: null,
+          execution_status: "EXECUTED",
+          safe_result: {
+            ...(plan.safe_result || {}),
+            skipped: true,
+            reason: "TP_LADDER_AGGREGATED_TO_TP1",
+            protectionMode: "AGGREGATED_TP1",
+            primaryTargetId: frozenProtectionDecision.primaryTargetId,
+            requestedTargetId
+          }
+        }).eq("id", plan.id).in("execution_status", ["PENDING", "QUEUED"]));
+        return { skipped: true, reason: "TP_LADDER_AGGREGATED_TO_TP1" };
+      }
       const parentVenueOrder = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol: intent.symbol, clientOrderId: parentOrder.client_order_id });
       const originalEntryQuantity = settledStrategyEntryQuantity(parentVenueOrder);
       if (!originalEntryQuantity) {
@@ -564,19 +1095,114 @@ export class BlackCloudExecutionWorker {
         throw retryableError("STRATEGY_GROUP_TAKE_PROFIT_WAITING_FOR_PARENT_FILL", "The follower parent IOC entry has not reached a final cumulative fill.", 2);
       }
       const position = venuePositions.find((item) => Number(item.quantity) > 0 && item.direction === desiredDirection);
-      if (!position) throw retryableError("STRATEGY_GROUP_TAKE_PROFIT_WAITING_FOR_POSITION", "The follower entry is not visible on Bybit yet; the reduce-only take-profit will retry.", 2);
+      if (!position) throw reconciliationError("STRATEGY_GROUP_TAKE_PROFIT_WAITING_FOR_POSITION", "The follower entry is not visible on Bybit yet; the reduce-only take-profit will retry.", 2);
       const owned = await rows(this.supabase.from("account_positions").select("position_idx,direction,strategy_target_binding_id").eq("account_id", account.id).eq("symbol", intent.symbol).gt("quantity", 0));
       const persistedPosition = owned.find((item) => Number(item.position_idx) === Number(position.positionIdx) && item.direction === position.direction);
-      if (!persistedPosition) throw retryableError("STRATEGY_POSITION_OWNERSHIP_PENDING", "The follower entry is visible at Bybit but its immutable strategy ownership is still reconciling.", 2);
+      if (!persistedPosition) throw reconciliationError("STRATEGY_POSITION_OWNERSHIP_PENDING", "The follower entry is visible at Bybit but its immutable strategy ownership is still reconciling.", 2);
       if (persistedPosition.strategy_target_binding_id !== intent.strategy_target_binding_id) throw terminalError("STRATEGY_POSITION_OWNERSHIP_REQUIRED", "Black Cloud refused to protect a follower position attributed to a different strategy target.");
-      const quantityPercent = Math.max(0.1, Math.min(100, Number(intent.strategy_execution_policy?.quantityPercent || 0)));
+      const parentTargets = reserveStrategyTakeProfits(parentGroupIntent?.strategy_execution_policy?.takeProfits).map((target) => ({
+        ...target,
+        price: resolveStrategyTakeProfitPrice({ ...target, direction: desiredDirection }, position)
+      }));
+      const protectionPlan = parentTargets.length
+        ? planStrategyTakeProfitProtection({
+          entryQuantity: originalEntryQuantity,
+          remainingQuantity: originalEntryQuantity,
+          targets: parentTargets,
+          venue: instrument
+        })
+        : null;
+      if (protectionPlan?.mode === "UNPROTECTABLE") {
+        const persistRescueOrder = ({ venueReport, orderDraft, recovered }) => this.persistAcceptedOrder({
+          command,
+          plan,
+          intent: {
+            ...intent,
+            side: orderDraft.side === "sell" ? "SELL" : "BUY",
+            order_type: "MARKET",
+            reduce_only: true,
+            take_profit: null,
+            stop_loss: null,
+            time_in_force: "IOC",
+            strategy_action: "FAIL_SAFE_FLATTEN"
+          },
+          account,
+          allocation: {
+            calculatedEquity: Number(wallet.accountMetrics?.equityUsd || 0),
+            calculatedAvailableMargin: Number(wallet.accountMetrics?.availableBalanceUsd || 0),
+            allocationPercent: null,
+            targetNotional: Number(position.quantity) * referencePrice,
+            roundedQuantity: Number(position.quantity || originalEntryQuantity),
+            estimatedMargin: 0,
+            leverage: 1
+          },
+          venueReport,
+          clientOrderId: orderDraft.clientOrderId,
+          linkPlan: false,
+          recovered
+        });
+        return this.ensureStrategyFailSafeFlatten({
+          command,
+          fencingToken,
+          connection,
+          account,
+          credentials,
+          credentialEnvironment,
+          marketKind,
+          category,
+          symbol: intent.symbol,
+          direction: desiredDirection,
+          position,
+          positionIdx: position.positionIdx,
+          referencePrice,
+          ownerUserId: intent.created_by,
+          orderUserId: plan.follower_user_id,
+          strategyId: intent.strategy_automation_id,
+          bindingId: intent.strategy_target_binding_id,
+          source: "investment-group-cloud",
+          baseClientOrderId: strategyRootClientOrderId(parentOrder.client_order_id),
+          persistRescueOrder,
+          authorize: async () => {
+            if (String(mandate.status || "").toUpperCase() !== "ACTIVE") throw terminalError("MANDATE_PAUSED", "The Investment Group follower mandate is no longer active.");
+            await this.repository.requireAutomationMandate(connection.id, "group");
+            if (!account.trading_enabled || account.is_read_only) throw terminalError("ACCOUNT_READ_ONLY", "The venue account is not approved for a safety flatten.");
+          },
+          reasons: protectionPlan.reasons
+        });
+      }
+      if (protectionPlan?.mode === "AGGREGATED_TP1" && requestedTargetId !== protectionPlan.primaryTargetId) {
+        await updateOrThrow(this.supabase.from("follower_execution_plans").update({
+          risk_result: "PASSED",
+          rejection_reason: null,
+          execution_status: "EXECUTED",
+          safe_result: {
+            ...(plan.safe_result || {}),
+            skipped: true,
+            reason: "TP_LADDER_AGGREGATED_TO_TP1",
+            protectionMode: "AGGREGATED_TP1",
+            primaryTargetId: protectionPlan.primaryTargetId,
+            requestedTargetId
+          }
+        }).eq("id", plan.id).in("execution_status", ["PENDING", "QUEUED"]));
+        return { skipped: true, reason: "TP_LADDER_AGGREGATED_TO_TP1" };
+      }
+      const effectiveTarget = protectionPlan?.mode === "AGGREGATED_TP1"
+        ? protectionPlan.target
+        : intent.strategy_execution_policy;
+      const quantityPercent = protectionPlan?.mode === "AGGREGATED_TP1"
+        ? 100
+        : Math.max(0.1, Math.min(100, Number(intent.strategy_execution_policy?.quantityPercent || 0)));
+      executionIntent.strategy_execution_policy = {
+        ...(intent.strategy_execution_policy || {}),
+        takeProfitProtectionMode: protectionPlan?.mode || "LEGACY_SINGLE_TARGET"
+      };
       executionIntent.side = position.direction === "long" ? "SELL" : "BUY";
       executionIntent.reduce_only = true;
       executionIntent.take_profit = null;
       executionIntent.stop_loss = null;
       executionIntent.limit_price = resolveStrategyTakeProfitPrice({
-        ...intent.strategy_execution_policy,
-        targetPrice: intent.limit_price,
+        ...effectiveTarget,
+        targetPrice: effectiveTarget?.price || intent.limit_price,
         direction: desiredDirection,
       }, position);
       if (!executionIntent.limit_price) throw terminalError("STRATEGY_TAKE_PROFIT_PRICE_INVALID", "The strategy take-profit formula did not resolve to a positive venue price.");
@@ -669,6 +1295,9 @@ export class BlackCloudExecutionWorker {
       metadata: { symbol: intent.symbol, orderType: intent.order_type, reduceOnly: executionIntent.reduce_only }
     });
 
+    const strategyEntryOrder = Boolean(intent.strategy_target_binding_id)
+      && intent.strategy_action === "SYNC_DIRECTION"
+      && executionIntent.reduce_only !== true;
     const clientOrderId = strategyReverseClose
       ? deterministicStrategyLegId(command.deterministic_client_order_id, groupReverseCloseLeg)
       : strategyReverseIntent
@@ -680,11 +1309,25 @@ export class BlackCloudExecutionWorker {
       clientOrderId
     });
     if (existingVenueOrder) {
-      const adopted = await this.adoptVenueOrder({ command, plan, intent: executionIntent, account, allocation, existingVenueOrder, clientOrderId });
-      if (isTerminalUnfilledVenueOrder(existingVenueOrder)) throw terminalError("STRATEGY_ENTRY_UNFILLED", "Bybit terminated the recovered strategy order without a fill.");
+      const adopted = await this.adoptVenueOrder({ command, plan, intent: executionIntent, account, allocation, existingVenueOrder, clientOrderId, linkPlan: !strategyReverseClose });
+      if (strategyEntryOrder) await requireProtectedGroupEntryFill(existingVenueOrder);
+      else if (isTerminalUnfilledVenueOrder(existingVenueOrder)) throw terminalError("STRATEGY_ORDER_UNFILLED", "Bybit terminated the recovered strategy order without a fill.");
       if (strategyReverseClose) throw retryableError("STRATEGY_REVERSE_WAITING_FOR_FLAT", "The existing follower close leg was adopted; waiting for Bybit to confirm the position is flat before entering the reverse leg.", 2);
       return adopted;
     }
+    await this.blockAcknowledgedOrderResubmission({
+      executionOrderId: command.execution_order_id,
+      followerPlanExecutionOrderId: plan.execution_order_id,
+      commandId: command.id,
+      followerPlanId: strategyReverseClose ? null : plan.id,
+      clientOrderId,
+      account,
+      symbol: intent.symbol,
+      orderUserId: plan.follower_user_id,
+      bindingId: intent.strategy_target_binding_id || null,
+      groupIntentId: intent.id,
+      mandateId: plan.mandate_id
+    });
 
     const orderDraft = {
       symbol: intent.symbol,
@@ -732,14 +1375,18 @@ export class BlackCloudExecutionWorker {
       if (!isAmbiguousTransportError(error)) throw error;
       const recovered = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol: intent.symbol, clientOrderId }).catch(() => null);
       if (recovered) {
-        const adopted = await this.adoptVenueOrder({ command, plan, intent: executionIntent, account, allocation, existingVenueOrder: recovered, clientOrderId });
+        const adopted = await this.adoptVenueOrder({ command, plan, intent: executionIntent, account, allocation, existingVenueOrder: recovered, clientOrderId, linkPlan: !strategyReverseClose });
+        if (strategyEntryOrder) await requireProtectedGroupEntryFill(recovered);
+        else if (isTerminalUnfilledVenueOrder(recovered)) throw terminalError("STRATEGY_ORDER_UNFILLED", "Bybit terminated the recovered follower strategy order without a fill.");
         if (strategyReverseClose) throw retryableError("GROUP_REVERSE_WAITING_FOR_FLAT", "The close leg was recovered; waiting for Bybit to confirm the attributed position is flat before entering the reverse leg.", 2);
         return adopted;
       }
       throw ambiguousError("Bybit submission timed out before acknowledgement. Reconciliation will query the deterministic client order ID.");
     }
 
-    const persisted = await this.persistAcceptedOrder({ command, plan, intent: executionIntent, account, allocation, venueReport, clientOrderId });
+    const persisted = await this.persistAcceptedOrder({ command, plan, intent: executionIntent, account, allocation, venueReport, clientOrderId, linkPlan: !strategyReverseClose });
+    if (strategyEntryOrder) await requireProtectedGroupEntryFill(venueReport);
+    else if (isTerminalUnfilledVenueOrder(venueReport)) throw terminalError("STRATEGY_ORDER_UNFILLED", "Bybit terminated the follower strategy order without a fill.");
     if (strategyReverseClose) throw retryableError("STRATEGY_REVERSE_WAITING_FOR_FLAT", "The follower close leg was acknowledged; waiting for Bybit to confirm the position is flat before entering the reverse leg.", 2);
     return persisted;
   }
@@ -801,6 +1448,66 @@ export class BlackCloudExecutionWorker {
     const recoveryPositionIdx = (direction) => venuePositions.some((item) => item.positionIdx === 1 || item.positionIdx === 2)
       ? (direction === "long" ? 1 : 2)
       : 0;
+    const requireProtectedEntryFill = async (venueOrder) => {
+      const finalFill = requireTerminalStrategyEntryFill(venueOrder);
+      const configuredTargets = reserveStrategyTakeProfits(payload.takeProfits);
+      if (!configuredTargets.length) return { finalFill, protectionPlan: null };
+      const position = openPositions.find((item) => item.direction === desiredDirection);
+      const persistRescueOrder = ({ venueReport, orderDraft, recovered }) => this.persistStrategyAcceptedOrder({
+        command,
+        binding,
+        strategy,
+        account,
+        orderDraft: { ...orderDraft, quantity: Number(position?.quantity || finalFill) },
+        venueReport,
+        estimatedMargin: 0,
+        estimatedNotional: Number(position?.quantity || 0) * referencePrice,
+        recovered,
+        linkCommand: false
+      });
+      const failSafeContext = {
+        command,
+        fencingToken,
+        connection,
+        account,
+        credentials,
+        credentialEnvironment,
+        marketKind,
+        category,
+        symbol,
+        direction: desiredDirection,
+        position,
+        positionIdx: Number(position?.positionIdx ?? venueOrder?.positionIdx ?? recoveryPositionIdx(desiredDirection)),
+        referencePrice,
+        ownerUserId: command.user_id,
+        strategyId: strategy.id,
+        bindingId: binding.id,
+        persistRescueOrder,
+        authorize: async () => {
+          await this.repository.requireAutomationMandate(connection.id, "strategy");
+          if (!account.trading_enabled || account.is_read_only) throw terminalError("ACCOUNT_READ_ONLY", "The Bybit account is not trade enabled for a safety flatten.");
+        }
+      };
+      if (!position) return this.ensureStrategyFailSafeFlatten({ ...failSafeContext, waitingForPositionOnly: true });
+      const persistedPosition = persistedPositions.find((item) => Number(item.position_idx) === Number(position.positionIdx) && item.direction === position.direction);
+      if (!persistedPosition) throw reconciliationError("STRATEGY_POSITION_OWNERSHIP_PENDING", "The entry is visible at Bybit but its immutable strategy ownership is still reconciling.", 2);
+      if (persistedPosition.strategy_target_binding_id !== binding.id) throw terminalError("STRATEGY_POSITION_OWNERSHIP_REQUIRED", "Black Cloud refused to safety-flatten a Bybit position attributed to a different strategy target.");
+      const resolvedTargets = configuredTargets.map((target) => ({
+        ...target,
+        price: resolveStrategyTakeProfitPrice({ ...target, direction: desiredDirection }, position)
+      }));
+      const protectionPlan = planStrategyTakeProfitProtection({
+        entryQuantity: finalFill,
+        remainingQuantity: finalFill,
+        targets: resolvedTargets,
+        venue: instrument
+      });
+      await this.recordStrategyProtectionDecision({ command, protectionPlan, terminalEntryQuantity: finalFill });
+      if (protectionPlan.mode === "UNPROTECTABLE") {
+        return this.ensureStrategyFailSafeFlatten({ ...failSafeContext, reasons: protectionPlan.reasons });
+      }
+      return { finalFill, protectionPlan };
+    };
     const adoptRecoveredOrder = async (venueOrder, clientOrderId, expected, options = {}) => {
       assertRecoveredVenueOrderShape(venueOrder, expected);
       const orderDraft = recoveredStrategyOrderDraft(venueOrder, {
@@ -823,7 +1530,8 @@ export class BlackCloudExecutionWorker {
         estimatedNotional: recoveredNotional,
         recovered: true,
       });
-      if (isTerminalUnfilledVenueOrder(venueOrder) && options.allowTerminalUnfilled !== true) throw terminalError("STRATEGY_ORDER_UNFILLED", "Bybit terminated the recovered strategy order without a fill.");
+      if (options.requireTerminalEntryFill === true) await requireProtectedEntryFill(venueOrder);
+      else if (isTerminalUnfilledVenueOrder(venueOrder) && options.allowTerminalUnfilled !== true) throw terminalError("STRATEGY_ORDER_UNFILLED", "Bybit terminated the recovered strategy order without a fill.");
       return persisted;
     };
 
@@ -840,7 +1548,7 @@ export class BlackCloudExecutionWorker {
           reduceOnly: false,
           positionIdx: recoveryPositionIdx(desiredDirection),
           orderType: "market",
-        });
+        }, { requireTerminalEntryFill: true });
       }
       const closeDirection = String(payload.positionDirection || oppositeDirectionPositions[0]?.direction || "").toLowerCase();
       const closeStillOpen = openPositions.some((position) => position.direction === closeDirection && Number(position.quantity) > 0);
@@ -888,13 +1596,17 @@ export class BlackCloudExecutionWorker {
           reduceOnly: isReduce,
           positionIdx: recoveryPositionIdx(expectedDirection),
           orderType: requestedAction === "TAKE_PROFIT" ? "limit" : "market",
-        });
+        }, { requireTerminalEntryFill: !isReduce && requestedAction === "ENTRY" });
       }
     }
 
     // Everything above this line is deterministic reconciliation only. Once no
     // matching venue order exists, every mutable authorization and risk gate is
     // re-evaluated before a new Bybit side effect may be created.
+    if (marketKind === "spot" && ["ENTRY", "REVERSE"].includes(requestedAction)
+      && reserveStrategyTakeProfits(payload.takeProfits).length) {
+      throw terminalError("STRATEGY_SPOT_TP_PROTECTION_UNSUPPORTED", "Spot strategy entries with partial take-profit protection are blocked before submission until balance-owned protective execution is certified.");
+    }
     this.assertSubmissionClockSafe();
     if (process.env.BYBIT_CLOUD_EXECUTION_ENABLED !== "true" || process.env.BLACK_CLOUD_GLOBAL_EXECUTION_KILL_SWITCH === "true") {
       throw terminalError("BYBIT_STRATEGY_DISABLED", "Bybit strategy execution is disabled.");
@@ -942,15 +1654,16 @@ export class BlackCloudExecutionWorker {
     let estimatedMargin = 0;
     let estimatedNotional = 0;
     let takeProfitLimitPrice = null;
+    let takeProfitProtectionMode = null;
     if (takeProfitOrder) {
       const parentEntryIdempotencyKey = String(payload.parentEntryIdempotencyKey || "");
       if (!parentEntryIdempotencyKey) throw terminalError("STRATEGY_TAKE_PROFIT_PARENT_REQUIRED", "A strategy target without an immutable parent entry is unsafe and cannot be submitted.");
       const parentCommand = await oneOrNull(this.supabase.from("execution_commands")
-        .select("id,status,execution_order_id,created_at")
+        .select("id,status,execution_order_id,payload,created_at")
         .eq("idempotency_key", parentEntryIdempotencyKey)
         .eq("strategy_target_binding_id", binding.id)
         .maybeSingle());
-      if (parentCommand && ["FAILED", "REJECTED", "CANCELLED"].includes(String(parentCommand.status || "").toUpperCase())) {
+      if (parentCommand && ["FAILED", "REJECTED", "CANCELLED", "DEAD_LETTER"].includes(String(parentCommand.status || "").toUpperCase())) {
         return { skipped: true, reason: "PARENT_ENTRY_FAILED" };
       }
       if (!parentCommand || parentCommand.status !== "SUCCEEDED" || !parentCommand.execution_order_id) {
@@ -978,6 +1691,10 @@ export class BlackCloudExecutionWorker {
       if (!latestMatchingEntry || latestMatchingEntry.id !== parentOrder.id) {
         return { skipped: true, reason: "STALE_STRATEGY_TP_GENERATION" };
       }
+      const requestedTargetId = String(payload.targetId || "").toUpperCase();
+      if (isAggregatedTargetSuppressed(parentCommand.payload?.takeProfitProtectionDecision, requestedTargetId)) {
+        return { skipped: true, reason: "TP_LADDER_AGGREGATED_TO_TP1" };
+      }
       const parentVenueOrder = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol, clientOrderId: parentOrder.client_order_id });
       const originalEntryQuantity = settledStrategyEntryQuantity(parentVenueOrder);
       if (!originalEntryQuantity) {
@@ -986,16 +1703,76 @@ export class BlackCloudExecutionWorker {
         throw retryableError("STRATEGY_TAKE_PROFIT_WAITING_FOR_PARENT_FILL", "The parent IOC entry has not reached a final cumulative fill; target sizing will retry without using a reduced remainder.", 2);
       }
       const position = openPositions.find((item) => item.direction === desiredDirection);
-      if (!position) throw retryableError("STRATEGY_TAKE_PROFIT_WAITING_FOR_POSITION", "The entry is not visible on Bybit yet; the reduce-only take-profit will retry after reconciliation.", 2);
+      if (!position) throw reconciliationError("STRATEGY_TAKE_PROFIT_WAITING_FOR_POSITION", "The entry is not visible on Bybit yet; the reduce-only take-profit will retry after reconciliation.", 2);
       const persistedPosition = persistedPositions.find((item) => Number(item.position_idx) === Number(position.positionIdx) && item.direction === position.direction);
-      if (!persistedPosition) throw retryableError("STRATEGY_POSITION_OWNERSHIP_PENDING", "The entry is visible at Bybit but its immutable strategy ownership is still reconciling.", 2);
+      if (!persistedPosition) throw reconciliationError("STRATEGY_POSITION_OWNERSHIP_PENDING", "The entry is visible at Bybit but its immutable strategy ownership is still reconciling.", 2);
       if (persistedPosition.strategy_target_binding_id !== binding.id) throw terminalError("STRATEGY_POSITION_OWNERSHIP_REQUIRED", "Black Cloud refused to protect a Bybit position attributed to a different strategy target.");
-      const percentage = Math.max(0.1, Math.min(100, Number(payload.quantityPercent || 0)));
+      const parentTargets = reserveStrategyTakeProfits(parentCommand.payload?.takeProfits).map((target) => ({
+        ...target,
+        price: resolveStrategyTakeProfitPrice({ ...target, direction: desiredDirection }, position)
+      }));
+      const protectionPlan = parentTargets.length
+        ? planStrategyTakeProfitProtection({
+          entryQuantity: originalEntryQuantity,
+          remainingQuantity: originalEntryQuantity,
+          targets: parentTargets,
+          venue: instrument
+        })
+        : null;
+      if (protectionPlan?.mode === "UNPROTECTABLE") {
+        const persistRescueOrder = ({ venueReport, orderDraft, recovered }) => this.persistStrategyAcceptedOrder({
+          command,
+          binding,
+          strategy,
+          account,
+          orderDraft: { ...orderDraft, quantity: Number(position.quantity || originalEntryQuantity) },
+          venueReport,
+          estimatedMargin: 0,
+          estimatedNotional: Number(position.quantity) * referencePrice,
+          recovered,
+          linkCommand: false
+        });
+        return this.ensureStrategyFailSafeFlatten({
+          command,
+          fencingToken,
+          connection,
+          account,
+          credentials,
+          credentialEnvironment,
+          marketKind,
+          category,
+          symbol,
+          direction: desiredDirection,
+          position,
+          positionIdx: position.positionIdx,
+          referencePrice,
+          ownerUserId: command.user_id,
+          orderUserId: command.user_id,
+          strategyId: strategy.id,
+          bindingId: binding.id,
+          source,
+          baseClientOrderId: strategyRootClientOrderId(parentOrder.client_order_id),
+          persistRescueOrder,
+          authorize: async () => {
+            await this.repository.requireAutomationMandate(connection.id, "strategy");
+            if (!account.trading_enabled || account.is_read_only) throw terminalError("ACCOUNT_READ_ONLY", "The Bybit account is not trade enabled for a safety flatten.");
+          },
+          reasons: protectionPlan.reasons
+        });
+      }
+      if (protectionPlan?.mode === "AGGREGATED_TP1" && requestedTargetId !== protectionPlan.primaryTargetId) {
+        return { skipped: true, reason: "TP_LADDER_AGGREGATED_TO_TP1" };
+      }
+      const effectiveTarget = protectionPlan?.mode === "AGGREGATED_TP1" ? protectionPlan.target : payload;
+      takeProfitProtectionMode = protectionPlan?.mode || "LEGACY_SINGLE_TARGET";
+      const percentage = protectionPlan?.mode === "AGGREGATED_TP1"
+        ? 100
+        : Math.max(0.1, Math.min(100, Number(payload.quantityPercent || 0)));
       side = position.direction === "long" ? "sell" : "buy";
       quantity = calculateStrategyTakeProfitQuantity(originalEntryQuantity, percentage, position.quantity);
       reduceOnly = true;
       positionIdx = position.positionIdx;
-      takeProfitLimitPrice = resolveStrategyTakeProfitPrice(payload, position);
+      takeProfitLimitPrice = resolveStrategyTakeProfitPrice(effectiveTarget, position);
       if (!takeProfitLimitPrice) throw terminalError("STRATEGY_TAKE_PROFIT_PRICE_INVALID", "The strategy take-profit formula did not resolve to a positive venue price.");
       estimatedNotional = Math.abs(quantity * referencePrice);
       estimatedMargin = 0;
@@ -1091,6 +1868,7 @@ export class BlackCloudExecutionWorker {
       clientOrderId: strategyExecutionClientOrderId,
       source
     };
+    if (takeProfitProtectionMode) orderDraft.takeProfitProtectionMode = takeProfitProtectionMode;
     if (!reduceOnly && orderDraft.orderType === "market" && Number(payload.slippageTicks) > 0) {
       orderDraft.slippageToleranceTicks = Math.max(1, Math.min(10_000, Math.floor(Number(payload.slippageTicks))));
     }
@@ -1103,10 +1881,20 @@ export class BlackCloudExecutionWorker {
     const existingVenueOrder = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol, clientOrderId: orderDraft.clientOrderId });
     if (existingVenueOrder) {
       const persisted = await this.persistStrategyAcceptedOrder({ command, binding, strategy, account, orderDraft, venueReport: existingVenueOrder, estimatedMargin, estimatedNotional, recovered: true });
-      if (isTerminalUnfilledVenueOrder(existingVenueOrder)) throw terminalError("STRATEGY_ENTRY_UNFILLED", "Bybit terminated the recovered strategy order without a fill.");
+      if (!orderDraft.reduceOnly && orderDraft.orderType === "market") await requireProtectedEntryFill(existingVenueOrder);
+      else if (isTerminalUnfilledVenueOrder(existingVenueOrder)) throw terminalError("STRATEGY_ORDER_UNFILLED", "Bybit terminated the recovered strategy order without a fill.");
       if (reversingClose) throw retryableError("STRATEGY_REVERSE_WAITING_FOR_FLAT", "The close leg was acknowledged; waiting for Bybit to confirm the position is flat before entering the reverse leg.", 2);
       return persisted;
     }
+    await this.blockAcknowledgedOrderResubmission({
+      executionOrderId: command.execution_order_id,
+      commandId: command.id,
+      clientOrderId: orderDraft.clientOrderId,
+      account,
+      symbol,
+      orderUserId: command.user_id,
+      bindingId: binding.id
+    });
 
     let venueReport;
     try {
@@ -1121,22 +1909,278 @@ export class BlackCloudExecutionWorker {
       const recovered = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol, clientOrderId: orderDraft.clientOrderId }).catch(() => null);
       if (recovered) {
         const persisted = await this.persistStrategyAcceptedOrder({ command, binding, strategy, account, orderDraft, venueReport: recovered, estimatedMargin, estimatedNotional, recovered: true });
+        if (!orderDraft.reduceOnly && orderDraft.orderType === "market") await requireProtectedEntryFill(recovered);
+        else if (isTerminalUnfilledVenueOrder(recovered)) throw terminalError("STRATEGY_ORDER_UNFILLED", "Bybit terminated the recovered strategy order without a fill.");
         if (reversingClose) throw retryableError("STRATEGY_REVERSE_WAITING_FOR_FLAT", "The close leg was recovered; waiting for Bybit to confirm the position is flat before entering the reverse leg.", 2);
         return persisted;
       }
       throw ambiguousError("Bybit submission timed out before acknowledgement. Reconciliation will query the deterministic client order ID.");
     }
     const persisted = await this.persistStrategyAcceptedOrder({ command, binding, strategy, account, orderDraft, venueReport, estimatedMargin, estimatedNotional, recovered: false });
+    if (!orderDraft.reduceOnly && orderDraft.orderType === "market") await requireProtectedEntryFill(venueReport);
+    else if (isTerminalUnfilledVenueOrder(venueReport)) throw terminalError("STRATEGY_ORDER_UNFILLED", "Bybit terminated the strategy order without a fill.");
     if (reversingClose) throw retryableError("STRATEGY_REVERSE_WAITING_FOR_FLAT", "The close leg was acknowledged; waiting for Bybit to confirm the position is flat before entering the reverse leg.", 2);
     return persisted;
   }
 
-  async persistStrategyAcceptedOrder({ command, binding, strategy, account, orderDraft, venueReport, estimatedMargin, estimatedNotional, recovered }) {
+  async blockAcknowledgedOrderResubmission({ executionOrderId, followerPlanExecutionOrderId = null, commandId = null, followerPlanId = null, clientOrderId, account, symbol, orderUserId, bindingId = null, groupIntentId = null, mandateId = null }) {
+    const candidateOrder = await oneOrNull(this.supabase.from("execution_orders")
+      .select("id,user_id,account_id,client_order_id,symbol,strategy_target_binding_id,group_intent_id,mandate_id")
+      .eq("user_id", orderUserId)
+      .eq("account_id", account.id)
+      .eq("client_order_id", clientOrderId)
+      .maybeSingle());
+    if (candidateOrder) {
+      assertAcknowledgedOrderOwnership(candidateOrder, { account, symbol, orderUserId, bindingId, groupIntentId, mandateId });
+      if (commandId && executionOrderId !== candidateOrder.id) {
+        let commandLinkUpdate = this.supabase.from("execution_commands").update({ execution_order_id: candidateOrder.id }).eq("id", commandId);
+        commandLinkUpdate = executionOrderId ? commandLinkUpdate.eq("execution_order_id", executionOrderId) : commandLinkUpdate.is("execution_order_id", null);
+        await updateOrThrow(commandLinkUpdate);
+        const repairedCommand = await oneOrNull(this.supabase.from("execution_commands").select("execution_order_id").eq("id", commandId).maybeSingle());
+        if (repairedCommand?.execution_order_id !== candidateOrder.id) {
+          throw reconciliationError("STRATEGY_ACKNOWLEDGED_ORDER_COMMAND_LINK_REPAIR_PENDING", "The durable order acknowledgement exists, but the command link changed concurrently. Black Cloud will reconcile the immutable link without resubmitting.", 2);
+        }
+      }
+      if (followerPlanId && followerPlanExecutionOrderId !== candidateOrder.id) {
+        let planLinkUpdate = this.supabase.from("follower_execution_plans").update({ execution_order_id: candidateOrder.id }).eq("id", followerPlanId);
+        planLinkUpdate = followerPlanExecutionOrderId ? planLinkUpdate.eq("execution_order_id", followerPlanExecutionOrderId) : planLinkUpdate.is("execution_order_id", null);
+        await updateOrThrow(planLinkUpdate);
+        const repairedPlan = await oneOrNull(this.supabase.from("follower_execution_plans").select("execution_order_id").eq("id", followerPlanId).maybeSingle());
+        if (repairedPlan?.execution_order_id !== candidateOrder.id) {
+          throw reconciliationError("STRATEGY_ACKNOWLEDGED_ORDER_PLAN_LINK_REPAIR_PENDING", "The durable follower entry acknowledgement exists, but its plan link changed concurrently. Black Cloud will reconcile the immutable link without resubmitting.", 2);
+        }
+      }
+      throw reconciliationError("STRATEGY_ACKNOWLEDGED_ORDER_RECONCILING", "Black Cloud found a durable OMS acknowledgement for the deterministic order identity while the temporary Bybit lookup returned no order. Resubmission is blocked and any missing parent link was restored.", 2);
+    }
+    const linkedOrderId = executionOrderId || followerPlanExecutionOrderId;
+    if (!linkedOrderId) return;
+    const linkedOrder = await oneOrNull(this.supabase.from("execution_orders")
+      .select("id,user_id,account_id,client_order_id,symbol,strategy_target_binding_id,group_intent_id,mandate_id")
+      .eq("id", linkedOrderId)
+      .maybeSingle());
+    if (!linkedOrder) {
+      throw reconciliationError("STRATEGY_ACKNOWLEDGED_ORDER_LINK_MISSING", "A durable order acknowledgement link exists, but its OMS order row is unavailable. Black Cloud will reconcile without resubmitting.", 2);
+    }
+    if (String(linkedOrder.client_order_id || "") !== String(clientOrderId || "")) return;
+    assertAcknowledgedOrderOwnership(linkedOrder, { account, symbol, orderUserId, bindingId, groupIntentId, mandateId });
+    throw reconciliationError("STRATEGY_ACKNOWLEDGED_ORDER_RECONCILING", "The venue lookup temporarily returned no order after Black Cloud durably recorded its acknowledgement. Resubmission is blocked while deterministic reconciliation continues.", 2);
+  }
+
+  async recordStrategyProtectionDecision({ command, plan = null, protectionPlan, terminalEntryQuantity }) {
+    const decision = {
+      mode: protectionPlan?.mode || "NONE",
+      primaryTargetId: protectionPlan?.primaryTargetId || null,
+      terminalEntryQuantity: Number(terminalEntryQuantity || 0),
+      basis: "TERMINAL_ENTRY_FILL"
+    };
+    if (plan?.id) {
+      const current = await oneOrNull(this.supabase.from("follower_execution_plans").select("safe_result").eq("id", plan.id).maybeSingle());
+      await updateOrThrow(this.supabase.from("follower_execution_plans").update({
+        safe_result: { ...(current?.safe_result || {}), takeProfitProtectionDecision: decision }
+      }).eq("id", plan.id));
+      return decision;
+    }
+    await updateOrThrow(this.supabase.from("execution_commands").update({
+      payload: { ...(command.payload || {}), takeProfitProtectionDecision: decision }
+    }).eq("id", command.id));
+    return decision;
+  }
+
+  async ensureStrategyFailSafeFlatten({
+    command,
+    fencingToken,
+    connection,
+    account,
+    credentials,
+    credentialEnvironment,
+    marketKind,
+    category,
+    symbol,
+    direction,
+    position,
+    positionIdx,
+    referencePrice,
+    ownerUserId,
+    orderUserId = ownerUserId,
+    strategyId,
+    bindingId,
+    source = "strategy-automation-mainnet",
+    baseClientOrderId = command.deterministic_client_order_id,
+    persistRescueOrder,
+    authorize,
+    reasons = [],
+    waitingForPositionOnly = false,
+    triggerCode = "STRATEGY_PARTIAL_FILL_UNPROTECTABLE",
+    flatIsSafe = false
+  }) {
+    if (marketKind === "spot") throw terminalError("STRATEGY_FAIL_SAFE_FLATTEN_UNSUPPORTED", "The certified zero-quantity close-all contract is available only for Bybit derivatives positions.");
+    const positionOpen = Boolean(position && Number(position.quantity) > 0);
+    let terminalRescueSeen = false;
+    for (let legNumber = 1; legNumber <= MAX_STRATEGY_REVERSAL_CLOSE_LEGS; legNumber += 1) {
+      const leg = legNumber === 1 ? "f" : `f${legNumber}`;
+      const clientOrderId = deterministicStrategyLegId(baseClientOrderId, leg);
+      const expected = {
+        category,
+        symbol,
+        side: direction === "long" ? "sell" : "buy",
+        reduceOnly: true,
+        closeOnTrigger: true,
+        positionIdx: Number(positionIdx),
+        orderType: "market"
+      };
+      const orderDraft = {
+        accountId: account.id,
+        symbol,
+        marketKind,
+        side: expected.side,
+        orderType: "market",
+        quantity: 0,
+        quantityMode: "quantity",
+        referencePrice,
+        leverage: 1,
+        marginMode: "cross",
+        reduceOnly: true,
+        closeOnTrigger: true,
+        positionIdx: expected.positionIdx,
+        timeInForce: "ioc",
+        clientOrderId,
+        source,
+        failSafeFlatten: true
+      };
+      const recovered = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol, clientOrderId }).catch((error) => {
+        throw reconciliationError("STRATEGY_FAIL_SAFE_FLATTEN_LOOKUP_RETRY", sanitizeError(error?.message || "The safety-flatten order lookup failed temporarily."), 2);
+      });
+      if (recovered) {
+        try {
+          assertRecoveredVenueOrderShape(recovered, expected);
+        } catch (error) {
+          throw reconciliationError("STRATEGY_FAIL_SAFE_FLATTEN_ORDER_MISMATCH", sanitizeError(error?.message || error), 30);
+        }
+        const persisted = await persistRescueOrder({ venueReport: recovered, orderDraft, recovered: true });
+        if (persisted.created) await this.emitStrategyFailSafeAudit({
+          ownerUserId, strategyId, bindingId, commandId: command.id, symbol, direction, clientOrderId,
+          eventType: "STRATEGY_FAIL_SAFE_FLATTEN_SUBMITTED", severity: "CRITICAL",
+          message: "Protective target coverage could not be established for an owned strategy position; Black Cloud submitted a deterministic reduce-only close-all safety order.",
+          metadata: { leg, recovered: true, reasonCount: reasons.length, executionEnvironment: credentialEnvironment, triggerCode }
+        });
+        if (!isTerminalVenueOrder(recovered)) {
+          throw reconciliationError("STRATEGY_FAIL_SAFE_FLATTEN_RECONCILING", "The deterministic reduce-only safety flatten is acknowledged and still settling; the parent entry remains non-terminal.", 2);
+        }
+        terminalRescueSeen = true;
+        if (!positionOpen) {
+          await this.emitStrategyFailSafeAudit({
+            ownerUserId, strategyId, bindingId, commandId: command.id, symbol, direction, clientOrderId,
+            eventType: "STRATEGY_FAIL_SAFE_FLATTEN_CONFIRMED", severity: "ERROR",
+            message: "Bybit confirmed the deterministic safety-flatten order and the owned strategy position is flat. The affected protection command can now terminalize safely.",
+            metadata: { leg, executionEnvironment: credentialEnvironment, triggerCode }
+          });
+          const completionCode = triggerCode === "STRATEGY_PARTIAL_FILL_UNPROTECTABLE"
+            ? "STRATEGY_ENTRY_FAIL_SAFE_FLATTENED"
+            : "STRATEGY_TP_PROTECTION_FAIL_SAFE_FLATTENED";
+          throw terminalError(completionCode, "Protective target coverage could not be established, so Black Cloud closed the owned position and confirmed it flat before terminalizing the affected command.");
+        }
+        if (!isTerminalInternalOrderStatus(persisted.priorStatus)) {
+          throw reconciliationError("STRATEGY_FAIL_SAFE_FLATTEN_REFRESHING_POSITION", "A terminal safety-flatten order was newly reconciled. Black Cloud will fetch a fresh Bybit position snapshot before deciding whether a residual close-all leg is required.", 2);
+        }
+        continue;
+      }
+
+      const localOrder = await oneOrNull(this.supabase.from("execution_orders")
+        .select("id,user_id,account_id,client_order_id,symbol,strategy_target_binding_id")
+        .eq("user_id", orderUserId)
+        .eq("account_id", account.id)
+        .eq("client_order_id", clientOrderId)
+        .maybeSingle());
+      if (localOrder) {
+        if (String(localOrder.symbol || "").toUpperCase() !== String(symbol).toUpperCase()
+          || localOrder.strategy_target_binding_id !== bindingId) {
+          throw terminalError("STRATEGY_FAIL_SAFE_FLATTEN_OWNERSHIP_MISMATCH", "The deterministic safety-flatten order identity belongs to another symbol or strategy target.");
+        }
+        throw reconciliationError("STRATEGY_FAIL_SAFE_FLATTEN_ACKNOWLEDGED_RECONCILING", "Black Cloud has a durable safety-flatten acknowledgement but the temporary Bybit lookup returned no order. Resubmission is blocked.", 2);
+      }
+      if (!positionOpen) {
+        if (flatIsSafe) {
+          await this.emitStrategyFailSafeAudit({
+            ownerUserId, strategyId, bindingId, commandId: command.id, symbol, direction, clientOrderId,
+            eventType: "STRATEGY_TP_PROTECTION_POSITION_FLAT", severity: "ERROR",
+            message: "Bybit reports the affected owned strategy position flat; no additional safety-close submission is required.",
+            metadata: { leg, executionEnvironment: credentialEnvironment, triggerCode }
+          });
+          throw terminalError("STRATEGY_TP_PROTECTION_POSITION_FLAT", "The affected strategy position is flat, so the failed protection command can terminalize without another broker side effect.");
+        }
+        throw reconciliationError("STRATEGY_ENTRY_WAITING_FOR_POSITION", terminalRescueSeen
+          ? "A terminal safety-flatten order was observed; waiting for a fresh Bybit position snapshot to confirm flat."
+          : "The terminal IOC fill is confirmed; waiting for its Bybit position before certifying TP protection or initiating the safety flatten.", 2);
+      }
+      if (waitingForPositionOnly && !terminalRescueSeen) {
+        throw reconciliationError("STRATEGY_ENTRY_WAITING_FOR_POSITION", "The terminal IOC fill is confirmed; waiting for its Bybit position before certifying TP protection.", 2);
+      }
+      try {
+        await authorize();
+        await this.repository.assertFencingToken(connection.id, fencingToken);
+        this.assertSubmissionClockSafe();
+      } catch (error) {
+        if (error?.reconciling === true) throw error;
+        throw reconciliationError("STRATEGY_FAIL_SAFE_FLATTEN_CONTROL_BLOCKED", sanitizeError(error?.message || error), 30);
+      }
+      const validation = await validateBybitOrderDraft(credentials, orderDraft);
+      if (!validation.ok) throw reconciliationError("STRATEGY_FAIL_SAFE_FLATTEN_VALIDATION_REJECTED", validation.reasons.join(" "), 30);
+      const adapter = createCloudExchangeAdapter(connection.provider, {
+        credentials,
+        executionEnvironment: credentialEnvironment,
+        endpointProfile: credentials.endpointProfile || connection.endpoint_profile || "GLOBAL",
+        connectionId: connection.id
+      });
+      let venueReport;
+      let recoveredAfterAmbiguous = false;
+      try {
+        venueReport = await adapter.placeOrder(orderDraft, validation);
+        this.metricsCounters.ordersSubmitted += 1;
+      } catch (error) {
+        if (!isAmbiguousTransportError(error)) {
+          throw reconciliationError("STRATEGY_FAIL_SAFE_FLATTEN_VENUE_REJECTED", sanitizeError(error?.message || error), 30);
+        }
+        venueReport = await findBybitOrderByClientOrderId(credentials, { marketKind, symbol, clientOrderId }).catch(() => null);
+        if (!venueReport) throw ambiguousError("The safety-flatten submission timed out before acknowledgement. Reconciliation will query its deterministic client order ID without resubmitting an acknowledged order.");
+        recoveredAfterAmbiguous = true;
+        try {
+          assertRecoveredVenueOrderShape(venueReport, expected);
+        } catch (error) {
+          throw reconciliationError("STRATEGY_FAIL_SAFE_FLATTEN_ORDER_MISMATCH", sanitizeError(error?.message || error), 30);
+        }
+      }
+      const persisted = await persistRescueOrder({ venueReport, orderDraft, recovered: recoveredAfterAmbiguous });
+      if (persisted.created) await this.emitStrategyFailSafeAudit({
+        ownerUserId, strategyId, bindingId, commandId: command.id, symbol, direction, clientOrderId,
+        eventType: "STRATEGY_FAIL_SAFE_FLATTEN_SUBMITTED", severity: "CRITICAL",
+        message: "Protective target coverage could not be established for an owned strategy position; Black Cloud submitted a deterministic reduce-only close-all safety order.",
+        metadata: { leg, recovered: recoveredAfterAmbiguous, reasonCount: reasons.length, executionEnvironment: credentialEnvironment, triggerCode }
+      });
+      throw reconciliationError("STRATEGY_FAIL_SAFE_FLATTEN_RECONCILING", "The deterministic reduce-only safety flatten was acknowledged; the parent entry remains non-terminal until a fresh Bybit position snapshot confirms flat.", 2);
+    }
+    throw reconciliationError("STRATEGY_FAIL_SAFE_FLATTEN_RESIDUAL", "Four deterministic close-all safety legs completed but Bybit still reports owned residual exposure. The parent entry remains reconciling and requires an operator incident review.", 30);
+  }
+
+  async emitStrategyFailSafeAudit({ ownerUserId, strategyId, bindingId, commandId, symbol, direction, clientOrderId, eventType, severity, message, metadata = {} }) {
+    const { error } = await this.supabase.from("strategy_automation_audit_events").insert({
+      owner_user_id: ownerUserId,
+      strategy_id: strategyId,
+      binding_id: bindingId,
+      event_type: eventType,
+      severity,
+      message,
+      safe_metadata: { commandId, symbol, direction, clientOrderId, ...metadata }
+    });
+    if (error) throw error;
+  }
+
+  async persistStrategyAcceptedOrder({ command, binding, strategy, account, orderDraft, venueReport, estimatedMargin, estimatedNotional, recovered, linkCommand = true }) {
     const venueOrderId = venueReport.exchangeOrderId || venueReport.orderId;
     const simulatedFunds = orderDraft.source === "strategy-automation-demo";
-    const { data: existing, error: existingError } = await this.supabase.from("execution_orders").select("id").eq("client_order_id", orderDraft.clientOrderId).maybeSingle();
+    const { data: existing, error: existingError } = await this.supabase.from("execution_orders").select("id,status").eq("user_id", command.user_id).eq("account_id", account.id).eq("client_order_id", orderDraft.clientOrderId).maybeSingle();
     if (existingError) throw existingError;
     let orderId = existing?.id;
+    let created = false;
     if (!orderId) {
       const order = await insertSingle(this.supabase.from("execution_orders"), {
         user_id: command.user_id,
@@ -1166,8 +2210,31 @@ export class BlackCloudExecutionWorker {
         risk_check_reasons: []
       });
       orderId = order.id;
+      created = true;
+      if (orderDraft.takeProfitProtectionMode === "AGGREGATED_TP1") {
+        const { error: warningError } = await this.supabase.from("strategy_automation_audit_events").insert({
+          owner_user_id: command.user_id,
+          strategy_id: strategy.id,
+          binding_id: binding.id,
+          event_type: "STRATEGY_TP_LADDER_AGGREGATED",
+          severity: "WARNING",
+          message: "The terminal IOC fill was too small for every independent TP leg; Black Cloud protected the full owned remainder with aggregate TP1.",
+          safe_metadata: { commandId: command.id, symbol: orderDraft.symbol, protectionMode: "AGGREGATED_TP1", simulatedFunds }
+        });
+        if (warningError) throw warningError;
+      }
     }
-    await updateOrThrow(this.supabase.from("execution_commands").update({ execution_order_id: orderId }).eq("id", command.id));
+    await this.repository.applyExecutionOrderState({
+      orderId,
+      accountId: account.id,
+      status: venueReport.status,
+      cumulativeFilledQuantity: venueReport.filledQuantity ?? venueReport.filled_quantity ?? 0,
+      exchangeOrderId: venueOrderId,
+      averageFillPrice: venueReport.averageFillPrice ?? venueReport.average_fill_price,
+      rejectionReason: venueReport.rejectReason ?? venueReport.rejection_reason,
+      venueUpdatedAt: venueReport.updatedTime ?? venueReport.updatedAt ?? venueReport.rawVersion ?? 0
+    });
+    if (linkCommand) await updateOrThrow(this.supabase.from("execution_commands").update({ execution_order_id: orderId }).eq("id", command.id));
     await this.repository.audit({
       userId: command.user_id,
       connectionId: command.connection_id,
@@ -1175,18 +2242,21 @@ export class BlackCloudExecutionWorker {
       eventType: recovered ? "STRATEGY_ORDER_RECONCILED" : "STRATEGY_ORDER_ACKNOWLEDGED",
       purpose: simulatedFunds ? "strategy_demo_order_execution" : "strategy_mainnet_order_execution",
       message: recovered ? "An existing Bybit strategy order was adopted by deterministic client order ID." : "A Bybit strategy order was acknowledged.",
-      metadata: { strategyId: strategy.id, bindingId: binding.id, symbol: orderDraft.symbol, reduceOnly: orderDraft.reduceOnly, simulatedFunds, venueOrderId }
+      metadata: { strategyId: strategy.id, bindingId: binding.id, symbol: orderDraft.symbol, reduceOnly: orderDraft.reduceOnly, simulatedFunds, venueOrderId, takeProfitProtectionMode: orderDraft.takeProfitProtectionMode || null }
     });
     this.metricsCounters.ordersConfirmed += 1;
-    return { venueOrderId, orderId, recovered, simulatedFunds };
+    return { venueOrderId, orderId, recovered, created, priorStatus: existing?.status || null, simulatedFunds, takeProfitProtectionMode: orderDraft.takeProfitProtectionMode || null };
   }
 
-  async adoptVenueOrder({ command, plan, intent, account, allocation, existingVenueOrder, clientOrderId }) {
+  async adoptVenueOrder({ command, plan, intent, account, allocation, existingVenueOrder, clientOrderId, linkPlan = true }) {
     const venueReport = {
       exchangeOrderId: existingVenueOrder.exchangeOrderId || existingVenueOrder.orderId,
       clientOrderId: existingVenueOrder.clientOrderId,
       status: existingVenueOrder.status,
       filledQuantity: Number(existingVenueOrder.filledQuantity || 0),
+      averageFillPrice: existingVenueOrder.averageFillPrice,
+      rejectReason: existingVenueOrder.rejectReason,
+      updatedTime: existingVenueOrder.updatedTime ?? existingVenueOrder.updatedAt ?? existingVenueOrder.rawVersion,
       recoveredByReconciliation: true
     };
     await this.repository.audit({
@@ -1199,13 +2269,15 @@ export class BlackCloudExecutionWorker {
       message: "An existing venue order was adopted by deterministic client order ID.",
       metadata: { venueOrderId: venueReport.exchangeOrderId }
     });
-    return this.persistAcceptedOrder({ command, plan, intent, account, allocation, venueReport, clientOrderId });
+    return this.persistAcceptedOrder({ command, plan, intent, account, allocation, venueReport, clientOrderId, linkPlan });
   }
 
-  async persistAcceptedOrder({ command, plan, intent, account, allocation, venueReport, clientOrderId }) {
+  async persistAcceptedOrder({ command, plan, intent, account, allocation, venueReport, clientOrderId, linkPlan = true }) {
     const actualClientOrderId = clientOrderId || venueReport.clientOrderId || command.deterministic_client_order_id;
-    const { data: existing } = await this.supabase.from("execution_orders").select("id,status").eq("client_order_id", actualClientOrderId).maybeSingle();
+    const { data: existing, error: existingError } = await this.supabase.from("execution_orders").select("id,status").eq("user_id", plan.follower_user_id).eq("account_id", account.id).eq("client_order_id", actualClientOrderId).maybeSingle();
+    if (existingError) throw existingError;
     let orderId = existing?.id;
+    let created = false;
     if (!orderId) {
       const order = await insertSingle(this.supabase.from("execution_orders"), {
         user_id: plan.follower_user_id,
@@ -1239,12 +2311,41 @@ export class BlackCloudExecutionWorker {
         risk_check_reasons: []
       });
       orderId = order.id;
+      created = true;
+      if (intent.strategy_execution_policy?.takeProfitProtectionMode === "AGGREGATED_TP1" && intent.strategy_target_binding_id) {
+        const { error: warningError } = await this.supabase.from("strategy_automation_audit_events").insert({
+          owner_user_id: intent.created_by,
+          strategy_id: intent.strategy_automation_id,
+          binding_id: intent.strategy_target_binding_id,
+          event_type: "STRATEGY_TP_LADDER_AGGREGATED",
+          severity: "WARNING",
+          message: "The terminal follower IOC fill was too small for every independent TP leg; Black Cloud protected the full owned remainder with aggregate TP1.",
+          safe_metadata: { commandId: command.id, groupIntentId: intent.id, followerPlanId: plan.id, symbol: intent.symbol, protectionMode: "AGGREGATED_TP1" }
+        });
+        if (warningError) throw warningError;
+      }
     }
-    await updateOrThrow(this.supabase.from("follower_execution_plans").update({
-      execution_order_id: orderId,
-      execution_status: normalizePlanStatus(venueReport.status),
-      safe_result: { venueOrderId: venueReport.exchangeOrderId, clientOrderId: actualClientOrderId }
-    }).eq("id", plan.id));
+    await this.repository.applyExecutionOrderState({
+      orderId,
+      accountId: account.id,
+      status: venueReport.status,
+      cumulativeFilledQuantity: venueReport.filledQuantity ?? venueReport.filled_quantity ?? 0,
+      exchangeOrderId: venueReport.exchangeOrderId || venueReport.orderId,
+      averageFillPrice: venueReport.averageFillPrice ?? venueReport.average_fill_price,
+      rejectionReason: venueReport.rejectReason ?? venueReport.rejection_reason,
+      venueUpdatedAt: venueReport.updatedTime ?? venueReport.updatedAt ?? venueReport.rawVersion ?? 0,
+      followerPlanId: linkPlan ? plan.id : null
+    });
+    if (linkPlan) {
+      await updateOrThrow(this.supabase.from("follower_execution_plans").update({
+        safe_result: {
+          venueOrderId: venueReport.exchangeOrderId,
+          clientOrderId: actualClientOrderId,
+          takeProfitProtectionMode: intent.strategy_execution_policy?.takeProfitProtectionMode || null
+        }
+      }).eq("id", plan.id).eq("execution_order_id", orderId));
+      await updateOrThrow(this.supabase.from("execution_commands").update({ execution_order_id: orderId }).eq("id", command.id));
+    }
     await this.repository.audit({
       userId: plan.follower_user_id,
       connectionId: plan.broker_connection_id,
@@ -1253,10 +2354,10 @@ export class BlackCloudExecutionWorker {
       commandId: command.id,
       eventType: "VENUE_ACKNOWLEDGED",
       message: "Investment Group order was acknowledged by Bybit while under Black Cloud control.",
-      metadata: { venueOrderId: venueReport.exchangeOrderId, orderId }
+      metadata: { venueOrderId: venueReport.exchangeOrderId, orderId, takeProfitProtectionMode: intent.strategy_execution_policy?.takeProfitProtectionMode || null }
     });
     this.metricsCounters.ordersConfirmed += 1;
-    return { venueOrderId: venueReport.exchangeOrderId, orderId, recovered: Boolean(venueReport.recoveredByReconciliation) };
+    return { venueOrderId: venueReport.exchangeOrderId, orderId, recovered: Boolean(venueReport.recoveredByReconciliation), created, priorStatus: existing?.status || null, takeProfitProtectionMode: intent.strategy_execution_policy?.takeProfitProtectionMode || null };
   }
 
   async syncAccount(command) {
@@ -1342,15 +2443,43 @@ export class BlackCloudExecutionWorker {
     if (newerError) throw newerError;
     if (newerCommands?.length) return { skipped: true, reason: "TAKE_PROFIT_REPRICE_SUPERSEDED" };
 
+    const marketKind = String(command.payload?.request?.marketKind || "perpetual").toLowerCase() === "spot" ? "spot" : "perpetual";
+    const category = marketKind === "spot" ? "spot" : "linear";
+    const symbol = String(command.payload?.request?.symbol || order.symbol || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    const expectedEntryOrderId = String(command.payload?.expectedEntryOrderId || "");
+    const expectedEntrySide = String(command.payload?.direction || "").toLowerCase() === "short" ? "sell" : "buy";
+    const [expectedEntryOrder, matchingEntries] = await Promise.all([
+      expectedEntryOrderId ? oneOrNull(this.supabase.from("execution_orders")
+        .select("id,account_id,symbol,side,reduce_only,status,filled_quantity,strategy_automation_id,strategy_target_binding_id")
+        .eq("id", expectedEntryOrderId)
+        .maybeSingle()) : Promise.resolve(null),
+      rows(this.supabase.from("execution_orders")
+        .select("id,account_id,symbol,side,reduce_only,status,filled_quantity,strategy_automation_id,strategy_target_binding_id")
+        .eq("account_id", connection.account_id)
+        .eq("strategy_target_binding_id", binding.id)
+        .eq("symbol", symbol)
+        .eq("side", expectedEntrySide)
+        .eq("reduce_only", false)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(20))
+    ]);
+    if (!isCurrentStrategyEntryGeneration(expectedEntryOrderId, expectedEntryOrder, matchingEntries, {
+      accountId: connection.account_id,
+      strategyId: strategy.id,
+      bindingId: binding.id,
+      symbol,
+      side: expectedEntrySide
+    })) {
+      return { skipped: true, reason: "TAKE_PROFIT_REPRICE_STALE_GENERATION" };
+    }
+
     const secretReference = await single(this.supabase.from("broker_secret_references")
       .select("id")
       .eq("connection_id", connection.id)
       .eq("status", "ACTIVE"));
     const credentials = await this.repository.readBrokerSecret(secretReference.id, "strategy_take_profit_reprice");
     assertWorkerEnvironment(connection, credentials);
-    const marketKind = String(command.payload?.request?.marketKind || "perpetual").toLowerCase() === "spot" ? "spot" : "perpetual";
-    const category = marketKind === "spot" ? "spot" : "linear";
-    const symbol = String(command.payload?.request?.symbol || order.symbol || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
     const [instrumentRows, venueOrder] = await Promise.all([
       getBybitInstrumentMetadata({ category, symbol, executionEnvironment: credentials.executionEnvironment || connection.execution_environment, endpointProfile: credentials.endpointProfile || connection.endpoint_profile }),
       findBybitOrderByClientOrderId(credentials, { marketKind, symbol, clientOrderId: order.client_order_id }),
@@ -1540,12 +2669,6 @@ function mapRiskStatus(codes) {
   return "RISK_REJECTED";
 }
 
-function normalizePlanStatus(status) {
-  if (status === "filled") return "FILLED";
-  if (status === "partially-filled") return "PARTIALLY_FILLED";
-  return "WORKING";
-}
-
 function normalizeInternalStatus(status) {
   if (status === "filled") return "filled";
   if (status === "partially-filled") return "partially-filled";
@@ -1554,9 +2677,14 @@ function normalizeInternalStatus(status) {
   return "accepted";
 }
 
+function isTerminalInternalOrderStatus(status) {
+  return ["filled", "cancelled", "rejected"].includes(String(status || "").toLowerCase());
+}
+
 function classifyExecutionError(error, command) {
   const code = error?.code || "EXECUTION_FAILED";
   const ambiguous = error?.ambiguous === true;
+  const reconciling = error?.reconciling === true;
   const retryable = ambiguous || error?.retryable === true || isRetryableTransportError(error);
   const exhausted = Number(command.attempt_count) >= Number(command.max_attempts);
   return {
@@ -1565,7 +2693,99 @@ function classifyExecutionError(error, command) {
     retryable,
     retryAfterSeconds: error?.retryAfterSeconds || Math.min(60, 2 ** Math.min(6, Number(command.attempt_count))),
     attemptOutcome: ambiguous ? "SUBMISSION_UNKNOWN" : retryable ? "RETRY" : "FAILED",
-    commandStatus: exhausted ? "DEAD_LETTER" : ambiguous ? "SUBMISSION_UNKNOWN" : retryable ? "RETRY" : "FAILED"
+    commandStatus: reconciling ? "RECONCILING" : ambiguous ? "SUBMISSION_UNKNOWN" : exhausted ? "DEAD_LETTER" : retryable ? "RETRY" : "FAILED"
+  };
+}
+
+export function isTerminalTakeProfitProtectionFailure(error) {
+  if (!error || error.retryable === true || error.ambiguous === true || error.reconciling === true) return false;
+  if (isAmbiguousTransportError(error) || isRetryableTransportError(error)) return false;
+  const code = String(error.code || "").toUpperCase();
+  if (new Set([
+    "VENUE_VALIDATION_REJECTED",
+    "BYBIT_ORDER_VALIDATION_FAILED",
+    "STRATEGY_TAKE_PROFIT_PRICE_INVALID",
+    "STRATEGY_QUANTITY_BELOW_VENUE_STEP",
+    "STRATEGY_PARTIAL_FILL_UNPROTECTABLE",
+    "STRATEGY_TP_LADDER_BELOW_VENUE_MINIMUM",
+    "STRATEGY_ORDER_UNFILLED",
+    "STRATEGY_TP_ORDER_TERMINATED_AT_VENUE"
+  ]).has(code)) return true;
+  const venueCode = Number(error?.bybit?.retCode);
+  const terminalVenueRejection = String(error?.bybitEndpoint || "") === "/v5/order/create"
+    && Number.isFinite(venueCode)
+    && ![10000, 10003, 10004, 10005, 10006, 10010, 10016].includes(venueCode)
+    && ![401, 403, 408, 429, 500, 502, 503, 504].includes(Number(error?.bybitHttpStatus || error?.statusCode));
+  return terminalVenueRejection || (Number(error?.statusCode) === 400 && /(?:BYBIT|BROKER|ORDER|VENUE)/.test(code));
+}
+
+export function followerPlanStatusForExecutionFailure(code) {
+  const normalized = String(code || "").toUpperCase();
+  if (normalized.includes("MANDATE")) return "MANDATE_PAUSED";
+  if (normalized.includes("AUTH")) return "AUTH_EXPIRED";
+  if (normalized.includes("MARGIN")) return "INSUFFICIENT_MARGIN";
+  if (normalized.includes("SYMBOL")) return "SYMBOL_NOT_ALLOWED";
+  if (normalized.includes("CONNECTION") || normalized.includes("WORKER_ENVIRONMENT")) return "CONNECTION_UNHEALTHY";
+  if (normalized.includes("RECONCIL") || normalized.includes("FAIL_SAFE")) return "RECONCILIATION_REQUIRED";
+  if (normalized.includes("CANCEL")) return "CANCELLED";
+  if (normalized.includes("RISK")) return "RISK_REJECTED";
+  return "VENUE_REJECTED";
+}
+
+export function hasPositiveFollowerPlanFill(plan, order) {
+  return ["FILLED", "PARTIALLY_FILLED"].includes(String(plan?.execution_status || "").toUpperCase())
+    || Number(order?.filled_quantity || 0) > 0;
+}
+
+export function isAggregatedTargetSuppressed(decision, requestedTargetId) {
+  const mode = String(decision?.mode || "").toUpperCase();
+  const primaryTargetId = String(decision?.primaryTargetId || "").toUpperCase();
+  const requested = String(requestedTargetId || "").toUpperCase();
+  return mode === "AGGREGATED_TP1" && Boolean(primaryTargetId) && Boolean(requested) && requested !== primaryTargetId;
+}
+
+export function assertAcknowledgedOrderOwnership(order, { account, symbol, orderUserId, bindingId = null, groupIntentId = null, mandateId = null }) {
+  const ownershipMismatch = order.account_id !== account.id
+    || order.user_id !== orderUserId
+    || String(order.symbol || "").toUpperCase() !== String(symbol || "").toUpperCase()
+    || (bindingId && order.strategy_target_binding_id !== bindingId)
+    || (groupIntentId && order.group_intent_id !== groupIntentId)
+    || (mandateId && order.mandate_id !== mandateId);
+  if (ownershipMismatch) throw terminalError("STRATEGY_ACKNOWLEDGED_ORDER_OWNERSHIP_MISMATCH", "The durable order acknowledgement belongs to a different user, account, symbol, strategy target, group intent, or mandate.");
+  return true;
+}
+
+export function strategyDependencyCancellation(result) {
+  if (result?.skipped !== true) return null;
+  const reason = String(result?.reason || "").toUpperCase();
+  return STRATEGY_DEPENDENCY_CANCELLATION_REASONS.has(reason) ? reason : null;
+}
+
+export function isTerminalFollowerPlanRejection(status) {
+  return TERMINAL_FOLLOWER_PLAN_REJECTION_STATUSES.has(String(status || "").toUpperCase());
+}
+
+export function strategyDependencyCancellationMessage(reason) {
+  const normalized = String(reason || "").toUpperCase();
+  if (normalized === "PARENT_ENTRY_UNFILLED" || normalized === "PARENT_GROUP_ENTRY_UNFILLED") {
+    return "Strategy child command was cancelled because its parent entry completed without an executable fill.";
+  }
+  return "Strategy child command was cancelled because its parent entry command failed or was cancelled.";
+}
+
+export function strategyCommandAuditMetadata(command, outcome = {}) {
+  const payload = command?.payload || {};
+  const request = payload.request || {};
+  return {
+    code: String(outcome.code || "EXECUTION_FAILED"),
+    commandStatus: String(outcome.commandStatus || "FAILED"),
+    commandType: String(command?.command_type || "UNKNOWN"),
+    action: String(payload.action || payload.strategyAction || "UNKNOWN").toUpperCase(),
+    direction: String(payload.direction || payload.positionDirection || "UNKNOWN").toLowerCase(),
+    symbol: String(payload.symbol || request.symbol || "UNKNOWN").replace(/[^A-Za-z0-9]/g, "").toUpperCase(),
+    targetId: payload.targetId ? String(payload.targetId).toUpperCase() : null,
+    retryable: outcome.retryable === true,
+    ambiguous: outcome.ambiguous === true
   };
 }
 
@@ -1590,9 +2810,19 @@ function retryableError(code, message, retryAfterSeconds) {
   return error;
 }
 
+function reconciliationError(code, message, retryAfterSeconds) {
+  const error = retryableError(code, message, retryAfterSeconds);
+  error.reconciling = true;
+  return error;
+}
+
 function deterministicStrategyLegId(baseId, leg) {
   const safeBase = String(baseId || "bt-strategy").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 33);
   return `${safeBase}-${leg}`.slice(0, 36);
+}
+
+function strategyRootClientOrderId(clientOrderId) {
+  return String(clientOrderId || "").replace(/-(?:e|c\d*)$/i, "");
 }
 
 export function reversalCloseLegName(number) {
@@ -1696,13 +2926,15 @@ export function assertRecoveredVenueOrderShape(order, expected) {
   const actualType = String(order?.orderType || order?.type || "").toLowerCase();
   const expectedType = String(expected?.orderType || "").toLowerCase();
   const positionMismatch = expected?.positionIdx !== undefined && Number(order?.positionIdx || 0) !== Number(expected.positionIdx);
+  const closeOnTriggerMismatch = expected?.closeOnTrigger !== undefined && Boolean(order?.closeOnTrigger) !== Boolean(expected.closeOnTrigger);
   if (actualSide !== expectedSide
     || Boolean(order?.reduceOnly) !== Boolean(expected?.reduceOnly)
     || (expectedSymbol && actualSymbol !== expectedSymbol)
     || (expectedCategory && actualCategory !== expectedCategory)
     || (expectedType && actualType !== expectedType)
-    || positionMismatch) {
-    throw terminalError("STRATEGY_RECOVERY_ORDER_MISMATCH", "The deterministic Bybit order identity exists with an unexpected symbol, category, side, type, position index, or reduce-only contract.");
+    || positionMismatch
+    || closeOnTriggerMismatch) {
+    throw terminalError("STRATEGY_RECOVERY_ORDER_MISMATCH", "The deterministic Bybit order identity exists with an unexpected symbol, category, side, type, position index, or reduce-only contract, including close-on-trigger state.");
   }
 }
 
@@ -1710,6 +2942,15 @@ export function isTerminalUnfilledVenueOrder(order) {
   const status = String(order?.status || "").toLowerCase();
   const terminal = ["cancelled", "canceled", "expired", "rejected", "failed"].includes(status);
   return terminal && !(Number(order?.filledQuantity ?? order?.filled_quantity ?? 0) > 0);
+}
+
+export function requireTerminalStrategyEntryFill(order) {
+  const filledQuantity = settledStrategyEntryQuantity(order);
+  if (filledQuantity) return filledQuantity;
+  if (isTerminalVenueOrder(order)) {
+    throw terminalError("STRATEGY_ENTRY_UNFILLED", "Bybit terminated the strategy entry without a fill.");
+  }
+  throw retryableError("STRATEGY_ENTRY_WAITING_FOR_FINAL_FILL", "Bybit acknowledged the IOC entry; waiting for its final cumulative fill.", 2);
 }
 
 export function isTerminalVenueOrder(order) {
@@ -1794,6 +3035,21 @@ export function isPotentialPositionGeneration(order) {
   const status = String(order?.status || "").toLowerCase();
   return ["accepted", "submitted", "working", "partially-filled", "filled"].includes(status)
     || Number(order?.filled_quantity ?? order?.filledQuantity ?? 0) > 0;
+}
+
+export function isCurrentStrategyEntryGeneration(expectedEntryOrderId, expectedEntryOrder, matchingEntries, context) {
+  if (!expectedEntryOrderId || !expectedEntryOrder) return false;
+  const exactOwnership = String(expectedEntryOrder.id) === String(expectedEntryOrderId)
+    && expectedEntryOrder.account_id === context.accountId
+    && expectedEntryOrder.strategy_automation_id === context.strategyId
+    && expectedEntryOrder.strategy_target_binding_id === context.bindingId
+    && String(expectedEntryOrder.symbol || "").toUpperCase() === String(context.symbol || "").toUpperCase()
+    && String(expectedEntryOrder.side || "").toLowerCase() === String(context.side || "").toLowerCase()
+    && expectedEntryOrder.reduce_only !== true
+    && isPotentialPositionGeneration(expectedEntryOrder);
+  if (!exactOwnership) return false;
+  const latest = (matchingEntries || []).find(isPotentialPositionGeneration);
+  return Boolean(latest && String(latest.id) === String(expectedEntryOrderId));
 }
 
 export function summarizeTakeProfitLadderFailure(ladder) {

@@ -154,6 +154,55 @@ export function evaluateStrategyTakeProfitLadder({ entryQuantity, targets, venue
 }
 
 /**
+ * Revalidates the complete TP contract against the terminal IOC fill. If the
+ * venue returned less than the requested entry and seven independent legs are
+ * no longer possible, reserve the entire owned remainder at TP1 instead of
+ * leaving exposure unprotected or submitting a partial ladder. Callers must
+ * emit an operator-visible warning when the aggregate fallback is selected.
+ */
+export function planStrategyTakeProfitProtection({ entryQuantity, remainingQuantity, targets, venue = {} } = {}) {
+  const reservedTargets = reserveStrategyTakeProfits(targets);
+  const normalizedEntry = positive(entryQuantity) || 0;
+  const normalizedRemaining = remainingQuantity === undefined || remainingQuantity === null
+    ? normalizedEntry
+    : positive(remainingQuantity) || 0;
+  const ownedRemainder = Math.min(normalizedEntry, normalizedRemaining);
+  const fullLadder = reservedTargets.length
+    ? evaluateStrategyTakeProfitLadder({ entryQuantity, targets: reservedTargets, venue })
+    : { ok: false, entryQuantity: positive(entryQuantity), totalReservedQuantity: 0, remainingQuantity: positive(entryQuantity), legs: [], reasons: [reason("TP_LADDER_EMPTY", null, "At least one reserved take-profit target is required.")] };
+  const fullLadderFitsOwnedRemainder = fullLadder.ok && fullLadder.totalReservedQuantity <= ownedRemainder + 1e-12;
+  if (fullLadderFitsOwnedRemainder) {
+    return { mode: "FULL_LADDER", primaryTargetId: reservedTargets[0]?.id || null, fullLadder, aggregateLadder: null, reasons: [] };
+  }
+
+  const firstTarget = reservedTargets[0];
+  const aggregateTarget = firstTarget ? { ...firstTarget, quantityPercent: 100 } : null;
+  const aggregateLadder = aggregateTarget && ownedRemainder > 0
+    ? evaluateStrategyTakeProfitLadder({ entryQuantity: ownedRemainder, targets: [aggregateTarget], venue })
+    : { ok: false, entryQuantity: positive(ownedRemainder), totalReservedQuantity: 0, remainingQuantity: positive(ownedRemainder), legs: [], reasons: [reason("TP_AGGREGATE_UNAVAILABLE", firstTarget?.id || null, "No executable owned remainder is available for aggregate TP1 protection.")] };
+  if (aggregateLadder.ok) {
+    return {
+      mode: "AGGREGATED_TP1",
+      primaryTargetId: firstTarget.id,
+      fullLadder,
+      aggregateLadder,
+      target: aggregateLadder.legs[0],
+      reasons: fullLadder.ok && !fullLadderFitsOwnedRemainder
+        ? [reason("TP_LADDER_EXCEEDS_OWNED_REMAINDER", null, `The complete ladder reserves ${fullLadder.totalReservedQuantity}, above the currently owned remainder ${ownedRemainder}.`)]
+        : fullLadder.reasons,
+    };
+  }
+  return {
+    mode: "UNPROTECTABLE",
+    primaryTargetId: firstTarget?.id || null,
+    fullLadder,
+    aggregateLadder,
+    target: null,
+    reasons: [...fullLadder.reasons, ...aggregateLadder.reasons],
+  };
+}
+
+/**
  * Resolves a SuperATR target against the authoritative venue average fill.
  * The absolute signal-candle price remains a compatibility fallback for
  * older queued commands, but certified commands carry their ATR/percentage

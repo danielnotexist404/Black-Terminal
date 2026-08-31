@@ -565,7 +565,10 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
         const binding = workspace.bindings.find((item) => item.id === sourceKey);
         if (!binding) throw new Error("The selected execution destination is no longer attached.");
         await strategyAutomationApi.updateTarget(workspace.strategy.id, binding, configured.capitalPolicy);
-        successMessage = `${binding.targetLabel || binding.targetProvider || "Execution target"} now enforces the selected equity/USDT sizing and side leverage. Signal/TP inputs are saved as the next immutable strategy draft.`;
+        const targetLabel = binding.targetLabel || binding.targetProvider || "Execution target";
+        successMessage = binding.status === "LIVE"
+          ? `${targetLabel} passed the replacement-policy execution preflight and remains armed. It now enforces the selected equity/USDT sizing and side leverage. Signal/TP inputs are saved as the next immutable strategy draft.`
+          : `${targetLabel} now enforces the selected equity/USDT sizing and side leverage. Its lifecycle state was not changed. Signal/TP inputs are saved as the next immutable strategy draft.`;
       }
       completedMutationStages = 3;
       onDefinitionChange(nextDefinition);

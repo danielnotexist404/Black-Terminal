@@ -186,6 +186,8 @@ assert.match(experience, /setWorkspace\(null\);[\s\S]*setDraft\(null\);[\s\S]*st
 assert.match(experience, /setWorkspace\(authoritative\);[\s\S]*setDraft\(hydrateDraft\(authoritative\)\)/, "authoritative recovery rehydrates both cockpit and draft state");
 assert.match(experience, /PARTIAL SAVE RECOVERED[\s\S]*retry is safe/, "successful recovery gives an explicit retry-safe operator message");
 assert.match(experience, /PARTIAL SAVE REQUIRES RELOAD[\s\S]*do not repeat Save from the old form/, "failed recovery closes stale settings and requires a clean reopen");
+assert.match(experience, /passed the replacement-policy execution preflight and remains armed/, "the active cockpit explicitly confirms that a validated live policy save did not disarm its target");
+assert.match(experience, /Its lifecycle state was not changed/, "non-live policy saves explicitly preserve their current target state");
 assert.match(draftStore, /perpetualSignalReversalEnabled: false/);
 assert.match(draftStore, /stopReversalEnabled: false/);
 assert.match(reviewStep, /Save strategy/);

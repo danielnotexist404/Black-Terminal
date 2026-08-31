@@ -1,0 +1,279 @@
+//@version=6
+strategy(
+     "HDLX Cognitive Rejection v1 [Non-Repainting]",
+     overlay = true,
+     pyramiding = 0,
+     initial_capital = 10000,
+     currency = currency.USD,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.06,
+     slippage = 2,
+     margin_long = 1,
+     margin_short = 1,
+     calc_on_order_fills = false,
+     calc_on_every_tick = false,
+     process_orders_on_close = false,
+     max_labels_count = 500)
+
+// This strategy is intentionally causal:
+// 1. Signals are evaluated only on confirmed chart bars.
+// 2. HTF requests use the previous confirmed candle with lookahead_on.
+// 3. Pivots become available only after their right-side confirmation bars.
+// 4. A rejection candidate must be confirmed on a later bar.
+
+string GROUP_ZONES = "01 — Confirmed S/R zones"
+string GROUP_EVIDENCE = "02 — Rejection evidence"
+string GROUP_MACRO = "03 — Confirmed macro context"
+string GROUP_RISK = "04 — Backtest sizing and exits"
+string GROUP_VISUALS = "05 — Visuals"
+
+int liquidityLookback = input.int(90, "Prior-range liquidity lookback", minval = 20, maxval = 1000, group = GROUP_ZONES)
+int pivotLeft = input.int(8, "Pivot bars left", minval = 2, maxval = 50, group = GROUP_ZONES)
+int pivotRight = input.int(8, "Pivot confirmation bars right", minval = 2, maxval = 50, group = GROUP_ZONES)
+float zoneAtrWidth = input.float(0.35, "Zone half-width (ATR)", minval = 0.05, maxval = 3.0, step = 0.05, group = GROUP_ZONES)
+
+int atrLength = input.int(14, "ATR length", minval = 2, maxval = 100, group = GROUP_EVIDENCE)
+int volumeLength = input.int(30, "Relative-volume length", minval = 5, maxval = 300, group = GROUP_EVIDENCE)
+float volumeMultiplier = input.float(1.15, "Minimum relative volume", minval = 0.1, maxval = 10.0, step = 0.05, group = GROUP_EVIDENCE)
+int rsiLength = input.int(14, "RSI length", minval = 2, maxval = 100, group = GROUP_EVIDENCE)
+float topRsi = input.float(67.0, "Top exhaustion RSI", minval = 50.0, maxval = 95.0, step = 0.5, group = GROUP_EVIDENCE)
+float bottomRsi = input.float(33.0, "Bottom exhaustion RSI", minval = 5.0, maxval = 50.0, step = 0.5, group = GROUP_EVIDENCE)
+float minimumWickAtr = input.float(0.35, "Minimum rejection wick (ATR)", minval = 0.0, maxval = 5.0, step = 0.05, group = GROUP_EVIDENCE)
+float minimumScore = input.float(65.0, "Minimum candidate confidence", minval = 30.0, maxval = 95.0, step = 1.0, group = GROUP_EVIDENCE)
+int confirmationBars = input.int(4, "Bars allowed for confirmation", minval = 1, maxval = 20, group = GROUP_EVIDENCE)
+float invalidationAtr = input.float(0.60, "Candidate invalidation buffer (ATR)", minval = 0.1, maxval = 5.0, step = 0.05, group = GROUP_EVIDENCE)
+int signalCooldown = input.int(10, "Signal cooldown bars", minval = 0, maxval = 100, group = GROUP_EVIDENCE)
+
+string weeklyTimeframe = input.timeframe("1W", "Confirmed weekly timeframe", group = GROUP_MACRO)
+string monthlyTimeframe = input.timeframe("1M", "Confirmed monthly timeframe", group = GROUP_MACRO)
+int macroEmaLength = input.int(20, "HTF EMA length", minval = 2, maxval = 200, group = GROUP_MACRO)
+int chartEmaLength = input.int(50, "Chart equilibrium EMA", minval = 5, maxval = 500, group = GROUP_MACRO)
+float extendedAtr = input.float(2.0, "Distance from equilibrium (ATR)", minval = 0.0, maxval = 20.0, step = 0.25, group = GROUP_MACRO)
+
+float equityPercent = input.float(10.0, "Equity used per trade (%)", minval = 0.1, maxval = 100.0, step = 0.1, group = GROUP_RISK)
+float leverage = input.float(1.0, "Exposure multiplier", minval = 1.0, maxval = 100.0, step = 0.5, group = GROUP_RISK)
+float stopAtr = input.float(2.5, "Initial stop distance (ATR)", minval = 0.25, maxval = 20.0, step = 0.25, group = GROUP_RISK)
+float tp1R = input.float(1.5, "TP1 reward/risk", minval = 0.25, maxval = 20.0, step = 0.25, group = GROUP_RISK)
+float tp2R = input.float(3.0, "TP2 reward/risk", minval = 0.5, maxval = 40.0, step = 0.25, group = GROUP_RISK)
+float tp3R = input.float(6.0, "TP3 reward/risk", minval = 1.0, maxval = 100.0, step = 0.5, group = GROUP_RISK)
+float runnerTrailAtr = input.float(4.0, "Runner trailing distance (ATR)", minval = 0.5, maxval = 30.0, step = 0.25, group = GROUP_RISK)
+
+bool showCandidates = input.bool(true, "Show unconfirmed candidates", group = GROUP_VISUALS)
+bool showZones = input.bool(true, "Show active S/R", group = GROUP_VISUALS)
+bool shadeRegime = input.bool(true, "Shade confirmed macro regime", group = GROUP_VISUALS)
+
+if timeframe.in_seconds(weeklyTimeframe) <= timeframe.in_seconds(timeframe.period)
+    runtime.error("The weekly context must be higher than the chart timeframe.")
+if timeframe.in_seconds(monthlyTimeframe) <= timeframe.in_seconds(timeframe.period)
+    runtime.error("The monthly context must be higher than the chart timeframe.")
+
+float atr = ta.atr(atrLength)
+float volumeAverage = ta.sma(volume, volumeLength)
+float rsi = ta.rsi(close, rsiLength)
+float equilibrium = ta.ema(close, chartEmaLength)
+float barRange = math.max(high - low, syminfo.mintick)
+float upperWick = high - math.max(open, close)
+float lowerWick = math.min(open, close) - low
+float closeLocation = ((close - low) - (high - close)) / barRange
+bool elevatedVolume = volumeAverage > 0 and volume >= volumeAverage * volumeMultiplier
+
+// Only the previous completed HTF candle is exposed to the current chart bar.
+float weeklyClose = request.security(syminfo.tickerid, weeklyTimeframe, close[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+float weeklyEma = request.security(syminfo.tickerid, weeklyTimeframe, ta.ema(close, macroEmaLength)[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+float monthlyClose = request.security(syminfo.tickerid, monthlyTimeframe, close[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+float monthlyEma = request.security(syminfo.tickerid, monthlyTimeframe, ta.ema(close, macroEmaLength)[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+bool weeklyBull = weeklyClose > weeklyEma
+bool monthlyBull = monthlyClose > monthlyEma
+
+// Confirmed pivots are registered on the bar on which they become knowable.
+float confirmedPivotHigh = ta.pivothigh(high, pivotLeft, pivotRight)
+float confirmedPivotLow = ta.pivotlow(low, pivotLeft, pivotRight)
+var float activeResistance = na
+var float activeSupport = na
+if barstate.isconfirmed and not na(confirmedPivotHigh)
+    activeResistance := confirmedPivotHigh
+if barstate.isconfirmed and not na(confirmedPivotLow)
+    activeSupport := confirmedPivotLow
+
+// Prior-range levels exclude the current bar, so a sweep can never create its own reference level.
+float priorRangeHigh = ta.highest(high, liquidityLookback)[1]
+float priorRangeLow = ta.lowest(low, liquidityLookback)[1]
+float zoneWidth = atr * zoneAtrWidth
+
+bool sweptPriorHigh = not na(priorRangeHigh) and high > priorRangeHigh and close < priorRangeHigh
+bool sweptPriorLow = not na(priorRangeLow) and low < priorRangeLow and close > priorRangeLow
+bool rejectedPivotHigh = not na(activeResistance) and high >= activeResistance - zoneWidth and close < activeResistance
+bool rejectedPivotLow = not na(activeSupport) and low <= activeSupport + zoneWidth and close > activeSupport
+
+float shortZone = sweptPriorHigh ? priorRangeHigh : activeResistance
+float longZone = sweptPriorLow ? priorRangeLow : activeSupport
+bool shortInteraction = sweptPriorHigh or rejectedPivotHigh
+bool longInteraction = sweptPriorLow or rejectedPivotLow
+
+score(bool condition, float weight) => condition ? weight : 0.0
+
+float topExtension = atr > 0 ? (close - equilibrium) / atr : 0.0
+float bottomExtension = atr > 0 ? (equilibrium - close) / atr : 0.0
+
+float shortScore =
+     score(shortInteraction, 25.0) +
+     score(upperWick >= atr * minimumWickAtr, 15.0) +
+     score(elevatedVolume, 10.0) +
+     score(rsi >= topRsi, 10.0) +
+     score(closeLocation <= -0.25, 10.0) +
+     score(topExtension >= extendedAtr, 10.0) +
+     score(weeklyBull, 5.0) +
+     score(monthlyBull, 5.0) +
+     score(close < open, 5.0) +
+     score(sweptPriorHigh, 5.0)
+
+float longScore =
+     score(longInteraction, 25.0) +
+     score(lowerWick >= atr * minimumWickAtr, 15.0) +
+     score(elevatedVolume, 10.0) +
+     score(rsi <= bottomRsi, 10.0) +
+     score(closeLocation >= 0.25, 10.0) +
+     score(bottomExtension >= extendedAtr, 10.0) +
+     score(not weeklyBull, 5.0) +
+     score(not monthlyBull, 5.0) +
+     score(close > open, 5.0) +
+     score(sweptPriorLow, 5.0)
+
+var int shortCandidateBar = na
+var float shortCandidateTrigger = na
+var float shortCandidateInvalidation = na
+var float shortCandidateScore = na
+var int longCandidateBar = na
+var float longCandidateTrigger = na
+var float longCandidateInvalidation = na
+var float longCandidateScore = na
+var int lastShortSignalBar = na
+var int lastLongSignalBar = na
+
+bool shortCooldownReady = na(lastShortSignalBar) or bar_index - lastShortSignalBar > signalCooldown
+bool longCooldownReady = na(lastLongSignalBar) or bar_index - lastLongSignalBar > signalCooldown
+bool newShortCandidate = barstate.isconfirmed and shortInteraction and shortScore >= minimumScore and na(shortCandidateBar) and shortCooldownReady
+bool newLongCandidate = barstate.isconfirmed and longInteraction and longScore >= minimumScore and na(longCandidateBar) and longCooldownReady
+
+if newShortCandidate
+    shortCandidateBar := bar_index
+    shortCandidateTrigger := low
+    shortCandidateInvalidation := math.max(high, nz(shortZone, high)) + atr * invalidationAtr
+    shortCandidateScore := shortScore
+
+if newLongCandidate
+    longCandidateBar := bar_index
+    longCandidateTrigger := high
+    longCandidateInvalidation := math.min(low, nz(longZone, low)) - atr * invalidationAtr
+    longCandidateScore := longScore
+
+bool shortSignal = false
+bool longSignal = false
+
+if barstate.isconfirmed and not na(shortCandidateBar)
+    int shortAge = bar_index - shortCandidateBar
+    if high > shortCandidateInvalidation or shortAge > confirmationBars
+        shortCandidateBar := na
+        shortCandidateTrigger := na
+        shortCandidateInvalidation := na
+        shortCandidateScore := na
+    else if shortAge >= 1 and close < shortCandidateTrigger
+        shortSignal := true
+        lastShortSignalBar := bar_index
+        shortCandidateBar := na
+        shortCandidateTrigger := na
+        shortCandidateInvalidation := na
+
+if barstate.isconfirmed and not na(longCandidateBar)
+    int longAge = bar_index - longCandidateBar
+    if low < longCandidateInvalidation or longAge > confirmationBars
+        longCandidateBar := na
+        longCandidateTrigger := na
+        longCandidateInvalidation := na
+        longCandidateScore := na
+    else if longAge >= 1 and close > longCandidateTrigger
+        longSignal := true
+        lastLongSignalBar := bar_index
+        longCandidateBar := na
+        longCandidateTrigger := na
+        longCandidateInvalidation := na
+
+// A single confirmed bar can never dispatch opposing orders. If an exceptional
+// outside bar confirms both candidates, retain only the stronger original thesis.
+if shortSignal and longSignal
+    if nz(shortCandidateScore) >= nz(longCandidateScore)
+        longSignal := false
+        longCandidateScore := na
+    else
+        shortSignal := false
+        shortCandidateScore := na
+
+// Backtest exposure. The multiplier models notional exposure, not exchange liquidation mechanics.
+float tradeNotional = strategy.equity * (equityPercent / 100.0) * leverage
+float tradeQuantity = math.max(tradeNotional / close, 0.000001)
+var float longEntryAtr = na
+var float shortEntryAtr = na
+
+if longSignal
+    shortCandidateBar := na
+    strategy.close("Short", comment = "Opposite structural confirmation")
+    strategy.entry("Long", strategy.long, qty = tradeQuantity, comment = "Confirmed bottom")
+    longEntryAtr := atr
+    alert('{"engine":"HDLX_COGNITIVE_V1","event":"LONG","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close) + ',"confidence":' + str.tostring(longCandidateScore) + '}', alert.freq_once_per_bar_close)
+    longCandidateScore := na
+
+if shortSignal
+    longCandidateBar := na
+    strategy.close("Long", comment = "Opposite structural confirmation")
+    strategy.entry("Short", strategy.short, qty = tradeQuantity, comment = "Confirmed top")
+    shortEntryAtr := atr
+    alert('{"engine":"HDLX_COGNITIVE_V1","event":"SHORT","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close) + ',"confidence":' + str.tostring(shortCandidateScore) + '}', alert.freq_once_per_bar_close)
+    shortCandidateScore := na
+
+var float highestSinceLong = na
+var float lowestSinceShort = na
+if strategy.position_size > 0
+    highestSinceLong := strategy.position_size[1] <= 0 ? high : math.max(nz(highestSinceLong, high), high)
+else
+    highestSinceLong := na
+if strategy.position_size < 0
+    lowestSinceShort := strategy.position_size[1] >= 0 ? low : math.min(nz(lowestSinceShort, low), low)
+else
+    lowestSinceShort := na
+
+if strategy.position_size > 0 and not na(longEntryAtr)
+    float longRisk = longEntryAtr * stopAtr
+    float longInitialStop = strategy.position_avg_price - longRisk
+    float longRunnerStop = math.max(longInitialStop, highestSinceLong - longEntryAtr * runnerTrailAtr)
+    strategy.exit("L-TP1", "Long", stop = longInitialStop, limit = strategy.position_avg_price + longRisk * tp1R, qty_percent = 25)
+    strategy.exit("L-TP2", "Long", stop = longInitialStop, limit = strategy.position_avg_price + longRisk * tp2R, qty_percent = 20)
+    strategy.exit("L-TP3", "Long", stop = longInitialStop, limit = strategy.position_avg_price + longRisk * tp3R, qty_percent = 15)
+    strategy.exit("L-Runner", "Long", stop = longRunnerStop, qty_percent = 40)
+
+if strategy.position_size < 0 and not na(shortEntryAtr)
+    float shortRisk = shortEntryAtr * stopAtr
+    float shortInitialStop = strategy.position_avg_price + shortRisk
+    float shortRunnerStop = math.min(shortInitialStop, lowestSinceShort + shortEntryAtr * runnerTrailAtr)
+    strategy.exit("S-TP1", "Short", stop = shortInitialStop, limit = strategy.position_avg_price - shortRisk * tp1R, qty_percent = 25)
+    strategy.exit("S-TP2", "Short", stop = shortInitialStop, limit = strategy.position_avg_price - shortRisk * tp2R, qty_percent = 20)
+    strategy.exit("S-TP3", "Short", stop = shortInitialStop, limit = strategy.position_avg_price - shortRisk * tp3R, qty_percent = 15)
+    strategy.exit("S-Runner", "Short", stop = shortRunnerStop, qty_percent = 40)
+
+plot(showZones ? activeResistance : na, "Confirmed pivot resistance", color = color.new(color.red, 10), linewidth = 2, style = plot.style_linebr)
+plot(showZones ? activeSupport : na, "Confirmed pivot support", color = color.new(color.lime, 10), linewidth = 2, style = plot.style_linebr)
+plot(showZones ? priorRangeHigh : na, "Prior-range high", color = color.new(color.orange, 60), linewidth = 1)
+plot(showZones ? priorRangeLow : na, "Prior-range low", color = color.new(color.aqua, 60), linewidth = 1)
+plot(equilibrium, "Chart equilibrium", color = color.new(color.white, 60), linewidth = 1)
+
+bgcolor(shadeRegime ? weeklyBull and monthlyBull ? color.new(color.green, 93) : not weeklyBull and not monthlyBull ? color.new(color.red, 93) : na : na)
+
+plotshape(showCandidates and newShortCandidate, "Top candidate", shape.circle, location.abovebar, color = color.orange, size = size.tiny, text = "T?")
+plotshape(showCandidates and newLongCandidate, "Bottom candidate", shape.circle, location.belowbar, color = color.aqua, size = size.tiny, text = "B?")
+plotshape(shortSignal, "Confirmed top", shape.labeldown, location.abovebar, color = color.red, textcolor = color.white, size = size.small, text = "TOP\nSHORT")
+plotshape(longSignal, "Confirmed bottom", shape.labelup, location.belowbar, color = color.green, textcolor = color.white, size = size.small, text = "BOTTOM\nLONG")
+
+plot(shortScore, "Top confidence", color = color.new(color.red, 100), display = display.data_window)
+plot(longScore, "Bottom confidence", color = color.new(color.green, 100), display = display.data_window)
+
+alertcondition(shortSignal, "HDLX confirmed top", "HDLX confirmed TOP/SHORT on {{ticker}} {{interval}} at {{close}}")
+alertcondition(longSignal, "HDLX confirmed bottom", "HDLX confirmed BOTTOM/LONG on {{ticker}} {{interval}} at {{close}}")

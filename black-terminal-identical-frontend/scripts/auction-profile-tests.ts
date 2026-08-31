@@ -21,6 +21,7 @@ import { PINE_CVD_PROFILE_KNOWN_ANOMALIES } from "../src/modules/auction-profile
 import { appendTradesToAuctionProfile, calculateAuctionProfile, calculateAuctionProfiles } from "../src/modules/auction-profile/engines/nativeEngine.ts";
 import { auctionTpoLetters, compactAuctionTpoLetters } from "../src/modules/auction-profile/engines/tpo.ts";
 import { InMemoryCanonicalCvdService } from "../src/modules/auction-profile/data/tradeSource.ts";
+import { planAuctionHistoryPages } from "../src/modules/auction-profile/data/historyPaging.ts";
 import { auctionProfileNeedsLowerHistory, resolveAuctionLowerSourceTimeframe, resolveAuctionTpoSourceTimeframe } from "../src/modules/auction-profile/core/lowerTimeframe.ts";
 import { AuctionProfileWorkerRuntime } from "../src/modules/auction-profile/worker/auctionProfileWorker.ts";
 import { AuctionProfileWorkerClient } from "../src/modules/auction-profile/worker/AuctionProfileWorkerClient.ts";
@@ -417,6 +418,11 @@ assert.equal(resolveAuctionTpoSourceTimeframe(45), "15m", "non-native TPO bracke
 assert.equal(resolveAuctionLowerSourceTimeframe(tpoSettings), "30m");
 assert.equal(auctionProfileNeedsLowerHistory("4h", tpoSettings), true, "higher-timeframe TPO must request bracket-scale history");
 assert.equal(auctionProfileNeedsLowerHistory("15m", tpoSettings), false, "a chart already finer than the TPO bracket needs no duplicate history request");
+const radapHistoryPages = planAuctionHistoryPages(1_000, 40_999, 1, 1_000, 40_000);
+assert.equal(radapHistoryPages.length, 40, "a 40k-bar RADAP history request must be split into bounded exchange pages");
+assert.deepEqual(radapHistoryPages[0], { from: 40_000, to: 40_999, limit: 1_000 });
+assert.deepEqual(radapHistoryPages.at(-1), { from: 1_000, to: 1_999, limit: 1_000 });
+assert.ok(radapHistoryPages.every((page, index) => index === 0 || page.to < radapHistoryPages[index - 1]!.from), "RADAP history pages must never overlap");
 const tpoSnapshot = calculateAuctionProfile({
   venue: "bybit",
   symbol: "BTCUSDT",

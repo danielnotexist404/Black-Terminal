@@ -3,10 +3,23 @@ import { getMarketDataEngineAdapter } from "../../../market-data/engine/marketDa
 import type { MarketSymbol, Timeframe } from "../../../market-data/types.ts";
 import { AUCTION_TIMEFRAME_SECONDS, auctionProfileNeedsLowerHistory, resolveAuctionLowerSourceTimeframe } from "../core/lowerTimeframe.ts";
 import type { AuctionProfileSettings } from "../core/types.ts";
+import { planAuctionHistoryPages } from "./historyPaging.ts";
 
 type CachedHistory = { candles: Map<number, Candle>; touchedAt: number };
 const historyCache = new Map<string, CachedHistory>();
 const MAX_CACHE_KEYS = 6;
+const MAX_PARALLEL_HISTORY_REQUESTS = 4;
+
+async function runWithConcurrency<T>(items: readonly T[], concurrency: number, task: (item: T) => Promise<void>) {
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (cursor < items.length) {
+      const item = items[cursor++];
+      if (item !== undefined) await task(item);
+    }
+  });
+  await Promise.all(workers);
+}
 
 function pruneCache() {
   if (historyCache.size <= MAX_CACHE_KEYS) return;
@@ -56,32 +69,30 @@ export async function loadAuctionProfileLowerHistory(
     return oldest <= targetStart + sourceSeconds && newest >= rangeEnd - sourceSeconds;
   };
 
-  let before = rangeEnd;
   const pageSize = market.exchange === "okx" ? 300 : 1000;
-  for (let page = 0; page < Math.ceil(targetBars / pageSize) + 3 && !complete(); page += 1) {
-    if (signal?.aborted) throw new DOMException("RADAP lower-timeframe history cancelled", "AbortError");
-    const batch = await adapter.getHistoricalCandles({
-      exchange: market.exchange,
-      symbol: market.rawSymbol,
-      marketKind: market.marketKind,
-      timeframe: sourceTimeframe,
-      from: targetStart,
-      to: before,
-      limit: Math.min(pageSize, targetBars),
-      signal
+  if (!complete()) {
+    const missingPages = planAuctionHistoryPages(targetStart, rangeEnd, sourceSeconds, pageSize, targetBars)
+      .filter(page => {
+        const firstCandle = Math.ceil(page.from / sourceSeconds) * sourceSeconds;
+        const lastCandle = Math.floor(page.to / sourceSeconds) * sourceSeconds;
+        return !cache.candles.has(firstCandle) || !cache.candles.has(lastCandle);
+      });
+    await runWithConcurrency(missingPages, MAX_PARALLEL_HISTORY_REQUESTS, async page => {
+      if (signal?.aborted) throw new DOMException("RADAP lower-timeframe history cancelled", "AbortError");
+      const batch = await adapter.getHistoricalCandles({
+        exchange: market.exchange,
+        symbol: market.rawSymbol,
+        marketKind: market.marketKind,
+        timeframe: sourceTimeframe,
+        from: page.from,
+        to: page.to,
+        limit: page.limit,
+        signal
+      });
+      for (const candle of batch) {
+        if (candle.time >= targetStart && candle.time <= rangeEnd) cache.candles.set(candle.time, candle);
+      }
     });
-    const eligible = batch.filter(candle => candle.time >= targetStart && candle.time <= rangeEnd);
-    let oldest = Number.POSITIVE_INFINITY;
-    let added = 0;
-    for (const candle of eligible) {
-      oldest = Math.min(oldest, candle.time);
-      if (!cache.candles.has(candle.time)) added += 1;
-      cache.candles.set(candle.time, candle);
-    }
-    if (!eligible.length || !Number.isFinite(oldest)) break;
-    if (complete()) break;
-    before = oldest - sourceSeconds;
-    if (!added && before <= targetStart) break;
   }
 
   const sorted = [...cache.candles.values()]

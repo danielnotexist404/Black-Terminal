@@ -1,0 +1,155 @@
+//@version=6
+indicator(
+     "Black Terminal — Confirmed MTF Regime Matrix",
+     shorttitle = "BT MTF MATRIX",
+     overlay = false,
+     precision = 1)
+
+// NON-REPAINTING CONTRACT
+// Every request reads [1] from its own timeframe and publishes it with
+// lookahead_on. The displayed state is therefore the most recently completed
+// candle from that timeframe, never the currently developing candle.
+
+string GROUP_FRAMES = "01 — Timeframes and weights"
+string GROUP_MODEL = "02 — Professional regime model"
+string GROUP_CONSENSUS = "03 — Consensus"
+string GROUP_DISPLAY = "04 — Display"
+
+string tf1 = input.timeframe("1D", "Timeframe 1", group = GROUP_FRAMES)
+string tf2 = input.timeframe("5D", "Timeframe 2", group = GROUP_FRAMES)
+string tf3 = input.timeframe("15D", "Timeframe 3", group = GROUP_FRAMES)
+string tf4 = input.timeframe("45D", "Timeframe 4", group = GROUP_FRAMES)
+float weight1 = input.float(1.0, "Weight 1", minval = 0.0, maxval = 10.0, step = 0.25, group = GROUP_FRAMES)
+float weight2 = input.float(1.25, "Weight 2", minval = 0.0, maxval = 10.0, step = 0.25, group = GROUP_FRAMES)
+float weight3 = input.float(1.5, "Weight 3", minval = 0.0, maxval = 10.0, step = 0.25, group = GROUP_FRAMES)
+float weight4 = input.float(2.0, "Weight 4", minval = 0.0, maxval = 10.0, step = 0.25, group = GROUP_FRAMES)
+
+int atrLength = input.int(14, "ATR normalization length", minval = 2, maxval = 100, group = GROUP_MODEL)
+int fastEmaLength = input.int(10, "Fast EMA", minval = 2, maxval = 200, group = GROUP_MODEL)
+int slowEmaLength = input.int(30, "Slow EMA", minval = 3, maxval = 400, group = GROUP_MODEL)
+int slopeLookback = input.int(3, "Slow EMA slope lookback", minval = 1, maxval = 30, group = GROUP_MODEL)
+int rsiLength = input.int(14, "RSI length", minval = 2, maxval = 100, group = GROUP_MODEL)
+float bodyWeight = input.float(20.0, "Candle displacement weight", minval = 0.0, maxval = 100.0, step = 1.0, group = GROUP_MODEL)
+float structureWeight = input.float(35.0, "EMA structure weight", minval = 0.0, maxval = 100.0, step = 1.0, group = GROUP_MODEL)
+float slopeWeight = input.float(25.0, "EMA slope weight", minval = 0.0, maxval = 100.0, step = 1.0, group = GROUP_MODEL)
+float momentumWeight = input.float(20.0, "RSI momentum weight", minval = 0.0, maxval = 100.0, step = 1.0, group = GROUP_MODEL)
+float neutralThreshold = input.float(12.0, "Per-timeframe neutral threshold", minval = 0.0, maxval = 50.0, step = 1.0, group = GROUP_MODEL)
+
+float consensusThreshold = input.float(35.0, "Consensus trigger threshold", minval = 5.0, maxval = 95.0, step = 1.0, group = GROUP_CONSENSUS)
+int minimumAgreement = input.int(3, "Minimum aligned timeframes", minval = 2, maxval = 4, group = GROUP_CONSENSUS)
+bool requireSlowestAgreement = input.bool(true, "Require Timeframe 4 agreement", group = GROUP_CONSENSUS)
+
+bool showDashboard = input.bool(true, "Show live matrix table", group = GROUP_DISPLAY)
+bool showTransitionMarks = input.bool(true, "Show consensus transitions", group = GROUP_DISPLAY)
+bool useGradient = input.bool(true, "Color strength by score", group = GROUP_DISPLAY)
+
+float chartSeconds = timeframe.in_seconds(timeframe.period)
+if timeframe.in_seconds(tf1) < chartSeconds or timeframe.in_seconds(tf2) < chartSeconds or timeframe.in_seconds(tf3) < chartSeconds or timeframe.in_seconds(tf4) < chartSeconds
+    runtime.error("All matrix timeframes must be equal to or higher than the chart timeframe.")
+
+clamp(float value, float lower, float upper) => math.max(lower, math.min(upper, value))
+
+regimeModel() =>
+    float localAtr = ta.atr(atrLength)
+    float fastEma = ta.ema(close, fastEmaLength)
+    float slowEma = ta.ema(close, slowEmaLength)
+    float localRsi = ta.rsi(close, rsiLength)
+    float safeAtr = math.max(localAtr, syminfo.mintick)
+
+    // Each component is bounded to [-1, +1] before weighting.
+    float displacement = clamp((close - open) / safeAtr, -1.0, 1.0)
+    float structure = fastEma > slowEma and close > slowEma ? 1.0 : fastEma < slowEma and close < slowEma ? -1.0 : clamp((close - slowEma) / safeAtr, -1.0, 1.0)
+    float slope = clamp((slowEma - slowEma[slopeLookback]) / safeAtr, -1.0, 1.0)
+    float momentum = clamp((localRsi - 50.0) / 25.0, -1.0, 1.0)
+    float totalWeight = math.max(bodyWeight + structureWeight + slopeWeight + momentumWeight, 0.000001)
+    clamp(100.0 * (displacement * bodyWeight + structure * structureWeight + slope * slopeWeight + momentum * momentumWeight) / totalWeight, -100.0, 100.0)
+
+// The one-bar offset occurs inside each requested context. This is the critical
+// difference from the legacy Pine v2 script, which leaked final HTF values.
+float score1 = request.security(syminfo.tickerid, tf1, regimeModel()[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+float score2 = request.security(syminfo.tickerid, tf2, regimeModel()[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+float score3 = request.security(syminfo.tickerid, tf3, regimeModel()[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+float score4 = request.security(syminfo.tickerid, tf4, regimeModel()[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+
+state(float value) => value > neutralThreshold ? 1 : value < -neutralThreshold ? -1 : 0
+string stateText(float value) => state(value) == 1 ? "BULL" : state(value) == -1 ? "BEAR" : "NEUTRAL"
+
+int state1 = state(score1)
+int state2 = state(score2)
+int state3 = state(score3)
+int state4 = state(score4)
+int bullishCount = (state1 == 1 ? 1 : 0) + (state2 == 1 ? 1 : 0) + (state3 == 1 ? 1 : 0) + (state4 == 1 ? 1 : 0)
+int bearishCount = (state1 == -1 ? 1 : 0) + (state2 == -1 ? 1 : 0) + (state3 == -1 ? 1 : 0) + (state4 == -1 ? 1 : 0)
+
+float totalFrameWeight = math.max(weight1 + weight2 + weight3 + weight4, 0.000001)
+float consensus = clamp((score1 * weight1 + score2 * weight2 + score3 * weight3 + score4 * weight4) / totalFrameWeight, -100.0, 100.0)
+bool slowestBullOk = not requireSlowestAgreement or state4 == 1
+bool slowestBearOk = not requireSlowestAgreement or state4 == -1
+bool bullishConsensus = consensus >= consensusThreshold and bullishCount >= minimumAgreement and slowestBullOk
+bool bearishConsensus = consensus <= -consensusThreshold and bearishCount >= minimumAgreement and slowestBearOk
+bool bullishTransition = bullishConsensus and not bullishConsensus[1]
+bool bearishTransition = bearishConsensus and not bearishConsensus[1]
+
+regimeColor(float value) =>
+    color result = color.rgb(150, 156, 166)
+    if value > neutralThreshold
+        result := useGradient ? color.from_gradient(value, neutralThreshold, 100.0, color.rgb(23, 92, 51), color.rgb(0, 255, 112)) : color.rgb(0, 210, 90)
+    else if value < -neutralThreshold
+        result := useGradient ? color.from_gradient(value, -100.0, -neutralThreshold, color.rgb(255, 25, 55), color.rgb(105, 25, 35)) : color.rgb(240, 25, 50)
+    result
+
+color consensusColor = bullishConsensus ? color.rgb(0, 255, 112) : bearishConsensus ? color.rgb(255, 25, 55) : math.abs(consensus) <= neutralThreshold ? color.rgb(210, 215, 225) : regimeColor(consensus)
+
+// Five professional horizontal timelines, matching the visual grammar of the
+// original indicator while displaying substantially richer information.
+plot(1, "TF1 confirmed regime", color = regimeColor(score1), linewidth = 6)
+plot(5, "TF2 confirmed regime", color = regimeColor(score2), linewidth = 6)
+plot(10, "TF3 confirmed regime", color = regimeColor(score3), linewidth = 6)
+plot(15, "TF4 confirmed regime", color = regimeColor(score4), linewidth = 6)
+plot(25, "Weighted confirmed consensus", color = consensusColor, linewidth = 7)
+
+hline(3, "Separator 1", color = color.new(color.gray, 86))
+hline(7.5, "Separator 2", color = color.new(color.gray, 86))
+hline(12.5, "Separator 3", color = color.new(color.gray, 86))
+hline(20, "Consensus separator", color = color.new(color.gray, 76))
+
+plotshape(showTransitionMarks and bullishTransition ? 28 : na, "Confirmed bullish transition", shape.triangleup, location.absolute, color = color.rgb(0, 255, 112), text = "BULL", textcolor = color.black, size = size.tiny)
+plotshape(showTransitionMarks and bearishTransition ? 28 : na, "Confirmed bearish transition", shape.triangledown, location.absolute, color = color.rgb(255, 25, 55), text = "BEAR", textcolor = color.white, size = size.tiny)
+
+plot(score1, "TF1 score", color = color.new(color.white, 100), display = display.data_window)
+plot(score2, "TF2 score", color = color.new(color.white, 100), display = display.data_window)
+plot(score3, "TF3 score", color = color.new(color.white, 100), display = display.data_window)
+plot(score4, "TF4 score", color = color.new(color.white, 100), display = display.data_window)
+plot(consensus, "Consensus score", color = color.new(color.white, 100), display = display.data_window)
+
+var table matrix = table.new(position.top_right, 3, 6, border_width = 1, border_color = color.new(color.gray, 70))
+if barstate.islast and showDashboard
+    table.cell(matrix, 0, 0, "FRAME", text_color = color.white, bgcolor = color.rgb(15, 18, 23))
+    table.cell(matrix, 1, 0, "STATE", text_color = color.white, bgcolor = color.rgb(15, 18, 23))
+    table.cell(matrix, 2, 0, "SCORE", text_color = color.white, bgcolor = color.rgb(15, 18, 23))
+    table.cell(matrix, 0, 1, tf1, text_color = color.white, bgcolor = color.rgb(10, 12, 16))
+    table.cell(matrix, 1, 1, stateText(score1), text_color = color.white, bgcolor = regimeColor(score1))
+    table.cell(matrix, 2, 1, str.tostring(score1, "#.0"), text_color = color.white, bgcolor = color.rgb(10, 12, 16))
+    table.cell(matrix, 0, 2, tf2, text_color = color.white, bgcolor = color.rgb(10, 12, 16))
+    table.cell(matrix, 1, 2, stateText(score2), text_color = color.white, bgcolor = regimeColor(score2))
+    table.cell(matrix, 2, 2, str.tostring(score2, "#.0"), text_color = color.white, bgcolor = color.rgb(10, 12, 16))
+    table.cell(matrix, 0, 3, tf3, text_color = color.white, bgcolor = color.rgb(10, 12, 16))
+    table.cell(matrix, 1, 3, stateText(score3), text_color = color.white, bgcolor = regimeColor(score3))
+    table.cell(matrix, 2, 3, str.tostring(score3, "#.0"), text_color = color.white, bgcolor = color.rgb(10, 12, 16))
+    table.cell(matrix, 0, 4, tf4, text_color = color.white, bgcolor = color.rgb(10, 12, 16))
+    table.cell(matrix, 1, 4, stateText(score4), text_color = color.white, bgcolor = regimeColor(score4))
+    table.cell(matrix, 2, 4, str.tostring(score4, "#.0"), text_color = color.white, bgcolor = color.rgb(10, 12, 16))
+    table.cell(matrix, 0, 5, "GLOBAL", text_color = color.white, bgcolor = color.rgb(15, 18, 23))
+    table.cell(matrix, 1, 5, bullishConsensus ? "BULLISH" : bearishConsensus ? "BEARISH" : "MIXED", text_color = bullishConsensus ? color.black : color.white, bgcolor = consensusColor)
+    table.cell(matrix, 2, 5, str.tostring(consensus, "#.0"), text_color = color.white, bgcolor = color.rgb(15, 18, 23))
+
+if barstate.islast and not showDashboard
+    table.clear(matrix, 0, 0, 2, 5)
+
+if bullishTransition
+    alert('{"engine":"BT_CONFIRMED_MTF_MATRIX","event":"BULLISH_CONSENSUS","ticker":"' + syminfo.ticker + '","chart_tf":"' + timeframe.period + '","score":' + str.tostring(consensus) + '}', alert.freq_once_per_bar)
+if bearishTransition
+    alert('{"engine":"BT_CONFIRMED_MTF_MATRIX","event":"BEARISH_CONSENSUS","ticker":"' + syminfo.ticker + '","chart_tf":"' + timeframe.period + '","score":' + str.tostring(consensus) + '}', alert.freq_once_per_bar)
+
+alertcondition(bullishTransition, "Confirmed bullish MTF consensus", "Confirmed bullish MTF consensus on {{ticker}} {{interval}}")
+alertcondition(bearishTransition, "Confirmed bearish MTF consensus", "Confirmed bearish MTF consensus on {{ticker}} {{interval}}")

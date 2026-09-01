@@ -17,6 +17,7 @@ import { startLocalStrategyCoordinator } from "../core/local-runtime/localStrate
 import { startLocalInvestmentGroupP2pCoordinator } from "../core/local-runtime/localInvestmentGroupP2pCoordinator";
 import { startLocalP2pOutbox } from "../core/local-runtime/localP2pOutbox";
 import { startLocalAlertDeliveryOutbox } from "../core/local-runtime/localAlertDeliveryOutbox";
+import { startLocalEmailDeliveryOutbox } from "../core/local-runtime/localEmailDeliveryOutbox";
 import { hydrateProfessionalNetworkStore } from "../modules/profile/professionalNetworkStore";
 import { restoreActiveLocalQalcRuntime } from "../modules/strategy-lab/qalc/localQalcRuntime";
 import "../styles/standalone-bootstrap.css";
@@ -64,7 +65,8 @@ export function StandaloneBootstrap() {
     const stopGroups = status.config.p2pEnabled ? startLocalInvestmentGroupP2pCoordinator() : () => undefined;
     const stopOutbox = status.config.p2pEnabled ? startLocalP2pOutbox() : () => undefined;
     const stopAlerts = startLocalAlertDeliveryOutbox();
-    return () => { stopAlerts(); stopOutbox(); stopGroups(); stopStrategy(); };
+    const stopEmail = startLocalEmailDeliveryOutbox();
+    return () => { stopEmail(); stopAlerts(); stopOutbox(); stopGroups(); stopStrategy(); };
   }, [status]);
 
   useEffect(() => {

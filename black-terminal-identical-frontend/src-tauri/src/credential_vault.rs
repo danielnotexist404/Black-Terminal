@@ -87,6 +87,35 @@ struct StoredSecretEnvelope {
     passphrase: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EmailCredentialInput {
+    credential_id: String,
+    username: String,
+    secret: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredEmailSecretEnvelope {
+    schema_version: u8,
+    credential_id: String,
+    username: String,
+    secret: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EmailCredentialStatus {
+    credential_id: String,
+    configured: bool,
+}
+
+pub(crate) struct EmailCredentialSecret {
+    pub(crate) username: Zeroizing<String>,
+    pub(crate) secret: Zeroizing<String>,
+}
+
 pub(crate) struct ExchangeCredentialSecret {
     pub(crate) account_id: String,
     pub(crate) exchange: String,
@@ -118,6 +147,35 @@ fn validate_secret(value: &str, label: &str) -> Result<(), String> {
     let length = value.trim().len();
     if !(8..=512).contains(&length) {
         return Err(format!("{label} must contain between 8 and 512 characters"));
+    }
+    Ok(())
+}
+
+fn email_vault_key(credential_id: &str) -> Result<String, String> {
+    Ok(format!(
+        "email:smtp:{}",
+        normalize_component(credential_id, "Email credential identifier", 64)?
+    ))
+}
+
+fn validate_email_login(value: &str) -> Result<(), String> {
+    let value = value.trim();
+    if value.is_empty() || value.len() > 320 || value.chars().any(char::is_control) {
+        return Err("SMTP username is invalid".to_string());
+    }
+    Ok(())
+}
+
+fn validate_email_secret(value: &str) -> Result<(), String> {
+    let length = value.len();
+    if !(8..=4096).contains(&length)
+        || value
+            .chars()
+            .any(|character| matches!(character, '\r' | '\n'))
+    {
+        return Err(
+            "SMTP password or token must contain between 8 and 4096 characters".to_string(),
+        );
     }
     Ok(())
 }
@@ -389,6 +447,87 @@ pub(crate) fn read_exchange_credentials<R: Runtime>(
     })
 }
 
+pub(crate) fn read_email_credentials(credential_id: &str) -> Result<EmailCredentialSecret, String> {
+    let normalized = normalize_component(credential_id, "Email credential identifier", 64)?;
+    let encoded = vault_entry(&email_vault_key(&normalized)?)?
+        .get_password()
+        .map(Zeroizing::new)
+        .map_err(|_| {
+            "The SMTP credential was not found in the operating-system vault".to_string()
+        })?;
+    let decoded: StoredEmailSecretEnvelope = serde_json::from_str(&encoded)
+        .map_err(|_| "The SMTP credential envelope is invalid".to_string())?;
+    if decoded.schema_version != 1
+        || decoded.credential_id.trim().to_ascii_lowercase() != normalized
+    {
+        return Err(
+            "The SMTP credential envelope does not match the requested profile".to_string(),
+        );
+    }
+    Ok(EmailCredentialSecret {
+        username: Zeroizing::new(decoded.username),
+        secret: Zeroizing::new(decoded.secret),
+    })
+}
+
+fn store_email_credentials(
+    credentials: EmailCredentialInput,
+) -> Result<EmailCredentialStatus, String> {
+    let credential_id = normalize_component(
+        &credentials.credential_id,
+        "Email credential identifier",
+        64,
+    )?;
+    validate_email_login(&credentials.username)?;
+    validate_email_secret(&credentials.secret)?;
+    let encoded = Zeroizing::new(
+        serde_json::to_string(&StoredEmailSecretEnvelope {
+            schema_version: 1,
+            credential_id: credential_id.clone(),
+            username: credentials.username.trim().to_string(),
+            secret: credentials.secret,
+        })
+        .map_err(|_| "The SMTP credential envelope could not be encoded".to_string())?,
+    );
+    vault_entry(&email_vault_key(&credential_id)?)?
+        .set_password(&encoded)
+        .map_err(|_| {
+            "The operating-system credential vault refused the SMTP credential".to_string()
+        })?;
+    Ok(EmailCredentialStatus {
+        credential_id,
+        configured: true,
+    })
+}
+
+fn email_credentials_status(credential_id: &str) -> Result<EmailCredentialStatus, String> {
+    let credential_id = normalize_component(credential_id, "Email credential identifier", 64)?;
+    let configured = match vault_entry(&email_vault_key(&credential_id)?)?.get_password() {
+        Ok(_) => true,
+        Err(keyring_core::Error::NoEntry) => false,
+        Err(_) => {
+            return Err(
+                "The operating-system credential vault could not inspect the SMTP credential"
+                    .to_string(),
+            )
+        }
+    };
+    Ok(EmailCredentialStatus {
+        credential_id,
+        configured,
+    })
+}
+
+fn delete_email_credentials(credential_id: &str) -> Result<(), String> {
+    let credential_id = normalize_component(credential_id, "Email credential identifier", 64)?;
+    match vault_entry(&email_vault_key(&credential_id)?)?.delete_credential() {
+        Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
+        Err(_) => Err(
+            "The operating-system credential vault refused SMTP credential deletion".to_string(),
+        ),
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn secure_store_exchange_credentials<R: Runtime>(
     app: AppHandle<R>,
@@ -415,6 +554,31 @@ pub(crate) async fn secure_list_exchange_credentials<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<Vec<StoredCredentialReference>, String> {
     tauri::async_runtime::spawn_blocking(move || list(&app))
+        .await
+        .map_err(|_| "The credential vault task stopped unexpectedly".to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn secure_store_email_credentials(
+    credentials: EmailCredentialInput,
+) -> Result<EmailCredentialStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || store_email_credentials(credentials))
+        .await
+        .map_err(|_| "The credential vault task stopped unexpectedly".to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn secure_email_credentials_status(
+    credential_id: String,
+) -> Result<EmailCredentialStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || email_credentials_status(&credential_id))
+        .await
+        .map_err(|_| "The credential vault task stopped unexpectedly".to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn secure_delete_email_credentials(credential_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || delete_email_credentials(&credential_id))
         .await
         .map_err(|_| "The credential vault task stopped unexpectedly".to_string())?
 }
@@ -453,5 +617,16 @@ mod tests {
         .unwrap();
         assert!(!encoded.contains("apiSecret"));
         assert!(!encoded.contains("apiKey"));
+    }
+
+    #[test]
+    fn smtp_credentials_use_a_separate_vault_namespace() {
+        assert_eq!(
+            email_vault_key(" Alerts-Primary ").unwrap(),
+            "email:smtp:alerts-primary"
+        );
+        assert!(email_vault_key("../../escape").is_err());
+        assert!(validate_email_secret("short").is_err());
+        assert!(validate_email_secret("valid-app-password").is_ok());
     }
 }

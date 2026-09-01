@@ -5,6 +5,7 @@ import { isLocalOnlyRuntime } from "../core/local-runtime/localRuntimeClient";
 import { dialLocalP2pPeer } from "../core/local-runtime/localP2pClient";
 import { enqueueLocalP2pDirectMessage } from "../core/local-runtime/localP2pOutbox";
 import { enqueueLocalWebhookDelivery } from "../core/local-runtime/localAlertDeliveryOutbox";
+import { enqueueLocalEmailDelivery } from "../core/local-runtime/localEmailDeliveryOutbox";
 
 export async function publicMarketGet<T = unknown>(url: string) {
   return await invoke<T>("public_market_get", { url });
@@ -82,7 +83,15 @@ export async function sendIndicatorAlert(
   }
 
   if (delivery.email && delivery.emailTo?.trim() && isLocalOnlyRuntime()) {
-    results.push({ skipped: true, reason: "Local email delivery requires an SMTP credential adapter; no email was sent." });
+    try {
+      results.push(await enqueueLocalEmailDelivery({
+        messageId: `email-${crypto.randomUUID()}`,
+        to: delivery.emailTo.trim(),
+        payload,
+      }));
+    } catch (error) {
+      results.push({ error: error instanceof Error ? error.message : String(error) });
+    }
   } else if (delivery.email && delivery.emailTo?.trim()) {
     results.push(await sendResendEmail({
       to: delivery.emailTo.trim(),

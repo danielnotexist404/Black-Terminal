@@ -11,6 +11,7 @@ mod bybit_local;
 mod credential_vault;
 mod local_ai;
 mod local_crypto;
+mod local_email;
 mod local_execution;
 mod local_p2p;
 mod local_runtime;
@@ -210,6 +211,10 @@ pub fn run() {
             credential_vault::secure_store_exchange_credentials,
             credential_vault::secure_delete_exchange_credentials,
             credential_vault::secure_list_exchange_credentials,
+            credential_vault::secure_store_email_credentials,
+            credential_vault::secure_email_credentials_status,
+            credential_vault::secure_delete_email_credentials,
+            local_email::local_email_send,
             bybit_local::bybit_local_instrument_rules,
             bybit_local::bybit_local_clock_sample,
             bybit_local::bybit_local_sync_account,

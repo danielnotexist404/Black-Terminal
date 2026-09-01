@@ -6,6 +6,17 @@ import { getLocalDocument, putLocalDocument } from "../core/local-runtime/localD
 import { dialLocalP2pPeer, forgetTrustedLocalP2pPeer, listConfiguredLocalP2pRelays, listTrustedLocalP2pPeers, readLocalP2pStatus, saveConfiguredLocalP2pRelays, startLocalP2p, stopLocalP2p, type LocalP2pStatus } from "../core/local-runtime/localP2pClient";
 import { localP2pOutboxSummary } from "../core/local-runtime/localP2pOutbox";
 import { localAlertOutboxSummary } from "../core/local-runtime/localAlertDeliveryOutbox";
+import { localEmailOutboxSummary } from "../core/local-runtime/localEmailDeliveryOutbox";
+import {
+  defaultLocalEmailProvider,
+  deleteLocalEmailCredential,
+  localEmailCredentialStatus,
+  readLocalEmailProviderSettings,
+  saveLocalEmailProviderSettings,
+  sendLocalEmail,
+  storeLocalEmailCredential,
+  type LocalEmailProviderSettings,
+} from "../core/local-runtime/localEmailClient";
 import { defaultLocalAiProvider, readLocalAiProviderSettings, saveLocalAiProviderSettings } from "../core/local-runtime/localAiClient";
 import {
   createEncryptedProfileArchive,
@@ -91,6 +102,7 @@ export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange,
   const [localRuntimeStatus, setLocalRuntimeStatus] = useState<LocalRuntimeStatus | null>(null);
   const [outboxSummary, setOutboxSummary] = useState<{ pending: number; retrying: number; oldestCreatedAt: number | null; lastSafeError: string | null } | null>(null);
   const [alertOutboxSummary, setAlertOutboxSummary] = useState<{ pending: number; retrying: number; lastSafeError: string | null } | null>(null);
+  const [emailOutboxSummary, setEmailOutboxSummary] = useState<{ pending: number; retrying: number; lastSafeError: string | null } | null>(null);
   const [runtimeConfigBusy, setRuntimeConfigBusy] = useState(false);
   const [localAiEndpoint, setLocalAiEndpoint] = useState(defaultLocalAiProvider.endpoint);
   const [localAiModel, setLocalAiModel] = useState(defaultLocalAiProvider.model);
@@ -100,6 +112,11 @@ export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange,
   // Local alert configs
   const [webhookUrl, setWebhookUrl] = useState("");
   const [alertEmail, setAlertEmail] = useState("");
+  const [emailProvider, setEmailProvider] = useState<LocalEmailProviderSettings>(defaultLocalEmailProvider);
+  const [smtpUsername, setSmtpUsername] = useState("");
+  const [smtpSecret, setSmtpSecret] = useState("");
+  const [smtpConfigured, setSmtpConfigured] = useState(false);
+  const [smtpBusy, setSmtpBusy] = useState(false);
 
   useEffect(() => {
     if (!localOnly) {
@@ -110,11 +127,14 @@ export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange,
     void Promise.all([
       getLocalDocument<{ webhookUrl: string; alertEmail: string }>("settings", "alert-delivery"),
       readLocalAiProviderSettings(),
-    ]).then(([document, provider]) => {
+      readLocalEmailProviderSettings(),
+    ]).then(async ([document, provider, smtp]) => {
         setWebhookUrl(document?.value.webhookUrl || "");
         setAlertEmail(document?.value.alertEmail || "");
         setLocalAiEndpoint(provider.endpoint);
         setLocalAiModel(provider.model);
+        setEmailProvider(smtp);
+        setSmtpConfigured((await localEmailCredentialStatus(smtp.credentialId)).configured);
       })
       .catch((error) => setErrorMsg(error instanceof Error ? error.message : String(error)));
   }, [localOnly]);
@@ -125,8 +145,8 @@ export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange,
     void listConfiguredLocalP2pRelays()
       .then((addresses) => { if (active) setP2pRelayAddresses(addresses.join("\n")); })
       .catch((error) => { if (active) setP2pMessage(error instanceof Error ? error.message : String(error)); });
-    const refresh = () => Promise.all([readLocalP2pStatus(), readLocalRuntimeStatus(), localP2pOutboxSummary(), localAlertOutboxSummary(), listTrustedLocalP2pPeers()])
-      .then(([nextP2p, nextRuntime, nextOutbox, nextAlerts, nextPeers]) => { if (active) { setP2pStatus(nextP2p); setLocalRuntimeStatus(nextRuntime); setOutboxSummary(nextOutbox); setAlertOutboxSummary(nextAlerts); setTrustedPeerAddresses(nextPeers); } })
+    const refresh = () => Promise.all([readLocalP2pStatus(), readLocalRuntimeStatus(), localP2pOutboxSummary(), localAlertOutboxSummary(), localEmailOutboxSummary(), listTrustedLocalP2pPeers()])
+      .then(([nextP2p, nextRuntime, nextOutbox, nextAlerts, nextEmail, nextPeers]) => { if (active) { setP2pStatus(nextP2p); setLocalRuntimeStatus(nextRuntime); setOutboxSummary(nextOutbox); setAlertOutboxSummary(nextAlerts); setEmailOutboxSummary(nextEmail); setTrustedPeerAddresses(nextPeers); } })
       .catch((error) => { if (active) setP2pMessage(error instanceof Error ? error.message : String(error)); });
     void readLocalRuntimeStatus().then((nextRuntime) => {
       if (!active || !nextRuntime) return;
@@ -140,16 +160,74 @@ export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange,
 
   const handleSaveLocalSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (localOnly) {
-      await putLocalDocument("settings", "alert-delivery", { webhookUrl: webhookUrl.trim(), alertEmail: alertEmail.trim() });
-      localStorage.removeItem("bt_webhook_url");
-      localStorage.removeItem("bt_alert_email");
-    } else {
-      localStorage.setItem("bt_webhook_url", webhookUrl.trim());
-      localStorage.setItem("bt_alert_email", alertEmail.trim());
+    setErrorMsg("");
+    setSmtpBusy(true);
+    try {
+      if (localOnly) {
+        const existing = await localEmailCredentialStatus(emailProvider.credentialId);
+        if (emailProvider.enabled && !existing.configured && !smtpSecret) {
+          throw new Error("Store the SMTP password or token before enabling local email delivery.");
+        }
+        if (smtpSecret) {
+          await storeLocalEmailCredential(emailProvider.credentialId, smtpUsername, smtpSecret);
+          setSmtpConfigured(true);
+          setSmtpUsername("");
+          setSmtpSecret("");
+        } else {
+          setSmtpConfigured(existing.configured);
+        }
+        setEmailProvider(await saveLocalEmailProviderSettings(emailProvider));
+        await putLocalDocument("settings", "alert-delivery", { webhookUrl: webhookUrl.trim(), alertEmail: alertEmail.trim() });
+        localStorage.removeItem("bt_webhook_url");
+        localStorage.removeItem("bt_alert_email");
+      } else {
+        localStorage.setItem("bt_webhook_url", webhookUrl.trim());
+        localStorage.setItem("bt_alert_email", alertEmail.trim());
+      }
+      setSuccessMsg(localOnly ? "Encrypted local alert, webhook, and SMTP settings saved." : "System configuration saved!");
+      setTimeout(() => setSuccessMsg(""), 3000);
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSmtpBusy(false);
     }
-    setSuccessMsg(localOnly ? "Encrypted local delivery settings saved." : "System configuration saved!");
-    setTimeout(() => setSuccessMsg(""), 3000);
+  };
+
+  const handleTestLocalEmail = async () => {
+    if (!alertEmail.trim() || smtpBusy) return;
+    setErrorMsg("");
+    setSuccessMsg("");
+    setSmtpBusy(true);
+    try {
+      await sendLocalEmail({
+        provider: emailProvider,
+        to: alertEmail.trim(),
+        subject: "Black Terminal local SMTP test",
+        body: `Black Terminal successfully reached the configured SMTP provider.\n\nDevice test time: ${new Date().toISOString()}`,
+      });
+      setSuccessMsg("SMTP test accepted by the configured provider.");
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSmtpBusy(false);
+    }
+  };
+
+  const handleDeleteLocalEmailCredential = async () => {
+    if (smtpBusy) return;
+    setSmtpBusy(true);
+    setErrorMsg("");
+    try {
+      await deleteLocalEmailCredential(emailProvider.credentialId);
+      setSmtpConfigured(false);
+      setSmtpUsername("");
+      setSmtpSecret("");
+      setSuccessMsg("SMTP credential removed from the operating-system vault.");
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSmtpBusy(false);
+    }
   };
 
   const handleDialPeer = async () => {
@@ -663,10 +741,14 @@ export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange,
               <Shield size={16} /> ALERTS & WEBHOOKS
             </h2>
             {successMsg && <div className="settings-success-msg">{successMsg}</div>}
+            {localOnly && errorMsg && <div className="settings-error-msg" role="alert">{errorMsg}</div>}
             {localOnly && <>
               <div className="telemetry-row"><span className="telemetry-lbl">Queued webhooks</span><span className="telemetry-val">{alertOutboxSummary?.pending ?? 0}</span></div>
               <div className="telemetry-row"><span className="telemetry-lbl">Retrying webhooks</span><span className="telemetry-val">{alertOutboxSummary?.retrying ?? 0}</span></div>
+              <div className="telemetry-row"><span className="telemetry-lbl">Queued emails</span><span className="telemetry-val">{emailOutboxSummary?.pending ?? 0}</span></div>
+              <div className="telemetry-row"><span className="telemetry-lbl">SMTP credential</span><span className="telemetry-val highlight">{smtpConfigured ? "OS VAULT READY" : "NOT STORED"}</span></div>
               {alertOutboxSummary?.lastSafeError && <div className="settings-error-msg" role="status">Last webhook: {alertOutboxSummary.lastSafeError}</div>}
+              {emailOutboxSummary?.lastSafeError && <div className="settings-error-msg" role="status">Last email: {emailOutboxSummary.lastSafeError}</div>}
             </>}
             
             <div className="settings-field">
@@ -693,8 +775,50 @@ export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange,
               <span className="settings-hint">Receive notifications for order book block updates</span>
             </div>
 
-            <button className="settings-submit-btn" type="submit">
-              Save Webhook Configuration
+            {localOnly && <>
+              <div className="settings-runtime-toggles">
+                <label><span><strong>Native SMTP delivery</strong><em>Send alert email directly from this computer through an authenticated TLS provider. No Black Cloud relay is used.</em></span><input type="checkbox" checked={emailProvider.enabled} disabled={smtpBusy} onChange={(event) => setEmailProvider((current) => ({ ...current, enabled: event.target.checked }))} /></label>
+              </div>
+              <div className="settings-field">
+                <label className="settings-label">SMTP hostname</label>
+                <input className="settings-input" value={emailProvider.smtpHost} placeholder="smtp.example.com" autoCapitalize="none" spellCheck={false} disabled={smtpBusy} onChange={(event) => setEmailProvider((current) => ({ ...current, smtpHost: event.target.value }))} />
+              </div>
+              <div className="settings-field">
+                <label className="settings-label">Encrypted transport</label>
+                <select className="settings-input" value={emailProvider.transport} disabled={smtpBusy} onChange={(event) => setEmailProvider((current) => ({ ...current, transport: event.target.value === "TLS" ? "TLS" : "STARTTLS", smtpPort: event.target.value === "TLS" ? 465 : 587 }))}>
+                  <option value="STARTTLS">STARTTLS (normally port 587)</option>
+                  <option value="TLS">TLS wrapper (normally port 465)</option>
+                </select>
+              </div>
+              <div className="settings-field">
+                <label className="settings-label">SMTP port</label>
+                <input className="settings-input" type="number" min={1} max={65535} value={emailProvider.smtpPort} disabled={smtpBusy} onChange={(event) => setEmailProvider((current) => ({ ...current, smtpPort: Number(event.target.value) }))} />
+              </div>
+              <div className="settings-field">
+                <label className="settings-label">Sender address</label>
+                <input className="settings-input" type="email" value={emailProvider.fromAddress} placeholder="terminal@example.com" disabled={smtpBusy} onChange={(event) => setEmailProvider((current) => ({ ...current, fromAddress: event.target.value }))} />
+              </div>
+              <div className="settings-field">
+                <label className="settings-label">Sender name</label>
+                <input className="settings-input" value={emailProvider.fromName} maxLength={100} disabled={smtpBusy} onChange={(event) => setEmailProvider((current) => ({ ...current, fromName: event.target.value }))} />
+              </div>
+              <div className="settings-field">
+                <label className="settings-label">SMTP username</label>
+                <input className="settings-input" value={smtpUsername} autoCapitalize="none" autoComplete="username" spellCheck={false} placeholder={smtpConfigured ? "Stored in OS vault — enter only to replace" : "SMTP account username"} disabled={smtpBusy} onChange={(event) => setSmtpUsername(event.target.value)} />
+              </div>
+              <div className="settings-field">
+                <label className="settings-label">SMTP password or application token</label>
+                <input className="settings-input" type="password" value={smtpSecret} minLength={8} maxLength={4096} autoComplete="new-password" placeholder={smtpConfigured ? "Stored in OS vault — leave blank to keep" : "Required before enabling"} disabled={smtpBusy} onChange={(event) => setSmtpSecret(event.target.value)} />
+                <span className="settings-hint">The username and password/token are stored only in Windows Credential Manager, Apple Keychain, Android Keystore-backed storage, or Linux Secret Service. They are never written to the encrypted document database or migration archive.</span>
+              </div>
+              <div className="settings-migration-actions">
+                <button className="settings-submit-btn secondary" type="button" disabled={smtpBusy || !smtpConfigured || !emailProvider.enabled || !alertEmail.trim()} onClick={() => void handleTestLocalEmail()}>SEND TEST EMAIL</button>
+                <button className="settings-submit-btn secondary" type="button" disabled={smtpBusy || !smtpConfigured} onClick={() => void handleDeleteLocalEmailCredential()}>DELETE SMTP CREDENTIAL</button>
+              </div>
+            </>}
+
+            <button className="settings-submit-btn" type="submit" disabled={smtpBusy}>
+              {smtpBusy ? "Saving…" : localOnly ? "Save Alert Delivery Configuration" : "Save Webhook Configuration"}
             </button>
           </form>
 

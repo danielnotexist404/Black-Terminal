@@ -21,4 +21,6 @@ These are engineering artifacts, not store releases. Android distribution still 
 
 ## Security gate
 
-The desktop credential vault is not silently downgraded on mobile. Broker secrets, the permanent peer identity, and encrypted profile data must use a certified mobile vault integration before a phone/tablet may connect live broker accounts or act as a trusted P2P authority. Until that gate passes, the mobile artifact is for companion UI and simulator/device testing only.
+The credential vault is not silently downgraded on mobile. Android uses encrypted SharedPreferences protected by Android Keystore; iOS uses protected application storage. The native store is installed before the local database, peer identity, or execution worker starts, and startup fails closed if that store cannot initialize.
+
+This is implementation evidence, not device certification. A phone/tablet must still pass clean-install, lock/unlock, backup/restore exclusion, uninstall/reinstall, and hardware-backed-storage tests before it may connect live broker accounts or act as a trusted P2P authority. Until those device gates pass, the mobile artifacts remain foreground companion engineering builds.

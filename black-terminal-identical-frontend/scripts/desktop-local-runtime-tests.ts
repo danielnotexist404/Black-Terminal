@@ -53,16 +53,25 @@ const persistentAuthenticFlow = read("src/modules/acvd/data/persistentFlowClient
 const liquidationController = read("src/modules/liquidation-field/data/LiquidationFieldController.ts");
 const indicatorLibrary = read("src/components/IndicatorLibrary.tsx");
 const releaseWorkflow = read("../.github/workflows/standalone-release.yml");
+const mobileWorkflow = read("../.github/workflows/mobile-companion.yml");
 const standaloneStyles = read("src/styles/standalone-bootstrap.css");
 const resend = read("src/lib/resend.ts");
 
 assert.match(secureClient, /return await invoke<StoredCredentialReference>\("secure_store_exchange_credentials"/);
 assert.doesNotMatch(secureClient, /catch\s*\([^)]*\)[\s\S]{0,300}storedAt:\s*Date\.now/);
-assert.match(vault, /keyring::Entry::new\(VAULT_SERVICE, vault_key\)/);
+assert.match(vault, /keyring_core::Entry::new\(VAULT_SERVICE, vault_key\)/);
+assert.match(vault, /android_native_keyring_store::Store::new\(\)/);
+assert.match(vault, /apple_native_keyring_store::protected::Store::new\(\)/);
+assert.match(vault, /apple_native_keyring_store::keychain::Store::new\(\)/);
+assert.match(vault, /zbus_secret_service_keyring_store::Store::new\(\)/);
+assert.match(vault, /windows_native_keyring_store::Store::new\(\)/);
+assert.match(vault, /keyring_core::set_default_store\(store\)/);
 assert.match(vault, /Zeroizing::new/);
 assert.match(vault, /credential-index-v1\.json/);
 assert.doesNotMatch(vault, /pub\(crate\) async fn secure_(?:get|read|load)_exchange/);
 assert.doesNotMatch(nativeShell, /secure_(?:get|read|load)_exchange_credentials/);
+assert.match(nativeShell, /credential_vault::initialize_credential_store\(\)[\s\S]{0,300}start_local_execution_runtime/);
+assert.match(nativeShell, /#\[cfg\(desktop\)\][\s\S]{0,80}fn show_main_window/);
 
 assert.match(localRuntime, /P2P_IDENTITY_VAULT_KEY/);
 assert.match(localRuntime, /pub\(crate\) struct UpdateLocalRuntimeRequest/);
@@ -283,6 +292,8 @@ assert.match(releaseWorkflow, /--target universal-apple-darwin --bundles app,dmg
 assert.match(releaseWorkflow, /cargo test --locked/);
 assert.match(releaseWorkflow, /Generate SHA-256 release manifest/);
 assert.match(releaseManifest, /createHash\("sha256"\)/);
+assert.match(mobileWorkflow, /android build --debug --apk --target aarch64 --ci/);
+assert.match(mobileWorkflow, /ios build --debug --target aarch64-sim --no-sign --ci/);
 
 assert.match(bootstrap, /Local-only core/);
 assert.match(bootstrap, /initializeLocalRuntime/);

@@ -22,7 +22,7 @@ jobs:
         include:
           - label: Windows x64
             os: windows-2022
-            args: --bundles nsis,wix
+            args: --bundles nsis,msi
             artifact: black-terminal-windows-x64
             artifact_path: black-terminal-identical-frontend/src-tauri/target/release/bundle/**
             bundle_root: src-tauri/target/release/bundle

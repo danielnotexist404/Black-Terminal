@@ -294,3 +294,130 @@
     grid-template-columns: 1fr;
   }
 }
+.settings-chart-colors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 6px 0 18px;
+}
+
+.settings-chart-colors label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid #24282e;
+  background: #080a0d;
+  color: #aeb3bb;
+  font-size: 10px;
+}
+
+.settings-chart-colors input[type="color"] {
+  width: 34px;
+  height: 24px;
+  padding: 1px;
+  border: 1px solid #363b43;
+  background: #030405;
+}
+
+.settings-submit-btn.secondary {
+  background: #080a0d;
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #d6d9de;
+  box-shadow: none;
+}
+
+.settings-trusted-peer-list {
+  display: grid;
+  gap: 6px;
+  max-height: 144px;
+  overflow: auto;
+}
+
+.settings-runtime-toggles {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.settings-runtime-toggles label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #050607;
+}
+
+.settings-runtime-toggles span {
+  display: grid;
+  gap: 3px;
+}
+
+.settings-runtime-toggles strong {
+  color: #d6d9de;
+  font: 700 10px "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.settings-runtime-toggles em {
+  color: #777d86;
+  font: normal 9px/1.45 "IBM Plex Mono", monospace;
+}
+
+.settings-trusted-peer-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #050607;
+}
+
+.settings-trusted-peer-list code {
+  min-width: 0;
+  overflow: hidden;
+  color: #b9bec6;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-trusted-peer-list button {
+  border: 1px solid rgba(255, 0, 0, 0.35);
+  background: rgba(255, 0, 0, 0.06);
+  color: #ff5b67;
+  font: 700 9px "IBM Plex Mono", monospace;
+  cursor: pointer;
+}
+
+.settings-migration-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-input[type="file"] {
+  height: auto;
+  min-height: 38px;
+  padding: 8px;
+}
+
+.settings-input[type="file"]::file-selector-button {
+  margin-right: 10px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 0, 0, 0.45);
+  background: #080a0d;
+  color: #f1f3f5;
+  font: inherit;
+  cursor: pointer;
+}
+
+@media (max-width: 768px) {
+  .settings-migration-actions {
+    grid-template-columns: 1fr;
+  }
+}

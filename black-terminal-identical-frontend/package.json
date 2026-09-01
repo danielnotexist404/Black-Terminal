@@ -1,7 +1,7 @@
 {
   "name": "black-terminal-pixi",
   "private": true,
-  "version": "0.2.0",
+  "version": "1.0.7",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -27,6 +27,7 @@
     "perf:dom-pro-soak": "node scripts/dom-pro-performance-harness.js",
     "test:performance": "node --experimental-strip-types scripts/performance-regression-tests.js",
     "test:chart-render-lod": "node --experimental-strip-types scripts/chart-render-lod-tests.ts",
+    "test:desktop-local": "node --experimental-strip-types scripts/desktop-local-runtime-tests.ts && node --experimental-strip-types scripts/local-qalc-runtime-tests.ts",
     "test:horizon-candles": "node --experimental-strip-types scripts/horizon-candle-tests.ts",
     "test:chart-visibility-recovery": "node --experimental-strip-types scripts/chart-visibility-recovery-tests.ts",
     "test:timeframes": "node --experimental-strip-types scripts/timeframe-support-tests.ts",
@@ -182,6 +183,7 @@
   },
   "dependencies": {
     "@nktkas/hyperliquid": "^0.33.1",
+    "@noble/hashes": "^2.2.0",
     "@supabase/supabase-js": "^2.108.2",
     "@tauri-apps/api": "^2.5.0",
     "lucide-react": "^0.468.0",

@@ -1,4 +1,5 @@
 import { supabase } from "../../../lib/supabase";
+import { isLocalOnlyRuntime } from "../../../core/local-runtime/localRuntimeClient";
 import type { AuthenticFlowBarInput, AcvdAuthority } from "../core/types";
 
 export type PersistentFlowSnapshot = {
@@ -13,6 +14,7 @@ export type PersistentFlowSnapshot = {
 };
 
 export async function fetchPersistentAuthenticFlow(options: { venue: string; symbol: string; timeframeSeconds: number; start: number; end: number; signal?: AbortSignal }): Promise<PersistentFlowSnapshot> {
+  if (isLocalOnlyRuntime()) throw new Error("Persistent authentic-flow archives are not present on this device; live public flow remains available.");
   if (!supabase) throw new Error("Authenticated Black Cloud flow history is unavailable.");
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;

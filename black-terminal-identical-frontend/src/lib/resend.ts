@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { isLocalOnlyRuntime } from "../core/local-runtime/localRuntimeClient";
 
 type EmailTemplate =
   | "investment_group_invite"
@@ -8,6 +9,7 @@ type EmailTemplate =
   | "account_verification";
 
 async function sendTemplate(type: EmailTemplate, data: Record<string, string | number | boolean> = {}) {
+  if (isLocalOnlyRuntime()) return { success: false, error: "Local email delivery requires an explicitly configured SMTP/OAuth adapter." };
   if (!supabase) return { success: false, error: "Authenticated email delivery is unavailable." };
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData.session?.access_token;

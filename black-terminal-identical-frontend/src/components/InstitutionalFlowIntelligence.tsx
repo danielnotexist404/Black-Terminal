@@ -6,6 +6,7 @@ import { getMarketDataEngineAdapter } from "../market-data/engine/marketDataEngi
 import { fetchInstitutionalFlow } from "../institutional-flow/institutionalFlowClient";
 import { nearestHistoricalCoinPrice, oscillatorHoverIndex, type HistoricalCoinPricePoint } from "../institutional-flow/oscillatorHoverModel";
 import type { InstitutionalFlowPoint, InstitutionalFlowSnapshot } from "../institutional-flow/types";
+import { isLocalOnlyRuntime } from "../core/local-runtime/localRuntimeClient";
 
 type InstitutionalFlowIntelligenceProps = {
   marketSymbol: MarketSymbol;
@@ -42,6 +43,13 @@ export function InstitutionalFlowIntelligence({ marketSymbol }: InstitutionalFlo
   }, [isMaximized]);
 
   useEffect(() => {
+    if (isLocalOnlyRuntime()) {
+      lastSuccessfulRef.current = null;
+      setSnapshot(null);
+      setStatus("error");
+      setError("No certified device-local institutional-fund provider is configured.");
+      return;
+    }
     let disposed = false;
     let timer: number | undefined;
     let controller: AbortController | undefined;

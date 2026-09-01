@@ -1,4 +1,5 @@
 import { Pause, Play, RotateCcw, WalletCards } from "lucide-react";
+import { isLocalOnlyRuntime } from "../../../../core/local-runtime/localRuntimeClient";
 import type { StrategyPaperAccount } from "../../automation/strategyAutomation.types";
 
 type Props = {
@@ -30,7 +31,7 @@ export function PaperCockpit({ paper, data, busy, onAction }: Props) {
       <Metric label="SHARPE" value={Number(analytics.sharpe || 0).toFixed(2)} />
       <Metric label="SORTINO" value={Number(analytics.sortino || 0).toFixed(2)} />
     </div>
-    <div className="paper-actions"><span><WalletCards size={14} /> Runs securely on Black Cloud · {paper.status.replaceAll("_", " ")}</span><button type="button" disabled={busy} onClick={() => onAction(running ? "pause" : "start")}>{running ? <Pause size={12} /> : <Play size={12} />}{running ? "PAUSE PAPER" : "START PAPER"}</button><button type="button" disabled={busy} onClick={() => onAction("top-up", { amount: 10_000 })}>TOP UP 10,000 USDT</button><button type="button" disabled={busy} onClick={() => onAction("reset", { demoEquity: 10_000 })}><RotateCcw size={12} /> RESET</button></div>
+    <div className="paper-actions"><span><WalletCards size={14} /> Runs securely on {isLocalOnlyRuntime() ? "this device" : "Black Cloud"} · {paper.status.replaceAll("_", " ")}</span><button type="button" disabled={busy} onClick={() => onAction(running ? "pause" : "start")}>{running ? <Pause size={12} /> : <Play size={12} />}{running ? "PAUSE PAPER" : "START PAPER"}</button><button type="button" disabled={busy} onClick={() => onAction("top-up", { amount: 10_000 })}>TOP UP 10,000 USDT</button><button type="button" disabled={busy} onClick={() => onAction("reset", { demoEquity: 10_000 })}><RotateCcw size={12} /> RESET</button></div>
   </div>;
 }
 

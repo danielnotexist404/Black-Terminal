@@ -5,6 +5,8 @@ import type { AdaptiveSwingStrategySettings, Candle, IndicatorAdvancedSettings, 
 import type { MarketSymbol, Timeframe } from "../../../market-data/types";
 import { dbGetCurrentUserScripts, isSupabaseConfigured } from "../../../lib/supabase";
 import { normalizeUserScripts, type UserScript } from "../../../scripts/userScriptLibrary";
+import { isLocalOnlyRuntime } from "../../../core/local-runtime/localRuntimeClient";
+import { loadLocalUserScripts } from "../../../core/local-runtime/localUserScriptStore";
 import { createAIStrategyReview } from "../ai/aiStrategyReview";
 import { fetchStrategyLabCandles, fetchStrategyLabIntrabars } from "../adapters/marketDataAdapter";
 import { runBlackScriptBacktest } from "../adapters/pythonStrategyAdapter";
@@ -176,9 +178,11 @@ export function StrategyLabPage({
     let cancelled = false;
     const loadOwnedScripts = async () => {
       try {
-        const rows = currentUser && isSupabaseConfigured
+        const rows = currentUser && isSupabaseConfigured && !isLocalOnlyRuntime()
           ? await dbGetCurrentUserScripts()
-          : JSON.parse(window.localStorage.getItem(currentUser ? `bt_user_scripts:${currentUser.username}` : "bt_user_scripts:anonymous") || "[]");
+          : isLocalOnlyRuntime()
+            ? await loadLocalUserScripts(currentUser?.username)
+            : JSON.parse(window.localStorage.getItem(currentUser ? `bt_user_scripts:${currentUser.username}` : "bt_user_scripts:anonymous") || "[]");
         if (!cancelled) setOwnedScripts(normalizeUserScripts(rows));
       } catch (catalogError) {
         if (!cancelled) {

@@ -242,34 +242,34 @@ function parseCustomAlertManifest(source: string, strategyScript = false): Strat
   for (const match of source.matchAll(/alertcondition\s*\([^,]+,\s*["']([^"']+)["']/gi)) {
     const name = match[1]?.trim();
     if (!name) continue;
-    rows.push({ id: `custom-alert:${stableHash(name)}`, name, description: "Owned script alert; VPS certification is required before publish.", semantic: inferSemantic(name), confirmedBar: true, intrabar: false });
+    rows.push({ id: `custom-alert:${stableHash(name)}`, name, description: "Owned script alert; headless-runtime certification is required before publish.", semantic: inferSemantic(name), confirmedBar: true, intrabar: false });
   }
   for (const match of source.matchAll(/\balert\s*\(\s*["']([^"']+)["']/gi)) {
     const name = match[1]?.trim();
     if (!name) continue;
-    rows.push({ id: `custom-alert:${stableHash(name)}`, name, description: "Owned script alert; VPS certification is required before activation.", semantic: inferSemantic(name), confirmedBar: true, intrabar: false });
+    rows.push({ id: `custom-alert:${stableHash(name)}`, name, description: "Owned script alert; headless-runtime certification is required before activation.", semantic: inferSemantic(name), confirmedBar: true, intrabar: false });
   }
   if (strategyScript) {
     for (const match of source.matchAll(/strategy\.entry\s*\(\s*["']([^"']+)["']\s*,\s*strategy\.(long|short)/gi)) {
       const name = match[1]?.trim();
       const direction = match[2]?.toLowerCase();
       if (!name || !direction) continue;
-      rows.push({ id: `custom-entry:${stableHash(`${name}:${direction}`)}`, name, description: `Owned script ${direction} entry event; VPS certification is required before activation.`, semantic: direction === "long" ? "LONG_ENTRY" : "SHORT_ENTRY", confirmedBar: true, intrabar: false });
+      rows.push({ id: `custom-entry:${stableHash(`${name}:${direction}`)}`, name, description: `Owned script ${direction} entry event; headless-runtime certification is required before activation.`, semantic: direction === "long" ? "LONG_ENTRY" : "SHORT_ENTRY", confirmedBar: true, intrabar: false });
     }
     for (const match of source.matchAll(/strategy\.exit\s*\(\s*["']([^"']+)["']\s*,\s*["']([^"']+)["']/gi)) {
       const name = match[1]?.trim();
       const fromEntry = match[2]?.trim();
       if (!name || !fromEntry) continue;
       const semantic = inferExitSemantic(`${name} ${fromEntry}`);
-      rows.push({ id: `custom-exit:${stableHash(`${name}:${fromEntry}`)}`, name, description: `Owned script exit from ${fromEntry}; VPS certification is required before activation.`, semantic, confirmedBar: true, intrabar: false });
+      rows.push({ id: `custom-exit:${stableHash(`${name}:${fromEntry}`)}`, name, description: `Owned script exit from ${fromEntry}; headless-runtime certification is required before activation.`, semantic, confirmedBar: true, intrabar: false });
     }
     for (const match of source.matchAll(/strategy\.close\s*\(\s*["']([^"']+)["']/gi)) {
       const fromEntry = match[1]?.trim();
       if (!fromEntry) continue;
-      rows.push({ id: `custom-close:${stableHash(fromEntry)}`, name: `Close ${fromEntry}`, description: `Owned script close event for ${fromEntry}; VPS certification is required before activation.`, semantic: inferExitSemantic(fromEntry), confirmedBar: true, intrabar: false });
+      rows.push({ id: `custom-close:${stableHash(fromEntry)}`, name: `Close ${fromEntry}`, description: `Owned script close event for ${fromEntry}; headless-runtime certification is required before activation.`, semantic: inferExitSemantic(fromEntry), confirmedBar: true, intrabar: false });
     }
     if (/strategy\.close_all\s*\(/i.test(source)) {
-      rows.push({ id: "custom-close-all", name: "Close All", description: "Owned script global close event; VPS certification is required before activation.", semantic: "NEUTRAL", confirmedBar: true, intrabar: false });
+      rows.push({ id: "custom-close-all", name: "Close All", description: "Owned script global close event; headless-runtime certification is required before activation.", semantic: "NEUTRAL", confirmedBar: true, intrabar: false });
     }
   }
   return uniqueAlerts(rows);

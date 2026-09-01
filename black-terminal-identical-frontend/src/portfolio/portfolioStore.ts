@@ -10,6 +10,16 @@ import type { ExchangeConnectionDraft, PortfolioAccount, PortfolioSnapshot } fro
 import { blackCoreEventBus } from "../core/blackCore";
 import { blackCorePerformanceMonitor } from "../performance/performanceMonitor";
 import { markPortfolioSnapshotFallback, unavailablePortfolioFreshness, withCurrentFreshnessAge } from "./portfolioFreshness";
+import { isLocalOnlyRuntime } from "../core/local-runtime/localRuntimeClient";
+import {
+  connectLocalBybitAccount,
+  disconnectLocalBrokerAccount,
+  getLocalBrokerPortfolioSnapshot,
+  getLocalBrokerRecord,
+  listLocalBrokerAccounts,
+  refreshLocalBrokerAccount,
+  restoreLocalBrokerAccounts,
+} from "../core/local-runtime/localBrokerStore";
 
 const credentialStore = new TauriSecureCredentialStore();
 
@@ -57,6 +67,13 @@ export function invalidatePortfolioSnapshot() {
 }
 
 async function loadPortfolioSnapshot(activeAccountIds: string[] | undefined, scopeKey: string): Promise<PortfolioSnapshot> {
+  if (isLocalOnlyRuntime()) {
+    const localSnapshot = await getLocalBrokerPortfolioSnapshot(activeAccountIds);
+    accounts = localSnapshot.accounts;
+    orders = localSnapshot.orders;
+    if (localSnapshot.freshness.status === "live") lastVerifiedSnapshots.set(scopeKey, localSnapshot);
+    return localSnapshot;
+  }
   try {
     const remoteSnapshot = await fetchPortfolioSnapshotFromApi(activeAccountIds);
     if (remoteSnapshot) {
@@ -147,6 +164,13 @@ export async function connectExchangeAccount(draft: ExchangeConnectionDraft): Pr
     throw new Error(`${draft.exchange.toUpperCase()} credential validation is not certified yet. This venue is ${certification?.executionMode ?? "unavailable"}.`);
   }
 
+  if (isLocalOnlyRuntime()) {
+    const account = await connectLocalBybitAccount(draft);
+    accounts = listLocalBrokerAccounts();
+    invalidatePortfolioSnapshot();
+    return account;
+  }
+
   try {
     const remoteAccount = await connectExchangeAccountViaApi(draft);
     if (remoteAccount) return remoteAccount;
@@ -209,4 +233,27 @@ export async function connectExchangeAccount(draft: ExchangeConnectionDraft): Pr
 
 export function getPortfolioPositions(): PortfolioPosition[] {
   return [];
+}
+
+export async function restoreLocalPortfolioAccounts() {
+  accounts = await restoreLocalBrokerAccounts();
+  invalidatePortfolioSnapshot();
+  return accounts;
+}
+
+export async function disconnectLocalPortfolioAccount(accountId: string) {
+  await disconnectLocalBrokerAccount(accountId);
+  accounts = listLocalBrokerAccounts();
+  invalidatePortfolioSnapshot();
+}
+
+export async function syncLocalPortfolioAccount(accountId: string) {
+  const record = await refreshLocalBrokerAccount(accountId, true);
+  accounts = listLocalBrokerAccounts();
+  invalidatePortfolioSnapshot();
+  return record;
+}
+
+export function readLocalPortfolioAccount(accountId: string) {
+  return getLocalBrokerRecord(accountId);
 }

@@ -6,6 +6,7 @@ import {
 import type {
   CompiledStrategyFill,
   CompiledStrategyPendingOrder,
+  CompiledStrategyReport,
   StrategyIntrabarSeries,
   StrategyRuntimeConfig,
   StrategyRuntimeSnapshot,
@@ -63,6 +64,21 @@ export type BlackScriptCloudEvaluation = {
   desiredOrders: BlackScriptDesiredOrder[];
   expectedOrderFills: BlackScriptExpectedOrderFill[];
   retiredOrderKeys: string[];
+  paperReport?: Pick<CompiledStrategyReport,
+    | "fills"
+    | "trades"
+    | "endingEquity"
+    | "realizedNetProfit"
+    | "totalCommission"
+    | "totalTrades"
+    | "winningTrades"
+    | "losingTrades"
+    | "winRate"
+    | "maxDrawdown"
+    | "openPosition"
+    | "openLots"
+    | "pendingOrders"
+  >;
   checkpoint: BlackScriptCloudCheckpoint;
 };
 
@@ -329,6 +345,21 @@ export function evaluateBlackScriptCloudRuntime(request: BlackScriptCloudEvaluat
     desiredOrders,
     expectedOrderFills,
     retiredOrderKeys,
+    paperReport: {
+      fills: compiled.strategy.fills,
+      trades: compiled.strategy.trades,
+      endingEquity: compiled.strategy.endingEquity,
+      realizedNetProfit: compiled.strategy.realizedNetProfit,
+      totalCommission: compiled.strategy.totalCommission,
+      totalTrades: compiled.strategy.totalTrades,
+      winningTrades: compiled.strategy.winningTrades,
+      losingTrades: compiled.strategy.losingTrades,
+      winRate: compiled.strategy.winRate,
+      maxDrawdown: compiled.strategy.maxDrawdown,
+      openPosition: compiled.strategy.openPosition,
+      openLots: compiled.strategy.openLots,
+      pendingOrders: compiled.strategy.pendingOrders,
+    },
     checkpoint: {
       schemaVersion: BLACK_SCRIPT_CLOUD_CHECKPOINT_VERSION,
       runtimeVersion: "black-script-v3",

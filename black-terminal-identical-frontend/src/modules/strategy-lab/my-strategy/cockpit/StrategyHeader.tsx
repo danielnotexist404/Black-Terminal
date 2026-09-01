@@ -1,5 +1,6 @@
 import { MoreHorizontal, Pause, Play, Square, SlidersHorizontal } from "lucide-react";
 import type { StrategyWorkspace } from "../../automation/strategyAutomation.types";
+import { isLocalOnlyRuntime } from "../../../../core/local-runtime/localRuntimeClient";
 
 type Props = {
   workspace: StrategyWorkspace;
@@ -19,7 +20,7 @@ export function StrategyHeader({ workspace, busy, onEdit, onPaperAction }: Props
       <p>{strategy.symbol} · {strategy.timeframe.toUpperCase()} · {title(strategy.marketType)} · Version {strategy.runningVersion || strategy.publishedVersion || "—"}</p>
     </div>
     <div className="strategy-runtime-health" data-tone={health.tone}>
-      <span>VPS RUNTIME</span><strong>{health.label}</strong><em>Last heartbeat {relative(runtime?.lastHeartbeatAt)}</em>
+      <span>{isLocalOnlyRuntime() ? "LOCAL RUNTIME" : "VPS RUNTIME"}</span><strong>{health.label}</strong><em>Last heartbeat {relative(runtime?.lastHeartbeatAt)}</em>
     </div>
     <div className="strategy-cockpit-actions">
       <button type="button" disabled={busy || !strategy.runningVersion} onClick={() => onPaperAction(running ? "pause" : "start")}>{running ? <Pause size={13} /> : <Play size={13} />}{running ? "PAUSE" : "START"}</button>

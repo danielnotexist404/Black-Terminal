@@ -1,4 +1,6 @@
 import { supabase } from "../../lib/supabase";
+import { getLocalDocument } from "../../core/local-runtime/localDocumentStore";
+import { isLocalOnlyRuntime } from "../../core/local-runtime/localRuntimeClient";
 
 export type EventAlphaRuntimeConfig = {
   engineEnabled: boolean;
@@ -23,7 +25,7 @@ export type EventAlphaRuntimeConfig = {
   protocolEconomicsConfigurationRequested: boolean;
   llmExtractionEnabled: false;
   llmExtractionConfigurationRejected: boolean;
-  architecture: "SERVER_AUTHORITY";
+  architecture: "SERVER_AUTHORITY" | "LOCAL_AUTHORITY";
   executionMode: "PAPER" | "DISABLED";
   directBrokerFanout: false;
   llmOrderAuthority: false;
@@ -163,26 +165,154 @@ async function request<T>(path: string, options: RequestInit = {}, signal?: Abor
   return payload as T;
 }
 
+type LocalEventAlphaState = {
+  version: 1;
+  config: EventAlphaRuntimeConfig;
+  events: EventAlphaEvent[];
+  theses: EventAlphaThesis[];
+  cryptoCandidates: CryptoDriftCandidate[];
+  peadSignals: PeadSignal[];
+  peadDetails: Record<string, PeadDetail>;
+  eventDetails: Record<string, Record<string, unknown>>;
+  health: EventAlphaHealth;
+  audit: EventAlphaAudit[];
+};
+
+const localConfig: EventAlphaRuntimeConfig = {
+  engineEnabled: true,
+  ingestionEnabled: false,
+  tokenSupplyEnabled: false,
+  governanceEnabled: false,
+  protocolEconomicsEnabled: false,
+  equityPeadEnabled: false,
+  peadProviderConfigured: false,
+  paperExecutionEnabled: false,
+  paperExecutionConfigurationRejected: false,
+  liveExecutionEnabled: false,
+  liveExecutionConfigurationRejected: true,
+  manualApprovalRequired: true,
+  manualApprovalConfigurationRejected: false,
+  strategyKillSwitchEngaged: true,
+  globalExecutionKillSwitchEngaged: false,
+  tokenUnlockSourceConfigured: false,
+  governanceAdapterEnabled: false,
+  governanceConfigurationRequested: false,
+  protocolEconomicsAdapterEnabled: false,
+  protocolEconomicsConfigurationRequested: false,
+  llmExtractionEnabled: false,
+  llmExtractionConfigurationRejected: true,
+  architecture: "LOCAL_AUTHORITY",
+  executionMode: "DISABLED",
+  directBrokerFanout: false,
+  llmOrderAuthority: false
+};
+
+function emptyLocalState(): LocalEventAlphaState {
+  const now = new Date().toISOString();
+  const health: EventAlphaHealth = {
+    config: localConfig,
+    pendingJobs: 0,
+    sources: [{
+      source_key: "local-evidence-provider",
+      event_family: "ALL",
+      enabled: false,
+      health_status: "UNCONFIGURED",
+      last_success_at: null,
+      last_error_at: null,
+      safe_error_code: "LOCAL_PROVIDER_REQUIRED",
+      updated_at: now
+    }],
+    peadProviders: [{
+      provider_key: "local-pead-provider",
+      display_name: "Local PEAD Evidence Provider",
+      enabled: false,
+      health_status: "UNCONFIGURED",
+      last_success_at: null,
+      last_error_at: null,
+      safe_error_code: "LOCAL_PROVIDER_REQUIRED",
+      updated_at: now
+    }]
+  };
+  return {
+    version: 1,
+    config: localConfig,
+    events: [],
+    theses: [],
+    cryptoCandidates: [],
+    peadSignals: [],
+    peadDetails: {},
+    eventDetails: {},
+    health,
+    audit: []
+  };
+}
+
+async function localState(): Promise<LocalEventAlphaState> {
+  const stored = await getLocalDocument<LocalEventAlphaState>("event-alpha", "state");
+  const value = stored?.value;
+  if (!value || value.version !== 1) return emptyLocalState();
+  const fallback = emptyLocalState();
+  const config: EventAlphaRuntimeConfig = {
+    ...fallback.config,
+    ...value.config,
+    architecture: "LOCAL_AUTHORITY",
+    directBrokerFanout: false,
+    llmOrderAuthority: false,
+    liveExecutionEnabled: false
+  };
+  return {
+    ...fallback,
+    ...value,
+    config,
+    events: Array.isArray(value.events) ? value.events : [],
+    theses: Array.isArray(value.theses) ? value.theses : [],
+    cryptoCandidates: Array.isArray(value.cryptoCandidates) ? value.cryptoCandidates : [],
+    peadSignals: Array.isArray(value.peadSignals) ? value.peadSignals : [],
+    peadDetails: value.peadDetails && typeof value.peadDetails === "object" ? value.peadDetails : {},
+    eventDetails: value.eventDetails && typeof value.eventDetails === "object" ? value.eventDetails : {},
+    audit: Array.isArray(value.audit) ? value.audit : [],
+    health: value.health ? { ...value.health, config } : { ...fallback.health, config }
+  };
+}
+
 export const eventAlphaApi = {
-  config: (signal?: AbortSignal) => request<{ config: EventAlphaRuntimeConfig }>("config", {}, signal),
-  feed: (signal?: AbortSignal) => request<{ events: EventAlphaEvent[] }>("feed?limit=100", {}, signal),
+  config: async (signal?: AbortSignal) => isLocalOnlyRuntime() ? { config: (await localState()).config } : request<{ config: EventAlphaRuntimeConfig }>("config", {}, signal),
+  feed: async (signal?: AbortSignal) => isLocalOnlyRuntime() ? { events: (await localState()).events.slice(0, 100) } : request<{ events: EventAlphaEvent[] }>("feed?limit=100", {}, signal),
   rankedCrypto: (filters: { family?: string; symbol?: string; minimumConfidence?: number } = {}, signal?: AbortSignal) => {
+    if (isLocalOnlyRuntime()) return localState().then((state) => ({ candidates: state.cryptoCandidates
+      .filter((row) => !filters.family || row.event.event_family === filters.family)
+      .filter((row) => !filters.symbol || row.event.symbol === filters.symbol)
+      .filter((row) => filters.minimumConfidence === undefined || Number(row.confidence) >= filters.minimumConfidence)
+      .slice(0, 100) }));
     const query = new URLSearchParams({ limit: "100" });
     if (filters.family) query.set("family", filters.family);
     if (filters.symbol) query.set("symbol", filters.symbol);
     if (filters.minimumConfidence !== undefined) query.set("minimumConfidence", String(filters.minimumConfidence));
     return request<{ candidates: CryptoDriftCandidate[] }>(`crypto-ranked?${query}`, {}, signal);
   },
-  theses: (signal?: AbortSignal) => request<{ theses: EventAlphaThesis[] }>("theses?limit=100", {}, signal),
-  health: (signal?: AbortSignal) => request<EventAlphaHealth>("health", {}, signal),
-  audit: (signal?: AbortSignal) => request<{ records: EventAlphaAudit[] }>("audit?limit=100", {}, signal),
-  eventDetail: (id: string, signal?: AbortSignal) => request<Record<string, unknown>>(`events/${encodeURIComponent(id)}`, {}, signal),
+  theses: async (signal?: AbortSignal) => isLocalOnlyRuntime() ? { theses: (await localState()).theses.slice(0, 100) } : request<{ theses: EventAlphaThesis[] }>("theses?limit=100", {}, signal),
+  health: async (signal?: AbortSignal) => isLocalOnlyRuntime() ? (await localState()).health : request<EventAlphaHealth>("health", {}, signal),
+  audit: async (signal?: AbortSignal) => isLocalOnlyRuntime() ? { records: (await localState()).audit.slice(0, 100) } : request<{ records: EventAlphaAudit[] }>("audit?limit=100", {}, signal),
+  eventDetail: async (id: string, signal?: AbortSignal) => isLocalOnlyRuntime() ? (await localState()).eventDetails[id] ?? {} : request<Record<string, unknown>>(`events/${encodeURIComponent(id)}`, {}, signal),
   peadSignals: (filters: { state?: string; ticker?: string } = {}, signal?: AbortSignal) => {
+    if (isLocalOnlyRuntime()) return localState().then((state) => ({ signals: state.peadSignals
+      .filter((row) => !filters.state || row.signal_state === filters.state)
+      .filter((row) => !filters.ticker || row.event.ticker === filters.ticker)
+      .slice(0, 100) }));
     const query = new URLSearchParams({ limit: "100" });
     if (filters.state) query.set("state", filters.state);
     if (filters.ticker) query.set("ticker", filters.ticker);
     return request<{ signals: PeadSignal[] }>(`pead/signals?${query}`, {}, signal);
   },
-  peadDetail: (id: string, signal?: AbortSignal) => request<PeadDetail>(`pead/signals/${encodeURIComponent(id)}`, {}, signal),
-  paperState: (signal?: AbortSignal) => request<{ positions: Record<string, unknown>[]; orders: Record<string, unknown>[]; intents: Record<string, unknown>[] }>("paper-state?limit=100", {}, signal)
+  peadDetail: async (id: string, signal?: AbortSignal) => {
+    if (isLocalOnlyRuntime()) {
+      const detail = (await localState()).peadDetails[id];
+      if (!detail) throw new Error("Local PEAD evidence is not available for this signal.");
+      return detail;
+    }
+    return request<PeadDetail>(`pead/signals/${encodeURIComponent(id)}`, {}, signal);
+  },
+  paperState: async (signal?: AbortSignal) => isLocalOnlyRuntime()
+    ? { positions: [], orders: [], intents: [] }
+    : request<{ positions: Record<string, unknown>[]; orders: Record<string, unknown>[]; intents: Record<string, unknown>[] }>("paper-state?limit=100", {}, signal)
 };

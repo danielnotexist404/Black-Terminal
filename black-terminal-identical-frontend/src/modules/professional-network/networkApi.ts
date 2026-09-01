@@ -1,4 +1,6 @@
 import { supabase } from "../../lib/supabase";
+import { isLocalOnlyRuntime } from "../../core/local-runtime/localRuntimeClient";
+import { localProfessionalNetworkApi } from "./localProfessionalNetworkApi";
 import type {
   CommentReactionType, ConversationSummary, DirectMessage, FeedMode, NetworkNotification,
   NotificationPreferences, PostVisibility, ProfilePayload, ReactionType, SavedCollection,
@@ -29,37 +31,38 @@ async function networkRequest<T>(resource: string, options: RequestOptions = {},
 }
 
 export const professionalNetworkApi = {
-  profile: (handle?: string) => networkRequest<ProfilePayload>("professional-center", {}, { handle }),
-  updateProfile: (patch: Record<string, unknown>) => networkRequest<ProfilePayload>("professional-center", { method: "PATCH", body: patch }),
-  posts: (mode: FeedMode | "profile", cursor?: string, handle?: string) => networkRequest<{ posts: SocialPost[]; nextCursor: string | null }>("social-posts", {}, { mode, cursor, handle }),
-  post: (postId: string) => networkRequest<{ post: SocialPost }>("social-posts", {}, { postId }),
-  createPost: (draft: Record<string, unknown>) => networkRequest<{ post: SocialPost }>("social-posts", { method: "POST", body: draft }),
-  updatePost: (postId: string, patch: Record<string, unknown>) => networkRequest<{ post: SocialPost }>("social-posts", { method: "PATCH", body: { postId, ...patch } }),
-  deletePost: (postId: string) => networkRequest<{ deleted: boolean }>("social-posts", { method: "DELETE", body: { postId } }),
-  react: (postId: string, reactionType: ReactionType | null) => networkRequest("social-engagement", { method: "POST", body: { operation: "reaction", postId, reactionType } }),
-  comment: (postId: string, body: string, parentCommentId?: string, clientCommentId = createIdempotencyKey("comment")) => networkRequest<{ comment: SocialComment }>("social-engagement", { method: "POST", body: { operation: "comment", postId, body, parentCommentId, clientCommentId } }),
-  comments: (postId: string, cursor?: string) => networkRequest<{ comments: SocialComment[]; nextCursor: string | null }>("social-engagement", {}, { postId, cursor }),
-  editComment: (commentId: string, body: string) => networkRequest<{ comment: SocialComment }>("social-engagement", { method: "POST", body: { operation: "edit_comment", commentId, body } }),
-  deleteComment: (commentId: string) => networkRequest<{ deleted: boolean }>("social-engagement", { method: "POST", body: { operation: "delete_comment", commentId } }),
-  reactToComment: (commentId: string, reactionType: CommentReactionType | null) => networkRequest("social-engagement", { method: "POST", body: { operation: "comment_reaction", commentId, reactionType } }),
-  collections: () => networkRequest<{ collections: SavedCollection[] }>("social-engagement", {}, { view: "collections" }),
-  collectionAction: (action: "create" | "rename" | "delete", payload: Record<string, unknown>) => networkRequest("social-engagement", { method: "POST", body: { operation: "collection", action, ...payload } }),
-  save: (postId: string, saved: boolean, collectionId?: string) => networkRequest("social-engagement", { method: "POST", body: { operation: "save", postId, saved, collectionId } }),
-  repost: (postId: string, commentary = "", reposted = true) => networkRequest("social-engagement", { method: "POST", body: { operation: "repost", postId, commentary, reposted } }),
-  hide: (postId: string) => networkRequest("social-engagement", { method: "POST", body: { operation: "hide", postId } }),
-  report: (targetType: string, targetId: string, reason: string, details = "") => networkRequest("social-engagement", { method: "POST", body: { operation: "report", targetType, targetId, reason, details } }),
-  relationship: (operation: string, targetUserId: string, extra: Record<string, unknown> = {}) => networkRequest("social-relationships", { method: "POST", body: { operation, targetUserId, ...extra } }),
-  conversations: () => networkRequest<{ conversations: ConversationSummary[] }>("social-messaging"),
-  messages: (conversationId: string, cursor?: string) => networkRequest<{ messages: DirectMessage[]; nextCursor: string | null }>("social-messaging", {}, { conversationId, cursor }),
-  messageAction: <T = Record<string, unknown>>(operation: string, payload: Record<string, unknown>) => networkRequest<T>("social-messaging", { method: "POST", body: { operation, ...payload } }),
-  notifications: (cursor?: string) => networkRequest<{ notifications: NetworkNotification[]; unreadCount: number; preferences: NotificationPreferences | null; nextCursor: string | null }>("social-notifications", {}, { cursor }),
-  notificationAction: (operation: string, payload: Record<string, unknown> = {}) => networkRequest("social-notifications", { method: "POST", body: { operation, ...payload } }),
-  search: (query: string) => networkRequest<SearchResults>("social-search", {}, { q: query }),
-  assets: (handle?: string) => networkRequest<{ indicators: Array<Record<string, unknown>>; strategies: Array<Record<string, unknown>> }>("social-assets", {}, { handle }),
-  publishAsset: (type: "indicator" | "strategy", payload: Record<string, unknown>) => networkRequest<{ asset: Record<string, unknown> }>("social-assets", { method: "POST", body: { type, ...payload } }),
-  moderationReports: (status = "pending") => networkRequest<{ reports: Array<Record<string, unknown>> }>("social-moderation", {}, { status }),
-  moderationAction: (reportId: string, action: string, reason: string, options: { scope?: string; durationDays?: number } = {}) => networkRequest("social-moderation", { method: "POST", body: { reportId, action, reason, ...options } }),
+  profile: (handle?: string) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.profile(handle) : networkRequest<ProfilePayload>("professional-center", {}, { handle }),
+  updateProfile: (patch: Record<string, unknown>) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.updateProfile(patch) : networkRequest<ProfilePayload>("professional-center", { method: "PATCH", body: patch }),
+  posts: (mode: FeedMode | "profile", cursor?: string, handle?: string) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.posts(mode, cursor, handle) : networkRequest<{ posts: SocialPost[]; nextCursor: string | null }>("social-posts", {}, { mode, cursor, handle }),
+  post: (postId: string) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.post(postId) : networkRequest<{ post: SocialPost }>("social-posts", {}, { postId }),
+  createPost: (draft: Record<string, unknown>) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.createPost(draft) : networkRequest<{ post: SocialPost }>("social-posts", { method: "POST", body: draft }),
+  updatePost: (postId: string, patch: Record<string, unknown>) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.updatePost(postId, patch) : networkRequest<{ post: SocialPost }>("social-posts", { method: "PATCH", body: { postId, ...patch } }),
+  deletePost: (postId: string) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.deletePost(postId) : networkRequest<{ deleted: boolean }>("social-posts", { method: "DELETE", body: { postId } }),
+  react: (postId: string, reactionType: ReactionType | null) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.react(postId, reactionType) : networkRequest("social-engagement", { method: "POST", body: { operation: "reaction", postId, reactionType } }),
+  comment: (postId: string, body: string, parentCommentId?: string, clientCommentId = createIdempotencyKey("comment")) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.comment(postId, body, parentCommentId, clientCommentId) : networkRequest<{ comment: SocialComment }>("social-engagement", { method: "POST", body: { operation: "comment", postId, body, parentCommentId, clientCommentId } }),
+  comments: (postId: string, cursor?: string) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.comments(postId, cursor) : networkRequest<{ comments: SocialComment[]; nextCursor: string | null }>("social-engagement", {}, { postId, cursor }),
+  editComment: (commentId: string, body: string) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.editComment(commentId, body) : networkRequest<{ comment: SocialComment }>("social-engagement", { method: "POST", body: { operation: "edit_comment", commentId, body } }),
+  deleteComment: (commentId: string) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.deleteComment(commentId) : networkRequest<{ deleted: boolean }>("social-engagement", { method: "POST", body: { operation: "delete_comment", commentId } }),
+  reactToComment: (commentId: string, reactionType: CommentReactionType | null) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.reactToComment(commentId, reactionType) : networkRequest("social-engagement", { method: "POST", body: { operation: "comment_reaction", commentId, reactionType } }),
+  collections: () => isLocalOnlyRuntime() ? localProfessionalNetworkApi.collections() : networkRequest<{ collections: SavedCollection[] }>("social-engagement", {}, { view: "collections" }),
+  collectionAction: (action: "create" | "rename" | "delete", payload: Record<string, unknown>) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.collectionAction(action, payload) : networkRequest("social-engagement", { method: "POST", body: { operation: "collection", action, ...payload } }),
+  save: (postId: string, saved: boolean, collectionId?: string) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.save(postId, saved, collectionId) : networkRequest("social-engagement", { method: "POST", body: { operation: "save", postId, saved, collectionId } }),
+  repost: (postId: string, commentary = "", reposted = true) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.repost(postId, commentary, reposted) : networkRequest("social-engagement", { method: "POST", body: { operation: "repost", postId, commentary, reposted } }),
+  hide: (postId: string) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.hide(postId) : networkRequest("social-engagement", { method: "POST", body: { operation: "hide", postId } }),
+  report: (targetType: string, targetId: string, reason: string, details = "") => isLocalOnlyRuntime() ? localProfessionalNetworkApi.report(targetType, targetId, reason, details) : networkRequest("social-engagement", { method: "POST", body: { operation: "report", targetType, targetId, reason, details } }),
+  relationship: (operation: string, targetUserId: string, extra: Record<string, unknown> = {}) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.relationship(operation, targetUserId, extra) : networkRequest("social-relationships", { method: "POST", body: { operation, targetUserId, ...extra } }),
+  conversations: () => isLocalOnlyRuntime() ? localProfessionalNetworkApi.conversations() : networkRequest<{ conversations: ConversationSummary[] }>("social-messaging"),
+  messages: (conversationId: string, cursor?: string) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.messages(conversationId, cursor) : networkRequest<{ messages: DirectMessage[]; nextCursor: string | null }>("social-messaging", {}, { conversationId, cursor }),
+  messageAction: <T = Record<string, unknown>>(operation: string, payload: Record<string, unknown>) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.messageAction<T>(operation, payload) : networkRequest<T>("social-messaging", { method: "POST", body: { operation, ...payload } }),
+  notifications: (cursor?: string) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.notifications(cursor) : networkRequest<{ notifications: NetworkNotification[]; unreadCount: number; preferences: NotificationPreferences | null; nextCursor: string | null }>("social-notifications", {}, { cursor }),
+  notificationAction: (operation: string, payload: Record<string, unknown> = {}) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.notificationAction(operation, payload) : networkRequest("social-notifications", { method: "POST", body: { operation, ...payload } }),
+  search: (query: string) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.search(query) : networkRequest<SearchResults>("social-search", {}, { q: query }),
+  assets: (handle?: string) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.assets(handle) : networkRequest<{ indicators: Array<Record<string, unknown>>; strategies: Array<Record<string, unknown>> }>("social-assets", {}, { handle }),
+  publishAsset: (type: "indicator" | "strategy", payload: Record<string, unknown>) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.publishAsset(type, payload) : networkRequest<{ asset: Record<string, unknown> }>("social-assets", { method: "POST", body: { type, ...payload } }),
+  moderationReports: (status = "pending") => isLocalOnlyRuntime() ? localProfessionalNetworkApi.moderationReports(status) : networkRequest<{ reports: Array<Record<string, unknown>> }>("social-moderation", {}, { status }),
+  moderationAction: (reportId: string, action: string, reason: string, options: { scope?: string; durationDays?: number } = {}) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.moderationAction(reportId, action, reason, options) : networkRequest("social-moderation", { method: "POST", body: { reportId, action, reason, ...options } }),
   uploadMedia: async (file: File, scope: "profile-avatar" | "profile-cover" | "post" | "message" | "group", context: Record<string, unknown> = {}, options: { onProgress?: (percent: number) => void; signal?: AbortSignal } = {}) => {
+    if (isLocalOnlyRuntime()) return localProfessionalNetworkApi.uploadMedia(file, scope, context, options);
     if (!supabase) throw new Error("Media storage is unavailable.");
     const prepared = await networkRequest<{ path: string; token: string; mimeType: string; byteSize: number }>("social-media", {
       method: "POST",
@@ -72,7 +75,7 @@ export const professionalNetworkApi = {
     }
     return prepared;
   },
-  deleteDraftMedia: (path: string) => networkRequest<{ deleted: boolean }>("social-media", { method: "DELETE", body: { path } })
+  deleteDraftMedia: (path: string) => isLocalOnlyRuntime() ? localProfessionalNetworkApi.deleteDraftMedia(path) : networkRequest<{ deleted: boolean }>("social-media", { method: "DELETE", body: { path } })
 };
 
 async function uploadSignedMediaWithProgress(path: string, token: string, file: File, options: { onProgress?: (percent: number) => void; signal?: AbortSignal }) {

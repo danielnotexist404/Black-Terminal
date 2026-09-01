@@ -22,6 +22,7 @@ import {
   type PersistentLiquidationFieldLoadResult
 } from "./PersistentLiquidationFieldClient.ts";
 import { LiquidationFieldTileContractError } from "./LiquidationFieldTileCodec.ts";
+import { isLocalOnlyRuntime } from "../../../core/local-runtime/localRuntimeClient.ts";
 
 export interface LiquidationFieldControllerOptions {
   symbol: string;
@@ -93,6 +94,10 @@ export class LiquidationFieldController {
     // synthetic fixture. The query is deliberately loopback-only.
     if (isBclifLiveBrowserFallbackProbeEnabled()) {
       await this.startBrowserFallback("LOCAL_LIVE_BROWSER_FALLBACK_PROBE");
+      return;
+    }
+    if (isLocalOnlyRuntime()) {
+      await this.startBrowserFallback("DEVICE_LOCAL_PUBLIC_MARKET_STREAM");
       return;
     }
     this.status({
@@ -181,6 +186,7 @@ export class LiquidationFieldController {
 
   private scheduleFallbackProbe(delayMs?: number) {
     if (this.disposed || this.selectedAuthority !== "BROWSER_FALLBACK") return;
+    if (isLocalOnlyRuntime()) return;
     if (this.fallbackProbeTimer !== null) window.clearTimeout(this.fallbackProbeTimer);
     const seed = [...this.options.symbol].reduce((sum, character) => (sum * 33 + character.charCodeAt(0)) >>> 0, 5381);
     const jitter = (seed + this.fallbackProbeAttempt++ * 7_919) % 15_001;

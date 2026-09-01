@@ -428,8 +428,8 @@ export function AlertCenter({ alerts, onAlertsChange, symbol, exchange, timefram
                   <input value={draft.webhookUrl ?? ""} onChange={(event) => updateDraft("webhookUrl", event.target.value)} />
                 </label>
                 <label className="alert-field wide">
-                  P2P Relay Endpoint
-                  <input placeholder="http://peer.local:8787/alert" value={draft.p2pEndpoint ?? ""} onChange={(event) => updateDraft("p2pEndpoint", event.target.value)} />
+                  P2P Peer ID / Multiaddress
+                  <input placeholder="12D3KooW… or /ip4/…/p2p/12D3KooW…" value={draft.p2pEndpoint ?? ""} onChange={(event) => updateDraft("p2pEndpoint", event.target.value)} />
                 </label>
                 <label className="alert-field wide">
                   SSH Target

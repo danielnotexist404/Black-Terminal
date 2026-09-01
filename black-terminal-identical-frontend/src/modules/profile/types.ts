@@ -110,6 +110,8 @@ export type InvestmentGroup = {
   id: string;
   ownerUserId: string;
   ownerUsername: string;
+  /** Stable libp2p identity of the owning standalone device. Never a broker identifier. */
+  ownerPeerId?: string;
   firmName: string;
   slug: string;
   description: string;
@@ -142,6 +144,7 @@ export type InvestmentGroupMember = {
   groupId: string;
   userId: string;
   username: string;
+  peerId?: string;
   role: InvestmentGroupMemberRole;
   status: InvestmentGroupMemberStatus;
   joinedAt: number;
@@ -153,6 +156,7 @@ export type InvestmentGroupJoinRequest = {
   groupId: string;
   userId: string;
   username: string;
+  requesterPeerId?: string;
   message: string;
   status: "pending" | "approved" | "declined";
   reviewedBy?: string;

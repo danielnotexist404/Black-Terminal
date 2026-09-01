@@ -18,6 +18,7 @@ export function StrategyControlPanelDialog({
   authoritativeAvailableBalance,
   authoritativeEquityTimestamp,
   authoritativeFreshness,
+  maximumLeverage = 1_000,
   authoritativeDestination = false,
   embedded = false,
   busy,
@@ -34,6 +35,7 @@ export function StrategyControlPanelDialog({
   authoritativeAvailableBalance?: number;
   authoritativeEquityTimestamp?: number;
   authoritativeFreshness?: string;
+  maximumLeverage?: number;
   authoritativeDestination?: boolean;
   embedded?: boolean;
   busy: boolean;
@@ -81,7 +83,7 @@ export function StrategyControlPanelDialog({
     try {
       await onApply(submitted, submittedSettings);
       // Keep the exact successfully submitted values in the form. React may not
-      // have committed the parent's refreshed VPS snapshot yet when onApply
+      // have committed the parent's refreshed authoritative snapshot yet when onApply
       // resolves; restoring `initial` here used to visibly roll every field back
       // to the pre-save values.
       dirty.current = false;
@@ -95,7 +97,7 @@ export function StrategyControlPanelDialog({
       <nav aria-label="Strategy settings sections">{(["inputs", "properties", "style", "visibility"] as Tab[]).map((item) => <button key={item} type="button" className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item.toUpperCase()}</button>)}</nav>
       <div key={tab} className="strategy-control-scroll" tabIndex={0} aria-label={`${tab} strategy settings controls`}>
         {tab === "inputs" ? nativeInputs.length ? <NativeInputs inputs={nativeInputs} settings={settings} onChange={(key, next) => { markDirty(); setSettings((current) => ({ ...current, [key]: next })); }} /> : <Inputs value={value} patch={patchInputs} /> : null}
-        {tab === "properties" ? <Properties value={value} patch={patchProperties} accountLabel={accountLabel} authoritativeEquity={authoritativeEquity} authoritativeAvailableBalance={authoritativeAvailableBalance} authoritativeEquityTimestamp={authoritativeEquityTimestamp} authoritativeFreshness={authoritativeFreshness} authoritativeDestination={authoritativeDestination} /> : null}
+        {tab === "properties" ? <Properties value={value} patch={patchProperties} accountLabel={accountLabel} authoritativeEquity={authoritativeEquity} authoritativeAvailableBalance={authoritativeAvailableBalance} authoritativeEquityTimestamp={authoritativeEquityTimestamp} authoritativeFreshness={authoritativeFreshness} authoritativeDestination={authoritativeDestination} maximumLeverage={maximumLeverage} /> : null}
         {tab === "style" ? <Style value={value} patch={patchStyle} /> : null}
         {tab === "visibility" ? <Visibility value={value} patch={patchVisibility} /> : null}
       </div>
@@ -142,7 +144,7 @@ function Inputs({ value, patch }: { value: StrategyControlPanel; patch: (value: 
   </div>;
 }
 
-function Properties({ value, patch, accountLabel, authoritativeEquity, authoritativeAvailableBalance, authoritativeEquityTimestamp, authoritativeFreshness, authoritativeDestination }: { value: StrategyControlPanel; patch: (value: Partial<StrategyControlPanel["properties"]>) => void; accountLabel: string; authoritativeEquity?: number; authoritativeAvailableBalance?: number; authoritativeEquityTimestamp?: number; authoritativeFreshness?: string; authoritativeDestination: boolean }) {
+function Properties({ value, patch, accountLabel, authoritativeEquity, authoritativeAvailableBalance, authoritativeEquityTimestamp, authoritativeFreshness, authoritativeDestination, maximumLeverage }: { value: StrategyControlPanel; patch: (value: Partial<StrategyControlPanel["properties"]>) => void; accountLabel: string; authoritativeEquity?: number; authoritativeAvailableBalance?: number; authoritativeEquityTimestamp?: number; authoritativeFreshness?: string; authoritativeDestination: boolean; maximumLeverage: number }) {
   const item = value.properties;
   const hasAuthoritativeSnapshot = authoritativeDestination
     && typeof authoritativeEquity === "number"
@@ -163,8 +165,9 @@ function Properties({ value, patch, accountLabel, authoritativeEquity, authorita
     {authoritativeDestination && !hasAuthoritativeSnapshot ? <p className="strategy-control-equity-source unavailable"><AlertTriangle size={12} />BROKER EQUITY IS SYNCHRONIZING. The script default is intentionally hidden and saving live sizing is locked until the authoritative account snapshot arrives.</p> : null}
     <ChoiceRow label="Default order size"><input type="number" min="0.00000001" max={orderSizeMaximum} value={item.orderSizeValue} onChange={(event) => patch({ orderSizeValue: numeric(event, item.orderSizeValue) })} /><select value={item.orderSizeMode} onChange={(event) => patch({ orderSizeMode: event.target.value as typeof item.orderSizeMode })}><option value="PERCENT_EQUITY">% of equity</option><option value="FIXED_USDT">USDT balance</option><option value="FIXED_QUANTITY">Raw quantity</option></select></ChoiceRow>
     {fixedUsdtLimit !== undefined && item.orderSizeMode === "FIXED_USDT" ? <p className="strategy-control-field-limit">CURRENT MAXIMUM · {fixedUsdtLimit.toLocaleString(undefined, { maximumFractionDigits: 8 })} USDT</p> : null}
-    <NumberRow label="Long entry leverage · per trade" value={item.longLeverage} min={1} max={1000} suffix="x" onChange={(longLeverage) => patch({ longLeverage })} />
-    <NumberRow label="Short entry leverage · per trade" value={item.shortLeverage} min={1} max={1000} suffix="x" onChange={(shortLeverage) => patch({ shortLeverage })} />
+    <NumberRow label="Long entry leverage · per trade" value={item.longLeverage} min={1} max={maximumLeverage} suffix="x" onChange={(longLeverage) => patch({ longLeverage })} />
+    <NumberRow label="Short entry leverage · per trade" value={item.shortLeverage} min={1} max={maximumLeverage} suffix="x" onChange={(shortLeverage) => patch({ shortLeverage })} />
+    {authoritativeDestination ? <p className="strategy-control-field-limit">BYBIT SYMBOL MAXIMUM · {maximumLeverage}x · revalidated when the order is submitted</p> : null}
     <NumberRow label="Pyramiding" value={item.pyramiding} min={1} max={100} onChange={(pyramiding) => patch({ pyramiding })} />
     <h3>DETAILIZATION AND EXECUTION</h3>
     <SelectRow label="Bar detailization" value={item.barDetailization} onChange={(barDetailization) => patch({ barDetailization: barDetailization as typeof item.barDetailization })}><option value="DEFAULT_4_TICKS">Default (4 ticks per bar)</option><option value="HIGH_LOWER_TIMEFRAME">High (lower-timeframe bars)</option><option value="CLOSED_BAR">Conservative OHLC (stop first)</option></SelectRow>
@@ -174,7 +177,7 @@ function Properties({ value, patch, accountLabel, authoritativeEquity, authorita
     <NumberRow label="Slippage" value={item.slippageTicks} min={0} suffix="ticks" onChange={(slippageTicks) => patch({ slippageTicks })} />
     <SelectRow label="Limit order execution" value={item.limitExecution} onChange={(limitExecution) => patch({ limitExecution: limitExecution as typeof item.limitExecution })}><option value="REQUESTED_PRICE">Requested price</option><option value="TOUCH">Price touch</option></SelectRow>
     <SelectRow label="Order execution delay" value={item.executionDelay} onChange={(executionDelay) => patch({ executionDelay: executionDelay as typeof item.executionDelay })}><option value="ONE_TICK">One tick</option><option value="NONE">None</option></SelectRow>
-    <p className="strategy-control-authority">Equity/USDT sizing and side leverage are enforced server-side against this selected destination, its available balance, Bybit instrument limits, account caps, and Strategy Lab risk ceilings.</p>
+    <p className="strategy-control-authority">Equity/USDT sizing and side leverage are enforced by the authoritative execution host against this selected destination, its available balance, Bybit instrument limits, account caps, and Strategy Lab risk ceilings.</p>
   </div>;
 }
 

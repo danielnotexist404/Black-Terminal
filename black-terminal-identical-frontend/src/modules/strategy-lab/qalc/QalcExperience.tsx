@@ -2,10 +2,12 @@ import { Activity, AlertTriangle, ArrowLeft, Check, Database, LockKeyhole, Pause
 import { useEffect, useMemo, useState } from "react";
 import { defaultQalcDraft, qalcApi, type QalcDraft, type QalcRuntimeStatus, type QalcSavedStrategy } from "./qalcApi";
 import { loadQalcStrategyHandoff, qalcDraftFromHandoff } from "../../qalc-indicator/config";
+import { isLocalOnlyRuntime } from "../../../core/local-runtime/localRuntimeClient";
 
 const steps = ["Market", "Data Quality", "Feature Model", "Quote Policy", "Inventory Exit", "Risk", "Paper Latency", "Review"];
 
 export function QalcExperience({ onBack }: { onBack: () => void }) {
+  const localOnly = isLocalOnlyRuntime();
   const [step, setStep] = useState(0);
   const [handoff] = useState(loadQalcStrategyHandoff);
   const [draft, setDraft] = useState<QalcDraft>(() => defaultQalcDraft(qalcDraftFromHandoff(handoff)));
@@ -15,6 +17,22 @@ export function QalcExperience({ onBack }: { onBack: () => void }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | undefined>(handoff ? `Loaded the exact chart configuration ${handoff.configurationHash} from BC-QALC.` : undefined);
   const [cockpit, setCockpit] = useState(false);
+
+  useEffect(() => {
+    if (handoff) return;
+    const controller = new AbortController();
+    void qalcApi.list(controller.signal).then(({ strategies }) => {
+      if (controller.signal.aborted || !strategies.length) return;
+      const latest = strategies[0];
+      setSaved(latest);
+      setDraft({ name: latest.name, symbol: latest.symbol, mode: "PAPER", config: structuredClone(latest.config) });
+      setMessage(`Restored encrypted BC-QALC configuration V${latest.revision}.`);
+      if (latest.desired_state === "ACTIVE") setCockpit(true);
+    }).catch((error) => {
+      if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : "BC-QALC configurations could not be restored.");
+    });
+    return () => controller.abort();
+  }, [handoff]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -38,7 +56,7 @@ export function QalcExperience({ onBack }: { onBack: () => void }) {
     setBusy(true);
     try {
       const response = saved ? await qalcApi.update(saved.id, draft) : await qalcApi.create(draft);
-      setSaved(response.strategy); setCockpit(true); setMessage("Private BC-QALC Paper configuration saved on the VPS. Live execution and group fanout remain disabled.");
+      setSaved(response.strategy); setCockpit(true); setMessage(localOnly ? "Private BC-QALC Paper configuration saved in encrypted local storage. Live execution and group fanout remain disabled." : "Private BC-QALC Paper configuration saved on the VPS. Live execution and group fanout remain disabled.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "BC-QALC configuration could not be saved."); }
     finally { setBusy(false); }
   };
@@ -73,7 +91,7 @@ function Summary({ label, value, tone }: { label: string; value: string; tone?: 
 function renderStep(step: number, draft: QalcDraft, setDraft: React.Dispatch<React.SetStateAction<QalcDraft>>, status: QalcRuntimeStatus) {
   const field = (key: keyof QalcDraft["config"], value: number) => setDraft((current) => ({ ...current, config: { ...current.config, [key]: value } }));
   if (step === 0) return <div className="strategy-form-grid"><Label title="Strategy name"><input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></Label><Label title="Venue"><select disabled><option>Bybit</option></select></Label><Label title="Symbol"><select value={draft.symbol} onChange={(event) => setDraft((current) => ({ ...current, symbol: event.target.value as QalcDraft["symbol"] }))}><option>BTCUSDT</option><option disabled>ETHUSDT — staged after BTC baseline</option></select></Label><Label title="Category"><select disabled><option>Linear Futures</option></select></Label><NumberField title="Paper equity" value={draft.config.paperEquity} onChange={(value) => field("paperEquity", value)} /><NumberField title="Strategy allocation %" value={draft.config.strategyAllocationPercent} onChange={(value) => field("strategyAllocationPercent", value)} /></div>;
-  if (step === 1) return <div className="qalc-health-grid"><Health icon={<Database size={15} />} label="Canonical book" value={status.book?.state || "NOT CONNECTED"} /><Health icon={<Radio size={15} />} label="Public trades" value={status.available ? "CANONICAL FEED" : "UNAVAILABLE"} /><Health icon={<Activity size={15} />} label="Book age" value={status.book ? `${Math.round(status.book.ageMs)} ms` : "—"} /><Health icon={<ShieldCheck size={15} />} label="Clock" value={status.clock?.state || "UNSAFE"} /><div className="qalc-boundary-note"><AlertTriangle size={15} /><span>Any gap, stale feed, crossed book, clock drift or sequence regression blocks Paper quoting. No browser-local fallback exists.</span></div></div>;
+  if (step === 1) return <div className="qalc-health-grid"><Health icon={<Database size={15} />} label="Canonical book" value={status.book?.state || "NOT CONNECTED"} /><Health icon={<Radio size={15} />} label="Public trades" value={status.available ? "CANONICAL FEED" : "UNAVAILABLE"} /><Health icon={<Activity size={15} />} label="Book age" value={status.book ? `${Math.round(status.book.ageMs)} ms` : "—"} /><Health icon={<ShieldCheck size={15} />} label="Clock" value={status.clock?.state || "UNSAFE"} /><div className="qalc-boundary-note"><AlertTriangle size={15} /><span>Any gap, stale feed, crossed book, clock drift or sequence regression blocks Paper quoting. No unverified browser fallback exists.</span></div></div>;
   if (step === 2) return <div className="strategy-form-grid"><Label title="Model version"><input disabled value="BC-QALC-BASELINE-1" /></Label><Label title="Prediction horizon"><select value={draft.config.predictionHorizonMs} onChange={(event) => field("predictionHorizonMs", Number(event.target.value))}>{[250,500,1000,3000,5000,10000].map((value) => <option value={value} key={value}>{value >= 1000 ? `${value / 1000}s` : `${value}ms`}</option>)}</select></Label><NumberField title="Minimum all-in edge multiple" value={draft.config.minimumNetEdgeMultiplier} step={0.1} onChange={(value) => field("minimumNetEdgeMultiplier", value)} /><NumberField title="Toxicity threshold" value={draft.config.maximumToxicity} onChange={(value) => field("maximumToxicity", value)} /><NumberField title="Minimum P(fill)" value={draft.config.minimumFillProbability} step={0.01} onChange={(value) => field("minimumFillProbability", value)} /></div>;
   if (step === 3) return <div className="strategy-form-grid"><Label title="Quote side"><input disabled value="One-sided automatic" /></Label><Label title="Order type"><input disabled value="PostOnly" /></Label><Label title="Placement"><input disabled value="Queue Optimized" /></Label><NumberField title="Quote lifetime (ms)" value={draft.config.quoteLifetimeMs} onChange={(value) => field("quoteLifetimeMs", value)} /><NumberField title="Max quote actions / second" value={draft.config.maximumQuoteActionsPerSecond} onChange={(value) => field("maximumQuoteActionsPerSecond", value)} /></div>;
   if (step === 4) return <div className="strategy-form-grid"><NumberField title="Maximum inventory time (ms)" value={draft.config.maximumInventoryDurationMs} onChange={(value) => field("maximumInventoryDurationMs", value)} /><Label title="Normal exit"><input disabled value="Time / edge invalidation" /></Label><Label title="Emergency exit"><input disabled value="Toxicity / hard stop" /></Label><Label title="Inventory policy"><input disabled value="Single position · no averaging" /></Label></div>;
@@ -84,9 +102,10 @@ function renderStep(step: number, draft: QalcDraft, setDraft: React.Dispatch<Rea
 
 function QalcCockpit({ strategy, status, history, busy, message, onBack, onAction }: { strategy?: QalcSavedStrategy; status: QalcRuntimeStatus; history: Record<string, number[]>; busy: boolean; message?: string; onBack: () => void; onAction: (state: "ACTIVE" | "PAUSED" | "STOPPED") => void }) {
   const f = status.features || {}; const d = status.decision || {}; const active = strategy?.desired_state === "ACTIVE";
-  const canStart = strategy?.certification_state !== "RESEARCH" && status.clock?.state === "CLOCK_SAFE";
-  return <section className="qalc-cockpit"><header><button type="button" onClick={onBack}><ArrowLeft size={13} /> CONFIGURATION</button><div><span>BC-QALC / PAPER</span><h1>{strategy?.name || "Unsaved BC-QALC candidate"}</h1><p>Native event-time engine · {strategy?.symbol || "BTCUSDT"} · Bybit Linear</p></div><div className="qalc-runtime-state"><span>RUNTIME</span><strong>{status.runtimeState}</strong><em>{status.available ? status.source : "NO FALLBACK DATA"}</em></div><div className="qalc-actions">{active ? <button disabled={busy} onClick={() => onAction("PAUSED")}><Pause size={13} /> PAUSE</button> : <button disabled={busy || !canStart} title={!canStart ? "Event replay certification and safe VPS clock are required." : undefined} onClick={() => onAction("ACTIVE")}><Play size={13} /> START PAPER</button>}</div></header>
-    <div className="qalc-certification"><LockKeyhole size={14} /><strong>{strategy?.certification_state || status.certificationState}</strong><span>Live execution and Investment Group fanout remain outside this chapter.</span></div>{message ? <div className="strategy-library-message">{message}</div> : null}
+  const localPaper = isLocalOnlyRuntime();
+  const canStart = localPaper ? Boolean(strategy) : strategy?.certification_state !== "RESEARCH" && status.clock?.state === "CLOCK_SAFE";
+  return <section className="qalc-cockpit"><header><button type="button" onClick={onBack}><ArrowLeft size={13} /> CONFIGURATION</button><div><span>BC-QALC / PAPER</span><h1>{strategy?.name || "Unsaved BC-QALC candidate"}</h1><p>Native event-time engine · {strategy?.symbol || "BTCUSDT"} · Bybit Linear</p></div><div className="qalc-runtime-state"><span>RUNTIME</span><strong>{status.runtimeState}</strong><em>{status.available ? status.source : "NO FALLBACK DATA"}</em></div><div className="qalc-actions">{active ? <button disabled={busy} onClick={() => onAction("PAUSED")}><Pause size={13} /> PAUSE</button> : <button disabled={busy || !canStart} title={!canStart ? "Event replay certification and a safe authoritative clock are required." : undefined} onClick={() => onAction("ACTIVE")}><Play size={13} /> START PAPER</button>}</div></header>
+    <div className="qalc-certification"><LockKeyhole size={14} /><strong>{strategy?.certification_state || status.certificationState}</strong><span>{localPaper ? "Local Paper may run under RESEARCH certification; every quote and fill remains simulated and live execution is impossible." : "Live execution and Investment Group fanout remain outside this chapter."}</span></div>{message ? <div className="strategy-library-message">{message}</div> : null}
     <div className="qalc-metrics">{[["BOOK",status.book?.state || "—"],["TRADES",status.available ? "CANONICAL" : "—"],["CLOCK",status.clock?.state || "UNSAFE"],["DIRECTION",d.directional ? `${(d.directional.probabilityUp * 100).toFixed(1)}% UP` : "—"],["MOVE",d.directional ? `${d.directional.expectedMoveTicks.toFixed(2)} ticks` : "—"],["NET EDGE",d.costs ? `${money(d.costs.expectedNetEdgeUsdt)}` : "—"],["P(FILL)",d.fill ? `${(d.fill.beforeInvalidation * 100).toFixed(1)}%` : "—"],["TOXICITY",f.toxicity ? `${f.toxicity.score.toFixed(1)} / 100` : "—"],["QUOTE AGE",status.activeQuote ? `${Date.now() - status.activeQuote.createdAt} ms` : "—"],["QUEUE AHEAD",status.activeQuote ? status.activeQuote.queueAheadEstimated.toFixed(4) : "—"],["INVENTORY",status.inventory ? `${status.inventory.side} ${status.inventory.quantity}` : "FLAT"],["DAILY DD",status.risk ? `${status.risk.dailyDrawdownPercent.toFixed(2)}%` : "—"]].map(([label,value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
     <div className="qalc-sparklines">{[["Queue Imbalance",history.imbalance],["Microprice Edge",history.microprice],["OFI",history.ofi],["Real CVD Impulse",history.cvd],["Replenishment",history.replenishment],["Toxicity",history.toxicity]].map(([label,values]) => <article key={label as string}><header><span>{label}</span><strong>{(values as number[]).at(-1)?.toFixed(3) || "—"}</strong></header><Spark values={values as number[]} /></article>)}</div>
     <div className="qalc-operational-grid"><Panel title="ACTIVE QUOTE">{status.activeQuote ? <><p><span>Side / Price</span><b>{status.activeQuote.side} @ {status.activeQuote.price}</b></p><p><span>State</span><b>{status.activeQuote.state}</b></p><p><span>Queue confidence</span><b>{(status.activeQuote.queueConfidence * 100).toFixed(1)}%</b></p></> : <Empty text="No Paper quote active" />}</Panel><Panel title="INVENTORY">{status.inventory ? <><p><span>Position</span><b>{status.inventory.side} {status.inventory.quantity}</b></p><p><span>Unrealized</span><b>{money(status.inventory.unrealizedPnl)}</b></p></> : <Empty text="Flat" />}</Panel><Panel title="LATEST DECISION">{d ? <><p><span>Action</span><b>{d.action || "NO QUOTE"}</b></p><p><span>Reason</span><b>{d.reason || "Awaiting canonical state"}</b></p></> : <Empty text="No decision" />}</Panel></div>

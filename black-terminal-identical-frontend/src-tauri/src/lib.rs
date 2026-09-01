@@ -1,11 +1,20 @@
 use serde_json::Value;
 use std::{net::SocketAddr, time::Duration};
+#[cfg(desktop)]
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, Runtime, WindowEvent,
+    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
 };
+use tauri::{Emitter, Manager, Runtime, WindowEvent};
 
+mod bybit_local;
+mod credential_vault;
+mod local_ai;
+mod local_crypto;
+mod local_execution;
+mod local_p2p;
+mod local_runtime;
+mod local_store;
 mod network_security;
 use network_security::{is_local_hostname, is_public_ip};
 
@@ -122,61 +131,112 @@ fn show_main_window<R: Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+#[cfg(desktop)]
+fn install_desktop_tray(app: &mut tauri::App) -> tauri::Result<()> {
+    let open = MenuItem::with_id(app, "open", "Open Black Terminal", true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, "settings", "Open Settings", true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let exit = MenuItem::with_id(app, "exit", "Quit Black Terminal", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &settings, &separator, &exit])?;
+
+    let mut tray = TrayIconBuilder::new()
+        .menu(&menu)
+        .tooltip("Black Terminal local runtime")
+        .show_menu_on_left_click(true)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "open" => show_main_window(app),
+            "settings" => {
+                show_main_window(app);
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.emit("bt-open-settings", ());
+                }
+            }
+            "exit" => {
+                local_p2p::stop_local_p2p(&app.state::<local_p2p::LocalP2pManager>());
+                app.exit(0);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| match event {
+            TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            } => show_main_window(tray.app_handle()),
+            _ => {}
+        });
+
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
+
+    if let Some(window) = app.get_webview_window("main") {
+        let window_to_hide = window.clone();
+        window.on_window_event(move |event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if local_runtime::background_execution_enabled(window_to_hide.app_handle()) {
+                    api.prevent_close();
+                    let _ = window_to_hide.hide();
+                } else {
+                    window_to_hide.app_handle().exit(0);
+                }
+            }
+        });
+    }
+    Ok(())
+}
+
+#[cfg(not(desktop))]
+fn install_desktop_tray(_app: &mut tauri::App) -> tauri::Result<()> {
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
+        .manage(local_p2p::LocalP2pManager::default())
         .setup(|app| {
-            let open = MenuItem::with_id(app, "open", "Open Black Terminal", true, None::<&str>)?;
-            let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
-            let separator = PredefinedMenuItem::separator(app)?;
-            let exit = MenuItem::with_id(app, "exit", "Exit Black Terminal", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &settings, &separator, &exit])?;
-
-            let mut tray = TrayIconBuilder::new()
-                .menu(&menu)
-                .tooltip("Black Terminal alerts running")
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| match event.id().as_ref() {
-                    "open" => show_main_window(app),
-                    "settings" => {
-                        show_main_window(app);
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.emit("bt-open-settings", ());
-                        }
-                    }
-                    "exit" => app.exit(0),
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| match event {
-                    TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    }
-                    | TrayIconEvent::DoubleClick {
-                        button: MouseButton::Left,
-                        ..
-                    } => show_main_window(tray.app_handle()),
-                    _ => {}
-                });
-
-            if let Some(icon) = app.default_window_icon() {
-                tray = tray.icon(icon.clone());
-            }
-            tray.build(app)?;
-
-            if let Some(window) = app.get_webview_window("main") {
-                let window_to_hide = window.clone();
-                window.on_window_event(move |event| {
-                    if let WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        let _ = window_to_hide.hide();
-                    }
-                });
-            }
-
+            install_desktop_tray(app)?;
+            local_execution::start_local_execution_runtime(app.handle().clone())
+                .map_err(std::io::Error::other)?;
+            local_runtime::start_local_runtime_watchdog(app.handle().clone());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![send_webhook, public_market_get])
+        .invoke_handler(tauri::generate_handler![
+            send_webhook,
+            public_market_get,
+            credential_vault::secure_store_exchange_credentials,
+            credential_vault::secure_delete_exchange_credentials,
+            credential_vault::secure_list_exchange_credentials,
+            bybit_local::bybit_local_instrument_rules,
+            bybit_local::bybit_local_clock_sample,
+            bybit_local::bybit_local_sync_account,
+            bybit_local::bybit_local_set_leverage,
+            bybit_local::bybit_local_set_trading_stop,
+            bybit_local::bybit_local_submit_order,
+            bybit_local::bybit_local_place_partial_take_profits,
+            bybit_local::bybit_local_cancel_order,
+            bybit_local::bybit_local_lookup_order,
+            bybit_local::bybit_local_amend_order,
+            bybit_local::bybit_local_reverse_position,
+            local_runtime::local_runtime_status,
+            local_runtime::initialize_local_runtime,
+            local_runtime::update_local_runtime,
+            local_runtime::local_runtime_heartbeat,
+            local_store::local_document_get,
+            local_store::local_document_put,
+            local_store::local_document_list,
+            local_store::local_document_delete,
+            local_execution::local_execution_enqueue,
+            local_execution::local_execution_get,
+            local_ai::local_ai_chat,
+            local_p2p::local_p2p_start,
+            local_p2p::local_p2p_status,
+            local_p2p::local_p2p_stop,
+            local_p2p::local_p2p_publish,
+            local_p2p::local_p2p_dial,
+            local_p2p::local_p2p_send_direct,
+            local_p2p::local_p2p_inbox
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Black-Terminal Pixi");
 }

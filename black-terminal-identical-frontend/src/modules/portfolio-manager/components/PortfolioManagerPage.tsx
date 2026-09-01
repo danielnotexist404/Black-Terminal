@@ -34,6 +34,7 @@ import type { OrderUpdate } from "../../../execution/types";
 import { deduplicateCanonicalOrders } from "../../../orders/canonicalOrder";
 import { OrderManagementMenu } from "../../../orders/OrderManagementMenu";
 import { readOrdersPanelHeight, resizeOrdersPanelHeight } from "../positionsWorkspaceLayout";
+import { isLocalOnlyRuntime } from "../../../core/local-runtime/localRuntimeClient";
 
 type PortfolioManagerTab =
   | "Overview"
@@ -409,7 +410,9 @@ export function PositionsWorkspace({
     accountName: "",
     apiKey: "",
     apiSecret: "",
-    passphrase: ""
+    passphrase: "",
+    environment: "demo",
+    mainnetConfirmed: false,
   });
   const [hyperliquidNetwork, setHyperliquidNetwork] = useState<"testnet" | "mainnet">("testnet");
   const [hyperliquidAgentPrivateKey, setHyperliquidAgentPrivateKey] = useState("");
@@ -456,6 +459,10 @@ export function PositionsWorkspace({
 
   useEffect(() => {
     if (!showConnection) return;
+    if (isLocalOnlyRuntime()) {
+      setBrokerAdapters([]);
+      return;
+    }
     let active = true;
     void listPersistedExchangeConnectionsViaApi()
       .then((payload) => { if (active && payload) setBrokerAdapters(payload.adapters); })
@@ -464,6 +471,11 @@ export function PositionsWorkspace({
   }, [showConnection]);
 
   useEffect(() => {
+    if (isLocalOnlyRuntime()) {
+      setCloudStatus(null);
+      setCloudStatusMessage("LOCAL BACKGROUND RUNTIME");
+      return;
+    }
     let active = true;
     let timer = 0;
     const refresh = async () => {
@@ -540,7 +552,7 @@ export function PositionsWorkspace({
     const warning = action === "emergency-account-lock" || action === "emergency-stop"
       ? "Emergency Account Lock blocks new execution, pauses strategies and mandates, and preserves broker-native protective orders. Continue?"
       : action === "revoke-mandate" ? "Revoke browser-independent automation authority for this broker? Existing broker-native protection is preserved."
-        : action === "disconnect-broker" ? "Disconnect this Black Cloud broker session? Existing broker-native orders are not cancelled."
+        : action === "disconnect-broker" ? `Disconnect this ${isLocalOnlyRuntime() ? "local" : "Black Cloud"} broker session? Existing broker-native orders are not cancelled.`
           : action === "cancel-all" ? "Cancel every working order, including broker-native protective orders? This is intentionally destructive."
             : "";
     if (warning && !window.confirm(warning)) return;
@@ -614,6 +626,10 @@ export function PositionsWorkspace({
       setConnectStatus("API KEY AND SECRET REQUIRED");
       return;
     }
+    if (isLocalOnlyRuntime() && selectedCex === "bybit" && connection.environment === "mainnet" && !connection.mainnetConfirmed) {
+      setConnectStatus("CONFIRM MAINNET LIVE EXECUTION BEFORE STORING THIS TARGET");
+      return;
+    }
     setConnectionInFlight(true);
     setConnectStatus("CONNECTING");
     try {
@@ -627,12 +643,19 @@ export function PositionsWorkspace({
           accountName,
           apiKey: connection.apiKey,
           apiSecret: connection.apiSecret,
+          environment: connection.environment,
+          mainnetConfirmed: connection.mainnetConfirmed,
           ...(selectedCex === "bybit" || !connection.passphrase?.trim() ? {} : { passphrase: connection.passphrase })
         },
-        metadata: { accountName, automationEnabled: false }
+        metadata: {
+          accountName,
+          automationEnabled: false,
+          environment: connection.environment,
+          mainnetConfirmed: connection.mainnetConfirmed,
+        }
       });
       setActiveVenueId(nextConnection.id);
-      setConnection({ exchange: selectedCex, accountName: "", apiKey: "", apiSecret: "", passphrase: "" });
+      setConnection({ exchange: selectedCex, accountName: "", apiKey: "", apiSecret: "", passphrase: "", environment: "demo", mainnetConfirmed: false });
       setConnectStatus("BROKER LINK STORED");
       setShowConnection(false);
     } catch (error) {
@@ -719,7 +742,7 @@ export function PositionsWorkspace({
 
   async function handleDisconnectExecutionVenue() {
     if (!activeExecutionVenue) return;
-    if (!window.confirm(`Disconnect ${activeExecutionVenue.label}? Encrypted credentials and active Black Cloud authorization for this account will be revoked. Existing broker-native orders are not cancelled.`)) return;
+    if (!window.confirm(`Disconnect ${activeExecutionVenue.label}? Encrypted credentials and active ${isLocalOnlyRuntime() ? "local execution" : "Black Cloud"} authorization for this account will be revoked. Existing broker-native orders are not cancelled.`)) return;
 
     const nextVenue = executionVenues.find((venue) => venue.id !== activeExecutionVenue.id);
     try {
@@ -942,8 +965,23 @@ export function PositionsWorkspace({
             {venueKind === "cex" ? (
               <>
                 <ConnectionSupportCard certification={selectedCexCertification} />
-                {selectedCex === "bybit" && <div className="connection-support-card"><div><span>Connection</span><b>PRODUCTION LOCKED</b></div><p>REAL FUNDS · UNIFIED ACCOUNT · MANUAL EXECUTION · WITHDRAWALS PROHIBITED</p></div>}
+                {selectedCex === "bybit" && <div className="connection-support-card"><div><span>Connection</span><b>{isLocalOnlyRuntime() ? "LOCAL NATIVE" : "BLACK CLOUD"}</b></div><p>{isLocalOnlyRuntime() ? "CREDENTIALS STAY IN THE OPERATING-SYSTEM VAULT · ORDERS ARE SIGNED BY THIS DEVICE" : "REAL FUNDS · UNIFIED ACCOUNT · MANUAL EXECUTION · WITHDRAWALS PROHIBITED"}</p></div>}
                 <input placeholder="Account name" value={connection.accountName} onChange={(event) => setConnection((current) => ({ ...current, accountName: event.target.value }))} />
+                {selectedCex === "bybit" && isLocalOnlyRuntime() && (
+                  <>
+                    <select value={connection.environment || "demo"} onChange={(event) => setConnection((current) => ({ ...current, environment: event.target.value as "mainnet" | "demo" | "testnet", mainnetConfirmed: false }))}>
+                      <option value="demo">Bybit Demo</option>
+                      <option value="testnet">Bybit Testnet</option>
+                      <option value="mainnet">Bybit Mainnet (real funds)</option>
+                    </select>
+                    {connection.environment === "mainnet" && (
+                      <label className="positions-confirm-line">
+                        <input type="checkbox" checked={connection.mainnetConfirmed === true} onChange={(event) => setConnection((current) => ({ ...current, mainnetConfirmed: event.target.checked }))} />
+                        Confirm that this account may execute real-funds orders locally
+                      </label>
+                    )}
+                  </>
+                )}
                 {selectedCex === "bybit" && selectedBrokerAdapter?.authorization.oauthAuthorization && (
                   <div className="broker-authorization-panel">
                     <div><b>Connect with Bybit</b><span>Official broker authorization</span></div>
@@ -1015,7 +1053,8 @@ function BlackCloudConnectionPanel({ connection, status, message, onControl }: {
   message: string;
   onControl: (action: BlackCloudControlAction, options?: { cancelProtectiveOrders?: boolean }) => Promise<void>;
 }) {
-  if (!connection) return <div className="black-cloud-panel unavailable"><b>BLACK CLOUD</b><span>NO PERSISTENT CLOUD CONNECTION</span>{message && <em>{message}</em>}</div>;
+  const localOnly = isLocalOnlyRuntime();
+  if (!connection) return <div className="black-cloud-panel unavailable"><b>{localOnly ? "LOCAL EXECUTION HOST" : "BLACK CLOUD"}</b><span>{localOnly ? "NO LOCAL BROKER CONNECTION" : "NO PERSISTENT CLOUD CONNECTION"}</span>{message && <em>{message}</em>}</div>;
   const mandates = status?.mandates.filter((item) => item.broker_connection_id === connection.id) ?? [];
   const automation = status?.automationMandates?.find((item) => item.connection_id === connection.id && item.status === "ACTIVE") ?? null;
   const strategies = status?.strategyDeployments?.filter((item) => item.connection_id === connection.id && !["STOPPED", "FAILED"].includes(item.status)) ?? [];
@@ -1023,9 +1062,9 @@ function BlackCloudConnectionPanel({ connection, status, message, onControl }: {
   const node = status?.nodes?.find((item) => item.execution_environment === connection.execution_environment) || status?.nodes?.[0] || null;
   const stopped = connection.control_state !== "ACTIVE";
   return <div className={`black-cloud-panel ${stopped ? "stopped" : "ready"}`}>
-    <div className="black-cloud-title"><b>BLACK CLOUD</b><span>{connection.execution_readiness}</span></div>
+    <div className="black-cloud-title"><b>{localOnly ? "LOCAL EXECUTION HOST" : "BLACK CLOUD"}</b><span>{connection.execution_readiness}</span></div>
     <div className="black-cloud-grid">
-      <span>Node <b>{node?.node_id || "BLACK_CLOUD_NODE_01"}</b></span>
+      <span>Node <b>{node?.node_id || (localOnly ? "LOCAL_DEVICE" : "BLACK_CLOUD_NODE_01")}</b></span>
       <span>Node Status <b>{node?.status || "OFFLINE"}</b></span>
       <span>Node Heartbeat <b>{node ? formatCloudAge(node.last_heartbeat_at) : "NEVER"}</b></span>
       <span>Deployment <b>{node?.deployment_commit?.slice(0, 7) || "NOT DEPLOYED"}</b></span>
@@ -1041,7 +1080,7 @@ function BlackCloudConnectionPanel({ connection, status, message, onControl }: {
       <span>Endpoint <b>{connection.endpoint_profile || "GLOBAL"}</b></span>
       <span>UI Session <b>AUTHENTICATED</b></span>
       <span>Broker Auth <b>{connection.credential_state}</b></span>
-      <span>Black Cloud <b>{connection.worker_state}</b></span>
+      <span>{localOnly ? "Local Runtime" : "Black Cloud"} <b>{connection.worker_state}</b></span>
       <span>Account Sync <b>{connection.synchronization_state}</b></span>
       <span>Automation <b>{automation?.status || "NOT AUTHORIZED"}</b></span>
       <span>Execution <b>{connection.execution_readiness}</b></span>
@@ -1054,14 +1093,14 @@ function BlackCloudConnectionPanel({ connection, status, message, onControl }: {
       <span>Incidents <b>{incidents.length}</b></span>
       <span>Reconnects <b>{connection.reconnect_attempts || 0}</b></span>
     </div>
-    <div className="black-cloud-actions">
+    {!localOnly ? <div className="black-cloud-actions">
       <button onClick={() => void onControl(stopped ? "resume" : "pause-new-entries")}>{stopped ? "Resume" : "Pause Entries"}</button>
       <button onClick={() => void onControl("cancel-entry-orders")}>Cancel Entries</button>
       <button onClick={() => void onControl("revoke-mandate")}>Revoke Mandate</button>
       <button onClick={() => void onControl("disconnect-broker")}>Disconnect Broker</button>
       <button className="danger" onClick={() => void onControl("cancel-all")}>Cancel All</button>
       <button className="danger" disabled={connection.control_state === "EMERGENCY_STOP"} onClick={() => void onControl("emergency-account-lock")}>Account Lock</button>
-    </div>
+    </div> : <em>Personal-chart execution is isolated from Strategy Lab. Use the dedicated broker and strategy target controls for pause, disconnect, and automation authority.</em>}
     {automation && <em>Risk policy v{automation.risk_policy_version} · order cap {automation.max_order_notional == null ? "DISABLED" : Number(automation.max_order_notional).toLocaleString()} · leverage cap {automation.max_leverage == null ? "DISABLED" : `${automation.max_leverage}x`} · withdrawals prohibited</em>}
     {message && <em>{message}</em>}
     {connection.last_error_code && <em>{connection.last_error_code}</em>}
@@ -1075,6 +1114,7 @@ function formatCloudAge(value: string | null) {
 }
 
 function ConnectionSupportCard({ certification }: { certification?: VenueCertificationRecord }) {
+  const localOnly = isLocalOnlyRuntime();
   if (!certification) {
     return (
       <div className="connection-support-card blocked">
@@ -1092,7 +1132,7 @@ function ConnectionSupportCard({ certification }: { certification?: VenueCertifi
       </div>
       <div>
         <span>Connection</span>
-        <b>{certification.authReady ? "SECURE SERVER AUTH" : "MARKET DATA ONLY"}</b>
+        <b>{certification.authReady ? localOnly ? "LOCAL OS-VAULT AUTH" : "SECURE SERVER AUTH" : "MARKET DATA ONLY"}</b>
       </div>
       <div>
         <span>Products</span>
@@ -1701,7 +1741,7 @@ export default function PortfolioManagerPage({ onClose, currentUser, activeAccou
           </div>
           <div className="pm-panel">
             <div className="pm-panel-title"><Layers3 size={15} /> Exposure Controls</div>
-            <div className="pm-panel-empty">ENTERPRISE RISK LIMITS ARE ENFORCED SERVER-SIDE BY THE EXECUTION ENGINE.</div>
+            <div className="pm-panel-empty">ENTERPRISE RISK LIMITS ARE ENFORCED BY THE AUTHORITATIVE EXECUTION ENGINE.</div>
           </div>
         </section>
       )}
@@ -1746,7 +1786,7 @@ export default function PortfolioManagerPage({ onClose, currentUser, activeAccou
       )}
 
       {activeTab === "Managed Capital" && (
-        <EnterprisePanel icon={CircleDollarSign} title="Managed Capital" message="CAPITAL ALLOCATION PROFILES, MANAGED AUM, AND GROUP-LEVEL EQUITY CONTROLS REQUIRE ENTERPRISE PERMISSIONS AND SERVER-SIDE POLICY TABLES." />
+        <EnterprisePanel icon={CircleDollarSign} title="Managed Capital" message="CAPITAL ALLOCATION PROFILES, MANAGED AUM, AND GROUP-LEVEL EQUITY CONTROLS REQUIRE ENTERPRISE PERMISSIONS AND AUTHORITATIVE POLICY RECORDS." />
       )}
 
       {activeTab === "Followers" && (
@@ -1758,7 +1798,7 @@ export default function PortfolioManagerPage({ onClose, currentUser, activeAccou
       )}
 
       {activeTab === "Audit" && (
-        <EnterprisePanel icon={Activity} title="Audit" message="EXECUTION, ALLOCATION, PERMISSION, AND INVESTMENT GROUP EVENTS WILL STREAM HERE FROM SERVER-SIDE AUDIT LOGS." />
+        <EnterprisePanel icon={Activity} title="Audit" message="EXECUTION, ALLOCATION, PERMISSION, AND INVESTMENT GROUP EVENTS WILL STREAM HERE FROM THE AUTHORITATIVE AUDIT LOG." />
       )}
 
       {activeTab === "Permissions" && (

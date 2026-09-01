@@ -1,5 +1,5 @@
 import type { ExchangeConnectionDraft } from "../../portfolio/types";
-import { connectExchangeAccount, invalidatePortfolioSnapshot } from "../../portfolio/portfolioStore";
+import { connectExchangeAccount, disconnectLocalPortfolioAccount, invalidatePortfolioSnapshot, readLocalPortfolioAccount, restoreLocalPortfolioAccounts, syncLocalPortfolioAccount } from "../../portfolio/portfolioStore";
 import { disconnectExchangeAccountViaApi, listPersistedExchangeConnectionsViaApi, probeExchangeAccountHealthViaApi, syncExchangeAccountViaApi } from "../../portfolio/portfolioApiClient";
 import { blackCoreOrderSyncService } from "../../orders/orderSyncService";
 import type { ExchangeId } from "../../market-data/types";
@@ -8,6 +8,7 @@ import { defaultConnectionHealth, defaultPermissionReport } from "../types";
 import { getVenueCertification } from "../venueRegistry";
 import { allowsManualExchangeTrading, isCloudExecutionReady } from "../manualTradingAccess";
 import { isPersonalWorkspaceBroker } from "../connectionWorkspaceScope";
+import { isLocalOnlyRuntime } from "../../core/local-runtime/localRuntimeClient";
 
 export function createCentralizedExchangeConnectionAdapter(exchange: ExchangeId, label: string): ConnectionAdapter {
   const certification = getVenueCertification(exchange);
@@ -60,7 +61,9 @@ export function createCentralizedExchangeConnectionAdapter(exchange: ExchangeId,
           exchange,
           apiHealth: account.apiHealth,
           status: account.status,
-          network: certification.defaultNetwork,
+          network: account.network || certification.defaultNetwork,
+          executionEnvironment: account.executionEnvironment,
+          mainnetConfirmed: credentials.mainnetConfirmed === true,
           accountRiskControls: account.riskControls,
           executionMode: certification.executionMode,
           lifecycle: tradingEnabled ? "CONNECTED_TRADING" : "CONNECTED_READ_ONLY",
@@ -77,13 +80,36 @@ export function createCentralizedExchangeConnectionAdapter(exchange: ExchangeId,
 
     async disconnect(connection) {
       if (!connection.accountId) return;
-      await disconnectExchangeAccountViaApi(connection.accountId);
+      if (isLocalOnlyRuntime()) await disconnectLocalPortfolioAccount(connection.accountId);
+      else await disconnectExchangeAccountViaApi(connection.accountId);
       blackCoreOrderSyncService.removeExchange(exchange);
       invalidatePortfolioSnapshot();
     },
 
     async heartbeat(connection) {
       if (!connection.accountId) throw new Error("Broker account identifier is unavailable for authenticated heartbeat.");
+      if (isLocalOnlyRuntime()) {
+        const record = await syncLocalPortfolioAccount(connection.accountId);
+        const trading = record.account.permissions.includes("place-orders");
+        return defaultConnectionHealth({
+          ...connection.health,
+          lifecycle: trading ? "CONNECTED_TRADING" : "CONNECTED_READ_ONLY",
+          status: record.account.status === "connected" ? "connected" : record.account.status === "read-only" ? "connected" : "degraded",
+          latencyMs: record.account.latencyMs,
+          heartbeat: "ok",
+          authentication: record.account.apiHealth === "failed" ? "failed" : "authenticated",
+          synchronization: "synced",
+          privateStream: "not-supported",
+          publicStream: "connected",
+          lastSuccessfulHeartbeat: record.lastSnapshot?.capturedAt,
+          permissions: defaultPermissionReport({
+            read: true,
+            trading,
+            withdrawal: !record.account.permissions.includes("withdraw-disabled"),
+            warnings: record.account.permissions.includes("withdraw-disabled") ? [] : ["Withdrawal permission is enabled on this API key. Create a trading-only key."],
+          }),
+        });
+      }
       const probe = await probeExchangeAccountHealthViaApi(connection.accountId);
       if (!probe) throw new Error("Authenticated Black Terminal session is required for broker heartbeat.");
       return defaultConnectionHealth({
@@ -104,7 +130,8 @@ export function createCentralizedExchangeConnectionAdapter(exchange: ExchangeId,
 
     async reconnect(connection) {
       if (!connection.accountId) throw new Error("Broker account identifier is unavailable for reconnect.");
-      await syncExchangeAccountViaApi(connection.accountId);
+      if (isLocalOnlyRuntime()) await syncLocalPortfolioAccount(connection.accountId);
+      else await syncExchangeAccountViaApi(connection.accountId);
       const health = await this.heartbeat(connection);
       return {
         ...connection,
@@ -122,13 +149,18 @@ export function createCentralizedExchangeConnectionAdapter(exchange: ExchangeId,
 
     async sync(connection) {
       if (!connection.accountId) throw new Error("Broker account identifier is unavailable for synchronization.");
-      await syncExchangeAccountViaApi(connection.accountId);
+      if (isLocalOnlyRuntime()) await syncLocalPortfolioAccount(connection.accountId);
+      else await syncExchangeAccountViaApi(connection.accountId);
       return { health: await this.heartbeat(connection), updatedAt: Date.now() };
     }
   };
 }
 
 export async function restoreCentralizedExchangeConnections(): Promise<ConnectionRecord[]> {
+  if (isLocalOnlyRuntime()) {
+    const localAccounts = await restoreLocalPortfolioAccounts();
+    return localAccounts.map((account) => localAccountConnectionRecord(account));
+  }
   const payload = await listPersistedExchangeConnectionsViaApi();
   if (!payload) return [];
   return payload.connections.filter(isPersonalWorkspaceBroker).map((item) => {
@@ -194,6 +226,59 @@ export async function restoreCentralizedExchangeConnections(): Promise<Connectio
       updatedAt: Date.now()
     };
   });
+}
+
+function localAccountConnectionRecord(account: Awaited<ReturnType<typeof restoreLocalPortfolioAccounts>>[number]): ConnectionRecord {
+  const certification = getVenueCertification(account.exchange);
+  const record = readLocalPortfolioAccount(account.id);
+  const trading = account.permissions.includes("place-orders");
+  const withdrawal = !account.permissions.includes("withdraw-disabled");
+  return {
+    id: `cex-${account.id}`,
+    adapterId: `cex:${account.exchange}`,
+    category: "centralized-exchange",
+    provider: account.exchange,
+    label: account.accountName,
+    status: account.status === "connected" || account.status === "read-only" ? "connected" : "degraded",
+    capabilities: certification?.connectionCapabilities ?? [],
+    accountId: account.id,
+    health: defaultConnectionHealth({
+      lifecycle: trading ? "CONNECTED_TRADING" : "CONNECTED_READ_ONLY",
+      status: account.status === "connected" || account.status === "read-only" ? "connected" : "degraded",
+      latencyMs: account.latencyMs,
+      heartbeat: "ok",
+      authentication: account.apiHealth === "failed" ? "failed" : "authenticated",
+      synchronization: record?.lastSnapshot ? "synced" : "unknown",
+      privateStream: "not-supported",
+      publicStream: "connected",
+      lastSuccessfulHeartbeat: record?.lastSnapshot?.capturedAt,
+      permissions: defaultPermissionReport({
+        read: true,
+        trading,
+        withdrawal,
+        warnings: withdrawal ? ["Withdrawal permission is enabled on this API key. Create a trading-only key."] : [],
+      }),
+    }),
+    metadata: {
+      restored: true,
+      localOnly: true,
+      accountName: account.accountName,
+      exchange: account.exchange,
+      network: account.network,
+      executionEnvironment: account.executionEnvironment,
+      mainnetConfirmed: record?.mainnetConfirmed === true,
+      lifecycle: trading ? "CONNECTED_TRADING" : "CONNECTED_READ_ONLY",
+      readiness: trading ? "execution-ready" : "connected-read-only",
+      executionReady: trading,
+      executionMode: certification?.executionMode,
+      mainnetValidated: certification?.mainnetValidated,
+      supportedProducts: certification?.supportedProducts || [],
+      supportedOrderTypes: certification?.supportedOrderTypes || [],
+      limitations: certification?.limitations || [],
+    },
+    createdAt: account.connectedAt,
+    updatedAt: Date.now(),
+  };
 }
 
 function lifecycleToStatus(lifecycle: ConnectionLifecycleState): ConnectionStatus {

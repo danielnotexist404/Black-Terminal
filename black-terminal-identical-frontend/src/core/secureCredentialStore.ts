@@ -24,29 +24,13 @@ export interface SecureCredentialStore {
 export class TauriSecureCredentialStore implements SecureCredentialStore {
   async storeExchangeCredentials(credentials: ExchangeCredentialInput): Promise<StoredCredentialReference> {
     const vaultKey = `exchange:${credentials.exchange}:${credentials.accountId}`;
-
-    try {
-      await invoke("secure_store_exchange_credentials", {
-        vaultKey,
-        credentials
-      });
-    } catch (error) {
-      console.warn("Secure credential command is not available yet; no secret was persisted.", error);
-    }
-
-    return {
-      accountId: credentials.accountId,
-      exchange: credentials.exchange,
+    return await invoke<StoredCredentialReference>("secure_store_exchange_credentials", {
       vaultKey,
-      storedAt: Date.now()
-    };
+      credentials
+    });
   }
 
   async deleteExchangeCredentials(accountId: string) {
-    try {
-      await invoke("secure_delete_exchange_credentials", { accountId });
-    } catch (error) {
-      console.warn("Secure credential delete command is not available yet.", error);
-    }
+    await invoke("secure_delete_exchange_credentials", { accountId });
   }
 }

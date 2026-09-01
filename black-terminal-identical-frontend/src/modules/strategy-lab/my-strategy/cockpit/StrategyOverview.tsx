@@ -1,9 +1,11 @@
 import { Activity, ShieldCheck } from "lucide-react";
+import { isLocalOnlyRuntime } from "../../../../core/local-runtime/localRuntimeClient";
 import type { StrategyWorkspace } from "../../automation/strategyAutomation.types";
 import { RuntimeTimeline } from "./RuntimeTimeline";
 import { TargetSlotMatrix } from "./TargetSlotMatrix";
 
 export function StrategyOverview({ workspace, paperData, onAddTarget }: { workspace: StrategyWorkspace; paperData: Record<string, unknown> | null; onAddTarget: (slot: number) => void }) {
+  const localOnly = isLocalOnlyRuntime();
   const paper = workspace.paper;
   const analytics = object(paperData?.analytics);
   const positions = list(paperData?.positions);
@@ -28,8 +30,8 @@ export function StrategyOverview({ workspace, paperData, onAddTarget }: { worksp
       <section className="cockpit-panel"><header><span>RISK STATE</span><strong>{paper?.status === "RISK_SUSPENDED" ? "SUSPENDED" : "WITHIN LIMITS"}</strong></header><div className="risk-state-summary"><Activity size={17} /><p>Maximum drawdown {paper?.capitalPolicy.maximumDrawdown || 0}% · Maximum exposure {paper?.capitalPolicy.maximumExposurePercent || 0}%</p></div></section>
     </div>
     <TargetSlotMatrix bindings={workspace.bindings} snapshots={workspace.snapshots} onAdd={onAddTarget} />
-    <section className="cockpit-panel runtime-overview"><header><span>RUNTIME TIMELINE</span><strong>SYNCED WITH VPS</strong></header><RuntimeTimeline audit={workspace.audit} /></section>
-    <div className="live-certification-banner demo-ready"><ShieldCheck size={14} /><div><strong>BROKER &amp; INVESTMENT GROUP EXECUTION</strong><span>Each armed target is server-authoritative, environment-isolated, mandate-bounded and idempotent. Withdrawals and asset transfers remain prohibited.</span></div></div>
+    <section className="cockpit-panel runtime-overview"><header><span>RUNTIME TIMELINE</span><strong>{localOnly ? "ENCRYPTED LOCAL AUTHORITY" : "SYNCED WITH VPS"}</strong></header><RuntimeTimeline audit={workspace.audit} /></section>
+    <div className="live-certification-banner demo-ready"><ShieldCheck size={14} /><div><strong>BROKER &amp; INVESTMENT GROUP EXECUTION</strong><span>Each armed target is {localOnly ? "device-authoritative" : "server-authoritative"}, environment-isolated, mandate-bounded and idempotent. Withdrawals and asset transfers remain prohibited.</span></div></div>
   </div>;
 }
 

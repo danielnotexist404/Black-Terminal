@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import type { CapabilityUser } from "../../../core/permissions/capabilities";
 import { dbGetCurrentUserProfile, dbUpdateCurrentUserProfile, type DBUser } from "../../../lib/supabase";
+import { isLocalOnlyRuntime } from "../../../core/local-runtime/localRuntimeClient";
+import { readLocalAccountProfile, updateLocalAccountProfile } from "../../../core/local-runtime/localAccountProfile";
 
 type AccountDraft = {
   displayName: string;
@@ -43,7 +45,8 @@ export function AccountDetailsPanel({ currentUser, onProfileUpdated }: {
 
   useEffect(() => {
     let active = true;
-    void dbGetCurrentUserProfile()
+    const loadProfile = isLocalOnlyRuntime() ? readLocalAccountProfile() : dbGetCurrentUserProfile();
+    void loadProfile
       .then((profile) => {
         if (!active || !profile) return;
         setEmail(profile.email);
@@ -74,7 +77,8 @@ export function AccountDetailsPanel({ currentUser, onProfileUpdated }: {
     setSaved(false);
     setStatus("");
     try {
-      const profile = await dbUpdateCurrentUserProfile({
+      const saveProfile = isLocalOnlyRuntime() ? updateLocalAccountProfile : dbUpdateCurrentUserProfile;
+      const profile = await saveProfile({
         displayName: draft.displayName.trim(),
         firstName: draft.firstName.trim(),
         lastName: draft.lastName.trim(),
@@ -99,9 +103,9 @@ export function AccountDetailsPanel({ currentUser, onProfileUpdated }: {
       <header className="pn-account-hero">
         <div className="pn-account-avatar" aria-hidden><UserRound size={24} /></div>
         <div>
-          <span>Authenticated Google account</span>
+          <span>{isLocalOnlyRuntime() ? "Encrypted local owner profile" : "Authenticated Google account"}</span>
           <h1 id="pn-account-title">Welcome, {draft.firstName || draft.displayName.split(/\s+/)[0] || currentUser.username}</h1>
-          <p>Complete your private account details whenever you are ready. These details are not required for Google sign-in.</p>
+          <p>{isLocalOnlyRuntime() ? "Private account details remain encrypted on this device and are never included in P2P profile broadcasts." : "Complete your private account details whenever you are ready. These details are not required for Google sign-in."}</p>
         </div>
         <div className="pn-account-completeness">
           <strong>{completeness}%</strong>
@@ -112,7 +116,7 @@ export function AccountDetailsPanel({ currentUser, onProfileUpdated }: {
 
       <div className="pn-account-security">
         <BadgeCheck size={15} />
-        <div><strong>{email || "Verified Google account"}</strong><span>Identity verified through Google SSO</span></div>
+        <div><strong>{email || (isLocalOnlyRuntime() ? "Local owner" : "Verified Google account")}</strong><span>{isLocalOnlyRuntime() ? "Protected by the operating-system vault" : "Identity verified through Google SSO"}</span></div>
         <ShieldCheck size={17} />
       </div>
 

@@ -18,6 +18,8 @@ export type PortfolioAccount = AccountConnection & {
   monthlyPnl: number;
   openPositions: number;
   openOrders: number;
+  network?: string | null;
+  executionEnvironment?: string | null;
   riskControls: AccountRiskControls;
 };
 
@@ -101,4 +103,7 @@ export type ExchangeConnectionDraft = {
   apiKey: string;
   apiSecret: string;
   passphrase?: string;
+  environment?: "mainnet" | "demo" | "testnet";
+  mainnetConfirmed?: boolean;
+  workspaceScope?: "PERSONAL" | "STRATEGY_LAB";
 };

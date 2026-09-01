@@ -13,6 +13,30 @@ import type {
   StrategyTargetType,
   StrategyWorkspace,
 } from "./strategyAutomation.types";
+import { isLocalOnlyRuntime } from "../../../core/local-runtime/localRuntimeClient";
+import { connectLocalBybitAccount, disconnectLocalBrokerAccount, getLocalBrokerRecord, listLocalBrokerAccounts } from "../../../core/local-runtime/localBrokerStore";
+import {
+  addLocalStrategyTarget,
+  configureLocalStrategyPaper,
+  createLocalStrategyDraft,
+  disconnectLocalStrategyTarget,
+  eligibleLocalStrategyTargets,
+  getLocalStrategy,
+  listLocalStrategies,
+  localStrategyPaperAction,
+  localStrategyPaperData,
+  localStrategyGroupExecutionDesks,
+  localStrategySnapshot,
+  localStrategyTargetAction,
+  localStrategyTargetData,
+  publishLocalStrategy,
+  removeLocalStrategy,
+  reorderLocalStrategyTargets,
+  saveLocalStrategyDraft,
+  startLocalStrategyVersion,
+  updateLocalGlobalPolicy,
+  updateLocalStrategyTarget,
+} from "../../../core/local-runtime/localStrategyStore";
 
 async function request<T>(
   path = "",
@@ -79,49 +103,103 @@ async function connectionRequest<T>(path = "", options: RequestInit = {}): Promi
 }
 
 export const strategyConnectionApi = {
-  list: () => connectionRequest<{ connections: StrategyBrokerConnection[]; limit: 9; testnetAccepted: false }>(),
-  connect: (apiKey: string, apiSecret: string) => connectionRequest<{ account: { id: string }; cloud: { connection: StrategyBrokerConnection }; publicApiKey: string; apiSecretDisplay: string }>("connect", { method: "POST", body: JSON.stringify({ apiKey, apiSecret }) }),
-  rotate: (connectionId: string, apiKey: string, apiSecret: string) => connectionRequest<{ account: { id: string }; cloud: { connection: StrategyBrokerConnection }; publicApiKey: string; apiSecretDisplay: string }>(encodeURIComponent(connectionId), { method: "PATCH", body: JSON.stringify({ apiKey, apiSecret }) }),
-  remove: (connectionId: string) => connectionRequest<{ ok: true; removedAccountIds: string[]; revokedConnectionIds: string[] }>(encodeURIComponent(connectionId), { method: "DELETE" }),
+  list: async () => {
+    if (isLocalOnlyRuntime()) return { connections: localStrategyConnections(), limit: 9 as const, testnetAccepted: true as const };
+    return connectionRequest<{ connections: StrategyBrokerConnection[]; limit: 9; testnetAccepted: false }>();
+  },
+  connect: async (apiKey: string, apiSecret: string, localOptions?: { environment: "demo" | "testnet" | "mainnet"; mainnetConfirmed: boolean; accountName?: string }) => {
+    if (isLocalOnlyRuntime()) {
+      const account = await connectLocalBybitAccount({
+        exchange: "bybit",
+        accountName: localOptions?.accountName || `Strategy Bybit ${String(localOptions?.environment || "demo").toUpperCase()}`,
+        apiKey,
+        apiSecret,
+        environment: localOptions?.environment || "demo",
+        mainnetConfirmed: localOptions?.mainnetConfirmed === true,
+        workspaceScope: "STRATEGY_LAB",
+      });
+      const connection = localStrategyConnections().find((item) => item.accountId === account.id);
+      if (!connection) throw new Error("The local Strategy Lab broker connection could not be restored after authentication.");
+      return { account: { id: account.id }, cloud: { connection }, publicApiKey: "OS VAULT", apiSecretDisplay: "••••••••••••••••" };
+    }
+    return connectionRequest<{ account: { id: string }; cloud: { connection: StrategyBrokerConnection }; publicApiKey: string; apiSecretDisplay: string }>("connect", { method: "POST", body: JSON.stringify({ apiKey, apiSecret }) });
+  },
+  rotate: (connectionId: string, apiKey: string, apiSecret: string) => {
+    if (isLocalOnlyRuntime()) throw new Error("Modify local broker credentials from Portfolio Manager so the venue environment can be re-authenticated safely.");
+    return connectionRequest<{ account: { id: string }; cloud: { connection: StrategyBrokerConnection }; publicApiKey: string; apiSecretDisplay: string }>(encodeURIComponent(connectionId), { method: "PATCH", body: JSON.stringify({ apiKey, apiSecret }) });
+  },
+  remove: async (connectionId: string) => {
+    if (isLocalOnlyRuntime()) {
+      await disconnectLocalBrokerAccount(connectionId);
+      return { ok: true as const, removedAccountIds: [connectionId], revokedConnectionIds: [connectionId] };
+    }
+    return connectionRequest<{ ok: true; removedAccountIds: string[]; revokedConnectionIds: string[] }>(encodeURIComponent(connectionId), { method: "DELETE" });
+  },
 };
 
+function localStrategyConnections(): StrategyBrokerConnection[] {
+  return listLocalBrokerAccounts("STRATEGY_LAB").map((account) => {
+    const record = getLocalBrokerRecord(account.id);
+    const environment = record?.environment === "MAINNET" ? "MAINNET_LIVE" : record?.environment || "DEMO";
+    return {
+      id: account.id,
+      accountId: account.id,
+      provider: "BYBIT",
+      label: account.accountName,
+      publicApiKey: "OS VAULT",
+      apiSecretDisplay: "••••••••••••••••",
+      credentialStatus: record?.lastSnapshot ? "AUTHENTICATED" : "PENDING",
+      healthStatus: account.status === "connected" ? "CONNECTED_LOCAL" : account.status.toUpperCase(),
+      lifecycleStatus: "ACTIVE",
+      credentialState: record?.lastSnapshot ? "AUTHENTICATED" : "PENDING",
+      workerState: "LOCAL_RUNTIME",
+      synchronizationState: record?.lastSnapshot ? "SYNCHRONIZED" : "PENDING",
+      executionReadiness: record?.lastSnapshot?.tradingEnabled ? "READY" : "READ_ONLY",
+      executionEnvironment: environment,
+      endpointProfile: `BYBIT_${environment}`,
+      lastAuthenticatedAt: record?.lastSnapshot ? new Date(record.lastSnapshot.capturedAt).toISOString() : undefined,
+      persistence: "LOCAL_DEVICE",
+    };
+  });
+}
+
 export const strategyAutomationApi = {
-  list: (signal?: AbortSignal) =>
-    request<{ strategies: StrategySummary[] }>("", {}, signal),
+  list: async (signal?: AbortSignal) =>
+    isLocalOnlyRuntime() ? { strategies: await listLocalStrategies() } : request<{ strategies: StrategySummary[] }>("", {}, signal),
   groupExecutionDesks: (groupId: string, signal?: AbortSignal) =>
-    request<{ groupId: string; desks: StrategyGroupExecutionDesk[] }>(
+    isLocalOnlyRuntime() ? localStrategyGroupExecutionDesks(groupId) : request<{ groupId: string; desks: StrategyGroupExecutionDesk[] }>(
       `group-execution-desks/${encodeURIComponent(groupId)}`,
       {},
       signal,
     ),
   get: (strategyId: string, signal?: AbortSignal) =>
-    request<StrategyWorkspace>(encodeURIComponent(strategyId), {}, signal),
+    isLocalOnlyRuntime() ? getLocalStrategy(strategyId) : request<StrategyWorkspace>(encodeURIComponent(strategyId), {}, signal),
   create: (name: string, definition: StrategyAutomationDefinition) =>
-    request<StrategyWorkspace>("", mutation({ name, definition })),
+    isLocalOnlyRuntime() ? createLocalStrategyDraft(name, definition) : request<StrategyWorkspace>("", mutation({ name, definition })),
   createDraft: (name: string, definition: StrategyAutomationDefinition) =>
-    request<StrategyWorkspace>("drafts", mutation({ name, definition })),
+    isLocalOnlyRuntime() ? createLocalStrategyDraft(name, definition) : request<StrategyWorkspace>("drafts", mutation({ name, definition })),
   saveDraft: (
     strategyId: string,
     name: string,
     definition: StrategyAutomationDefinition,
     expectedRevision?: number,
   ) =>
-    request<StrategyWorkspace>(
+    isLocalOnlyRuntime() ? saveLocalStrategyDraft(strategyId, name, definition, expectedRevision) : request<StrategyWorkspace>(
       `${encodeURIComponent(strategyId)}/draft`,
       mutation({ name, definition, expectedRevision }, "PATCH"),
     ),
   publishDraft: (strategyId: string, expectedRevision: number) =>
-    request<StrategyWorkspace>(
+    isLocalOnlyRuntime() ? publishLocalStrategy(strategyId, expectedRevision) : request<StrategyWorkspace>(
       `${encodeURIComponent(strategyId)}/publish`,
       mutation({ expectedRevision }),
     ),
   updateGlobalPolicy: (strategyId: string, expectedRevision: number, capitalPolicy: StrategyCapitalPolicy) =>
-    request<StrategyWorkspace>(
+    isLocalOnlyRuntime() ? updateLocalGlobalPolicy(strategyId, expectedRevision, capitalPolicy) : request<StrategyWorkspace>(
       `${encodeURIComponent(strategyId)}/global-policy`,
       mutation({ expectedRevision, capitalPolicy }, "PATCH"),
     ),
   startVersion: (strategyId: string, version: number) =>
-    request<StrategyWorkspace>(
+    isLocalOnlyRuntime() ? startLocalStrategyVersion(strategyId, version) : request<StrategyWorkspace>(
       `${encodeURIComponent(strategyId)}/versions/${version}/start`,
       mutation({}),
     ),
@@ -129,18 +207,16 @@ export const strategyAutomationApi = {
     strategyId: string,
     name: string,
     definition: StrategyAutomationDefinition,
-  ) =>
-    request<StrategyWorkspace>(
-      encodeURIComponent(strategyId),
-      mutation({ name, definition }, "PATCH"),
-    ),
+  ) => isLocalOnlyRuntime()
+    ? getLocalStrategy(strategyId).then((workspace) => saveLocalStrategyDraft(strategyId, name, definition, workspace.strategy.draftRevision))
+    : request<StrategyWorkspace>(encodeURIComponent(strategyId), mutation({ name, definition }, "PATCH")),
   remove: (strategy: Pick<StrategySummary, "id" | "name" | "draftRevision">) =>
-    request<{ strategyId: string; archivedAt: string; idempotent: boolean }>(
+    isLocalOnlyRuntime() ? removeLocalStrategy(strategy) : request<{ strategyId: string; archivedAt: string; idempotent: boolean }>(
       encodeURIComponent(strategy.id),
       mutation({ expectedName: strategy.name, expectedRevision: strategy.draftRevision || 0 }, "DELETE"),
     ),
   eligibleTargets: (strategyId: string, signal?: AbortSignal) =>
-    request<{
+    isLocalOnlyRuntime() ? eligibleLocalStrategyTargets(strategyId).then((targets) => ({ strategyId, ...targets })) : request<{
       strategyId: string;
       brokerAccounts: EligibleBrokerTarget[];
       groups: EligibleGroupTarget[];
@@ -153,7 +229,7 @@ export const strategyAutomationApi = {
     marketType: "SPOT" | "FUTURES",
     capitalPolicy?: StrategyCapitalPolicy,
   ) =>
-    request<{ binding: StrategyTargetBinding }>(
+    isLocalOnlyRuntime() ? addLocalStrategyTarget(strategyId, slotIndex, targetType, targetId, marketType, capitalPolicy) : request<{ binding: StrategyTargetBinding }>(
       `${encodeURIComponent(strategyId)}/targets`,
       mutation({ slotIndex, targetType, targetId, marketType, ...(capitalPolicy ? { capitalPolicy } : {}) }),
     ),
@@ -165,7 +241,7 @@ export const strategyAutomationApi = {
       expectedVersion: number;
     }>,
   ) =>
-    request<{
+    isLocalOnlyRuntime() ? reorderLocalStrategyTargets(strategyId, assignments) : request<{
       bindings: StrategyTargetBinding[];
       snapshots: StrategyTargetSnapshot[];
     }>(
@@ -177,7 +253,7 @@ export const strategyAutomationApi = {
     binding: StrategyTargetBinding,
     capitalPolicy: StrategyCapitalPolicy,
   ) =>
-    request<{ binding: StrategyTargetBinding }>(
+    isLocalOnlyRuntime() ? updateLocalStrategyTarget(strategyId, binding, capitalPolicy) : request<{ binding: StrategyTargetBinding }>(
       `${encodeURIComponent(strategyId)}/targets/${encodeURIComponent(binding.id)}`,
       mutation({ expectedVersion: binding.rowVersion, capitalPolicy }, "PATCH"),
     ),
@@ -186,7 +262,7 @@ export const strategyAutomationApi = {
     binding: StrategyTargetBinding,
     action: "arm" | "pause" | "resume",
   ) =>
-    request<{ binding: StrategyTargetBinding }>(
+    isLocalOnlyRuntime() ? localStrategyTargetAction(strategyId, binding, action) : request<{ binding: StrategyTargetBinding }>(
       `${encodeURIComponent(strategyId)}/targets/${encodeURIComponent(binding.id)}/${action}`,
       mutation({ expectedVersion: binding.rowVersion }),
     ),
@@ -195,7 +271,7 @@ export const strategyAutomationApi = {
     binding: StrategyTargetBinding,
     disconnectPolicy = "DETACH_MANUAL",
   ) =>
-    request<{ binding: StrategyTargetBinding }>(
+    isLocalOnlyRuntime() ? disconnectLocalStrategyTarget(strategyId, binding) : request<{ binding: StrategyTargetBinding }>(
       `${encodeURIComponent(strategyId)}/targets/${encodeURIComponent(binding.id)}`,
       mutation(
         { expectedVersion: binding.rowVersion, disconnectPolicy },
@@ -203,7 +279,7 @@ export const strategyAutomationApi = {
       ),
     ),
   snapshot: (strategyId: string, signal?: AbortSignal) =>
-    request<{
+    isLocalOnlyRuntime() ? localStrategySnapshot(strategyId) : request<{
       strategyId: string;
       timestamp: number;
       paper: StrategyPaperAccount | null;
@@ -224,13 +300,13 @@ export const strategyAutomationApi = {
       | "logs",
     signal?: AbortSignal,
   ) =>
-    request<Record<string, T>>(
+    isLocalOnlyRuntime() ? localStrategyTargetData(strategyId, bindingId, resource) as Promise<Record<string, T>> : request<Record<string, T>>(
       `${encodeURIComponent(strategyId)}/targets/${encodeURIComponent(bindingId)}/${resource}`,
       {},
       signal,
     ),
   paperData: (strategyId: string, signal?: AbortSignal) =>
-    request<Record<string, unknown>>(
+    isLocalOnlyRuntime() ? localStrategyPaperData(strategyId) : request<Record<string, unknown>>(
       `${encodeURIComponent(strategyId)}/paper`,
       {},
       signal,
@@ -240,7 +316,7 @@ export const strategyAutomationApi = {
     expectedVersion: number,
     capitalPolicy: StrategyCapitalPolicy,
   ) =>
-    request<{ paper: StrategyPaperAccount }>(
+    isLocalOnlyRuntime() ? configureLocalStrategyPaper(strategyId, expectedVersion, capitalPolicy) : request<{ paper: StrategyPaperAccount }>(
       `${encodeURIComponent(strategyId)}/paper/configure`,
       mutation({ expectedVersion, capitalPolicy }),
     ),
@@ -250,7 +326,7 @@ export const strategyAutomationApi = {
     expectedVersion: number,
     body: Record<string, unknown> = {},
   ) =>
-    request<{ paper: StrategyPaperAccount }>(
+    isLocalOnlyRuntime() ? localStrategyPaperAction(strategyId, action, expectedVersion, body) : request<{ paper: StrategyPaperAccount }>(
       `${encodeURIComponent(strategyId)}/paper/${action}`,
       mutation({ expectedVersion, ...body }),
     ),

@@ -11,6 +11,7 @@ import {
   DrawingToolId,
   FeedEvent,
   IndicatorAdvancedSettings,
+  ChartRenderingPreferences,
   IndicatorColorKey,
   IndicatorPeriods,
   QalcIndicatorSettings,
@@ -148,6 +149,7 @@ import { calculateMarketSentiment } from "../modules/market-sentiment/core/engin
 import { DEFAULT_MARKET_SENTIMENT_SETTINGS, migrateMarketSentimentSettings } from "../modules/market-sentiment/core/settings";
 import type { MarketSentimentSettings } from "../modules/market-sentiment/core/types";
 import { fetchPersistentAuthenticFlow, type PersistentFlowSnapshot } from "../modules/acvd/data/persistentFlowClient";
+import { isLocalOnlyRuntime } from "../core/local-runtime/localRuntimeClient";
 import { authenticFlowRevision, mergePersistentAndLiveFlow } from "../modules/acvd/data/flowMerge";
 import { AuctionProfileWorkerClient } from "../modules/auction-profile/worker/AuctionProfileWorkerClient";
 import { resolveAuctionVisualizationLayers } from "../modules/auction-profile/rendering/visualization";
@@ -234,6 +236,7 @@ type PixiBlackChartProps = {
   onAlertFired?: (symbol: string, message: string) => void;
   priceLineColor?: string;
   priceLineIntensity?: number;
+  renderingPreferences?: ChartRenderingPreferences;
   activeOrders?: OrderUpdate[];
   onRefreshOrders?: () => void | Promise<unknown>;
   liquidationProfileRequested?: boolean;
@@ -531,6 +534,7 @@ export function PixiBlackChart({
   onAlertFired,
   priceLineColor,
   priceLineIntensity,
+  renderingPreferences,
   activeOrders = [],
   onRefreshOrders,
   liquidationProfileRequested = false,
@@ -1603,7 +1607,8 @@ export function PixiBlackChart({
       },
       onLiquidationRendererMetrics: setLiquidationFieldRendererMetrics,
       priceLineColor,
-      priceLineIntensity
+      priceLineIntensity,
+      renderingPreferences
     });
     engineRef.current = engine;
     candleReaderCallbackRef.current?.(() => engine.getCustomScriptCandles());
@@ -1819,7 +1824,13 @@ export function PixiBlackChart({
     marketHistoryTarget,
     visibleIndicators.volatilityHeatmap,
     auctionDataRequired,
-    onPriceChange
+    onPriceChange,
+    renderingPreferences?.resolutionMode,
+    renderingPreferences?.antialias,
+    renderingPreferences?.backgroundColor,
+    renderingPreferences?.gridColor,
+    renderingPreferences?.bullishCandleColor,
+    renderingPreferences?.bearishCandleColor
   ]);
 
   useEffect(() => {
@@ -2764,6 +2775,12 @@ export function PixiBlackChart({
     const timeframeDuration = timeframeSeconds[timeframe];
     if (!acvdRuntimeRequested || !engine || marketSymbol.exchange.toLowerCase() !== "bybit" || timeframeDuration < 60 || timeframeDuration % 60 !== 0) {
       acvdPersistentRequestRef.current = "";
+      setAcvdPersistentFlow(null);
+      setAcvdPersistentFlowError(null);
+      return;
+    }
+    if (isLocalOnlyRuntime()) {
+      acvdPersistentRequestRef.current = "DEVICE_LOCAL_LIVE_FLOW";
       setAcvdPersistentFlow(null);
       setAcvdPersistentFlowError(null);
       return;
@@ -6883,7 +6900,7 @@ export function PixiBlackChart({
               <div className="indicator-settings-section">BC-RDA Engine</div>
               <div className="bcrda-integrity-warning">
                 <strong>{ddaProSettings.signalModelVersion === BC_RDA_LEGACY_REPAINTING ? "REPAINTING RESEARCH VERSION" : "CAUSAL V2 — EXECUTION CONTAINMENT ACTIVE"}</strong>
-                <span>{ddaProSettings.signalModelVersion === BC_RDA_LEGACY_REPAINTING ? "Historical signals may move as future data arrives. Alerts, statistics, backtests and automation are invalid and disabled." : "Final signals use confirmation-bar timestamps. Alerts and Strategy Lab remain blocked until the separate headless VPS runtime is certified."}</span>
+                <span>{ddaProSettings.signalModelVersion === BC_RDA_LEGACY_REPAINTING ? "Historical signals may move as future data arrives. Alerts, statistics, backtests and automation are invalid and disabled." : "Final signals use confirmation-bar timestamps. Alerts and Strategy Lab remain blocked until the separate headless automation runtime is certified."}</span>
               </div>
               <label>
                 Signal Model

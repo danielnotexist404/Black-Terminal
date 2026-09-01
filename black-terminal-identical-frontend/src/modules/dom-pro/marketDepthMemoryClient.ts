@@ -1,4 +1,5 @@
 import type { MarketSymbol } from "../../market-data/types";
+import { isLocalOnlyRuntime } from "../../core/local-runtime/localRuntimeClient";
 import { supabase } from "../../lib/supabase";
 import type { DomHeatmapHorizon, MacroLiquidityRange } from "./types";
 
@@ -88,6 +89,7 @@ export async function fetchBlackCoreDepthReplay(
   range: MacroLiquidityRange,
   horizon: DomHeatmapHorizon
 ): Promise<BlackCoreDepthReplay | null> {
+  if (isLocalOnlyRuntime()) return null;
   const params = new URLSearchParams({
     venue: symbol.exchange,
     marketKind: symbol.marketKind,
@@ -112,6 +114,7 @@ export async function fetchBlackCoreDepthTiles(
   horizon: DomHeatmapHorizon,
   maxCells = 1800
 ): Promise<BlackCoreDepthTiles | null> {
+  if (isLocalOnlyRuntime()) return null;
   const params = new URLSearchParams({
     venue: symbol.exchange,
     marketKind: symbol.marketKind,

@@ -92,7 +92,7 @@ export type BuildBlackScriptTargetManifestRequest = {
   accountId: string;
   symbol: string;
   marketType: "SPOT" | "FUTURES";
-  executionEnvironment: "DEMO" | "MAINNET_LIVE";
+  executionEnvironment: "DEMO" | "TESTNET" | "MAINNET_LIVE";
   requestedLongLeverage: number;
   requestedShortLeverage: number;
   evaluation: BlackScriptCloudEvaluation;
@@ -354,7 +354,7 @@ function basePayload(request: BuildBlackScriptTargetManifestRequest) {
     sourceVersion: request.evaluation.sourceVersion,
     settingsVersion: request.evaluation.settingsVersion,
     executionEnvironment: request.executionEnvironment,
-    simulatedFunds: request.executionEnvironment === "DEMO",
+    simulatedFunds: request.executionEnvironment !== "MAINNET_LIVE",
     blackScriptRuntimeVersion: "black-script-v3",
     generationCandleTime: request.evaluation.latestClosedCandleTime,
   };

@@ -21,6 +21,7 @@ import { QalcExperience } from "../qalc/QalcExperience";
 import { consumeQalcStrategyHandoffIntent } from "../../qalc-indicator/config";
 import { applySharedStrategyControlPanel, applyStrategyControlPanel, readStrategyControlPanel } from "../execution-desk/strategyControlPanelModel";
 import { activateBlackCloudConnectionViaApi, listPersistedExchangeConnectionsViaApi, type PersistedExchangeConnection } from "../../../portfolio/portfolioApiClient";
+import { isLocalOnlyRuntime } from "../../../core/local-runtime/localRuntimeClient";
 
 type View = "library" | "wizard" | "cockpit" | "qalc";
 type Props = {
@@ -32,6 +33,7 @@ type Props = {
 };
 
 export function StrategyAutomationExperience({ definition, chartTimeframe, indicators, onDefinitionChange, onOpenBacktest }: Props) {
+  const localOnly = isLocalOnlyRuntime();
   const fixtureMode = typeof window !== "undefined" && window.location.hostname === "127.0.0.1" && new URLSearchParams(window.location.search).get("uiPreview") === "1"
     ? new URLSearchParams(window.location.search).get("strategyLabFixture")
     : null;
@@ -141,13 +143,13 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
   };
 
   const openStrategy = async (strategyId: string) => {
-    setBusy(true); setMessage("Loading strategy state from the VPS…");
+    setBusy(true); setMessage(localOnly ? "Loading strategy state from encrypted local storage…" : "Loading strategy state from the VPS…");
     try {
       const next = await loadWorkspace(strategyId);
       if (!next) return;
       setDraft(hydrateDraft(next)); setDirty(false); setView("cockpit");
       setMessage(next.strategy.publishedVersion
-        ? "Strategy cockpit restored from authoritative VPS state."
+        ? localOnly ? "Strategy cockpit restored from authoritative local state." : "Strategy cockpit restored from authoritative VPS state."
         : "Saved strategy restored. Its settings are available; Paper and live execution remain locked until runtime certification.");
     } catch (error) { setMessage(errorMessage(error, "Strategy could not be opened.")); }
     finally { setBusy(false); }
@@ -161,7 +163,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
 
   const modifyStrategy = async (strategyId: string) => {
     setBusy(true);
-    setMessage("Loading the saved strategy configuration from the VPS…");
+    setMessage(localOnly ? "Loading the saved strategy configuration from encrypted local storage…" : "Loading the saved strategy configuration from the VPS…");
     try {
       const next = await loadWorkspace(strategyId);
       if (!next) return;
@@ -300,7 +302,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
     try {
       const result = await strategyAutomationApi.eligibleTargets(saved.strategy.id);
       setWizardEligible({ brokerAccounts: result.brokerAccounts, groups: result.groups });
-      setMessage("Execution destinations refreshed from authenticated Black Cloud ownership and readiness state.");
+      setMessage(localOnly ? "Execution destinations refreshed from this device's isolated broker vault and local readiness state." : "Execution destinations refreshed from authenticated Black Cloud ownership and readiness state.");
     } catch (error) { setMessage(errorMessage(error, "Execution destinations are unavailable.")); }
     finally { setBusy(false); }
   };
@@ -325,7 +327,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
       if (certified && version && next.strategy.runningVersion !== version) next = await strategyAutomationApi.startVersion(next.strategy.id, version);
       const activationMessage = certified && version
         ? `Strategy V${version} is saved and active only in its isolated Paper account. Add brokers or Investment Groups from LIVE TARGETS when you are ready.`
-        : "Strategy saved with its native settings. Paper and live arming remain locked until this script receives a certified VPS runtime.";
+        : "Strategy saved with its native settings. Paper and live arming remain locked until this script receives a certified headless runtime.";
       next = await strategyAutomationApi.get(next.strategy.id);
       setWorkspace(next);
       setDraft(hydrateDraft(next));
@@ -355,7 +357,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
   const refreshCockpit = async () => {
     if (!workspace) return;
     setBusy(true);
-    try { await loadWorkspace(workspace.strategy.id); setMessage("Cockpit refreshed from the VPS."); }
+    try { await loadWorkspace(workspace.strategy.id); setMessage(localOnly ? "Cockpit refreshed from authoritative local state." : "Cockpit refreshed from the VPS."); }
     catch (error) { setMessage(errorMessage(error, "Refresh failed; last-known state is preserved.")); }
     finally { setBusy(false); }
   };
@@ -439,15 +441,17 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
     setMessage(`${target.label} selected. Explicitly authorize it in Execution Destination before activation.`);
   };
 
-  const linkBrokerConnection = async (apiKey: string, apiSecret: string, connectionId?: string) => {
+  const linkBrokerConnection = async (apiKey: string, apiSecret: string, connectionId?: string, localOptions?: { environment: "demo" | "testnet" | "mainnet"; mainnetConfirmed: boolean; accountName?: string }) => {
     if (!workspace || (addSlot === null && !wizardTargetPickerMode)) return;
     setBusy(true);
     try {
       const result = connectionId
         ? await strategyConnectionApi.rotate(connectionId, apiKey, apiSecret)
-        : await strategyConnectionApi.connect(apiKey, apiSecret);
+        : await strategyConnectionApi.connect(apiKey, apiSecret, localOptions);
       const connectedId = result.cloud.connection.id;
-      setMessage(connectionId ? "Credentials rotated. Black Cloud is reconciling the persistent connection." : "Broker authenticated. Black Cloud is reconciling it before target authorization.");
+      setMessage(connectionId
+        ? localOnly ? "Credentials rotated in the operating-system vault. The local execution host is reconciling the connection." : "Credentials rotated. Black Cloud is reconciling the persistent connection."
+        : localOnly ? "Broker authenticated locally. The execution host is reconciling it before target authorization." : "Broker authenticated. Black Cloud is reconciling it before target authorization.");
       let next = await refreshTargetPicker();
       if (!editingBinding && !connectionId) {
         for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -460,10 +464,10 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
           await new Promise((resolve) => window.setTimeout(resolve, 1_000));
           next = await refreshTargetPicker();
         }
-        setMessage("Connection saved permanently. Black Cloud is still authenticating its private stream; use LINK TO TARGET when it becomes READY.");
+        setMessage(localOnly ? "Connection saved in the operating-system vault. Local reconciliation is still in progress; use LINK TO TARGET when it becomes READY." : "Connection saved permanently. Black Cloud is still authenticating its private stream; use LINK TO TARGET when it becomes READY.");
       } else {
         await loadWorkspace(workspace.strategy.id);
-        setMessage("Connection credentials were modified without changing its strategy slot. Black Cloud is revalidating readiness.");
+        setMessage(localOnly ? "Connection credentials were modified without changing its strategy slot. The local execution host is revalidating readiness." : "Connection credentials were modified without changing its strategy slot. Black Cloud is revalidating readiness.");
       }
     } catch (error) { setMessage(errorMessage(error, "Broker connection could not be linked.")); throw error; }
     finally { setBusy(false); }
@@ -475,7 +479,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
     try {
       const activated = await activateBlackCloudConnectionViaApi(accountId, { allowStrategyExecution: true, allowInvestmentGroupExecution: true });
       if (!activated?.connection.id) throw new Error("The existing broker account could not be enabled for Strategy Lab.");
-      setMessage("Existing broker enabled for permanent Black Cloud execution. Its private stream is now reconciling.");
+      setMessage(localOnly ? "Existing broker enabled for local Strategy Lab execution. Its account snapshot is now reconciling." : "Existing broker enabled for permanent Black Cloud execution. Its private stream is now reconciling.");
       let next = await refreshTargetPicker();
       for (let attempt = 0; attempt < 8; attempt += 1) {
         const target = next?.brokerAccounts.find((item) => item.targetId === activated.connection.id);
@@ -487,7 +491,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
         await new Promise((resolve) => window.setTimeout(resolve, 1_000));
         next = await refreshTargetPicker();
       }
-      setMessage("Broker authorization is saved permanently. Black Cloud is still reconciling; select LINK TO TARGET as soon as its status becomes READY.");
+      setMessage(localOnly ? "Broker authorization is saved in the local vault. Reconciliation is still in progress; select LINK TO TARGET when its status becomes READY." : "Broker authorization is saved permanently. Black Cloud is still reconciling; select LINK TO TARGET as soon as its status becomes READY.");
     } catch (error) { setMessage(errorMessage(error, "Existing broker could not be enabled for Strategy Lab.")); throw error; }
     finally { setBusy(false); }
   };
@@ -518,7 +522,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
     const binding = workspace.bindings.find((item) => item.id === bindingId);
     if (!binding) return;
     setBusy(true);
-    try { await strategyAutomationApi.targetAction(workspace.strategy.id, binding, action); await loadWorkspace(workspace.strategy.id); setMessage(action === "arm" ? "Strategy target armed after server-side validation." : action === "pause" ? "Strategy target paused." : "Strategy target revalidated and resumed."); }
+    try { await strategyAutomationApi.targetAction(workspace.strategy.id, binding, action); await loadWorkspace(workspace.strategy.id); setMessage(action === "arm" ? `Strategy target armed after ${localOnly ? "local execution-host" : "server-side"} validation.` : action === "pause" ? "Strategy target paused." : "Strategy target revalidated and resumed."); }
     catch (error) { setMessage(errorMessage(error, "Target action failed.")); }
     finally { setBusy(false); }
   };
@@ -572,7 +576,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
           if (workspace.paper) await strategyAutomationApi.configurePaper(workspace.strategy.id, workspace.paper.rowVersion, configured.capitalPolicy);
           successMessage = "Sizing and leverage were applied to the current Paper account. Signal/TP input changes are saved as the next immutable draft and will activate after current positions and live bindings are flat or migrated.";
         } else {
-          successMessage = "Native script inputs and strategy properties were saved. Paper and live execution remain locked until this script receives a certified VPS runtime.";
+          successMessage = "Native script inputs and strategy properties were saved. Paper and live execution remain locked until this script receives a certified headless runtime.";
         }
       } else {
         const binding = workspace.bindings.find((item) => item.id === sourceKey);
@@ -610,7 +614,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
         setDirty(false);
         onDefinitionChange(authoritative.strategy.draftDefinition || authoritative.strategy.definition);
         await loadList().catch(() => undefined);
-        const recoveryMessage = `PARTIAL SAVE RECOVERED · ${failedStage} failed after ${completedMutationStages}/3 mutation stages. The cockpit and draft were reloaded from authoritative VPS state, and the stale revision was discarded. Review the recovered values, then Save again; retry is safe. ${failure}`;
+        const recoveryMessage = `PARTIAL SAVE RECOVERED · ${failedStage} failed after ${completedMutationStages}/3 mutation stages. The cockpit and draft were reloaded from authoritative ${localOnly ? "local" : "VPS"} state, and the stale revision was discarded. Review the recovered values, then Save again; retry is safe. ${failure}`;
         setMessage(recoveryMessage);
         const retrySafeError = new Error(recoveryMessage) as Error & { cause?: unknown };
         retrySafeError.cause = error;
@@ -623,7 +627,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
         setDirty(false);
         setView("library");
         await loadList().catch(() => undefined);
-        const recoveryFailure = errorMessage(recoveryError, "Authoritative VPS reload failed.");
+        const recoveryFailure = errorMessage(recoveryError, `Authoritative ${localOnly ? "local" : "VPS"} reload failed.`);
         const recoveryMessage = `PARTIAL SAVE REQUIRES RELOAD · ${failedStage} failed after ${completedMutationStages}/3 mutation stages. Authoritative recovery also failed, so the stale revision was discarded and the settings editor was closed. Reopen the strategy before retrying; do not repeat Save from the old form. ${failure} ${recoveryFailure}`;
         setMessage(recoveryMessage);
         const retrySafeError = new Error(recoveryMessage) as Error & { cause?: unknown };
@@ -648,7 +652,7 @@ function persistedDefinition(draft: StrategyWizardDraft): StrategyAutomationDefi
   if (base.runtimeKind !== "builtin-superatr-seven-step") return base;
   // Script Editor input keys can be variable names or their human-facing Pine
   // labels. Normalize both forms into the immutable native SuperATR contract
-  // before the VPS worker ever evaluates a bar.
+  // before the authoritative headless worker ever evaluates a bar.
   return applyStrategyControlPanel(base, draft.paperPolicy, readStrategyControlPanel(base, draft.paperPolicy)).definition;
 }
 
@@ -696,23 +700,28 @@ function expandedGlobalPolicy(globalPolicy: StrategyCapitalPolicy, targetPolicy:
   };
 }
 
-function TargetPicker({ slot, initialMode, existingBinding, eligible, connections, existingAccounts, busy, onClose, onRefresh, onConnect, onActivateExisting, onRemoveConnection, onSelect }: { slot: number; initialMode: "BROKER" | "GROUP" | null; existingBinding: StrategyTargetBinding | null; eligible: { brokerAccounts: EligibleBrokerTarget[]; groups: EligibleGroupTarget[] } | null; connections: StrategyBrokerConnection[]; existingAccounts: PersistedExchangeConnection[]; busy: boolean; onClose: () => void; onRefresh: () => void; onConnect: (apiKey: string, apiSecret: string, connectionId?: string) => Promise<void>; onActivateExisting: (accountId: string) => Promise<void>; onRemoveConnection: (connectionId: string) => Promise<void>; onSelect: (target: EligibleBrokerTarget | EligibleGroupTarget) => void }) {
+function TargetPicker({ slot, initialMode, existingBinding, eligible, connections, existingAccounts, busy, onClose, onRefresh, onConnect, onActivateExisting, onRemoveConnection, onSelect }: { slot: number; initialMode: "BROKER" | "GROUP" | null; existingBinding: StrategyTargetBinding | null; eligible: { brokerAccounts: EligibleBrokerTarget[]; groups: EligibleGroupTarget[] } | null; connections: StrategyBrokerConnection[]; existingAccounts: PersistedExchangeConnection[]; busy: boolean; onClose: () => void; onRefresh: () => void; onConnect: (apiKey: string, apiSecret: string, connectionId?: string, localOptions?: { environment: "demo" | "testnet" | "mainnet"; mainnetConfirmed: boolean; accountName?: string }) => Promise<void>; onActivateExisting: (accountId: string) => Promise<void>; onRemoveConnection: (connectionId: string) => Promise<void>; onSelect: (target: EligibleBrokerTarget | EligibleGroupTarget) => void }) {
+  const localOnly = isLocalOnlyRuntime();
   const [mode, setMode] = useState<"BROKER" | "GROUP" | null>(initialMode || (existingBinding?.targetType === "BROKER_ACCOUNT" ? "BROKER" : existingBinding?.targetType === "INVESTMENT_GROUP" ? "GROUP" : null));
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
+  const [localAccountName, setLocalAccountName] = useState("");
+  const [localEnvironment, setLocalEnvironment] = useState<"demo" | "testnet" | "mainnet">("demo");
+  const [mainnetConfirmed, setMainnetConfirmed] = useState(false);
   const [editingConnectionId, setEditingConnectionId] = useState<string>();
   const [selectedGroupId, setSelectedGroupId] = useState<string>();
   const [localError, setLocalError] = useState<string>();
   const eligibleById = new Map((eligible?.brokerAccounts || []).map((item) => [item.targetId, item]));
   const editingConnection = existingBinding?.connectionId ? connections.find((item) => item.id === existingBinding.connectionId) : undefined;
   const linkedAccountIds = new Set(connections.map((item) => item.accountId));
-  const activatableAccounts = existingAccounts.filter((item) => !linkedAccountIds.has(item.account.id));
+  const activatableAccounts = localOnly ? [] : existingAccounts.filter((item) => !linkedAccountIds.has(item.account.id));
   const connectionLimitReached = connections.length >= 9 && !editingConnectionId;
   const startModify = (connection: StrategyBrokerConnection) => { setEditingConnectionId(connection.id); setApiKey(connection.publicApiKey); setApiSecret(""); setLocalError(undefined); };
   const submitBroker = async () => {
     if (!apiKey.trim() || !apiSecret.trim()) { setLocalError("Both API and API Secret are required."); return; }
     setLocalError(undefined);
-    try { await onConnect(apiKey.trim(), apiSecret.trim(), editingConnectionId); setApiSecret(""); }
+    if (localOnly && localEnvironment === "mainnet" && !mainnetConfirmed) { setLocalError("Explicitly confirm that this is a real-funds Bybit Mainnet account."); return; }
+    try { await onConnect(apiKey.trim(), apiSecret.trim(), editingConnectionId, localOnly ? { environment: localEnvironment, mainnetConfirmed, accountName: localAccountName.trim() || undefined } : undefined); setApiSecret(""); }
     catch (error) { setLocalError(errorMessage(error, "Connection failed.")); }
   };
   const removeConnection = async (connectionId: string) => {
@@ -727,19 +736,21 @@ function TargetPicker({ slot, initialMode, existingBinding, eligible, connection
   };
   return <div className="strategy-modal-backdrop" role="presentation"><section className="strategy-target-picker strategy-connection-picker" role="dialog" aria-modal="true" aria-label={`${existingBinding ? "Modify" : "Add"} target ${slot}`}>
     <header><div><span>TARGET {String(slot).padStart(2, "0")} · {existingBinding ? "MODIFY" : "NEW CONNECTION"}</span><h2>{existingBinding ? "Connection control" : "Add execution destination"}</h2></div><button type="button" aria-label="Close target picker" onClick={onClose}><X size={16} /></button></header>
-    <div className="target-picker-warning"><LockKeyhole size={13} /><span>Credentials are encrypted on the VPS. API Secret is never returned after submission. Testnet endpoints are rejected; Bybit Mainnet and Mainnet Demo are detected server-side.</span></div>
+    <div className="target-picker-warning"><LockKeyhole size={13} /><span>{localOnly ? "Credentials stay in this device's operating-system vault. Strategy Lab accounts are isolated from the personal chart. Choose Demo, Testnet, or Mainnet explicitly." : "Credentials are encrypted on the VPS. API Secret is never returned after submission. Testnet endpoints are rejected; Bybit Mainnet and Mainnet Demo are detected server-side."}</span></div>
     {!mode ? <div className="connection-type-menu"><button type="button" onClick={() => setMode("BROKER")}><KeyRound size={18} /><span>BROKER CONNECTION</span><strong>Direct trade-only API connection</strong></button><button type="button" onClick={() => setMode("GROUP")}><Building2 size={18} /><span>INVESTMENT GROUP</span><strong>Link a group you own or manage</strong></button></div> : null}
     {mode === "BROKER" ? <div className="broker-connection-flow">
       <div className="connection-flow-head"><button type="button" onClick={() => existingBinding ? onClose() : setMode(null)}>BACK</button><button type="button" onClick={onRefresh}><RefreshCw size={12} /> REFRESH</button></div>
       <div className="strategy-connection-count"><span>PERSISTENT BROKER CONNECTIONS</span><strong>{connections.length} / 9</strong></div>
       {activatableAccounts.length ? <div className="persistent-connection-list existing-exchange-account-list">{activatableAccounts.map((item) => <article key={item.account.id}><header><div><span>{String(item.account.exchange).toUpperCase()} · EXISTING BLACK TERMINAL ACCOUNT</span><strong>{item.account.accountName}</strong></div><em>{item.lifecycle}</em></header><p>{item.account.executionEnvironment === "DEMO" ? "MAINNET DEMO" : "MAINNET REAL"} · {item.account.apiHealth} · STORED VPS CREDENTIAL</p><footer><button type="button" className="link-connection-button" disabled={busy || connections.length >= 9} onClick={() => void activateExisting(item.account.id)}><CloudCog size={12} /> ENABLE FOR STRATEGY LAB</button></footer></article>)}</div> : null}
-      <div className="credential-form"><label><span>API</span><input autoComplete="off" spellCheck={false} disabled={busy || connectionLimitReached} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Bybit API key" /></label><label><span>API SECRET</span><input type="password" autoComplete="new-password" disabled={busy || connectionLimitReached} value={apiSecret} onChange={(event) => setApiSecret(event.target.value)} placeholder={editingConnectionId ? "Enter the replacement secret" : "Bybit API secret"} /></label><button type="button" className="link-connection-button" disabled={busy || connectionLimitReached} onClick={() => void submitBroker()}><Link2 size={13} /> {editingConnectionId ? "MODIFY CONNECTION" : "LINK CONNECTION"}</button></div>
+      <div className="credential-form">
+        {localOnly && !editingConnectionId ? <><label><span>ACCOUNT LABEL</span><input autoComplete="off" maxLength={80} disabled={busy || connectionLimitReached} value={localAccountName} onChange={(event) => setLocalAccountName(event.target.value)} placeholder="Strategy execution account" /></label><label><span>BYBIT ENVIRONMENT</span><select disabled={busy || connectionLimitReached} value={localEnvironment} onChange={(event) => { setLocalEnvironment(event.target.value as typeof localEnvironment); setMainnetConfirmed(false); }}><option value="demo">Mainnet Demo · simulated funds</option><option value="testnet">Testnet</option><option value="mainnet">Mainnet · real funds</option></select></label>{localEnvironment === "mainnet" ? <label className="local-mainnet-confirm"><input type="checkbox" checked={mainnetConfirmed} onChange={(event) => setMainnetConfirmed(event.target.checked)} /><span>I confirm this API key controls real funds on Bybit Mainnet.</span></label> : null}</> : null}
+        <label><span>API</span><input autoComplete="off" spellCheck={false} disabled={busy || connectionLimitReached} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Bybit API key" /></label><label><span>API SECRET</span><input type="password" autoComplete="new-password" disabled={busy || connectionLimitReached} value={apiSecret} onChange={(event) => setApiSecret(event.target.value)} placeholder={editingConnectionId ? "Enter the replacement secret" : "Bybit API secret"} /></label><button type="button" className="link-connection-button" disabled={busy || connectionLimitReached || (localOnly && localEnvironment === "mainnet" && !mainnetConfirmed)} onClick={() => void submitBroker()}><Link2 size={13} /> {editingConnectionId ? "MODIFY CONNECTION" : "LINK CONNECTION"}</button></div>
       {connectionLimitReached ? <div className="connection-local-error"><AlertTriangle size={13} />The maximum of 9 persistent broker connections is active. Modify or remove one before adding another.</div> : null}
       {localError ? <div className="connection-local-error" role="alert"><AlertTriangle size={13} />{localError}</div> : null}
       <div className="persistent-connection-list">{connections.length ? connections.map((connection) => {
         const target = eligibleById.get(connection.id);
         const selected = connection.id === existingBinding?.connectionId;
-        return <article key={connection.id} className={selected ? "selected" : ""}><header><div><span>{connection.provider} · {connection.executionEnvironment === "DEMO" ? "MAINNET DEMO" : "MAINNET REAL"}</span><strong>{connection.label}</strong></div><em>{connection.executionReadiness}</em></header><div className="stored-credential-grid"><label><span>API</span><input readOnly value={connection.publicApiKey || "Reconnect required"} /></label><label><span>API SECRET</span><input readOnly type="password" value={connection.apiSecretDisplay} /></label></div><p>{connection.workerState} · {connection.synchronizationState} · VPS PERSISTENT</p><footer>{!existingBinding ? <button type="button" disabled={busy || !target?.validation.eligible} onClick={() => target && onSelect(target)}><ShieldCheck size={12} /> LINK TO TARGET</button> : null}<button type="button" disabled={busy} onClick={() => startModify(connection)}>MODIFY</button>{!selected ? <button type="button" className="danger" disabled={busy} onClick={() => void removeConnection(connection.id)}>REMOVE</button> : null}</footer>{target && !target.validation.eligible ? <small>{target.validation.reasons.join(" · ")}</small> : null}</article>;
+        return <article key={connection.id} className={selected ? "selected" : ""}><header><div><span>{connection.provider} · {connection.executionEnvironment === "DEMO" ? "MAINNET DEMO" : connection.executionEnvironment === "TESTNET" ? "TESTNET" : "MAINNET REAL"}</span><strong>{connection.label}</strong></div><em>{connection.executionReadiness}</em></header><div className="stored-credential-grid"><label><span>API</span><input readOnly value={connection.publicApiKey || "Reconnect required"} /></label><label><span>API SECRET</span><input readOnly type="password" value={connection.apiSecretDisplay} /></label></div><p>{connection.workerState} · {connection.synchronizationState} · {connection.persistence === "LOCAL_DEVICE" ? "LOCAL VAULT" : "VPS PERSISTENT"}</p><footer>{!existingBinding ? <button type="button" disabled={busy || !target?.validation.eligible} onClick={() => target && onSelect(target)}><ShieldCheck size={12} /> LINK TO TARGET</button> : null}{!localOnly ? <button type="button" disabled={busy} onClick={() => startModify(connection)}>MODIFY</button> : null}{!selected ? <button type="button" className="danger" disabled={busy} onClick={() => void removeConnection(connection.id)}>REMOVE</button> : null}</footer>{target && !target.validation.eligible ? <small>{target.validation.reasons.join(" · ")}</small> : null}</article>;
       }) : <div className="cockpit-empty-state compact"><Plus size={17} /><strong>No broker connection yet</strong><span>Enter a trade-only Bybit Mainnet or Mainnet Demo key above.</span></div>}</div>
       {editingConnection ? <div className="connection-selected-note"><ShieldCheck size={13} /><span>This strategy slot remains bound to {editingConnection.label} while credentials are rotated and reconciled.</span></div> : null}
     </div> : null}

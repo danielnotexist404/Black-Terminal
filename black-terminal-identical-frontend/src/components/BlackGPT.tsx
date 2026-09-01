@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Send, Bot, RefreshCw, AlertTriangle, ShieldAlert, Sparkles } from "lucide-react";
-import { dbUpdateUser, dbAddAuditLog, dbGetUsers, supabase } from "../lib/supabase";
+import { dbUpdateUser, dbAddAuditLog, supabase } from "../lib/supabase";
 import { sendSecurityAlertEmail } from "../lib/resend";
+import { getLocalDocument, putLocalDocument } from "../core/local-runtime/localDocumentStore";
+import { isLocalOnlyRuntime } from "../core/local-runtime/localRuntimeClient";
+import { requestLocalAiChat } from "../core/local-runtime/localAiClient";
 
 interface Message {
   role: "user" | "model" | "system";
@@ -41,23 +44,39 @@ export default function BlackGPT({
   activeIndicators,
   recentCandles = []
 }: BlackGPTProps) {
+  const localOnly = isLocalOnlyRuntime();
+  const localChatHydrated = useRef(false);
+  const localChatKey = currentUser.username.toLowerCase().replace(/[^a-z0-9@._-]/g, "-").slice(0, 120) || "owner";
   const [messages, setMessages] = useState<Message[]>(() => {
+    if (localOnly) return [defaultWelcomeMessage(currentUser.username)];
     const stored = localStorage.getItem(`bt_gpt_messages_${currentUser.username}`);
     if (stored) {
       try { return JSON.parse(stored); } catch (e) {}
     }
     return [
-      {
-        role: "model",
-        text: `Hello ${currentUser.username}. I am BlackGPT. I have established a secure handshake with your terminal workspace. Ask me to analyze the current chart, evaluate indicators, or suggest potential trading signals.`,
-        timestamp: new Date().toLocaleTimeString()
-      }
+      defaultWelcomeMessage(currentUser.username)
     ];
   });
 
   useEffect(() => {
+    if (!localOnly) return;
+    let active = true;
+    void getLocalDocument<Message[]>("local-ai-chats", localChatKey).then((document) => {
+      if (!active) return;
+      if (document?.value.length) setMessages(document.value);
+      localStorage.removeItem(`bt_gpt_messages_${currentUser.username}`);
+      localChatHydrated.current = true;
+    }).catch(() => { localChatHydrated.current = true; });
+    return () => { active = false; };
+  }, [currentUser.username, localChatKey, localOnly]);
+
+  useEffect(() => {
+    if (localOnly) {
+      if (localChatHydrated.current) void putLocalDocument("local-ai-chats", localChatKey, messages).catch((error) => console.error("Encrypted local BlackGPT history could not be saved", error));
+      return;
+    }
     localStorage.setItem(`bt_gpt_messages_${currentUser.username}`, JSON.stringify(messages));
-  }, [messages, currentUser.username]);
+  }, [localChatKey, localOnly, messages, currentUser.username]);
 
   const [inputValue, setInputValue] = useState("");
   const [loading, setLoading] = useState(false);
@@ -65,7 +84,7 @@ export default function BlackGPT({
 
   // Message Limit Settings
   const MESSAGE_LIMIT = 5;
-  const isPremium = currentUser.allowedIndicators.includes("volumeProfile") || currentUser.role === "admin";
+  const isPremium = localOnly || currentUser.allowedIndicators.includes("volumeProfile") || currentUser.role === "admin";
   const messagesCount = currentUser.aiMessagesCount || 0;
   const lastTimestamp = currentUser.aiLastMessageTimestamp || "";
 
@@ -163,10 +182,12 @@ export default function BlackGPT({
         ]);
 
         // Audit Log
-        await dbAddAuditLog("ERROR", `AI security shield blocked a prohibited request for user ${currentUser.username}.`);
+        if (localOnly) await appendLocalAiAudit(currentUser.username, "AI security shield blocked a prohibited request.");
+        else await dbAddAuditLog("ERROR", `AI security shield blocked a prohibited request for user ${currentUser.username}.`);
 
         // Send Email notification via Resend
         try {
+          if (localOnly) return;
           await sendSecurityAlertEmail(currentUser.username);
         } catch (e) {
           console.error("Failed to send security alert email:", e);
@@ -190,7 +211,7 @@ export default function BlackGPT({
       });
     }
 
-    // Trigger Claude API Request
+    // Trigger the selected local or hosted AI provider.
     setLoading(true);
     try {
       // Map active indicators to human friendly descriptions
@@ -226,36 +247,48 @@ export default function BlackGPT({
         content: query
       });
 
-      const { data: authData } = await supabase!.auth.getSession();
-      const authToken = authData.session?.access_token;
-      if (!authToken) throw new Error("Sign in again before using BlackGPT.");
-      const response = await fetch("/api/claude", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authToken}`
-        },
-        body: JSON.stringify({
-          messages: history,
-          context: {
-            workspace,
-            symbol,
-            price,
-            timeframe,
-            exchange,
-            indicators: formattedIndicators,
-            chartSummary: chartDataBlock.slice(0, 12000)
-          }
-        })
-      });
+      let modelText: string;
+      if (localOnly) {
+        const localResponse = await requestLocalAiChat(history, [
+          "You are BlackGPT, Black Terminal's local market-analysis assistant.",
+          "Treat the supplied chart data as context, never as proof of future performance.",
+          "Never claim certainty, guaranteed profit, or that a live order has executed unless an execution receipt is supplied.",
+          `Workspace: ${workspace}; market: ${exchange} ${symbol}; price: ${price}; timeframe: ${timeframe}; active indicators: ${formattedIndicators}.`,
+          chartDataBlock.slice(0, 12000)
+        ].join("\n"));
+        modelText = localResponse.content;
+      } else {
+        const { data: authData } = await supabase!.auth.getSession();
+        const authToken = authData.session?.access_token;
+        if (!authToken) throw new Error("Sign in again before using BlackGPT.");
+        const response = await fetch("/api/claude", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${authToken}`
+          },
+          body: JSON.stringify({
+            messages: history,
+            context: {
+              workspace,
+              symbol,
+              price,
+              timeframe,
+              exchange,
+              indicators: formattedIndicators,
+              chartSummary: chartDataBlock.slice(0, 12000)
+            }
+          })
+        });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Claude API connection error: ${errorText}`);
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Hosted BlackGPT connection error: ${errorText}`);
+        }
+
+        const resData = await response.json();
+        modelText = resData.content?.[0]?.text || "No response generated by the hosted BlackGPT provider.";
       }
-
-      const resData = await response.json();
-      const modelText = resData.content?.[0]?.text || "No response generated by Claude.";
 
       setLoading(false);
       setMessages(prev => [
@@ -272,7 +305,7 @@ export default function BlackGPT({
         ...prev,
         {
           role: "system",
-          text: `⚠️ ERROR: Gemini API handshake failed. ${err.message || String(err)}`,
+          text: `⚠️ ERROR: BlackGPT provider handshake failed. ${err.message || String(err)}`,
           timestamp: new Date().toLocaleTimeString()
         }
       ]);
@@ -410,4 +443,29 @@ export default function BlackGPT({
       </form>
     </div>
   );
+}
+
+function defaultWelcomeMessage(username: string): Message {
+  return {
+    role: "model",
+    text: `Welcome ${username}. BlackGPT is ready to analyze the active workspace and the chart context supplied by Black Terminal. Verify every conclusion independently before risking capital.`,
+    timestamp: new Date().toLocaleTimeString()
+  };
+}
+
+async function appendLocalAiAudit(username: string, message: string) {
+  const key = username.toLowerCase().replace(/[^a-z0-9@._-]/g, "-").slice(0, 120) || "owner";
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const current = await getLocalDocument<Array<{ level: string; message: string; timestamp: string }>>("local-ai-audit", key);
+    const value = [
+      ...(current?.value ?? []),
+      { level: "ERROR", message, timestamp: new Date().toISOString() }
+    ].slice(-500);
+    try {
+      await putLocalDocument("local-ai-audit", key, value, current?.revision ?? 0);
+      return;
+    } catch (error) {
+      if (attempt === 2) throw error;
+    }
+  }
 }

@@ -8,6 +8,8 @@ import { dbGetCurrentUserScripts, dbSaveCurrentUserScripts, isSupabaseConfigured
 import { isSecureSessionUnavailableError } from "../auth/authenticatedSession";
 import { normalizeUserScripts, type UserScript } from "../scripts/userScriptLibrary";
 import { clearScriptEditorRecovery, readScriptEditorRecovery, writeScriptEditorRecovery } from "../scripts/scriptEditorRecovery";
+import { isLocalOnlyRuntime } from "../core/local-runtime/localRuntimeClient";
+import { loadLocalUserScripts, saveLocalUserScripts } from "../core/local-runtime/localUserScriptStore";
 
 type ScriptEditorProps = {
   symbol: string;
@@ -110,19 +112,18 @@ export function ScriptEditor({
   useEffect(() => {
     const loadScripts = async () => {
       let stored: UserScript[] = [];
-      if (currentUser && isSupabaseConfigured) {
+      if (currentUser && isSupabaseConfigured && !isLocalOnlyRuntime()) {
         try {
           stored = normalizeUserScripts(await dbGetCurrentUserScripts());
         } catch (e) {
           if (isSecureSessionUnavailableError(e)) setAuthenticationRequired(true);
-          setConsoleLogs([{ type: "error", text: `VPS script storage could not be loaded: ${e instanceof Error ? e.message : "Unknown storage error"}` }]);
+          setConsoleLogs([{ type: "error", text: `Authenticated script storage could not be loaded: ${e instanceof Error ? e.message : "Unknown storage error"}` }]);
           return;
         }
       } else {
-        const local = localStorage.getItem(localStorageKey);
-        if (local) {
-          try { stored = normalizeUserScripts(JSON.parse(local)); } catch (e) {}
-        }
+        stored = isLocalOnlyRuntime()
+          ? await loadLocalUserScripts(currentUser?.username)
+          : normalizeUserScripts(JSON.parse(localStorage.getItem(localStorageKey) || "[]"));
       }
 
       setScripts(stored);
@@ -143,10 +144,12 @@ export function ScriptEditor({
     writeScriptEditorRecovery(window.sessionStorage, recoveryOwner, { selectedScriptId, name, kind, source });
   }, [kind, name, recoveryOwner, selectedScriptId, source]);
 
-  // Save scripts to local/Supabase
+  // Save scripts to encrypted native storage or the authenticated hosted store.
   const saveScriptsCollection = async (updated: UserScript[]) => {
-    if (currentUser && isSupabaseConfigured) {
+    if (currentUser && isSupabaseConfigured && !isLocalOnlyRuntime()) {
       await dbSaveCurrentUserScripts(updated);
+    } else if (isLocalOnlyRuntime()) {
+      await saveLocalUserScripts(currentUser?.username, updated);
     } else {
       localStorage.setItem(localStorageKey, JSON.stringify(updated));
     }
@@ -209,7 +212,8 @@ export function ScriptEditor({
         clearScriptEditorRecovery(window.sessionStorage, recoveryOwner);
       }
       if (!quiet) {
-        setConsoleLogs([{ type: "success", text: `Script "${newScript.name}" saved to ${isSupabaseConfigured ? "authenticated VPS storage" : "local development storage"}. It was not added to the chart.` }]);
+        const destination = isLocalOnlyRuntime() ? "encrypted local storage" : isSupabaseConfigured ? "authenticated VPS storage" : "local development storage";
+        setConsoleLogs([{ type: "success", text: `Script "${newScript.name}" saved to ${destination}. It was not added to the chart.` }]);
       }
       return newScript;
     } catch (error) {

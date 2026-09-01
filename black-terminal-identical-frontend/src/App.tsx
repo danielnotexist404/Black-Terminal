@@ -17,6 +17,7 @@ import {
   Eye,
   EyeOff,
   LayoutDashboard,
+  LayoutGrid,
   LineChart,
   Lock,
   Magnet,
@@ -50,6 +51,11 @@ import { AlertCenter } from "./components/AlertCenter";
 import { IndicatorLibrary } from "./components/IndicatorLibrary";
 import { OrderBook } from "./components/OrderBook";
 import { PixiBlackChart } from "./components/PixiBlackChart";
+import {
+  MultiChartWorkspace,
+  normalizeMultiChartPaneCount,
+  type MultiChartPaneConfiguration,
+} from "./components/MultiChartWorkspace";
 import { InteractionShield } from "./components/InteractionShield";
 import { ScriptEditor } from "./components/ScriptEditor";
 import { compileAndRunScript, finalizedScriptResult, type ScriptInputValue } from "./components/ScriptCompiler";
@@ -102,6 +108,7 @@ import { blackHorizonCandlesEnabled } from "./modules/horizon-candles/core/setti
 import type {
   Candle,
   ChartDisplayType,
+  ChartRenderingPreferences,
   DrawingToolId,
   IndicatorAdvancedSettings,
   IndicatorPeriods,
@@ -137,6 +144,9 @@ import { restoreCentralizedExchangeConnections } from "./connectivity/adapters/c
 import { getCapabilities, type CapabilityUser, type ProductTier, type TerminalCapability } from "./core/permissions/capabilities";
 import { blackCoreWindowDockManager } from "./core/windows/windowDockManager";
 import type { BlackCoreModuleMode } from "./core/modules/moduleRegistry";
+import { getCachedLocalRuntimeStatus, isLocalOnlyRuntime } from "./core/local-runtime/localRuntimeClient";
+import { loadLocalUserScripts, saveLocalUserScripts } from "./core/local-runtime/localUserScriptStore";
+import { mirrorLocalDocument } from "./core/local-runtime/localDocumentStore";
 import { PerformanceHud } from "./performance/PerformanceHud";
 import { mergeNewestWorkspaceSnapshots } from "./indicators/indicatorSettingsPersistence";
 import { blackCoreChartPriceViewportStore } from "./modules/dom-pro/chartPriceViewportStore";
@@ -615,6 +625,20 @@ export default function App() {
   const isLocalAuthPreview = window.location.hostname === "127.0.0.1" && new URLSearchParams(window.location.search).has("authPreview");
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     if (isLocalAuthPreview) return null;
+    const localRuntime = getCachedLocalRuntimeStatus();
+    if (localRuntime?.initialized && localRuntime.config?.mode === "LOCAL_ONLY") {
+      return {
+        username: localRuntime.config.profile.username,
+        displayName: localRuntime.config.profile.displayName,
+        email: localRuntime.config.profile.email,
+        emailVerified: true,
+        authSessionReady: true,
+        role: "admin",
+        allowedIndicators: [...ADMIN_ALLOWED_INDICATORS],
+        productTier: "admin",
+        permissions: ["admin.override"],
+      };
+    }
     if (isLocalUiPreview) {
       return {
         username: "preview.user",
@@ -632,7 +656,7 @@ export default function App() {
     }
     return null;
   });
-  const authBootstrapBypassed = isLocalUiPreview || isLocalAuthPreview || !isSupabaseConfigured || !supabase;
+  const authBootstrapBypassed = isLocalOnlyRuntime() || isLocalUiPreview || isLocalAuthPreview || !isSupabaseConfigured || !supabase;
   const [authBootstrapReady, setAuthBootstrapReady] = useState(authBootstrapBypassed);
 
   useEffect(() => {
@@ -724,7 +748,15 @@ export default function App() {
     return {
       showDOM: true,
       chartDepthLadder: false,
-      enabledTimeframes: ["1m", "5m", "15m", "1h", "4h", "1d"]
+      enabledTimeframes: ["1m", "5m", "15m", "1h", "4h", "1d"],
+      uiDensity: "compact",
+      chartResolutionMode: "AUTO",
+      chartAntialias: true,
+      chartPaneCount: 1,
+      chartBackgroundColor: "#000000",
+      chartGridColor: "#ff344a",
+      bullishCandleColor: "#a9a3a8",
+      bearishCandleColor: "#e3132d"
     };
   });
   const currentUserCapabilities = useMemo(() => getCapabilities(currentUser), [currentUser]);
@@ -857,6 +889,7 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem("bt_terminal_settings", JSON.stringify(terminalSettings));
+    mirrorLocalDocument("settings", "terminal", terminalSettings);
   }, [terminalSettings]);
 
   const visibleNav = useMemo(() => {
@@ -876,13 +909,17 @@ export default function App() {
       { label: "MARKET OVERVIEW", icon: LayoutDashboard },
       { label: "SETTINGS", icon: Settings }
     ];
-    if (currentUser?.role === "admin") {
+    if (currentUser?.role === "admin" && !isLocalOnlyRuntime()) {
       base.push({ label: "ADMIN PANEL", icon: Shield });
     }
     return base;
   }, [currentUser]);
 
   const handleSignOut = async (skipWarning = false) => {
+    if (isLocalOnlyRuntime()) {
+      setActiveNav("SETTINGS");
+      return;
+    }
     if (!skipWarning && !window.confirm("Sign out of Black Terminal? Your authorized broker connections and cloud-side protection will continue running.")) return;
     if (currentUser) {
       await dbUpdateUser(currentUser.username, { status: "offline" });
@@ -1025,9 +1062,14 @@ export default function App() {
   const updateStoredCustomScripts = useCallback((update: (scripts: UserScript[]) => UserScript[]) => {
     const username = currentUser?.username;
     const task = customScriptStorageQueueRef.current.catch(() => undefined).then(async () => {
-      if (username && isSupabaseConfigured) {
+      if (username && isSupabaseConfigured && !isLocalOnlyRuntime()) {
         const scripts = normalizeUserScripts(await dbGetCurrentUserScripts());
         await dbSaveCurrentUserScripts(update(scripts));
+        return;
+      }
+      if (isLocalOnlyRuntime()) {
+        const scripts = await loadLocalUserScripts(username);
+        await saveLocalUserScripts(username, update(scripts));
         return;
       }
       const storageKey = username ? `bt_user_scripts:${username}` : "bt_user_scripts:anonymous";
@@ -1066,9 +1108,11 @@ export default function App() {
     const restore = async () => {
       try {
         const username = currentUser?.username;
-        const scripts = username && isSupabaseConfigured
+        const scripts = username && isSupabaseConfigured && !isLocalOnlyRuntime()
           ? normalizeUserScripts(await dbGetCurrentUserScripts())
-          : normalizeUserScripts(JSON.parse(localStorage.getItem(username ? `bt_user_scripts:${username}` : "bt_user_scripts:anonymous") || "[]"));
+          : isLocalOnlyRuntime()
+            ? await loadLocalUserScripts(username)
+            : normalizeUserScripts(JSON.parse(localStorage.getItem(username ? `bt_user_scripts:${username}` : "bt_user_scripts:anonymous") || "[]"));
         if (cancelled) return;
         setMountedCustomScripts(restoreMountedCustomScripts(
           scripts,
@@ -1267,7 +1311,7 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("bt_watchlist", JSON.stringify(watchlist));
     localStorage.setItem("bt_alert_event_logs", JSON.stringify(alertEventLogs));
-    if (currentUser) {
+    if (currentUser && !isLocalOnlyRuntime()) {
       dbUpdateUser(currentUser.username, { alerts: indicatorAlerts, alertEventLogs });
     }
   }, [watchlist, alertEventLogs, currentUser, indicatorAlerts]);
@@ -1410,6 +1454,7 @@ export default function App() {
     if (!("__TAURI_INTERNALS__" in window)) return;
 
     let unlisten: (() => void) | undefined;
+    let unlistenP2p: (() => void) | undefined;
     listen("bt-open-settings", () => setActiveNav("SETTINGS"))
       .then((dispose) => {
         unlisten = dispose;
@@ -1417,17 +1462,32 @@ export default function App() {
       .catch((err: unknown) => {
         console.error("Failed to attach tray settings listener", err);
       });
+    listen<{ topic: string; sourcePeerId: string; payload: Record<string, unknown> }>("bt-p2p-message", (event) => {
+      const envelope = event.payload?.payload;
+      const direct = envelope && typeof envelope === "object" ? (envelope as Record<string, unknown>).payload : null;
+      const message = direct && typeof direct === "object" ? direct as Record<string, unknown> : null;
+      if (!event.payload.topic.includes("direct") || message?.kind !== "alert") return;
+      const alertPayload = message.payload && typeof message.payload === "object" ? message.payload as Record<string, unknown> : {};
+      handleAlertFired(
+        String(alertPayload.symbol || "P2P"),
+        `[ENCRYPTED P2P · ${event.payload.sourcePeerId.slice(0, 12)}] ${String(alertPayload.message || alertPayload.alertName || "Alert received")}`,
+      );
+    }).then((dispose) => { unlistenP2p = dispose; }).catch((err: unknown) => {
+      console.error("Failed to attach encrypted P2P alert listener", err);
+    });
 
-    return () => unlisten?.();
+    return () => { unlisten?.(); unlistenP2p?.(); };
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(alertStorageKey, JSON.stringify(indicatorAlerts));
+    if (isLocalOnlyRuntime()) localStorage.removeItem(alertStorageKey);
+    else localStorage.setItem(alertStorageKey, JSON.stringify(indicatorAlerts));
+    mirrorLocalDocument("automation", "indicator-alerts", indicatorAlerts);
   }, [indicatorAlerts]);
 
   // Real-time active indicators sync
   useEffect(() => {
-    if (!currentUser || indicatorPreferencesUser !== currentUser.username) return;
+    if (!currentUser || isLocalOnlyRuntime() || indicatorPreferencesUser !== currentUser.username) return;
     const activeList = Object.entries(visibleIndicators)
       .filter(([_, visible]) => visible === true)
       .map(([key]) => key);
@@ -1451,6 +1511,10 @@ export default function App() {
   // Load user database configuration on boot/refresh
   useEffect(() => {
     if (!currentUser || isLocalUiPreview) return;
+    if (isLocalOnlyRuntime()) {
+      setIndicatorPreferencesUser(currentUser.username);
+      return;
+    }
     const username = currentUser.username;
     let disposed = false;
     let preferencesHydrated = false;
@@ -1545,7 +1609,7 @@ export default function App() {
 
   // Real-time allowed indicators sync (and automatic turn-off of revoked indicators)
   useEffect(() => {
-    if (!currentUser || isLocalUiPreview) return;
+    if (!currentUser || isLocalUiPreview || isLocalOnlyRuntime()) return;
     let disposed = false;
     let channel: ReturnType<NonNullable<typeof supabase>["channel"]> | null = null;
     const syncAccess = async () => {
@@ -1758,11 +1822,16 @@ export default function App() {
     try {
       localStorage.setItem(workspaceStorageKey, JSON.stringify(snapshots));
       localStorage.setItem(activeWorkspaceStorageKey, workspace);
+      mirrorLocalDocument("workspaces", "catalog", {
+        names: [...new Set([...workspaces, workspace])],
+        snapshots,
+        active: workspace,
+      });
     } catch (error) {
       console.error("Failed to persist indicator settings locally:", error);
     }
 
-    if (!currentUser || isLocalUiPreview) return;
+    if (!currentUser || isLocalUiPreview || isLocalOnlyRuntime()) return;
     const names = [...new Set([...workspaces, workspace])];
     const timer = window.setTimeout(() => {
       void dbUpdateUser(currentUser.username, {
@@ -1802,7 +1871,8 @@ export default function App() {
     localStorage.setItem(activeWorkspaceStorageKey, safeName);
 
     // Backend sync
-    if (currentUser) {
+    mirrorLocalDocument("workspaces", "catalog", { names, snapshots, active: safeName });
+    if (currentUser && !isLocalOnlyRuntime()) {
       try {
         await dbUpdateUser(currentUser.username, {
           workspaces: names,
@@ -1837,7 +1907,8 @@ export default function App() {
     openWorkspace(fallback);
 
     // Backend sync
-    if (currentUser) {
+    mirrorLocalDocument("workspaces", "catalog", { names: nextWorkspaces, snapshots, active: fallback });
+    if (currentUser && !isLocalOnlyRuntime()) {
       try {
         await dbUpdateUser(currentUser.username, {
           workspaces: nextWorkspaces,
@@ -2024,6 +2095,28 @@ export default function App() {
     return () => underlay.removeAttribute("inert");
   }, [chartWorkspaceIsolated]);
 
+  const multiChartSeed = useMemo<Omit<MultiChartPaneConfiguration, "id">>(() => ({
+    symbolRaw: symbol.rawSymbol,
+    timeframe,
+    chartType,
+    visibleIndicators: structuredClone(visibleIndicators),
+    indicatorPeriods: structuredClone(indicatorPeriods),
+    indicatorVisualSettings: structuredClone(indicatorVisualSettings),
+    indicatorAdvancedSettings: structuredClone(indicatorAdvancedSettings),
+    kioseffSettings: structuredClone(kioseffSettings),
+    auctionProfileSettings: structuredClone(auctionProfileSettings),
+  }), [
+    auctionProfileSettings,
+    chartType,
+    indicatorAdvancedSettings,
+    indicatorPeriods,
+    indicatorVisualSettings,
+    kioseffSettings,
+    symbol.rawSymbol,
+    timeframe,
+    visibleIndicators,
+  ]);
+
   if (!authBootstrapReady) {
     return <div style={{ minHeight: "100vh", background: "#020304", color: "#d8d8dc", display: "grid", placeItems: "center", fontFamily: "var(--font-mono)", fontSize: "11px", letterSpacing: "0.12em" }}>RESTORING SECURE SESSION…</div>;
   }
@@ -2072,8 +2165,23 @@ export default function App() {
     );
   }
 
+  const uiDensity = terminalSettings.uiDensity === "dense" || terminalSettings.uiDensity === "comfortable"
+    ? terminalSettings.uiDensity
+    : "compact";
+  const chartRenderingPreferences: ChartRenderingPreferences = {
+    resolutionMode: ["LOW_DPI", "HIGH_DPI", "ULTRA"].includes(terminalSettings.chartResolutionMode)
+      ? terminalSettings.chartResolutionMode
+      : "AUTO",
+    antialias: terminalSettings.chartAntialias !== false,
+    backgroundColor: terminalSettings.chartBackgroundColor || "#000000",
+    gridColor: terminalSettings.chartGridColor || "#ff344a",
+    bullishCandleColor: terminalSettings.bullishCandleColor || "#a9a3a8",
+    bearishCandleColor: terminalSettings.bearishCandleColor || "#e3132d",
+  };
+  const chartPaneCount = normalizeMultiChartPaneCount(Number(terminalSettings.chartPaneCount ?? 1));
+
   return (
-    <div className={sidebarCollapsed ? "app-shell terminal-command-center collapsed-sidebar" : "app-shell terminal-command-center"}>
+    <div className={`${sidebarCollapsed ? "app-shell terminal-command-center collapsed-sidebar" : "app-shell terminal-command-center"} ui-density-${uiDensity}`}>
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark" aria-hidden />
@@ -2452,12 +2560,28 @@ export default function App() {
           </div>
         )}
         <div className="latency">UP {ping}ms</div>
-        {currentUser?.role !== "admin" && (
+        {currentUser?.role !== "admin" && !isLocalOnlyRuntime() && (
           <button className="upgrade-btn" onClick={() => setActiveNav("UPGRADE")}>
             UPGRADE
           </button>
         )}
         <div className="top-separator" />
+        <label className="chart-pane-count-control" title="Split the workspace into independently configured chart panes">
+          <LayoutGrid size={15} />
+          <select
+            aria-label="Independent chart pane count"
+            value={chartPaneCount}
+            onChange={(event) => {
+              const nextCount = normalizeMultiChartPaneCount(Number(event.target.value));
+              setBattlefieldMode(false);
+              setTerminalSettings((current: typeof terminalSettings) => ({ ...current, chartPaneCount: nextCount }));
+            }}
+          >
+            {Array.from({ length: 7 }, (_, index) => index + 1).map((count) => (
+              <option value={count} key={count}>{count} {count === 1 ? "CHART" : "CHARTS"}</option>
+            ))}
+          </select>
+        </label>
         <button className="icon-btn" onClick={() => setActiveNav("SETTINGS")}>
           <Settings size={17} />
         </button>
@@ -2556,7 +2680,7 @@ export default function App() {
         </div>
       </aside>
 
-      {activeNav === "ADMIN PANEL" ? (
+      {activeNav === "ADMIN PANEL" && !isLocalOnlyRuntime() ? (
         <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
           <AdminPanel />
         </div>
@@ -2569,7 +2693,7 @@ export default function App() {
             onClose={() => setActiveNav("CHART")}
           />
         </div>
-      ) : activeNav === "UPGRADE" ? (
+      ) : activeNav === "UPGRADE" && !isLocalOnlyRuntime() ? (
         <div style={{ gridRow: "2/3", gridColumn: "2/3", overflow: "hidden" }}>
           <UpgradePanel
             currentUser={currentUser!}
@@ -2657,7 +2781,14 @@ export default function App() {
               />
             </Suspense>
           ) : (
-          <PixiBlackChart
+          <MultiChartWorkspace
+            workspaceId={workspace}
+            paneCount={chartPaneCount}
+            seed={multiChartSeed}
+            symbols={availableSymbols}
+            timeframeOptions={timeframes}
+            chartTypeOptions={chartTypes}
+            primary={(<PixiBlackChart
             workspaceId={workspace}
             marketSymbol={symbol}
             displaySymbol={symbol.label}
@@ -2710,12 +2841,50 @@ export default function App() {
             onAlertFired={handleAlertFired}
             priceLineColor={terminalSettings.priceLineColor}
             priceLineIntensity={terminalSettings.priceLineIntensity}
+            renderingPreferences={chartRenderingPreferences}
             activeOrders={visiblePortfolioOrders}
             onRefreshOrders={() => refreshPortfolioState(true)}
             liquidationProfileRequested={chartDepthLadderOpen && chartDepthLppRequested}
             onLiquidationProfileSnapshotChange={setChartDepthLppSnapshot}
             onLiquidationProfileStatusChange={setChartDepthLppStatus}
             allowedIndicators={effectiveAllowedIndicators}
+          />)}
+            renderSecondary={(pane, paneSymbol, update) => (
+              <PixiBlackChart
+                workspaceId={`${workspace}:${pane.id}`}
+                marketSymbol={paneSymbol}
+                displaySymbol={paneSymbol.label}
+                exchangeLabel={selectedExchange.label}
+                timeframe={pane.timeframe}
+                timeframeLabel={timeframes.find((item) => item.value === pane.timeframe)?.label ?? pane.timeframe}
+                chartType={pane.chartType}
+                snapToLatest
+                activeDrawingTool="cursor"
+                drawingsVisible={false}
+                drawingsLocked
+                drawingClearSignal={0}
+                replayControls={defaultReplayControls}
+                visibleIndicators={pane.visibleIndicators}
+                indicatorPeriods={pane.indicatorPeriods}
+                indicatorVisualSettings={pane.indicatorVisualSettings}
+                indicatorAdvancedSettings={pane.indicatorAdvancedSettings}
+                kioseffSettings={pane.kioseffSettings}
+                alertDefinitions={[]}
+                auctionProfileSettings={pane.auctionProfileSettings}
+                onVisibleIndicatorsChange={(value) => update("visibleIndicators", value)}
+                onIndicatorPeriodsChange={(value) => update("indicatorPeriods", value)}
+                onIndicatorVisualSettingsChange={(value) => update("indicatorVisualSettings", value)}
+                onIndicatorAdvancedSettingsChange={(value) => update("indicatorAdvancedSettings", value)}
+                onKioseffSettingsChange={(value) => update("kioseffSettings", value)}
+                onAuctionProfileSettingsChange={(value) => update("auctionProfileSettings", value)}
+                onOpenAlerts={() => setActiveNav("ALERTS")}
+                onOpenStrategyLab={() => setActiveNav("STRATEGY LAB")}
+                priceLineColor={terminalSettings.priceLineColor}
+                priceLineIntensity={terminalSettings.priceLineIntensity}
+                renderingPreferences={chartRenderingPreferences}
+                allowedIndicators={effectiveAllowedIndicators}
+              />
+            )}
           />
           )}
           {!battlefieldMode && drawingsEnabled && (

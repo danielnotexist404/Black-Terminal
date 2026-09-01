@@ -1,7 +1,9 @@
 import { supabase } from "../lib/supabase";
+import { isLocalOnlyRuntime } from "../core/local-runtime/localRuntimeClient";
 import type { InstitutionalFlowSnapshot } from "./types";
 
 export async function fetchInstitutionalFlow(asset: string, signal?: AbortSignal): Promise<InstitutionalFlowSnapshot> {
+  if (isLocalOnlyRuntime()) throw new Error("Institutional fund intelligence has no certified device-local data provider yet.");
   if (!supabase) throw new Error("Authenticated institutional intelligence is unavailable.");
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;

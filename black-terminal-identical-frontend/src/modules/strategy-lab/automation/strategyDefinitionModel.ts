@@ -63,17 +63,17 @@ export function validateAutomationDefinition(
   definition: StrategyAutomationDefinition,
 ) {
   if (definition.exchange.toLowerCase() !== "bybit") {
-    return "Black Cloud automation is currently certified for Bybit only.";
+    return "The authoritative automation runtime is currently certified for Bybit only.";
   }
   if (!certifiedRuntimeKinds.has(definition.runtimeKind) && definition.runtimeKind !== "python-script") {
-    return "The selected indicator does not yet have a certified Black Cloud signal adapter.";
+    return "The selected indicator does not yet have a certified headless signal adapter.";
   }
   if (definition.runtimeKind === "python-script" && (
     definition.indicator?.runtimeStatus !== "CERTIFIED"
     || definition.indicator?.runtimeVersion !== "black-script-v3"
     || !definition.indicator?.indicatorId.startsWith("custom:")
   )) {
-    return "The selected indicator does not yet have a certified Black Cloud signal adapter (Black Script v3 execution contract required).";
+    return "The selected indicator does not yet have a certified headless signal adapter (Black Script v3 execution contract required).";
   }
   if (definition.runtimeKind === "python-script" && definition.marketType !== "FUTURES") {
     return "Black Script v3 broker automation is currently certified for futures targets only.";
@@ -82,7 +82,7 @@ export function validateAutomationDefinition(
     return "Black Script v3 broker automation currently requires pyramiding set to 1.";
   }
   if (!supportedTimeframes.has(definition.timeframe)) {
-    return "Select a closed-candle timeframe supported by the Black Cloud worker.";
+    return "Select a closed-candle timeframe supported by the authoritative automation worker.";
   }
   if (!/^[A-Z0-9:_/.-]{2,40}$/.test(definition.symbol.toUpperCase())) {
     return "Select a valid Bybit market symbol.";

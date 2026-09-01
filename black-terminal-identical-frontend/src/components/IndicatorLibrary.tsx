@@ -8,6 +8,8 @@ import type { CompiledScriptActivation } from "./ScriptCompiler";
 import { dbGetCurrentUserScripts, dbListPublicScriptAssets, dbSaveCurrentUserScripts, isSupabaseConfigured, type PublicScriptAsset } from "../lib/supabase";
 import { professionalNetworkApi } from "../modules/professional-network/networkApi";
 import { normalizeUserScripts, type UserScript } from "../scripts/userScriptLibrary";
+import { isLocalOnlyRuntime } from "../core/local-runtime/localRuntimeClient";
+import { loadLocalUserScripts, saveLocalUserScripts } from "../core/local-runtime/localUserScriptStore";
 
 type IndicatorKey = keyof VisibleIndicators;
 type IndicatorPeriodKey = keyof IndicatorPeriods;
@@ -164,7 +166,7 @@ const builtInIndicators: BuiltInIndicator[] = [
     title: "BC-RDA — Causal V2 / Legacy Research",
     group: "Black Core / Risk Analytics",
     type: "Oscillator + Dashboard",
-    signal: "Causal drawdown-risk research; alerts and automation blocked pending VPS certification",
+    signal: "Causal drawdown-risk research; alerts and automation blocked pending headless-runtime certification",
     runtime: "Worker",
     periodKey: "ddaProOscillator",
     min: 100,
@@ -343,10 +345,17 @@ export function IndicatorLibrary({
     let cancelled = false;
     const load = async () => {
       try {
-        const stored = currentUser && isSupabaseConfigured
+        const stored = currentUser && isSupabaseConfigured && !isLocalOnlyRuntime()
           ? normalizeUserScripts(await dbGetCurrentUserScripts())
-          : normalizeUserScripts(JSON.parse(localStorage.getItem(localStorageKey) || "[]"));
-        const community = await dbListPublicScriptAssets();
+          : isLocalOnlyRuntime()
+            ? await loadLocalUserScripts(currentUser?.username)
+            : normalizeUserScripts(JSON.parse(localStorage.getItem(localStorageKey) || "[]"));
+        const community = isLocalOnlyRuntime()
+          ? await professionalNetworkApi.search("").then((result) => ({
+              indicators: result.indicators as unknown as PublicScriptAsset[],
+              strategies: result.strategies as unknown as PublicScriptAsset[],
+            }))
+          : await dbListPublicScriptAssets();
         if (cancelled) return;
         setUserScripts(stored);
         setPublicAssets(community);
@@ -394,7 +403,8 @@ export function IndicatorLibrary({
   };
 
   const persistUserScripts = async (next: UserScript[]) => {
-    if (currentUser && isSupabaseConfigured) await dbSaveCurrentUserScripts(next);
+    if (currentUser && isSupabaseConfigured && !isLocalOnlyRuntime()) await dbSaveCurrentUserScripts(next);
+    else if (isLocalOnlyRuntime()) await saveLocalUserScripts(currentUser?.username, next);
     else localStorage.setItem(localStorageKey, JSON.stringify(next));
     setUserScripts(next);
   };
@@ -426,7 +436,12 @@ export function IndicatorLibrary({
         ? { ...candidate, publication: { assetId, visibility: "public" as const, publishedAt: Date.now() } }
         : candidate);
       await persistUserScripts(next);
-      const refreshed = await dbListPublicScriptAssets();
+      const refreshed = isLocalOnlyRuntime()
+        ? await professionalNetworkApi.search("").then((result) => ({
+            indicators: result.indicators as unknown as PublicScriptAsset[],
+            strategies: result.strategies as unknown as PublicScriptAsset[],
+          }))
+        : await dbListPublicScriptAssets();
       setPublicAssets(refreshed);
       setLibraryStatus(`${script.name} is now public in Community ${script.kind === "indicator" ? "Indicators" : "Strategies"}.`);
     } catch (error) {

@@ -32,6 +32,11 @@ const first = evaluateBlackScriptCloudRuntime({
 });
 assert.deepEqual(first.marketActions.map((intent) => [intent.action, intent.direction, intent.referencePrice]), [["ENTRY", "long", 102]]);
 assert.equal(first.marketActions[0]?.placedTime, firstClosed[1].time, "a cloud command must retain the confirmed signal candle");
+assert.ok(first.paperReport, "the headless generation must expose the deterministic Paper ledger report");
+assert.equal(first.paperReport?.fills.length, 1, "the Paper ledger receives the same confirmed entry fill as the execution generation");
+assert.equal(first.paperReport?.openPosition?.side, "long");
+assert.equal(first.paperReport?.openPosition?.quantity, 1);
+assert.equal(first.paperReport?.endingEquity, 10_000, "an uncommissioned entry at the reference price must preserve equity");
 
 const duplicateTick = evaluateBlackScriptCloudRuntime({
   source: reversalSource,
@@ -42,6 +47,9 @@ const duplicateTick = evaluateBlackScriptCloudRuntime({
   checkpoint: first.checkpoint,
 });
 assert.equal(duplicateTick.marketActions.length, 0, "re-evaluating the same closed candle must never duplicate a broker action");
+assert.equal(duplicateTick.paperReport?.fills.length, 0, "re-evaluating a committed Paper checkpoint must not append a duplicate fill");
+assert.equal(duplicateTick.paperReport?.trades.length, 0, "re-evaluating a committed Paper checkpoint must not append a duplicate trade");
+assert.equal(duplicateTick.paperReport?.openPosition?.side, "long", "the restart-safe checkpoint must retain the open Paper position");
 
 const secondClosed: Candle[] = [
   ...firstClosed,

@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { ChevronDown, ChevronUp, ExternalLink, Maximize2, Minimize2, Minus, Settings, X } from "lucide-react";
 import type { Candle } from "../../../chart-engine/types";
 import { blackCoreConnectionManager } from "../../../connectivity/connectionManager";
+import { isLocalOnlyRuntime } from "../../../core/local-runtime/localRuntimeClient";
 import { validateMainnetOrderReadiness } from "../../../execution/mainnetValidationMode";
 import { readActiveExecutionVenueId } from "../../../connectivity/activeExecutionVenue";
 import type { ConnectionDiagnostics } from "../../../connectivity/types";
@@ -20,6 +21,7 @@ import { buildVenueExecutionSchema, calculateVenueOrderPreview, sizeFromEquityPe
 import { requestUserText } from "../../../ui/requestUserText";
 import { DomAggregationEngine } from "../domAggregationEngine";
 import { aggregateDomSnapshot } from "../domAggregationClient";
+import { immWorkerDiagnostics } from "../immAggregationClient";
 import { DomAdaptiveQualityController, type DomVisualQuality } from "../domAdaptiveQuality";
 import { buildStableLiquidityProjection, resolveChartDockedProjectionRowCount } from "../chartDockedDepthLadderModel";
 import { useConsolidatedLiquidityFeed } from "../consolidatedLiquidityClient";
@@ -395,6 +397,9 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   const [interactionActive, setInteractionActive] = useState(false);
   const [visualQuality, setVisualQuality] = useState<DomVisualQuality>("full");
   const [documentVisible, setDocumentVisible] = useState(() => typeof document === "undefined" || document.visibilityState !== "hidden");
+  const localOnlyRuntime = isLocalOnlyRuntime();
+  const localBuyWallCount = snapshot.walls.filter((wall) => wall.side === "buy").length;
+  const localSellWallCount = snapshot.walls.filter((wall) => wall.side === "sell").length;
   const effectiveVisualQuality = resolveVisualQuality(settings.performanceMode, visualQuality);
   const venueSchema = useMemo(() => selectedConnection
     ? buildVenueExecutionSchema({ connection: selectedConnection, product: executionMarketKind, symbol: marketSymbol.rawSymbol, sync: accountSync })
@@ -614,6 +619,32 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
   }, [settings.showCvd, settings.showExecutionPanel, settings.showDepthChart, settings.showHeatmap, settings.showVolumeProfile]);
 
   useEffect(() => {
+    if (!localOnlyRuntime) return;
+    const staleForMs = Math.max(0, Date.now() - feed.updatedAt);
+    const hasBook = Boolean(feed.book?.bids.length && feed.book?.asks.length);
+    const worker = immWorkerDiagnostics();
+    const unavailable = !hasBook && staleForMs > 15_000;
+    const degraded = Boolean(feed.lastError) || staleForMs > 15_000;
+    setImmStatus({
+      overallStatus: unavailable ? "unavailable" : degraded ? "degraded" : "live",
+      workerStatus: worker.running ? "local-worker" : "local-idle",
+      currentVenue: marketSymbol.exchange,
+      currentSymbol: marketSymbol.rawSymbol,
+      lastMessageAt: new Date(feed.updatedAt).toISOString(),
+      activeBuyWalls: localBuyWallCount,
+      activeSellWalls: localSellWallCount,
+      staleForMs,
+      quality: {
+        coverageScore: [hasBook, feed.trades.length > 0, Boolean(feed.ticker)].filter(Boolean).length / 3 * 100,
+        replayConfidence: "local",
+        bidAskBalance: hasBook ? "available" : "unavailable"
+      },
+      warnings: feed.lastError ? [feed.lastError] : []
+    });
+  }, [feed.book, feed.lastError, feed.ticker, feed.trades.length, feed.updatedAt, localBuyWallCount, localOnlyRuntime, localSellWallCount, marketSymbol.exchange, marketSymbol.rawSymbol]);
+
+  useEffect(() => {
+    if (localOnlyRuntime) return;
     let cancelled = false;
     const loadStatus = async () => {
       try {
@@ -633,7 +664,7 @@ export function DomProWindow({ marketSymbol, lastPrice, exchangeLabel, workspace
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, []);
+  }, [localOnlyRuntime]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2467,7 +2498,7 @@ function IMMStatusBar({
       <span>{formatPrice(heatmapRange.min)} - {formatPrice(heatmapRange.max)}</span>
       <span>{status?.activeBuyWalls ?? snapshot.walls.filter((wall) => wall.side === "buy").length} BUY / {status?.activeSellWalls ?? snapshot.walls.filter((wall) => wall.side === "sell").length} SELL WALLS</span>
       <span>{staleFor > 0 ? `${formatDuration(staleFor)} STALE` : `${lastMessageAge} MSG`}</span>
-      <span>{persistAge} PERSIST</span>
+      <span>{depthHistory.stats.localOnly ? "ENCRYPTED LOCAL" : `${persistAge} PERSIST`}</span>
     </footer>
   );
 }

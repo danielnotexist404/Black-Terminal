@@ -1,4 +1,6 @@
 import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+import { getLocalDocument, mirrorLocalDocument } from "../../core/local-runtime/localDocumentStore";
+import { isLocalOnlyRuntime } from "../../core/local-runtime/localRuntimeClient";
 import type { MarketSymbol, OrderBookLevel, OrderBookSnapshot } from "../../market-data/types";
 import type { DomHeatmapHorizon, MacroLiquidityRange } from "./types";
 import { shapeBlackCoreReplayPoints } from "./immAggregationClient";
@@ -40,6 +42,7 @@ type DepthHistoryData = {
 };
 
 const storagePrefix = "bt_depth_history_v1";
+const localDocumentNamespace = "imm-depth-history";
 const maxPointsPerSymbol = 900;
 const recordThrottleMs = 5000;
 const persistThrottleMs = 15000;
@@ -63,6 +66,7 @@ export class BlackDepthHistoryStore {
   private blackCoreTileHydrated = new Set<string>();
   private blackCoreLastQueryAt = new Map<string, number>();
   private blackCoreDisabledUntil = 0;
+  private localHydrated = new Set<string>();
 
   subscribe(symbol: MarketSymbol, listener: () => void) {
     const key = symbolKey(symbol);
@@ -70,7 +74,8 @@ export class BlackDepthHistoryStore {
     listeners.add(listener);
     this.listeners.set(key, listeners);
     this.load(symbol);
-    if (allowLegacyDepthHydrate) void this.hydrateRemote(symbol);
+    if (isLocalOnlyRuntime()) void this.hydrateEncryptedLocal(symbol);
+    else if (allowLegacyDepthHydrate) void this.hydrateRemote(symbol);
     return () => {
       const next = this.listeners.get(key);
       if (!next) return;
@@ -144,7 +149,7 @@ export class BlackDepthHistoryStore {
   read(symbol: MarketSymbol, range: MacroLiquidityRange, horizon: DomHeatmapHorizon): DepthHistoryRead {
     const now = Date.now();
     const data = this.load(symbol);
-    void this.hydrateBlackCore(symbol, range, horizon);
+    if (!isLocalOnlyRuntime()) void this.hydrateBlackCore(symbol, range, horizon);
     const cutoff = now - horizonMs(horizon);
     const points = data.points
       .filter((point) => point.price >= range.min && point.price <= range.max)
@@ -162,12 +167,12 @@ export class BlackDepthHistoryStore {
         askPoints: data.points.filter((point) => point.side === "ask").length,
         firstSeen,
         lastSeen,
-        localOnly: !this.blackCoreHydrated.has(symbolKey(symbol)) && !allowLegacyDepthHydrate,
+        localOnly: isLocalOnlyRuntime() || (!this.blackCoreHydrated.has(symbolKey(symbol)) && !allowLegacyDepthHydrate),
         source: this.blackCoreTileHydrated.has(symbolKey(symbol))
           ? "black-core-tiles"
           : this.blackCoreHydrated.has(symbolKey(symbol))
             ? "black-core"
-            : allowLegacyDepthHydrate && isSupabaseConfigured
+            : !isLocalOnlyRuntime() && allowLegacyDepthHydrate && isSupabaseConfigured
               ? "supabase"
               : "local"
       }
@@ -230,7 +235,7 @@ export class BlackDepthHistoryStore {
     const existing = this.stores.get(key);
     if (existing) return existing;
     const fallback: DepthHistoryData = { version: 1, symbolKey: key, updatedAt: Date.now(), points: [] };
-    if (typeof localStorage === "undefined") {
+    if (isLocalOnlyRuntime() || typeof localStorage === "undefined") {
       this.stores.set(key, fallback);
       return fallback;
     }
@@ -246,6 +251,10 @@ export class BlackDepthHistoryStore {
   }
 
   private persist(key: string, data: DepthHistoryData) {
+    if (isLocalOnlyRuntime()) {
+      mirrorLocalDocument(localDocumentNamespace, key, data);
+      return;
+    }
     if (typeof localStorage === "undefined") return;
     try {
       localStorage.setItem(storageKey(key), JSON.stringify(data));
@@ -297,7 +306,7 @@ export class BlackDepthHistoryStore {
 
   private async hydrateRemote(symbol: MarketSymbol) {
     const key = symbolKey(symbol);
-    if (this.remoteHydrated.has(key) || !isSupabaseConfigured || !supabase || Date.now() < this.remoteDisabledUntil) return;
+    if (isLocalOnlyRuntime() || this.remoteHydrated.has(key) || !isSupabaseConfigured || !supabase || Date.now() < this.remoteDisabledUntil) return;
     this.remoteHydrated.add(key);
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -347,6 +356,31 @@ export class BlackDepthHistoryStore {
       this.notify(key);
     } catch {
       this.remoteDisabledUntil = Date.now() + 5 * 60 * 1000;
+    }
+  }
+
+  private async hydrateEncryptedLocal(symbol: MarketSymbol) {
+    const key = symbolKey(symbol);
+    if (this.localHydrated.has(key)) return;
+    this.localHydrated.add(key);
+    try {
+      const stored = await getLocalDocument<DepthHistoryData>(localDocumentNamespace, key);
+      if (!stored?.value || stored.value.version !== 1 || !Array.isArray(stored.value.points)) return;
+      const current = this.load(symbol);
+      const map = new Map(current.points.map((point) => [point.id, point]));
+      for (const point of stored.value.points) {
+        if (!point || !Number.isFinite(point.price) || point.price <= 0) continue;
+        const previous = map.get(point.id);
+        if (!previous || point.lastSeen >= previous.lastSeen) map.set(point.id, point);
+      }
+      current.points = Array.from(map.values())
+        .sort((a, b) => historyScore(b, Date.now()) - historyScore(a, Date.now()))
+        .slice(0, maxPointsPerSymbol)
+        .sort((a, b) => b.price - a.price);
+      current.updatedAt = Math.max(current.updatedAt, stored.value.updatedAt || 0);
+      this.notify(key);
+    } catch (error) {
+      console.error("Failed to hydrate encrypted local IMM depth history", error);
     }
   }
 

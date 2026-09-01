@@ -138,6 +138,16 @@ export type ChartEngineOptions = {
   onFps?: (fps: number) => void;
   priceLineColor?: string;
   priceLineIntensity?: number;
+  renderingPreferences?: ChartRenderingPreferences;
+};
+
+export type ChartRenderingPreferences = {
+  resolutionMode: "AUTO" | "LOW_DPI" | "HIGH_DPI" | "ULTRA";
+  antialias: boolean;
+  backgroundColor: string;
+  gridColor: string;
+  bullishCandleColor: string;
+  bearishCandleColor: string;
 };
 
 export type VisibleIndicators = {

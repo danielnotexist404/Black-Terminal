@@ -1,4 +1,6 @@
 import { supabase } from "../../lib/supabase";
+import { isLocalOnlyRuntime } from "../../core/local-runtime/localRuntimeClient";
+import { listAllLocalInvestmentGroups } from "../profile/professionalNetworkStore";
 import type { InvestmentGroup, InvestmentGroupStats } from "../profile/types";
 
 type ServerGroup = Record<string, unknown> & { investment_group_stats?: Record<string, unknown> | Record<string, unknown>[] | null };
@@ -75,10 +77,12 @@ export function normalizeServerInvestmentGroup(row: ServerGroup): InvestmentGrou
 
 export const investmentGroupsApi = {
   async list() {
+    if (isLocalOnlyRuntime()) return listAllLocalInvestmentGroups();
     const payload = await request<{ groups: ServerGroup[] }>();
     return payload.groups.map(normalizeServerInvestmentGroup);
   },
   async importLocal(group: InvestmentGroup) {
+    if (isLocalOnlyRuntime()) return;
     await request({
       method: "POST",
       body: JSON.stringify({

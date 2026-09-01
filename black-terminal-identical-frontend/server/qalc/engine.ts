@@ -1,5 +1,4 @@
 import type { QalcAuditEvent, QalcConfig, QalcDecision, QalcFeeSchedule, QalcMarketEvent, QalcPaperInventory, QalcRuntimeState, QalcTelemetry } from "./contracts.ts";
-import { performance } from "node:perf_hooks";
 import { defaultQalcConfig } from "./contracts.ts";
 import { QalcClockMonitor } from "./clock.ts";
 import { QalcFeatureEngine } from "./features.ts";
@@ -110,7 +109,7 @@ export class QalcEngine {
     if (!this.lastTradeAt || now - this.lastTradeAt > 3_000) return this.block("DATA_STALE", "PUBLIC_TRADE_STREAM_STALE", now, features);
     if (!this.clock.mayQuote(now)) return this.block("CLOCK_UNSAFE", "CLOCK_NOT_SAFE", now, features);
     if (!features?.warm) return this.block("WARMING_FEATURES", "FEATURE_WARMUP", now, features);
-    if (this.feeSchedule.source === "UNAVAILABLE" || (this.config.mode === "PAPER" && this.feeSchedule.source !== "ACCOUNT_API")) return this.block("RISK_SUSPENDED", "ACCOUNT_FEE_SCHEDULE_REQUIRED", now, features);
+    if (this.feeSchedule.source === "UNAVAILABLE") return this.block("RISK_SUSPENDED", "FEE_SCHEDULE_REQUIRED", now, features);
     if (this.risk.state().suspended) return this.block("RISK_SUSPENDED", this.risk.state().reason || "RISK_SUSPENDED", now, features);
     if (this.inventory) return this.manageInventory(now, view, features);
     const active = this.paper.order();

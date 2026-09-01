@@ -1,0 +1,104 @@
+name: Standalone desktop release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "desktop-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    name: ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            os: windows-2022
+            args: --bundles nsis,wix
+            artifact: black-terminal-windows-x64
+            artifact_path: src-tauri/target/release/bundle/**
+            bundle_root: src-tauri/target/release/bundle
+          - label: Linux x64
+            os: ubuntu-22.04
+            args: --bundles deb,rpm,appimage
+            artifact: black-terminal-linux-x64
+            artifact_path: src-tauri/target/release/bundle/**
+            bundle_root: src-tauri/target/release/bundle
+          - label: macOS universal
+            os: macos-14
+            args: --target universal-apple-darwin --bundles app,dmg
+            artifact: black-terminal-macos-universal
+            artifact_path: src-tauri/target/universal-apple-darwin/release/bundle/**
+            bundle_root: src-tauri/target/universal-apple-darwin/release/bundle
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            pkg-config \
+            wget
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.1
+          cache: npm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install JavaScript dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Verify local-runtime contracts
+        run: npm run test:desktop-local
+
+      - name: Verify TypeScript and production bundle
+        run: npm run build
+
+      - name: Verify native core
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Build native installers
+        uses: tauri-apps/tauri-action@v0
+        with:
+          args: ${{ matrix.args }}
+
+      - name: Generate SHA-256 release manifest
+        run: node scripts/generate-standalone-release-manifest.mjs "${{ matrix.bundle_root }}"
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact_path }}
+          if-no-files-found: error
+          retention-days: 30

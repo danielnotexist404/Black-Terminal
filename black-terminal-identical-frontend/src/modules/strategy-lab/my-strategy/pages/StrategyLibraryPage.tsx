@@ -1,5 +1,6 @@
 import { Activity, FlaskConical, MoreHorizontal, Pause, Pencil, Play, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { isLocalOnlyRuntime } from "../../../../core/local-runtime/localRuntimeClient";
 import type { StrategySummary } from "../../automation/strategyAutomation.types";
 
 type Props = {
@@ -43,7 +44,7 @@ export function StrategyLibraryPage({ strategies, loading, message, onCreate, on
       </header>
       {message ? <div className="strategy-library-message" role="status">{message}</div> : null}
       {loading ? (
-        <div className="strategy-library-empty"><Activity className="spin" size={22} /><strong>Loading strategies</strong><span>Restoring VPS strategy and Paper runtime state.</span></div>
+        <div className="strategy-library-empty"><Activity className="spin" size={22} /><strong>Loading strategies</strong><span>Restoring {isLocalOnlyRuntime() ? "encrypted local strategy and Paper runtime" : "VPS strategy and Paper runtime"} state.</span></div>
       ) : strategies.length === 0 ? (
         <div className="strategy-library-empty">
           <FlaskConical size={28} />

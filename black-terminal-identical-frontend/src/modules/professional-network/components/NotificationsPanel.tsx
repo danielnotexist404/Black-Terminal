@@ -1,6 +1,7 @@
 import { Bell, CheckCheck, Settings2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabase";
+import { isLocalOnlyRuntime } from "../../../core/local-runtime/localRuntimeClient";
 import { professionalNetworkApi } from "../networkApi";
 import type { NetworkNotification, NotificationPreferences } from "../types";
 
@@ -19,7 +20,7 @@ export function NotificationsPanel({ currentUserId, onDeepLink }: { currentUserI
   }, []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase || isLocalOnlyRuntime()) return;
     const channel = supabase.channel(`professional-notifications:${currentUserId}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "notification_events", filter: `user_id=eq.${currentUserId}` }, () => { void load(); }).subscribe();
     return () => { channel.unsubscribe(); };
   }, [currentUserId, load]);

@@ -15,8 +15,19 @@ import {
   UserMinus,
   UserRound,
   Users,
+  WalletCards,
   X
 } from "lucide-react";
+import { isLocalOnlyRuntime } from "../../../core/local-runtime/localRuntimeClient";
+import { listLocalBrokerAccounts } from "../../../core/local-runtime/localBrokerStore";
+import {
+  authorizeLocalInvestmentGroupMandate,
+  listLocalInvestmentGroupMandates,
+  revokeLocalInvestmentGroupMandate,
+  setLocalInvestmentGroupMandateStatus,
+  type LocalInvestmentGroupMandate,
+} from "../../../core/local-runtime/localInvestmentGroupMandateStore";
+import { listRemoteInvestmentGroupMandates, type RemoteInvestmentGroupMandate } from "../../../core/local-runtime/localInvestmentGroupRemoteStore";
 import type { CapabilityUser } from "../../../core/permissions/capabilities";
 import {
   canCreateInvestmentGroup,
@@ -64,6 +75,7 @@ type GroupTab =
   | "Members"
   | "Trading Room"
   | "Risk"
+  | "Execution Mandates"
   | "Requests"
   | "Settings";
 
@@ -77,6 +89,7 @@ const groupTabs: GroupTab[] = [
   "Members",
   "Trading Room",
   "Risk",
+  "Execution Mandates",
   "Requests",
   "Settings"
 ];
@@ -145,10 +158,17 @@ export function InvestmentGroupsPage({ currentUser, onClose, onOpenProfile }: In
   const selectedIsMember = selectedGroup ? isInvestmentGroupMember(currentUser, selectedGroup.id) : false;
   const visibleTabs = selectedGroup ? groupTabs.filter((tab) => {
     if (tab === "Strategy Execution Desk") return strategyDeskAvailable;
+    if (tab === "Execution Mandates") return isLocalOnlyRuntime() && (selectedIsMember || selectedCanModerate);
     if (tab === "Settings" || tab === "Requests") return selectedCanManage;
     const publicSection = publicSectionByTab.get(tab);
     return !publicSection || selectedIsMember || selectedCanModerate || isInvestmentGroupSectionPublic(selectedGroup, publicSection);
   }) : ["Overview"] as GroupTab[];
+
+  useEffect(() => {
+    const updated = () => setRevision((value) => value + 1);
+    window.addEventListener("bt-professional-network-updated", updated);
+    return () => window.removeEventListener("bt-professional-network-updated", updated);
+  }, []);
 
   useEffect(() => {
     if (!visibleTabs.includes(activeTab)) setActiveTab("Overview");
@@ -549,6 +569,10 @@ function GroupTabContent({
     );
   }
 
+  if (tab === "Execution Mandates") {
+    return <LocalExecutionMandatesPanel group={group} />;
+  }
+
   if (tab === "Settings") {
     return canManage
       ? <GroupSettingsEditor currentUser={currentUser} group={group} onSaved={onGroupUpdated} />
@@ -745,6 +769,105 @@ function MembersPanel({
       )}
     </section>
   );
+}
+
+function LocalExecutionMandatesPanel({ group }: { group: InvestmentGroup }) {
+  const accounts = useMemo(() => listLocalBrokerAccounts("STRATEGY_LAB"), []);
+  const [mandates, setMandates] = useState<LocalInvestmentGroupMandate[]>([]);
+  const [remoteMandates, setRemoteMandates] = useState<RemoteInvestmentGroupMandate[]>([]);
+  const [accountId, setAccountId] = useState(accounts[0]?.id || "");
+  const [symbols, setSymbols] = useState("BTCUSDT");
+  const [allocation, setAllocation] = useState("100");
+  const [perTrade, setPerTrade] = useState("20");
+  const [leverage, setLeverage] = useState("1");
+  const [allowMainnet, setAllowMainnet] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+
+  const refresh = async () => {
+    const [local, remote] = await Promise.all([listLocalInvestmentGroupMandates(group.id), listRemoteInvestmentGroupMandates(group.id)]);
+    setMandates(local);
+    setRemoteMandates(remote);
+  };
+  useEffect(() => { void refresh().catch((error) => setStatus(error instanceof Error ? error.message : String(error))); }, [group.id]);
+
+  const authorize = async () => {
+    setBusy(true);
+    setStatus("");
+    try {
+      await authorizeLocalInvestmentGroupMandate({
+        groupId: group.id,
+        accountId,
+        allowedSymbols: splitList(symbols),
+        maxStrategyAllocationPercent: Number(allocation),
+        maxPerTradeAllocationPercent: Number(perTrade),
+        maxLeverage: Number(leverage),
+        allowMainnet,
+      });
+      await refresh();
+      setStatus("Encrypted execution mandate saved. The group still must be linked and armed separately in Strategy Lab.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const changeStatus = async (mandate: LocalInvestmentGroupMandate, action: "ACTIVE" | "PAUSED" | "REVOKED") => {
+    setBusy(true);
+    setStatus("");
+    try {
+      if (action === "REVOKED") await revokeLocalInvestmentGroupMandate(mandate.id);
+      else await setLocalInvestmentGroupMandateStatus(mandate.id, action);
+      await refresh();
+      setStatus(action === "REVOKED" ? "Broker authority revoked. Existing venue exposure was not modified." : `Mandate ${action.toLowerCase()}.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <section className="network-panel investment-settings-panel">
+    <div className="network-panel-title"><WalletCards size={14} /> Local Execution Mandates</div>
+    <div className="network-note"><Lock size={13} /> Membership never grants trading authority. Each account owner must explicitly authorize a dedicated Strategy Lab broker account, symbol scope, allocation ceiling, per-trade ceiling, leverage ceiling, and Mainnet permission. Secrets remain in the operating-system vault.</div>
+    {status && <div className="network-status investment-settings-status">{status}</div>}
+    <div className="investment-settings-form">
+      <div className="investment-settings-section">
+        <strong>AUTHORIZE THIS DEVICE'S ACCOUNT</strong>
+        {accounts.length ? <div className="network-inline-form local-group-mandate-form">
+          <select value={accountId} onChange={(event) => setAccountId(event.target.value)}>{accounts.map((account) => <option value={account.id} key={account.id}>{account.accountName} · {String(account.network || account.executionEnvironment || "LOCAL").toUpperCase()} · ${account.equityUsd.toLocaleString()}</option>)}</select>
+          <input value={symbols} onChange={(event) => setSymbols(event.target.value)} placeholder="BTCUSDT, ETHUSDT" aria-label="Allowed futures symbols" />
+          <input type="number" min="0.01" max="100" step="0.01" value={allocation} onChange={(event) => setAllocation(event.target.value)} aria-label="Maximum strategy allocation percent" title="Maximum strategy allocation percent" />
+          <input type="number" min="0.01" max="100" step="0.01" value={perTrade} onChange={(event) => setPerTrade(event.target.value)} aria-label="Maximum per-trade percent of allocation" title="Maximum per-trade percent of allocation" />
+          <input type="number" min="1" max="100" step="0.01" value={leverage} onChange={(event) => setLeverage(event.target.value)} aria-label="Maximum leverage" title="Maximum leverage" />
+          <label className="network-check"><input type="checkbox" checked={allowMainnet} onChange={(event) => setAllowMainnet(event.target.checked)} /> Allow Mainnet</label>
+          <button type="button" disabled={busy || !accountId} onClick={() => void authorize()}><ShieldCheck size={13} /> Authorize / Replace</button>
+        </div> : <div className="network-empty">ADD A DEDICATED BROKER CONNECTION FROM STRATEGY LAB BEFORE CREATING A MANDATE.</div>}
+        <div className="network-note">Fields: allowed futures symbols · maximum strategy allocation % · maximum margin per trade as % of allocation · maximum leverage. A group strategy is rejected if it exceeds any active member mandate.</div>
+      </div>
+      <div className="investment-settings-section">
+        <strong>ENCRYPTED DEVICE AUTHORITIES</strong>
+        {mandates.length ? <div className="network-list">{mandates.map((mandate) => <div className="network-list-row member-management-row" key={mandate.id}>
+          <strong>{mandate.accountLabel}</strong>
+          <span>{mandate.environment} · {mandate.allowedSymbols.join(", ")} · ALLOCATION ≤ {mandate.maxStrategyAllocationPercent}% · TRADE ≤ {mandate.maxPerTradeAllocationPercent}% · LEVERAGE ≤ {mandate.maxLeverage}x</span>
+          <em>{mandate.status} · V{mandate.version} · {new Date(mandate.updatedAt).toLocaleString()}</em>
+          <div className="member-management-actions">
+            {mandate.status !== "REVOKED" && <button type="button" disabled={busy} onClick={() => void changeStatus(mandate, mandate.status === "ACTIVE" ? "PAUSED" : "ACTIVE")}>{mandate.status === "ACTIVE" ? "Pause" : "Resume"}</button>}
+            {mandate.status !== "REVOKED" && <button className="network-danger" type="button" disabled={busy} onClick={() => void changeStatus(mandate, "REVOKED")}><Trash2 size={13} /> Revoke</button>}
+          </div>
+        </div>)}</div> : <div className="network-empty">NO EXECUTION MANDATES HAVE BEEN AUTHORIZED ON THIS DEVICE.</div>}
+      </div>
+      <div className="investment-settings-section">
+        <strong>AUTHENTICATED P2P MEMBER AUTHORITIES</strong>
+        {remoteMandates.length ? <div className="network-list">{remoteMandates.map((mandate) => <div className="network-list-row member-management-row" key={`${mandate.memberPeerId}:${mandate.publicMandateId}`}>
+          <strong>{mandate.memberUsername}</strong>
+          <span>{mandate.environment} · {mandate.allowedSymbols.join(", ")} · ALLOCATION ≤ {mandate.maxStrategyAllocationPercent}% · TRADE ≤ {mandate.maxPerTradeAllocationPercent}% · LEVERAGE ≤ {mandate.maxLeverage}x</span>
+          <em>{mandate.status} · V{mandate.version} · HEARTBEAT {new Date(mandate.lastReceivedAt).toLocaleTimeString()}</em>
+        </div>)}</div> : <div className="network-empty">NO REMOTE MEMBER HAS DELIVERED AN AUTHENTICATED EXECUTION MANDATE.</div>}
+      </div>
+    </div>
+  </section>;
 }
 
 function ModerationDialog({

@@ -27,6 +27,38 @@
   --line-height-body: 1.5;
 }
 
+.credential-form select {
+  width: 100%;
+  min-height: 33px;
+  box-sizing: border-box;
+  border: 1px solid #292b31;
+  background: #050608;
+  color: #e6e8eb;
+  padding: 7px 9px;
+  font-family: var(--font-mono, monospace);
+}
+
+.credential-form .local-mainnet-confirm {
+  grid-column: 1 / -1;
+  display: flex;
+  grid-template-columns: none;
+  flex-direction: row;
+  align-items: center;
+  border: 1px solid #6c172a;
+  background: #16070d;
+  padding: 8px 10px;
+}
+
+.credential-form .local-mainnet-confirm input {
+  width: 15px;
+  min-height: 15px;
+  accent-color: #d3133a;
+}
+
+.credential-form .local-mainnet-confirm span {
+  color: #f0b1bf;
+}
+
 /* Secure account profile --------------------------------------------------- */
 .pn-account-panel {
   width: min(1120px, calc(100% - 28px));
@@ -12142,6 +12174,27 @@ body.resizing-orders-panel .positions-stack-resizer::after {
   padding: 0 14px;
 }
 
+.local-group-mandate-form {
+  grid-template-columns: minmax(190px, 1.4fr) minmax(160px, 1fr) repeat(3, minmax(92px, 0.5fr)) auto auto;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-color: rgba(255, 22, 55, 0.72) rgba(255, 255, 255, 0.035);
+}
+
+.local-group-mandate-form .network-check {
+  min-width: 112px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #07080a;
+}
+
+.local-group-mandate-form input,
+.local-group-mandate-form select {
+  background: #050608;
+  color: #e7ebf1;
+}
+
 .investment-public-sections {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -15437,3 +15490,13 @@ body.dom-pro-resize-active {
 .bcrda-integrity-warning span { font-size:9px; line-height:1.45; }
 .bcrda-integrity-panel { display:grid; gap:3px; margin:8px 0; padding:9px; border:1px solid #34363c; border-radius:4px; background:#050608; color:#aeb1b8; font-size:9px; }
 .bcrda-integrity-panel strong { color:#f2f2f4; letter-spacing:.08em; }
+.terminal-command-center.ui-density-dense .icon-btn svg,
+.terminal-command-center.ui-density-dense .nav svg { width: 15px; height: 15px; }
+.terminal-command-center.ui-density-dense .nav { min-height: 31px; font-size: 9px; }
+.terminal-command-center.ui-density-dense .topbar { --bt-density-control-height: 29px; }
+.terminal-command-center.ui-density-compact .icon-btn svg,
+.terminal-command-center.ui-density-compact .nav svg { width: 17px; height: 17px; }
+.terminal-command-center.ui-density-compact .nav { min-height: 35px; }
+.terminal-command-center.ui-density-comfortable .icon-btn svg,
+.terminal-command-center.ui-density-comfortable .nav svg { width: 21px; height: 21px; }
+.terminal-command-center.ui-density-comfortable .nav { min-height: 43px; font-size: 11px; }

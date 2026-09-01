@@ -43,7 +43,7 @@ import { CvdFootprintRenderer } from "../modules/auction-profile/rendering/footp
 import { resolveAuctionVisualizationLayers } from "../modules/auction-profile/rendering/visualization";
 import { AUCTION_PROFILE_DEFAULT_SETTINGS, migrateAuctionProfileSettings } from "../modules/auction-profile/core/settings";
 import type { AuctionProfileSettings, AuctionProfileSnapshot } from "../modules/auction-profile/core/types";
-import { resolveChartDeviceCapabilities } from "./deviceCapabilities";
+import { resolveChartDevicePreferences } from "./deviceCapabilities";
 import type { LiquidationFieldSettings, LiquidationFieldSnapshot } from "../modules/liquidation-field/core/types";
 import { migrateLiquidationFieldSettings } from "../modules/liquidation-field/core/settings";
 import { BlackCoreLiquidationFieldRenderer, type BclifRendererMetrics } from "../modules/liquidation-field/rendering/BlackCoreLiquidationFieldRenderer";
@@ -332,6 +332,12 @@ export class BlackChartEngine {
   private heatmapTexts: Text[] = [];
   private alertTexts: Text[] = [];
   private priceLineColor = "";
+  private chartBackground = theme.background;
+  private chartGridColor = theme.grid;
+  private bullishCandleColor = theme.silver;
+  private bearishCandleColor = theme.red;
+  private rendererResolutionMode: "AUTO" | "LOW_DPI" | "HIGH_DPI" | "ULTRA" = "AUTO";
+  private rendererAntialias = true;
   private priceLineIntensity = 75;
 
   private view: ViewState = {
@@ -434,19 +440,27 @@ export class BlackChartEngine {
     this.onAlertEditRequest = options.onAlertEditRequest;
     if (options.priceLineColor !== undefined) this.priceLineColor = options.priceLineColor;
     if (options.priceLineIntensity !== undefined) this.priceLineIntensity = options.priceLineIntensity;
+    if (options.renderingPreferences) {
+      this.rendererResolutionMode = options.renderingPreferences.resolutionMode;
+      this.rendererAntialias = options.renderingPreferences.antialias;
+      this.chartBackground = this.hexColor(options.renderingPreferences.backgroundColor, theme.background);
+      this.chartGridColor = this.hexColor(options.renderingPreferences.gridColor, theme.grid);
+      this.bullishCandleColor = this.hexColor(options.renderingPreferences.bullishCandleColor, theme.silver);
+      this.bearishCandleColor = this.hexColor(options.renderingPreferences.bearishCandleColor, theme.red);
+    }
   }
 
   async init() {
-    const device = resolveChartDeviceCapabilities({
+    const device = resolveChartDevicePreferences({
       devicePixelRatio: window.devicePixelRatio || 1,
       maxTouchPoints: navigator.maxTouchPoints || 0,
       platform: navigator.platform || "",
       userAgent: navigator.userAgent || ""
-    });
+    }, this.rendererResolutionMode);
     this.constrainedTouchRenderer = device.constrainedTouchRenderer;
     await this.app.init({
-      background: theme.background,
-      antialias: true,
+      background: this.chartBackground,
+      antialias: this.rendererAntialias,
       autoDensity: true,
       resolution: device.rendererResolution,
       resizeTo: this.host,
@@ -2117,10 +2131,10 @@ export class BlackChartEngine {
     const plotWidth = this.view.width - this.view.rightAxisWidth;
     const plotHeight = this.view.height - this.view.bottomAxisHeight;
 
-    g.rect(0, 0, this.view.width, this.view.height).fill({ color: theme.background });
+    g.rect(0, 0, this.view.width, this.view.height).fill({ color: this.chartBackground });
 
-    g.moveTo(plotWidth, 0).lineTo(plotWidth, this.view.height).stroke({ width: 1, color: 0xffffff, alpha: 0.08 });
-    g.moveTo(0, plotHeight).lineTo(this.view.width, plotHeight).stroke({ width: 1, color: 0xffffff, alpha: 0.08 });
+    g.moveTo(plotWidth, 0).lineTo(plotWidth, this.view.height).stroke({ width: 1, color: this.chartGridColor, alpha: 0.16 });
+    g.moveTo(0, plotHeight).lineTo(this.view.width, plotHeight).stroke({ width: 1, color: this.chartGridColor, alpha: 0.16 });
   }
 
   private drawWatermark() {
@@ -4904,7 +4918,7 @@ export class BlackChartEngine {
     const bullish = c.close >= c.open;
     const referencePalette = this.visibleIndicators.liquidationHeatmap
       && this.liquidationFieldSettings.candlePalette === "REFERENCE_CYAN_MAGENTA";
-    const defaultColor = bullish ? (referencePalette ? 0x31d5cf : theme.silver) : (referencePalette ? 0xec145d : theme.red);
+    const defaultColor = bullish ? (referencePalette ? 0x31d5cf : this.bullishCandleColor) : (referencePalette ? 0xec145d : this.bearishCandleColor);
     const defaultWick = bullish ? (referencePalette ? 0x7ff7ee : theme.silverBright) : (referencePalette ? 0xff4b83 : theme.redBright);
     const color = override?.color ?? defaultColor;
     const wick = override?.wick ?? defaultWick;

@@ -3,7 +3,7 @@
 import "pixi.js/unsafe-eval";
 import React from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App";
+import { StandaloneBootstrap } from "./components/StandaloneBootstrap";
 import { registerBlackCoreServices } from "./core/registerBlackCore";
 import { blackCorePerformanceMonitor } from "./performance/performanceMonitor";
 import { blackCoreMarketDataEngine } from "./market-data/engine/marketDataEngine";
@@ -67,7 +67,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       blackCorePerformanceMonitor.recordMetric("react.commit_ms", actualDuration, "ms", { phase });
       blackCorePerformanceMonitor.recordMetric("react.base_duration_ms", baseDuration, "ms", { phase });
     }}>
-      <App />
+      <StandaloneBootstrap />
     </React.Profiler>
   </React.StrictMode>
 );

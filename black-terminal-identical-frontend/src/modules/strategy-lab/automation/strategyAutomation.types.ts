@@ -247,7 +247,7 @@ export type StrategyTargetBinding = {
   targetId: string;
   targetLabel?: string;
   targetProvider?: string;
-  executionEnvironment?: "DEMO" | "MAINNET_LIVE" | "INVESTMENT_GROUP";
+  executionEnvironment?: "DEMO" | "TESTNET" | "MAINNET_LIVE" | "INVESTMENT_GROUP";
   connectionId?: string;
   accountId?: string;
   groupId?: string;
@@ -255,7 +255,7 @@ export type StrategyTargetBinding = {
   status: StrategyTargetStatus;
   capitalPolicyVersion: number;
   capitalPolicy: StrategyCapitalPolicy;
-  validation: { eligible?: boolean; reasons?: string[]; checkedAt?: string };
+  validation: { eligible?: boolean; reasons?: string[]; checkedAt?: string; maximumLeverage?: number };
   rowVersion: number;
   createdAt: string;
   updatedAt: string;
@@ -391,10 +391,10 @@ export type StrategyBrokerConnection = {
   workerState: string;
   synchronizationState: string;
   executionReadiness: string;
-  executionEnvironment: "DEMO" | "MAINNET_LIVE";
+  executionEnvironment: "DEMO" | "TESTNET" | "MAINNET_LIVE";
   endpointProfile: string;
   lastAuthenticatedAt?: string;
-  persistence: "VPS_MANAGED";
+  persistence: "VPS_MANAGED" | "LOCAL_DEVICE";
 };
 
 export type EligibleGroupTarget = {

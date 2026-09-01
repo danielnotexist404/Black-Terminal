@@ -1,6 +1,8 @@
 import { ImagePlus, Save, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { dbGetCurrentUserProfile, dbUpdateCurrentUserProfile } from "../../../lib/supabase";
+import { isLocalOnlyRuntime } from "../../../core/local-runtime/localRuntimeClient";
+import { readLocalAccountProfile, updateLocalAccountProfile } from "../../../core/local-runtime/localAccountProfile";
 import { professionalNetworkApi, sanitizeNetworkImage } from "../networkApi";
 import type { ProfessionalProfile } from "../types";
 
@@ -53,7 +55,8 @@ export function ProfileEditor({ profile, onClose, onSaved }: { profile: Professi
   useEffect(() => () => Object.values(objectUrls.current).forEach((url) => url && URL.revokeObjectURL(url)), []);
   useEffect(() => {
     let active = true;
-    void dbGetCurrentUserProfile().then((account) => {
+    const loadAccount = isLocalOnlyRuntime() ? readLocalAccountProfile() : dbGetCurrentUserProfile();
+    void loadAccount.then((account) => {
       if (!active || !account) return;
       setAccountAvailable(true);
       setAccountDraft({
@@ -108,7 +111,8 @@ export function ProfileEditor({ profile, onClose, onSaved }: { profile: Professi
         tradingStyleTags: splitTags(draft.tradingStyleTags)
       });
       if (accountAvailable) {
-        await dbUpdateCurrentUserProfile({
+        const saveAccount = isLocalOnlyRuntime() ? updateLocalAccountProfile : dbUpdateCurrentUserProfile;
+        await saveAccount({
           displayName: draft.displayName.trim(),
           firstName: accountDraft.firstName.trim(),
           lastName: accountDraft.lastName.trim(),

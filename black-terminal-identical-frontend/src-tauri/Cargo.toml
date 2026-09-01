@@ -1,10 +1,10 @@
 [package]
 name = "black-terminal-pixi"
-version = "0.2.0"
-description = "Black-Terminal: PixiJS GPU-rendered quant crypto trading terminal"
+version = "1.0.7"
+description = "Black Terminal local-first professional crypto trading and strategy automation terminal"
 authors = ["Black Triangle Group"]
 license = ""
-repository = ""
+repository = "https://github.com/danielnotexist404/Black-Terminal"
 edition = "2021"
 
 [lib]
@@ -19,4 +19,18 @@ tauri = { version = "2.5", features = ["tray-icon", "image-ico", "image-png"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync"] }
+base64 = "0.22"
+aes-gcm = "0.10"
+futures = "0.3"
+hmac = "0.12"
+keyring = "4.2"
+libp2p = { version = "0.56", default-features = false, features = ["cbor", "ed25519", "gossipsub", "identify", "kad", "macros", "mdns", "noise", "request-response", "tcp", "tokio", "upnp", "yamux"] }
+rusqlite = { version = "0.38", features = ["bundled"] }
+rust_decimal = "1.40"
+sha2 = "0.10"
+urlencoding = "2.1"
+zeroize = "1.9"
+
+[dev-dependencies]
+tempfile = "3"

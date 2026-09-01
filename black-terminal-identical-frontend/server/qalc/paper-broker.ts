@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import type { QalcBookMutation, QalcBookView, QalcConfig, QalcFeeSchedule, QalcMarketEvent, QalcPaperExecution, QalcPaperOrder, QalcTradePayload } from "./contracts.ts";
+import { stableQalcId } from "./stable-id.ts";
 
 type PendingCancel = { orderId: string; effectiveAt: number; reason: string };
 
@@ -34,7 +34,7 @@ export class QalcPaperBroker {
     this.generation += 1;
     const atPrice = input.book[input.side === "BUY" ? "bids" : "asks"].find((row) => row.price === input.price)?.quantity || 0;
     const order: QalcPaperOrder = {
-      id: deterministicId("order", this.config.runId, String(this.generation), input.side, String(input.price), String(input.quantity), String(input.now)),
+      id: stableQalcId("order", this.config.runId, String(this.generation), input.side, String(input.price), String(input.quantity), String(input.now)),
       clientOrderId: `qalc-paper-${this.config.runId.slice(0, 12)}-${this.generation}`,
       generation: this.generation,
       symbol: this.config.symbol,
@@ -115,7 +115,7 @@ export class QalcPaperBroker {
     if (order.state === "FILLED") this.pendingCancel = undefined;
     const fee = order.price * fillQuantity * this.fees().makerRate;
     const execution: QalcPaperExecution = {
-      id: deterministicId("fill", this.config.runId, order.id, trade.tradeId, String(order.filledQuantity)), orderId: order.id, symbol: order.symbol, side: order.side,
+      id: stableQalcId("fill", this.config.runId, order.id, trade.tradeId, String(order.filledQuantity)), orderId: order.id, symbol: order.symbol, side: order.side,
       price: order.price, quantity: fillQuantity, notional: order.price * fillQuantity,
       fee, maker: true, time: event.receiveTimestamp + this.config.latency.executionNotificationMs,
       sourceTradeId: trade.tradeId,
@@ -130,7 +130,7 @@ export class QalcPaperBroker {
     const signedSlippage = input.side === "BUY" ? input.slippageTicks : -input.slippageTicks;
     const price = level.price + signedSlippage * input.tickSize;
     const execution: QalcPaperExecution = {
-      id: deterministicId("exit", this.config.runId, String(this.generation), input.side, String(input.quantity), String(input.now)), orderId: `qalc-paper-exit-${this.generation}`, symbol: this.config.symbol,
+      id: stableQalcId("exit", this.config.runId, String(this.generation), input.side, String(input.quantity), String(input.now)), orderId: `qalc-paper-exit-${this.generation}`, symbol: this.config.symbol,
       side: input.side, price, quantity: input.quantity, notional: price * input.quantity,
       fee: price * input.quantity * this.fees().takerRate, maker: false,
       time: input.now + this.config.latency.submissionMs + this.config.latency.executionNotificationMs,
@@ -141,6 +141,3 @@ export class QalcPaperBroker {
 }
 
 function terminal(state: QalcPaperOrder["state"]) { return ["FILLED", "CANCELLED", "REJECTED", "EXPIRED"].includes(state); }
-function deterministicId(...parts: string[]) {
-  return `qalc-${createHash("sha256").update(parts.join("\u001f")).digest("hex").slice(0, 32)}`;
-}

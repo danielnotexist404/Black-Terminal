@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Black-Terminal Pixi",
-  "version": "0.2.0",
+  "productName": "Black Terminal",
+  "version": "1.0.7",
   "identifier": "com.blacktriangle.blackterminalpixi",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -19,27 +19,60 @@
         "minHeight": 720,
         "resizable": true,
         "fullscreen": false,
-        "decorations": true
+        "decorations": true,
+        "backgroundColor": "#030405",
+        "backgroundThrottling": "disabled"
       }
     ],
     "security": {
-      "csp": "default-src 'self' tauri: asset:; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' asset: data: blob: https://flagcdn.com https://*.supabase.co; connect-src 'self' ipc: http://ipc.localhost https://black-terminal.live https://www.black-terminal.live https://jdwlspxzoudgzxcghbjo.supabase.co wss://jdwlspxzoudgzxcghbjo.supabase.co https://ipapi.co https://api.binance.com https://fapi.binance.com https://api.bybit.com https://www.okx.com wss://stream.binance.com:9443 wss://fstream.binance.com wss://stream.bybit.com wss://ws.okx.com:8443 wss://ws.kraken.com wss://api.hyperliquid.xyz wss://api-pub.bitfinex.com wss://ws-feed.exchange.coinbase.com; worker-src 'self' blob:"
+      "csp": "default-src 'self' tauri: asset:; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' asset: data: blob: https://flagcdn.com; connect-src 'self' ipc: http://ipc.localhost https://ipapi.co https://api.binance.com https://fapi.binance.com https://api.bybit.com https://www.okx.com wss://stream.binance.com:9443 wss://fstream.binance.com wss://stream.bybit.com wss://ws.okx.com:8443 wss://ws.kraken.com wss://api.hyperliquid.xyz wss://api-pub.bitfinex.com wss://ws-feed.exchange.coinbase.com; worker-src 'self' blob:"
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["msi"],
+    "targets": "all",
+    "publisher": "Black Triangle Group",
+    "homepage": "https://black-terminal.live",
+    "category": "Finance",
+    "shortDescription": "Local-first professional crypto trading and strategy automation terminal.",
+    "longDescription": "Black Terminal combines professional charting, market intelligence, strategy automation, encrypted local broker connectivity, and peer-to-peer collaboration in a native desktop application.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
-      "icons/icon.ico"
+      "icons/icon.icns",
+      "icons/icon.ico",
+      "icons/icon.png"
     ],
     "windows": {
+      "webviewInstallMode": {
+        "type": "offlineInstaller",
+        "silent": true
+      },
       "wix": {
         "bannerPath": "installer/wix-banner.bmp",
         "dialogImagePath": "installer/wix-dialog.bmp"
+      },
+      "nsis": {
+        "headerImage": "installer/nsis-header.bmp",
+        "sidebarImage": "installer/nsis-sidebar.bmp",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "installMode": "currentUser",
+        "languages": ["English"],
+        "compression": "lzma"
       }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "hardenedRuntime": true
+    },
+    "iOS": {
+      "minimumSystemVersion": "16.0"
+    },
+    "android": {
+      "minSdkVersion": 26,
+      "autoIncrementVersionCode": true
     }
   }
 }

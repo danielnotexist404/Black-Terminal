@@ -1,4 +1,9 @@
 import { blackCoreNotificationCenter } from "../../notifications/notificationCenter";
+import { getLocalDocument, putLocalDocument } from "../../core/local-runtime/localDocumentStore";
+import { isLocalOnlyRuntime } from "../../core/local-runtime/localRuntimeClient";
+import { getCachedLocalRuntimeStatus } from "../../core/local-runtime/localRuntimeClient";
+import { publishLocalP2p } from "../../core/local-runtime/localP2pClient";
+import { enqueueLocalP2pDirectMessage } from "../../core/local-runtime/localP2pOutbox";
 import {
   getCapabilities,
   resolveProductTier,
@@ -22,6 +27,8 @@ import type {
 } from "./types";
 
 const storageKey = "bt_professional_network_v1";
+const localNamespace = "professional-network";
+const localDocumentKey = "legacy-state-v1";
 
 const emptyState: ProfessionalNetworkState = {
   profiles: [],
@@ -37,6 +44,51 @@ const emptyState: ProfessionalNetworkState = {
   notifications: []
 };
 
+let encryptedLocalState: ProfessionalNetworkState | null = null;
+let localPersistenceChain = Promise.resolve();
+
+function normalizeState(parsed: Partial<ProfessionalNetworkState> | null | undefined): ProfessionalNetworkState {
+  return {
+    profiles: parsed?.profiles ?? [],
+    follows: parsed?.follows ?? [],
+    posts: parsed?.posts ?? [],
+    indicators: parsed?.indicators ?? [],
+    strategies: parsed?.strategies ?? [],
+    groups: (parsed?.groups ?? []).map((group) => ({
+      ...group,
+      publicSections: Array.isArray(group.publicSections) ? group.publicSections : []
+    })),
+    groupMembers: parsed?.groupMembers ?? [],
+    joinRequests: parsed?.joinRequests ?? [],
+    messages: parsed?.messages ?? [],
+    moderationEvents: parsed?.moderationEvents ?? [],
+    notifications: parsed?.notifications ?? []
+  };
+}
+
+/**
+ * Loads private profile/group state from the encrypted native document store
+ * before the synchronous legacy screens mount. A one-time plaintext browser
+ * cache is migrated and removed when found.
+ */
+export async function hydrateProfessionalNetworkStore() {
+  if (!isLocalOnlyRuntime()) return;
+  const saved = await getLocalDocument<ProfessionalNetworkState>(localNamespace, localDocumentKey);
+  if (saved) {
+    encryptedLocalState = normalizeState(saved.value);
+    localStorage.removeItem(storageKey);
+    return;
+  }
+  let migrated = normalizeState(null);
+  const legacy = localStorage.getItem(storageKey);
+  if (legacy) {
+    try { migrated = normalizeState(JSON.parse(legacy) as Partial<ProfessionalNetworkState>); } catch { /* Ignore corrupt browser cache. */ }
+  }
+  encryptedLocalState = migrated;
+  await putLocalDocument(localNamespace, localDocumentKey, migrated);
+  localStorage.removeItem(storageKey);
+}
+
 export function userIdFromUsername(username: string) {
   return `user:${username.trim().toLowerCase()}`;
 }
@@ -50,29 +102,71 @@ function now() {
   return Date.now();
 }
 
+function localPeerId() {
+  return isLocalOnlyRuntime() ? getCachedLocalRuntimeStatus()?.config?.peerId || "" : "";
+}
+
+function publicGroupEntity(group: InvestmentGroup): Record<string, unknown> {
+  const { passwordHash: _passwordHash, stats: _stats, ...safe } = group;
+  return {
+    ...safe,
+    ownerPeerId: group.ownerPeerId || localPeerId(),
+    stats: {
+      followerCount: group.stats.followerCount,
+      connectedInvestorCount: 0,
+      connectedEquity: 0,
+      monthlyReturn: group.publicSections.includes("performance") ? group.stats.monthlyReturn : null,
+      yearlyReturn: group.publicSections.includes("performance") ? group.stats.yearlyReturn : null,
+      totalReturn: group.publicSections.includes("performance") ? group.stats.totalReturn : null,
+      maxDrawdown: group.publicSections.includes("drawdown") ? group.stats.maxDrawdown : null,
+      currentDrawdown: group.publicSections.includes("drawdown") ? group.stats.currentDrawdown : null,
+      riskScore: group.publicSections.includes("risk") ? group.stats.riskScore : null,
+      winRate: group.publicSections.includes("performance") ? group.stats.winRate : null,
+      profitFactor: group.publicSections.includes("performance") ? group.stats.profitFactor : null,
+      averageTradeDuration: group.publicSections.includes("performance") ? group.stats.averageTradeDuration : null,
+      updatedAt: group.stats.updatedAt,
+      verified: false,
+    },
+  };
+}
+
+function broadcastInvestmentGroup(group: InvestmentGroup) {
+  if (!isLocalOnlyRuntime() || group.visibility !== "public" || group.status !== "active") return;
+  void publishLocalP2p("investment-groups", {
+    schemaVersion: 1,
+    kind: "group-directory-entry",
+    group: publicGroupEntity(group),
+  }).catch(() => undefined);
+}
+
+export function announceLocalInvestmentGroups() {
+  const peerId = localPeerId();
+  if (!peerId) return;
+  readState().groups
+    .filter((group) => group.ownerPeerId === peerId && group.visibility === "public" && group.status === "active")
+    .forEach(broadcastInvestmentGroup);
+}
+
+function directGroupEvent(peerId: string | undefined, kind: string, payload: Record<string, unknown>, id = makeId("group-p2p")) {
+  if (!isLocalOnlyRuntime() || !peerId || peerId === localPeerId()) return;
+  void enqueueLocalP2pDirectMessage({ peerId, messageId: id, category: `investment-group:${kind}`, payload: { schemaVersion: 1, kind, ...payload } }).catch((error) => {
+    blackCoreNotificationCenter.push({
+      severity: "warning",
+      title: "P2P Group Delivery Pending",
+      message: error instanceof Error ? error.message : "The peer is offline or unreachable. Re-open the group after reconnecting to retry.",
+    });
+  });
+}
+
 function readState(): ProfessionalNetworkState {
   if (typeof window === "undefined") return emptyState;
+
+  if (isLocalOnlyRuntime()) return structuredClone(encryptedLocalState ?? emptyState);
 
   try {
     const stored = localStorage.getItem(storageKey);
     if (!stored) return { ...emptyState };
-    const parsed = JSON.parse(stored) as Partial<ProfessionalNetworkState>;
-    return {
-      profiles: parsed.profiles ?? [],
-      follows: parsed.follows ?? [],
-      posts: parsed.posts ?? [],
-      indicators: parsed.indicators ?? [],
-      strategies: parsed.strategies ?? [],
-      groups: (parsed.groups ?? []).map((group) => ({
-        ...group,
-        publicSections: Array.isArray(group.publicSections) ? group.publicSections : []
-      })),
-      groupMembers: parsed.groupMembers ?? [],
-      joinRequests: parsed.joinRequests ?? [],
-      messages: parsed.messages ?? [],
-      moderationEvents: parsed.moderationEvents ?? [],
-      notifications: parsed.notifications ?? []
-    };
+    return normalizeState(JSON.parse(stored) as Partial<ProfessionalNetworkState>);
   } catch {
     return { ...emptyState };
   }
@@ -80,6 +174,26 @@ function readState(): ProfessionalNetworkState {
 
 function writeState(state: ProfessionalNetworkState) {
   if (typeof window === "undefined") return;
+  if (isLocalOnlyRuntime()) {
+    encryptedLocalState = structuredClone(state);
+    localPersistenceChain = localPersistenceChain
+      .catch(() => undefined)
+      .then(async () => {
+        const saved = await putLocalDocument(localNamespace, localDocumentKey, encryptedLocalState);
+        if (!saved) throw new Error("The encrypted professional-network store is unavailable.");
+      })
+      .catch((error) => {
+        console.error("Failed to persist encrypted professional-network state", error);
+        blackCoreNotificationCenter.push({
+          severity: "error",
+          title: "Local Network Save Failed",
+          message: "A professional-network change remains in memory but was not durably committed. Restarting now could lose it."
+        });
+      });
+    localStorage.removeItem(storageKey);
+    window.dispatchEvent(new CustomEvent("bt-professional-network-updated"));
+    return;
+  }
   localStorage.setItem(storageKey, JSON.stringify(state));
 }
 
@@ -216,6 +330,192 @@ export function getProfessionalNetworkSnapshot(user: CapabilityUser) {
       .filter(Boolean) as InvestmentGroup[],
     notifications: state.notifications.filter((item) => item.userId === profile.userId)
   };
+}
+
+export function listAllLocalInvestmentGroups() {
+  return readState().groups;
+}
+
+/**
+ * Returns an isolated snapshot for local execution-authority checks. Callers
+ * must never mutate the returned value or treat group membership alone as a
+ * broker trading mandate.
+ */
+export function getLocalProfessionalNetworkState() {
+  return readState();
+}
+
+export function flushProfessionalNetworkStore() {
+  return localPersistenceChain;
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function remoteGroup(value: unknown, sourcePeerId: string): InvestmentGroup | null {
+  const raw = record(value);
+  if (!String(raw.id || "").trim() || String(raw.ownerPeerId || "") !== sourcePeerId) return null;
+  if (String(raw.visibility || "") !== "public" || String(raw.status || "") !== "active") return null;
+  const stats = record(raw.stats);
+  const timestamp = now();
+  return {
+    id: String(raw.id),
+    ownerUserId: `peer:${sourcePeerId}`,
+    ownerUsername: String(raw.ownerUsername || `peer-${sourcePeerId.slice(-10)}`).slice(0, 100),
+    ownerPeerId: sourcePeerId,
+    firmName: String(raw.firmName || "Investment Group").slice(0, 160),
+    slug: String(raw.slug || raw.id).slice(0, 160),
+    description: String(raw.description || "").slice(0, 4_000),
+    bio: String(raw.bio || "").slice(0, 4_000),
+    logoUrl: String(raw.logoUrl || "").slice(0, 2_000),
+    bannerUrl: String(raw.bannerUrl || "").slice(0, 2_000),
+    visibility: "public",
+    accessMode: ["open", "approval_required", "invite_only", "password_protected"].includes(String(raw.accessMode)) ? raw.accessMode as InvestmentGroup["accessMode"] : "approval_required",
+    tradingStyleTags: Array.isArray(raw.tradingStyleTags) ? raw.tradingStyleTags.map(String).slice(0, 30) : [],
+    acceptedExchanges: Array.isArray(raw.acceptedExchanges) ? raw.acceptedExchanges.map(String).slice(0, 30) : [],
+    acceptedWallets: Array.isArray(raw.acceptedWallets) ? raw.acceptedWallets.map(String).slice(0, 30) : [],
+    minimumEquity: raw.minimumEquity == null ? undefined : Number(raw.minimumEquity),
+    maxFollowers: raw.maxFollowers == null ? undefined : Number(raw.maxFollowers),
+    approvalRequired: raw.approvalRequired !== false,
+    publicSections: Array.isArray(raw.publicSections) ? raw.publicSections.filter((section): section is InvestmentGroupPublicSection => ["performance", "drawdown", "positions", "research", "members", "trading_room", "risk"].includes(String(section))) : [],
+    status: "active",
+    riskDisclaimer: String(raw.riskDisclaimer || "Historical performance is not a guarantee of future returns.").slice(0, 2_000),
+    managerTermsAccepted: true,
+    createdAt: Number(raw.createdAt || timestamp),
+    updatedAt: Number(raw.updatedAt || timestamp),
+    stats: {
+      followerCount: Number(stats.followerCount || 0),
+      connectedInvestorCount: 0,
+      connectedEquity: 0,
+      monthlyReturn: stats.monthlyReturn == null ? null : Number(stats.monthlyReturn),
+      yearlyReturn: stats.yearlyReturn == null ? null : Number(stats.yearlyReturn),
+      totalReturn: stats.totalReturn == null ? null : Number(stats.totalReturn),
+      maxDrawdown: stats.maxDrawdown == null ? null : Number(stats.maxDrawdown),
+      currentDrawdown: stats.currentDrawdown == null ? null : Number(stats.currentDrawdown),
+      riskScore: stats.riskScore == null ? null : Number(stats.riskScore),
+      winRate: stats.winRate == null ? null : Number(stats.winRate),
+      profitFactor: stats.profitFactor == null ? null : Number(stats.profitFactor),
+      averageTradeDuration: stats.averageTradeDuration == null ? null : String(stats.averageTradeDuration).slice(0, 100),
+      updatedAt: Number(stats.updatedAt || timestamp),
+      verified: false,
+    },
+  };
+}
+
+export function ingestLocalP2pInvestmentGroupDirectory(sourcePeerId: string, value: unknown) {
+  const group = remoteGroup(value, sourcePeerId);
+  if (!group || sourcePeerId === localPeerId()) return false;
+  mutate((state) => {
+    const existing = state.groups.find((item) => item.id === group.id);
+    if (existing && existing.ownerPeerId && existing.ownerPeerId !== sourcePeerId) return;
+    if (existing?.ownerUserId === userIdFromUsername(getCachedLocalRuntimeStatus()?.config?.profile.username || "")) return;
+    state.groups = [group, ...state.groups.filter((item) => item.id !== group.id)];
+  });
+  return true;
+}
+
+export function ingestLocalP2pInvestmentGroupJoinRequest(sourcePeerId: string, groupId: string, value: unknown) {
+  const raw = record(value);
+  const state = readState();
+  const group = state.groups.find((item) => item.id === groupId && item.ownerPeerId === localPeerId());
+  if (!group || String(raw.requesterPeerId || "") !== sourcePeerId) return false;
+  if (group.accessMode === "invite_only") return false;
+  if (group.accessMode === "password_protected" && group.passwordHash && String(raw.providedPasswordHash || "") !== group.passwordHash) return false;
+  const id = String(raw.id || "").slice(0, 180);
+  if (!id) return false;
+  mutate((draft) => {
+    if (draft.joinRequests.some((request) => request.id === id)) return;
+    const request: InvestmentGroupJoinRequest = {
+      id,
+      groupId,
+      userId: `peer:${sourcePeerId}`,
+      username: String(raw.username || `peer-${sourcePeerId.slice(-10)}`).slice(0, 100),
+      requesterPeerId: sourcePeerId,
+      message: String(raw.message || "").slice(0, 2_000),
+      status: "pending",
+      createdAt: Number(raw.createdAt || now()),
+    };
+    draft.joinRequests.unshift(request);
+    draft.notifications.unshift(makeNotification(group.ownerUserId, "investment_group_join_request", "Encrypted P2P Join Request", `${request.username} requested access to ${group.firmName}.`, { groupId, requestId: id, sourcePeerId }));
+  });
+  return true;
+}
+
+export function ingestLocalP2pInvestmentGroupDecision(sourcePeerId: string, groupValue: unknown, requestId: string, action: "approve" | "decline") {
+  const group = remoteGroup(groupValue, sourcePeerId);
+  if (!group) return false;
+  const identity = ownerIdentityForInbound();
+  mutate((state) => {
+    state.groups = [group, ...state.groups.filter((item) => item.id !== group.id)];
+    const request = state.joinRequests.find((item) => item.id === requestId && item.groupId === group.id);
+    if (request) {
+      request.status = action === "approve" ? "approved" : "declined";
+      request.reviewedAt = now();
+      request.reviewedBy = `peer:${sourcePeerId}`;
+    }
+    if (action === "approve" && !state.groupMembers.some((member) => member.groupId === group.id && member.userId === identity.userId && member.status === "active")) {
+      state.groupMembers.unshift({
+        id: makeId("member"),
+        groupId: group.id,
+        userId: identity.userId,
+        username: identity.username,
+        peerId: identity.peerId,
+        role: "member",
+        status: "active",
+        joinedAt: now(),
+        createdAt: now(),
+      });
+    }
+    state.notifications.unshift(makeNotification(identity.userId, action === "approve" ? "join_request_approved" : "join_request_declined", action === "approve" ? "P2P Join Request Approved" : "P2P Join Request Declined", `${group.firmName} ${action === "approve" ? "approved" : "declined"} your request.`, { groupId: group.id, requestId }));
+  });
+  return true;
+}
+
+function ownerIdentityForInbound() {
+  const config = getCachedLocalRuntimeStatus()?.config;
+  if (!config) throw new Error("The local owner identity is unavailable.");
+  return { userId: userIdFromUsername(config.profile.username), username: config.profile.username, peerId: config.peerId };
+}
+
+export function ingestLocalP2pInvestmentGroupMessage(sourcePeerId: string, groupId: string, value: unknown) {
+  const raw = record(value);
+  const state = readState();
+  const group = state.groups.find((item) => item.id === groupId);
+  if (!group) return false;
+  const ownerRelay = group.ownerPeerId === sourcePeerId && raw.relayedByOwner === true;
+  const originPeerId = ownerRelay ? String(raw.originPeerId || sourcePeerId) : sourcePeerId;
+  const remoteMember = state.groupMembers.find((member) => member.groupId === groupId && member.peerId === originPeerId && member.status === "active");
+  const owner = group.ownerPeerId === sourcePeerId;
+  if (!remoteMember && !owner) return false;
+  const id = String(raw.id || "").slice(0, 180);
+  const body = String(raw.body || "").trim().slice(0, 8_000);
+  if (!id || !body) return false;
+  mutate((draft) => {
+    if (draft.messages.some((message) => message.id === id)) return;
+    draft.messages.unshift({
+      id,
+      groupId,
+      channel: ["announcements", "general", "research", "trades"].includes(String(raw.channel)) ? raw.channel as TradingRoomChannel : "general",
+      userId: `peer:${originPeerId}`,
+      username: String(raw.username || remoteMember?.username || group.ownerUsername).slice(0, 100),
+      role: ownerRelay
+        ? ["owner", "manager", "member"].includes(String(raw.role)) ? raw.role as InvestmentGroupMember["role"] : "member"
+        : owner ? "owner" : remoteMember?.role || "member",
+      body,
+      metadata: { transport: "NOISE_AUTHENTICATED_DIRECT" },
+      createdAt: Number(raw.createdAt || now()),
+    });
+  });
+  if (group.ownerPeerId === localPeerId() && sourcePeerId !== localPeerId()) {
+    state.groupMembers
+      .filter((member) => member.groupId === groupId && member.status === "active" && member.peerId && ![sourcePeerId, localPeerId()].includes(member.peerId))
+      .forEach((member) => directGroupEvent(member.peerId, "group-room-message", {
+        groupId,
+        message: { ...raw, originPeerId, relayedByOwner: true },
+      }, `relay:${id}:${member.peerId}`));
+  }
+  return true;
 }
 
 export function getPublicProfessionalProfileSnapshot(username: string) {
@@ -377,6 +677,7 @@ export function createInvestmentGroup(user: CapabilityUser, draft: Omit<Investme
     id: makeId("group"),
     ownerUserId: owner.userId,
     ownerUsername: owner.username,
+    ownerPeerId: localPeerId() || undefined,
     slug: slugify(draft.firmName),
     status: "active",
     createdAt: timestamp,
@@ -406,6 +707,7 @@ export function createInvestmentGroup(user: CapabilityUser, draft: Omit<Investme
       groupId: group.id,
       userId: owner.userId,
       username: owner.username,
+      peerId: localPeerId() || undefined,
       role: "owner",
       status: "active",
       joinedAt: timestamp,
@@ -419,6 +721,8 @@ export function createInvestmentGroup(user: CapabilityUser, draft: Omit<Investme
     title: "Investment Group Created",
     message: `${group.firmName} was added to the professional network.`
   });
+
+  broadcastInvestmentGroup(group);
 
   return group;
 }
@@ -470,6 +774,8 @@ export function updateInvestmentGroup(
     title: "Investment Group Updated",
     message: `${updated?.firmName ?? group.firmName} settings were saved.`
   });
+
+  broadcastInvestmentGroup(updated ?? group);
 
   return updated ?? group;
 }
@@ -600,6 +906,9 @@ export function requestToJoinGroup(user: CapabilityUser, groupId: string, messag
   const state = readState();
   const group = state.groups.find((item) => item.id === groupId);
   if (!group) throw new Error("Investment group not found.");
+  if (group.accessMode === "invite_only" && group.ownerPeerId !== localPeerId()) {
+    throw new Error("This group accepts direct invitations only.");
+  }
   if (group.accessMode === "password_protected" && group.passwordHash && group.passwordHash !== passwordHash) {
     throw new Error("Investment group password check failed.");
   }
@@ -615,6 +924,7 @@ export function requestToJoinGroup(user: CapabilityUser, groupId: string, messag
     groupId,
     userId: profile.userId,
     username: profile.username,
+    requesterPeerId: localPeerId() || undefined,
     message,
     status: "pending",
     createdAt: now()
@@ -624,6 +934,18 @@ export function requestToJoinGroup(user: CapabilityUser, groupId: string, messag
     draftState.joinRequests.unshift(request);
     draftState.notifications.unshift(makeNotification(group.ownerUserId, "investment_group_join_request", "Investment Group Join Request", `${profile.displayName} requested access to ${group.firmName}.`, { groupId, requestId: request.id }));
   });
+
+  directGroupEvent(group.ownerPeerId, "group-join-request", {
+    groupId: group.id,
+    request: {
+      id: request.id,
+      username: request.username,
+      message: request.message,
+      requesterPeerId: request.requesterPeerId,
+      providedPasswordHash: passwordHash,
+      createdAt: request.createdAt,
+    },
+  }, request.id);
 
   return request;
 }
@@ -652,6 +974,7 @@ export function reviewJoinRequest(user: CapabilityUser, requestId: string, actio
           groupId: group.id,
           userId: target.userId,
           username: target.username,
+          peerId: target.requesterPeerId,
           role: "member",
           status: "active",
           joinedAt: now(),
@@ -670,6 +993,20 @@ export function reviewJoinRequest(user: CapabilityUser, requestId: string, actio
       { groupId: group.id, requestId }
     ));
   });
+
+  directGroupEvent(request.requesterPeerId, "group-join-decision", {
+    group: publicGroupEntity(group),
+    requestId,
+    action,
+    member: action === "approve" ? {
+      groupId: group.id,
+      username: request.username,
+      peerId: request.requesterPeerId,
+      role: "member",
+      status: "active",
+      joinedAt: now(),
+    } : null,
+  }, `group-decision:${requestId}:${action}`);
 }
 
 export function postGroupMessage(user: CapabilityUser, groupId: string, channel: TradingRoomChannel, body: string) {
@@ -710,6 +1047,23 @@ export function postGroupMessage(user: CapabilityUser, groupId: string, channel:
         ));
       });
   });
+
+  const roomPeers = new Set([
+    group.ownerPeerId,
+    ...state.groupMembers.filter((item) => item.groupId === groupId && item.status === "active").map((item) => item.peerId),
+  ].filter((peerId): peerId is string => Boolean(peerId && peerId !== localPeerId())));
+  roomPeers.forEach((peerId) => directGroupEvent(peerId, "group-room-message", {
+      groupId,
+      message: {
+        id: message.id,
+        channel: message.channel,
+        username: message.username,
+        role: message.role,
+        originPeerId: localPeerId(),
+        body: message.body,
+        createdAt: message.createdAt,
+      },
+    }, message.id));
 
   return message;
 }

@@ -1,6 +1,7 @@
 import { Archive, ArrowLeft, BellOff, Check, ImagePlus, Inbox, MessageSquare, Send } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "../../../lib/supabase";
+import { isLocalOnlyRuntime } from "../../../core/local-runtime/localRuntimeClient";
 import { createIdempotencyKey, professionalNetworkApi, sanitizeNetworkImage } from "../networkApi";
 import type { ConversationSummary, DirectMessage, SocialPost } from "../types";
 
@@ -46,7 +47,7 @@ export function MessagingPanel({ currentUserId, initialConversationId, sharedPos
   useEffect(() => {
     if (!selectedId) { setMessages([]); return; }
     loadMessages(selectedId);
-    if (!supabase) return;
+    if (!supabase || isLocalOnlyRuntime()) return;
     channelRef.current?.unsubscribe();
     const channel = supabase.channel(`professional-conversation:${selectedId}`, { config: { broadcast: { self: false } } })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `conversation_id=eq.${selectedId}` }, () => loadMessages(selectedId))

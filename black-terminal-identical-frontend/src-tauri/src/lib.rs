@@ -4,8 +4,8 @@ use std::{net::SocketAddr, time::Duration};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager, Runtime, WindowEvent,
 };
-use tauri::{Emitter, Manager, Runtime, WindowEvent};
 
 mod bybit_local;
 mod credential_vault;
@@ -123,6 +123,7 @@ async fn restricted_client(url: &reqwest::Url) -> Result<reqwest::Client, String
         .map_err(|_| "Restricted HTTP client could not be initialized".to_string())
 }
 
+#[cfg(desktop)]
 fn show_main_window<R: Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -196,6 +197,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(local_p2p::LocalP2pManager::default())
         .setup(|app| {
+            credential_vault::initialize_credential_store().map_err(std::io::Error::other)?;
             install_desktop_tray(app)?;
             local_execution::start_local_execution_runtime(app.handle().clone())
                 .map_err(std::io::Error::other)?;

@@ -12,6 +12,33 @@ const VAULT_SERVICE: &str = "com.blacktriangle.blackterminal";
 const CREDENTIAL_INDEX_FILE: &str = "credential-index-v1.json";
 static CREDENTIAL_INDEX_LOCK: Mutex<()> = Mutex::new(());
 
+pub(crate) fn initialize_credential_store() -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    let store = android_native_keyring_store::Store::new();
+    #[cfg(target_os = "ios")]
+    let store = apple_native_keyring_store::protected::Store::new();
+    #[cfg(target_os = "macos")]
+    let store = apple_native_keyring_store::keychain::Store::new();
+    #[cfg(target_os = "linux")]
+    let store = zbus_secret_service_keyring_store::Store::new();
+    #[cfg(target_os = "windows")]
+    let store = windows_native_keyring_store::Store::new();
+    #[cfg(not(any(
+        target_os = "android",
+        target_os = "ios",
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "windows"
+    )))]
+    return Err("This operating system has no certified credential vault adapter".to_string());
+
+    let store = store.map_err(|_| {
+        "The native operating-system credential vault could not be initialized".to_string()
+    })?;
+    keyring_core::set_default_store(store);
+    Ok(())
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ExchangeCredentialInput {
@@ -95,8 +122,8 @@ fn validate_secret(value: &str, label: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn vault_entry(vault_key: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(VAULT_SERVICE, vault_key)
+fn vault_entry(vault_key: &str) -> Result<keyring_core::Entry, String> {
+    keyring_core::Entry::new(VAULT_SERVICE, vault_key)
         .map_err(|_| "The operating-system credential vault is unavailable".to_string())
 }
 
@@ -227,7 +254,7 @@ fn store<R: Runtime>(
     let entry = vault_entry(&vault_key)?;
     let previous_secret = match entry.get_password() {
         Ok(value) => Some(Zeroizing::new(value)),
-        Err(keyring::Error::NoEntry) => None,
+        Err(keyring_core::Error::NoEntry) => None,
         Err(_) => return Err(
             "The operating-system credential vault could not read the existing broker credential"
                 .to_string(),
@@ -276,7 +303,7 @@ fn delete<R: Runtime>(app: &AppHandle<R>, account_id: &str) -> Result<(), String
     for reference in &matching {
         let entry = vault_entry(&reference.vault_key)?;
         match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Ok(()) | Err(keyring_core::Error::NoEntry) => {}
             Err(_) => {
                 return Err("The operating-system credential vault refused deletion".to_string())
             }
@@ -311,7 +338,7 @@ pub(crate) fn set_internal_secret(vault_key: &str, value: &str) -> Result<(), St
 pub(crate) fn get_internal_secret(vault_key: &str) -> Result<Option<Zeroizing<String>>, String> {
     match vault_entry(vault_key)?.get_password() {
         Ok(value) => Ok(Some(Zeroizing::new(value))),
-        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(keyring_core::Error::NoEntry) => Ok(None),
         Err(_) => Err(
             "The operating-system credential vault could not unlock the local identity".to_string(),
         ),

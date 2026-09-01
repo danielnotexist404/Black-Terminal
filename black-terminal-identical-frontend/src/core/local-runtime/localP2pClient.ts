@@ -7,6 +7,10 @@ export type LocalP2pStatus = {
   listenAddresses: string[];
   externalAddresses: string[];
   connectedPeers: string[];
+  configuredRelayAddresses: string[];
+  activeRelayAddresses: string[];
+  holePunchSuccesses: number;
+  holePunchFailures: number;
   receivedMessages: number;
   transportEncryption: "NOISE_XX_LINK_ENCRYPTION";
   discovery: string[];
@@ -24,11 +28,14 @@ export type LocalP2pInboxMessage = {
 };
 
 type TrustedPeerCatalog = { addresses: string[]; updatedAt: number };
+type RelayCatalog = { addresses: string[]; updatedAt: number };
 const TRUSTED_PEER_NAMESPACE = "p2p-network";
 const TRUSTED_PEER_KEY = "trusted-addresses";
+const RELAY_KEY = "relay-addresses";
 
 export async function startLocalP2p() {
-  const status = await invoke<LocalP2pStatus>("local_p2p_start");
+  const relayAddresses = await listConfiguredLocalP2pRelays().catch(() => []);
+  const status = await invoke<LocalP2pStatus>("local_p2p_start", { relayAddresses });
   const peers = await listTrustedLocalP2pPeers().catch(() => []);
   await Promise.allSettled(peers.map((address) => invoke<void>("local_p2p_dial", { address })));
   return status;
@@ -60,6 +67,27 @@ export async function listTrustedLocalP2pPeers() {
 
 export async function forgetTrustedLocalP2pPeer(address: string) {
   await updateTrustedPeers((current) => current.filter((item) => item !== address));
+}
+
+export async function listConfiguredLocalP2pRelays() {
+  const document = await getLocalDocument<RelayCatalog>(TRUSTED_PEER_NAMESPACE, RELAY_KEY);
+  return document?.value.addresses.filter((item) => typeof item === "string" && item.length <= 512).slice(0, 4) || [];
+}
+
+export async function saveConfiguredLocalP2pRelays(values: string[]) {
+  const addresses = Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)));
+  if (addresses.length > 4) throw new Error("Configure no more than four public relay addresses.");
+  if (addresses.some((item) => item.length > 512)) throw new Error("A relay multiaddress is too long.");
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const document = await getLocalDocument<RelayCatalog>(TRUSTED_PEER_NAMESPACE, RELAY_KEY);
+    try {
+      await putLocalDocument(TRUSTED_PEER_NAMESPACE, RELAY_KEY, { addresses, updatedAt: Date.now() }, document?.revision ?? 0);
+      return addresses;
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("LOCAL_DOCUMENT_REVISION_CONFLICT") || attempt === 2) throw error;
+    }
+  }
+  return addresses;
 }
 
 async function updateTrustedPeers(update: (current: string[]) => string[]) {

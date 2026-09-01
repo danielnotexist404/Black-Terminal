@@ -1,8 +1,10 @@
 use futures::StreamExt;
 use libp2p::{
-    gossipsub, identify,
+    dcutr, gossipsub, identify,
     kad::{self, store::MemoryStore},
-    mdns, noise, request_response,
+    mdns,
+    multiaddr::Protocol,
+    noise, relay, request_response,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, upnp, yamux, Multiaddr, PeerId, StreamProtocol, SwarmBuilder,
 };
@@ -25,6 +27,8 @@ use crate::{
 };
 
 const MAX_P2P_MESSAGE_BYTES: usize = 64 * 1024;
+const MAX_RELAY_ADDRESSES: usize = 4;
+const MAX_MULTIADDRESS_BYTES: usize = 512;
 const TOPICS: &[&str] = &[
     "black-terminal.social.v1",
     "black-terminal.alerts.v1",
@@ -33,6 +37,8 @@ const TOPICS: &[&str] = &[
 
 #[derive(NetworkBehaviour)]
 struct BlackTerminalP2pBehaviour {
+    relay_client: relay::client::Behaviour,
+    dcutr: dcutr::Behaviour,
     gossipsub: gossipsub::Behaviour,
     identify: identify::Behaviour,
     kademlia: kad::Behaviour<MemoryStore>,
@@ -72,7 +78,9 @@ enum P2pCommand {
         request: DirectRequest,
         reply: oneshot::Sender<Result<String, String>>,
     },
-    Stop,
+    Stop {
+        reply: Option<oneshot::Sender<()>>,
+    },
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -83,6 +91,10 @@ pub(crate) struct LocalP2pStatus {
     listen_addresses: Vec<String>,
     external_addresses: Vec<String>,
     connected_peers: Vec<String>,
+    configured_relay_addresses: Vec<String>,
+    active_relay_addresses: Vec<String>,
+    hole_punch_successes: u64,
+    hole_punch_failures: u64,
     received_messages: u64,
     transport_encryption: &'static str,
     discovery: Vec<&'static str>,
@@ -102,8 +114,8 @@ impl Default for LocalP2pManager {
             sender: Mutex::new(None),
             status: Arc::new(RwLock::new(LocalP2pStatus {
                 transport_encryption: "NOISE_XX_LINK_ENCRYPTION",
-                discovery: vec!["MDNS_LAN", "DIRECT_MULTIADDR", "TRUSTED_PEER_KADEMLIA_MESH", "UPNP_PORT_MAPPING"],
-                limitation: "The encrypted Kademlia mesh expands discovery after one trusted peer is reachable, and UPnP can expose a direct address when the router permits it. First contact still requires a shared trusted address; symmetric NAT and restrictive firewalls require a separately operated relay/rendezvous service.",
+                discovery: vec!["MDNS_LAN", "DIRECT_MULTIADDR", "TRUSTED_PEER_KADEMLIA_MESH", "UPNP_PORT_MAPPING", "CONFIGURED_CIRCUIT_RELAY", "DCUTR_HOLE_PUNCH"],
+                limitation: "Internet-wide reachability requires at least one operator-controlled public relay reservation. DCUtR attempts a direct upgrade after relayed contact, but restrictive or symmetric NAT may keep traffic on the encrypted relay circuit.",
                 ..LocalP2pStatus::default()
             })),
         }
@@ -236,9 +248,61 @@ fn list_inbox<R: Runtime>(
         .collect()
 }
 
+fn validate_relay_addresses(values: Vec<String>) -> Result<Vec<Multiaddr>, String> {
+    if values.len() > MAX_RELAY_ADDRESSES {
+        return Err(format!(
+            "Configure no more than {MAX_RELAY_ADDRESSES} relay addresses"
+        ));
+    }
+    let mut normalized = Vec::new();
+    let mut seen = HashSet::new();
+    for value in values {
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        if value.len() > MAX_MULTIADDRESS_BYTES {
+            return Err("A relay multiaddress is too long".into());
+        }
+        let address: Multiaddr = value
+            .parse()
+            .map_err(|_| "Enter a valid relay multiaddress".to_string())?;
+        if !matches!(address.iter().last(), Some(Protocol::P2p(_))) {
+            return Err("A relay address must end with /p2p/<relay-peer-id>".into());
+        }
+        if address
+            .iter()
+            .any(|protocol| matches!(protocol, Protocol::P2pCircuit))
+        {
+            return Err("Configure the relay base address without /p2p-circuit".into());
+        }
+        if !address.iter().any(|protocol| {
+            matches!(
+                protocol,
+                Protocol::Ip4(_)
+                    | Protocol::Ip6(_)
+                    | Protocol::Dns(_)
+                    | Protocol::Dns4(_)
+                    | Protocol::Dns6(_)
+            )
+        }) || !address
+            .iter()
+            .any(|protocol| matches!(protocol, Protocol::Tcp(_)))
+        {
+            return Err("A relay address must contain an IP/DNS host and TCP port".into());
+        }
+        let encoded = address.to_string();
+        if seen.insert(encoded) {
+            normalized.push(address);
+        }
+    }
+    Ok(normalized)
+}
+
 async fn start_node<R: Runtime>(
     app: AppHandle<R>,
     manager: &LocalP2pManager,
+    relay_addresses: Vec<String>,
 ) -> Result<LocalP2pStatus, String> {
     if !p2p_enabled(&app)? {
         return Err("P2P is disabled in this local runtime profile".into());
@@ -252,6 +316,7 @@ async fn start_node<R: Runtime>(
         return Ok(manager.status.read().await.clone());
     }
     initialize_inbox(&app)?;
+    let relay_addresses = validate_relay_addresses(relay_addresses)?;
     let keypair = load_or_create_local_identity()?;
     let peer_id = keypair.public().to_peer_id();
     let mut swarm = SwarmBuilder::with_existing_identity(keypair)
@@ -262,7 +327,11 @@ async fn start_node<R: Runtime>(
             yamux::Config::default,
         )
         .map_err(|_| "The encrypted P2P transport could not be initialized".to_string())?
-        .with_behaviour(|key| {
+        .with_dns()
+        .map_err(|_| "The P2P DNS transport could not be initialized".to_string())?
+        .with_relay_client(noise::Config::new, yamux::Config::default)
+        .map_err(|_| "The encrypted circuit-relay transport could not be initialized".to_string())?
+        .with_behaviour(|key, relay_client| {
             let message_id_fn = |message: &gossipsub::Message| {
                 let mut hasher = DefaultHasher::new();
                 message.data.hash(&mut hasher);
@@ -302,6 +371,8 @@ async fn start_node<R: Runtime>(
                 request_response::Config::default().with_request_timeout(Duration::from_secs(20)),
             );
             Ok(BlackTerminalP2pBehaviour {
+                relay_client,
+                dcutr: dcutr::Behaviour::new(local_peer_id),
                 gossipsub,
                 identify,
                 kademlia,
@@ -328,6 +399,16 @@ async fn start_node<R: Runtime>(
                 .map_err(|_| "The local P2P listen address is invalid".to_string())?,
         )
         .map_err(|_| "The local P2P listener could not start".to_string())?;
+    for relay_address in &relay_addresses {
+        swarm
+            .dial(relay_address.clone())
+            .map_err(|error| format!("The configured relay could not be dialed: {error}"))?;
+        swarm
+            .listen_on(relay_address.clone().with(Protocol::P2pCircuit))
+            .map_err(|error| {
+                format!("The configured relay reservation could not start: {error}")
+            })?;
+    }
 
     let (sender, mut receiver) = mpsc::channel::<P2pCommand>(256);
     *manager
@@ -339,11 +420,16 @@ async fn start_node<R: Runtime>(
         let mut current = status.write().await;
         current.running = true;
         current.peer_id = peer_id.to_string();
+        current.configured_relay_addresses =
+            relay_addresses.iter().map(ToString::to_string).collect();
+        current.active_relay_addresses.clear();
+        current.global_relay_configured = false;
         current.last_error = None;
     }
     let initial = status.read().await.clone();
     tauri::async_runtime::spawn(async move {
         let mut connected = HashSet::<PeerId>::new();
+        let mut stop_reply = None;
         let mut pending_direct = HashMap::<
             request_response::OutboundRequestId,
             oneshot::Sender<Result<String, String>>,
@@ -385,7 +471,11 @@ async fn start_node<R: Runtime>(
                         let request_id = swarm.behaviour_mut().direct.send_request(&peer_id, request);
                         pending_direct.insert(request_id, reply);
                     }
-                    Some(P2pCommand::Stop) | None => break,
+                    Some(P2pCommand::Stop { reply }) => {
+                        stop_reply = reply;
+                        break;
+                    }
+                    None => break,
                 },
                 event = swarm.select_next_some() => match event {
                     SwarmEvent::Behaviour(BlackTerminalP2pBehaviourEvent::Mdns(mdns::Event::Discovered(peers))) => {
@@ -498,10 +588,30 @@ async fn start_node<R: Runtime>(
                         }
                     }
                     SwarmEvent::NewListenAddr { address, .. } => {
+                        let relayed = address.iter().any(|protocol| matches!(protocol, Protocol::P2pCircuit));
                         let address = format!("{address}/p2p/{peer_id}");
                         let mut current = status.write().await;
                         if !current.listen_addresses.contains(&address) {
-                            current.listen_addresses.push(address);
+                            current.listen_addresses.push(address.clone());
+                        }
+                        if relayed && !current.active_relay_addresses.contains(&address) {
+                            current.active_relay_addresses.push(address);
+                            current.global_relay_configured = true;
+                        }
+                    }
+                    SwarmEvent::ExpiredListenAddr { address, .. } => {
+                        let address = format!("{address}/p2p/{peer_id}");
+                        let mut current = status.write().await;
+                        current.listen_addresses.retain(|item| item != &address);
+                        current.active_relay_addresses.retain(|item| item != &address);
+                        current.global_relay_configured = !current.active_relay_addresses.is_empty();
+                    }
+                    SwarmEvent::Behaviour(BlackTerminalP2pBehaviourEvent::Dcutr(event)) => {
+                        let mut current = status.write().await;
+                        if event.result.is_ok() {
+                            current.hole_punch_successes = current.hole_punch_successes.saturating_add(1);
+                        } else {
+                            current.hole_punch_failures = current.hole_punch_failures.saturating_add(1);
                         }
                     }
                     SwarmEvent::ConnectionEstablished { peer_id, .. } => {
@@ -517,7 +627,15 @@ async fn start_node<R: Runtime>(
                 }
             }
         }
-        status.write().await.running = false;
+        let mut current = status.write().await;
+        current.running = false;
+        current.connected_peers.clear();
+        current.active_relay_addresses.clear();
+        current.global_relay_configured = false;
+        drop(current);
+        if let Some(reply) = stop_reply {
+            let _ = reply.send(());
+        }
     });
     Ok(initial)
 }
@@ -526,8 +644,9 @@ async fn start_node<R: Runtime>(
 pub(crate) async fn local_p2p_start<R: Runtime>(
     app: AppHandle<R>,
     manager: State<'_, LocalP2pManager>,
+    relay_addresses: Option<Vec<String>>,
 ) -> Result<LocalP2pStatus, String> {
-    start_node(app, &manager).await
+    start_node(app, &manager, relay_addresses.unwrap_or_default()).await
 }
 
 #[tauri::command]
@@ -541,7 +660,22 @@ pub(crate) async fn local_p2p_status(
 pub(crate) async fn local_p2p_stop(
     manager: State<'_, LocalP2pManager>,
 ) -> Result<LocalP2pStatus, String> {
-    stop_local_p2p(&manager);
+    let sender = manager
+        .sender
+        .lock()
+        .map_err(|_| "The local P2P manager lock is poisoned".to_string())?
+        .take();
+    if let Some(sender) = sender {
+        let (reply, stopped) = oneshot::channel();
+        sender
+            .send(P2pCommand::Stop { reply: Some(reply) })
+            .await
+            .map_err(|_| "The local P2P node stopped before acknowledging shutdown".to_string())?;
+        tokio::time::timeout(Duration::from_secs(5), stopped)
+            .await
+            .map_err(|_| "The local P2P node did not stop within five seconds".to_string())?
+            .map_err(|_| "The local P2P shutdown acknowledgement was lost".to_string())?;
+    }
     let mut status = manager.status.write().await;
     status.running = false;
     status.connected_peers.clear();
@@ -661,7 +795,7 @@ pub(crate) async fn local_p2p_inbox<R: Runtime>(
 pub(crate) fn stop_local_p2p(manager: &LocalP2pManager) {
     if let Ok(mut sender) = manager.sender.lock() {
         if let Some(sender) = sender.take() {
-            let _ = sender.try_send(P2pCommand::Stop);
+            let _ = sender.try_send(P2pCommand::Stop { reply: None });
         }
     }
 }
@@ -671,4 +805,25 @@ fn unix_millis() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_relay_addresses;
+
+    const PEER: &str = "12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN";
+
+    #[test]
+    fn relay_addresses_are_validated_and_deduplicated() {
+        let address = format!("/dns4/relay.black-terminal.invalid/tcp/4001/p2p/{PEER}");
+        let parsed = validate_relay_addresses(vec![address.clone(), address]).unwrap();
+        assert_eq!(parsed.len(), 1);
+    }
+
+    #[test]
+    fn relay_addresses_reject_circuit_and_missing_peer() {
+        let circuit = format!("/ip4/203.0.113.10/tcp/4001/p2p/{PEER}/p2p-circuit");
+        assert!(validate_relay_addresses(vec![circuit]).is_err());
+        assert!(validate_relay_addresses(vec!["/ip4/203.0.113.10/tcp/4001".into()]).is_err());
+    }
 }

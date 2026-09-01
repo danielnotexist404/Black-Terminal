@@ -3,7 +3,7 @@ import { Shield, Lock, Check, Database, Sliders, Clock, Download, Upload, KeyRou
 import { dbUpdateUser, isSupabaseConfigured } from "../lib/supabase";
 import { isLocalOnlyRuntime, readLocalRuntimeStatus, updateLocalRuntimeSettings, type LocalRuntimeStatus } from "../core/local-runtime/localRuntimeClient";
 import { getLocalDocument, putLocalDocument } from "../core/local-runtime/localDocumentStore";
-import { dialLocalP2pPeer, forgetTrustedLocalP2pPeer, listTrustedLocalP2pPeers, readLocalP2pStatus, startLocalP2p, stopLocalP2p, type LocalP2pStatus } from "../core/local-runtime/localP2pClient";
+import { dialLocalP2pPeer, forgetTrustedLocalP2pPeer, listConfiguredLocalP2pRelays, listTrustedLocalP2pPeers, readLocalP2pStatus, saveConfiguredLocalP2pRelays, startLocalP2p, stopLocalP2p, type LocalP2pStatus } from "../core/local-runtime/localP2pClient";
 import { localP2pOutboxSummary } from "../core/local-runtime/localP2pOutbox";
 import { localAlertOutboxSummary } from "../core/local-runtime/localAlertDeliveryOutbox";
 import { defaultLocalAiProvider, readLocalAiProviderSettings, saveLocalAiProviderSettings } from "../core/local-runtime/localAiClient";
@@ -85,6 +85,7 @@ export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange,
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [p2pStatus, setP2pStatus] = useState<LocalP2pStatus | null>(null);
   const [p2pAddress, setP2pAddress] = useState("");
+  const [p2pRelayAddresses, setP2pRelayAddresses] = useState("");
   const [trustedPeerAddresses, setTrustedPeerAddresses] = useState<string[]>([]);
   const [p2pMessage, setP2pMessage] = useState("");
   const [localRuntimeStatus, setLocalRuntimeStatus] = useState<LocalRuntimeStatus | null>(null);
@@ -121,6 +122,9 @@ export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange,
   useEffect(() => {
     if (!localOnly) return;
     let active = true;
+    void listConfiguredLocalP2pRelays()
+      .then((addresses) => { if (active) setP2pRelayAddresses(addresses.join("\n")); })
+      .catch((error) => { if (active) setP2pMessage(error instanceof Error ? error.message : String(error)); });
     const refresh = () => Promise.all([readLocalP2pStatus(), readLocalRuntimeStatus(), localP2pOutboxSummary(), localAlertOutboxSummary(), listTrustedLocalP2pPeers()])
       .then(([nextP2p, nextRuntime, nextOutbox, nextAlerts, nextPeers]) => { if (active) { setP2pStatus(nextP2p); setLocalRuntimeStatus(nextRuntime); setOutboxSummary(nextOutbox); setAlertOutboxSummary(nextAlerts); setTrustedPeerAddresses(nextPeers); } })
       .catch((error) => { if (active) setP2pMessage(error instanceof Error ? error.message : String(error)); });
@@ -168,6 +172,27 @@ export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange,
       setP2pMessage("Trusted peer address removed. Any currently open transport connection is left to close naturally.");
     } catch (error) {
       setP2pMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleSaveRelays = async () => {
+    if (runtimeConfigBusy) return;
+    setRuntimeConfigBusy(true);
+    setP2pMessage("");
+    try {
+      const addresses = await saveConfiguredLocalP2pRelays(p2pRelayAddresses.split(/\r?\n/));
+      setP2pRelayAddresses(addresses.join("\n"));
+      if (localRuntimeStatus?.config?.p2pEnabled) {
+        await stopLocalP2p();
+        setP2pStatus(await startLocalP2p());
+      }
+      setP2pMessage(addresses.length
+        ? "Public relay configuration saved. Reservation status will become active only after an authenticated relay accepts this device."
+        : "Public relay configuration cleared. Direct, LAN, Kademlia, and UPnP paths remain available.");
+    } catch (error) {
+      setP2pMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRuntimeConfigBusy(false);
     }
   };
 
@@ -554,13 +579,21 @@ export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange,
             <div className="telemetry-row"><span className="telemetry-lbl">Native execution worker</span><span className="telemetry-val">{localRuntimeStatus?.executionWorkerHeartbeatAt ? "HEALTHY" : "STARTING"}</span></div>
             <div className="telemetry-row"><span className="telemetry-lbl">Peer ID</span><span className="telemetry-val highlight">{p2pStatus?.peerId || "STARTING"}</span></div>
             <div className="telemetry-row"><span className="telemetry-lbl">Connected peers</span><span className="telemetry-val">{p2pStatus?.connectedPeers.length ?? 0}</span></div>
+            <div className="telemetry-row"><span className="telemetry-lbl">Public relay reservation</span><span className="telemetry-val highlight">{p2pStatus?.globalRelayConfigured ? "ACTIVE" : p2pStatus?.configuredRelayAddresses.length ? "CONNECTING" : "NOT CONFIGURED"}</span></div>
+            <div className="telemetry-row"><span className="telemetry-lbl">DCUtR direct upgrades</span><span className="telemetry-val">{p2pStatus?.holePunchSuccesses ?? 0} OK · {p2pStatus?.holePunchFailures ?? 0} FAILED</span></div>
             <div className="telemetry-row"><span className="telemetry-lbl">Queued direct deliveries</span><span className="telemetry-val">{outboxSummary?.pending ?? 0}</span></div>
             <div className="telemetry-row"><span className="telemetry-lbl">Retrying deliveries</span><span className="telemetry-val">{outboxSummary?.retrying ?? 0}</span></div>
             <div className="settings-field">
               <label className="settings-label">This device's direct addresses</label>
-              <textarea className="settings-input" readOnly value={[...(p2pStatus?.externalAddresses || []), ...(p2pStatus?.listenAddresses || [])].join("\n")} placeholder="Waiting for a local listen address…" />
+              <textarea className="settings-input" readOnly value={[...(p2pStatus?.activeRelayAddresses || []), ...(p2pStatus?.externalAddresses || []), ...(p2pStatus?.listenAddresses || [])].filter((value, index, values) => values.indexOf(value) === index).join("\n")} placeholder="Waiting for a local listen address…" />
               <span className="settings-hint">Share one reachable multiaddress with a trusted peer. Link transport uses authenticated Noise encryption; private messages use recipient-addressed request streams, never the public feed topic.</span>
             </div>
+            <div className="settings-field">
+              <label className="settings-label">Operator-controlled public relays</label>
+              <textarea className="settings-input" value={p2pRelayAddresses} placeholder="/dns4/relay.example.com/tcp/4001/p2p/12D3KooW…" onChange={(event) => setP2pRelayAddresses(event.target.value)} />
+              <span className="settings-hint">One relay base multiaddress per line, maximum four. Each must end with the relay peer ID. Black Terminal requests encrypted Circuit Relay v2 reservations and uses DCUtR to attempt a direct connection upgrade.</span>
+            </div>
+            <button className="settings-submit-btn secondary" type="button" disabled={runtimeConfigBusy} onClick={() => void handleSaveRelays()}>SAVE RELAYS AND RESTART P2P</button>
             <div className="settings-field">
               <label className="settings-label">Dial peer multiaddress</label>
               <input className="settings-input" value={p2pAddress} placeholder="/ip4/192.168.1.20/tcp/4001/p2p/12D3KooW…" onChange={(event) => setP2pAddress(event.target.value)} />

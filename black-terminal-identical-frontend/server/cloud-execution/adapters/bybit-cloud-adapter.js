@@ -16,6 +16,7 @@ import {
   placeBybitOrder,
   placeBybitStrategyOrder,
   setBybitLeverage,
+  setBybitPositionProtection,
   validateBybitMainnetValidationRequest,
   validateBybitManagementGate,
   validateBybitOrderDraft,
@@ -84,6 +85,7 @@ export class BybitCloudAdapter extends ExchangeAdapter {
 
   async placeOrder(order, validation) { return placeBybitOrder(this.credentials, order, validation); }
   async configureLeverage(request) { return setBybitLeverage(this.credentials, request); }
+  async setPositionProtection(request) { return setBybitPositionProtection(this.credentials, request); }
   async placeStrategyOrder(order, validation) { return placeBybitStrategyOrder(this.credentials, order, validation); }
   async cancelOrder(request) { return cancelBybitOrder(this.credentials, request); }
   async modifyOrder(request) { return modifyBybitOrder(this.credentials, request); }

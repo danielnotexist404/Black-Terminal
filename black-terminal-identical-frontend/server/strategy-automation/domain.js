@@ -88,8 +88,18 @@ export function assertCertifiedStrategyDefinition(definition) {
   if (indicatorId === "black-core-dda-pro" || indicatorId.includes("ddapro") || indicatorName.includes("bc-rda") || indicatorName.includes("risk distribution analysis")) {
     throw strategyError(409, "BC_RDA_SIGNAL_INTEGRITY_BLOCKED", "BC-RDA is blocked from Strategy Lab while causal replay and headless runtime certification are incomplete.");
   }
-  if (!["builtin-ema-cross", "builtin-adaptive-swing", "builtin-superatr-seven-step"].includes(definition.runtimeKind)) {
+  const blackScriptV3 = definition.runtimeKind === "python-script"
+    && String(definition.indicator?.indicatorId || "").startsWith("custom:")
+    && definition.indicator?.runtimeVersion === "black-script-v3"
+    && /^[0-9a-f]{8}$/.test(String(definition.indicator?.version || ""));
+  if (!["builtin-ema-cross", "builtin-adaptive-swing", "builtin-superatr-seven-step"].includes(definition.runtimeKind) && !blackScriptV3) {
     throw strategyError(409, "STRATEGY_RUNTIME_NOT_CERTIFIED", "This indicator does not yet have a certified VPS strategy runtime.");
+  }
+  if (blackScriptV3 && definition.marketType !== "FUTURES") {
+    throw strategyError(409, "BLACK_SCRIPT_SPOT_EXECUTION_NOT_CERTIFIED", "Black Script v3 broker automation is currently certified for futures targets only.");
+  }
+  if (blackScriptV3 && Number(definition.controlPanel?.properties?.pyramiding || 1) !== 1) {
+    throw strategyError(409, "BLACK_SCRIPT_PYRAMIDING_NOT_CERTIFIED", "Black Script v3 broker automation currently requires pyramiding set to 1.");
   }
   if (definition.indicator && definition.indicator.runtimeStatus !== "CERTIFIED") {
     throw strategyError(409, "STRATEGY_INDICATOR_NOT_CERTIFIED", "The selected indicator is visible on the chart but is not certified for Black Cloud automation.");

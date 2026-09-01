@@ -251,6 +251,8 @@ assert.match(engineSource, /plot\.pane === "oscillator"/, "custom oscillator plo
 assert.match(engineSource, /customOscillatorPlots/, "custom oscillator plots must render in an isolated pane");
 assert.match(engineSource, /stack\.customPanes/, "custom oscillators must be laid out by the unified oscillator stack");
 assert.match(engineSource, /plot\.visible !== false/, "hidden custom plots must not reserve or render a chart pane");
-assert.match(strategyAdapterSource, /not wired yet|not available/i, "uncertified headless Python automation must remain fail closed");
+assert.match(strategyAdapterSource, /compileAndRunScript/, "Strategy Lab replay must use the shared deterministic Black Script runtime");
+assert.match(strategyAdapterSource, /bypasses the legacy[\s\S]*signal-only backtester/, "custom strategy fills must not be reinterpreted by a second execution model");
+assert.doesNotMatch(strategyAdapterSource, /placeOrder|submitOrder|execution_commands/, "the replay adapter must remain incapable of broker mutation");
 
 console.log("Black Terminal Python indicator/strategy/alert runtime: PASS");

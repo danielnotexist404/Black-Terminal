@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isCertifiedSuperAtrSevenStepSource, ownedCustomIndicatorInstances } from "../src/modules/strategy-lab/my-strategy/state/indicatorManifest.ts";
+import { isBlackScriptV3CloudEligibleSource, isCertifiedSuperAtrSevenStepSource, ownedCustomIndicatorInstances } from "../src/modules/strategy-lab/my-strategy/state/indicatorManifest.ts";
 import { formatExecutionTime, targetExecutionFailure } from "../src/modules/strategy-lab/my-strategy/cockpit/targetExecutionPresentation.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -131,6 +131,14 @@ ${Array.from({ length: 7 }, (_, index) => `strategy.exit("TP${index + 1}", "Supe
 `;
 assert.equal(isCertifiedSuperAtrSevenStepSource(certifiedSuperAtrSource), true, "the structurally pinned seven-step source is eligible for the native adapter");
 assert.equal(isCertifiedSuperAtrSevenStepSource(certifiedSuperAtrSource.replace("adaptive_atr", "other_atr")), false, "lookalike scripts fail closed");
+const cloudBlackScript = `strategy(default_qty_type=strategy.percent_of_equity, default_qty_value=10)
+long_setup = ta.crossover(ta.ema(close, 3), ta.ema(close, 7))
+strategy.entry("Long", strategy.long, when=long_setup)
+strategy.exit("TP", "Long", limit=strategy.position_avg_price * 1.02, qty_percent=25)
+alertcondition(long_setup, "Long", "long")`;
+assert.equal(isBlackScriptV3CloudEligibleSource(cloudBlackScript), true, "a compiler-validated closed-candle strategy receives the Black Script v3 cloud contract");
+assert.equal(isBlackScriptV3CloudEligibleSource(cloudBlackScript.replace("strategy(", "indicator(")), false, "an indicator cannot be armed as a cloud strategy");
+assert.equal(isBlackScriptV3CloudEligibleSource(`${cloudBlackScript}\nstrategy.exit("Trail", "Long", trail_points=2, trail_offset=1, qty_percent=25)`), false, "partial trailing exits remain explicitly uncertified");
 
 for (const tab of ["OVERVIEW", "EXECUTION DESK", "STRATEGY SETTINGS", "CONFIGURATION", "PAPER", "LIVE TARGETS", "POSITIONS", "TRADES", "PERFORMANCE", "RISK", "LOGS"]) assert.match(cockpit, new RegExp(tab));
 assert.match(cockpit, /rows\.length > 100/, "large Paper tables use windowed rendering");

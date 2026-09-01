@@ -250,7 +250,10 @@ export class BrokerConnectionManager {
       .eq("account_id", runtime.account.id)
       .maybeSingle();
     if (settledError) throw settledError;
-    if (settledOrder) await this.monitorStrategyTakeProfitProtection(runtime, settledOrder, report);
+    if (settledOrder) {
+      await this.queueBlackScriptOcoSiblingCancellation(runtime, settledOrder);
+      await this.monitorStrategyTakeProfitProtection(runtime, settledOrder, report);
+    }
   }
 
   async monitorStrategyTakeProfitProtection(runtime, order, report) {
@@ -579,6 +582,62 @@ export class BrokerConnectionManager {
       actualFeeDelta: fill.fee,
       venueUpdatedAt: fill.time ?? 0
     });
+    const { data: settled, error: settledError } = await this.supabase.from("execution_orders")
+      .select("id,user_id,account_id,client_order_id,symbol,filled_quantity,status,reduce_only,strategy_automation_id,strategy_target_binding_id")
+      .eq("id", order.id).eq("account_id", runtime.account.id).maybeSingle();
+    if (settledError) throw settledError;
+    if (settled) await this.queueBlackScriptOcoSiblingCancellation(runtime, settled);
+  }
+
+  async queueBlackScriptOcoSiblingCancellation(runtime, filledOrder) {
+    if (!filledOrder?.strategy_automation_id || !filledOrder?.strategy_target_binding_id
+      || filledOrder.reduce_only !== true || !(Number(filledOrder.filled_quantity || 0) > 0)) return;
+    const { data: source, error: sourceError } = await this.supabase.from("execution_commands")
+      .select("id,idempotency_key,connection_id,user_id,payload,strategy_automation_id,strategy_target_binding_id")
+      .eq("execution_order_id", filledOrder.id)
+      .eq("command_type", "PLACE_ORDER")
+      .eq("strategy_automation_id", filledOrder.strategy_automation_id)
+      .eq("strategy_target_binding_id", filledOrder.strategy_target_binding_id)
+      .contains("payload", { blackScriptRuntimeVersion: "black-script-v3" })
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (sourceError) throw sourceError;
+    const ocoGroup = String(source?.payload?.ocoGroup || "");
+    if (!source || !ocoGroup || source.connection_id !== runtime.connection.id || source.user_id !== runtime.connection.user_id) return;
+    const { data: siblingCommands, error: siblingError } = await this.supabase.from("execution_commands")
+      .select("id,idempotency_key,deterministic_client_order_id,execution_order_id,status,payload")
+      .eq("strategy_automation_id", source.strategy_automation_id)
+      .eq("strategy_target_binding_id", source.strategy_target_binding_id)
+      .eq("connection_id", source.connection_id)
+      .eq("command_type", "PLACE_ORDER")
+      .contains("payload", { blackScriptRuntimeVersion: "black-script-v3", ocoGroup })
+      .neq("id", source.id)
+      .limit(8);
+    if (siblingError) throw siblingError;
+    for (const sibling of siblingCommands || []) {
+      if (["FAILED", "DEAD_LETTER", "CANCELLED"].includes(String(sibling.status || "").toUpperCase())) continue;
+      let siblingOrder = null;
+      if (sibling.execution_order_id) {
+        const { data, error } = await this.supabase.from("execution_orders")
+          .select("id,status,quantity,filled_quantity")
+          .eq("id", sibling.execution_order_id)
+          .maybeSingle();
+        if (error) throw error;
+        siblingOrder = data;
+      }
+      const command = buildBlackScriptOcoSiblingMutationCommand({
+        source,
+        sibling,
+        siblingOrder,
+        filledOrder,
+        ocoGroup,
+      });
+      if (!command) continue;
+      const { error: insertError } = await this.supabase.from("execution_commands")
+        .upsert(command, { onConflict: "idempotency_key", ignoreDuplicates: true });
+      if (insertError) throw insertError;
+    }
   }
 
   scheduleReconciliation(runtime, triggerType) {
@@ -606,6 +665,11 @@ export class BrokerConnectionManager {
       // accepted non-reduce strategy order for the exact live binding, symbol,
       // and direction precedes the reconciled venue position.
       await this.attributeStrategyState(runtime);
+      // Private websocket delivery is not a correctness dependency. A
+      // scheduled reconciliation replays every partially/fully filled Black
+      // Script reduce-only order through the same idempotent OCO reducer so a
+      // missed event cannot leave an oversized sibling order behind.
+      await this.reconcileBlackScriptOcoGroups(runtime);
       await updateOrThrow(this.supabase.from("connectivity_connections").update({
         status: "connected",
         health_status: "CONNECTED_CLOUD",
@@ -636,6 +700,20 @@ export class BrokerConnectionManager {
       this.metrics.reconciliationDurationMs = Date.now() - startedAt;
       runtime.reconciling = false;
     }
+  }
+
+  async reconcileBlackScriptOcoGroups(runtime) {
+    const { data: orders, error } = await this.supabase.from("execution_orders")
+      .select("id,user_id,account_id,client_order_id,symbol,side,order_type,quantity,filled_quantity,status,reduce_only,strategy_automation_id,strategy_target_binding_id")
+      .eq("account_id", runtime.account.id)
+      .eq("reduce_only", true)
+      .not("strategy_automation_id", "is", null)
+      .gt("filled_quantity", 0)
+      .in("status", ["partially-filled", "filled"])
+      .order("updated_at", { ascending: false })
+      .limit(100);
+    if (error) throw error;
+    for (const order of orders || []) await this.queueBlackScriptOcoSiblingCancellation(runtime, order);
   }
 
   async attributeStrategyState(runtime) {
@@ -1004,6 +1082,122 @@ export async function persistStrategyProtectionRepairCommand(supabase, command) 
     .maybeSingle();
   if (existingError) throw existingError;
   return { inserted: false, id: existing?.id || null };
+}
+
+export function buildBlackScriptOcoCancellationCommand({ source, sibling, filledOrder, ocoGroup, now = new Date() }) {
+  if (!source?.idempotency_key || !sibling?.idempotency_key || !filledOrder?.id || !ocoGroup) {
+    throw typedError("BLACK_SCRIPT_OCO_IDENTITY_INVALID", "A deterministic source, sibling, fill and OCO group are required.");
+  }
+  const cancellationIdentity = crypto.createHash("sha256")
+    .update(`black-script-v3:oco-cancel:${filledOrder.id}:${sibling.idempotency_key}`)
+    .digest("hex");
+  return {
+    command_type: "CANCEL_ORDER",
+    user_id: source.user_id,
+    connection_id: source.connection_id,
+    execution_order_id: sibling.execution_order_id || null,
+    strategy_automation_id: source.strategy_automation_id,
+    strategy_target_binding_id: source.strategy_target_binding_id,
+    strategy_signal_key: `black-script:oco:${ocoGroup}:${sibling.payload?.logicalOrderKey || sibling.id}`.slice(0, 512),
+    idempotency_key: cancellationIdentity,
+    deterministic_client_order_id: null,
+    payload: {
+      blackScriptRuntimeVersion: "black-script-v3",
+      sourceVersion: source.payload?.sourceVersion,
+      settingsVersion: source.payload?.settingsVersion,
+      generationCandleTime: source.payload?.generationCandleTime,
+      strategyVersion: source.payload?.strategyVersion,
+      executionEnvironment: source.payload?.executionEnvironment,
+      strategyAction: "BLACK_SCRIPT_ORDER_CANCEL",
+      parentPlaceIdempotencyKey: sibling.idempotency_key,
+      logicalOrderKey: sibling.payload?.logicalOrderKey,
+      ocoGroup,
+      filledOcoOrderId: filledOrder.id,
+      request: {
+        marketKind: source.payload?.marketType === "SPOT" ? "spot" : "perpetual",
+        symbol: filledOrder.symbol,
+      },
+    },
+    status: "QUEUED",
+    priority: 5,
+    max_attempts: 100,
+    available_at: now.toISOString(),
+  };
+}
+
+/**
+ * Maintain TradingView-style OCO reservation semantics after a venue fill.
+ * A complete fill cancels the sibling. A partial fill reduces the sibling's
+ * total order quantity by the amount already consumed on the other leg, so
+ * the unfilled position remains protected without allowing the pair to close
+ * more than its original reservation.
+ */
+export function buildBlackScriptOcoSiblingMutationCommand({
+  source,
+  sibling,
+  siblingOrder,
+  filledOrder,
+  ocoGroup,
+  now = new Date(),
+}) {
+  if (!source?.idempotency_key || !sibling?.idempotency_key || !filledOrder?.id || !ocoGroup) {
+    throw typedError("BLACK_SCRIPT_OCO_IDENTITY_INVALID", "A deterministic source, sibling, fill and OCO group are required.");
+  }
+  const siblingStatus = String(siblingOrder?.status || "").toLowerCase();
+  if (["filled", "cancelled", "canceled", "rejected", "failed"].includes(siblingStatus)) return null;
+  const reservedQuantity = Number(filledOrder.quantity || sibling.payload?.quantity || 0);
+  const consumedQuantity = Number(filledOrder.filled_quantity || 0);
+  const complete = String(filledOrder.status || "").toLowerCase() === "filled"
+    || reservedQuantity > 0 && consumedQuantity >= reservedQuantity - 1e-12;
+  if (complete || !(reservedQuantity > 0) || !(consumedQuantity > 0)) {
+    return buildBlackScriptOcoCancellationCommand({ source, sibling, filledOrder, ocoGroup, now });
+  }
+  const siblingFilled = Math.max(0, Number(siblingOrder?.filled_quantity || 0));
+  const currentSiblingQuantity = Number(siblingOrder?.quantity || sibling.payload?.quantity || reservedQuantity);
+  const desiredSiblingQuantity = Math.max(siblingFilled, reservedQuantity - consumedQuantity);
+  if (!(desiredSiblingQuantity > siblingFilled + 1e-12)) {
+    return buildBlackScriptOcoCancellationCommand({ source, sibling, filledOrder, ocoGroup, now });
+  }
+  if (Math.abs(currentSiblingQuantity - desiredSiblingQuantity) <= 1e-12) return null;
+  const quantityIdentity = desiredSiblingQuantity.toFixed(12);
+  const idempotencyKey = crypto.createHash("sha256")
+    .update(`black-script-v3:oco-resize:${filledOrder.id}:${sibling.idempotency_key}:${quantityIdentity}`)
+    .digest("hex");
+  return {
+    command_type: "MODIFY_ORDER",
+    user_id: source.user_id,
+    connection_id: source.connection_id,
+    execution_order_id: sibling.execution_order_id || null,
+    strategy_automation_id: source.strategy_automation_id,
+    strategy_target_binding_id: source.strategy_target_binding_id,
+    strategy_signal_key: `black-script:oco:${ocoGroup}:${sibling.payload?.logicalOrderKey || sibling.id}:resize`.slice(0, 512),
+    idempotency_key: idempotencyKey,
+    deterministic_client_order_id: null,
+    payload: {
+      blackScriptRuntimeVersion: "black-script-v3",
+      sourceVersion: source.payload?.sourceVersion,
+      settingsVersion: source.payload?.settingsVersion,
+      generationCandleTime: source.payload?.generationCandleTime,
+      strategyVersion: source.payload?.strategyVersion,
+      executionEnvironment: source.payload?.executionEnvironment,
+      strategyAction: "BLACK_SCRIPT_ORDER_MODIFY",
+      parentPlaceIdempotencyKey: sibling.idempotency_key,
+      logicalOrderKey: sibling.payload?.logicalOrderKey,
+      direction: sibling.payload?.direction,
+      ocoGroup,
+      filledOcoOrderId: filledOrder.id,
+      request: {
+        marketKind: source.payload?.marketType === "SPOT" ? "spot" : "perpetual",
+        symbol: filledOrder.symbol,
+        quantity: desiredSiblingQuantity,
+        previousQuantity: currentSiblingQuantity,
+      },
+    },
+    status: "QUEUED",
+    priority: 5,
+    max_attempts: 100,
+    available_at: now.toISOString(),
+  };
 }
 
 function explicitlyIntentionalProtectionReplacement(payload = {}) {

@@ -3,7 +3,9 @@ import {
   defaultStrategyRuntimeConfig,
   simulateStrategy,
   type CompiledStrategyReport,
+  type StrategyIntrabarSeries,
   type StrategyInstruction,
+  type StrategyRuntimeSnapshot,
   type StrategyRuntimeConfig
 } from "./ScriptStrategyEngine.ts";
 
@@ -1148,7 +1150,11 @@ class ScriptRuntime {
       slippageTicks: Math.max(0, this.scalarNumber(args.named.slippage, this.strategyConfig.slippageTicks)),
       tickSize: Math.max(1e-12, this.scalarNumber(args.named.tick_size, this.strategyConfig.tickSize)),
       pyramiding: Math.max(1, Math.round(this.scalarNumber(args.named.pyramiding, this.strategyConfig.pyramiding))),
-      processOrdersOnClose: this.scalarBoolean(args.named.process_orders_on_close, this.strategyConfig.processOrdersOnClose)
+      processOrdersOnClose: this.scalarBoolean(args.named.process_orders_on_close, this.strategyConfig.processOrdersOnClose),
+      historicalFillMode: textValue(args.named.historical_fill_mode, this.strategyConfig.historicalFillMode) === "conservative"
+        ? "conservative"
+        : "tradingview",
+      useBarMagnifier: this.scalarBoolean(args.named.use_bar_magnifier, this.strategyConfig.useBarMagnifier)
     };
     return true;
   }
@@ -1186,7 +1192,10 @@ class ScriptRuntime {
       limit: this.optionalNumberSeries(args.named.limit),
       stop: this.optionalNumberSeries(args.named.stop),
       profitTicks: this.optionalNumberSeries(args.named.profit),
-      lossTicks: this.optionalNumberSeries(args.named.loss)
+      lossTicks: this.optionalNumberSeries(args.named.loss),
+      trailPrice: this.optionalNumberSeries(args.named.trail_price),
+      trailPoints: this.optionalNumberSeries(args.named.trail_points),
+      trailOffsetTicks: this.optionalNumberSeries(args.named.trail_offset)
     });
     return condition;
   }
@@ -1370,7 +1379,14 @@ function registerStrategyFills(runtime: ScriptRuntime, report: CompiledStrategyR
 export function compileAndRunScript(
   script: string,
   candles: Candle[],
-  inputValues: Readonly<Record<string, ScriptInputValue>> = {}
+  inputValues: Readonly<Record<string, ScriptInputValue>> = {},
+  executionData: {
+    intrabars?: StrategyIntrabarSeries;
+    runtimeConfig?: Partial<StrategyRuntimeConfig>;
+    initialState?: StrategyRuntimeSnapshot | null;
+    executionStartIndex?: number;
+    executionEndIndex?: number;
+  } = {}
 ): CompileResult {
   const sourceHash = stableHash(script);
   const result: CompileResult = {
@@ -1402,7 +1418,15 @@ export function compileAndRunScript(
   let runtime = pass.runtime;
   let strategy: CompiledStrategyReport | null = null;
   if (runtime.strategyInstructions.length > 0) {
-    strategy = simulateStrategy({ candles, instructions: runtime.strategyInstructions, config: runtime.strategyConfig });
+    strategy = simulateStrategy({
+      candles,
+      instructions: runtime.strategyInstructions,
+      config: { ...runtime.strategyConfig, ...executionData.runtimeConfig },
+      intrabars: executionData.intrabars,
+      initialState: executionData.initialState,
+      executionStartIndex: executionData.executionStartIndex,
+      executionEndIndex: executionData.executionEndIndex
+    });
     const requiresStateResolution = /\bstrategy\.(?:position_size|position_avg_price|equity|openprofit|netprofit)\b/.test(script);
     for (let iteration = 0; requiresStateResolution && iteration < 4; iteration += 1) {
       pass = executeScriptPass({ script, candles, sourceHash, inputValues, strategyState: strategy });
@@ -1410,7 +1434,15 @@ export function compileAndRunScript(
         result.errors.push(...pass.errors);
         return result;
       }
-      const nextStrategy = simulateStrategy({ candles, instructions: pass.runtime.strategyInstructions, config: pass.runtime.strategyConfig });
+      const nextStrategy = simulateStrategy({
+        candles,
+        instructions: pass.runtime.strategyInstructions,
+        config: { ...pass.runtime.strategyConfig, ...executionData.runtimeConfig },
+        intrabars: executionData.intrabars,
+        initialState: executionData.initialState,
+        executionStartIndex: executionData.executionStartIndex,
+        executionEndIndex: executionData.executionEndIndex
+      });
       runtime = pass.runtime;
       const converged = strategyStateMatches(strategy, nextStrategy);
       strategy = nextStrategy;

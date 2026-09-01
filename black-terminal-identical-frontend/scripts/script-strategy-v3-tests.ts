@@ -67,7 +67,7 @@ assert.deepEqual(
 );
 assert.ok(sevenTargetFillMarkers.every((marker) => marker.direction === "long"), "partial exits must preserve the side being exited for correct label placement");
 
-const conservativeBracket = `strategy(default_qty_type=strategy.fixed, default_qty_value=1, process_orders_on_close=True)
+const conservativeBracket = `strategy(default_qty_type=strategy.fixed, default_qty_value=1, process_orders_on_close=True, historical_fill_mode="conservative")
 enter = close > open
 strategy.entry("Long", strategy.long, when=enter)
 target = strategy.position_avg_price + 5
@@ -87,6 +87,41 @@ assert.deepEqual(
   [["Long", "entry"], ["SL", "stopLoss"], ["Long", "entry"]],
   "protective fills must be visibly distinct from take profits"
 );
+
+const tradingViewBracket = `strategy(default_qty_type=strategy.fixed, default_qty_value=1, process_orders_on_close=True)
+enter = close > open
+strategy.entry("Long", strategy.long, when=enter)
+target = strategy.position_avg_price + 5
+protection = strategy.position_avg_price - 5
+strategy.exit("Bracket", "Long", limit=target, stop=protection, when=strategy.position_size > 0)`;
+const highFirstCandles: Candle[] = [
+  { time: 1_811_000_000, open: 99, high: 101, low: 98, close: 100, volume: 100 },
+  { time: 1_811_000_060, open: 104, high: 106, low: 94, close: 102, volume: 100 }
+];
+const highFirst = compileAndRunScript(tradingViewBracket, highFirstCandles);
+assert.equal(highFirst.success, true, JSON.stringify(highFirst.errors));
+assert.match(highFirst.strategy?.trades[0]?.exitReason ?? "", /LIMIT$/, "TradingView's high-first four-tick path must reach the target before the stop");
+assert.equal(highFirst.strategy?.trades[0]?.exitPrice, 105);
+
+const lowFirstCandles: Candle[] = [
+  { time: 1_812_000_000, open: 99, high: 101, low: 98, close: 100, volume: 100 },
+  { time: 1_812_000_060, open: 96, high: 106, low: 94, close: 102, volume: 100 }
+];
+const lowFirst = compileAndRunScript(tradingViewBracket, lowFirstCandles);
+assert.equal(lowFirst.success, true, JSON.stringify(lowFirst.errors));
+assert.match(lowFirst.strategy?.trades[0]?.exitReason ?? "", /STOP$/, "TradingView's low-first four-tick path must reach the stop before the target");
+assert.equal(lowFirst.strategy?.trades[0]?.exitPrice, 95);
+
+const magnifiedBracket = tradingViewBracket.replace(")\nenter", ", use_bar_magnifier=True)\nenter");
+const magnified = compileAndRunScript(magnifiedBracket, highFirstCandles, {}, {
+  intrabars: [undefined, [
+    { time: 1_811_000_070, open: 104, high: 104.5, low: 94, close: 96, volume: 50 },
+    { time: 1_811_000_080, open: 96, high: 106, low: 95.5, close: 102, volume: 50 }
+  ]]
+});
+assert.equal(magnified.success, true, JSON.stringify(magnified.errors));
+assert.match(magnified.strategy?.trades[0]?.exitReason ?? "", /STOP$/, "bar magnifier must use chronological lower-timeframe candles instead of the parent OHLC path");
+assert.equal(magnified.strategy?.trades[0]?.exitTime, 1_811_000_070, "magnified fills retain the authoritative lower-timeframe timestamp");
 
 const reversalScript = `strategy(default_qty_type=strategy.fixed, default_qty_value=1, commission_type=strategy.commission.percent, commission_value=1, slippage=1, tick_size=1)
 long_signal = close > open
@@ -124,6 +159,41 @@ const nextOpen = compileAndRunScript(nextOpenScript, nextOpenCandles);
 assert.equal(nextOpen.success, true, JSON.stringify(nextOpen.errors));
 assert.equal(nextOpen.strategy?.fills[0].index, 1);
 assert.equal(nextOpen.strategy?.fills[0].price, 105, "market orders configured for next-bar execution must fill at the next open");
+assert.equal(nextOpen.strategy?.fills[0].placedIndex, 0, "a delayed fill must retain the signal bar that created the order");
+assert.equal(nextOpen.strategy?.fills[0].placedTime, nextOpenCandles[0].time);
+
+const trailingScript = `strategy(default_qty_type=strategy.fixed, default_qty_value=1, process_orders_on_close=True, tick_size=1)
+enter = close > open
+strategy.entry("Long", strategy.long, when=enter)
+strategy.exit("Trail", "Long", trail_points=2, trail_offset=1, when=strategy.position_size > 0)`;
+const trailingCandles: Candle[] = [
+  { time: 1_835_000_000, open: 99, high: 101, low: 98, close: 100, volume: 100 },
+  { time: 1_835_000_060, open: 100, high: 104, low: 98, close: 99, volume: 100 }
+];
+const trailing = compileAndRunScript(trailingScript, trailingCandles);
+assert.equal(trailing.success, true, JSON.stringify(trailing.errors));
+assert.equal(trailing.strategy?.trades.length, 1, "an activated trailing order must close the matching lot exactly once");
+assert.equal(trailing.strategy?.trades[0].exitPrice, 103, "the trailing stop must follow the favorable high before the path reverses");
+assert.match(trailing.strategy?.trades[0].exitReason ?? "", /TRAIL$/, "trailing fills must retain their own auditable reason");
+
+const restartCandles: Candle[] = [
+  { time: 1_836_000_000, open: 99, high: 101, low: 98, close: 100, volume: 100 },
+  { time: 1_836_000_060, open: 101, high: 102, low: 98, close: 99, volume: 100 },
+  { time: 1_836_000_120, open: 98, high: 99, low: 96, close: 97, volume: 100 }
+];
+const uninterrupted = compileAndRunScript(reversalScript, restartCandles);
+const beforeRestart = compileAndRunScript(reversalScript, restartCandles.slice(0, 2));
+assert.ok(beforeRestart.strategy?.checkpoint, "the engine must expose a durable restart checkpoint");
+const afterRestart = compileAndRunScript(reversalScript, restartCandles.slice(1), {}, {
+  initialState: beforeRestart.strategy?.checkpoint,
+  executionStartIndex: 1
+});
+assert.deepEqual(
+  afterRestart.strategy?.fills.map((fill) => [fill.action, fill.side, fill.price, fill.placedTime]),
+  uninterrupted.strategy?.fills.filter((fill) => fill.time >= restartCandles[2].time).map((fill) => [fill.action, fill.side, fill.price, fill.placedTime]),
+  "a restarted engine must produce the same next-bar reversal fills as uninterrupted execution"
+);
+assert.deepEqual(afterRestart.strategy?.openPosition, uninterrupted.strategy?.openPosition, "restart checkpoints must preserve the final virtual position");
 
 const finalizedReversal = finalizedScriptResult(reversal, reversalCandles[0].time);
 assert.ok(finalizedReversal.strategy?.fills.every((fill) => fill.time <= reversalCandles[0].time));

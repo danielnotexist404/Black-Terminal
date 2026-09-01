@@ -18,6 +18,11 @@ const explicitCancel = buildBybitTradingStopBody({ category: "linear", symbol: "
 assert.equal(explicitCancel.takeProfit, "0", "only explicit zero cancellation becomes Bybit's cancel sentinel");
 assert.throws(() => buildBybitTradingStopBody({ category: "linear", symbol: "BTCUSDT", stopLoss: 1 }), /explicit positionIdx/);
 assert.throws(() => buildBybitTradingStopBody({ category: "linear", symbol: "BTCUSDT", positionIdx: 0, stopLoss: Number.NaN }), /finite non-negative/);
+const trailing = buildBybitTradingStopBody({ category: "linear", symbol: "BTCUSDT", positionIdx: 0, tpslMode: "full", trailingStop: 750, trailingActivationPrice: 65_000 });
+assert.deepEqual({ trailingStop: trailing.trailingStop, activePrice: trailing.activePrice }, { trailingStop: "750", activePrice: "65000" }, "Black Script trailing protection must map to Bybit's distance and activation fields");
+const partial = buildBybitTradingStopBody({ category: "linear", symbol: "BTCUSDT", positionIdx: 1, tpslMode: "partial", takeProfit: 66_000, stopLoss: 61_000, tpSize: 0.01, slSize: 0.01, tpOrderType: "limit", slOrderType: "market", tpLimitPrice: 65_990 });
+assert.deepEqual({ tpslMode: partial.tpslMode, tpSize: partial.tpSize, slSize: partial.slSize, tpOrderType: partial.tpOrderType, slOrderType: partial.slOrderType, tpLimitPrice: partial.tpLimitPrice }, { tpslMode: "Partial", tpSize: "0.01", slSize: "0.01", tpOrderType: "Limit", slOrderType: "Market", tpLimitPrice: "65990" });
+assert.throws(() => buildBybitTradingStopBody({ category: "linear", symbol: "BTCUSDT", positionIdx: 0, tpslMode: "partial", stopLoss: 61_000, tpSize: 0.01, slSize: 0.02 }), /equal positive/);
 assert.equal(isBybitProtectionNoopError({ bybit: { retCode: 34040, retMsg: "Not modified" } }), true,
   "Bybit's documented protection no-op must enter authoritative reconciliation instead of becoming a 502");
 assert.equal(isBybitProtectionNoopError({ bybit: { retCode: 3400214, retMsg: "Server error" } }), false,

@@ -7,6 +7,8 @@ import type {
 import type { StrategyRuntimeKind } from "../../types/strategy.types";
 import type { UserScript } from "../../../../scripts/userScriptLibrary";
 import { extractScriptInputs } from "../../../../components/ScriptCompiler.ts";
+import { isBlackScriptV3CloudEligibleSource } from "../../adapters/blackScriptCloudRuntime.ts";
+export { isBlackScriptV3CloudEligibleSource } from "../../adapters/blackScriptCloudRuntime.ts";
 import type {
   StrategyIndicatorAlert,
   StrategyIndicatorBinding,
@@ -156,6 +158,9 @@ export function ownedCustomIndicatorInstances(rows: readonly UserScript[]): Stra
       };
       const label = row.kind === "strategy" ? "Owned Strategy" : "Owned Indicator";
       const certifiedSuperAtr = row.kind === "strategy" && isCertifiedSuperAtrSevenStepSource(row.source);
+      const certifiedBlackScript = row.kind === "strategy"
+        && !certifiedSuperAtr
+        && isBlackScriptV3CloudEligibleSource(row.source, row.inputValues || {});
       return {
         indicatorId: `custom:${row.id}`,
         instanceId: `custom:${row.id}`,
@@ -167,9 +172,9 @@ export function ownedCustomIndicatorInstances(rows: readonly UserScript[]): Stra
           ? `${summarizeSettings(settings)} · private ${row.kind}`
           : `Private ${row.kind} · Black Script v3`,
         alertManifestVersion: `custom:${stableHash(alerts)}`,
-        runtimeVersion: certifiedSuperAtr ? "black-cloud-superatr-v1" : "black-script-v3-browser",
+        runtimeVersion: certifiedSuperAtr ? "black-cloud-superatr-v1" : certifiedBlackScript ? "black-script-v3" : "black-script-v3-browser",
         warmupBars: 500,
-        runtimeStatus: certifiedSuperAtr ? "CERTIFIED" as const : "REQUIRES_CERTIFICATION" as const,
+        runtimeStatus: certifiedSuperAtr || certifiedBlackScript ? "CERTIFIED" as const : "REQUIRES_CERTIFICATION" as const,
         useCurrentChartSettings: false,
         alerts,
         source: "CUSTOM" as const,

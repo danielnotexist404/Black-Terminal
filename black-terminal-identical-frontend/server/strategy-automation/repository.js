@@ -324,6 +324,10 @@ export async function listEligibleTargets(supabase, userId, strategyId, environm
     const risk = riskMap.get(connection.account_id);
     const amounts = authoritativeAccountMoney(accountEquityMap.get(connection.account_id));
     const validation = validateBrokerEligibility({ connection, account, capability, strategy, conflict: conflicts.has(`BROKER_ACCOUNT:${connection.id}`), environment });
+    if (strategy.runtime_kind === "python-script" && strategy.market_type !== "FUTURES") {
+      validation.reasons.push("Black Script v3 direct-broker automation is currently certified for futures targets only.");
+      validation.eligible = false;
+    }
     return {
       targetId: connection.id,
       accountId: connection.account_id,
@@ -347,6 +351,10 @@ export async function listEligibleTargets(supabase, userId, strategyId, environm
     const groupMandates = mandates.filter((item) => item.group_id === group.id);
     const activeMandates = groupMandates.filter((item) => item.status === "ACTIVE" && (!item.expires_at || Date.parse(item.expires_at) > Date.now()));
     const validation = validateGroupEligibility({ group, activeMandates, conflict: conflicts.has(`INVESTMENT_GROUP:${group.id}`), environment });
+    if (strategy.runtime_kind === "python-script") {
+      validation.reasons.push("Black Script v3 Investment Group fanout remains fail-closed until per-follower resting-order reconciliation is certified.");
+      validation.eligible = false;
+    }
     return {
       targetId: group.id,
       targetType: "INVESTMENT_GROUP",

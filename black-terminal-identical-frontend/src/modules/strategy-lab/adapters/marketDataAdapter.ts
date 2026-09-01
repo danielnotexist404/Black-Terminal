@@ -2,7 +2,7 @@ import type { Candle } from "../../../chart-engine/types";
 import { getMarketDataEngineAdapter } from "../../../market-data/engine/marketDataEngine";
 import type { MarketSymbol, Timeframe } from "../../../market-data/types";
 
-const timeframeSeconds: Record<Timeframe, number> = {
+export const strategyTimeframeSeconds: Record<Timeframe, number> = {
   "1s": 1,
   "10s": 10,
   "30s": 30,
@@ -25,6 +25,27 @@ const timeframeSeconds: Record<Timeframe, number> = {
   "10t": 10,
   "100t": 100
 };
+
+const magnifierTimeframes: Partial<Record<Timeframe, Timeframe>> = {
+  "3m": "1m",
+  "5m": "1m",
+  "15m": "3m",
+  "30m": "5m",
+  "1h": "15m",
+  "2h": "30m",
+  "3h": "30m",
+  "4h": "30m",
+  "6h": "1h",
+  "8h": "1h",
+  "12h": "1h",
+  "1d": "1h",
+  "1w": "1d",
+  "1M": "1d",
+};
+
+export function strategyMagnifierTimeframe(timeframe: Timeframe) {
+  return magnifierTimeframes[timeframe] ?? null;
+}
 
 function uniqueSortedCandles(candles: Candle[]) {
   const byTime = new Map<number, Candle>();
@@ -72,4 +93,45 @@ export async function fetchStrategyLabCandles(
     throw new Error("No historical candles returned for the Strategy Lab request.");
   }
   return history;
+}
+
+export async function fetchStrategyLabIntrabars(
+  marketSymbol: MarketSymbol,
+  chartTimeframe: Timeframe,
+  chartCandles: readonly Candle[],
+) {
+  const lowerTimeframe = strategyMagnifierTimeframe(chartTimeframe);
+  if (!lowerTimeframe || chartCandles.length === 0) {
+    return { lowerTimeframe, intrabars: chartCandles.map(() => [] as Candle[]), coveredBars: 0, requestedBars: chartCandles.length };
+  }
+  const chartSeconds = strategyTimeframeSeconds[chartTimeframe];
+  const lowerSeconds = strategyTimeframeSeconds[lowerTimeframe];
+  const start = chartCandles[0]!.time;
+  const end = chartCandles.at(-1)!.time + chartSeconds;
+  // Match TradingView's documented maximum lower-timeframe request size.
+  // When the history exceeds it, the most recent bars receive magnification
+  // and older bars deterministically fall back to the four-tick parent path.
+  const targetBars = Math.min(200_000, Math.max(1, Math.ceil((end - start) / lowerSeconds)));
+  const lowerCandles = await fetchStrategyLabCandles(
+    marketSymbol,
+    lowerTimeframe,
+    new Date(start * 1000).toISOString(),
+    new Date(end * 1000).toISOString(),
+    targetBars,
+  );
+  const grouped = new Map<number, Candle[]>();
+  for (const candle of lowerCandles) {
+    const parentTime = Math.floor(candle.time / chartSeconds) * chartSeconds;
+    if (parentTime < start || parentTime >= end) continue;
+    const bucket = grouped.get(parentTime);
+    if (bucket) bucket.push(candle);
+    else grouped.set(parentTime, [candle]);
+  }
+  const intrabars = chartCandles.map((candle) => (grouped.get(candle.time) || []).sort((left, right) => left.time - right.time));
+  return {
+    lowerTimeframe,
+    intrabars,
+    coveredBars: intrabars.filter((candles) => candles.length > 0).length,
+    requestedBars: chartCandles.length,
+  };
 }

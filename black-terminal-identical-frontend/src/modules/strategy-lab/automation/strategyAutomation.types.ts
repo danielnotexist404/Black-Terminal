@@ -75,7 +75,7 @@ export type StrategyPropertyConfiguration = {
   orderSizeValue: number;
   orderSizeMode: "PERCENT_EQUITY" | "FIXED_USDT" | "FIXED_QUANTITY";
   pyramiding: number;
-  barDetailization: "DEFAULT_4_TICKS" | "CLOSED_BAR";
+  barDetailization: "DEFAULT_4_TICKS" | "HIGH_LOWER_TIMEFRAME" | "CLOSED_BAR";
   executionCadence: "BAR_CLOSE_AND_REALTIME" | "BAR_CLOSE";
   commissionValue: number;
   commissionMode: "PERCENT" | "USDT_PER_ORDER";

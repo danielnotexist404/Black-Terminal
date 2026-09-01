@@ -185,7 +185,19 @@ assert.match(worker, /execution_commands/);
 assert.match(worker, /group_trade_intents/);
 assert.match(worker, /signCanonicalPayload/);
 assert.match(worker, /isBcrdaDefinition[\s\S]*BC_RDA_SIGNAL_INTEGRITY_BLOCKED/);
-assert.doesNotMatch(worker, /placeOrder|cancelOrder|modifyOrder|execution_orders.*insert/i, "paper worker contains no broker order mutation path");
+assert.doesNotMatch(
+  worker,
+  /getConnectionCredentials|decryptConnectionCredentials|exchangeAdapter|bybit-cloud-adapter|\.placeOrder\(|\.cancelOrder\(|\.modifyOrder\(/i,
+  "strategy worker may plan durable commands but cannot hold credentials or call a broker adapter",
+);
+assert.match(
+  worker,
+  /black_cloud_commit_script_generation_v1/,
+  "Black Script strategy truth and target command manifests cross one fenced database transaction",
+);
+assert.match(worker, /BLACK_SCRIPT_PYRAMIDING_NOT_CERTIFIED/);
+assert.match(worker, /BLACK_SCRIPT_SPOT_EXECUTION_NOT_CERTIFIED/);
+assert.match(repository, /Black Script v3 direct-broker automation is currently certified for futures targets only/);
 assert.match(worker, /candleClosedAt <= Date\.parse\(position\.opened_at\)/, "same-candle look-ahead exit is rejected");
 assert.match(worker, /averageTrueRange\(candles, 14\)/, "volatility-target sizing is based on closed-candle ATR");
 assert.match(worker, /MAXIMUM_CONSECUTIVE_LOSSES/, "stop-loss revenge reversals honor the configured loss-chain ceiling");

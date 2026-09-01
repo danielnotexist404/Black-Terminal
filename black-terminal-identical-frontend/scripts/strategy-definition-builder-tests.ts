@@ -113,6 +113,29 @@ assert.match(
   validateAutomationDefinition({ ...definition, runtimeKind: "python-script" }) || "",
   /certified Black Cloud signal adapter/,
 );
+const blackScriptDefinition = {
+  ...definition,
+  runtimeKind: "python-script" as const,
+  indicator: {
+    indicatorId: "custom:owned-script",
+    instanceId: "custom:owned-script",
+    name: "Owned Script",
+    version: "12345678",
+    settingsHash: "87654321",
+    alertManifestVersion: "custom:1",
+    runtimeVersion: "black-script-v3",
+    runtimeStatus: "CERTIFIED" as const,
+    warmupBars: 500,
+    useCurrentChartSettings: false,
+    alerts: [],
+  },
+};
+assert.equal(validateAutomationDefinition(blackScriptDefinition), null);
+assert.match(validateAutomationDefinition({ ...blackScriptDefinition, marketType: "SPOT" }) || "", /futures targets only/);
+assert.match(validateAutomationDefinition({
+  ...blackScriptDefinition,
+  controlPanel: { schemaVersion: 2, properties: { pyramiding: 2 } } as never,
+}) || "", /pyramiding set to 1/);
 assert.match(
   validateAutomationDefinition({
     ...definition,

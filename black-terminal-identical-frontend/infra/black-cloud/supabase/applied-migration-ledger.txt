@@ -52,3 +52,4 @@
 202608310002|black_cloud_reconciliation_liveness
 202608310003|strategy_generation_release_barrier
 202608310004|live_strategy_policy_updates
+202609010001|black_script_cloud_artifacts

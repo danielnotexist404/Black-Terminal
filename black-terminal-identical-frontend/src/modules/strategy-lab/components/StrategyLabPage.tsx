@@ -6,7 +6,8 @@ import type { MarketSymbol, Timeframe } from "../../../market-data/types";
 import { dbGetCurrentUserScripts, isSupabaseConfigured } from "../../../lib/supabase";
 import { normalizeUserScripts, type UserScript } from "../../../scripts/userScriptLibrary";
 import { createAIStrategyReview } from "../ai/aiStrategyReview";
-import { fetchStrategyLabCandles } from "../adapters/marketDataAdapter";
+import { fetchStrategyLabCandles, fetchStrategyLabIntrabars } from "../adapters/marketDataAdapter";
+import { runBlackScriptBacktest } from "../adapters/pythonStrategyAdapter";
 import { createStrategySignals } from "../adapters/signalAdapter";
 import { runBacktest } from "../engine/backtestEngine";
 import { runOptimization } from "../engine/optimizer";
@@ -14,12 +15,14 @@ import { buildStrategyReviewInput } from "../engine/tradeAnalyzer";
 import { runWalkForward } from "../engine/walkForward";
 import { createDefaultBacktestConfig } from "../state/strategyLabStore";
 import { StrategyAutomationExperience } from "../my-strategy/StrategyAutomationExperience";
-import { buildSelectableIndicatorInstances, ownedCustomIndicatorInstances } from "../my-strategy/state/indicatorManifest";
+import { buildSelectableIndicatorInstances, ownedCustomIndicatorInstances, stableHash } from "../my-strategy/state/indicatorManifest";
 import {
   applyAutomationDefinitionToConfig,
   marketSymbolFromBacktestConfig,
 } from "../automation/strategyDefinitionModel";
 import type { StrategyAutomationDefinition } from "../automation/strategyAutomation.types";
+import type { StrategyWorkspace } from "../automation/strategyAutomation.types";
+import { readStrategyControlPanel } from "../execution-desk/strategyControlPanelModel";
 import type { AIStrategyReview, CodeSuggestion } from "../types/ai.types";
 import type { BacktestConfig, BacktestResult, BacktestRunState, TradeResult } from "../types/backtest.types";
 import type { OptimizationResult, OptimizationSpace, WalkForwardWindow } from "../types/optimization.types";
@@ -167,6 +170,7 @@ export function StrategyLabPage({
   const [review, setReview] = useState<AIStrategyReview | undefined>();
   const [codeSuggestions, setCodeSuggestions] = useState<CodeSuggestion[]>([]);
   const [ownedScripts, setOwnedScripts] = useState<UserScript[]>([]);
+  const [backtestDefinition, setBacktestDefinition] = useState<StrategyAutomationDefinition>();
 
   useEffect(() => {
     let cancelled = false;
@@ -198,6 +202,7 @@ export function StrategyLabPage({
     setCodeSuggestions([]);
     setError(undefined);
     setRunState("idle");
+    setBacktestDefinition(undefined);
   }, [adaptiveSwingSettings, displaySymbol, exchangeLabel, marketSymbol, selectedStrategyKind, timeframe]);
 
   useEffect(() => {
@@ -217,8 +222,51 @@ export function StrategyLabPage({
       const history = await fetchStrategyLabCandles(configuredMarket, config.timeframe, config.startDate, config.endDate, 1800);
       setCandles(history);
       setRunState("running");
-      const signals = createStrategySignals(config.strategyKind, history, config.symbol, config.strategySettings);
-      const nextResult = runBacktest(history, signals, config);
+      let nextResult: BacktestResult;
+      if (config.strategyKind === "python-script") {
+        const definition = backtestDefinition;
+        if (!definition?.indicator?.indicatorId.startsWith("custom:")) {
+          throw new Error("Select a saved owned Black Script strategy before running this backtest.");
+        }
+        const scriptId = definition.indicator.indicatorId.slice("custom:".length);
+        const script = ownedScripts.find((item) => item.id === scriptId && item.kind === "strategy");
+        if (!script) throw new Error("The exact saved strategy source is unavailable in your authenticated script library.");
+        if (definition.indicator.version && definition.indicator.version !== stableHash(script.source)) {
+          throw new Error("The saved strategy version does not match the current script source. Publish or select the matching version before backtesting.");
+        }
+        const panel = readStrategyControlPanel(definition);
+        const highDetail = panel.properties.barDetailization === "HIGH_LOWER_TIMEFRAME" || /use_bar_magnifier\s*=\s*True/i.test(script.source);
+        const magnifier = highDetail
+          ? await fetchStrategyLabIntrabars(configuredMarket, config.timeframe, history)
+          : null;
+        const inputValues = Object.fromEntries(Object.entries(definition.settings).filter(([, value]) => ["number", "boolean", "string"].includes(typeof value))) as Record<string, number | boolean | string>;
+        nextResult = runBlackScriptBacktest({
+          source: script.source,
+          candles: history,
+          config,
+          inputValues,
+          intrabars: magnifier?.intrabars,
+          runtimeConfig: {
+            initialCapital: config.initialCapital,
+            defaultQuantityMode: panel.properties.orderSizeMode === "FIXED_QUANTITY" ? "fixed" : panel.properties.orderSizeMode === "FIXED_USDT" ? "cash" : "percent_of_equity",
+            defaultQuantityValue: panel.properties.orderSizeValue,
+            commissionMode: panel.properties.commissionMode === "USDT_PER_ORDER" ? "cash_per_order" : "percent",
+            commissionValue: panel.properties.commissionValue,
+            slippageTicks: panel.properties.slippageTicks,
+            tickSize: config.tickSize,
+            pyramiding: panel.properties.pyramiding,
+            processOrdersOnClose: panel.properties.executionDelay === "NONE",
+            historicalFillMode: panel.properties.barDetailization === "CLOSED_BAR" ? "conservative" : "tradingview",
+            useBarMagnifier: highDetail,
+          },
+        });
+        if (highDetail && magnifier && magnifier.coveredBars < magnifier.requestedBars) {
+          nextResult.warnings.push(`Lower-timeframe coverage was available for ${magnifier.coveredBars.toLocaleString()} of ${magnifier.requestedBars.toLocaleString()} bars; uncovered history used deterministic four-tick fills.`);
+        }
+      } else {
+        const signals = createStrategySignals(config.strategyKind, history, config.symbol, config.strategySettings);
+        nextResult = runBacktest(history, signals, config);
+      }
       setResult(nextResult);
       const reviewInput = buildStrategyReviewInput(nextResult, optimizationResults);
       const nextReview = createAIStrategyReview(reviewInput);
@@ -289,6 +337,7 @@ export function StrategyLabPage({
   );
   const updateAutomationDefinition = useCallback(
     (definition: StrategyAutomationDefinition) => {
+      setBacktestDefinition(definition);
       setConfig((current) =>
         applyAutomationDefinitionToConfig(current, definition),
       );
@@ -310,8 +359,9 @@ export function StrategyLabPage({
     configuredAlerts: indicatorAlerts,
   }), ...ownedCustomIndicatorInstances(ownedScripts)], [visibleIndicators, indicatorPeriods, indicatorAdvancedSettings, indicatorAlerts, ownedScripts]);
 
-  const openStrategyBacktest = useCallback((strategy: { symbol: string; timeframe: string; marketType: "SPOT" | "FUTURES" }) => {
-    setConfig((current) => ({ ...current, symbol: strategy.symbol, rawSymbol: strategy.symbol, timeframe: strategy.timeframe as Timeframe, marketKind: strategy.marketType === "SPOT" ? "spot" : "perpetual" }));
+  const openStrategyBacktest = useCallback((workspace: StrategyWorkspace) => {
+    setBacktestDefinition(workspace.strategy.definition);
+    setConfig((current) => applyAutomationDefinitionToConfig(current, workspace.strategy.definition));
     setActiveTab("backtest");
   }, []);
 

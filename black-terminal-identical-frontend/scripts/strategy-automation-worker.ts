@@ -20,6 +20,23 @@ import {
   reserveStrategyTakeProfits,
   shouldQueueStrategyTakeProfits,
 } from "../server/strategy-automation/superatr-execution.js";
+import {
+  blackScriptOwnedSourceVersion,
+  evaluateBlackScriptCloudRuntime,
+  isBlackScriptV3CloudEligibleSource,
+  type BlackScriptCloudCheckpoint,
+} from "../src/modules/strategy-lab/adapters/blackScriptCloudRuntime.ts";
+import {
+  buildBlackScriptBrokerPlan,
+  buildBlackScriptTargetCommandManifest,
+  assertBlackScriptExpectedTargetFills,
+  settleBlackScriptTargetMarketActions,
+  type BlackScriptBrokerOrderHandle,
+  type BlackScriptTargetCommandManifest,
+} from "../src/modules/strategy-lab/adapters/blackScriptBrokerPlanner.ts";
+import { readStrategyControlPanel } from "../src/modules/strategy-lab/execution-desk/strategyControlPanelModel.ts";
+import { strategyMagnifierTimeframe } from "../src/modules/strategy-lab/adapters/marketDataAdapter.ts";
+import { normalizeUserScripts } from "../src/scripts/userScriptLibrary.ts";
 import type { Candle } from "../src/chart-engine/types.ts";
 
 type JsonRow = Record<string, any>;
@@ -200,7 +217,7 @@ async function processStrategy(strategy: JsonRow) {
   if (!activePaper && activeBrokerBindings.length === 0 && groupBindings.length === 0)
     return heartbeat(strategy, "PAUSED", null);
   if (
-    !["builtin-ema-cross", "builtin-adaptive-swing", "builtin-superatr-seven-step"].includes(
+    !["builtin-ema-cross", "builtin-adaptive-swing", "builtin-superatr-seven-step", "python-script"].includes(
       strategy.runtime_kind,
     )
   ) {
@@ -228,6 +245,16 @@ async function processStrategy(strategy: JsonRow) {
     .eq("strategy_id", strategy.id)
     .maybeSingle();
   if (runtimeError) throw runtimeError;
+  if (strategy.runtime_kind === "python-script") {
+    return processBlackScriptStrategy({
+      strategy,
+      runtime,
+      activePaper,
+      activeBrokerBindings,
+      groupBindings,
+      marketWindow,
+    });
+  }
   const candleAt = new Date(
     candleCloseTimeMs(candle.time, strategy.timeframe),
   ).toISOString();
@@ -348,6 +375,412 @@ async function processStrategy(strategy: JsonRow) {
   if (updateError) throw updateError;
 }
 
+async function loadOrPinBlackScriptArtifact(strategy: JsonRow) {
+  const indicatorId = String(strategy.definition?.indicator?.indicatorId || "");
+  if (!indicatorId.startsWith("custom:")) {
+    throw Object.assign(new Error("A headless Black Script strategy requires an owned custom source identity."), {
+      code: "BLACK_SCRIPT_OWNED_SOURCE_REQUIRED",
+    });
+  }
+  const scriptId = indicatorId.slice("custom:".length);
+  const expectedVersion = String(strategy.definition?.indicator?.version || "");
+  if (!/^[0-9a-f]{8}$/.test(expectedVersion)) {
+    throw Object.assign(new Error("The published Black Script source version is invalid."), {
+      code: "BLACK_SCRIPT_SOURCE_VERSION_INVALID",
+    });
+  }
+  const { data: pinned, error: pinnedError } = await supabase
+    .from("strategy_script_artifacts")
+    .select("script_id,runtime_version,source_version,source_sha256,source")
+    .eq("strategy_id", strategy.id)
+    .eq("strategy_version", strategy.current_version)
+    .maybeSingle();
+  if (pinnedError) throw pinnedError;
+  if (pinned) {
+    const sha256 = crypto.createHash("sha256").update(String(pinned.source)).digest("hex");
+    if (pinned.script_id !== scriptId
+      || pinned.runtime_version !== "black-script-v3"
+      || pinned.source_version !== expectedVersion
+      || blackScriptOwnedSourceVersion(String(pinned.source)) !== expectedVersion
+      || pinned.source_sha256 !== sha256) {
+      throw Object.assign(new Error("The immutable Black Script artifact failed its source identity check."), {
+        code: "BLACK_SCRIPT_ARTIFACT_INTEGRITY_FAILED",
+      });
+    }
+    return { ...pinned, source: String(pinned.source) };
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from("bt_users")
+    .select("scripts")
+    .eq("auth_user_id", strategy.owner_user_id)
+    .maybeSingle();
+  if (profileError) throw profileError;
+  const sourceRow = normalizeUserScripts(profile?.scripts).find((row) => row.id === scriptId && row.kind === "strategy");
+  if (!sourceRow) {
+    throw Object.assign(new Error("The exact owned Black Script source is unavailable for pinning."), {
+      code: "BLACK_SCRIPT_SOURCE_UNAVAILABLE",
+    });
+  }
+  const sourceVersion = blackScriptOwnedSourceVersion(sourceRow.source);
+  if (sourceVersion !== expectedVersion) {
+    throw Object.assign(new Error("The owned script changed after this strategy version was published."), {
+      code: "BLACK_SCRIPT_SOURCE_VERSION_MISMATCH",
+    });
+  }
+  const sourceSha256 = crypto.createHash("sha256").update(sourceRow.source).digest("hex");
+  const artifact = {
+    strategy_id: strategy.id,
+    strategy_version: strategy.current_version,
+    owner_user_id: strategy.owner_user_id,
+    script_id: scriptId,
+    runtime_version: "black-script-v3",
+    source_version: sourceVersion,
+    source_sha256: sourceSha256,
+    source: sourceRow.source,
+  };
+  const { error: pinError } = await supabase.from("strategy_script_artifacts").insert(artifact);
+  if (pinError) throw pinError;
+  return {
+    script_id: scriptId,
+    runtime_version: "black-script-v3",
+    source_version: sourceVersion,
+    source_sha256: sourceSha256,
+    source: sourceRow.source,
+  };
+}
+
+function blackScriptInputValues(settings: JsonRow) {
+  return Object.fromEntries(Object.entries(settings || {}).filter(([, value]) => ["string", "number", "boolean"].includes(typeof value))) as Record<string, string | number | boolean>;
+}
+
+async function processBlackScriptStrategy({
+  strategy,
+  runtime,
+  activePaper,
+  activeBrokerBindings,
+  groupBindings,
+  marketWindow,
+}: JsonRow) {
+  const candle = marketWindow.closed.at(-1) as Candle | undefined;
+  if (!candle) return heartbeat(strategy, "DEGRADED", "MARKET_DATA_UNAVAILABLE");
+  const candleAt = new Date(candleCloseTimeMs(candle.time, strategy.timeframe)).toISOString();
+  if (runtime?.last_closed_candle_at && Date.parse(runtime.last_closed_candle_at) >= Date.parse(candleAt)) {
+    return heartbeat(strategy, "LIVE", null);
+  }
+  const artifact = await loadOrPinBlackScriptArtifact(strategy);
+  const panel = readStrategyControlPanel(strategy.definition);
+  if (panel.properties.pyramiding !== 1) {
+    throw Object.assign(new Error("Black Cloud direct-broker execution currently requires pyramiding=1 so one deterministic virtual position maps to one venue position."), {
+      code: "BLACK_SCRIPT_PYRAMIDING_NOT_CERTIFIED",
+    });
+  }
+  if (activeBrokerBindings.some((binding: JsonRow) => binding.market_type !== "FUTURES")) {
+    throw Object.assign(new Error("Black Script v3 direct-broker execution is currently certified for futures targets only."), {
+      code: "BLACK_SCRIPT_SPOT_EXECUTION_NOT_CERTIFIED",
+    });
+  }
+  const intrabars = panel.properties.barDetailization === "HIGH_LOWER_TIMEFRAME"
+    ? await fetchBybitBlackScriptIntrabars({
+      symbol: strategy.symbol,
+      timeframe: strategy.timeframe,
+      marketType: strategy.market_type,
+      closedCandles: marketWindow.closed,
+      checkpoint: runtime?.pine_checkpoint,
+    })
+    : undefined;
+  const inputValues = blackScriptInputValues(strategy.definition?.settings || {});
+  if (!isBlackScriptV3CloudEligibleSource(artifact.source, inputValues)) {
+    throw Object.assign(new Error("The immutable Black Script source uses features that are not certified for headless execution."), {
+      code: "BLACK_SCRIPT_RUNTIME_NOT_CERTIFIED",
+    });
+  }
+  const checkpoint = runtime?.pine_checkpoint?.runtimeVersion === "black-script-v3"
+    ? runtime.pine_checkpoint as BlackScriptCloudCheckpoint
+    : null;
+  const evaluation = evaluateBlackScriptCloudRuntime({
+    source: artifact.source,
+    expectedSourceVersion: artifact.source_version,
+    settings: inputValues,
+    closedCandles: marketWindow.closed,
+    currentCandle: marketWindow.current,
+    checkpoint,
+    intrabars,
+    runtimeConfig: {
+      initialCapital: panel.properties.initialCapital,
+      defaultQuantityMode: panel.properties.orderSizeMode === "FIXED_QUANTITY"
+        ? "fixed"
+        : panel.properties.orderSizeMode === "FIXED_USDT" ? "cash" : "percent_of_equity",
+      defaultQuantityValue: panel.properties.orderSizeValue,
+      commissionMode: panel.properties.commissionMode === "USDT_PER_ORDER" ? "cash_per_order" : "percent",
+      commissionValue: panel.properties.commissionValue,
+      slippageTicks: panel.properties.slippageTicks,
+      tickSize: Number(strategy.definition?.execution?.tickSize || 0.01),
+      pyramiding: panel.properties.pyramiding,
+      processOrdersOnClose: panel.properties.executionDelay === "NONE",
+      historicalFillMode: panel.properties.barDetailization === "CLOSED_BAR" ? "conservative" : "tradingview",
+      useBarMagnifier: panel.properties.barDetailization === "HIGH_LOWER_TIMEFRAME",
+    },
+  });
+  if (groupBindings.length) {
+    return heartbeat(strategy, "DEGRADED", "BLACK_SCRIPT_GROUP_EXECUTION_PENDING");
+  }
+  const tickSize = Number(strategy.definition?.execution?.tickSize || 0.01);
+  const plan = buildBlackScriptBrokerPlan({
+    evaluation,
+    previousCheckpoint: checkpoint,
+    tickSize,
+  });
+  evaluation.checkpoint.brokerOrderFingerprints = plan.brokerOrderFingerprints;
+  // Broker handles are per account and must never leak into the shared
+  // strategy checkpoint. They live in strategy_script_target_state.
+  evaluation.checkpoint.brokerOrderHandles = {};
+  const targetManifests = await buildBlackScriptTargetManifests({
+    strategy,
+    evaluation,
+    bindings: activeBrokerBindings,
+    tickSize,
+  });
+  const { data: committed, error: commitError } = await supabase.rpc(
+    "black_cloud_commit_script_generation_v1",
+    {
+      p_strategy_id: strategy.id,
+      p_owner_user_id: strategy.owner_user_id,
+      p_worker_id: workerId,
+      p_expected_state_version: Number(runtime?.state_version || 0),
+      p_running_version: strategy.current_version,
+      p_last_closed_candle_at: candleAt,
+      p_checkpoint: evaluation.checkpoint,
+      p_source_sha256: artifact.source_sha256,
+      p_settings_sha256: hashCanonicalPayload(strategy.definition),
+      p_target_manifests: targetManifests,
+    },
+  );
+  if (commitError) throw commitError;
+  const expectedCommands = targetManifests.reduce((sum, manifest) => sum + manifest.commands.length, 0);
+  if (Number(committed) !== expectedCommands) {
+    throw Object.assign(new Error("The atomic Black Script generation did not persist its complete command manifest."), {
+      code: "BLACK_SCRIPT_GENERATION_COMMIT_INCOMPLETE",
+    });
+  }
+  if (evaluation.marketActions.length || evaluation.desiredOrders.length || evaluation.retiredOrderKeys.length) {
+    await supabase.from("strategy_automation_audit_events").insert({
+      owner_user_id: strategy.owner_user_id,
+      strategy_id: strategy.id,
+      event_type: "BLACK_SCRIPT_CLOUD_GENERATION_COMMITTED",
+      severity: "INFO",
+      message: "Black Cloud atomically committed a pinned confirmed-candle Black Script generation and every direct-broker OMS command.",
+      safe_metadata: {
+        sourceVersion: evaluation.sourceVersion,
+        candleTime: evaluation.latestClosedCandleTime,
+        targetCount: targetManifests.length,
+        commandCount: expectedCommands,
+        marketActionCount: evaluation.marketActions.length,
+        desiredOrderCount: evaluation.desiredOrders.length,
+        expectedOrderFillCount: evaluation.expectedOrderFills.length,
+      },
+    });
+  }
+  return undefined;
+}
+
+async function buildBlackScriptTargetManifests({
+  strategy,
+  evaluation,
+  bindings,
+  tickSize,
+}: JsonRow): Promise<BlackScriptTargetCommandManifest[]> {
+  if (!bindings.length) return [];
+  const bindingIds = bindings.map((binding: JsonRow) => binding.id);
+  const connectionIds = bindings.map((binding: JsonRow) => binding.connection_id).filter(Boolean);
+  const accountIds = bindings.map((binding: JsonRow) => binding.account_id).filter(Boolean);
+  const [
+    { data: targetStates, error: stateError },
+    { data: connections, error: connectionError },
+    { data: positions, error: positionError },
+  ] = await Promise.all([
+    supabase.from("strategy_script_target_state").select("*").in("binding_id", bindingIds),
+    supabase.from("connectivity_connections")
+      .select("id,user_id,account_id,execution_environment,health_status,credential_state,worker_state,synchronization_state,execution_readiness,control_state")
+      .in("id", connectionIds),
+    supabase.from("account_positions")
+      .select("account_id,strategy_target_binding_id,direction,quantity")
+      .in("account_id", accountIds)
+      .eq("symbol", strategy.symbol)
+      .gt("quantity", 0),
+  ]);
+  if (stateError) throw stateError;
+  if (connectionError) throw connectionError;
+  if (positionError) throw positionError;
+  const stateByBinding = new Map((targetStates || []).map((row) => [String(row.binding_id), row]));
+  const connectionById = new Map((connections || []).map((row) => [String(row.id), row]));
+  const priorPlaceKeys = [...new Set((targetStates || []).flatMap((state) =>
+    Object.values(state.broker_order_handles && typeof state.broker_order_handles === "object" ? state.broker_order_handles : {})
+      .filter((handle: any) => handle?.commandType === "PLACE_ORDER" && typeof handle.placeIdempotencyKey === "string")
+      .map((handle: any) => handle.placeIdempotencyKey)))];
+  const { data: placeCommands, error: commandError } = priorPlaceKeys.length
+    ? await supabase.from("execution_commands")
+      .select("idempotency_key,status,execution_order_id,strategy_target_binding_id")
+      .eq("strategy_automation_id", strategy.id)
+      .in("idempotency_key", priorPlaceKeys)
+    : { data: [], error: null };
+  if (commandError) throw commandError;
+  const executionOrderIds = [...new Set((placeCommands || []).map((row) => row.execution_order_id).filter(Boolean))];
+  const { data: acknowledgedOrders, error: acknowledgedError } = executionOrderIds.length
+    ? await supabase.from("execution_orders")
+      .select("id,status,quantity,filled_quantity,strategy_target_binding_id")
+      .in("id", executionOrderIds)
+    : { data: [], error: null };
+  if (acknowledgedError) throw acknowledgedError;
+  const manifests: BlackScriptTargetCommandManifest[] = [];
+  for (const binding of bindings as JsonRow[]) {
+    const connection = connectionById.get(String(binding.connection_id));
+    const executionEnvironment = String(connection?.execution_environment || "");
+    const environmentEnabled = executionEnvironment === "DEMO"
+      ? demoExecutionEnabled
+      : executionEnvironment === "MAINNET_LIVE" ? liveExecutionEnabled : false;
+    if (!connection || connection.user_id !== strategy.owner_user_id
+      || connection.account_id !== binding.account_id
+      || !environmentEnabled
+      || !["CONNECTED_CLOUD", "CONNECTED_HYBRID"].includes(connection.health_status)
+      || connection.credential_state !== "AUTHENTICATED"
+      || connection.worker_state !== "LIVE"
+      || connection.synchronization_state !== "SYNCHRONIZED"
+      || connection.execution_readiness !== "READY"
+      || connection.control_state !== "ACTIVE") {
+      await auditBrokerSignalBlocked(
+        strategy,
+        binding,
+        `black-script:${evaluation.latestClosedCandleTime}:${binding.id}`,
+        "BROKER_CONNECTION_NOT_READY",
+        executionEnvironment,
+      );
+      throw Object.assign(new Error("Every armed Black Script target must be synchronized before committing the next shared generation."), {
+        code: "BLACK_SCRIPT_TARGET_NOT_READY",
+      });
+    }
+    const prior = stateByBinding.get(String(binding.id));
+    if (prior && (Number(prior.strategy_version) !== Number(strategy.current_version)
+      || prior.source_version !== evaluation.sourceVersion
+      || prior.settings_version !== evaluation.settingsVersion)) {
+      const priorHandles = prior.broker_order_handles && typeof prior.broker_order_handles === "object"
+        ? Object.keys(prior.broker_order_handles)
+        : [];
+      if (priorHandles.length) {
+        throw Object.assign(new Error("A prior Black Script version still owns broker orders on this target."), {
+          code: "BLACK_SCRIPT_PRIOR_VERSION_ORDERS_REQUIRE_CANCEL",
+        });
+      }
+    }
+    const storedPriorHandles = prior?.broker_order_handles && typeof prior.broker_order_handles === "object"
+      ? prior.broker_order_handles as Record<string, BlackScriptBrokerOrderHandle>
+      : {};
+    const hasOwnedPosition = (positions || []).some((position) =>
+      position.account_id === binding.account_id
+      && position.strategy_target_binding_id === binding.id
+      && Number(position.quantity) > 0);
+    const ownedPositions = (positions || []).filter((position) =>
+      position.account_id === binding.account_id
+      && position.strategy_target_binding_id === binding.id
+      && Number(position.quantity) > 0)
+      .map((position) => ({ direction: position.direction, quantity: Number(position.quantity) }));
+    const targetCommands = (placeCommands || []).filter((command) => command.strategy_target_binding_id === binding.id);
+    const targetOrderIds = new Set(targetCommands.map((command) => command.execution_order_id).filter(Boolean));
+    const targetFillState = {
+      commandsByIdempotencyKey: Object.fromEntries(targetCommands.map((command) => [command.idempotency_key, {
+        status: command.status,
+        executionOrderId: command.execution_order_id,
+      }])),
+      ordersById: Object.fromEntries((acknowledgedOrders || [])
+        .filter((order) => targetOrderIds.has(order.id) && order.strategy_target_binding_id === binding.id)
+        .map((order) => [order.id, {
+          status: order.status,
+          quantity: Number(order.quantity || 0),
+          filledQuantity: Number(order.filled_quantity || 0),
+        }])),
+      ownedPositions,
+    };
+    assertBlackScriptExpectedTargetFills({
+      evaluation,
+      priorHandles: storedPriorHandles,
+      state: targetFillState,
+    });
+    const priorHandles = settleBlackScriptTargetMarketActions({
+      priorHandles: storedPriorHandles,
+      state: targetFillState,
+    });
+    const opensPositionThisGeneration = evaluation.marketActions.some((action: JsonRow) => ["ENTRY", "REVERSE"].includes(action.action));
+    // A newly attached flat account begins following at the next entry. It
+    // must not receive orphaned reduce-only exits belonging to the strategy's
+    // pre-attachment virtual position.
+    const targetEvaluation = !prior && !hasOwnedPosition && !opensPositionThisGeneration
+      ? {
+        ...evaluation,
+        desiredOrders: evaluation.desiredOrders.filter((order: JsonRow) => order.action === "entry"),
+      }
+      : evaluation;
+    const targetPreviousCheckpoint = prior
+      ? {
+        ...evaluation.checkpoint,
+        brokerOrderFingerprints: prior.desired_order_fingerprints && typeof prior.desired_order_fingerprints === "object"
+          ? prior.desired_order_fingerprints
+          : {},
+      }
+      : null;
+    const targetPlan = buildBlackScriptBrokerPlan({
+      evaluation: targetEvaluation,
+      previousCheckpoint: targetPreviousCheckpoint,
+      tickSize: Number(tickSize),
+    });
+    if (hasOwnedPosition || opensPositionThisGeneration) {
+      const allDesired = buildBlackScriptBrokerPlan({
+        evaluation: targetEvaluation,
+        previousCheckpoint: null,
+        tickSize: Number(tickSize),
+      });
+      const currentCreateKeys = new Set(targetPlan.createOrders.map((order) => order.key));
+      for (const order of allDesired.createOrders) {
+        if (!priorHandles[order.key] && !currentCreateKeys.has(order.key)) {
+          targetPlan.createOrders.push(order);
+          currentCreateKeys.add(order.key);
+        }
+      }
+      const currentProtectionKeys = new Set(targetPlan.setProtections.map((item) => item.key));
+      for (const protection of allDesired.setProtections) {
+        if (!priorHandles[protection.key] && !currentProtectionKeys.has(protection.key)) {
+          targetPlan.setProtections.push(protection);
+          currentProtectionKeys.add(protection.key);
+        }
+      }
+      targetPlan.modifyOrders = targetPlan.modifyOrders.filter((order) => priorHandles[order.key]);
+    } else {
+      targetPlan.modifyOrders = targetPlan.modifyOrders.filter((order) => priorHandles[order.key]);
+    }
+    const manifest = buildBlackScriptTargetCommandManifest({
+      strategyId: strategy.id,
+      strategyVersion: strategy.current_version,
+      ownerUserId: strategy.owner_user_id,
+      bindingId: binding.id,
+      connectionId: binding.connection_id,
+      accountId: binding.account_id,
+      symbol: strategy.symbol,
+      marketType: binding.market_type === "SPOT" ? "SPOT" : "FUTURES",
+      executionEnvironment: executionEnvironment as "DEMO" | "MAINNET_LIVE",
+      requestedLongLeverage: sideSpecificLeverage(strategy.definition, "long", binding),
+      requestedShortLeverage: sideSpecificLeverage(strategy.definition, "short", binding),
+      evaluation: targetEvaluation,
+      plan: targetPlan,
+      priorHandles,
+      digest: (value) => crypto.createHash("sha256").update(value).digest("hex"),
+    });
+    if (targetEvaluation !== evaluation) {
+      manifest.desiredOrderFingerprints = { ...evaluation.checkpoint.brokerOrderFingerprints };
+    }
+    manifests.push(manifest);
+  }
+  return manifests;
+}
+
 function strategyDirectionFromSignalKey(value: unknown): "long" | "short" | null {
   const match = String(value || "").match(/:(long|short)$/i);
   return match ? match[1]!.toLowerCase() as "long" | "short" : null;
@@ -397,7 +830,7 @@ async function enqueueBrokerStrategySignal(
   signal: JsonRow,
   signalKey: string,
 ) {
-  if (!binding.connection_id || !binding.account_id) return;
+  if (!binding.connection_id || !binding.account_id) return false;
   const { data: connection, error: connectionError } = await supabase
     .from("connectivity_connections")
     .select("id,execution_environment,health_status,credential_state,worker_state,synchronization_state,execution_readiness,control_state")
@@ -409,7 +842,7 @@ async function enqueueBrokerStrategySignal(
   const environmentEnabled = executionEnvironment === "DEMO" ? demoExecutionEnabled : executionEnvironment === "MAINNET_LIVE" ? liveExecutionEnabled : false;
   if (!connection || !environmentEnabled || !["CONNECTED_CLOUD", "CONNECTED_HYBRID"].includes(connection.health_status) || connection.credential_state !== "AUTHENTICATED" || connection.worker_state !== "LIVE" || connection.synchronization_state !== "SYNCHRONIZED" || connection.execution_readiness !== "READY" || connection.control_state !== "ACTIVE") {
     await auditBrokerSignalBlocked(strategy, binding, signalKey, "BROKER_CONNECTION_NOT_READY", executionEnvironment);
-    return;
+    return false;
   }
   const { data: positions, error: positionError } = await supabase
     .from("account_positions")
@@ -422,25 +855,52 @@ async function enqueueBrokerStrategySignal(
   const unowned = open.find((item) => item.strategy_target_binding_id !== binding.id);
   if (unowned) {
     await auditBrokerSignalBlocked(strategy, binding, signalKey, "ACCOUNT_SYMBOL_OCCUPIED_BY_UNOWNED_POSITION", executionEnvironment);
-    return;
+    return false;
   }
   const owned = open.filter((item) => item.strategy_target_binding_id === binding.id);
   const sameDirection = owned.some((item) => item.direction === signal.direction);
   const opposite = owned.find((item) => item.direction !== signal.direction);
-  if (sameDirection) return;
-  const perpetualReversal = strategy.definition?.execution?.perpetualSignalReversalEnabled === true;
-  const conflictResolution = perpetualReversal
-    ? "CLOSE_THEN_REVERSE"
-    : String(strategy.definition?.execution?.conflictResolution || "CLOSE_ONLY").toUpperCase();
-  if (opposite && conflictResolution === "IGNORE") {
-    await auditBrokerSignalBlocked(strategy, binding, signalKey, "OPPOSITE_SIGNAL_IGNORED_BY_POLICY", executionEnvironment);
-    return;
+  const explicitAction = ["ENTRY", "CLOSE", "REVERSE"].includes(String(signal.explicitAction || "").toUpperCase())
+    ? String(signal.explicitAction).toUpperCase()
+    : null;
+  let action: string;
+  let positionDirection: string | null = opposite?.direction || null;
+  if (explicitAction === "CLOSE") {
+    const closing = owned.find((item) => item.direction === String(signal.positionDirection || signal.direction).toLowerCase());
+    if (!closing) return true;
+    action = "CLOSE";
+    positionDirection = closing.direction;
+  } else if (explicitAction === "REVERSE") {
+    if (sameDirection && !opposite) return true;
+    if (!opposite) {
+      await auditBrokerSignalBlocked(strategy, binding, signalKey, "BLACK_SCRIPT_REVERSE_POSITION_MISSING", executionEnvironment);
+      return false;
+    }
+    action = "REVERSE";
+    positionDirection = opposite.direction;
+  } else if (explicitAction === "ENTRY") {
+    if (sameDirection) return true;
+    if (opposite) {
+      await auditBrokerSignalBlocked(strategy, binding, signalKey, "BLACK_SCRIPT_ENTRY_POSITION_CONFLICT", executionEnvironment);
+      return false;
+    }
+    action = "ENTRY";
+  } else {
+    if (sameDirection) return true;
+    const perpetualReversal = strategy.definition?.execution?.perpetualSignalReversalEnabled === true;
+    const conflictResolution = perpetualReversal
+      ? "CLOSE_THEN_REVERSE"
+      : String(strategy.definition?.execution?.conflictResolution || "CLOSE_ONLY").toUpperCase();
+    if (opposite && conflictResolution === "IGNORE") {
+      await auditBrokerSignalBlocked(strategy, binding, signalKey, "OPPOSITE_SIGNAL_IGNORED_BY_POLICY", executionEnvironment);
+      return false;
+    }
+    action = opposite ? (conflictResolution === "CLOSE_ONLY" ? "CLOSE" : "REVERSE") : "ENTRY";
   }
-  const action = opposite ? (conflictResolution === "CLOSE_ONLY" ? "CLOSE" : "REVERSE") : "ENTRY";
   const takeProfitPlan = reserveStrategyTakeProfits(signal.takeProfits);
   if (binding.market_type === "SPOT" && shouldQueueStrategyTakeProfits(action) && takeProfitPlan.length) {
     await auditBrokerSignalBlocked(strategy, binding, signalKey, "SPOT_TP_PROTECTION_UNCERTIFIED", executionEnvironment);
-    return;
+    return false;
   }
   const commandSignalKey = `${signalKey}:${binding.id}:${action.toLowerCase()}`;
   const idempotencyKey = crypto.createHash("sha256").update(commandSignalKey).digest("hex");
@@ -458,7 +918,8 @@ async function enqueueBrokerStrategySignal(
       symbol: strategy.symbol,
       marketType: strategy.market_type,
       direction: signal.direction,
-      positionDirection: opposite?.direction || null,
+      positionDirection,
+      closeQuantity: Number(signal.quantity) > 0 ? Number(signal.quantity) : null,
       stopLoss: signal.stopLoss || null,
       takeProfit: signal.takeProfit || null,
       takeProfits: takeProfitPlan,
@@ -520,6 +981,15 @@ async function enqueueBrokerStrategySignal(
     message: `A confirmed closed-candle signal queued an idempotent Bybit ${executionEnvironment === "DEMO" ? "Demo" : "Mainnet"} order command.`,
     safe_metadata: { signalKey, action, symbol: strategy.symbol, direction: signal.direction, executionEnvironment, simulatedFunds: executionEnvironment === "DEMO" }
   });
+  return {
+    durable: true,
+    parentIdempotencyKey: idempotencyKey,
+    takeProfitHandles: Object.fromEntries(takeProfitPlan.map((target, index) => {
+      const targetId = String(target?.id || `TP${index + 1}`).toUpperCase();
+      const targetKey = `${idempotencyKey}:TAKE_PROFIT:${targetId}`;
+      return [String(target?.logicalOrderKey || targetId), crypto.createHash("sha256").update(targetKey).digest("hex")];
+    })),
+  };
 }
 
 async function auditBrokerSignalBlocked(strategy: JsonRow, binding: JsonRow, signalKey: string, reason: string, executionEnvironment: string) {
@@ -1588,6 +2058,86 @@ async function fetchBybitCandleWindow(
     closed,
     current: candles.find((candle: Candle) => candle.time * 1000 <= now && candleCloseTimeMsForInterval(candle.time, interval) > now) || null,
   };
+}
+
+async function fetchBybitBlackScriptIntrabars({
+  symbol,
+  timeframe,
+  marketType,
+  closedCandles,
+  checkpoint,
+}: {
+  symbol: string;
+  timeframe: string;
+  marketType: string;
+  closedCandles: Candle[];
+  checkpoint: JsonRow | null | undefined;
+}) {
+  const lowerTimeframe = strategyMagnifierTimeframe(timeframe as Parameters<typeof strategyMagnifierTimeframe>[0]);
+  if (!lowerTimeframe) {
+    throw Object.assign(new Error("The selected Bybit timeframe has no certified lower-timeframe magnifier feed."), {
+      code: "BLACK_SCRIPT_MAGNIFIER_TIMEFRAME_UNAVAILABLE",
+    });
+  }
+  const priorTime = Number(checkpoint?.runtimeVersion === "black-script-v3" ? checkpoint.lastClosedCandleTime : NaN);
+  const executable = closedCandles.filter((candle) => Number.isFinite(priorTime) ? candle.time > priorTime : candle === closedCandles.at(-1));
+  if (!executable.length) return closedCandles.map(() => [] as Candle[]);
+  const lowerInterval = bybitInterval(lowerTimeframe);
+  const startMs = executable[0]!.time * 1000;
+  const endMs = candleCloseTimeMs(executable.at(-1)!.time, timeframe) - 1;
+  const fixedLowerMs = Number(lowerInterval.milliseconds || 86_400_000);
+  const expected = Math.ceil((endMs + 1 - startMs) / fixedLowerMs);
+  if (expected > 1_000) {
+    throw Object.assign(new Error("The live Bar Magnifier request exceeds Bybit's atomic lower-timeframe page."), {
+      code: "BLACK_SCRIPT_MAGNIFIER_WINDOW_TOO_LARGE",
+    });
+  }
+  const url = new URL("https://api.bybit.com/v5/market/kline");
+  url.searchParams.set("category", marketType === "SPOT" ? "spot" : "linear");
+  url.searchParams.set("symbol", String(symbol).replace(/[^A-Za-z0-9]/g, "").toUpperCase());
+  url.searchParams.set("interval", lowerInterval.value);
+  url.searchParams.set("start", String(startMs));
+  url.searchParams.set("end", String(endMs));
+  url.searchParams.set("limit", String(Math.max(1, Math.min(1_000, expected + 2))));
+  const response = await fetch(url, { signal: AbortSignal.timeout(8_000), headers: { accept: "application/json" } });
+  if (!response.ok) {
+    throw Object.assign(new Error("Bybit lower-timeframe candle request failed."), {
+      code: `BLACK_SCRIPT_MAGNIFIER_HTTP_${response.status}`,
+    });
+  }
+  const payload = await response.json();
+  if (Number(payload.retCode) !== 0 || !Array.isArray(payload.result?.list)) {
+    throw Object.assign(new Error("Bybit lower-timeframe candle payload was rejected."), {
+      code: "BLACK_SCRIPT_MAGNIFIER_PAYLOAD_INVALID",
+    });
+  }
+  const lowerCandles = payload.result.list.map((row: string[]): Candle => ({
+    time: Math.floor(Number(row[0]) / 1000),
+    open: Number(row[1]),
+    high: Number(row[2]),
+    low: Number(row[3]),
+    close: Number(row[4]),
+    volume: Number(row[5]),
+  })).filter((candle: Candle) => [candle.time, candle.open, candle.high, candle.low, candle.close].every(Number.isFinite))
+    .sort((left: Candle, right: Candle) => left.time - right.time);
+  const grouped = new Map<number, Candle[]>();
+  for (const parent of executable) grouped.set(parent.time, []);
+  for (const candle of lowerCandles) {
+    const parent = executable.find((candidate) => candle.time >= candidate.time && candle.time * 1000 < candleCloseTimeMs(candidate.time, timeframe));
+    if (parent) grouped.get(parent.time)!.push(candle);
+  }
+  for (const parent of executable) {
+    const bucket = grouped.get(parent.time) || [];
+    const parentCloseMs = candleCloseTimeMs(parent.time, timeframe);
+    if (!bucket.length || bucket[0]!.time !== parent.time
+      || candleCloseTimeMsForInterval(bucket.at(-1)!.time, lowerInterval) !== parentCloseMs) {
+      throw Object.assign(new Error("Bybit lower-timeframe coverage is incomplete for a confirmed strategy candle."), {
+        code: "BLACK_SCRIPT_MAGNIFIER_COVERAGE_INCOMPLETE",
+      });
+    }
+    assertBybitCandleWindowIntegrity(bucket, lowerInterval, parentCloseMs);
+  }
+  return closedCandles.map((candle) => grouped.get(candle.time) || []);
 }
 
 function bybitInterval(timeframe: string): { value: string; milliseconds: number | null } {

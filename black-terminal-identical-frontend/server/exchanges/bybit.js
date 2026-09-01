@@ -1174,9 +1174,18 @@ export function buildBybitTradingStopBody(patch) {
     stopLoss: numericIntent("stopLoss", patch.stopLoss),
     trailingStop: numericIntent("trailingStop", patch.trailingStop),
     activePrice: numericIntent("trailingActivationPrice", patch.trailingActivationPrice),
+    tpSize: numericIntent("tpSize", patch.tpSize),
+    slSize: numericIntent("slSize", patch.slSize),
+    tpLimitPrice: numericIntent("tpLimitPrice", patch.tpLimitPrice),
+    slLimitPrice: numericIntent("slLimitPrice", patch.slLimitPrice),
+    tpOrderType: patch.tpOrderType === "limit" || patch.tpOrderType === "Limit" ? "Limit" : patch.tpOrderType ? "Market" : undefined,
+    slOrderType: patch.slOrderType === "limit" || patch.slOrderType === "Limit" ? "Limit" : patch.slOrderType ? "Market" : undefined,
     ...(patch.takeProfit !== undefined ? { tpTriggerBy: triggerBy(patch.tpTriggerBy) } : {}),
     ...(patch.stopLoss !== undefined ? { slTriggerBy: triggerBy(patch.slTriggerBy) } : {})
   };
+  if (body.tpslMode === "Partial" && (Number(body.tpSize) <= 0 || Number(body.slSize) <= 0 || body.tpSize !== body.slSize)) {
+    throw new Error("Bybit partial protection requires equal positive tpSize and slSize values.");
+  }
   if (body.takeProfit === undefined && body.stopLoss === undefined && body.trailingStop === undefined) throw new Error("Bybit native protection requires an explicit set or cancel intent.");
   return body;
 }

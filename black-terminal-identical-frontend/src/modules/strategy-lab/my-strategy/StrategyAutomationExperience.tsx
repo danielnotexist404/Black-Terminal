@@ -28,7 +28,7 @@ type Props = {
   chartTimeframe: string;
   indicators: StrategyIndicatorInstance[];
   onDefinitionChange: (definition: StrategyAutomationDefinition) => void;
-  onOpenBacktest: (strategy: StrategySummary) => void;
+  onOpenBacktest: (workspace: StrategyWorkspace) => void;
 };
 
 export function StrategyAutomationExperience({ definition, chartTimeframe, indicators, onDefinitionChange, onOpenBacktest }: Props) {
@@ -78,6 +78,19 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
     }
     return next;
   }, []);
+
+  const openBacktest = useCallback(async (strategy: StrategySummary) => {
+    setBusy(true);
+    setMessage(undefined);
+    try {
+      const next = await strategyAutomationApi.get(strategy.id);
+      onOpenBacktest(next);
+    } catch (error) {
+      setMessage(errorMessage(error, "The saved strategy could not be loaded for backtesting."));
+    } finally {
+      setBusy(false);
+    }
+  }, [onOpenBacktest]);
 
   useEffect(() => {
     if (fixtureMode) {
@@ -621,7 +634,7 @@ export function StrategyAutomationExperience({ definition, chartTimeframe, indic
   };
 
   return <div className="my-strategy-experience">
-    {view === "library" ? <StrategyLibraryPage strategies={strategies} loading={loading} message={message} onCreate={newStrategy} onOpen={(id) => void openStrategy(id)} onModify={(id) => void modifyStrategy(id)} onDelete={setPendingDelete} onBacktest={onOpenBacktest} onPaperAction={(strategy, action) => void libraryPaperAction(strategy, action)} /> : null}
+    {view === "library" ? <StrategyLibraryPage strategies={strategies} loading={loading || busy} message={message} onCreate={newStrategy} onOpen={(id) => void openStrategy(id)} onModify={(id) => void modifyStrategy(id)} onDelete={setPendingDelete} onBacktest={(strategy) => void openBacktest(strategy)} onPaperAction={(strategy, action) => void libraryPaperAction(strategy, action)} /> : null}
     {view === "qalc" ? <QalcExperience onBack={() => setView("library")} /> : null}
     {view === "wizard" && draft ? <StrategyWizardPage draft={draft} chartTimeframe={chartTimeframe} indicators={indicators} publishedName={workspace?.strategy.name} publishedDefinition={workspace?.strategy.definition} saving={busy} message={message || (dirty ? "Draft changes have not been saved." : undefined)} onChange={(next) => { setDraft(next); setDirty(true); }} onSaveDraft={() => void persistDraft()} onActivate={() => void activateConfiguredStrategy()} onCancel={() => { setView(workspace?.strategy.id ? "cockpit" : "library"); setMessage(undefined); }} /> : null}
     {view === "cockpit" && workspace ? <StrategyCockpitPage workspace={workspace} paperData={paperData} busy={busy} message={message} onEdit={editStrategy} onRefresh={() => void refreshCockpit()} onPaperAction={(action, body) => void paperAction(action, body)} onAddTarget={(slot) => void openTargetPicker(slot)} onModifyTarget={(binding) => void openTargetPicker(binding.slotIndex, binding)} onTargetAction={(bindingId, action) => void targetAction(bindingId, action)} onDisconnectTarget={(bindingId) => void disconnectTarget(bindingId)} onApplyExecutionConfiguration={applyExecutionConfiguration} /> : null}

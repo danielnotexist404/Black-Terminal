@@ -191,6 +191,7 @@ fn install_desktop_tray(_app: &mut tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(local_p2p::LocalP2pManager::default())

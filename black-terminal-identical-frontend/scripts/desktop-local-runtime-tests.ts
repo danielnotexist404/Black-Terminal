@@ -52,7 +52,7 @@ const institutionalFlow = read("src/institutional-flow/institutionalFlowClient.t
 const persistentAuthenticFlow = read("src/modules/acvd/data/persistentFlowClient.ts");
 const liquidationController = read("src/modules/liquidation-field/data/LiquidationFieldController.ts");
 const indicatorLibrary = read("src/components/IndicatorLibrary.tsx");
-const releaseWorkflow = read(".github/workflows/standalone-release.yml");
+const releaseWorkflow = read("../.github/workflows/standalone-release.yml");
 const standaloneStyles = read("src/styles/standalone-bootstrap.css");
 const resend = read("src/lib/resend.ts");
 

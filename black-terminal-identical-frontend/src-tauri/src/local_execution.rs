@@ -159,13 +159,23 @@ fn initialize_schema(path: &Path) -> Result<(), String> {
                FOREIGN KEY(dependency_key) REFERENCES local_execution_intents(idempotency_key)
              );
              CREATE INDEX IF NOT EXISTS local_execution_dependency_key_idx
-               ON local_execution_dependencies(dependency_key);
-             UPDATE local_execution_intents
-                SET status = 'RETRY', lease_expires_at = NULL, available_at = 0,
-                    last_error = COALESCE(last_error, 'Recovered after local runtime restart')
-              WHERE status = 'IN_FLIGHT';",
+               ON local_execution_dependencies(dependency_key);",
         )
         .map_err(|_| "The local execution queue schema could not be initialized".to_string())?;
+    Ok(())
+}
+
+fn recover_interrupted_executions(path: &Path) -> Result<(), String> {
+    let connection = open_database(path)?;
+    connection
+        .execute(
+            "UPDATE local_execution_intents
+                SET status = 'RETRY', lease_expires_at = NULL, available_at = 0,
+                    last_error = COALESCE(last_error, 'Recovered after local runtime restart')
+              WHERE status = 'IN_FLIGHT'",
+            [],
+        )
+        .map_err(|_| "Interrupted local executions could not be recovered".to_string())?;
     Ok(())
 }
 
@@ -546,6 +556,7 @@ async fn execute_async<R: Runtime>(
 pub(crate) fn start_local_execution_runtime<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     let path = database_path(&app)?;
     initialize_schema(&path)?;
+    recover_interrupted_executions(&path)?;
     tauri::async_runtime::spawn(async move {
         loop {
             WORKER_HEARTBEAT_AT.store(unix_millis(), Ordering::Relaxed);
@@ -671,6 +682,31 @@ mod tests {
             claim_next(&path).unwrap().unwrap().idempotency_key,
             "strategy:child"
         );
+    }
+
+    #[test]
+    fn startup_recovery_requeues_only_interrupted_claims() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("recovery.sqlite3");
+        enqueue_at_path(
+            &path,
+            EnqueueLocalExecutionRequest {
+                execution_type: "ORDER".into(),
+                idempotency_key: "strategy:interrupted".into(),
+                payload: serde_json::json!({"accountId":"local-bybit-1"}),
+                priority: Some(20),
+                max_attempts: Some(4),
+            },
+        )
+        .unwrap();
+        let first_claim = claim_next(&path).unwrap().unwrap();
+        assert_eq!(first_claim.attempts, 1);
+        assert!(claim_next(&path).unwrap().is_none());
+
+        recover_interrupted_executions(&path).unwrap();
+        let recovered_claim = claim_next(&path).unwrap().unwrap();
+        assert_eq!(recovered_claim.idempotency_key, "strategy:interrupted");
+        assert_eq!(recovered_claim.attempts, 2);
     }
 
     #[test]

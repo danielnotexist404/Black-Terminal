@@ -172,6 +172,8 @@ fn store_inbox_message<R: Runtime>(
     let encoded = serde_json::to_string(&message.payload)
         .map_err(|_| "The P2P message payload could not be encoded".to_string())?;
     let encrypted = encrypt_local_text(&format!("p2p-inbox:{}", message.message_id), &encoded)?;
+    let received_at = i64::try_from(message.received_at)
+        .map_err(|_| "The P2P message timestamp exceeds SQLite range".to_string())?;
     connection
         .execute(
             "INSERT OR IGNORE INTO local_p2p_inbox(message_id,topic,source_peer_id,payload_json,received_at)
@@ -181,7 +183,7 @@ fn store_inbox_message<R: Runtime>(
                 message.topic,
                 message.source_peer_id,
                 encrypted,
-                message.received_at
+                received_at
             ],
         )
         .map_err(|_| "The encrypted P2P inbox message could not be committed".to_string())?;
@@ -201,14 +203,16 @@ fn list_inbox<R: Runtime>(
                FROM local_p2p_inbox ORDER BY received_at DESC LIMIT ?1",
         )
         .map_err(|_| "The local P2P inbox could not be prepared".to_string())?;
+    let query_limit = i64::try_from(limit.clamp(1, 500))
+        .map_err(|_| "The local P2P inbox limit is invalid".to_string())?;
     let rows = statement
-        .query_map(params![limit.clamp(1, 500)], |row| {
+        .query_map(params![query_limit], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
-                row.get::<_, u64>(4)?,
+                row.get::<_, i64>(4)?,
             ))
         })
         .map_err(|_| "The local P2P inbox could not be queried".to_string())?;
@@ -218,6 +222,8 @@ fn list_inbox<R: Runtime>(
     rows.into_iter()
         .map(|(message_id, topic, source_peer_id, stored, received_at)| {
             let encoded = decrypt_local_text(&format!("p2p-inbox:{message_id}"), &stored)?;
+            let received_at = u64::try_from(received_at)
+                .map_err(|_| "A local P2P inbox timestamp is invalid".to_string())?;
             Ok(LocalP2pInboxMessage {
                 message_id,
                 topic,
@@ -444,6 +450,7 @@ async fn start_node<R: Runtime>(
                     SwarmEvent::Behaviour(BlackTerminalP2pBehaviourEvent::Direct(request_response::Event::Message {
                         peer,
                         message: request_response::Message::Request { request, channel, .. },
+                        ..
                     })) => {
                         let accepted = request.schema_version == 1
                             && !request.message_id.trim().is_empty()

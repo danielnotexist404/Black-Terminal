@@ -280,6 +280,7 @@ fn status<R: Runtime>(app: &AppHandle<R>) -> Result<LocalRuntimeStatus, String> 
     let now = unix_millis();
     let webview_at = WEBVIEW_HEARTBEAT_AT.load(Ordering::Relaxed);
     let worker_at = crate::local_execution::local_execution_worker_heartbeat();
+    let background_health = background_health(config.as_ref(), now, webview_at, worker_at);
     Ok(LocalRuntimeStatus {
         available: true,
         initialized: config.is_some() && vault_ready,
@@ -290,7 +291,7 @@ fn status<R: Runtime>(app: &AppHandle<R>) -> Result<LocalRuntimeStatus, String> 
         background_limitation,
         webview_heartbeat_at: optional_timestamp(webview_at),
         execution_worker_heartbeat_at: optional_timestamp(worker_at),
-        background_health: background_health(config.as_ref(), now, webview_at, worker_at),
+        background_health,
     })
 }
 

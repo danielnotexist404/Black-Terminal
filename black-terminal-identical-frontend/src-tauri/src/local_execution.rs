@@ -39,7 +39,7 @@ pub(crate) struct EnqueueLocalExecutionRequest {
     max_attempts: Option<u32>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LocalExecutionIntent {
     id: i64,
@@ -56,6 +56,38 @@ pub(crate) struct LocalExecutionIntent {
     last_error: Option<String>,
     created_at: u64,
     updated_at: u64,
+}
+
+fn sqlite_integer(value: u64) -> Result<i64, String> {
+    i64::try_from(value).map_err(|_| "The local execution timestamp exceeds SQLite range".into())
+}
+
+fn sqlite_unsigned(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<u64> {
+    let value = row.get::<_, i64>(column)?;
+    u64::try_from(value).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            column,
+            rusqlite::types::Type::Integer,
+            Box::new(error),
+        )
+    })
+}
+
+fn sqlite_optional_unsigned(
+    row: &rusqlite::Row<'_>,
+    column: usize,
+) -> rusqlite::Result<Option<u64>> {
+    row.get::<_, Option<i64>>(column)?
+        .map(|value| {
+            u64::try_from(value).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    column,
+                    rusqlite::types::Type::Integer,
+                    Box::new(error),
+                )
+            })
+        })
+        .transpose()
 }
 
 fn normalize_execution_type(value: &str) -> Result<String, String> {
@@ -198,12 +230,12 @@ fn decode_intent(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalExecutionInte
         priority: row.get(5)?,
         attempts: row.get::<_, u32>(6)?,
         max_attempts: row.get::<_, u32>(7)?,
-        available_at: row.get::<_, u64>(8)?,
-        lease_expires_at: row.get::<_, Option<u64>>(9)?,
+        available_at: sqlite_unsigned(row, 8)?,
+        lease_expires_at: sqlite_optional_unsigned(row, 9)?,
         result: result_plaintext.and_then(|value| serde_json::from_str(&value).ok()),
         last_error: row.get(10)?,
-        created_at: row.get(12)?,
-        updated_at: row.get(13)?,
+        created_at: sqlite_unsigned(row, 12)?,
+        updated_at: sqlite_unsigned(row, 13)?,
     })
 }
 
@@ -244,6 +276,7 @@ fn enqueue_at_path(
         &payload_json,
     )?;
     let now = unix_millis();
+    let now_sql = sqlite_integer(now)?;
     let max_attempts = request.max_attempts.unwrap_or(8).clamp(1, 20);
     let priority = request.priority.unwrap_or(50).clamp(0, 100);
     let mut connection = open_database(path)?;
@@ -263,7 +296,7 @@ fn enqueue_at_path(
                 encrypted_payload,
                 priority,
                 max_attempts,
-                now
+                now_sql
             ],
         )
         .map_err(|_| "The local execution intent could not be queued".to_string())?;
@@ -302,6 +335,8 @@ fn enqueue_at_path(
 fn claim_next(path: &Path) -> Result<Option<LocalExecutionIntent>, String> {
     initialize_schema(path)?;
     let now = unix_millis();
+    let now_sql = sqlite_integer(now)?;
+    let lease_expires_at_sql = sqlite_integer(now.saturating_add(STALE_LEASE_MILLIS))?;
     let mut connection = open_database(path)?;
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -319,7 +354,7 @@ fn claim_next(path: &Path) -> Result<Option<LocalExecutionIntent>, String> {
                   WHERE dependency.intent_id=child.id
                     AND parent.status IN ('FAILED','CANCELLED')
                 )",
-            params![now],
+            params![now_sql],
         )
         .map_err(|_| "Failed local execution dependencies could not be propagated".to_string())?;
     transaction
@@ -328,7 +363,7 @@ fn claim_next(path: &Path) -> Result<Option<LocalExecutionIntent>, String> {
                 SET status='RETRY', lease_expires_at=NULL, available_at=?1,
                     last_error=COALESCE(last_error,'Recovered expired execution lease')
               WHERE status='IN_FLIGHT' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?1",
-            params![now],
+            params![now_sql],
         )
         .map_err(|_| "Expired local execution leases could not be recovered".to_string())?;
     let id: Option<i64> = transaction
@@ -345,7 +380,7 @@ fn claim_next(path: &Path) -> Result<Option<LocalExecutionIntent>, String> {
                     AND (parent.id IS NULL OR parent.status <> 'SUCCEEDED')
                 )
               ORDER BY priority ASC, created_at ASC LIMIT 1",
-            params![now],
+            params![now_sql],
             |row| row.get(0),
         )
         .optional()
@@ -361,7 +396,7 @@ fn claim_next(path: &Path) -> Result<Option<LocalExecutionIntent>, String> {
             "UPDATE local_execution_intents
                 SET status='IN_FLIGHT', attempts=attempts+1, lease_expires_at=?2, updated_at=?1
               WHERE id=?3 AND status IN ('PENDING','RETRY')",
-            params![now, now.saturating_add(STALE_LEASE_MILLIS), id],
+            params![now_sql, lease_expires_at_sql, id],
         )
         .map_err(|_| "The local execution lease could not be acquired".to_string())?;
     let intent = transaction
@@ -385,12 +420,13 @@ fn complete(path: &Path, intent: &LocalExecutionIntent, result: Value) -> Result
         &format!("execution-result:{}", intent.idempotency_key),
         &encoded,
     )?;
+    let updated_at = sqlite_integer(unix_millis())?;
     connection
         .execute(
             "UPDATE local_execution_intents SET status='SUCCEEDED', result_json=?1,
                last_error=NULL, lease_expires_at=NULL, updated_at=?2
              WHERE id=?3 AND status='IN_FLIGHT'",
-            params![encrypted, unix_millis(), intent.id],
+            params![encrypted, updated_at, intent.id],
         )
         .map_err(|_| "The local execution result could not be committed".to_string())?;
     Ok(())
@@ -400,6 +436,12 @@ fn fail(path: &Path, intent: &LocalExecutionIntent, error: &str) -> Result<(), S
     let retry = is_retryable(error) && intent.attempts < intent.max_attempts;
     let backoff = 500u64.saturating_mul(2u64.saturating_pow(intent.attempts.min(6)));
     let now = unix_millis();
+    let now_sql = sqlite_integer(now)?;
+    let available_at_sql = sqlite_integer(if retry {
+        now.saturating_add(backoff)
+    } else {
+        now
+    })?;
     let connection = open_database(path)?;
     connection
         .execute(
@@ -408,12 +450,8 @@ fn fail(path: &Path, intent: &LocalExecutionIntent, error: &str) -> Result<(), S
             params![
                 if retry { "RETRY" } else { "FAILED" },
                 sanitize_error(error),
-                if retry {
-                    now.saturating_add(backoff)
-                } else {
-                    now
-                },
-                now,
+                available_at_sql,
+                now_sql,
                 intent.id
             ],
         )

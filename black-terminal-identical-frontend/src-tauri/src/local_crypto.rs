@@ -8,6 +8,7 @@ use zeroize::Zeroizing;
 #[cfg(test)]
 use std::sync::OnceLock;
 
+#[cfg(not(test))]
 use crate::credential_vault::{get_internal_secret, set_internal_secret};
 
 const LOCAL_DATA_KEY: &str = "internal:local-data-master:v1";

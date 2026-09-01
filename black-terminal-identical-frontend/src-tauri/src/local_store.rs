@@ -12,7 +12,7 @@ use crate::local_crypto::{decrypt_local_text, encrypt_local_text};
 const DATABASE_FILE: &str = "black-terminal-local-v1.sqlite3";
 const MAX_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LocalDocument {
     namespace: String,

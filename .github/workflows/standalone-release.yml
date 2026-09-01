@@ -39,7 +39,7 @@ jobs:
       - name: Build relay container
         run: docker build --tag black-terminal-relay:ci --file infra/p2p-relay/Dockerfile infra/p2p-relay
 
-      - name: Verify a real Circuit Relay v2 reservation
+      - name: Verify a real relay reservation and rendezvous registration
         run: |
           docker run --detach --name black-terminal-relay-ci \
             --publish 44001:4001/tcp \
@@ -56,7 +56,7 @@ jobs:
           relay_peer_id="$(curl --fail --silent http://127.0.0.1:18081/status | jq --raw-output .peerId)"
           cargo run --quiet --locked --manifest-path infra/p2p-relay/Cargo.toml -- \
             probe "/ip4/127.0.0.1/tcp/44001/p2p/${relay_peer_id}"
-          curl --fail --silent http://127.0.0.1:18081/status | jq --exit-status '.acceptedReservations >= 1'
+          curl --fail --silent http://127.0.0.1:18081/status | jq --exit-status '.acceptedReservations >= 1 and .acceptedRendezvousRegistrations >= 1 and .servedRendezvousDiscoveries >= 1'
 
       - name: Stop relay test container
         if: always()

@@ -69,7 +69,8 @@
       "hardenedRuntime": true
     },
     "iOS": {
-      "minimumSystemVersion": "16.0"
+      "minimumSystemVersion": "16.0",
+      "frameworks": ["SystemConfiguration"]
     },
     "android": {
       "minSdkVersion": 26,

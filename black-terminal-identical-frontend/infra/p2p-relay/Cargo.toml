@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 futures = "0.3"
-libp2p = { version = "0.56", default-features = false, features = ["identify", "macros", "noise", "ping", "relay", "tcp", "tokio", "yamux"] }
+libp2p = { version = "0.56", default-features = false, features = ["identify", "macros", "noise", "ping", "relay", "rendezvous", "tcp", "tokio", "yamux"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }

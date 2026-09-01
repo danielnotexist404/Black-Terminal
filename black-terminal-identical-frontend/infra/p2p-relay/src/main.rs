@@ -2,7 +2,7 @@ use futures::StreamExt;
 use libp2p::{
     identify, identity,
     multiaddr::Protocol,
-    noise, ping, relay,
+    noise, ping, relay, rendezvous,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId, SwarmBuilder,
 };
@@ -30,8 +30,15 @@ const MAX_HEALTH_REQUEST_BYTES: usize = 2048;
 #[derive(NetworkBehaviour)]
 struct RelayBehaviour {
     relay: relay::Behaviour,
+    rendezvous: rendezvous::server::Behaviour,
     identify: identify::Behaviour,
     ping: ping::Behaviour,
+}
+
+#[derive(NetworkBehaviour)]
+struct ProbeBehaviour {
+    relay: relay::client::Behaviour,
+    rendezvous: rendezvous::client::Behaviour,
 }
 
 #[derive(Clone, Debug)]
@@ -61,8 +68,12 @@ struct RelayStatus {
     advertised_addresses: Vec<String>,
     active_connections: u64,
     active_reservations: u64,
+    active_rendezvous_registrations: u64,
     accepted_reservations: u64,
     denied_reservations: u64,
+    accepted_rendezvous_registrations: u64,
+    denied_rendezvous_registrations: u64,
+    served_rendezvous_discoveries: u64,
     accepted_circuits: u64,
     denied_circuits: u64,
     last_error: Option<String>,
@@ -363,7 +374,10 @@ async fn probe_relay(raw_address: &str) -> Result<(), String> {
         .map_err(|error| format!("The probe transport could not initialize: {error}"))?
         .with_relay_client(noise::Config::new, yamux::Config::default)
         .map_err(|error| format!("The probe relay client could not initialize: {error}"))?
-        .with_behaviour(|_, relay_client| relay_client)
+        .with_behaviour(|key, relay_client| ProbeBehaviour {
+            relay: relay_client,
+            rendezvous: rendezvous::client::Behaviour::new(key.clone()),
+        })
         .map_err(|error| format!("The probe behaviour could not initialize: {error}"))?
         .build();
     swarm
@@ -391,18 +405,56 @@ async fn probe_relay(raw_address: &str) -> Result<(), String> {
     let relayed_address = tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             match swarm.select_next_some().await {
-                SwarmEvent::Behaviour(relay::client::Event::ReservationReqAccepted {
-                    relay_peer_id: accepted_peer,
-                    ..
-                }) if accepted_peer == relay_peer_id => {
-                    return Ok::<Multiaddr, String>(circuit_address.clone());
-                }
+                SwarmEvent::Behaviour(ProbeBehaviourEvent::Relay(
+                    relay::client::Event::ReservationReqAccepted {
+                        relay_peer_id: accepted_peer,
+                        ..
+                    },
+                )) if accepted_peer == relay_peer_id => {}
                 SwarmEvent::NewListenAddr { address, .. }
                     if address
                         .iter()
                         .any(|protocol| matches!(protocol, Protocol::P2pCircuit)) =>
                 {
-                    return Ok::<Multiaddr, String>(address);
+                    swarm.add_external_address(address.clone());
+                    swarm
+                        .behaviour_mut()
+                        .rendezvous
+                        .register(
+                            rendezvous::Namespace::from_static("black-terminal.public.v1"),
+                            relay_peer_id,
+                            None,
+                        )
+                        .map_err(|error| {
+                            format!("The relay probe could not register for discovery: {error}")
+                        })?;
+                }
+                SwarmEvent::Behaviour(ProbeBehaviourEvent::Rendezvous(
+                    rendezvous::client::Event::Registered {
+                        rendezvous_node, ..
+                    },
+                )) if rendezvous_node == relay_peer_id => {
+                    swarm.behaviour_mut().rendezvous.discover(
+                        Some(rendezvous::Namespace::from_static(
+                            "black-terminal.public.v1",
+                        )),
+                        None,
+                        Some(16),
+                        relay_peer_id,
+                    );
+                }
+                SwarmEvent::Behaviour(ProbeBehaviourEvent::Rendezvous(
+                    rendezvous::client::Event::Discovered {
+                        rendezvous_node,
+                        registrations,
+                        ..
+                    },
+                )) if rendezvous_node == relay_peer_id
+                    && registrations
+                        .iter()
+                        .any(|registration| registration.record.peer_id() == local_peer_id) =>
+                {
+                    return Ok::<Multiaddr, String>(circuit_address.clone());
                 }
                 SwarmEvent::OutgoingConnectionError { error, .. } => {
                     return Err(format!("The relay probe connection failed: {error}"));
@@ -458,6 +510,11 @@ async fn run() -> Result<(), String> {
         .map_err(|error| format!("The relay transport could not initialize: {error}"))?
         .with_behaviour(|key| RelayBehaviour {
             relay: relay::Behaviour::new(key.public().to_peer_id(), relay_config),
+            rendezvous: rendezvous::server::Behaviour::new(
+                rendezvous::server::Config::default()
+                    .with_max_registration_per_peer(1)
+                    .with_max_registration_total(config.max_reservations),
+            ),
             identify: identify::Behaviour::new(
                 identify::Config::new("/black-terminal/relay-identify/1".into(), key.public())
                     .with_agent_version(AGENT_VERSION.into())
@@ -478,7 +535,7 @@ async fn run() -> Result<(), String> {
     }
 
     let status = Arc::new(RwLock::new(RelayStatus {
-        service: "black-terminal-circuit-relay-v2",
+        service: "black-terminal-circuit-relay-v2-rendezvous-v1",
         version: env!("CARGO_PKG_VERSION"),
         peer_id: peer_id.to_string(),
         started_at: unix_seconds(),
@@ -510,6 +567,8 @@ async fn run() -> Result<(), String> {
             "advertisedAddresses": status.read().await.advertised_addresses,
         })
     );
+
+    let mut registered_rendezvous_peers = std::collections::HashSet::<PeerId>::new();
 
     loop {
         tokio::select! {
@@ -568,6 +627,31 @@ async fn run() -> Result<(), String> {
                             current.denied_circuits = current.denied_circuits.saturating_add(1);
                         }
                         _ => {}
+                    }
+                }
+                SwarmEvent::Behaviour(RelayBehaviourEvent::Rendezvous(event)) => {
+                    let mut current = status.write().await;
+                    match event {
+                        rendezvous::server::Event::PeerRegistered { peer, .. } => {
+                            current.accepted_rendezvous_registrations = current.accepted_rendezvous_registrations.saturating_add(1);
+                            registered_rendezvous_peers.insert(peer);
+                            current.active_rendezvous_registrations = registered_rendezvous_peers.len() as u64;
+                        }
+                        rendezvous::server::Event::PeerNotRegistered { .. } => {
+                            current.denied_rendezvous_registrations = current.denied_rendezvous_registrations.saturating_add(1);
+                        }
+                        rendezvous::server::Event::PeerUnregistered { peer, .. } => {
+                            registered_rendezvous_peers.remove(&peer);
+                            current.active_rendezvous_registrations = registered_rendezvous_peers.len() as u64;
+                        }
+                        rendezvous::server::Event::RegistrationExpired(registration) => {
+                            registered_rendezvous_peers.remove(&registration.record.peer_id());
+                            current.active_rendezvous_registrations = registered_rendezvous_peers.len() as u64;
+                        }
+                        rendezvous::server::Event::DiscoverServed { .. } => {
+                            current.served_rendezvous_discoveries = current.served_rendezvous_discoveries.saturating_add(1);
+                        }
+                        rendezvous::server::Event::DiscoverNotServed { .. } => {}
                     }
                 }
                 _ => {}

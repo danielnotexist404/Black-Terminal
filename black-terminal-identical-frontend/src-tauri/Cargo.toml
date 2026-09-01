@@ -25,7 +25,7 @@ aes-gcm = "0.10"
 futures = "0.3"
 hmac = "0.12"
 keyring-core = "1"
-libp2p = { version = "0.56", default-features = false, features = ["cbor", "dcutr", "dns", "ed25519", "gossipsub", "identify", "kad", "macros", "mdns", "noise", "relay", "request-response", "tcp", "tokio", "upnp", "yamux"] }
+libp2p = { version = "0.56", default-features = false, features = ["cbor", "dcutr", "dns", "ed25519", "gossipsub", "identify", "kad", "macros", "mdns", "noise", "relay", "rendezvous", "request-response", "tcp", "tokio", "upnp", "yamux"] }
 rusqlite = { version = "0.38", features = ["bundled"] }
 rust_decimal = "1.40"
 sha2 = "0.10"

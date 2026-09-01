@@ -12,6 +12,8 @@ export type LocalP2pStatus = {
   holePunchSuccesses: number;
   holePunchFailures: number;
   receivedMessages: number;
+  rendezvousRegistered: boolean;
+  rendezvousDiscoveredPeers: number;
   transportEncryption: "NOISE_XX_LINK_ENCRYPTION";
   discovery: string[];
   globalRelayConfigured: boolean;

@@ -580,6 +580,7 @@ export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange,
             <div className="telemetry-row"><span className="telemetry-lbl">Peer ID</span><span className="telemetry-val highlight">{p2pStatus?.peerId || "STARTING"}</span></div>
             <div className="telemetry-row"><span className="telemetry-lbl">Connected peers</span><span className="telemetry-val">{p2pStatus?.connectedPeers.length ?? 0}</span></div>
             <div className="telemetry-row"><span className="telemetry-lbl">Public relay reservation</span><span className="telemetry-val highlight">{p2pStatus?.globalRelayConfigured ? "ACTIVE" : p2pStatus?.configuredRelayAddresses.length ? "CONNECTING" : "NOT CONFIGURED"}</span></div>
+            <div className="telemetry-row"><span className="telemetry-lbl">Global peer rendezvous</span><span className="telemetry-val highlight">{p2pStatus?.rendezvousRegistered ? `${p2pStatus.rendezvousDiscoveredPeers} PEERS DISCOVERED` : p2pStatus?.configuredRelayAddresses.length ? "REGISTERING" : "NOT CONFIGURED"}</span></div>
             <div className="telemetry-row"><span className="telemetry-lbl">DCUtR direct upgrades</span><span className="telemetry-val">{p2pStatus?.holePunchSuccesses ?? 0} OK · {p2pStatus?.holePunchFailures ?? 0} FAILED</span></div>
             <div className="telemetry-row"><span className="telemetry-lbl">Queued direct deliveries</span><span className="telemetry-val">{outboxSummary?.pending ?? 0}</span></div>
             <div className="telemetry-row"><span className="telemetry-lbl">Retrying deliveries</span><span className="telemetry-val">{outboxSummary?.retrying ?? 0}</span></div>
@@ -591,7 +592,7 @@ export function SettingsPanel({ currentUser, terminalSettings, onSettingsChange,
             <div className="settings-field">
               <label className="settings-label">Operator-controlled public relays</label>
               <textarea className="settings-input" value={p2pRelayAddresses} placeholder="/dns4/relay.example.com/tcp/4001/p2p/12D3KooW…" onChange={(event) => setP2pRelayAddresses(event.target.value)} />
-              <span className="settings-hint">One relay base multiaddress per line, maximum four. Each must end with the relay peer ID. Black Terminal requests encrypted Circuit Relay v2 reservations and uses DCUtR to attempt a direct connection upgrade.</span>
+              <span className="settings-hint">One relay base multiaddress per line, maximum four. Each must end with the relay peer ID. Black Terminal requests encrypted Circuit Relay v2 reservations, registers for bounded Rendezvous v1 discovery, and uses DCUtR to attempt a direct connection upgrade.</span>
             </div>
             <button className="settings-submit-btn secondary" type="button" disabled={runtimeConfigBusy} onClick={() => void handleSaveRelays()}>SAVE RELAYS AND RESTART P2P</button>
             <div className="settings-field">

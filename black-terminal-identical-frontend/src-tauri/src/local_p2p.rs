@@ -4,7 +4,7 @@ use libp2p::{
     kad::{self, store::MemoryStore},
     mdns,
     multiaddr::Protocol,
-    noise, relay, request_response,
+    noise, relay, rendezvous, request_response,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, upnp, yamux, Multiaddr, PeerId, StreamProtocol, SwarmBuilder,
 };
@@ -29,6 +29,9 @@ use crate::{
 const MAX_P2P_MESSAGE_BYTES: usize = 64 * 1024;
 const MAX_RELAY_ADDRESSES: usize = 4;
 const MAX_MULTIADDRESS_BYTES: usize = 512;
+const MAX_RENDEZVOUS_DISCOVERIES: u64 = 128;
+const RENDEZVOUS_DISCOVERY_INTERVAL: Duration = Duration::from_secs(60);
+const RENDEZVOUS_REGISTRATION_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const TOPICS: &[&str] = &[
     "black-terminal.social.v1",
     "black-terminal.alerts.v1",
@@ -38,6 +41,7 @@ const TOPICS: &[&str] = &[
 #[derive(NetworkBehaviour)]
 struct BlackTerminalP2pBehaviour {
     relay_client: relay::client::Behaviour,
+    rendezvous: rendezvous::client::Behaviour,
     dcutr: dcutr::Behaviour,
     gossipsub: gossipsub::Behaviour,
     identify: identify::Behaviour,
@@ -96,6 +100,8 @@ pub(crate) struct LocalP2pStatus {
     hole_punch_successes: u64,
     hole_punch_failures: u64,
     received_messages: u64,
+    rendezvous_registered: bool,
+    rendezvous_discovered_peers: u64,
     transport_encryption: &'static str,
     discovery: Vec<&'static str>,
     global_relay_configured: bool,
@@ -114,8 +120,8 @@ impl Default for LocalP2pManager {
             sender: Mutex::new(None),
             status: Arc::new(RwLock::new(LocalP2pStatus {
                 transport_encryption: "NOISE_XX_LINK_ENCRYPTION",
-                discovery: vec!["MDNS_LAN", "DIRECT_MULTIADDR", "TRUSTED_PEER_KADEMLIA_MESH", "UPNP_PORT_MAPPING", "CONFIGURED_CIRCUIT_RELAY", "DCUTR_HOLE_PUNCH"],
-                limitation: "Internet-wide reachability requires at least one operator-controlled public relay reservation. DCUtR attempts a direct upgrade after relayed contact, but restrictive or symmetric NAT may keep traffic on the encrypted relay circuit.",
+                discovery: vec!["MDNS_LAN", "DIRECT_MULTIADDR", "TRUSTED_PEER_KADEMLIA_MESH", "UPNP_PORT_MAPPING", "CONFIGURED_CIRCUIT_RELAY", "RELAY_RENDEZVOUS", "DCUTR_HOLE_PUNCH"],
+                limitation: "Internet-wide discovery and reachability require at least one operator-controlled public relay with Rendezvous v1. DCUtR attempts a direct upgrade after relayed contact, but restrictive or symmetric NAT may keep traffic on the authenticated encrypted relay circuit.",
                 ..LocalP2pStatus::default()
             })),
         }
@@ -299,6 +305,20 @@ fn validate_relay_addresses(values: Vec<String>) -> Result<Vec<Multiaddr>, Strin
     Ok(normalized)
 }
 
+fn relay_peer_ids(addresses: &[Multiaddr]) -> Vec<PeerId> {
+    addresses
+        .iter()
+        .filter_map(|address| match address.iter().last() {
+            Some(Protocol::P2p(peer_id)) => Some(peer_id),
+            _ => None,
+        })
+        .collect()
+}
+
+fn public_rendezvous_namespace() -> rendezvous::Namespace {
+    rendezvous::Namespace::from_static("black-terminal.public.v1")
+}
+
 async fn start_node<R: Runtime>(
     app: AppHandle<R>,
     manager: &LocalP2pManager,
@@ -317,6 +337,7 @@ async fn start_node<R: Runtime>(
     }
     initialize_inbox(&app)?;
     let relay_addresses = validate_relay_addresses(relay_addresses)?;
+    let configured_relay_peers = relay_peer_ids(&relay_addresses);
     let keypair = load_or_create_local_identity()?;
     let peer_id = keypair.public().to_peer_id();
     let mut swarm = SwarmBuilder::with_existing_identity(keypair)
@@ -372,6 +393,7 @@ async fn start_node<R: Runtime>(
             );
             Ok(BlackTerminalP2pBehaviour {
                 relay_client,
+                rendezvous: rendezvous::client::Behaviour::new(key.clone()),
                 dcutr: dcutr::Behaviour::new(local_peer_id),
                 gossipsub,
                 identify,
@@ -424,18 +446,54 @@ async fn start_node<R: Runtime>(
             relay_addresses.iter().map(ToString::to_string).collect();
         current.active_relay_addresses.clear();
         current.global_relay_configured = false;
+        current.rendezvous_registered = false;
+        current.rendezvous_discovered_peers = 0;
         current.last_error = None;
     }
     let initial = status.read().await.clone();
     tauri::async_runtime::spawn(async move {
         let mut connected = HashSet::<PeerId>::new();
+        let mut registered_relays = HashSet::<PeerId>::new();
+        let mut rendezvous_peers = HashSet::<PeerId>::new();
         let mut stop_reply = None;
         let mut pending_direct = HashMap::<
             request_response::OutboundRequestId,
             oneshot::Sender<Result<String, String>>,
         >::new();
+        let mut rendezvous_discovery_tick = tokio::time::interval_at(
+            tokio::time::Instant::now() + RENDEZVOUS_DISCOVERY_INTERVAL,
+            RENDEZVOUS_DISCOVERY_INTERVAL,
+        );
+        rendezvous_discovery_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut rendezvous_registration_tick = tokio::time::interval_at(
+            tokio::time::Instant::now() + RENDEZVOUS_REGISTRATION_INTERVAL,
+            RENDEZVOUS_REGISTRATION_INTERVAL,
+        );
+        rendezvous_registration_tick
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
+                _ = rendezvous_discovery_tick.tick(), if !configured_relay_peers.is_empty() => {
+                    for relay_peer in &configured_relay_peers {
+                        swarm.behaviour_mut().rendezvous.discover(
+                            Some(public_rendezvous_namespace()),
+                            None,
+                            Some(MAX_RENDEZVOUS_DISCOVERIES),
+                            *relay_peer,
+                        );
+                    }
+                }
+                _ = rendezvous_registration_tick.tick(), if !configured_relay_peers.is_empty() => {
+                    for relay_peer in &configured_relay_peers {
+                        if let Err(error) = swarm.behaviour_mut().rendezvous.register(
+                            public_rendezvous_namespace(),
+                            *relay_peer,
+                            None,
+                        ) {
+                            status.write().await.last_error = Some(format!("Rendezvous registration refresh failed: {error}"));
+                        }
+                    }
+                }
                 command = receiver.recv() => match command {
                     Some(P2pCommand::Publish { topic, payload, reply }) => {
                         let result = serde_json::to_vec(&json!({
@@ -587,8 +645,82 @@ async fn start_node<R: Runtime>(
                             let _ = reply.send(Err(format!("Direct P2P delivery failed: {error}")));
                         }
                     }
+                    SwarmEvent::Behaviour(BlackTerminalP2pBehaviourEvent::Rendezvous(rendezvous::client::Event::Registered {
+                        rendezvous_node,
+                        ..
+                    })) => {
+                        registered_relays.insert(rendezvous_node);
+                        swarm.behaviour_mut().rendezvous.discover(
+                            Some(public_rendezvous_namespace()),
+                            None,
+                            Some(MAX_RENDEZVOUS_DISCOVERIES),
+                            rendezvous_node,
+                        );
+                        let mut current = status.write().await;
+                        current.rendezvous_registered = !registered_relays.is_empty();
+                        current.last_error = None;
+                    }
+                    SwarmEvent::Behaviour(BlackTerminalP2pBehaviourEvent::Rendezvous(rendezvous::client::Event::RegisterFailed {
+                        rendezvous_node,
+                        error,
+                        ..
+                    })) => {
+                        registered_relays.remove(&rendezvous_node);
+                        let mut current = status.write().await;
+                        current.rendezvous_registered = !registered_relays.is_empty();
+                        current.last_error = Some(format!("Rendezvous registration failed: {error:?}"));
+                    }
+                    SwarmEvent::Behaviour(BlackTerminalP2pBehaviourEvent::Rendezvous(rendezvous::client::Event::Discovered {
+                        registrations,
+                        ..
+                    })) => {
+                        let mut peers_to_dial = HashSet::new();
+                        for registration in registrations {
+                            let discovered_peer = registration.record.peer_id();
+                            if discovered_peer == peer_id {
+                                continue;
+                            }
+                            rendezvous_peers.insert(discovered_peer);
+                            swarm.behaviour_mut().gossipsub.add_explicit_peer(&discovered_peer);
+                            for address in registration.record.addresses() {
+                                swarm.behaviour_mut().kademlia.add_address(&discovered_peer, address.clone());
+                            }
+                            if !connected.contains(&discovered_peer) {
+                                peers_to_dial.insert(discovered_peer);
+                            }
+                        }
+                        for discovered_peer in peers_to_dial {
+                            let _ = swarm.dial(discovered_peer);
+                        }
+                        status.write().await.rendezvous_discovered_peers = rendezvous_peers.len() as u64;
+                    }
+                    SwarmEvent::Behaviour(BlackTerminalP2pBehaviourEvent::Rendezvous(rendezvous::client::Event::DiscoverFailed {
+                        error,
+                        ..
+                    })) => {
+                        status.write().await.last_error = Some(format!("Rendezvous discovery failed: {error:?}"));
+                    }
+                    SwarmEvent::Behaviour(BlackTerminalP2pBehaviourEvent::Rendezvous(rendezvous::client::Event::Expired { peer })) => {
+                        rendezvous_peers.remove(&peer);
+                        swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
+                        let mut current = status.write().await;
+                        current.rendezvous_discovered_peers = rendezvous_peers.len() as u64;
+                    }
                     SwarmEvent::NewListenAddr { address, .. } => {
                         let relayed = address.iter().any(|protocol| matches!(protocol, Protocol::P2pCircuit));
+                        let mut registration_error = None;
+                        if relayed {
+                            swarm.add_external_address(address.clone());
+                            for relay_peer in configured_relay_peers.iter().filter(|relay_peer| connected.contains(relay_peer)) {
+                                if let Err(error) = swarm.behaviour_mut().rendezvous.register(
+                                    public_rendezvous_namespace(),
+                                    *relay_peer,
+                                    None,
+                                ) {
+                                    registration_error = Some(format!("Rendezvous registration failed: {error}"));
+                                }
+                            }
+                        }
                         let address = format!("{address}/p2p/{peer_id}");
                         let mut current = status.write().await;
                         if !current.listen_addresses.contains(&address) {
@@ -597,6 +729,9 @@ async fn start_node<R: Runtime>(
                         if relayed && !current.active_relay_addresses.contains(&address) {
                             current.active_relay_addresses.push(address);
                             current.global_relay_configured = true;
+                        }
+                        if registration_error.is_some() {
+                            current.last_error = registration_error;
                         }
                     }
                     SwarmEvent::ExpiredListenAddr { address, .. } => {
@@ -621,7 +756,12 @@ async fn start_node<R: Runtime>(
                     }
                     SwarmEvent::ConnectionClosed { peer_id, .. } => {
                         connected.remove(&peer_id);
-                        status.write().await.connected_peers = connected.iter().map(ToString::to_string).collect();
+                        if configured_relay_peers.contains(&peer_id) {
+                            registered_relays.remove(&peer_id);
+                        }
+                        let mut current = status.write().await;
+                        current.connected_peers = connected.iter().map(ToString::to_string).collect();
+                        current.rendezvous_registered = !registered_relays.is_empty();
                     }
                     _ => {}
                 }
@@ -632,6 +772,8 @@ async fn start_node<R: Runtime>(
         current.connected_peers.clear();
         current.active_relay_addresses.clear();
         current.global_relay_configured = false;
+        current.rendezvous_registered = false;
+        current.rendezvous_discovered_peers = 0;
         drop(current);
         if let Some(reply) = stop_reply {
             let _ = reply.send(());

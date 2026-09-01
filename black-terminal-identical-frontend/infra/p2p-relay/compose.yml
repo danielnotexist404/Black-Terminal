@@ -1,0 +1,36 @@
+services:
+  relay:
+    build: .
+    image: black-terminal/relay:1.0.7
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      BT_RELAY_IDENTITY_PATH: /var/lib/black-terminal-relay/identity.key
+      BT_RELAY_LISTEN: /ip4/0.0.0.0/tcp/4001
+      BT_RELAY_ADVERTISE: ${BT_RELAY_ADVERTISE:?Set BT_RELAY_ADVERTISE to a public DNS or IP multiaddress}
+      BT_RELAY_HEALTH_LISTEN: 0.0.0.0:8080
+      BT_RELAY_MAX_RESERVATIONS: ${BT_RELAY_MAX_RESERVATIONS:-256}
+      BT_RELAY_MAX_RESERVATIONS_PER_PEER: ${BT_RELAY_MAX_RESERVATIONS_PER_PEER:-2}
+      BT_RELAY_MAX_CIRCUITS: ${BT_RELAY_MAX_CIRCUITS:-128}
+      BT_RELAY_MAX_CIRCUITS_PER_PEER: ${BT_RELAY_MAX_CIRCUITS_PER_PEER:-4}
+      BT_RELAY_MAX_CIRCUIT_BYTES: ${BT_RELAY_MAX_CIRCUIT_BYTES:-8388608}
+    ports:
+      - "4001:4001/tcp"
+      - "127.0.0.1:18080:8080/tcp"
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    volumes:
+      - relay-identity:/var/lib/black-terminal-relay
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 512M
+
+volumes:
+  relay-identity:

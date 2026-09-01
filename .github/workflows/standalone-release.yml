@@ -14,6 +14,54 @@ defaults:
     working-directory: black-terminal-identical-frontend
 
 jobs:
+  relay:
+    name: P2P relay service
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache relay dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: black-terminal-identical-frontend/infra/p2p-relay
+
+      - name: Verify relay formatting
+        run: cargo fmt --manifest-path infra/p2p-relay/Cargo.toml -- --check
+
+      - name: Verify relay service
+        run: cargo test --locked --manifest-path infra/p2p-relay/Cargo.toml
+
+      - name: Build relay container
+        run: docker build --tag black-terminal-relay:ci --file infra/p2p-relay/Dockerfile infra/p2p-relay
+
+      - name: Verify a real Circuit Relay v2 reservation
+        run: |
+          docker run --detach --name black-terminal-relay-ci \
+            --publish 44001:4001/tcp \
+            --publish 127.0.0.1:18081:8080/tcp \
+            --env BT_RELAY_ADVERTISE=/ip4/127.0.0.1/tcp/44001 \
+            black-terminal-relay:ci
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18081/health/ready >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:18081/health/ready
+          relay_peer_id="$(curl --fail --silent http://127.0.0.1:18081/status | jq --raw-output .peerId)"
+          cargo run --quiet --locked --manifest-path infra/p2p-relay/Cargo.toml -- \
+            probe "/ip4/127.0.0.1/tcp/44001/p2p/${relay_peer_id}"
+          curl --fail --silent http://127.0.0.1:18081/status | jq --exit-status '.acceptedReservations >= 1'
+
+      - name: Stop relay test container
+        if: always()
+        run: docker rm --force black-terminal-relay-ci || true
+
   desktop:
     name: ${{ matrix.label }}
     strategy:

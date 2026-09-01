@@ -1,6 +1,6 @@
 use futures::StreamExt;
 use libp2p::{
-    dcutr, gossipsub, identify,
+    connection_limits, dcutr, gossipsub, identify,
     kad::{self, store::MemoryStore},
     mdns,
     multiaddr::Protocol,
@@ -29,7 +29,7 @@ use crate::{
 const MAX_P2P_MESSAGE_BYTES: usize = 64 * 1024;
 const MAX_RELAY_ADDRESSES: usize = 4;
 const MAX_MULTIADDRESS_BYTES: usize = 512;
-const MAX_RENDEZVOUS_DISCOVERIES: u64 = 128;
+const MAX_RENDEZVOUS_DISCOVERIES: u64 = 32;
 const RENDEZVOUS_DISCOVERY_INTERVAL: Duration = Duration::from_secs(60);
 const RENDEZVOUS_REGISTRATION_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const TOPICS: &[&str] = &[
@@ -40,6 +40,7 @@ const TOPICS: &[&str] = &[
 
 #[derive(NetworkBehaviour)]
 struct BlackTerminalP2pBehaviour {
+    limits: connection_limits::Behaviour,
     relay_client: relay::client::Behaviour,
     rendezvous: rendezvous::client::Behaviour,
     dcutr: dcutr::Behaviour,
@@ -392,6 +393,15 @@ async fn start_node<R: Runtime>(
                 request_response::Config::default().with_request_timeout(Duration::from_secs(20)),
             );
             Ok(BlackTerminalP2pBehaviour {
+                limits: connection_limits::Behaviour::new(
+                    connection_limits::ConnectionLimits::default()
+                        .with_max_pending_incoming(Some(32))
+                        .with_max_pending_outgoing(Some(32))
+                        .with_max_established_incoming(Some(64))
+                        .with_max_established_outgoing(Some(64))
+                        .with_max_established_per_peer(Some(4))
+                        .with_max_established(Some(96)),
+                ),
                 relay_client,
                 rendezvous: rendezvous::client::Behaviour::new(key.clone()),
                 dcutr: dcutr::Behaviour::new(local_peer_id),
@@ -405,6 +415,9 @@ async fn start_node<R: Runtime>(
         })
         .map_err(|_| "The Black Terminal P2P protocols could not be initialized".to_string())?
         .build();
+    for relay_peer in &configured_relay_peers {
+        swarm.behaviour_mut().limits.bypass_peer_id(relay_peer);
+    }
     for topic in TOPICS {
         swarm
             .behaviour_mut()

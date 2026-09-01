@@ -139,6 +139,8 @@ assert.match(localP2p, /with_relay_client/);
 assert.match(localP2p, /rendezvous::client::Behaviour/);
 assert.match(localP2p, /black-terminal\.public\.v1/);
 assert.match(localP2p, /MAX_RENDEZVOUS_DISCOVERIES/);
+assert.match(localP2p, /connection_limits::ConnectionLimits/);
+assert.match(localP2p, /with_max_established\(Some\(96\)\)/);
 assert.match(localP2p, /dcutr::Behaviour::new/);
 assert.match(localP2p, /Protocol::P2pCircuit/);
 assert.match(localP2p, /global_relay_configured = true/);

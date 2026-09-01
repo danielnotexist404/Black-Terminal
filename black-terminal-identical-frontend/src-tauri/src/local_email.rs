@@ -154,9 +154,15 @@ pub(crate) async fn local_email_send(
     .await
     .map_err(|_| "SMTP delivery timed out".to_string())?
     .map_err(|error| format!("SMTP delivery failed: {}", sanitize_response(error)))?;
+    let accepted = response.is_positive();
+    let response_summary = sanitize_response(format!(
+        "{} {}",
+        response.code(),
+        response.first_line().unwrap_or("accepted")
+    ));
     Ok(LocalEmailReceipt {
-        accepted: response.is_positive(),
-        response: sanitize_response(response),
+        accepted,
+        response: response_summary,
     })
 }
 

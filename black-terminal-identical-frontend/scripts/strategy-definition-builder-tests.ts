@@ -111,7 +111,7 @@ assert.match(
 );
 assert.match(
   validateAutomationDefinition({ ...definition, runtimeKind: "python-script" }) || "",
-  /certified Black Cloud signal adapter/,
+  /certified headless signal adapter/,
 );
 const blackScriptDefinition = {
   ...definition,

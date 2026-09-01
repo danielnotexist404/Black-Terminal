@@ -174,6 +174,7 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
+    "verify:standalone-bundle": "node scripts/verify-standalone-bundles.mjs",
     "check:rust": "cargo check --manifest-path src-tauri/Cargo.toml",
     "check": "npm run typecheck && npm run check:rust"
   },

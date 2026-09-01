@@ -146,6 +146,9 @@ jobs:
           projectPath: black-terminal-identical-frontend
           args: ${{ matrix.args }}
 
+      - name: Verify installer package contracts
+        run: node scripts/verify-standalone-bundles.mjs "${{ matrix.bundle_root }}" "${{ runner.os }}"
+
       - name: Generate SHA-256 release manifest
         run: node scripts/generate-standalone-release-manifest.mjs "${{ matrix.bundle_root }}"
 

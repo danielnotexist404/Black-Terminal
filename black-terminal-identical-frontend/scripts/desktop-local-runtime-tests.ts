@@ -301,6 +301,7 @@ assert.match(releaseWorkflow, /Generate SHA-256 release manifest/);
 assert.match(releaseManifest, /createHash\("sha256"\)/);
 assert.match(mobileWorkflow, /android build --debug --apk --target aarch64 --ci/);
 assert.match(mobileWorkflow, /ios build --debug --target aarch64-sim --no-sign --ci/);
+assert.equal(mobileWorkflow.match(/npm run test:desktop-local/g)?.length, 2);
 
 assert.match(bootstrap, /Local-only core/);
 assert.match(bootstrap, /initializeLocalRuntime/);
